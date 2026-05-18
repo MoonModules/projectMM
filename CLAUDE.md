@@ -17,6 +17,11 @@ rules and constraints for working on the project.
 - **Let structure emerge.** Don't pre-design files, classes, or interfaces
   for things that don't exist yet. Build what you need, refactor when
   patterns become clear.
+- **Present tense only.** Code, comments, and documentation describe the
+  system as it is now. No changelogs, no roadmaps, no "will be added
+  later" notes. History lives in git commits. The one exception is
+  `docs/decisions.md` — a record of approaches we tried and rejected,
+  to avoid repeating mistakes.
 
 ## Hard Rules
 
@@ -52,17 +57,24 @@ considering work complete. New core logic needs a corresponding test.
 - Namespace: `mm`, platform code in `mm::platform`
 - No `using namespace` in headers
 
+## Agent Roles
+
+The project uses Claude Code agents in defined roles. The user is the
+**Product Owner** — defines requirements, sets priorities, approves work.
+
+| Agent | Model | Focus | Does |
+|-------|-------|-------|------|
+| **Architect** | Opus | System design | Reviews against architecture, designs components, validates boundaries |
+| **Developer** | Sonnet | Implementation | Writes code in worktrees, follows all rules, one step at a time |
+| **Reviewer** | Opus | Code quality | Reviews diffs against CLAUDE.md rules, flags violations |
+| **Tester** | Sonnet | Verification | Writes tests, verifies architectural rules in code |
+| **Runner** | Haiku | Quick checks | Runs MoonDeck scripts, platform boundary checks, build verification, formatting |
+
+Agents work in parallel on independent steps (e.g. core types and
+platform code). Agents never commit — only the product owner approves
+commits after testing.
+
 ## Build
 
-```bash
-# Desktop (macOS/Linux/Windows)
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-
-# ESP32
-cd esp32 && idf.py build
-idf.py flash monitor
-
-# Tests (desktop)
-cmake --build build --target test
-```
+See [scripts/MoonDeck.md](scripts/MoonDeck.md) for all build, run, test,
+and check commands. Quick start: `uv run scripts/moondeck.py`

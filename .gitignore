@@ -67,3 +67,23 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# MoonDeck state
+scripts/moondeck.json
+
+# ESP-IDF
+esp32/build/
+esp32/sdkconfig
+esp32/sdkconfig.old
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc

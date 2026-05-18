@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MoonDeck</title>
+    <link rel="icon" type="image/png" href="/assets/moonlight-logo.png">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <img src="/assets/moonlight-logo.png" alt="MoonDeck" class="header-logo">
+        <h1>MoonDeck</h1>
+        <nav id="tabs">
+            <button class="tab active" data-tab="pc">PC</button>
+            <button class="tab" data-tab="esp32">ESP32</button>
+            <button class="tab" data-tab="live">Live</button>
+        </nav>
+    </header>
+
+    <div class="content">
+        <aside class="sidebar">
+            <section id="tab-pc" class="tab-content active">
+                <div id="scripts-pc" class="script-grid"></div>
+            </section>
+
+            <section id="tab-esp32" class="tab-content">
+                <div class="esp32-controls">
+                    <label>Chip: <select id="env-select"></select></label>
+                    <label>Port:
+                        <span class="port-row">
+                            <select id="port-select"><option value="">--</option></select>
+                            <button id="refresh-ports" title="Refresh">&#x21bb;</button>
+                        </span>
+                    </label>
+                </div>
+                <div id="scripts-esp32" class="script-grid"></div>
+            </section>
+
+            <section id="tab-live" class="tab-content">
+                <div class="live-controls">
+                    <button id="discover-btn">Discover Devices</button>
+                </div>
+                <div id="device-list"></div>
+            </section>
+        </aside>
+
+        <main class="main-pane">
+            <div class="pane-header">
+                <div class="pane-tabs">
+                    <button class="pane-tab active" data-pane="log">Log</button>
+                    <button class="pane-tab" data-pane="view">View</button>
+                </div>
+                <button id="clear-log">Clear</button>
+            </div>
+            <div id="pane-log" class="pane-content active">
+                <pre id="log"></pre>
+            </div>
+            <div id="pane-view" class="pane-content">
+                <iframe id="view-frame" sandbox="allow-same-origin allow-scripts allow-forms"></iframe>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

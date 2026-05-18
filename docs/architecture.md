@@ -37,8 +37,9 @@ protocols, physical LED layout, or mapping.
 
 Multiple effects can run simultaneously, each writing into its own **layer
 buffer** in **logical coordinate space**. Each layer also owns its own
-**mapping LUT**, so different layers can have different geometries (e.g.
-one layer maps to a grid, another to a ring on the same physical strip).
+**mapping LUT** — not because layers typically have different geometries,
+but because different modifiers or different start/end coordinates (a
+layer control) can place effects on different parts of the fixture.
 
 The number of active layers depends on available memory — a device with
 PSRAM can run many layers; a device without may be limited to one.
@@ -112,12 +113,23 @@ need, the UI renders it.
 
 ### MoonModules
 
-The core building block is a **MoonModule**. Effects, Modifiers, Layouts,
-and Drivers are all MoonModules — they share the same class structure,
-including how they declare controls. Learn the pattern once, apply it
-everywhere. The exact interface will emerge when we implement the first
-MoonModules, but the principle is: all four are peers with a common
-shape, not special cases of each other.
+The core building block is a **MoonModule**. Everything is a MoonModule
+— not just effects, modifiers, layouts, and drivers, but also system
+services: HTTP server, WebSocket server, file server, WiFi, mDNS, OTA
+updates. The core itself is minimal: MoonModule base, buffer management,
+and a scheduler. Everything else is loaded as a MoonModule.
+
+This means:
+- All MoonModules share the same class structure, lifecycle (setup, loop,
+  teardown), and controls. Learn the pattern once, apply it everywhere.
+- System services get controls for free — HTTP port, WiFi SSID, mDNS
+  hostname are all configurable through the same UI as effect parameters.
+- Capabilities are modular — don't need WiFi? Don't load the WiFi
+  MoonModule. No `#ifdef`s needed.
+- System MoonModules that listen (HTTP, WebSocket) poll in their `loop()`
+  — the standard pattern for embedded servers.
+- The scheduler handles init-order dependencies between system MoonModules
+  (e.g. WiFi before HTTP, HTTP before WebSocket).
 
 Each MoonModule is documented in `docs/modules/` as it is built.
 
@@ -141,21 +153,30 @@ On multi-core systems (ESP32 has 2 cores, desktop/RPi have many), the
 pipeline exploits parallelism by assigning MoonModules to specific cores.
 
 The key split is **producers vs consumers**:
-- **Producers** (effects, blend+map) generate pixel data into the physical
-  buffer. Pinned to one core.
-- **Consumers** (drivers — LED output, ArtNet send) read from the physical
-  buffer and push to hardware/network. Pinned to another core.
+- **Producers** (effects) generate pixel data into layer buffers (logical
+  space). Pinned to one core.
+- **Consumers** (drivers — LED output, ArtNet send) perform blend+map from
+  logical buffers into their output, and push to hardware/network. Pinned
+  to another core. Consumers own the blend+map step because they know
+  what they consume from.
 
-To run producers and consumers simultaneously without blocking each other,
-the physical buffer is **double-buffered** when memory allows: producers
-write into one buffer while consumers read from the other, then the
-buffers swap at the frame boundary (atomic pointer swap). This way the
-driver can be transmitting frame N while effects are already rendering
-frame N+1.
+The logical and physical buffers **are** the double buffer: producers
+write into logical buffers while consumers read from the physical buffer
+(or directly from DMA/packet buffers). No additional buffers are needed.
+At the frame boundary, roles swap via atomic pointer swap — the driver
+transmits frame N while effects render frame N+1.
 
-On memory-constrained devices (ESP32 without PSRAM), double buffering may
-not be affordable. In that case, producers and consumers run sequentially
-on the same buffer — correct but slower.
+For LED drivers and ArtNet output, consumers may blend+map directly into
+DMA regions or network packet buffers rather than into a separate physical
+buffer. This happens per-chunk (per DMA region or per ArtNet packet), not
+per-frame, so the physical buffer may not need to exist as a full
+contiguous allocation in all cases.
+
+On memory-constrained devices (ESP32 without PSRAM), there is no double
+buffering — consumers read the logical buffer directly. This means no
+mapping, no blending, and no parallelism between producers and consumers.
+But it works, and this is how the 12K LED stretch goal is achieved on
+ESP32 without PSRAM.
 
 Each MoonModule can declare a core affinity. The scheduler respects this
 when pinning tasks. On single-core or desktop systems, core affinity is
@@ -171,13 +192,14 @@ steady state.
 ### Buffer types
 
 - **Layer buffers.** One per active effect layer. Each holds the logical
-  pixel data for one effect. Allocated in PSRAM when available. When
-  memory is tight, a layer buffer may share the physical buffer directly
-  (single-layer mode, no blending overhead).
-- **Physical buffer.** The final output buffer matching the physical LED
-  layout. Layer buffers are blended into this. Drivers (ArtNet, LED
-  output, etc.) read directly from the physical buffer — no separate
-  staging or driver buffers.
+  pixel data for one effect. Allocated in PSRAM when available. On
+  memory-constrained devices, consumers may read from the layer buffer
+  directly (no mapping, no blending, no physical buffer needed).
+- **Physical buffer.** When present, holds the blended+mapped output.
+  Consumers may blend+map directly into DMA regions or network packet
+  buffers instead, in which case a full physical buffer is not needed.
+  The logical and physical buffers together form the double buffer for
+  producer/consumer parallelism.
 - **Mapping LUT.** The flat lookup table for logical→physical coordinate
   mapping. Read-only during rendering. PSRAM is fine — sequential reads
   are cache-friendly.
@@ -194,7 +216,7 @@ The system adapts to what the device has:
 | Device | Memory | Typical capability |
 |--------|--------|--------------------|
 | ESP32 + OPI PSRAM | 2-8 MB | Many layers, 10K+ LEDs |
-| ESP32, no PSRAM | ~320 KB internal | Single layer (shared with physical buffer), 4K+ LEDs (12K stretch goal with minimal other processes) |
+| ESP32, no PSRAM | ~320 KB internal | Single layer, consumers read logical buffer directly (no mapping/blending/parallelism), 4K+ LEDs (12K stretch goal with minimal other processes) |
 | Desktop / RPi | Abundant | No constraints |
 
 The architecture does not assume PSRAM is present. Buffer counts and sizes
@@ -264,6 +286,27 @@ The project is structured as a set of CMake libraries:
 
 Further decomposition (effects, networking, drivers as separate libraries)
 will happen when the codebase is large enough to justify it.
+
+## Developer Tooling
+
+**MoonDeck** (`scripts/moondeck.py`) is a Python web server providing a
+browser-based console for all project scripts. Run with `uv run scripts/moondeck.py`,
+open `http://localhost:8420`.
+
+Three tabs:
+- **PC** — desktop build, run, test. Fast iteration.
+- **ESP32** — chip type and USB port selection. Build, flash, monitor.
+- **Live** — device discovery and monitoring. Select devices for operations.
+
+Each script is a small card with a `?` help link and a Run button. Output
+streams to a shared log window. Scripts are individual Python files in
+`scripts/` — always runnable standalone via `uv run scripts/<name>.py`
+as well as from MoonDeck.
+
+Script definitions and configuration live in `scripts/moondeck_config.json`
+(committed). Script documentation lives in `scripts/MoonDeck.md`, one
+section per script. Runtime state (selected devices, ports) persists in
+`scripts/moondeck.json` (gitignored).
 
 ## Testing
 

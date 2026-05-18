@@ -1,0 +1,65 @@
+{
+  "envs": ["esp32", "esp32s2", "esp32s3", "esp32c3"],
+  "scripts": [
+    {
+      "id": "build_desktop",
+      "tab": "pc",
+      "group": "build",
+      "label": "Build",
+      "help": "build_desktop",
+      "script": "build/build_desktop.py"
+    },
+    {
+      "id": "run_desktop",
+      "tab": "pc",
+      "group": "run",
+      "label": "Run",
+      "help": "run_desktop",
+      "script": "run/run_desktop.py"
+    },
+    {
+      "id": "test_desktop",
+      "tab": "pc",
+      "group": "test",
+      "label": "Test",
+      "help": "test_desktop",
+      "script": "test/test_desktop.py"
+    },
+    {
+      "id": "check_platform_boundary",
+      "tab": "pc",
+      "group": "check",
+      "label": "Platform Boundary",
+      "help": "check_platform_boundary",
+      "script": "check/check_platform_boundary.py"
+    },
+    {
+      "id": "build_esp32",
+      "tab": "esp32",
+      "group": "build",
+      "label": "Build",
+      "help": "build_esp32",
+      "script": "build/build_esp32.py",
+      "needs_env": true
+    },
+    {
+      "id": "flash_esp32",
+      "tab": "esp32",
+      "group": "build",
+      "label": "Flash",
+      "help": "flash_esp32",
+      "script": "build/flash_esp32.py",
+      "needs_env": true,
+      "needs_port": true
+    },
+    {
+      "id": "monitor_esp32",
+      "tab": "esp32",
+      "group": "run",
+      "label": "Monitor",
+      "help": "monitor_esp32",
+      "script": "run/monitor_esp32.py",
+      "needs_port": true
+    }
+  ]
+}
