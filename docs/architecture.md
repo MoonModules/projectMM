@@ -7,6 +7,21 @@ frame rates. Support multiple LED protocols (WS2812, APA102, DMX/ArtNet).
 Run the same core logic on ESP32, desktop, and Raspberry Pi. Provide a web
 UI and network APIs for control.
 
+## Core vs Domain
+
+The system has two layers:
+- **Core** — MoonModule base, controls, scheduling, platform abstraction,
+  system services (HTTP, WiFi, filesystem). Domain-neutral.
+- **Light domain** — pixels, layers, mapping, blending, effects, layouts,
+  modifiers, LED drivers, ArtNet. Built on top of the core.
+
+These are separated as much as practical. When mixing is needed (for
+performance or simplicity), it must be an explicit decision — consciously
+choosing minimalism over separation, not accidentally blurring the
+boundary. Use domain-neutral naming in those cases ("producer buffer"
+not "LED buffer", "output driver" not "LED driver" in core interfaces)
+to keep the door open for future separation.
+
 ## The Pipeline
 
 The system is a render pipeline:
@@ -401,6 +416,26 @@ drivers — each with their controls) and renders them generically:
 
 Adding a new MoonModule with controls requires **zero changes** to the UI
 files. The UI discovers and renders whatever MoonModules the system reports.
+
+## Documentation
+
+Documentation describes the system as it is, not its history or future.
+
+```
+docs/
+  architecture.md          ← this file (system design)
+  decisions.md             ← approaches tried and rejected
+  core/                    ← one page per core concept
+  modules/                 ← one page per MoonModule
+  plan.md                  ← temporary: steps not yet implemented
+```
+
+As each piece is implemented:
+1. Its step is removed from `plan.md`.
+2. A doc page is created in `docs/core/` or `docs/modules/`.
+3. When `plan.md` is empty, it is deleted.
+
+Doc pages are kept current with the code. Git commits are the history.
 
 ## What We Leave Undesigned
 

@@ -4,234 +4,164 @@
 
 We have CLAUDE.md and docs/architecture.md defining the system design.
 No code exists yet. This plan builds the first end-to-end working system
-on macOS desktop: effects rendering into a layer, mapped to a physical
-buffer, output via ArtNet, controllable via a web UI in the browser.
+on macOS desktop: effects rendering into layers, mapped and blended into
+output, sent via ArtNet, controllable via a web UI in the browser.
 
 ## What We're Building
 
 A desktop (macOS) application that:
-- Runs a render pipeline: effect → layer buffer → blend+map → physical buffer → driver
+- Runs a render pipeline: effect → producer buffer → blend+map → consumer buffer → driver
 - Has one layer with a switchable effect (2 effects available)
 - Has switchable layouts (grid + wheel) with controls for dimensions
-- Sends ArtNet UDP output (driver)
-- Can receive ArtNet UDP as an effect (fills a layer buffer like any effect)
-- Provides an embedded web UI to change effects, layouts, and control values
+- Sends ArtNet UDP output (driver MoonModule)
+- Can receive ArtNet UDP as an effect (fills a producer buffer like any effect)
+- Provides an embedded web UI (HTTP server MoonModule) to change effects,
+  layouts, and control values
+- Everything is a MoonModule — effects, layouts, drivers, HTTP server
+- Every step includes tests for what was built
 
-## Key Design Insight
+## Directory Structure
 
-ArtNet receive is a MoonModule (effect type) — it writes incoming pixel
-data into a layer buffer, just like any other effect. ArtNet send is a
-MoonModule (driver type) — it reads from the physical buffer and sends UDP.
+```
+src/
+  core/                    ← domain-neutral: MoonModule, controls, scheduler
+    modules/               ← system MoonModules (HTTP server, WiFi, mDNS)
+  platform/                ← platform abstraction
+    desktop/
+  light/                   ← light domain: buffers, mapping, blending
+    modules/               ← light MoonModules
+      effects/
+      layouts/
+      modifiers/
+      drivers/
+  app/                     ← entry points
+  ui/                      ← web UI assets (index.html, app.js, style.css)
+test/
+  core/                    ← core tests
+  light/                   ← light domain tests
+```
 
-## Implementation Steps (bottom-up)
+## Implementation Steps
 
-### Step 1: Build System
-- `CMakeLists.txt` — root CMake for desktop build
-- Target: `mmv3` executable
-- C++20, `-Wall -Wextra -Werror`
-- `src/` as source tree, structured as core + platform libraries
+### Step 1: Build System + Platform + Test Framework
+- `CMakeLists.txt` — root CMake for desktop build, including test target
+- Target: `mmv3` executable, C++20, `-Wall -Wextra -Werror`
+- `src/platform/Platform.h` — platform detection
+- `src/platform/desktop/PlatformDesktop.cpp` — alloc, free, millis, micros
+- Test framework setup (doctest or Catch2, header-only)
+- `test/core/test_platform.cpp` — verify alloc/free, millis/micros work
 
-Files:
-- `/CMakeLists.txt`
-- `/src/core/CMakeLists.txt`
-- `/src/platform/CMakeLists.txt`
-- `/src/platform/desktop/CMakeLists.txt`
-- `/src/app/CMakeLists.txt`
+### Step 2: MoonModule Base + Controls
+The core building block. Domain-neutral — knows nothing about pixels.
 
-### Step 2: Core Types
-Minimal, no dependencies on platform code.
+- `src/core/MoonModule.h` — base class with setup/loop/teardown, controls
+- `src/core/Control.h` — named value with type (uint16, bool, text).
+  Fixed-capacity array per MoonModule, no heap per control.
+  onChange notifies the owning MoonModule.
+- `test/core/test_moonmodule.cpp` — lifecycle (setup/loop/teardown called
+  in order), control add/get/set, onChange notification
+- `test/core/test_controls.cpp` — control types, value bounds, name lookup
 
-**Pixel (RGB)**
-- `src/core/Pixel.h` — `struct RGB { uint8_t r, g, b; }` with `constexpr`
-  blending, scale8. 3 bytes, `static_assert(sizeof(RGB) == 3)`.
+### Step 3: Light Domain Types
+Light-specific types, separate from core.
 
-**Coord3D**
-- `src/core/Coord3D.h` — `struct Coord3D { uint16_t x, y, z; }`.
-  Used by effects and layouts.
+- `src/light/Pixel.h` — `struct RGB { uint8_t r, g, b; }` with constexpr
+  blending, scale8. 3 bytes.
+- `src/light/Coord3D.h` — `struct Coord3D { uint16_t x, y, z; }`.
+- `src/light/Buffer.h` — contiguous pixel array. Allocate/free via
+  `platform::alloc`/`platform::free`. Exposes `std::span<RGB>`.
+- `src/light/MappingLUT.h` — flat CSR-style lookup table supporting
+  1:0, 1:1, 1:N. Allocated outside hot path.
+- `src/light/Noise.h` — integer Perlin noise (2D/3D).
+- `test/light/test_pixel.cpp` — RGB construction, scale8, blend, HSV
+  conversion, static_assert(sizeof == 3)
+- `test/light/test_buffer.cpp` — allocate, clear, fill, operator[],
+  span access, reallocate on size change
+- `test/light/test_mapping.cpp` — 1:0 skip, 1:1 direct, 1:N mirror,
+  rebuild on config change
+- `test/light/test_noise.cpp` — deterministic output, range bounds
 
-**FrameBuffer**
-- `src/core/FrameBuffer.h` — owns a contiguous `RGB*` array. Allocate/free
-  via `platform::alloc`/`platform::free`. Exposes `std::span<RGB>`.
-  `allocate(size_t count)`, `clear()`, `operator[]`, `count()`, `bytes()`.
-  Not templated initially — just RGB. Add RGBW later if needed.
-
-### Step 3: Platform Desktop
-Minimal platform implementation for desktop.
-
-- `src/platform/Platform.h` — platform detection macros
-- `src/platform/desktop/PlatformDesktop.cpp`:
-  - `platform::alloc(size_t)` → `std::malloc`
-  - `platform::free(void*)` → `std::free`
-  - `platform::millis()` → `std::chrono`
-  - `platform::micros()` → `std::chrono`
-
-### Step 4: MoonModule Base + Controls
-The core building block.
-
-**Controls**
-- `src/core/Control.h` — a control is a named value with a type.
-  Minimal initial types: `uint16_t` (slider), `bool` (toggle),
-  `char[64]` (text/IP). Controls are stored in a fixed-capacity array
-  owned by the MoonModule (no heap per control). When a value changes,
-  the MoonModule's `onChange(controlIndex)` is called.
-
-**MoonModule**
-- `src/core/MoonModule.h` — base class:
-  ```
-  class MoonModule {
-      virtual const char* name() = 0;
-      virtual void setup() {}
-      virtual void loop() {}     // called each frame (hot path)
-      virtual void teardown() {}
-      virtual void addControls() {}
-      virtual void onChange(uint8_t controlIndex) {}
-      Control controls[8];       // fixed capacity, no heap
-      uint8_t controlCount = 0;
-  };
-  ```
-  Helper methods: `addControl(name, type, default, min, max)` returns index.
-
-### Step 5: Mapping LUT
-- `src/core/MappingLUT.h` — flat CSR-style lookup table:
-  - `uint32_t* offsets` — one per logical pixel + 1 sentinel
-  - `uint16_t* destinations` — flat array of physical indices
-  - `allocate(logicalCount, totalDestinations)` via `platform::alloc`
-  - Supports 1:0 (offset[i] == offset[i+1]), 1:1, 1:N
-  - `rebuild()` triggers reallocation if sizes change
-
-### Step 6: Layouts (MoonModules)
+### Step 4: Layouts (MoonModules)
 Each layout is a MoonModule that produces a mapping LUT.
 
-**GridLayout** — `src/modules/layouts/GridLayout.h`
-- Controls: width, height, depth (uint16_t each)
-- Produces a 1:1 mapping (logical index == physical index for a simple grid)
-- `onChange` rebuilds the LUT
+- `src/light/modules/layouts/GridLayout.h` — controls: width, height, depth.
+  1:1 mapping. onChange rebuilds LUT.
+- `src/light/modules/layouts/WheelLayout.h` — controls: numSpokes, ledsPerSpoke.
+  Mapping with 1:0 gaps between spokes. onChange rebuilds LUT.
+- `test/light/test_grid_layout.cpp` — correct LUT for various dimensions,
+  LUT rebuild on control change
+- `test/light/test_wheel_layout.cpp` — correct gaps between spokes,
+  correct spoke pixel positions
 
-**WheelLayout** — `src/modules/layouts/WheelLayout.h`
-- Controls: numSpokes, ledsPerSpoke, radius (uint16_t each)
-- Produces a mapping with 1:0 gaps between spokes
-- Maps spoke LEDs to positions on a logical grid, leaving gaps unmapped
-- `onChange` rebuilds the LUT
+### Step 5: Effects (MoonModules)
+Each effect is a MoonModule that writes pixels into a producer buffer.
 
-### Step 7: Effects (MoonModules)
-Each effect is a MoonModule that writes pixels into a layer buffer.
+- `src/light/modules/effects/RainbowEffect.h` — controls: speed.
+  Integer hue-to-RGB. Writes based on frame count + coordinate.
+- `src/light/modules/effects/NoiseEffect.h` — controls: speed, scale.
+  Uses Noise.h for 2D/3D Perlin patterns.
+- `src/light/modules/effects/ArtNetReceiveEffect.h` — controls: universe, port.
+  Reads ArtNet UDP packets synchronously, writes pixel data into
+  producer buffer like any other effect.
+- `test/light/test_rainbow.cpp` — produces non-zero pixels, deterministic
+  for same frame number, respects speed control
+- `test/light/test_noise_effect.cpp` — produces varied output, respects
+  scale control
 
-**RainbowEffect** — `src/modules/effects/RainbowEffect.h`
-- Controls: speed (uint16_t)
-- `loop()`: writes rainbow pattern based on frame count + coordinate
-- Pure integer math (hue-to-RGB via 6-sector)
+### Step 6: Pipeline + Scheduler
+Wires layers together. Manages the render loop.
 
-**NoiseEffect** — `src/modules/effects/NoiseEffect.h`
-- Controls: speed (uint16_t), scale (uint16_t)
-- `loop()`: 2D/3D Perlin noise pattern using integer noise functions
-- Needs `src/core/Noise.h` with integer Perlin implementation
+- `src/light/Layer.h` — owns a producer buffer, a current effect
+  MoonModule, a current layout MoonModule, and a MappingLUT.
+- `src/core/Scheduler.h` — runs MoonModule lifecycle. Calls setup,
+  loop, teardown. Manages frame timing. Domain-neutral.
+- Blend+map is performed by consumers: each driver MoonModule walks the
+  layers, applies their LUTs, and blends into its own output.
+- `test/core/test_scheduler.cpp` — correct lifecycle ordering, frame
+  timing, multiple MoonModules
+- `test/light/test_layer.cpp` — effect writes to buffer, layout builds
+  LUT, layer wires them together
+- `test/light/test_blend_map.cpp` — blend+map produces correct output
+  for 1:0/1:1/1:N, multiple layers blend correctly
 
-**ArtNetReceiveEffect** — `src/modules/effects/ArtNetReceiveEffect.h`
-- Controls: listenUniverse (uint16_t), listenPort (uint16_t)
-- Opens a UDP socket, reads ArtNet packets
-- `loop()`: copies received pixel data into the layer buffer
-- Processed synchronously — checks for pending packets, doesn't block
+### Step 7: Drivers (MoonModules)
+Consumers that read from layers and push to output.
 
-### Step 8: Layer + Pipeline
-- `src/core/Layer.h` — owns a FrameBuffer (layer buffer), a MoonModule*
-  (current effect), and a MappingLUT. Holds a pointer to available layouts.
-  `render()` calls effect's `loop()`.
+- `src/light/modules/drivers/ArtNetSendDriver.h` — controls: destIP, universe.
+  Blend+maps from layers into ArtNet packets. Sends UDP.
+  Multiple universes for >170 pixels.
+- `test/light/test_artnet_send.cpp` — correct packet format, correct
+  universe splitting, correct pixel data in packets
 
-- `src/core/Pipeline.h` — owns the physical FrameBuffer and an array of
-  Layers. `frame()` method:
-  1. For each layer: call `layer.render()` (effect fills layer buffer)
-  2. Blend+map: walk each layer, apply its LUT, blend into physical buffer
-  3. For each driver: call `driver.loop()` (reads physical buffer)
+### Step 8: System MoonModules + Web UI
+System services as MoonModules.
 
-### Step 9: Drivers (MoonModules)
+- `src/core/modules/HttpServerModule.h` — controls: port.
+  Embedded HTTP server, polls in loop(). Serves UI assets.
+  REST API: GET /api/state, POST to switch effects/layouts/controls.
+- `src/ui/index.html`, `src/ui/app.js`, `src/ui/style.css` —
+  MoonModule-driven UI. Auto-renders controls. No frameworks.
+  Zero changes needed when adding new MoonModules.
+- `test/core/test_http_server.cpp` — starts, responds to GET, serves
+  correct content type, API returns valid JSON
 
-**ArtNetSendDriver** — `src/modules/drivers/ArtNetSendDriver.h`
-- Controls: destIP (text), universe (uint16_t)
-- `loop()`: reads from physical buffer, packs into ArtNet DMX packets
-  (512 bytes per universe, multiple universes for >170 pixels), sends UDP
-- Uses BSD sockets (platform-independent on desktop/RPi/ESP32-lwIP)
-
-### Step 10: Web UI
-Embedded HTTP server serving a simple SPA.
-
-**HTTP Server** — `src/net/HttpServer.h/.cpp`
-- Lightweight HTTP server on a configurable port (default 80)
-- Desktop: BSD sockets, single-threaded, non-blocking poll in frame loop
-- Serves static HTML/JS/CSS from compiled-in assets
-- REST API endpoints:
-  - `GET /api/state` — current layers, effects, layouts, controls
-  - `POST /api/layer/{id}/effect` — switch effect
-  - `POST /api/layer/{id}/layout` — switch layout
-  - `POST /api/control/{module}/{control}` — set control value
-
-**Web UI Assets** — `src/ui/`
-- Single HTML file with inline JS/CSS (keep it minimal)
-- Shows: current effect (dropdown to switch), current layout (dropdown),
-  controls for active effect and layout (auto-rendered from control types)
-- Polls `/api/state` periodically or uses simple refresh
-
-### Step 11: Application Entry Point
+### Step 9: Application Entry Point
 - `src/app/main_desktop.cpp`:
-  1. Create pipeline with physical buffer
-  2. Register available effects, layouts, drivers
+  1. Create scheduler
+  2. Load system MoonModules (HTTP server)
   3. Create one layer with default effect (Rainbow) and layout (Grid 16x16x1)
   4. Create ArtNet send driver
-  5. Start HTTP server
-  6. Main loop: process network → pipeline.frame() → sleep to target FPS
-
-## File Tree (what gets created)
-
-```
-CMakeLists.txt
-src/
-  core/
-    Pixel.h
-    Coord3D.h
-    FrameBuffer.h
-    Control.h
-    MoonModule.h
-    Noise.h
-    MappingLUT.h
-    Layer.h
-    Pipeline.h
-    CMakeLists.txt
-  platform/
-    Platform.h
-    desktop/
-      PlatformDesktop.cpp
-      CMakeLists.txt
-    CMakeLists.txt
-  modules/
-    effects/
-      RainbowEffect.h
-      NoiseEffect.h
-      ArtNetReceiveEffect.h
-    layouts/
-      GridLayout.h
-      WheelLayout.h
-    drivers/
-      ArtNetSendDriver.h
-    CMakeLists.txt
-  net/
-    HttpServer.h
-    HttpServer.cpp
-    CMakeLists.txt
-  ui/
-    index.html
-    CMakeLists.txt
-  app/
-    main_desktop.cpp
-    CMakeLists.txt
-```
+  5. Main loop: scheduler.tick() at target FPS
 
 ## Verification
 
 1. `cmake -B build && cmake --build build` — compiles without warnings
-2. `./build/mmv3` — runs, starts HTTP server
-3. Open browser → see UI with controls
-4. Switch effect between Rainbow and Noise → visual change in ArtNet output
-5. Switch layout between Grid and Wheel → mapping changes
-6. Change grid dimensions → LUT rebuilds
-7. Verify ArtNet output with a receiver (e.g. another ArtNet node, or
-   Wireshark to see UDP packets on port 6454)
-8. ArtNet receive effect: send ArtNet to the app, see it appear as a layer
+2. `cmake --build build --target test` — all tests pass
+3. `./build/mmv3` — runs, starts HTTP server
+4. Open browser → see UI with controls
+5. Switch effect between Rainbow and Noise → visual change in ArtNet output
+6. Switch layout between Grid and Wheel → mapping changes
+7. Change grid dimensions → LUT rebuilds
+8. Verify ArtNet output with Wireshark (UDP packets on port 6454)
+9. ArtNet receive effect: send ArtNet to the app, see it appear as a layer
+10. `uv run scripts/check/check_platform_boundary.py` — passes

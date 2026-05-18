@@ -17,6 +17,10 @@ rules and constraints for working on the project.
 - **Let structure emerge.** Don't pre-design files, classes, or interfaces
   for things that don't exist yet. Build what you need, refactor when
   patterns become clear.
+- **Domain-neutral core.** Separate core infrastructure from the light
+  domain as much as practical. When mixing is necessary for performance
+  or simplicity, use domain-neutral naming (e.g. "producer buffer" not
+  "LED buffer") so the code stays open to future separation.
 - **Present tense only.** Code, comments, and documentation describe the
   system as it is now. No changelogs, no roadmaps, no "will be added
   later" notes. History lives in git commits. The one exception is
