@@ -124,18 +124,33 @@ PSRAM can run many layers; a device without may be limited to one.
 
 ### Effects
 
-Effects produce pixel colors. An effect is a function from (frame number,
-3D coordinate, parameters) to color. Effects know nothing about hardware,
-protocols, physical LED layout, or mapping. They write into the layer's
-buffer sequentially.
+Effects produce pixel colors. They write into the layer's buffer, which
+represents a logical grid. The layer determines the buffer's dimensions
+(width, height, depth) from the LayoutGroup and its own start/end
+position and modifiers. Effects receive these logical dimensions and
+elapsed time (millis) as their rendering context. They compute pixel
+positions from the buffer index (e.g. `x = i % width`, `y = i / width`).
+
+Effects use elapsed time for animation, not frame count. This makes
+animation speed independent of frame rate — an effect looks the same at
+30fps and 60fps. For multi-device sync, the leader synchronizes elapsed
+time across devices (same approach as syncing a frame counter, but
+frame-rate independent).
+
+Effects know nothing about hardware, protocols, physical LED layout, or
+mapping. They only see the logical grid the layer provides.
 
 ### Modifiers
 
-A modifier (MoonModule) lives inside a layer alongside its effect. A
-modifier can transform the mapping LUT (rebuilt on the cold path, zero
-render cost), and optionally override a pixel function to transform
-coordinates or colors on the hot path (per-pixel cost, but enables
-dynamic animations like continuous rotation).
+A modifier (MoonModule) lives inside a layer alongside its effects.
+Modifiers expose a virtual interface — the Layer calls modifier methods
+without knowing the concrete type (no dynamic_cast).
+
+A modifier can:
+- Transform the mapping LUT via a virtual `transformCoord()` method
+  (rebuilt on the cold path, zero render cost).
+- Transform pixels via a virtual `transformPixels()` method on the hot
+  path (per-pixel cost, enables dynamic animations like rotation).
 
 ### Mapping and Blending
 
@@ -180,6 +195,12 @@ Each driver (MoonModule) speaks one protocol:
 Drivers read from the DriverGroup's output buffer. Everything before
 the DriverGroup is platform-independent.
 
+Network-based drivers (ArtNet, E1.31) must pace their packet output —
+never blast all universe packets in a tight loop. Requires both FPS
+limiting (skip frames if called too fast) and inter-packet delay
+(microsecond pause between universe packets within a frame). Without
+pacing, receivers drop packets and the output appears broken.
+
 ### Controls
 
 Every MoonModule (effect, modifier, layout, driver) exposes **controls** —
@@ -188,16 +209,32 @@ runtime-configurable parameters visible in the web UI. Examples:
 - An ArtNet driver exposes destination IP and universe.
 - A fire effect exposes speed, cooling, sparking.
 
-Controls are part of the MoonModule interface — every MoonModule declares
-its controls the same way. When a control value changes, the system
-notifies the owning MoonModule so it can react (e.g. a layout size change
-triggers a LUT rebuild).
+Controls are linked to MoonModule class variables. The default value of
+the variable is the default value of the control when the module is
+created. When a control value changes, the system notifies the owning
+MoonModule so it can react (e.g. a layout size change triggers a LUT
+rebuild).
+
+Controls are shown dynamically: when a control value changes, the
+control set can be rebuilt. For example, if a control selects a mode,
+the controls belonging to that mode are shown while others are hidden.
 
 Controls are the bridge between the UI and the engine. The web UI renders
 them automatically based on what MoonModules declare. The exact control
-types (slider, toggle, color picker, text input, dropdown) will emerge
-from implementation, but the principle is: MoonModules declare what they
-need, the UI renders it.
+types (slider, toggle, color picker, text input, dropdown) are defined
+in the UI spec (`docs/modules_draft/core/ui-spec.md`). The principle is:
+MoonModules declare what they need, the UI renders it.
+
+### Rebuild Propagation
+
+When a control value changes on a layout, the pipeline must rebuild:
+layers rebuild their LUTs, the DriverGroup reallocates its output buffer.
+When a modifier control changes, only the affected layer's LUT is
+rebuilt (the output buffer size doesn't change). This propagation must be built into the framework — not
+handled by ad-hoc dirty flag checks in the application entry point.
+
+The mechanism (observer pattern, signal/slot, or centralized pipeline
+manager) will be defined in the module spec before implementation.
 
 ### MoonModules
 
@@ -249,22 +286,22 @@ The key split is **producers vs consumers**:
   what they consume from.
 
 The logical and physical buffers **are** the double buffer: producers
-write into logical buffers while consumers read from the physical buffer
-(or directly from DMA/packet buffers). No additional buffers are needed.
-At the frame boundary, roles swap via atomic pointer swap — the driver
-transmits frame N while effects render frame N+1.
+write into logical buffers while consumers read from the physical buffer.
+No additional buffers are needed. At the frame boundary, roles swap via
+atomic pointer swap — the driver transmits frame N while effects render
+frame N+1.
 
-For LED drivers and ArtNet output, consumers may blend+map directly into
-DMA regions or network packet buffers rather than into a separate physical
-buffer. This happens per-chunk (per DMA region or per ArtNet packet), not
-per-frame, so the physical buffer may not need to exist as a full
-contiguous allocation in all cases.
+When memory is sufficient (even on ESP32 without PSRAM for small
+layouts up to ~4K pixels), the system uses double buffering with a
+separate physical buffer, mapping, blending, and producer/consumer
+parallelism — same as devices with PSRAM.
 
-On memory-constrained devices (ESP32 without PSRAM), there is no double
-buffering — consumers read the logical buffer directly. This means no
-mapping, no blending, and no parallelism between producers and consumers.
-But it works, and this is how the 12K LED stretch goal is achieved on
-ESP32 without PSRAM.
+Only when memory is too tight for double buffering (large layouts on
+devices without PSRAM) does the system fall back: one layer with 1:1
+unshuffled mapping, effects write directly into their layer buffer,
+drivers read from that same buffer to fill DMA/UDP packets directly.
+No blend+map step, no mapping, no blending, no parallelism. This is
+how the 12K LED stretch goal is achieved on ESP32 without PSRAM.
 
 Each MoonModule can declare a core affinity. The scheduler respects this
 when pinning tasks. On single-core or desktop systems, core affinity is
@@ -304,7 +341,8 @@ The system adapts to what the device has:
 | Device | Memory | Typical capability |
 |--------|--------|--------------------|
 | ESP32 + OPI PSRAM | 2-8 MB | Many layers, 10K+ LEDs |
-| ESP32, no PSRAM | ~320 KB internal | Single layer, consumers read logical buffer directly (no mapping/blending/parallelism), 4K+ LEDs (12K stretch goal with minimal other processes) |
+| ESP32, no PSRAM, small layout | ~320 KB internal | Full pipeline: double buffering, mapping, blending, parallelism. Up to ~4K pixels. |
+| ESP32, no PSRAM, large layout | ~320 KB internal | Fallback: single layer, 1:1 direct, no blending/parallelism. 4K-12K pixels (12K stretch goal). |
 | Teensy 4.x | 1 MB internal, no PSRAM | Single/few layers, excellent DMA-based LED output (OctoWS2811), no WiFi (USB or serial control) |
 | Desktop / RPi | Abundant | No constraints |
 
@@ -328,23 +366,20 @@ Only abstract what you actually need. Currently that means:
 - **Filesystem.** Read/write config and UI assets. (`LittleFS` /
   `std::filesystem`). Teensy: SD card or flash.
 
-Don't create an abstraction until you have two platforms that need it.
-Don't pre-design headers for abstractions you haven't written yet.
-
-All platform-specific code lives in `src/platform/`. Everything outside it
-compiles cleanly on every target.
+Abstractions are added when needed by a concrete implementation, not
+pre-designed. All platform-specific code lives in `src/platform/`.
+Everything outside it compiles cleanly on every target.
 
 ## Multi-Device Sync
 
 For installations spanning multiple controllers:
 
 1. **Discovery.** Devices find each other via mDNS.
-2. **Clock sync.** One leader broadcasts timestamps. Followers compute their
-   offset. Target: sub-millisecond accuracy.
-3. **Frame sync.** Leader broadcasts a frame counter at each tick. Effects
-   use this counter (not wall-clock time) for animation, so all devices
-   produce identical output for the same frame number.
-4. **Pixel distribution.** When one device needs to send pixel data to
+2. **Time sync.** One leader broadcasts its elapsed time (millis).
+   Followers compute their offset. Target: sub-millisecond accuracy.
+   Since effects use elapsed time for animation, synced time means
+   synced visuals — regardless of each device's frame rate.
+3. **Pixel distribution.** When one device needs to send pixel data to
    another, use ArtNet/E1.31 — it's the standard, no need to invent a
    protocol.
 
@@ -499,32 +534,24 @@ Documentation describes the system as it is, not its history or future.
 ```
 docs/
   architecture.md          ← this file (system design)
-  decisions.md             ← approaches tried and rejected
-  core/                    ← one page per core concept
-  modules/                 ← one page per MoonModule
-  plan.md                  ← temporary: steps not yet implemented
+  decisions.md             ← approaches tried and rejected, lessons learned
+  modules/                 ← one page per MoonModule (specs before code)
+  modules_draft/           ← draft specs from prototype cycle, to be reviewed
 ```
 
-As each piece is implemented:
-1. Its step is removed from `plan.md`.
-2. A doc page is created in `docs/core/` or `docs/modules/`.
-3. When `plan.md` is empty, it is deleted.
-
-Doc pages are kept current with the code. Git commits are the history.
+Module specs are written before implementation. They define: purpose,
+controls, behavior, edge cases, interactions with other modules. Doc
+pages are kept current with the code. Git commits are the history.
 
 ## What We Leave Undesigned
 
-These will be designed when we build them:
+These will be specified in module docs before implementation:
 
-- **MoonModule interface.** We know effects, modifiers, layouts, and drivers
-  are all MoonModules with controls. The exact base class / concept will
-  emerge when we implement the first few.
+- **MoonModule interface.** Draft exists in `docs/modules_draft/core/`.
+  Needs review: virtual modifier interface, rebuild propagation.
 - **Config persistence.** Controls need to be saved/loaded. The storage
-  format and mechanism will emerge when we have controls to persist.
-- **Web UI details.** Communication protocol, exact API shape, and
-  interaction patterns will emerge from implementation.
-- **File/directory structure.** We know the platform boundary. The rest of
-  the directory tree will grow organically as we add code.
-
-This is deliberate. Designing these now would mean guessing. We'd rather
-build, learn, and then design with real information.
+  format and mechanism will be specified when we build that module.
+- **Web UI.** Draft spec exists in `docs/modules_draft/core/ui-spec.md`.
+  Needs review: multiple layers, live preview, WebSocket.
+- **File/directory structure.** The platform boundary is fixed. The rest
+  will grow as modules are specified and implemented.

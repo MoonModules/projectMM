@@ -12,21 +12,20 @@ rules and constraints for working on the project.
 
 ## Principles
 
-- **Minimalism.** Every addition must pay for itself. Prefer removing code
-  over adding it. No speculative abstractions.
+- **Minimalism means simplicity.** Flat, simple, predictable code. Not
+  clever abstractions. Not elegant templates. If a contributor can't
+  understand it in 30 seconds, it's too complex. Every addition must
+  pay for itself. Prefer removing code over adding it.
 - **Data over objects.** Design around data flow, not class hierarchies.
-- **Let structure emerge.** Don't pre-design files, classes, or interfaces
-  for things that don't exist yet. Build what you need, refactor when
-  patterns become clear.
+- **Concrete first, abstract later.** Build one working feature
+  end-to-end before extracting patterns into shared abstractions.
+  Don't build the framework before the domain logic works.
 - **Domain-neutral core.** Separate core infrastructure from the light
-  domain as much as practical. When mixing is necessary for performance
-  or simplicity, use domain-neutral naming (e.g. "producer buffer" not
-  "LED buffer") so the code stays open to future separation.
-- **Present tense only.** Code, comments, and documentation describe the
-  system as it is now. No changelogs, no roadmaps, no "will be added
-  later" notes. History lives in git commits. The one exception is
-  `docs/decisions.md` — a record of approaches we tried and rejected,
-  to avoid repeating mistakes.
+  domain as much as practical. When mixing is necessary, use
+  domain-neutral naming so the code stays open to future separation.
+- **Present tense only.** Code, comments, and documentation describe
+  the system as it is now. No changelogs, no roadmaps. History lives
+  in git commits. The one exception is `docs/decisions.md`.
 
 ## Hard Rules
 
@@ -35,27 +34,56 @@ hardware API calls live exclusively in `src/platform/`. Everything outside
 `src/platform/` compiles on every target without modification.
 
 **Hot path (render loop):**
-- No heap allocations (`new`, `malloc`, `push_back`, `std::string` construction)
-- No blocking (`delay`, `sleep`, `mutex.lock()` — use `try_lock` or lock-free)
+- No heap allocations (`new`, `malloc`, `push_back`, `std::string`)
+- No blocking (`delay`, `sleep`, `mutex.lock()` — use `try_lock`)
 - Integer math preferred over `float` in per-pixel work
 
 **Memory.** Allocate buffers as single contiguous blocks outside the hot
-path. Never allocate small scattered objects in loops. On ESP32 with PSRAM,
-use `heap_caps_malloc(..., MALLOC_CAP_SPIRAM)` for large buffers.
+path. Never allocate small scattered objects in loops. On ESP32 with
+PSRAM, use `heap_caps_malloc(..., MALLOC_CAP_SPIRAM)` for large buffers.
 
 **Network input.** Process synchronously at a defined point in the frame
-loop. No async network tasks writing into render buffers. Minimize all
-network-related buffer overhead.
-
-**Build errors.** Stop. Diagnose root cause. Do not retry or work around.
-
-**No staging files.** Do not `git add` files. The product owner stages
-and commits manually.
+loop. No async network tasks writing into render buffers.
 
 **Warnings are errors.** Build with `-Wall -Wextra -Werror`.
 
 **Tests must pass.** Run `cmake --build build --target test` before
-considering work complete. New core logic needs a corresponding test.
+considering work complete. New core logic needs a corresponding unit
+test. Full pipeline needs integration tests.
+
+## Process Rules
+
+**Specs before code.** Module docs (`docs/modules/*.md`) and the UI spec
+must be sufficient to implement from before writing code. "Sufficient"
+means: controls defined, behavior described, edge cases identified,
+interactions with other modules listed. When in doubt, ask.
+
+**Ask, don't guess.** When uncertain about requirements, behavior, or
+approach — ask the product owner. Asking is always preferred over
+guessing. This is the default.
+
+**Plan before implementing.** Use `/plan` mode before every feature.
+Review plans for: unnecessary files, inheritance where structs suffice,
+modifications outside the relevant directory. Reject and regenerate
+bad plans.
+
+**Consider extending before creating.** When adding a feature, check if
+an existing module can be extended cleanly. If a new file is genuinely
+cleaner, that's fine — but justify it.
+
+**Anti-stalling.** If a build error or test failure takes more than 2
+attempts to fix, STOP. Do not rewrite surrounding files. Ask the
+product owner for guidance or rollback with Git and re-approach.
+
+**No staging files.** Do not `git add` files. The product owner stages,
+tests, and commits manually.
+
+**Mandatory subtraction.** Periodically review and remove code and docs
+that no longer earn their place. If nothing can be removed, justify why.
+
+**Reference, don't copy.** The `prototype-v3-cycle1` branch has working
+solutions (ArtNet pacing, mirror kaleidoscope mapping, etc.). Reference
+it for proven approaches but don't copy code structure.
 
 ## Code Style
 
@@ -64,8 +92,7 @@ considering work complete. New core logic needs a corresponding test.
 - `std::span` over pointer + length
 - Namespace: `mm`, platform code in `mm::platform`
 - No `using namespace` in headers
-- MoonModules are single-file (`.h` only, implementation inline) to
-  minimize files and make authoring easy
+- MoonModules are single-file (`.h` only, implementation inline)
 
 ## Agent Roles
 
@@ -78,11 +105,10 @@ The project uses Claude Code agents in defined roles. The user is the
 | **Developer** | Sonnet | Implementation | Writes code in worktrees, follows all rules, one step at a time |
 | **Reviewer** | Opus | Code quality | Reviews diffs against CLAUDE.md rules, flags violations |
 | **Tester** | Sonnet | Verification | Writes tests, verifies architectural rules in code |
-| **Runner** | Haiku | Quick checks | Runs MoonDeck scripts, platform boundary checks, build verification, formatting |
+| **Runner** | Haiku | Quick checks | Runs MoonDeck scripts, platform boundary checks, build verification |
 
-Agents work in parallel on independent steps (e.g. core types and
-platform code). Agents never commit — only the product owner approves
-commits after testing.
+Agents work in parallel on independent steps. Agents never commit —
+only the product owner approves commits after testing.
 
 ## Build
 
