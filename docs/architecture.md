@@ -55,6 +55,17 @@ operate in 3D space (x, y, z). 2D and 1D are simply the case where one or
 two dimensions have size 1. There is no separate 2D mode — everything is
 3D, and lower dimensions fall out naturally.
 
+**Numeric types:**
+- Coordinates (x, y, z) and dimensions (width, height, depth): `int16_t`.
+  Supports negatives for effects that run out of bounds. Max 32767 per axis.
+- Pixel indices in storage (LUT destinations): `uint16_t`. Covers up to
+  65K pixels per LUT. Saves memory on constrained devices.
+- Pixel counts and iteration indices: `uint32_t`. Stack variables only,
+  no storage cost. Supports >65K when needed.
+
+Use these types consistently to avoid casting. If >65K LUT destinations
+are needed (large hub75 panels), introduce a `PixelIndex` typedef.
+
 ### LayoutGroup
 
 A **LayoutGroup** (MoonModule) groups layouts and defines the physical
@@ -86,15 +97,26 @@ multiple layouts (e.g. a LED strip section + a row of par lights).
 ### Layers
 
 A **layer** owns:
-- A **buffer** — the pixel data the effect writes into (logical space)
+- A **buffer** — the pixel data effects write into (logical space)
 - A **mapping LUT** — built by the layer from the LayoutGroup's layouts
-  and the layer's modifiers
-- An **effect** (MoonModule) — writes pixels into the buffer
-- **Modifiers** (MoonModules) — transform the LUT or pixels
+  and the layer's static modifiers
+- **Effects** (MoonModules, ordered list) — write pixels into the buffer
+- **Modifiers** (MoonModules, ordered list) — transform the LUT or pixels
+
+A layer can have **multiple effects**. Effects are not blended — they
+write to the buffer sequentially in the order they are listed. Each
+effect overwrites or adds to what the previous effect wrote. This allows
+layering patterns (e.g. a base color effect followed by a sparkle effect).
+
+A layer can have **multiple modifiers**. Modifiers run in order, each
+taking the result of the previous modifier as input. This means the order
+matters: mirror-then-rotate produces different output than rotate-then-mirror.
+Static modifiers chain during LUT build, dynamic modifiers chain during
+rendering.
 
 Each layer references the shared LayoutGroup. The layer builds its own LUT
 by iterating the LayoutGroup's layout coordinates and applying its static
-modifiers. Different layers can have different modifiers, producing
+modifiers in order. Different layers can have different modifiers, producing
 different LUTs from the same LayoutGroup.
 
 The number of active layers depends on available memory — a device with
@@ -105,7 +127,7 @@ PSRAM can run many layers; a device without may be limited to one.
 Effects produce pixel colors. An effect is a function from (frame number,
 3D coordinate, parameters) to color. Effects know nothing about hardware,
 protocols, physical LED layout, or mapping. They write into the layer's
-buffer.
+buffer sequentially.
 
 ### Modifiers
 
@@ -138,8 +160,15 @@ buffer is the only output-side allocation.
 ### DriverGroup
 
 A **DriverGroup** (MoonModule) groups output drivers. It is the consumer
-side of the pipeline — drivers perform blend+map from layers into their
-output (consumer buffer, DMA region, or network packets).
+side of the pipeline. The DriverGroup owns a shared output buffer and
+performs blend+map from all layers into it each frame. Individual drivers
+then read from this buffer to push to hardware/network.
+
+The shared output buffer is necessary because blend+map writes to
+arbitrary physical positions (via LUT) — the output is not filled
+sequentially. A driver cannot read chunk-by-chunk until the full buffer
+is populated. Direct-to-DMA/packet optimization would only work for the
+trivial case (1:1 sequential mapping with no modifiers), which is rare.
 
 Each driver (MoonModule) speaks one protocol:
 - **LED drivers:** WS2812 via RMT, APA102 via SPI. Platform-specific.
@@ -148,8 +177,8 @@ Each driver (MoonModule) speaks one protocol:
 - **Preview:** streams pixel data to the web UI via WebSocket.
 - **Simulation:** SDL2 or terminal output for desktop development.
 
-Drivers own their consumer buffer (or write directly to DMA/packet
-buffers). Everything before the DriverGroup is platform-independent.
+Drivers read from the DriverGroup's output buffer. Everything before
+the DriverGroup is platform-independent.
 
 ### Controls
 
@@ -276,6 +305,7 @@ The system adapts to what the device has:
 |--------|--------|--------------------|
 | ESP32 + OPI PSRAM | 2-8 MB | Many layers, 10K+ LEDs |
 | ESP32, no PSRAM | ~320 KB internal | Single layer, consumers read logical buffer directly (no mapping/blending/parallelism), 4K+ LEDs (12K stretch goal with minimal other processes) |
+| Teensy 4.x | 1 MB internal, no PSRAM | Single/few layers, excellent DMA-based LED output (OctoWS2811), no WiFi (USB or serial control) |
 | Desktop / RPi | Abundant | No constraints |
 
 The architecture does not assume PSRAM is present. Buffer counts and sizes
@@ -291,11 +321,12 @@ Only abstract what you actually need. Currently that means:
   heap. (`heap_caps_malloc` / `std::malloc`)
 - **Threads.** Create a thread pinned to a specific core (ESP32 has 2),
   with mutex/semaphore primitives. (`FreeRTOS` / `std::thread`)
-- **LED drivers.** Per-protocol, per-platform. RMT on ESP32, SPI on RPi,
-  SDL2 or terminal on desktop.
+- **LED drivers.** Per-protocol, per-platform. RMT on ESP32, DMA/OctoWS2811
+  on Teensy, SPI on RPi, SDL2 or terminal on desktop.
 - **Networking.** HTTP server, WebSocket, UDP sockets. (`esp_http_server` /
-  BSD sockets / platform library)
-- **Filesystem.** Read/write config and UI assets. (`LittleFS` / `std::filesystem`)
+  BSD sockets / platform library). Teensy: USB serial or Ethernet shield.
+- **Filesystem.** Read/write config and UI assets. (`LittleFS` /
+  `std::filesystem`). Teensy: SD card or flash.
 
 Don't create an abstraction until you have two platforms that need it.
 Don't pre-design headers for abstractions you haven't written yet.
