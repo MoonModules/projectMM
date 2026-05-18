@@ -2,10 +2,11 @@
 
 ## The Problem
 
-Drive 10,000+ addressable LEDs across multiple synchronized devices at high
-frame rates. Support multiple LED protocols (WS2812, APA102, DMX/ArtNet).
-Run the same core logic on ESP32, desktop, and Raspberry Pi. Provide a web
-UI and network APIs for control.
+Drive 10,000+ addressable LEDs and DMX lighting fixtures (RGB(W) pars,
+moving heads, dimmers) across multiple synchronized devices at high frame
+rates. Support LED protocols (WS2812, APA102) and DMX/ArtNet for
+conventional lighting fixtures. Run the same core logic on ESP32, desktop,
+and Raspberry Pi. Provide a web UI and network APIs for control.
 
 ## Core vs Domain
 
@@ -27,14 +28,24 @@ to keep the door open for future separation.
 The system is a render pipeline:
 
 ```
-            Layer A: Effect + Modifiers → Buffer A (logical) ─ LUT A ─┐
-            Layer B: Effect + Modifiers → Buffer B (logical) ─ LUT B ─┼→ Blend+Map → Physical Buffer → Drivers
-            Layer C: Effect + Modifiers → Buffer C (logical) ─ LUT C ─┘
-                                                                 ▲
-                                                                 │
-                                                           Layout (algorithmic)
-                                                         defines physical positions,
-                                                          shapes the mapping LUTs
+              LayoutGroup (shared across layers and drivers)
+                ├── GridLayout  ──→ coordinate iterator
+                └── WheelLayout ──→ coordinate iterator
+                        │
+          ┌─────────────┼─────────────┐
+          ▼             ▼             ▼
+      Layer A        Layer B       Layer C
+    Effect(s)      Effect(s)     Effect(s)
+    Modifier(s)    Modifier(s)   Modifier(s)
+    Buffer (own)   Buffer (own)  Buffer (own)
+    LUT (own)      LUT (own)     LUT (own)
+          │             │             │
+          └──── Blend+Map ────────────┘
+                    │
+              DriverGroup
+                ├── WS2812Driver  (consumer buffer / DMA)
+                ├── ArtNetDriver  (UDP packets)
+                └── PreviewDriver (WebSocket)
 ```
 
 ### 3D From the Core
@@ -44,41 +55,65 @@ operate in 3D space (x, y, z). 2D and 1D are simply the case where one or
 two dimensions have size 1. There is no separate 2D mode — everything is
 3D, and lower dimensions fall out naturally.
 
-### Effects and Layers
+### LayoutGroup
 
-Effects produce pixel colors. An effect is a function from (frame number,
-3D coordinate, parameters) to color. Effects know nothing about hardware,
-protocols, physical LED layout, or mapping.
+A **LayoutGroup** (MoonModule) groups layouts and defines the physical
+topology of the light installation. It is shared across all layers and
+drivers — there is one LayoutGroup describing the physical setup, and
+multiple layers render into it. When a layout changes, all layers rebuild
+their LUTs.
 
-Multiple effects can run simultaneously, each writing into its own **layer
-buffer** in **logical coordinate space**. Each layer also owns its own
-**mapping LUT** — not because layers typically have different geometries,
-but because different modifiers or different start/end coordinates (a
-layer control) can place effects on different parts of the fixture.
+Note: the term "fixture" is reserved for DMX lighting fixtures (pars,
+moving heads, etc.) — it is not used for layout grouping.
+
+### Layouts
+
+A layout (MoonModule) defines the physical positions of lights in 3D
+space. It is a **coordinate iterator** — it yields (physicalIndex, x, y, z)
+for each light it defines. A layout does not own or build any mapping LUT.
+
+Layouts cover both addressable LEDs and DMX fixtures. An LED strip layout
+yields one coordinate per LED. A DMX fixture layout yields one coordinate
+per fixture (a moving head is one point in 3D space).
+
+Layout positions are computed algorithmically, not stored in memory.
+The default is a grid, but any geometry is possible: spheres, rings,
+cones, spirals, arbitrary point clouds.
+
+Layouts are grouped inside a LayoutGroup. A LayoutGroup can contain
+multiple layouts (e.g. a LED strip section + a row of par lights).
+
+### Layers
+
+A **layer** owns:
+- A **buffer** — the pixel data the effect writes into (logical space)
+- A **mapping LUT** — built by the layer from the LayoutGroup's layouts
+  and the layer's modifiers
+- An **effect** (MoonModule) — writes pixels into the buffer
+- **Modifiers** (MoonModules) — transform the LUT or pixels
+
+Each layer references the shared LayoutGroup. The layer builds its own LUT
+by iterating the LayoutGroup's layout coordinates and applying its static
+modifiers. Different layers can have different modifiers, producing
+different LUTs from the same LayoutGroup.
 
 The number of active layers depends on available memory — a device with
 PSRAM can run many layers; a device without may be limited to one.
 
+### Effects
+
+Effects produce pixel colors. An effect is a function from (frame number,
+3D coordinate, parameters) to color. Effects know nothing about hardware,
+protocols, physical LED layout, or mapping. They write into the layer's
+buffer.
+
 ### Modifiers
 
-A modifier is an effect on an effect. Modifiers live inside a layer
-alongside its effect. A modifier can transform the mapping LUT (rebuilt
-on the cold path, zero render cost), and optionally override a pixel
-function to transform coordinates or colors on the hot path (per-pixel
-cost, but enables dynamic animations like continuous rotation).
-
-### Layouts
-
-A layout defines the physical positions of LEDs in 3D space. The default
-is a grid, but any geometry is possible: spheres, rings, cones, spirals,
-arbitrary point clouds.
-
-Layout positions are **computed algorithmically**, not stored in memory.
-A layout is a function from (physical index) → (x, y, z). This saves
-memory — a 10K LED sphere doesn't need 30KB of stored coordinates.
-
-When a layout changes, the mapping LUT is rebuilt. The layout function
-runs only during LUT construction (cold path), never during rendering.
+A modifier (MoonModule) lives inside a layer alongside its effect. A
+modifier can transform the mapping LUT (rebuilt on the cold path, zero
+render cost), and optionally override a pixel function to transform
+coordinates or colors on the hot path (per-pixel cost, but enables
+dynamic animations like continuous rotation).
 
 ### Mapping and Blending
 
@@ -88,7 +123,7 @@ color into the physical output buffer. This is where logical space meets
 physical space.
 
 Each mapping LUT is a flat, contiguous lookup table allocated outside the
-hot path (at startup or when the fixture configuration changes).
+hot path (at startup or when the layout configuration changes).
 
 The LUT supports three mapping types without dynamic allocation:
 - **1:0** — logical pixel is unmapped (skipped).
@@ -100,12 +135,21 @@ Because mapping and blending happen together in a single pass over each
 layer, there is no intermediate "mapped but unblended" buffer. The physical
 buffer is the only output-side allocation.
 
-### Output
+### DriverGroup
 
-Drivers push pixel data from the physical buffer to hardware. Each driver
-speaks one protocol (WS2812 via RMT, APA102 via SPI, ArtNet via UDP,
-simulated via SDL2 or terminal). Drivers are platform-specific; everything
-before them is not.
+A **DriverGroup** (MoonModule) groups output drivers. It is the consumer
+side of the pipeline — drivers perform blend+map from layers into their
+output (consumer buffer, DMA region, or network packets).
+
+Each driver (MoonModule) speaks one protocol:
+- **LED drivers:** WS2812 via RMT, APA102 via SPI. Platform-specific.
+- **DMX/ArtNet:** sends DMX data over UDP. Supports both addressable LEDs
+  and conventional DMX fixtures (pars, moving heads, dimmers).
+- **Preview:** streams pixel data to the web UI via WebSocket.
+- **Simulation:** SDL2 or terminal output for desktop development.
+
+Drivers own their consumer buffer (or write directly to DMA/packet
+buffers). Everything before the DriverGroup is platform-independent.
 
 ### Controls
 
@@ -200,7 +244,7 @@ ignored and everything runs on available threads.
 ## Memory Strategy
 
 All buffers are allocated as single contiguous blocks outside the hot path
-— at startup or when configuration changes (e.g. LED count, fixture size,
+— at startup or when configuration changes (e.g. LED count, layout size,
 layer count). They are then reused every frame with zero allocations in
 steady state.
 

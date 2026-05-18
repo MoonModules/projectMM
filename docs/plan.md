@@ -81,17 +81,18 @@ Light-specific types, separate from core.
   rebuild on config change
 - `test/light/test_noise.cpp` — deterministic output, range bounds
 
-### Step 4: Layouts (MoonModules)
-Each layout is a MoonModule that produces a mapping LUT.
+### Step 4: LayoutGroup, Layouts, Modifiers, Layer, DriverGroup
+LayoutGroup groups layouts (shared). Layouts are coordinate iterators.
+Layer owns buffer + LUT + effect + modifiers. DriverGroup groups drivers.
+All MoonModules are single-file (.h only).
 
-- `src/light/modules/layouts/GridLayout.h` — controls: width, height, depth.
-  1:1 mapping. onChange rebuilds LUT.
-- `src/light/modules/layouts/WheelLayout.h` — controls: numSpokes, ledsPerSpoke.
-  Mapping with 1:0 gaps between spokes. onChange rebuilds LUT.
-- `test/light/test_grid_layout.cpp` — correct LUT for various dimensions,
-  LUT rebuild on control change
-- `test/light/test_wheel_layout.cpp` — correct gaps between spokes,
-  correct spoke pixel positions
+- `src/light/LayoutGroup.h` — MoonModule grouping layouts, shared
+- `src/light/Layer.h` — owns buffer, LUT, effect, modifiers. rebuildLUT
+- `src/light/modules/layouts/GridLayout.h` — coordinate iterator
+- `src/light/modules/layouts/WheelLayout.h` — coordinate iterator with gaps
+- `src/light/modules/modifiers/MirrorModifier.h` — static LUT transform
+- `src/light/modules/modifiers/RotateModifier.h` — dynamic pixel transform
+- Tests: layout group, grid, wheel, mirror, rotate, layer integration
 
 ### Step 5: Effects (MoonModules)
 Each effect is a MoonModule that writes pixels into a producer buffer.
@@ -124,12 +125,15 @@ Wires layers together. Manages the render loop.
 - `test/light/test_blend_map.cpp` — blend+map produces correct output
   for 1:0/1:1/1:N, multiple layers blend correctly
 
-### Step 7: Drivers (MoonModules)
-Consumers that read from layers and push to output.
+### Step 7: DriverGroup + Drivers (MoonModules)
+DriverGroup groups drivers. Drivers are consumers that perform blend+map
+from layers into their output and push to hardware/network.
 
+- `src/light/DriverGroup.h` — MoonModule grouping drivers, shared
 - `src/light/modules/drivers/ArtNetSendDriver.h` — controls: destIP, universe.
   Blend+maps from layers into ArtNet packets. Sends UDP.
   Multiple universes for >170 pixels.
+- `test/light/test_driver_group.cpp` — driver group with mock driver
 - `test/light/test_artnet_send.cpp` — correct packet format, correct
   universe splitting, correct pixel data in packets
 

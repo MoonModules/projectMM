@@ -60,6 +60,8 @@ considering work complete. New core logic needs a corresponding test.
 - `std::span` over pointer + length
 - Namespace: `mm`, platform code in `mm::platform`
 - No `using namespace` in headers
+- MoonModules are single-file (`.h` only, implementation inline) to
+  minimize files and make authoring easy
 
 ## Agent Roles
 
