@@ -64,6 +64,18 @@ def kill_script(script_id: str):
         except (OSError, ProcessLookupError):
             pass
 
+    # Clean up any orphaned processes (e.g. mmv3 after os.execv)
+    script_def = next((s for s in SCRIPTS if s["id"] == script_id), None)
+    pname = script_def.get("process_name") if script_def else None
+    if pname:
+        subprocess.run(["pkill", "-f", pname], capture_output=True)
+
+
+def is_process_running(name: str) -> bool:
+    """Check if a process matching the name is running (via pgrep)."""
+    r = subprocess.run(["pgrep", "-f", name], capture_output=True)
+    return r.returncode == 0
+
 
 # ---------------------------------------------------------------------------
 # Serial port discovery
@@ -122,6 +134,14 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
 
         elif self.path == "/api/state":
             self._send_json(load_state())
+
+        elif self.path == "/api/running":
+            running = {}
+            for s in SCRIPTS:
+                pname = s.get("process_name")
+                if pname:
+                    running[s["id"]] = is_process_running(pname)
+            self._send_json(running)
 
         elif self.path.startswith("/api/stream/"):
             script_id = self.path.split("/")[-1]
@@ -323,7 +343,7 @@ p {{ margin: 2px 0; }}
 # ---------------------------------------------------------------------------
 
 def main():
-    server = http.server.HTTPServer(("", PORT), MoonDeckHandler)
+    server = http.server.ThreadingHTTPServer(("", PORT), MoonDeckHandler)
     print(f"MoonDeck running at http://localhost:{PORT}")
     try:
         server.serve_forever()

@@ -10,20 +10,22 @@
       "script": "build/build_desktop.py"
     },
     {
-      "id": "run_desktop",
-      "tab": "pc",
-      "group": "run",
-      "label": "Run",
-      "help": "run_desktop",
-      "script": "run/run_desktop.py"
-    },
-    {
       "id": "test_desktop",
       "tab": "pc",
       "group": "test",
       "label": "Test",
       "help": "test_desktop",
       "script": "test/test_desktop.py"
+    },
+    {
+      "id": "run_desktop",
+      "tab": "pc",
+      "group": "run",
+      "label": "Run",
+      "help": "run_desktop",
+      "script": "run/run_desktop.py",
+      "long_running": true,
+      "process_name": "mmv3"
     },
     {
       "id": "check_platform_boundary",
@@ -59,7 +61,8 @@
       "label": "Monitor",
       "help": "monitor_esp32",
       "script": "run/monitor_esp32.py",
-      "needs_port": true
+      "needs_port": true,
+      "long_running": true
     }
   ]
 }

@@ -144,7 +144,7 @@ select {
 .script-card .run-btn.running {
     background: #e94560;
     color: #fff;
-    cursor: wait;
+    cursor: pointer;
 }
 
 /* Live tab */

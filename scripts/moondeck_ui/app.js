@@ -27,9 +27,28 @@ async function init() {
 
     renderEnvSelect();
     renderScripts();
+    await updateRunningState();
     refreshPorts();
     setupTabs();
     setupPaneTabs();
+}
+
+async function updateRunningState() {
+    try {
+        const resp = await fetch("/api/running");
+        const running = await resp.json();
+        for (const [scriptId, isRunning] of Object.entries(running)) {
+            if (isRunning) {
+                const btn = document.querySelector(`.run-btn[data-id="${scriptId}"]`);
+                if (btn) {
+                    btn.classList.add("running");
+                    btn.textContent = "Stop";
+                }
+            }
+        }
+    } catch (e) {
+        // ignore — non-critical
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -112,7 +131,16 @@ function renderScripts() {
 // ---------------------------------------------------------------------------
 
 async function runScript(script, btn) {
-    if (btn.classList.contains("running")) return;
+    // Long-running scripts toggle between Run and Stop
+    if (btn.classList.contains("running")) {
+        if (script.long_running) {
+            appendLog(`\n--- Stopping ${script.label} ---\n`);
+            await fetch("/api/kill/" + script.id, { method: "POST" });
+            btn.classList.remove("running");
+            btn.textContent = "Run";
+        }
+        return;
+    }
 
     const params = {};
     if (script.needs_env) params.env = state.env;
@@ -121,8 +149,13 @@ async function runScript(script, btn) {
     // Switch to log pane and show output
     switchPane("log");
     btn.classList.add("running");
-    btn.textContent = "...";
+    btn.textContent = script.long_running ? "Stop" : "...";
     appendLog(`\n--- ${script.label} ---\n`);
+
+    function resetBtn() {
+        btn.classList.remove("running");
+        btn.textContent = "Run";
+    }
 
     try {
         const resp = await fetch("/api/run/" + script.id, {
@@ -134,8 +167,7 @@ async function runScript(script, btn) {
 
         if (result.error) {
             appendLog("Error: " + result.error + "\n");
-            btn.classList.remove("running");
-            btn.textContent = "Run";
+            resetBtn();
             return;
         }
 
@@ -147,19 +179,16 @@ async function runScript(script, btn) {
 
         evtSource.addEventListener("done", () => {
             evtSource.close();
-            btn.classList.remove("running");
-            btn.textContent = "Run";
+            resetBtn();
         });
 
         evtSource.onerror = () => {
             evtSource.close();
-            btn.classList.remove("running");
-            btn.textContent = "Run";
+            resetBtn();
         };
     } catch (err) {
         appendLog("Failed: " + err.message + "\n");
-        btn.classList.remove("running");
-        btn.textContent = "Run";
+        resetBtn();
     }
 }
 
