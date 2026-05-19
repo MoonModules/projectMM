@@ -186,8 +186,10 @@ Full test inventory: [docs/testing.md](testing.md). Module specs link to their t
 - GridLayout (coordinate iteration, row-major, 3D) — [testing.md#gridlayout](testing.md#gridlayout)
 - RainbowEffect (output correctness, spatial variation) — [testing.md#rainbow](testing.md#rainbow)
 - ArtNet packet (header format, byte order, universe splitting) — [testing.md#artnet](testing.md#artnet)
-- Mapping LUT (1:0, 1:1, 1:N, rebuild on config change) — when implemented
-- Blend+map pass (correct physical output from logical layers) — when implemented
+- MappingLUT (1:N CSR, oneToOne fast path) — [testing.md#mappinglut](testing.md#mappinglut)
+- BlendMap (logical→physical via LUT) — [testing.md#blendmap](testing.md#blendmap)
+- NoiseEffect (spatial variation, differs from rainbow) — [testing.md#noise](testing.md#noise)
+- MirrorModifier (logical dims, corner/centre mapping, dedup) — [testing.md#mirror](testing.md#mirror)
 
 ### Scenario tests (desktop)
 

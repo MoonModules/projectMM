@@ -61,9 +61,10 @@ function setupTabs() {
         document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
         document.querySelectorAll(".tab-content").forEach(s => s.classList.remove("active"));
         const btn = document.querySelector(`.tab[data-tab="${state.tab}"]`);
-        if (btn) {
+        const content = document.getElementById("tab-" + state.tab);
+        if (btn && content) {
             btn.classList.add("active");
-            document.getElementById("tab-" + state.tab).classList.add("active");
+            content.classList.add("active");
         }
     }
 
@@ -213,8 +214,8 @@ async function runScript(script, btn) {
             try {
                 const data = JSON.parse(e.data);
                 resetBtn(data.exitCode);
-            } catch {
-                resetBtn(0);
+            } catch (err) {
+                resetBtn(1);
             }
         });
 

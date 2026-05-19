@@ -68,12 +68,6 @@ Only abstract what you actually need. Currently implemented:
 - **Scheduling.** `yield()` — cooperative yield to OS/RTOS. (`vTaskDelay` / no-op on desktop)
 - **Platform config.** `platform_config.h` per platform — compile-time constants like `hasPsram`. Each platform provides its own version; `types.h` includes it without `#ifdef`.
 
-Not yet implemented (add when needed):
-- **Threads.** Create a thread pinned to a specific core (ESP32 has 2), with mutex/semaphore primitives. (`FreeRTOS` / `std::thread`)
-- **LED drivers.** Per-protocol, per-platform. RMT on ESP32, DMA/OctoWS2811 on Teensy, SPI on RPi, SDL2 or terminal on desktop.
-- **HTTP/WebSocket.** (`esp_http_server` / BSD sockets)
-- **Filesystem.** Read/write config and UI assets. (`LittleFS` / `std::filesystem`)
-
 Abstractions are added when needed by a concrete implementation, not pre-designed. All platform-specific code lives in `src/platform/`. Everything outside it compiles cleanly on every target.
 
 ## ESP-IDF, No Arduino

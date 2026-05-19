@@ -229,7 +229,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 cwd=str(ROOT),
             )
             if not _IS_WIN:
-                popen_kwargs["preexec_fn"] = os.setsid
+                popen_kwargs["start_new_session"] = True
             else:
                 popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
             proc = subprocess.Popen(cmd, **popen_kwargs)
