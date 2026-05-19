@@ -11,6 +11,10 @@ uint32_t micros();
 void* alloc(size_t bytes);
 void free(void* ptr);
 
+void yield();
+size_t freeHeap();
+size_t maxAllocBlock();
+
 class UdpSocket {
 public:
     UdpSocket() = default;

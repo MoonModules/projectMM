@@ -1,15 +1,19 @@
 #pragma once
 
 #include <cstdint>
+#include <type_traits>
+#include "platform_config.h"
 
 namespace mm {
 
-// Desktop uses larger types (PSRAM-like).
-// ESP32 without PSRAM: uint16_t / int8_t (selected at compile time).
-using nrOfLightsType = uint32_t;
+// Type sizes depend on PSRAM availability (set per-platform in platform_config.h).
+// With PSRAM: larger types for big installations (10K+ lights, large coordinates).
+// Without PSRAM: smaller nrOfLightsType to minimize LUT memory.
+// lengthType stays int16_t everywhere — int8_t can't hold 128 and the savings
+// only matter in MappingLUT (not yet implemented).
+using nrOfLightsType = std::conditional_t<platform::hasPsram, uint32_t, uint16_t>;
 using lengthType = int16_t;
 
-// Default grid size: 128 everywhere except ESP32 without PSRAM (16).
 constexpr lengthType defaultGridSize = 128;
 
 // Callback for layout coordinate iteration

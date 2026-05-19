@@ -13,10 +13,10 @@ target_include_directories(mm_core INTERFACE src/)
 
 # Platform library (desktop)
 add_library(mm_platform src/platform/desktop/platform_desktop.cpp)
-target_include_directories(mm_platform PUBLIC src/)
+target_include_directories(mm_platform PUBLIC src/ src/platform/desktop/)
 
 # Application
-add_executable(mmv3 src/main.cpp)
+add_executable(mmv3 src/main.cpp src/platform/desktop/main_desktop.cpp)
 target_link_libraries(mmv3 PRIVATE mm_core mm_platform)
 
 # Tests

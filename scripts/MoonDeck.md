@@ -1,88 +1,112 @@
 # MoonDeck Script Reference
 
-## build_desktop
+## UI Features
+
+- **Status dots** on each card: grey (not run), orange (running), green (exit 0), red (exit non-zero).
+- **Run/Stop toggle** for long-running scripts (Run desktop, Monitor ESP32).
+- **Group headers** in the sidebar (build, test, run, check, scenario, setup).
+- **Tab persistence** — selected tab survives page refresh.
+- **Process detection** — on page load, checks if mmv3 or idf.py is already running and shows Stop button.
+
+## PC Tab
+
+### build_desktop
 
 Build the desktop target using CMake.
 
 ```bash
-uv run scripts/build_desktop.py
+uv run scripts/build/build_desktop.py
 ```
 
-Runs `cmake -B build -DCMAKE_BUILD_TYPE=Release` then `cmake --build build`
-from the project root. Requires CMake installed.
+Runs `cmake -B build -DCMAKE_BUILD_TYPE=Release` then `cmake --build build`.
 
-## run_desktop
-
-Run the desktop executable.
-
-```bash
-uv run scripts/run_desktop.py
-```
-
-Runs `./build/mmv3`. Build first with `build_desktop`.
-
-## test_desktop
+### test_desktop
 
 Run the desktop test suite.
 
 ```bash
-uv run scripts/test_desktop.py
+uv run scripts/test/test_desktop.py
 ```
 
-Runs `cmake --build build --target test`. Build first with `build_desktop`.
+Runs `./build/test/mm_tests -s` (doctest with all test cases shown).
 
-## check_platform_boundary
+### run_desktop
+
+Run the desktop executable. Long-running — shows Stop button.
+
+```bash
+uv run scripts/run/run_desktop.py
+```
+
+Kills any already-running mmv3, then runs `./build/mmv3`. Build first.
+
+### check_platform_boundary
 
 Verify that platform-specific code stays inside `src/platform/`.
 
 ```bash
-uv run scripts/check_platform_boundary.py
+uv run scripts/check/check_platform_boundary.py
 ```
 
-Scans all `.h`, `.hpp`, `.cpp`, `.c` files outside `src/platform/` for
-forbidden includes (`esp_*`, `freertos/*`, `driver/*`, `SDL.h`, etc.)
-and platform-specific `#ifdef`s. Exits with code 1 if violations found.
+Scans all source files outside `src/platform/` for forbidden includes and platform `#ifdef`s.
 
-## scenario_pipeline
+### scenario_pipeline
 
 Run scenario tests. Replays JSON scenario files in-process.
 
 ```bash
-uv run scripts/scenario/run_scenario.py                    # run all scenarios
-uv run scripts/scenario/run_scenario.py --name base-pipeline  # run one
+uv run scripts/scenario/run_scenario.py                       # run all
+uv run scripts/scenario/run_scenario.py --name base-pipeline   # run one
 ```
 
-Scenarios are JSON files in `scenarios/`. Each defines a sequence of steps (add_module, set_control) with optional performance bounds. The runner replays steps, measures timing, and checks bounds. Build first with `build_desktop`.
+Scenarios are JSON files in `test/scenarios/`. When HTTP API is added, the same JSON files will work against a live system.
 
-When HTTP API is added (plan item 6), the same JSON files will work with a Python runner against a live system — same as projectMM v1's `deploy/scenario.py`.
+## ESP32 Tab
 
-## build_esp32
+### setup_esp_idf
+
+Set up ESP-IDF Python environment.
+
+```bash
+uv run scripts/build/setup_esp_idf.py
+```
+
+Finds the ESP-IDF installation and runs `install.sh` to create the Python venv. Run once after installing ESP-IDF or after a Python version change.
+
+### clean_esp32
+
+Clean the ESP32 build directory.
+
+```bash
+uv run scripts/build/clean_esp32.py
+```
+
+Removes `esp32/build/` and `esp32/sdkconfig`. Run after ESP-IDF updates, Python version changes, or chip target changes.
+
+### build_esp32
 
 Build for an ESP32 chip target.
 
 ```bash
-uv run scripts/build_esp32.py --env esp32s3
+uv run scripts/build/build_esp32.py --env esp32
 ```
 
-Runs `idf.py set-target <env>` then `idf.py build` in the `esp32/`
-directory. Requires ESP-IDF installed and sourced.
+Auto-detects ESP-IDF installation, sets target if needed, builds, and shows flash/RAM usage summary.
 
-## flash_esp32
+### flash_esp32
 
 Flash firmware to an ESP32 device.
 
 ```bash
-uv run scripts/flash_esp32.py --env esp32s3 --port /dev/tty.usbserial-0001
+uv run scripts/build/flash_esp32.py --port /dev/tty.usbserial-0001
 ```
 
-Runs `idf.py flash -p <port>` in the `esp32/` directory.
+### monitor_esp32
 
-## monitor_esp32
-
-Monitor serial output from an ESP32 device.
+Monitor serial output. Long-running — shows Stop button.
 
 ```bash
-uv run scripts/monitor_esp32.py --port /dev/tty.usbserial-0001
+uv run scripts/run/monitor_esp32.py --port /dev/tty.usbserial-0001
 ```
 
-Runs `idf.py monitor -p <port>`. Press Ctrl+C to stop.
+Reads serial at 115200 baud. Output streams to MoonDeck's log and is saved to `esp32/monitor.log` for later inspection (useful when crashes flood the output).

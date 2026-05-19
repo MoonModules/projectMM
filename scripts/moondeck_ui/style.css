@@ -125,6 +125,17 @@ select {
     gap: 8px;
 }
 
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #333;
+    flex-shrink: 0;
+}
+.status-dot.running { background: #f0a030; }
+.status-dot.pass { background: #30c040; }
+.status-dot.fail { background: #e04040; }
+
 .script-card .label {
     flex: 1;
     font-size: 12px;

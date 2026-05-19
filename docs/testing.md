@@ -89,6 +89,17 @@ Sets up the core pipeline: LayoutGroup → GridLayout → Layer → RainbowEffec
 - Buffer contains non-zero data after rendering 200 frames
 - FPS >= 30 (performance bound)
 
+## Hardware Verification
+
+### ESP32 — Olimex ESP32-Gateway Rev G (no PSRAM)
+
+Verified working:
+- 128x128 grid (16,384 lights) — renders and sends ArtNet at 23+ FPS
+- 215KB free heap after buffer allocation (49KB buffer)
+- Rainbow effect flows correctly on hub75 panel via ArtNet receiver
+- Ethernet (LAN8720 RMII) connects and obtains IP via DHCP
+- Stable operation (no crashes, no memory leaks over extended runs)
+
 ## Adding Tests
 
 **Module test:** add a `TEST_CASE` to the appropriate `test/test_*.cpp` file. If the module doesn't have a test file yet, create one and add it to `test/CMakeLists.txt`. Update the matching section in this file.

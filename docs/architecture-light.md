@@ -35,12 +35,12 @@ The system is natively 3D. Coordinates, effects, layouts, and mappings all opera
 
 **Numeric types use typedefs to minimize memory usage, especially in LUT tables:**
 
-- `nrOfLightsType` — total number of lights, light indices, LUT destinations, width*height*depth products. `uint16_t` on devices without PSRAM (max 65K), `uint32_t` on devices with PSRAM (supports large hub75 panels).
-- `lengthType` — coordinates (x, y, z) and dimensions (width, height, depth). `int8_t` on devices without PSRAM (max 127 per axis, supports negatives for out-of-bounds effects), `int16_t` on devices with PSRAM (max 32767 per axis).
+- `nrOfLightsType` — total number of lights, light indices, LUT destinations, width*height*depth products. `uint16_t` on devices without PSRAM (max 65K), `uint32_t` on devices with PSRAM (supports large hub75 panels). Selected at compile time via `platform_config.h`.
+- `lengthType` — coordinates (x, y, z) and dimensions (width, height, depth). Always `int16_t` (max 32767 per axis, supports negatives for out-of-bounds effects). Using `int8_t` was considered for no-PSRAM devices but rejected — it can't hold values >= 128 and the memory savings only matter in MappingLUT (which can use its own compact storage when implemented).
 
-The smaller types on no-PSRAM devices significantly reduce LUT memory: each destination entry is 2 bytes instead of 4, each coordinate is 1 byte instead of 2. For 12K LEDs with a 1:1 LUT, this saves 24KB.
+The smaller `nrOfLightsType` on no-PSRAM devices reduces LUT memory: each destination entry is 2 bytes instead of 4. For 12K LEDs with a 1:1 LUT, this saves 24KB.
 
-The typedef is selected at compile time based on the target platform's memory configuration. All code uses the typedefs consistently to avoid casting.
+All code uses the typedefs consistently to avoid casting.
 
 ## LayoutGroup
 

@@ -33,6 +33,18 @@ void free(void* ptr) {
     std::free(ptr);
 }
 
+void yield() {
+    // No-op on desktop — OS scheduler handles threading
+}
+
+size_t freeHeap() {
+    return 0; // Not meaningful on desktop
+}
+
+size_t maxAllocBlock() {
+    return 0; // Not meaningful on desktop
+}
+
 // UdpSocket
 
 UdpSocket::~UdpSocket() {

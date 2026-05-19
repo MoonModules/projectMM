@@ -42,7 +42,7 @@ public:
         if (now - lastSendTime_ < interval) return;
         lastSendTime_ = now;
 
-        // Send ArtNet packets, splitting across universes
+        // Send all universes in one burst — receiver expects a complete frame
         const uint8_t* data = sourceBuffer_->data();
         size_t totalBytes = sourceBuffer_->bytes();
         uint16_t universe = universeStart;

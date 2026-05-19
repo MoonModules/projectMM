@@ -44,6 +44,22 @@
       "script": "scenario/run_scenario.py"
     },
     {
+      "id": "setup_esp_idf",
+      "tab": "esp32",
+      "group": "setup",
+      "label": "Setup ESP-IDF",
+      "help": "setup_esp_idf",
+      "script": "build/setup_esp_idf.py"
+    },
+    {
+      "id": "clean_esp32",
+      "tab": "esp32",
+      "group": "setup",
+      "label": "Clean",
+      "help": "clean_esp32",
+      "script": "build/clean_esp32.py"
+    },
+    {
       "id": "build_esp32",
       "tab": "esp32",
       "group": "build",
@@ -59,7 +75,6 @@
       "label": "Flash",
       "help": "flash_esp32",
       "script": "build/flash_esp32.py",
-      "needs_env": true,
       "needs_port": true
     },
     {
@@ -70,7 +85,8 @@
       "help": "monitor_esp32",
       "script": "run/monitor_esp32.py",
       "needs_port": true,
-      "long_running": true
+      "long_running": true,
+      "process_name": "idf.py"
     }
   ]
 }

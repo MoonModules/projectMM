@@ -56,12 +56,25 @@ async function updateRunningState() {
 // ---------------------------------------------------------------------------
 
 function setupTabs() {
+    // Restore saved tab
+    if (state.tab) {
+        document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
+        document.querySelectorAll(".tab-content").forEach(s => s.classList.remove("active"));
+        const btn = document.querySelector(`.tab[data-tab="${state.tab}"]`);
+        if (btn) {
+            btn.classList.add("active");
+            document.getElementById("tab-" + state.tab).classList.add("active");
+        }
+    }
+
     document.querySelectorAll(".tab").forEach(btn => {
         btn.addEventListener("click", () => {
             document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
             document.querySelectorAll(".tab-content").forEach(s => s.classList.remove("active"));
             btn.classList.add("active");
             document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+            state.tab = btn.dataset.tab;
+            saveState();
         });
     });
 }
@@ -117,6 +130,7 @@ function renderScripts() {
             const card = document.createElement("div");
             card.className = "script-card";
             card.innerHTML = `
+                <span class="status-dot" data-id="${script.id}"></span>
                 <span class="label">${script.label}</span>
                 <button class="help-btn" title="Help">?</button>
                 <button class="run-btn" data-id="${script.id}">Run</button>
@@ -147,6 +161,8 @@ async function runScript(script, btn) {
             await fetch("/api/kill/" + script.id, { method: "POST" });
             btn.classList.remove("running");
             btn.textContent = "Run";
+            const dot = document.querySelector(`.status-dot[data-id="${script.id}"]`);
+            if (dot) { dot.className = "status-dot"; }
         }
         return;
     }
@@ -161,9 +177,15 @@ async function runScript(script, btn) {
     btn.textContent = script.long_running ? "Stop" : "...";
     appendLog(`\n--- ${script.label} ---\n`);
 
-    function resetBtn() {
+    const dot = document.querySelector(`.status-dot[data-id="${script.id}"]`);
+    if (dot) { dot.className = "status-dot running"; }
+
+    function resetBtn(exitCode) {
         btn.classList.remove("running");
         btn.textContent = "Run";
+        if (dot) {
+            dot.className = exitCode === 0 ? "status-dot pass" : "status-dot fail";
+        }
     }
 
     try {
@@ -176,7 +198,7 @@ async function runScript(script, btn) {
 
         if (result.error) {
             appendLog("Error: " + result.error + "\n");
-            resetBtn();
+            resetBtn(1);
             return;
         }
 
@@ -186,18 +208,23 @@ async function runScript(script, btn) {
             appendLog(JSON.parse(e.data) + "\n");
         };
 
-        evtSource.addEventListener("done", () => {
+        evtSource.addEventListener("done", (e) => {
             evtSource.close();
-            resetBtn();
+            try {
+                const data = JSON.parse(e.data);
+                resetBtn(data.exitCode);
+            } catch {
+                resetBtn(0);
+            }
         });
 
         evtSource.onerror = () => {
             evtSource.close();
-            resetBtn();
+            resetBtn(1);
         };
     } catch (err) {
         appendLog("Failed: " + err.message + "\n");
-        resetBtn();
+        resetBtn(1);
     }
 }
 

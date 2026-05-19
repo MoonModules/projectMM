@@ -284,8 +284,8 @@ static int runScenario(const char* path) {
 
         uint32_t elapsedUs = mm::platform::micros() - startUs;
         float elapsedMs = static_cast<float>(elapsedUs) / 1000.0f;
-        float msPerFrame = elapsedMs / MEASURE_FRAMES;
-        float fps = 1000.0f / msPerFrame;
+        float msPerFrame = elapsedMs > 0 ? elapsedMs / MEASURE_FRAMES : 0;
+        float fps = msPerFrame > 0 ? 1000.0f / msPerFrame : 0;
 
         std::printf("\n");
         std::printf("  Total:     %.1f ms\n", static_cast<double>(elapsedMs));

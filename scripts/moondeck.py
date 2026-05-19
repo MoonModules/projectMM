@@ -39,7 +39,7 @@ def load_state():
     if STATE_FILE.exists():
         with open(STATE_FILE) as f:
             return json.load(f)
-    return {"env": "esp32s3", "port": "", "devices": []}
+    return {"env": "esp32", "port": "", "devices": []}
 
 
 def save_state(state):
@@ -131,6 +131,12 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         # Suppress default request logging
         pass
 
+    def handle(self):
+        try:
+            super().handle()
+        except (ConnectionResetError, BrokenPipeError):
+            pass  # Browser closed connection — harmless
+
     def _send_json(self, data, status=200):
         body = json.dumps(data).encode()
         self.send_response(status)
@@ -208,7 +214,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         kill_script(script_id)  # Kill previous if still running
 
         script_path = SCRIPTS_DIR / script_def["script"]
-        cmd = [sys.executable, str(script_path)]
+        cmd = ["uv", "run", str(script_path)]
 
         # Add environment/port args
         if script_def.get("needs_env") and params.get("env"):
@@ -257,7 +263,8 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             proc.wait()
             exit_msg = f"[exit code: {proc.returncode}]"
             self.wfile.write(f"data: {json.dumps(exit_msg)}\n\n".encode())
-            self.wfile.write(b"event: done\ndata: done\n\n")
+            done_data = json.dumps({"exitCode": proc.returncode})
+            self.wfile.write(f"event: done\ndata: {done_data}\n\n".encode())
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass

@@ -29,7 +29,7 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 
 **Warnings are errors.** Build with `-Wall -Wextra -Werror`.
 
-**Tests must pass.** Run `cmake --build build --target test` before considering work complete. New core logic needs a corresponding unit test. Full pipeline needs integration tests.
+**Tests must pass.** Run `cmake --build build --target test` before considering work complete. New core logic needs a corresponding module test. Full pipeline needs a scenario test. See [docs/testing.md](docs/testing.md) for the test inventory and [docs/architecture.md](docs/architecture.md#testing) for the testing strategy.
 
 ## Process Rules
 
@@ -44,6 +44,8 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 **Anti-stalling.** If a build error or test failure takes more than 2 attempts to fix, STOP. Do not rewrite surrounding files. Ask the product owner for guidance or rollback with Git and re-approach.
 
 **No staging files.** Do not `git add` files. The product owner stages, tests, and commits manually.
+
+**No pushing.** Do not `git push`. The product owner pushes manually.
 
 **Mandatory subtraction.** Periodically review and remove code and docs that no longer earn their place. If nothing can be removed, justify why.
 

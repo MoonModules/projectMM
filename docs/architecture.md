@@ -60,14 +60,19 @@ The general model is **producers vs consumers**: producers generate data, consum
 
 ## Platform Abstraction
 
-Only abstract what you actually need. Currently that means:
+Only abstract what you actually need. Currently implemented:
 
-- **Time.** Microsecond-resolution monotonic clock. (`esp_timer` / `std::chrono`)
-- **Memory.** Allocator that prefers PSRAM on ESP32, falls back to regular heap. (`heap_caps_malloc` / `std::malloc`)
+- **Time.** `millis()`, `micros()` — microsecond-resolution monotonic clock. (`esp_timer` / `std::chrono`)
+- **Memory.** `alloc(size)`, `free(ptr)` — allocator that prefers PSRAM on ESP32, falls back to regular heap. `freeHeap()`, `maxAllocBlock()` for diagnostics. (`heap_caps_malloc` / `std::malloc`)
+- **Networking.** `UdpSocket` — UDP send for ArtNet. (`lwip/sockets.h` / BSD sockets)
+- **Scheduling.** `yield()` — cooperative yield to OS/RTOS. (`vTaskDelay` / no-op on desktop)
+- **Platform config.** `platform_config.h` per platform — compile-time constants like `hasPsram`. Each platform provides its own version; `types.h` includes it without `#ifdef`.
+
+Not yet implemented (add when needed):
 - **Threads.** Create a thread pinned to a specific core (ESP32 has 2), with mutex/semaphore primitives. (`FreeRTOS` / `std::thread`)
 - **LED drivers.** Per-protocol, per-platform. RMT on ESP32, DMA/OctoWS2811 on Teensy, SPI on RPi, SDL2 or terminal on desktop.
-- **Networking.** HTTP server, WebSocket, UDP sockets. (`esp_http_server` / BSD sockets / platform library). Teensy: USB serial or Ethernet shield.
-- **Filesystem.** Read/write config and UI assets. (`LittleFS` / `std::filesystem`). Teensy: SD card or flash.
+- **HTTP/WebSocket.** (`esp_http_server` / BSD sockets)
+- **Filesystem.** Read/write config and UI assets. (`LittleFS` / `std::filesystem`)
 
 Abstractions are added when needed by a concrete implementation, not pre-designed. All platform-specific code lives in `src/platform/`. Everything outside it compiles cleanly on every target.
 
@@ -79,6 +84,12 @@ The ESP32 target uses ESP-IDF directly, not the Arduino framework. Rationale:
 - **Version stability.** ESP-IDF APIs are stable. Arduino-esp32 version churn caused recurring breakage in MoonLight.
 
 Arduino can be added as an ESP-IDF component later if a specific Arduino library is needed. This is officially supported by Espressif and doesn't require restructuring.
+
+### ESP-IDF version
+
+Minimum: ESP-IDF v5.1 (C++20 support via GCC 12+). Recommended: latest stable (v5.4 as of writing). The project also builds on v6.1-dev but that is pre-release — some APIs changed (e.g. `esp_eth_phy_new_lan87xx` → `esp_eth_phy_new_generic`, Ethernet kconfig symbol names). If using a dev version, expect occasional API churn.
+
+MoonDeck's ESP-IDF setup script (`scripts/build/setup_esp_idf.py`) auto-detects the installed version and creates the required Python environment. Run it once after installing or updating ESP-IDF.
 
 ### Library strategy
 
@@ -97,12 +108,24 @@ If a library is genuinely needed later (e.g. FastLED for specific hardware suppo
 CMake is the sole build system. The source tree is shared across all platforms, but build entry points are separate because ESP-IDF wraps CMake with its own conventions (`idf_component_register()` instead of `add_library()`).
 
 ```
-CMakeLists.txt              ← standard CMake: desktop/RPi build + tests
+CMakeLists.txt                          ← standard CMake: desktop/RPi build + tests
+src/
+  main.cpp                              ← shared pipeline wiring (mm_main), platform-neutral
+  platform/
+    desktop/
+      main_desktop.cpp                  ← desktop entry point: int main() + SIGINT
+      platform_config.h                 ← desktop platform constants
+    esp32/
+      platform_config.h                 ← ESP32 platform constants (reads sdkconfig)
 esp32/
-  CMakeLists.txt            ← ESP-IDF project root (thin wrapper)
+  CMakeLists.txt                        ← ESP-IDF project root (thin wrapper)
   main/
-    CMakeLists.txt          ← idf_component_register() pointing at src/
+    CMakeLists.txt                      ← idf_component_register() pointing at src/
+    main.cpp                            ← ESP32 entry point: app_main() + Ethernet init
+  sdkconfig.defaults                    ← board-specific defaults
 ```
+
+The shared `src/main.cpp` defines `mm_main(keepRunning, gridW, gridH)` — the full pipeline wiring. Each platform provides a thin entry point that does platform-specific init (SIGINT on desktop, Ethernet on ESP32) then calls `mm_main()`.
 
 - **Desktop/RPi:** `cmake -B build && cmake --build build` from the root.
 - **ESP32:** `cd esp32 && idf.py build` — the wrapper pulls in `src/` from the parent directory.

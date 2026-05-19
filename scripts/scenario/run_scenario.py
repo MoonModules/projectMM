@@ -9,7 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 BUILD_DIR = ROOT / "build"
 SCENARIOS_DIR = ROOT / "test" / "scenarios"
-RUNNER = BUILD_DIR / "test" / "mm_scenarios"
+_RUNNER_BASE = BUILD_DIR / "test" / "mm_scenarios"
+RUNNER = _RUNNER_BASE.with_suffix(".exe") if not _RUNNER_BASE.exists() and sys.platform == "win32" else _RUNNER_BASE
 
 def main():
     parser = argparse.ArgumentParser()
