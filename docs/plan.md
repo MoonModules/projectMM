@@ -12,14 +12,6 @@ Completed items are removed. This file is deleted when empty.
 - Updated MoonModule specs (docs/moonmodules/) for what was built
 - Tested on hardware where applicable
 
-## 3. Second effect
-
-Add Noise effect. Proves effect switching via API.
-
-## 4. Mirror modifier
-
-Add Mirror modifier. Proves modifiers, virtual interface, 1:N kaleidoscope mapping, LUT rebuild on control change.
-
 ## 5. WebSocket + Preview
 
 Add WebSocket server and Preview driver. Proves system MoonModules, binary frame streaming, 3D browser preview.

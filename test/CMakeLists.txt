@@ -5,6 +5,10 @@ add_executable(mm_tests
     test_grid_layout.cpp
     test_rainbow.cpp
     test_artnet_packet.cpp
+    test_noise.cpp
+    test_mapping_lut.cpp
+    test_mirror.cpp
+    test_blend_map.cpp
 )
 
 target_include_directories(mm_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

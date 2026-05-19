@@ -76,6 +76,42 @@ Tests `ArtNetSendDriver::buildPacket` in `src/light/ArtNetSendDriver.h`.
 - Universe splitting: 256 RGB lights → 2 universes (510 + 258 bytes)
 - Length field big-endian for 510 bytes
 
+### Noise Effect (`test/test_noise.cpp`) {#noise}
+
+Tests `NoiseEffect` in `src/light/NoiseEffect.h`.
+
+- Buffer contains non-zero RGB data after render
+- Different positions produce different colors (spatial variation)
+- Produces different output than RainbowEffect
+
+### MappingLUT (`test/test_mapping_lut.cpp`) {#mappinglut}
+
+Tests `MappingLUT` in `src/light/MappingLUT.h`.
+
+- Default state is oneToOne
+- setOneToOne: forEachDestination returns logical index
+- Build with 1:N mappings: verify correct destinations for each logical index
+- Free and rebuild: clean reset, can re-allocate
+
+### Mirror Modifier (`test/test_mirror.cpp`) {#mirror}
+
+Tests `MirrorModifier` in `src/light/MirrorModifier.h`.
+
+- logicalDimensions: 128x128 with mirrorXY → 64x64
+- logicalDimensions: odd grid (127x127) → 64x64 (ceiling division)
+- Corner pixel (0,0) produces 4 positions with mirrorXY
+- Centre pixel on odd grid: deduplication (1 position, not 4)
+- No mirrors: 1 position
+- mirrorX only: 2 positions
+
+### BlendMap (`test/test_blend_map.cpp`) {#blendmap}
+
+Tests `blendMap()` in `src/light/BlendMap.h`.
+
+- oneToOne: output equals input (memcpy path)
+- 1:N mapping: logical pixel appears at multiple physical positions
+- Additive blend with clamping
+
 ## Scenario Tests
 
 Scenario tests verify the integrated pipeline. Defined as JSON in `test/scenarios/`. Run with `./build/test/mm_scenarios` or via MoonDeck (PC → 01 - Pipeline).
@@ -86,6 +122,14 @@ Sets up the core pipeline: LayoutGroup → GridLayout → Layer → RainbowEffec
 
 - Buffer allocated after setup
 - Buffer size matches layout light count
+- Buffer contains non-zero data after rendering 200 frames
+- FPS >= 30 (performance bound)
+
+### mirror (`test/scenarios/mirror.json`) {#scenario-mirror}
+
+Pipeline with mirror modifier: LayoutGroup → GridLayout → Layer → NoiseEffect → MirrorModifier → DriverGroup → ArtNetSendDriver. Tests the full LUT-based pipeline with 1:N mapping.
+
+- Buffer allocated after setup (logical size, not physical)
 - Buffer contains non-zero data after rendering 200 frames
 - FPS >= 30 (performance bound)
 

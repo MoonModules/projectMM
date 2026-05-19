@@ -5,6 +5,8 @@
 #include "core/Scheduler.h"
 #include "light/GridLayout.h"
 #include "light/RainbowEffect.h"
+#include "light/NoiseEffect.h"
+#include "light/MirrorModifier.h"
 #include "light/ArtNetSendDriver.h"
 #include "platform/platform.h"
 
@@ -130,6 +132,8 @@ struct ScenarioContext {
     mm::GridLayout grid;
     mm::Layer layer;
     mm::RainbowEffect rainbow;
+    mm::NoiseEffect noise;
+    mm::MirrorModifier mirror;
     mm::DriverGroup driverGroup;
     mm::ArtNetSendDriver artnet;
 
@@ -138,6 +142,8 @@ struct ScenarioContext {
         if (std::strcmp(type, "GridLayout") == 0) return &grid;
         if (std::strcmp(type, "Layer") == 0) return &layer;
         if (std::strcmp(type, "RainbowEffect") == 0) return &rainbow;
+        if (std::strcmp(type, "NoiseEffect") == 0) return &noise;
+        if (std::strcmp(type, "MirrorModifier") == 0) return &mirror;
         if (std::strcmp(type, "DriverGroup") == 0) return &driverGroup;
         if (std::strcmp(type, "ArtNetSendDriver") == 0) return &artnet;
         return nullptr;
@@ -155,9 +161,13 @@ struct ScenarioContext {
                 if (std::strcmp(type, "GridLayout") == 0) {
                     static_cast<mm::LayoutGroup*>(parent)->addLayout(
                         static_cast<mm::LayoutBase*>(mod));
-                } else if (std::strcmp(type, "RainbowEffect") == 0) {
+                } else if (std::strcmp(type, "RainbowEffect") == 0 ||
+                           std::strcmp(type, "NoiseEffect") == 0) {
                     static_cast<mm::Layer*>(parent)->addEffect(
                         static_cast<mm::EffectBase*>(mod));
+                } else if (std::strcmp(type, "MirrorModifier") == 0) {
+                    static_cast<mm::Layer*>(parent)->addModifier(
+                        static_cast<mm::ModifierBase*>(mod));
                 } else if (std::strcmp(type, "ArtNetSendDriver") == 0) {
                     static_cast<mm::DriverGroup*>(parent)->addDriver(
                         static_cast<mm::DriverBase*>(mod));

@@ -1,6 +1,8 @@
 #include "core/Scheduler.h"
 #include "light/GridLayout.h"
 #include "light/RainbowEffect.h"
+#include "light/NoiseEffect.h"
+#include "light/MirrorModifier.h"
 #include "light/ArtNetSendDriver.h"
 #include "platform/platform.h"
 
@@ -25,9 +27,14 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     layer.setLayoutGroup(&layoutGroup);
     layer.setChannelsPerLight(3);
 
-    mm::RainbowEffect rainbow;
-    rainbow.setName("Rainbow");
-    layer.addEffect(&rainbow);
+    mm::NoiseEffect noise;
+    noise.setName("Noise");
+    layer.addEffect(&noise);
+
+    // Modifier
+    mm::MirrorModifier mirror;
+    mirror.setName("Mirror");
+    layer.addModifier(&mirror);
 
     // Driver Group + ArtNet
     mm::DriverGroup driverGroup;

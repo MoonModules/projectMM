@@ -3,6 +3,7 @@
 #include "core/MoonModule.h"
 #include "light/Buffer.h"
 #include "light/Layer.h"
+#include "light/BlendMap.h"
 
 #include <array>
 
@@ -29,12 +30,7 @@ public:
         for (uint8_t i = 0; i < driverCount_; i++) {
             drivers_[i]->setup();
         }
-        // Pass the layer buffer to all drivers
-        if (layer_) {
-            for (uint8_t i = 0; i < driverCount_; i++) {
-                drivers_[i]->setSourceBuffer(&layer_->buffer());
-            }
-        }
+        passBufferToDrivers();
     }
 
     void onBuildControls() override {
@@ -47,15 +43,18 @@ public:
         for (uint8_t i = 0; i < driverCount_; i++) {
             drivers_[i]->onAllocateMemory();
         }
-        // Re-pass buffer after layer reallocates
-        if (layer_) {
-            for (uint8_t i = 0; i < driverCount_; i++) {
-                drivers_[i]->setSourceBuffer(&layer_->buffer());
-            }
+        if (layer_ && !layer_->lut().isOneToOne()) {
+            // Allocate physical output buffer for blend+map
+            outputBuffer_.allocate(layer_->physicalLightCount(), layer_->channelsPerLight());
         }
+        passBufferToDrivers();
     }
 
     void loop() override {
+        if (layer_ && !layer_->lut().isOneToOne()) {
+            // Blend+map: logical buffer → physical output buffer via LUT
+            blendMap(layer_->buffer(), outputBuffer_, layer_->lut(), layer_->channelsPerLight());
+        }
         for (uint8_t i = 0; i < driverCount_; i++) {
             drivers_[i]->loop();
         }
@@ -71,6 +70,15 @@ private:
     std::array<DriverBase*, 4> drivers_{};
     uint8_t driverCount_ = 0;
     Layer* layer_ = nullptr;
+    Buffer outputBuffer_;
+
+    void passBufferToDrivers() {
+        if (!layer_) return;
+        Buffer* buf = layer_->lut().isOneToOne() ? &layer_->buffer() : &outputBuffer_;
+        for (uint8_t i = 0; i < driverCount_; i++) {
+            drivers_[i]->setSourceBuffer(buf);
+        }
+    }
 };
 
 } // namespace mm

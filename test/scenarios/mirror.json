@@ -1,0 +1,63 @@
+{
+  "name": "mirror",
+  "description": "Pipeline with mirror modifier: noise effect + XY kaleidoscope",
+  "steps": [
+    {
+      "name": "add-layout-group",
+      "op": "add_module",
+      "id": "layoutGroup",
+      "type": "LayoutGroup"
+    },
+    {
+      "name": "add-grid",
+      "op": "add_module",
+      "id": "grid",
+      "type": "GridLayout",
+      "parent_id": "layoutGroup"
+    },
+    {
+      "name": "add-layer",
+      "op": "add_module",
+      "id": "layer",
+      "type": "Layer",
+      "props": {
+        "layoutGroup": "layoutGroup",
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "add-noise",
+      "op": "add_module",
+      "id": "noise",
+      "type": "NoiseEffect",
+      "parent_id": "layer"
+    },
+    {
+      "name": "add-mirror",
+      "op": "add_module",
+      "id": "mirror",
+      "type": "MirrorModifier",
+      "parent_id": "layer"
+    },
+    {
+      "name": "add-driver-group",
+      "op": "add_module",
+      "id": "driverGroup",
+      "type": "DriverGroup",
+      "props": {
+        "layer": "layer"
+      }
+    },
+    {
+      "name": "add-artnet",
+      "op": "add_module",
+      "id": "artnet",
+      "type": "ArtNetSendDriver",
+      "parent_id": "driverGroup",
+      "measure": true,
+      "bounds": {
+        "fps": { "min": 30 }
+      }
+    }
+  ]
+}
