@@ -130,21 +130,36 @@ Script definitions and configuration live in `scripts/moondeck_config.json` (com
 
 ## Testing
 
-### Unit tests (desktop)
+Three test categories, each with a clear purpose. Full inventory of what is tested: [docs/testing.md](testing.md).
 
-Core logic runs on desktop, so all non-hardware code is testable via `ctest`. Core priority areas:
+### Module tests (desktop, `test/test_*.cpp`)
+
+Test individual MoonModules in isolation. Each module has its own test file. Run via doctest (`ctest` or `./build/test/mm_tests -s`). These verify that a module's API, edge cases, and output are correct — independent of how the module is wired into a pipeline.
+
+Module specs in `docs/moonmodules/` link to their test sections in `docs/testing.md` so end users can see what is tested for each module.
+
+Core priority areas:
 - MoonModule lifecycle (setup, loop, teardown ordering)
-- Control operations (add, set, clamp, onChange)
+- Control operations (add, set, bind by reference)
 - Scheduler (module dispatch, timing)
 
-Light domain test areas are in `architecture-light.md`.
+Light domain areas are in `architecture-light.md`.
 
-Test framework will be chosen when we write the first test. Preference for something header-only and lightweight (doctest, Catch2, or plain `assert`).
+### Scenario tests (desktop, `test/scenarios/*.json`)
+
+Test the system as an integrated pipeline. Scenarios are declarative JSON files — each defines a sequence of steps (`add_module`, `set_control`) with optional performance bounds. The scenario runner (`test/scenario_runner.cpp`) replays steps in-process and checks output and timing.
+
+Currently in-process only. When the HTTP API is added, the same JSON files will work with a Python runner against a live system (same approach as projectMM v1's `deploy/scenario.py`).
+
+### Regression tests
+
+When a bug is found, the fix includes a new test (module test or scenario) that reproduces the bug. This ensures the bug stays fixed. The test references the bug in a comment so the connection is traceable.
 
 ### Performance tests (desktop)
 
 Automated checks that verify architectural rules at runtime:
 - **Zero-allocation render loop.** Run N frames, intercept `malloc`/`free` (via overriding or platform allocator hooks), fail if any allocation occurs during steady-state rendering.
+- **Frame time bounds.** Scenario tests include `"bounds": {"fps": {"min": N}}` to catch performance regressions.
 
 ### Live system tests (on-device)
 

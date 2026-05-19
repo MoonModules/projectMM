@@ -177,16 +177,21 @@ The architecture does not assume PSRAM is present. Buffer counts and sizes are d
 
 ## Testing (light domain)
 
-### Unit tests (desktop)
+Full test inventory: [docs/testing.md](testing.md). Module specs link to their test sections.
 
-- Color math (HSV→RGB, blending, scale8)
-- Buffer operations (allocate, fill, clear, bounds)
-- Mapping LUT (1:0, 1:1, 1:N, rebuild on config change)
-- Blend+map pass (correct physical output from logical layers)
+### Module tests (desktop)
 
-### Performance tests (desktop)
+- Color math (HSV→RGB, scale8) — [testing.md#color](testing.md#color)
+- Buffer operations (allocate, clear, move, bounds) — [testing.md#buffer](testing.md#buffer)
+- GridLayout (coordinate iteration, row-major, 3D) — [testing.md#gridlayout](testing.md#gridlayout)
+- RainbowEffect (output correctness, spatial variation) — [testing.md#rainbow](testing.md#rainbow)
+- ArtNet packet (header format, byte order, universe splitting) — [testing.md#artnet](testing.md#artnet)
+- Mapping LUT (1:0, 1:1, 1:N, rebuild on config change) — when implemented
+- Blend+map pass (correct physical output from logical layers) — when implemented
 
-- **Frame time regression.** Measure render time for a known workload (e.g. 10K lights, 3 layers, rainbow effect). Fail if it exceeds a threshold.
+### Scenario tests (desktop)
+
+- Base pipeline (full render pipeline, performance bounds) — [testing.md#scenario-pipeline](testing.md#scenario-pipeline)
 
 ### Live system tests (on-device)
 

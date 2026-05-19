@@ -103,6 +103,18 @@ select {
     gap: 6px;
 }
 
+.group-header {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #e94560;
+    padding: 8px 2px 2px;
+}
+
+.group-header:first-child {
+    padding-top: 0;
+}
+
 .script-card {
     background: #1a1a2e;
     border: 1px solid #0f3460;

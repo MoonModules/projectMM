@@ -44,11 +44,10 @@ int main() {
     artnet.setName("ArtNet");
     driverGroup.addDriver(&artnet);
 
-    // Register all with scheduler
+    // Register top-level modules with scheduler
+    // Children (grid, rainbow, artnet) get lifecycle from their parents
     scheduler.addModule(&layoutGroup);
-    scheduler.addModule(&grid);
     scheduler.addModule(&layer);
-    scheduler.addModule(&rainbow);
     scheduler.addModule(&driverGroup);
 
     scheduler.setup();

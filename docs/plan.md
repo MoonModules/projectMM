@@ -28,7 +28,9 @@ Also: CMake build system, platform desktop, doctest, integration test.
 
 Same pipeline running on ESP32dev. Proves platform abstraction works, esp32/ CMake wrapper, ESP-IDF build, flash, run. ArtNet output from ESP32 to panel.
 
-Modules: platform esp32 (Alloc, Timing, UdpSocket implementations).
+Add a System MoonModule (reverse engineer from projectMM v1, MoonLight, in that order) — system-level info, diagnostics, heap reporting.
+
+Modules: platform esp32 (Alloc, Timing, UdpSocket implementations), SystemModule.
 
 ## 3. Second effect
 

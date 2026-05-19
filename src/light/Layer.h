@@ -21,6 +21,18 @@ public:
         effects_[effectCount_++] = effect;
     }
 
+    void setup() override {
+        for (uint8_t i = 0; i < effectCount_; i++) {
+            effects_[i]->setup();
+        }
+    }
+
+    void onBuildControls() override {
+        for (uint8_t i = 0; i < effectCount_; i++) {
+            effects_[i]->onBuildControls();
+        }
+    }
+
     void onAllocateMemory() override {
         if (!layoutGroup_) return;
         nrOfLightsType total = layoutGroup_->totalLightCount();

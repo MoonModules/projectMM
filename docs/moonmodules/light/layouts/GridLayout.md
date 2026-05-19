@@ -25,6 +25,10 @@ Grid with default settings (no serpentine, X-then-Y order) is **1:1 unshuffled**
 - Width or height = 0: prevented by min=1 on controls.
 - Very large grids may exceed available memory for buffer allocation.
 
+## Tests
+
+[Module test: GridLayout](../../../testing.md#gridlayout) — row-major coordinate iteration, 3D grids, LayoutGroup multi-layout offset.
+
 ## Prior art
 
 ### MoonLight — L_MoonLight.h Panel ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h))

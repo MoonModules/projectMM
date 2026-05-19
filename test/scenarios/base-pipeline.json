@@ -1,0 +1,56 @@
+{
+  "name": "base-pipeline",
+  "description": "Core pipeline: grid layout, rainbow effect, ArtNet output",
+  "steps": [
+    {
+      "name": "add-layout-group",
+      "op": "add_module",
+      "id": "layoutGroup",
+      "type": "LayoutGroup"
+    },
+    {
+      "name": "add-grid",
+      "op": "add_module",
+      "id": "grid",
+      "type": "GridLayout",
+      "parent_id": "layoutGroup"
+    },
+    {
+      "name": "add-layer",
+      "op": "add_module",
+      "id": "layer",
+      "type": "Layer",
+      "props": {
+        "layoutGroup": "layoutGroup",
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "add-rainbow",
+      "op": "add_module",
+      "id": "rainbow",
+      "type": "RainbowEffect",
+      "parent_id": "layer"
+    },
+    {
+      "name": "add-driver-group",
+      "op": "add_module",
+      "id": "driverGroup",
+      "type": "DriverGroup",
+      "props": {
+        "layer": "layer"
+      }
+    },
+    {
+      "name": "add-artnet",
+      "op": "add_module",
+      "id": "artnet",
+      "type": "ArtNetSendDriver",
+      "parent_id": "driverGroup",
+      "measure": true,
+      "bounds": {
+        "fps": { "min": 30 }
+      }
+    }
+  ]
+}

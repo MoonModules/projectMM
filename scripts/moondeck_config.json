@@ -36,6 +36,14 @@
       "script": "check/check_platform_boundary.py"
     },
     {
+      "id": "scenario_pipeline",
+      "tab": "pc",
+      "group": "scenario",
+      "label": "01 - Pipeline",
+      "help": "scenario_pipeline",
+      "script": "scenario/run_scenario.py"
+    },
+    {
       "id": "build_esp32",
       "tab": "esp32",
       "group": "build",

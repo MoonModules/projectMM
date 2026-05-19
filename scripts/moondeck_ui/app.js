@@ -98,13 +98,22 @@ function renderScripts() {
     const containers = {
         pc: document.getElementById("scripts-pc"),
         esp32: document.getElementById("scripts-esp32"),
+        live: document.getElementById("scripts-live"),
     };
 
     for (const [tab, container] of Object.entries(containers)) {
         container.innerHTML = "";
         const tabScripts = scripts.filter(s => s.tab === tab);
 
+        let lastGroup = "";
         for (const script of tabScripts) {
+            if (script.group !== lastGroup) {
+                lastGroup = script.group;
+                const header = document.createElement("div");
+                header.className = "group-header";
+                header.textContent = script.group;
+                container.appendChild(header);
+            }
             const card = document.createElement("div");
             card.className = "script-card";
             card.innerHTML = `

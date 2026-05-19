@@ -43,6 +43,19 @@ Scans all `.h`, `.hpp`, `.cpp`, `.c` files outside `src/platform/` for
 forbidden includes (`esp_*`, `freertos/*`, `driver/*`, `SDL.h`, etc.)
 and platform-specific `#ifdef`s. Exits with code 1 if violations found.
 
+## scenario_pipeline
+
+Run scenario tests. Replays JSON scenario files in-process.
+
+```bash
+uv run scripts/scenario/run_scenario.py                    # run all scenarios
+uv run scripts/scenario/run_scenario.py --name base-pipeline  # run one
+```
+
+Scenarios are JSON files in `scenarios/`. Each defines a sequence of steps (add_module, set_control) with optional performance bounds. The runner replays steps, measures timing, and checks bounds. Build first with `build_desktop`.
+
+When HTTP API is added (plan item 6), the same JSON files will work with a Python runner against a live system — same as projectMM v1's `deploy/scenario.py`.
+
 ## build_esp32
 
 Build for an ESP32 chip target.

@@ -21,6 +21,24 @@ public:
         layouts_[layoutCount_++] = layout;
     }
 
+    void setup() override {
+        for (uint8_t i = 0; i < layoutCount_; i++) {
+            layouts_[i]->setup();
+        }
+    }
+
+    void onBuildControls() override {
+        for (uint8_t i = 0; i < layoutCount_; i++) {
+            layouts_[i]->onBuildControls();
+        }
+    }
+
+    void onAllocateMemory() override {
+        for (uint8_t i = 0; i < layoutCount_; i++) {
+            layouts_[i]->onAllocateMemory();
+        }
+    }
+
     nrOfLightsType totalLightCount() const {
         nrOfLightsType total = 0;
         for (uint8_t i = 0; i < layoutCount_; i++) {

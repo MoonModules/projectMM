@@ -26,6 +26,9 @@ public:
     }
 
     void setup() override {
+        for (uint8_t i = 0; i < driverCount_; i++) {
+            drivers_[i]->setup();
+        }
         // Pass the layer buffer to all drivers
         if (layer_) {
             for (uint8_t i = 0; i < driverCount_; i++) {
@@ -34,7 +37,16 @@ public:
         }
     }
 
+    void onBuildControls() override {
+        for (uint8_t i = 0; i < driverCount_; i++) {
+            drivers_[i]->onBuildControls();
+        }
+    }
+
     void onAllocateMemory() override {
+        for (uint8_t i = 0; i < driverCount_; i++) {
+            drivers_[i]->onAllocateMemory();
+        }
         // Re-pass buffer after layer reallocates
         if (layer_) {
             for (uint8_t i = 0; i < driverCount_; i++) {
@@ -46,6 +58,12 @@ public:
     void loop() override {
         for (uint8_t i = 0; i < driverCount_; i++) {
             drivers_[i]->loop();
+        }
+    }
+
+    void teardown() override {
+        for (uint8_t i = driverCount_; i > 0; i--) {
+            drivers_[i - 1]->teardown();
         }
     }
 
