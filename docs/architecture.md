@@ -29,7 +29,7 @@ MoonModules should have a minimal memory footprint. The base class and controls 
 
 Modules can be added, changed, replaced, or removed dynamically at runtime. When removed (teardown), all allocated resources are cleaned up.
 
-Each MoonModule is documented in `docs/modules/` as it is built.
+Each MoonModule is documented in `docs/moonmodules/` as it is built.
 
 ## Controls
 
@@ -42,7 +42,9 @@ Controls are linked to MoonModule class variables. The default value of the vari
 
 Controls are shown dynamically: when a control value changes, the control set can be rebuilt. For example, if a control selects a mode, the controls belonging to that mode are shown while others are hidden.
 
-Controls are the bridge between the UI and the engine. The web UI renders them automatically based on what MoonModules declare. The exact control types (slider, toggle, color picker, text input, dropdown) are defined in the UI spec (`docs/modules_draft/core/ui-spec.md`). The principle is: MoonModules declare what they need, the UI renders it.
+Prefer `uint8_t` (0-255) for slider controls where possible. This minimizes memory per control, aligns with DMX channel values (0-255), and keeps the control range manageable in the UI.
+
+Controls are the bridge between the UI and the engine. The web UI renders them automatically based on what MoonModules declare. The exact control types (slider, toggle, color picker, text input, dropdown) are defined in the UI spec (`docs/moonmodules_draft/core/ui-spec.md`). The principle is: MoonModules declare what they need, the UI renders it.
 
 ## Rebuild Propagation
 
@@ -170,7 +172,7 @@ Adding a new MoonModule with controls requires **zero changes** to the UI files.
 
 These will be specified in module docs before implementation:
 
-- **MoonModule interface.** Draft exists in `docs/modules_draft/core/`. Needs review: virtual modifier interface, rebuild propagation.
+- **MoonModule interface.** Draft exists in `docs/moonmodules_draft/core/`. Needs review: virtual modifier interface, rebuild propagation.
 - **Config persistence.** Controls need to be saved/loaded. The storage format and mechanism will be specified when we build that module.
-- **Web UI.** Draft spec exists in `docs/modules_draft/core/ui-spec.md`. Needs review: multiple layers, live preview, WebSocket.
+- **Web UI.** Draft spec exists in `docs/moonmodules_draft/core/ui-spec.md`. Needs review: multiple layers, live preview, WebSocket.
 - **File/directory structure.** The platform boundary is fixed. The rest will grow as modules are specified and implemented.

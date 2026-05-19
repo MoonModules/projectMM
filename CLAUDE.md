@@ -12,7 +12,7 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 - **Data over objects.** Design around data flow, not class hierarchies.
 - **Concrete first, abstract later.** Build one working feature end-to-end before extracting patterns into shared abstractions. Don't build the framework before the domain logic works.
 - **Domain-neutral core.** Separate core infrastructure from the light domain as much as practical. When mixing is necessary, use domain-neutral naming so the code stays open to future separation.
-- **Present tense only.** Code, comments, and documentation describe the system as it is now. No changelogs, no roadmaps. History lives in git commits. The one exception is `docs/decisions.md`.
+- **Present tense only.** Code, comments, and documentation describe the system as it is now. No changelogs, no roadmaps. History lives in git commits. The one exception is `docs/history/decisions.md`.
 
 ## Hard Rules
 
@@ -33,7 +33,7 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 
 ## Process Rules
 
-**Specs before code.** Module docs (`docs/modules/*.md`) and the UI spec must be sufficient to implement from before writing code. What's sufficient is case by case. When in doubt, ask.
+**Specs before code.** Module docs (`docs/moonmodules/*.md`) and the UI spec must be sufficient to implement from before writing code. What's sufficient is case by case. When in doubt, ask.
 
 **Ask, don't guess.** When uncertain about requirements, behavior, or approach — ask the product owner. Asking is always preferred over guessing. This is the default.
 
@@ -49,6 +49,21 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 
 **Reference, don't copy.** Previous prototype branches have working solutions. Reference them for proven approaches but don't copy code structure.
 
+## Implementation Process
+
+Build one capability at a time. Each commit produces visible output. The product owner picks what to build next.
+
+1. **Pick what to build.** One layout, one effect, one driver, one modifier, one system module — whatever adds the next useful capability.
+2. **Review only the relevant module drafts.** Cherry-pick from `docs/moonmodules_draft/`. Promote only what's needed to `docs/moonmodules/`.
+3. **`/plan` it.** Plan references only the promoted specs + architecture docs.
+4. **Implement, test on hardware, commit.**
+5. **Repeat.**
+
+What the agent reads:
+- Always: `CLAUDE.md`, `architecture.md`, `architecture-light.md`
+- For this commit: `docs/moonmodules/<only the promoted specs>`
+- Never automatically: `docs/history/*`, `docs/moonmodules_draft/*`
+
 ## Documentation
 
 ```
@@ -56,12 +71,18 @@ CLAUDE.md                  ← this file (rules and process)
 docs/
   architecture.md          ← core system design
   architecture-light.md    ← light domain design
-  decisions.md             ← lessons learned, approaches tried and rejected
-  modules/                 ← one page per MoonModule (specs before code)
-  modules_draft/           ← draft specs from prototype, to be reviewed
+  history/                 ← accumulated wisdom
+    decisions.md           ← actions, lessons, proven patterns
+    moonlight-inventory.md ← MoonLight gems to harvest
+    v1-inventory.md        ← projectMM v1 inventory
+    v2-inventory.md        ← projectMM v2 inventory
+  moonmodules/             ← one page per MoonModule (specs before code)
+  moonmodules_draft/           ← draft specs from prototype, to be reviewed
 ```
 
 Documentation describes the system as it is. Git commits are the history. Module specs are written before implementation. Doc pages are kept current with the code.
+
+The `history/` folder is the distilled experience of years of building LED/light systems — from WLED, WLED-MM, StarLight, MoonLight, through projectMM. It contains proven patterns, memory tricks, control mechanisms, and hard-won lessons. We cherry-pick from it — we never implement it wholesale.
 
 ## Code Style
 
