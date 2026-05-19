@@ -24,9 +24,9 @@ Yields `(physicalIndex, x, y, z)` for each light in row-major order. With serpen
 ### MoonLight — L_MoonLight.h Panel ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h))
 Panel layout with serpentine, multiple panel arrangements. Uses `addLight()` to define each position.
 
-### projectMM v2 — GridLayoutModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/GridLayoutModule.h))
-Same controls. Uses LayoutModule base class ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/layouts/LayoutModule.h)).
-
 ### projectMM v1 — GridLayout ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/modules/layouts/GridLayout.h))
 Width/height/depth/serpentine controls. Mapping rebuilt in onUpdate(), parent notified via onChildrenReady().
 v1 GridLayout (commit 54b50bc) had identical controls including serpentine. Mapping table rebuilt in `onUpdate()`, parent notified via `onChildrenReady()`.
+
+### projectMM v2 — GridLayoutModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/GridLayoutModule.h))
+Same controls. Uses LayoutModule base class ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/layouts/LayoutModule.h)).

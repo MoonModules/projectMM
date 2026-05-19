@@ -153,6 +153,8 @@ All buffers are allocated as single contiguous blocks outside the hot path — a
 - **Physical buffer.** When present, holds the blended+mapped output. The logical and physical buffers together form the double buffer for producer/consumer parallelism.
 - **Mapping LUT.** The flat lookup table for logical→physical coordinate mapping. Read-only during rendering. PSRAM is fine — sequential reads are cache-friendly.
 
+All buffers are raw `uint8_t*` arrays sized by `channelsPerLight * nrOfLights`. This supports RGB (3 channels), RGBW (4 channels), and multi-channel DMX fixtures (up to 32 channels per light) without separate code paths. Channel layout is configured via offsets (see MoonLight's [LightsHeader](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/LightsHeader.h) pattern).
+
 Network input (ArtNet receive, WebSocket) is processed synchronously at a defined point in the frame loop. This means zero extra buffers and no race conditions. The trade-off is up to one frame of latency (~16ms at 60fps), which is imperceptible for LEDs.
 
 ### Scaling to available memory

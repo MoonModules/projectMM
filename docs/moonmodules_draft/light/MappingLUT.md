@@ -1,43 +1,35 @@
 # MappingLUT
 
-Lookup table mapping logical light indices to physical light indices.
+Lookup table mapping logical light indices to physical light indices. Based on MoonLight's PhysMap design, tuned for v3.
 
-## Mapping Types
+## Mapping types
 
-- **1:0** — logical light is unmapped (skipped). `destinationCount() == 0`.
-- **1:1** — logical light maps to one physical position.
-- **1:N** — logical light maps to N physical positions (mirroring).
+- **1:0** (`m_zeroLights`) — logical light is unmapped (skipped). In MoonLight, the mapping entry stores a cached color value for unmapped positions — a "hack" that avoids a separate buffer for unmapped lights.
+- **1:1** (`m_oneLight`) — logical light maps to one physical position. Two sub-cases:
+  - **1:1 unshuffled** — logical index equals physical index. Grid layout, no serpentine, X-then-Y order. This IS MoonLight's `oneToOneMapping` — the mapping table can be skipped entirely.
+  - **1:1 shuffled** — logical maps to a different physical index. Grid with serpentine, or any non-identity mapping. This IS MoonLight's `allOneLight` — a direct table fast path (no per-entry type check needed).
+- **1:N** (`m_moreLights`) — logical light maps to N physical positions (mirroring, cloning). Entry stores an index into a secondary flat array (CSR-style). In MoonLight, this uses `forEachLightIndex()` callback pattern.
 
-## v3 prototype approach (CSR)
+## Storage (based on PhysMap)
 
-- `offsets_[]` — uint32_t, one per logical light + 1 sentinel
-- `destinations_[]` — uint16_t, flat array of physical indices
-- CSR format is cache-friendly for sequential reads on hot path.
-- 1:N mapping works for mirror/kaleidoscope.
+Uses `nrOfLightsType` and `lengthType` typedefs (see architecture-light.md).
 
-## Design decision for v3
+Each entry is a union, sized by platform:
+- No-PSRAM: 2 bytes (mapType in 2 bits + 14-bit payload)
+- PSRAM: 4 bytes (mapType in 8 bits + 24-bit payload)
 
-Consider MoonLight's PhysMap approach (type-in-entry union) for minimal memory. But use a flat CSR-style secondary array instead of nested vectors for 1:N entries. Best of both: minimal per-entry size + cache-friendly 1:N lookup.
+Secondary lookup for 1:N: CSR flat array (offsets + destinations). Better cache locality than MoonLight's nested `std::vector<std::vector<>>`.
 
-## What needs improvement
+CSR (Compressed Sparse Row): two arrays — `offsets[logicalCount + 1]` stores where each entry's destinations start, `destinations[]` stores the flat list of physical indices. For entry `i`, destinations are `destinations[offsets[i] .. offsets[i+1])`.
 
-- `setMapping` must be called in order. No random-access building.
-- `totalDestinations` must be known upfront (overestimation wastes memory).
-- No validation that destinations are within physical buffer bounds.
-- Should support MoonLight's `oneToOneMapping` fast path flag.
+## Size information
+
+`totalDestinations` (total physical lights) is provided by the LayoutGroup. Used by both layers and driver groups to allocate their buffers. Destinations are therefore always within valid bounds.
 
 ## Prior art
 
 ### MoonLight — PhysMap ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/PhysMap.h))
-**Memory-optimal approach.** Each entry is a union packed into 2 bytes (no-PSRAM) or 4 bytes (PSRAM):
-- No-PSRAM (2 bytes): mapType in 2 bits + 14-bit payload (physical index OR condensed 554 RGB OR secondary index)
-- PSRAM (4 bytes): mapType in 8 bits + 24-bit payload (max 16M lights) + 3-byte RGB cache
-
-The map type is stored IN each entry, not in a separate array. This is more memory-efficient than v3's CSR approach which uses a separate offsets array (4 bytes per entry).
-
-Fast paths: `oneToOneMapping` flag skips the table entirely (identity mapping). `allOneLight` flag enables a direct-table path bypassing the switch/case when no 1:N entries exist.
-
-Secondary lookup for 1:N: `std::vector<std::vector<nrOfLights_t>>` (per-entry variable length). v3's CSR flat array is better for cache locality.
+Memory-optimal union. 2 bytes (no-PSRAM) or 4 bytes (PSRAM). Map type stored IN each entry. `oneToOneMapping` and `allOneLight` fast path flags. `forEachLightIndex()` for 1:N iteration.
 
 ### projectMM v1 — GridLayout.requestMappings ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/modules/layouts/GridLayout.h))
-Simple flat array: `mappings[logical_index] = physical_strip_index`. Only 1:1 mapping. Rebuilt on control change.
+Simple flat array: `mappings[logical_index] = physical_strip_index`. Only 1:1. Rebuilt on control change.

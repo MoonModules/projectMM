@@ -34,9 +34,9 @@ Without pacing, blasting all universe packets in a tight loop causes receivers t
 ### MoonLight — D_NetworkOut ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Drivers/D_NetworkOut.h))
 Supports ArtNet, E1.31, and DDP output. Multi-protocol in one driver.
 
-### projectMM v2 — ArtnetOutModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/ArtnetOutModule.h))
-Uses PalUdp abstraction ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/pal/PalUdp.h)). ADR 0005 teardown safety via DataBuffer invalidation.
-
 ### projectMM v1 — ArtNetOutModule ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/modules/drivers/ArtNetOutModule.h))
 Controls: universe_start (slider 0-255), ip (text). Platform UDP abstraction.
 v1 ArtNetOutModule (commit 54b50bc). Controls: `universe_start` (slider 0-255), `ip` (text). Used platform UDP abstraction.
+
+### projectMM v2 — ArtnetOutModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/ArtnetOutModule.h))
+Uses PalUdp abstraction ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/pal/PalUdp.h)). ADR 0005 teardown safety via DataBuffer invalidation.

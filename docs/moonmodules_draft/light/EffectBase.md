@@ -2,38 +2,32 @@
 
 Light-domain MoonModule subclass for effects. Adds rendering context.
 
-## Purpose
+## Design questions
 
-Effects need to know their buffer, dimensions, and elapsed time, but the MoonModule `loop()` interface has no parameters. EffectBase solves this by providing a `RenderContext` that the Layer sets before calling `loop()`.
+**Does EffectBase need to exist?** The Layer already knows the buffer, dimensions, and elapsed time. Consider having the Layer provide the rendering context directly to effects via their `loop()` call, eliminating EffectBase. The effect would access `layer->buffer()`, `layer->width()`, etc. — exactly what MoonLight does. Pro: smaller codebase, fewer files, cleaner separation of concerns — the layer IS the context. Con: effects need a pointer to their layer, coupling them slightly.
 
-## RenderContext
+**Do we also need DriverBase and LayoutBase?** Same question. If the parent (DriverGroup, LayoutGroup) provides everything the child needs via a pointer, separate base classes may be unnecessary boilerplate. MoonLight uses a single Node base class for effects, layouts, modifiers, and drivers — the parent (VirtualLayer, PhysicalLayer) provides context.
 
-- `lights()` — the buffer to write into (span of light values)
+If base classes are kept, they should be zero-state — just convenience accessors pointing to the parent.
+
+## Rendering context
+
+Whatever provides it, effects need:
+- `buffer()` — the `uint8_t*` buffer to write into
 - `width()`, `height()`, `depth()` — logical dimensions
-- `elapsed()` — milliseconds since startup (for frame-rate independent animation)
-
-## What worked
-
-- Clean separation: MoonModule stays domain-neutral, EffectBase adds light-domain context.
-- Context set per-frame means effects always get current dimensions.
-
-## What needs improvement
-
-- Use elapsed time (millis), not frame count, for animation (architecture decision).
-- Follow v2's PixelEffectBase pattern: concrete effect implements only controls + render. Base handles everything else.
-- Effects compute x/y from light index (`i % width`). The layer provides the logical grid dimensions for this.
+- `channelsPerLight()` — channels per light (3=RGB, 4=RGBW, etc.)
+- `elapsed()` — milliseconds for animation (synchronized clock)
+- `nrOfLights()` — total lights in this layer's buffer
 
 ## Prior art
 
 ### MoonLight — Node + VirtualLayer ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonBase/Nodes.h), [source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h))
-- Effects access `layer->width()`, `layer->height()`, `layer->depth()` directly via the VirtualLayer pointer.
-- Buffer access via `layer->virtualChannels` (raw byte array indexed by `channelsPerLight`).
-- Time via `timeMicros()` — microsecond precision, used for animation.
-
-### projectMM v2 — PixelEffectBase ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/effects/PixelEffectBase.h))
-- Shared spine: concrete effect implements only `build_effect_controls()` + `render_(px, w, h, d)`.
-- Layout resolution, buffer management, DataBuffer declaration/teardown, resize polling all in the base.
-- Eliminates ~70 lines of boilerplate per effect.
+- Effects access `layer->width()`, `layer->height()`, `layer->depth()` directly via the VirtualLayer pointer. No separate EffectBase.
+- Buffer access via `layer->virtualChannels` (raw byte array).
+- Time via `timeMicros()`.
 
 ### projectMM v1 — ProducerModule ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/core/ProducerModule.h))
-Base for effects. Produces into a Channel (pixel buffer). Effects access layer dimensions via the EffectsLayer pointer.
+Base for effects. Produces into a Channel.
+
+### projectMM v2 — PixelEffectBase ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/effects/PixelEffectBase.h))
+Shared spine: concrete effect implements only `build_effect_controls()` + `render_(px, w, h, d)`. Eliminates ~70 lines boilerplate.
