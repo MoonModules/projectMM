@@ -39,15 +39,25 @@ Structure mirrors the source tree:
 ```
 docs/moonmodules_draft/
   core/                    MoonModule base, Control, Scheduler, HttpServer, UI spec
-  light/                   Buffer, MappingLUT, Layer, LayoutGroup, DriverGroup, EffectBase
-    modules/
-      effects/             Rainbow, Noise, DistortionWaves, GameOfLife, Sine, Ripples, Lines, ArtNetReceive
-      layouts/             Grid (with serpentine), Wheel (sparse)
-      modifiers/           Mirror (kaleidoscope 1:N), Rotate (2D rotation)
-      drivers/             ArtNet send, Preview (WebSocket 3D)
+  light/                   Buffer, MappingLUT, Layer, LayoutGroup, DriverGroup, EffectBase, LightConfig
+    effects/               Rainbow, Noise, DistortionWaves, GameOfLife, Sine, Ripples, Lines, ArtNetReceive
+    layouts/               Grid, Wheel (sparse)
+    modifiers/             Mirror (kaleidoscope 1:N), Rotate (2D)
+    drivers/               ArtNet send, Preview (WebSocket 3D)
 ```
 
-Specs are reviewed and promoted to `docs/moonmodules/` one at a time, just before implementation. This is how we cherry-pick — we never implement wholesale.
+Specs are reviewed and promoted to [`docs/moonmodules/`](docs/moonmodules/) one at a time, just before implementation. This is how we cherry-pick — we never implement wholesale.
+
+Currently promoted (ready for implementation):
+
+```
+docs/moonmodules/
+  core/                    MoonModule, Control, Scheduler
+  light/                   Buffer, MappingLUT, Layer, LayoutGroup, DriverGroup, EffectBase, BlendMap, LightConfig
+    effects/               Rainbow 2D
+    layouts/               Grid
+    drivers/               ArtNet send
+```
 
 ## History
 

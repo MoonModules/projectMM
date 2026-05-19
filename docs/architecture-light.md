@@ -82,6 +82,10 @@ Effects use elapsed time for animation, not frame count. This makes animation sp
 
 Effects know nothing about hardware, protocols, physical LED layout, or mapping. They only see the logical grid the layer provides.
 
+**Speed convention:** effects that have a speed control use BPM (beats per minute) as the unit. `uint8_t`, default 60 (= 1 beat per second). This is human-readable, musically meaningful, and DMX-compatible. The effect converts BPM to animation rate internally using elapsed millis.
+
+**Dimensionality:** all effects must be at least 2D (use both x and y). 3D effects (using z) are preferred. 1D-only effects are not accepted — the system is natively 3D and effects should take advantage of that.
+
 ## Modifiers
 
 A modifier (MoonModule) lives inside a layer alongside its effects. Modifiers expose a virtual interface — the Layer calls modifier methods without knowing the concrete type (no dynamic_cast).
