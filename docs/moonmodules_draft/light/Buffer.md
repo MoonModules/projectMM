@@ -10,7 +10,7 @@ drivers read from.
 - `clear()` — memset to 0
 - `fill(RGB)` — fill all lights with one color
 - `operator[]` — read/write access
-- `pixels()` — `std::span<RGB>` view
+- `lights()` — `std::span<RGB>` view
 - Move-constructible, not copyable.
 
 ## What worked

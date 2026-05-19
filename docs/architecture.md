@@ -52,6 +52,12 @@ When a control value changes on a layout, the pipeline must rebuild: layers rebu
 
 The mechanism (observer pattern, signal/slot, or centralized pipeline manager) will be defined in the module spec before implementation.
 
+## Parallelism
+
+On multi-core systems (ESP32 has 2 cores, desktop/RPi have many), the system exploits parallelism by assigning MoonModules to specific cores. Each MoonModule can declare a core affinity. The scheduler respects this when pinning tasks. On single-core or desktop systems, core affinity is ignored and everything runs on available threads.
+
+The general model is **producers vs consumers**: producers generate data, consumers process and output it. They run on separate cores with double buffering at the boundary — no locks on the hot path. The domain-specific application of this model (which MoonModules are producers, which are consumers, what is double-buffered) is defined in `architecture-light.md`.
+
 ## Platform Abstraction
 
 Only abstract what you actually need. Currently that means:
@@ -64,6 +70,27 @@ Only abstract what you actually need. Currently that means:
 - **Filesystem.** Read/write config and UI assets. (`LittleFS` / `std::filesystem`). Teensy: SD card or flash.
 
 Abstractions are added when needed by a concrete implementation, not pre-designed. All platform-specific code lives in `src/platform/`. Everything outside it compiles cleanly on every target.
+
+## ESP-IDF, No Arduino
+
+The ESP32 target uses ESP-IDF directly, not the Arduino framework. Rationale:
+- **Direct hardware control.** RMT peripheral for LED protocols, FreeRTOS task pinning with explicit stack sizes, `heap_caps_malloc` with SPIRAM/8BIT caps, `esp_timer` microsecond timing. Arduino wraps these with abstractions that add overhead and hide control.
+- **Native CMake.** ESP-IDF's build system IS CMake (`idf.py` wraps it). No impedance mismatch. Arduino-on-ESP-IDF adds a compatibility layer that complicates the build.
+- **Version stability.** ESP-IDF APIs are stable. Arduino-esp32 version churn caused recurring breakage in MoonLight.
+
+Arduino can be added as an ESP-IDF component later if a specific Arduino library is needed. This is officially supported by Espressif and doesn't require restructuring.
+
+### Library strategy
+
+Start without third-party libraries. The platform abstraction layer replaces what libraries typically provide:
+
+| Previously used | Why not now | v3 approach |
+|----------------|-------------|-------------|
+| [**FastLED**](https://github.com/FastLED/FastLED) | Arduino-dependent. LED protocol drivers (RMT, SPI) are available natively in ESP-IDF. FastLED's color math can be reimplemented in pure C++. | Own color math in core. Own LED drivers per platform in `src/platform/`. |
+| [**ESPAsyncWebServer**](https://github.com/ESP32Async/ESPAsyncWebServer) | Arduino-dependent. Previously had memory leak issues, now under active development and reportedly improved. Still ties us to Arduino framework. | Own HTTP server via ESP-IDF's `esp_http_server` (ESP32) or BSD sockets (desktop). Can reconsider if Arduino-as-component is added. |
+| [**ArduinoJson**](https://github.com/bblanchon/ArduinoJson) | Not Arduino-dependent (works with ESP-IDF), but heavy: dynamic allocation, large footprint. | Own fixed-size control storage. JSON only for API serialization, not internal state. |
+
+If a library is genuinely needed later (e.g. FastLED for specific hardware support), it can be added as an ESP-IDF component. The rule: the library lives inside `src/platform/` and is not referenced from core or light domain code.
 
 ## Build System
 
@@ -105,11 +132,12 @@ Script definitions and configuration live in `scripts/moondeck_config.json` (com
 
 ### Unit tests (desktop)
 
-Core logic runs on desktop, so all non-hardware code is testable via `ctest`. Priority areas:
-- Color math (HSV→RGB, blending, scale8)
-- Buffer operations (allocate, fill, clear, bounds)
-- Mapping LUT (1:0, 1:1, 1:N, rebuild on config change)
-- Blend+map pass (correct physical output from logical layers)
+Core logic runs on desktop, so all non-hardware code is testable via `ctest`. Core priority areas:
+- MoonModule lifecycle (setup, loop, teardown ordering)
+- Control operations (add, set, clamp, onChange)
+- Scheduler (module dispatch, timing)
+
+Light domain test areas are in `architecture-light.md`.
 
 Test framework will be chosen when we write the first test. Preference for something header-only and lightweight (doctest, Catch2, or plain `assert`).
 
@@ -117,13 +145,10 @@ Test framework will be chosen when we write the first test. Preference for somet
 
 Automated checks that verify architectural rules at runtime:
 - **Zero-allocation render loop.** Run N frames, intercept `malloc`/`free` (via overriding or platform allocator hooks), fail if any allocation occurs during steady-state rendering.
-- **Frame time regression.** Measure render time for a known workload (e.g. 10K lights, 3 layers, rainbow effect). Fail if it exceeds a threshold. Not a hard real-time guarantee, but catches gross regressions.
 
 ### Live system tests (on-device)
 
 For ESP32 targets, test what desktop can't:
-- LED output produces correct signal (protocol-level, verified with logic analyzer or known-good reference).
-- Multi-device sync achieves sub-millisecond accuracy.
 - Memory stays within bounds over long runs (no leaks, no fragmentation drift).
 
 These are manual or semi-automated for now. Automation strategy will emerge with the hardware.

@@ -113,7 +113,7 @@ Each driver (MoonModule) speaks one protocol:
 - **LED drivers:** WS2812 via RMT, APA102 via SPI. Platform-specific.
 - **DMX/ArtNet:** sends DMX data over UDP. Supports both addressable LEDs and conventional DMX fixtures (pars, moving heads, dimmers).
 - **Preview:** streams light data to the web UI via WebSocket.
-- **Simulation:** SDL2 or terminal output for desktop development.
+- **Desktop output:** SDL2 or terminal for visual preview. Desktop also serves as a high-speed processing node, driving lights via ArtNet/DDP over the network.
 
 Drivers read from the DriverGroup's output buffer. Everything before the DriverGroup is platform-independent.
 
@@ -130,21 +130,18 @@ Network-based drivers (ArtNet, E1.31, DDP) must pace their packet output — nev
 - MoonModule model → low barrier for contributors.
 - Zero allocations in steady state. Buffers are (re)allocated outside the hot path — at startup or when configuration changes.
 
-## Parallelism
+## Parallelism (light domain)
 
-On multi-core systems (ESP32 has 2 cores, desktop/RPi have many), the pipeline exploits parallelism by assigning MoonModules to specific cores.
+The core parallelism model (see `architecture.md`) applies to the light pipeline as follows:
 
-The key split is **producers vs consumers**:
-- **Producers** (effects) generate light data into layer buffers (logical space). Pinned to one core.
-- **Consumers** (drivers — LED output, ArtNet send) perform blend+map from logical buffers into their output, and push to hardware/network. Pinned to another core. Consumers own the blend+map step because they know what they consume from.
+- **Producers** = effects. Generate light data into layer buffers (logical space). Pinned to one core.
+- **Consumers** = drivers (LED output, ArtNet send). Perform blend+map from logical buffers into their output, push to hardware/network. Pinned to another core. Consumers own the blend+map step because they know what they consume from.
 
-The logical and physical buffers **are** the double buffer: producers write into logical buffers while consumers read from the physical buffer. No additional buffers are needed. At the frame boundary, roles swap via atomic pointer swap — the driver transmits frame N while effects render frame N+1.
+The logical and physical buffers **are** the double buffer: producers write into logical buffers while consumers read from the physical buffer. At the frame boundary, roles swap via atomic pointer swap — the driver transmits frame N while effects render frame N+1.
 
 When memory is sufficient (even on ESP32 without PSRAM for small layouts up to ~4K lights), the system uses double buffering with a separate physical buffer, mapping, blending, and producer/consumer parallelism — same as devices with PSRAM.
 
 When memory is too tight for double buffering (large layouts on devices without PSRAM), the system is limited to: one layer with 1:1 unshuffled mapping, effects write directly into their layer buffer, drivers read from that same buffer to fill DMA/UDP packets directly. No blend+map step, no mapping, no blending, no parallelism. This is how the 12K LED stretch goal is achieved on ESP32 without PSRAM.
-
-Each MoonModule can declare a core affinity. The scheduler respects this when pinning tasks. On single-core or desktop systems, core affinity is ignored and everything runs on available threads.
 
 ## Memory Strategy
 
@@ -171,6 +168,24 @@ The system adapts to what the device has:
 | Desktop / RPi | Abundant | No constraints |
 
 The architecture does not assume PSRAM is present. Buffer counts and sizes are determined at runtime based on available memory. They are reallocated when configuration changes.
+
+## Testing (light domain)
+
+### Unit tests (desktop)
+
+- Color math (HSV→RGB, blending, scale8)
+- Buffer operations (allocate, fill, clear, bounds)
+- Mapping LUT (1:0, 1:1, 1:N, rebuild on config change)
+- Blend+map pass (correct physical output from logical layers)
+
+### Performance tests (desktop)
+
+- **Frame time regression.** Measure render time for a known workload (e.g. 10K lights, 3 layers, rainbow effect). Fail if it exceeds a threshold.
+
+### Live system tests (on-device)
+
+- Light output produces correct signal (protocol-level, verified with logic analyzer or known-good reference).
+- Multi-device sync achieves sub-millisecond accuracy.
 
 ## Multi-Device Sync
 

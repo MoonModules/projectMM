@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A high-performance multi-platform system that drives large LED installations and DMX lighting fixtures. ESP32 (ESP-IDF, no Arduino) is the primary target. Also runs on Teensy, macOS, Windows, Linux, and Raspberry Pi. C++20. CMake.
+A high-performance multi-platform system that drives large LED installations and DMX lighting fixtures. ESP32 is the primary target. Also runs on Teensy, macOS, Windows, Linux, and Raspberry Pi. C++20. CMake.
 
 See `docs/architecture.md` for system design. This file contains only rules and constraints for working on the project.
 
