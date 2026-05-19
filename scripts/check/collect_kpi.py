@@ -49,6 +49,7 @@ def collect_desktop():
     if scenarios.exists():
         out, rc = run([str(scenarios)], cwd=ROOT)
         fps_values = []
+        buffer_lights = []
         for line in out.splitlines():
             if "FPS:" in line:
                 parts = line.strip().split()
@@ -56,10 +57,18 @@ def collect_desktop():
                     if p == "FPS:" and i + 1 < len(parts):
                         try: fps_values.append(int(parts[i + 1]))
                         except ValueError: pass
+            if "Buffer:" in line and "lights" in line:
+                parts = line.strip().split()
+                for i, p in enumerate(parts):
+                    if p == "Buffer:" and i + 1 < len(parts):
+                        try: buffer_lights.append(int(parts[i + 1]))
+                        except ValueError: pass
             if "scenario(s)" in line:
                 kpi["scenarios"] = line.strip()
         if fps_values:
             kpi["fps"] = fps_values
+        if buffer_lights:
+            kpi["lights"] = max(buffer_lights)
 
     check = ROOT / "scripts" / "check" / "check_platform_boundary.py"
     if check.exists():
@@ -177,6 +186,8 @@ def collect_code():
 
 def format_oneliner(desktop, esp32, code):
     parts = []
+    if "lights" in desktop:
+        parts.append(f"{desktop['lights']}lights")
     if "binary_kb" in desktop:
         parts.append(f"PC:{desktop['binary_kb']}KB")
     if "fps" in desktop:
@@ -198,6 +209,8 @@ def format_full(desktop, esp32, code):
     lines.append("KPI Details:")
 
     lines.append("  Desktop:")
+    if "lights" in desktop:
+        lines.append(f"    Lights: {desktop['lights']:,}")
     if "binary_kb" in desktop:
         lines.append(f"    Binary: {desktop['binary_kb']} KB")
     if "tests" in desktop:
@@ -247,6 +260,7 @@ def main():
 
     if args.commit:
         print(format_oneliner(desktop, esp32, code))
+        print("(see KPI Details at bottom)")
         print()
         print(format_full(desktop, esp32, code))
     else:

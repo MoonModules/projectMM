@@ -41,11 +41,11 @@ public:
     }
 
 private:
-    // Hash function for value noise
-    static uint8_t hash(int32_t x, int32_t y, int32_t t) {
-        int32_t h = x * 1619 + y * 31337 + t * 6271;
+    // Hash function for value noise (uint32_t to avoid signed overflow UB)
+    static uint8_t hash(uint32_t x, uint32_t y, uint32_t t) {
+        uint32_t h = x * 1619u + y * 31337u + t * 6271u;
         h = (h >> 13) ^ h;
-        h = h * (h * h * 60493 + 19990303) + 1376312589;
+        h = h * (h * h * 60493u + 19990303u) + 1376312589u;
         return static_cast<uint8_t>((h >> 16) & 0xFF);
     }
 
@@ -56,9 +56,10 @@ private:
         return static_cast<uint8_t>((3 * t2 - 2 * t3) & 0xFF);
     }
 
-    // Linear interpolation: a + (b-a) * t/255, all uint8_t
+    // Linear interpolation: a + (b-a) * t/255
     static uint8_t lerp8(uint8_t a, uint8_t b, uint8_t t) {
-        return static_cast<uint8_t>(a + (static_cast<int16_t>(b - a) * t / 255));
+        int16_t delta = static_cast<int16_t>(b) - static_cast<int16_t>(a);
+        return static_cast<uint8_t>(static_cast<int16_t>(a) + delta * t / 255);
     }
 
     // 2D value noise with bilinear interpolation

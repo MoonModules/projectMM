@@ -17,7 +17,7 @@ public:
     void setChannelsPerLight(uint8_t cpl) { channelsPerLight_ = cpl; }
 
     void addEffect(EffectBase* effect) {
-        if (effectCount_ >= effects_.size()) return;
+        if (!effect || effectCount_ >= effects_.size()) return;
         effect->setParent(this);
         effect->setLayer(this);
         effects_[effectCount_++] = effect;

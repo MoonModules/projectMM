@@ -47,7 +47,7 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 
 **No pushing.** Do not `git push`. The product owner pushes manually.
 
-**KPI in every commit.** Run `uv run scripts/check/collect_kpi.py --commit` and include the output in the commit message: one-liner summary after the description, full details at the bottom.
+**KPI in every commit.** Run `uv run scripts/check/collect_kpi.py --commit` and include the output in the commit message: one-liner summary as the FIRST line of the commit description (line after the title), full details at the bottom.
 
 **Mandatory subtraction.** Periodically review and remove code and docs that no longer earn their place. If nothing can be removed, justify why.
 

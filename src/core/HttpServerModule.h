@@ -213,8 +213,9 @@ private:
     int buildStateJson(char* buf, size_t bufSize) {
         int pos = 0;
         auto append = [&](const char* s) {
+            if (static_cast<size_t>(pos) >= bufSize) return;
             int n = std::snprintf(buf + pos, bufSize - pos, "%s", s);
-            if (n > 0) pos += n;
+            if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
         };
 
         append("{\"modules\":[");
@@ -235,10 +236,12 @@ private:
 
     void writeModuleJson(char* buf, size_t bufSize, int& pos, MoonModule* mod) {
         auto append = [&](const char* s) {
+            if (static_cast<size_t>(pos) >= bufSize) return;
             int n = std::snprintf(buf + pos, bufSize - pos, "%s", s);
-            if (n > 0) pos += n;
+            if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
         };
 
+        if (static_cast<size_t>(pos) >= bufSize) return;
         int n = std::snprintf(buf + pos, bufSize - pos,
             "{\"name\":\"%s\",\"controls\":[", mod->name() ? mod->name() : "");
         if (n > 0) pos += n;

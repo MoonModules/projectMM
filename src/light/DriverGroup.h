@@ -40,14 +40,13 @@ public:
     }
 
     void onAllocateMemory() override {
-        for (uint8_t i = 0; i < driverCount_; i++) {
-            drivers_[i]->onAllocateMemory();
-        }
         if (layer_ && !layer_->lut().isOneToOne()) {
-            // Allocate physical output buffer for blend+map
             outputBuffer_.allocate(layer_->physicalLightCount(), layer_->channelsPerLight());
         }
         passBufferToDrivers();
+        for (uint8_t i = 0; i < driverCount_; i++) {
+            drivers_[i]->onAllocateMemory();
+        }
     }
 
     void loop() override {
