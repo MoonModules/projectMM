@@ -6,10 +6,10 @@
 #include <csignal>
 #include <cstdio>
 
-static volatile bool running = true;
+static volatile std::sig_atomic_t running = 1;
 
 static void signalHandler(int) {
-    running = false;
+    running = 0;
 }
 
 int main() {
@@ -50,7 +50,6 @@ int main() {
     scheduler.addModule(&layer);
     scheduler.addModule(&rainbow);
     scheduler.addModule(&driverGroup);
-    scheduler.addModule(&artnet);
 
     scheduler.setup();
 

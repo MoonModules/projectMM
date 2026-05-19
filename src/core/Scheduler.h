@@ -10,7 +10,7 @@ namespace mm {
 class Scheduler {
 public:
     void addModule(MoonModule* mod) {
-        if (moduleCount_ >= modules_.size()) return;
+        if (!mod || moduleCount_ >= modules_.size()) return;
         modules_[moduleCount_++] = mod;
     }
 

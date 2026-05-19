@@ -33,7 +33,6 @@ TEST_CASE("Full pipeline produces non-zero buffer data") {
     scheduler.addModule(&layer);
     scheduler.addModule(&rainbow);
     scheduler.addModule(&driverGroup);
-    scheduler.addModule(&artnet);
 
     scheduler.setup();
 

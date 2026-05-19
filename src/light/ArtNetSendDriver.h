@@ -36,6 +36,7 @@ public:
         if (!sourceBuffer_ || !sourceBuffer_->data()) return;
 
         // FPS limiting
+        if (fps == 0) return;
         uint32_t now = platform::millis();
         uint32_t interval = 1000 / fps;
         if (now - lastSendTime_ < interval) return;

@@ -16,7 +16,7 @@ public:
 class DriverGroup : public MoonModule {
 public:
     void addDriver(DriverBase* driver) {
-        if (driverCount_ >= drivers_.size()) return;
+        if (!driver || driverCount_ >= drivers_.size()) return;
         driver->setParent(this);
         drivers_[driverCount_++] = driver;
     }

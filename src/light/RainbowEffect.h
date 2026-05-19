@@ -21,8 +21,10 @@ public:
         nrOfLightsType count = nrOfLights();
 
         // BPM to phase: one full hue cycle (256) per beat
-        // phase = elapsed_ms * speed / 60000 * 256
-        uint32_t phase = static_cast<uint32_t>(elapsed()) * speed * 256 / 60000;
+        // Use 64-bit to avoid overflow (uint32 overflows after ~5.5 minutes)
+        uint32_t phase = static_cast<uint32_t>(
+            static_cast<uint64_t>(elapsed()) * speed * 256 / 60000
+        );
 
         for (nrOfLightsType i = 0; i < count; i++) {
             lengthType x = static_cast<lengthType>(i % w);
@@ -35,9 +37,9 @@ public:
 
             RGB c = hsvToRgb(hue, 255, 255);
             size_t offset = static_cast<size_t>(i) * cpl;
-            buf[offset + 0] = c.r;
-            buf[offset + 1] = c.g;
-            buf[offset + 2] = c.b;
+            if (cpl >= 1) buf[offset + 0] = c.r;
+            if (cpl >= 2) buf[offset + 1] = c.g;
+            if (cpl >= 3) buf[offset + 2] = c.b;
         }
     }
 };

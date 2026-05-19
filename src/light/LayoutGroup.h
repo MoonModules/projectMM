@@ -16,7 +16,7 @@ public:
 class LayoutGroup : public MoonModule {
 public:
     void addLayout(LayoutBase* layout) {
-        if (layoutCount_ >= layouts_.size()) return;
+        if (!layout || layoutCount_ >= layouts_.size()) return;
         layout->setParent(this);
         layouts_[layoutCount_++] = layout;
     }

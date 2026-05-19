@@ -53,6 +53,16 @@ def save_state(state):
 
 _running: dict[str, subprocess.Popen] = {}
 _lock = threading.Lock()
+_IS_WIN = sys.platform == "win32"
+
+
+def _kill_process_by_name(name: str):
+    """Kill processes matching name. Cross-platform."""
+    if _IS_WIN:
+        subprocess.run(["taskkill", "/F", "/IM", name + ".exe"],
+                       capture_output=True)
+    else:
+        subprocess.run(["pkill", "-f", name], capture_output=True)
 
 
 def kill_script(script_id: str):
@@ -60,7 +70,10 @@ def kill_script(script_id: str):
         proc = _running.pop(script_id, None)
     if proc and proc.poll() is None:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            if _IS_WIN:
+                proc.terminate()
+            else:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
         except (OSError, ProcessLookupError):
             pass
 
@@ -68,13 +81,18 @@ def kill_script(script_id: str):
     script_def = next((s for s in SCRIPTS if s["id"] == script_id), None)
     pname = script_def.get("process_name") if script_def else None
     if pname:
-        subprocess.run(["pkill", "-f", pname], capture_output=True)
+        _kill_process_by_name(pname)
 
 
 def is_process_running(name: str) -> bool:
-    """Check if a process matching the name is running (via pgrep)."""
-    r = subprocess.run(["pgrep", "-f", name], capture_output=True)
-    return r.returncode == 0
+    """Check if a process matching name is running. Cross-platform."""
+    if _IS_WIN:
+        r = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {name}.exe"],
+                           capture_output=True, text=True)
+        return name in r.stdout
+    else:
+        r = subprocess.run(["pgrep", "-f", name], capture_output=True)
+        return r.returncode == 0
 
 
 # ---------------------------------------------------------------------------
@@ -199,13 +217,16 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             cmd.extend(["--port", params["port"]])
 
         try:
-            proc = subprocess.Popen(
-                cmd,
+            popen_kwargs = dict(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 cwd=str(ROOT),
-                preexec_fn=os.setsid,
             )
+            if not _IS_WIN:
+                popen_kwargs["preexec_fn"] = os.setsid
+            else:
+                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            proc = subprocess.Popen(cmd, **popen_kwargs)
             with _lock:
                 _running[script_id] = proc
             self._send_json({"status": "started", "pid": proc.pid})
