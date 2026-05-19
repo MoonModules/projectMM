@@ -47,7 +47,7 @@ are concrete rules, not aspirations.
     std::string in any code path called per-frame. Enforce with a
     test that intercepts malloc/free.
 12. **PSRAM for bulk, IRAM for speed.** Large contiguous buffers
-    (pixels, LUTs) in PSRAM at boot. Never scattered small allocations
+    (light buffers, LUTs) in PSRAM at boot. Never scattered small allocations
     in PSRAM during loops.
 13. **Pace all network output.** Never blast UDP packets in a tight
     loop. Add inter-packet delay and FPS limiting. Missing pacing
@@ -240,7 +240,7 @@ Extracted from design review session with Gemini (2026-05-18).
   is 30KB. With double-buffering and LUTs, you exceed 320KB internal
   SRAM easily.
 - OPI PSRAM (80-120MHz, 16-bit bus) has sufficient bandwidth for
-  sequential pixel streaming.
+  sequential light data streaming.
 - The rule: PSRAM allowed for large contiguous bulk allocations at
   boot. Never small scattered allocations in loops.
 
@@ -249,7 +249,7 @@ Extracted from design review session with Gemini (2026-05-18).
   packet drops. Inter-packet delays (50us) and FPS limiting are
   required.
 - The absence of pacing produced symptoms that looked like rendering
-  bugs (missing pixels, random output) when the actual issue was
+  bugs (missing lights, random output) when the actual issue was
   network flooding.
 
 ### Map-on-the-fly vs separate Map stage
@@ -321,7 +321,7 @@ drift that we decided to restart implementation with better specs.
   dynamic_cast<RotateModifier*> to dispatch modifier behavior.
   This tightly couples Layer to specific modifier types.
 - Modifiers should have a virtual interface (transformCoord,
-  transformPixels) that Layer calls without knowing the concrete type.
+  transformLights) that Layer calls without knowing the concrete type.
 
 ### Hot-path allocation in RotateModifier
 - The RotateModifier allocated a temporary buffer every frame via

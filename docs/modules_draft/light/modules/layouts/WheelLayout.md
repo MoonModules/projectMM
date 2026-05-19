@@ -13,7 +13,7 @@ Yields `(physicalIndex, x, y, 0)` for each LED on each spoke.
 Positions are computed using trigonometry (cos/sin). LEDs radiate
 from center outward along each spoke.
 
-`pixelCount() = spokes * ledsPerSpoke`.
+`lightCount() = spokes * ledsPerSpoke`.
 
 ## What worked
 

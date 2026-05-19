@@ -6,14 +6,14 @@ physical light topology.
 ## API
 
 - `addLayout(LayoutBase*)` — add a layout (max 8)
-- `totalPixelCount()` — sum of all layouts' pixel counts
+- `totalLightCount()` — sum of all layouts' light counts
 - `forEachCoord(callback, ctx)` — iterate all coordinates across all
   layouts, offsetting physical indices so they don't overlap
 
 ## LayoutBase Interface
 
 Layouts must implement:
-- `pixelCount()` — number of lights this layout defines
+- `lightCount()` — number of lights this layout defines
 - `forEachCoord(CoordCallback, ctx)` — yield (idx, x, y, z) for each
 
 The callback signature: `void(void* ctx, uint32_t idx, int16_t x, int16_t y, int16_t z)`

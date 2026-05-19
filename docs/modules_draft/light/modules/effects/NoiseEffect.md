@@ -9,12 +9,12 @@
 
 ## Rendering
 
-For each pixel at (x, y): computes `noise8(x*scale + frame*speed, y*scale)`,
+For each light at (x, y): computes `noise8(x*scale + frame*speed, y*scale)`,
 maps noise value to hue via `RGB::fromHSV(n, 255, 255)`.
 
 ## Critical lesson: brightness
 
-Initially used `fromHSV(n, 255, n)` which made most pixels nearly
+Initially used `fromHSV(n, 255, n)` which made most lights nearly
 black (noise value used as both hue AND brightness). The fix:
 always use full brightness (v=255). Noise value should only control
 hue or be mapped to a palette.

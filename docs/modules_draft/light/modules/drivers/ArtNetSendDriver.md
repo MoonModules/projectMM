@@ -16,12 +16,12 @@ Art-Net DMX (OpDmx = 0x5000):
 - OpCode: 0x5000 (little-endian)
 - Protocol version: 14 (big-endian)
 - Sequence, Physical, Universe, Length
-- Data: RGB bytes (max 512 = 170 pixels per universe)
+- Data: RGB bytes (max 512 = 170 lights per universe)
 
 ## Universe Splitting
 
-For >170 pixels, data is split across consecutive universes. 128x128 =
-16384 pixels = 97 universes.
+For >170 lights, data is split across consecutive universes. 128x128 =
+16384 lights = 97 universes.
 
 ## Critical lesson: packet pacing
 

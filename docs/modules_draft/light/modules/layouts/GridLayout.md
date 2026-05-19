@@ -11,7 +11,7 @@ Arranges lights in a 3D grid (row-major: x varies fastest, then y, then z).
 ## Coordinate Iterator
 
 Yields `(physicalIndex, x, y, z)` for each LED in row-major order.
-`pixelCount() = width * height * depth`.
+`lightCount() = width * height * depth`.
 
 ## What worked
 
@@ -23,7 +23,7 @@ Yields `(physicalIndex, x, y, z)` for each LED in row-major order.
 
 - Needs a LayoutBase adapter (GridAdapter) to work with LayoutGroup's
   virtual dispatch. This boilerplate should be eliminated.
-- Default 128x128 is 16384 pixels → 97 ArtNet universes. This is a
+- Default 128x128 is 16384 lights → 97 ArtNet universes. This is a
   lot for testing. Consider smaller default or configurable presets.
 - No serpentine wiring option (alternating row direction). Common in
   real LED matrices.

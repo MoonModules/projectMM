@@ -1,4 +1,4 @@
-# Pixel (RGB)
+# Light Value (RGB)
 
 3-byte RGB struct. The fundamental color type.
 
@@ -19,7 +19,7 @@
 
 ## What needs improvement
 
-- `fromHSV` with value < 255 can produce very dark pixels that appear
+- `fromHSV` with value < 255 can produce very dark lights that appear
   black on LEDs. Effects should generally use full brightness (v=255)
   and vary hue/saturation.
 - No RGBW support yet. Needed for RGBW LED strips and white-channel

@@ -1,7 +1,7 @@
 # Rotate Modifier
 
-Dynamic modifier. Rotates the 2D pixel buffer around its centre each
-frame. Has per-pixel cost on the hot path.
+Dynamic modifier. Rotates the 2D light buffer around its centre each
+frame. Has per-light cost on the hot path.
 
 ## Controls
 
@@ -11,7 +11,7 @@ frame. Has per-pixel cost on the hot path.
 
 - Allocates a temporary buffer each frame (via platform::alloc)
 - Computes rotation angle from frame * speed
-- For each destination pixel, samples from rotated source position
+- For each destination light, samples from rotated source position
   using inverse rotation (cos/sin)
 - Copies result back to original buffer
 
@@ -29,13 +29,13 @@ Not working correctly in testing. Needs debugging.
   slow. Consider integer rotation using fixed-point math or lookup
   tables.
 - **Nearest-neighbor sampling**. The inverse rotation uses truncation
-  to find source pixel. This produces visible aliasing. Bilinear
+  to find source light. This produces visible aliasing. Bilinear
   interpolation would look better but costs more.
 - **2D only**. Doesn't handle 3D rotation. For 3D, would need rotation
   matrices around arbitrary axes.
 - **Layer::render is coupled** to RotateModifier via dynamic_cast.
   Should use a generic dynamic modifier interface (e.g.
-  `transformPixels(span, frame, w, h, d)` as a virtual method on a
+  `transformLights(span, frame, w, h, d)` as a virtual method on a
   modifier base class).
 - **No interpolation of angle** between frames. At low frame rates,
   the rotation appears to jump. Should use time-based angle, not

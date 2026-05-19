@@ -1,6 +1,6 @@
 # Buffer
 
-Contiguous pixel array. The data structure effects write into and
+Contiguous light data array. The data structure effects write into and
 drivers read from.
 
 ## API
@@ -8,7 +8,7 @@ drivers read from.
 - `allocate(count)` — allocate via `platform::alloc`, clears to black
 - `free()` — safe to call multiple times
 - `clear()` — memset to 0
-- `fill(RGB)` — fill all pixels with one color
+- `fill(RGB)` — fill all lights with one color
 - `operator[]` — read/write access
 - `pixels()` — `std::span<RGB>` view
 - Move-constructible, not copyable.

@@ -39,5 +39,5 @@ struct RenderContext {
   isn't set and the effect gets stale/empty data. Should enforce
   that light effects always extend EffectBase.
 - No access to coordinates or the LUT from effects. Effects compute
-  x/y from pixel index (`i % width`). For non-grid layouts this is
+  x/y from light index (`i % width`). For non-grid layouts this is
   wrong — effects should receive actual coordinates.

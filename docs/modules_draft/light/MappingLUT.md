@@ -1,13 +1,13 @@
 # MappingLUT
 
-CSR (Compressed Sparse Row) style lookup table mapping logical pixel
-indices to physical pixel indices.
+CSR (Compressed Sparse Row) style lookup table mapping logical light
+indices to physical light indices.
 
 ## Mapping Types
 
-- **1:0** — logical pixel is unmapped (skipped). `destinationCount() == 0`.
-- **1:1** — logical pixel maps to one physical position.
-- **1:N** — logical pixel maps to N physical positions (mirroring).
+- **1:0** — logical light is unmapped (skipped). `destinationCount() == 0`.
+- **1:1** — logical light maps to one physical position.
+- **1:N** — logical light maps to N physical positions (mirroring).
 
 ## API
 
@@ -20,11 +20,11 @@ indices to physical pixel indices.
 
 ## Storage
 
-- `offsets_[]` — uint32_t, one per logical pixel + 1 sentinel
+- `offsets_[]` — uint32_t, one per logical light + 1 sentinel
 - `destinations_[]` — uint16_t, flat array of physical indices
 
 Destination indices are uint16_t (max 65535). Sufficient for most
-installations. If >65K pixels needed, introduce a `PixelIndex` typedef.
+installations. If >65K lights needed, introduce a `nrOfLightsType` typedef.
 
 ## What worked
 

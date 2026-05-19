@@ -5,10 +5,10 @@ shared LayoutGroup.
 
 ## Ownership
 
-- **Buffer** — logical pixel data, sized to logical dimensions
-- **MappingLUT** — maps logical pixels to physical positions
-- **Effects** (ordered list, max 4) — write pixels into buffer
-- **Modifiers** (ordered list, max 4) — transform LUT or pixels
+- **Buffer** — logical light data, sized to logical dimensions
+- **MappingLUT** — maps logical lights to physical positions
+- **Effects** (ordered list, max 4) — write lights into buffer
+- **Modifiers** (ordered list, max 4) — transform LUT or light values
 
 ## Key Operations
 
@@ -22,7 +22,7 @@ add/remove changes.
    dimensions (e.g. 128x128 → 64x64 with mirror X+Y)
 3. Allocates buffer to logical dimensions
 4. Allocates LUT with logical count and total destinations
-5. For each logical pixel, asks modifier for physical destinations
+5. For each logical light, asks modifier for physical destinations
 6. Without modifier: 1:1 mapping (logIdx → physIdx)
 
 ### render(frame)

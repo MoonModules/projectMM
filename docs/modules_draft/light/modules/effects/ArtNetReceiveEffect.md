@@ -1,6 +1,6 @@
 # ArtNet Receive Effect
 
-Receives ArtNet UDP packets and writes pixel data into the layer buffer,
+Receives ArtNet UDP packets and writes light data into the layer buffer,
 behaving like any other effect.
 
 ## Controls
@@ -26,6 +26,6 @@ ArtNet receive as an effect (not a separate input mechanism) means:
 
 - Open UDP socket in setup(), poll in loop() (non-blocking, synchronous)
 - Parse ArtNet DMX packets (OpDmx = 0x5000)
-- Map received RGB data to buffer pixels
-- Handle multiple universes for >170 pixels
+- Map received RGB data to buffer lights
+- Handle multiple universes for >170 lights
 - Platform UDP receive abstraction (complement to UdpSocket send)

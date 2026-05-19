@@ -13,7 +13,7 @@ Domain-neutral. Manages MoonModule lifecycles and frame counting.
 
 ## What worked
 
-- Simple, domain-neutral. Doesn't know about pixels or lights.
+- Simple, domain-neutral. Doesn't know about lights or lights.
 - Frame counter is useful for deterministic effects.
 
 ## What needs improvement

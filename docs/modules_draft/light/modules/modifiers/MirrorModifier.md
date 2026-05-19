@@ -14,23 +14,23 @@ physical output from the same logical data.
 
 - **Logical dimensions reduced**: 128x128 with mirrorX+Y → 64x64
   logical buffer (25% of physical).
-- **LUT produces 1:N mappings**: each logical pixel maps to 2/4/8
+- **LUT produces 1:N mappings**: each logical light maps to 2/4/8
   physical positions depending on how many axes are mirrored.
-- **Deduplication**: pixels exactly on the centre axis don't get
+- **Deduplication**: lights exactly on the centre axis don't get
   doubled (e.g. x=63 in 128-wide with mirrorX: 128-1-63=64 ≠ 63,
   not duplicated. But in 127-wide: 127-1-63=63 = duplicate, skipped).
 
 ## Key function: mapToPhysical
 
 Given a logical coordinate (lx, ly, lz) and physical dimensions,
-produces all physical positions this logical pixel maps to.
+produces all physical positions this logical light maps to.
 Uses nested loops over enabled axes, deduplicates, returns count.
 
 ## What worked
 
 - Kaleidoscope-style mirror is the correct approach (not coordinate
   flip). Logical buffer is smaller, 1:N mapping fills all quadrants.
-- Deduplication of centre-axis pixels prevents double-brightness.
+- Deduplication of centre-axis lights prevents double-brightness.
 - `markDirty()` on onChange triggers LUT rebuild.
 - Works with both Rainbow and Noise effects.
 

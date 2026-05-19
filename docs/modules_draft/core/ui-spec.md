@@ -181,7 +181,7 @@ Clear all modifiers from a layer.
   add/remove layers, reorder effects and modifiers within a layer.
 - **Drag-and-drop.** Reorder modifiers within a layer, drag effects
   between layers.
-- **Live preview.** Canvas-based pixel preview in the browser
+- **Live preview.** Canvas-based light preview in the browser
   (alternative to requiring an ArtNet receiver for visual feedback).
 - **Responsive.** Current layout doesn't adapt to mobile screens.
 - **WebSocket.** Replace polling with real-time push updates.
