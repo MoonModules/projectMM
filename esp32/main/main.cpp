@@ -11,7 +11,7 @@
 
 #include "core/types.h"
 
-extern void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gridH);
+extern void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gridH, uint16_t httpPort);
 
 static const char* TAG = "mmv3";
 static constexpr int ETH_CONNECTED_BIT = BIT0;
@@ -98,5 +98,5 @@ extern "C" void app_main() {
     std::printf("Heap free after Ethernet: %lu bytes\n",
                 static_cast<unsigned long>(esp_get_free_heap_size()));
 
-    mm_main(running, mm::defaultGridSize, mm::defaultGridSize);
+    mm_main(running, mm::defaultGridSize, mm::defaultGridSize, 80);
 }

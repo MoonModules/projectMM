@@ -4,11 +4,12 @@
 #include "light/NoiseEffect.h"
 #include "light/MirrorModifier.h"
 #include "light/ArtNetSendDriver.h"
+#include "core/HttpServerModule.h"
 #include "platform/platform.h"
 
 #include <cstdio>
 
-void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gridH) {
+void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gridH, uint16_t httpPort) {
     mm::Scheduler scheduler;
 
     // Layout
@@ -45,10 +46,17 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     artnet.setName("ArtNet");
     driverGroup.addDriver(&artnet);
 
+    // HTTP Server + WebSocket
+    mm::HttpServerModule httpServer;
+    httpServer.setName("HttpServer");
+    httpServer.port = httpPort;
+    httpServer.setScheduler(&scheduler);
+
     // Register top-level modules with scheduler
     scheduler.addModule(&layoutGroup);
     scheduler.addModule(&layer);
     scheduler.addModule(&driverGroup);
+    scheduler.addModule(&httpServer);
 
     scheduler.setup();
 
@@ -59,6 +67,7 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
                 static_cast<unsigned long>(lights),
                 static_cast<unsigned long>(bufBytes));
     std::printf("ArtNet → %s\n", artnet.ip);
+    std::printf("HTTP server → http://localhost:%u\n", httpServer.port);
 
     size_t heap = mm::platform::freeHeap();
     if (heap > 0) {

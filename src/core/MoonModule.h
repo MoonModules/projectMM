@@ -25,6 +25,10 @@ public:
     ControlList<8>& controls() { return controls_; }
     const ControlList<8>& controls() const { return controls_; }
 
+    // Generic children interface for tree walking (UI, serialization)
+    virtual uint8_t childCount() const { return 0; }
+    virtual MoonModule* child(uint8_t) const { return nullptr; }
+
 protected:
     ControlList<8> controls_;
 

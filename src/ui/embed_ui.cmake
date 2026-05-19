@@ -1,0 +1,42 @@
+# Generate C header with embedded UI files as byte arrays
+# Usage: cmake -P embed_ui.cmake -DUI_DIR=src/ui -DOUT=src/ui/ui_embedded.h
+
+file(READ "${UI_DIR}/index.html" INDEX_HTML HEX)
+file(READ "${UI_DIR}/app.js" APP_JS HEX)
+file(READ "${UI_DIR}/style.css" STYLE_CSS HEX)
+
+# Convert hex string to C array initializer
+function(hex_to_c_array HEX_STR VAR_NAME OUT_VAR)
+    string(LENGTH "${HEX_STR}" HEX_LEN)
+    set(result "")
+    math(EXPR last "${HEX_LEN} - 1")
+    foreach(i RANGE 0 ${last} 2)
+        string(SUBSTRING "${HEX_STR}" ${i} 2 byte)
+        if(result)
+            string(APPEND result ",")
+        endif()
+        string(APPEND result "0x${byte}")
+    endforeach()
+    set(${OUT_VAR} "${result}" PARENT_SCOPE)
+endfunction()
+
+hex_to_c_array("${INDEX_HTML}" "indexHtml" INDEX_ARRAY)
+hex_to_c_array("${APP_JS}" "appJs" APP_ARRAY)
+hex_to_c_array("${STYLE_CSS}" "styleCss" STYLE_ARRAY)
+
+string(LENGTH "${INDEX_HTML}" INDEX_HEX_LEN)
+string(LENGTH "${APP_JS}" APP_HEX_LEN)
+string(LENGTH "${STYLE_CSS}" STYLE_HEX_LEN)
+math(EXPR INDEX_LEN "${INDEX_HEX_LEN} / 2")
+math(EXPR APP_LEN "${APP_HEX_LEN} / 2")
+math(EXPR STYLE_LEN "${STYLE_HEX_LEN} / 2")
+
+file(WRITE "${OUT}" "// Auto-generated — do not edit. Rebuild to update.\n")
+file(APPEND "${OUT}" "#pragma once\n#include <cstdint>\n#include <cstddef>\nnamespace mm::ui {\n")
+file(APPEND "${OUT}" "constexpr uint8_t indexHtml[] = {${INDEX_ARRAY}};\n")
+file(APPEND "${OUT}" "constexpr size_t indexHtmlLen = ${INDEX_LEN};\n")
+file(APPEND "${OUT}" "constexpr uint8_t appJs[] = {${APP_ARRAY}};\n")
+file(APPEND "${OUT}" "constexpr size_t appJsLen = ${APP_LEN};\n")
+file(APPEND "${OUT}" "constexpr uint8_t styleCss[] = {${STYLE_ARRAY}};\n")
+file(APPEND "${OUT}" "constexpr size_t styleCssLen = ${STYLE_LEN};\n")
+file(APPEND "${OUT}" "} // namespace mm::ui\n")

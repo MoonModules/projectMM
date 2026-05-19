@@ -36,6 +36,14 @@
       "script": "check/check_platform_boundary.py"
     },
     {
+      "id": "collect_kpi",
+      "tab": "pc",
+      "group": "check",
+      "label": "KPI Report",
+      "help": "collect_kpi",
+      "script": "check/collect_kpi.py"
+    },
+    {
       "id": "scenario_pipeline",
       "tab": "pc",
       "group": "scenario",

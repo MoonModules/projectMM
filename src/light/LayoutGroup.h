@@ -67,6 +67,10 @@ public:
     }
 
     uint8_t layoutCount() const { return layoutCount_; }
+    LayoutBase* layout(uint8_t i) const { return i < layoutCount_ ? layouts_[i] : nullptr; }
+
+    uint8_t childCount() const override { return layoutCount_; }
+    MoonModule* child(uint8_t i) const override { return layout(i); }
 
 private:
     std::array<LayoutBase*, 4> layouts_{};

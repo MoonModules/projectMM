@@ -61,6 +61,9 @@ public:
         return platform::millis() - startTime_;
     }
 
+    uint8_t moduleCount() const { return moduleCount_; }
+    MoonModule* module(uint8_t i) const { return i < moduleCount_ ? modules_[i] : nullptr; }
+
 private:
     std::array<MoonModule*, 32> modules_{};
     uint8_t moduleCount_ = 0;

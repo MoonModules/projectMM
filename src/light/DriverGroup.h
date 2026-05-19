@@ -66,6 +66,12 @@ public:
         }
     }
 
+    uint8_t driverCount() const { return driverCount_; }
+    DriverBase* driver(uint8_t i) const { return i < driverCount_ ? drivers_[i] : nullptr; }
+
+    uint8_t childCount() const override { return driverCount_; }
+    MoonModule* child(uint8_t i) const override { return driver(i); }
+
 private:
     std::array<DriverBase*, 4> drivers_{};
     uint8_t driverCount_ = 0;

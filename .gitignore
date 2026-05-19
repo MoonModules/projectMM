@@ -70,6 +70,9 @@ Testing/
 # MoonDeck state
 scripts/moondeck.json
 
+# Generated files
+src/ui/ui_embedded.h
+
 # ESP-IDF
 esp32/build/
 esp32/sdkconfig

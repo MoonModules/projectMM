@@ -214,7 +214,7 @@ async function runScript(script, btn) {
             try {
                 const data = JSON.parse(e.data);
                 resetBtn(data.exitCode);
-            } catch (err) {
+            } catch {
                 resetBtn(1);
             }
         });

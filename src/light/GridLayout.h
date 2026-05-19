@@ -10,6 +10,12 @@ public:
     lengthType height = defaultGridSize;
     lengthType depth = 1;
 
+    void onBuildControls() override {
+        controls_.addUint16("width", reinterpret_cast<uint16_t&>(width));
+        controls_.addUint16("height", reinterpret_cast<uint16_t&>(height));
+        controls_.addUint16("depth", reinterpret_cast<uint16_t&>(depth));
+    }
+
     nrOfLightsType lightCount() const override {
         return static_cast<nrOfLightsType>(width) * height * depth;
     }

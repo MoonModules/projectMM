@@ -6,6 +6,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <cerrno>
 
 namespace mm::platform {
 
@@ -71,6 +73,96 @@ bool UdpSocket::send(const char* ip, uint16_t port, const uint8_t* data, size_t 
 }
 
 void UdpSocket::close() {
+    if (fd_ >= 0) {
+        ::close(fd_);
+        fd_ = -1;
+    }
+}
+
+// TcpConnection
+
+TcpConnection::~TcpConnection() {
+    close();
+}
+
+int TcpConnection::read(uint8_t* buf, size_t maxLen) {
+    if (fd_ < 0) return -1;
+    auto n = ::read(fd_, buf, maxLen);
+    if (n > 0) return static_cast<int>(n);
+    if (n == 0) return 0; // peer closed
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return -1; // nothing available
+    return 0; // error → treat as closed
+}
+
+bool TcpConnection::write(const uint8_t* data, size_t len) {
+    if (fd_ < 0) return false;
+    size_t sent = 0;
+    while (sent < len) {
+        auto n = ::write(fd_, data + sent, len - sent);
+        if (n <= 0) return false;
+        sent += static_cast<size_t>(n);
+    }
+    return true;
+}
+
+void TcpConnection::close() {
+    if (fd_ >= 0) {
+        ::close(fd_);
+        fd_ = -1;
+    }
+}
+
+// TcpServer
+
+TcpServer::~TcpServer() {
+    close();
+}
+
+bool TcpServer::open(uint16_t port) {
+    if (fd_ >= 0) return true;
+    fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (fd_ < 0) return false;
+
+    int opt = 1;
+    setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(port);
+
+    if (::bind(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+        ::close(fd_);
+        fd_ = -1;
+        return false;
+    }
+
+    if (::listen(fd_, 8) < 0) {
+        ::close(fd_);
+        fd_ = -1;
+        return false;
+    }
+
+    // Set non-blocking
+    int flags = fcntl(fd_, F_GETFL, 0);
+    fcntl(fd_, F_SETFL, flags | O_NONBLOCK);
+
+    return true;
+}
+
+TcpConnection TcpServer::accept() {
+    if (fd_ < 0) return TcpConnection();
+    int clientFd = ::accept(fd_, nullptr, nullptr);
+    if (clientFd < 0) return TcpConnection();
+
+    // Set client non-blocking
+    int flags = fcntl(clientFd, F_GETFL, 0);
+    fcntl(clientFd, F_SETFL, flags | O_NONBLOCK);
+
+    return TcpConnection(clientFd);
+}
+
+void TcpServer::close() {
     if (fd_ >= 0) {
         ::close(fd_);
         fd_ = -1;

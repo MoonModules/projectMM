@@ -96,6 +96,19 @@ public:
     const Buffer& buffer() const { return buffer_; }
     const MappingLUT& lut() const { return lut_; }
 
+    uint8_t effectCount() const { return effectCount_; }
+    EffectBase* effect(uint8_t i) const { return i < effectCount_ ? effects_[i] : nullptr; }
+    uint8_t modifierCount() const { return modifierCount_; }
+    ModifierBase* modifier(uint8_t i) const { return i < modifierCount_ ? modifiers_[i] : nullptr; }
+
+    uint8_t childCount() const override { return effectCount_ + modifierCount_; }
+    MoonModule* child(uint8_t i) const override {
+        if (i < effectCount_) return effects_[i];
+        i -= effectCount_;
+        if (i < modifierCount_) return modifiers_[i];
+        return nullptr;
+    }
+
     // Effects see logical dimensions
     lengthType width() const { return width_; }
     lengthType height() const { return height_; }
@@ -107,7 +120,6 @@ public:
         return layoutGroup_ ? layoutGroup_->totalLightCount() : 0;
     }
 
-private:
     void rebuildLUT() {
         if (modifierCount_ == 0) {
             // No modifiers: 1:1 unshuffled, logical == physical
@@ -155,6 +167,7 @@ private:
         buffer_.allocate(logicalCount, channelsPerLight_);
     }
 
+private:
     LayoutGroup* layoutGroup_ = nullptr;
     std::array<EffectBase*, 4> effects_{};
     uint8_t effectCount_ = 0;

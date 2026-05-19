@@ -3,7 +3,7 @@
 #include <csignal>
 #include <cstdio>
 
-extern void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gridH);
+extern void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gridH, uint16_t httpPort);
 
 static volatile bool running = true;
 
@@ -14,6 +14,6 @@ static void signalHandler(int) {
 int main() {
     std::signal(SIGINT, signalHandler);
     std::printf("Press Ctrl-C to stop.\n");
-    mm_main(running, mm::defaultGridSize, mm::defaultGridSize);
+    mm_main(running, mm::defaultGridSize, mm::defaultGridSize, 8080);
     return 0;
 }

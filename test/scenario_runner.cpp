@@ -270,13 +270,28 @@ static int runScenario(const char* path) {
         }
     }
 
+    // Memory before setup
+    size_t heapBefore = mm::platform::freeHeap();
+
     // Setup all modules
     ctx.scheduler.setup();
+
+    // Memory after setup
+    size_t heapAfter = mm::platform::freeHeap();
+    if (heapBefore > 0) {
+        std::printf("\n  Heap: %u → %u (pipeline: %u bytes)\n",
+                    static_cast<unsigned>(heapBefore),
+                    static_cast<unsigned>(heapAfter),
+                    static_cast<unsigned>(heapBefore - heapAfter));
+    }
 
     // Verify buffer
     auto& buf = ctx.layer.buffer();
     result.check(buf.data() != nullptr, "buffer allocated");
     result.check(buf.count() > 0, "buffer has lights");
+    std::printf("  Buffer: %u lights, %u bytes\n",
+                static_cast<unsigned>(buf.count()),
+                static_cast<unsigned>(buf.bytes()));
 
     // Warmup
     for (int i = 0; i < WARMUP_FRAMES; i++) {
@@ -301,6 +316,15 @@ static int runScenario(const char* path) {
         std::printf("  Total:     %.1f ms\n", static_cast<double>(elapsedMs));
         std::printf("  Per frame: %.2f ms\n", static_cast<double>(msPerFrame));
         std::printf("  FPS:       %.0f\n\n", static_cast<double>(fps));
+
+        // Heap after render (check for leaks)
+        size_t heapAfterRender = mm::platform::freeHeap();
+        if (heapAfter > 0) {
+            int64_t delta = static_cast<int64_t>(heapAfter) - static_cast<int64_t>(heapAfterRender);
+            std::printf("  Heap after render: %u (delta: %+lld bytes)\n",
+                        static_cast<unsigned>(heapAfterRender),
+                        static_cast<long long>(delta));
+        }
 
         // Check output
         bool hasNonZero = false;

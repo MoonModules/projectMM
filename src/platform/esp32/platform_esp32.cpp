@@ -76,4 +76,98 @@ void UdpSocket::close() {
     }
 }
 
+// TcpConnection
+
+TcpConnection::~TcpConnection() {
+    close();
+}
+
+int TcpConnection::read(uint8_t* buf, size_t maxLen) {
+    if (fd_ < 0) return -1;
+    auto n = lwip_read(fd_, buf, maxLen);
+    if (n > 0) return static_cast<int>(n);
+    if (n == 0) return 0;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return -1;
+    return 0;
+}
+
+bool TcpConnection::write(const uint8_t* data, size_t len) {
+    if (fd_ < 0) return false;
+    size_t sent = 0;
+    while (sent < len) {
+        auto n = lwip_write(fd_, data + sent, len - sent);
+        if (n > 0) {
+            sent += static_cast<size_t>(n);
+        } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            vTaskDelay(pdMS_TO_TICKS(1)); // wait for send buffer space
+        } else {
+            return false; // real error
+        }
+    }
+    return true;
+}
+
+void TcpConnection::close() {
+    if (fd_ >= 0) {
+        lwip_close(fd_);
+        fd_ = -1;
+    }
+}
+
+// TcpServer
+
+TcpServer::~TcpServer() {
+    close();
+}
+
+bool TcpServer::open(uint16_t port) {
+    if (fd_ >= 0) return true;
+    fd_ = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd_ < 0) return false;
+
+    int opt = 1;
+    setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(port);
+
+    if (bind(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+        lwip_close(fd_);
+        fd_ = -1;
+        return false;
+    }
+
+    if (listen(fd_, 4) < 0) {
+        lwip_close(fd_);
+        fd_ = -1;
+        return false;
+    }
+
+    // Set non-blocking
+    int flags = fcntl(fd_, F_GETFL, 0);
+    fcntl(fd_, F_SETFL, flags | O_NONBLOCK);
+
+    return true;
+}
+
+TcpConnection TcpServer::accept() {
+    if (fd_ < 0) return TcpConnection();
+    int clientFd = ::accept(fd_, nullptr, nullptr);
+    if (clientFd < 0) return TcpConnection();
+
+    int flags = fcntl(clientFd, F_GETFL, 0);
+    fcntl(clientFd, F_SETFL, flags | O_NONBLOCK);
+
+    return TcpConnection(clientFd);
+}
+
+void TcpServer::close() {
+    if (fd_ >= 0) {
+        lwip_close(fd_);
+        fd_ = -1;
+    }
+}
+
 } // namespace mm::platform
