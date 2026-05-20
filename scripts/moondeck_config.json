@@ -52,6 +52,14 @@
       "script": "scenario/run_scenario.py"
     },
     {
+      "id": "live_scenario_local",
+      "tab": "live",
+      "group": "scenario",
+      "label": "Live - localhost",
+      "help": "live_scenario",
+      "script": "scenario/run_live_scenario.py"
+    },
+    {
       "id": "setup_esp_idf",
       "tab": "esp32",
       "group": "setup",

@@ -54,7 +54,7 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 4. Platform boundary — `check_platform_boundary.py` (PASS)
 5. Spec check — `check_specs.py` (all ok)
 6. ESP32 build — `build_esp32.py` (clean)
-7. Reviewer agent — Opus agent reviews staged changes for: domain boundary, unnecessary abstractions, hot-path violations, spec conformance, bloat, platform boundary. Must PASS.
+7. Reviewer agent — Opus agent reviews staged changes for: domain boundary, unnecessary abstractions, **duplicated patterns** (same logic in multiple places that belongs in a base class or shared function), hot-path violations, spec conformance, bloat, platform boundary. Must PASS.
 8. KPI collection — `collect_kpi.py --commit` (include in commit message: one-liner as FIRST line of description, full details at bottom)
 
 Do not commit until all 8 steps pass. Do not skip the Reviewer agent.
@@ -67,13 +67,31 @@ Do not commit until all 8 steps pass. Do not skip the Reviewer agent.
 
 Build one capability at a time. Each commit produces visible output. The product owner picks what to build next.
 
+### Per-feature workflow
+
 1. **Pick what to build.** One layout, one effect, one driver, one modifier, one system module — whatever adds the next useful capability.
 2. **Review only the relevant module drafts.** Cherry-pick from `docs/moonmodules_draft/`. Promote only what's needed to `docs/moonmodules/`.
 3. **`/plan` it.** Plan references only the promoted specs + architecture docs. Save the plan as `docs/history/plan-NN.md` (numbered sequentially).
-4. **Implement in a branch** (`next-iteration` or feature branch). Test on hardware, commit.
-5. **Repeat.**
+4. **Implement in a branch** (`next-iteration` or feature branch). Test on hardware. Run pre-commit checklist. Commit.
+5. **Push.** Product owner pushes. CodeRabbit reviews the PR. Process findings.
+6. **Repeat.**
 
-On branch merge: review the plans (`docs/history/plan-*.md`), evaluate if they were followed correctly, process lessons learned into `docs/history/decisions.md`, then move the plans to `docs/history/archive/`.
+### Branch merge
+
+When a set of features is complete and stable:
+1. Review plans (`docs/history/plan-*.md`) — were they followed? What changed?
+2. Process lessons learned into `docs/history/decisions.md`
+3. Move reviewed plans to `docs/history/archive/`
+4. Merge branch to `main` via PR
+5. Tag if it's a release milestone
+
+### Releases
+
+A GitHub release marks a milestone useful to end users. Release criteria are defined in `docs/plan.md` per release. General requirements:
+- All tests and scenarios pass on all target platforms
+- Tested on real hardware
+- README updated with quick-start instructions
+- No known critical bugs
 
 What the agent reads:
 - Always: `CLAUDE.md`, `architecture.md`, `architecture-light.md`
@@ -131,7 +149,7 @@ The project uses Claude Code agents in defined roles. The user is the **Product 
 |-------|-------|-------|------|
 | **Architect** | Opus | System design | Reviews against architecture, designs components, validates boundaries |
 | **Developer** | Sonnet | Implementation | Writes code in worktrees, follows all rules, one step at a time |
-| **Reviewer** | Opus | Pre-PR check | Runs locally before push. Reviews architecture: domain boundary, unnecessary abstractions, hot-path violations, spec conformance. Complements CodeRabbit (which handles line-level bugs in the PR). |
+| **Reviewer** | Opus | Pre-PR check | Runs locally before push. Reviews architecture: domain boundary, unnecessary abstractions, duplicated patterns (same logic in multiple places → consolidate into base class), hot-path violations, spec conformance. Complements CodeRabbit (which handles line-level bugs in the PR). |
 | **Tester** | Sonnet | Verification | Writes tests, verifies architectural rules in code |
 | **Runner** | Haiku | Quick checks | Runs MoonDeck scripts, platform boundary checks, build verification |
 

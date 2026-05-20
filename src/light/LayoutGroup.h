@@ -3,54 +3,29 @@
 #include "core/MoonModule.h"
 #include "core/types.h"
 
-#include <array>
-
 namespace mm {
 
 class LayoutBase : public MoonModule {
 public:
+    ModuleRole role() const override { return ModuleRole::Layout; }
     virtual nrOfLightsType lightCount() const = 0;
     virtual void forEachCoord(CoordCallback cb, void* ctx) const = 0;
 };
 
 class LayoutGroup : public MoonModule {
 public:
-    void addLayout(LayoutBase* layout) {
-        if (!layout || layoutCount_ >= layouts_.size()) return;
-        layout->setParent(this);
-        layouts_[layoutCount_++] = layout;
-    }
-
-    void setup() override {
-        for (uint8_t i = 0; i < layoutCount_; i++) {
-            layouts_[i]->setup();
-        }
-    }
-
-    void onBuildControls() override {
-        for (uint8_t i = 0; i < layoutCount_; i++) {
-            layouts_[i]->onBuildControls();
-        }
-    }
-
-    void onAllocateMemory() override {
-        for (uint8_t i = 0; i < layoutCount_; i++) {
-            layouts_[i]->onAllocateMemory();
-        }
-    }
-
     nrOfLightsType totalLightCount() const {
         nrOfLightsType total = 0;
-        for (uint8_t i = 0; i < layoutCount_; i++) {
-            total += layouts_[i]->lightCount();
+        for (uint8_t i = 0; i < childCount(); i++) {
+            total += static_cast<LayoutBase*>(child(i))->lightCount();
         }
         return total;
     }
 
     void forEachCoord(CoordCallback cb, void* ctx) const {
         nrOfLightsType offset = 0;
-        for (uint8_t i = 0; i < layoutCount_; i++) {
-            auto* layout = layouts_[i];
+        for (uint8_t i = 0; i < childCount(); i++) {
+            auto* layout = static_cast<LayoutBase*>(child(i));
             // Wrap callback to add physical index offset
             struct WrapCtx {
                 CoordCallback cb;
@@ -65,16 +40,6 @@ public:
             offset += layout->lightCount();
         }
     }
-
-    uint8_t layoutCount() const { return layoutCount_; }
-    LayoutBase* layout(uint8_t i) const { return i < layoutCount_ ? layouts_[i] : nullptr; }
-
-    uint8_t childCount() const override { return layoutCount_; }
-    MoonModule* child(uint8_t i) const override { return layout(i); }
-
-private:
-    std::array<LayoutBase*, 4> layouts_{};
-    uint8_t layoutCount_ = 0;
 };
 
 } // namespace mm

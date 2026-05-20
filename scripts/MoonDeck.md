@@ -59,7 +59,23 @@ uv run scripts/scenario/run_scenario.py                       # run all
 uv run scripts/scenario/run_scenario.py --name base-pipeline   # run one
 ```
 
-Scenarios are JSON files in `test/scenarios/`. When HTTP API is added, the same JSON files will work against a live system.
+Scenarios are JSON files in `test/scenarios/`.
+
+## Live Tab
+
+### live_scenario
+
+Run scenario tests against a live running device via HTTP.
+
+```bash
+uv run scripts/scenario/run_live_scenario.py                                    # all scenarios vs localhost:8080
+uv run scripts/scenario/run_live_scenario.py --host 192.168.1.210               # vs ESP32
+uv run scripts/scenario/run_live_scenario.py --name control-change              # one scenario
+uv run scripts/scenario/run_live_scenario.py --update-baseline                  # save baseline
+uv run scripts/scenario/run_live_scenario.py --compare-baseline                 # detect regressions
+```
+
+Executes scenario steps (add_module, set_control, delete_module) via REST API. Collects per-step FPS and heap measurements. Compares against stored baselines to detect performance regressions.
 
 ## ESP32 Tab
 

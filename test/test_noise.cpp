@@ -9,14 +9,14 @@ TEST_CASE("NoiseEffect writes non-zero RGB data to buffer") {
     grid.width = 8;
     grid.height = 8;
     grid.depth = 1;
-    layoutGroup.addLayout(&grid);
+    layoutGroup.addChild(&grid);
 
     mm::Layer layer;
     layer.setLayoutGroup(&layoutGroup);
     layer.setChannelsPerLight(3);
 
     mm::NoiseEffect noise;
-    layer.addEffect(&noise);
+    layer.addChild(&noise);
 
     layer.onAllocateMemory();
     layer.loop();
@@ -37,14 +37,14 @@ TEST_CASE("NoiseEffect produces spatial variation") {
     grid.width = 16;
     grid.height = 16;
     grid.depth = 1;
-    layoutGroup.addLayout(&grid);
+    layoutGroup.addChild(&grid);
 
     mm::Layer layer;
     layer.setLayoutGroup(&layoutGroup);
     layer.setChannelsPerLight(3);
 
     mm::NoiseEffect noise;
-    layer.addEffect(&noise);
+    layer.addChild(&noise);
 
     layer.onAllocateMemory();
     layer.loop();
@@ -63,14 +63,14 @@ TEST_CASE("NoiseEffect produces different output than RainbowEffect") {
     grid.width = 8;
     grid.height = 8;
     grid.depth = 1;
-    layoutGroup.addLayout(&grid);
+    layoutGroup.addChild(&grid);
 
     // Render rainbow
     mm::Layer layer1;
     layer1.setLayoutGroup(&layoutGroup);
     layer1.setChannelsPerLight(3);
     mm::RainbowEffect rainbow;
-    layer1.addEffect(&rainbow);
+    layer1.addChild(&rainbow);
     layer1.onAllocateMemory();
     layer1.loop();
 
@@ -79,7 +79,7 @@ TEST_CASE("NoiseEffect produces different output than RainbowEffect") {
     layer2.setLayoutGroup(&layoutGroup);
     layer2.setChannelsPerLight(3);
     mm::NoiseEffect noise;
-    layer2.addEffect(&noise);
+    layer2.addChild(&noise);
     layer2.onAllocateMemory();
     layer2.loop();
 

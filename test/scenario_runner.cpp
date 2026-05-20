@@ -158,20 +158,7 @@ struct ScenarioContext {
             const char* parentId = step["parent_id"].c_str();
             auto* parent = modules[parentId];
             if (parent) {
-                if (std::strcmp(type, "GridLayout") == 0) {
-                    static_cast<mm::LayoutGroup*>(parent)->addLayout(
-                        static_cast<mm::LayoutBase*>(mod));
-                } else if (std::strcmp(type, "RainbowEffect") == 0 ||
-                           std::strcmp(type, "NoiseEffect") == 0) {
-                    static_cast<mm::Layer*>(parent)->addEffect(
-                        static_cast<mm::EffectBase*>(mod));
-                } else if (std::strcmp(type, "MirrorModifier") == 0) {
-                    static_cast<mm::Layer*>(parent)->addModifier(
-                        static_cast<mm::ModifierBase*>(mod));
-                } else if (std::strcmp(type, "ArtNetSendDriver") == 0) {
-                    static_cast<mm::DriverGroup*>(parent)->addDriver(
-                        static_cast<mm::DriverBase*>(mod));
-                }
+                parent->addChild(mod);
             }
         }
 
@@ -226,6 +213,16 @@ static int runScenario(const char* path) {
     auto scenario = parseJson(text);
     std::printf("=== Scenario: %s ===\n", scenario["name"].c_str());
     std::printf("%s\n\n", scenario["description"].c_str());
+
+    // Skip live-only scenarios (no add_module steps — requires running device)
+    bool hasAddModule = false;
+    for (auto& step : scenario["steps"].arr) {
+        if (std::strcmp(step["op"].c_str(), "add_module") == 0) { hasAddModule = true; break; }
+    }
+    if (!hasAddModule) {
+        std::printf("  SKIP (live-only scenario, no add_module steps)\n");
+        return 0;
+    }
 
     ScenarioContext ctx;
     Result result;
@@ -308,14 +305,12 @@ static int runScenario(const char* path) {
         }
 
         uint32_t elapsedUs = mm::platform::micros() - startUs;
-        float elapsedMs = static_cast<float>(elapsedUs) / 1000.0f;
-        float msPerFrame = elapsedMs > 0 ? elapsedMs / MEASURE_FRAMES : 0;
-        float fps = msPerFrame > 0 ? 1000.0f / msPerFrame : 0;
+        uint32_t tickTimeUs = MEASURE_FRAMES > 0 ? elapsedUs / MEASURE_FRAMES : 0;
+        uint32_t fps = tickTimeUs > 0 ? 1000000 / tickTimeUs : 0;
 
         std::printf("\n");
-        std::printf("  Total:     %.1f ms\n", static_cast<double>(elapsedMs));
-        std::printf("  Per frame: %.2f ms\n", static_cast<double>(msPerFrame));
-        std::printf("  FPS:       %.0f\n\n", static_cast<double>(fps));
+        std::printf("  tick: %uus (FPS: %u)\n\n",
+                    static_cast<unsigned>(tickTimeUs), static_cast<unsigned>(fps));
 
         // Heap after render (check for leaks)
         size_t heapAfterRender = mm::platform::freeHeap();

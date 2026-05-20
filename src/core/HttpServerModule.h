@@ -3,6 +3,7 @@
 #include "core/MoonModule.h"
 #include "core/Scheduler.h"
 #include "core/PreviewFrame.h"
+#include "core/ModuleFactory.h"
 #include "platform/platform.h"
 
 #include "ui/ui_embedded.h"
@@ -64,6 +65,10 @@ private:
     static constexpr int MAX_WS_CLIENTS = 4;
     platform::TcpConnection wsClients_[MAX_WS_CLIENTS];
 
+    // Shared JSON buffer for API responses (one request at a time, so safe to share)
+    static constexpr size_t JSON_BUF_SIZE = 4096;
+    static inline char jsonBuf_[JSON_BUF_SIZE];
+
     // -----------------------------------------------------------------------
     // HTTP handling
     // -----------------------------------------------------------------------
@@ -90,6 +95,23 @@ private:
         buf[totalRead] = 0;
         auto* req = reinterpret_cast<char*>(buf);
 
+        // If we have headers but body might still be arriving, read more
+        auto* headerEnd = std::strstr(req, "\r\n\r\n");
+        if (headerEnd) {
+            auto* clh = std::strstr(req, "Content-Length:");
+            if (clh) {
+                int contentLen = std::atoi(clh + 15);
+                int headerSize = static_cast<int>(headerEnd + 4 - req);
+                int bodyNeeded = headerSize + contentLen;
+                while (totalRead < bodyNeeded && totalRead < static_cast<int>(sizeof(buf) - 1)) {
+                    int n = conn.read(buf + totalRead, sizeof(buf) - 1 - totalRead);
+                    if (n > 0) totalRead += n;
+                    else break;
+                }
+                buf[totalRead] = 0;
+            }
+        }
+
         // Parse method and path
         char method[8] = {};
         char path[128] = {};
@@ -104,16 +126,8 @@ private:
         }
 
         // Read POST body if present
-        char* body = nullptr;
-        auto* clHeader = std::strstr(req, "Content-Length:");
-        if (clHeader) {
-            // Content-Length present — body follows headers
-            (void)std::atoi(clHeader + 15);
-        }
-        char* headerEnd = std::strstr(req, "\r\n\r\n");
-        if (headerEnd) {
-            body = headerEnd + 4;
-        }
+        // Body pointer (headerEnd already found above)
+        char* body = headerEnd ? const_cast<char*>(headerEnd) + 4 : nullptr;
 
         // Route
         if (std::strcmp(method, "GET") == 0) {
@@ -121,10 +135,20 @@ private:
             else if (std::strcmp(path, "/app.js") == 0) serveFile(conn, "app.js", "application/javascript");
             else if (std::strcmp(path, "/style.css") == 0) serveFile(conn, "style.css", "text/css");
             else if (std::strcmp(path, "/api/state") == 0) serveState(conn);
+            else if (std::strcmp(path, "/api/system") == 0) serveSystem(conn);
             else sendResponse(conn, 404, "text/plain", "Not found");
         } else if (std::strcmp(method, "POST") == 0) {
             if (std::strcmp(path, "/api/control") == 0 && body) {
                 handleSetControl(conn, body);
+            } else if (std::strcmp(path, "/api/modules") == 0 && body) {
+                handleAddModule(conn, body);
+            } else {
+                sendResponse(conn, 404, "text/plain", "Not found");
+            }
+        } else if (std::strcmp(method, "DELETE") == 0) {
+            // DELETE /api/modules/ModuleName
+            if (std::strncmp(path, "/api/modules/", 13) == 0) {
+                handleDeleteModule(conn, path + 13);
             } else {
                 sendResponse(conn, 404, "text/plain", "Not found");
             }
@@ -136,7 +160,7 @@ private:
     }
 
     void sendResponse(platform::TcpConnection& conn, int status, const char* contentType, const char* body) {
-        const char* statusText = status == 200 ? "OK" : status == 404 ? "Not Found" : "Error";
+        const char* statusText = status == 200 ? "OK" : status == 400 ? "Bad Request" : status == 404 ? "Not Found" : status == 405 ? "Method Not Allowed" : "Error";
         char header[256];
         int bodyLen = static_cast<int>(std::strlen(body));
         int headerLen = std::snprintf(header, sizeof(header),
@@ -215,10 +239,8 @@ private:
     // -----------------------------------------------------------------------
 
     void serveState(platform::TcpConnection& conn) {
-        // Static buffer: ~700 bytes now, grows with modules/controls. Not on stack (ESP32 has 8KB).
-        static char json[4096];
-        int len = buildStateJson(json, sizeof(json));
-        sendResponse(conn, 200, "application/json", json);
+        int len = buildStateJson(jsonBuf_, JSON_BUF_SIZE);
+        sendResponse(conn, 200, "application/json", jsonBuf_);
         (void)len;
     }
 
@@ -358,13 +380,7 @@ private:
                     break;
                 }
             }
-            // Trigger pipeline rebuild on all modules
-            if (scheduler_) {
-                for (uint8_t m = 0; m < scheduler_->moduleCount(); m++) {
-                    auto* mod = scheduler_->module(m);
-                    if (mod && mod != this) mod->onAllocateMemory();
-                }
-            }
+            if (scheduler_) scheduler_->rebuild();
 
             sendResponse(conn, 200, "application/json", "{\"ok\":true}");
             return;
@@ -394,6 +410,126 @@ private:
     }
 
     // -----------------------------------------------------------------------
+    // -----------------------------------------------------------------------
+    // System metrics
+    // -----------------------------------------------------------------------
+
+    void serveSystem(platform::TcpConnection& conn) {
+        int pos = std::snprintf(jsonBuf_, JSON_BUF_SIZE,
+            "{\"fps\":%u,\"tickTimeUs\":%u,\"freeHeap\":%u,\"maxBlock\":%u,\"uptime\":%u,\"modules\":[",
+            static_cast<unsigned>(scheduler_ ? scheduler_->fps() : 0),
+            static_cast<unsigned>(scheduler_ ? scheduler_->tickTimeUs() : 0),
+            static_cast<unsigned>(platform::freeHeap()),
+            static_cast<unsigned>(platform::maxAllocBlock()),
+            static_cast<unsigned>(scheduler_ ? scheduler_->elapsed() / 1000 : 0));
+
+        // Per-module timing (walk tree recursively)
+        if (scheduler_ && pos > 0 && static_cast<size_t>(pos) < JSON_BUF_SIZE) {
+            bool first = true;
+            for (uint8_t i = 0; i < scheduler_->moduleCount(); i++) {
+                writeModuleTimingJson(jsonBuf_, JSON_BUF_SIZE, pos, scheduler_->module(i), first);
+            }
+        }
+
+        int n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos, "]}");
+        if (n > 0) pos += n;
+
+        sendResponse(conn, 200, "application/json", jsonBuf_);
+    }
+
+    void writeModuleTimingJson(char* buf, size_t bufSize, int& pos, MoonModule* mod, bool& first) {
+        if (!mod || static_cast<size_t>(pos) >= bufSize) return;
+        int n = std::snprintf(buf + pos, bufSize - pos,
+            "%s{\"name\":\"%s\",\"us\":%u}",
+            first ? "" : ",",
+            mod->name() ? mod->name() : "?",
+            static_cast<unsigned>(mod->loopTimeUs()));
+        if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
+        first = false;
+        for (uint8_t i = 0; i < mod->childCount(); i++) {
+            writeModuleTimingJson(buf, bufSize, pos, mod->child(i), first);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Module CRUD
+    // -----------------------------------------------------------------------
+
+    void handleAddModule(platform::TcpConnection& conn, const char* body) {
+        char typeName[32] = {};
+        char id[32] = {};
+        char parentId[32] = {};
+        parseJsonString(body, "type", typeName, sizeof(typeName));
+        parseJsonString(body, "id", id, sizeof(id));
+        parseJsonString(body, "parent_id", parentId, sizeof(parentId));
+
+        if (typeName[0] == 0) {
+            sendResponse(conn, 400, "application/json", "{\"error\":\"missing type\"}");
+            return;
+        }
+
+        // Check if module with this name already exists
+        if (id[0] != 0 && findModuleByName(id)) {
+            sendResponse(conn, 200, "application/json", "{\"ok\":true,\"note\":\"already exists\"}");
+            return;
+        }
+
+        // Create module via factory
+        auto* mod = ModuleFactory::create(typeName);
+        if (!mod) {
+            sendResponse(conn, 400, "application/json", "{\"error\":\"unknown type\"}");
+            return;
+        }
+        if (id[0] != 0) mod->setName(id);
+
+        // Find parent and add as child
+        if (parentId[0] != 0) {
+            auto* parent = findModuleByName(parentId);
+            if (!parent) {
+                delete mod;
+                sendResponse(conn, 404, "application/json", "{\"error\":\"parent not found\"}");
+                return;
+            }
+            if (!parent->addChild(mod)) {
+                delete mod;
+                sendResponse(conn, 400, "application/json", "{\"error\":\"parent rejected child\"}");
+                return;
+            }
+        }
+
+        // Lifecycle: setup the new module
+        mod->setup();
+        mod->onBuildControls();
+        mod->onAllocateMemory();
+
+        if (scheduler_) scheduler_->rebuild();
+
+        sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+    }
+
+    void handleDeleteModule(platform::TcpConnection& conn, const char* moduleName) {
+        auto* mod = findModuleByName(moduleName);
+        if (!mod) {
+            sendResponse(conn, 404, "application/json", "{\"error\":\"module not found\"}");
+            return;
+        }
+
+        // Remove from parent
+        auto* parent = mod->parent();
+        if (parent) {
+            parent->removeChild(mod);
+        }
+
+        // Teardown and delete
+        mod->teardown();
+        delete mod;
+
+        if (scheduler_) scheduler_->rebuild();
+
+        sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+    }
+
+    // -----------------------------------------------------------------------
     // Minimal JSON parsing (no library)
     // -----------------------------------------------------------------------
 
@@ -401,6 +537,11 @@ private:
         char search[48];
         std::snprintf(search, sizeof(search), "\"%s\":\"", key);
         const char* start = std::strstr(json, search);
+        if (!start) {
+            // Try with space after colon (Python's json.dumps uses spaces)
+            std::snprintf(search, sizeof(search), "\"%s\": \"", key);
+            start = std::strstr(json, search);
+        }
         if (!start) return;
         start += std::strlen(search);
         const char* end = std::strchr(start, '"');
@@ -415,6 +556,10 @@ private:
         char search[48];
         std::snprintf(search, sizeof(search), "\"%s\":", key);
         const char* start = std::strstr(json, search);
+        if (!start) {
+            std::snprintf(search, sizeof(search), "\"%s\": ", key);
+            start = std::strstr(json, search);
+        }
         if (!start) return 0;
         return std::atoi(start + std::strlen(search));
     }
@@ -423,8 +568,14 @@ private:
         char search[48];
         std::snprintf(search, sizeof(search), "\"%s\":", key);
         const char* start = std::strstr(json, search);
+        if (!start) {
+            std::snprintf(search, sizeof(search), "\"%s\": ", key);
+            start = std::strstr(json, search);
+        }
         if (!start) return false;
-        return std::strncmp(start + std::strlen(search), "true", 4) == 0;
+        const char* val = start + std::strlen(search);
+        while (*val == ' ') val++; // skip extra spaces
+        return std::strncmp(val, "true", 4) == 0;
     }
 
     // -----------------------------------------------------------------------

@@ -6,11 +6,31 @@
 #include "light/ArtNetSendDriver.h"
 #include "light/PreviewDriver.h"
 #include "core/HttpServerModule.h"
+#include "core/ModuleFactory.h"
 #include "platform/platform.h"
 
 #include <cstdio>
 
+static void registerModuleTypes() {
+    mm::ModuleFactory::registerType("GridLayout", []() -> mm::MoonModule* { return new mm::GridLayout(); });
+    mm::ModuleFactory::registerType("RainbowEffect", []() -> mm::MoonModule* { return new mm::RainbowEffect(); });
+    mm::ModuleFactory::registerType("NoiseEffect", []() -> mm::MoonModule* { return new mm::NoiseEffect(); });
+    mm::ModuleFactory::registerType("MirrorModifier", []() -> mm::MoonModule* { return new mm::MirrorModifier(); });
+    mm::ModuleFactory::registerType("ArtNetSendDriver", []() -> mm::MoonModule* { return new mm::ArtNetSendDriver(); });
+    mm::ModuleFactory::registerType("PreviewDriver", []() -> mm::MoonModule* { return new mm::PreviewDriver(); });
+}
+
+static void printModuleTiming(mm::MoonModule* mod, int depth) {
+    if (!mod) return;
+    std::printf("  %s:%uus", mod->name() ? mod->name() : "?",
+                static_cast<unsigned>(mod->loopTimeUs()));
+    for (uint8_t i = 0; i < mod->childCount(); i++) {
+        printModuleTiming(mod->child(i), depth + 1);
+    }
+}
+
 void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gridH, uint16_t httpPort) {
+    registerModuleTypes();
     mm::Scheduler scheduler;
 
     // Layout
@@ -21,7 +41,7 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     grid.setName("Grid");
     grid.width = gridW;
     grid.height = gridH;
-    layoutGroup.addLayout(&grid);
+    layoutGroup.addChild(&grid);
 
     // Layer + Effect
     mm::Layer layer;
@@ -31,12 +51,12 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
 
     mm::NoiseEffect noise;
     noise.setName("Noise");
-    layer.addEffect(&noise);
+    layer.addChild(&noise);
 
     // Modifier
     mm::MirrorModifier mirror;
     mirror.setName("Mirror");
-    layer.addModifier(&mirror);
+    layer.addChild(&mirror);
 
     // Driver Group + ArtNet
     mm::DriverGroup driverGroup;
@@ -45,7 +65,7 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
 
     mm::ArtNetSendDriver artnet;
     artnet.setName("ArtNet");
-    driverGroup.addDriver(&artnet);
+    driverGroup.addChild(&artnet);
 
     // Preview driver (WebSocket binary frames)
     mm::PreviewFrame previewFrame;
@@ -54,7 +74,7 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     preview.width = gridW;
     preview.height = gridH;
     preview.setPreviewFrame(&previewFrame);
-    driverGroup.addDriver(&preview);
+    driverGroup.addChild(&preview);
 
     // HTTP Server + WebSocket
     mm::HttpServerModule httpServer;
@@ -87,29 +107,30 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     std::fflush(stdout);
 
     uint32_t lastLog = mm::platform::millis();
-    uint32_t frameCount = 0;
 
     while (keepRunning) {
         scheduler.tick();
-        frameCount++;
 
         // Log every second
         uint32_t now = mm::platform::millis();
         if (now - lastLog >= 1000) {
-            uint32_t fps = frameCount * 1000 / (now - lastLog);
-            heap = mm::platform::freeHeap();
-            if (heap > 0) {
-                size_t maxBlock = mm::platform::maxAllocBlock();
-                std::printf("FPS: %u  free: %u  maxBlock: %u\n",
-                            static_cast<unsigned>(fps),
-                            static_cast<unsigned>(heap),
-                            static_cast<unsigned>(maxBlock));
-            } else {
-                std::printf("FPS: %u\n", static_cast<unsigned>(fps));
-            }
-            std::fflush(stdout);
             lastLog = now;
-            frameCount = 0;
+            if (scheduler.tickTimeUs() == 0) continue; // no measurement yet
+
+            heap = mm::platform::freeHeap();
+            std::printf("tick: %uus (FPS: %u)", static_cast<unsigned>(scheduler.tickTimeUs()),
+                        static_cast<unsigned>(scheduler.fps()));
+            if (heap > 0) {
+                std::printf("  free: %u  maxBlock: %u",
+                            static_cast<unsigned>(heap),
+                            static_cast<unsigned>(mm::platform::maxAllocBlock()));
+            }
+            // Per-module timing (walk tree recursively)
+            for (uint8_t i = 0; i < scheduler.moduleCount(); i++) {
+                printModuleTiming(scheduler.module(i), 0);
+            }
+            std::printf("\n");
+            std::fflush(stdout);
         }
 
         mm::platform::yield();

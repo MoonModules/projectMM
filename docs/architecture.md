@@ -25,7 +25,15 @@ This means:
 - System MoonModules that listen (HTTP, WebSocket) poll in their `loop()` — the standard pattern for embedded servers.
 - The scheduler handles init-order dependencies between system MoonModules (e.g. WiFi before HTTP, HTTP before WebSocket).
 
-MoonModules should have a minimal memory footprint. The base class and controls use fixed-size storage, no heap per instance. On constrained devices, many modules may be loaded simultaneously.
+MoonModules should have a minimal memory footprint. On constrained devices, many modules may be loaded simultaneously.
+
+### Dynamic over fixed-size
+
+Prefer dynamic (grow-on-demand) over fixed-size arrays for structural data like children, module lists, and control sets. Fixed-size arrays impose arbitrary limits, waste memory on instances that don't use the full capacity, and cost memory on instances that need none (e.g. leaf modules with zero children).
+
+Dynamic arrays allocate from the heap during setup. The hot path only iterates these arrays — same pointer arithmetic as a fixed array, no performance difference.
+
+Exception: contiguous data buffers (LED output, LUT tables) are allocated as a single block in `onAllocateMemory()`. These are sized by the layout, not by arbitrary limits, and are already dynamic.
 
 Modules can be added, changed, replaced, or removed dynamically at runtime. When removed (teardown), all allocated resources are cleaned up.
 

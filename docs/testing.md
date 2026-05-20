@@ -133,6 +133,28 @@ Pipeline with mirror modifier: LayoutGroup → GridLayout → Layer → NoiseEff
 - Buffer contains non-zero data after rendering 200 frames
 - FPS >= 30 (performance bound)
 
+## Live Scenario Tests
+
+Live scenarios run against a running device via HTTP REST API. Same JSON format as in-process scenarios. Run with `scripts/scenario/run_live_scenario.py`.
+
+### control-change (`test/scenarios/control-change.json`) {#scenario-control-change}
+
+Tests performance impact of control changes on a running system.
+
+- Measures FPS/heap after each control change
+- Toggles mirror X/Y and measures impact
+- Checks FPS bounds
+- Supports baseline comparison for regression detection
+
+### Running live scenarios
+
+```bash
+uv run scripts/scenario/run_live_scenario.py --host localhost:8080       # desktop
+uv run scripts/scenario/run_live_scenario.py --host 192.168.1.210        # ESP32
+uv run scripts/scenario/run_live_scenario.py --update-baseline           # save
+uv run scripts/scenario/run_live_scenario.py --compare-baseline          # check
+```
+
 ## Hardware Verification
 
 ### ESP32 — Olimex ESP32-Gateway Rev G (no PSRAM)

@@ -36,9 +36,8 @@ void free(void* ptr) {
 }
 
 void yield() {
-    // Small sleep to avoid busy-waiting (needed for non-blocking socket reads)
-    struct timespec ts = {0, 1000000}; // 1ms
-    nanosleep(&ts, nullptr);
+    // No-op on desktop — OS scheduler handles threading.
+    // Socket reads use SO_RCVTIMEO for blocking with timeout.
 }
 
 size_t freeHeap() {
@@ -103,8 +102,9 @@ bool TcpConnection::write(const uint8_t* data, size_t len) {
         auto n = ::write(fd_, data + sent, len - sent);
         if (n > 0) {
             sent += static_cast<size_t>(n);
+        } else if (n < 0 && errno == EINTR) {
+            continue; // interrupted by signal, retry
         } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            // Wait briefly for send buffer space
             struct timespec ts = {0, 1000000}; // 1ms
             nanosleep(&ts, nullptr);
         } else {

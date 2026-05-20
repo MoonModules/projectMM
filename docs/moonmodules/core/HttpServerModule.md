@@ -15,7 +15,10 @@ HttpServerModule is core infrastructure with no light domain dependencies. It wa
 - `GET /` — serves index.html (disk on desktop, embedded C array on ESP32)
 - `GET /app.js`, `/style.css` — serves UI assets
 - `GET /api/state` — JSON module tree with controls
+- `GET /api/system` — system metrics: FPS, freeHeap, maxBlock, uptime
 - `POST /api/control` — set control value: `{"module":"name","control":"name","value":...}`
+- `POST /api/modules` — create module: `{"type":"NoiseEffect","id":"noise","parent_id":"layer"}`
+- `DELETE /api/modules/{name}` — remove module by name, teardown, rebuild pipeline
 
 ## WebSocket
 

@@ -107,7 +107,7 @@ TEST_CASE("LayoutGroup with one layout") {
     grid.height = 4;
     grid.depth = 1;
 
-    group.addLayout(&grid);
+    group.addChild(&grid);
     CHECK(group.totalLightCount() == 16);
 
     std::vector<CoordEntry> coords;
@@ -128,8 +128,8 @@ TEST_CASE("LayoutGroup with two layouts offsets physical indices") {
     grid2.height = 1;
     grid2.depth = 1;
 
-    group.addLayout(&grid1);
-    group.addLayout(&grid2);
+    group.addChild(&grid1);
+    group.addChild(&grid2);
 
     CHECK(group.totalLightCount() == 7);
 

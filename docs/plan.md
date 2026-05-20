@@ -11,15 +11,34 @@ Completed items are removed. This file is deleted when empty.
 - Zero warnings (`-Wall -Wextra -Werror`)
 - Updated MoonModule specs (docs/moonmodules/) for what was built
 - Tested on hardware where applicable
-
-## 5b. 3D WebGL Preview
-
-Add Preview driver that streams binary light data via WebSocket. 3D point-cloud renderer in the browser UI. Binary frame format: `[0x02][w16][h16][d16][RGB...]`.
+- Pre-commit checklist passed (8 steps including Reviewer agent)
 
 ## 8. Live scenario testing
 
-Python scenario runner that replays scenario JSON files via HTTP against a running device (desktop or ESP32). Same JSON format as in-process runner. MoonDeck Live tab: device discovery (subnet scan + /api/state probe), device selection, run scenarios against selected device. Adapts projectMM v1's `deploy/scenario.py` for v3's REST API.
+Python scenario runner that replays scenario JSON files via HTTP against a running device (desktop or ESP32). Same JSON format as in-process runner. MoonDeck Live tab: device discovery (subnet scan + /api/state probe), device selection, run scenarios against selected device. First because: all subsequent work goes through the live test pipeline.
 
-## 9. System MoonModule + Network MoonModules
+## 9. System MoonModule
 
-Add System MoonModule (reverse engineer from projectMM v1, MoonLight, in that order). System-level info, diagnostics, heap reporting. Add Ethernet and WiFi MoonModules — when Ethernet is available, WiFi doesn't need to run. Needs UI to be useful.
+System-level diagnostics as a MoonModule: heap free/used, FPS, uptime, chip info, firmware version. Visible in the Web UI. Simpler than WiFi — useful for debugging while building subsequent features. Reverse engineer from projectMM v1, MoonLight.
+
+## 10. WiFi MoonModule
+
+Add WiFi MoonModule (STA + AP fallback). Controls: SSID, password, status. When Ethernet is available, WiFi doesn't need to run. Proves network as a MoonModule. Reverse engineer from projectMM v1.
+
+## 11. Config persistence
+
+Save/load control values to filesystem. Settings survive reboot. Format: one file per module or one file for all — decide based on ESP32 filesystem constraints. Platform filesystem abstraction (LittleFS on ESP32, std::filesystem on desktop).
+
+## 12. Effect/module switching from UI
+
+Add/remove/switch effects and modifiers from the browser. Type picker with category filtering. Lifecycle-aware add/remove (setup/teardown called at runtime).
+
+## 13. README + quick-start
+
+Update README with: what it does now, how to build/flash, how to connect and open the UI. Include screenshots.
+
+---
+
+## Release 1.0 — "connect, open browser, see lights"
+
+Milestone after items 8-13. An end user with an ESP32 can flash the firmware, connect via WiFi, open a browser, see the 3D preview, change effects and controls, and have settings persist across reboots.

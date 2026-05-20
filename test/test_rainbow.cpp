@@ -8,14 +8,14 @@ TEST_CASE("RainbowEffect writes non-zero RGB data to buffer") {
     grid.width = 4;
     grid.height = 4;
     grid.depth = 1;
-    layoutGroup.addLayout(&grid);
+    layoutGroup.addChild(&grid);
 
     mm::Layer layer;
     layer.setLayoutGroup(&layoutGroup);
     layer.setChannelsPerLight(3);
 
     mm::RainbowEffect rainbow;
-    layer.addEffect(&rainbow);
+    layer.addChild(&rainbow);
 
     layer.onAllocateMemory();
 
@@ -40,14 +40,14 @@ TEST_CASE("RainbowEffect pixel 0,0 produces valid RGB") {
     grid.width = 8;
     grid.height = 8;
     grid.depth = 1;
-    layoutGroup.addLayout(&grid);
+    layoutGroup.addChild(&grid);
 
     mm::Layer layer;
     layer.setLayoutGroup(&layoutGroup);
     layer.setChannelsPerLight(3);
 
     mm::RainbowEffect rainbow;
-    layer.addEffect(&rainbow);
+    layer.addChild(&rainbow);
 
     layer.onAllocateMemory();
     layer.loop();
@@ -67,14 +67,14 @@ TEST_CASE("RainbowEffect different positions produce different hues") {
     grid.width = 16;
     grid.height = 16;
     grid.depth = 1;
-    layoutGroup.addLayout(&grid);
+    layoutGroup.addChild(&grid);
 
     mm::Layer layer;
     layer.setLayoutGroup(&layoutGroup);
     layer.setChannelsPerLight(3);
 
     mm::RainbowEffect rainbow;
-    layer.addEffect(&rainbow);
+    layer.addChild(&rainbow);
 
     layer.onAllocateMemory();
     layer.loop();

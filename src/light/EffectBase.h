@@ -11,8 +11,10 @@ class Layer; // forward declaration
 
 class EffectBase : public MoonModule {
 public:
-    void setLayer(Layer* l) { layer_ = l; }
-    Layer* layer() const { return layer_; }
+    ModuleRole role() const override { return ModuleRole::Effect; }
+
+    // Parent is always a Layer (defined in Layer.h after Layer is complete)
+    Layer* layer() const;
 
     // Convenience accessors — delegate to parent Layer
     // Defined after Layer is complete (in Layer.h)
@@ -23,9 +25,6 @@ public:
     uint8_t channelsPerLight() const;
     nrOfLightsType nrOfLights() const;
     uint32_t elapsed() const;
-
-private:
-    Layer* layer_ = nullptr;
 };
 
 } // namespace mm

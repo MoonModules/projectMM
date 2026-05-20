@@ -48,25 +48,28 @@ def collect_desktop():
     scenarios = BUILD_DIR / "test" / "mm_scenarios"
     if scenarios.exists():
         out, rc = run([str(scenarios)], cwd=ROOT)
-        fps_values = []
+        tick_values = []
         buffer_lights = []
         for line in out.splitlines():
-            if "FPS:" in line:
-                parts = line.strip().split()
-                for i, p in enumerate(parts):
-                    if p == "FPS:" and i + 1 < len(parts):
-                        try: fps_values.append(int(parts[i + 1]))
-                        except ValueError: pass
+            if "tick:" in line:
+                # Format: "tick: 108us (FPS: 9259)"
+                import re
+                m = re.search(r'tick:\s*(\d+)us', line)
+                if m:
+                    tick_values.append(int(m.group(1)))
             if "Buffer:" in line and "lights" in line:
                 parts = line.strip().split()
                 for i, p in enumerate(parts):
                     if p == "Buffer:" and i + 1 < len(parts):
-                        try: buffer_lights.append(int(parts[i + 1]))
-                        except ValueError: pass
+                        try:
+                            buffer_lights.append(int(parts[i + 1]))
+                        except ValueError:
+                            pass
             if "scenario(s)" in line:
                 kpi["scenarios"] = line.strip()
-        if fps_values:
-            kpi["fps"] = fps_values
+        if tick_values:
+            kpi["tick_us"] = tick_values
+            kpi["fps"] = [1000000 // t if t > 0 else 0 for t in tick_values]
         if buffer_lights:
             kpi["lights"] = max(buffer_lights)
 
@@ -134,16 +137,18 @@ def collect_esp32():
     if log.exists():
         age_min = (time.time() - log.stat().st_mtime) / 60
         if age_min < 60:
+            import re
             for line in reversed(log.read_text().splitlines()):
-                if "FPS:" in line and "free:" in line:
-                    parts = line.strip().split()
-                    for i, p in enumerate(parts):
-                        if p == "FPS:" and i + 1 < len(parts):
-                            try: kpi["fps"] = int(parts[i + 1])
-                            except ValueError: pass
-                        if p == "free:" and i + 1 < len(parts):
-                            try: kpi["heap_free"] = int(parts[i + 1])
-                            except ValueError: pass
+                if "tick:" in line:
+                    # Format: "tick: 108us (FPS: 9259)  free: 215180  maxBlock: 63488"
+                    m = re.search(r'tick:\s*(\d+)us', line)
+                    if m:
+                        tick_us = int(m.group(1))
+                        kpi["tick_us"] = tick_us
+                        kpi["fps"] = 1000000 // tick_us if tick_us > 0 else 0
+                    m = re.search(r'free:\s*(\d+)', line)
+                    if m:
+                        kpi["heap_free"] = int(m.group(1))
                     break
 
     return kpi
@@ -198,12 +203,14 @@ def format_oneliner(desktop, esp32, code):
         parts.append(f"{desktop['lights']}lights")
     if "binary_kb" in desktop:
         parts.append(f"PC:{desktop['binary_kb']}KB")
-    if "fps" in desktop:
-        parts.append(f"FPS:{'/'.join(str(f) for f in desktop['fps'])}")
+    if "tick_us" in desktop:
+        ticks = '/'.join(str(t) for t in desktop['tick_us'])
+        fps = '/'.join(str(f) for f in desktop.get('fps', []))
+        parts.append(f"tick:{ticks}us(FPS:{fps})")
     if "flash_kb" in esp32:
         parts.append(f"ESP32:{esp32['flash_kb']}KB")
-    if "fps" in esp32:
-        parts.append(f"FPS:{esp32['fps']}")
+    if "tick_us" in esp32:
+        parts.append(f"tick:{esp32['tick_us']}us(FPS:{esp32.get('fps', '?')})")
     if "heap_free" in esp32:
         parts.append(f"heap:{esp32['heap_free']//1024}KB")
     parts.append(f"src:{code['src_files']}({code['src_lines']})")
@@ -223,8 +230,10 @@ def format_full(desktop, esp32, code):
         lines.append(f"    Binary: {desktop['binary_kb']} KB")
     if "tests" in desktop:
         lines.append(f"    {desktop['tests']}")
-    if "fps" in desktop:
-        lines.append(f"    FPS: {', '.join(str(f) for f in desktop['fps'])} (per scenario)")
+    if "tick_us" in desktop:
+        ticks = ', '.join(f"{t}us" for t in desktop['tick_us'])
+        fps = ', '.join(str(f) for f in desktop.get('fps', []))
+        lines.append(f"    tick: {ticks} (FPS: {fps}) (per scenario)")
     if "scenarios" in desktop:
         lines.append(f"    {desktop['scenarios']}")
     if "boundary" in desktop:
@@ -241,8 +250,8 @@ def format_full(desktop, esp32, code):
         if "dram_used" in esp32:
             total = esp32["dram_used"] + esp32.get("dram_free", 0)
             lines.append(f"    DRAM: {esp32['dram_used']:,} / {total:,} ({esp32.get('dram_free', 0):,} free)")
-        if "fps" in esp32:
-            lines.append(f"    FPS: {esp32['fps']}  heap free: {esp32.get('heap_free', '?')}")
+        if "tick_us" in esp32:
+            lines.append(f"    tick: {esp32['tick_us']}us (FPS: {esp32.get('fps', '?')})  heap free: {esp32.get('heap_free', '?')}")
 
     lines.append("  Code:")
     lines.append(f"    {code['src_files']} source files ({code['src_lines']} lines)")

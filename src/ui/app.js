@@ -170,8 +170,8 @@ function createControl(moduleName, ctrl) {
     } else if (ctrl.type === "uint16") {
         const input = document.createElement("input");
         input.type = "number";
-        input.min = 0;
-        input.max = 65535;
+        input.min = ctrl.min !== undefined ? ctrl.min : 0;
+        input.max = ctrl.max !== undefined ? ctrl.max : 65535;
         input.value = ctrl.value;
         input.dataset.key = key;
 
@@ -361,13 +361,16 @@ function renderPreviewFrame(buf) {
     if (!gl) initWebGL();
     if (!gl) return;
 
+    if (buf.byteLength < 7) return;
     const view = new DataView(buf);
     if (view.getUint8(0) !== 0x02) return;
     const w = view.getUint16(1, true);
     const h = view.getUint16(3, true);
     const d = view.getUint16(5, true);
-    const pixels = new Uint8Array(buf, 7);
+    if (w === 0 || h === 0 || d === 0) return;
     const count = w * h * d;
+    if (buf.byteLength < 7 + count * 3) return;
+    const pixels = new Uint8Array(buf, 7);
 
     // Build vertex data: [x,y,z,r,g,b] per point
     const maxDim = Math.max(w, h, d);

@@ -7,6 +7,7 @@ namespace mm {
 
 class ModifierBase : public MoonModule {
 public:
+    ModuleRole role() const override { return ModuleRole::Modifier; }
     virtual bool isStatic() const { return true; }
 
     // Compute logical dimensions given physical dimensions
