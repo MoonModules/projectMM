@@ -10,6 +10,14 @@ Light-domain MoonModule subclass for effects. Adds rendering context.
 
 If base classes are kept, they should be zero-state — just convenience accessors pointing to the parent.
 
+## Animation guidelines
+
+Effects use **BPM** (beats per minute) for speed controls, not abstract 0-255 ranges. This gives users a musical reference: 60 BPM = one beat per second, 120 BPM = two beats per second. Default is 60 BPM.
+
+Animation must be **resolution-independent**: multiply the time offset by the panel dimension (width or height) so the perceived visual speed is the same regardless of display size. Without this, large displays look sluggish and small displays look frantic at the same BPM.
+
+Animation is driven by **elapsed millis**, not frame count. This ensures consistent speed regardless of FPS. The speed slider controls the animation dynamics, never the framerate — FPS should always be maximal for smooth motion.
+
 ## Rendering context
 
 Whatever provides it, effects need:

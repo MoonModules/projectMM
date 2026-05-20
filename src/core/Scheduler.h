@@ -81,7 +81,9 @@ public:
     void teardown() {
         for (uint8_t i = moduleCount_; i > 0; i--) {
             modules_[i - 1]->teardown();
+            deleteTree(modules_[i - 1]);
         }
+        moduleCount_ = 0;
     }
 
     uint32_t elapsed() const {
@@ -98,6 +100,14 @@ public:
     uint32_t fps() const { return tickTimeUs_ > 0 ? 1000000 / tickTimeUs_ : 0; }
     uint8_t moduleCount() const { return moduleCount_; }
     MoonModule* module(uint8_t i) const { return i < moduleCount_ ? modules_[i] : nullptr; }
+
+    static void deleteTree(MoonModule* mod) {
+        if (!mod) return;
+        for (uint8_t i = 0; i < mod->childCount(); i++) {
+            deleteTree(mod->child(i));
+        }
+        delete mod;
+    }
 
 private:
     std::array<MoonModule*, 32> modules_{};

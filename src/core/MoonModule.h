@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Control.h"
+#include "platform/platform.h"
 
 #include <cstring>
 
@@ -10,6 +11,10 @@ enum class ModuleRole : uint8_t { Generic, Effect, Modifier, Driver, Layout };
 
 class MoonModule {
 public:
+    // Allocate modules in PSRAM when available (ESP32)
+    void* operator new(size_t size) { return platform::alloc(size); }
+    void operator delete(void* ptr) noexcept { platform::free(ptr); }
+
     MoonModule() = default;
     virtual ~MoonModule() { delete[] children_; }
 

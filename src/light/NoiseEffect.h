@@ -8,11 +8,11 @@ namespace mm {
 class NoiseEffect : public EffectBase {
 public:
     uint8_t scale = 4;  // spatial frequency (1-32)
-    uint8_t speed = 50; // animation speed (0-255)
+    uint8_t bpm = 60;   // beats per minute — scrolls 8 noise cells per beat
 
     void onBuildControls() override {
         controls_.addUint8("scale", scale, 1, 32);
-        controls_.addUint8("speed", speed, 0, 255);
+        controls_.addUint8("bpm", bpm, 1, 255);
     }
 
     void loop() override {
@@ -23,10 +23,13 @@ public:
         nrOfLightsType count = nrOfLights();
         nrOfLightsType wh = static_cast<nrOfLightsType>(w) * h;
 
-        // Time phase from elapsed millis, scaled by speed
-        uint32_t t = static_cast<uint32_t>(
-            static_cast<uint64_t>(elapsed()) * speed / 1000
-        );
+        // Accumulate phase incrementally — changing BPM doesn't cause a jump.
+        // Factor 32 tuned so 60 BPM at 128-wide gives smooth motion.
+        uint32_t now = elapsed();
+        uint32_t dt = now - lastElapsed_;
+        lastElapsed_ = now;
+        phase_ += static_cast<uint64_t>(dt) * bpm * w * 64 / 60000;
+        uint32_t t = static_cast<uint32_t>(phase_);
 
         for (nrOfLightsType i = 0; i < count; i++) {
             nrOfLightsType rem = i % wh;
@@ -44,6 +47,9 @@ public:
     }
 
 private:
+    uint64_t phase_ = 0;
+    uint32_t lastElapsed_ = 0;
+
     // Hash function for value noise (uint32_t to avoid signed overflow UB)
     static uint8_t hash(uint32_t x, uint32_t y, uint32_t t) {
         uint32_t h = x * 1619u + y * 31337u + t * 6271u;
@@ -66,10 +72,11 @@ private:
     }
 
     // 2D value noise with bilinear interpolation
-    uint8_t noise2d(lengthType px, lengthType py, uint32_t t) const {
-        // Scale coordinates: divide by scale to get noise cell
-        int32_t sx = static_cast<int32_t>(px) * 256 / scale;
-        int32_t sy = static_cast<int32_t>(py) * 256 / scale;
+    // Time scrolls the noise field smoothly (offset, not hash seed)
+    uint8_t noise2d(lengthType px, lengthType py, uint32_t timeOffset) const {
+        // Scale coordinates and add time as smooth scroll offset
+        int32_t sx = (static_cast<int32_t>(px) * 256 + static_cast<int32_t>(timeOffset)) / scale;
+        int32_t sy = (static_cast<int32_t>(py) * 256 + static_cast<int32_t>(timeOffset / 3)) / scale;
 
         // Integer cell coordinates
         int32_t ix = sx >> 8;
@@ -79,11 +86,11 @@ private:
         uint8_t fx = smoothstep(static_cast<uint8_t>(sx & 0xFF));
         uint8_t fy = smoothstep(static_cast<uint8_t>(sy & 0xFF));
 
-        // Hash at four corners
-        uint8_t v00 = hash(static_cast<uint32_t>(ix),     static_cast<uint32_t>(iy),     t);
-        uint8_t v10 = hash(static_cast<uint32_t>(ix + 1), static_cast<uint32_t>(iy),     t);
-        uint8_t v01 = hash(static_cast<uint32_t>(ix),     static_cast<uint32_t>(iy + 1), t);
-        uint8_t v11 = hash(static_cast<uint32_t>(ix + 1), static_cast<uint32_t>(iy + 1), t);
+        // Hash at four corners (time=0, motion comes from coordinate scrolling)
+        uint8_t v00 = hash(static_cast<uint32_t>(ix),     static_cast<uint32_t>(iy),     0);
+        uint8_t v10 = hash(static_cast<uint32_t>(ix + 1), static_cast<uint32_t>(iy),     0);
+        uint8_t v01 = hash(static_cast<uint32_t>(ix),     static_cast<uint32_t>(iy + 1), 0);
+        uint8_t v11 = hash(static_cast<uint32_t>(ix + 1), static_cast<uint32_t>(iy + 1), 0);
 
         // Bilinear interpolation
         uint8_t top = lerp8(v00, v10, fx);

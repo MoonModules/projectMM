@@ -23,13 +23,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier");
     mm::ModuleFactory::registerType<mm::ArtNetSendDriver>("ArtNetSendDriver");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver");
-}
-
-// Set classSize on a stack-allocated module (not created via factory)
-template<typename T>
-static void initModule(T& mod, const char* name) {
-    mod.setName(name);
-    mod.setClassSize(sizeof(T));
+    mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule");
 }
 
 static void printModuleMetrics(mm::MoonModule* mod, int depth) {
@@ -51,75 +45,66 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     registerModuleTypes();
     mm::Scheduler scheduler;
 
-    // Layout
-    mm::LayoutGroup layoutGroup;
-    initModule(layoutGroup, "LayoutGroup");
+    // All modules created via factory (heap-allocated, PSRAM when available, classSize set)
+    auto* layoutGroup = static_cast<mm::LayoutGroup*>(mm::ModuleFactory::create("LayoutGroup"));
+    auto* grid = static_cast<mm::GridLayout*>(mm::ModuleFactory::create("GridLayout"));
+    grid->setName("Grid");
+    grid->width = gridW;
+    grid->height = gridH;
+    layoutGroup->addChild(grid);
 
-    mm::GridLayout grid;
-    initModule(grid, "Grid");
-    grid.width = gridW;
-    grid.height = gridH;
-    layoutGroup.addChild(&grid);
+    auto* layer = static_cast<mm::Layer*>(mm::ModuleFactory::create("Layer"));
+    layer->setLayoutGroup(layoutGroup);
+    layer->setChannelsPerLight(3);
 
-    // Layer + Effect
-    mm::Layer layer;
-    initModule(layer, "Layer");
-    layer.setLayoutGroup(&layoutGroup);
-    layer.setChannelsPerLight(3);
+    auto* noise = mm::ModuleFactory::create("NoiseEffect");
+    noise->setName("Noise");
+    layer->addChild(noise);
 
-    mm::NoiseEffect noise;
-    initModule(noise, "Noise");
-    layer.addChild(&noise);
+    auto* mirror = mm::ModuleFactory::create("MirrorModifier");
+    mirror->setName("Mirror");
+    layer->addChild(mirror);
 
-    // Modifier
-    mm::MirrorModifier mirror;
-    initModule(mirror, "Mirror");
-    layer.addChild(&mirror);
+    auto* driverGroup = static_cast<mm::DriverGroup*>(mm::ModuleFactory::create("DriverGroup"));
+    driverGroup->setLayer(layer);
 
-    // Driver Group + ArtNet
-    mm::DriverGroup driverGroup;
-    initModule(driverGroup, "DriverGroup");
-    driverGroup.setLayer(&layer);
+    auto* artnet = mm::ModuleFactory::create("ArtNetSendDriver");
+    artnet->setName("ArtNet");
+    driverGroup->addChild(artnet);
 
-    mm::ArtNetSendDriver artnet;
-    initModule(artnet, "ArtNet");
-    driverGroup.addChild(&artnet);
+    auto* previewFrame = new mm::PreviewFrame();
+    auto* preview = static_cast<mm::PreviewDriver*>(mm::ModuleFactory::create("PreviewDriver"));
+    preview->setName("Preview");
+    preview->width = gridW;
+    preview->height = gridH;
+    preview->setPreviewFrame(previewFrame);
+    driverGroup->addChild(preview);
 
-    // Preview driver (WebSocket binary frames)
-    mm::PreviewFrame previewFrame;
-    mm::PreviewDriver preview;
-    initModule(preview, "Preview");
-    preview.width = gridW;
-    preview.height = gridH;
-    preview.setPreviewFrame(&previewFrame);
-    driverGroup.addChild(&preview);
+    auto* httpServer = static_cast<mm::HttpServerModule*>(mm::ModuleFactory::create("HttpServerModule"));
+    httpServer->setName("HttpServer");
+    httpServer->port = httpPort;
+    httpServer->setScheduler(&scheduler);
+    httpServer->setPreviewFrame(previewFrame);
 
-    // HTTP Server + WebSocket
-    mm::HttpServerModule httpServer;
-    initModule(httpServer, "HttpServer");
-    httpServer.port = httpPort;
-    httpServer.setScheduler(&scheduler);
-    httpServer.setPreviewFrame(&previewFrame);
-
-    // Register top-level modules with scheduler
-    scheduler.addModule(&layoutGroup);
-    scheduler.addModule(&layer);
-    scheduler.addModule(&driverGroup);
-    scheduler.addModule(&httpServer);
+    // Register top-level modules with scheduler (scheduler deletes on teardown)
+    scheduler.addModule(layoutGroup);
+    scheduler.addModule(layer);
+    scheduler.addModule(driverGroup);
+    scheduler.addModule(httpServer);
 
     scheduler.setup();
 
-    uint32_t lights = layoutGroup.totalLightCount();
+    uint32_t lights = layoutGroup->totalLightCount();
     uint32_t bufBytes = lights * 3;
     std::printf("mmv3 running — grid %dx%d, %lu lights, buffer %lu bytes\n",
-                grid.width, grid.height,
+                grid->width, grid->height,
                 static_cast<unsigned long>(lights),
                 static_cast<unsigned long>(bufBytes));
     std::printf("sizeof: MoonModule=%zu Layer=%zu DriverGroup=%zu Grid=%zu HttpServer=%zu\n",
                 sizeof(mm::MoonModule), sizeof(mm::Layer), sizeof(mm::DriverGroup),
                 sizeof(mm::GridLayout), sizeof(mm::HttpServerModule));
-    std::printf("ArtNet → %s\n", artnet.ip);
-    std::printf("HTTP server → http://localhost:%u\n", httpServer.port);
+    std::printf("ArtNet → %s\n", static_cast<mm::ArtNetSendDriver*>(artnet)->ip);
+    std::printf("HTTP server → http://localhost:%u\n", httpServer->port);
 
     size_t heap = mm::platform::freeHeap();
     if (heap > 0) {
@@ -159,4 +144,5 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
 
     std::printf("\nShutting down.\n");
     scheduler.teardown();
+    delete previewFrame;
 }
