@@ -75,6 +75,14 @@ def collect_desktop():
         _, rc = run([sys.executable, str(check)])
         kpi["boundary"] = "PASS" if rc == 0 else "FAIL"
 
+    specs = ROOT / "scripts" / "check" / "check_specs.py"
+    if specs.exists():
+        out, rc = run([sys.executable, str(specs)])
+        kpi["specs_check"] = "PASS" if rc == 0 else "FAIL"
+        for line in out.splitlines():
+            if "Spec check:" in line:
+                kpi["specs_summary"] = line.strip()
+
     return kpi
 
 def collect_esp32():
@@ -221,6 +229,8 @@ def format_full(desktop, esp32, code):
         lines.append(f"    {desktop['scenarios']}")
     if "boundary" in desktop:
         lines.append(f"    Platform boundary: {desktop['boundary']}")
+    if "specs_check" in desktop:
+        lines.append(f"    Specs: {desktop.get('specs_summary', desktop['specs_check'])}")
 
     if esp32:
         lines.append("  ESP32:")

@@ -38,18 +38,26 @@ async function updateRunningState() {
         const resp = await fetch("/api/running");
         const running = await resp.json();
         for (const [scriptId, isRunning] of Object.entries(running)) {
-            if (isRunning) {
-                const btn = document.querySelector(`.run-btn[data-id="${scriptId}"]`);
-                if (btn) {
-                    btn.classList.add("running");
-                    btn.textContent = "Stop";
-                }
+            const btn = document.querySelector(`.run-btn[data-id="${scriptId}"]`);
+            if (!btn) continue;
+            const dot = document.querySelector(`.status-dot[data-id="${scriptId}"]`);
+            if (isRunning && !btn.classList.contains("running")) {
+                btn.classList.add("running");
+                btn.textContent = "Stop";
+                if (dot) dot.className = "status-dot running";
+            } else if (!isRunning && btn.classList.contains("running")) {
+                btn.classList.remove("running");
+                btn.textContent = "Run";
+                if (dot) dot.className = "status-dot";
             }
         }
-    } catch (e) {
+    } catch {
         // ignore — non-critical
     }
 }
+
+// Poll running state every 5 seconds
+setInterval(updateRunningState, 5000);
 
 // ---------------------------------------------------------------------------
 // Tabs (sidebar)

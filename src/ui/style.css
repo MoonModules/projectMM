@@ -58,6 +58,13 @@ nav {
 .nav-item:hover { background: #0f3460; }
 .nav-item.active { background: #a78bfa; color: #fff; }
 
+.main-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
 main {
     flex: 1;
     padding: 16px;
@@ -66,6 +73,16 @@ main {
     flex-direction: column;
     gap: 12px;
 }
+
+#preview {
+    width: 100%;
+    height: 40vh;
+    min-height: 200px;
+    background: #0d1117;
+    border-top: 2px solid #a78bfa;
+    cursor: grab;
+}
+#preview:active { cursor: grabbing; }
 
 .card {
     background: #16213e;
@@ -105,6 +122,16 @@ main {
     text-align: right;
     font-size: 12px;
     color: #a0a0b0;
+}
+
+.control-row input[type="number"] {
+    width: 80px;
+    background: #1a1a2e;
+    border: 1px solid #0f3460;
+    color: #e0e0e0;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 13px;
 }
 
 .control-row input[type="checkbox"] {

@@ -293,6 +293,41 @@ Extracted from design review session with Gemini (2026-05-18).
 
 ---
 
+## Lessons from projectMM v3
+
+### Product owner as critical success factor
+
+The single biggest improvement in v3's approach: the human is an active, hands-on product owner — not a passive requester. In v1 and v2, the agent had significant autonomy: it designed, implemented, tested, and committed with light oversight. The result was bloat, architectural drift, compounding bugs, and code the human couldn't fully understand.
+
+In v3, the product owner:
+- Reviews every line of generated code before committing
+- Specifies requirements in detail — the agent asks, it doesn't guess
+- Controls all git operations (staging, committing, pushing)
+- Tests on real hardware before approving
+- Questions design choices ("why static_cast here?", "is this future-proof?", "do we need this?")
+- Catches overengineering early ("that's too much code for something we might change later")
+- Rejects suggestions that add complexity without clear value
+
+This is the fundamental lesson: in agentic coding, the agent writes code but the human must think. The agent is a tool, not a decision-maker. Tight human control produces cleaner, simpler, more predictable systems than giving the agent autonomy.
+
+### Specs-before-code works
+
+Writing module specs before implementation prevented the architectural drift that plagued v1 and v2. Each spec documents: purpose, controls, behavior, edge cases, prior art. When the code deviates from the spec, one of them is wrong — the spec serves as the reference.
+
+Drafts live in `moonmodules_draft/`, get reviewed and promoted to `moonmodules/` just before implementation. Drafts for implemented modules are deleted — only one source of truth.
+
+### Zero-copy preview driver (memory lesson)
+
+The initial PreviewDriver allocated a 49KB frame buffer to copy pixel data before sending via WebSocket. Following MoonLight's pattern (drivers read directly from the physical buffer), we eliminated the copy — saving 49KB on ESP32 without PSRAM. The lesson: always check if an existing buffer can be reused before allocating a new one.
+
+### WebSocket GUID typo cost hours
+
+A single wrong character in the RFC 6455 magic GUID (`5AB5FDF632E5` instead of `C5AB0DC85B11`) caused the WebSocket handshake to fail silently — the SHA-1 was correct, the response format was correct, but the browser rejected it. The accept key matched our computation but not the browser's because the GUID was wrong. Lesson: when implementing protocols, verify against the RFC test vectors, not just internal consistency.
+
+### KPI tracking in every commit
+
+Adding standardized KPIs (binary size, FPS, heap usage, test count, lizard warnings) to every commit message makes performance regressions visible in git history. The `collect_kpi.py --commit` script automates this.
+
 ## Lessons from projectMM v3 (this project)
 
 Extracted from the first implementation cycle (Steps 1-9, 2026-05-18).

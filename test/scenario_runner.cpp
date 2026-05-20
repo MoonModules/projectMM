@@ -279,10 +279,10 @@ static int runScenario(const char* path) {
     // Memory after setup
     size_t heapAfter = mm::platform::freeHeap();
     if (heapBefore > 0) {
-        std::printf("\n  Heap: %u → %u (pipeline: %u bytes)\n",
+        long delta = static_cast<long>(heapBefore) - static_cast<long>(heapAfter);
+        std::printf("\n  Heap: %u → %u (pipeline: %ld bytes)\n",
                     static_cast<unsigned>(heapBefore),
-                    static_cast<unsigned>(heapAfter),
-                    static_cast<unsigned>(heapBefore - heapAfter));
+                    static_cast<unsigned>(heapAfter), delta);
     }
 
     // Verify buffer

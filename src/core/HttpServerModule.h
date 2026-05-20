@@ -2,6 +2,7 @@
 
 #include "core/MoonModule.h"
 #include "core/Scheduler.h"
+#include "core/PreviewFrame.h"
 #include "platform/platform.h"
 
 #include "ui/ui_embedded.h"
@@ -18,13 +19,16 @@ public:
 
     void setScheduler(Scheduler* s) { scheduler_ = s; }
     void setUiPath(const char* path) { uiPath_ = path; }
+    void setPreviewFrame(PreviewFrame* f) { previewFrame_ = f; }
 
     void onBuildControls() override {
         controls_.addUint16("port", port);
     }
 
     void setup() override {
-        server_.open(port);
+        if (!server_.open(port)) {
+            std::printf("HTTP server failed to open port %u\n", port);
+        }
     }
 
     void teardown() override {
@@ -35,18 +39,26 @@ public:
     void loop20ms() override {
         // Accept one HTTP connection per tick
         auto conn = server_.accept();
-        if (!conn.valid()) return;
-        handleConnection(conn);
+        if (conn.valid()) {
+            handleConnection(conn);
+            return; // don't broadcast in same tick as accept (WebSocket needs time to process 101)
+        }
+
+        // Broadcast preview frame if ready
+        if (previewFrame_ && previewFrame_->ready) {
+            broadcastPreviewFrame();
+            previewFrame_->ready = false;
+        }
     }
 
     void loop1s() override {
-        // Push state to WebSocket clients
         pushStateToWebSockets();
     }
 
 private:
     platform::TcpServer server_;
     Scheduler* scheduler_ = nullptr;
+    PreviewFrame* previewFrame_ = nullptr;
     const char* uiPath_ = "src/ui";
 
     static constexpr int MAX_WS_CLIENTS = 4;
@@ -60,19 +72,18 @@ private:
         uint8_t buf[2048];
         int totalRead = 0;
 
-        // Non-blocking read with retries (data may not arrive immediately on ESP32)
-        for (int attempt = 0; attempt < 50 && totalRead < static_cast<int>(sizeof(buf) - 1); attempt++) {
+        // Read request (blocking with timeout on desktop, retries on ESP32)
+        for (int attempt = 0; attempt < 20 && totalRead < static_cast<int>(sizeof(buf) - 1); attempt++) {
             int n = conn.read(buf + totalRead, sizeof(buf) - 1 - totalRead);
             if (n > 0) {
                 totalRead += n;
-                // Check if we have the full headers (double CRLF)
                 buf[totalRead] = 0;
                 if (std::strstr(reinterpret_cast<char*>(buf), "\r\n\r\n")) break;
             } else if (n == 0) {
                 return; // peer closed
+            } else {
+                break; // timeout or error
             }
-            // n == -1: nothing yet, yield and retry
-            platform::yield();
         }
 
         if (totalRead == 0) { conn.close(); return; }
@@ -84,9 +95,10 @@ private:
         char path[128] = {};
         std::sscanf(req, "%7s %127s", method, path);
 
-        // Check for WebSocket upgrade
+        // Check for WebSocket upgrade (case-insensitive header check)
         if (std::strcmp(method, "GET") == 0 && std::strcmp(path, "/ws") == 0 &&
-            std::strstr(req, "Upgrade: websocket")) {
+            (std::strstr(req, "Upgrade: websocket") || std::strstr(req, "upgrade: websocket") ||
+             std::strstr(req, "Upgrade: WebSocket"))) {
             handleWebSocketUpgrade(conn, req);
             return; // don't close — connection is now a WebSocket
         }
@@ -203,7 +215,7 @@ private:
     // -----------------------------------------------------------------------
 
     void serveState(platform::TcpConnection& conn) {
-        // Static buffer to avoid stack overflow on ESP32 (main task = 8KB)
+        // Static buffer: ~700 bytes now, grows with modules/controls. Not on stack (ESP32 has 8KB).
         static char json[4096];
         int len = buildStateJson(json, sizeof(json));
         sendResponse(conn, 200, "application/json", json);
@@ -244,7 +256,7 @@ private:
         if (static_cast<size_t>(pos) >= bufSize) return;
         int n = std::snprintf(buf + pos, bufSize - pos,
             "{\"name\":\"%s\",\"controls\":[", mod->name() ? mod->name() : "");
-        if (n > 0) pos += n;
+        if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
         writeControls(buf, bufSize, pos, mod);
         append("]");
 
@@ -267,7 +279,7 @@ private:
         for (uint8_t i = 0; i < ctrls.count(); i++) {
             if (i > 0) {
                 int n = std::snprintf(buf + pos, bufSize - pos, ",");
-                if (n > 0) pos += n;
+                if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
             }
             auto& c = ctrls[i];
             int n = 0;
@@ -293,7 +305,7 @@ private:
                         c.name, static_cast<char*>(c.ptr));
                     break;
             }
-            if (n > 0) pos += n;
+            if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
         }
     }
 
@@ -340,7 +352,9 @@ private:
                 case ControlType::Text: {
                     char v[64] = {};
                     parseJsonString(body, "value", v, sizeof(v));
-                    std::strncpy(static_cast<char*>(c.ptr), v, 15);
+                    uint8_t maxLen = c.max > 0 ? c.max - 1 : 15;
+                    std::strncpy(static_cast<char*>(c.ptr), v, maxLen);
+                    static_cast<char*>(c.ptr)[maxLen] = '\0';
                     break;
                 }
             }
@@ -429,9 +443,10 @@ private:
         }
         wsKey[ki] = 0;
 
-        // Compute accept key: SHA1(key + magic) → base64
+        // RFC 6455: accept = base64(SHA1(client_key + magic_GUID))
+        // The GUID is a fixed constant from the spec, proving the server speaks WebSocket.
         char concat[128];
-        std::snprintf(concat, sizeof(concat), "%s258EAFA5-E914-47DA-95CA-5AB5FDF632E5", wsKey);
+        std::snprintf(concat, sizeof(concat), "%s258EAFA5-E914-47DA-95CA-C5AB0DC85B11", wsKey);
         uint8_t sha1Hash[20];
         sha1(reinterpret_cast<const uint8_t*>(concat), std::strlen(concat), sha1Hash);
         char acceptKey[32];
@@ -496,6 +511,76 @@ private:
 
         if (!conn.write(header, headerLen)) return false;
         return conn.write(reinterpret_cast<const uint8_t*>(data), len);
+    }
+
+    static bool sendWsBinaryFrame(platform::TcpConnection& conn, const uint8_t* data, size_t len) {
+        uint8_t header[10];
+        int headerLen = 0;
+
+        header[0] = 0x82; // FIN + binary opcode
+        if (len < 126) {
+            header[1] = static_cast<uint8_t>(len);
+            headerLen = 2;
+        } else if (len < 65536) {
+            header[1] = 126;
+            header[2] = static_cast<uint8_t>((len >> 8) & 0xFF);
+            header[3] = static_cast<uint8_t>(len & 0xFF);
+            headerLen = 4;
+        } else {
+            return false;
+        }
+
+        if (!conn.write(header, headerLen)) return false;
+        return conn.write(data, len);
+    }
+
+    void broadcastPreviewFrame() {
+        if (!previewFrame_ || !previewFrame_->data || previewFrame_->dataLen == 0) return;
+
+        // Build 7-byte preview header on stack: [0x02][w16][h16][d16]
+        uint8_t previewHeader[7];
+        previewHeader[0] = 0x02;
+        previewHeader[1] = static_cast<uint8_t>(previewFrame_->width & 0xFF);
+        previewHeader[2] = static_cast<uint8_t>(previewFrame_->width >> 8);
+        previewHeader[3] = static_cast<uint8_t>(previewFrame_->height & 0xFF);
+        previewHeader[4] = static_cast<uint8_t>(previewFrame_->height >> 8);
+        previewHeader[5] = static_cast<uint8_t>(previewFrame_->depth & 0xFF);
+        previewHeader[6] = static_cast<uint8_t>(previewFrame_->depth >> 8);
+
+        size_t totalLen = 7 + previewFrame_->dataLen;
+
+        for (auto& ws : wsClients_) {
+            if (!ws.valid()) continue;
+            // Send WebSocket frame header + preview header + buffer data (3 writes, zero copy)
+            if (!sendWsBinaryFrameMulti(ws, previewHeader, 7, previewFrame_->data, previewFrame_->dataLen, totalLen)) {
+                ws.close();
+            }
+        }
+    }
+
+    static bool sendWsBinaryFrameMulti(platform::TcpConnection& conn,
+                                        const uint8_t* data1, size_t len1,
+                                        const uint8_t* data2, size_t len2,
+                                        size_t totalLen) {
+        uint8_t header[10];
+        int headerLen = 0;
+
+        header[0] = 0x82; // FIN + binary opcode
+        if (totalLen < 126) {
+            header[1] = static_cast<uint8_t>(totalLen);
+            headerLen = 2;
+        } else if (totalLen < 65536) {
+            header[1] = 126;
+            header[2] = static_cast<uint8_t>((totalLen >> 8) & 0xFF);
+            header[3] = static_cast<uint8_t>(totalLen & 0xFF);
+            headerLen = 4;
+        } else {
+            return false;
+        }
+
+        if (!conn.write(header, headerLen)) return false;
+        if (!conn.write(data1, len1)) return false;
+        return conn.write(data2, len2);
     }
 
     // -----------------------------------------------------------------------

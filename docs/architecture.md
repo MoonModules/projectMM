@@ -203,6 +203,14 @@ Fails the build if any are found.
 
 A custom check (clang-tidy plugin, script, or code review rule) flags allocation calls (`new`, `malloc`, `make_unique`, `make_shared`, `push_back`, `std::string` constructors) inside functions identified as hot path (render loop and its callees). This can start as a code review convention and become automated as the codebase grows.
 
+### Type casting
+
+Use project typedefs (`lengthType`, `nrOfLightsType`) consistently so types match and casts are unnecessary. When casts are needed:
+
+- **`static_cast`** — converts a value between related types. Checked at compile time. Use only at system boundaries: byte protocol packing, OS API return values, overflow-prevention with wider intermediates. If you need `static_cast` between project types, the types should be made to match instead.
+- **`reinterpret_cast`** — reinterprets raw memory as a different type. No conversion, no safety. Avoid. The only legitimate use is raw byte/memory access (e.g. `reinterpret_cast<const sockaddr*>` for socket APIs).
+- **`dynamic_cast`** — runtime-checked cast from base to derived class. Requires RTTI which is disabled on ESP32 (`-fno-rtti`). Not used in this project.
+
 ### Code formatting
 
 clang-format with a project `.clang-format` file. Applied in CI — code that doesn't match the format fails the check. Developers can run `clang-format` locally or via editor integration.

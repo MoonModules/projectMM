@@ -18,8 +18,10 @@ public:
     void loop() override {
         uint8_t* buf = buffer();
         lengthType w = width();
+        lengthType h = height();
         uint8_t cpl = channelsPerLight();
         nrOfLightsType count = nrOfLights();
+        nrOfLightsType wh = static_cast<nrOfLightsType>(w) * h;
 
         // Time phase from elapsed millis, scaled by speed
         uint32_t t = static_cast<uint32_t>(
@@ -27,8 +29,9 @@ public:
         );
 
         for (nrOfLightsType i = 0; i < count; i++) {
-            lengthType x = static_cast<lengthType>(i % w);
-            lengthType y = static_cast<lengthType>(i / w);
+            nrOfLightsType rem = i % wh;
+            lengthType x = static_cast<lengthType>(rem % w);
+            lengthType y = static_cast<lengthType>(rem / w);
 
             uint8_t n = noise2d(x, y, t);
             RGB c = hsvToRgb(n, 200, 255);
@@ -77,10 +80,10 @@ private:
         uint8_t fy = smoothstep(static_cast<uint8_t>(sy & 0xFF));
 
         // Hash at four corners
-        uint8_t v00 = hash(ix,     iy,     static_cast<int32_t>(t));
-        uint8_t v10 = hash(ix + 1, iy,     static_cast<int32_t>(t));
-        uint8_t v01 = hash(ix,     iy + 1, static_cast<int32_t>(t));
-        uint8_t v11 = hash(ix + 1, iy + 1, static_cast<int32_t>(t));
+        uint8_t v00 = hash(static_cast<uint32_t>(ix),     static_cast<uint32_t>(iy),     t);
+        uint8_t v10 = hash(static_cast<uint32_t>(ix + 1), static_cast<uint32_t>(iy),     t);
+        uint8_t v01 = hash(static_cast<uint32_t>(ix),     static_cast<uint32_t>(iy + 1), t);
+        uint8_t v11 = hash(static_cast<uint32_t>(ix + 1), static_cast<uint32_t>(iy + 1), t);
 
         // Bilinear interpolation
         uint8_t top = lerp8(v00, v10, fx);

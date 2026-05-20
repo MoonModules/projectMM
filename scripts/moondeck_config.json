@@ -94,7 +94,7 @@
       "script": "run/monitor_esp32.py",
       "needs_port": true,
       "long_running": true,
-      "process_name": "idf.py"
+      "process_name": "monitor_esp32"
     }
   ]
 }

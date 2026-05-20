@@ -67,22 +67,20 @@ TEST_CASE("blendMap 1:N mapping duplicates pixels") {
 TEST_CASE("blendMap additive clamping") {
     mm::Buffer src, dst;
     src.allocate(1, 3);
-    dst.allocate(2, 3);
+    dst.allocate(1, 3);
 
     src.data()[0] = 200; src.data()[1] = 200; src.data()[2] = 200;
 
-    // Map logical 0 to both physical 0 AND physical 0 (would double-add)
-    // But with single-layer, each destination is written once
+    // Map logical 0 to physical 0 TWICE — forces double-add with clamping
     mm::MappingLUT lut;
-    lut.build(1, 1);
-    mm::nrOfLightsType map[] = {0};
-    lut.setMapping(0, map, 1);
+    lut.build(1, 2);
+    mm::nrOfLightsType map[] = {0, 0};
+    lut.setMapping(0, map, 2);
     lut.finalize();
 
-    // Pre-fill dst to test clamping
-    dst.data()[0] = 100; dst.data()[1] = 100; dst.data()[2] = 100;
-
-    // blendMap clears dst first, so pre-fill is wiped
     mm::blendMap(src, dst, lut, 3);
-    CHECK(dst.data()[0] == 200); // cleared then written, not 300
+    // 200 + 200 = 400 → clamped to 255
+    CHECK(dst.data()[0] == 255);
+    CHECK(dst.data()[1] == 255);
+    CHECK(dst.data()[2] == 255);
 }

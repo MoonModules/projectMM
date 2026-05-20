@@ -11,9 +11,9 @@ public:
     lengthType depth = 1;
 
     void onBuildControls() override {
-        controls_.addUint16("width", reinterpret_cast<uint16_t&>(width));
-        controls_.addUint16("height", reinterpret_cast<uint16_t&>(height));
-        controls_.addUint16("depth", reinterpret_cast<uint16_t&>(depth));
+        controls_.addInt16("width", width);
+        controls_.addInt16("height", height);
+        controls_.addInt16("depth", depth);
     }
 
     nrOfLightsType lightCount() const override {

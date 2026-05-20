@@ -4,6 +4,7 @@
 #include "light/NoiseEffect.h"
 #include "light/MirrorModifier.h"
 #include "light/ArtNetSendDriver.h"
+#include "light/PreviewDriver.h"
 #include "core/HttpServerModule.h"
 #include "platform/platform.h"
 
@@ -46,11 +47,21 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     artnet.setName("ArtNet");
     driverGroup.addDriver(&artnet);
 
+    // Preview driver (WebSocket binary frames)
+    mm::PreviewFrame previewFrame;
+    mm::PreviewDriver preview;
+    preview.setName("Preview");
+    preview.width = gridW;
+    preview.height = gridH;
+    preview.setPreviewFrame(&previewFrame);
+    driverGroup.addDriver(&preview);
+
     // HTTP Server + WebSocket
     mm::HttpServerModule httpServer;
     httpServer.setName("HttpServer");
     httpServer.port = httpPort;
     httpServer.setScheduler(&scheduler);
+    httpServer.setPreviewFrame(&previewFrame);
 
     // Register top-level modules with scheduler
     scheduler.addModule(&layoutGroup);

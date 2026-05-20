@@ -34,14 +34,20 @@ public:
         controls_[count_++] = {&var, name, ControlType::Uint16, 0, 0};
     }
 
+    // lengthType (int16_t) — same wire format as uint16, values are always positive for dimensions
+    void addInt16(const char* name, int16_t& var) {
+        if (count_ >= Capacity) return;
+        controls_[count_++] = {&var, name, ControlType::Uint16, 0, 0};
+    }
+
     void addBool(const char* name, bool& var) {
         if (count_ >= Capacity) return;
         controls_[count_++] = {&var, name, ControlType::Bool, 0, 1};
     }
 
-    void addText(const char* name, char* var) {
+    void addText(const char* name, char* var, uint8_t bufSize = 16) {
         if (count_ >= Capacity) return;
-        controls_[count_++] = {var, name, ControlType::Text, 0, 0};
+        controls_[count_++] = {var, name, ControlType::Text, 0, bufSize};
     }
 
     void clear() { count_ = 0; }
