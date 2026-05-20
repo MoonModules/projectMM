@@ -10,14 +10,6 @@
       "script": "build/build_desktop.py"
     },
     {
-      "id": "run_desktop",
-      "tab": "pc",
-      "group": "run",
-      "label": "Run",
-      "help": "run_desktop",
-      "script": "run/run_desktop.py"
-    },
-    {
       "id": "test_desktop",
       "tab": "pc",
       "group": "test",
@@ -26,12 +18,63 @@
       "script": "test/test_desktop.py"
     },
     {
+      "id": "run_desktop",
+      "tab": "pc",
+      "group": "run",
+      "label": "Run",
+      "help": "run_desktop",
+      "script": "run/run_desktop.py",
+      "long_running": true,
+      "process_name": "mmv3"
+    },
+    {
       "id": "check_platform_boundary",
       "tab": "pc",
       "group": "check",
       "label": "Platform Boundary",
       "help": "check_platform_boundary",
       "script": "check/check_platform_boundary.py"
+    },
+    {
+      "id": "collect_kpi",
+      "tab": "pc",
+      "group": "check",
+      "label": "KPI Report",
+      "help": "collect_kpi",
+      "script": "check/collect_kpi.py"
+    },
+    {
+      "id": "scenario_pipeline",
+      "tab": "pc",
+      "group": "scenario",
+      "label": "01 - Pipeline",
+      "help": "scenario_pipeline",
+      "script": "scenario/run_scenario.py"
+    },
+    {
+      "id": "live_scenario",
+      "tab": "live",
+      "group": "scenario",
+      "label": "Live Scenarios",
+      "help": "live_scenario",
+      "script": "scenario/run_live_scenario.py",
+      "needs_device": true
+    },
+    {
+      "id": "setup_esp_idf",
+      "tab": "esp32",
+      "group": "setup",
+      "label": "Setup ESP-IDF",
+      "help": "setup_esp_idf",
+      "script": "build/setup_esp_idf.py"
+    },
+    {
+      "id": "clean_esp32",
+      "tab": "esp32",
+      "group": "setup",
+      "label": "Clean",
+      "help": "clean_esp32",
+      "script": "build/clean_esp32.py"
     },
     {
       "id": "build_esp32",
@@ -49,7 +92,6 @@
       "label": "Flash",
       "help": "flash_esp32",
       "script": "build/flash_esp32.py",
-      "needs_env": true,
       "needs_port": true
     },
     {
@@ -59,7 +101,9 @@
       "label": "Monitor",
       "help": "monitor_esp32",
       "script": "run/monitor_esp32.py",
-      "needs_port": true
+      "needs_port": true,
+      "long_running": true,
+      "process_name": "monitor_esp32"
     }
   ]
 }

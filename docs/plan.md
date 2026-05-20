@@ -11,37 +11,40 @@ Completed items are removed. This file is deleted when empty.
 - Zero warnings (`-Wall -Wextra -Werror`)
 - Updated MoonModule specs (docs/moonmodules/) for what was built
 - Tested on hardware where applicable
+- Pre-commit checklist passed (8 steps including Reviewer agent)
 
-## 1. Core pipeline on desktop — lights on panel via ArtNet
+## 8. Live scenario testing
 
-Grid layout → Rainbow effect → ArtNet driver → lights visible on panel (via ArtNet receiver).
+Python scenario runner that replays scenario JSON files via HTTP against a running device (desktop or ESP32). Same JSON format as in-process runner. MoonDeck Live tab: device discovery (subnet scan + /api/state probe), device selection, run scenarios against selected device. First because: all subsequent work goes through the live test pipeline.
 
-Modules to review and promote:
-- core: MoonModule, Control, Scheduler
-- light: Buffer, MappingLUT, Layer, LayoutGroup, DriverGroup, EffectBase, BlendMap, Pixel
-- modules: GridLayout, RainbowEffect, ArtNetSendDriver
-- platform: Alloc, Timing, UdpSocket
+## 9. System MoonModule
 
-Also: CMake build system, platform desktop, doctest, integration test.
+System-level diagnostics as a MoonModule: heap free/used, FPS, uptime, chip info, firmware version. Visible in the Web UI. Simpler than WiFi — useful for debugging while building subsequent features. Reverse engineer from projectMM v1, MoonLight.
 
-## 2. ESP32 deployment
+## 10. WiFi MoonModule
 
-Same pipeline running on ESP32dev. Proves platform abstraction works, esp32/ CMake wrapper, ESP-IDF build, flash, run. ArtNet output from ESP32 to panel.
+Add WiFi MoonModule (STA + AP fallback). Controls: SSID, password, status. When Ethernet is available, WiFi doesn't need to run. Proves network as a MoonModule. Reverse engineer from projectMM v1.
 
-Modules: platform esp32 (Alloc, Timing, UdpSocket implementations).
+## 11. Config persistence
 
-## 3. Second effect
+Save/load control values to filesystem. Settings survive reboot. Format: one file per module or one file for all — decide based on ESP32 filesystem constraints. Platform filesystem abstraction (LittleFS on ESP32, std::filesystem on desktop).
 
-Add Noise effect. Proves effect switching via API.
+## 12. Effect/module switching from UI
 
-## 4. Mirror modifier
+Add/remove/switch effects and modifiers from the browser. Type picker with category filtering. Lifecycle-aware add/remove (setup/teardown called at runtime).
 
-Add Mirror modifier. Proves modifiers, virtual interface, 1:N kaleidoscope mapping, LUT rebuild on control change.
+## 13. README + quick-start
 
-## 5. WebSocket + Preview
+Update README with: what it does now, how to build/flash, how to connect and open the UI. Include screenshots.
 
-Add WebSocket server and Preview driver. Proves system MoonModules, binary frame streaming, 3D browser preview.
+---
 
-## 6. Web UI (tree view)
+## Release 1.0 — "connect, open browser, see lights"
 
-Add embedded web UI with tree view. Proves MoonModule-driven UI, auto-rendered controls, effect/modifier switching from browser.
+Milestone after items 8-13. An end user with an ESP32 can flash the firmware, connect via WiFi, open a browser, see the 3D preview, change effects and controls, and have settings persist across reboots.
+
+---
+
+## Remarks
+
+- Live scenarios that use `add_module` create temporary modules on the running device (cleaned up after each scenario). Scenarios like `base-pipeline` and `memory-1to1` add a `Rainbow` effect because the running device has `Noise` — the names don't match. This is harmless (cleanup deletes it), but the measurement runs with both effects active. For pure non-destructive live testing, scenarios should match the running device's module names, or use `set_control`-only steps that don't modify the pipeline.

@@ -28,6 +28,12 @@ Opened in setup(), closed in teardown(). Uses platform UDP abstraction. Not a ho
 
 - Inter-packet delay (microsecond pause between universe packets) — add when packet dropping occurs. May need a `platform::delay_us` abstraction.
 
+## Tests
+
+[Module test: ArtNet Packet](../../../testing.md#artnet) — header format, byte order, universe splitting.
+
+[Scenario: base-pipeline](../../../testing.md#scenario-pipeline) — full pipeline with ArtNet output, performance bounds.
+
 ## Prior art
 
 ### MoonLight — D_NetworkOut ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Drivers/D_NetworkOut.h))

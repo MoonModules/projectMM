@@ -23,6 +23,10 @@ Pure functions (not tied to a struct):
 
 These operate on individual channel values, not on a struct. They live in core (platform-independent).
 
+## Tests
+
+[Module test: Color Math](../../testing.md#color) — hsvToRgb at cardinal hues, white/black edge cases, scale8, constexpr verification.
+
 ## Prior art
 
 ### MoonLight — LightsHeader ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/LightsHeader.h))

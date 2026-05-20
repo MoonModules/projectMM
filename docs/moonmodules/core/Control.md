@@ -49,6 +49,10 @@ Control values must be saved/loaded persistently (filesystem). The mechanism:
 - No `controlAllocBytes()` pre-check — defer until needed.
 - No richer types (v2-style ControlDescriptor) until genuinely needed.
 
+## Tests
+
+[Module test: MoonModule + Control](../../testing.md#moonmodule) — control binding by reference, pointer read/write, clear and rebuild.
+
 ## Prior art
 
 ### MoonLight — addControl ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonBase/Nodes.h#L80))

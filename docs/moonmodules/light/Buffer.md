@@ -30,6 +30,10 @@ Semaphores are expensive (~150 bytes on ESP32). Prefer:
 
 Move-constructible, not copyable.
 
+## Tests
+
+[Module test: Buffer](../../testing.md#buffer) — allocate, clear, move semantics, double-free safety, zero-size edge case.
+
 ## Prior art
 
 ### MoonLight — VirtualLayer.virtualChannels ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h))

@@ -32,6 +32,115 @@ SCRIPTS = _scripts_data["scripts"]
 ESP32_ENVS = _scripts_data["envs"]
 
 # ---------------------------------------------------------------------------
+# Device discovery
+# ---------------------------------------------------------------------------
+
+def _get_local_subnet():
+    """Try to detect the local subnet (e.g. '192.168.1')."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ".".join(ip.split(".")[:3])
+    except Exception:
+        return "192.168.1"
+
+
+def _probe_device(ip, port=8080, timeout=2.0):
+    """Probe a single IP for /api/state. Returns device info or None."""
+    import urllib.request
+    import urllib.error
+    url = f"http://{ip}:{port}/api/state"
+    try:
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read())
+            module_count = len(data.get("modules", []))
+            return {"ip": f"{ip}:{port}", "modules": module_count}
+    except Exception:
+        return None
+
+
+def discover_devices(subnet=""):
+    """Scan subnet for devices responding to /api/state."""
+    if not subnet:
+        subnet = _get_local_subnet()
+
+    devices = []
+    devLock = threading.Lock()
+    threads = []
+
+    def probe(ip, port):
+        result = _probe_device(ip, port)
+        if result:
+            with devLock:
+                devices.append(result)
+
+    # Scan .1 to .254 on both port 80 (ESP32) and 8080 (desktop)
+    for i in range(1, 255):
+        ip = f"{subnet}.{i}"
+        for port in [80, 8080]:
+            t = threading.Thread(target=probe, args=(ip, port), daemon=True)
+            threads.append(t)
+            t.start()
+
+    # Also check localhost:8080 (desktop dev)
+    t = threading.Thread(target=lambda: probe("localhost", 8080), daemon=True)
+    threads.append(t)
+    t.start()
+
+    for t in threads:
+        t.join(timeout=3.0)
+
+    # Deduplicate: if localhost found, remove the Mac's own IP:port (same process)
+    hasLocalhost = any(d["ip"].startswith("localhost") for d in devices)
+    if hasLocalhost:
+        import socket
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            localIp = s.getsockname()[0]
+            s.close()
+            devices = [d for d in devices if not d["ip"].startswith(localIp + ":")]
+        except Exception:
+            pass
+
+    # Sort by IP
+    devices.sort(key=lambda d: d["ip"])
+    return devices, subnet
+
+
+def refresh_devices(known_devices):
+    """Probe known devices to check online/offline status."""
+    online = []
+    devLock = threading.Lock()
+    threads = []
+
+    def probe(device):
+        ip = device.get("ip", "")
+        if ":" in ip:
+            host, port = ip.rsplit(":", 1)
+            result = _probe_device(host, int(port))
+        else:
+            result = _probe_device(ip)
+        if result:
+            with devLock:
+                online.append(result)
+
+    for device in known_devices:
+        t = threading.Thread(target=probe, args=(device,), daemon=True)
+        threads.append(t)
+        t.start()
+
+    for t in threads:
+        t.join(timeout=3.0)
+
+    return online
+
+
+# ---------------------------------------------------------------------------
 # State management
 # ---------------------------------------------------------------------------
 
@@ -39,7 +148,7 @@ def load_state():
     if STATE_FILE.exists():
         with open(STATE_FILE) as f:
             return json.load(f)
-    return {"env": "esp32s3", "port": "", "devices": []}
+    return {"env": "esp32", "port": "", "devices": [], "tab": "pc"}
 
 
 def save_state(state):
@@ -53,6 +162,16 @@ def save_state(state):
 
 _running: dict[str, subprocess.Popen] = {}
 _lock = threading.Lock()
+_IS_WIN = sys.platform == "win32"
+
+
+def _kill_process_by_name(name: str):
+    """Kill processes matching name. Cross-platform."""
+    if _IS_WIN:
+        subprocess.run(["taskkill", "/F", "/IM", name + ".exe"],
+                       capture_output=True)
+    else:
+        subprocess.run(["pkill", "-f", name], capture_output=True)
 
 
 def kill_script(script_id: str):
@@ -60,9 +179,29 @@ def kill_script(script_id: str):
         proc = _running.pop(script_id, None)
     if proc and proc.poll() is None:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            if _IS_WIN:
+                proc.terminate()
+            else:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
         except (OSError, ProcessLookupError):
             pass
+
+    # Clean up any orphaned processes (e.g. mmv3 after os.execv)
+    script_def = next((s for s in SCRIPTS if s["id"] == script_id), None)
+    pname = script_def.get("process_name") if script_def else None
+    if pname:
+        _kill_process_by_name(pname)
+
+
+def is_process_running(name: str) -> bool:
+    """Check if a process matching name is running. Cross-platform."""
+    if _IS_WIN:
+        r = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {name}.exe"],
+                           capture_output=True, text=True)
+        return name in r.stdout
+    else:
+        r = subprocess.run(["pgrep", "-f", name], capture_output=True)
+        return r.returncode == 0
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +240,12 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         # Suppress default request logging
         pass
 
+    def handle(self):
+        try:
+            super().handle()
+        except (ConnectionResetError, BrokenPipeError):
+            pass  # Browser closed connection — harmless
+
     def _send_json(self, data, status=200):
         body = json.dumps(data).encode()
         self.send_response(status)
@@ -122,6 +267,14 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
 
         elif self.path == "/api/state":
             self._send_json(load_state())
+
+        elif self.path == "/api/running":
+            running = {}
+            for s in SCRIPTS:
+                pname = s.get("process_name")
+                if pname:
+                    running[s["id"]] = is_process_running(pname)
+            self._send_json(running)
 
         elif self.path.startswith("/api/stream/"):
             script_id = self.path.split("/")[-1]
@@ -154,8 +307,18 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             self._send_json(current)
 
         elif self.path == "/api/discover":
-            # Placeholder for mDNS discovery
-            self._send_json({"devices": []})
+            body = self._read_body()
+            params = json.loads(body) if body else {}
+            subnet = params.get("subnet", "")
+            devices, scanned_subnet = discover_devices(subnet)
+            self._send_json({"devices": devices, "subnet": scanned_subnet})
+
+        elif self.path == "/api/refresh":
+            body = self._read_body()
+            params = json.loads(body) if body else {}
+            known = params.get("devices", [])
+            online = refresh_devices(known)
+            self._send_json({"online": online})
 
         else:
             self.send_error(404)
@@ -170,22 +333,27 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         kill_script(script_id)  # Kill previous if still running
 
         script_path = SCRIPTS_DIR / script_def["script"]
-        cmd = [sys.executable, str(script_path)]
+        cmd = ["uv", "run", str(script_path)]
 
-        # Add environment/port args
+        # Add environment/port/host args
         if script_def.get("needs_env") and params.get("env"):
             cmd.extend(["--env", params["env"]])
         if script_def.get("needs_port") and params.get("port"):
             cmd.extend(["--port", params["port"]])
+        if params.get("host"):
+            cmd.extend(["--host", params["host"]])
 
         try:
-            proc = subprocess.Popen(
-                cmd,
+            popen_kwargs = dict(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 cwd=str(ROOT),
-                preexec_fn=os.setsid,
             )
+            if not _IS_WIN:
+                popen_kwargs["start_new_session"] = True
+            else:
+                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            proc = subprocess.Popen(cmd, **popen_kwargs)
             with _lock:
                 _running[script_id] = proc
             self._send_json({"status": "started", "pid": proc.pid})
@@ -216,7 +384,8 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             proc.wait()
             exit_msg = f"[exit code: {proc.returncode}]"
             self.wfile.write(f"data: {json.dumps(exit_msg)}\n\n".encode())
-            self.wfile.write(b"event: done\ndata: done\n\n")
+            done_data = json.dumps({"exitCode": proc.returncode})
+            self.wfile.write(f"event: done\ndata: {done_data}\n\n".encode())
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass
@@ -314,6 +483,7 @@ p {{ margin: 2px 0; }}
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(data)
 
@@ -323,7 +493,7 @@ p {{ margin: 2px 0; }}
 # ---------------------------------------------------------------------------
 
 def main():
-    server = http.server.HTTPServer(("", PORT), MoonDeckHandler)
+    server = http.server.ThreadingHTTPServer(("", PORT), MoonDeckHandler)
     print(f"MoonDeck running at http://localhost:{PORT}")
     try:
         server.serve_forever()

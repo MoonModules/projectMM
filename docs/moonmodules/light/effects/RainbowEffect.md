@@ -12,6 +12,12 @@ Writes directly to `uint8_t*` buffer using channel offsets. For RGB: computes hu
 
 Time-based animation via elapsed millis, converted to BPM phase internally.
 
+## Tests
+
+[Module test: RainbowEffect](../../../testing.md#rainbow) — non-zero output, valid RGB, spatial variation.
+
+[Scenario: base-pipeline](../../../testing.md#scenario-pipeline) — full pipeline with rainbow effect, performance bounds.
+
 ## Design notes
 
 - First/test effect. Dead simple — proves the pipeline works.

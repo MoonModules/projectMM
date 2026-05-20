@@ -32,11 +32,34 @@ Controls bind to class variables by reference. Hot-path code reads the variable 
 
 - `classSize()` — set once at registration via `register_type<T>()`. No per-class boilerplate.
 - `dynamicMemorySize()` — heap bytes allocated by this module (set by `onAllocateMemory()`).
-- `usPerLoop()` — microseconds per loop iteration, for performance monitoring.
+
+## Per-module timing
+
+Every MoonModule tracks `loopTimeUs()` — average microseconds per tick, computed over a 1-second window. The Scheduler times top-level modules; containers (Layer, DriverGroup) time their children. `publishTiming(frameCount)` recurses the tree every second to compute averages.
+
+`tickTimeUs` is the primary performance metric. FPS is derived from it (`1000000 / tickTimeUs`). This gives per-module cost visibility at any depth in the tree.
 
 ## Parent/child
 
 Modules form a tree. Parent/child relationships only (no arbitrary DAG like v2's AutoWireSpec — simpler, sufficient). Children run in order within their parent. Top-level modules also run in order. UI supports reordering, backed by the backend.
+
+### Generic children in MoonModule base
+
+Every MoonModule has a dynamic children array. `addChild()` and `removeChild()` are implemented once in the base class — containers (Layer, DriverGroup, LayoutGroup) do not override them. The array starts empty (zero allocation for leaf modules) and grows on demand during setup. This eliminates the per-container typed arrays (`effects_[]`, `drivers_[]`, `layouts_[]`) and typed add methods (`addEffect()`, `addDriver()`, `addLayout()`) that existed in earlier iterations.
+
+Children are distinguished by `role()` (Effect, Modifier, Driver, Layout, Generic). Containers that need role-specific iteration (e.g. Layer::loop() only calls loop() on Effects, not Modifiers) filter children by role at the call site.
+
+Parents own their children's lifecycle. Only top-level modules are registered with the Scheduler — parents propagate `setup()`, `onBuildControls()`, `onAllocateMemory()`, `loop()`, and `teardown()` to their children. This means children don't need separate Scheduler registration.
+
+### Lifecycle-aware add/remove
+
+When the UI adds or removes a child at runtime (e.g. switching an effect on a layer, adding a driver), the caller must handle lifecycle:
+
+- **Add at runtime:** caller calls `setup()` → `onBuildControls()` → `onAllocateMemory()` on the new child (since the parent's own setup has already run).
+- **Remove at runtime:** caller calls `teardown()` on the child before removing it.
+- **Add before setup:** if children are added before `scheduler.setup()` (startup or persistence restore), the parent's own `setup()` propagates to all children — no special handling needed.
+
+This is needed for: effect switching, modifier add/remove, driver hot-plug, and persistence restore after reboot.
 
 `onChildrenReady()` — parent notified when all children finish setup. Keep this minimal.
 
@@ -50,6 +73,10 @@ Module state (control values) persisted to filesystem. Load on setup, save on ch
 - No color picker control (RGB) — not needed for v3 initial scope.
 - No AutoWireSpec — parent/child is sufficient.
 - No `controlAllocBytes()` pre-check — defer until needed.
+
+## Tests
+
+[Module test: MoonModule + Control](../../testing.md#moonmodule) — lifecycle, control binding, clear and rebuild.
 
 ## Prior art
 

@@ -103,6 +103,18 @@ select {
     gap: 6px;
 }
 
+.group-header {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #e94560;
+    padding: 8px 2px 2px;
+}
+
+.group-header:first-child {
+    padding-top: 0;
+}
+
 .script-card {
     background: #1a1a2e;
     border: 1px solid #0f3460;
@@ -112,6 +124,17 @@ select {
     align-items: center;
     gap: 8px;
 }
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #333;
+    flex-shrink: 0;
+}
+.status-dot.running { background: #f0a030; }
+.status-dot.pass { background: #30c040; }
+.status-dot.fail { background: #e04040; }
 
 .script-card .label {
     flex: 1;
@@ -144,7 +167,7 @@ select {
 .script-card .run-btn.running {
     background: #e94560;
     color: #fff;
-    cursor: wait;
+    cursor: pointer;
 }
 
 /* Live tab */
@@ -163,10 +186,26 @@ select {
     border: 1px solid #0f3460;
     border-radius: 4px;
     padding: 6px 10px;
-    cursor: pointer;
     font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
-.device-item:hover { border-color: #e94560; color: #e94560; }
+.device-item:hover { border-color: #e94560; }
+.device-item input[type="checkbox"] { margin: 0; cursor: pointer; }
+.device-item span { cursor: pointer; }
+.device-item span:hover { color: #e94560; }
+.device-status {
+    width: 8px; height: 8px; border-radius: 50%;
+    display: inline-block; flex-shrink: 0;
+}
+.device-status.online { background: #4caf50; }
+.device-status.offline { background: #666; }
+.device-remove {
+    margin-left: auto; background: none; border: none; color: #666;
+    cursor: pointer; font-size: 11px; padding: 0 4px;
+}
+.device-remove:hover { color: #e94560; }
 
 /* Main pane */
 .main-pane {
