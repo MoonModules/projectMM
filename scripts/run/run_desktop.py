@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-EXECUTABLE = ROOT / "build" / "mmv3"
+EXECUTABLE = ROOT / "build" / "projectMM"
 if sys.platform == "win32":
     EXECUTABLE = EXECUTABLE.with_suffix(".exe")
 

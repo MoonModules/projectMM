@@ -186,7 +186,7 @@ def kill_script(script_id: str):
         except (OSError, ProcessLookupError):
             pass
 
-    # Clean up any orphaned processes (e.g. mmv3 after os.execv)
+    # Clean up any orphaned processes (e.g. projectMM after os.execv)
     script_def = next((s for s in SCRIPTS if s["id"] == script_id), None)
     pname = script_def.get("process_name") if script_def else None
     if pname:

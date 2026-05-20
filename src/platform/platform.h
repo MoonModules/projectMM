@@ -15,6 +15,35 @@ void yield();
 size_t freeHeap();          // total free (internal + PSRAM if present)
 size_t freeInternalHeap();  // internal RAM only (for stack/HTTP/WiFi reserve check)
 size_t maxAllocBlock();     // largest contiguous block (any memory type)
+size_t totalHeap();         // total heap capacity (internal + PSRAM)
+size_t totalInternalHeap(); // total internal heap capacity
+
+void getMacAddress(uint8_t mac[6]);
+const char* chipModel();
+const char* sdkVersion();
+size_t firmwareSize();        // firmware image bytes
+size_t firmwarePartition();   // app partition size (firmware capacity)
+size_t flashChipSize();       // total flash chip capacity
+size_t filesystemUsed();      // filesystem used bytes
+size_t filesystemTotal();     // filesystem total bytes
+
+// Network (ESP32 only, stubs on desktop)
+bool ethInit();
+bool ethLinkUp();       // PHY link detected (cable plugged, fast check)
+bool ethConnected();    // IP assigned (DHCP complete)
+void ethGetIP(char* buf, size_t len);
+
+bool wifiStaInit(const char* ssid, const char* password);
+bool wifiStaConnected();
+void wifiStaGetIP(char* buf, size_t len);
+void wifiStaStop();
+
+bool wifiApInit(const char* apName, const char* ip);
+bool wifiApConnected();
+void wifiApStop();
+
+bool mdnsInit(const char* deviceName);
+void mdnsStop();
 
 class UdpSocket {
 public:

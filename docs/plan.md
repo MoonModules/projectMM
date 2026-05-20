@@ -48,3 +48,36 @@ Milestone after items 8-13. An end user with an ESP32 can flash the firmware, co
 ## Remarks
 
 - Live scenarios that use `add_module` create temporary modules on the running device (cleaned up after each scenario). Scenarios like `base-pipeline` and `memory-1to1` add a `Rainbow` effect because the running device has `Noise` — the names don't match. This is harmless (cleanup deletes it), but the measurement runs with both effects active. For pure non-destructive live testing, scenarios should match the running device's module names, or use `set_control`-only steps that don't modify the pipeline.
+
+## WiFi performance testing (pending)
+
+Need to measure FPS over WiFi STA vs Ethernet at different LED counts. The leaked WiFi task caused 8 FPS (fixed via `esp_wifi_deinit()`), but actual WiFi operation may still be slower than Ethernet due to encryption overhead and management frames. Test matrix:
+
+- WiFi STA 128x128 (16K LEDs, 97 ArtNet universes) — may be too many packets for WiFi
+- WiFi STA 64x64 (4K LEDs, 24 universes) — should be feasible
+- WiFi STA 32x32 (1K LEDs, 6 universes) — baseline
+- Compare each with Ethernet at the same grid size
+
+This determines the practical LED limit for WiFi-only boards. If WiFi can't handle 128x128, document the maximum and recommend Ethernet for large installations.
+
+## Additional testing (pending)
+
+- **UI page load time**: add a scenario step that measures HTTP response time for `/` (index.html), `/api/state`, `/api/system` using the live runner's HTTP client. Verifies the web UI loads within acceptable time on ESP32.
+- **Module teardown memory**: add a scenario that tears down all modules (`DELETE /api/modules/*`) and verifies heap returns to pre-setup baseline. Confirms no memory leaks in the full lifecycle.
+
+## mDNS toggle (evaluate)
+
+The mDNS checkbox in NetworkModule was added as a diagnostic tool during performance investigation. Testing showed mDNS has zero FPS impact (the issue was a leaked WiFi task, not mDNS). Evaluate whether to keep the toggle (useful for debugging on other boards) or remove it (unnecessary complexity). Decision after WiFi performance testing.
+
+## ESP-IDF version pinning (pending)
+
+The `setup_esp_idf.py` script currently clones or pulls the latest from the ESP-IDF repo. Need to check: does it pin to a specific commit/tag, or does it always get latest? If latest, running "Setup ESP-IDF" in MoonDeck will silently change the IDF version, potentially breaking the build. Should pin to the tested version (`v6.1-dev-399-gd1b91b79b`) in the setup script or document that updates require re-testing.
+
+## Flash partition scheme (pending)
+
+With WiFi included, firmware grew from ~365KB to ~879KB. The default ESP32 partition table (`default.csv`) has a 1MB app partition. At 879KB / 1024KB = 86% full — little room for growth. Need to adopt a custom partition table (like projectMM v1) with a larger app partition. Options:
+- Single OTA: 2MB app partition (no OTA rollback, but maximum space)
+- Dual OTA: 2x 1.5MB app partitions (OTA updates with rollback, needs 4MB flash)
+- Filesystem partition for config persistence (item 11)
+
+Reference projectMM v1's partition scheme for a proven layout.

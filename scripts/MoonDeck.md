@@ -6,7 +6,7 @@
 - **Run/Stop toggle** for long-running scripts (Run desktop, Monitor ESP32).
 - **Group headers** in the sidebar (build, test, run, check, scenario, setup).
 - **Tab persistence** — selected tab survives page refresh.
-- **Process detection** — on page load, checks if mmv3 or idf.py is already running and shows Stop button.
+- **Process detection** — on page load, checks if projectMM or idf.py is already running and shows Stop button.
 
 ## PC Tab
 
@@ -38,7 +38,7 @@ Run the desktop executable. Long-running — shows Stop button.
 uv run scripts/run/run_desktop.py
 ```
 
-Kills any already-running mmv3, then runs `./build/mmv3`. Build first.
+Kills any already-running projectMM, then runs `./build/projectMM`. Build first.
 
 ### check_platform_boundary
 

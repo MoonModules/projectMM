@@ -9,12 +9,16 @@ enum class ControlType : uint8_t {
     Uint8,
     Uint16,
     Bool,
-    Text
+    Text,
+    ReadOnly,   // display-only text (ptr → char buffer)
+    Select,     // dropdown (ptr → uint8_t index, aux → options array pointer)
+    Progress    // bar with value/total (ptr → uint32_t value, aux = total)
 };
 
 struct ControlDescriptor {
     void* ptr = nullptr;
     const char* name = nullptr;
+    uintptr_t aux = 0;      // Progress: total capacity. Select: pointer to options array.
     ControlType type = ControlType::Uint8;
     uint8_t min = 0;
     uint8_t max = 255;
@@ -32,28 +36,43 @@ public:
 
     void addUint8(const char* name, uint8_t& var, uint8_t min = 0, uint8_t max = 255) {
         grow();
-        controls_[count_++] = {&var, name, ControlType::Uint8, min, max};
+        controls_[count_++] = {&var, name, 0, ControlType::Uint8, min, max};
     }
 
     void addUint16(const char* name, uint16_t& var) {
         grow();
-        controls_[count_++] = {&var, name, ControlType::Uint16, 0, 0};
+        controls_[count_++] = {&var, name, 0, ControlType::Uint16, 0, 0};
     }
 
     // lengthType (int16_t) — same wire format as uint16, values are always positive for dimensions
     void addInt16(const char* name, int16_t& var) {
         grow();
-        controls_[count_++] = {&var, name, ControlType::Uint16, 0, 0};
+        controls_[count_++] = {&var, name, 0, ControlType::Uint16, 0, 0};
     }
 
     void addBool(const char* name, bool& var) {
         grow();
-        controls_[count_++] = {&var, name, ControlType::Bool, 0, 1};
+        controls_[count_++] = {&var, name, 0, ControlType::Bool, 0, 1};
     }
 
     void addText(const char* name, char* var, uint8_t bufSize = 16) {
         grow();
-        controls_[count_++] = {var, name, ControlType::Text, 0, bufSize};
+        controls_[count_++] = {var, name, 0, ControlType::Text, 0, bufSize};
+    }
+
+    void addReadOnly(const char* name, char* var, uint8_t bufSize = 32) {
+        grow();
+        controls_[count_++] = {var, name, 0, ControlType::ReadOnly, 0, bufSize};
+    }
+
+    void addSelect(const char* name, uint8_t& var, const char* const* options, uint8_t optionCount) {
+        grow();
+        controls_[count_++] = {&var, name, reinterpret_cast<uintptr_t>(options), ControlType::Select, 0, optionCount};
+    }
+
+    void addProgress(const char* name, uint32_t& var, uint32_t total) {
+        grow();
+        controls_[count_++] = {&var, name, total, ControlType::Progress, 0, 0};
     }
 
     void clear() { count_ = 0; }

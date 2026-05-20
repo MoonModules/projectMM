@@ -52,6 +52,59 @@ size_t maxAllocBlock() {
     return 0; // Not meaningful on desktop (0 = unlimited)
 }
 
+size_t totalHeap() {
+    return 0; // Not meaningful on desktop
+}
+
+size_t totalInternalHeap() {
+    return 0; // Not meaningful on desktop
+}
+
+void getMacAddress(uint8_t mac[6]) {
+    // Stable fake MAC for desktop (consistent deviceName across runs)
+    mac[0] = 0xDE; mac[1] = 0xAD; mac[2] = 0xBE;
+    mac[3] = 0xEF; mac[4] = 0xCA; mac[5] = 0xFE;
+}
+
+const char* chipModel() {
+    return "desktop";
+}
+
+const char* sdkVersion() {
+#ifdef __clang__
+    return "clang " __clang_version__;
+#elif defined(__GNUC__)
+    return "gcc " __VERSION__;
+#else
+    return "unknown";
+#endif
+}
+
+size_t firmwareSize() { return 0; }
+size_t firmwarePartition() { return 0; }
+size_t flashChipSize() { return 0; }
+size_t filesystemUsed() { return 0; }
+size_t filesystemTotal() { return 0; }
+
+// Network stubs (desktop has no WiFi/Ethernet hardware)
+
+bool ethInit() { return false; }
+bool ethLinkUp() { return false; }
+bool ethConnected() { return false; }
+void ethGetIP(char* buf, size_t len) { if (len > 0) buf[0] = 0; }
+
+bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) { return false; }
+bool wifiStaConnected() { return false; }
+void wifiStaGetIP(char* buf, size_t len) { if (len > 0) buf[0] = 0; }
+void wifiStaStop() {}
+
+bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
+bool wifiApConnected() { return false; }
+void wifiApStop() {}
+
+bool mdnsInit(const char* /*deviceName*/) { return false; }
+void mdnsStop() {}
+
 // UdpSocket
 
 UdpSocket::~UdpSocket() {

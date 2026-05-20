@@ -34,9 +34,9 @@ def run(cmd, cwd=None, timeout=30):
 def collect_desktop():
     kpi = {}
 
-    mmv3 = BUILD_DIR / "mmv3"
-    if mmv3.exists():
-        kpi["binary_kb"] = mmv3.stat().st_size // 1024
+    projectMM = BUILD_DIR / "projectMM"
+    if projectMM.exists():
+        kpi["binary_kb"] = projectMM.stat().st_size // 1024
 
     test_exe = BUILD_DIR / "test" / "mm_tests"
     if test_exe.exists():
@@ -281,7 +281,7 @@ def main():
     else:
         # Full interactive report
         print("=" * 50)
-        print("  mmv3 KPI Report")
+        print("  projectMM KPI Report")
         print("=" * 50)
         print()
         print(format_oneliner(desktop, esp32, code))

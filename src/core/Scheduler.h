@@ -34,8 +34,9 @@ public:
         uint32_t now = platform::millis();
         uint32_t tickStart = platform::micros();
 
-        // loop() — every tick, timed per module
+        // loop() — every tick, timed per module (skip disabled)
         for (uint8_t i = 0; i < moduleCount_; i++) {
+            if (!modules_[i]->enabled()) continue;
             uint32_t modStart = platform::micros();
             modules_[i]->loop();
             modules_[i]->addAccumUs(platform::micros() - modStart);
@@ -45,6 +46,7 @@ public:
         if (now - lastLoop20ms_ >= 20) {
             lastLoop20ms_ = now;
             for (uint8_t i = 0; i < moduleCount_; i++) {
+                if (!modules_[i]->enabled()) continue;
                 uint32_t modStart = platform::micros();
                 modules_[i]->loop20ms();
                 modules_[i]->addAccumUs(platform::micros() - modStart);
@@ -55,6 +57,7 @@ public:
         if (now - lastLoop1s_ >= 1000) {
             lastLoop1s_ = now;
             for (uint8_t i = 0; i < moduleCount_; i++) {
+                if (!modules_[i]->enabled()) continue;
                 uint32_t modStart = platform::micros();
                 modules_[i]->loop1s();
                 modules_[i]->addAccumUs(platform::micros() - modStart);

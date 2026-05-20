@@ -99,7 +99,9 @@ Arduino can be added as an ESP-IDF component later if a specific Arduino library
 
 ### ESP-IDF version
 
-Minimum: ESP-IDF v5.1 (C++20 support via GCC 12+). Recommended: latest stable (v5.4 as of writing). The project also builds on v6.1-dev but that is pre-release — some APIs changed (e.g. `esp_eth_phy_new_lan87xx` → `esp_eth_phy_new_generic`, Ethernet kconfig symbol names). If using a dev version, expect occasional API churn.
+Currently tested on: **ESP-IDF v6.1-dev-399-gd1b91b79b**. This is the reference version — all builds and hardware tests use this exact commit.
+
+Minimum: ESP-IDF v5.1 (C++20 support via GCC 12+). The project targets v6.x APIs (e.g. `esp_eth_phy_new_generic`, component manager for mDNS). Building on v5.x may require API adjustments.
 
 MoonDeck's ESP-IDF setup script (`scripts/build/setup_esp_idf.py`) auto-detects the installed version and creates the required Python environment. Run it once after installing or updating ESP-IDF.
 
@@ -149,6 +151,17 @@ The project is structured as a set of CMake libraries:
 - An application target (links both, provides the entry point)
 
 Further decomposition (effects, networking, drivers as separate libraries) will happen when the codebase is large enough to justify it.
+
+### Pre-compilation steps
+
+CMake runs these automatically before compilation when their source files change:
+
+| Step | Source | Generated | Trigger |
+|------|--------|-----------|---------|
+| `version_gen` | `library.json` | `src/core/version.h` | library.json changes |
+| `ui_embed` | `src/ui/index.html`, `app.js`, `style.css` | `src/ui/ui_embedded.h` | any UI file changes |
+
+Both are defined in the root `CMakeLists.txt` (desktop) and `esp32/main/CMakeLists.txt` (ESP32). Generated files are gitignored — they're rebuilt on every clean build.
 
 ## Developer Tooling
 

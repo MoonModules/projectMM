@@ -41,6 +41,9 @@ public:
         name_[len] = 0;
     }
 
+    bool enabled() const { return enabled_; }
+    void setEnabled(bool e) { enabled_ = e; }
+
     MoonModule* parent() const { return parent_; }
     void setParent(MoonModule* p) { parent_ = p; }
 
@@ -105,6 +108,7 @@ protected:
 
 private:
     char name_[24] = {};
+    bool enabled_ = true;
     MoonModule* parent_ = nullptr;
     MoonModule** children_ = nullptr;
     uint8_t childCount_ = 0;

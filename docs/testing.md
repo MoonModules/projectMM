@@ -30,6 +30,16 @@ Tests `MoonModule` lifecycle and `Control` binding in `src/core/MoonModule.h` an
 - Control binding via ControlList (uint8_t, bool)
 - Pointer binding: changing variable updates control, changing via pointer updates variable
 - ControlList clear and rebuild
+- ReadOnly control: binds to char buffer, reflects updates
+- Select control: binds to uint8_t index, stores options pointer in aux, option count in max
+- Progress control: binds to uint32_t value, total stored in aux
+
+### SystemModule (`test/test_system_module.cpp`) {#systemmodule}
+
+Tests `SystemModule` in `src/core/SystemModule.h`.
+
+- MAC-to-deviceName: desktop MAC DE:AD:BE:EF:CA:FE produces "MM-CAFE"
+- Controls include deviceName as Text, uptime/fps/chip as ReadOnly
 
 ### Buffer (`test/test_buffer.cpp`) {#buffer}
 
@@ -161,6 +171,13 @@ Tests performance impact of control changes on a running system.
 - Toggles mirror X/Y and measures impact
 - Checks FPS bounds
 - Supports baseline comparison for regression detection
+
+### mdns-toggle (`test/scenarios/mdns-toggle.json`) {#scenario-mdns-toggle}
+
+Measures FPS impact of enabling/disabling mDNS on a running device.
+
+- Toggles mDNS on → off → on, measures tick/FPS at each step
+- Verified: mDNS has zero FPS impact (5KB heap difference only)
 
 ### Running live scenarios
 

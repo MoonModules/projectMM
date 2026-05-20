@@ -277,7 +277,9 @@ private:
 
         if (static_cast<size_t>(pos) >= bufSize) return;
         int n = std::snprintf(buf + pos, bufSize - pos,
-            "{\"name\":\"%s\",\"controls\":[", mod->name() ? mod->name() : "");
+            "{\"name\":\"%s\",\"enabled\":%s,\"controls\":[",
+            mod->name() ? mod->name() : "",
+            mod->enabled() ? "true" : "false");
         if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
         writeControls(buf, bufSize, pos, mod);
         append("]");
@@ -326,6 +328,31 @@ private:
                         "{\"name\":\"%s\",\"type\":\"text\",\"value\":\"%s\"}",
                         c.name, static_cast<char*>(c.ptr));
                     break;
+                case ControlType::ReadOnly:
+                    n = std::snprintf(buf + pos, bufSize - pos,
+                        "{\"name\":\"%s\",\"type\":\"display\",\"value\":\"%s\"}",
+                        c.name, static_cast<char*>(c.ptr));
+                    break;
+                case ControlType::Select: {
+                    n = std::snprintf(buf + pos, bufSize - pos,
+                        "{\"name\":\"%s\",\"type\":\"select\",\"value\":%u,\"options\":[",
+                        c.name, *static_cast<uint8_t*>(c.ptr));
+                    if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
+                    auto* options = reinterpret_cast<const char* const*>(c.aux);
+                    for (uint8_t o = 0; o < c.max; o++) {
+                        n = std::snprintf(buf + pos, bufSize - pos,
+                            "%s\"%s\"", o > 0 ? "," : "", options[o]);
+                        if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
+                    }
+                    n = std::snprintf(buf + pos, bufSize - pos, "]}");
+                    break;
+                }
+                case ControlType::Progress:
+                    n = std::snprintf(buf + pos, bufSize - pos,
+                        "{\"name\":\"%s\",\"type\":\"progress\",\"value\":%lu,\"total\":%lu}",
+                        c.name, static_cast<unsigned long>(*static_cast<uint32_t*>(c.ptr)),
+                        static_cast<unsigned long>(c.aux));
+                    break;
             }
             if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
         }
@@ -346,6 +373,14 @@ private:
         MoonModule* target = findModuleByName(moduleName);
         if (!target) {
             sendResponse(conn, 404, "application/json", "{\"error\":\"module not found\"}");
+            return;
+        }
+
+        // Handle module-level "enabled" property
+        if (std::strcmp(controlName, "enabled") == 0) {
+            target->setEnabled(parseJsonBool(body, "value"));
+            if (scheduler_) scheduler_->rebuild();
+            sendResponse(conn, 200, "application/json", "{\"ok\":true}");
             return;
         }
 
@@ -379,6 +414,19 @@ private:
                     static_cast<char*>(c.ptr)[maxLen] = '\0';
                     break;
                 }
+                case ControlType::Select: {
+                    int v = parseJsonInt(body, "value");
+                    *static_cast<uint8_t*>(c.ptr) = static_cast<uint8_t>(v);
+                    break;
+                }
+                case ControlType::ReadOnly:
+                case ControlType::Progress:
+                    break; // read-only, skip
+            }
+            // Rebuild controls only for Select (dynamic onBuildControls), rebuild pipeline for all
+            if (c.type == ControlType::Select) {
+                target->controls().clear();
+                target->onBuildControls();
             }
             if (scheduler_) scheduler_->rebuild();
 

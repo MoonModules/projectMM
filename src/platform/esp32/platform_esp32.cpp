@@ -2,12 +2,29 @@
 
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
+#include "esp_system.h"
+#include "esp_chip_info.h"
+#include "esp_mac.h"
+#include "esp_idf_version.h"
+#include "esp_partition.h"
+#include "esp_ota_ops.h"
+#include "esp_image_format.h"
+#include "esp_flash.h"
+#include "esp_event.h"
+#include "esp_netif.h"
+#include "esp_eth.h"
+#include "esp_wifi.h"
+#include "esp_log.h"
+#include "mdns.h"
+#include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
 #include "lwip/inet.h"
 
 #include <cstdlib>
+#include <cstdio>
+#include <cstring>
 
 namespace mm::platform {
 
@@ -46,6 +63,322 @@ size_t freeInternalHeap() {
 
 size_t maxAllocBlock() {
     return heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+}
+
+size_t totalHeap() {
+    return heap_caps_get_total_size(MALLOC_CAP_8BIT);
+}
+
+size_t totalInternalHeap() {
+    return heap_caps_get_total_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+
+void getMacAddress(uint8_t mac[6]) {
+    esp_efuse_mac_get_default(mac);
+}
+
+const char* chipModel() {
+    esp_chip_info_t info;
+    esp_chip_info(&info);
+    switch (info.model) {
+        case CHIP_ESP32:   return "ESP32";
+        case CHIP_ESP32S2: return "ESP32-S2";
+        case CHIP_ESP32S3: return "ESP32-S3";
+        case CHIP_ESP32C3: return "ESP32-C3";
+        default:           return "ESP32-?";
+    }
+}
+
+const char* sdkVersion() {
+    return esp_get_idf_version();
+}
+
+size_t firmwareSize() {
+    // Get actual running image size from the image header
+    const esp_partition_t* part = esp_ota_get_running_partition();
+    if (!part) return 0;
+    esp_partition_pos_t partPos = { .offset = part->address, .size = part->size };
+    esp_image_metadata_t metadata;
+    if (esp_image_get_metadata(&partPos, &metadata) == ESP_OK) {
+        return metadata.image_len;
+    }
+    return 0;
+}
+
+size_t firmwarePartition() {
+    const esp_partition_t* part = esp_ota_get_running_partition();
+    if (part) return part->size;
+    return 0;
+}
+
+size_t flashChipSize() {
+    uint32_t chipSize = 0;
+    esp_flash_get_size(nullptr, &chipSize);
+    return chipSize;
+}
+
+size_t filesystemUsed() {
+    // TODO: implement when filesystem (LittleFS/SPIFFS) is added
+    return 0;
+}
+
+size_t filesystemTotal() {
+    // TODO: implement when filesystem is added
+    return 0;
+}
+
+// -----------------------------------------------------------------------
+// Network
+// -----------------------------------------------------------------------
+
+static const char* NET_TAG = "mm_net";
+
+// Connection state tracked by event handlers
+static bool ethLinkUp_ = false;
+static bool ethConnected_ = false;
+static bool wifiStaConnected_ = false;
+static bool wifiApActive_ = false;
+static esp_netif_t* ethNetif_ = nullptr;
+static esp_netif_t* staNetif_ = nullptr;
+static bool netifInitDone_ = false;
+static bool wifiInitDone_ = false;
+
+static void ensureNetifInit() {
+    if (!netifInitDone_) {
+        ESP_ERROR_CHECK(esp_netif_init());
+        ESP_ERROR_CHECK(esp_event_loop_create_default());
+        netifInitDone_ = true;
+    }
+}
+
+static void ethEventHandler(void* /*arg*/, esp_event_base_t base,
+                            int32_t id, void* data) {
+    if (base == ETH_EVENT) {
+        if (id == ETHERNET_EVENT_CONNECTED) {
+            ESP_LOGI(NET_TAG, "Ethernet link up");
+            ethLinkUp_ = true;
+        } else if (id == ETHERNET_EVENT_DISCONNECTED) {
+            ethLinkUp_ = false;
+            ESP_LOGI(NET_TAG, "Ethernet link down");
+            ethConnected_ = false;
+        } else if (id == ETHERNET_EVENT_START) {
+            ESP_LOGI(NET_TAG, "Ethernet started");
+        }
+    } else if (base == IP_EVENT && id == IP_EVENT_ETH_GOT_IP) {
+        auto* event = static_cast<ip_event_got_ip_t*>(data);
+        ESP_LOGI(NET_TAG, "Ethernet got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        ethConnected_ = true;
+    }
+}
+
+bool ethInit() {
+    ensureNetifInit();
+
+    esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
+    ethNetif_ = esp_netif_new(&netif_cfg);
+
+    // MAC config — Olimex ESP32-Gateway Rev G: RMII clock output on GPIO17
+    eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
+    eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
+    emac_config.clock_config.rmii.clock_mode = EMAC_CLK_OUT;
+    emac_config.clock_config.rmii.clock_gpio = static_cast<int>(GPIO_NUM_17);
+
+    // PHY config — Olimex ESP32-Gateway: LAN8720, addr 0, reset GPIO 5
+    eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
+    phy_config.phy_addr = 0;
+    phy_config.reset_gpio_num = 5;
+
+    esp_eth_mac_t* mac = esp_eth_mac_new_esp32(&emac_config, &mac_config);
+    esp_eth_phy_t* phy = esp_eth_phy_new_generic(&phy_config);
+
+    esp_eth_config_t eth_config = ETH_DEFAULT_CONFIG(mac, phy);
+    esp_eth_handle_t eth_handle = nullptr;
+    esp_err_t err = esp_eth_driver_install(&eth_config, &eth_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(NET_TAG, "Ethernet driver install failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    ESP_ERROR_CHECK(esp_netif_attach(ethNetif_, esp_eth_new_netif_glue(eth_handle)));
+
+    ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID,
+                                               &ethEventHandler, nullptr));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP,
+                                               &ethEventHandler, nullptr));
+
+    err = esp_eth_start(eth_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(NET_TAG, "Ethernet start failed: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    ESP_LOGI(NET_TAG, "Ethernet init done (non-blocking)");
+    return true;
+}
+
+bool ethLinkUp() {
+    return ethLinkUp_;
+}
+
+bool ethConnected() {
+    return ethConnected_;
+}
+
+void ethGetIP(char* buf, size_t len) {
+    if (!ethNetif_ || len == 0) { if (len > 0) buf[0] = 0; return; }
+    esp_netif_ip_info_t info;
+    if (esp_netif_get_ip_info(ethNetif_, &info) == ESP_OK) {
+        std::snprintf(buf, len, IPSTR, IP2STR(&info.ip));
+    } else {
+        buf[0] = 0;
+    }
+}
+
+// WiFi event handler
+static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
+                             int32_t id, void* data) {
+    if (base == WIFI_EVENT) {
+        if (id == WIFI_EVENT_STA_DISCONNECTED) {
+            ESP_LOGI(NET_TAG, "WiFi STA disconnected");
+            wifiStaConnected_ = false;
+        } else if (id == WIFI_EVENT_AP_STACONNECTED) {
+            ESP_LOGI(NET_TAG, "WiFi AP client connected");
+        } else if (id == WIFI_EVENT_AP_STADISCONNECTED) {
+            ESP_LOGI(NET_TAG, "WiFi AP client disconnected");
+        }
+    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        auto* event = static_cast<ip_event_got_ip_t*>(data);
+        ESP_LOGI(NET_TAG, "WiFi STA got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        wifiStaConnected_ = true;
+    }
+}
+
+static void ensureWifiInit() {
+    if (wifiInitDone_) return;
+    ensureNetifInit();
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                               &wifiEventHandler, nullptr));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                               &wifiEventHandler, nullptr));
+
+    wifiInitDone_ = true;
+}
+
+bool wifiStaInit(const char* ssid, const char* password) {
+    if (!ssid || ssid[0] == 0) return false;
+    ensureWifiInit();
+
+    staNetif_ = esp_netif_create_default_wifi_sta();
+
+    wifi_config_t wifi_config = {};
+    std::strncpy(reinterpret_cast<char*>(wifi_config.sta.ssid), ssid, sizeof(wifi_config.sta.ssid) - 1);
+    if (password && password[0] != 0) {
+        std::strncpy(reinterpret_cast<char*>(wifi_config.sta.password), password, sizeof(wifi_config.sta.password) - 1);
+    }
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    esp_err_t err = esp_wifi_connect();
+    if (err != ESP_OK) {
+        ESP_LOGE(NET_TAG, "WiFi STA connect failed: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    ESP_LOGI(NET_TAG, "WiFi STA init done (non-blocking), SSID: %s", ssid);
+    return true;
+}
+
+bool wifiStaConnected() {
+    return wifiStaConnected_;
+}
+
+void wifiStaGetIP(char* buf, size_t len) {
+    if (!staNetif_ || len == 0) { if (len > 0) buf[0] = 0; return; }
+    esp_netif_ip_info_t info;
+    if (esp_netif_get_ip_info(staNetif_, &info) == ESP_OK) {
+        std::snprintf(buf, len, IPSTR, IP2STR(&info.ip));
+    } else {
+        buf[0] = 0;
+    }
+}
+
+void wifiStaStop() {
+    esp_wifi_disconnect();
+    esp_wifi_stop();
+    esp_wifi_deinit();
+    wifiStaConnected_ = false;
+    wifiInitDone_ = false;
+    ESP_LOGI(NET_TAG, "WiFi STA stopped + deinit");
+}
+
+bool wifiApInit(const char* apName, const char* ip) {
+    ensureWifiInit();
+
+    esp_netif_t* apNetif = esp_netif_create_default_wifi_ap();
+
+    // Set static IP for AP
+    if (ip && ip[0] != 0) {
+        esp_netif_dhcps_stop(apNetif);
+        esp_netif_ip_info_t ipInfo = {};
+        esp_netif_str_to_ip4(ip, &ipInfo.ip);
+        ipInfo.gw = ipInfo.ip;
+        IP4_ADDR(&ipInfo.netmask, 255, 255, 255, 0);
+        esp_netif_set_ip_info(apNetif, &ipInfo);
+        esp_netif_dhcps_start(apNetif);
+    }
+
+    wifi_config_t wifi_config = {};
+    if (apName) {
+        std::strncpy(reinterpret_cast<char*>(wifi_config.ap.ssid), apName, sizeof(wifi_config.ap.ssid) - 1);
+        wifi_config.ap.ssid_len = static_cast<uint8_t>(std::strlen(apName));
+    }
+    wifi_config.ap.channel = 1;
+    wifi_config.ap.max_connection = 4;
+    wifi_config.ap.authmode = WIFI_AUTH_OPEN;
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    wifiApActive_ = true;
+    ESP_LOGI(NET_TAG, "WiFi AP started: %s @ %s", apName ? apName : "?", ip ? ip : "?");
+    return true;
+}
+
+bool wifiApConnected() {
+    return wifiApActive_;
+}
+
+void wifiApStop() {
+    esp_wifi_stop();
+    esp_wifi_deinit();
+    wifiApActive_ = false;
+    wifiInitDone_ = false;
+    ESP_LOGI(NET_TAG, "WiFi AP stopped + deinit");
+}
+
+bool mdnsInit(const char* deviceName) {
+    esp_err_t err = mdns_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(NET_TAG, "mDNS init failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    err = mdns_hostname_set(deviceName);
+    if (err != ESP_OK) {
+        ESP_LOGE(NET_TAG, "mDNS hostname set failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    ESP_LOGI(NET_TAG, "mDNS started: %s.local", deviceName);
+    return true;
+}
+
+void mdnsStop() {
+    mdns_free();
 }
 
 // UdpSocket

@@ -17,6 +17,7 @@ header {
     gap: 12px;
     border-bottom: 1px solid #0f3460;
 }
+#device-name { color: #a0a0b0; font-size: 14px; }
 
 header h1 {
     font-size: 18px;

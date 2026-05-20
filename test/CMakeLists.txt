@@ -2,6 +2,7 @@ add_executable(mm_tests
     test_color.cpp
     test_buffer.cpp
     test_moonmodule.cpp
+    test_system_module.cpp
     test_grid_layout.cpp
     test_rainbow.cpp
     test_artnet_packet.cpp

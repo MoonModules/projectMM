@@ -39,6 +39,12 @@ Every MoonModule tracks `loopTimeUs()` — average microseconds per tick, comput
 
 `tickTimeUs` is the primary performance metric. FPS is derived from it (`1000000 / tickTimeUs`). This gives per-module cost visibility at any depth in the tree.
 
+## Enabled toggle
+
+Every MoonModule has an `enabled` property (default: true). When disabled, the Scheduler skips `loop()`, `loop20ms()`, and `loop1s()` — the module stops processing but remains in the tree. The UI shows a checkbox in the card header to toggle it. Settable via `POST /api/control` with `control=enabled`.
+
+This is a module-level property, not a regular control — it's serialized as `"enabled": true/false` in the module JSON, not in the controls array.
+
 ## Parent/child
 
 Modules form a tree. Parent/child relationships only (no arbitrary DAG like v2's AutoWireSpec — simpler, sufficient). Children run in order within their parent. Top-level modules also run in order. UI supports reordering, backed by the backend.

@@ -1,4 +1,4 @@
-// mmv3 Web UI
+// projectMM Web UI
 
 let state = null;
 let selectedModule = null;
@@ -35,6 +35,7 @@ function connectWs() {
             const data = JSON.parse(e.data);
             state = data;
             updateValues();
+            updateDeviceName();
         } catch {
             // ignore malformed messages
         }
@@ -83,6 +84,18 @@ function selectModule(name) {
     renderCards();
 }
 
+function updateDeviceName() {
+    if (!state || !state.modules) return;
+    const sys = state.modules.find(m => m.name === "System");
+    if (!sys || !sys.controls) return;
+    const nameCtrl = sys.controls.find(c => c.name === "deviceName");
+    if (!nameCtrl || !nameCtrl.value) return;
+    const deviceName = nameCtrl.value;
+    document.title = deviceName + " — projectMM";
+    const topBar = document.getElementById("device-name");
+    if (topBar) topBar.textContent = deviceName;
+}
+
 // ---------------------------------------------------------------------------
 // Module cards
 // ---------------------------------------------------------------------------
@@ -115,7 +128,20 @@ function createCard(mod) {
 
     const title = document.createElement("div");
     title.className = "card-title";
-    title.textContent = mod.name;
+
+    const enabledToggle = document.createElement("input");
+    enabledToggle.type = "checkbox";
+    enabledToggle.checked = mod.enabled !== false;
+    enabledToggle.className = "module-enabled";
+    enabledToggle.addEventListener("change", () => {
+        sendControl(mod.name, "enabled", enabledToggle.checked);
+    });
+    title.appendChild(enabledToggle);
+
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = mod.name;
+    title.appendChild(nameSpan);
+
     card.appendChild(title);
 
     if (mod.controls) {
@@ -212,6 +238,49 @@ function createControl(moduleName, ctrl) {
         });
 
         row.appendChild(input);
+
+    } else if (ctrl.type === "display") {
+        const span = document.createElement("span");
+        span.className = "control-display";
+        span.textContent = ctrl.value || "";
+        span.dataset.key = key;
+        row.appendChild(span);
+
+    } else if (ctrl.type === "select") {
+        const select = document.createElement("select");
+        select.dataset.key = key;
+        if (ctrl.options) {
+            for (let o = 0; o < ctrl.options.length; o++) {
+                const opt = document.createElement("option");
+                opt.value = o;
+                opt.textContent = ctrl.options[o];
+                if (o === ctrl.value) opt.selected = true;
+                select.appendChild(opt);
+            }
+        }
+        select.addEventListener("change", async () => {
+            await sendControl(moduleName, ctrl.name, parseInt(select.value));
+            // Server rebuilds controls (dynamic onBuildControls) — re-fetch and re-render
+            setTimeout(async () => {
+                const resp = await fetch("/api/state");
+                state = await resp.json();
+                renderCards();
+            }, 200);
+        });
+        row.appendChild(select);
+
+    } else if (ctrl.type === "progress") {
+        const bar = document.createElement("progress");
+        bar.max = ctrl.total || 100;
+        bar.value = ctrl.value || 0;
+        bar.dataset.key = key;
+        const pct = ctrl.total > 0 ? Math.round(ctrl.value * 100 / ctrl.total) : 0;
+        const valSpan = document.createElement("span");
+        valSpan.className = "control-value";
+        valSpan.textContent = `${Math.round(ctrl.value/1024)}KB / ${Math.round(ctrl.total/1024)}KB (${pct}%)`;
+        valSpan.dataset.key = key + ".label";
+        row.appendChild(bar);
+        row.appendChild(valSpan);
     }
 
     return row;
@@ -267,6 +336,30 @@ function updateModuleControls(mod) {
         const text = document.querySelector(`input[data-key="${key}"][type="text"]`);
         if (text && text.value !== ctrl.value) {
             text.value = ctrl.value || "";
+        }
+
+        // Update display (read-only)
+        const display = document.querySelector(`span.control-display[data-key="${key}"]`);
+        if (display && display.textContent !== String(ctrl.value || "")) {
+            display.textContent = ctrl.value || "";
+        }
+
+        // Update select
+        const select = document.querySelector(`select[data-key="${key}"]`);
+        if (select && parseInt(select.value) !== ctrl.value) {
+            select.value = ctrl.value;
+        }
+
+        // Update progress
+        const bar = document.querySelector(`progress[data-key="${key}"]`);
+        if (bar) {
+            bar.value = ctrl.value || 0;
+            bar.max = ctrl.total || 100;
+            const lbl = document.querySelector(`span[data-key="${key}.label"]`);
+            if (lbl) {
+                const pct = ctrl.total > 0 ? Math.round(ctrl.value * 100 / ctrl.total) : 0;
+                lbl.textContent = `${Math.round(ctrl.value/1024)}KB / ${Math.round(ctrl.total/1024)}KB (${pct}%)`;
+            }
         }
     }
 }

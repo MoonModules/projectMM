@@ -11,16 +11,34 @@ Controls bind to class variables by reference (proven in MoonLight, v1, v2). The
 | Type | Storage | UI | DMX-compatible |
 |------|---------|-----|----------------|
 | uint8_t | 1 byte, min/max | Slider (0-255) | Yes — preferred default |
+| uint16_t | 2 bytes | Number input | Yes (universe number, port) |
 | bool | 1 byte | Toggle | Yes (0/1) |
 | char[N] | fixed buffer | Text input | No |
-| select | uint8_t index | Dropdown | Yes (mode selection) |
+| ReadOnly | char[N] buffer | Display text (read-only) | No |
+| Select | uint8_t index | Dropdown | Yes (mode selection) |
+| Progress | uint32_t value + total | Progress bar | No |
 
 Additional types — add only when needed:
-- uint16_t — for values that genuinely exceed 255 (e.g. universe number)
 - float — use minimally, prefer uint8_t where possible
 - Coord3D — for position controls
-- display (read-only) — for status values
-- progress — for progress bars
+
+### ReadOnly
+
+Display-only text value. Binds to a `char[]` buffer. The module updates the buffer in `loop1s()` and the UI renders it as static text. Cannot be set by the user or via API. Used for status strings (uptime, IP address, chip info).
+
+`controls_.addReadOnly("status", buf, sizeof(buf));`
+
+### Select
+
+Dropdown with named options. Binds to a `uint8_t` index. Options are stored as a `const char* const*` array pointer in `aux`. Option count is stored in `max`. Used for mode selection (DHCP/Static, effect type). When the selected value changes, `onBuildControls()` can rebuild to show/hide dependent controls.
+
+`controls_.addSelect("mode", modeVar, optionsArray, optionCount);`
+
+### Progress
+
+Bar showing value/total. Binds to a `uint32_t` value. Total capacity is stored in `aux`. Used for heap usage, buffer fill level. Read-only — value updated by module code.
+
+`controls_.addProgress("freeHeap", heapVar, totalHeap);`
 
 No color picker (RGB) control type — effects use palette index (uint8_t) instead.
 

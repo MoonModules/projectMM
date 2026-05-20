@@ -25,7 +25,7 @@
       "help": "run_desktop",
       "script": "run/run_desktop.py",
       "long_running": true,
-      "process_name": "mmv3"
+      "process_name": "projectMM"
     },
     {
       "id": "check_platform_boundary",

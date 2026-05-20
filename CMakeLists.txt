@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(mmv3 LANGUAGES CXX)
+project(projectMM LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -15,6 +15,15 @@ target_include_directories(mm_core INTERFACE src/)
 add_library(mm_platform src/platform/desktop/platform_desktop.cpp)
 target_include_directories(mm_platform PUBLIC src/ src/platform/desktop/)
 
+# Generate version.h from library.json
+add_custom_command(
+    OUTPUT ${CMAKE_SOURCE_DIR}/src/core/version.h
+    COMMAND ${CMAKE_COMMAND} -E env python3 ${CMAKE_SOURCE_DIR}/scripts/build/generate_version.py
+    DEPENDS ${CMAKE_SOURCE_DIR}/library.json
+    COMMENT "Generating version.h"
+)
+add_custom_target(version_gen DEPENDS ${CMAKE_SOURCE_DIR}/src/core/version.h)
+
 # Embed UI files as C arrays
 add_custom_command(
     OUTPUT ${CMAKE_SOURCE_DIR}/src/ui/ui_embedded.h
@@ -25,9 +34,9 @@ add_custom_command(
 add_custom_target(ui_embed DEPENDS ${CMAKE_SOURCE_DIR}/src/ui/ui_embedded.h)
 
 # Application
-add_executable(mmv3 src/main.cpp src/platform/desktop/main_desktop.cpp)
-target_link_libraries(mmv3 PRIVATE mm_core mm_platform)
-add_dependencies(mmv3 ui_embed)
+add_executable(projectMM src/main.cpp src/platform/desktop/main_desktop.cpp)
+target_link_libraries(projectMM PRIVATE mm_core mm_platform)
+add_dependencies(projectMM ui_embed version_gen)
 
 # Tests
 enable_testing()
