@@ -106,10 +106,10 @@ docs/
   plan.md                  ← what to build next
   architecture.md          ← core system design
   architecture-light.md    ← light domain design
+  performance.md           ← per-module timing, memory, sizeof for each platform
   testing.md               ← test inventory with anchored sections
   history/                 ← accumulated wisdom
     decisions.md           ← actions, lessons, proven patterns
-    memory-budget.md       ← ESP32 heap breakdown and optimization ideas
     plan-NN.md             ← plans for each feature (numbered)
     archive/               ← reviewed plans moved here after branch merge
   moonmodules/             ← one page per MoonModule (specs before code)
@@ -128,6 +128,7 @@ The `history/` folder is the distilled experience of years of building LED/light
 - Namespace: `mm`, platform code in `mm::platform`
 - No `using namespace` in headers
 - MoonModules are single-file (`.h` only, implementation inline)
+- Semantic variable names — name variables for what they represent, not just their type. `availableHeap` not `available`, `internalHeap` not `internal`, `lutBytes` not `bytes`. A reader should understand the variable without looking at its assignment.
 - No hard line wraps in markdown — let the editor soft-wrap
 
 ## Agent Roles

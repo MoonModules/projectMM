@@ -35,7 +35,7 @@ TEST_CASE("MoonModule lifecycle") {
 
 TEST_CASE("MoonModule name") {
     TestModule mod;
-    CHECK(mod.name() == nullptr);
+    CHECK(mod.name()[0] == '\0');
     mod.setName("TestModule");
     CHECK(std::strcmp(mod.name(), "TestModule") == 0);
 }

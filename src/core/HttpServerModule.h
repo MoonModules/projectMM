@@ -416,10 +416,11 @@ private:
 
     void serveSystem(platform::TcpConnection& conn) {
         int pos = std::snprintf(jsonBuf_, JSON_BUF_SIZE,
-            "{\"fps\":%u,\"tickTimeUs\":%u,\"freeHeap\":%u,\"maxBlock\":%u,\"uptime\":%u,\"modules\":[",
+            "{\"fps\":%u,\"tickTimeUs\":%u,\"freeHeap\":%u,\"freeInternal\":%u,\"maxBlock\":%u,\"uptime\":%u,\"modules\":[",
             static_cast<unsigned>(scheduler_ ? scheduler_->fps() : 0),
             static_cast<unsigned>(scheduler_ ? scheduler_->tickTimeUs() : 0),
             static_cast<unsigned>(platform::freeHeap()),
+            static_cast<unsigned>(platform::freeInternalHeap()),
             static_cast<unsigned>(platform::maxAllocBlock()),
             static_cast<unsigned>(scheduler_ ? scheduler_->elapsed() / 1000 : 0));
 
@@ -427,27 +428,29 @@ private:
         if (scheduler_ && pos > 0 && static_cast<size_t>(pos) < JSON_BUF_SIZE) {
             bool first = true;
             for (uint8_t i = 0; i < scheduler_->moduleCount(); i++) {
-                writeModuleTimingJson(jsonBuf_, JSON_BUF_SIZE, pos, scheduler_->module(i), first);
+                writeModuleMetricsJson(jsonBuf_, JSON_BUF_SIZE, pos, scheduler_->module(i), first);
             }
         }
 
         int n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos, "]}");
-        if (n > 0) pos += n;
+        if (n > 0 && static_cast<size_t>(pos + n) < JSON_BUF_SIZE) pos += n;
 
         sendResponse(conn, 200, "application/json", jsonBuf_);
     }
 
-    void writeModuleTimingJson(char* buf, size_t bufSize, int& pos, MoonModule* mod, bool& first) {
+    void writeModuleMetricsJson(char* buf, size_t bufSize, int& pos, MoonModule* mod, bool& first) {
         if (!mod || static_cast<size_t>(pos) >= bufSize) return;
         int n = std::snprintf(buf + pos, bufSize - pos,
-            "%s{\"name\":\"%s\",\"us\":%u}",
+            "%s{\"name\":\"%s\",\"us\":%u,\"classSize\":%u,\"heap\":%u}",
             first ? "" : ",",
             mod->name() ? mod->name() : "?",
-            static_cast<unsigned>(mod->loopTimeUs()));
+            static_cast<unsigned>(mod->loopTimeUs()),
+            static_cast<unsigned>(mod->classSize()),
+            static_cast<unsigned>(mod->dynamicBytes()));
         if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
         first = false;
         for (uint8_t i = 0; i < mod->childCount(); i++) {
-            writeModuleTimingJson(buf, bufSize, pos, mod->child(i), first);
+            writeModuleMetricsJson(buf, bufSize, pos, mod->child(i), first);
         }
     }
 

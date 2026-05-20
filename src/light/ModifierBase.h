@@ -10,6 +10,9 @@ public:
     ModuleRole role() const override { return ModuleRole::Modifier; }
     virtual bool isStatic() const { return true; }
 
+    // Max physical destinations per logical light (for LUT allocation estimate)
+    virtual uint8_t maxMultiplier() const { return 8; }
+
     // Compute logical dimensions given physical dimensions
     virtual void logicalDimensions(lengthType physW, lengthType physH, lengthType physD,
                                    lengthType& logW, lengthType& logH, lengthType& logD) const = 0;

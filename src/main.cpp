@@ -12,20 +12,38 @@
 #include <cstdio>
 
 static void registerModuleTypes() {
-    mm::ModuleFactory::registerType("GridLayout", []() -> mm::MoonModule* { return new mm::GridLayout(); });
-    mm::ModuleFactory::registerType("RainbowEffect", []() -> mm::MoonModule* { return new mm::RainbowEffect(); });
-    mm::ModuleFactory::registerType("NoiseEffect", []() -> mm::MoonModule* { return new mm::NoiseEffect(); });
-    mm::ModuleFactory::registerType("MirrorModifier", []() -> mm::MoonModule* { return new mm::MirrorModifier(); });
-    mm::ModuleFactory::registerType("ArtNetSendDriver", []() -> mm::MoonModule* { return new mm::ArtNetSendDriver(); });
-    mm::ModuleFactory::registerType("PreviewDriver", []() -> mm::MoonModule* { return new mm::PreviewDriver(); });
+    // Containers
+    mm::ModuleFactory::registerType<mm::LayoutGroup>("LayoutGroup");
+    mm::ModuleFactory::registerType<mm::Layer>("Layer");
+    mm::ModuleFactory::registerType<mm::DriverGroup>("DriverGroup");
+    // Concrete modules
+    mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout");
+    mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
+    mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect");
+    mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier");
+    mm::ModuleFactory::registerType<mm::ArtNetSendDriver>("ArtNetSendDriver");
+    mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver");
 }
 
-static void printModuleTiming(mm::MoonModule* mod, int depth) {
+// Set classSize on a stack-allocated module (not created via factory)
+template<typename T>
+static void initModule(T& mod, const char* name) {
+    mod.setName(name);
+    mod.setClassSize(sizeof(T));
+}
+
+static void printModuleMetrics(mm::MoonModule* mod, int depth) {
     if (!mod) return;
-    std::printf("  %s:%uus", mod->name() ? mod->name() : "?",
-                static_cast<unsigned>(mod->loopTimeUs()));
+    if (mod->dynamicBytes() > 0) {
+        std::printf("  %s:%uus/%uKB", mod->name() ? mod->name() : "?",
+                    static_cast<unsigned>(mod->loopTimeUs()),
+                    static_cast<unsigned>(mod->dynamicBytes() / 1024));
+    } else {
+        std::printf("  %s:%uus", mod->name() ? mod->name() : "?",
+                    static_cast<unsigned>(mod->loopTimeUs()));
+    }
     for (uint8_t i = 0; i < mod->childCount(); i++) {
-        printModuleTiming(mod->child(i), depth + 1);
+        printModuleMetrics(mod->child(i), depth + 1);
     }
 }
 
@@ -35,42 +53,42 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
 
     // Layout
     mm::LayoutGroup layoutGroup;
-    layoutGroup.setName("LayoutGroup");
+    initModule(layoutGroup, "LayoutGroup");
 
     mm::GridLayout grid;
-    grid.setName("Grid");
+    initModule(grid, "Grid");
     grid.width = gridW;
     grid.height = gridH;
     layoutGroup.addChild(&grid);
 
     // Layer + Effect
     mm::Layer layer;
-    layer.setName("Layer");
+    initModule(layer, "Layer");
     layer.setLayoutGroup(&layoutGroup);
     layer.setChannelsPerLight(3);
 
     mm::NoiseEffect noise;
-    noise.setName("Noise");
+    initModule(noise, "Noise");
     layer.addChild(&noise);
 
     // Modifier
     mm::MirrorModifier mirror;
-    mirror.setName("Mirror");
+    initModule(mirror, "Mirror");
     layer.addChild(&mirror);
 
     // Driver Group + ArtNet
     mm::DriverGroup driverGroup;
-    driverGroup.setName("DriverGroup");
+    initModule(driverGroup, "DriverGroup");
     driverGroup.setLayer(&layer);
 
     mm::ArtNetSendDriver artnet;
-    artnet.setName("ArtNet");
+    initModule(artnet, "ArtNet");
     driverGroup.addChild(&artnet);
 
     // Preview driver (WebSocket binary frames)
     mm::PreviewFrame previewFrame;
     mm::PreviewDriver preview;
-    preview.setName("Preview");
+    initModule(preview, "Preview");
     preview.width = gridW;
     preview.height = gridH;
     preview.setPreviewFrame(&previewFrame);
@@ -78,7 +96,7 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
 
     // HTTP Server + WebSocket
     mm::HttpServerModule httpServer;
-    httpServer.setName("HttpServer");
+    initModule(httpServer, "HttpServer");
     httpServer.port = httpPort;
     httpServer.setScheduler(&scheduler);
     httpServer.setPreviewFrame(&previewFrame);
@@ -97,6 +115,9 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
                 grid.width, grid.height,
                 static_cast<unsigned long>(lights),
                 static_cast<unsigned long>(bufBytes));
+    std::printf("sizeof: MoonModule=%zu Layer=%zu DriverGroup=%zu Grid=%zu HttpServer=%zu\n",
+                sizeof(mm::MoonModule), sizeof(mm::Layer), sizeof(mm::DriverGroup),
+                sizeof(mm::GridLayout), sizeof(mm::HttpServerModule));
     std::printf("ArtNet → %s\n", artnet.ip);
     std::printf("HTTP server → http://localhost:%u\n", httpServer.port);
 
@@ -127,7 +148,7 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
             }
             // Per-module timing (walk tree recursively)
             for (uint8_t i = 0; i < scheduler.moduleCount(); i++) {
-                printModuleTiming(scheduler.module(i), 0);
+                printModuleMetrics(scheduler.module(i), 0);
             }
             std::printf("\n");
             std::fflush(stdout);

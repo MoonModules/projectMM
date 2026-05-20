@@ -186,10 +186,26 @@ select {
     border: 1px solid #0f3460;
     border-radius: 4px;
     padding: 6px 10px;
-    cursor: pointer;
     font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
-.device-item:hover { border-color: #e94560; color: #e94560; }
+.device-item:hover { border-color: #e94560; }
+.device-item input[type="checkbox"] { margin: 0; cursor: pointer; }
+.device-item span { cursor: pointer; }
+.device-item span:hover { color: #e94560; }
+.device-status {
+    width: 8px; height: 8px; border-radius: 50%;
+    display: inline-block; flex-shrink: 0;
+}
+.device-status.online { background: #4caf50; }
+.device-status.offline { background: #666; }
+.device-remove {
+    margin-left: auto; background: none; border: none; color: #666;
+    cursor: pointer; font-size: 11px; padding: 0 4px;
+}
+.device-remove:hover { color: #e94560; }
 
 /* Main pane */
 .main-pane {

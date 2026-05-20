@@ -4,23 +4,34 @@ Lookup table mapping logical light indices to physical light indices. Based on M
 
 ## Mapping types
 
-- **1:0** (`m_zeroLights`) — logical light is unmapped (skipped). In MoonLight, the mapping entry stores a cached color value for unmapped positions — a "hack" that avoids a separate buffer for unmapped lights.
-- **1:1** (`m_oneLight`) — logical light maps to one physical position. Two sub-cases:
-  - **1:1 unshuffled** — logical index equals physical index. Grid layout, no serpentine, X-then-Y order. This IS MoonLight's `oneToOneMapping` — the mapping table can be skipped entirely.
-  - **1:1 shuffled** — logical maps to a different physical index. Grid with serpentine, or any non-identity mapping. This IS MoonLight's `allOneLight` — a direct table fast path (no per-entry type check needed).
-- **1:N** (`m_moreLights`) — logical light maps to N physical positions (mirroring, cloning). Entry stores an index into a secondary flat array (CSR-style). In MoonLight, this uses `forEachLightIndex()` callback pattern.
+Four mapping types describe how logical lights relate to physical lights:
 
-## Storage (based on PhysMap)
+| Type | Meaning | LUT needed | Example |
+|------|---------|-----------|---------|
+| **1:1 identical** | logical index == physical index | No | Grid, no serpentine, no modifiers |
+| **1:1 shuffled** | each logical → one physical, reordered | Yes | Grid with serpentine |
+| **1:0 unmapped** | logical has no physical output | Yes | Sparse layouts (wheel) |
+| **1:N multimap** | logical → multiple physical | Yes | Mirror/clone modifier |
 
-Uses `nrOfLightsType` and `lengthType` typedefs (see architecture-light.md).
+## API
 
-Each entry is a union, sized by platform:
-- No-PSRAM: 2 bytes (mapType in 2 bits + 14-bit payload)
-- PSRAM: 4 bytes (mapType in 8 bits + 24-bit payload)
+The code API answers one question: **does this LUT have a mapping table?**
 
-Secondary lookup for 1:N: CSR flat array (offsets + destinations). Better cache locality than MoonLight's nested `std::vector<std::vector<>>`.
+- **`hasLUT()`** — returns true if a mapping table is allocated. Covers 1:1 shuffled, 1:0, and 1:N.
+- **`setIdentity(count)`** — sets identity mode (1:1 identical). No table allocated, `hasLUT()` returns false. `forEachDestination(i, cb)` calls `cb(i)` — logical index IS the physical index.
+- **`build(logicalCount, maxDest)`** — allocates CSR arrays for non-identity mapping. `hasLUT()` returns true.
 
-CSR (Compressed Sparse Row): two arrays — `offsets[logicalCount + 1]` stores where each entry's destinations start, `destinations[]` stores the flat list of physical indices. For entry `i`, destinations are `destinations[offsets[i] .. offsets[i+1])`.
+Callers don't need to know which mapping type is used — they only need to know whether a table exists. DriverGroup checks `hasLUT()` to decide whether to allocate an output buffer. BlendMap checks `hasLUT()` to choose between memcpy (identity) and LUT-based mapping.
+
+MoonLight heritage: `setIdentity()` replaces MoonLight's `oneToOneMapping` flag. `hasLUT()` replaces `!oneToOneMapping`. The rename clarifies that "one-to-one" was specifically the sequential identity case, not all 1:1 mappings.
+
+## Storage
+
+Uses `nrOfLightsType` typedef (see architecture-light.md): `uint16_t` on no-PSRAM, `uint32_t` on PSRAM.
+
+CSR (Compressed Sparse Row) format: two arrays — `offsets[logicalCount + 1]` stores where each entry's destinations start, `destinations[]` stores the flat list of physical indices. For entry `i`, destinations are `destinations[offsets[i] .. offsets[i+1])`.
+
+Memory: `estimateBytes(logicalCount, maxDest)` returns the total allocation size. `memoryUsed()` returns actual bytes allocated (0 for identity).
 
 ## Size information
 

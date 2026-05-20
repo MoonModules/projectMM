@@ -10,6 +10,10 @@ public:
     bool mirrorY = true;
     bool mirrorZ = false;
 
+    uint8_t maxMultiplier() const override {
+        return (mirrorX ? 2 : 1) * (mirrorY ? 2 : 1) * (mirrorZ ? 2 : 1);
+    }
+
     void onBuildControls() override {
         controls_.addBool("mirrorX", mirrorX);
         controls_.addBool("mirrorY", mirrorY);

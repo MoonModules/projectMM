@@ -10,7 +10,7 @@ namespace mm {
 // Reads from logical buffer (src), writes to physical buffer (dst) via LUT.
 // Additive blending with clamping (for future multi-layer support).
 inline void blendMap(const Buffer& src, Buffer& dst, const MappingLUT& lut, uint8_t channelsPerLight) {
-    if (lut.isOneToOne()) {
+    if (!lut.hasLUT()) {
         std::memcpy(dst.data(), src.data(), src.bytes());
         return;
     }

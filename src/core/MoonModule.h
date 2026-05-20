@@ -2,6 +2,8 @@
 
 #include "core/Control.h"
 
+#include <cstring>
+
 namespace mm {
 
 enum class ModuleRole : uint8_t { Generic, Effect, Modifier, Driver, Layout };
@@ -20,7 +22,13 @@ public:
     virtual void onAllocateMemory() { for (uint8_t i = 0; i < childCount_; i++) children_[i]->onAllocateMemory(); }
 
     const char* name() const { return name_; }
-    void setName(const char* n) { name_ = n; }
+    void setName(const char* n) {
+        if (!n) { name_[0] = 0; return; }
+        size_t len = std::strlen(n);
+        if (len >= sizeof(name_)) len = sizeof(name_) - 1;
+        std::memcpy(name_, n, len);
+        name_[len] = 0;
+    }
 
     MoonModule* parent() const { return parent_; }
     void setParent(MoonModule* p) { parent_ = p; }
@@ -61,6 +69,12 @@ public:
     uint8_t childCount() const { return childCount_; }
     MoonModule* child(uint8_t i) const { return i < childCount_ ? children_[i] : nullptr; }
 
+    // Per-module memory reporting
+    size_t classSize() const { return classSize_ > 0 ? classSize_ : sizeof(MoonModule); }
+    void setClassSize(size_t s) { classSize_ = s; }
+    size_t dynamicBytes() const { return dynamicBytes_; }
+    void setDynamicBytes(size_t b) { dynamicBytes_ = b; }
+
     // Per-module timing: parents time children, Scheduler times top-level
     uint32_t loopTimeUs() const { return loopTimeUs_; }
     void addAccumUs(uint32_t us) { accumUs_ += us; }
@@ -78,11 +92,13 @@ protected:
     ControlList controls_;
 
 private:
-    const char* name_ = nullptr;
+    char name_[24] = {};
     MoonModule* parent_ = nullptr;
     MoonModule** children_ = nullptr;
     uint8_t childCount_ = 0;
     uint8_t childCapacity_ = 0;
+    size_t classSize_ = 0;
+    size_t dynamicBytes_ = 0;
     uint32_t loopTimeUs_ = 0;
     uint32_t accumUs_ = 0;
 };

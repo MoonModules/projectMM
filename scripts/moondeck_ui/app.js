@@ -27,6 +27,7 @@ async function init() {
 
     renderEnvSelect();
     renderScripts();
+    try { renderDevices(); } catch (e) { console.error("renderDevices:", e); }
     await updateRunningState();
     refreshPorts();
     setupTabs();
@@ -176,7 +177,27 @@ async function runScript(script, btn) {
         return;
     }
 
-    const params = {};
+    // Live tab scripts: run against each selected device
+    if (script.tab === "live" && script.needs_device) {
+        const devices = (state.devices || []).filter(d => d.selected);
+        if (devices.length === 0) {
+            switchPane("log");
+            appendLog("\n--- No devices selected. Use Discover and check devices first. ---\n");
+            return;
+        }
+        let allPassed = true;
+        for (const device of devices) {
+            const ok = await runScriptOnce(script, btn, { host: device.ip });
+            if (!ok) allPassed = false;
+        }
+        return;
+    }
+
+    await runScriptOnce(script, btn, {});
+}
+
+async function runScriptOnce(script, btn, extraParams) {
+    const params = { ...extraParams };
     if (script.needs_env) params.env = state.env;
     if (script.needs_port) params.port = state.port;
 
@@ -184,7 +205,8 @@ async function runScript(script, btn) {
     switchPane("log");
     btn.classList.add("running");
     btn.textContent = script.long_running ? "Stop" : "...";
-    appendLog(`\n--- ${script.label} ---\n`);
+    const hostLabel = params.host ? ` - ${params.host}` : "";
+    appendLog(`\n--- ${script.label}${hostLabel} ---\n`);
 
     const dot = document.querySelector(`.status-dot[data-id="${script.id}"]`);
     if (dot) { dot.className = "status-dot running"; }
@@ -197,44 +219,48 @@ async function runScript(script, btn) {
         }
     }
 
-    try {
-        const resp = await fetch("/api/run/" + script.id, {
+    return new Promise((resolve) => {
+        fetch("/api/run/" + script.id, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(params),
-        });
-        const result = await resp.json();
-
-        if (result.error) {
-            appendLog("Error: " + result.error + "\n");
-            resetBtn(1);
-            return;
-        }
-
-        const evtSource = new EventSource("/api/stream/" + script.id);
-
-        evtSource.onmessage = (e) => {
-            appendLog(JSON.parse(e.data) + "\n");
-        };
-
-        evtSource.addEventListener("done", (e) => {
-            evtSource.close();
-            try {
-                const data = JSON.parse(e.data);
-                resetBtn(data.exitCode);
-            } catch {
+        }).then(r => r.json()).then(result => {
+            if (result.error) {
+                appendLog("Error: " + result.error + "\n");
                 resetBtn(1);
+                resolve(false);
+                return;
             }
-        });
 
-        evtSource.onerror = () => {
-            evtSource.close();
+            const evtSource = new EventSource("/api/stream/" + script.id);
+
+            evtSource.onmessage = (e) => {
+                appendLog(JSON.parse(e.data) + "\n");
+            };
+
+            evtSource.addEventListener("done", (e) => {
+                evtSource.close();
+                try {
+                    const data = JSON.parse(e.data);
+                    resetBtn(data.exitCode);
+                    resolve(data.exitCode === 0);
+                } catch {
+                    resetBtn(1);
+                    resolve(false);
+                }
+            });
+
+            evtSource.onerror = () => {
+                evtSource.close();
+                resetBtn(1);
+                resolve(false);
+            };
+        }).catch(err => {
+            appendLog("Failed: " + err.message + "\n");
             resetBtn(1);
-        };
-    } catch (err) {
-        appendLog("Failed: " + err.message + "\n");
-        resetBtn(1);
-    }
+            resolve(false);
+        });
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -287,10 +313,48 @@ document.getElementById("discover-btn").addEventListener("click", async () => {
     switchPane("log");
     const resp = await fetch("/api/discover", { method: "POST" });
     const data = await resp.json();
-    state.devices = data.devices;
+    appendLog("Scanned subnet: " + (data.subnet || "?") + ".*\n");
+    // Merge: keep existing devices, add new ones, update online status
+    const existing = state.devices || [];
+    const existingByIp = Object.fromEntries(existing.map(d => [d.ip, d]));
+    const foundIps = new Set(data.devices.map(d => d.ip));
+    // Update existing devices found in scan
+    for (const found of data.devices) {
+        if (existingByIp[found.ip]) {
+            existingByIp[found.ip].online = true;
+            existingByIp[found.ip].modules = found.modules;
+        } else {
+            existing.push({ ...found, online: true, selected: false });
+        }
+    }
+    // Mark not-found existing devices as offline
+    for (const d of existing) {
+        if (!foundIps.has(d.ip)) d.online = false;
+    }
+    state.devices = existing;
     await saveState();
     renderDevices();
-    appendLog("Found " + data.devices.length + " device(s)\n");
+    const newCount = data.devices.filter(d => !existingByIp[d.ip]).length;
+    appendLog(`Found ${data.devices.length} device(s)` + (newCount ? `, ${newCount} new` : "") + "\n");
+});
+
+document.getElementById("refresh-devices-btn")?.addEventListener("click", async () => {
+    if (!state.devices || state.devices.length === 0) return;
+    appendLog("\n--- Refreshing device status ---\n");
+    const resp = await fetch("/api/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ devices: state.devices }),
+    });
+    const data = await resp.json();
+    const onlineIps = new Set(data.online.map(d => d.ip));
+    for (const device of state.devices) {
+        device.online = onlineIps.has(device.ip);
+    }
+    await saveState();
+    renderDevices();
+    const onCount = state.devices.filter(d => d.online).length;
+    appendLog(`${onCount}/${state.devices.length} online\n`);
 });
 
 function renderDevices() {
@@ -301,14 +365,45 @@ function renderDevices() {
     }
     el.innerHTML = "";
     for (const device of state.devices) {
-        const div = document.createElement("div");
-        div.className = "device-item";
-        div.textContent = device.name || device.ip;
-        div.title = device.ip;
-        div.addEventListener("click", () => {
-            showInView("http://" + device.ip);
+        const label = document.createElement("label");
+        label.className = "device-item";
+
+        const dot = document.createElement("span");
+        dot.className = "device-status " + (device.online !== false ? "online" : "offline");
+        dot.title = device.online !== false ? "online" : "offline";
+
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = !!device.selected;
+        cb.addEventListener("change", () => {
+            device.selected = cb.checked;
+            saveState();
         });
-        el.appendChild(div);
+
+        const text = document.createElement("span");
+        text.textContent = `${device.ip} (${device.modules} modules)`;
+        text.title = device.ip;
+        text.style.cursor = "pointer";
+        text.addEventListener("click", (e) => {
+            if (e.target === text) showInView("http://" + device.ip);
+        });
+
+        const removeBtn = document.createElement("button");
+        removeBtn.className = "device-remove";
+        removeBtn.textContent = "x";
+        removeBtn.title = "Remove device";
+        removeBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            state.devices = state.devices.filter(d => d.ip !== device.ip);
+            saveState();
+            renderDevices();
+        });
+
+        label.appendChild(dot);
+        label.appendChild(cb);
+        label.appendChild(text);
+        label.appendChild(removeBtn);
+        el.appendChild(label);
     }
 }
 

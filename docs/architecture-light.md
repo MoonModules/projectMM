@@ -100,10 +100,11 @@ The blend+map step walks each layer in turn: it reads each logical light, uses t
 
 Each mapping LUT is a flat, contiguous lookup table allocated outside the hot path (at startup or when the layout configuration changes).
 
-The LUT supports three mapping types without dynamic allocation:
-- **1:0** — logical light is unmapped (skipped). This is how sparse layouts like wheel produce gaps in the physical output.
-- **1:1** — logical light maps to one physical position (direct or shuffled).
-- **1:N** — logical light maps to multiple physical positions (mirroring, cloning). Stored as a flat index array, not nested vectors.
+The LUT supports four mapping types:
+- **1:1 identical** — logical index equals physical index. No table needed (`hasLUT()` returns false, `setIdentity()` mode). Grid without serpentine, no modifiers.
+- **1:1 shuffled** — logical maps to one physical, but reordered. Table needed. Grid with serpentine.
+- **1:0 unmapped** — logical light has no physical output. Table needed. Sparse layouts (wheel).
+- **1:N multimap** — logical maps to multiple physical positions. Table needed (CSR format). Mirror/clone modifier.
 
 Because mapping and blending happen together in a single pass over each layer, there is no intermediate "mapped but unblended" buffer. The physical buffer is the only output-side allocation.
 
@@ -111,7 +112,7 @@ Because mapping and blending happen together in a single pass over each layer, t
 
 A **DriverGroup** (MoonModule) groups output drivers. It is the consumer side of the pipeline. The DriverGroup owns a shared output buffer and performs blend+map from all layers into it each frame. Individual drivers then read from this buffer to push to hardware/network.
 
-The shared output buffer is necessary because blend+map writes to arbitrary physical positions (via LUT) — the output is not filled sequentially. A driver cannot read chunk-by-chunk until the full buffer is populated. Direct-to-DMA/packet optimization would only work for the trivial case (1:1 sequential mapping with no modifiers).
+The shared output buffer is necessary because blend+map writes to arbitrary physical positions (via LUT) — the output is not filled sequentially. A driver cannot read chunk-by-chunk until the full buffer is populated. Direct-to-DMA/packet optimization would only work for the trivial case (1:1 identical mapping with no modifiers).
 
 Each driver (MoonModule) speaks one protocol:
 - **LED drivers:** WS2812 via RMT, APA102 via SPI. Platform-specific.
@@ -149,7 +150,7 @@ When memory is too tight for double buffering (large layouts on devices without 
 
 ## Memory Strategy
 
-All buffers are allocated as single contiguous blocks outside the hot path — at startup or when configuration changes (e.g. LED count, layout size, layer count). They are then reused every frame with zero allocations in steady state.
+All buffers are allocated as single contiguous blocks outside the hot path — at startup or when configuration changes (e.g. LED count, layout size, layer count). They are then reused every frame with zero allocations in steady state. Measured per-module timing and memory for each platform: [performance.md](performance.md).
 
 ### Buffer types
 
@@ -161,15 +162,42 @@ All buffers are raw `uint8_t*` arrays sized by `channelsPerLight * nrOfLights`. 
 
 Network input (ArtNet receive, WebSocket) is processed synchronously at a defined point in the frame loop. This means zero extra buffers and no race conditions. The trade-off is up to one frame of latency (~16ms at 60fps), which is imperceptible for LEDs.
 
-### Scaling to available memory
+### Adaptive allocation rules
 
-The system adapts to what the device has:
+The system checks available heap before each allocation and degrades gracefully when memory is insufficient. A minimum reserve (`HEAP_RESERVE = 32KB`) is preserved for stack, HTTP, WiFi, and overhead.
+
+**Mapping LUT** is created only if ALL of:
+- Modifiers exist on the layer
+- Layout is not a simple non-serpentine grid (where physical == logical)
+- Enough heap available after reserving HEAP_RESERVE
+
+**Driver output buffer** is created only if:
+- At least one layer has a mapping LUT actually allocated (not per-layer — if ANY layer has a LUT, the driver needs the output buffer)
+- Enough heap available
+
+**Degradation cascade** (from best to worst):
+1. **Full pipeline** — LUT + driver output buffer. Modifier applied, clean separation.
+2. **Skip LUT + driver buffer** — modifier not applied, forced 1:1 mapping. No intermediate buffers. (A LUT without a driver buffer to map into is useless — they are always skipped together.)
+3. **Reduce layer dimensions** — halve width/height until buffer fits, minimum 8×8.
+
+Each degradation is observable via `lutSkipped()` and reported in `/api/system` per-module metrics.
+
+**Invariants** (non-negotiable):
+- Effects ALWAYS write to their layer's logical buffer. Never to output, never to physical coordinates.
+- DriverGroup ALWAYS owns the output path (blending, mapping, brightness correction, channel reordering).
+- Layer buffer is mandatory — if it doesn't fit, reduce dimensions until it does ("at least see something").
+
+### Per-module memory reporting
+
+Every MoonModule reports `classSize()` (sizeof the class instance) and `dynamicBytes()` (heap allocated during `onAllocateMemory`). These are visible in `/api/system`, console output, and scenario tests. Memory scenarios verify that 1:1 pipelines use zero intermediate buffers and that the degradation cascade triggers at correct thresholds.
+
+### Scaling to available memory
 
 | Device | Memory | Typical capability |
 |--------|--------|--------------------|
 | ESP32 + OPI PSRAM | 2-8 MB | Many layers, 10K+ LEDs |
 | ESP32, no PSRAM, small layout | ~320 KB internal | Full pipeline: double buffering, mapping, blending, parallelism. Up to ~4K lights. |
-| ESP32, no PSRAM, large layout | ~320 KB internal | Fallback: single layer, 1:1 direct, no blending/parallelism. 4K-12K lights (12K stretch goal). |
+| ESP32, no PSRAM, large layout | ~320 KB internal | Fallback: single layer, 1:1 direct, no blending/parallelism. 4K-16K lights. |
 | Teensy 4.x | 1 MB internal, no PSRAM | Single/few layers, excellent DMA-based LED output (OctoWS2811), no WiFi (USB or serial control) |
 | Desktop / RPi | Abundant | No constraints |
 

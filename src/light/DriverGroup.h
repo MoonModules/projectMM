@@ -26,15 +26,20 @@ public:
     }
 
     void onAllocateMemory() override {
-        if (layer_ && !layer_->lut().isOneToOne()) {
+        // Output buffer needed if any layer has a LUT (currently single layer).
+        // Multi-layer: check all layers, allocate if at least one has a LUT.
+        if (layer_ && layer_->lut().hasLUT()) {
             outputBuffer_.allocate(layer_->physicalLightCount(), layer_->channelsPerLight());
+        } else {
+            outputBuffer_.free();
         }
+        setDynamicBytes(outputBuffer_.bytes());
         passBufferToDrivers();
         MoonModule::onAllocateMemory();
     }
 
     void loop() override {
-        if (layer_ && !layer_->lut().isOneToOne()) {
+        if (layer_ && layer_->lut().hasLUT()) {
             blendMap(layer_->buffer(), outputBuffer_, layer_->lut(), layer_->channelsPerLight());
         }
         for (uint8_t i = 0; i < childCount(); i++) {
@@ -50,7 +55,7 @@ private:
 
     void passBufferToDrivers() {
         if (!layer_) return;
-        Buffer* buf = layer_->lut().isOneToOne() ? &layer_->buffer() : &outputBuffer_;
+        Buffer* buf = layer_->lut().hasLUT() ? &outputBuffer_ : &layer_->buffer();
         for (uint8_t i = 0; i < childCount(); i++) {
             static_cast<DriverBase*>(child(i))->setSourceBuffer(buf);
         }

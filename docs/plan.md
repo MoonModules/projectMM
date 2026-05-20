@@ -42,3 +42,9 @@ Update README with: what it does now, how to build/flash, how to connect and ope
 ## Release 1.0 — "connect, open browser, see lights"
 
 Milestone after items 8-13. An end user with an ESP32 can flash the firmware, connect via WiFi, open a browser, see the 3D preview, change effects and controls, and have settings persist across reboots.
+
+---
+
+## Remarks
+
+- Live scenarios that use `add_module` create temporary modules on the running device (cleaned up after each scenario). Scenarios like `base-pipeline` and `memory-1to1` add a `Rainbow` effect because the running device has `Noise` — the names don't match. This is harmless (cleanup deletes it), but the measurement runs with both effects active. For pure non-destructive live testing, scenarios should match the running device's module names, or use `set_control`-only steps that don't modify the pipeline.

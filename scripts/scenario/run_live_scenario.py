@@ -56,9 +56,10 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5) -> 
     print(scenario.get("description", ""))
 
     results = {"name": name, "steps": [], "passed": True}
+    created_modules = []  # track newly created modules for cleanup
 
-    # Collect baseline metrics before any steps
-    baseline = collect_metrics(client, settle_s=0.5)
+    # Collect baseline metrics — longer settle to let pipeline stabilize after previous scenario
+    baseline = collect_metrics(client, settle_s=settle_s)
     print(f"\n  Baseline: tick={baseline.get('tickTimeUs', '?')}us (FPS={baseline.get('fps', '?')})  heap={baseline.get('freeHeap', '?')}")
 
     for step in scenario.get("steps", []):
@@ -72,7 +73,11 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5) -> 
                         "parent_id": step.get("parent_id", "")}
                 resp = client.post("/api/modules", data)
                 step_result["status"] = "ok" if resp.get("ok") else "error"
-                print(f"  +     {step.get('id', '?')} ({step['type']})")
+                if resp.get("note") == "already exists":
+                    print(f"  =     {step.get('id', '?')} (exists)")
+                else:
+                    print(f"  +     {step.get('id', '?')} ({step['type']})")
+                    created_modules.append(step.get("id", ""))
 
             elif op == "set_control":
                 data = {"module": step["id"], "control": step["key"],
@@ -145,6 +150,14 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5) -> 
 
         results["steps"].append(step_result)
 
+    # Cleanup: delete modules that were created by this scenario
+    for module_id in reversed(created_modules):
+        try:
+            client.delete(f"/api/modules/{module_id}")
+            print(f"  -     {module_id} (cleanup)")
+        except Exception:
+            pass
+
     # Summary
     print(f"\n---")
     if results["passed"]:
@@ -211,7 +224,7 @@ def main():
                         help="Device host:port (default: localhost:8080)")
     parser.add_argument("--name", default=None,
                         help="Scenario name (without .json). Runs all if omitted.")
-    parser.add_argument("--settle", type=float, default=1.5,
+    parser.add_argument("--settle", type=float, default=3.0,
                         help="Settle time in seconds between step and measurement")
     parser.add_argument("--update-baseline", action="store_true",
                         help="Save results as new baseline")

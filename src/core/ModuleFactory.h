@@ -10,9 +10,15 @@ using CreateModuleFn = MoonModule*(*)();
 
 class ModuleFactory {
 public:
-    static bool registerType(const char* typeName, CreateModuleFn fn) {
+    // Template registration: captures sizeof(T) automatically
+    template<typename T>
+    static bool registerType(const char* typeName) {
+        return registerType(typeName, []() -> MoonModule* { return new T(); }, sizeof(T));
+    }
+
+    static bool registerType(const char* typeName, CreateModuleFn fn, size_t classSize = 0) {
         if (count_ >= MAX_TYPES) return false;
-        types_[count_] = {typeName, fn};
+        types_[count_] = {typeName, fn, classSize};
         count_++;
         return true;
     }
@@ -21,7 +27,10 @@ public:
         for (uint8_t i = 0; i < count_; i++) {
             if (std::strcmp(types_[i].name, typeName) == 0) {
                 auto* mod = types_[i].create();
-                if (mod) mod->setName(typeName);
+                if (mod) {
+                    mod->setName(typeName);
+                    if (types_[i].classSize > 0) mod->setClassSize(types_[i].classSize);
+                }
                 return mod;
             }
         }
@@ -37,6 +46,7 @@ private:
     struct TypeEntry {
         const char* name;
         CreateModuleFn create;
+        size_t classSize;
     };
 
     static inline std::array<TypeEntry, MAX_TYPES> types_{};

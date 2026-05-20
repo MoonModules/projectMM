@@ -12,8 +12,9 @@ void* alloc(size_t bytes);
 void free(void* ptr);
 
 void yield();
-size_t freeHeap();
-size_t maxAllocBlock();
+size_t freeHeap();          // total free (internal + PSRAM if present)
+size_t freeInternalHeap();  // internal RAM only (for stack/HTTP/WiFi reserve check)
+size_t maxAllocBlock();     // largest contiguous block (any memory type)
 
 class UdpSocket {
 public:

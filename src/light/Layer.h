@@ -7,6 +7,8 @@
 #include "light/ModifierBase.h"
 #include "platform/platform.h"
 
+#include <cstdio>
+
 namespace mm {
 
 class Layer : public MoonModule {
@@ -65,7 +67,12 @@ public:
         return layoutGroup_ ? layoutGroup_->totalLightCount() : 0;
     }
 
+    bool lutSkipped() const { return lutSkipped_; }
+
+    // Precondition: physicalWidth_/Height_/Depth_ must be set (call from onAllocateMemory)
     void rebuildLUT() {
+        lutSkipped_ = false;
+
         // Find first modifier (if any)
         ModifierBase* mod = nullptr;
         for (uint8_t i = 0; i < childCount(); i++) {
@@ -81,8 +88,8 @@ public:
             height_ = physicalHeight_;
             depth_ = physicalDepth_;
             nrOfLightsType count = static_cast<nrOfLightsType>(width_) * height_ * depth_;
-            lut_.setOneToOne(count);
-            buffer_.allocate(count, channelsPerLight_);
+            lut_.setIdentity(count);
+            allocateBuffer(count);
             return;
         }
 
@@ -93,9 +100,24 @@ public:
         nrOfLightsType logicalCount = static_cast<nrOfLightsType>(width_) * height_ * depth_;
         nrOfLightsType physicalCount = static_cast<nrOfLightsType>(physicalWidth_) * physicalHeight_ * physicalDepth_;
 
-        // Estimate max destinations: each logical light can map to at most 8 (XYZ mirror)
-        nrOfLightsType maxDest = logicalCount * 8;
+        // Estimate max destinations from modifier's multiplier
+        nrOfLightsType maxDest = logicalCount * mod->maxMultiplier();
         if (maxDest > physicalCount * 2) maxDest = physicalCount * 2;
+
+        size_t lutBytes = MappingLUT::estimateBytes(logicalCount, maxDest);
+        if (!canAllocate(lutBytes)) {
+            // Not enough memory for LUT — degrade to 1:1
+            std::printf("  DEGRADE  LUT skipped (need %u, free %u)\n",
+                        static_cast<unsigned>(lutBytes),
+                        static_cast<unsigned>(platform::freeHeap()));
+            lutSkipped_ = true;
+            width_ = physicalWidth_;
+            height_ = physicalHeight_;
+            depth_ = physicalDepth_;
+            lut_.setIdentity(physicalCount);
+            allocateBuffer(physicalCount);
+            return;
+        }
 
         lut_.build(logicalCount, maxDest);
 
@@ -117,7 +139,7 @@ public:
         }
 
         lut_.finalize();
-        buffer_.allocate(logicalCount, channelsPerLight_);
+        allocateBuffer(logicalCount);
     }
 
 private:
@@ -125,6 +147,7 @@ private:
     Buffer buffer_;
     MappingLUT lut_;
     uint8_t channelsPerLight_ = 3;
+    bool lutSkipped_ = false;
     lengthType physicalWidth_ = 0;
     lengthType physicalHeight_ = 0;
     lengthType physicalDepth_ = 0;
@@ -132,6 +155,38 @@ private:
     lengthType height_ = 0;
     lengthType depth_ = 0;
     uint32_t elapsed_ = 0;
+
+    // Check if heap can afford an allocation (returns true if unlimited or enough budget)
+    static bool canAllocate(size_t bytesNeeded) {
+        size_t availableHeap = platform::freeHeap();
+        if (availableHeap == 0) return true; // desktop: unlimited
+        size_t internalHeap = platform::freeInternalHeap();
+        if (internalHeap > 0 && internalHeap <= HEAP_RESERVE) return false;
+        size_t budget = availableHeap > HEAP_RESERVE ? availableHeap - HEAP_RESERVE : 0;
+        return budget >= bytesNeeded && platform::maxAllocBlock() >= bytesNeeded;
+    }
+
+    void allocateBuffer(nrOfLightsType count) {
+        // Try to allocate buffer, halve dimensions if needed
+        while (count > 0) {
+            size_t needed = static_cast<size_t>(count) * channelsPerLight_;
+            if (canAllocate(needed)) {
+                buffer_.allocate(count, channelsPerLight_);
+                setDynamicBytes(buffer_.bytes() + lut_.memoryUsed());
+                return;
+            }
+            // Halve: reduce to sqrt of count (halve each dimension)
+            width_ = width_ > 1 ? width_ / 2 : 1;
+            height_ = height_ > 1 ? height_ / 2 : 1;
+            depth_ = depth_ > 1 ? depth_ / 2 : 1;
+            count = static_cast<nrOfLightsType>(width_) * height_ * depth_;
+            std::printf("  DEGRADE  buffer too large, reducing to %dx%dx%d\n",
+                        static_cast<int>(width_), static_cast<int>(height_), static_cast<int>(depth_));
+            if (width_ <= 8 && height_ <= 8) break; // minimum
+        }
+        buffer_.allocate(count, channelsPerLight_);
+        setDynamicBytes(buffer_.bytes() + lut_.memoryUsed());
+    }
 };
 
 // EffectBase accessor implementations

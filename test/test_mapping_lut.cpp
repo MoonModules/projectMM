@@ -3,19 +3,19 @@
 
 #include <vector>
 
-TEST_CASE("MappingLUT default is oneToOne") {
+TEST_CASE("MappingLUT default is identity (no LUT)") {
     mm::MappingLUT lut;
-    CHECK(lut.isOneToOne());
+    CHECK(!lut.hasLUT());
     CHECK(lut.logicalCount() == 0);
 }
 
-TEST_CASE("MappingLUT setOneToOne") {
+TEST_CASE("MappingLUT setIdentity") {
     mm::MappingLUT lut;
-    lut.setOneToOne(256);
-    CHECK(lut.isOneToOne());
+    lut.setIdentity(256);
+    CHECK(!lut.hasLUT());
     CHECK(lut.logicalCount() == 256);
 
-    // forEachDestination in oneToOne mode returns the logical index
+    // forEachDestination in identity mode returns the logical index
     std::vector<mm::nrOfLightsType> dests;
     lut.forEachDestination(42, [&](mm::nrOfLightsType idx) { dests.push_back(idx); });
     REQUIRE(dests.size() == 1);
@@ -26,7 +26,7 @@ TEST_CASE("MappingLUT 1:N mapping") {
     mm::MappingLUT lut;
     // 4 logical lights, each maps to different number of physical lights
     CHECK(lut.build(4, 10));
-    CHECK_FALSE(lut.isOneToOne());
+    CHECK_FALSE(!lut.hasLUT());
 
     // Logical 0 → physical {0, 3}
     mm::nrOfLightsType map0[] = {0, 3};
@@ -80,7 +80,7 @@ TEST_CASE("MappingLUT free and rebuild") {
     mm::MappingLUT lut;
     lut.build(4, 8);
     lut.free();
-    CHECK(lut.isOneToOne());
+    CHECK(!lut.hasLUT());
     CHECK(lut.logicalCount() == 0);
 
     // Can rebuild after free

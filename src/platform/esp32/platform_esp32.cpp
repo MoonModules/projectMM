@@ -40,6 +40,10 @@ size_t freeHeap() {
     return heap_caps_get_free_size(MALLOC_CAP_8BIT);
 }
 
+size_t freeInternalHeap() {
+    return heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+
 size_t maxAllocBlock() {
     return heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
 }

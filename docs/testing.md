@@ -133,6 +133,22 @@ Pipeline with mirror modifier: LayoutGroup → GridLayout → Layer → NoiseEff
 - Buffer contains non-zero data after rendering 200 frames
 - FPS >= 30 (performance bound)
 
+### memory-1to1 (`test/scenarios/memory-1to1.json`) {#scenario-memory-1to1}
+
+Verifies 1:1 unshuffled mapping (no modifiers) uses zero intermediate buffers.
+
+- 16×16 grid, rainbow effect, no modifier
+- Asserts: LUT is 1:1, DriverGroup dynamicBytes = 0
+- Reports per-module sizeof and heap allocation
+
+### memory-lut (`test/scenarios/memory-lut.json`) {#scenario-memory-lut}
+
+Verifies modifier with LUT allocates mapping table and driver buffer.
+
+- 16×16 grid, noise effect + mirror modifier (1:N multimap)
+- Asserts: LUT allocated (`hasLUT()`), DriverGroup has output buffer
+- Reports LUT size, buffer sizes, per-module metrics
+
 ## Live Scenario Tests
 
 Live scenarios run against a running device via HTTP REST API. Same JSON format as in-process scenarios. Run with `scripts/scenario/run_live_scenario.py`.
@@ -155,16 +171,24 @@ uv run scripts/scenario/run_live_scenario.py --update-baseline           # save
 uv run scripts/scenario/run_live_scenario.py --compare-baseline          # check
 ```
 
+### Live scenario behavior
+
+All scenarios use relative FPS bounds (`min_pct`) so they pass on any device — desktop at 10K FPS or ESP32 at 17 FPS. Settle time is 3 seconds to let the pipeline stabilize after rebuilds.
+
+Scenarios that add modules (`base-pipeline`, `memory-1to1`) create temporary modules on the running device. These are cleaned up after each scenario (`- Rainbow (cleanup)`). Modules that already exist show `=` instead of `+`.
+
+Memory tracking works on ESP32: `freeHeap` and `freeInternalHeap` report real values. Desktop returns 0 (unlimited). The control-change scenario verifies no memory leaks by checking heap returns to baseline after mirror toggle.
+
 ## Hardware Verification
+
+All 5 live scenarios pass on both desktop and ESP32 with `min_pct: 80` relative bounds. Per-module timing, memory allocation, and sizeof measurements for each platform are in [performance.md](performance.md).
 
 ### ESP32 — Olimex ESP32-Gateway Rev G (no PSRAM)
 
-Verified working:
-- 128x128 grid (16,384 lights) — renders and sends ArtNet at 23+ FPS
-- 215KB free heap after buffer allocation (49KB buffer)
-- Rainbow effect flows correctly on hub75 panel via ArtNet receiver
-- Ethernet (LAN8720 RMII) connects and obtains IP via DHCP
-- Stable operation (no crashes, no memory leaks over extended runs)
+- 128x128 grid (16,384 lights) — all live scenarios pass
+- Memory tracking verified: mirror toggle shows heap changes, returns to baseline (no leaks)
+- Ethernet (LAN8720 RMII) connects via DHCP
+- Device discovery from MoonDeck finds ESP32 on port 80
 
 ## Adding Tests
 

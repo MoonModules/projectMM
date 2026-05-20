@@ -5,51 +5,51 @@
     {
       "name": "add-layout-group",
       "op": "add_module",
-      "id": "layoutGroup",
+      "id": "LayoutGroup",
       "type": "LayoutGroup"
     },
     {
       "name": "add-grid",
       "op": "add_module",
-      "id": "grid",
+      "id": "Grid",
       "type": "GridLayout",
-      "parent_id": "layoutGroup"
+      "parent_id": "LayoutGroup"
     },
     {
       "name": "add-layer",
       "op": "add_module",
-      "id": "layer",
+      "id": "Layer",
       "type": "Layer",
       "props": {
-        "layoutGroup": "layoutGroup",
+        "layoutGroup": "LayoutGroup",
         "channelsPerLight": 3
       }
     },
     {
       "name": "add-rainbow",
       "op": "add_module",
-      "id": "rainbow",
+      "id": "Rainbow",
       "type": "RainbowEffect",
-      "parent_id": "layer"
+      "parent_id": "Layer"
     },
     {
       "name": "add-driver-group",
       "op": "add_module",
-      "id": "driverGroup",
+      "id": "DriverGroup",
       "type": "DriverGroup",
       "props": {
-        "layer": "layer"
+        "layer": "Layer"
       }
     },
     {
       "name": "add-artnet",
       "op": "add_module",
-      "id": "artnet",
+      "id": "ArtNet",
       "type": "ArtNetSendDriver",
-      "parent_id": "driverGroup",
+      "parent_id": "DriverGroup",
       "measure": true,
       "bounds": {
-        "fps": { "min": 30 }
+        "fps": { "min_pct": 80 }
       }
     }
   ]

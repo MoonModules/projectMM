@@ -27,6 +27,16 @@ This means:
 
 MoonModules should have a minimal memory footprint. On constrained devices, many modules may be loaded simultaneously.
 
+### ModuleFactory
+
+A static registry mapping type names (strings) to create functions. Used by the HTTP API to create modules by name at runtime (`POST /api/modules {"type":"NoiseEffect"}`). Registration happens once at startup via a template that also captures `sizeof(T)` for memory reporting:
+
+```cpp
+ModuleFactory::registerType<NoiseEffect>("NoiseEffect");
+```
+
+The factory is only for dynamic creation (HTTP CRUD). The main pipeline in `main.cpp` constructs modules directly. ModuleFactory is not a MoonModule — it's core infrastructure in `src/core/ModuleFactory.h`.
+
 ### Dynamic over fixed-size
 
 Prefer dynamic (grow-on-demand) over fixed-size arrays for structural data like children, module lists, and control sets. Fixed-size arrays impose arbitrary limits, waste memory on instances that don't use the full capacity, and cost memory on instances that need none (e.g. leaf modules with zero children).

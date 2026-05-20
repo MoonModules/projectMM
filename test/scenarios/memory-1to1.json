@@ -1,6 +1,6 @@
 {
-  "name": "mirror",
-  "description": "Pipeline with mirror modifier: noise effect + XY kaleidoscope",
+  "name": "memory-1to1",
+  "description": "Verify 1:1 unshuffled mapping uses no LUT and no driver buffer",
   "steps": [
     {
       "name": "add-layout-group",
@@ -13,30 +13,21 @@
       "op": "add_module",
       "id": "Grid",
       "type": "GridLayout",
-      "parent_id": "LayoutGroup"
+      "parent_id": "LayoutGroup",
+      "props": {"width": 16, "height": 16}
     },
     {
       "name": "add-layer",
       "op": "add_module",
       "id": "Layer",
       "type": "Layer",
-      "props": {
-        "layoutGroup": "LayoutGroup",
-        "channelsPerLight": 3
-      }
+      "props": {"layoutGroup": "LayoutGroup", "channelsPerLight": 3}
     },
     {
-      "name": "add-noise",
+      "name": "add-rainbow",
       "op": "add_module",
-      "id": "Noise",
-      "type": "NoiseEffect",
-      "parent_id": "Layer"
-    },
-    {
-      "name": "add-mirror",
-      "op": "add_module",
-      "id": "Mirror",
-      "type": "MirrorModifier",
+      "id": "Rainbow",
+      "type": "RainbowEffect",
       "parent_id": "Layer"
     },
     {
@@ -44,9 +35,7 @@
       "op": "add_module",
       "id": "DriverGroup",
       "type": "DriverGroup",
-      "props": {
-        "layer": "Layer"
-      }
+      "props": {"layer": "Layer"}
     },
     {
       "name": "add-artnet",
@@ -56,7 +45,7 @@
       "parent_id": "DriverGroup",
       "measure": true,
       "bounds": {
-        "fps": { "min_pct": 80 }
+        "fps": {"min_pct": 80}
       }
     }
   ]

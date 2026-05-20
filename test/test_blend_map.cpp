@@ -1,7 +1,7 @@
 #include "doctest.h"
 #include "light/BlendMap.h"
 
-TEST_CASE("blendMap oneToOne copies buffer") {
+TEST_CASE("blendMap identity (no LUT) copies buffer") {
     mm::Buffer src, dst;
     src.allocate(4, 3);
     dst.allocate(4, 3);
@@ -12,7 +12,7 @@ TEST_CASE("blendMap oneToOne copies buffer") {
     }
 
     mm::MappingLUT lut;
-    lut.setOneToOne(4);
+    lut.setIdentity(4);
 
     mm::blendMap(src, dst, lut, 3);
 

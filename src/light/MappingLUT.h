@@ -16,16 +16,16 @@ public:
     MappingLUT& operator=(const MappingLUT&) = delete;
 
     // Fast path: logical == physical, no table needed
-    void setOneToOne(nrOfLightsType count) {
+    void setIdentity(nrOfLightsType count) {
         free();
-        oneToOneMapping_ = true;
+        identity_ = true;
         logicalCount_ = count;
     }
 
     // Allocate CSR arrays for 1:N mapping
     bool build(nrOfLightsType logicalCount, nrOfLightsType maxDestinations) {
         free();
-        oneToOneMapping_ = false;
+        identity_ = false;
         logicalCount_ = logicalCount;
         destinationCapacity_ = maxDestinations;
 
@@ -68,17 +68,30 @@ public:
         logicalCount_ = 0;
         destinationCount_ = 0;
         destinationCapacity_ = 0;
-        oneToOneMapping_ = true;
+        identity_ = true;
     }
 
-    bool isOneToOne() const { return oneToOneMapping_; }
+    bool hasLUT() const { return !identity_; }
     nrOfLightsType logicalCount() const { return logicalCount_; }
     nrOfLightsType destinationCount() const { return destinationCount_; }
+
+    // Memory accounting
+    size_t memoryUsed() const {
+        if (identity_) return 0;
+        // Actual bytes used (not capacity — destinations may be over-allocated)
+        return static_cast<size_t>(logicalCount_ + 1) * sizeof(nrOfLightsType)
+             + static_cast<size_t>(destinationCount_) * sizeof(nrOfLightsType);
+    }
+
+    static size_t estimateBytes(nrOfLightsType logicalCount, nrOfLightsType maxDest) {
+        return static_cast<size_t>(logicalCount + 1) * sizeof(nrOfLightsType)
+             + static_cast<size_t>(maxDest) * sizeof(nrOfLightsType);
+    }
 
     // Hot-path: iterate physical destinations for a logical index
     template<typename F>
     void forEachDestination(nrOfLightsType logicalIdx, F&& callback) const {
-        if (oneToOneMapping_) {
+        if (identity_) {
             callback(logicalIdx);
             return;
         }
@@ -91,7 +104,7 @@ public:
     }
 
 private:
-    bool oneToOneMapping_ = true;
+    bool identity_ = true;
     nrOfLightsType logicalCount_ = 0;
     nrOfLightsType* offsets_ = nullptr;
     nrOfLightsType* destinations_ = nullptr;

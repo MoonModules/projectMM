@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import re
 import subprocess
 import sys
 import os
@@ -53,7 +54,6 @@ def collect_desktop():
         for line in out.splitlines():
             if "tick:" in line:
                 # Format: "tick: 108us (FPS: 9259)"
-                import re
                 m = re.search(r'tick:\s*(\d+)us', line)
                 if m:
                     tick_values.append(int(m.group(1)))
@@ -118,13 +118,10 @@ def collect_esp32():
                         try: kpi["dram_free"] = int(parts[3])
                         except ValueError: pass
                 if "app partition" in line and "free" in line:
-                    # Extract percentage: "0x9fee0 bytes (62%) free"
-                    import re
                     m = re.search(r'\((\d+)%\)\s+free', line)
                     if m:
                         kpi["partition_free_pct"] = int(m.group(1))
                 if "Total image size" in line:
-                    import re
                     m = re.search(r'(\d+)\s+bytes', line)
                     if m:
                         kpi["image_bytes"] = int(m.group(1))
@@ -137,7 +134,6 @@ def collect_esp32():
     if log.exists():
         age_min = (time.time() - log.stat().st_mtime) / 60
         if age_min < 60:
-            import re
             for line in reversed(log.read_text().splitlines()):
                 if "tick:" in line:
                     # Format: "tick: 108us (FPS: 9259)  free: 215180  maxBlock: 63488"

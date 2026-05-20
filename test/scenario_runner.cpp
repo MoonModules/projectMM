@@ -13,6 +13,17 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+
+static void printModuleMemory(mm::MoonModule* mod, int indent) {
+    if (!mod) return;
+    for (int i = 0; i < indent; i++) std::printf("  ");
+    std::printf("%s: sizeof=%zu heap=%zu\n",
+                mod->name() ? mod->name() : "?",
+                mod->classSize(), mod->dynamicBytes());
+    for (uint8_t i = 0; i < mod->childCount(); i++) {
+        printModuleMemory(mod->child(i), indent + 1);
+    }
+}
 #include <string>
 #include <map>
 #include <filesystem>
@@ -261,9 +272,11 @@ static int runScenario(const char* path) {
         if (step.has("measure") && step["measure"].boolean) {
             hasMeasure = true;
         }
-        if (step.has("bounds") && step["bounds"].has("fps") &&
-            step["bounds"]["fps"].has("min")) {
-            fpsBound = step["bounds"]["fps"]["min"].num;
+        if (step.has("bounds") && step["bounds"].has("fps")) {
+            if (step["bounds"]["fps"].has("min"))
+                fpsBound = step["bounds"]["fps"]["min"].num;
+            else if (step["bounds"]["fps"].has("min_pct"))
+                fpsBound = 1; // min_pct is for live runner; in-process just checks FPS > 0
         }
     }
 
@@ -282,6 +295,14 @@ static int runScenario(const char* path) {
                     static_cast<unsigned>(heapAfter), delta);
     }
 
+    // Memory report per module
+    std::printf("  Memory:\n");
+    for (uint8_t m = 0; m < ctx.scheduler.moduleCount(); m++) {
+        auto* mod = ctx.scheduler.module(m);
+        if (!mod) continue;
+        printModuleMemory(mod, 2);
+    }
+
     // Verify buffer
     auto& buf = ctx.layer.buffer();
     result.check(buf.data() != nullptr, "buffer allocated");
@@ -289,6 +310,10 @@ static int runScenario(const char* path) {
     std::printf("  Buffer: %u lights, %u bytes\n",
                 static_cast<unsigned>(buf.count()),
                 static_cast<unsigned>(buf.bytes()));
+    std::printf("  LUT: %s  dynamicBytes: Layer=%u DriverGroup=%u\n",
+                ctx.layer.lut().hasLUT() ? "has LUT" : "identity",
+                static_cast<unsigned>(ctx.layer.dynamicBytes()),
+                static_cast<unsigned>(ctx.driverGroup.dynamicBytes()));
 
     // Warmup
     for (int i = 0; i < WARMUP_FRAMES; i++) {

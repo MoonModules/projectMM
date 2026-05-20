@@ -41,11 +41,15 @@ void yield() {
 }
 
 size_t freeHeap() {
-    return 0; // Not meaningful on desktop
+    return 0; // Not meaningful on desktop (0 = unlimited)
+}
+
+size_t freeInternalHeap() {
+    return 0; // Not meaningful on desktop (0 = unlimited)
 }
 
 size_t maxAllocBlock() {
-    return 0; // Not meaningful on desktop
+    return 0; // Not meaningful on desktop (0 = unlimited)
 }
 
 // UdpSocket

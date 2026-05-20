@@ -52,12 +52,13 @@
       "script": "scenario/run_scenario.py"
     },
     {
-      "id": "live_scenario_local",
+      "id": "live_scenario",
       "tab": "live",
       "group": "scenario",
-      "label": "Live - localhost",
+      "label": "Live Scenarios",
       "help": "live_scenario",
-      "script": "scenario/run_live_scenario.py"
+      "script": "scenario/run_live_scenario.py",
+      "needs_device": true
     },
     {
       "id": "setup_esp_idf",
