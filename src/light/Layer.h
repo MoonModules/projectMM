@@ -171,9 +171,13 @@ private:
         while (count > 0) {
             size_t needed = static_cast<size_t>(count) * channelsPerLight_;
             if (canAllocate(needed)) {
-                buffer_.allocate(count, channelsPerLight_);
-                setDynamicBytes(buffer_.bytes() + lut_.memoryUsed());
-                return;
+                if (buffer_.allocate(count, channelsPerLight_)) {
+                    setDynamicBytes(buffer_.bytes() + lut_.memoryUsed());
+                    return;
+                }
+                // allocate returned false despite canAllocate check — degrade
+                std::printf("  DEGRADE  buffer_.allocate failed for %u lights\n",
+                            static_cast<unsigned>(count));
             }
             // Halve: reduce to sqrt of count (halve each dimension)
             width_ = width_ > 1 ? width_ / 2 : 1;
@@ -184,7 +188,10 @@ private:
                         static_cast<int>(width_), static_cast<int>(height_), static_cast<int>(depth_));
             if (width_ <= 8 && height_ <= 8) break; // minimum
         }
-        buffer_.allocate(count, channelsPerLight_);
+        if (!buffer_.allocate(count, channelsPerLight_)) {
+            std::printf("  DEGRADE  buffer_.allocate failed at minimum size %u\n",
+                        static_cast<unsigned>(count));
+        }
         setDynamicBytes(buffer_.bytes() + lut_.memoryUsed());
     }
 };

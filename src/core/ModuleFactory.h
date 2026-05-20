@@ -17,6 +17,7 @@ public:
     }
 
     static bool registerType(const char* typeName, CreateModuleFn fn, size_t classSize = 0) {
+        if (!typeName || !fn) return false;
         if (count_ >= MAX_TYPES) return false;
         types_[count_] = {typeName, fn, classSize};
         count_++;
@@ -24,6 +25,7 @@ public:
     }
 
     static MoonModule* create(const char* typeName) {
+        if (!typeName) return nullptr;
         for (uint8_t i = 0; i < count_; i++) {
             if (std::strcmp(types_[i].name, typeName) == 0) {
                 auto* mod = types_[i].create();

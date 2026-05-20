@@ -43,9 +43,7 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 
 **Anti-stalling.** If a build error or test failure takes more than 2 attempts to fix, STOP. Do not rewrite surrounding files. Ask the product owner for guidance or rollback with Git and re-approach.
 
-**No staging files.** Do not `git add` files. The product owner stages, tests, and commits manually.
-
-**No pushing.** Do not `git push`. The product owner pushes manually.
+**Git: only on explicit request.** Do not `git add`, `git commit`, or `git push` on your own initiative. Only execute these when the product owner explicitly asks (e.g. "commit now", "push it"). The product owner controls when changes are staged, committed, and pushed.
 
 **Pre-commit checklist (mandatory, in this order):**
 1. Desktop build — `cmake --build build` (zero warnings)

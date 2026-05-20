@@ -48,6 +48,7 @@ public:
     // Fill one logical entry's destinations (call sequentially, idx 0..logicalCount-1)
     void setMapping(nrOfLightsType logicalIdx, const nrOfLightsType* physicals, nrOfLightsType count) {
         if (!offsets_ || !destinations_) return;
+        if (logicalIdx >= logicalCount_) return;
 
         offsets_[logicalIdx] = destinationCount_;
         for (nrOfLightsType i = 0; i < count && destinationCount_ < destinationCapacity_; i++) {

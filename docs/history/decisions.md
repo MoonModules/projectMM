@@ -428,6 +428,35 @@ drift that we decided to restart implementation with better specs.
   progress visibility. Removing completed steps keeps the document
   focused on what's next.
 
+### Generic children eliminate boilerplate
+- Moving children array + addChild/removeChild to MoonModule base eliminated ~120 lines of duplicated code across Layer, DriverGroup, LayoutGroup. The typed arrays (effects_, modifiers_, drivers_, layouts_) and typed add methods were unnecessary — role() distinguishes child types at the call site.
+
+### Dynamic arrays over fixed-size
+- Replacing fixed arrays (MAX_CHILDREN=8, ControlList<8>) with grow-on-demand eliminated arbitrary limits. Leaf modules pay zero cost (nullptr). No hot-path impact — allocation happens during setup only.
+
+### classSize via template, not per-class override
+- ModuleFactory::registerType<T>() captures sizeof(T) automatically. Eliminated 10 boilerplate `classSize() const override` lines. Same pattern as v2's register_type.
+
+### Naming matters
+- `isOneToOne()` was misleading — "1:1" includes both sequential and shuffled. Renamed to `hasLUT()` (asks the real question: is there a table?). `setIdentity()` for the no-table case. Four mapping types defined: 1:1 identical, 1:1 shuffled, 1:0 unmapped, 1:N multimap.
+- Semantic variable names (`availableHeap` not `available`, `internalHeap` not `internal`) — a reader should understand without looking at the assignment.
+
+### Per-module timing reveals bottlenecks
+- tickTimeUs as primary metric (FPS derived) exposed that ArtNet takes 51% of frame time on ESP32 128x128. Without per-module timing this would be invisible.
+- Memory reporting (classSize + dynamicBytes per module) revealed the LUT over-allocation: maxMultiplier() on MirrorModifier saved 64KB by using 4x instead of hardcoded 8x.
+
+### Live scenarios must be non-destructive
+- Initial implementation created modules on the running device without cleanup — the device ended up slower with extra effects. Fix: track created modules, delete them after each scenario. Show `=` for existing vs `+` for new.
+
+### freeHeap vs freeInternalHeap
+- On ESP32 with PSRAM, freeHeap() returns combined (internal + PSRAM). The HEAP_RESERVE check must use freeInternalHeap() because stack/HTTP/WiFi need internal RAM, not PSRAM. On desktop both return 0 (unlimited).
+
+### Rule of Five catches real bugs
+- MoonModule and ControlList owned raw pointers but had implicit copy/move — CodeRabbit caught the double-free risk. Delete copy/move on any class that owns raw memory.
+
+### setName must copy, not store pointer
+- HTTP module creation stored a pointer to a stack-local buffer. After the function returned, the name was garbage. Fixed by making name_ a char[24] buffer with memcpy in setName().
+
 ### What to do differently next time
 - Write module specifications BEFORE code (docs/modules/*.md)
 - Write UI specification BEFORE implementing the web UI

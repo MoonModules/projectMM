@@ -42,7 +42,7 @@ Desktop `freeHeap` returns 0 (unlimited). No memory constraints.
 | BlendMap (LUT traversal) | 17,000 | 29% | 4096 to 16384 via CSR LUT |
 | ArtNet (97 UDP packets) | 30,000 | **51%** | lwIP per-packet overhead |
 | HttpServer | 90 | <1% | loop20ms only |
-| **Total tick** | **58,000** | **FPS: 17** |
+| **Total tick** | **58,000** | **FPS: 17** | |
 
 ArtNet dominates. Each of 97 UDP packets takes ~309us through lwIP.
 

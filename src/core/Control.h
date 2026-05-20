@@ -24,6 +24,12 @@ class ControlList {
 public:
     ~ControlList() { delete[] controls_; }
 
+    ControlList() = default;
+    ControlList(const ControlList&) = delete;
+    ControlList& operator=(const ControlList&) = delete;
+    ControlList(ControlList&&) = delete;
+    ControlList& operator=(ControlList&&) = delete;
+
     void addUint8(const char* name, uint8_t& var, uint8_t min = 0, uint8_t max = 255) {
         grow();
         controls_[count_++] = {&var, name, ControlType::Uint8, min, max};

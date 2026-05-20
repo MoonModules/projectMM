@@ -134,7 +134,7 @@ Before each step, predict memory impact. After, compare.
 - Total predicted delta = sum of new allocations
 
 **Scenario output**:
-```
+```text
   PREDICT  Layer buffer: 49152, LUT: 0, driver buffer: 0 → total: 49152
   MEASURE  heap delta: 49168 (variance: +16 bytes, 0.03%)
   PASS     variance < 5%
@@ -162,7 +162,7 @@ Updated alongside each phase:
 
 ## Files Summary
 
-```
+```text
 src/core/MoonModule.h           # classSize(), dynamicBytes_
 src/core/types.h                # HEAP_RESERVE constant
 src/light/Layer.h               # adaptive LUT allocation, degradation

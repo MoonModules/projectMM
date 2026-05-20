@@ -10,7 +10,13 @@ enum class ModuleRole : uint8_t { Generic, Effect, Modifier, Driver, Layout };
 
 class MoonModule {
 public:
+    MoonModule() = default;
     virtual ~MoonModule() { delete[] children_; }
+
+    MoonModule(const MoonModule&) = delete;
+    MoonModule& operator=(const MoonModule&) = delete;
+    MoonModule(MoonModule&&) = delete;
+    MoonModule& operator=(MoonModule&&) = delete;
 
     // Default lifecycle propagates to children. Override to add container-specific logic.
     virtual void setup() { for (uint8_t i = 0; i < childCount_; i++) children_[i]->setup(); }
@@ -58,6 +64,7 @@ public:
     bool removeChild(MoonModule* child) {
         for (uint8_t i = 0; i < childCount_; i++) {
             if (children_[i] == child) {
+                child->setParent(nullptr);
                 for (uint8_t j = i; j + 1 < childCount_; j++) children_[j] = children_[j + 1];
                 childCount_--;
                 return true;
