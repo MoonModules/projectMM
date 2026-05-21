@@ -50,9 +50,13 @@ async function init() {
     try {
         const resp = await fetch("/api/state");
         state = await resp.json();
+        updateDeviceName();
         renderNav();
         if (state.modules && state.modules.length > 0) {
-            selectModule(state.modules[0].name);
+            // Restore the previously-selected module if it still exists; otherwise the first.
+            const saved = localStorage.getItem("mm.selectedModule");
+            const exists = saved && state.modules.some(m => m.name === saved);
+            selectModule(exists ? saved : state.modules[0].name);
         }
     } catch (err) {
         document.getElementById("main").textContent = "Error: " + err.message;
@@ -80,6 +84,7 @@ function renderNav() {
 
 function selectModule(name) {
     selectedModule = name;
+    localStorage.setItem("mm.selectedModule", name);
     renderNav();
     renderCards();
 }

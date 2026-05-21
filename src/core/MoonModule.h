@@ -29,7 +29,28 @@ public:
     virtual void loop20ms() {}
     virtual void loop1s() {}
     virtual void teardown() { for (uint8_t i = childCount_; i > 0; i--) children_[i-1]->teardown(); }
+
+    // onBuildControls MUST be idempotent and pure: only `controls_.clear()` + `controls_.addX()`.
+    // No platform queries, no I/O, no allocations. HttpServerModule calls it again whenever a
+    // Select control changes the visible control set, so a second invocation must produce
+    // exactly the same result for unchanged inputs. Conditional branches may depend on any
+    // member variable.
     virtual void onBuildControls() { for (uint8_t i = 0; i < childCount_; i++) children_[i]->onBuildControls(); }
+
+    // Non-virtual helper: clear-and-rebuild for this module AND its descendants. The default
+    // onBuildControls cascades into children, so we must also clear their control lists first;
+    // otherwise the recursive append would duplicate every child's controls. Used after Select
+    // changes (in HttpServerModule) and anywhere else the conditional control set needs
+    // re-evaluation.
+    void rebuildControls() {
+        clearControlsRecursive();
+        onBuildControls();
+    }
+    void clearControlsRecursive() {
+        controls_.clear();
+        for (uint8_t i = 0; i < childCount_; i++) children_[i]->clearControlsRecursive();
+    }
+
     virtual void onAllocateMemory() { for (uint8_t i = 0; i < childCount_; i++) children_[i]->onAllocateMemory(); }
 
     const char* name() const { return name_; }
@@ -41,8 +62,24 @@ public:
         name_[len] = 0;
     }
 
+    // typeName is the stable factory key (e.g. "NoiseEffect"), set once by ModuleFactory.
+    // Stored as `const char*` pointing at the factory's string literal — zero per-instance
+    // copy, lives in flash. Caller must pass a string with static lifetime (string literal
+    // or factory-owned storage); do not pass stack-local or temporary buffers.
+    // Distinct from name() which is a per-instance human label and may be overridden
+    // ("Noise" instead of "NoiseEffect"); typeName() stays the factory key.
+    const char* typeName() const { return typeName_; }
+    void setTypeName(const char* tn) { typeName_ = tn ? tn : ""; }
+
     bool enabled() const { return enabled_; }
     void setEnabled(bool e) { enabled_ = e; }
+
+    // Dirty flag — set by HttpServerModule when a control changes. A future persistence layer
+    // (or any consumer interested in "this module's state has been touched") can observe it
+    // and clear it after handling.
+    bool dirty() const { return dirty_; }
+    void markDirty() { dirty_ = true; }
+    void clearDirty() { dirty_ = false; }
 
     MoonModule* parent() const { return parent_; }
     void setParent(MoonModule* p) { parent_ = p; }
@@ -108,7 +145,9 @@ protected:
 
 private:
     char name_[24] = {};
+    const char* typeName_ = "";  // points into flash (factory string literal); see setTypeName comment
     bool enabled_ = true;
+    bool dirty_ = false;
     MoonModule* parent_ = nullptr;
     MoonModule** children_ = nullptr;
     uint8_t childCount_ = 0;

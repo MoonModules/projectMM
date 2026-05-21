@@ -21,6 +21,15 @@ v1's `handleStateUpdate()` updates individual control values in-place using `que
 ### Debounced control sending
 v1 debounces slider input with a 150ms timer and text input with a 500ms timer. Values are sent via `PATCH /api/modules/:id/props/:key`. This prevents flooding the API during rapid slider movement while keeping the UI responsive.
 
+The debounce applies only to network sends. Visible UI feedback (slider thumb, numeric display, color swatch) must update within ~20ms of the user input event — directly in the input handler, not waiting on the server round-trip. Two independent timescales:
+
+| Timescale | What |
+|-----------|------|
+| ≤20ms     | Local UI feedback (thumb position, value label) — synchronous in the input handler |
+| 150ms (slider) / 500ms (text) | Network send to the server |
+
+Keeping these layered means the slider feels instant even when the server is busy.
+
 ### Module cards with metadata
 Each module card shows: name, id, category, core affinity badge, timing stats (fps/avg/min/max — clickable to cycle), class size, heap size. This gives immediate visibility into system health without a separate diagnostics page.
 

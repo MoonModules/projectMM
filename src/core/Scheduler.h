@@ -82,8 +82,14 @@ public:
     }
 
     void teardown() {
+        // Two passes: tear down all modules first (so a module's teardown can still safely
+        // observe sibling modules' state), then delete the trees. Otherwise the reverse-order
+        // teardown-then-delete pattern would leave a module's teardown looking at already-freed
+        // siblings — relevant for any cross-module cleanup work.
         for (uint8_t i = moduleCount_; i > 0; i--) {
             modules_[i - 1]->teardown();
+        }
+        for (uint8_t i = moduleCount_; i > 0; i--) {
             deleteTree(modules_[i - 1]);
         }
         moduleCount_ = 0;

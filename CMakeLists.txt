@@ -19,7 +19,7 @@ target_include_directories(mm_platform PUBLIC src/ src/platform/desktop/)
 add_custom_command(
     OUTPUT ${CMAKE_SOURCE_DIR}/src/core/version.h
     COMMAND ${CMAKE_COMMAND} -E env python3 ${CMAKE_SOURCE_DIR}/scripts/build/generate_version.py
-    DEPENDS ${CMAKE_SOURCE_DIR}/library.json
+    DEPENDS ${CMAKE_SOURCE_DIR}/library.json ${CMAKE_SOURCE_DIR}/scripts/build/generate_version.py
     COMMENT "Generating version.h"
 )
 add_custom_target(version_gen DEPENDS ${CMAKE_SOURCE_DIR}/src/core/version.h)

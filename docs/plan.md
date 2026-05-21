@@ -2,32 +2,54 @@
 
 Completed items are removed. This file is deleted when empty.
 
-## Each commit delivers
+## 11. Config persistence (blob-based)
 
-- Source code (src/)
-- Unit tests (test/) — all passing
-- Integration test if pipeline is involved
-- Platform boundary check passing
-- Zero warnings (`-Wall -Wextra -Werror`)
-- Updated MoonModule specs (docs/moonmodules/) for what was built
-- Tested on hardware where applicable
-- Pre-commit checklist passed (8 steps including Reviewer agent)
+Save each MoonModule's per-instance state to flash so settings survive reboot. Storage is **binary blob per module instance** — one file per top-level subtree, the file is a recursive dump of each module's post-base member memory plus a header. No JSON parsing, no schema definition, no per-module persistence code.
 
-## 8. Live scenario testing
+**Why blob and not JSON** (plan-09 attempted JSON and was abandoned — see `docs/history/plan-09.md`):
+- ~80 lines vs ~800 lines of code
+- Zero per-module boilerplate
+- Save/load is one `memcpy` per module — sub-millisecond
+- Files exactly `classSize` bytes — trivial budgeting
+- Format-version mismatch (class layout changed) → discard, defaults apply
 
-Python scenario runner that replays scenario JSON files via HTTP against a running device (desktop or ESP32). Same JSON format as in-process runner. MoonDeck Live tab: device discovery (subnet scan + /api/state probe), device selection, run scenarios against selected device. First because: all subsequent work goes through the live test pipeline.
+**File format:**
+```
+header (16 bytes): magic 'MMBL' | uint16 version | uint16 typeNameHash | uint16 classSize | uint16 childCount
+controls blob: classSize - sizeof(MoonModule) bytes of memcpy(this + sizeof(MoonModule))
+children: recursive (each child has its own header + blob)
+```
 
-## 9. System MoonModule
+**Boot flow:**
+1. FilesystemModule::setup() mounts LittleFS, reads /.config/<TypeName>[.N].blob into stack buffer
+2. For each top-level module: validate header (magic, hash, classSize). If valid, memcpy bytes back over (this + sizeof(MoonModule)) and recurse into children. If mismatch, discard — defaults stand.
+3. Other modules' setup() runs with their member variables already overlaid.
 
-System-level diagnostics as a MoonModule: heap free/used, FPS, uptime, chip info, firmware version. Visible in the Web UI. Simpler than WiFi — useful for debugging while building subsequent features. Reverse engineer from projectMM v1, MoonLight.
+**Save flow:**
+- HttpServerModule sets `module->markDirty()` on control changes (already done in pile A).
+- FilesystemModule::loop1s() checks dirty flags with 2s debounce, walks subtree, serializes (header + memcpy + recurse), atomic write-and-rename.
 
-## 10. WiFi MoonModule
+**Constraints to enforce at compile time:**
+- `static_assert(std::is_trivially_copyable_v<T>)` for any factory-registered type. Modules must only contain POD members. No pointers, no `std::string`, no `std::vector`.
+- Children handled separately (their own files), not part of parent's blob.
+- Cross-platform binary differs (desktop 64-bit vs ESP32 32-bit) — persistence files are per-device only. Use `MM_DEVICE_TAG` byte in header so wrong-platform files are rejected.
 
-Add WiFi MoonModule (STA + AP fallback). Controls: SSID, password, status. When Ethernet is available, WiFi doesn't need to run. Proves network as a MoonModule. Reverse engineer from projectMM v1.
+**Estimated scope:** new `FilesystemModule.h` (~80 lines), modify `MoonModule` slightly for class-size introspection (already have `classSize_`), no other module changes. One unit test that round-trips a module.
 
-## 11. Config persistence
+## 11.5. Light pipeline free-then-allocate rebuild
 
-Save/load control values to filesystem. Settings survive reboot. Format: one file per module or one file for all — decide based on ESP32 filesystem constraints. Platform filesystem abstraction (LittleFS on ESP32, std::filesystem on desktop).
+Layer + DriverGroup currently rebuild in-place (allocate-before-free) which produces a heap fragmentation cycle under memory pressure: free heap drops to ~60KB but max contiguous block shrinks to ~15KB, lwIP can't allocate new TCBs, HTTP refuses connections, scenarios fail intermittently. Plan-09 tried defensive guards (~5 patches across BlendMap, DriverGroup, Layer) but the right fix is structural.
+
+**Approach:** add a `Pipeline` coordinator (or modify Scheduler::rebuild) that calls a new two-phase rebuild:
+1. **Phase A — free all**: every module's `onAllocateMemory()` is split into `onFreeMemory()` + `onAllocateMemory()`. Phase A walks the tree calling `onFreeMemory` (release LUT, output buffer, layer buffer). After phase A, max heap block is genuinely the post-free state.
+2. **Phase B — allocate fresh**: walk again calling `onAllocateMemory`. `canAllocate` sees true heap, degrade decisions are deterministic and consistent across modules.
+
+**Eliminates:**
+- Stride-mismatch bugs (LUT references logical=N but buffer count=M)
+- Zombie state (buffer empty while LUT thinks it's alive)
+- Half-built state where DriverGroup output buffer is freed but Layer thinks LUT is active
+
+**Scope:** Layer, DriverGroup, Scheduler::rebuild, possibly Buffer/MappingLUT. ~half a day. Self-contained — doesn't touch the persistence story.
 
 ## 12. Effect/module switching from UI
 
@@ -41,7 +63,7 @@ Update README with: what it does now, how to build/flash, how to connect and ope
 
 ## Release 1.0 — "connect, open browser, see lights"
 
-Milestone after items 8-13. An end user with an ESP32 can flash the firmware, connect via WiFi, open a browser, see the 3D preview, change effects and controls, and have settings persist across reboots.
+Milestone after items 11-13. An end user with an ESP32 can flash the firmware, connect via WiFi, open a browser, see the 3D preview, change effects and controls, and have settings persist across reboots.
 
 ---
 
@@ -73,11 +95,8 @@ The mDNS checkbox in NetworkModule was added as a diagnostic tool during perform
 
 The `setup_esp_idf.py` script currently clones or pulls the latest from the ESP-IDF repo. Need to check: does it pin to a specific commit/tag, or does it always get latest? If latest, running "Setup ESP-IDF" in MoonDeck will silently change the IDF version, potentially breaking the build. Should pin to the tested version (`v6.1-dev-399-gd1b91b79b`) in the setup script or document that updates require re-testing.
 
-## Flash partition scheme (pending)
+## WiFi runtime disable (backlog)
 
-With WiFi included, firmware grew from ~365KB to ~879KB. The default ESP32 partition table (`default.csv`) has a 1MB app partition. At 879KB / 1024KB = 86% full — little room for growth. Need to adopt a custom partition table (like projectMM v1) with a larger app partition. Options:
-- Single OTA: 2MB app partition (no OTA rollback, but maximum space)
-- Dual OTA: 2x 1.5MB app partitions (OTA updates with rollback, needs 4MB flash)
-- Filesystem partition for config persistence (item 11)
+Postponed. Single firmware binary ships the WiFi stack regardless (the 1.75 MB app partition has plenty of room for it to live unused). When and how WiFi controls are exposed in the UI gets revisited after persistence (item 11) lands.
 
-Reference projectMM v1's partition scheme for a proven layout.
+Open design question to address when this is picked up: can the platform detect at runtime whether Ethernet hardware is present (PHY responds on MDIO during `esp_eth_driver_install`)? If yes, the UI can hide WiFi controls — and skip `wifiStaInit()` — when Ethernet hardware is detected. That's a behavior-driven gate rather than a user toggle. Some ESP32 variants (e.g. ESP32-C2, ESP32-H2) don't have WiFi hardware at all, so the gate also needs to handle "WiFi not present" cleanly. Both detections live in `src/platform/`.

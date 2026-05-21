@@ -27,6 +27,26 @@ size_t flashChipSize();       // total flash chip capacity
 size_t filesystemUsed();      // filesystem used bytes
 size_t filesystemTotal();     // filesystem total bytes
 
+// Filesystem — LittleFS on ESP32, std::filesystem on desktop (rooted at ./.config/'s parent).
+// Paths are absolute-looking (start with '/'); desktop strips the leading '/' so
+// "/.config/System.json" maps to "<root>/.config/System.json".
+//
+// fsSetRoot redirects the desktop root from CWD to an absolute path. Used by unit tests
+// to give each TEST_CASE an isolated working directory without chdir. No-op on ESP32
+// (LittleFS is mounted at a fixed partition). Must be called BEFORE fsMount; defaults
+// to ".".
+void fsSetRoot(const char* path);
+bool fsMount();                                              // idempotent; safe to call multiple times
+void fsUnmount();
+bool fsMkdir(const char* path);                              // mkdir -p; no error if exists
+bool fsExists(const char* path);
+bool fsRemove(const char* path);                             // file or empty dir
+int  fsRead(const char* path, char* buf, size_t maxLen);     // bytes read; -1 on error; null-terminated on success
+bool fsWriteAtomic(const char* path, const char* data, size_t len);
+                                                              // writes <path>.tmp, fsync, rename. Caller ensures parent dir exists.
+using FsListCb = void(*)(const char* name, bool isDir, void* user);
+void fsList(const char* dir, FsListCb cb, void* user);       // single-level listing
+
 // Network (ESP32 only, stubs on desktop)
 bool ethInit();
 bool ethLinkUp();       // PHY link detected (cable plugged, fast check)

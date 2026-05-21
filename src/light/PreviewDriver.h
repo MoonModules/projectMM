@@ -9,9 +9,6 @@ namespace mm {
 class PreviewDriver : public DriverBase {
 public:
     uint8_t fps = 20;
-    lengthType width = 0;
-    lengthType height = 0;
-    lengthType depth = 1;
 
     void setPreviewFrame(PreviewFrame* f) { frame_ = f; }
 
@@ -24,7 +21,7 @@ public:
     }
 
     void loop() override {
-        if (!sourceBuffer_ || !sourceBuffer_->data() || !frame_) return;
+        if (!sourceBuffer_ || !sourceBuffer_->data() || !frame_ || !layer_) return;
         if (fps == 0) return;
 
         uint32_t now = platform::millis();
@@ -32,12 +29,13 @@ public:
         if (now - lastSendTime_ < interval) return;
         lastSendTime_ = now;
 
-        // Zero-copy: point directly at the output buffer
+        // Read dimensions from Layer each frame so the preview tracks runtime grid resizes.
+        // Zero-copy: point directly at the source buffer.
         frame_->data = sourceBuffer_->data();
         frame_->dataLen = sourceBuffer_->bytes();
-        frame_->width = width;
-        frame_->height = height;
-        frame_->depth = depth;
+        frame_->width = layer_->physicalWidth();
+        frame_->height = layer_->physicalHeight();
+        frame_->depth = layer_->physicalDepth();
         frame_->fps = fps;
         frame_->ready = true;
     }

@@ -30,6 +30,9 @@ public:
             if (std::strcmp(types_[i].name, typeName) == 0) {
                 auto* mod = types_[i].create();
                 if (mod) {
+                    // typeName is the stable factory key; name() is the human-facing label and
+                    // is often overridden ("Noise" instead of "NoiseEffect"). Persistence uses typeName().
+                    mod->setTypeName(typeName);
                     mod->setName(typeName);
                     if (types_[i].classSize > 0) mod->setClassSize(types_[i].classSize);
                 }

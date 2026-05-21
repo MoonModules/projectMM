@@ -379,6 +379,7 @@ private:
         // Handle module-level "enabled" property
         if (std::strcmp(controlName, "enabled") == 0) {
             target->setEnabled(parseJsonBool(body, "value"));
+            target->markDirty();
             if (scheduler_) scheduler_->rebuild();
             sendResponse(conn, 200, "application/json", "{\"ok\":true}");
             return;
@@ -416,6 +417,10 @@ private:
                 }
                 case ControlType::Select: {
                     int v = parseJsonInt(body, "value");
+                    if (v < 0 || v >= c.max) {
+                        sendResponse(conn, 400, "application/json", "{\"error\":\"value out of range\"}");
+                        return;
+                    }
                     *static_cast<uint8_t*>(c.ptr) = static_cast<uint8_t>(v);
                     break;
                 }
@@ -425,9 +430,9 @@ private:
             }
             // Rebuild controls only for Select (dynamic onBuildControls), rebuild pipeline for all
             if (c.type == ControlType::Select) {
-                target->controls().clear();
-                target->onBuildControls();
+                target->rebuildControls();
             }
+            target->markDirty();
             if (scheduler_) scheduler_->rebuild();
 
             sendResponse(conn, 200, "application/json", "{\"ok\":true}");

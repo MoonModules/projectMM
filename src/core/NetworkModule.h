@@ -182,7 +182,7 @@ private:
             state_ = State::Idle;
             std::snprintf(statusStr_, sizeof(statusStr_), "No network");
         }
-        rebuildControls();
+        rebuildLocalControlsAndPipeline();
     }
 
     void onConnected(const char* via) {
@@ -209,7 +209,7 @@ private:
 
         syncMdns();
 
-        rebuildControls();
+        rebuildLocalControlsAndPipeline();
     }
 
     void updateStatusIP() {
@@ -228,17 +228,22 @@ private:
         if (shouldRun && !mdnsRunning_) {
             const char* devName = (systemModule_ && systemModule_->deviceName()[0] != 0)
                                   ? systemModule_->deviceName() : "mm";
-            platform::mdnsInit(devName);
-            mdnsRunning_ = true;
+            // Only mark running on success — leave false so loop1s retries next tick
+            if (platform::mdnsInit(devName)) {
+                mdnsRunning_ = true;
+            }
         } else if (!shouldRun && mdnsRunning_) {
             platform::mdnsStop();
             mdnsRunning_ = false;
         }
     }
 
-    void rebuildControls() {
-        controls_.clear();
-        onBuildControls();
+    // Rebuilds local control set AND triggers a pipeline-level allocate. Used after the
+    // status changes (connected/AP/etc.) which alters statusStr_ and may toggle the addressing
+    // conditional. The base rebuildControls() handles the controls clear+rebuild; we just add
+    // the scheduler kick.
+    void rebuildLocalControlsAndPipeline() {
+        rebuildControls();
         if (scheduler_) scheduler_->rebuild();
     }
 };

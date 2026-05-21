@@ -1,7 +1,10 @@
 #include "platform/platform.h"
 
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <filesystem>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -83,8 +86,116 @@ const char* sdkVersion() {
 size_t firmwareSize() { return 0; }
 size_t firmwarePartition() { return 0; }
 size_t flashChipSize() { return 0; }
-size_t filesystemUsed() { return 0; }
-size_t filesystemTotal() { return 0; }
+
+// Filesystem — std::filesystem rooted at fsRoot_ (default ".", overridable via fsSetRoot).
+// A leading '/' in the API path maps to root-relative.
+
+namespace {
+std::filesystem::path fsRoot_{"."};
+
+// Map "/.config/foo.json" → "<root>/.config/foo.json". Strip a single leading '/'.
+std::filesystem::path toFsPath(const char* path) {
+    if (!path) return {};
+    if (path[0] == '/') return fsRoot_ / (path + 1);
+    return fsRoot_ / path;
+}
+}
+
+void fsSetRoot(const char* path) {
+    fsRoot_ = (path && *path) ? std::filesystem::path(path) : std::filesystem::path(".");
+}
+
+bool fsMount() {
+    // No mount needed on desktop; OS handles it.
+    return true;
+}
+
+void fsUnmount() {}
+
+bool fsMkdir(const char* path) {
+    std::error_code ec;
+    std::filesystem::create_directories(toFsPath(path), ec);
+    return !ec;
+}
+
+bool fsExists(const char* path) {
+    std::error_code ec;
+    return std::filesystem::exists(toFsPath(path), ec);
+}
+
+bool fsRemove(const char* path) {
+    std::error_code ec;
+    return std::filesystem::remove(toFsPath(path), ec);
+}
+
+int fsRead(const char* path, char* buf, size_t maxLen) {
+    if (!buf || maxLen == 0) return -1;
+    FILE* f = std::fopen(toFsPath(path).c_str(), "rb");
+    if (!f) return -1;
+    size_t n = std::fread(buf, 1, maxLen - 1, f);
+    std::fclose(f);
+    buf[n] = 0;
+    return static_cast<int>(n);
+}
+
+bool fsWriteAtomic(const char* path, const char* data, size_t len) {
+    auto target = toFsPath(path);
+    auto tmp = target;
+    tmp += ".tmp";
+
+    FILE* f = std::fopen(tmp.c_str(), "wb");
+    if (!f) return false;
+    size_t written = std::fwrite(data, 1, len, f);
+    if (written != len) {
+        std::fclose(f);
+        std::error_code ec;
+        std::filesystem::remove(tmp, ec);
+        return false;
+    }
+    std::fflush(f);
+    int fd = ::fileno(f);
+    if (fd >= 0) ::fsync(fd);
+    std::fclose(f);
+
+    std::error_code ec;
+    std::filesystem::rename(tmp, target, ec);
+    if (ec) {
+        std::filesystem::remove(tmp, ec);
+        return false;
+    }
+    return true;
+}
+
+void fsList(const char* dir, FsListCb cb, void* user) {
+    if (!cb) return;
+    std::error_code ec;
+    auto p = toFsPath(dir);
+    if (!std::filesystem::exists(p, ec)) return;
+    for (auto& entry : std::filesystem::directory_iterator(p, ec)) {
+        if (ec) break;
+        cb(entry.path().filename().c_str(), entry.is_directory(ec), user);
+    }
+}
+
+size_t filesystemUsed() {
+    // Sum of file sizes under ./.config/
+    std::error_code ec;
+    auto root = toFsPath("/.config");
+    if (!std::filesystem::exists(root, ec)) return 0;
+    size_t total = 0;
+    for (auto& entry : std::filesystem::recursive_directory_iterator(root, ec)) {
+        if (ec) break;
+        if (entry.is_regular_file(ec)) {
+            total += entry.file_size(ec);
+        }
+    }
+    return total;
+}
+
+size_t filesystemTotal() {
+    // Desktop has no fixed quota; report a notional 384 KB to match the 4MB ESP32 partition.
+    return 384 * 1024;
+}
 
 // Network stubs (desktop has no WiFi/Ethernet hardware)
 

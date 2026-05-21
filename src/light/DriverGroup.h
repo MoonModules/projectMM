@@ -12,6 +12,12 @@ class DriverBase : public MoonModule {
 public:
     ModuleRole role() const override { return ModuleRole::Driver; }
     virtual void setSourceBuffer(Buffer* buf) = 0;
+    // Optional: drivers that need dimensions (e.g. PreviewDriver describing the LED grid in
+    // the WebSocket frame) call layer_ for current physical width/height/depth. ArtNet doesn't
+    // need it — it just streams bytes.
+    void setLayer(Layer* layer) { layer_ = layer; }
+protected:
+    Layer* layer_ = nullptr;
 };
 
 class DriverGroup : public MoonModule {
@@ -57,7 +63,9 @@ private:
         if (!layer_) return;
         Buffer* buf = layer_->lut().hasLUT() ? &outputBuffer_ : &layer_->buffer();
         for (uint8_t i = 0; i < childCount(); i++) {
-            static_cast<DriverBase*>(child(i))->setSourceBuffer(buf);
+            auto* drv = static_cast<DriverBase*>(child(i));
+            drv->setSourceBuffer(buf);
+            drv->setLayer(layer_);  // so PreviewDriver can read current physical dimensions
         }
     }
 };

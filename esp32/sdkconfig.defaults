@@ -4,6 +4,13 @@ CONFIG_COMPILER_CXX_EXCEPTIONS=n
 CONFIG_LWIP_SO_REUSE=y
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
+# Custom partition table (4MB classic; S3 variants override via sdkconfig.defaults.<board>)
+# app0/app1 = 1.75 MB each, spiffs = 384 KB (LittleFS), coredump = 64 KB
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/esp32dev.csv"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+
 # Task watchdog disabled — we use platform::yield() for cooperative scheduling
 CONFIG_ESP_TASK_WDT_EN=n
 

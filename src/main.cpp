@@ -93,8 +93,8 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     auto* previewFrame = new mm::PreviewFrame();
     auto* preview = static_cast<mm::PreviewDriver*>(mm::ModuleFactory::create("PreviewDriver"));
     preview->setName("Preview");
-    preview->width = gridW;
-    preview->height = gridH;
+    // PreviewDriver reads physical dimensions from Layer at frame time (via DriverGroup's
+    // setLayer wiring) so runtime grid resizes are reflected in the preview header.
     preview->setPreviewFrame(previewFrame);
     driverGroup->addChild(preview);
 

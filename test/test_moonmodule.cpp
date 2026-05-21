@@ -40,6 +40,31 @@ TEST_CASE("MoonModule name") {
     CHECK(std::strcmp(mod.name(), "TestModule") == 0);
 }
 
+TEST_CASE("MoonModule typeName is independent of name") {
+    TestModule mod;
+    // Both empty by default
+    CHECK(mod.name()[0] == '\0');
+    CHECK(mod.typeName()[0] == '\0');
+
+    // Factory sets typeName then name; later setName doesn't touch typeName
+    mod.setTypeName("NoiseEffect");
+    mod.setName("NoiseEffect");
+    CHECK(std::strcmp(mod.typeName(), "NoiseEffect") == 0);
+
+    mod.setName("Noise");   // human label override (matches main.cpp pattern)
+    CHECK(std::strcmp(mod.name(), "Noise") == 0);
+    CHECK(std::strcmp(mod.typeName(), "NoiseEffect") == 0);
+}
+
+TEST_CASE("MoonModule dirty flag") {
+    TestModule mod;
+    CHECK_FALSE(mod.dirty());
+    mod.markDirty();
+    CHECK(mod.dirty());
+    mod.clearDirty();
+    CHECK_FALSE(mod.dirty());
+}
+
 TEST_CASE("MoonModule parent") {
     TestModule parent;
     TestModule child;

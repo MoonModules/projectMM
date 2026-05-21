@@ -111,20 +111,21 @@ mDNS has zero FPS impact. The 5KB heap difference is the mDNS service memory.
 
 | Component | Size |
 |-----------|------|
-| Firmware image | 879KB |
-| App partition | 1024KB (86% used) |
-| Flash chip | 2MB |
+| Firmware image | ~880KB (partition layout updated; LittleFS available via platform fs API but no module uses it yet — plan-10) |
+| App partition | 1.75MB |
+| Flash chip | 4MB |
 | DRAM used | 41KB |
 | DRAM free | 139KB |
+| `sizeof(MoonModule)` ESP32 | 56 bytes (was 80; saved 24 bytes per instance via const char* typeName_ + dirty bool) |
 
-WiFi driver adds ~514KB to firmware (was 365KB before WiFi/mDNS). Partition is 86% full — custom partition table needed for growth.
+The partition layout matches projectMM v1: app0/app1 = 1.75 MB each, `spiffs` (LittleFS) = 384 KB, coredump = 64 KB. The joltwallet/esp_littlefs component adds ~30KB to the firmware image; plan-10 will use it for blob persistence. Partition is well under 50% used.
 
 ### Key limits
 
 - 128x128 = 16,384 lights feasible on Ethernet (14 FPS, 124KB free heap)
 - ArtNet is the bottleneck (43% of frame time), not rendering
 - WiFi performance: pending testing (see plan.md)
-- Partition space: 14% free — approaching limit
+- Partition space: 50% free in the app partition; 384KB filesystem partition holds dozens of config + preset files easily
 
 ## 1:1 identical vs LUT pipeline
 

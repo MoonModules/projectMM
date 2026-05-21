@@ -25,7 +25,7 @@ set(VERSION_DIR ${COMPONENT_DIR}/../../src/core)
 add_custom_command(
     OUTPUT ${VERSION_DIR}/version.h
     COMMAND python3 ${COMPONENT_DIR}/../../scripts/build/generate_version.py
-    DEPENDS ${COMPONENT_DIR}/../../library.json
+    DEPENDS ${COMPONENT_DIR}/../../library.json ${COMPONENT_DIR}/../../scripts/build/generate_version.py
     COMMENT "Generating version.h"
 )
 add_custom_target(version_gen DEPENDS ${VERSION_DIR}/version.h)

@@ -3,6 +3,20 @@
   "description": "Measure performance impact of control changes on a running system",
   "steps": [
     {
+      "name": "reset-mirrorX",
+      "op": "set_control",
+      "id": "Mirror",
+      "key": "mirrorX",
+      "value": true
+    },
+    {
+      "name": "reset-mirrorY",
+      "op": "set_control",
+      "id": "Mirror",
+      "key": "mirrorY",
+      "value": true
+    },
+    {
       "name": "baseline",
       "op": "set_control",
       "id": "Noise",

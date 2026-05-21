@@ -94,6 +94,16 @@ After persistence (item 11), credentials survive reboot automatically.
 
 This module is ESP32-specific (and Teensy later). Desktop and RPi use OS-level networking — no NetworkModule loaded. The HTTP server and ArtNet work regardless because they use the platform socket abstraction which works on any connected interface.
 
+## Hardware availability
+
+Not every ESP32 has WiFi (e.g. ESP32-C2, ESP32-H2 ship without it) and not every board has Ethernet (classic ESP32 dev boards don't have a PHY). The cascade adapts to whatever the platform layer reports as present:
+- If Ethernet hardware is detected (PHY responds during init), the cascade starts at Ethernet. Otherwise Ethernet is skipped.
+- If WiFi hardware is present, STA + AP fallback are available. Otherwise the cascade ends after Ethernet.
+
+How presence is detected lives in `src/platform/` — see `platform::ethPresent()` and `platform::wifiPresent()` (to be added). Controls and UI cards for unavailable interfaces are hidden via `onBuildControls()`. There is no firmware variant — one binary handles all combinations.
+
+Whether a user-facing toggle is also exposed (force WiFi off even when present) is deferred — see `docs/plan.md`.
+
 ## Security
 
 - AP mode: open (no password) — fallback for initial setup only

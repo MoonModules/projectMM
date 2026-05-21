@@ -26,7 +26,9 @@ Tests `MoonModule` lifecycle and `Control` binding in `src/core/MoonModule.h` an
 
 - Lifecycle methods called (setup, teardown)
 - Name get/set
+- `typeName` independent of `name` — factory sets typeName once, name can be overridden
 - Parent get/set
+- Dirty flag set/clear (future persistence consumer)
 - Control binding via ControlList (uint8_t, bool)
 - Pointer binding: changing variable updates control, changing via pointer updates variable
 - ControlList clear and rebuild
@@ -176,8 +178,16 @@ Tests performance impact of control changes on a running system.
 
 Measures FPS impact of enabling/disabling mDNS on a running device.
 
-- Toggles mDNS on → off → on, measures tick/FPS at each step
-- Verified: mDNS has zero FPS impact (5KB heap difference only)
+- Toggles mDNS on → off → on, measures FPS at each step
+- Final step asserts `fps.min_pct: 80` — re-enabling mDNS keeps FPS within 20% of baseline
+
+### grid-resize (`test/scenarios/grid-resize.json`) {#scenario-grid-resize}
+
+Exercises the light-pipeline adaptive allocation path. Useful for catching regressions in the Layer/DriverGroup allocate path under memory pressure (see plan 11.5 in `docs/plan.md`).
+
+- Mirror state reset to known values at start (mirrorX=true, mirrorY=true) so subsequent runs don't contaminate each other
+- Sizes the grid to 128×128, then shrinks to 128×64, then grows back to 128×128
+- Only the shrink step asserts a bound (`fps.min_pct: 80`) because shrinks always release memory and should match or beat baseline. Grow steps deliberately have no bound — they're inherently slower at a larger size.
 
 ### Running live scenarios
 

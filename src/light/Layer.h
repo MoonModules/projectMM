@@ -67,6 +67,13 @@ public:
         return layoutGroup_ ? layoutGroup_->totalLightCount() : 0;
     }
 
+    // Physical dimensions match the actual LED arrangement (computed in onAllocateMemory from
+    // the LayoutGroup). PreviewDriver and any future driver that needs to describe the LED
+    // shape should read these rather than caching values from main.cpp startup.
+    lengthType physicalWidth() const { return physicalWidth_; }
+    lengthType physicalHeight() const { return physicalHeight_; }
+    lengthType physicalDepth() const { return physicalDepth_; }
+
     bool lutSkipped() const { return lutSkipped_; }
 
     // Precondition: physicalWidth_/Height_/Depth_ must be set (call from onAllocateMemory)
