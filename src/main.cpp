@@ -7,6 +7,7 @@
 #include "light/PreviewDriver.h"
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
+#include "core/FilesystemModule.h"
 #include "core/ModuleFactory.h"
 #include "platform/platform.h"
 
@@ -29,6 +30,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule");
     mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule");
+    mm::ModuleFactory::registerType<mm::FilesystemModule>("FilesystemModule");
 }
 
 static void printModuleMetrics(mm::MoonModule* mod, int depth) {
@@ -52,7 +54,13 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
 
     // All modules created via factory (heap-allocated, PSRAM when available, classSize set)
 
-    // System (first — deviceName needed by other modules)
+    // Filesystem (first — wires the load hook into the scheduler so persisted values
+    // overlay into other modules' bound variables before their setup() runs)
+    auto* filesystemModule = static_cast<mm::FilesystemModule*>(mm::ModuleFactory::create("FilesystemModule"));
+    filesystemModule->setName("Filesystem");
+    filesystemModule->setScheduler(&scheduler);
+
+    // System (deviceName needed by other modules)
     auto* systemModule = static_cast<mm::SystemModule*>(mm::ModuleFactory::create("SystemModule"));
     systemModule->setName("System");
     systemModule->setScheduler(&scheduler);
@@ -105,7 +113,9 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     httpServer->setPreviewFrame(previewFrame);
 
     // Register top-level modules with scheduler (scheduler deletes on teardown)
-    // Order matters: system first (deviceName), network second, then light pipeline, then HTTP
+    // Order matters: filesystem first (load hook runs before any module's setup),
+    // then system (deviceName), network, light pipeline, then HTTP
+    scheduler.addModule(filesystemModule);
     scheduler.addModule(systemModule);
     scheduler.addModule(networkModule);
     scheduler.addModule(layoutGroup);

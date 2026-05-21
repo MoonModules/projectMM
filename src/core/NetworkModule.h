@@ -42,13 +42,19 @@ public:
         controls_.addSelect("addressing", addressing_, addressingOptions_, 2);
         controls_.addBool("mDNS", mdnsEnabled_);
 
-        // Dynamic: show static IP fields when addressing==1
-        if (addressing_ == 1) {
-            controls_.addText("ip", staticIp_, sizeof(staticIp_));
-            controls_.addText("gateway", staticGateway_, sizeof(staticGateway_));
-            controls_.addText("subnet", staticSubnet_, sizeof(staticSubnet_));
-            controls_.addText("dns", staticDns_, sizeof(staticDns_));
-        }
+        // Static-IP fields are always bound (so persistence can load them at any time),
+        // but visibility flips based on addressing mode. Toggling the Select triggers a
+        // rebuildControls() in HttpServerModule which re-runs this method and re-evaluates
+        // the hidden flags.
+        const bool hideStatic = (addressing_ != 1);
+        controls_.addText("ip", staticIp_, sizeof(staticIp_));
+        controls_.setHidden(controls_.count() - 1, hideStatic);
+        controls_.addText("gateway", staticGateway_, sizeof(staticGateway_));
+        controls_.setHidden(controls_.count() - 1, hideStatic);
+        controls_.addText("subnet", staticSubnet_, sizeof(staticSubnet_));
+        controls_.setHidden(controls_.count() - 1, hideStatic);
+        controls_.addText("dns", staticDns_, sizeof(staticDns_));
+        controls_.setHidden(controls_.count() - 1, hideStatic);
     }
 
     void loop1s() override {
@@ -238,12 +244,11 @@ private:
         }
     }
 
-    // Rebuilds local control set AND triggers a pipeline-level allocate. Used after the
-    // status changes (connected/AP/etc.) which alters statusStr_ and may toggle the addressing
-    // conditional. The base rebuildControls() handles the controls clear+rebuild; we just add
-    // the scheduler kick.
+    // Network state changes (connected/AP/etc.) update statusStr_ in place — that's a
+    // ReadOnly control whose buffer is bound by pointer, so the UI picks up the new value via
+    // the WebSocket push without needing a control-list rebuild. Just kick the scheduler so
+    // any dependent pipeline reallocations run.
     void rebuildLocalControlsAndPipeline() {
-        rebuildControls();
         if (scheduler_) scheduler_->rebuild();
     }
 };

@@ -95,6 +95,15 @@
       "needs_port": true
     },
     {
+      "id": "erase_flash_esp32",
+      "tab": "esp32",
+      "group": "build",
+      "label": "Erase Flash",
+      "help": "erase_flash_esp32",
+      "script": "build/erase_flash_esp32.py",
+      "needs_port": true
+    },
+    {
       "id": "monitor_esp32",
       "tab": "esp32",
       "group": "run",

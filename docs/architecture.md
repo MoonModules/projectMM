@@ -64,6 +64,17 @@ Prefer `uint8_t` (0-255) for slider controls where possible. This minimizes memo
 
 Controls are the bridge between the UI and the engine. The web UI renders them automatically based on what MoonModules declare. The exact control types (slider, toggle, color picker, text input, dropdown) are defined in the UI spec (`docs/moonmodules_draft/core/ui-spec.md`). The principle is: MoonModules declare what they need, the UI renders it.
 
+## Persistence
+
+Control values + each module's `enabled` flag are persisted to flash so settings survive a reboot. The mechanism lives in [FilesystemModule](moonmodules/core/FilesystemModule.md):
+
+- **Storage**: one flat JSON file per top-level module under `/.config/<TypeName>.json`. Children are encoded positionally with `<index>.` key prefixes — no nested objects, no arrays. The parser stays minimal (three flat-JSON helpers in `core/JsonUtil.h`).
+- **Lifecycle**: `Scheduler::setup()` runs four phases — (1) `onBuildControls` binds every module's full control set, (2) the FilesystemModule load hook overlays persisted values onto the bound variables, (2b) `rebuildControls` re-evaluates conditional `hidden` flags against the loaded state, (3) each module's own `setup()` runs with persisted values already in member variables, (4) `onAllocateMemory` sizes buffers. Modules themselves know nothing about persistence — they just bind their variables.
+- **Save trigger**: HttpServerModule marks the target module dirty on every successful control mutation. FilesystemModule debounces 2s in `loop1s()`, walks the tree, and writes any subtree containing a dirty descendant via atomic write-and-rename.
+- **Conditional controls**: every conditional control is always bound; the module sets a `hidden` flag (`controls_.setHidden(i, …)`) to tell the UI not to render it. This means the load path can find persisted values regardless of the live conditional state.
+
+The Scheduler stays independent of FilesystemModule's type via a function-pointer hook (`setLoadAllHook`), so there's no circular include and persistence is opt-in: if no FilesystemModule is registered, the load phase is a no-op and the system runs with member-initialized defaults.
+
 ## Rebuild Propagation
 
 When a control value changes on a layout, the pipeline must rebuild: layers rebuild their LUTs, the DriverGroup reallocates its output buffer. When a modifier control changes, only the affected layer's LUT is rebuilt (the output buffer size doesn't change). This propagation must be built into the framework — not handled by ad-hoc dirty flag checks in the application entry point.

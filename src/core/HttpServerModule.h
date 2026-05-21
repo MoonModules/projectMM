@@ -4,6 +4,8 @@
 #include "core/Scheduler.h"
 #include "core/PreviewFrame.h"
 #include "core/ModuleFactory.h"
+#include "core/JsonUtil.h"
+#include "core/FilesystemModule.h"
 #include "platform/platform.h"
 
 #include "ui/ui_embedded.h"
@@ -306,31 +308,32 @@ private:
                 if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
             }
             auto& c = ctrls[i];
+            // Per-type body emitted WITHOUT the closing }. We append "hidden" then } afterwards.
             int n = 0;
             switch (c.type) {
                 case ControlType::Uint8:
                     n = std::snprintf(buf + pos, bufSize - pos,
-                        "{\"name\":\"%s\",\"type\":\"uint8\",\"value\":%u,\"min\":%u,\"max\":%u}",
+                        "{\"name\":\"%s\",\"type\":\"uint8\",\"value\":%u,\"min\":%u,\"max\":%u",
                         c.name, *static_cast<uint8_t*>(c.ptr), c.min, c.max);
                     break;
                 case ControlType::Uint16:
                     n = std::snprintf(buf + pos, bufSize - pos,
-                        "{\"name\":\"%s\",\"type\":\"uint16\",\"value\":%u}",
+                        "{\"name\":\"%s\",\"type\":\"uint16\",\"value\":%u",
                         c.name, *static_cast<uint16_t*>(c.ptr));
                     break;
                 case ControlType::Bool:
                     n = std::snprintf(buf + pos, bufSize - pos,
-                        "{\"name\":\"%s\",\"type\":\"bool\",\"value\":%s}",
+                        "{\"name\":\"%s\",\"type\":\"bool\",\"value\":%s",
                         c.name, *static_cast<bool*>(c.ptr) ? "true" : "false");
                     break;
                 case ControlType::Text:
                     n = std::snprintf(buf + pos, bufSize - pos,
-                        "{\"name\":\"%s\",\"type\":\"text\",\"value\":\"%s\"}",
+                        "{\"name\":\"%s\",\"type\":\"text\",\"value\":\"%s\"",
                         c.name, static_cast<char*>(c.ptr));
                     break;
                 case ControlType::ReadOnly:
                     n = std::snprintf(buf + pos, bufSize - pos,
-                        "{\"name\":\"%s\",\"type\":\"display\",\"value\":\"%s\"}",
+                        "{\"name\":\"%s\",\"type\":\"display\",\"value\":\"%s\"",
                         c.name, static_cast<char*>(c.ptr));
                     break;
                 case ControlType::Select: {
@@ -344,15 +347,23 @@ private:
                             "%s\"%s\"", o > 0 ? "," : "", options[o]);
                         if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
                     }
-                    n = std::snprintf(buf + pos, bufSize - pos, "]}");
+                    n = std::snprintf(buf + pos, bufSize - pos, "]");
                     break;
                 }
                 case ControlType::Progress:
                     n = std::snprintf(buf + pos, bufSize - pos,
-                        "{\"name\":\"%s\",\"type\":\"progress\",\"value\":%lu,\"total\":%lu}",
+                        "{\"name\":\"%s\",\"type\":\"progress\",\"value\":%lu,\"total\":%lu",
                         c.name, static_cast<unsigned long>(*static_cast<uint32_t*>(c.ptr)),
                         static_cast<unsigned long>(c.aux));
                     break;
+            }
+            if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
+            // Emit "hidden":true only when set (common case is false; omit to save bytes).
+            // Then close the per-control object.
+            if (c.hidden) {
+                n = std::snprintf(buf + pos, bufSize - pos, ",\"hidden\":true}");
+            } else {
+                n = std::snprintf(buf + pos, bufSize - pos, "}");
             }
             if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
         }
@@ -380,6 +391,7 @@ private:
         if (std::strcmp(controlName, "enabled") == 0) {
             target->setEnabled(parseJsonBool(body, "value"));
             target->markDirty();
+            FilesystemModule::noteDirty();
             if (scheduler_) scheduler_->rebuild();
             sendResponse(conn, 200, "application/json", "{\"ok\":true}");
             return;
@@ -433,6 +445,7 @@ private:
                 target->rebuildControls();
             }
             target->markDirty();
+            FilesystemModule::noteDirty();
             if (scheduler_) scheduler_->rebuild();
 
             sendResponse(conn, 200, "application/json", "{\"ok\":true}");
@@ -585,53 +598,16 @@ private:
         sendResponse(conn, 200, "application/json", "{\"ok\":true}");
     }
 
-    // -----------------------------------------------------------------------
-    // Minimal JSON parsing (no library)
-    // -----------------------------------------------------------------------
-
+    // JSON parsing delegates to core/JsonUtil.h. Kept as thin wrappers so existing call
+    // sites read unchanged.
     static void parseJsonString(const char* json, const char* key, char* out, size_t maxLen) {
-        char search[48];
-        std::snprintf(search, sizeof(search), "\"%s\":\"", key);
-        const char* start = std::strstr(json, search);
-        if (!start) {
-            // Try with space after colon (Python's json.dumps uses spaces)
-            std::snprintf(search, sizeof(search), "\"%s\": \"", key);
-            start = std::strstr(json, search);
-        }
-        if (!start) return;
-        start += std::strlen(search);
-        const char* end = std::strchr(start, '"');
-        if (!end) return;
-        size_t len = static_cast<size_t>(end - start);
-        if (len >= maxLen) len = maxLen - 1;
-        std::memcpy(out, start, len);
-        out[len] = 0;
+        mm::json::parseString(json, key, out, maxLen);
     }
-
     static int parseJsonInt(const char* json, const char* key) {
-        char search[48];
-        std::snprintf(search, sizeof(search), "\"%s\":", key);
-        const char* start = std::strstr(json, search);
-        if (!start) {
-            std::snprintf(search, sizeof(search), "\"%s\": ", key);
-            start = std::strstr(json, search);
-        }
-        if (!start) return 0;
-        return std::atoi(start + std::strlen(search));
+        return mm::json::parseInt(json, key);
     }
-
     static bool parseJsonBool(const char* json, const char* key) {
-        char search[48];
-        std::snprintf(search, sizeof(search), "\"%s\":", key);
-        const char* start = std::strstr(json, search);
-        if (!start) {
-            std::snprintf(search, sizeof(search), "\"%s\": ", key);
-            start = std::strstr(json, search);
-        }
-        if (!start) return false;
-        const char* val = start + std::strlen(search);
-        while (*val == ' ') val++; // skip extra spaces
-        return std::strncmp(val, "true", 4) == 0;
+        return mm::json::parseBool(json, key);
     }
 
     // -----------------------------------------------------------------------

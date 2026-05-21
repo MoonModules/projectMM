@@ -124,6 +124,15 @@ Tests `blendMap()` in `src/light/BlendMap.h`.
 - 1:N mapping: logical pixel appears at multiple physical positions
 - Additive blend with clamping
 
+### Filesystem persistence (`test/test_filesystem_persistence.cpp`) {#filesystem-persistence}
+
+Two test cases for [FilesystemModule](moonmodules/core/FilesystemModule.md):
+
+- **Value round-trip**: set `deviceName` on a running Scheduler+SystemModule, wait for the 2s debounce flush, recreate a fresh Scheduler+modules, and assert the deviceName is loaded from disk.
+- **Structural reconciliation**: hand-write a `Layer.json` describing a one-child tree (`RainbowEffect`). Build a live two-child tree (`NoiseEffect` + `MirrorModifier`) and run `scheduler.setup()`. Assert the live tree was reconciled — NoiseEffect swapped to RainbowEffect, Mirror trimmed.
+
+Both use `platform::fsSetRoot()` to redirect the config root into `/tmp/mm_*_test_<ms>/` for isolation. Combined wall time ~2.3s (the debounce window in the first test dominates).
+
 ## Scenario Tests
 
 Scenario tests verify the integrated pipeline. Defined as JSON in `test/scenarios/`. Run with `./build/test/mm_scenarios` or via MoonDeck (PC → 01 - Pipeline).

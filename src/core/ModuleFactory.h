@@ -30,10 +30,12 @@ public:
             if (std::strcmp(types_[i].name, typeName) == 0) {
                 auto* mod = types_[i].create();
                 if (mod) {
-                    // typeName is the stable factory key; name() is the human-facing label and
-                    // is often overridden ("Noise" instead of "NoiseEffect"). Persistence uses typeName().
-                    mod->setTypeName(typeName);
-                    mod->setName(typeName);
+                    // typeName_ stores a pointer (no copy), so we hand the module the registry's
+                    // canonical string literal — not the caller's `typeName` parameter, which may
+                    // be a stack buffer (e.g. persistence reading JSON). The registry pointer is
+                    // a flash literal from registerType<T>("…"), valid for the program lifetime.
+                    mod->setTypeName(types_[i].name);
+                    mod->setName(types_[i].name);
                     if (types_[i].classSize > 0) mod->setClassSize(types_[i].classSize);
                 }
                 return mod;

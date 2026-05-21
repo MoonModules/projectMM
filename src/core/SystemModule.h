@@ -14,31 +14,39 @@ public:
     void setScheduler(Scheduler* s) { scheduler_ = s; }
 
     void setup() override {
-        // Compute default deviceName from MAC: MM-XXXX
-        uint8_t mac[6];
-        platform::getMacAddress(mac);
-        std::snprintf(deviceName_, sizeof(deviceName_), "MM-%02X%02X",
-                      mac[4], mac[5]);
+        // Compute default deviceName from MAC: MM-XXXX. Skip if a persisted value was
+        // already overlaid by Scheduler phase 2 (deviceName_ non-empty).
+        if (deviceName_[0] == 0) {
+            uint8_t mac[6];
+            platform::getMacAddress(mac);
+            std::snprintf(deviceName_, sizeof(deviceName_), "MM-%02X%02X",
+                          mac[4], mac[5]);
+        }
 
-        // Static info
+        // Snprintf static display strings into the bound buffers. onBuildControls already
+        // bound these buffers by pointer; we fill them now and the UI picks up the content
+        // on the next WebSocket push.
         std::snprintf(chipInfo_, sizeof(chipInfo_), "%s", platform::chipModel());
         std::snprintf(sdkInfo_, sizeof(sdkInfo_), "%s", platform::sdkVersion());
         std::snprintf(versionStr_, sizeof(versionStr_), "%s", MM_VERSION);
         std::snprintf(buildStr_, sizeof(buildStr_), "%s", MM_BUILD_DATE);
 
+        if (chipFlashVal_ > 0) {
+            std::snprintf(flashStr_, sizeof(flashStr_), "%uMB",
+                          static_cast<unsigned>(chipFlashVal_ / (1024 * 1024)));
+        }
+    }
+
+    void onBuildControls() override {
+        // Platform-derived totals queried here (idempotent, no I/O) so the conditionals that
+        // gate the Progress controls see real values rather than waiting on setup().
         totalInternalVal_ = platform::totalInternalHeap();
         totalHeapVal_ = platform::totalHeap();
         firmwareSizeVal_ = static_cast<uint32_t>(platform::firmwareSize());
         totalFlashVal_ = static_cast<uint32_t>(platform::firmwarePartition());
         chipFlashVal_ = static_cast<uint32_t>(platform::flashChipSize());
-        if (chipFlashVal_ > 0) {
-            std::snprintf(flashStr_, sizeof(flashStr_), "%uMB",
-                          static_cast<unsigned>(chipFlashVal_ / (1024 * 1024)));
-        }
         totalFsVal_ = static_cast<uint32_t>(platform::filesystemTotal());
-    }
 
-    void onBuildControls() override {
         // Device name on top
         controls_.addText("deviceName", deviceName_, sizeof(deviceName_));
 

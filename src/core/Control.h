@@ -22,6 +22,9 @@ struct ControlDescriptor {
     ControlType type = ControlType::Uint8;
     uint8_t min = 0;
     uint8_t max = 255;
+    bool hidden = false;    // UI visibility flag. Set via ControlList::setHidden() after addX().
+                            // Persistence ignores this — hidden controls are still saved/loaded
+                            // so toggling visibility doesn't lose state.
 };
 
 class ControlList {
@@ -78,6 +81,13 @@ public:
     void clear() { count_ = 0; }
     uint8_t count() const { return count_; }
     const ControlDescriptor& operator[](uint8_t i) const { return controls_[i]; }
+
+    // Flip the hidden flag on a previously-added control. Typical use: call addX() then
+    // setHidden(count() - 1, condition). Hidden controls are not rendered in the UI but
+    // remain bound for persistence — toggling visibility doesn't lose state.
+    void setHidden(uint8_t i, bool hidden) {
+        if (i < count_) controls_[i].hidden = hidden;
+    }
 
 private:
     ControlDescriptor* controls_ = nullptr;

@@ -118,6 +118,17 @@ public:
         return false;
     }
 
+    // Replace child at position i with fresh. Caller owns lifecycle of the removed
+    // (returned) child — teardown + delete. Returns nullptr if i is out of range.
+    MoonModule* replaceChildAt(uint8_t i, MoonModule* fresh) {
+        if (i >= childCount_ || !fresh) return nullptr;
+        MoonModule* old = children_[i];
+        if (old) old->setParent(nullptr);
+        fresh->setParent(this);
+        children_[i] = fresh;
+        return old;
+    }
+
     uint8_t childCount() const { return childCount_; }
     MoonModule* child(uint8_t i) const { return i < childCount_ ? children_[i] : nullptr; }
 

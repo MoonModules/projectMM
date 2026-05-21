@@ -9,6 +9,13 @@ namespace mm {
 
 class Scheduler {
 public:
+    // Function-pointer hook invoked between phase 1 (onBuildControls) and phase 3 (setup).
+    // Used by FilesystemModule to overlay persisted control values onto bound variables
+    // before modules' setup() runs. Scheduler stays independent of FilesystemModule's type
+    // (no circular include). Wired in via setLoadAllHook from main.cpp.
+    using LoadAllFn = void(*)(Scheduler*);
+    void setLoadAllHook(LoadAllFn fn) { loadAllHook_ = fn; }
+
     void addModule(MoonModule* mod) {
         if (!mod || moduleCount_ >= modules_.size()) return;
         modules_[moduleCount_++] = mod;
@@ -16,15 +23,38 @@ public:
 
     void setup() {
         startTime_ = platform::millis();
-        for (uint8_t i = 0; i < moduleCount_; i++) {
-            modules_[i]->setup();
-        }
+
+        // Phase 1: bind each module's controls. After this, ControlList descriptors hold
+        // (name → variable pointer) so the persistence hook can apply file values.
         for (uint8_t i = 0; i < moduleCount_; i++) {
             modules_[i]->onBuildControls();
         }
+
+        // Phase 2: persistence load. No-op if no hook is set.
+        if (loadAllHook_) loadAllHook_(this);
+
+        // Phase 2b: re-run onBuildControls with persisted values in place so any conditional
+        // hidden flags (e.g. NetworkModule's static-IP fields depending on addressing_) are
+        // evaluated against the loaded state, not the default. rebuildControls clears the
+        // descriptor list before re-binding, so this is idempotent.
+        if (loadAllHook_) {
+            for (uint8_t i = 0; i < moduleCount_; i++) {
+                modules_[i]->rebuildControls();
+            }
+        }
+
+        // Phase 3: each module's own init. Persisted values are already in member variables,
+        // so e.g. NetworkModule sees the persisted ssid_, SystemModule sees an overlaid
+        // deviceName_ (or guards if empty to derive the MAC-based default).
+        for (uint8_t i = 0; i < moduleCount_; i++) {
+            modules_[i]->setup();
+        }
+
+        // Phase 4: allocate buffers sized to final control values.
         for (uint8_t i = 0; i < moduleCount_; i++) {
             modules_[i]->onAllocateMemory();
         }
+
         lastLoop20ms_ = platform::millis();
         lastLoop1s_ = platform::millis();
         lastTimingUpdate_ = platform::millis();
@@ -121,6 +151,7 @@ public:
 private:
     std::array<MoonModule*, 32> modules_{};
     uint8_t moduleCount_ = 0;
+    LoadAllFn loadAllHook_ = nullptr;
     uint32_t startTime_ = 0;
     uint32_t lastLoop20ms_ = 0;
     uint32_t lastLoop1s_ = 0;

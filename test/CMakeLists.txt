@@ -10,6 +10,7 @@ add_executable(mm_tests
     test_mapping_lut.cpp
     test_mirror.cpp
     test_blend_map.cpp
+    test_filesystem_persistence.cpp
 )
 
 target_include_directories(mm_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

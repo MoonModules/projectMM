@@ -151,6 +151,7 @@ function createCard(mod) {
 
     if (mod.controls) {
         for (const ctrl of mod.controls) {
+            if (ctrl.hidden) continue;  // Module flagged this control as hidden (conditional UI)
             card.appendChild(createControl(mod.name, ctrl));
         }
     }

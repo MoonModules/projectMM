@@ -51,7 +51,9 @@ Modules form a tree. Parent/child relationships only (no arbitrary DAG like v2's
 
 ### Generic children in MoonModule base
 
-Every MoonModule has a dynamic children array. `addChild()` and `removeChild()` are implemented once in the base class — containers (Layer, DriverGroup, LayoutGroup) do not override them. The array starts empty (zero allocation for leaf modules) and grows on demand during setup. This eliminates the per-container typed arrays (`effects_[]`, `drivers_[]`, `layouts_[]`) and typed add methods (`addEffect()`, `addDriver()`, `addLayout()`) that existed in earlier iterations.
+Every MoonModule has a dynamic children array. `addChild()`, `removeChild()`, and `replaceChildAt(i, fresh)` are implemented once in the base class — containers (Layer, DriverGroup, LayoutGroup) do not override them. The array starts empty (zero allocation for leaf modules) and grows on demand during setup. This eliminates the per-container typed arrays (`effects_[]`, `drivers_[]`, `layouts_[]`) and typed add methods (`addEffect()`, `addDriver()`, `addLayout()`) that existed in earlier iterations.
+
+`replaceChildAt` is used by [FilesystemModule](FilesystemModule.md) at load time to swap a child whose type differs from the persisted JSON. The caller owns the lifecycle of the returned old child (typically `teardown()` + `Scheduler::deleteTree`).
 
 Children are distinguished by `role()` (Effect, Modifier, Driver, Layout, Generic). Containers that need role-specific iteration (e.g. Layer::loop() only calls loop() on Effects, not Modifiers) filter children by role at the call site.
 
@@ -71,11 +73,14 @@ This is needed for: effect switching, modifier add/remove, driver hot-plug, and 
 
 ## Persistence
 
-Module state (control values) persisted to filesystem. Load on setup, save on change. Format and mechanism to be specified — keep simple (one file per module, or one file for all).
+Module state (control values + `enabled` flag) is persisted to flash by [FilesystemModule](FilesystemModule.md). Modules themselves know nothing about persistence — they just bind variables via `addX(...)` calls in `onBuildControls()`. The Scheduler's phase 2 load hook overlays persisted values onto bound variables before any module's `setup()` runs.
+
+Conditional controls (e.g. fields only visible under a Select mode) are always bound, with a `hidden` flag toggled via `controls_.setHidden(i, true/false)`. This lets the persistence layer load values regardless of the live conditional state, while the UI hides them. See [FilesystemModule.md](FilesystemModule.md) and [Control.md](Control.md).
+
+`markDirty()` / `dirty()` / `clearDirty()` are set by HttpServerModule on every successful control mutation. FilesystemModule polls dirty flags in `loop1s()` and writes any subtree with a dirty descendant after a 2-second debounce.
 
 ## Deferred
 
-- `markDirty()` / `dirty()` / `clearDirty()` — postpone until rebuild propagation is needed in practice.
 - No color picker control (RGB) — not needed for v3 initial scope.
 - No AutoWireSpec — parent/child is sufficient.
 - No `controlAllocBytes()` pre-check — defer until needed.

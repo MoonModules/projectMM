@@ -87,11 +87,13 @@ size_t firmwareSize() { return 0; }
 size_t firmwarePartition() { return 0; }
 size_t flashChipSize() { return 0; }
 
-// Filesystem — std::filesystem rooted at fsRoot_ (default ".", overridable via fsSetRoot).
-// A leading '/' in the API path maps to root-relative.
+// Filesystem — std::filesystem rooted at fsRoot_ (default "build", overridable via fsSetRoot).
+// A leading '/' in the API path maps to root-relative. Default lives under build/ so the
+// desktop-created .config/ is gitignored (along with the rest of build/) and doesn't clutter
+// the repo root. Tests override this to a tmpdir via fsSetRoot for isolation.
 
 namespace {
-std::filesystem::path fsRoot_{"."};
+std::filesystem::path fsRoot_{"build"};
 
 // Map "/.config/foo.json" → "<root>/.config/foo.json". Strip a single leading '/'.
 std::filesystem::path toFsPath(const char* path) {
@@ -102,7 +104,7 @@ std::filesystem::path toFsPath(const char* path) {
 }
 
 void fsSetRoot(const char* path) {
-    fsRoot_ = (path && *path) ? std::filesystem::path(path) : std::filesystem::path(".");
+    fsRoot_ = (path && *path) ? std::filesystem::path(path) : std::filesystem::path("build");
 }
 
 bool fsMount() {
