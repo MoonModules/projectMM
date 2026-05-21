@@ -15,6 +15,11 @@ public:
     void setScheduler(Scheduler* s) { scheduler_ = s; }
     void setSystemModule(SystemModule* s) { systemModule_ = s; }
 
+    // Networking is infrastructure — keep the cascade ticking even when the user
+    // toggled "enabled" off, otherwise the device would silently drop off the LAN
+    // and become unreachable.
+    bool respectsEnabled() const override { return false; }
+
     void setup() override {
         // Try Ethernet first (non-blocking)
         if (platform::ethInit()) {

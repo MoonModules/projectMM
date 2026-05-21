@@ -130,24 +130,69 @@ def collect_esp32():
     except Exception:
         pass
 
+    # Read tick/FPS from monitor.log. If the log is stale or has no usable
+    # line, do a live capture against the canonical port from
+    # scripts/moondeck.json — instead of silently skipping ESP32 KPI.
     log = ESP32_DIR / "monitor.log"
-    if log.exists():
-        age_min = (time.time() - log.stat().st_mtime) / 60
-        if age_min < 60:
-            for line in reversed(log.read_text().splitlines()):
-                if "tick:" in line:
-                    # Format: "tick: 108us (FPS: 9259)  free: 215180  maxBlock: 63488"
-                    m = re.search(r'tick:\s*(\d+)us', line)
-                    if m:
-                        tick_us = int(m.group(1))
-                        kpi["tick_us"] = tick_us
-                        kpi["fps"] = 1000000 // tick_us if tick_us > 0 else 0
-                    m = re.search(r'free:\s*(\d+)', line)
-                    if m:
-                        kpi["heap_free"] = int(m.group(1))
-                    break
+    stale = (not log.exists()) or (time.time() - log.stat().st_mtime) > 300
+    if stale and _live_capture(log):
+        pass  # log refreshed
+    _extract_esp32_tick(log, kpi)
 
     return kpi
+
+def _extract_esp32_tick(log, kpi):
+    if not log.exists():
+        return False
+    for line in reversed(log.read_text().splitlines()):
+        if "tick:" not in line:
+            continue
+        # Format: "tick: 108us (FPS: 9259)  free: 215180  maxBlock: 63488"
+        m = re.search(r'tick:\s*(\d+)us', line)
+        if m:
+            tick_us = int(m.group(1))
+            kpi["tick_us"] = tick_us
+            kpi["fps"] = 1000000 // tick_us if tick_us > 0 else 0
+        m = re.search(r'free:\s*(\d+)', line)
+        if m:
+            kpi["heap_free"] = int(m.group(1))
+        return "tick_us" in kpi
+    return False
+
+def _live_capture(log, seconds=15):
+    """Capture ESP32 serial output to monitor.log for ~seconds. Returns True on success."""
+    import json
+    cfg = ROOT / "scripts" / "moondeck.json"
+    if not cfg.exists():
+        return False
+    try:
+        port = json.loads(cfg.read_text()).get("port")
+    except Exception:
+        return False
+    if not port or not Path(port).exists():
+        print(f"  ESP32 KPI: configured port {port} not present, skipping live capture")
+        return False
+    try:
+        import serial
+    except ImportError:
+        return False
+    print(f"  ESP32 KPI: capturing {seconds}s from {port}...")
+    try:
+        ser = serial.Serial(port, 115200, timeout=1)
+    except Exception as e:
+        print(f"  ESP32 KPI: cannot open {port}: {e}")
+        return False
+    end = time.time() + seconds
+    try:
+        with open(log, "w") as f:
+            while time.time() < end:
+                line = ser.readline().decode("utf-8", errors="replace").rstrip("\r\n")
+                if line:
+                    f.write(line + "\n")
+                    f.flush()
+    finally:
+        ser.close()
+    return True
 
 def collect_code():
     kpi = {}

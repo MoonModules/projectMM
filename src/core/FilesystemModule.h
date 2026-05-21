@@ -35,11 +35,22 @@ public:
     static constexpr size_t MAX_KEY = 48;
     static constexpr uint32_t DEBOUNCE_MS = 2000;
 
-    FilesystemModule() { instance_ = this; }
+    // Singleton is registered in setScheduler() (called by main.cpp on the real
+    // FilesystemModule), NOT in the constructor. The factory creates short-lived
+    // probe instances for /api/types defaults capture; the probe's destructor would
+    // otherwise clear instance_ and break noteDirty()/flushPending() for the rest
+    // of the device's life.
+    FilesystemModule() = default;
     ~FilesystemModule() override { if (instance_ == this) instance_ = nullptr; }
+
+    // Persistence must keep flushing dirty subtrees regardless of the `enabled` toggle —
+    // otherwise the user could lose changes by accidentally disabling this module via
+    // the UI before the 2s debounce expires.
+    bool respectsEnabled() const override { return false; }
 
     void setScheduler(Scheduler* s) {
         scheduler_ = s;
+        instance_ = this;
         if (s) s->setLoadAllHook(&loadAllHookTrampoline_);
     }
 
@@ -58,7 +69,14 @@ public:
         if (!mounted_ || !scheduler_) return;
         if (!dirtyPending_) return;
         if (platform::millis() - lastDirtyMs_ < DEBOUNCE_MS) return;
+        flush();
+    }
 
+    // Synchronous save of every dirty subtree, bypassing the debounce. Same work loop1s
+    // does once the debounce expires. Exposed for tests so they can assert the file appears
+    // without wall-clock waits; production callers shouldn't need this.
+    void flush() {
+        if (!mounted_ || !scheduler_) return;
         for (uint8_t i = 0; i < scheduler_->moduleCount(); i++) {
             MoonModule* m = scheduler_->module(i);
             if (!m || m == this) continue;
@@ -76,6 +94,12 @@ public:
     // We just need to know "something is dirty" — checked by walking the tree in loop1s.
     // To avoid walking the tree every loop1s when nothing is dirty, the noteDirty() static
     // is called by the same HttpServerModule path (cheap timestamp record).
+    // Static convenience for callers (e.g. reboot handler) that need to force any
+    // debounced saves through before a teardown — mirrors noteDirty's call style.
+    static void flushPending() {
+        if (instance_) instance_->flush();
+    }
+
     static void noteDirty() {
         if (!instance_) return;
         instance_->lastDirtyMs_ = platform::millis();
@@ -89,6 +113,11 @@ private:
     bool dirtyPending_ = false;
     uint32_t lastDirtyMs_ = 0;
     uint32_t lastSaveMs_ = 0;
+    // Shared load/save buffer — load runs once at boot (phase 2), save runs in loop1s after
+    // the 2s debounce. Mutually exclusive, so one buffer is enough. Kept off the task stack
+    // since 2KB plus recursive applyNode/writeNode frames is uncomfortably close to the ESP32
+    // default task stack ceiling (4–8KB).
+    char fileBuf_[MAX_FILE_BYTES] = {};
 
     // ---- Scheduler hook trampoline (C-style for typedef compatibility) ----
     static void loadAllHookTrampoline_(Scheduler* s) {
@@ -114,10 +143,9 @@ private:
     void loadSubtree(MoonModule* m) {
         char path[MAX_PATH];
         if (!pathFor(m, path, sizeof(path))) return;
-        char buf[MAX_FILE_BYTES];
-        int n = platform::fsRead(path, buf, sizeof(buf));
+        int n = platform::fsRead(path, fileBuf_, sizeof(fileBuf_));
         if (n <= 0) return;
-        applyNode(m, buf, "");
+        applyNode(m, fileBuf_, "");
     }
 
     void applyNode(MoonModule* m, const char* json, const char* prefix) {
@@ -153,12 +181,17 @@ private:
             char typeName[32] = {};
             mm::json::parseString(json, typeKey, typeName, sizeof(typeName));
             if (typeName[0] == 0) break;
-            jsonChildCount = i + 1;
 
             MoonModule* live = m->child(i);
             if (!live || std::strcmp(live->typeName(), typeName) != 0) {
                 MoonModule* created = ModuleFactory::create(typeName);
-                if (!created) continue;
+                if (!created) {
+                    // Factory failed (type not registered). Stop here so subsequent JSON
+                    // children don't get applied to misaligned live slots; jsonChildCount
+                    // stays at the last successfully reconciled position, and the trim loop
+                    // below removes any live children past that point.
+                    break;
+                }
                 created->onBuildControls();
                 if (live) {
                     MoonModule* old = m->replaceChildAt(i, created);
@@ -168,6 +201,7 @@ private:
                 }
             }
 
+            jsonChildCount = i + 1;
             char childPrefix[MAX_KEY];
             std::snprintf(childPrefix, sizeof(childPrefix), "%s%u.", prefix, static_cast<unsigned>(i));
             applyNode(m->child(i), json, childPrefix);
@@ -219,26 +253,29 @@ private:
     void saveSubtree(MoonModule* m) {
         char path[MAX_PATH];
         if (!pathFor(m, path, sizeof(path))) return;
-        char buf[MAX_FILE_BYTES];
-        int pos = std::snprintf(buf, sizeof(buf), "{");
+        int pos = std::snprintf(fileBuf_, sizeof(fileBuf_), "{");
         if (pos < 0) return;
-        if (!writeNode(m, buf, sizeof(buf), pos, "")) {
+        if (!writeNode(m, fileBuf_, sizeof(fileBuf_), pos, "")) {
             std::printf("FilesystemModule: subtree too large for %s\n", path);
             return;
         }
-        int n = std::snprintf(buf + pos, sizeof(buf) - pos, "}");
-        if (n < 0 || static_cast<size_t>(pos + n) >= sizeof(buf)) return;
+        int n = std::snprintf(fileBuf_ + pos, sizeof(fileBuf_) - pos, "}");
+        if (n < 0 || static_cast<size_t>(pos + n) >= sizeof(fileBuf_)) return;
         pos += n;
-        if (platform::fsWriteAtomic(path, buf, static_cast<size_t>(pos))) {
+        if (platform::fsWriteAtomic(path, fileBuf_, static_cast<size_t>(pos))) {
             std::printf("FilesystemModule: saved %s (%d bytes)\n", path, pos);
         } else {
             std::printf("FilesystemModule: write failed for %s\n", path);
         }
     }
 
-    // Returns false on overflow.
-    bool writeNode(MoonModule* m, char* buf, size_t bufLen, int& pos, const char* prefix) {
-        bool first = true;
+    // Returns false on overflow. `firstField` is true when this writeNode is the first
+    // field-emitter inside its containing `{` — the top-level call passes true, the
+    // recursive child call passes false because the parent already emitted its `"N.type"`
+    // field and the child must therefore prefix a comma before its first control.
+    bool writeNode(MoonModule* m, char* buf, size_t bufLen, int& pos, const char* prefix,
+                   bool firstField = true) {
+        bool first = firstField;
         auto& cs = m->controls();
         for (uint8_t i = 0; i < cs.count(); i++) {
             auto& c = cs[i];
@@ -254,14 +291,16 @@ private:
         if (n < 0 || static_cast<size_t>(pos + n) >= bufLen) return false;
         pos += n;
         for (uint8_t i = 0; i < m->childCount(); i++) {
+            MoonModule* child = m->child(i);
+            if (!child) continue;  // addChild rejects nullptr today; defend against future invariants
             char childPrefix[MAX_KEY];
             std::snprintf(childPrefix, sizeof(childPrefix), "%s%u.", prefix, static_cast<unsigned>(i));
             // Emit "0.type":"NoiseEffect" so the reader can detect tree-shape mismatches.
             n = std::snprintf(buf + pos, bufLen - pos, ",\"%stype\":\"%s\"",
-                              childPrefix, m->child(i)->typeName());
+                              childPrefix, child->typeName());
             if (n < 0 || static_cast<size_t>(pos + n) >= bufLen) return false;
             pos += n;
-            if (!writeNode(m->child(i), buf, bufLen, pos, childPrefix)) return false;
+            if (!writeNode(child, buf, bufLen, pos, childPrefix, /*firstField=*/false)) return false;
         }
         return true;
     }

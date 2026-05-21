@@ -9,6 +9,18 @@ namespace mm {
 
 enum class ModuleRole : uint8_t { Generic, Effect, Modifier, Driver, Layout };
 
+// Lowercase role name for JSON/API output. Single source of truth so the role
+// string can't drift between /api/state and /api/types.
+inline const char* roleName(ModuleRole role) {
+    switch (role) {
+        case ModuleRole::Effect:   return "effect";
+        case ModuleRole::Modifier: return "modifier";
+        case ModuleRole::Driver:   return "driver";
+        case ModuleRole::Layout:   return "layout";
+        default:                   return "generic";
+    }
+}
+
 class MoonModule {
 public:
     // Allocate modules in PSRAM when available (ESP32)
@@ -29,6 +41,12 @@ public:
     virtual void loop20ms() {}
     virtual void loop1s() {}
     virtual void teardown() { for (uint8_t i = childCount_; i > 0; i--) children_[i-1]->teardown(); }
+
+    // Called when enabled flips. Default no-op; override to start/stop sockets, free
+    // buffers, etc. The scheduler always invokes loop()/loop20ms()/loop1s() regardless
+    // of `enabled` — modules decide what disabled means by checking enabled() inside
+    // their loop fns or by stopping/starting their work in onOnOff().
+    virtual void onOnOff(bool /*newEnabled*/) {}
 
     // onBuildControls MUST be idempotent and pure: only `controls_.clear()` + `controls_.addX()`.
     // No platform queries, no I/O, no allocations. HttpServerModule calls it again whenever a
@@ -72,7 +90,17 @@ public:
     void setTypeName(const char* tn) { typeName_ = tn ? tn : ""; }
 
     bool enabled() const { return enabled_; }
-    void setEnabled(bool e) { enabled_ = e; }
+    void setEnabled(bool e) {
+        if (enabled_ == e) return;
+        enabled_ = e;
+        onOnOff(e);
+    }
+
+    // Whether the Scheduler should honor `enabled()` for this module's loop callbacks.
+    // Default true — disabled modules don't have their loop fns called. Override to
+    // return false for system modules that must keep running regardless (HttpServer,
+    // Network, Filesystem) so the user can re-enable other modules through them.
+    virtual bool respectsEnabled() const { return true; }
 
     // Dirty flag — set by HttpServerModule when a control changes. A future persistence layer
     // (or any consumer interested in "this module's state has been touched") can observe it
@@ -127,6 +155,27 @@ public:
         fresh->setParent(this);
         children_[i] = fresh;
         return old;
+    }
+
+    // Move child to absolute position newIndex (0..childCount-1). Intermediate siblings
+    // shift toward the vacated slot. Returns false if child isn't found, newIndex is out
+    // of range, or the move is a no-op (already at newIndex).
+    bool moveChildTo(MoonModule* child, uint8_t newIndex) {
+        if (newIndex >= childCount_) return false;
+        for (uint8_t i = 0; i < childCount_; i++) {
+            if (children_[i] != child) continue;
+            if (i == newIndex) return false;  // no-op
+            if (newIndex > i) {
+                // Shift left to fill the gap
+                for (uint8_t j = i; j < newIndex; j++) children_[j] = children_[j + 1];
+            } else {
+                // Shift right to make room
+                for (uint8_t j = i; j > newIndex; j--) children_[j] = children_[j - 1];
+            }
+            children_[newIndex] = child;
+            return true;
+        }
+        return false;
     }
 
     uint8_t childCount() const { return childCount_; }

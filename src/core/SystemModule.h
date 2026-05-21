@@ -13,6 +13,10 @@ class SystemModule : public MoonModule {
 public:
     void setScheduler(Scheduler* s) { scheduler_ = s; }
 
+    // Diagnostics keep ticking regardless — disabling System hides uptime/heap/fps
+    // from the UI for no good reason, and the user can't easily re-enable.
+    bool respectsEnabled() const override { return false; }
+
     void setup() override {
         // Compute default deviceName from MAC: MM-XXXX. Skip if a persisted value was
         // already overlaid by Scheduler phase 2 (deviceName_ non-empty).
@@ -30,6 +34,7 @@ public:
         std::snprintf(sdkInfo_, sizeof(sdkInfo_), "%s", platform::sdkVersion());
         std::snprintf(versionStr_, sizeof(versionStr_), "%s", MM_VERSION);
         std::snprintf(buildStr_, sizeof(buildStr_), "%s", MM_BUILD_DATE);
+        std::snprintf(bootReasonStr_, sizeof(bootReasonStr_), "%s", platform::resetReason());
 
         if (chipFlashVal_ > 0) {
             std::snprintf(flashStr_, sizeof(flashStr_), "%uMB",
@@ -78,6 +83,7 @@ public:
         controls_.addReadOnly("build", buildStr_, sizeof(buildStr_));
         controls_.addReadOnly("chip", chipInfo_, sizeof(chipInfo_));
         controls_.addReadOnly("sdk", sdkInfo_, sizeof(sdkInfo_));
+        controls_.addReadOnly("bootReason", bootReasonStr_, sizeof(bootReasonStr_));
     }
 
     void loop1s() override {
@@ -132,6 +138,7 @@ private:
     char sdkInfo_[24] = {};
     char versionStr_[16] = {};
     char buildStr_[24] = {};
+    char bootReasonStr_[16] = {};
     uint32_t totalInternalVal_ = 0;
     uint32_t totalHeapVal_ = 0;
     char flashStr_[12] = {};

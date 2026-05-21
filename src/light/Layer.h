@@ -41,14 +41,17 @@ public:
     }
 
     void loop() override {
+        // Scheduler already gates the Layer itself by enabled() via respectsEnabled().
+        // We still gate per-effect-child explicitly because Layer iterates its own
+        // children rather than going through the Scheduler.
         elapsed_ = platform::millis();
         buffer_.clear();
         for (uint8_t i = 0; i < childCount(); i++) {
-            if (child(i)->role() == ModuleRole::Effect) {
-                uint32_t start = platform::micros();
-                child(i)->loop();
-                child(i)->addAccumUs(platform::micros() - start);
-            }
+            if (child(i)->role() != ModuleRole::Effect) continue;
+            if (!child(i)->enabled()) continue;
+            uint32_t start = platform::micros();
+            child(i)->loop();
+            child(i)->addAccumUs(platform::micros() - start);
         }
     }
 

@@ -57,6 +57,14 @@ void yield() {
     vTaskDelay(pdMS_TO_TICKS(1));
 }
 
+void delayMs(uint32_t ms) {
+    vTaskDelay(pdMS_TO_TICKS(ms));
+}
+
+void reboot() {
+    esp_restart();
+}
+
 size_t freeHeap() {
     return heap_caps_get_free_size(MALLOC_CAP_8BIT);
 }
@@ -97,6 +105,22 @@ const char* sdkVersion() {
     return esp_get_idf_version();
 }
 
+const char* resetReason() {
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON:    return "POWERON";
+        case ESP_RST_EXT:        return "EXT";
+        case ESP_RST_SW:         return "SW";
+        case ESP_RST_PANIC:      return "PANIC";
+        case ESP_RST_INT_WDT:    return "INT_WDT";
+        case ESP_RST_TASK_WDT:   return "TASK_WDT";
+        case ESP_RST_WDT:        return "WDT";
+        case ESP_RST_DEEPSLEEP:  return "DEEPSLEEP";
+        case ESP_RST_BROWNOUT:   return "BROWNOUT";
+        case ESP_RST_SDIO:       return "SDIO";
+        default:                 return "UNKNOWN";
+    }
+}
+
 size_t firmwareSize() {
     // Get actual running image size from the image header
     const esp_partition_t* part = esp_ota_get_running_partition();
@@ -127,11 +151,16 @@ static const char* FS_PARTITION_LABEL = "spiffs";  // partition label kept for t
 static const char* FS_MOUNT_POINT = "/littlefs";    // VFS mount point; not exposed in API paths
 static bool fsMounted_ = false;
 
-// Translate API path "/foo/bar" or "foo/bar" → "/littlefs/foo/bar" into out (must be large enough).
-static void fsTranslate(const char* apiPath, char* out, size_t outLen) {
-    if (!apiPath) { if (outLen > 0) out[0] = 0; return; }
+// Translate API path "/foo/bar" or "foo/bar" → "/littlefs/foo/bar" into out.
+// Returns false on null input, zero-sized output, or truncation; out[0] is set to 0
+// on any failure so callers don't accidentally consume a partial path.
+static bool fsTranslate(const char* apiPath, char* out, size_t outLen) {
+    if (outLen == 0) return false;
+    if (!apiPath) { out[0] = 0; return false; }
     const char* sep = (apiPath[0] == '/') ? "" : "/";
-    std::snprintf(out, outLen, "%s%s%s", FS_MOUNT_POINT, sep, apiPath);
+    int n = std::snprintf(out, outLen, "%s%s%s", FS_MOUNT_POINT, sep, apiPath);
+    if (n < 0 || static_cast<size_t>(n) >= outLen) { out[0] = 0; return false; }
+    return true;
 }
 
 void fsSetRoot(const char* /*path*/) {
@@ -167,7 +196,7 @@ void fsUnmount() {
 bool fsMkdir(const char* path) {
     if (!fsMounted_) return false;
     char full[128];
-    fsTranslate(path, full, sizeof(full));
+    if (!fsTranslate(path, full, sizeof(full))) return false;
     // mkdir -p: walk components, create each if missing
     char* p = full + std::strlen(FS_MOUNT_POINT) + 1; // skip "/littlefs/"
     while (*p) {
@@ -185,7 +214,7 @@ bool fsMkdir(const char* path) {
 bool fsExists(const char* path) {
     if (!fsMounted_) return false;
     char full[128];
-    fsTranslate(path, full, sizeof(full));
+    if (!fsTranslate(path, full, sizeof(full))) return false;
     struct stat st;
     return stat(full, &st) == 0;
 }
@@ -193,14 +222,14 @@ bool fsExists(const char* path) {
 bool fsRemove(const char* path) {
     if (!fsMounted_) return false;
     char full[128];
-    fsTranslate(path, full, sizeof(full));
+    if (!fsTranslate(path, full, sizeof(full))) return false;
     return ::remove(full) == 0;
 }
 
 int fsRead(const char* path, char* buf, size_t maxLen) {
     if (!fsMounted_ || !buf || maxLen == 0) return -1;
     char full[128];
-    fsTranslate(path, full, sizeof(full));
+    if (!fsTranslate(path, full, sizeof(full))) return -1;
     FILE* f = std::fopen(full, "rb");
     if (!f) return -1;
     size_t n = std::fread(buf, 1, maxLen - 1, f);
@@ -213,8 +242,9 @@ bool fsWriteAtomic(const char* path, const char* data, size_t len) {
     if (!fsMounted_) return false;
     char full[128];
     char tmp[136];
-    fsTranslate(path, full, sizeof(full));
-    std::snprintf(tmp, sizeof(tmp), "%s.tmp", full);
+    if (!fsTranslate(path, full, sizeof(full))) return false;
+    int n = std::snprintf(tmp, sizeof(tmp), "%s.tmp", full);
+    if (n < 0 || static_cast<size_t>(n) >= sizeof(tmp)) return false;
 
     FILE* f = std::fopen(tmp, "wb");
     if (!f) return false;
@@ -239,7 +269,7 @@ bool fsWriteAtomic(const char* path, const char* data, size_t len) {
 void fsList(const char* dir, FsListCb cb, void* user) {
     if (!fsMounted_ || !cb) return;
     char full[128];
-    fsTranslate(dir, full, sizeof(full));
+    if (!fsTranslate(dir, full, sizeof(full))) return;
     DIR* d = ::opendir(full);
     if (!d) return;
     struct dirent* ent;

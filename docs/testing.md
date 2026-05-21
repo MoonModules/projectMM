@@ -124,14 +124,38 @@ Tests `blendMap()` in `src/light/BlendMap.h`.
 - 1:N mapping: logical pixel appears at multiple physical positions
 - Additive blend with clamping
 
+### MoonModule::moveChildTo (`test/test_movechild.cpp`) {#movechild}
+
+Tests `MoonModule::moveChildTo(child, newIndex)` in `src/core/MoonModule.h`.
+
+- No-op when already at target index returns false
+- Forward move (toward end) shifts intervening siblings left
+- Backward move (toward start) shifts intervening siblings right
+- One-position swap (matches up/down buttons in the UI)
+- Out-of-range newIndex rejected without modifying the tree
+- Non-child argument rejected without modifying the tree
+- Middle-to-middle move
+
+### ModuleFactory (`test/test_module_factory.cpp`) {#module-factory}
+
+Tests `ModuleFactory` in `src/core/ModuleFactory.h`.
+
+- `registerType<T>()` captures `T::role()` via a stack-allocated probe instance — no per-type boilerplate
+- `create()` returns a module of the registered type with `typeName()` set
+- `create()` returns nullptr for unknown or null type names
+- `typeName()` and `typeRole()` are bounds-safe (out-of-range returns nullptr / Generic)
+- Dynamic capacity grows past the initial 4 — registering 10 throwaway types all succeed and remain discoverable
+
 ### Filesystem persistence (`test/test_filesystem_persistence.cpp`) {#filesystem-persistence}
 
-Two test cases for [FilesystemModule](moonmodules/core/FilesystemModule.md):
+Four test cases for [FilesystemModule](moonmodules/core/FilesystemModule.md):
 
 - **Value round-trip**: set `deviceName` on a running Scheduler+SystemModule, wait for the 2s debounce flush, recreate a fresh Scheduler+modules, and assert the deviceName is loaded from disk.
 - **Structural reconciliation**: hand-write a `Layer.json` describing a one-child tree (`RainbowEffect`). Build a live two-child tree (`NoiseEffect` + `MirrorModifier`) and run `scheduler.setup()`. Assert the live tree was reconciled — NoiseEffect swapped to RainbowEffect, Mirror trimmed.
+- **Valid JSON with children**: flush a Layer subtree containing two children (each with controls) and assert the raw file contains `"MirrorModifier",` / `"NoiseEffect",` — guards against the missing-comma bug between a child's `"N.type"` field and its first control.
+- **Singleton survives probe lifecycle**: construct the real FS instance + register via `setScheduler` (which now binds the singleton), factory-construct+destruct a probe instance (mimicking what `/api/types` does to capture defaults), and assert that `flushPending()` still saves a marked-dirty subtree after the probe is gone — guards against the bug where the probe's destructor cleared the static singleton, silently breaking persistence for the rest of the device's life.
 
-Both use `platform::fsSetRoot()` to redirect the config root into `/tmp/mm_*_test_<ms>/` for isolation. Combined wall time ~2.3s (the debounce window in the first test dominates).
+All four use `platform::fsSetRoot()` to redirect the config root into `/tmp/mm_*_test_<ms>/` for isolation. Combined wall time ~2.3s (the debounce window in the first test dominates).
 
 ## Scenario Tests
 

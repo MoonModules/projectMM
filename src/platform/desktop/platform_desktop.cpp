@@ -1,10 +1,12 @@
 #include "platform/platform.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <thread>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -41,6 +43,10 @@ void free(void* ptr) {
 void yield() {
     // No-op on desktop — OS scheduler handles threading.
     // Socket reads use SO_RCVTIMEO for blocking with timeout.
+}
+
+void delayMs(uint32_t ms) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 }
 
 size_t freeHeap() {
@@ -83,6 +89,11 @@ const char* sdkVersion() {
 #endif
 }
 
+const char* resetReason() {
+    // Desktop has no reset-reason concept; report a benign value the UI treats as "not crashed".
+    return "OK";
+}
+
 size_t firmwareSize() { return 0; }
 size_t firmwarePartition() { return 0; }
 size_t flashChipSize() { return 0; }
@@ -95,11 +106,21 @@ size_t flashChipSize() { return 0; }
 namespace {
 std::filesystem::path fsRoot_{"build"};
 
-// Map "/.config/foo.json" → "<root>/.config/foo.json". Strip a single leading '/'.
+// Map "/.config/foo.json" → "<root>/.config/foo.json". Strips leading '/'s, normalizes
+// the result, and rejects paths that escape fsRoot_ (e.g. "../../etc/passwd"). Returns
+// an empty path on rejection; callers already treat empty/nonexistent as failure.
 std::filesystem::path toFsPath(const char* path) {
     if (!path) return {};
-    if (path[0] == '/') return fsRoot_ / (path + 1);
-    return fsRoot_ / path;
+    while (*path == '/') path++;  // strip any number of leading slashes
+    std::filesystem::path candidate = (fsRoot_ / path).lexically_normal();
+    std::filesystem::path rootNormal = fsRoot_.lexically_normal();
+    // Prefix check on the normalized string: candidate must start with rootNormal followed
+    // by either end-of-string or a separator. Iterator comparison is more robust against
+    // trailing-slash quirks; mismatched_first signals an escape.
+    auto [r, c] = std::mismatch(rootNormal.begin(), rootNormal.end(),
+                                candidate.begin(), candidate.end());
+    if (r != rootNormal.end()) return {};  // candidate diverges before consuming all of rootNormal
+    return candidate;
 }
 }
 
@@ -217,6 +238,15 @@ void wifiApStop() {}
 
 bool mdnsInit(const char* /*deviceName*/) { return false; }
 void mdnsStop() {}
+
+void reboot() {
+    // Desktop: the device is the host process. Exit cleanly; the OS user / supervisor
+    // can restart it. Matches the "device disappeared from the network" semantics the
+    // browser-side WS reconnect logic expects.
+    std::printf("platform::reboot() — exiting\n");
+    std::fflush(stdout);
+    std::exit(0);
+}
 
 // UdpSocket
 

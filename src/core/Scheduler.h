@@ -64,30 +64,35 @@ public:
         uint32_t now = platform::millis();
         uint32_t tickStart = platform::micros();
 
-        // loop() — every tick, timed per module (skip disabled)
+        // Scheduler gates loop callbacks by `enabled()` — disabled modules don't tick.
+        // System modules that need to keep running regardless (HttpServer, Network,
+        // Filesystem — so users can re-enable other modules through them) override
+        // `respectsEnabled()` to return false. `onOnOff()` fires once per transition
+        // for custom start/stop semantics; see MoonModule::setEnabled().
+        auto shouldRun = [](MoonModule* m) {
+            return !m->respectsEnabled() || m->enabled();
+        };
         for (uint8_t i = 0; i < moduleCount_; i++) {
-            if (!modules_[i]->enabled()) continue;
+            if (!shouldRun(modules_[i])) continue;
             uint32_t modStart = platform::micros();
             modules_[i]->loop();
             modules_[i]->addAccumUs(platform::micros() - modStart);
         }
 
-        // loop20ms — timed per module too
         if (now - lastLoop20ms_ >= 20) {
             lastLoop20ms_ = now;
             for (uint8_t i = 0; i < moduleCount_; i++) {
-                if (!modules_[i]->enabled()) continue;
+                if (!shouldRun(modules_[i])) continue;
                 uint32_t modStart = platform::micros();
                 modules_[i]->loop20ms();
                 modules_[i]->addAccumUs(platform::micros() - modStart);
             }
         }
 
-        // loop1s — timed per module too
         if (now - lastLoop1s_ >= 1000) {
             lastLoop1s_ = now;
             for (uint8_t i = 0; i < moduleCount_; i++) {
-                if (!modules_[i]->enabled()) continue;
+                if (!shouldRun(modules_[i])) continue;
                 uint32_t modStart = platform::micros();
                 modules_[i]->loop1s();
                 modules_[i]->addAccumUs(platform::micros() - modStart);

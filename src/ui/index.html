@@ -6,17 +6,24 @@
     <title>projectMM</title>
     <link rel="stylesheet" href="style.css">
 </head>
-<body>
-    <header>
-        <h1>projectMM</h1>
+<body data-theme="dark">
+    <header id="status-bar">
+        <span class="brand">projectMM</span>
         <span id="device-name"></span>
+        <span id="sys-stats"></span>
+        <span class="spacer"></span>
         <span id="ws-dot" class="ws-dot disconnected" title="WebSocket"></span>
+        <button id="ws-reconnect" class="header-btn" title="Reconnect WebSocket">⟳</button>
+        <button id="reboot-btn" class="header-btn" title="Reboot device">⏻</button>
+        <button id="theme-toggle" class="header-btn" title="Toggle light/dark theme">☀</button>
     </header>
     <div class="content">
         <nav id="nav"></nav>
         <div class="main-area">
+            <div class="preview-wrap">
+                <canvas id="preview"></canvas>
+            </div>
             <main id="main"></main>
-            <canvas id="preview"></canvas>
         </div>
     </div>
     <script src="app.js"></script>

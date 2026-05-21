@@ -6,7 +6,7 @@ Persists control values to flash so settings survive a reboot. Always loaded, ru
 
 One flat JSON file per top-level module under `/.config/`:
 
-```
+```text
 /.config/
   SystemModule.json     → {"deviceName":"MM-TEST","enabled":true}
   NetworkModule.json    → {"ssid":"home","password":"...","addressing":1,
@@ -28,7 +28,7 @@ Filename comes from `MoonModule::typeName()`. Child modules are encoded **positi
 
 `Scheduler::setup()` runs in four phases:
 
-```
+```text
 phase 1  onBuildControls()    every module binds its full control set (incl. hidden)
 phase 2  loadAllHook()         FilesystemModule reads files, overlays bound variables
 phase 2b rebuildControls()     re-runs onBuildControls so conditional hidden flags see
@@ -42,9 +42,13 @@ The Scheduler exposes `setLoadAllHook(LoadAllFn fn)` as a function pointer so it
 
 ## Save trigger
 
-HttpServerModule calls `target->markDirty()` and `FilesystemModule::noteDirty()` on every successful control mutation. `noteDirty()` stamps `lastDirtyMs_` and sets `dirtyPending_`. In `loop1s()`, FilesystemModule waits `DEBOUNCE_MS` (2000ms) after the last dirty mark, then walks the module tree; any subtree with a dirty descendant is serialized to a flat JSON blob and written atomically (write to `.tmp` then rename).
+HttpServerModule calls `target->markDirty()` and `FilesystemModule::noteDirty()` on every successful mutation: control changes, **and tree-shape changes** (add / delete / move a module — the parent is marked dirty so its file is rewritten with the new child set). `noteDirty()` stamps `lastDirtyMs_` and sets `dirtyPending_`. In `loop1s()`, FilesystemModule waits `DEBOUNCE_MS` (2000ms) after the last dirty mark, then walks the module tree; any subtree with a dirty descendant is serialized to a flat JSON blob and written atomically (write to `.tmp` then rename).
 
-After writing, `clearSubtreeDirty()` clears the dirty flags. Tearing down or losing power before debounce expires loses the in-flight change — that's the cost of debouncing in exchange for fewer flash writes.
+After writing, `clearSubtreeDirty()` clears the dirty flags. Losing power before the debounce expires loses the in-flight change — that's the cost of debouncing in exchange for fewer flash writes. For deliberate teardowns, `FilesystemModule::flushPending()` forces all dirty subtrees through synchronously, bypassing the debounce. HttpServerModule's `POST /api/reboot` handler calls it so an add-then-immediate-reboot doesn't lose the change.
+
+The serializer emits each child as `"N.type":"TypeName"` followed by that child's controls; the reader (`applyNode`) reconciles the live tree to match — factory-creating, replacing, or trimming children by position so the persisted tree shape is restored on boot.
+
+The singleton pointer used by the static `noteDirty()` / `flushPending()` is bound in `setScheduler()`, **not** the constructor — the factory creates short-lived probe instances (for `/api/types` defaults capture) whose destructor would otherwise clear the singleton.
 
 ## Conditional visibility (`hidden` flag)
 

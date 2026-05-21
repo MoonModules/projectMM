@@ -12,6 +12,7 @@ void* alloc(size_t bytes);
 void free(void* ptr);
 
 void yield();
+void delayMs(uint32_t ms);  // blocking sleep; only use outside the hot path
 size_t freeHeap();          // total free (internal + PSRAM if present)
 size_t freeInternalHeap();  // internal RAM only (for stack/HTTP/WiFi reserve check)
 size_t maxAllocBlock();     // largest contiguous block (any memory type)
@@ -21,6 +22,11 @@ size_t totalInternalHeap(); // total internal heap capacity
 void getMacAddress(uint8_t mac[6]);
 const char* chipModel();
 const char* sdkVersion();
+
+// Human-readable reset reason: "POWERON", "SW", "PANIC", "INT_WDT", "TASK_WDT",
+// "BROWNOUT", "DEEPSLEEP", or "UNKNOWN". On desktop always returns "OK". UI uses
+// this to flag a "crashed" prior boot (PANIC / INT_WDT / TASK_WDT / BROWNOUT).
+const char* resetReason();
 size_t firmwareSize();        // firmware image bytes
 size_t firmwarePartition();   // app partition size (firmware capacity)
 size_t flashChipSize();       // total flash chip capacity
@@ -120,5 +126,9 @@ public:
 private:
     int fd_ = -1;
 };
+
+// Restart the device. On ESP32: hardware reset (esp_restart). On desktop: process exit.
+// Does not return.
+[[noreturn]] void reboot();
 
 } // namespace mm::platform

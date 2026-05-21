@@ -62,7 +62,7 @@ Controls are shown dynamically: when a control value changes, the control set ca
 
 Prefer `uint8_t` (0-255) for slider controls where possible. This minimizes memory per control, aligns with DMX channel values (0-255), and keeps the control range manageable in the UI.
 
-Controls are the bridge between the UI and the engine. The web UI renders them automatically based on what MoonModules declare. The exact control types (slider, toggle, color picker, text input, dropdown) are defined in the UI spec (`docs/moonmodules_draft/core/ui-spec.md`). The principle is: MoonModules declare what they need, the UI renders it.
+Controls are the bridge between the UI and the engine. The web UI renders them automatically based on what MoonModules declare. The exact control types (slider, toggle, color picker, text input, dropdown) are defined in the UI spec (`docs/moonmodules/core/ui-spec.md`). The principle is: MoonModules declare what they need, the UI renders it.
 
 ## Persistence
 
@@ -94,7 +94,7 @@ Only abstract what you actually need. Currently implemented:
 - **Time.** `millis()`, `micros()` — microsecond-resolution monotonic clock. (`esp_timer` / `std::chrono`)
 - **Memory.** `alloc(size)`, `free(ptr)` — allocator that prefers PSRAM on ESP32, falls back to regular heap. `freeHeap()`, `maxAllocBlock()` for diagnostics. (`heap_caps_malloc` / `std::malloc`)
 - **Networking.** `UdpSocket` — UDP send for ArtNet. (`lwip/sockets.h` / BSD sockets)
-- **Scheduling.** `yield()` — cooperative yield to OS/RTOS. (`vTaskDelay` / no-op on desktop)
+- **Scheduling.** `yield()` — cooperative yield to OS/RTOS. `delayMs(ms)` — blocking sleep, outside the hot path only. `reboot()` — restart the device. (`vTaskDelay` / `esp_restart` on ESP32; `std::this_thread::sleep_for` / `std::exit` on desktop)
 - **Platform config.** `platform_config.h` per platform — compile-time constants like `hasPsram`. Each platform provides its own version; `types.h` includes it without `#ifdef`.
 
 Abstractions are added when needed by a concrete implementation, not pre-designed. All platform-specific code lives in `src/platform/`. Everything outside it compiles cleanly on every target.
@@ -281,5 +281,5 @@ These will be specified in module docs before implementation:
 
 - **MoonModule interface.** Draft exists in `docs/moonmodules_draft/core/`. Needs review: virtual modifier interface, rebuild propagation.
 - **Config persistence.** Controls need to be saved/loaded. The storage format and mechanism will be specified when we build that module.
-- **Web UI.** Draft spec exists in `docs/moonmodules_draft/core/ui-spec.md`. Needs review: multiple layers, live preview, WebSocket.
+- **Web UI.** Spec at `docs/moonmodules/core/ui-spec.md` describes the current implementation (status bar, card layout, 9 control types, type picker, theme, WS lifecycle, 3D preview). Open design questions: multi-layer UI, modifier chain visualization, presets, canvas/node-graph view.
 - **File/directory structure.** The platform boundary is fixed. The rest will grow as modules are specified and implemented.

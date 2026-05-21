@@ -50,6 +50,7 @@ public:
     }
 
     void loop() override {
+        // Scheduler gates DriverGroup itself via respectsEnabled() default.
         if (layer_ && layer_->lut().hasLUT()) {
             blendMap(layer_->buffer(), outputBuffer_, layer_->lut(), layer_->channelsPerLight());
         }

@@ -23,6 +23,7 @@ System-level diagnostics and device identity. Always loaded, always visible in t
 - `flash` (read-only) — total flash chip size
 - `psram` (read-only, progress) — used / total PSRAM (only if present)
 - `filesystem` (read-only, progress) — used / total filesystem
+- `bootReason` (read-only) — human-readable reset reason from `platform::resetReason()` (e.g. `POWERON`, `SW`, `PANIC`, `INT_WDT`, `TASK_WDT`, `BROWNOUT`, `DEEPSLEEP`). Desktop always reports `OK`. The UI flags the reboot button with a red border (`data-crashed="true"`) when the value is one of PANIC / INT_WDT / TASK_WDT / BROWNOUT, indicating the prior boot ended unexpectedly.
 
 On desktop these show "desktop" / "N/A" for hardware-specific fields.
 

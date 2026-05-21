@@ -14,11 +14,14 @@ HttpServerModule is core infrastructure with no light domain dependencies. It wa
 
 - `GET /` — serves index.html (disk on desktop, embedded C array on ESP32)
 - `GET /app.js`, `/style.css` — serves UI assets
-- `GET /api/state` — JSON module tree with controls
+- `GET /api/state` — JSON module tree with controls. Each module entry includes `name`, `type`, `role`, `enabled`, `loopTimeUs`, and `controls[]`. Controls with `hidden` set are still emitted (UI skips rendering them).
 - `GET /api/system` — system metrics: FPS, freeHeap, maxBlock, uptime
+- `GET /api/types` — registered module types with their roles and factory defaults: `{"types":[{"name":"NoiseEffect","role":"effect","defaults":{"scale":4,"bpm":60}}, ...]}`. Defaults are captured by factory-creating a fresh probe instance per type and reading each bound variable's value-at-rest. The UI uses these for the reset-to-default ↺ button.
 - `POST /api/control` — set control value: `{"module":"name","control":"name","value":...}`
-- `POST /api/modules` — create module: `{"type":"NoiseEffect","id":"noise","parent_id":"layer"}`
-- `DELETE /api/modules/{name}` — remove module by name, teardown, rebuild pipeline
+- `POST /api/modules` — create module: `{"type":"NoiseEffect","id":"noise","parent_id":"layer"}`. Runs the new module's lifecycle in `onBuildControls()` → `setup()` → `onAllocateMemory()` order (matching `Scheduler::setup()`), then marks the parent dirty so the tree-shape change is persisted.
+- `POST /api/modules/{name}/move` — reorder within parent: `{"to":N}` where N is the new absolute index in the parent's children array. Strict-suffix match — `/movex` is rejected with 404. Triggers `Scheduler::rebuild()` so LUTs depending on modifier/layout order are rebuilt; marks the parent dirty for persistence.
+- `POST /api/reboot` — restart the device. Flushes pending FilesystemModule writes first (`flushPending()`) so an add-then-immediate-reboot isn't lost to the save debounce. ESP32: `esp_restart()`. Desktop: `std::exit(0)`. The 200 response races the actual restart; the UI's WS-reconnect logic handles the resulting disconnect.
+- `DELETE /api/modules/{name}` — remove module by name, teardown, rebuild pipeline, mark the parent dirty so the removal is persisted
 
 ## WebSocket
 

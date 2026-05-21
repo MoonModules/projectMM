@@ -47,6 +47,8 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 
 **Git: only on explicit request.** Do not `git add`, `git commit`, or `git push` on your own initiative. Only execute these when the product owner explicitly asks (e.g. "commit now", "push it"). The product owner controls when changes are staged, committed, and pushed.
 
+**Pre-commit is initiated by the product owner, not by agents.** When the product owner says "run pre-commit" / "pre-commit go" / "commit now" the checklist below runs. Do NOT start it automatically because you finished a feature, because tests pass, because a milestone feels reached, or because completion seems imminent. Treat the checklist as a gate the product owner opens; the agent's job is finishing the work and reporting status so the product owner can decide when to open it.
+
 **Pre-commit checklist (mandatory, in this order):**
 1. Desktop build — `cmake --build build` (zero warnings)
 2. Unit tests — `ctest --output-on-failure` (all pass)
@@ -55,7 +57,7 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 5. Spec check — `check_specs.py` (all ok)
 6. ESP32 build — `build_esp32.py` (clean)
 7. Reviewer agent — Opus agent reviews staged changes for: domain boundary, unnecessary abstractions, **duplicated patterns** (same logic in multiple places that belongs in a base class or shared function), hot-path violations, spec conformance, bloat, platform boundary. Must PASS.
-8. KPI collection — `collect_kpi.py --commit` (include in commit message: one-liner as FIRST line of description, full details at bottom)
+8. KPI collection — `collect_kpi.py --commit` (include in commit message: one-liner as FIRST line of description, full details at bottom). **The one-liner MUST include `tick:Xus(FPS:Y)` for every supported target** (PC + ESP32 today; Teensy/RPi when added). If a target's tick/FPS is missing — e.g. ESP32 wasn't monitored recently and `esp32/monitor.log` is stale — re-run a short live capture before committing, or note explicitly in the commit message why the value is absent.
 9. Live scenario analysis — run scenarios on both PC and ESP32 (if available), update `docs/performance.md` with new measurements. Compare with previous values and explain significant changes.
 10. Documentation check — verify all new functionality has matching docs: module specs updated, testing.md entries added, architecture docs reflect changes.
 

@@ -24,6 +24,11 @@ public:
     void setUiPath(const char* path) { uiPath_ = path; }
     void setPreviewFrame(PreviewFrame* f) { previewFrame_ = f; }
 
+    // Keep running even when "disabled" via the UI — otherwise the user has no way
+    // to re-enable themselves through the same UI. The `enabled` checkbox on this
+    // card has no effect; that's intentional.
+    bool respectsEnabled() const override { return false; }
+
     void onBuildControls() override {
         controls_.addUint16("port", port);
     }
@@ -138,12 +143,29 @@ private:
             else if (std::strcmp(path, "/style.css") == 0) serveFile(conn, "style.css", "text/css");
             else if (std::strcmp(path, "/api/state") == 0) serveState(conn);
             else if (std::strcmp(path, "/api/system") == 0) serveSystem(conn);
+            else if (std::strcmp(path, "/api/types") == 0) serveTypes(conn);
             else sendResponse(conn, 404, "text/plain", "Not found");
         } else if (std::strcmp(method, "POST") == 0) {
+            // POST /api/modules/<name>/move with body {"to":N}.
+            // Strict-suffix check: path must end with "/move" exactly (rejects "/movex").
+            const size_t pathLen = std::strlen(path);
+            const bool isMoveRoute =
+                std::strncmp(path, "/api/modules/", 13) == 0 &&
+                pathLen > 18 &&
+                std::strcmp(path + pathLen - 5, "/move") == 0;
             if (std::strcmp(path, "/api/control") == 0 && body) {
                 handleSetControl(conn, body);
             } else if (std::strcmp(path, "/api/modules") == 0 && body) {
                 handleAddModule(conn, body);
+            } else if (isMoveRoute && body) {
+                char nameBuf[32] = {};
+                size_t nameLen = pathLen - 13 - 5;  // strip "/api/modules/" prefix and "/move" suffix
+                if (nameLen >= sizeof(nameBuf)) nameLen = sizeof(nameBuf) - 1;
+                std::memcpy(nameBuf, path + 13, nameLen);
+                nameBuf[nameLen] = 0;
+                handleMoveModule(conn, nameBuf, body);
+            } else if (std::strcmp(path, "/api/reboot") == 0) {
+                handleReboot(conn);
             } else {
                 sendResponse(conn, 404, "text/plain", "Not found");
             }
@@ -278,10 +300,17 @@ private:
         };
 
         if (static_cast<size_t>(pos) >= bufSize) return;
+        // Per-module header: name, role, enabled, loopTimeUs (for fps/ms display), controls
+        const char* roleStr = roleName(mod->role());
+        const char* type = mod->typeName();
+        if (!type) type = "";
         int n = std::snprintf(buf + pos, bufSize - pos,
-            "{\"name\":\"%s\",\"enabled\":%s,\"controls\":[",
+            "{\"name\":\"%s\",\"type\":\"%s\",\"role\":\"%s\",\"enabled\":%s,\"loopTimeUs\":%u,\"controls\":[",
             mod->name() ? mod->name() : "",
-            mod->enabled() ? "true" : "false");
+            type,
+            roleStr,
+            mod->enabled() ? "true" : "false",
+            static_cast<unsigned>(mod->loopTimeUs()));
         if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
         writeControls(buf, bufSize, pos, mod);
         append("]");
@@ -566,12 +595,26 @@ private:
             }
         }
 
-        // Lifecycle: setup the new module
-        mod->setup();
+        // Lifecycle: same phase order as Scheduler::setup() — onBuildControls() first so
+        // control buffers are bound, then setup() (which may read those bound members),
+        // then onAllocateMemory(). Getting this order wrong means a module's setup() sees
+        // uninitialized control state.
         mod->onBuildControls();
+        mod->setup();
         mod->onAllocateMemory();
 
         if (scheduler_) scheduler_->rebuild();
+
+        // Persist the new tree shape — marking the parent dirty causes saveSubtree
+        // to write the parent's file with the new child slot included. The save is
+        // debounced (2s after the last dirty mark) so an immediate reboot won't catch
+        // the write; callers wanting a synchronous save can call FilesystemModule::flush().
+        if (parentId[0] != 0) {
+            if (auto* parent = findModuleByName(parentId)) parent->markDirty();
+        } else {
+            mod->markDirty();
+        }
+        FilesystemModule::noteDirty();
 
         sendResponse(conn, 200, "application/json", "{\"ok\":true}");
     }
@@ -595,7 +638,149 @@ private:
 
         if (scheduler_) scheduler_->rebuild();
 
+        // Persist the new tree shape — marking the parent dirty rewrites its file
+        // without the deleted child slot. Root deletes are skipped (no parent to mark);
+        // the top-level shape is fixed in main.cpp anyway.
+        if (parent) {
+            parent->markDirty();
+            FilesystemModule::noteDirty();
+        }
+
         sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+    }
+
+    // GET /api/types → {"types":[{"name":"NoiseEffect","role":"effect",
+    //                              "defaults":{"bpm":60,"scale":4,...}}, ...]}.
+    // The defaults map is captured by factory-creating a fresh probe instance per type,
+    // running its onBuildControls(), and reading each bound variable's value-at-rest.
+    // The probe is destroyed before the next iteration. UI uses these to render the
+    // ↺ reset-to-default button (active when the live value differs).
+    void serveTypes(platform::TcpConnection& conn) {
+        int pos = std::snprintf(jsonBuf_, JSON_BUF_SIZE, "{\"types\":[");
+        if (pos < 0) {
+            sendResponse(conn, 500, "application/json", "{\"error\":\"format\"}");
+            return;
+        }
+        bool first = true;
+        for (uint8_t i = 0; i < ModuleFactory::typeCount(); i++) {
+            const char* name = ModuleFactory::typeName(i);
+            if (!name) continue;
+            const char* roleStr = roleName(ModuleFactory::typeRole(i));
+            int n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
+                                  "%s{\"name\":\"%s\",\"role\":\"%s\",\"defaults\":{",
+                                  first ? "" : ",", name, roleStr);
+            if (n < 0 || static_cast<size_t>(pos + n) >= JSON_BUF_SIZE) break;
+            pos += n;
+            writeTypeDefaults(name, pos);
+            n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos, "}}");
+            if (n < 0 || static_cast<size_t>(pos + n) >= JSON_BUF_SIZE) break;
+            pos += n;
+            first = false;
+        }
+        int n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos, "]}");
+        if (n > 0 && static_cast<size_t>(pos + n) < JSON_BUF_SIZE) pos += n;
+        sendResponse(conn, 200, "application/json", jsonBuf_);
+    }
+
+    // Emit `"controlName":value, ...` pairs into jsonBuf_ at &pos for a probe of typeName.
+    // The probe is created from the factory, onBuildControls is run, and the bound
+    // variables are read at their initial (just-constructed) state. The probe is deleted
+    // before return. Only persistable scalar types are emitted (Uint8/Uint16/Bool/Text).
+    // Text values are JSON-escaped minimally — typeName-derived control names are
+    // alphanumeric so the keys are safe.
+    void writeTypeDefaults(const char* typeName, int& pos) {
+        MoonModule* probe = ModuleFactory::create(typeName);
+        if (!probe) return;
+        probe->onBuildControls();
+        auto& cs = probe->controls();
+        bool first = true;
+        for (uint8_t i = 0; i < cs.count(); i++) {
+            auto& c = cs[i];
+            int n = 0;
+            switch (c.type) {
+                case ControlType::Uint8:
+                    n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
+                                      "%s\"%s\":%u", first ? "" : ",", c.name,
+                                      *static_cast<uint8_t*>(c.ptr));
+                    break;
+                case ControlType::Uint16:
+                    n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
+                                      "%s\"%s\":%u", first ? "" : ",", c.name,
+                                      *static_cast<uint16_t*>(c.ptr));
+                    break;
+                case ControlType::Bool:
+                    n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
+                                      "%s\"%s\":%s", first ? "" : ",", c.name,
+                                      *static_cast<bool*>(c.ptr) ? "true" : "false");
+                    break;
+                case ControlType::Text:
+                    n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
+                                      "%s\"%s\":\"%s\"", first ? "" : ",", c.name,
+                                      static_cast<char*>(c.ptr));
+                    break;
+                case ControlType::Select:
+                    n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
+                                      "%s\"%s\":%u", first ? "" : ",", c.name,
+                                      *static_cast<uint8_t*>(c.ptr));
+                    break;
+                default:
+                    continue;  // ReadOnly/Progress have no meaningful default
+            }
+            if (n < 0 || static_cast<size_t>(pos + n) >= JSON_BUF_SIZE) break;
+            pos += n;
+            first = false;
+        }
+        probe->teardown();
+        delete probe;
+    }
+
+    // POST /api/modules/<name>/move with body {"to":N}. Moves the named module to
+    // absolute index N within its parent's children. Triggers a full pipeline rebuild
+    // because modifier/layout reorders change the LUT.
+    void handleMoveModule(platform::TcpConnection& conn, const char* moduleName, const char* body) {
+        auto* mod = findModuleByName(moduleName);
+        if (!mod) {
+            sendResponse(conn, 404, "application/json", "{\"error\":\"module not found\"}");
+            return;
+        }
+        auto* parent = mod->parent();
+        if (!parent) {
+            sendResponse(conn, 400, "application/json", "{\"error\":\"top-level modules cannot be reordered\"}");
+            return;
+        }
+        int to = parseJsonInt(body, "to");
+        if (to < 0 || to >= parent->childCount()) {
+            sendResponse(conn, 400, "application/json", "{\"error\":\"to out of range\"}");
+            return;
+        }
+        if (!parent->moveChildTo(mod, static_cast<uint8_t>(to))) {
+            // Either already at position N or some other no-op — not an error per se,
+            // but report so the UI can avoid a refetch storm on rapid drags.
+            sendResponse(conn, 200, "application/json", "{\"ok\":true,\"noop\":true}");
+            return;
+        }
+        mod->markDirty();
+        FilesystemModule::noteDirty();
+        if (scheduler_) scheduler_->rebuild();
+        sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+    }
+
+    // POST /api/reboot — restart the device. Response is sent before the restart
+    // happens, but on ESP32 the device may reset before the TCP socket finishes;
+    // browsers handle this via their existing WS-disconnect → reconnect logic.
+    //
+    // Flush pending FS writes first — otherwise a quick add-then-reboot loses the
+    // pending change to the 2s save debounce.
+    void handleReboot(platform::TcpConnection& conn) {
+        FilesystemModule::flushPending();
+        sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+        // Best-effort: close the socket and give LWIP a brief window to push the FIN
+        // + payload out over Ethernet before esp_restart() yanks the world. Without the
+        // delay the browser sees an aborted connection instead of a clean 200; the UI
+        // copes (it auto-reconnects on WS close) but a clean response is friendlier.
+        conn.close();
+        platform::delayMs(200);
+        platform::reboot();  // noreturn
     }
 
     // JSON parsing delegates to core/JsonUtil.h. Kept as thin wrappers so existing call

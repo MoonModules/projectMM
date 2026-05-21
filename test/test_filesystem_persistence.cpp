@@ -50,16 +50,9 @@ TEST_CASE("FilesystemModule round-trip") {
             }
         }
 
-        // FilesystemModule debounces saves by 2s after the dirty mark. We can't sleep
-        // (well, we can — and we do) — busy-poll loop1s() until the file appears or
-        // a 3-second wall-time deadline expires.
-        uint32_t deadline = mm::platform::millis() + 3000;
-        while (mm::platform::millis() < deadline) {
-            fs->loop1s();
-            char path[256];
-            std::snprintf(path, sizeof(path), "%s/.config/SystemModule.json", tmpRoot);
-            if (std::filesystem::exists(path)) break;
-        }
+        // flush() does the same work as loop1s() does once the debounce expires, but
+        // synchronously — used here to keep the test deterministic without wall-clock waits.
+        fs->flush();
 
         char path[256];
         std::snprintf(path, sizeof(path), "%s/.config/SystemModule.json", tmpRoot);
@@ -137,6 +130,115 @@ TEST_CASE("FilesystemModule structural reconciliation") {
 
     REQUIRE(layer->childCount() == 1);
     CHECK(std::strcmp(layer->child(0)->typeName(), "RainbowEffect") == 0);
+
+    scheduler.teardown();
+    std::filesystem::remove_all(tmpRoot);
+    mm::platform::fsSetRoot(".");
+}
+
+// Round-trip persistence with children: write a Layer subtree that contains both
+// controls and child modules with controls of their own, then read the file back as
+// text and verify it parses as valid JSON. Regresses the missing-comma bug between
+// each child's "N.type" field and that child's first control (e.g. "0.type":"X""0.foo":1
+// instead of "0.type":"X","0.foo":1).
+TEST_CASE("FilesystemModule writes valid JSON with children") {
+    char tmpRoot[256];
+    std::snprintf(tmpRoot, sizeof(tmpRoot), "/tmp/mm_write_test_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(tmpRoot);
+    std::filesystem::create_directories(std::string(tmpRoot) + "/.config");
+    mm::platform::fsSetRoot(tmpRoot);
+
+    mm::ModuleFactory::registerType<mm::Layer>("Layer");
+    mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect");
+    mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier");
+
+    mm::Scheduler scheduler;
+    auto* fs = new mm::FilesystemModule();
+    fs->setTypeName("FilesystemModule");
+    fs->setScheduler(&scheduler);
+    auto* layer = new mm::Layer();
+    layer->setTypeName("Layer");
+    auto* mirror = new mm::MirrorModifier();
+    mirror->setTypeName("MirrorModifier");
+    auto* noise = new mm::NoiseEffect();
+    noise->setTypeName("NoiseEffect");
+    layer->addChild(mirror);
+    layer->addChild(noise);
+
+    scheduler.addModule(fs);
+    scheduler.addModule(layer);
+    scheduler.setup();
+
+    // Mark dirty and flush so the file appears immediately.
+    layer->markDirty();
+    fs->flush();
+
+    // Read back the raw file and verify both child "type" fields are followed by
+    // a comma before the next field — the previously-broken serializer emitted
+    // "0.type":"MirrorModifier""0.mirrorX":true with no separator.
+    std::ifstream f(std::string(tmpRoot) + "/.config/Layer.json");
+    std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    CHECK(content.find("\"MirrorModifier\",") != std::string::npos);
+    CHECK(content.find("\"NoiseEffect\",") != std::string::npos);
+    // And the catastrophic "}{ or "X""Y syntactic shape must not appear.
+    CHECK(content.find("\"\"") == std::string::npos);
+
+    scheduler.teardown();
+    std::filesystem::remove_all(tmpRoot);
+    mm::platform::fsSetRoot(".");
+}
+
+// Singleton survives probe lifecycle: /api/types factory-creates a probe of every
+// registered type (including FilesystemModule) to capture defaults, then deletes it.
+// The probe's destructor must NOT clear the singleton — otherwise every save path
+// (noteDirty, debounced loop1s, flushPending on reboot) silently no-ops for the rest
+// of the device's life. The fix is to register the singleton in setScheduler(), not
+// in the constructor. This test would have caught the bug if it had existed before.
+TEST_CASE("FilesystemModule singleton survives probe construct+destruct") {
+    char tmpRoot[256];
+    std::snprintf(tmpRoot, sizeof(tmpRoot), "/tmp/mm_singleton_test_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(tmpRoot);
+    std::filesystem::create_directories(std::string(tmpRoot) + "/.config");
+    mm::platform::fsSetRoot(tmpRoot);
+
+    mm::ModuleFactory::registerType<mm::FilesystemModule>("FilesystemModule");
+    mm::ModuleFactory::registerType<mm::Layer>("Layer");
+    mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect");
+
+    mm::Scheduler scheduler;
+
+    // 1) Real FS instance, registered via setScheduler (this is the singleton-binding path).
+    auto* fs = new mm::FilesystemModule();
+    fs->setTypeName("FilesystemModule");
+    fs->setScheduler(&scheduler);
+
+    auto* layer = new mm::Layer();
+    layer->setTypeName("Layer");
+    scheduler.addModule(fs);
+    scheduler.addModule(layer);
+    scheduler.setup();
+
+    // 2) Mimic /api/types: factory-construct a probe FilesystemModule, then delete it.
+    //    Before the fix, the probe's destructor cleared the static singleton because
+    //    `instance_ == this` for the probe at destruction time.
+    {
+        auto* probe = mm::ModuleFactory::create("FilesystemModule");
+        REQUIRE(probe != nullptr);
+        delete probe;
+    }
+
+    // 3) After the probe died, noteDirty() must still reach the real singleton. We
+    //    verify it indirectly: mark Layer dirty + flush, and observe that the Layer.json
+    //    file appears on disk. If the singleton was lost, flush would be a no-op
+    //    (flushPending() returns early when instance_ is null) and the file would not
+    //    exist.
+    layer->markDirty();
+    mm::FilesystemModule::flushPending();
+
+    std::ifstream f(std::string(tmpRoot) + "/.config/Layer.json");
+    CHECK(f.is_open());
 
     scheduler.teardown();
     std::filesystem::remove_all(tmpRoot);

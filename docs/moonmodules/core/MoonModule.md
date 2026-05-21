@@ -41,9 +41,14 @@ Every MoonModule tracks `loopTimeUs()` — average microseconds per tick, comput
 
 ## Enabled toggle
 
-Every MoonModule has an `enabled` property (default: true). When disabled, the Scheduler skips `loop()`, `loop20ms()`, and `loop1s()` — the module stops processing but remains in the tree. The UI shows a checkbox in the card header to toggle it. Settable via `POST /api/control` with `control=enabled`.
+Every MoonModule has an `enabled` property (default: true). The UI shows a checkbox in the card header to toggle it. Settable via `POST /api/control` with `control=enabled`. Serialized as `"enabled": true/false` in the module JSON (module-level, not in the controls array).
 
-This is a module-level property, not a regular control — it's serialized as `"enabled": true/false` in the module JSON, not in the controls array.
+**Semantics are owned by each module, not by the Scheduler.** The Scheduler always calls `loop()`, `loop20ms()`, and `loop1s()` regardless of `enabled`. Modules decide what "disabled" means:
+
+- **Rendering modules** (Layer, DriverGroup, effects, modifiers): early-return from `loop()` when `enabled()` is false. The buffer keeps its last state; the user sees the layer/driver freeze. This is the typical UX intent of "turn this effect off."
+- **System modules** (HttpServer, Network, Filesystem): typically ignore `enabled` and keep accepting connections / serving requests, since "disable HttpServer" via the UI would lock the user out.
+
+**`onOnOff(bool newEnabled)`** is called once per transition by `setEnabled(b)` when the value actually flips. Override it to start/stop sockets, free buffers, switch driver pins to high-impedance, etc. Default is a no-op. Use this instead of polling `enabled()` in the hot path for one-shot transition work.
 
 ## Parent/child
 
@@ -51,9 +56,11 @@ Modules form a tree. Parent/child relationships only (no arbitrary DAG like v2's
 
 ### Generic children in MoonModule base
 
-Every MoonModule has a dynamic children array. `addChild()`, `removeChild()`, and `replaceChildAt(i, fresh)` are implemented once in the base class — containers (Layer, DriverGroup, LayoutGroup) do not override them. The array starts empty (zero allocation for leaf modules) and grows on demand during setup. This eliminates the per-container typed arrays (`effects_[]`, `drivers_[]`, `layouts_[]`) and typed add methods (`addEffect()`, `addDriver()`, `addLayout()`) that existed in earlier iterations.
+Every MoonModule has a dynamic children array. `addChild()`, `removeChild()`, `replaceChildAt(i, fresh)`, and `moveChildTo(child, newIndex)` are implemented once in the base class — containers (Layer, DriverGroup, LayoutGroup) do not override them. The array starts empty (zero allocation for leaf modules) and grows on demand during setup. This eliminates the per-container typed arrays (`effects_[]`, `drivers_[]`, `layouts_[]`) and typed add methods (`addEffect()`, `addDriver()`, `addLayout()`) that existed in earlier iterations.
 
 `replaceChildAt` is used by [FilesystemModule](FilesystemModule.md) at load time to swap a child whose type differs from the persisted JSON. The caller owns the lifecycle of the returned old child (typically `teardown()` + `Scheduler::deleteTree`).
+
+`moveChildTo(child, newIndex)` reorders a child to an absolute index 0..childCount-1. Intervening siblings shift to fill the vacated slot. Used by the UI's up/down/drag-and-drop reorder via `POST /api/modules/<name>/move {to:N}`. Returns false if `child` isn't found, `newIndex` is out of range, or the child is already at `newIndex`. After a successful move, the caller (currently `HttpServerModule::handleMoveModule`) triggers `Scheduler::rebuild()` so any LUT that depends on modifier/layout order rebuilds.
 
 Children are distinguished by `role()` (Effect, Modifier, Driver, Layout, Generic). Containers that need role-specific iteration (e.g. Layer::loop() only calls loop() on Effects, not Modifiers) filter children by role at the call site.
 
