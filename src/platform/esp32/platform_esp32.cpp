@@ -13,7 +13,9 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_eth.h"
+#ifndef MM_NO_WIFI
 #include "esp_wifi.h"
+#endif
 #include "esp_log.h"
 #include "mdns.h"
 #include "esp_littlefs.h"
@@ -28,6 +30,7 @@
 #include <cstring>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <unistd.h>
 
 namespace mm::platform {
@@ -307,13 +310,17 @@ static const char* NET_TAG = "mm_net";
 // Connection state tracked by event handlers
 static bool ethLinkUp_ = false;
 static bool ethConnected_ = false;
+static esp_netif_t* ethNetif_ = nullptr;
+static bool netifInitDone_ = false;
+
+#ifndef MM_NO_WIFI
+// WiFi-only state — absent in the Ethernet-only build.
 static bool wifiStaConnected_ = false;
 static bool wifiApActive_ = false;
-static esp_netif_t* ethNetif_ = nullptr;
 static esp_netif_t* staNetif_ = nullptr;
 static esp_netif_t* apNetif_ = nullptr;
-static bool netifInitDone_ = false;
 static bool wifiInitDone_ = false;
+#endif
 
 static void ensureNetifInit() {
     if (!netifInitDone_) {
@@ -404,6 +411,8 @@ void ethGetIP(char* buf, size_t len) {
         buf[0] = 0;
     }
 }
+
+#ifndef MM_NO_WIFI
 
 // WiFi event handler
 static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
@@ -550,6 +559,22 @@ void wifiApStop() {
     ESP_LOGI(NET_TAG, "WiFi AP stopped + deinit");
 }
 
+#else // MM_NO_WIFI — Ethernet-only build: WiFi compiled out.
+
+// Stub definitions so the linker is satisfied (platform.h declares these and
+// NetworkModule's discarded `if constexpr (hasWiFi)` branch still ODR-uses them).
+// With hasWiFi==false the calls are not code-generated, so --gc-sections drops
+// these stubs from the final image.
+bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) { return false; }
+bool wifiStaConnected() { return false; }
+void wifiStaGetIP(char* buf, size_t len) { if (len > 0) buf[0] = 0; }
+void wifiStaStop() {}
+bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
+bool wifiApConnected() { return false; }
+void wifiApStop() {}
+
+#endif // MM_NO_WIFI
+
 bool mdnsInit(const char* deviceName) {
     esp_err_t err = mdns_init();
     if (err != ESP_OK) {
@@ -581,17 +606,18 @@ bool UdpSocket::open() {
     return fd_ >= 0;
 }
 
-bool UdpSocket::send(const char* ip, uint16_t port, const uint8_t* data, size_t len) {
+bool UdpSocket::connect(const char* ip, uint16_t port) {
     if (fd_ < 0) return false;
-
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) return false;
+    return ::connect(fd_, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == 0;
+}
 
-    auto sent = sendto(fd_, data, len, 0,
-                       reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
-    return sent >= 0;
+bool UdpSocket::sendTo(const uint8_t* data, size_t len) {
+    if (fd_ < 0) return false;
+    return ::send(fd_, data, len, 0) >= 0;
 }
 
 void UdpSocket::close() {
@@ -630,6 +656,27 @@ bool TcpConnection::write(const uint8_t* data, size_t len) {
         }
     }
     return true;
+}
+
+WriteResult TcpConnection::writeChunks(const WriteChunk* chunks, int count) {
+    if (fd_ < 0) return WriteResult::Error;
+    if (count < 1 || count > MAX_WRITE_CHUNKS) return WriteResult::Error;
+    struct iovec iov[MAX_WRITE_CHUNKS];
+    size_t total = 0;
+    for (int i = 0; i < count; i++) {
+        iov[i].iov_base = const_cast<uint8_t*>(chunks[i].data);
+        iov[i].iov_len = chunks[i].len;
+        total += chunks[i].len;
+    }
+    // Single non-blocking writev — the socket is already O_NONBLOCK.
+    ssize_t n = lwip_writev(fd_, iov, count);
+    if (n < 0) {
+        return (errno == EAGAIN || errno == EWOULDBLOCK)
+                   ? WriteResult::WouldBlock : WriteResult::Error;
+    }
+    if (n == 0) return WriteResult::WouldBlock;
+    if (static_cast<size_t>(n) == total) return WriteResult::Complete;
+    return WriteResult::Partial;
 }
 
 void TcpConnection::close() {

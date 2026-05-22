@@ -883,74 +883,75 @@ private:
         return conn.write(reinterpret_cast<const uint8_t*>(data), len);
     }
 
-    static bool sendWsBinaryFrame(platform::TcpConnection& conn, const uint8_t* data, size_t len) {
-        uint8_t header[10];
-        int headerLen = 0;
 
-        header[0] = 0x82; // FIN + binary opcode
-        if (len < 126) {
-            header[1] = static_cast<uint8_t>(len);
-            headerLen = 2;
-        } else if (len < 65536) {
-            header[1] = 126;
-            header[2] = static_cast<uint8_t>((len >> 8) & 0xFF);
-            header[3] = static_cast<uint8_t>(len & 0xFF);
-            headerLen = 4;
-        } else {
-            return false;
-        }
-
-        if (!conn.write(header, headerLen)) return false;
-        return conn.write(data, len);
-    }
-
+    // Broadcast the 3D preview frame to every connected browser. The send is
+    // non-blocking and all-or-nothing: a backpressured browser causes the frame
+    // to be skipped (WouldBlock), never a render-task stall. The preview is
+    // already rate-limited by PreviewDriver's fps control.
     void broadcastPreviewFrame() {
         if (!previewFrame_ || !previewFrame_->data || previewFrame_->dataLen == 0) return;
 
-        // Build 7-byte preview header on stack: [0x02][w16][h16][d16]
-        uint8_t previewHeader[7];
+        // Build 13-byte preview header on stack:
+        //   [0x02][dw16][dh16][dd16][ow16][oh16][od16]
+        // dw/dh/dd = dimensions of the (downsampled) data in the payload;
+        // ow/oh/od = original physical grid dimensions, for optional UI upscale.
+        // All uint16 little-endian.
+        uint8_t previewHeader[13];
         previewHeader[0] = 0x02;
-        previewHeader[1] = static_cast<uint8_t>(previewFrame_->width & 0xFF);
-        previewHeader[2] = static_cast<uint8_t>(previewFrame_->width >> 8);
-        previewHeader[3] = static_cast<uint8_t>(previewFrame_->height & 0xFF);
-        previewHeader[4] = static_cast<uint8_t>(previewFrame_->height >> 8);
-        previewHeader[5] = static_cast<uint8_t>(previewFrame_->depth & 0xFF);
-        previewHeader[6] = static_cast<uint8_t>(previewFrame_->depth >> 8);
+        auto put16 = [&](int at, lengthType v) {
+            previewHeader[at]     = static_cast<uint8_t>(v & 0xFF);
+            previewHeader[at + 1] = static_cast<uint8_t>(v >> 8);
+        };
+        put16(1, previewFrame_->width);
+        put16(3, previewFrame_->height);
+        put16(5, previewFrame_->depth);
+        put16(7, previewFrame_->origWidth);
+        put16(9, previewFrame_->origHeight);
+        put16(11, previewFrame_->origDepth);
 
-        size_t totalLen = 7 + previewFrame_->dataLen;
+        size_t totalLen = 13 + previewFrame_->dataLen;
+
+        // WebSocket frame header for a binary message of totalLen bytes.
+        uint8_t wsHeader[4];
+        int wsHeaderLen = 0;
+        wsHeader[0] = 0x82; // FIN + binary opcode
+        if (totalLen < 126) {
+            wsHeader[1] = static_cast<uint8_t>(totalLen);
+            wsHeaderLen = 2;
+        } else if (totalLen < 65536) {
+            wsHeader[1] = 126;
+            wsHeader[2] = static_cast<uint8_t>((totalLen >> 8) & 0xFF);
+            wsHeader[3] = static_cast<uint8_t>(totalLen & 0xFF);
+            wsHeaderLen = 4;
+        } else {
+            return; // frame too large for the 16-bit length form
+        }
+
+        // One scatter-gather chunk list: WS header + preview header + payload.
+        // The payload chunk stays a zero-copy pointer into the DriverGroup buffer.
+        const platform::WriteChunk chunks[] = {
+            { wsHeader,      static_cast<size_t>(wsHeaderLen) },
+            { previewHeader, sizeof(previewHeader) },
+            { previewFrame_->data, previewFrame_->dataLen },
+        };
+        constexpr int chunkCount = sizeof(chunks) / sizeof(chunks[0]);
 
         for (auto& ws : wsClients_) {
             if (!ws.valid()) continue;
-            // Send WebSocket frame header + preview header + buffer data (3 writes, zero copy)
-            if (!sendWsBinaryFrameMulti(ws, previewHeader, 7, previewFrame_->data, previewFrame_->dataLen, totalLen)) {
-                ws.close();
+            switch (ws.writeChunks(chunks, chunkCount)) {
+                case platform::WriteResult::Complete:
+                case platform::WriteResult::WouldBlock:
+                    // WouldBlock: browser is backpressured — skip this frame,
+                    // keep the connection open (the next frame may fit).
+                    break;
+                case platform::WriteResult::Partial:
+                case platform::WriteResult::Error:
+                    // Partial: a truncated WS message went out — the stream is
+                    // corrupt, the connection must be dropped. Error: dead socket.
+                    ws.close();
+                    break;
             }
         }
-    }
-
-    static bool sendWsBinaryFrameMulti(platform::TcpConnection& conn,
-                                        const uint8_t* data1, size_t len1,
-                                        const uint8_t* data2, size_t len2,
-                                        size_t totalLen) {
-        uint8_t header[10];
-        int headerLen = 0;
-
-        header[0] = 0x82; // FIN + binary opcode
-        if (totalLen < 126) {
-            header[1] = static_cast<uint8_t>(totalLen);
-            headerLen = 2;
-        } else if (totalLen < 65536) {
-            header[1] = 126;
-            header[2] = static_cast<uint8_t>((totalLen >> 8) & 0xFF);
-            header[3] = static_cast<uint8_t>(totalLen & 0xFF);
-            headerLen = 4;
-        } else {
-            return false;
-        }
-
-        if (!conn.write(header, headerLen)) return false;
-        if (!conn.write(data1, len1)) return false;
-        return conn.write(data2, len2);
     }
 
     // -----------------------------------------------------------------------

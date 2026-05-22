@@ -2,6 +2,8 @@
 
 Output driver. Reads from the DriverGroup's output buffer and sends ArtNet DMX packets over UDP. The driver doesn't care whether the buffer is a separate driver buffer or a shared layer buffer — it reads from whatever DriverGroup provides.
 
+The UDP socket is `connect()`-bound to the destination in `setup()`, so each per-universe `sendTo()` skips the address parse + route lookup — a measurable saving when a frame spans dozens of universes (16,384 lights = 97 universes). See [performance.md](../../../performance.md) "ArtNet UDP send cost".
+
 ## Controls
 
 - `ip` (text, default "192.168.1.70") — destination IP address

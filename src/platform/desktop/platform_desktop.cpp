@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <thread>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -260,17 +261,18 @@ bool UdpSocket::open() {
     return fd_ >= 0;
 }
 
-bool UdpSocket::send(const char* ip, uint16_t port, const uint8_t* data, size_t len) {
+bool UdpSocket::connect(const char* ip, uint16_t port) {
     if (fd_ < 0) return false;
-
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) return false;
+    return ::connect(fd_, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == 0;
+}
 
-    auto sent = ::sendto(fd_, data, len, 0,
-                         reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
-    return sent >= 0;
+bool UdpSocket::sendTo(const uint8_t* data, size_t len) {
+    if (fd_ < 0) return false;
+    return ::send(fd_, data, len, 0) >= 0;
 }
 
 void UdpSocket::close() {
@@ -312,6 +314,32 @@ bool TcpConnection::write(const uint8_t* data, size_t len) {
         }
     }
     return true;
+}
+
+WriteResult TcpConnection::writeChunks(const WriteChunk* chunks, int count) {
+    if (fd_ < 0) return WriteResult::Error;
+    if (count < 1 || count > MAX_WRITE_CHUNKS) return WriteResult::Error;
+    struct iovec iov[MAX_WRITE_CHUNKS];
+    size_t total = 0;
+    for (int i = 0; i < count; i++) {
+        iov[i].iov_base = const_cast<uint8_t*>(chunks[i].data);
+        iov[i].iov_len = chunks[i].len;
+        total += chunks[i].len;
+    }
+    // sendmsg + MSG_DONTWAIT makes this single scatter-gather write non-blocking
+    // regardless of the socket's blocking mode (the desktop client socket uses a
+    // read timeout, not O_NONBLOCK, so writev alone would block).
+    struct msghdr msg{};
+    msg.msg_iov = iov;
+    msg.msg_iovlen = static_cast<decltype(msg.msg_iovlen)>(count);
+    ssize_t n = ::sendmsg(fd_, &msg, MSG_DONTWAIT);
+    if (n < 0) {
+        return (errno == EAGAIN || errno == EWOULDBLOCK)
+                   ? WriteResult::WouldBlock : WriteResult::Error;
+    }
+    if (n == 0) return WriteResult::WouldBlock;
+    if (static_cast<size_t>(n) == total) return WriteResult::Complete;
+    return WriteResult::Partial;
 }
 
 void TcpConnection::close() {

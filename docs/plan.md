@@ -61,6 +61,20 @@ When picked up:
 - Memory-aware allocator: decide at `onAllocateMemory` time how many layers actually fit, degrade gracefully if PSRAM is unavailable.
 - Persistence (plan-10) already encodes layers + their children positionally — adding more siblings to a LayoutGroup just works on the file-format side.
 
-## ESP32 tick variability (investigate)
+## HTTP file serving blocks the render tick (follow-up)
 
-ESP32 tick time swings between ~55ms / 18 FPS and ~115-155ms / 6-8 FPS on the same firmware with no scenario change (measurements in `docs/performance.md`). On slow ticks the HttpServer step dominates (~80-95 ms). Suspected cause: bursty WebSocket / HTTP work when a browser is connected — the `/api/types` fetch and the larger per-module JSON push (role/type/loopTimeUs fields, plan-11) inflate the HttpServer loop. Investigate whether to bound per-tick HTTP work, move WS pushes off the render tick, or rate-limit state snapshots.
+The ESP32 tick-variability swing (FPS collapse when a browser connected) was traced to the blocking 49 KB preview WebSocket broadcast and **fixed** — see `docs/performance.md` "ESP32 tick variability". A lesser, one-shot version of the same issue remains: `HttpServerModule::handleConnection()` serves the embedded UI files (`app.js`, `style.css` — tens of KB) with the plain blocking `TcpConnection::write`, so a page load can briefly stall `loop20ms`. It's one-shot per load rather than per-tick, so lower priority. Fix when convenient: serve large HTTP responses with the same non-blocking `writeChunks` path, or chunk the response across ticks.
+
+## Preview coordinate message — true-shape 3D preview (backlog)
+
+The 3D preview currently positions every voxel by deriving `(x, y, z)` from a dense grid index (`ix/maxDim` etc. in `app.js renderPreviewFrame`). This only works for **grid** layouts. For a **sparse / non-grid 3D layout** — rings, spheres, a dodecahedron of LED rings, arbitrary point clouds — the physical light positions are not a regular grid, so the preview cannot show the true shape. `PreviewDriver`'s downsample is now crash-safe for sparse layouts (light index bounded by the real light count) but still previews them as their dense bounding box, which is wrong: e.g. 8 rings of 24 LEDs in a 20×20×20 space (192 lights) would render as a clump in one corner of the box, not as 8 rings.
+
+Motivating use case: a layout shaped like a Gigaminx (12-face dodecahedron), each pentagonal face tiled with rings of 24 LEDs, positioned in true 3D space.
+
+The architecture's intended solution (already noted in `docs/moonmodules/light/drivers/PreviewDriver.md`): a **one-time coordinate message**. When picked up:
+- The engine sends, once per layout change and once to each newly-connected WebSocket client, a coordinate table — the real `(x, y, z)` of every light. The data already exists: `LayoutGroup::forEachCoord(callback, ctx)` yields `(index, x, y, z)` per light (it's how `Layer::onAllocateMemory` computes the bounding box).
+- A new binary WS message type (the preview frame is `[0x02]…`; allocate `[0x01]` or `[0x03]` for coordinates). Format roughly `[type][count16][x16 y16 z16]×count` — `lengthType` is int16, so 6 bytes per light.
+- The browser caches the coordinate table and positions preview points from it instead of deriving from a grid index. Per-frame binary frames then stream **only RGB**, indexed by light — for the ring example that is 192×3 ≈ 576 bytes/frame, tiny and fast.
+- `PreviewDriver`'s downsample should switch to **index-based** striding (stride over the light index, not the x/y/z box) once coordinates drive the display — simpler and correct for any shape.
+- Re-send the table when the layout changes (a hook on layout-control change / `Scheduler::rebuild`) and when a new WS client connects (a per-client "needs coordinates" flag, or just resend to all on connect).
+- Keep the grid fast-path: a pure grid layout can still use the derived-position path (no coordinate table needed) to save the one-time transfer — or always send coordinates for uniformity; decide when planning.

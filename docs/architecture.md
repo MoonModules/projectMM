@@ -94,9 +94,9 @@ Only abstract what you actually need. Currently implemented:
 
 - **Time.** `millis()`, `micros()` — microsecond-resolution monotonic clock. (`esp_timer` / `std::chrono`)
 - **Memory.** `alloc(size)`, `free(ptr)` — allocator that prefers PSRAM on ESP32, falls back to regular heap. `freeHeap()`, `maxAllocBlock()` for diagnostics. (`heap_caps_malloc` / `std::malloc`)
-- **Networking.** `UdpSocket` — UDP send for ArtNet. (`lwip/sockets.h` / BSD sockets)
+- **Networking.** `UdpSocket` — UDP send for ArtNet. `TcpConnection`/`TcpServer` — HTTP + WebSocket; `TcpConnection::writeChunks` is a non-blocking scatter-gather write so a backpressured browser can't stall the render loop. (`lwip/sockets.h` / BSD sockets)
 - **Scheduling.** `yield()` — cooperative yield to OS/RTOS. `delayMs(ms)` — blocking sleep, outside the hot path only. `reboot()` — restart the device. (`vTaskDelay` / `esp_restart` on ESP32; `std::this_thread::sleep_for` / `std::exit` on desktop)
-- **Platform config.** `platform_config.h` per platform — compile-time constants like `hasPsram`. Each platform provides its own version; `types.h` includes it without `#ifdef`.
+- **Platform config.** `platform_config.h` per platform — compile-time constants like `hasPsram` and `hasWiFi`. Each platform provides its own version; `types.h` includes it without `#ifdef`. Core code branches on these via `if constexpr` (e.g. NetworkModule drops its WiFi cascade when `hasWiFi` is false), so the dead branch is removed from the binary with no `#ifdef` outside `src/platform/`.
 
 Abstractions are added when needed by a concrete implementation, not pre-designed. All platform-specific code lives in `src/platform/`. Everything outside it compiles cleanly on every target.
 
@@ -154,8 +154,17 @@ esp32/
 The shared `src/main.cpp` defines `mm_main(keepRunning, gridW, gridH)` — the full pipeline wiring. Each platform provides a thin entry point that does platform-specific init (SIGINT on desktop, Ethernet on ESP32) then calls `mm_main()`.
 
 - **Desktop/RPi:** `cmake -B build && cmake --build build` from the root.
-- **ESP32:** `cd esp32 && idf.py build` — the wrapper pulls in `src/` from the parent directory.
+- **ESP32:** `cd esp32 && idf.py build` — the wrapper pulls in `src/` from the parent directory. Prefer `python scripts/build/build_esp32.py`, which also handles build profiles.
 - **Raspberry Pi:** cross-compile using the root CMakeLists.txt, or build natively on the device.
+
+### ESP32 build profiles
+
+`build_esp32.py` takes a `--profile` argument selecting which sdkconfig fragments are layered:
+
+- `--profile default` (default) — WiFi + Ethernet. The full Ethernet → WiFi STA → WiFi AP cascade.
+- `--profile eth-only` — WiFi compiled out entirely. ESP-IDF v6.x has no `CONFIG_ESP_WIFI_ENABLED` switch (the symbol is non-settable, forced on for WiFi-capable SoCs), so the eth-only profile drops the WiFi components via `-DEXCLUDE_COMPONENTS=esp_wifi;wpa_supplicant;esp_phy;esp_coex` and defines `MM_NO_WIFI` (passed as `-DMM_ETH_ONLY=1`, applied in `esp32/main/CMakeLists.txt`). No WiFi driver/`wpa_supplicant` in the binary, no WiFi FreeRTOS tasks. Smaller image, more free RAM, for Ethernet-only deployments. `build_esp32_ethonly.py` is a thin wrapper (`--profile eth-only` baked in) used by the MoonDeck "Build (Ethernet-only)" button.
+
+Switching profiles forces a clean reconfigure — `build_esp32.py` removes `build/` + `sdkconfig` when the profile changes (tracked via a `build/.mm_profile` marker), so the CMake cache (`EXCLUDE_COMPONENTS`, `MM_ETH_ONLY`) is reseeded correctly. Same-profile rebuilds stay incremental.
 
 The project is structured as a set of CMake libraries:
 - A core library (platform-independent logic)

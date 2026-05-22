@@ -12,7 +12,7 @@ A high-performance multi-platform system that drives large LED installations and
 
 ## Platforms
 
-- **ESP32** (primary) — ESP-IDF, no Arduino. See [rationale](docs/architecture.md#esp-idf-no-arduino).
+- **ESP32** (primary) — ESP-IDF, no Arduino. See [rationale](docs/architecture.md#esp-idf-no-arduino). Two build profiles: `default` (WiFi + Ethernet) and `eth-only` (`build_esp32.py --profile eth-only` — WiFi compiled out for a smaller image and more free RAM on Ethernet-only installs).
 - **Teensy 4.x** — DMA-based LED output (OctoWS2811)
 - **macOS / Windows / Linux** — development, fast live testing/scenarios, high-speed processing via ArtNet/DDP, and simulation
 - **Raspberry Pi** — GPIO + network output

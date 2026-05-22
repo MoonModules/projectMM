@@ -22,6 +22,9 @@ public:
 
     void setup() override {
         socket_.open();
+        // Bind the destination once so each per-universe send skips the
+        // per-packet address parse + route lookup.
+        socket_.connect(ip, ARTNET_PORT);
     }
 
     void teardown() override {
@@ -109,7 +112,7 @@ private:
     void sendUniverse(uint16_t universe, const uint8_t* data, uint16_t dataLen) {
         uint8_t packet[ARTNET_HEADER_SIZE + MAX_CHANNELS_PER_UNIVERSE];
         size_t packetLen = buildPacket(packet, universe, sequence_, data, dataLen);
-        socket_.send(ip, ARTNET_PORT, packet, packetLen);
+        socket_.sendTo(packet, packetLen);
     }
 };
 

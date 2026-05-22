@@ -25,16 +25,19 @@ public:
         if (platform::ethInit()) {
             state_ = State::WaitingEth;
             std::printf("NetworkModule: Ethernet init started\n");
-        } else if (ssid_[0] != 0) {
-            // Ethernet not available, try WiFi STA
-            if (platform::wifiStaInit(ssid_, password_)) {
+        } else if constexpr (platform::hasWiFi) {
+            // Ethernet not available, fall back to WiFi (STA → AP).
+            if (ssid_[0] != 0 && platform::wifiStaInit(ssid_, password_)) {
                 state_ = State::WaitingSta;
                 std::printf("NetworkModule: WiFi STA init started, SSID: %s\n", ssid_);
             } else {
                 startAP();
             }
         } else {
-            startAP();
+            // Ethernet-only build: no WiFi fallback. Stay Idle until a cable
+            // appears (WaitingEth is only entered on a successful ethInit()).
+            state_ = State::Idle;
+            std::snprintf(statusStr_, sizeof(statusStr_), "No network (Ethernet only)");
         }
 
         stateChangeTime_ = platform::millis();
@@ -42,8 +45,11 @@ public:
 
     void onBuildControls() override {
         controls_.addReadOnly("status", statusStr_, sizeof(statusStr_));
-        controls_.addText("ssid", ssid_, sizeof(ssid_));
-        controls_.addText("password", password_, sizeof(password_));
+        // WiFi credential controls are absent in the Ethernet-only build.
+        if constexpr (platform::hasWiFi) {
+            controls_.addText("ssid", ssid_, sizeof(ssid_));
+            controls_.addText("password", password_, sizeof(password_));
+        }
         controls_.addSelect("addressing", addressing_, addressingOptions_, 2);
         controls_.addBool("mDNS", mdnsEnabled_);
 
@@ -71,66 +77,79 @@ public:
                 if (platform::ethConnected()) {
                     onConnected("Ethernet");
                 } else if ((elapsed > 3000 && !platform::ethLinkUp()) || elapsed > 15000) {
-                    // No cable after 3s, or link up but no IP after 15s — cascade to WiFi
-                    std::printf("NetworkModule: Ethernet %s, cascading\n",
-                                platform::ethLinkUp() ? "no IP (DHCP timeout)" : "no link (no cable)");
-                    if (ssid_[0] != 0) {
-                        if (platform::wifiStaInit(ssid_, password_)) {
+                    if constexpr (platform::hasWiFi) {
+                        // No cable after 3s, or link up but no IP after 15s — cascade to WiFi
+                        std::printf("NetworkModule: Ethernet %s, cascading\n",
+                                    platform::ethLinkUp() ? "no IP (DHCP timeout)" : "no link (no cable)");
+                        if (ssid_[0] != 0 && platform::wifiStaInit(ssid_, password_)) {
                             state_ = State::WaitingSta;
                             stateChangeTime_ = now;
                         } else {
                             startAP();
                         }
                     } else {
-                        startAP();
+                        // Ethernet-only build: no fallback. Keep polling for a cable.
+                        std::snprintf(statusStr_, sizeof(statusStr_), "No network (Ethernet only)");
+                        stateChangeTime_ = now;
                     }
                 }
                 break;
 
             case State::WaitingSta:
-                if (platform::wifiStaConnected()) {
-                    onConnected("WiFi STA");
-                } else if (elapsed > 10000) {
-                    // WiFi STA didn't connect in 10s, start AP
-                    platform::wifiStaStop();
-                    startAP();
+                if constexpr (platform::hasWiFi) {
+                    if (platform::wifiStaConnected()) {
+                        onConnected("WiFi STA");
+                    } else if (elapsed > 10000) {
+                        // WiFi STA didn't connect in 10s, start AP
+                        platform::wifiStaStop();
+                        startAP();
+                    }
                 }
                 break;
 
             case State::ConnectedEth:
                 if (!platform::ethConnected()) {
-                    std::printf("NetworkModule: Ethernet dropped, cascading\n");
-                    platform::mdnsStop();
-                    if (ssid_[0] != 0) {
-                        if (platform::wifiStaInit(ssid_, password_)) {
+                    if constexpr (platform::hasWiFi) {
+                        std::printf("NetworkModule: Ethernet dropped, cascading\n");
+                        platform::mdnsStop();
+                        if (ssid_[0] != 0 && platform::wifiStaInit(ssid_, password_)) {
                             state_ = State::WaitingSta;
                             stateChangeTime_ = now;
                         } else {
                             startAP();
                         }
                     } else {
-                        startAP();
+                        // Ethernet-only build: drop back to polling for the cable.
+                        std::printf("NetworkModule: Ethernet dropped\n");
+                        platform::mdnsStop();
+                        std::snprintf(statusStr_, sizeof(statusStr_), "No network (Ethernet only)");
+                        state_ = State::WaitingEth;
+                        stateChangeTime_ = now;
                     }
                 }
                 updateStatusIP();
                 break;
 
             case State::ConnectedSta:
-                if (!platform::wifiStaConnected()) {
-                    std::printf("NetworkModule: WiFi STA dropped, starting AP\n");
-                    platform::mdnsStop();
-                    platform::wifiStaStop();
-                    startAP();
+                if constexpr (platform::hasWiFi) {
+                    if (!platform::wifiStaConnected()) {
+                        std::printf("NetworkModule: WiFi STA dropped, starting AP\n");
+                        platform::mdnsStop();
+                        platform::wifiStaStop();
+                        startAP();
+                    }
+                    updateStatusIP();
                 }
-                updateStatusIP();
                 break;
 
             case State::AP:
-                // Check if higher-priority connection became available
-                if (platform::ethConnected()) {
-                    onConnected("Ethernet");
-                } else if (ssid_[0] != 0 && platform::wifiStaConnected()) {
-                    onConnected("WiFi STA");
+                if constexpr (platform::hasWiFi) {
+                    // Check if higher-priority connection became available
+                    if (platform::ethConnected()) {
+                        onConnected("Ethernet");
+                    } else if (ssid_[0] != 0 && platform::wifiStaConnected()) {
+                        onConnected("WiFi STA");
+                    }
                 }
                 break;
 
@@ -143,8 +162,10 @@ public:
 
     void teardown() override {
         platform::mdnsStop();
-        if (state_ == State::AP) platform::wifiApStop();
-        if (state_ == State::ConnectedSta || state_ == State::WaitingSta) platform::wifiStaStop();
+        if constexpr (platform::hasWiFi) {
+            if (state_ == State::AP) platform::wifiApStop();
+            if (state_ == State::ConnectedSta || state_ == State::WaitingSta) platform::wifiStaStop();
+        }
     }
 
 private:
@@ -204,15 +225,17 @@ private:
         }
         stateChangeTime_ = platform::millis();
 
-        // Shut down lower-priority connections
-        if (apShutdownPending_ || platform::wifiApConnected()) {
-            std::printf("NetworkModule: Shutting down AP (higher priority connected)\n");
-            platform::wifiApStop();
-            apShutdownPending_ = false;
-        }
-        if (state_ == State::ConnectedEth && platform::wifiStaConnected()) {
-            std::printf("NetworkModule: Shutting down WiFi STA (Ethernet connected)\n");
-            platform::wifiStaStop();
+        // Shut down lower-priority WiFi connections (no-op in the Ethernet-only build).
+        if constexpr (platform::hasWiFi) {
+            if (apShutdownPending_ || platform::wifiApConnected()) {
+                std::printf("NetworkModule: Shutting down AP (higher priority connected)\n");
+                platform::wifiApStop();
+                apShutdownPending_ = false;
+            }
+            if (state_ == State::ConnectedEth && platform::wifiStaConnected()) {
+                std::printf("NetworkModule: Shutting down WiFi STA (Ethernet connected)\n");
+                platform::wifiStaStop();
+            }
         }
 
         updateStatusIP();
@@ -228,9 +251,11 @@ private:
         if (state_ == State::ConnectedEth) {
             platform::ethGetIP(ip, sizeof(ip));
             std::snprintf(statusStr_, sizeof(statusStr_), "Eth: %s", ip);
-        } else if (state_ == State::ConnectedSta) {
-            platform::wifiStaGetIP(ip, sizeof(ip));
-            std::snprintf(statusStr_, sizeof(statusStr_), "WiFi: %s", ip);
+        } else if constexpr (platform::hasWiFi) {
+            if (state_ == State::ConnectedSta) {
+                platform::wifiStaGetIP(ip, sizeof(ip));
+                std::snprintf(statusStr_, sizeof(statusStr_), "WiFi: %s", ip);
+            }
         }
     }
 

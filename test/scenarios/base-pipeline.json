@@ -49,7 +49,7 @@
       "parent_id": "DriverGroup",
       "measure": true,
       "bounds": {
-        "fps": { "min_pct": 80 }
+        "fps": { "min_pct": 80, "min_fps_led_product": 294912 }
       }
     }
   ]

@@ -4,6 +4,7 @@
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -102,9 +103,37 @@ def idf_cmd(idf_path: Path) -> list[str]:
     return [str(idf_path / "tools" / "idf.py")]
 
 
+# Components to drop from the eth-only build. ESP-IDF v6.x has no
+# CONFIG_ESP_WIFI_ENABLED switch (the symbol is non-settable, forced y on
+# WiFi-capable SoCs), so WiFi is removed via EXCLUDE_COMPONENTS instead.
+# All consumers of these use *optional* requires, so excluding them links
+# cleanly as long as our own code never references esp_wifi (it doesn't —
+# the WiFi platform functions are #ifdef-stubbed in the eth-only build).
+#
+# NOTE: esp_phy is NOT excluded — it provides RF/clock init the ESP32 EMAC
+# (Ethernet RMII) depends on. Excluding it leaves Ethernet stuck "started"
+# with no link. Only the genuinely WiFi-side components are dropped.
+ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
+
+
+def profile_cmake_args(profile: str) -> list[str]:
+    """Extra -D cache args for the requested build profile."""
+    args = ["-DSDKCONFIG_DEFAULTS=sdkconfig.defaults"]
+    if profile == "eth-only":
+        # Drop the WiFi components from the link, and tell our code to compile
+        # out the WiFi paths (MM_NO_WIFI → esp32/main/CMakeLists.txt).
+        args.append("-DEXCLUDE_COMPONENTS=" + ";".join(ETH_ONLY_EXCLUDE))
+        args.append("-DMM_ETH_ONLY=1")
+    return args
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", default="esp32", help="ESP32 chip type")
+    parser.add_argument("--profile", default="default",
+                        choices=["default", "eth-only"],
+                        help="Build profile: 'default' (WiFi + Ethernet) or "
+                             "'eth-only' (WiFi compiled out)")
     args = parser.parse_args()
 
     if not ESP32_DIR.exists():
@@ -122,18 +151,35 @@ def main():
     cmd = idf_cmd(idf_path)
 
     build_dir = ESP32_DIR / "build"
+    marker = build_dir / ".mm_profile"
+
+    # Switching profiles requires a fresh sdkconfig — ESP-IDF only seeds it from
+    # SDKCONFIG_DEFAULTS when no sdkconfig exists. A missing marker is treated as
+    # "default" so pre-existing default builds aren't surprise-cleaned.
+    if build_dir.exists():
+        prev = marker.read_text().strip() if marker.exists() else "default"
+        if prev != args.profile:
+            print(f"Profile change ({prev} -> {args.profile}): cleaning build/ and sdkconfig")
+            shutil.rmtree(build_dir, ignore_errors=True)
+            sdkconfig = ESP32_DIR / "sdkconfig"
+            if sdkconfig.exists():
+                sdkconfig.unlink()
+
+    extra = profile_cmake_args(args.profile)
 
     if not build_dir.exists():
-        print(f"Setting target to {args.env}...")
-        r = subprocess.run(cmd + ["set-target", args.env],
+        print(f"Setting target to {args.env} (profile: {args.profile})...")
+        r = subprocess.run(cmd + extra + ["set-target", args.env],
                            cwd=ESP32_DIR, env=env)
         if r.returncode != 0:
             sys.exit(r.returncode)
 
-    print(f"Building for {args.env}...")
-    r = subprocess.run(cmd + ["build"], cwd=ESP32_DIR, env=env)
+    print(f"Building for {args.env} (profile: {args.profile})...")
+    r = subprocess.run(cmd + extra + ["build"], cwd=ESP32_DIR, env=env)
     if r.returncode != 0:
         sys.exit(r.returncode)
+
+    marker.write_text(args.profile)
 
     # Show flash/RAM usage summary
     subprocess.run(cmd + ["size"], cwd=ESP32_DIR, env=env)

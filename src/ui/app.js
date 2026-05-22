@@ -1032,27 +1032,73 @@ function initWebGL() {
     canvas.addEventListener("touchend", () => { dragging = false; });
 }
 
+// Read the Preview module's "decompress" control from the latest state push.
+function previewDecompressOn() {
+    if (!state || !state.modules) return false;
+    let found = false;
+    (function walk(mods) {
+        for (const m of mods) {
+            if (m.type === "PreviewDriver" || m.name === "Preview") {
+                const c = (m.controls || []).find(c => c.name === "decompress");
+                if (c) found = !!c.value;
+            }
+            if (m.children) walk(m.children);
+        }
+    })(state.modules);
+    return found;
+}
+
 function renderPreviewFrame(buf) {
     if (!gl) initWebGL();
     if (!gl) return;
 
-    if (buf.byteLength < 7) return;
+    // 13-byte header: [0x02][dw16][dh16][dd16][ow16][oh16][od16], little-endian.
+    // dw/dh/dd = dimensions of the data in this frame; ow/oh/od = original grid.
+    if (buf.byteLength < 13) return;
     const view = new DataView(buf);
     if (view.getUint8(0) !== 0x02) return;
-    const w = view.getUint16(1, true);
-    const h = view.getUint16(3, true);
-    const d = view.getUint16(5, true);
-    if (w === 0 || h === 0 || d === 0) return;
-    const total = w * h * d;
-    if (buf.byteLength < 7 + total * 3) return;
-    const pixels = new Uint8Array(buf, 7);
+    const dw = view.getUint16(1, true);
+    const dh = view.getUint16(3, true);
+    const dd = view.getUint16(5, true);
+    const ow = view.getUint16(7, true);
+    const oh = view.getUint16(9, true);
+    const od = view.getUint16(11, true);
+    if (dw === 0 || dh === 0 || dd === 0) return;
+    const total = dw * dh * dd;
+    if (buf.byteLength < 13 + total * 3) return;
+    const pixels = new Uint8Array(buf, 13);
+
+    // Decompress: when on, reconstruct the original grid by block-replicating
+    // each received voxel across its stride×stride×stride original cells, so the
+    // preview shows the same voxel count as the real layout. When off, render the
+    // downsampled cloud directly.
+    const decompress = previewDecompressOn()
+        && ow >= dw && oh >= dh && od >= dd
+        && (ow > dw || oh > dh || od > dd);
+    const w = decompress ? ow : dw;
+    const h = decompress ? oh : dh;
+    const d = decompress ? od : dd;
+
+    const colorAt = decompress
+        // map original cell (ix,iy,iz) → nearest downsampled voxel
+        ? (ix, iy, iz) => {
+              const sx = Math.min(dw - 1, (ix * dw / ow) | 0);
+              const sy = Math.min(dh - 1, (iy * dh / oh) | 0);
+              const sz = Math.min(dd - 1, (iz * dd / od) | 0);
+              return (sz * dh * dw + sy * dw + sx) * 3;
+          }
+        : (ix, iy, iz) => (iz * dh * dw + iy * dw + ix) * 3;
 
     // Sparse vertex buffer — skip black voxels. Halves GPU work for typical effects
     // and avoids drawing invisible points underneath the lit ones.
     let nonBlack = 0;
-    for (let i = 0; i < total; i++) {
-        const o = i * 3;
-        if (pixels[o] | pixels[o + 1] | pixels[o + 2]) nonBlack++;
+    for (let iz = 0; iz < d; iz++) {
+        for (let iy = 0; iy < h; iy++) {
+            for (let ix = 0; ix < w; ix++) {
+                const o = colorAt(ix, iy, iz);
+                if (pixels[o] | pixels[o + 1] | pixels[o + 2]) nonBlack++;
+            }
+        }
     }
     const maxDim = Math.max(w, h, d);
     const verts = new Float32Array(nonBlack * 6);
@@ -1060,7 +1106,7 @@ function renderPreviewFrame(buf) {
     for (let iz = 0; iz < d; iz++) {
         for (let iy = 0; iy < h; iy++) {
             for (let ix = 0; ix < w; ix++) {
-                const idx = (iz * h * w + iy * w + ix) * 3;
+                const idx = colorAt(ix, iy, iz);
                 const r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
                 if (!(r | g | b)) continue;
                 verts[vi++] = (ix / maxDim) - 0.5 * w / maxDim;

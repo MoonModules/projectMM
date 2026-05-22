@@ -146,6 +146,17 @@ Tests `ModuleFactory` in `src/core/ModuleFactory.h`.
 - `typeName()` and `typeRole()` are bounds-safe (out-of-range returns nullptr / Generic)
 - Dynamic capacity grows past the initial 4 — registering 10 throwaway types all succeed and remain discoverable
 
+### Preview Driver (`test/test_preview_driver.cpp`) {#preview-driver}
+
+Tests `PreviewDriver` downsampling in `src/light/PreviewDriver.h`. Each case builds a GridLayout → LayoutGroup → Layer pipeline, wires the driver, and inspects the resulting [PreviewFrame](moonmodules/light/drivers/PreviewDriver.md).
+
+- `detail` 1/2/3 on a 128×128 grid select distinct strides (8/4/3 → 16/32/43 voxels per axis) — the three settings are visibly different
+- The frame always carries the original grid dimensions (`origWidth/Height/Depth`) so the `decompress` UI hint can block-replicate back to the real resolution
+- `detail = 3` (the largest payload) stays within lwIP's TCP send-buffer budget: ≤1849 voxels, payload + 13-byte header < 5760 B — so the non-blocking `writeChunks` completes whole
+- A grid under the voxel budget is copied 1:1 (stride 1, no downsample)
+- The strided copy is channel-agnostic: an RGBW (4-channel) source still produces a 3 B/voxel RGB frame
+- Default controls: `fps = 12`, `detail = 2`, `decompress = false`
+
 ### Filesystem persistence (`test/test_filesystem_persistence.cpp`) {#filesystem-persistence}
 
 Four test cases for [FilesystemModule](moonmodules/core/FilesystemModule.md):
@@ -168,7 +179,8 @@ Sets up the core pipeline: LayoutGroup → GridLayout → Layer → RainbowEffec
 - Buffer allocated after setup
 - Buffer size matches layout light count
 - Buffer contains non-zero data after rendering 200 frames
-- FPS >= 30 (performance bound)
+- `fps.min_pct: 80` — render FPS within 20% of the saved baseline (regression guard)
+- `fps.min_fps_led_product: 294912` — an absolute throughput floor (see below)
 
 ### mirror (`test/scenarios/mirror.json`) {#scenario-mirror}
 
@@ -222,6 +234,24 @@ Exercises the light-pipeline adaptive allocation path. Useful for catching regre
 - Sizes the grid to 128×128, then shrinks to 128×64, then grows back to 128×128
 - Only the shrink step asserts a bound (`fps.min_pct: 80`) because shrinks always release memory and should match or beat baseline. Grow steps deliberately have no bound — they're inherently slower at a larger size.
 
+### preview-detail (`test/scenarios/preview-detail.json`) {#scenario-preview-detail}
+
+Toggles the [PreviewDriver](moonmodules/light/drivers/PreviewDriver.md)'s `detail` (1/2/3) and `decompress` controls on a running device and measures the render-FPS impact.
+
+- `detail-1`, `detail-2` and both `decompress` steps assert `fps.min_pct: 80`; `detail-3` asserts `fps.min_pct: 70`. The downsample strided copy runs on the render task, so higher detail has a real, **known and accepted** cost (see [performance.md](performance.md) — "Preview `detail` cost on the render tick"; detail 3 measures ~79% of a settled baseline). `decompress` is purely client-side (the browser block-replicates) and cannot change the render tick at all.
+- All steps assert a **relative** bound only. A single ESP32 scenario step swings too much (see "Run-to-run tick variance" in performance.md) for an absolute FPS floor to be meaningful here — the absolute `min_fps_led_product` floor is enforced in `collect_kpi.py --commit`, which uses a settled reading.
+- Live-only (only `set_control` steps, no `add_module`) — the in-process runner skips it.
+
+## The FPS×lights throughput floor
+
+`fps.min_fps_led_product` is an absolute performance floor that scales to any grid. The value is an **FPS × light-count product**; the per-grid floor is `product / lightCount`. Anchored at the 128×128 reference (18 FPS × 16384 lights = 294912), so a smaller grid must run proportionally faster (64×64 = 4096 lights → 72 FPS floor).
+
+It is compared against the measured **tick time** (the device's native unit — FPS is only ever derived by lossy integer division), as `tick_us ≤ lightCount × 1e6 / product`. Enforced in three places:
+
+- `test/scenario_runner.cpp` — in-process; the desktop runs far above any floor, so this passes trivially and just exercises the bound logic.
+- `scripts/scenario/run_live_scenario.py` — live; derives the light count from the layout modules' `width/height/depth` in `/api/state` and enforces the floor for real on ESP32.
+- `scripts/check/collect_kpi.py` — pre-commit (`--commit` mode); fails the commit if a captured ESP32 tick exceeds the budget.
+
 ### Running live scenarios
 
 ```bash
@@ -233,7 +263,7 @@ uv run scripts/scenario/run_live_scenario.py --compare-baseline          # check
 
 ### Live scenario behavior
 
-All scenarios use relative FPS bounds (`min_pct`) so they pass on any device — desktop at 10K FPS or ESP32 at 17 FPS. Settle time is 3 seconds to let the pipeline stabilize after rebuilds.
+Most scenarios use relative FPS bounds (`min_pct`) so they pass on any device — desktop at 10K FPS or ESP32 at 17 FPS. `base-pipeline` and `preview-detail` additionally carry the absolute `min_fps_led_product` throughput floor (see above). Settle time is 3 seconds to let the pipeline stabilize after rebuilds.
 
 Scenarios that add modules (`base-pipeline`, `memory-1to1`) create temporary modules on the running device. These are cleaned up after each scenario (`- Rainbow (cleanup)`). Modules that already exist show `=` instead of `+`.
 
@@ -241,7 +271,7 @@ Memory tracking works on ESP32: `freeHeap` and `freeInternalHeap` report real va
 
 ## Hardware Verification
 
-All 5 live scenarios pass on both desktop and ESP32 with `min_pct: 80` relative bounds. Per-module timing, memory allocation, and sizeof measurements for each platform are in [performance.md](performance.md).
+The live scenarios pass on both desktop and ESP32. Per-module timing, memory allocation, and sizeof measurements for each platform are in [performance.md](performance.md).
 
 ### ESP32 — Olimex ESP32-Gateway Rev G (no PSRAM)
 
@@ -249,6 +279,15 @@ All 5 live scenarios pass on both desktop and ESP32 with `min_pct: 80` relative 
 - Memory tracking verified: mirror toggle shows heap changes, returns to baseline (no leaks)
 - Ethernet (LAN8720 RMII) connects via DHCP
 - Device discovery from MoonDeck finds ESP32 on port 80
+
+### ESP32 build profiles
+
+The pre-commit ESP32 build must build **both** profiles warning-free under `-Werror`:
+
+- `build_esp32.py --profile default` — exercises the `hasWiFi == true` code path.
+- `build_esp32.py --profile eth-only` — exercises the `hasWiFi == false` path (WiFi compiled out; NetworkModule's `if constexpr` WiFi branches dropped).
+
+A clean `-Werror` build of each profile *is* the test — `hasWiFi` gating is compile-time, and NetworkModule has no desktop unit tests (OS networking). Desktop builds cover `hasWiFi == true` independently.
 
 ## Adding Tests
 

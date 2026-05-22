@@ -86,6 +86,15 @@
       "needs_env": true
     },
     {
+      "id": "build_esp32_ethonly",
+      "tab": "esp32",
+      "group": "build",
+      "label": "Build (Ethernet-only)",
+      "help": "build_esp32",
+      "script": "build/build_esp32_ethonly.py",
+      "needs_env": true
+    },
+    {
       "id": "flash_esp32",
       "tab": "esp32",
       "group": "build",

@@ -80,11 +80,25 @@ public:
     UdpSocket& operator=(const UdpSocket&) = delete;
 
     bool open();
-    bool send(const char* ip, uint16_t port, const uint8_t* data, size_t len);
+    // Bind a fixed destination so each sendTo() skips the per-packet address
+    // parse + route lookup. Returns false on a bad IP.
+    bool connect(const char* ip, uint16_t port);
+    bool sendTo(const uint8_t* data, size_t len);  // uses the connect()ed destination
     void close();
 
 private:
     int fd_ = -1;
+};
+
+// One contiguous span for a scatter-gather write.
+struct WriteChunk { const uint8_t* data; size_t len; };
+
+// Outcome of a non-blocking scatter-gather write (TcpConnection::writeChunks).
+enum class WriteResult {
+    Complete,    // every byte across all chunks was sent
+    WouldBlock,  // socket buffer full, NOTHING was sent — caller may retry later
+    Partial,     // some bytes sent — the message is truncated, caller MUST close()
+    Error        // socket error — caller MUST close()
 };
 
 class TcpConnection {
@@ -104,7 +118,14 @@ public:
 
     bool valid() const { return fd_ >= 0; }
     int read(uint8_t* buf, size_t maxLen);   // non-blocking: >0 data, 0 closed, -1 nothing
-    bool write(const uint8_t* data, size_t len);
+    bool write(const uint8_t* data, size_t len);  // blocking — retries until all sent
+
+    // Single non-blocking scatter-gather write (one writev). Never blocks.
+    // Used for the preview broadcast so a backpressured browser cannot stall
+    // the render task. `count` must be 1..MAX_WRITE_CHUNKS.
+    static constexpr int MAX_WRITE_CHUNKS = 3;
+    WriteResult writeChunks(const WriteChunk* chunks, int count);
+
     void close();
 
 private:

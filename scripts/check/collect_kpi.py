@@ -21,6 +21,18 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 BUILD_DIR = ROOT / "build"
 ESP32_DIR = ROOT / "esp32"
 
+# Hard performance floor for the ESP32 render loop, expressed as an FPS ×
+# light-count throughput so it scales to any grid size. Anchored at the 128×128
+# reference: 18 FPS × 16384 lights. A smaller grid must run proportionally
+# faster (e.g. 64×64 = 4096 lights → 72 FPS floor).
+#
+# The device reports tick *time* (µs), not FPS — FPS is only ever derived by
+# integer division, which loses precision. So the gate compares the measured
+# tick_us directly against a per-grid *max tick time*:
+#   max_tick_us = lights × 1e6 / MIN_ESP32_FPS_LED_PRODUCT
+# Enforced in --commit mode so a regression fails pre-commit.
+MIN_ESP32_FPS_LED_PRODUCT = 18 * 16384  # 294912
+
 sys.path.insert(0, str(ROOT / "scripts" / "build"))
 
 def run(cmd, cwd=None, timeout=30):
@@ -337,6 +349,24 @@ def main():
         print(format_full(desktop, esp32, code))
         print()
         print("=" * 50)
+
+    # Hard throughput gate: if a live ESP32 tick was captured, it must clear the
+    # floor. The device reports tick *time* (µs), so compare that directly — no
+    # lossy FPS division. The per-grid budget scales with light count:
+    #   max_tick_us = lights × 1e6 / MIN_ESP32_FPS_LED_PRODUCT
+    # so a smaller grid gets proportionally less time (18 FPS at 128×128).
+    # An absent ESP32 reading is not a failure — the caller decides whether a
+    # missing measurement is acceptable (see CLAUDE.md pre-commit step 8).
+    esp32_tick = esp32.get("tick_us")
+    lights = desktop.get("lights")
+    if esp32_tick is not None and lights:
+        max_tick = round(lights * 1_000_000 / MIN_ESP32_FPS_LED_PRODUCT)
+        if esp32_tick > max_tick:
+            print()
+            print(f"FAIL: ESP32 render tick {esp32_tick}us exceeds the {max_tick}us "
+                  f"budget for {lights} lights (18 FPS at the 128×128 / 16384-light "
+                  f"reference).")
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()

@@ -3,10 +3,14 @@
 // against a live system (like projectMM v1's deploy/scenario.py).
 
 #include "core/Scheduler.h"
+#include "core/ModuleFactory.h"
 #include "light/GridLayout.h"
+#include "light/Layer.h"
+#include "light/LayoutGroup.h"
 #include "light/RainbowEffect.h"
 #include "light/NoiseEffect.h"
 #include "light/MirrorModifier.h"
+#include "light/DriverGroup.h"
 #include "light/ArtNetSendDriver.h"
 #include "platform/platform.h"
 
@@ -133,31 +137,33 @@ static std::string readFile(const char* path) {
     return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
 
+// Register the module types this runner can replay. Heap-allocated by the
+// factory (new T()) so Scheduler::teardown()'s deleteTree can validly delete
+// them — same ownership model as production main.cpp. Idempotent: safe to call
+// before every scenario.
+static void registerScenarioTypes() {
+    static bool done = false;
+    if (done) return;
+    mm::ModuleFactory::registerType<mm::LayoutGroup>("LayoutGroup");
+    mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout");
+    mm::ModuleFactory::registerType<mm::Layer>("Layer");
+    mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
+    mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect");
+    mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier");
+    mm::ModuleFactory::registerType<mm::DriverGroup>("DriverGroup");
+    mm::ModuleFactory::registerType<mm::ArtNetSendDriver>("ArtNetSendDriver");
+    done = true;
+}
+
 // Module registry for scenario replay
 struct ScenarioContext {
     mm::Scheduler scheduler;
     std::map<std::string, mm::MoonModule*> modules;
 
-    // Concrete module storage (stack-allocated, max one of each for now)
-    mm::LayoutGroup layoutGroup;
-    mm::GridLayout grid;
-    mm::Layer layer;
-    mm::RainbowEffect rainbow;
-    mm::NoiseEffect noise;
-    mm::MirrorModifier mirror;
-    mm::DriverGroup driverGroup;
-    mm::ArtNetSendDriver artnet;
-
+    // Modules are heap-allocated by the factory; Scheduler::teardown owns and
+    // deletes them.
     mm::MoonModule* createModule(const char* type) {
-        if (std::strcmp(type, "LayoutGroup") == 0) return &layoutGroup;
-        if (std::strcmp(type, "GridLayout") == 0) return &grid;
-        if (std::strcmp(type, "Layer") == 0) return &layer;
-        if (std::strcmp(type, "RainbowEffect") == 0) return &rainbow;
-        if (std::strcmp(type, "NoiseEffect") == 0) return &noise;
-        if (std::strcmp(type, "MirrorModifier") == 0) return &mirror;
-        if (std::strcmp(type, "DriverGroup") == 0) return &driverGroup;
-        if (std::strcmp(type, "ArtNetSendDriver") == 0) return &artnet;
-        return nullptr;
+        return mm::ModuleFactory::create(type);
     }
 
     void wireModule(const char* type, const char* id, const JsonVal& step) {
@@ -177,17 +183,18 @@ struct ScenarioContext {
         if (step.has("props")) {
             auto& props = step["props"];
             if (std::strcmp(type, "Layer") == 0) {
+                auto* layer = static_cast<mm::Layer*>(mod);
                 if (props.has("layoutGroup")) {
                     auto* lg = static_cast<mm::LayoutGroup*>(modules[props["layoutGroup"].str]);
-                    if (lg) layer.setLayoutGroup(lg);
+                    if (lg) layer->setLayoutGroup(lg);
                 }
                 if (props.has("channelsPerLight")) {
-                    layer.setChannelsPerLight(static_cast<uint8_t>(props["channelsPerLight"].num));
+                    layer->setChannelsPerLight(static_cast<uint8_t>(props["channelsPerLight"].num));
                 }
             } else if (std::strcmp(type, "DriverGroup") == 0) {
                 if (props.has("layer")) {
                     auto* l = static_cast<mm::Layer*>(modules[props["layer"].str]);
-                    if (l) driverGroup.setLayer(l);
+                    if (l) static_cast<mm::DriverGroup*>(mod)->setLayer(l);
                 }
             }
         }
@@ -215,6 +222,8 @@ struct Result {
 };
 
 static int runScenario(const char* path) {
+    registerScenarioTypes();
+
     std::string text = readFile(path);
     if (text.empty()) {
         std::printf("Cannot read scenario file: %s\n", path);
@@ -241,6 +250,7 @@ static int runScenario(const char* path) {
     // Replay steps
     bool hasMeasure = false;
     double fpsBound = 0;
+    double fpsLedProduct = 0;
     for (auto& step : scenario["steps"].arr) {
         const char* name = step["name"].c_str();
         const char* op = step["op"].c_str();
@@ -277,6 +287,13 @@ static int runScenario(const char* path) {
                 fpsBound = step["bounds"]["fps"]["min"].num;
             else if (step["bounds"]["fps"].has("min_pct"))
                 fpsBound = 1; // min_pct is for live runner; in-process just checks FPS > 0
+            // min_fps_led_product: an FPS×lights throughput floor that scales to
+            // any grid. Compared against the measured tick *time* (the native
+            // unit — FPS is only ever derived by lossy division): the per-grid
+            // budget is maxTickUs = lights × 1e6 / product, resolved at measure
+            // time once the buffer size is known.
+            if (step["bounds"]["fps"].has("min_fps_led_product"))
+                fpsLedProduct = step["bounds"]["fps"]["min_fps_led_product"].num;
         }
     }
 
@@ -303,17 +320,27 @@ static int runScenario(const char* path) {
         printModuleMemory(mod, 2);
     }
 
-    // Verify buffer
-    auto& buf = ctx.layer.buffer();
+    // Verify buffer — the render buffer lives on the Layer module.
+    auto* layer = static_cast<mm::Layer*>(ctx.modules.count("Layer")
+                                              ? ctx.modules["Layer"] : nullptr);
+    auto* driverGroup = static_cast<mm::DriverGroup*>(ctx.modules.count("DriverGroup")
+                                              ? ctx.modules["DriverGroup"] : nullptr);
+    if (!layer) {
+        std::printf("  (no Layer module — skipping buffer checks)\n");
+        ctx.scheduler.teardown();
+        std::printf("---\nPASSED (%d checks)\n", result.checks);
+        return result.passed ? 0 : 1;
+    }
+    auto& buf = layer->buffer();
     result.check(buf.data() != nullptr, "buffer allocated");
     result.check(buf.count() > 0, "buffer has lights");
     std::printf("  Buffer: %u lights, %u bytes\n",
                 static_cast<unsigned>(buf.count()),
                 static_cast<unsigned>(buf.bytes()));
     std::printf("  LUT: %s  dynamicBytes: Layer=%u DriverGroup=%u\n",
-                ctx.layer.lut().hasLUT() ? "has LUT" : "identity",
-                static_cast<unsigned>(ctx.layer.dynamicBytes()),
-                static_cast<unsigned>(ctx.driverGroup.dynamicBytes()));
+                layer->lut().hasLUT() ? "has LUT" : "identity",
+                static_cast<unsigned>(layer->dynamicBytes()),
+                static_cast<unsigned>(driverGroup ? driverGroup->dynamicBytes() : 0));
 
     // Warmup
     for (int i = 0; i < WARMUP_FRAMES; i++) {
@@ -358,6 +385,18 @@ static int runScenario(const char* path) {
             char msg[64];
             std::snprintf(msg, sizeof(msg), "fps >= %.0f", fpsBound);
             result.check(fps >= static_cast<float>(fpsBound), msg);
+        }
+
+        // FPS×lights throughput floor — compared against the measured tick
+        // *time* (native unit), not derived FPS. Per-grid budget scales with the
+        // light count: maxTickUs = lights × 1e6 / product.
+        if (fpsLedProduct > 0 && buf.count() > 0) {
+            double maxTickUs = buf.count() * 1000000.0 / fpsLedProduct;
+            char msg[96];
+            std::snprintf(msg, sizeof(msg),
+                          "tick <= %.0fus (%u lights, throughput floor)",
+                          maxTickUs, static_cast<unsigned>(buf.count()));
+            result.check(static_cast<double>(tickTimeUs) <= maxTickUs, msg);
         }
     }
 

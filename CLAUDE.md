@@ -60,8 +60,9 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 8. KPI collection — `collect_kpi.py --commit` (include in commit message: one-liner as FIRST line of description, full details at bottom). **The one-liner MUST include `tick:Xus(FPS:Y)` for every supported target** (PC + ESP32 today; Teensy/RPi when added). If a target's tick/FPS is missing — e.g. ESP32 wasn't monitored recently and `esp32/monitor.log` is stale — re-run a short live capture before committing, or note explicitly in the commit message why the value is absent.
 9. Live scenario analysis — run scenarios on both PC and ESP32 (if available), update `docs/performance.md` with new measurements. Compare with previous values and explain significant changes.
 10. Documentation check — verify all new functionality has matching docs: module specs updated, testing.md entries added, architecture docs reflect changes.
+11. Permission review — scan `.claude/settings.local.json`. The `allow` list grows organically and accumulates one-off entries (specific `sed` line ranges, one-time `lldb` invocations, `/tmp/probe` paths) that will never recur. Propose to the product owner: (a) one-off entries that can be deleted, and (b) clusters of narrow entries that could collapse into one broad pattern (e.g. several `./build/test/mm_tests -tc="..."` lines → `Bash(./build/test/mm_tests:*)`) so routine commands stop prompting. This is advisory — the agent suggests, the product owner approves any change. Never broaden permissions for destructive or network-mutating commands without explicit approval; err toward keeping the list tight.
 
-Do not commit until all 10 steps pass. Do not skip the Reviewer agent.
+Do not commit until all 10 functional steps (1-10) pass; step 11 is advisory and does not block. Do not skip the Reviewer agent.
 
 **Mandatory subtraction.** Periodically review and remove code and docs that no longer earn their place. If nothing can be removed, justify why.
 

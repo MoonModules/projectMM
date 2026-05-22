@@ -31,6 +31,10 @@ HttpServerModule is core infrastructure with no light domain dependencies. It wa
 - Client→server: none (mutations via REST POST)
 - Up to 4 concurrent WebSocket clients
 
+### Preview broadcast — non-blocking
+
+The 3D preview frame is downsampled by [PreviewDriver](../light/drivers/PreviewDriver.md) (its `detail` control, ≤1849 voxels) so the whole WebSocket message fits lwIP's TCP send buffer. It is sent with a single non-blocking scatter-gather write (`TcpConnection::writeChunks` — one `writev`/`sendmsg` for the WS header + 13-byte preview header + payload). `Complete` and `WouldBlock` both keep the connection open (a backpressured browser just misses that frame — the render task never blocks). A truncated send (`Partial`) or socket error closes the connection; the browser auto-reconnects. With the small downsampled payload `Partial` is rare. The preview rate is bounded by `PreviewDriver`'s `fps` control (default 12). The 1 Hz JSON state push still uses the plain blocking write — it is small and infrequent.
+
 ## JSON state buffer
 
 Static 4KB buffer for serializing the module tree. Current state JSON is ~700 bytes. Grows with each module and control: ~50 bytes per module, ~50 bytes per control. Estimated max with a full system (20 modules, 50 controls): ~5KB. When the buffer is outgrown, switch to streaming JSON directly to the socket (write each module as we iterate, no full buffer needed).

@@ -104,6 +104,16 @@ Today the cascade tries each interface unconditionally and relies on the platfor
 
 Surfacing hardware presence to the UI (so cards for absent interfaces hide rather than show as "no link" / "no IP") is deferred — see `docs/plan.md`.
 
+## Ethernet-only build
+
+The `eth-only` ESP32 build profile (`build_esp32.py --profile eth-only`) compiles WiFi out entirely — the platform layer reports `mm::platform::hasWiFi == false`. NetworkModule branches on that constant via `if constexpr`, so in this build:
+
+- The cascade is **Ethernet-only**: no STA/AP states are reachable. `setup()` enters `WaitingEth` on a successful `ethInit()`; if Ethernet fails or the cable is absent, the status reads "No network (Ethernet only)" and the module keeps polling for a cable (replug works; no reboot needed once a link appears via `WaitingEth`).
+- `onBuildControls()` does **not** bind the `ssid` / `password` controls — they are absent from the UI card.
+- The `addressing` selector (DHCP / Static) and the static-IP controls **remain** — static IP is valid on Ethernet. The `mDNS` toggle also remains (mDNS is interface-agnostic).
+
+The `ssid_` / `password_` member buffers still exist (unconditional struct layout keeps persistence stable) — they are simply never displayed or used.
+
 ## Security
 
 - AP mode: open (no password) — fallback for initial setup only

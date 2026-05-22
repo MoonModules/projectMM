@@ -10,6 +10,14 @@ idf_component_register(
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra -Werror)
 
+# Ethernet-only build profile: build_esp32.py --profile eth-only passes
+# -DMM_ETH_ONLY=1 (and EXCLUDE_COMPONENTS for the WiFi components). MM_NO_WIFI
+# makes platform_config.h report hasWiFi=false and #ifdefs-out the WiFi code
+# in platform_esp32.cpp.
+if(MM_ETH_ONLY)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_NO_WIFI)
+endif()
+
 # Embed UI files — regenerate on every build
 set(UI_DIR ${COMPONENT_DIR}/../../src/ui)
 add_custom_command(

@@ -46,6 +46,36 @@ def collect_metrics(client: Client, settle_s: float = 1.5) -> dict:
     return client.get("/api/system")
 
 
+def _control_value(module: dict, name: str):
+    """Return the value of a named control on a module, or None."""
+    for ctrl in module.get("controls", []):
+        if ctrl.get("name") == name:
+            return ctrl.get("value")
+    return None
+
+
+def count_lights(client: Client) -> int:
+    """Derive the total light count from layout modules in the state tree.
+
+    Layout modules expose width/height/depth controls; their product is the
+    grid's light count. Used to scale the FPS-throughput floor to the grid.
+    The module tree is nested (children[]), so walk it recursively.
+    """
+    def walk(module: dict) -> int:
+        total = 0
+        w = _control_value(module, "width")
+        h = _control_value(module, "height")
+        d = _control_value(module, "depth")
+        if w is not None and h is not None and d is not None:
+            total += int(w) * int(h) * int(d)
+        for child in module.get("children", []):
+            total += walk(child)
+        return total
+
+    state = client.get("/api/state")
+    return sum(walk(m) for m in state.get("modules", []))
+
+
 def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5) -> dict:
     """Run a scenario against a live device and return results."""
     with open(scenario_path) as f:
@@ -147,6 +177,22 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5) -> 
                         results["passed"] = False
                     else:
                         print(f"  PASS  fps {fps} >= {min_pct}% of baseline")
+                # FPS×lights throughput floor — compared against the measured
+                # tick *time* (the device's native unit), not derived FPS.
+                # Per-grid budget: max_tick_us = lights * 1e6 / product.
+                if "min_fps_led_product" in bounds["fps"]:
+                    product = bounds["fps"]["min_fps_led_product"]
+                    lights = count_lights(client)
+                    if lights > 0 and tick_us > 0:
+                        max_tick = round(lights * 1_000_000 / product)
+                        if tick_us > max_tick:
+                            print(f"  FAIL  tick {tick_us}us > {max_tick}us "
+                                  f"(throughput budget for {lights} lights)")
+                            results["passed"] = False
+                        else:
+                            print(f"  PASS  tick {tick_us}us <= {max_tick}us ({lights} lights)")
+                    else:
+                        print("  WARN  min_fps_led_product: no layout lights / tick, skipped")
 
         results["steps"].append(step_result)
 

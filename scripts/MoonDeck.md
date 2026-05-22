@@ -105,9 +105,12 @@ Build for an ESP32 chip target.
 
 ```bash
 uv run scripts/build/build_esp32.py --env esp32
+uv run scripts/build/build_esp32.py --env esp32 --profile eth-only
 ```
 
 Auto-detects ESP-IDF installation, sets target if needed, builds, and shows flash/RAM usage summary.
+
+`--profile` selects the build profile: `default` (WiFi + Ethernet, the full cascade) or `eth-only` (WiFi compiled out — smaller image, more free RAM, for Ethernet-only deployments). Switching profiles cleans `build/` automatically. The MoonDeck **Build (Ethernet-only)** button runs `build_esp32_ethonly.py`, a thin wrapper that bakes in `--profile eth-only`.
 
 ### flash_esp32
 

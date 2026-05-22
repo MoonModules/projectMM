@@ -13,6 +13,7 @@ add_executable(mm_tests
     test_filesystem_persistence.cpp
     test_movechild.cpp
     test_module_factory.cpp
+    test_preview_driver.cpp
 )
 
 target_include_directories(mm_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
