@@ -441,6 +441,11 @@ static void ensureWifiInit() {
 
 bool wifiStaInit(const char* ssid, const char* password) {
     if (!ssid || ssid[0] == 0) return false;
+
+    // Guard against repeated init leaking the previous netif (the cascade can
+    // call wifiStaInit again after an Ethernet drop without a prior stop).
+    // Stop before ensureWifiInit() — wifiStaStop() deinits the WiFi driver.
+    if (staNetif_) wifiStaStop();
     ensureWifiInit();
 
     staNetif_ = esp_netif_create_default_wifi_sta();
@@ -493,6 +498,9 @@ void wifiStaStop() {
 }
 
 bool wifiApInit(const char* apName, const char* ip) {
+    // Guard against repeated init leaking the previous AP netif.
+    // Stop before ensureWifiInit() — wifiApStop() deinits the WiFi driver.
+    if (apNetif_) wifiApStop();
     ensureWifiInit();
 
     apNetif_ = esp_netif_create_default_wifi_ap();

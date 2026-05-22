@@ -20,7 +20,7 @@ Zero-copy design: PreviewDriver points at the existing physical output buffer (o
 
 For grid layouts, the browser derives 3D positions from the index (`x = i % w`). For non-grid layouts (wheel, ring, sphere, arbitrary point clouds), positions can't be derived — the browser needs actual coordinates.
 
-Solution: **one-time coordinate message**. When the layout changes, send a separate WebSocket message with the coordinate table per light. The browser caches it. Binary pixel frames continue to stream only RGB data. This is the MoonLight approach — coordinates sent once, then only pixel data streams.
+Solution: **one-time coordinate message**. When the layout changes, send a separate WebSocket message with the coordinate table per light. The browser caches it. Binary pixel frames continue to stream only RGB data — coordinates sent once, then only pixel data streams.
 
 Frame types:
 - `0x02` — pixel data (every frame)

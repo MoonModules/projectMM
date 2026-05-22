@@ -2,7 +2,14 @@
 
 ## The Problem
 
-Drive 10,000+ addressable LEDs and DMX lighting fixtures (RGB(W) pars, moving heads, dimmers) across multiple synchronized devices at high frame rates. Support LED protocols (WS2812, APA102) and DMX/ArtNet/DDP for conventional lighting fixtures. Run the same core logic on ESP32, desktop, and Raspberry Pi and Teensy. Provide a web UI and network APIs for control.
+Build a modular runtime for resource-constrained embedded devices that the same source compiles for, unmodified, on ESP32, Teensy, desktop, and Raspberry Pi. The runtime must:
+
+- Compose behaviour from small, uniform units (modules) that can be created, configured, reordered, and removed at runtime — including from a network API.
+- Expose every module's parameters generically so a single web UI renders any module with zero per-module UI code.
+- Run a hot loop with predictable timing and zero steady-state heap allocation on devices with as little as ~320 KB of RAM.
+- Persist configuration across reboots, exploit multiple CPU cores where present, and keep all platform-specific code behind one boundary.
+
+This document describes that domain-neutral core. It carries no knowledge of what the modules actually do — that is the *domain* layered on top.
 
 ## Core vs Domain
 
@@ -62,7 +69,7 @@ Controls are shown dynamically: when a control value changes, the control set ca
 
 Prefer `uint8_t` (0-255) for slider controls where possible. This minimizes memory per control, aligns with DMX channel values (0-255), and keeps the control range manageable in the UI.
 
-Controls are the bridge between the UI and the engine. The web UI renders them automatically based on what MoonModules declare. The exact control types (slider, toggle, color picker, text input, dropdown) are defined in the UI spec (`docs/moonmodules/core/ui-spec.md`). The principle is: MoonModules declare what they need, the UI renders it.
+Controls are the bridge between the UI and the engine. The web UI renders them automatically based on what MoonModules declare. The exact control types (slider, toggle, color picker, text input, dropdown) are defined in the UI spec (`docs/moonmodules/core/ui.md`). The principle is: MoonModules declare what they need, the UI renders it.
 
 ## Persistence
 
@@ -74,12 +81,6 @@ Control values + each module's `enabled` flag are persisted to flash so settings
 - **Conditional controls**: every conditional control is always bound; the module sets a `hidden` flag (`controls_.setHidden(i, …)`) to tell the UI not to render it. This means the load path can find persisted values regardless of the live conditional state.
 
 The Scheduler stays independent of FilesystemModule's type via a function-pointer hook (`setLoadAllHook`), so there's no circular include and persistence is opt-in: if no FilesystemModule is registered, the load phase is a no-op and the system runs with member-initialized defaults.
-
-## Rebuild Propagation
-
-When a control value changes on a layout, the pipeline must rebuild: layers rebuild their LUTs, the DriverGroup reallocates its output buffer. When a modifier control changes, only the affected layer's LUT is rebuilt (the output buffer size doesn't change). This propagation must be built into the framework — not handled by ad-hoc dirty flag checks in the application entry point.
-
-The mechanism (observer pattern, signal/slot, or centralized pipeline manager) will be defined in the module spec before implementation.
 
 ## Parallelism
 
@@ -281,5 +282,5 @@ These will be specified in module docs before implementation:
 
 - **MoonModule interface.** Draft exists in `docs/moonmodules_draft/core/`. Needs review: virtual modifier interface, rebuild propagation.
 - **Config persistence.** Controls need to be saved/loaded. The storage format and mechanism will be specified when we build that module.
-- **Web UI.** Spec at `docs/moonmodules/core/ui-spec.md` describes the current implementation (status bar, card layout, 9 control types, type picker, theme, WS lifecycle, 3D preview). Open design questions: multi-layer UI, modifier chain visualization, presets, canvas/node-graph view.
+- **Web UI.** Spec at `docs/moonmodules/core/ui.md` describes the current implementation (status bar, card layout, 9 control types, type picker, theme, WS lifecycle, 3D preview). Open design questions: multi-layer UI, modifier chain visualization, presets, canvas/node-graph view.
 - **File/directory structure.** The platform boundary is fixed. The rest will grow as modules are specified and implemented.

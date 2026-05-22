@@ -1,6 +1,6 @@
 # MappingLUT
 
-Lookup table mapping logical light indices to physical light indices. Based on MoonLight's PhysMap design, tuned for v3.
+Lookup table mapping logical light indices to physical light indices.
 
 ## Mapping types
 
@@ -23,7 +23,7 @@ The code API answers one question: **does this LUT have a mapping table?**
 
 Callers don't need to know which mapping type is used — they only need to know whether a table exists. DriverGroup checks `hasLUT()` to decide whether to allocate an output buffer. BlendMap checks `hasLUT()` to choose between memcpy (identity) and LUT-based mapping.
 
-MoonLight heritage: `setIdentity()` replaces MoonLight's `oneToOneMapping` flag. `hasLUT()` replaces `!oneToOneMapping`. The rename clarifies that "one-to-one" was specifically the sequential identity case, not all 1:1 mappings.
+Naming: `setIdentity()` / `hasLUT()` are used rather than a "one-to-one" flag because "one-to-one" is ambiguous — it reads as covering all 1:1 mappings, but the table-free fast path applies only to the *sequential identity* case (logical index == physical index).
 
 ## Storage
 
@@ -40,7 +40,7 @@ Memory: `estimateBytes(logicalCount, maxDest)` returns the total allocation size
 ## Prior art
 
 ### MoonLight — PhysMap ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/PhysMap.h))
-Memory-optimal union. 2 bytes (no-PSRAM) or 4 bytes (PSRAM). Map type stored IN each entry. `oneToOneMapping` and `allOneLight` fast path flags. `forEachLightIndex()` for 1:N iteration.
+Memory-optimal union. 2 bytes (no-PSRAM) or 4 bytes (PSRAM). Map type stored IN each entry. `oneToOneMapping` and `allOneLight` fast path flags. `forEachLightIndex()` for 1:N iteration. v3 renamed `oneToOneMapping` → `setIdentity()` / `!hasLUT()` because "one-to-one" reads as covering all 1:1 mappings, but the table-free fast path applies only to the sequential identity case.
 
 ### projectMM v1 — GridLayout.requestMappings ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/modules/layouts/GridLayout.h))
 Simple flat array: `mappings[logical_index] = physical_strip_index`. Only 1:1. Rebuilt on control change.

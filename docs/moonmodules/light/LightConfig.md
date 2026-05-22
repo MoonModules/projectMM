@@ -4,7 +4,7 @@ NOT a fixed 3-byte RGB struct. The system must support RGB (3 bytes), RGBW (4 by
 
 ## Design
 
-Follow MoonLight's LightsHeader approach: the buffer is raw `uint8_t*` with configurable `channelsPerLight` and per-channel offsets. There is no `RGB` struct that all code passes around — instead, effects and drivers work with the buffer directly using the channel configuration.
+The buffer is raw `uint8_t*` with configurable `channelsPerLight` and per-channel offsets. There is no `RGB` struct that all code passes around — instead, effects and drivers work with the buffer directly using the channel configuration.
 
 Channel offsets define where each color/function channel lives within a light's data:
 - `offsetRed`, `offsetGreen`, `offsetBlue` — primary RGB

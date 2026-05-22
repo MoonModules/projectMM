@@ -2,13 +2,9 @@
 
 Light-domain MoonModule subclass for effects. Adds rendering context.
 
-## Design questions
+## Design
 
-**Does EffectBase need to exist?** The Layer already knows the buffer, dimensions, and elapsed time. Consider having the Layer provide the rendering context directly to effects via their `loop()` call, eliminating EffectBase. The effect would access `layer->buffer()`, `layer->width()`, etc. — exactly what MoonLight does. Pro: smaller codebase, fewer files, cleaner separation of concerns — the layer IS the context. Con: effects need a pointer to their layer, coupling them slightly.
-
-**Do we also need DriverBase and LayoutBase?** Same question. If the parent (DriverGroup, LayoutGroup) provides everything the child needs via a pointer, separate base classes may be unnecessary boilerplate. MoonLight uses a single Node base class for effects, layouts, modifiers, and drivers — the parent (VirtualLayer, PhysicalLayer) provides context.
-
-If base classes are kept, they should be zero-state — just convenience accessors pointing to the parent.
+`EffectBase` is a zero-state convenience layer: it holds no data of its own, just accessors (`buffer()`, `width()`, `height()`, `depth()`, `elapsed()`, …) that forward to the parent `Layer`. An effect reads its rendering context through these instead of caching a `Layer*` and the dimensions itself. `DriverBase` plays the same role for drivers against `DriverGroup`.
 
 ## Animation guidelines
 

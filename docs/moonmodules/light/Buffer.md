@@ -4,7 +4,7 @@ Contiguous light data buffer. Used by both layers (effects write into it) and dr
 
 ## Storage
 
-Raw `uint8_t*` buffer, sized by `channelsPerLight * nrOfLights`. This supports RGB (3 channels), RGBW (4 channels), and multi-channel DMX fixtures (up to 32 channels per light) via configurable channel count and offsets (see MoonLight's LightsHeader pattern).
+Raw `uint8_t*` buffer, sized by `channelsPerLight * nrOfLights`. This supports RGB (3 channels), RGBW (4 channels), and multi-channel DMX fixtures (up to 32 channels per light) via configurable channel count and offsets.
 
 Memory allocated via `platform::alloc` (PSRAM when available). Allocated outside the hot path, reused every frame.
 
@@ -14,7 +14,7 @@ Memory allocated via `platform::alloc` (PSRAM when available). Allocated outside
 
 Semaphores are expensive (~150 bytes on ESP32). Prefer:
 - Atomic pointer swap for double-buffering (producer/consumer)
-- Lock-free single-slot SPSC pattern (proven in v2's DataBuffer)
+- Lock-free single-slot SPSC pattern
 - Share a single semaphore across multiple layers rather than one per layer
 
 ## API

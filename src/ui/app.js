@@ -37,7 +37,7 @@ const dragTimers = {};           // per-control debounce timers (clearTimeout ha
 const dragTs = {};               // per-control last-touched timestamp (ms)
 const TIMING_MODES = ["fps", "ms"];
 
-// localStorage keys per ui-spec.md
+// localStorage keys per ui.md
 const LS_SELECTED  = "mm_selectedRoot";
 const LS_THEME     = "mm_theme";
 const LS_TIMING    = "mm_timing_mode";
@@ -418,18 +418,19 @@ function findParent(childName) {
 function acceptsChildren(mod) {
     // role-based: Layer → effect+modifier, DriverGroup → driver, LayoutGroup → layout.
     // Mapped in JS, not in engine, so no backend allowedChildRoles field needed.
-    return mod.name === "Layer" || mod.name === "DriverGroup" || mod.name === "LayoutGroup";
+    // Keyed on mod.type (stable factory key) — mod.name is editable per instance.
+    return mod.type === "Layer" || mod.type === "DriverGroup" || mod.type === "LayoutGroup";
 }
 
 function rolesAcceptedBy(parentMod) {
-    if (parentMod.name === "Layer")       return ["effect", "modifier"];
-    if (parentMod.name === "DriverGroup") return ["driver"];
-    if (parentMod.name === "LayoutGroup") return ["layout"];
+    if (parentMod.type === "Layer")       return ["effect", "modifier"];
+    if (parentMod.type === "DriverGroup") return ["driver"];
+    if (parentMod.type === "LayoutGroup") return ["layout"];
     return [];
 }
 
 // ---------------------------------------------------------------------------
-// Control rendering (9 types per ui-spec.md)
+// Control rendering (9 types per ui.md)
 // ---------------------------------------------------------------------------
 
 // Look up the factory default for a given module type's control. Returns undefined when

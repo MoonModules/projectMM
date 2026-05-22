@@ -1,6 +1,6 @@
 # UI Specification — Deferred items & research
 
-Companion to [moonmodules/core/ui-spec.md](../../moonmodules/core/ui-spec.md). The main spec describes the v3 UI as shipped (the implemented baseline). This file holds everything that is **not** in the live UI yet: short-term deferred items, open design questions for 1.0, the full gap analysis against projectMM v1, loose ends, and prior-art notes.
+Companion to [moonmodules/core/ui.md](../../moonmodules/core/ui.md). The main spec describes the v3 UI as shipped (the implemented baseline). This file holds everything that is **not** in the live UI yet: short-term deferred items, open design questions for 1.0, the full gap analysis against projectMM v1, loose ends, and prior-art notes.
 
 Promote sections from here into the main spec as they ship. When the entire file becomes empty, delete it.
 

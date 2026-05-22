@@ -64,9 +64,9 @@ With SystemModule + NetworkModule added (vs previous 58ms/17FPS without them), t
 | Ethernet, mirror off | 74-82ms | 12-13 | 98-103KB |
 | 128x64, Ethernet, mirror XY | 30ms | 33 | 204KB |
 
-### Pending: ESP32 tick variability (plan-11)
+### ESP32 tick variability (plan-11)
 
-Live capture after plan-11 sometimes lands at ~55ms / 18 FPS and sometimes ~115-155ms / 6-8 FPS on the same firmware with no scenario change. The slow ticks show HttpServer dominating (~80-95 ms out of the total) while the render path is normal (Layer/Noise ~13 ms, DriverGroup+ArtNet ~75 ms). Suspected cause is bursty WebSocket / HTTP work — when a browser is connected and the new `/api/types` + larger per-module JSON (role/type/loopTimeUs fields) get pushed, the HttpServer step inflates. Not chasing now; tracked here so the variance isn't mistaken for a regression in later plans.
+Measured: live capture lands anywhere from ~55ms / 18 FPS to ~100-155ms / 6-9 FPS on the same firmware with no scenario change. On slow ticks HttpServer dominates (~80-95 ms of the total) while the render path stays normal (Layer/Noise ~13 ms, DriverGroup+ArtNet ~75 ms) — the variance correlates with bursty WebSocket / HTTP work when a browser is connected. Recorded here so the swing isn't mistaken for a regression; the investigation item is tracked in [plan.md](plan.md).
 
 ### Memory (128x128 with mirror)
 

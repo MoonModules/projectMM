@@ -22,10 +22,6 @@ Each top-level module declares a core affinity (0 or 1 on ESP32). The scheduler 
 
 Child modules run in their declared order within the parent. Top-level modules also run in declared order. The UI supports reordering, backed by the scheduler. Only parent/child relationships — no arbitrary dependency graph.
 
-## Deferred
-
-- `elapsed()` accessor — use the synchronized clock directly instead.
-
 ## Prior art
 
 ### MoonLight — effectTask / svelteTask

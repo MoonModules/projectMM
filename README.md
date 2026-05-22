@@ -19,14 +19,15 @@ A high-performance multi-platform system that drives large LED installations and
 
 ## Architecture
 
-Everything is a **MoonModule** — effects, modifiers, layouts, drivers, and system services share the same class structure. Learn the pattern once, apply it everywhere.
+The system is two layers:
 
-The render pipeline: effects write into layer buffers → mapping LUT translates logical to physical positions → drivers output to hardware/network.
+- **Core** — a domain-neutral modular runtime. Everything is a **MoonModule**: effects, modifiers, layouts, drivers, and system services all share the same class structure, lifecycle, and controls. The core knows nothing about lights — it provides modules, controls, scheduling, persistence, and platform abstraction.
+- **Light domain** — built on the core. The render pipeline: effects write into layer buffers → mapping LUT translates logical to physical positions → drivers output to hardware/network.
 
 | Document | Description |
 |----------|-------------|
 | [CLAUDE.md](CLAUDE.md) | Rules, constraints, and development process |
-| [architecture.md](docs/architecture.md) | Core architecture: MoonModule, controls, scheduling, platform abstraction, build system, testing |
+| [architecture.md](docs/architecture.md) | Core architecture: the domain-neutral runtime — MoonModule, controls, scheduling, persistence, platform abstraction, build system, testing |
 | [architecture-light.md](docs/architecture-light.md) | Light domain: pipeline, layouts, layers, effects, modifiers, mapping, drivers, parallelism, memory strategy |
 | [plan.md](docs/plan.md) | What to build next |
 

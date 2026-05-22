@@ -4,6 +4,12 @@ The light domain is built on top of the core (see `architecture.md`). It defines
 
 In this document, **light** refers to any controllable light source: an addressable LED pixel (WS2812, APA102), a DMX fixture (RGB par, moving head, dimmer), or any other output that receives color/intensity data. The term is used instead of "pixel" to reflect that the system controls both LEDs and conventional lighting fixtures.
 
+## The Problem
+
+Drive 10,000+ addressable LEDs and DMX lighting fixtures (RGB(W) pars, moving heads, dimmers) across multiple synchronized devices at high frame rates. Support LED protocols (WS2812, APA102) and DMX/ArtNet/E1.31/DDP for conventional lighting fixtures. Render effects natively in 3D space. Run the full pipeline on devices ranging from an ESP32 with no PSRAM to a desktop, scaling buffer counts and pipeline complexity to the memory available. Provide a web UI with live 3D preview and network APIs for control.
+
+The light domain is everything specific to that goal. The generic module/runtime machinery it stands on — modules, controls, scheduling, persistence, platform abstraction — is the core (see `architecture.md`).
+
 ## The Pipeline
 
 Modules can be added, replaced (e.g. change an effect on a layer), or removed dynamically at runtime.
@@ -123,6 +129,12 @@ Each driver (MoonModule) speaks one protocol:
 Drivers read from the DriverGroup's output buffer. Everything before the DriverGroup is platform-independent.
 
 Network-based drivers (ArtNet, E1.31, DDP) must pace their packet output — never blast all universe packets in a tight loop. Requires both FPS limiting (skip frames if called too fast) and inter-packet delay (microsecond pause between universe packets within a frame). Without pacing, receivers drop packets and the output appears broken.
+
+## Rebuild Propagation
+
+When a control value changes on a layout, the pipeline must rebuild: layers rebuild their LUTs, the DriverGroup reallocates its output buffer. When a modifier control changes, only the affected layer's LUT is rebuilt (the output buffer size doesn't change). This propagation is built into the framework — not handled by ad-hoc dirty flag checks in the application entry point.
+
+The current mechanism: `Scheduler::rebuild()` re-runs `onAllocateMemory()` across the module tree, which re-evaluates layout-derived dimensions, LUTs, and buffer sizes. The HTTP handlers that change layout/modifier order or structure trigger `rebuild()` after the mutation.
 
 ## Why this design?
 

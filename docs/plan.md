@@ -60,3 +60,7 @@ When picked up:
 - Per-layer enable/disable from the UI (already supported by `MoonModule::enabled`); ordering via existing child-array order.
 - Memory-aware allocator: decide at `onAllocateMemory` time how many layers actually fit, degrade gracefully if PSRAM is unavailable.
 - Persistence (plan-10) already encodes layers + their children positionally — adding more siblings to a LayoutGroup just works on the file-format side.
+
+## ESP32 tick variability (investigate)
+
+ESP32 tick time swings between ~55ms / 18 FPS and ~115-155ms / 6-8 FPS on the same firmware with no scenario change (measurements in `docs/performance.md`). On slow ticks the HttpServer step dominates (~80-95 ms). Suspected cause: bursty WebSocket / HTTP work when a browser is connected — the `/api/types` fetch and the larger per-module JSON push (role/type/loopTimeUs fields, plan-11) inflate the HttpServer loop. Investigate whether to bound per-tick HTTP work, move WS pushes off the render tick, or rate-limit state snapshots.

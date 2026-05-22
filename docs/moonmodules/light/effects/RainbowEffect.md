@@ -20,6 +20,5 @@ Time-based animation via elapsed millis, converted to BPM phase internally.
 
 ## Design notes
 
-- First/test effect. Dead simple — proves the pipeline works.
-- No palette, no variants yet.
-- No v1 equivalent (v1 used SineEffect). Rainbow is simpler and more visually recognizable for testing.
+- Test effect. Dead simple — proves the pipeline works.
+- No palette, no variants. Rainbow is visually recognizable, which makes it easy to spot in tests.

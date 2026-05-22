@@ -77,16 +77,23 @@ public:
     // without wall-clock waits; production callers shouldn't need this.
     void flush() {
         if (!mounted_ || !scheduler_) return;
+        bool allSaved = true;
         for (uint8_t i = 0; i < scheduler_->moduleCount(); i++) {
             MoonModule* m = scheduler_->module(i);
             if (!m || m == this) continue;
             if (subtreeDirty(m)) {
-                saveSubtree(m);
-                clearSubtreeDirty(m);
-                lastSaveMs_ = platform::millis();
+                // Only clear the dirty flag when the write actually succeeded —
+                // otherwise a failed write would silently drop the pending change.
+                if (saveSubtree(m)) {
+                    clearSubtreeDirty(m);
+                    lastSaveMs_ = platform::millis();
+                } else {
+                    allSaved = false;
+                }
             }
         }
-        dirtyPending_ = false;
+        // Keep dirtyPending_ set if anything failed, so loop1s retries.
+        dirtyPending_ = !allSaved;
     }
 
     // FilesystemModule polls dirty flags in loop1s; modules don't call us directly.
@@ -145,6 +152,8 @@ private:
         if (!pathFor(m, path, sizeof(path))) return;
         int n = platform::fsRead(path, fileBuf_, sizeof(fileBuf_));
         if (n <= 0) return;
+        // fsRead doesn't NUL-terminate; applyNode parses fileBuf_ as a C-string.
+        fileBuf_[n < static_cast<int>(sizeof(fileBuf_)) ? n : static_cast<int>(sizeof(fileBuf_)) - 1] = '\0';
         applyNode(m, fileBuf_, "");
     }
 
@@ -250,23 +259,26 @@ private:
     }
 
     // ---- Save ----
-    void saveSubtree(MoonModule* m) {
+    // Returns true only when the file was written. On failure (path/overflow/write
+    // error) the caller must keep the subtree dirty so the change isn't lost.
+    bool saveSubtree(MoonModule* m) {
         char path[MAX_PATH];
-        if (!pathFor(m, path, sizeof(path))) return;
+        if (!pathFor(m, path, sizeof(path))) return false;
         int pos = std::snprintf(fileBuf_, sizeof(fileBuf_), "{");
-        if (pos < 0) return;
+        if (pos < 0) return false;
         if (!writeNode(m, fileBuf_, sizeof(fileBuf_), pos, "")) {
             std::printf("FilesystemModule: subtree too large for %s\n", path);
-            return;
+            return false;
         }
         int n = std::snprintf(fileBuf_ + pos, sizeof(fileBuf_) - pos, "}");
-        if (n < 0 || static_cast<size_t>(pos + n) >= sizeof(fileBuf_)) return;
+        if (n < 0 || static_cast<size_t>(pos + n) >= sizeof(fileBuf_)) return false;
         pos += n;
         if (platform::fsWriteAtomic(path, fileBuf_, static_cast<size_t>(pos))) {
             std::printf("FilesystemModule: saved %s (%d bytes)\n", path, pos);
-        } else {
-            std::printf("FilesystemModule: write failed for %s\n", path);
+            return true;
         }
+        std::printf("FilesystemModule: write failed for %s\n", path);
+        return false;
     }
 
     // Returns false on overflow. `firstField` is true when this writeNode is the first

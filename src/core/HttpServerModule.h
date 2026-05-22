@@ -759,7 +759,9 @@ private:
             sendResponse(conn, 200, "application/json", "{\"ok\":true,\"noop\":true}");
             return;
         }
-        mod->markDirty();
+        // A move changes the parent's child ordering — mark the parent dirty so its
+        // file is rewritten with the new order (same as add/delete handlers).
+        parent->markDirty();
         FilesystemModule::noteDirty();
         if (scheduler_) scheduler_->rebuild();
         sendResponse(conn, 200, "application/json", "{\"ok\":true}");

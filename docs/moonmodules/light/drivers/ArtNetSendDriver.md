@@ -24,10 +24,6 @@ For >170 RGB lights, data is split across consecutive universes starting from `u
 
 Opened in setup(), closed in teardown(). Uses platform UDP abstraction. Not a hot-path allocation.
 
-## Deferred
-
-- Inter-packet delay (microsecond pause between universe packets) — add when packet dropping occurs. May need a `platform::delay_us` abstraction.
-
 ## Tests
 
 [Module test: ArtNet Packet](../../../testing.md#artnet) — header format, byte order, universe splitting.

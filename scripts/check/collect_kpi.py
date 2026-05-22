@@ -130,14 +130,17 @@ def collect_esp32():
     except Exception:
         pass
 
-    # Read tick/FPS from monitor.log. If the log is stale or has no usable
-    # line, do a live capture against the canonical port from
-    # scripts/moondeck.json — instead of silently skipping ESP32 KPI.
+    # Read tick/FPS from monitor.log. Do a live capture against the canonical
+    # port (scripts/moondeck.json) when the log is stale OR when it exists but
+    # has no parseable tick line — instead of silently skipping ESP32 KPI.
     log = ESP32_DIR / "monitor.log"
     stale = (not log.exists()) or (time.time() - log.stat().st_mtime) > 300
-    if stale and _live_capture(log):
-        pass  # log refreshed
-    _extract_esp32_tick(log, kpi)
+    if stale:
+        _live_capture(log)
+    if not _extract_esp32_tick(log, kpi):
+        # Parse failed (empty/garbled/no tick line) — try a fresh capture once.
+        if not stale and _live_capture(log):
+            _extract_esp32_tick(log, kpi)
 
     return kpi
 

@@ -1,8 +1,8 @@
 # UI Specification
 
-This spec describes the projectMM v3 web UI **as shipped**. It distils what v1 proved at scale, adapted to v3's principles (minimalism, MoonModule-driven, no frameworks).
+This spec describes the projectMM web UI **as shipped** — minimal, MoonModule-driven, no frameworks.
 
-For deferred items, the open design questions for 1.0, the full gap analysis against projectMM v1, loose ends, and prior-art notes, see [moonmodules_draft/core/ui-spec-deferred.md](../../moonmodules_draft/core/ui-spec-deferred.md).
+For deferred items, the open design questions for 1.0, and the gap analysis, see [moonmodules_draft/core/ui.md](../../moonmodules_draft/core/ui.md).
 
 ## TL;DR
 
@@ -136,7 +136,7 @@ Reorder of root modules is **not** supported — the order is fixed in `main.cpp
 
 ### REST API (for mutations and initial state)
 
-```
+```text
 GET    /api/state             full module tree state — initial load + post-mutation refresh
                               each module entry includes name, type, role, enabled, loopTimeUs, controls[]
 GET    /api/types             {types:[{name, role, defaults}]} — for the type picker
@@ -206,7 +206,7 @@ The DOM is **never rebuilt** during a state update. Full re-render only happens 
 
 ## localStorage keys
 
-```
+```text
 mm_selectedRoot     id of currently-selected root module       (string)
 mm_theme            "dark" | "light"                            (default: "dark")
 mm_timing_mode      "fps" | "ms"                                (default: "fps")
@@ -214,9 +214,9 @@ mm_timing_mode      "fps" | "ms"                                (default: "fps")
 
 No other client state persists. Reorder, control values, etc. all live on the device.
 
-## Implemented baseline
+## Feature summary
 
-Everything in this spec is in the live codebase. The 10 features below are the explicit baseline established by plan-11 — each links to the section that describes the contract.
+Everything in this spec is in the live codebase. The 10 features below each link to the section that describes the contract.
 
 1. **Status bar** with brand, device name, system stats (uptime · free heap), WS dot, reconnect button, reboot button (with crashed-state styling), and theme toggle — see [Status bar](#status-bar).
 2. **Single-column module card layout** with hierarchy (children inline-indented, depth-based card backgrounds) — see [Module card](#module-card).
@@ -228,7 +228,3 @@ Everything in this spec is in the live codebase. The 10 features below are the e
 8. **3D preview** with orbit camera (mouse + touch), sticky position, scroll-shrink 0→50% over 300px, sparse vertex buffer (skipping black voxels), and depth-corrected GLSL point size — see [3D preview](#3d-preview).
 9. **Per-card fps/ms toggle** — clickable stats line cycles fps↔ms; global mode persists in `localStorage['mm_timing_mode']`.
 10. **Up/↑/↓ icon buttons** for reorder + delete (×) on reorderable children (Effect/Modifier role). Drag-and-drop (HTML5 DnD) works on desktop; mobile naturally falls through to the icon buttons. Both call `POST /api/modules/<n>/move`.
-
-## Heritage
-
-v3's UI is a reduction of projectMM v1's UI ([source](https://github.com/ewowi/projectMM/tree/main/src/frontend)), which shipped at release 1.4.0 as ~84/1647/744 lines (HTML/JS/CSS). The v1 patterns proven in production and carried forward are documented inline above. v1's larger surface (OTA, GitHub-release update badge, health/log panels, side nav) is held back until v3 has the supporting engine infrastructure — see [moonmodules_draft/core/ui-spec-deferred.md](../../moonmodules_draft/core/ui-spec-deferred.md) for the full catalogue and adopt/defer/drop verdicts per item.

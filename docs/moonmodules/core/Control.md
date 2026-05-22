@@ -4,7 +4,7 @@ A named, typed value exposed by a MoonModule to the UI. Must be the lightest wei
 
 ## Design
 
-Controls bind to class variables by reference (proven in MoonLight, v1, v2). The control stores a pointer to the variable. Hot-path code reads the variable directly — zero overhead. No getter/setter.
+Controls bind to class variables by reference. The control stores a pointer to the variable. Hot-path code reads the variable directly — zero overhead. No getter/setter.
 
 ## Types
 
@@ -54,18 +54,13 @@ Fixed-capacity array per module. No heap allocation per control. Capacity chosen
 
 Control values must be saved/loaded persistently (filesystem). The mechanism:
 - **Save:** iterate control descriptors, read each variable via its pointer, write key:value to a file. Format: compact binary or minimal JSON — TBD based on what's simplest.
-- **Load:** read file, match keys to control descriptors, write values via pointer. Apply pending values in `onBuildControls()` (same pattern as v2's `applyPending_`).
+- **Load:** read file, match keys to control descriptors, write values via pointer. Apply pending values in `onBuildControls()`.
 - **When:** save on control change (debounced). Load at setup before `onBuildControls()`.
 - **Scope:** one file per module instance, or one file for all modules — decide based on filesystem constraints (LittleFS on ESP32 has limited file count).
 
 ## Dynamic controls
 
 `onBuildControls()` in MoonModule supports rebuilding the control set at runtime. When a mode selector changes, call `onBuildControls()` again — it clears and rebuilds, showing only controls relevant to the current mode.
-
-## Deferred
-
-- No `controlAllocBytes()` pre-check — defer until needed.
-- No richer types (v2-style ControlDescriptor) until genuinely needed.
 
 ## Tests
 
@@ -81,3 +76,4 @@ Control values must be saved/loaded persistently (filesystem). The mechanism:
 
 ### projectMM v2 — ControlDescriptor ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/MoonModule.h#L40))
 - Richer but heavier: key, uiType, CtrlType enum, ptr, min/max, default, options array, ownsOptions flag, system flag. Not all of this weight is justified for v3.
+- Persisted values applied via an `applyPending_` step during `onBuildControls()` — v3 follows the same overlay-in-onBuildControls timing.

@@ -6,7 +6,7 @@ The base class for everything in the system. Effects, modifiers, layouts, driver
 
 Aim for the smallest possible base class. Name stored in flash (progmem/constexpr), not in instance memory. Target: zero bytes of instance overhead beyond the vtable pointer and control variables. Every byte costs — on ESP32 without PSRAM, dozens of modules are loaded simultaneously.
 
-Field order optimized for minimal padding: group 8-byte fields, then 4-byte, then 2-byte, then 1-byte. This avoids alignment waste (v2 saved 24 bytes vs naive order).
+Field order optimized for minimal padding: group 8-byte fields, then 4-byte, then 2-byte, then 1-byte. This avoids alignment waste.
 
 ## Lifecycle
 
@@ -52,7 +52,7 @@ Every MoonModule has an `enabled` property (default: true). The UI shows a check
 
 ## Parent/child
 
-Modules form a tree. Parent/child relationships only (no arbitrary DAG like v2's AutoWireSpec — simpler, sufficient). Children run in order within their parent. Top-level modules also run in order. UI supports reordering, backed by the backend.
+Modules form a tree. Parent/child relationships only — no arbitrary DAG. Children run in order within their parent. Top-level modules also run in order. UI supports reordering, backed by the backend.
 
 ### Generic children in MoonModule base
 
@@ -86,12 +86,6 @@ Conditional controls (e.g. fields only visible under a Select mode) are always b
 
 `markDirty()` / `dirty()` / `clearDirty()` are set by HttpServerModule on every successful control mutation. FilesystemModule polls dirty flags in `loop1s()` and writes any subtree with a dirty descendant after a 2-second debounce.
 
-## Deferred
-
-- No color picker control (RGB) — not needed for v3 initial scope.
-- No AutoWireSpec — parent/child is sufficient.
-- No `controlAllocBytes()` pre-check — defer until needed.
-
 ## Tests
 
 [Module test: MoonModule + Control](../../testing.md#moonmodule) — lifecycle, control binding, clear and rebuild.
@@ -112,3 +106,4 @@ Conditional controls (e.g. fields only visible under a Select mode) are always b
 - `onChildrenReady()`.
 - Field order optimized 8B→4B→2B→1B, saving 24 bytes.
 - `classSize` set via `register_type<T>()`.
+- `AutoWireSpec` — an arbitrary dependency-graph (DAG) wiring mechanism. v3 deliberately uses parent/child only; the DAG was more than the domain needs.
