@@ -147,12 +147,19 @@ def collect_esp32():
     # has no parseable tick line — instead of silently skipping ESP32 KPI.
     log = ESP32_DIR / "monitor.log"
     stale = (not log.exists()) or (time.time() - log.stat().st_mtime) > 300
+
+    # Only extract from a log we trust: a non-stale file, or one a live capture
+    # just refreshed. If the file is stale and the capture fails (port absent,
+    # garbled output), do NOT fall back to the old file — a stale tick reported
+    # as fresh is worse than no ESP32 KPI at all.
     if stale:
-        _live_capture(log)
-    if not _extract_esp32_tick(log, kpi):
-        # Parse failed (empty/garbled/no tick line) — try a fresh capture once.
-        if not stale and _live_capture(log):
+        if _live_capture(log):
             _extract_esp32_tick(log, kpi)
+    else:
+        if not _extract_esp32_tick(log, kpi):
+            # File is fresh but unparseable (no tick line) — one capture retry.
+            if _live_capture(log):
+                _extract_esp32_tick(log, kpi)
 
     return kpi
 

@@ -14,20 +14,15 @@ Milestone after items 11-13. An end user with an ESP32 can flash the firmware, c
 
 ---
 
-## Remarks
-
-- Live scenarios that use `add_module` create temporary modules on the running device (cleaned up after each scenario). Scenarios like `base-pipeline` and `memory-1to1` add a `Rainbow` effect because the running device has `Noise` — the names don't match. This is harmless (cleanup deletes it), but the measurement runs with both effects active. For pure non-destructive live testing, scenarios should match the running device's module names, or use `set_control`-only steps that don't modify the pipeline.
-
 ## WiFi performance testing (pending)
 
-Need to measure FPS over WiFi STA vs Ethernet at different LED counts. The leaked WiFi task caused 8 FPS (fixed via `esp_wifi_deinit()`), but actual WiFi operation may still be slower than Ethernet due to encryption overhead and management frames. Test matrix:
+Measure FPS over WiFi STA vs Ethernet at different LED counts. The 128×128 case is **done** — WiFi ArtNet is ~4× the Ethernet per-packet cost, ~7 FPS at 16K LEDs vs ~19 on Ethernet (see `docs/performance.md` "ArtNet over WiFi"). Remaining matrix:
 
-- WiFi STA 128x128 (16K LEDs, 97 ArtNet universes) — may be too many packets for WiFi
 - WiFi STA 64x64 (4K LEDs, 24 universes) — should be feasible
 - WiFi STA 32x32 (1K LEDs, 6 universes) — baseline
 - Compare each with Ethernet at the same grid size
 
-This determines the practical LED limit for WiFi-only boards. If WiFi can't handle 128x128, document the maximum and recommend Ethernet for large installations.
+This determines the practical LED limit for WiFi-only boards. The 128×128 result already says: recommend Ethernet (or the `eth-only` build profile) for large installations.
 
 ## Additional testing (pending)
 
@@ -44,7 +39,7 @@ The `setup_esp_idf.py` script currently clones or pulls the latest from the ESP-
 
 ## WiFi runtime disable (backlog)
 
-Postponed. Single firmware binary ships the WiFi stack regardless (the 1.75 MB app partition has plenty of room for it to live unused). When and how WiFi controls are exposed in the UI is a follow-up to plan-10 (persistence is now in place — see `docs/history/plan-10.md`).
+Postponed. A **compile-time** answer already ships: the `eth-only` build profile (`build_esp32.py --profile eth-only`) excludes the WiFi stack entirely. This item is the *runtime* variant — a single default-profile binary that detects at boot whether WiFi is needed and skips bringing it up. The default firmware ships the WiFi stack regardless (the app partition has room for it to live unused).
 
 Open design question to address when this is picked up: can the platform detect at runtime whether Ethernet hardware is present (PHY responds on MDIO during `esp_eth_driver_install`)? If yes, the UI can hide WiFi controls — and skip `wifiStaInit()` — when Ethernet hardware is detected. That's a behavior-driven gate rather than a user toggle. Some ESP32 variants (e.g. ESP32-C2, ESP32-H2) don't have WiFi hardware at all, so the gate also needs to handle "WiFi not present" cleanly. Both detections live in `src/platform/`.
 

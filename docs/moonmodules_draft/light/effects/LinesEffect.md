@@ -8,7 +8,7 @@ Moving lines synchronized to a BPM tempo.
 
 ## Prior art
 
-### projectMM v1 — LinesEffect ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/modules/effects/LinesEffect.h))
+### projectMM v1 — LinesEffect ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/effects/LinesEffect.h))
 v1 LinesEffect (commit 54b50bc). Simple rhythmic line pattern. Good for music-reactive setups.
 BPM-based line pattern.
 

@@ -9,7 +9,7 @@ Expanding circular ripples from random centre points on the XY plane.
 
 ## Prior art
 
-### projectMM v1 — RipplesEffect ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/modules/effects/RipplesEffect.h))
+### projectMM v1 — RipplesEffect ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/effects/RipplesEffect.h))
 v1 RipplesEffect (commit 54b50bc). Spawns ripples at random positions, each expanding outward as a ring. Older ripples fade out. Multiple ripples can overlap.
 Proven implementation with speed and interval controls.
 

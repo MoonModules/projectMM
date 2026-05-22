@@ -42,5 +42,5 @@ Memory: `estimateBytes(logicalCount, maxDest)` returns the total allocation size
 ### MoonLight — PhysMap ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/PhysMap.h))
 Memory-optimal union. 2 bytes (no-PSRAM) or 4 bytes (PSRAM). Map type stored IN each entry. `oneToOneMapping` and `allOneLight` fast path flags. `forEachLightIndex()` for 1:N iteration. v3 renamed `oneToOneMapping` → `setIdentity()` / `!hasLUT()` because "one-to-one" reads as covering all 1:1 mappings, but the table-free fast path applies only to the sequential identity case.
 
-### projectMM v1 — GridLayout.requestMappings ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/modules/layouts/GridLayout.h))
+### projectMM v1 — GridLayout.requestMappings ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/layouts/GridLayout.h))
 Simple flat array: `mappings[logical_index] = physical_strip_index`. Only 1:1. Rebuilt on control change.

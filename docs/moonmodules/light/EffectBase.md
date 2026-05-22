@@ -30,7 +30,7 @@ Whatever provides it, effects need:
 - Buffer access via `layer->virtualChannels` (raw byte array).
 - Time via `timeMicros()`.
 
-### projectMM v1 — ProducerModule ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/core/ProducerModule.h))
+### projectMM v1 — ProducerModule ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/core/ProducerModule.h))
 Base for effects. Produces into a Channel.
 
 ### projectMM v2 — PixelEffectBase ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/effects/PixelEffectBase.h))

@@ -137,8 +137,10 @@ async function init() {
         const savedSel = lsRead(LS_SELECTED, "mm.selectedModule", null);
         if (state.modules && state.modules.length > 0) {
             const exists = savedSel && state.modules.some(m => m.name === savedSel);
-            selectModule(exists ? savedSel : state.modules[0].name);
+            selectedModule = exists ? savedSel : state.modules[0].name;
         }
+        renderNav();
+        renderCards();
         updateStatusBar();
         // /api/types arrived in plan-11; fetch in parallel. When it arrives, re-render
         // so reset-to-default buttons (whose defaults come from this payload) appear.
@@ -216,13 +218,70 @@ function renderNav() {
     const nav = document.getElementById("nav");
     if (!nav || !state) return;
     nav.innerHTML = "";
-    // Side nav deferred to 1.x; main column shows the selected module + children
+
+    // One entry per root module. Clicking selects that root — only the selected
+    // root's card subtree is rendered (one root visible at a time).
+    const list = document.createElement("div");
+    list.className = "nav-list";
+    for (const mod of state.modules) {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "nav-item";
+        item.textContent = mod.name;
+        item.dataset.module = mod.name;
+        if (mod.name === selectedModule) item.classList.add("active");
+        item.addEventListener("click", () => selectModule(mod.name));
+        list.appendChild(item);
+    }
+    nav.appendChild(list);
+    nav.appendChild(buildNavFooter());
+}
+
+// Footer pinned to the bottom of the side nav: copyright + social links.
+function buildNavFooter() {
+    const footer = document.createElement("footer");
+    footer.className = "nav-footer";
+
+    const links = document.createElement("div");
+    links.className = "nav-social";
+    const SOCIAL = [
+        ["GitHub",  "https://github.com/ewowi/projectMM-v3",
+         "M12 .5C5.65.5.5 5.65.5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.54-3.88-1.54-.53-1.34-1.3-1.7-1.3-1.7-1.06-.72.08-.71.08-.71 1.17.08 1.79 1.2 1.79 1.2 1.04 1.79 2.73 1.27 3.4.97.1-.76.41-1.27.74-1.56-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.25 5.68.42.36.8 1.08.8 2.18v3.23c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"],
+        ["Discord", "https://discord.gg/TC8NSUSCdV",
+         "M20.32 4.37A19.8 19.8 0 0 0 15.45 2.9a13.6 13.6 0 0 0-.62 1.27 18.3 18.3 0 0 0-5.67 0A13 13 0 0 0 8.54 2.9 19.7 19.7 0 0 0 3.67 4.37C.57 8.96-.27 13.44.15 17.85a19.9 19.9 0 0 0 6 3.03c.49-.66.92-1.36 1.29-2.1-.71-.27-1.39-.6-2.03-.99.17-.12.34-.25.5-.38a14.2 14.2 0 0 0 12.18 0c.16.13.33.26.5.38-.64.39-1.32.72-2.03.99.37.74.8 1.44 1.29 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.1-.85-9.55-3.58-13.48ZM8.02 15.13c-1.18 0-2.15-1.08-2.15-2.41 0-1.33.95-2.42 2.15-2.42 1.2 0 2.17 1.1 2.15 2.42 0 1.33-.95 2.41-2.15 2.41Zm7.96 0c-1.18 0-2.15-1.08-2.15-2.41 0-1.33.95-2.42 2.15-2.42 1.2 0 2.17 1.1 2.15 2.42 0 1.33-.95 2.41-2.15 2.41Z"],
+        ["Reddit",  "https://reddit.com/r/moonmodules",
+         "M22 12c0-1.1-.9-2-2-2-.55 0-1.04.22-1.4.58a9.8 9.8 0 0 0-5.1-1.55l.87-4.1 2.85.6a1.5 1.5 0 1 0 .15-1l-3.18-.67a.5.5 0 0 0-.59.38l-.97 4.57a9.8 9.8 0 0 0-5.16 1.55A2 2 0 1 0 4 13.66a3.9 3.9 0 0 0-.05.6c0 3.3 3.86 5.98 8.62 5.98 4.76 0 8.62-2.68 8.62-5.98 0-.2-.02-.4-.05-.6.53-.36.86-.96.86-1.66ZM8 13.5a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0Zm8.32 4.07c-1.04 1.04-3.02 1.12-3.6 1.12-.58 0-2.57-.08-3.6-1.12a.4.4 0 0 1 .56-.56c.65.65 2.05.88 3.04.88.99 0 2.39-.23 3.04-.88a.4.4 0 0 1 .56.56ZM16 15a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z"],
+        ["YouTube", "https://www.youtube.com/@MoonModulesLighting",
+         "M23.5 6.5a3 3 0 0 0-2.12-2.12C19.5 3.87 12 3.87 12 3.87s-7.5 0-9.38.51A3 3 0 0 0 .5 6.5C0 8.38 0 12 0 12s0 3.62.5 5.5a3 3 0 0 0 2.12 2.12c1.88.51 9.38.51 9.38.51s7.5 0 9.38-.51a3 3 0 0 0 2.12-2.12C24 15.62 24 12 24 12s0-3.62-.5-5.5ZM9.6 15.6V8.4l6.2 3.6-6.2 3.6Z"],
+    ];
+    for (const [name, url, path] of SOCIAL) {
+        const a = document.createElement("a");
+        a.href = url;
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.title = name;
+        a.setAttribute("aria-label", name);
+        a.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="${path}"/></svg>`;
+        links.appendChild(a);
+    }
+    footer.appendChild(links);
+
+    const copy = document.createElement("div");
+    copy.className = "nav-copyright";
+    copy.textContent = `© ${new Date().getFullYear()} MoonLight`;
+    footer.appendChild(copy);
+
+    return footer;
 }
 
 function selectModule(name) {
     selectedModule = name;
     localStorage.setItem(LS_SELECTED, name);
+    document.querySelectorAll(".nav-item").forEach((el) => {
+        el.classList.toggle("active", el.dataset.module === name);
+    });
     renderCards();
+    closeNavDrawer();
 }
 
 function findModule(name, modules) {
@@ -242,11 +301,14 @@ function renderCards() {
     if (!main || !state) return;
     main.innerHTML = "";
 
-    // Plan-11: render all top-level modules in one column. The "selected module"
-    // concept survives for localStorage purposes but the UI shows everything.
-    for (const mod of state.modules) {
-        renderModuleTree(mod, main, 0);
+    // One root visible at a time: render only the selected root's subtree.
+    // Falls back to the first root if the selection is missing or stale.
+    let root = selectedModule ? findModule(selectedModule) : null;
+    if (!root && state.modules.length > 0) {
+        root = state.modules[0];
+        selectedModule = root.name;
     }
+    if (root) renderModuleTree(root, main, 0);
 }
 
 function renderModuleTree(mod, parentEl, depth) {
@@ -522,9 +584,13 @@ function createControl(moduleName, moduleType, ctrl) {
             break;
         }
         case "password": {
+            // ctrl.value arrives XOR-obfuscated + base64-encoded (see
+            // HttpServerModule PASSWORD_XOR_KEY). Decode it so the input holds
+            // the real stored password — masked by the password input, revealed
+            // by hold-to-peek. The obfuscation is trivially reversible by design.
             const input = document.createElement("input");
             input.type = "password";
-            input.placeholder = ctrl.value ? "•".repeat(8) : "";
+            input.value = decodePassword(ctrl.value);
             input.dataset.mid = moduleName;
             input.dataset.key = ctrl.name;
             input.addEventListener("input", () => {
@@ -532,7 +598,7 @@ function createControl(moduleName, moduleType, ctrl) {
                 debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, input.value));
             });
             row.appendChild(input);
-            // Hold-to-peek button
+            // Hold-to-peek button — reveals the stored password.
             const peek = document.createElement("button");
             peek.className = "peek-btn";
             peek.type = "button";
@@ -647,6 +713,25 @@ function debounceSend(key, ms, fn) {
     dragTimers[key] = setTimeout(fn, ms);
 }
 
+// Password controls arrive XOR-obfuscated + base64-encoded (see
+// HttpServerModule PASSWORD_XOR_KEY). This reverses it. The XOR key is a fixed
+// shared constant, not a secret — this is obfuscation so the password is not
+// plainly readable in a raw /api/state response, not real encryption.
+const PW_XOR_KEY = 0x5A;
+function decodePassword(encoded) {
+    if (!encoded) return "";
+    try {
+        const bytes = atob(encoded);
+        let out = "";
+        for (let i = 0; i < bytes.length; i++) {
+            out += String.fromCharCode(bytes.charCodeAt(i) ^ PW_XOR_KEY);
+        }
+        return out;
+    } catch {
+        return "";
+    }
+}
+
 function fmtTime(sec) {
     sec = Math.max(0, Math.floor(Number(sec) || 0));
     const d = Math.floor(sec / 86400); sec -= d * 86400;
@@ -733,6 +818,14 @@ function updateModuleControls(mod) {
                 if (userActive) break;
                 const input = document.querySelector(`input[type="text"][data-mid="${mid}"][data-key="${k}"]`);
                 if (input && input.value !== (ctrl.value ?? "")) input.value = ctrl.value ?? "";
+                break;
+            }
+            case "password": {
+                if (userActive) break;
+                // The peek button flips the input to type="text", so match either.
+                const input = document.querySelector(`input[data-mid="${mid}"][data-key="${k}"]`);
+                const decoded = decodePassword(ctrl.value);
+                if (input && input.value !== decoded) input.value = decoded;
                 break;
             }
             case "select": {
@@ -1038,7 +1131,8 @@ function previewDecompressOn() {
     let found = false;
     (function walk(mods) {
         for (const m of mods) {
-            if (m.type === "PreviewDriver" || m.name === "Preview") {
+            // Match on type only — the name is user-editable, the type is not.
+            if (m.type === "PreviewDriver") {
                 const c = (m.controls || []).find(c => c.name === "decompress");
                 if (c) found = !!c.value;
             }
@@ -1242,6 +1336,23 @@ function setupStatusBarButtons() {
         localStorage.setItem(LS_THEME, theme);
         applyTheme(theme);
     });
+
+    // Hamburger: toggles the side nav. On wide screens it collapses/expands the
+    // static column; on narrow screens (<820px) the same class drives a slide-in
+    // drawer over an overlay (CSS handles the responsive difference).
+    document.getElementById("nav-toggle")?.addEventListener("click", () => {
+        document.body.classList.toggle("nav-open");
+    });
+    document.getElementById("nav-overlay")?.addEventListener("click", closeNavDrawer);
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") closeNavDrawer();
+    });
+}
+
+// Close the side nav. On wide screens this collapses the column; on narrow
+// screens it dismisses the slide-in drawer + overlay.
+function closeNavDrawer() {
+    document.body.classList.remove("nav-open");
 }
 
 function applyTheme(t) {

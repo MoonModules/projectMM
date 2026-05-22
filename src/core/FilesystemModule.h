@@ -242,7 +242,10 @@ private:
             case ControlType::Bool:
                 *static_cast<bool*>(c.ptr) = mm::json::parseBool(json, key);
                 break;
-            case ControlType::Text: {
+            case ControlType::Text:
+            case ControlType::Password: {
+                // Password persists to disk like Text — the leak that mattered
+                // was the network API, not local flash.
                 uint8_t maxLen = c.max > 0 ? c.max : 16;
                 mm::json::parseString(json, key, static_cast<char*>(c.ptr), maxLen);
                 break;
@@ -317,6 +320,24 @@ private:
         return true;
     }
 
+    // Emit a JSON string literal (with surrounding quotes) for `s`, escaping the
+    // two characters that would otherwise break JSON: " and \. Returns false if
+    // the value (plus quotes/escapes) does not fit the remaining buffer.
+    static bool writeJsonString(const char* s, char* buf, size_t bufLen, int& pos) {
+        if (static_cast<size_t>(pos) >= bufLen) return false;
+        buf[pos++] = '"';
+        for (; *s; s++) {
+            char c = *s;
+            bool escape = (c == '"' || c == '\\');
+            if (static_cast<size_t>(pos) + (escape ? 2 : 1) >= bufLen) return false;
+            if (escape) buf[pos++] = '\\';
+            buf[pos++] = c;
+        }
+        if (static_cast<size_t>(pos) + 1 >= bufLen) return false;
+        buf[pos++] = '"';
+        return true;
+    }
+
     bool writeValue(const ControlDescriptor& c, char* buf, size_t bufLen, int& pos) {
         int n = 0;
         switch (c.type) {
@@ -333,9 +354,10 @@ private:
                                   *static_cast<bool*>(c.ptr) ? "true" : "false");
                 break;
             case ControlType::Text:
-                n = std::snprintf(buf + pos, bufLen - pos, "\"%s\"",
-                                  static_cast<char*>(c.ptr));
-                break;
+            case ControlType::Password:
+                // Escape " and \ so a value like My"SSID can't produce malformed
+                // JSON. Returns false on buffer overflow.
+                return writeJsonString(static_cast<const char*>(c.ptr), buf, bufLen, pos);
             case ControlType::Select:
                 n = std::snprintf(buf + pos, bufLen - pos, "%u",
                                   *static_cast<uint8_t*>(c.ptr));

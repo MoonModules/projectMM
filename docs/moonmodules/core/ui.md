@@ -10,13 +10,13 @@ For deferred items, the open design questions for 1.0, and the gap analysis, see
 
 **Backend contract** — what the UI depends on:
 - HttpServerModule serves `/api/state`, `/api/types`, `/api/control`, `POST /api/modules`, `DELETE /api/modules/<n>`, `POST /api/modules/<n>/move`, `POST /api/reboot`.
-- WebSocket at `/ws` pushes full-tree state JSON and binary preview frames (`[0x02][w16][h16][d16][RGB…]`).
+- WebSocket at `/ws` pushes full-tree state JSON and binary preview frames (`[0x02][dw16][dh16][dd16][ow16][oh16][od16][RGB…]` — 13-byte header: downsampled then original grid dims).
 - Per-control `hidden` flag is supported.
 - Per-module `loopTimeUs` and `dynamicBytes()` are exposed in `/api/state`.
 
 ## Principles
 
-- **Three hand-maintained files**: `index.html`, `app.js`, `style.css`. No frameworks, no build tools, no npm. Embedded at compile time on ESP32 via `ui_embedded.h`.
+- **Three hand-maintained files**: `index.html`, `app.js`, `style.css`, plus the `moonlight-logo.png` asset. No frameworks, no build tools, no npm. All four are embedded at compile time on ESP32 via `ui_embedded.h` (the logo as a binary byte array).
 - **MoonModule-driven.** The UI has zero hard-coded knowledge of specific effects, layouts, modifiers, or drivers. It queries `/api/types` and `/api/state` (or its WebSocket equivalent) and renders generically.
 - **Adding a new MoonModule with new controls requires zero UI changes** — provided the engine uses control types the UI already knows how to render.
 - **WebSocket for updates, REST for mutations.** Real-time state push without polling; user actions are explicit POST/DELETE calls.
@@ -28,31 +28,47 @@ For deferred items, the open design questions for 1.0, and the gap analysis, see
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│  Status bar: brand · device name · sys stats                │
+│  Status bar: ☰ · logo · brand · device name · sys stats     │
 │              · WS dot · reconnect · reboot · theme toggle   │
-├─────────────────────────────────────────────────────────────┤
-│  Sticky 3D preview canvas (shrinks 50% on scroll)           │
-├─────────────────────────────────────────────────────────────┤
-│  Module cards in a single column (max-width 500px)          │
-│    ↳ child cards inline                                     │
-│      ↳ grandchild cards inline                              │
-└─────────────────────────────────────────────────────────────┘
+├──────────────┬──────────────────────────────────────────────┤
+│  Side nav    │  Sticky 3D preview canvas (shrinks on scroll)│
+│  (root list) ├──────────────────────────────────────────────┤
+│              │  Cards for the selected root module          │
+│              │    ↳ child cards inline                      │
+│  ─────────   │      ↳ grandchild cards inline               │
+│  footer:     │                                              │
+│  social ©    │                                              │
+└──────────────┴──────────────────────────────────────────────┘
 ```
 
-- Fixed status bar at top (44px)
+- Fixed status bar at top (44px) — hamburger, MoonLight logo, then the rest
+- Side nav: a left column listing root modules; the selected root's card subtree fills the main area (one root visible at a time)
 - Main column max-width 500px, centered (single-column module list — easier to read on phones)
 - 3D preview is sticky just below the status bar and shrinks 0% → 50% as the user scrolls 0 → 300px
 
 ## Status bar
 
 Fixed top, 44px. Left-to-right:
-1. Brand wordmark — "projectMM"
-2. Device name (from `System.deviceName` control)
-3. System stats — `uptime · NN K free` (uptime as `Xd Yh Zm Ws`, free heap as KB). Read from the SystemModule controls in the WebSocket state push; no separate polling endpoint.
-4. WebSocket connection dot — green=connected, gray=disconnected
-5. Reconnect button (⟳)
-6. Reboot button (⏻; red border via `data-crashed="true"` when `SystemModule.bootReason` is PANIC / INT_WDT / TASK_WDT / BROWNOUT). Confirms via `confirm()` then `POST /api/reboot`.
-7. Theme toggle (☀/🌙) — flips `[data-theme]` on `<body>`; preference in `localStorage['mm_theme']`.
+1. Hamburger (☰) — toggles the side nav (`body.nav-open` class). See [Side navigation](#side-navigation).
+2. MoonLight logo — 28px PNG, served from `/moonlight-logo.png`. The same image is the page favicon (`<link rel="icon">`).
+3. Brand wordmark — "projectMM"
+4. Device name (from `System.deviceName` control)
+5. System stats — `uptime · NN K free` (uptime as `Xd Yh Zm Ws`, free heap as KB). Read from the SystemModule controls in the WebSocket state push; no separate polling endpoint.
+6. WebSocket connection dot — green=connected, gray=disconnected
+7. Reconnect button (⟳)
+8. Reboot button (⏻; red border via `data-crashed="true"` when `SystemModule.bootReason` is PANIC / INT_WDT / TASK_WDT / BROWNOUT). Confirms via `confirm()` then `POST /api/reboot`.
+9. Theme toggle (☀/🌙) — flips `[data-theme]` on `<body>`; preference in `localStorage['mm_theme']`.
+
+## Side navigation
+
+A left column listing the root modules, one entry per top-level MoonModule.
+
+- **One root visible at a time.** Clicking a nav entry sets the selected root; `renderCards()` renders only that root's card subtree. The selection persists in `localStorage['mm_selectedRoot']`; the active entry is highlighted.
+- **Hamburger toggle.** The ☰ button toggles `body.nav-open`. On wide screens (≥820px) the nav is a static column the hamburger collapses/expands. On narrow screens (<820px) the nav is a slide-in drawer over a dimming overlay; clicking the overlay or pressing Esc closes it.
+- **No root reorder.** Root order is fixed in `main.cpp` — the nav does not drag-reorder.
+- **Footer** pinned to the bottom of the nav: social links (GitHub, Discord, Reddit, YouTube — inline SVG icons) and a `© <year> MoonLight` copyright line.
+
+The WebSocket state push still carries the full module tree; only the selected root is rendered, and `updateValues()` patches just the visible cards (non-rendered roots have no DOM nodes, so their data is silently ignored). Per-root server-side filtering was evaluated and deferred — the 1 Hz, ~700-byte push is too cheap to justify a bidirectional view-state protocol.
 
 ## Module card
 
@@ -83,7 +99,7 @@ Auto-rendered by `controls[].type`. Adding a new MoonModule with these control t
 | `toggle` (bool) | checkbox | sends immediately on change | none |
 | `select` | dropdown | sends immediately; server may rebuild controls (dynamic onBuildControls) | none |
 | `text` | text input | sends debounced | 500ms |
-| `password` | password input | hold-to-peek button; placeholder shows `•` for existing length | 500ms |
+| `password` | password input | masked; hold-to-peek button reveals the stored value | 500ms |
 | `display` (read-only) | static text | WS push updates value in place | n/a |
 | `time` (read-only seconds) | formatted text (`1d 4h 27m 13s`) | WS push updates | n/a |
 | `progress` | bar + numeric `X / max` | WS push updates value | n/a |
@@ -92,6 +108,8 @@ Auto-rendered by `controls[].type`. Adding a new MoonModule with these control t
 **Reset-to-default button (↺).** Appears next to controls whose default is known. Defaults are captured from a fresh probe instance per type (factory's probe — no per-control boilerplate) and emitted in `/api/types`. The button is dim/inactive when value equals default, bright/clickable otherwise. Clicking sends the default value.
 
 **Hidden controls.** When the engine returns `hidden: true` on a control descriptor, the UI skips rendering it. Used for conditional controls like NetworkModule's static-IP fields under DHCP.
+
+**Password controls are obfuscated, not encrypted.** A `password` control (`ControlType::Password`) is serialized in `/api/state` as `{"type":"password","value":"<encoded>"}` where `<encoded>` is the password XOR'd with a fixed key then base64-encoded. The UI decodes it (`decodePassword()` in `app.js`) so the input holds the real value — masked by the password field, revealed by hold-to-peek. This is a **first line of defence only**: the XOR key is a shared constant present in both the firmware and `app.js`, so the obfuscation is trivially reversible by anyone who looks. It stops the password being plainly readable in a raw `curl /api/state`; it is not real protection against a determined reader. Writes (`/api/control`) set the value like any text control.
 
 ## Type picker
 
@@ -129,7 +147,7 @@ Reorder of root modules is **not** supported — the order is fixed in `main.cpp
 
 - URL: `ws://<host>/ws` (same port as HTTP)
 - Server pushes full state snapshot as JSON ~1/sec (same shape as `GET /api/state`)
-- Server pushes binary preview frames: `[0x02][w16][h16][d16][R G B …]` — 3D voxel grid, little-endian widths
+- Server pushes binary preview frames: `[0x02][dw16][dh16][dd16][ow16][oh16][od16][R G B …]` — 13-byte header (downsampled dims `dw/dh/dd`, then original-grid dims `ow/oh/od`), little-endian uint16, then RGB triples for the downsampled grid
 - Client sends `"ping"` every 25s as keepalive (Safari kills idle sockets otherwise)
 - Auto-reconnect on close with exponential backoff (500ms → 5s ceiling)
 - Pause on `document.visibilityState === 'hidden'`; resume on `pageshow` (Safari bfcache survival)
@@ -157,7 +175,8 @@ The `/api/control` shape is `{module: "name", control: "key", value: …}`.
 
 - `GET /` → `index.html`
 - `GET /app.js`, `GET /style.css`
-- `Cache-Control: no-cache, no-store, must-revalidate` on all UI responses (live development)
+- `GET /moonlight-logo.png` → the MoonLight logo (`image/png`), used in the header and as the favicon
+- `Cache-Control: no-cache` on all UI responses (live development)
 - ESP32: served from C arrays in `ui_embedded.h` regenerated at build time
 - Desktop: served from disk (`uiPath_`)
 
@@ -179,7 +198,7 @@ The `/api/control` shape is `{module: "name", control: "key", value: …}`.
 WebGL point cloud rendered to a `<canvas>`.
 
 - Server pushes binary frames over the same WebSocket as state updates
-- Frame format: `[0x02][w16][h16][d16][R G B …]` — width/height/depth in 16-bit little-endian, then RGB triples in `(z, y, x)` order
+- Frame format: `[0x02][dw16][dh16][dd16][ow16][oh16][od16][R G B …]` — a 13-byte header (downsampled grid dims `dw/dh/dd`, then the original-grid dims `ow/oh/od`, each 16-bit little-endian), then RGB triples for the `dw×dh×dd` downsampled grid in `(z, y, x)` order. The original dims drive the `decompress` UI hint (block-replicate back to the full grid). See [PreviewDriver](light/drivers/PreviewDriver.md).
 - UI builds an interleaved float vertex buffer `[x, y, z, r, g, b]`, **skipping black voxels** so payload-to-GPU is sparse and fast
 - Camera: orbit on mouse-drag, wheel-zoom, touch-orbit on mobile
 - Point size scales with canvas size and grid maxDim (target ~10px per LED at rest)
@@ -216,15 +235,17 @@ No other client state persists. Reorder, control values, etc. all live on the de
 
 ## Feature summary
 
-Everything in this spec is in the live codebase. The 10 features below each link to the section that describes the contract.
+Everything in this spec is in the live codebase. The 12 features below each link to the section that describes the contract.
 
-1. **Status bar** with brand, device name, system stats (uptime · free heap), WS dot, reconnect button, reboot button (with crashed-state styling), and theme toggle — see [Status bar](#status-bar).
-2. **Single-column module card layout** with hierarchy (children inline-indented, depth-based card backgrounds) — see [Module card](#module-card).
-3. **All 9 control types** (uint8 slider, uint16, bool, text, password with hold-to-peek, select, display, time, progress, button) with the `dragTs` + 20ms-feedback + 150/500ms-debounce pattern — see [Control types](#control-types).
-4. **Type picker** (role-filtered, search box, keyboard navigation) on parents that accept children — see [Type picker](#type-picker).
-5. **Reset-to-default ↺** buttons per control with a known default. Defaults are captured from a fresh probe instance per type (factory's probe — no per-control boilerplate) and emitted in `/api/types`.
-6. **Light/dark theme toggle** via `[data-theme]` on `<body>` + CSS variables; preference persists in `localStorage['mm_theme']`.
-7. **WS keepalive ping (25s)** + `visibilitychange` pause + `pageshow` bfcache resume — see [Communication § WebSocket](#websocket-primary-for-state-updates).
-8. **3D preview** with orbit camera (mouse + touch), sticky position, scroll-shrink 0→50% over 300px, sparse vertex buffer (skipping black voxels), and depth-corrected GLSL point size — see [3D preview](#3d-preview).
-9. **Per-card fps/ms toggle** — clickable stats line cycles fps↔ms; global mode persists in `localStorage['mm_timing_mode']`.
-10. **Up/↑/↓ icon buttons** for reorder + delete (×) on reorderable children (Effect/Modifier role). Drag-and-drop (HTML5 DnD) works on desktop; mobile naturally falls through to the icon buttons. Both call `POST /api/modules/<n>/move`.
+1. **Status bar** with hamburger, MoonLight logo, brand, device name, system stats (uptime · free heap), WS dot, reconnect button, reboot button (with crashed-state styling), and theme toggle — see [Status bar](#status-bar).
+2. **Side navigation** — a left column listing root modules; one root visible at a time, selection persisted; footer with social links + copyright; hamburger collapses it (wide) or slides it in over an overlay (<820px) — see [Side navigation](#side-navigation).
+3. **Single-column module card layout** with hierarchy (children inline-indented, depth-based card backgrounds) — see [Module card](#module-card).
+4. **All 9 control types** (uint8 slider, uint16, bool, text, password with hold-to-peek, select, display, time, progress, button) with the `dragTs` + 20ms-feedback + 150/500ms-debounce pattern — see [Control types](#control-types).
+5. **Type picker** (role-filtered, search box, keyboard navigation) on parents that accept children — see [Type picker](#type-picker).
+6. **Reset-to-default ↺** buttons per control with a known default. Defaults are captured from a fresh probe instance per type (factory's probe — no per-control boilerplate) and emitted in `/api/types`.
+7. **Light/dark theme toggle** via `[data-theme]` on `<body>` + CSS variables; preference persists in `localStorage['mm_theme']`.
+8. **WS keepalive ping (25s)** + `visibilitychange` pause + `pageshow` bfcache resume — see [Communication § WebSocket](#websocket-primary-for-state-updates).
+9. **3D preview** with orbit camera (mouse + touch), sticky position, scroll-shrink 0→50% over 300px, sparse vertex buffer (skipping black voxels), and depth-corrected GLSL point size — see [3D preview](#3d-preview).
+10. **Per-card fps/ms toggle** — clickable stats line cycles fps↔ms; global mode persists in `localStorage['mm_timing_mode']`.
+11. **Up/↑/↓ icon buttons** for reorder + delete (×) on reorderable children (Effect/Modifier role). Drag-and-drop (HTML5 DnD) works on desktop; mobile naturally falls through to the icon buttons. Both call `POST /api/modules/<n>/move`.
+12. **MoonLight logo + favicon** — the header logo and browser-tab favicon are the same `/moonlight-logo.png` asset, embedded on ESP32.

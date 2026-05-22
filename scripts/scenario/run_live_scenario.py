@@ -183,7 +183,10 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5) -> 
                 if "min_fps_led_product" in bounds["fps"]:
                     product = bounds["fps"]["min_fps_led_product"]
                     lights = count_lights(client)
-                    if lights > 0 and tick_us > 0:
+                    if not isinstance(product, (int, float)) or product <= 0:
+                        print(f"  WARN  min_fps_led_product: invalid value "
+                              f"{product!r}, skipped")
+                    elif lights > 0 and tick_us > 0:
                         max_tick = round(lights * 1_000_000 / product)
                         if tick_us > max_tick:
                             print(f"  FAIL  tick {tick_us}us > {max_tick}us "

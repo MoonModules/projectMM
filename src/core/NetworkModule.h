@@ -48,7 +48,7 @@ public:
         // WiFi credential controls are absent in the Ethernet-only build.
         if constexpr (platform::hasWiFi) {
             controls_.addText("ssid", ssid_, sizeof(ssid_));
-            controls_.addText("password", password_, sizeof(password_));
+            controls_.addPassword("password", password_, sizeof(password_));
         }
         controls_.addSelect("addressing", addressing_, addressingOptions_, 2);
         controls_.addBool("mDNS", mdnsEnabled_);
@@ -132,13 +132,23 @@ public:
 
             case State::ConnectedSta:
                 if constexpr (platform::hasWiFi) {
-                    if (!platform::wifiStaConnected()) {
+                    // Ethernet outranks WiFi: if a cable comes up while we are on
+                    // WiFi STA, promote to Ethernet. onConnected() then shuts the
+                    // WiFi STA down. Gated on ethConnected() (link + DHCP IP), not
+                    // bare link-up, so WiFi is never dropped for a not-yet-working
+                    // Ethernet — matches the State::AP upgrade check.
+                    if (platform::ethConnected()) {
+                        std::printf("NetworkModule: Ethernet up, switching from WiFi STA\n");
+                        platform::mdnsStop();
+                        onConnected("Ethernet");
+                    } else if (!platform::wifiStaConnected()) {
                         std::printf("NetworkModule: WiFi STA dropped, starting AP\n");
                         platform::mdnsStop();
                         platform::wifiStaStop();
                         startAP();
+                    } else {
+                        updateStatusIP();
                     }
-                    updateStatusIP();
                 }
                 break;
 
@@ -214,7 +224,9 @@ private:
             state_ = State::Idle;
             std::snprintf(statusStr_, sizeof(statusStr_), "No network");
         }
-        rebuildLocalControlsAndPipeline();
+        // statusStr_ is a pointer-bound ReadOnly control, so no control rebuild
+        // is needed; just kick the scheduler for any dependent reallocations.
+        if (scheduler_) scheduler_->rebuild();
     }
 
     void onConnected(const char* via) {
@@ -243,7 +255,9 @@ private:
 
         syncMdns();
 
-        rebuildLocalControlsAndPipeline();
+        // statusStr_ is a pointer-bound ReadOnly control, so no control rebuild
+        // is needed; just kick the scheduler for any dependent reallocations.
+        if (scheduler_) scheduler_->rebuild();
     }
 
     void updateStatusIP() {
@@ -274,13 +288,6 @@ private:
         }
     }
 
-    // Network state changes (connected/AP/etc.) update statusStr_ in place — that's a
-    // ReadOnly control whose buffer is bound by pointer, so the UI picks up the new value via
-    // the WebSocket push without needing a control-list rebuild. Just kick the scheduler so
-    // any dependent pipeline reallocations run.
-    void rebuildLocalControlsAndPipeline() {
-        if (scheduler_) scheduler_->rebuild();
-    }
 };
 
 } // namespace mm

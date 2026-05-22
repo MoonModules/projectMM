@@ -4,7 +4,6 @@
 #include "light/LayoutGroup.h"
 #include "light/GridLayout.h"
 #include "core/PreviewFrame.h"
-#include "platform/platform.h"
 
 // PreviewDriver downsamples the render buffer into a small RGB frame so the
 // whole WebSocket message fits lwIP's TCP send buffer. These tests verify that
@@ -46,11 +45,10 @@ struct PreviewRig {
         driver.onAllocateMemory();
     }
 
-    // PreviewDriver self-rate-limits in loop() (1000/fps ms between frames).
-    // Wait out that interval so a single loop() reliably produces a frame.
+    // Produce one frame deterministically. renderFrame() bypasses loop()'s fps
+    // rate-limit, so the test never sleeps and never depends on wall-clock time.
     void produceFrame() {
-        mm::platform::delayMs(1000 / driver.fps + 5);
-        driver.loop();
+        driver.renderFrame();
     }
 };
 

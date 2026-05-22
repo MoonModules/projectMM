@@ -68,6 +68,12 @@ body {
     color: var(--accent);
 }
 
+#brand-logo {
+    width: 28px;
+    height: 28px;
+    display: block;
+}
+
 #device-name {
     font-weight: 500;
     color: var(--fg);
@@ -109,15 +115,85 @@ body {
 }
 
 /* ============================================================
-   Content layout
+   Content layout — side nav + main area
    ============================================================ */
 
 .content {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
+    align-items: flex-start;
 }
 
-#nav { display: none; }  /* placeholder for future side nav; not used in plan-11 */
+/* Side nav: a static left column on wide screens. The hamburger toggles the
+   body.nav-open class — see the wide-screen and <820px rules below. */
+#nav {
+    position: sticky;
+    top: 44px;
+    width: 200px;
+    flex: 0 0 200px;
+    height: calc(100vh - 44px);
+    background: var(--bg-1);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+/* Wide screens: nav shown by default; body.nav-open collapses it. */
+body.nav-open #nav {
+    display: none;
+}
+
+#nav-overlay { display: none; }
+
+.nav-list {
+    display: flex;
+    flex-direction: column;
+    padding: 8px;
+    gap: 2px;
+    flex: 1;
+}
+
+.nav-item {
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: var(--fg-muted);
+    text-align: left;
+    padding: 8px 10px;
+    font: inherit;
+    cursor: pointer;
+}
+.nav-item:hover { color: var(--fg); background: var(--bg-2); }
+.nav-item.active {
+    color: var(--accent);
+    background: var(--bg-2);
+    font-weight: 600;
+}
+
+.nav-footer {
+    border-top: 1px solid var(--border);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+}
+
+.nav-social {
+    display: flex;
+    gap: 14px;
+}
+.nav-social a {
+    color: var(--fg-muted);
+    display: flex;
+}
+.nav-social a:hover { color: var(--accent); }
+
+.nav-copyright {
+    color: var(--fg-muted);
+    font-size: 11px;
+}
 
 .main-area {
     max-width: 500px;
@@ -416,4 +492,31 @@ body {
     .main-area { padding: 8px; }
     .card[data-depth="1"] { margin-left: 8px; }
     .card[data-depth="2"] { margin-left: 16px; }
+
+    /* Narrow screens: the nav is a slide-in drawer, hidden until the hamburger
+       opens it. body.nav-open shows the drawer over a dimming overlay. */
+    #nav {
+        position: fixed;
+        top: 44px;
+        left: 0;
+        bottom: 0;
+        height: auto;
+        transform: translateX(-100%);
+        transition: transform 0.2s ease;
+        z-index: 90;
+    }
+    body.nav-open #nav {
+        display: flex;
+        transform: translateX(0);
+    }
+    #nav-overlay {
+        position: fixed;
+        top: 44px;
+        left: 0; right: 0; bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 80;
+    }
+    body.nav-open #nav-overlay {
+        display: block;
+    }
 }

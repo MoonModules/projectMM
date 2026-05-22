@@ -76,6 +76,12 @@ private:
     static constexpr size_t JSON_BUF_SIZE = 4096;
     static inline char jsonBuf_[JSON_BUF_SIZE];
 
+    // XOR key for Password-control obfuscation in /api/state. NOT a secret — the
+    // same value lives in src/ui/app.js (PW_XOR_KEY). This only stops the
+    // password being plainly readable in a raw API response; it is trivially
+    // reversible by design (see the ControlType::Password serialization).
+    static constexpr uint8_t PASSWORD_XOR_KEY = 0x5A;
+
     // -----------------------------------------------------------------------
     // HTTP handling
     // -----------------------------------------------------------------------
@@ -141,6 +147,7 @@ private:
             if (std::strcmp(path, "/") == 0) serveFile(conn, "index.html", "text/html");
             else if (std::strcmp(path, "/app.js") == 0) serveFile(conn, "app.js", "application/javascript");
             else if (std::strcmp(path, "/style.css") == 0) serveFile(conn, "style.css", "text/css");
+            else if (std::strcmp(path, "/moonlight-logo.png") == 0) serveFile(conn, "moonlight-logo.png", "image/png");
             else if (std::strcmp(path, "/api/state") == 0) serveState(conn);
             else if (std::strcmp(path, "/api/system") == 0) serveSystem(conn);
             else if (std::strcmp(path, "/api/types") == 0) serveTypes(conn);
@@ -239,6 +246,7 @@ private:
         if (std::strcmp(filename, "index.html") == 0) { data = ui::indexHtml; dataLen = ui::indexHtmlLen; }
         else if (std::strcmp(filename, "app.js") == 0) { data = ui::appJs; dataLen = ui::appJsLen; }
         else if (std::strcmp(filename, "style.css") == 0) { data = ui::styleCss; dataLen = ui::styleCssLen; }
+        else if (std::strcmp(filename, "moonlight-logo.png") == 0) { data = ui::logoPng; dataLen = ui::logoPngLen; }
 
         if (!data) {
             sendResponse(conn, 404, "text/plain", "File not found");
@@ -355,16 +363,43 @@ private:
                         "{\"name\":\"%s\",\"type\":\"bool\",\"value\":%s",
                         c.name, *static_cast<bool*>(c.ptr) ? "true" : "false");
                     break;
-                case ControlType::Text:
+                case ControlType::Text: {
+                    char escaped[128];
+                    jsonEscape(static_cast<char*>(c.ptr), escaped, sizeof(escaped));
                     n = std::snprintf(buf + pos, bufSize - pos,
                         "{\"name\":\"%s\",\"type\":\"text\",\"value\":\"%s\"",
-                        c.name, static_cast<char*>(c.ptr));
+                        c.name, escaped);
                     break;
-                case ControlType::ReadOnly:
+                }
+                case ControlType::Password: {
+                    // The password is sent XOR-obfuscated + base64-encoded, NOT
+                    // in plaintext. This is deliberate obfuscation, not security:
+                    // the XOR key is a fixed shared constant (also in app.js), so
+                    // anyone can reverse it. It is a first line of defence — the
+                    // value is not readable at a glance in `curl /api/state` — and
+                    // it lets the UI's hold-to-peek reveal the stored password.
+                    const char* pw = static_cast<char*>(c.ptr);
+                    uint8_t scrambled[64];
+                    size_t pwLen = std::strlen(pw);
+                    if (pwLen > sizeof(scrambled)) pwLen = sizeof(scrambled);
+                    for (size_t k = 0; k < pwLen; k++) {
+                        scrambled[k] = static_cast<uint8_t>(pw[k]) ^ PASSWORD_XOR_KEY;
+                    }
+                    char encoded[96];
+                    base64Encode(scrambled, pwLen, encoded, sizeof(encoded));
+                    n = std::snprintf(buf + pos, bufSize - pos,
+                        "{\"name\":\"%s\",\"type\":\"password\",\"value\":\"%s\"",
+                        c.name, encoded);
+                    break;
+                }
+                case ControlType::ReadOnly: {
+                    char escaped[128];
+                    jsonEscape(static_cast<char*>(c.ptr), escaped, sizeof(escaped));
                     n = std::snprintf(buf + pos, bufSize - pos,
                         "{\"name\":\"%s\",\"type\":\"display\",\"value\":\"%s\"",
-                        c.name, static_cast<char*>(c.ptr));
+                        c.name, escaped);
                     break;
+                }
                 case ControlType::Select: {
                     n = std::snprintf(buf + pos, bufSize - pos,
                         "{\"name\":\"%s\",\"type\":\"select\",\"value\":%u,\"options\":[",
@@ -406,8 +441,8 @@ private:
         // Parse: {"module":"Noise","control":"scale","value":8}
         char moduleName[32] = {};
         char controlName[32] = {};
-        parseJsonString(body, "module", moduleName, sizeof(moduleName));
-        parseJsonString(body, "control", controlName, sizeof(controlName));
+        mm::json::parseString(body, "module", moduleName, sizeof(moduleName));
+        mm::json::parseString(body, "control", controlName, sizeof(controlName));
 
         // Find the module by name
         MoonModule* target = findModuleByName(moduleName);
@@ -418,7 +453,7 @@ private:
 
         // Handle module-level "enabled" property
         if (std::strcmp(controlName, "enabled") == 0) {
-            target->setEnabled(parseJsonBool(body, "value"));
+            target->setEnabled(mm::json::parseBool(body, "value"));
             target->markDirty();
             FilesystemModule::noteDirty();
             if (scheduler_) scheduler_->rebuild();
@@ -434,30 +469,33 @@ private:
 
             switch (c.type) {
                 case ControlType::Uint8: {
-                    int v = parseJsonInt(body, "value");
+                    int v = mm::json::parseInt(body, "value");
                     *static_cast<uint8_t*>(c.ptr) = static_cast<uint8_t>(v);
                     break;
                 }
                 case ControlType::Uint16: {
-                    int v = parseJsonInt(body, "value");
+                    int v = mm::json::parseInt(body, "value");
                     *static_cast<uint16_t*>(c.ptr) = static_cast<uint16_t>(v);
                     break;
                 }
                 case ControlType::Bool: {
-                    bool v = parseJsonBool(body, "value");
+                    bool v = mm::json::parseBool(body, "value");
                     *static_cast<bool*>(c.ptr) = v;
                     break;
                 }
-                case ControlType::Text: {
+                case ControlType::Text:
+                case ControlType::Password: {
+                    // Password writes set the real value just like Text; only
+                    // serialization (writeControls) hides it.
                     char v[64] = {};
-                    parseJsonString(body, "value", v, sizeof(v));
+                    mm::json::parseString(body, "value", v, sizeof(v));
                     uint8_t maxLen = c.max > 0 ? c.max - 1 : 15;
                     std::strncpy(static_cast<char*>(c.ptr), v, maxLen);
                     static_cast<char*>(c.ptr)[maxLen] = '\0';
                     break;
                 }
                 case ControlType::Select: {
-                    int v = parseJsonInt(body, "value");
+                    int v = mm::json::parseInt(body, "value");
                     if (v < 0 || v >= c.max) {
                         sendResponse(conn, 400, "application/json", "{\"error\":\"value out of range\"}");
                         return;
@@ -557,9 +595,9 @@ private:
         char typeName[32] = {};
         char id[32] = {};
         char parentId[32] = {};
-        parseJsonString(body, "type", typeName, sizeof(typeName));
-        parseJsonString(body, "id", id, sizeof(id));
-        parseJsonString(body, "parent_id", parentId, sizeof(parentId));
+        mm::json::parseString(body, "type", typeName, sizeof(typeName));
+        mm::json::parseString(body, "id", id, sizeof(id));
+        mm::json::parseString(body, "parent_id", parentId, sizeof(parentId));
 
         if (typeName[0] == 0) {
             sendResponse(conn, 400, "application/json", "{\"error\":\"missing type\"}");
@@ -713,18 +751,21 @@ private:
                                       "%s\"%s\":%s", first ? "" : ",", c.name,
                                       *static_cast<bool*>(c.ptr) ? "true" : "false");
                     break;
-                case ControlType::Text:
+                case ControlType::Text: {
+                    char escaped[128];
+                    jsonEscape(static_cast<char*>(c.ptr), escaped, sizeof(escaped));
                     n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
                                       "%s\"%s\":\"%s\"", first ? "" : ",", c.name,
-                                      static_cast<char*>(c.ptr));
+                                      escaped);
                     break;
+                }
                 case ControlType::Select:
                     n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
                                       "%s\"%s\":%u", first ? "" : ",", c.name,
                                       *static_cast<uint8_t*>(c.ptr));
                     break;
                 default:
-                    continue;  // ReadOnly/Progress have no meaningful default
+                    continue;  // ReadOnly/Progress: no default; Password: never serialized
             }
             if (n < 0 || static_cast<size_t>(pos + n) >= JSON_BUF_SIZE) break;
             pos += n;
@@ -748,7 +789,7 @@ private:
             sendResponse(conn, 400, "application/json", "{\"error\":\"top-level modules cannot be reordered\"}");
             return;
         }
-        int to = parseJsonInt(body, "to");
+        int to = mm::json::parseInt(body, "to");
         if (to < 0 || to >= parent->childCount()) {
             sendResponse(conn, 400, "application/json", "{\"error\":\"to out of range\"}");
             return;
@@ -783,18 +824,6 @@ private:
         conn.close();
         platform::delayMs(200);
         platform::reboot();  // noreturn
-    }
-
-    // JSON parsing delegates to core/JsonUtil.h. Kept as thin wrappers so existing call
-    // sites read unchanged.
-    static void parseJsonString(const char* json, const char* key, char* out, size_t maxLen) {
-        mm::json::parseString(json, key, out, maxLen);
-    }
-    static int parseJsonInt(const char* json, const char* key) {
-        return mm::json::parseInt(json, key);
-    }
-    static bool parseJsonBool(const char* json, const char* key) {
-        return mm::json::parseBool(json, key);
     }
 
     // -----------------------------------------------------------------------
@@ -928,7 +957,10 @@ private:
         }
 
         // One scatter-gather chunk list: WS header + preview header + payload.
-        // The payload chunk stays a zero-copy pointer into the DriverGroup buffer.
+        // The payload chunk points at PreviewDriver's own downsample buffer —
+        // PreviewDriver::loop() writes the strided RGB copy there and sets
+        // previewFrame_->data to it. No copy here; the buffer is driver-owned
+        // (not a DriverGroup slice — the downsample step owns its own storage).
         const platform::WriteChunk chunks[] = {
             { wsHeader,      static_cast<size_t>(wsHeaderLen) },
             { previewHeader, sizeof(previewHeader) },
@@ -1008,6 +1040,18 @@ private:
     }
 
     // -----------------------------------------------------------------------
+    // Escape a string for embedding inside a JSON string literal: " → \" and
+    // \ → \\. Writes into `out` (no surrounding quotes). Truncates rather than
+    // overflowing if the escaped form exceeds outMax.
+    static void jsonEscape(const char* in, char* out, size_t outMax) {
+        size_t oi = 0;
+        for (; *in && oi + 2 < outMax; in++) {
+            if (*in == '"' || *in == '\\') out[oi++] = '\\';
+            out[oi++] = *in;
+        }
+        out[oi] = 0;
+    }
+
     // Base64 encode
     // -----------------------------------------------------------------------
 

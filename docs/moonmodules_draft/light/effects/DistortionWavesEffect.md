@@ -22,6 +22,6 @@ Original WLED port of distortion waves among many WLED effects.
 ### projectMM v2 — DistortionWavesEffect ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/effects/DistortionWavesEffect.h))
 Uses PixelEffectBase spine. Same algorithm as v1.
 
-### projectMM v1 — DistortionWaves2DEffect ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/modules/effects/DistortionWaves2DEffect.h))
+### projectMM v1 — DistortionWaves2DEffect ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/effects/DistortionWaves2DEffect.h))
 Two interfering sine waves. Uses `sinf()`. Controls: freq_x, freq_y, speed.
 v1 DistortionWaves2DEffect (commit 54b50bc). Uses `sinf()` — floating point, but only on cold-ish path (per-light per-frame). Acceptable on ESP32 with FPU (LX7) but consider integer approximation for LX6.

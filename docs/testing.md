@@ -263,11 +263,13 @@ uv run scripts/scenario/run_live_scenario.py --compare-baseline          # check
 
 ### Live scenario behavior
 
-Most scenarios use relative FPS bounds (`min_pct`) so they pass on any device — desktop at 10K FPS or ESP32 at 17 FPS. `base-pipeline` and `preview-detail` additionally carry the absolute `min_fps_led_product` throughput floor (see above). Settle time is 3 seconds to let the pipeline stabilize after rebuilds.
+Most scenarios use relative FPS bounds (`min_pct`) so they pass on any device — desktop at 10K FPS or ESP32 at 17 FPS. `base-pipeline` additionally carries the absolute `min_fps_led_product` throughput floor (see above); `preview-detail` deliberately does not — a single preview-toggle step swings too much for an absolute floor (the floor is enforced instead by `collect_kpi.py --commit` on a settled reading). Settle time is 3 seconds to let the pipeline stabilize after rebuilds.
 
 Scenarios that add modules (`base-pipeline`, `memory-1to1`) create temporary modules on the running device. These are cleaned up after each scenario (`- Rainbow (cleanup)`). Modules that already exist show `=` instead of `+`.
 
 Memory tracking works on ESP32: `freeHeap` and `freeInternalHeap` report real values. Desktop returns 0 (unlimited). The control-change scenario verifies no memory leaks by checking heap returns to baseline after mirror toggle.
+
+`control-change` and `grid-resize` do `set_control` on modules named `Mirror` / `Noise`. They pass only against a device tree that uses those exact names — a tree with `MirrorModifier` / `RainbowEffect` instead reports "module not found" for those steps. This is a scenario/device-tree naming assumption, not a firmware regression; align the scenario JSON with the device's actual module names (or vice versa) before relying on those two scenarios as a gate.
 
 ## Hardware Verification
 
@@ -288,6 +290,8 @@ The pre-commit ESP32 build must build **both** profiles warning-free under `-Wer
 - `build_esp32.py --profile eth-only` — exercises the `hasWiFi == false` path (WiFi compiled out; NetworkModule's `if constexpr` WiFi branches dropped).
 
 A clean `-Werror` build of each profile *is* the test — `hasWiFi` gating is compile-time, and NetworkModule has no desktop unit tests (OS networking). Desktop builds cover `hasWiFi == true` independently.
+
+"Warning-free" here means **compiler** warnings on project code. The ESP-IDF *configure* step emits one harmless CMake warning — `gdbinit.cmake: Error while generating esp_rom gdbinit` because `ESP_ROM_ELF_DIR` is unset (it is normally exported by `$IDF_PATH/export.sh`). It affects only `idf.py gdb`, not the firmware, and is expected when building via `build_esp32.py` rather than a full IDF export shell.
 
 ## Adding Tests
 

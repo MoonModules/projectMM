@@ -10,6 +10,9 @@ enum class ControlType : uint8_t {
     Uint16,
     Bool,
     Text,
+    Password,   // secret text — /api/state serializes it XOR-obfuscated +
+                // base64-encoded, not plaintext. Obfuscation only (the XOR key
+                // is shared with app.js), so it is trivially reversible.
     ReadOnly,   // display-only text (ptr → char buffer)
     Select,     // dropdown (ptr → uint8_t index, aux → options array pointer)
     Progress    // bar with value/total (ptr → uint32_t value, aux = total)
@@ -61,6 +64,14 @@ public:
     void addText(const char* name, char* var, uint8_t bufSize = 16) {
         grow();
         controls_[count_++] = {var, name, 0, ControlType::Text, 0, bufSize};
+    }
+
+    // Like addText but the value is a secret: the API serializes it
+    // XOR-obfuscated + base64-encoded (not plaintext, but trivially reversible —
+    // see ControlType::Password). Writes still set the real value.
+    void addPassword(const char* name, char* var, uint8_t bufSize = 32) {
+        grow();
+        controls_[count_++] = {var, name, 0, ControlType::Password, 0, bufSize};
     }
 
     void addReadOnly(const char* name, char* var, uint8_t bufSize = 32) {

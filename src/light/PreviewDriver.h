@@ -49,14 +49,20 @@ public:
     }
 
     void loop() override {
-        if (!sourceBuffer_ || !sourceBuffer_->data() || !frame_ || !layer_) return;
-        if (!downsampled_.data()) return;
         if (fps == 0) return;
-
         uint32_t now = platform::millis();
         uint32_t interval = 1000 / fps;
-        if (now - lastSendTime_ < interval) return;
+        if (now - lastSendTime_ < interval) return;  // rate-limit gate
         lastSendTime_ = now;
+        renderFrame();
+    }
+
+    // Produce one downsampled preview frame, bypassing the loop()'s fps
+    // rate-limit. Public so tests can drive frame production deterministically
+    // without sleeping for the rate-limit interval.
+    void renderFrame() {
+        if (!sourceBuffer_ || !sourceBuffer_->data() || !frame_ || !layer_) return;
+        if (!downsampled_.data()) return;
 
         // Dimensions read from Layer each frame so the preview tracks runtime resizes.
         lengthType w = layer_->physicalWidth();

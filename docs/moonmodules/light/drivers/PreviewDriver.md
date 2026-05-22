@@ -43,7 +43,7 @@ Frame types:
 ### MoonLight — PhysicalLayer + WebSocket
 Light preview sent via WebSocket binary frames directly from PhysicalLayer's display buffer. 3D WebGL renderer in frontend. No intermediate copy.
 
-### projectMM v1 — PreviewModule ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/modules/drivers/PreviewModule.h))
+### projectMM v1 — PreviewModule ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/drivers/PreviewModule.h))
 Streamed via WebSocket binary frames. Control: `logEveryN` (slider 1-1000) for throttling.
 
 ### projectMM v2 — PreviewModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/PreviewModule.h))

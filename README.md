@@ -70,7 +70,7 @@ Built on years of LED/light system development:
 | **WLED-MoonModules** | WLED fork with advanced features | [MoonModules/WLED](https://github.com/MoonModules/WLED) |
 | **StarLight** | Standalone LED firmware | [ewowi/StarLight](https://github.com/ewowi/StarLight) |
 | **MoonLight** | Ground-up build: 60+ effects, memory-optimized mapping, 11 driver types | [MoonModules/MoonLight](https://github.com/MoonModules/MoonLight) |
-| **projectMM v1** | First agentic build: proved MoonModule pattern, 8 releases | [ewowi/projectMM](https://github.com/ewowi/projectMM) |
+| **projectMM v1** | First agentic build: proved MoonModule pattern, 8 releases | [ewowi/projectMM](https://github.com/ewowi/projectMM-v1) |
 | **projectMM v2** | Lock-free buffers, multi-core scheduling, canvas UI | [ewowi/projectMM-v2](https://github.com/ewowi/projectMM-v2) |
 
 Lessons learned and proven patterns from all projects are distilled in [`docs/history/`](docs/history/):

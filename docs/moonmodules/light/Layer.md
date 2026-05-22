@@ -45,7 +45,7 @@ Consider whether Layer itself can provide the rendering context (buffer, dims, e
 - `nodes` vector for effects/modifiers (dynamic, not fixed-capacity).
 - `forEachLight` — per-logical-light iteration that asks the modifier for physical destinations; v3's LUT build uses the same per-light virtual-dispatch pattern.
 
-### projectMM v1 — EffectsLayer ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/modules/layers/EffectsLayer.h))
+### projectMM v1 — EffectsLayer ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/layers/EffectsLayer.h))
 Container for effects. Owns Channel (pixel buffer). Effects wired via `setInput("layer", ...)`.
 
 ### projectMM v2 — PixelEffectBase ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/effects/PixelEffectBase.h))

@@ -34,13 +34,12 @@ Legend:
 
 ### Layout & navigation
 
+Side nav (one root visible at a time), hamburger + slide-in drawer, and the nav footer with copyright + social links all shipped in plan-12 — see [moonmodules/core/ui.md § Side navigation](../../moonmodules/core/ui.md#side-navigation). Remaining items:
+
 | v1 feature | v3 today | Recommendation |
 |---|---|---|
-| Sidebar nav with one root visible at a time (selection persisted in localStorage) | flat module grid, all roots visible at once | **Defer-1.x** — the current grid works for v3's ~6 root modules. Side nav matters when the tree grows. Start with grid; add side nav when root count exceeds ~8 or the user reports clutter. |
 | Drag-to-reorder root modules (saves to `/api/modules/reorder`) | not supported | **Drop** — root order is fixed in `main.cpp` and that's correct: System/Network/Layer/DriverGroup are mandatory and have a logical setup order. Children get up/down + drag (already shipped). |
-| Hamburger menu + slide-in drawer + overlay on mobile (<820px) | none | **Adopt-1.0 only if side nav is adopted.** Skip otherwise. |
 | `<details>` collapsible panels at bottom (health, log) | none | See dedicated rows below. |
-| Footer in side nav with copyright + Discord/Reddit/YouTube/GitHub links | none | **Defer-1.x** until/unless we adopt the side nav. The links can sit elsewhere (or in a README). |
 
 ### Per-card features
 
@@ -85,12 +84,10 @@ Legend:
 |---|---|---|
 | Byte formatting (`X B` / `X KB`) | inconsistent | **Adopt-1.0** — ~5 lines of `fmtBytes()`. Use everywhere memory is shown. |
 | Numeric formatting with `Number.isInteger()` check (integer→`String(n)`, float→`n.toFixed(1)`) | inconsistent | **Adopt-1.0** — small utility. Already done by `displayControlValue` in v3 partially. |
-| Favicon = base64 brand logo (declared once in HTML, copied to favicon link at init) | no favicon | **Adopt-1.0** — visual identity in browser tabs. ~5 lines. |
 | Document title kept in sync with deviceName | none | **Adopt-1.0** — one line in the WS handler. Helps when juggling multiple devices in browser tabs. |
 
 ### Patterns to consciously NOT carry over
 
-- **Single root visible at a time.** v1's side nav forces the user to pick which root to look at. v3 has fewer roots — show them all by default and revisit if it gets noisy.
 - **Two-port WS (HTTP on 80, WS on 81).** v1 uses port 81 for WS because of the ESPAsyncWebServer constraints. v3's HTTP stack handles both on the same port — keep `/ws`.
 - **`PATCH /api/modules/:id/props/:key`.** The earlier draft mentioned this; v1 itself doesn't use it. Drop entirely. `POST /api/control {module, control, value}` is the path.
 - **In-card OTA injection** (`if (mod.type === 'FirmwareUpdateModule') card.appendChild(buildOtaPanel())`). Special-casing module types in the UI breaks the "UI is generic" principle. If/when OTA arrives in v3, the OTA module should expose its UI via standard controls (file-upload control type, progress-bar control type) — not a hand-built panel.
@@ -99,10 +96,10 @@ Legend:
 
 | Cost class | Items |
 |---|---|
-| Tiny (< 30 lines each, no backend work) | category emoji badge, child indent + bg-depth, document.title sync, favicon, byte/number formatters |
+| Tiny (< 30 lines each, no backend work) | category emoji badge, child indent + bg-depth, document.title sync, byte/number formatters |
 | Small (30–100 lines, no backend) | — (all small items shipped in the baseline) |
 | Medium (needs minor backend change) | help-link mapping (needs docs site), Module replace (needs `/api/modules/replace`), category() field if we ever want it richer than role()-derived |
-| Large (separate plan) | health panel + `/api/test`, log panel + WS log channel, side nav, OTA + GitHub-update badge, full multi-layer UI, presets UI |
+| Large (separate plan) | health panel + `/api/test`, log panel + WS log channel, OTA + GitHub-update badge, full multi-layer UI, presets UI |
 
 ## Loose ends — details from v1 that don't belong in any cluster
 
@@ -145,6 +142,6 @@ These are smaller mechanisms recorded so we don't have to rediscover them. Each 
 
 ## Prior art
 
-- **projectMM v1** ([source](https://github.com/ewowi/projectMM/tree/main/src/frontend)) — the direct ancestor. The full v1 frontend at release 1.4.0 has been thoroughly reverse-engineered into this catalogue.
+- **projectMM v1** ([source](https://github.com/ewowi/projectMM-v1/tree/main/src/frontend)) — the direct ancestor. The full v1 frontend at release 1.4.0 has been thoroughly reverse-engineered into this catalogue.
 - **projectMM v2** ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/frontend/index.html)) — added a canvas/node-graph view alongside the tree view. The tree view stayed as the proven default; canvas was an "alongside" complexity tax. v3 inherits only the tree view.
 - **MoonLight** — the WLED-MM web UI. Card layout, type picker patterns, and the dragTs cooldown originated there.

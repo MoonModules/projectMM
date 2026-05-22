@@ -14,6 +14,7 @@ Controls bind to class variables by reference. The control stores a pointer to t
 | uint16_t | 2 bytes | Number input | Yes (universe number, port) |
 | bool | 1 byte | Toggle | Yes (0/1) |
 | char[N] | fixed buffer | Text input | No |
+| Password | char[N] buffer | Password input (masked) | No |
 | ReadOnly | char[N] buffer | Display text (read-only) | No |
 | Select | uint8_t index | Dropdown | Yes (mode selection) |
 | Progress | uint32_t value + total | Progress bar | No |
@@ -21,6 +22,12 @@ Controls bind to class variables by reference. The control stores a pointer to t
 Additional types — add only when needed:
 - float — use minimally, prefer uint8_t where possible
 - Coord3D — for position controls
+
+### Password
+
+Text whose value is a secret. Binds to a `char[]` buffer like `Text`, but `/api/state` serializes it XOR-obfuscated + base64-encoded rather than in plaintext — a first line of defence so the password is not plainly readable in a raw API response. The obfuscation key is a shared constant (firmware + `app.js`), so it is trivially reversible by design, not encryption. The UI renders a masked input with a hold-to-peek button. Persists to flash like any text control.
+
+`controls_.addPassword("password", buf, sizeof(buf));`
 
 ### ReadOnly
 
@@ -71,7 +78,7 @@ Control values must be saved/loaded persistently (filesystem). The mechanism:
 ### MoonLight — addControl ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonBase/Nodes.h#L80))
 - Binds via `reinterpret_cast<uintptr_t>(&variable)`. Types: uint8_t, int8_t, uint16_t, uint32_t, int, float, bool, Coord3D. UI types: "slider", "select", "toggle", "text", "display". Select via `addControlValue()`.
 
-### projectMM v1 — addControl ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/core/StatefulModule.h))
+### projectMM v1 — addControl ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/core/StatefulModule.h))
 - Same pattern. Also supports "display", "progress", "button".
 
 ### projectMM v2 — ControlDescriptor ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/MoonModule.h#L40))

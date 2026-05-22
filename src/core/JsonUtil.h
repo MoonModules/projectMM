@@ -25,12 +25,19 @@ inline void parseString(const char* json, const char* key, char* out, size_t max
     }
     if (!start) return;
     start += std::strlen(search);
-    const char* end = std::strchr(start, '"');
-    if (!end) return;
-    size_t len = static_cast<size_t>(end - start);
-    if (len >= maxLen) len = maxLen - 1;
-    std::memcpy(out, start, len);
-    out[len] = 0;
+    // Copy until the real closing quote, un-escaping \" and \\. A bare strchr
+    // for '"' would stop at an escaped quote inside the value — must honour the
+    // backslash escapes written by FilesystemModule::writeJsonString.
+    size_t oi = 0;
+    for (const char* p = start; *p && oi + 1 < maxLen; p++) {
+        if (*p == '\\' && (p[1] == '"' || p[1] == '\\')) {
+            p++;                 // skip the backslash, copy the escaped char
+        } else if (*p == '"') {
+            break;               // unescaped quote — end of string
+        }
+        out[oi++] = *p;
+    }
+    out[oi] = 0;
 }
 
 inline int parseInt(const char* json, const char* key) {

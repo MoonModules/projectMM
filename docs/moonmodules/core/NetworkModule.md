@@ -17,7 +17,7 @@ When a higher-priority connection becomes available, lower ones are torn down to
 ## Controls
 
 - `ssid` (text) — WiFi STA network name
-- `password` (text) — WiFi STA password
+- `password` (password) — WiFi STA password. Serialized to the API XOR-obfuscated + base64-encoded, not in plaintext — a first line of defence only, trivially reversible. See [ui.md § Control types](ui.md#control-types).
 - `addressing` (dropdown: DHCP / Static) — IP addressing mode (applies to both Ethernet and WiFi STA)
 - When Static: `ip`, `gateway`, `subnet` (text controls, shown dynamically via onBuildControls)
 - `dns` (text, optional) — DNS server. Empty = use gateway as DNS.

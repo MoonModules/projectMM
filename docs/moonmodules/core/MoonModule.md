@@ -98,7 +98,7 @@ Conditional controls (e.g. fields only visible under a Select mode) are always b
 - `addControl()` binds to class variable by reference, stores `uintptr_t` pointer.
 - `classSize()` reports actual instance size.
 
-### projectMM v1 — StatefulModule ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/core/StatefulModule.h))
+### projectMM v1 — StatefulModule ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/core/StatefulModule.h))
 - Same addControl-by-reference pattern.
 
 ### projectMM v2 — MoonModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/MoonModule.h))

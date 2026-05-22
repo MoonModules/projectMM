@@ -28,7 +28,7 @@ Child modules run in their declared order within the parent. Top-level modules a
 - Two FreeRTOS tasks: effects on core 1, system/drivers on core 0.
 - Per-node: `loop()` every frame, `loop20ms()` for slow updates.
 
-### projectMM v1 — Scheduler ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/core/Scheduler.h))
+### projectMM v1 — Scheduler ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/core/Scheduler.h))
 - Time-sliced dispatch: setup, loop, loop20ms, loop1s for all modules. Single-threaded.
 
 ### projectMM v2 — Scheduler ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/Scheduler.h))

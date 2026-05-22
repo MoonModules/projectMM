@@ -39,7 +39,7 @@ Move-constructible, not copyable.
 ### MoonLight — VirtualLayer.virtualChannels ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h))
 Raw `uint8_t*` buffer, sized by `channelsPerLight * nrOfLights`. Supports RGB, RGBW, and multi-channel DMX fixtures via LightsHeader offsets.
 
-### projectMM v1 — Channel ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/modules/layers/Channel.h))
+### projectMM v1 — Channel ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/layers/Channel.h))
 3D array of RGB with width/height/depth metadata. `checksum()` method for verification in tests and health reporting.
 
 ### projectMM v2 — DataBuffer ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/DataBuffer.h))

@@ -82,7 +82,7 @@ Consequence for the live-scenario suite: relative bounds (`min_pct`) with a tigh
 
 **Fix:** the preview broadcast uses a single non-blocking scatter-gather write (`TcpConnection::writeChunks`, one `writev`/`sendmsg`). For the write to be atomic the frame must fit lwIP's TCP send buffer, which is enlarged to 11520 B (`CONFIG_LWIP_TCP_SND_BUF_DEFAULT`), so PreviewDriver downsamples the preview to ≤1849 voxels (~5.5 KB payload, adaptive stride) — the render task never blocks and the frame always sends whole. The PreviewDriver `fps` default dropped 20 → 12.
 
-**Measured (Olimex, eth-only firmware, 128×128 grid):** before the fix the `HttpServer` step cost ~44,000 µs/tick with a browser connected and the tick collapsed to 9 FPS. After the fix `HttpServer` is ~500-900 µs/tick steady (brief ~8 ms spikes once per second for the JSON state push), and FPS holds at 13 with a browser connected — the same as with no browser. The preview still animates in the browser.
+**Measured (Olimex, eth-only firmware, 128×128 grid) — HttpServer fix in isolation:** before the fix the `HttpServer` step cost ~44,000 µs/tick with a browser connected and the tick collapsed to 9 FPS. After the fix `HttpServer` is ~500-900 µs/tick steady (brief ~8 ms spikes once per second for the JSON state push), and — with the browser no longer stalling the render task — the tick stops varying with browser ACK timing. At this point ArtNet was still unoptimized, so the tick was ~73 ms (≈13 FPS); the ArtNet optimization below closes the rest of the gap. The preview still animates in the browser.
 
 ### ArtNet UDP send cost
 
@@ -93,7 +93,20 @@ Two fixes, measured on hardware (Olimex, eth-only, 128×128):
 - **Connected UDP socket** — `UdpSocket::connect()` binds the destination once, so each `sendTo()` skips the per-packet address parse + route lookup. ~49,000 → ~37,000 µs/tick.
 - **lwIP core locking** (`CONFIG_LWIP_TCPIP_CORE_LOCKING=y`) — socket calls take the TCP/IP core mutex and run inline instead of context-switching to `tcpip_thread` per call. ~37,000 → ~27,000 µs/tick.
 
-Combined: ArtNet ~50,000 → ~26,600 µs/tick, and the overall tick ~73 → ~49 ms — **20 FPS at 128×128 with ArtNet output and a browser connected**. The remaining ~26 ms is the genuine floor (97 × ~280 µs: pbuf alloc + IP/Ethernet framing + EMAC DMA + ~4 ms wire time). Reducing it further would need packet batching or moving ArtNet output off the render task.
+Combined ArtNet effect: ~50,000 → ~27,000 µs/tick. With the HttpServer fix above also in place, the **steady tick is ~51 ms / 19 FPS at 128×128 with ArtNet output and a browser connected** — the single current measurement the Timing table at the top of this section reports. (The exact ArtNet step and total fluctuate within the run-to-run variance band documented above; ~27,000 µs / ~51 ms are representative settled values.) The remaining ~26 ms is the genuine floor (97 × ~280 µs: pbuf alloc + IP/Ethernet framing + EMAC DMA + ~4 ms wire time). Reducing it further would need packet batching or moving ArtNet output off the render task.
+
+### ArtNet over WiFi — ~4× the Ethernet cost
+
+All the ArtNet figures above are on **Ethernet** (LAN8720 RMII). The same firmware on the **same board over WiFi STA** measures very differently — captured live from `/api/system`:
+
+| Module | Ethernet | WiFi STA |
+|--------|----------|----------|
+| ArtNet (97 UDP packets) | ~27,000 µs | **~110,000 µs** |
+| Total tick | ~50,000 µs (20 FPS) | **~130,000 µs (7 FPS)** |
+
+WiFi UDP `sendto()` is ~1,140 µs/packet vs Ethernet's ~280 µs — the WiFi driver adds CSMA/CA backoff, rate adaptation, link-layer retries, power-save wakeups, and contends for CPU with the render task. A 97-packet burst per frame is simply expensive on WiFi. This is **not a regression** — it is WiFi physics; the connected-socket + core-locking optimizations help on both links but cannot close the per-packet gap.
+
+Implication: for ArtNet at 16,384 lights, **use Ethernet** (the eth-only firmware profile forces this and also frees the WiFi RAM). On WiFi, expect ~7 FPS at this light count until ArtNet output is batched or moved off the render task (the same follow-up noted above).
 
 ### Preview `detail` cost on the render tick
 

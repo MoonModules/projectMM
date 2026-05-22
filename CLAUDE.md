@@ -29,7 +29,7 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 
 **Warnings are errors.** Build with `-Wall -Wextra -Werror`.
 
-**Tests must pass.** Run `cmake --build build --target test` before considering work complete. New core logic needs a corresponding module test. Full pipeline needs a scenario test. See [docs/testing.md](docs/testing.md) for the test inventory and [docs/architecture.md](docs/architecture.md#testing) for the testing strategy.
+**Tests must pass.** Run `ctest` (unit tests) and `./build/test/mm_scenarios` (scenarios) before considering work complete. New core logic needs a corresponding module test. Full pipeline needs a scenario test. See [docs/testing.md](docs/testing.md) for the test inventory and [docs/architecture.md](docs/architecture.md#testing) for the testing strategy.
 
 ## Process Rules
 
@@ -56,13 +56,13 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 4. Platform boundary — `check_platform_boundary.py` (PASS)
 5. Spec check — `check_specs.py` (all ok)
 6. ESP32 build — `build_esp32.py` (clean)
-7. Reviewer agent — Opus agent reviews staged changes for: domain boundary, unnecessary abstractions, **duplicated patterns** (same logic in multiple places that belongs in a base class or shared function), hot-path violations, spec conformance, bloat, platform boundary. Must PASS.
+7. Reviewer agent — Opus agent reviews staged changes for: domain boundary, **unnecessary abstractions** (no-op / pass-through wrappers that only rename or re-namespace an existing function, single-call-site indirection that would read clearer inlined, names that obscure where the real code lives), **duplicated patterns** (same logic in multiple places that belongs in a base class or shared function), hot-path violations, spec conformance, bloat, platform boundary. Must PASS.
 8. KPI collection — `collect_kpi.py --commit` (include in commit message: one-liner as FIRST line of description, full details at bottom). **The one-liner MUST include `tick:Xus(FPS:Y)` for every supported target** (PC + ESP32 today; Teensy/RPi when added). If a target's tick/FPS is missing — e.g. ESP32 wasn't monitored recently and `esp32/monitor.log` is stale — re-run a short live capture before committing, or note explicitly in the commit message why the value is absent.
 9. Live scenario analysis — run scenarios on both PC and ESP32 (if available), update `docs/performance.md` with new measurements. Compare with previous values and explain significant changes.
 10. Documentation check — verify all new functionality has matching docs: module specs updated, testing.md entries added, architecture docs reflect changes.
 11. Permission review — scan `.claude/settings.local.json`. The `allow` list grows organically and accumulates one-off entries (specific `sed` line ranges, one-time `lldb` invocations, `/tmp/probe` paths) that will never recur. Propose to the product owner: (a) one-off entries that can be deleted, and (b) clusters of narrow entries that could collapse into one broad pattern (e.g. several `./build/test/mm_tests -tc="..."` lines → `Bash(./build/test/mm_tests:*)`) so routine commands stop prompting. This is advisory — the agent suggests, the product owner approves any change. Never broaden permissions for destructive or network-mutating commands without explicit approval; err toward keeping the list tight.
 
-Do not commit until all 10 functional steps (1-10) pass; step 11 is advisory and does not block. Do not skip the Reviewer agent.
+Do not commit until steps 1-10 (the functional gates) all pass. Step 11 (permission review) is advisory and does not block a commit. Do not skip the Reviewer agent.
 
 **Mandatory subtraction.** Periodically review and remove code and docs that no longer earn their place. If nothing can be removed, justify why.
 
@@ -155,7 +155,7 @@ The project uses Claude Code agents in defined roles. The user is the **Product 
 |--|-------|-------|-------|------|
 | 🤖 | **Architect** | Opus | System design | Reviews against architecture, designs components, validates boundaries |
 | 👽 | **Developer** | Sonnet | Implementation | Writes code in worktrees, follows all rules, one step at a time |
-| 👾 | **Reviewer** | Opus | Pre-PR check | Runs locally before push. Reviews architecture: domain boundary, unnecessary abstractions, duplicated patterns (same logic in multiple places → consolidate into base class), hot-path violations, spec conformance. Complements CodeRabbit (which handles line-level bugs in the PR). |
+| 👾 | **Reviewer** | Opus | Pre-PR check | Runs locally before push as pre-commit step 7 — see that step for the full review scope. Complements CodeRabbit (which handles line-level bugs in the PR). |
 | 🛸 | **Tester** | Sonnet | Verification | Writes tests, verifies architectural rules in code |
 | 💀 | **Runner** | Haiku | Quick checks | Runs MoonDeck scripts, platform boundary checks, build verification |
 
