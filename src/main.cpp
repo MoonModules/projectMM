@@ -2,6 +2,16 @@
 #include "light/GridLayout.h"
 #include "light/RainbowEffect.h"
 #include "light/NoiseEffect.h"
+#include "light/PlasmaEffect.h"
+#include "light/PlasmaPaletteEffect.h"
+#include "light/MetaballsEffect.h"
+#include "light/FireEffect.h"
+#include "light/ParticlesEffect.h"
+#include "light/GlowParticlesEffect.h"
+#include "light/CheckerboardEffect.h"
+#include "light/SpiralEffect.h"
+#include "light/RipplesEffect.h"
+#include "light/LavaLampEffect.h"
 #include "light/MirrorModifier.h"
 #include "light/ArtNetSendDriver.h"
 #include "light/PreviewDriver.h"
@@ -24,6 +34,16 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout");
     mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
     mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect");
+    mm::ModuleFactory::registerType<mm::PlasmaEffect>("PlasmaEffect");
+    mm::ModuleFactory::registerType<mm::PlasmaPaletteEffect>("PlasmaPaletteEffect");
+    mm::ModuleFactory::registerType<mm::MetaballsEffect>("MetaballsEffect");
+    mm::ModuleFactory::registerType<mm::FireEffect>("FireEffect");
+    mm::ModuleFactory::registerType<mm::ParticlesEffect>("ParticlesEffect");
+    mm::ModuleFactory::registerType<mm::GlowParticlesEffect>("GlowParticlesEffect");
+    mm::ModuleFactory::registerType<mm::CheckerboardEffect>("CheckerboardEffect");
+    mm::ModuleFactory::registerType<mm::SpiralEffect>("SpiralEffect");
+    mm::ModuleFactory::registerType<mm::RipplesEffect>("RipplesEffect");
+    mm::ModuleFactory::registerType<mm::LavaLampEffect>("LavaLampEffect");
     mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier");
     mm::ModuleFactory::registerType<mm::ArtNetSendDriver>("ArtNetSendDriver");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver");
