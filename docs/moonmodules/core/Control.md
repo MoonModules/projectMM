@@ -61,8 +61,8 @@ Fixed-capacity array per module. No heap allocation per control. Capacity chosen
 
 Control values must be saved/loaded persistently (filesystem). The mechanism:
 - **Save:** iterate control descriptors, read each variable via its pointer, write key:value to a file. Format: compact binary or minimal JSON — TBD based on what's simplest.
-- **Load:** read file, match keys to control descriptors, write values via pointer. Apply pending values in `onBuildControls()`.
-- **When:** save on control change (debounced). Load at setup before `onBuildControls()`.
+- **Load:** read the file at setup, before `onBuildControls()` runs, into a pending-values store; the values are then written through each control's pointer during `onBuildControls()` (the overlay-in-onBuildControls step).
+- **When:** save on control change (debounced).
 - **Scope:** one file per module instance, or one file for all modules — decide based on filesystem constraints (LittleFS on ESP32 has limited file count).
 
 ## Dynamic controls
@@ -76,11 +76,14 @@ Control values must be saved/loaded persistently (filesystem). The mechanism:
 ## Prior art
 
 ### MoonLight — addControl ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonBase/Nodes.h#L80))
+
 - Binds via `reinterpret_cast<uintptr_t>(&variable)`. Types: uint8_t, int8_t, uint16_t, uint32_t, int, float, bool, Coord3D. UI types: "slider", "select", "toggle", "text", "display". Select via `addControlValue()`.
 
 ### projectMM v1 — addControl ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/core/StatefulModule.h))
+
 - Same pattern. Also supports "display", "progress", "button".
 
 ### projectMM v2 — ControlDescriptor ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/MoonModule.h#L40))
+
 - Richer but heavier: key, uiType, CtrlType enum, ptr, min/max, default, options array, ownsOptions flag, system flag. Not all of this weight is justified for v3.
 - Persisted values applied via an `applyPending_` step during `onBuildControls()` — v3 follows the same overlay-in-onBuildControls timing.

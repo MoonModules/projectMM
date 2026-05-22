@@ -22,9 +22,10 @@ public:
 
     void setup() override {
         socket_.open();
-        // Bind the destination once so each per-universe send skips the
-        // per-packet address parse + route lookup.
-        socket_.connect(ip, ARTNET_PORT);
+        // Bind the destination so each per-universe send skips the per-packet
+        // address parse + route lookup. Re-bound in loop() if the ip control
+        // changes (see connectIfIpChanged).
+        connectIfIpChanged();
     }
 
     void teardown() override {
@@ -44,6 +45,9 @@ public:
         uint32_t interval = 1000 / fps;
         if (now - lastSendTime_ < interval) return;
         lastSendTime_ = now;
+
+        // Re-bind the socket if the ip control was changed from the UI.
+        connectIfIpChanged();
 
         // Send all universes in one burst — receiver expects a complete frame
         const uint8_t* data = sourceBuffer_->data();
@@ -108,6 +112,17 @@ private:
     Buffer* sourceBuffer_ = nullptr;
     uint8_t sequence_ = 0;
     uint32_t lastSendTime_ = 0;
+    char lastConnectedIp_[16] = {};  // destination the socket is currently bound to
+
+    // Re-bind the connected socket when the ip control differs from what it was
+    // last bound to. UDP connect() only sets the destination (no handshake), so
+    // this is cheap; it runs only on an actual change.
+    void connectIfIpChanged() {
+        if (std::strcmp(ip, lastConnectedIp_) == 0) return;
+        socket_.connect(ip, ARTNET_PORT);
+        std::strncpy(lastConnectedIp_, ip, sizeof(lastConnectedIp_) - 1);
+        lastConnectedIp_[sizeof(lastConnectedIp_) - 1] = '\0';
+    }
 
     void sendUniverse(uint16_t universe, const uint8_t* data, uint16_t dataLen) {
         uint8_t packet[ARTNET_HEADER_SIZE + MAX_CHANNELS_PER_UNIVERSE];

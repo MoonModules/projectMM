@@ -30,10 +30,13 @@ These operate on individual channel values, not on a struct. They live in core (
 ## Prior art
 
 ### MoonLight — LightsHeader ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/LightsHeader.h))
+
 48-byte metadata struct: `channelsPerLight` (3-32), per-channel offsets for RGB, RGBW, RGBCCT, brightness, pan/tilt/zoom/rotate/gobo. One struct handles LEDs AND DMX fixtures. Sent to frontend for preview rendering.
 
 ### projectMM v1 — RGB ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/layers/RGB.h))
+
 Plain 3-byte RGB struct. No FastLED dependency. Limited to RGB only.
 
 ### projectMM v2 — RGB ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/RGB.h))
+
 Same 3-byte struct. Still limited to RGB.

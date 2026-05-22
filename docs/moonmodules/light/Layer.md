@@ -37,6 +37,7 @@ Consider whether Layer itself can provide the rendering context (buffer, dims, e
 ## Prior art
 
 ### MoonLight — VirtualLayer ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h))
+
 - `startPct`/`endPct` as Coord3D percentages (0-100) of the total fixture.
 - `oneToOneMapping` flag for fast path.
 - `brightness` per layer (0-255) + `transitionBrightness` for smooth fade-in/out.
@@ -46,7 +47,9 @@ Consider whether Layer itself can provide the rendering context (buffer, dims, e
 - `forEachLight` — per-logical-light iteration that asks the modifier for physical destinations; v3's LUT build uses the same per-light virtual-dispatch pattern.
 
 ### projectMM v1 — EffectsLayer ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/layers/EffectsLayer.h))
+
 Container for effects. Owns Channel (pixel buffer). Effects wired via `setInput("layer", ...)`.
 
 ### projectMM v2 — PixelEffectBase ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/effects/PixelEffectBase.h))
+
 Shared spine eliminates ~70 lines boilerplate per effect. Layout resolution by category, not type string. DataBuffer + DataRegistry for producer/consumer decoupling.

@@ -26,12 +26,15 @@ Whatever provides it, effects need:
 ## Prior art
 
 ### MoonLight — Node + VirtualLayer ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonBase/Nodes.h), [source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h))
+
 - Effects access `layer->width()`, `layer->height()`, `layer->depth()` directly via the VirtualLayer pointer. No separate EffectBase.
 - Buffer access via `layer->virtualChannels` (raw byte array).
 - Time via `timeMicros()`.
 
 ### projectMM v1 — ProducerModule ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/core/ProducerModule.h))
+
 Base for effects. Produces into a Channel.
 
 ### projectMM v2 — PixelEffectBase ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/effects/PixelEffectBase.h))
+
 Shared spine: concrete effect implements only `build_effect_controls()` + `render_(px, w, h, d)`. Eliminates ~70 lines boilerplate.

@@ -93,15 +93,18 @@ Conditional controls (e.g. fields only visible under a Select mode) are always b
 ## Prior art
 
 ### MoonLight — Node ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonBase/Nodes.h))
+
 - Base ~29 bytes + vtable. Effects add only their control variables (uint8_t each).
 - No std::string members (uses `Char<N>` fixed-size strings).
 - `addControl()` binds to class variable by reference, stores `uintptr_t` pointer.
 - `classSize()` reports actual instance size.
 
 ### projectMM v1 — StatefulModule ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/core/StatefulModule.h))
+
 - Same addControl-by-reference pattern.
 
 ### projectMM v2 — MoonModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/MoonModule.h))
+
 - `onBuildControls()` / `onAllocateMemory()` separation.
 - `onChildrenReady()`.
 - Field order optimized 8B→4B→2B→1B, saving 24 bytes.

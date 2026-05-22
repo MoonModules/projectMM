@@ -25,12 +25,15 @@ Child modules run in their declared order within the parent. Top-level modules a
 ## Prior art
 
 ### MoonLight — effectTask / svelteTask
+
 - Two FreeRTOS tasks: effects on core 1, system/drivers on core 0.
 - Per-node: `loop()` every frame, `loop20ms()` for slow updates.
 
 ### projectMM v1 — Scheduler ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/core/Scheduler.h))
+
 - Time-sliced dispatch: setup, loop, loop20ms, loop1s for all modules. Single-threaded.
 
 ### projectMM v2 — Scheduler ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/Scheduler.h))
+
 - Multi-core: runs N `core_loop()` threads (default 2 on ESP32). Each module declares `coreAffinity()`. Uses `pal::task_create_pinned` with 8KB stacks.
 - Module ticking: setup, loop, loop20ms, loop1s, loop10s, teardown — dispatched per core.

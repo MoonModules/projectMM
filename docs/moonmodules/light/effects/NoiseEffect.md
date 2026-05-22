@@ -28,10 +28,13 @@ Animation: time scrolls the noise coordinate space (smooth drift). The scroll sp
 ## Prior art
 
 ### MoonLight — E_MoonLight.h ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h))
+
 Multiple noise effects (Noise2D, Noise3D variants). Uses FastLED noise functions. Time via `millis()`.
 
 ### projectMM v2 — Noise2DEffect ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/effects/Noise2DEffect.h))
+
 Same hash-based value noise as v1. Uses PixelEffectBase spine.
 
 ### projectMM v1 — NoiseEffect2D ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/effects/NoiseEffect2D.h))
+
 Hash-based value noise with trilinear interpolation. Controls: scale (1-32), speed (0-255). Uses `timeMicros()` for animation. v1 ran scale 4 with a 0.1x multiplier (effective 0.4) — v3's default of 4 is informed by this.

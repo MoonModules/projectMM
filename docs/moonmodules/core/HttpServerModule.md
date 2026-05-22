@@ -51,7 +51,9 @@ Static 4KB buffer for serializing the module tree. Current state JSON is ~700 by
 ## Prior art
 
 ### projectMM v1 — HttpServer + WsServer ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/core/HttpServer.h))
+
 HTTP via cpp-httplib (PC) / ESPAsyncWebServer (ESP32). WebSocket on separate port 81.
 
 ### projectMM v2 — HttpServerModule + WebSocketModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/network/HttpServerModule.h))
+
 Separate MoonModules for HTTP and WebSocket. v3 combines them into one module.

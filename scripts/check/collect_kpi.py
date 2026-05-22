@@ -364,16 +364,20 @@ def main():
     # so a smaller grid gets proportionally less time (18 FPS at 128×128).
     # An absent ESP32 reading is not a failure — the caller decides whether a
     # missing measurement is acceptable (see CLAUDE.md pre-commit step 8).
+    # Only --commit mode aborts on a breach; a plain interactive report just
+    # warns, so viewing KPIs on an unlucky slow sample does not exit non-zero.
     esp32_tick = esp32.get("tick_us")
     lights = desktop.get("lights")
     if esp32_tick is not None and lights:
         max_tick = round(lights * 1_000_000 / MIN_ESP32_FPS_LED_PRODUCT)
         if esp32_tick > max_tick:
             print()
-            print(f"FAIL: ESP32 render tick {esp32_tick}us exceeds the {max_tick}us "
+            label = "FAIL" if args.commit else "WARN"
+            print(f"{label}: ESP32 render tick {esp32_tick}us exceeds the {max_tick}us "
                   f"budget for {lights} lights (18 FPS at the 128×128 / 16384-light "
                   f"reference).")
-            sys.exit(1)
+            if args.commit:
+                sys.exit(1)
 
 if __name__ == "__main__":
     main()

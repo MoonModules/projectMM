@@ -24,5 +24,6 @@ Allocates 2 × width × height bytes for the cell grids. At 128x128 = 32KB. Free
 ## Prior art
 
 ### projectMM v1 — GameOfLifeEffect ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/effects/GameOfLifeEffect.h))
+
 v1 GameOfLifeEffect (commit 54b50bc). Used `pal::psram_malloc` for grids. Had test helpers: `setPattern()`, `getCell()`, `liveCount()`, `stepGeneration()` for deterministic testing without rendering.
 Full implementation with test helpers (setPattern, getCell, liveCount, stepGeneration).

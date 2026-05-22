@@ -35,10 +35,13 @@ Opened in setup(), closed in teardown(). Uses platform UDP abstraction. Not a ho
 ## Prior art
 
 ### MoonLight — D_NetworkOut ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Drivers/D_NetworkOut.h))
+
 Supports ArtNet, E1.31, and DDP output. Multi-protocol in one driver.
 
 ### projectMM v1 — ArtNetOutModule ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/drivers/ArtNetOutModule.h))
+
 Controls: universe_start (slider 0-255), ip (text). Platform UDP abstraction.
 
 ### projectMM v2 — ArtnetOutModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/ArtnetOutModule.h))
+
 Uses PalUdp abstraction. ADR 0005 teardown safety via DataBuffer invalidation.

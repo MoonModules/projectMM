@@ -67,7 +67,11 @@ def count_lights(client: Client) -> int:
         h = _control_value(module, "height")
         d = _control_value(module, "depth")
         if w is not None and h is not None and d is not None:
-            total += int(w) * int(h) * int(d)
+            try:
+                total += int(w) * int(h) * int(d)
+            except (ValueError, TypeError):
+                print(f"  WARN  count_lights: non-numeric w/h/d "
+                      f"({w!r}/{h!r}/{d!r}) on module {module.get('name','?')}, skipped")
         for child in module.get("children", []):
             total += walk(child)
         return total

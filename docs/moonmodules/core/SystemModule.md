@@ -62,9 +62,11 @@ Needs:
 ## Prior art
 
 ### projectMM v1
+
 - System info displayed in web UI (heap, FPS, chip info)
 - Device name configurable and persisted
 
 ### MoonLight
+
 - System diagnostics via REST API
 - Device name used for mDNS

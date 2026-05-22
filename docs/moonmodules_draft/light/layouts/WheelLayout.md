@@ -33,7 +33,9 @@ from center outward along each spoke.
 ## Prior art
 
 ### MoonLight — various ring/spoke layouts ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h))
+
 Ring, Rings241, and other circular/radial layout types.
 
 ### projectMM v2 — WheelLayoutModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/layouts/WheelLayoutModule.h))
+
 Wheel layout with spoke-based coordinate generation. Uses LayoutModule base.
