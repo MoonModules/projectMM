@@ -26,22 +26,10 @@ Tests `MoonModule` lifecycle and `Control` binding in `src/core/MoonModule.h` an
 
 - Lifecycle methods called (setup, teardown)
 - Name get/set
-- `typeName` independent of `name` — factory sets typeName once, name can be overridden
 - Parent get/set
-- Dirty flag set/clear (future persistence consumer)
 - Control binding via ControlList (uint8_t, bool)
 - Pointer binding: changing variable updates control, changing via pointer updates variable
 - ControlList clear and rebuild
-- ReadOnly control: binds to char buffer, reflects updates
-- Select control: binds to uint8_t index, stores options pointer in aux, option count in max
-- Progress control: binds to uint32_t value, total stored in aux
-
-### SystemModule (`test/test_system_module.cpp`) {#systemmodule}
-
-Tests `SystemModule` in `src/core/SystemModule.h`.
-
-- MAC-to-deviceName: desktop MAC DE:AD:BE:EF:CA:FE produces "MM-CAFE"
-- Controls include deviceName as Text, uptime/fps/chip as ReadOnly
 
 ### Buffer (`test/test_buffer.cpp`) {#buffer}
 
@@ -96,6 +84,43 @@ Tests `NoiseEffect` in `src/light/NoiseEffect.h`.
 - Different positions produce different colors (spatial variation)
 - Produces different output than RainbowEffect
 
+### Plasma Effect (`test/test_plasma.cpp`) {#plasma}
+
+Tests `PlasmaEffect` in `src/light/PlasmaEffect.h`.
+
+- Buffer contains non-zero RGB data after render
+- Different positions produce different colors (spatial variation)
+- Produces different output than NoiseEffect
+
+### Metaballs Effect (`test/test_metaballs.cpp`) {#metaballs}
+
+Tests `MetaballsEffect` in `src/light/MetaballsEffect.h`.
+
+- Buffer contains non-zero RGB data after render
+- Different positions produce different colors (spatial variation)
+
+### Fire Effect (`test/test_fire.cpp`) {#fire}
+
+Tests `FireEffect` in `src/light/FireEffect.h`.
+
+- Heat buffer allocated to `width * height` bytes when enabled
+- Buffer non-zero after ~50 frames of high sparking
+- Heat buffer freed when disabled via `setEnabled(false)`
+
+### Particles Effect (`test/test_particles.cpp`) {#particles}
+
+Tests `ParticlesEffect` in `src/light/ParticlesEffect.h`.
+
+- Trail buffer allocated to `width * height * cpl` bytes when enabled
+- Buffer non-zero after a single render (particles draw immediately)
+- Trail buffer freed when disabled via `setEnabled(false)`
+
+### Stateless effects (`test/test_stateless_effects.cpp`) {#stateless-effects}
+
+Tests zero-heap effects: `CheckerboardEffect`, `SpiralEffect`, `PlasmaPaletteEffect`, `RipplesEffect`, `GlowParticlesEffect`, `LavaLampEffect`.
+
+Each effect: buffer contains non-zero RGB after render; corners produce different colours (spatial variation).
+
 ### MappingLUT (`test/test_mapping_lut.cpp`) {#mappinglut}
 
 Tests `MappingLUT` in `src/light/MappingLUT.h`.
@@ -124,50 +149,6 @@ Tests `blendMap()` in `src/light/BlendMap.h`.
 - 1:N mapping: logical pixel appears at multiple physical positions
 - Additive blend with clamping
 
-### MoonModule::moveChildTo (`test/test_movechild.cpp`) {#movechild}
-
-Tests `MoonModule::moveChildTo(child, newIndex)` in `src/core/MoonModule.h`.
-
-- No-op when already at target index returns false
-- Forward move (toward end) shifts intervening siblings left
-- Backward move (toward start) shifts intervening siblings right
-- One-position swap (matches up/down buttons in the UI)
-- Out-of-range newIndex rejected without modifying the tree
-- Non-child argument rejected without modifying the tree
-- Middle-to-middle move
-
-### ModuleFactory (`test/test_module_factory.cpp`) {#module-factory}
-
-Tests `ModuleFactory` in `src/core/ModuleFactory.h`.
-
-- `registerType<T>()` captures `T::role()` via a stack-allocated probe instance — no per-type boilerplate
-- `create()` returns a module of the registered type with `typeName()` set
-- `create()` returns nullptr for unknown or null type names
-- `typeName()` and `typeRole()` are bounds-safe (out-of-range returns nullptr / Generic)
-- Dynamic capacity grows past the initial 4 — registering 10 throwaway types all succeed and remain discoverable
-
-### Preview Driver (`test/test_preview_driver.cpp`) {#preview-driver}
-
-Tests `PreviewDriver` downsampling in `src/light/PreviewDriver.h`. Each case builds a GridLayout → LayoutGroup → Layer pipeline, wires the driver, and inspects the resulting [PreviewFrame](moonmodules/light/drivers/PreviewDriver.md).
-
-- `detail` 1/2/3 on a 128×128 grid select distinct strides (8/4/3 → 16/32/43 voxels per axis) — the three settings are visibly different
-- The frame always carries the original grid dimensions (`origWidth/Height/Depth`) so the `decompress` UI hint can block-replicate back to the real resolution
-- `detail = 3` (the largest payload) stays within lwIP's TCP send-buffer budget: ≤1849 voxels, payload + 13-byte header < 5760 B — so the non-blocking `writeChunks` completes whole
-- A grid under the voxel budget is copied 1:1 (stride 1, no downsample)
-- The strided copy is channel-agnostic: an RGBW (4-channel) source still produces a 3 B/voxel RGB frame
-- Default controls: `fps = 12`, `detail = 2`, `decompress = false`
-
-### Filesystem persistence (`test/test_filesystem_persistence.cpp`) {#filesystem-persistence}
-
-Four test cases for [FilesystemModule](moonmodules/core/FilesystemModule.md):
-
-- **Value round-trip**: set `deviceName` on a running Scheduler+SystemModule, wait for the 2s debounce flush, recreate a fresh Scheduler+modules, and assert the deviceName is loaded from disk.
-- **Structural reconciliation**: hand-write a `Layer.json` describing a one-child tree (`RainbowEffect`). Build a live two-child tree (`NoiseEffect` + `MirrorModifier`) and run `scheduler.setup()`. Assert the live tree was reconciled — NoiseEffect swapped to RainbowEffect, Mirror trimmed.
-- **Valid JSON with children**: flush a Layer subtree containing two children (each with controls) and assert the raw file contains `"MirrorModifier",` / `"NoiseEffect",` — guards against the missing-comma bug between a child's `"N.type"` field and its first control.
-- **Singleton survives probe lifecycle**: construct the real FS instance + register via `setScheduler` (which now binds the singleton), factory-construct+destruct a probe instance (mimicking what `/api/types` does to capture defaults), and assert that `flushPending()` still saves a marked-dirty subtree after the probe is gone — guards against the bug where the probe's destructor cleared the static singleton, silently breaking persistence for the rest of the device's life.
-
-All four use `platform::fsSetRoot()` to redirect the config root into `/tmp/mm_*_test_<ms>/` for isolation. Combined wall time ~2.3s (the debounce window in the first test dominates).
-
 ## Scenario Tests
 
 Scenario tests verify the integrated pipeline. Defined as JSON in `test/scenarios/`. Run with `./build/test/mm_scenarios` or via MoonDeck (PC → 01 - Pipeline).
@@ -179,8 +160,7 @@ Sets up the core pipeline: LayoutGroup → GridLayout → Layer → RainbowEffec
 - Buffer allocated after setup
 - Buffer size matches layout light count
 - Buffer contains non-zero data after rendering 200 frames
-- `fps.min_pct: 80` — render FPS within 20% of the saved baseline (regression guard)
-- `fps.min_fps_led_product: 294912` — an absolute throughput floor (see below)
+- FPS >= 30 (performance bound)
 
 ### mirror (`test/scenarios/mirror.json`) {#scenario-mirror}
 
@@ -219,39 +199,6 @@ Tests performance impact of control changes on a running system.
 - Checks FPS bounds
 - Supports baseline comparison for regression detection
 
-### mdns-toggle (`test/scenarios/mdns-toggle.json`) {#scenario-mdns-toggle}
-
-Measures FPS impact of enabling/disabling mDNS on a running device.
-
-- Toggles mDNS on → off → on, measures FPS at each step
-- Final step asserts `fps.min_pct: 80` — re-enabling mDNS keeps FPS within 20% of baseline
-
-### grid-resize (`test/scenarios/grid-resize.json`) {#scenario-grid-resize}
-
-Exercises the light-pipeline adaptive allocation path. Useful for catching regressions in the Layer/DriverGroup allocate path under memory pressure (see plan 11.5 in `docs/plan.md`).
-
-- Mirror state reset to known values at start (mirrorX=true, mirrorY=true) so subsequent runs don't contaminate each other
-- Sizes the grid to 128×128, then shrinks to 128×64, then grows back to 128×128
-- Only the shrink step asserts a bound (`fps.min_pct: 80`) because shrinks always release memory and should match or beat baseline. Grow steps deliberately have no bound — they're inherently slower at a larger size.
-
-### preview-detail (`test/scenarios/preview-detail.json`) {#scenario-preview-detail}
-
-Toggles the [PreviewDriver](moonmodules/light/drivers/PreviewDriver.md)'s `detail` (1/2/3) and `decompress` controls on a running device and measures the render-FPS impact.
-
-- `detail-1`, `detail-2` and both `decompress` steps assert `fps.min_pct: 80`; `detail-3` asserts `fps.min_pct: 70`. The downsample strided copy runs on the render task, so higher detail has a real, **known and accepted** cost (see [performance.md](performance.md) — "Preview `detail` cost on the render tick"; detail 3 measures ~79% of a settled baseline). `decompress` is purely client-side (the browser block-replicates) and cannot change the render tick at all.
-- All steps assert a **relative** bound only. A single ESP32 scenario step swings too much (see "Run-to-run tick variance" in performance.md) for an absolute FPS floor to be meaningful here — the absolute `min_fps_led_product` floor is enforced in `collect_kpi.py --commit`, which uses a settled reading.
-- Live-only (only `set_control` steps, no `add_module`) — the in-process runner skips it.
-
-## The FPS×lights throughput floor
-
-`fps.min_fps_led_product` is an absolute performance floor that scales to any grid. The value is an **FPS × light-count product**; the per-grid floor is `product / lightCount`. Anchored at the 128×128 reference (18 FPS × 16384 lights = 294912), so a smaller grid must run proportionally faster (64×64 = 4096 lights → 72 FPS floor).
-
-It is compared against the measured **tick time** (the device's native unit — FPS is only ever derived by lossy integer division), as `tick_us ≤ lightCount × 1e6 / product`. Enforced in three places:
-
-- `test/scenario_runner.cpp` — in-process; the desktop runs far above any floor, so this passes trivially and just exercises the bound logic.
-- `scripts/scenario/run_live_scenario.py` — live; derives the light count from the layout modules' `width/height/depth` in `/api/state` and enforces the floor for real on ESP32.
-- `scripts/check/collect_kpi.py` — pre-commit (`--commit` mode); fails the commit if a captured ESP32 tick exceeds the budget.
-
 ### Running live scenarios
 
 ```bash
@@ -263,17 +210,15 @@ uv run scripts/scenario/run_live_scenario.py --compare-baseline          # check
 
 ### Live scenario behavior
 
-Most scenarios use relative FPS bounds (`min_pct`) so they pass on any device — desktop at 10K FPS or ESP32 at 17 FPS. `base-pipeline` additionally carries the absolute `min_fps_led_product` throughput floor (see above); `preview-detail` deliberately does not — a single preview-toggle step swings too much for an absolute floor (the floor is enforced instead by `collect_kpi.py --commit` on a settled reading). Settle time is 3 seconds to let the pipeline stabilize after rebuilds.
+All scenarios use relative FPS bounds (`min_pct`) so they pass on any device — desktop at 10K FPS or ESP32 at 17 FPS. Settle time is 3 seconds to let the pipeline stabilize after rebuilds.
 
 Scenarios that add modules (`base-pipeline`, `memory-1to1`) create temporary modules on the running device. These are cleaned up after each scenario (`- Rainbow (cleanup)`). Modules that already exist show `=` instead of `+`.
 
 Memory tracking works on ESP32: `freeHeap` and `freeInternalHeap` report real values. Desktop returns 0 (unlimited). The control-change scenario verifies no memory leaks by checking heap returns to baseline after mirror toggle.
 
-`control-change` and `grid-resize` do `set_control` on modules named `Mirror` / `Noise`. They pass only against a device tree that uses those exact names — a tree with `MirrorModifier` / `RainbowEffect` instead reports "module not found" for those steps. This is a scenario/device-tree naming assumption, not a firmware regression; align the scenario JSON with the device's actual module names (or vice versa) before relying on those two scenarios as a gate.
-
 ## Hardware Verification
 
-The live scenarios pass on both desktop and ESP32. Per-module timing, memory allocation, and sizeof measurements for each platform are in [performance.md](performance.md).
+All 5 live scenarios pass on both desktop and ESP32 with `min_pct: 80` relative bounds. Per-module timing, memory allocation, and sizeof measurements for each platform are in [performance.md](performance.md).
 
 ### ESP32 — Olimex ESP32-Gateway Rev G (no PSRAM)
 
@@ -281,17 +226,6 @@ The live scenarios pass on both desktop and ESP32. Per-module timing, memory all
 - Memory tracking verified: mirror toggle shows heap changes, returns to baseline (no leaks)
 - Ethernet (LAN8720 RMII) connects via DHCP
 - Device discovery from MoonDeck finds ESP32 on port 80
-
-### ESP32 build profiles
-
-The pre-commit ESP32 build must build **both** profiles warning-free under `-Werror`:
-
-- `build_esp32.py --profile default` — exercises the `hasWiFi == true` code path.
-- `build_esp32.py --profile eth-only` — exercises the `hasWiFi == false` path (WiFi compiled out; NetworkModule's `if constexpr` WiFi branches dropped).
-
-A clean `-Werror` build of each profile *is* the test — `hasWiFi` gating is compile-time, and NetworkModule has no desktop unit tests (OS networking). Desktop builds cover `hasWiFi == true` independently.
-
-"Warning-free" here means **compiler** warnings on project code. The ESP-IDF *configure* step emits one harmless CMake warning — `gdbinit.cmake: Error while generating esp_rom gdbinit` because `ESP_ROM_ELF_DIR` is unset (it is normally exported by `$IDF_PATH/export.sh`). It affects only `idf.py gdb`, not the firmware, and is expected when building via `build_esp32.py` rather than a full IDF export shell.
 
 ## Adding Tests
 
