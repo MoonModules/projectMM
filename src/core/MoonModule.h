@@ -9,6 +9,18 @@ namespace mm {
 
 enum class ModuleRole : uint8_t { Generic, Effect, Modifier, Driver, Layout };
 
+// Lowercase role name for JSON/API output. Single source of truth so the role
+// string can't drift between /api/state and /api/types.
+inline const char* roleName(ModuleRole role) {
+    switch (role) {
+        case ModuleRole::Effect:   return "effect";
+        case ModuleRole::Modifier: return "modifier";
+        case ModuleRole::Driver:   return "driver";
+        case ModuleRole::Layout:   return "layout";
+        default:                   return "generic";
+    }
+}
+
 class MoonModule {
 public:
     // Allocate modules in PSRAM when available (ESP32)
@@ -29,7 +41,34 @@ public:
     virtual void loop20ms() {}
     virtual void loop1s() {}
     virtual void teardown() { for (uint8_t i = childCount_; i > 0; i--) children_[i-1]->teardown(); }
+
+    // Called when enabled flips. Default no-op; override to start/stop sockets, free
+    // buffers, etc. The scheduler always invokes loop()/loop20ms()/loop1s() regardless
+    // of `enabled` — modules decide what disabled means by checking enabled() inside
+    // their loop fns or by stopping/starting their work in onOnOff().
+    virtual void onOnOff(bool /*newEnabled*/) {}
+
+    // onBuildControls MUST be idempotent and pure: only `controls_.clear()` + `controls_.addX()`.
+    // No platform queries, no I/O, no allocations. HttpServerModule calls it again whenever a
+    // Select control changes the visible control set, so a second invocation must produce
+    // exactly the same result for unchanged inputs. Conditional branches may depend on any
+    // member variable.
     virtual void onBuildControls() { for (uint8_t i = 0; i < childCount_; i++) children_[i]->onBuildControls(); }
+
+    // Non-virtual helper: clear-and-rebuild for this module AND its descendants. The default
+    // onBuildControls cascades into children, so we must also clear their control lists first;
+    // otherwise the recursive append would duplicate every child's controls. Used after Select
+    // changes (in HttpServerModule) and anywhere else the conditional control set needs
+    // re-evaluation.
+    void rebuildControls() {
+        clearControlsRecursive();
+        onBuildControls();
+    }
+    void clearControlsRecursive() {
+        controls_.clear();
+        for (uint8_t i = 0; i < childCount_; i++) children_[i]->clearControlsRecursive();
+    }
+
     virtual void onAllocateMemory() { for (uint8_t i = 0; i < childCount_; i++) children_[i]->onAllocateMemory(); }
 
     const char* name() const { return name_; }
@@ -40,6 +79,35 @@ public:
         std::memcpy(name_, n, len);
         name_[len] = 0;
     }
+
+    // typeName is the stable factory key (e.g. "NoiseEffect"), set once by ModuleFactory.
+    // Stored as `const char*` pointing at the factory's string literal — zero per-instance
+    // copy, lives in flash. Caller must pass a string with static lifetime (string literal
+    // or factory-owned storage); do not pass stack-local or temporary buffers.
+    // Distinct from name() which is a per-instance human label and may be overridden
+    // ("Noise" instead of "NoiseEffect"); typeName() stays the factory key.
+    const char* typeName() const { return typeName_; }
+    void setTypeName(const char* tn) { typeName_ = tn ? tn : ""; }
+
+    bool enabled() const { return enabled_; }
+    void setEnabled(bool e) {
+        if (enabled_ == e) return;
+        enabled_ = e;
+        onOnOff(e);
+    }
+
+    // Whether the Scheduler should honor `enabled()` for this module's loop callbacks.
+    // Default true — disabled modules don't have their loop fns called. Override to
+    // return false for system modules that must keep running regardless (HttpServer,
+    // Network, Filesystem) so the user can re-enable other modules through them.
+    virtual bool respectsEnabled() const { return true; }
+
+    // Dirty flag — set by HttpServerModule when a control changes. A future persistence layer
+    // (or any consumer interested in "this module's state has been touched") can observe it
+    // and clear it after handling.
+    bool dirty() const { return dirty_; }
+    void markDirty() { dirty_ = true; }
+    void clearDirty() { dirty_ = false; }
 
     MoonModule* parent() const { return parent_; }
     void setParent(MoonModule* p) { parent_ = p; }
@@ -78,6 +146,38 @@ public:
         return false;
     }
 
+    // Replace child at position i with fresh. Caller owns lifecycle of the removed
+    // (returned) child — teardown + delete. Returns nullptr if i is out of range.
+    MoonModule* replaceChildAt(uint8_t i, MoonModule* fresh) {
+        if (i >= childCount_ || !fresh) return nullptr;
+        MoonModule* old = children_[i];
+        if (old) old->setParent(nullptr);
+        fresh->setParent(this);
+        children_[i] = fresh;
+        return old;
+    }
+
+    // Move child to absolute position newIndex (0..childCount-1). Intermediate siblings
+    // shift toward the vacated slot. Returns false if child isn't found, newIndex is out
+    // of range, or the move is a no-op (already at newIndex).
+    bool moveChildTo(MoonModule* child, uint8_t newIndex) {
+        if (newIndex >= childCount_) return false;
+        for (uint8_t i = 0; i < childCount_; i++) {
+            if (children_[i] != child) continue;
+            if (i == newIndex) return false;  // no-op
+            if (newIndex > i) {
+                // Shift left to fill the gap
+                for (uint8_t j = i; j < newIndex; j++) children_[j] = children_[j + 1];
+            } else {
+                // Shift right to make room
+                for (uint8_t j = i; j > newIndex; j--) children_[j] = children_[j - 1];
+            }
+            children_[newIndex] = child;
+            return true;
+        }
+        return false;
+    }
+
     uint8_t childCount() const { return childCount_; }
     MoonModule* child(uint8_t i) const { return i < childCount_ ? children_[i] : nullptr; }
 
@@ -105,6 +205,9 @@ protected:
 
 private:
     char name_[24] = {};
+    const char* typeName_ = "";  // points into flash (factory string literal); see setTypeName comment
+    bool enabled_ = true;
+    bool dirty_ = false;
     MoonModule* parent_ = nullptr;
     MoonModule** children_ = nullptr;
     uint8_t childCount_ = 0;

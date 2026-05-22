@@ -21,6 +21,18 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 BUILD_DIR = ROOT / "build"
 ESP32_DIR = ROOT / "esp32"
 
+# Hard performance floor for the ESP32 render loop, expressed as an FPS ×
+# light-count throughput so it scales to any grid size. Anchored at the 128×128
+# reference: 18 FPS × 16384 lights. A smaller grid must run proportionally
+# faster (e.g. 64×64 = 4096 lights → 72 FPS floor).
+#
+# The device reports tick *time* (µs), not FPS — FPS is only ever derived by
+# integer division, which loses precision. So the gate compares the measured
+# tick_us directly against a per-grid *max tick time*:
+#   max_tick_us = lights × 1e6 / MIN_ESP32_FPS_LED_PRODUCT
+# Enforced in --commit mode so a regression fails pre-commit.
+MIN_ESP32_FPS_LED_PRODUCT = 18 * 16384  # 294912
+
 sys.path.insert(0, str(ROOT / "scripts" / "build"))
 
 def run(cmd, cwd=None, timeout=30):
@@ -34,9 +46,9 @@ def run(cmd, cwd=None, timeout=30):
 def collect_desktop():
     kpi = {}
 
-    mmv3 = BUILD_DIR / "mmv3"
-    if mmv3.exists():
-        kpi["binary_kb"] = mmv3.stat().st_size // 1024
+    projectMM = BUILD_DIR / "projectMM"
+    if projectMM.exists():
+        kpi["binary_kb"] = projectMM.stat().st_size // 1024
 
     test_exe = BUILD_DIR / "test" / "mm_tests"
     if test_exe.exists():
@@ -130,24 +142,79 @@ def collect_esp32():
     except Exception:
         pass
 
+    # Read tick/FPS from monitor.log. Do a live capture against the canonical
+    # port (scripts/moondeck.json) when the log is stale OR when it exists but
+    # has no parseable tick line — instead of silently skipping ESP32 KPI.
     log = ESP32_DIR / "monitor.log"
-    if log.exists():
-        age_min = (time.time() - log.stat().st_mtime) / 60
-        if age_min < 60:
-            for line in reversed(log.read_text().splitlines()):
-                if "tick:" in line:
-                    # Format: "tick: 108us (FPS: 9259)  free: 215180  maxBlock: 63488"
-                    m = re.search(r'tick:\s*(\d+)us', line)
-                    if m:
-                        tick_us = int(m.group(1))
-                        kpi["tick_us"] = tick_us
-                        kpi["fps"] = 1000000 // tick_us if tick_us > 0 else 0
-                    m = re.search(r'free:\s*(\d+)', line)
-                    if m:
-                        kpi["heap_free"] = int(m.group(1))
-                    break
+    stale = (not log.exists()) or (time.time() - log.stat().st_mtime) > 300
+
+    # Only extract from a log we trust: a non-stale file, or one a live capture
+    # just refreshed. If the file is stale and the capture fails (port absent,
+    # garbled output), do NOT fall back to the old file — a stale tick reported
+    # as fresh is worse than no ESP32 KPI at all.
+    if stale:
+        if _live_capture(log):
+            _extract_esp32_tick(log, kpi)
+    else:
+        if not _extract_esp32_tick(log, kpi):
+            # File is fresh but unparseable (no tick line) — one capture retry.
+            if _live_capture(log):
+                _extract_esp32_tick(log, kpi)
 
     return kpi
+
+def _extract_esp32_tick(log, kpi):
+    if not log.exists():
+        return False
+    for line in reversed(log.read_text().splitlines()):
+        if "tick:" not in line:
+            continue
+        # Format: "tick: 108us (FPS: 9259)  free: 215180  maxBlock: 63488"
+        m = re.search(r'tick:\s*(\d+)us', line)
+        if m:
+            tick_us = int(m.group(1))
+            kpi["tick_us"] = tick_us
+            kpi["fps"] = 1000000 // tick_us if tick_us > 0 else 0
+        m = re.search(r'free:\s*(\d+)', line)
+        if m:
+            kpi["heap_free"] = int(m.group(1))
+        return "tick_us" in kpi
+    return False
+
+def _live_capture(log, seconds=15):
+    """Capture ESP32 serial output to monitor.log for ~seconds. Returns True on success."""
+    import json
+    cfg = ROOT / "scripts" / "moondeck.json"
+    if not cfg.exists():
+        return False
+    try:
+        port = json.loads(cfg.read_text()).get("port")
+    except Exception:
+        return False
+    if not port or not Path(port).exists():
+        print(f"  ESP32 KPI: configured port {port} not present, skipping live capture")
+        return False
+    try:
+        import serial
+    except ImportError:
+        return False
+    print(f"  ESP32 KPI: capturing {seconds}s from {port}...")
+    try:
+        ser = serial.Serial(port, 115200, timeout=1)
+    except Exception as e:
+        print(f"  ESP32 KPI: cannot open {port}: {e}")
+        return False
+    end = time.time() + seconds
+    try:
+        with open(log, "w") as f:
+            while time.time() < end:
+                line = ser.readline().decode("utf-8", errors="replace").rstrip("\r\n")
+                if line:
+                    f.write(line + "\n")
+                    f.flush()
+    finally:
+        ser.close()
+    return True
 
 def collect_code():
     kpi = {}
@@ -281,7 +348,7 @@ def main():
     else:
         # Full interactive report
         print("=" * 50)
-        print("  mmv3 KPI Report")
+        print("  projectMM KPI Report")
         print("=" * 50)
         print()
         print(format_oneliner(desktop, esp32, code))
@@ -289,6 +356,28 @@ def main():
         print(format_full(desktop, esp32, code))
         print()
         print("=" * 50)
+
+    # Hard throughput gate: if a live ESP32 tick was captured, it must clear the
+    # floor. The device reports tick *time* (µs), so compare that directly — no
+    # lossy FPS division. The per-grid budget scales with light count:
+    #   max_tick_us = lights × 1e6 / MIN_ESP32_FPS_LED_PRODUCT
+    # so a smaller grid gets proportionally less time (18 FPS at 128×128).
+    # An absent ESP32 reading is not a failure — the caller decides whether a
+    # missing measurement is acceptable (see CLAUDE.md pre-commit step 8).
+    # Only --commit mode aborts on a breach; a plain interactive report just
+    # warns, so viewing KPIs on an unlucky slow sample does not exit non-zero.
+    esp32_tick = esp32.get("tick_us")
+    lights = desktop.get("lights")
+    if esp32_tick is not None and lights:
+        max_tick = round(lights * 1_000_000 / MIN_ESP32_FPS_LED_PRODUCT)
+        if esp32_tick > max_tick:
+            print()
+            label = "FAIL" if args.commit else "WARN"
+            print(f"{label}: ESP32 render tick {esp32_tick}us exceeds the {max_tick}us "
+                  f"budget for {lights} lights (18 FPS at the 128×128 / 16384-light "
+                  f"reference).")
+            if args.commit:
+                sys.exit(1)
 
 if __name__ == "__main__":
     main()

@@ -40,6 +40,31 @@ TEST_CASE("MoonModule name") {
     CHECK(std::strcmp(mod.name(), "TestModule") == 0);
 }
 
+TEST_CASE("MoonModule typeName is independent of name") {
+    TestModule mod;
+    // Both empty by default
+    CHECK(mod.name()[0] == '\0');
+    CHECK(mod.typeName()[0] == '\0');
+
+    // Factory sets typeName then name; later setName doesn't touch typeName
+    mod.setTypeName("NoiseEffect");
+    mod.setName("NoiseEffect");
+    CHECK(std::strcmp(mod.typeName(), "NoiseEffect") == 0);
+
+    mod.setName("Noise");   // human label override (matches main.cpp pattern)
+    CHECK(std::strcmp(mod.name(), "Noise") == 0);
+    CHECK(std::strcmp(mod.typeName(), "NoiseEffect") == 0);
+}
+
+TEST_CASE("MoonModule dirty flag") {
+    TestModule mod;
+    CHECK_FALSE(mod.dirty());
+    mod.markDirty();
+    CHECK(mod.dirty());
+    mod.clearDirty();
+    CHECK_FALSE(mod.dirty());
+}
+
 TEST_CASE("MoonModule parent") {
     TestModule parent;
     TestModule child;
@@ -76,6 +101,72 @@ TEST_CASE("ControlList clear and rebuild") {
 
     mod.onBuildControls();
     CHECK(mod.controls().count() == 3);
+}
+
+TEST_CASE("ReadOnly control binding") {
+    mm::MoonModule mod;
+    char statusBuf[32] = "idle";
+    mod.controls().addReadOnly("status", statusBuf, sizeof(statusBuf));
+
+    CHECK(mod.controls().count() == 1);
+    auto& ctrl = mod.controls()[0];
+    CHECK(std::strcmp(ctrl.name, "status") == 0);
+    CHECK(ctrl.type == mm::ControlType::ReadOnly);
+    CHECK(std::strcmp(static_cast<char*>(ctrl.ptr), "idle") == 0);
+
+    // Update the buffer — control reflects it
+    std::strcpy(statusBuf, "running");
+    CHECK(std::strcmp(static_cast<char*>(ctrl.ptr), "running") == 0);
+}
+
+TEST_CASE("Select control binding") {
+    mm::MoonModule mod;
+    uint8_t mode = 0;
+    static constexpr const char* options[] = {"Off", "Auto", "Manual"};
+    mod.controls().addSelect("mode", mode, options, 3);
+
+    CHECK(mod.controls().count() == 1);
+    auto& ctrl = mod.controls()[0];
+    CHECK(std::strcmp(ctrl.name, "mode") == 0);
+    CHECK(ctrl.type == mm::ControlType::Select);
+    CHECK(*static_cast<uint8_t*>(ctrl.ptr) == 0);
+    CHECK(ctrl.max == 3); // option count
+
+    // Options pointer is stored in aux
+    auto* opts = reinterpret_cast<const char* const*>(ctrl.aux);
+    CHECK(std::strcmp(opts[0], "Off") == 0);
+    CHECK(std::strcmp(opts[1], "Auto") == 0);
+    CHECK(std::strcmp(opts[2], "Manual") == 0);
+
+    // Change via pointer
+    mode = 2;
+    CHECK(*static_cast<uint8_t*>(ctrl.ptr) == 2);
+}
+
+TEST_CASE("Progress control binding") {
+    mm::MoonModule mod;
+    uint32_t used = 1000;
+    mod.controls().addProgress("heap", used, 4096);
+
+    CHECK(mod.controls().count() == 1);
+    auto& ctrl = mod.controls()[0];
+    CHECK(std::strcmp(ctrl.name, "heap") == 0);
+    CHECK(ctrl.type == mm::ControlType::Progress);
+    CHECK(*static_cast<uint32_t*>(ctrl.ptr) == 1000);
+    CHECK(ctrl.aux == 4096); // total
+
+    // Update value
+    used = 2048;
+    CHECK(*static_cast<uint32_t*>(ctrl.ptr) == 2048);
+}
+
+TEST_CASE("Module enabled property") {
+    mm::MoonModule mod;
+    CHECK(mod.enabled() == true); // default enabled
+    mod.setEnabled(false);
+    CHECK(mod.enabled() == false);
+    mod.setEnabled(true);
+    CHECK(mod.enabled() == true);
 }
 
 TEST_CASE("Bool control binding") {

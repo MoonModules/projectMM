@@ -4,8 +4,28 @@ CONFIG_COMPILER_CXX_EXCEPTIONS=n
 CONFIG_LWIP_SO_REUSE=y
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
+# Custom partition table (4MB classic; S3 variants override via sdkconfig.defaults.<board>)
+# app0/app1 = 1.75 MB each, spiffs = 384 KB (LittleFS), coredump = 64 KB
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/esp32dev.csv"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+
 # Task watchdog disabled — we use platform::yield() for cooperative scheduling
 CONFIG_ESP_TASK_WDT_EN=n
+
+# lwIP core locking — socket calls take the TCP/IP core mutex and run inline
+# instead of context-switching to the tcpip_thread per call. Large win for the
+# ArtNet send path (97 UDP packets per frame).
+CONFIG_LWIP_TCPIP_CORE_LOCKING=y
+
+# Larger TCP send buffer so the preview WebSocket frame (up to ~5.5 KB at the
+# finest detail level) fits in one non-blocking write with comfortable headroom
+# — avoids partial sends that would drop and reconnect the preview connection.
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=11520
+
+# WiFi
+CONFIG_ESP_WIFI_ENABLED=y
 
 # Ethernet — Olimex ESP32-Gateway (LAN8720 RMII)
 CONFIG_ETH_USE_ESP32_EMAC=y

@@ -2,6 +2,7 @@ add_executable(mm_tests
     test_color.cpp
     test_buffer.cpp
     test_moonmodule.cpp
+    test_system_module.cpp
     test_grid_layout.cpp
     test_rainbow.cpp
     test_artnet_packet.cpp
@@ -9,6 +10,10 @@ add_executable(mm_tests
     test_mapping_lut.cpp
     test_mirror.cpp
     test_blend_map.cpp
+    test_filesystem_persistence.cpp
+    test_movechild.cpp
+    test_module_factory.cpp
+    test_preview_driver.cpp
 )
 
 target_include_directories(mm_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

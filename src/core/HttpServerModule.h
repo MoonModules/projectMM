@@ -4,6 +4,8 @@
 #include "core/Scheduler.h"
 #include "core/PreviewFrame.h"
 #include "core/ModuleFactory.h"
+#include "core/JsonUtil.h"
+#include "core/FilesystemModule.h"
 #include "platform/platform.h"
 
 #include "ui/ui_embedded.h"
@@ -21,6 +23,11 @@ public:
     void setScheduler(Scheduler* s) { scheduler_ = s; }
     void setUiPath(const char* path) { uiPath_ = path; }
     void setPreviewFrame(PreviewFrame* f) { previewFrame_ = f; }
+
+    // Keep running even when "disabled" via the UI — otherwise the user has no way
+    // to re-enable themselves through the same UI. The `enabled` checkbox on this
+    // card has no effect; that's intentional.
+    bool respectsEnabled() const override { return false; }
 
     void onBuildControls() override {
         controls_.addUint16("port", port);
@@ -68,6 +75,12 @@ private:
     // Shared JSON buffer for API responses (one request at a time, so safe to share)
     static constexpr size_t JSON_BUF_SIZE = 4096;
     static inline char jsonBuf_[JSON_BUF_SIZE];
+
+    // XOR key for Password-control obfuscation in /api/state. NOT a secret — the
+    // same value lives in src/ui/app.js (PW_XOR_KEY). This only stops the
+    // password being plainly readable in a raw API response; it is trivially
+    // reversible by design (see the ControlType::Password serialization).
+    static constexpr uint8_t PASSWORD_XOR_KEY = 0x5A;
 
     // -----------------------------------------------------------------------
     // HTTP handling
@@ -134,14 +147,32 @@ private:
             if (std::strcmp(path, "/") == 0) serveFile(conn, "index.html", "text/html");
             else if (std::strcmp(path, "/app.js") == 0) serveFile(conn, "app.js", "application/javascript");
             else if (std::strcmp(path, "/style.css") == 0) serveFile(conn, "style.css", "text/css");
+            else if (std::strcmp(path, "/moonlight-logo.png") == 0) serveFile(conn, "moonlight-logo.png", "image/png");
             else if (std::strcmp(path, "/api/state") == 0) serveState(conn);
             else if (std::strcmp(path, "/api/system") == 0) serveSystem(conn);
+            else if (std::strcmp(path, "/api/types") == 0) serveTypes(conn);
             else sendResponse(conn, 404, "text/plain", "Not found");
         } else if (std::strcmp(method, "POST") == 0) {
+            // POST /api/modules/<name>/move with body {"to":N}.
+            // Strict-suffix check: path must end with "/move" exactly (rejects "/movex").
+            const size_t pathLen = std::strlen(path);
+            const bool isMoveRoute =
+                std::strncmp(path, "/api/modules/", 13) == 0 &&
+                pathLen > 18 &&
+                std::strcmp(path + pathLen - 5, "/move") == 0;
             if (std::strcmp(path, "/api/control") == 0 && body) {
                 handleSetControl(conn, body);
             } else if (std::strcmp(path, "/api/modules") == 0 && body) {
                 handleAddModule(conn, body);
+            } else if (isMoveRoute && body) {
+                char nameBuf[32] = {};
+                size_t nameLen = pathLen - 13 - 5;  // strip "/api/modules/" prefix and "/move" suffix
+                if (nameLen >= sizeof(nameBuf)) nameLen = sizeof(nameBuf) - 1;
+                std::memcpy(nameBuf, path + 13, nameLen);
+                nameBuf[nameLen] = 0;
+                handleMoveModule(conn, nameBuf, body);
+            } else if (std::strcmp(path, "/api/reboot") == 0) {
+                handleReboot(conn);
             } else {
                 sendResponse(conn, 404, "text/plain", "Not found");
             }
@@ -215,6 +246,7 @@ private:
         if (std::strcmp(filename, "index.html") == 0) { data = ui::indexHtml; dataLen = ui::indexHtmlLen; }
         else if (std::strcmp(filename, "app.js") == 0) { data = ui::appJs; dataLen = ui::appJsLen; }
         else if (std::strcmp(filename, "style.css") == 0) { data = ui::styleCss; dataLen = ui::styleCssLen; }
+        else if (std::strcmp(filename, "moonlight-logo.png") == 0) { data = ui::logoPng; dataLen = ui::logoPngLen; }
 
         if (!data) {
             sendResponse(conn, 404, "text/plain", "File not found");
@@ -276,8 +308,17 @@ private:
         };
 
         if (static_cast<size_t>(pos) >= bufSize) return;
+        // Per-module header: name, role, enabled, loopTimeUs (for fps/ms display), controls
+        const char* roleStr = roleName(mod->role());
+        const char* type = mod->typeName();
+        if (!type) type = "";
         int n = std::snprintf(buf + pos, bufSize - pos,
-            "{\"name\":\"%s\",\"controls\":[", mod->name() ? mod->name() : "");
+            "{\"name\":\"%s\",\"type\":\"%s\",\"role\":\"%s\",\"enabled\":%s,\"loopTimeUs\":%u,\"controls\":[",
+            mod->name() ? mod->name() : "",
+            type,
+            roleStr,
+            mod->enabled() ? "true" : "false",
+            static_cast<unsigned>(mod->loopTimeUs()));
         if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
         writeControls(buf, bufSize, pos, mod);
         append("]");
@@ -304,28 +345,89 @@ private:
                 if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
             }
             auto& c = ctrls[i];
+            // Per-type body emitted WITHOUT the closing }. We append "hidden" then } afterwards.
             int n = 0;
             switch (c.type) {
                 case ControlType::Uint8:
                     n = std::snprintf(buf + pos, bufSize - pos,
-                        "{\"name\":\"%s\",\"type\":\"uint8\",\"value\":%u,\"min\":%u,\"max\":%u}",
+                        "{\"name\":\"%s\",\"type\":\"uint8\",\"value\":%u,\"min\":%u,\"max\":%u",
                         c.name, *static_cast<uint8_t*>(c.ptr), c.min, c.max);
                     break;
                 case ControlType::Uint16:
                     n = std::snprintf(buf + pos, bufSize - pos,
-                        "{\"name\":\"%s\",\"type\":\"uint16\",\"value\":%u}",
+                        "{\"name\":\"%s\",\"type\":\"uint16\",\"value\":%u",
                         c.name, *static_cast<uint16_t*>(c.ptr));
                     break;
                 case ControlType::Bool:
                     n = std::snprintf(buf + pos, bufSize - pos,
-                        "{\"name\":\"%s\",\"type\":\"bool\",\"value\":%s}",
+                        "{\"name\":\"%s\",\"type\":\"bool\",\"value\":%s",
                         c.name, *static_cast<bool*>(c.ptr) ? "true" : "false");
                     break;
-                case ControlType::Text:
+                case ControlType::Text: {
+                    char escaped[128];
+                    jsonEscape(static_cast<char*>(c.ptr), escaped, sizeof(escaped));
                     n = std::snprintf(buf + pos, bufSize - pos,
-                        "{\"name\":\"%s\",\"type\":\"text\",\"value\":\"%s\"}",
-                        c.name, static_cast<char*>(c.ptr));
+                        "{\"name\":\"%s\",\"type\":\"text\",\"value\":\"%s\"",
+                        c.name, escaped);
                     break;
+                }
+                case ControlType::Password: {
+                    // The password is sent XOR-obfuscated + base64-encoded, NOT
+                    // in plaintext. This is deliberate obfuscation, not security:
+                    // the XOR key is a fixed shared constant (also in app.js), so
+                    // anyone can reverse it. It is a first line of defence — the
+                    // value is not readable at a glance in `curl /api/state` — and
+                    // it lets the UI's hold-to-peek reveal the stored password.
+                    const char* pw = static_cast<char*>(c.ptr);
+                    uint8_t scrambled[64];
+                    size_t pwLen = std::strlen(pw);
+                    if (pwLen > sizeof(scrambled)) pwLen = sizeof(scrambled);
+                    for (size_t k = 0; k < pwLen; k++) {
+                        scrambled[k] = static_cast<uint8_t>(pw[k]) ^ PASSWORD_XOR_KEY;
+                    }
+                    char encoded[96];
+                    base64Encode(scrambled, pwLen, encoded, sizeof(encoded));
+                    n = std::snprintf(buf + pos, bufSize - pos,
+                        "{\"name\":\"%s\",\"type\":\"password\",\"value\":\"%s\"",
+                        c.name, encoded);
+                    break;
+                }
+                case ControlType::ReadOnly: {
+                    char escaped[128];
+                    jsonEscape(static_cast<char*>(c.ptr), escaped, sizeof(escaped));
+                    n = std::snprintf(buf + pos, bufSize - pos,
+                        "{\"name\":\"%s\",\"type\":\"display\",\"value\":\"%s\"",
+                        c.name, escaped);
+                    break;
+                }
+                case ControlType::Select: {
+                    n = std::snprintf(buf + pos, bufSize - pos,
+                        "{\"name\":\"%s\",\"type\":\"select\",\"value\":%u,\"options\":[",
+                        c.name, *static_cast<uint8_t*>(c.ptr));
+                    if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
+                    auto* options = reinterpret_cast<const char* const*>(c.aux);
+                    for (uint8_t o = 0; o < c.max; o++) {
+                        n = std::snprintf(buf + pos, bufSize - pos,
+                            "%s\"%s\"", o > 0 ? "," : "", options[o]);
+                        if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
+                    }
+                    n = std::snprintf(buf + pos, bufSize - pos, "]");
+                    break;
+                }
+                case ControlType::Progress:
+                    n = std::snprintf(buf + pos, bufSize - pos,
+                        "{\"name\":\"%s\",\"type\":\"progress\",\"value\":%lu,\"total\":%lu",
+                        c.name, static_cast<unsigned long>(*static_cast<uint32_t*>(c.ptr)),
+                        static_cast<unsigned long>(c.aux));
+                    break;
+            }
+            if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
+            // Emit "hidden":true only when set (common case is false; omit to save bytes).
+            // Then close the per-control object.
+            if (c.hidden) {
+                n = std::snprintf(buf + pos, bufSize - pos, ",\"hidden\":true}");
+            } else {
+                n = std::snprintf(buf + pos, bufSize - pos, "}");
             }
             if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
         }
@@ -339,13 +441,23 @@ private:
         // Parse: {"module":"Noise","control":"scale","value":8}
         char moduleName[32] = {};
         char controlName[32] = {};
-        parseJsonString(body, "module", moduleName, sizeof(moduleName));
-        parseJsonString(body, "control", controlName, sizeof(controlName));
+        mm::json::parseString(body, "module", moduleName, sizeof(moduleName));
+        mm::json::parseString(body, "control", controlName, sizeof(controlName));
 
         // Find the module by name
         MoonModule* target = findModuleByName(moduleName);
         if (!target) {
             sendResponse(conn, 404, "application/json", "{\"error\":\"module not found\"}");
+            return;
+        }
+
+        // Handle module-level "enabled" property
+        if (std::strcmp(controlName, "enabled") == 0) {
+            target->setEnabled(mm::json::parseBool(body, "value"));
+            target->markDirty();
+            FilesystemModule::noteDirty();
+            if (scheduler_) scheduler_->rebuild();
+            sendResponse(conn, 200, "application/json", "{\"ok\":true}");
             return;
         }
 
@@ -357,29 +469,50 @@ private:
 
             switch (c.type) {
                 case ControlType::Uint8: {
-                    int v = parseJsonInt(body, "value");
+                    int v = mm::json::parseInt(body, "value");
                     *static_cast<uint8_t*>(c.ptr) = static_cast<uint8_t>(v);
                     break;
                 }
                 case ControlType::Uint16: {
-                    int v = parseJsonInt(body, "value");
+                    int v = mm::json::parseInt(body, "value");
                     *static_cast<uint16_t*>(c.ptr) = static_cast<uint16_t>(v);
                     break;
                 }
                 case ControlType::Bool: {
-                    bool v = parseJsonBool(body, "value");
+                    bool v = mm::json::parseBool(body, "value");
                     *static_cast<bool*>(c.ptr) = v;
                     break;
                 }
-                case ControlType::Text: {
+                case ControlType::Text:
+                case ControlType::Password: {
+                    // Password writes set the real value just like Text; only
+                    // serialization (writeControls) hides it.
                     char v[64] = {};
-                    parseJsonString(body, "value", v, sizeof(v));
+                    mm::json::parseString(body, "value", v, sizeof(v));
                     uint8_t maxLen = c.max > 0 ? c.max - 1 : 15;
                     std::strncpy(static_cast<char*>(c.ptr), v, maxLen);
                     static_cast<char*>(c.ptr)[maxLen] = '\0';
                     break;
                 }
+                case ControlType::Select: {
+                    int v = mm::json::parseInt(body, "value");
+                    if (v < 0 || v >= c.max) {
+                        sendResponse(conn, 400, "application/json", "{\"error\":\"value out of range\"}");
+                        return;
+                    }
+                    *static_cast<uint8_t*>(c.ptr) = static_cast<uint8_t>(v);
+                    break;
+                }
+                case ControlType::ReadOnly:
+                case ControlType::Progress:
+                    break; // read-only, skip
             }
+            // Rebuild controls only for Select (dynamic onBuildControls), rebuild pipeline for all
+            if (c.type == ControlType::Select) {
+                target->rebuildControls();
+            }
+            target->markDirty();
+            FilesystemModule::noteDirty();
             if (scheduler_) scheduler_->rebuild();
 
             sendResponse(conn, 200, "application/json", "{\"ok\":true}");
@@ -462,9 +595,9 @@ private:
         char typeName[32] = {};
         char id[32] = {};
         char parentId[32] = {};
-        parseJsonString(body, "type", typeName, sizeof(typeName));
-        parseJsonString(body, "id", id, sizeof(id));
-        parseJsonString(body, "parent_id", parentId, sizeof(parentId));
+        mm::json::parseString(body, "type", typeName, sizeof(typeName));
+        mm::json::parseString(body, "id", id, sizeof(id));
+        mm::json::parseString(body, "parent_id", parentId, sizeof(parentId));
 
         if (typeName[0] == 0) {
             sendResponse(conn, 400, "application/json", "{\"error\":\"missing type\"}");
@@ -500,12 +633,26 @@ private:
             }
         }
 
-        // Lifecycle: setup the new module
-        mod->setup();
+        // Lifecycle: same phase order as Scheduler::setup() — onBuildControls() first so
+        // control buffers are bound, then setup() (which may read those bound members),
+        // then onAllocateMemory(). Getting this order wrong means a module's setup() sees
+        // uninitialized control state.
         mod->onBuildControls();
+        mod->setup();
         mod->onAllocateMemory();
 
         if (scheduler_) scheduler_->rebuild();
+
+        // Persist the new tree shape — marking the parent dirty causes saveSubtree
+        // to write the parent's file with the new child slot included. The save is
+        // debounced (2s after the last dirty mark) so an immediate reboot won't catch
+        // the write; callers wanting a synchronous save can call FilesystemModule::flush().
+        if (parentId[0] != 0) {
+            if (auto* parent = findModuleByName(parentId)) parent->markDirty();
+        } else {
+            mod->markDirty();
+        }
+        FilesystemModule::noteDirty();
 
         sendResponse(conn, 200, "application/json", "{\"ok\":true}");
     }
@@ -529,56 +676,154 @@ private:
 
         if (scheduler_) scheduler_->rebuild();
 
+        // Persist the new tree shape — marking the parent dirty rewrites its file
+        // without the deleted child slot. Root deletes are skipped (no parent to mark);
+        // the top-level shape is fixed in main.cpp anyway.
+        if (parent) {
+            parent->markDirty();
+            FilesystemModule::noteDirty();
+        }
+
         sendResponse(conn, 200, "application/json", "{\"ok\":true}");
     }
 
-    // -----------------------------------------------------------------------
-    // Minimal JSON parsing (no library)
-    // -----------------------------------------------------------------------
-
-    static void parseJsonString(const char* json, const char* key, char* out, size_t maxLen) {
-        char search[48];
-        std::snprintf(search, sizeof(search), "\"%s\":\"", key);
-        const char* start = std::strstr(json, search);
-        if (!start) {
-            // Try with space after colon (Python's json.dumps uses spaces)
-            std::snprintf(search, sizeof(search), "\"%s\": \"", key);
-            start = std::strstr(json, search);
+    // GET /api/types → {"types":[{"name":"NoiseEffect","role":"effect",
+    //                              "defaults":{"bpm":60,"scale":4,...}}, ...]}.
+    // The defaults map is captured by factory-creating a fresh probe instance per type,
+    // running its onBuildControls(), and reading each bound variable's value-at-rest.
+    // The probe is destroyed before the next iteration. UI uses these to render the
+    // ↺ reset-to-default button (active when the live value differs).
+    void serveTypes(platform::TcpConnection& conn) {
+        int pos = std::snprintf(jsonBuf_, JSON_BUF_SIZE, "{\"types\":[");
+        if (pos < 0) {
+            sendResponse(conn, 500, "application/json", "{\"error\":\"format\"}");
+            return;
         }
-        if (!start) return;
-        start += std::strlen(search);
-        const char* end = std::strchr(start, '"');
-        if (!end) return;
-        size_t len = static_cast<size_t>(end - start);
-        if (len >= maxLen) len = maxLen - 1;
-        std::memcpy(out, start, len);
-        out[len] = 0;
+        bool first = true;
+        for (uint8_t i = 0; i < ModuleFactory::typeCount(); i++) {
+            const char* name = ModuleFactory::typeName(i);
+            if (!name) continue;
+            const char* roleStr = roleName(ModuleFactory::typeRole(i));
+            int n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
+                                  "%s{\"name\":\"%s\",\"role\":\"%s\",\"defaults\":{",
+                                  first ? "" : ",", name, roleStr);
+            if (n < 0 || static_cast<size_t>(pos + n) >= JSON_BUF_SIZE) break;
+            pos += n;
+            writeTypeDefaults(name, pos);
+            n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos, "}}");
+            if (n < 0 || static_cast<size_t>(pos + n) >= JSON_BUF_SIZE) break;
+            pos += n;
+            first = false;
+        }
+        int n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos, "]}");
+        if (n > 0 && static_cast<size_t>(pos + n) < JSON_BUF_SIZE) pos += n;
+        sendResponse(conn, 200, "application/json", jsonBuf_);
     }
 
-    static int parseJsonInt(const char* json, const char* key) {
-        char search[48];
-        std::snprintf(search, sizeof(search), "\"%s\":", key);
-        const char* start = std::strstr(json, search);
-        if (!start) {
-            std::snprintf(search, sizeof(search), "\"%s\": ", key);
-            start = std::strstr(json, search);
+    // Emit `"controlName":value, ...` pairs into jsonBuf_ at &pos for a probe of typeName.
+    // The probe is created from the factory, onBuildControls is run, and the bound
+    // variables are read at their initial (just-constructed) state. The probe is deleted
+    // before return. Only persistable scalar types are emitted (Uint8/Uint16/Bool/Text).
+    // Text values are JSON-escaped minimally — typeName-derived control names are
+    // alphanumeric so the keys are safe.
+    void writeTypeDefaults(const char* typeName, int& pos) {
+        MoonModule* probe = ModuleFactory::create(typeName);
+        if (!probe) return;
+        probe->onBuildControls();
+        auto& cs = probe->controls();
+        bool first = true;
+        for (uint8_t i = 0; i < cs.count(); i++) {
+            auto& c = cs[i];
+            int n = 0;
+            switch (c.type) {
+                case ControlType::Uint8:
+                    n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
+                                      "%s\"%s\":%u", first ? "" : ",", c.name,
+                                      *static_cast<uint8_t*>(c.ptr));
+                    break;
+                case ControlType::Uint16:
+                    n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
+                                      "%s\"%s\":%u", first ? "" : ",", c.name,
+                                      *static_cast<uint16_t*>(c.ptr));
+                    break;
+                case ControlType::Bool:
+                    n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
+                                      "%s\"%s\":%s", first ? "" : ",", c.name,
+                                      *static_cast<bool*>(c.ptr) ? "true" : "false");
+                    break;
+                case ControlType::Text: {
+                    char escaped[128];
+                    jsonEscape(static_cast<char*>(c.ptr), escaped, sizeof(escaped));
+                    n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
+                                      "%s\"%s\":\"%s\"", first ? "" : ",", c.name,
+                                      escaped);
+                    break;
+                }
+                case ControlType::Select:
+                    n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
+                                      "%s\"%s\":%u", first ? "" : ",", c.name,
+                                      *static_cast<uint8_t*>(c.ptr));
+                    break;
+                default:
+                    continue;  // ReadOnly/Progress: no default; Password: never serialized
+            }
+            if (n < 0 || static_cast<size_t>(pos + n) >= JSON_BUF_SIZE) break;
+            pos += n;
+            first = false;
         }
-        if (!start) return 0;
-        return std::atoi(start + std::strlen(search));
+        probe->teardown();
+        delete probe;
     }
 
-    static bool parseJsonBool(const char* json, const char* key) {
-        char search[48];
-        std::snprintf(search, sizeof(search), "\"%s\":", key);
-        const char* start = std::strstr(json, search);
-        if (!start) {
-            std::snprintf(search, sizeof(search), "\"%s\": ", key);
-            start = std::strstr(json, search);
+    // POST /api/modules/<name>/move with body {"to":N}. Moves the named module to
+    // absolute index N within its parent's children. Triggers a full pipeline rebuild
+    // because modifier/layout reorders change the LUT.
+    void handleMoveModule(platform::TcpConnection& conn, const char* moduleName, const char* body) {
+        auto* mod = findModuleByName(moduleName);
+        if (!mod) {
+            sendResponse(conn, 404, "application/json", "{\"error\":\"module not found\"}");
+            return;
         }
-        if (!start) return false;
-        const char* val = start + std::strlen(search);
-        while (*val == ' ') val++; // skip extra spaces
-        return std::strncmp(val, "true", 4) == 0;
+        auto* parent = mod->parent();
+        if (!parent) {
+            sendResponse(conn, 400, "application/json", "{\"error\":\"top-level modules cannot be reordered\"}");
+            return;
+        }
+        int to = mm::json::parseInt(body, "to");
+        if (to < 0 || to >= parent->childCount()) {
+            sendResponse(conn, 400, "application/json", "{\"error\":\"to out of range\"}");
+            return;
+        }
+        if (!parent->moveChildTo(mod, static_cast<uint8_t>(to))) {
+            // Either already at position N or some other no-op — not an error per se,
+            // but report so the UI can avoid a refetch storm on rapid drags.
+            sendResponse(conn, 200, "application/json", "{\"ok\":true,\"noop\":true}");
+            return;
+        }
+        // A move changes the parent's child ordering — mark the parent dirty so its
+        // file is rewritten with the new order (same as add/delete handlers).
+        parent->markDirty();
+        FilesystemModule::noteDirty();
+        if (scheduler_) scheduler_->rebuild();
+        sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+    }
+
+    // POST /api/reboot — restart the device. Response is sent before the restart
+    // happens, but on ESP32 the device may reset before the TCP socket finishes;
+    // browsers handle this via their existing WS-disconnect → reconnect logic.
+    //
+    // Flush pending FS writes first — otherwise a quick add-then-reboot loses the
+    // pending change to the 2s save debounce.
+    void handleReboot(platform::TcpConnection& conn) {
+        FilesystemModule::flushPending();
+        sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+        // Best-effort: close the socket and give LWIP a brief window to push the FIN
+        // + payload out over Ethernet before esp_restart() yanks the world. Without the
+        // delay the browser sees an aborted connection instead of a clean 200; the UI
+        // copes (it auto-reconnects on WS close) but a clean response is friendlier.
+        conn.close();
+        platform::delayMs(200);
+        platform::reboot();  // noreturn
     }
 
     // -----------------------------------------------------------------------
@@ -667,74 +912,78 @@ private:
         return conn.write(reinterpret_cast<const uint8_t*>(data), len);
     }
 
-    static bool sendWsBinaryFrame(platform::TcpConnection& conn, const uint8_t* data, size_t len) {
-        uint8_t header[10];
-        int headerLen = 0;
 
-        header[0] = 0x82; // FIN + binary opcode
-        if (len < 126) {
-            header[1] = static_cast<uint8_t>(len);
-            headerLen = 2;
-        } else if (len < 65536) {
-            header[1] = 126;
-            header[2] = static_cast<uint8_t>((len >> 8) & 0xFF);
-            header[3] = static_cast<uint8_t>(len & 0xFF);
-            headerLen = 4;
-        } else {
-            return false;
-        }
-
-        if (!conn.write(header, headerLen)) return false;
-        return conn.write(data, len);
-    }
-
+    // Broadcast the 3D preview frame to every connected browser. The send is
+    // non-blocking and all-or-nothing: a backpressured browser causes the frame
+    // to be skipped (WouldBlock), never a render-task stall. The preview is
+    // already rate-limited by PreviewDriver's fps control.
     void broadcastPreviewFrame() {
         if (!previewFrame_ || !previewFrame_->data || previewFrame_->dataLen == 0) return;
 
-        // Build 7-byte preview header on stack: [0x02][w16][h16][d16]
-        uint8_t previewHeader[7];
+        // Build 13-byte preview header on stack:
+        //   [0x02][dw16][dh16][dd16][ow16][oh16][od16]
+        // dw/dh/dd = dimensions of the (downsampled) data in the payload;
+        // ow/oh/od = original physical grid dimensions, for optional UI upscale.
+        // All uint16 little-endian.
+        uint8_t previewHeader[13];
         previewHeader[0] = 0x02;
-        previewHeader[1] = static_cast<uint8_t>(previewFrame_->width & 0xFF);
-        previewHeader[2] = static_cast<uint8_t>(previewFrame_->width >> 8);
-        previewHeader[3] = static_cast<uint8_t>(previewFrame_->height & 0xFF);
-        previewHeader[4] = static_cast<uint8_t>(previewFrame_->height >> 8);
-        previewHeader[5] = static_cast<uint8_t>(previewFrame_->depth & 0xFF);
-        previewHeader[6] = static_cast<uint8_t>(previewFrame_->depth >> 8);
+        auto put16 = [&](int at, lengthType v) {
+            previewHeader[at]     = static_cast<uint8_t>(v & 0xFF);
+            previewHeader[at + 1] = static_cast<uint8_t>(v >> 8);
+        };
+        put16(1, previewFrame_->width);
+        put16(3, previewFrame_->height);
+        put16(5, previewFrame_->depth);
+        put16(7, previewFrame_->origWidth);
+        put16(9, previewFrame_->origHeight);
+        put16(11, previewFrame_->origDepth);
 
-        size_t totalLen = 7 + previewFrame_->dataLen;
+        size_t totalLen = 13 + previewFrame_->dataLen;
+
+        // WebSocket frame header for a binary message of totalLen bytes.
+        uint8_t wsHeader[4];
+        int wsHeaderLen = 0;
+        wsHeader[0] = 0x82; // FIN + binary opcode
+        if (totalLen < 126) {
+            wsHeader[1] = static_cast<uint8_t>(totalLen);
+            wsHeaderLen = 2;
+        } else if (totalLen < 65536) {
+            wsHeader[1] = 126;
+            wsHeader[2] = static_cast<uint8_t>((totalLen >> 8) & 0xFF);
+            wsHeader[3] = static_cast<uint8_t>(totalLen & 0xFF);
+            wsHeaderLen = 4;
+        } else {
+            return; // frame too large for the 16-bit length form
+        }
+
+        // One scatter-gather chunk list: WS header + preview header + payload.
+        // The payload chunk points at PreviewDriver's own downsample buffer —
+        // PreviewDriver::loop() writes the strided RGB copy there and sets
+        // previewFrame_->data to it. No copy here; the buffer is driver-owned
+        // (not a DriverGroup slice — the downsample step owns its own storage).
+        const platform::WriteChunk chunks[] = {
+            { wsHeader,      static_cast<size_t>(wsHeaderLen) },
+            { previewHeader, sizeof(previewHeader) },
+            { previewFrame_->data, previewFrame_->dataLen },
+        };
+        constexpr int chunkCount = sizeof(chunks) / sizeof(chunks[0]);
 
         for (auto& ws : wsClients_) {
             if (!ws.valid()) continue;
-            // Send WebSocket frame header + preview header + buffer data (3 writes, zero copy)
-            if (!sendWsBinaryFrameMulti(ws, previewHeader, 7, previewFrame_->data, previewFrame_->dataLen, totalLen)) {
-                ws.close();
+            switch (ws.writeChunks(chunks, chunkCount)) {
+                case platform::WriteResult::Complete:
+                case platform::WriteResult::WouldBlock:
+                    // WouldBlock: browser is backpressured — skip this frame,
+                    // keep the connection open (the next frame may fit).
+                    break;
+                case platform::WriteResult::Partial:
+                case platform::WriteResult::Error:
+                    // Partial: a truncated WS message went out — the stream is
+                    // corrupt, the connection must be dropped. Error: dead socket.
+                    ws.close();
+                    break;
             }
         }
-    }
-
-    static bool sendWsBinaryFrameMulti(platform::TcpConnection& conn,
-                                        const uint8_t* data1, size_t len1,
-                                        const uint8_t* data2, size_t len2,
-                                        size_t totalLen) {
-        uint8_t header[10];
-        int headerLen = 0;
-
-        header[0] = 0x82; // FIN + binary opcode
-        if (totalLen < 126) {
-            header[1] = static_cast<uint8_t>(totalLen);
-            headerLen = 2;
-        } else if (totalLen < 65536) {
-            header[1] = 126;
-            header[2] = static_cast<uint8_t>((totalLen >> 8) & 0xFF);
-            header[3] = static_cast<uint8_t>(totalLen & 0xFF);
-            headerLen = 4;
-        } else {
-            return false;
-        }
-
-        if (!conn.write(header, headerLen)) return false;
-        if (!conn.write(data1, len1)) return false;
-        return conn.write(data2, len2);
     }
 
     // -----------------------------------------------------------------------
@@ -791,6 +1040,18 @@ private:
     }
 
     // -----------------------------------------------------------------------
+    // Escape a string for embedding inside a JSON string literal: " → \" and
+    // \ → \\. Writes into `out` (no surrounding quotes). Truncates rather than
+    // overflowing if the escaped form exceeds outMax.
+    static void jsonEscape(const char* in, char* out, size_t outMax) {
+        size_t oi = 0;
+        for (; *in && oi + 2 < outMax; in++) {
+            if (*in == '"' || *in == '\\') out[oi++] = '\\';
+            out[oi++] = *in;
+        }
+        out[oi] = 0;
+    }
+
     // Base64 encode
     // -----------------------------------------------------------------------
 

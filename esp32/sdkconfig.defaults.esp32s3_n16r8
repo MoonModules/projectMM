@@ -1,0 +1,13 @@
+# ESP32-S3-N16R8 (16 MB flash, 8 MB PSRAM)
+# Append to sdkconfig.defaults or copy as sdkconfig.defaults
+
+# Custom partition table — 16MB layout (app0/app1 = 4 MB each, spiffs = 8 MB)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/esp32s3_n16r8.csv"
+
+# Flash size override (default is 2MB on ESP32-S3)
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# PSRAM
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y

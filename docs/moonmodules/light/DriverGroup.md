@@ -26,10 +26,13 @@ Currently all drivers see all layers. Assigning specific layers to specific driv
 ## Prior art
 
 ### MoonLight — PhysicalLayer ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h))
+
 Owns `channelsD` (display buffer). `compositeLayers()` maps virtualChannels → channelsD. Parallelism via semaphore: driver signals completion, compositor writes.
 
-### projectMM v1 — DriverLayer ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/modules/layers/DriverLayer.h))
+### projectMM v1 — DriverLayer ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/layers/DriverLayer.h))
+
 Container for driver modules. Receives pixel data from EffectsLayer.
 
 ### projectMM v2 — DataRegistry ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/DataRegistry.h))
+
 Type-erased buffer directory. Producers declare, consumers resolve by id. Decouples effects from drivers.

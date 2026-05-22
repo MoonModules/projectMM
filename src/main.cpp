@@ -6,8 +6,12 @@
 #include "light/ArtNetSendDriver.h"
 #include "light/PreviewDriver.h"
 #include "core/HttpServerModule.h"
+#include "core/SystemModule.h"
+#include "core/FilesystemModule.h"
 #include "core/ModuleFactory.h"
 #include "platform/platform.h"
+
+#include "core/NetworkModule.h"
 
 #include <cstdio>
 
@@ -24,6 +28,9 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::ArtNetSendDriver>("ArtNetSendDriver");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver");
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule");
+    mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule");
+    mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule");
+    mm::ModuleFactory::registerType<mm::FilesystemModule>("FilesystemModule");
 }
 
 static void printModuleMetrics(mm::MoonModule* mod, int depth) {
@@ -46,6 +53,25 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     mm::Scheduler scheduler;
 
     // All modules created via factory (heap-allocated, PSRAM when available, classSize set)
+
+    // Filesystem (first — wires the load hook into the scheduler so persisted values
+    // overlay into other modules' bound variables before their setup() runs)
+    auto* filesystemModule = static_cast<mm::FilesystemModule*>(mm::ModuleFactory::create("FilesystemModule"));
+    filesystemModule->setName("Filesystem");
+    filesystemModule->setScheduler(&scheduler);
+
+    // System (deviceName needed by other modules)
+    auto* systemModule = static_cast<mm::SystemModule*>(mm::ModuleFactory::create("SystemModule"));
+    systemModule->setName("System");
+    systemModule->setScheduler(&scheduler);
+
+    // Network (platform stubs return false on desktop — module is a no-op)
+    auto* networkModule = static_cast<mm::NetworkModule*>(mm::ModuleFactory::create("NetworkModule"));
+    networkModule->setName("Network");
+    networkModule->setScheduler(&scheduler);
+    networkModule->setSystemModule(systemModule);
+
+    // Layout
     auto* layoutGroup = static_cast<mm::LayoutGroup*>(mm::ModuleFactory::create("LayoutGroup"));
     auto* grid = static_cast<mm::GridLayout*>(mm::ModuleFactory::create("GridLayout"));
     grid->setName("Grid");
@@ -75,8 +101,8 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     auto* previewFrame = new mm::PreviewFrame();
     auto* preview = static_cast<mm::PreviewDriver*>(mm::ModuleFactory::create("PreviewDriver"));
     preview->setName("Preview");
-    preview->width = gridW;
-    preview->height = gridH;
+    // PreviewDriver reads physical dimensions from Layer at frame time (via DriverGroup's
+    // setLayer wiring) so runtime grid resizes are reflected in the preview header.
     preview->setPreviewFrame(previewFrame);
     driverGroup->addChild(preview);
 
@@ -87,6 +113,11 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     httpServer->setPreviewFrame(previewFrame);
 
     // Register top-level modules with scheduler (scheduler deletes on teardown)
+    // Order matters: filesystem first (load hook runs before any module's setup),
+    // then system (deviceName), network, light pipeline, then HTTP
+    scheduler.addModule(filesystemModule);
+    scheduler.addModule(systemModule);
+    scheduler.addModule(networkModule);
     scheduler.addModule(layoutGroup);
     scheduler.addModule(layer);
     scheduler.addModule(driverGroup);
@@ -96,7 +127,7 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
 
     uint32_t lights = layoutGroup->totalLightCount();
     uint32_t bufBytes = lights * 3;
-    std::printf("mmv3 running — grid %dx%d, %lu lights, buffer %lu bytes\n",
+    std::printf("projectMM running — grid %dx%d, %lu lights, buffer %lu bytes\n",
                 grid->width, grid->height,
                 static_cast<unsigned long>(lights),
                 static_cast<unsigned long>(bufBytes));

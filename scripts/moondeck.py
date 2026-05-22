@@ -48,8 +48,14 @@ def _get_local_subnet():
         return "192.168.1"
 
 
-def _probe_device(ip, port=8080, timeout=2.0):
-    """Probe a single IP for /api/state. Returns device info or None."""
+def _probe_device(ip, port=8080, timeout=0.4):
+    """Probe a single IP for /api/state. Returns device info or None.
+
+    Short timeout: on a LAN a live device answers in a few ms and a dead IP
+    refuses the connection almost instantly; 0.4s only matters for IPs that
+    silently drop packets (firewalled hosts), and a subnet scan should not
+    stall seconds on those.
+    """
     import urllib.request
     import urllib.error
     url = f"http://{ip}:{port}/api/state"
@@ -68,31 +74,21 @@ def discover_devices(subnet=""):
     if not subnet:
         subnet = _get_local_subnet()
 
+    # .1-.254 on port 80 (ESP32) and 8080 (desktop), plus localhost.
+    targets = [(f"{subnet}.{i}", port)
+               for i in range(1, 255) for port in (80, 8080)]
+    targets.append(("localhost", 8080))
+
+    # Wide thread pool — the probes are I/O-bound (almost always blocked on the
+    # socket, not the CPU), so running all ~509 in one wave means the whole /24
+    # scan finishes in about one probe-timeout window (~0.4s) instead of
+    # batch-serializing. The pool still caps thread churn vs. raw thread spawns.
+    from concurrent.futures import ThreadPoolExecutor
     devices = []
-    devLock = threading.Lock()
-    threads = []
-
-    def probe(ip, port):
-        result = _probe_device(ip, port)
-        if result:
-            with devLock:
+    with ThreadPoolExecutor(max_workers=len(targets)) as pool:
+        for result in pool.map(lambda t: _probe_device(*t), targets):
+            if result:
                 devices.append(result)
-
-    # Scan .1 to .254 on both port 80 (ESP32) and 8080 (desktop)
-    for i in range(1, 255):
-        ip = f"{subnet}.{i}"
-        for port in [80, 8080]:
-            t = threading.Thread(target=probe, args=(ip, port), daemon=True)
-            threads.append(t)
-            t.start()
-
-    # Also check localhost:8080 (desktop dev)
-    t = threading.Thread(target=lambda: probe("localhost", 8080), daemon=True)
-    threads.append(t)
-    t.start()
-
-    for t in threads:
-        t.join(timeout=3.0)
 
     # Deduplicate: if localhost found, remove the Mac's own IP:port (same process)
     hasLocalhost = any(d["ip"].startswith("localhost") for d in devices)
@@ -114,30 +110,18 @@ def discover_devices(subnet=""):
 
 def refresh_devices(known_devices):
     """Probe known devices to check online/offline status."""
-    online = []
-    devLock = threading.Lock()
-    threads = []
-
     def probe(device):
         ip = device.get("ip", "")
         if ":" in ip:
             host, port = ip.rsplit(":", 1)
-            result = _probe_device(host, int(port))
-        else:
-            result = _probe_device(ip)
-        if result:
-            with devLock:
-                online.append(result)
+            return _probe_device(host, int(port))
+        return _probe_device(ip)
 
-    for device in known_devices:
-        t = threading.Thread(target=probe, args=(device,), daemon=True)
-        threads.append(t)
-        t.start()
-
-    for t in threads:
-        t.join(timeout=3.0)
-
-    return online
+    if not known_devices:
+        return []
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        return [r for r in pool.map(probe, known_devices) if r]
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +170,7 @@ def kill_script(script_id: str):
         except (OSError, ProcessLookupError):
             pass
 
-    # Clean up any orphaned processes (e.g. mmv3 after os.execv)
+    # Clean up any orphaned processes (e.g. projectMM after os.execv)
     script_def = next((s for s in SCRIPTS if s["id"] == script_id), None)
     pname = script_def.get("process_name") if script_def else None
     if pname:

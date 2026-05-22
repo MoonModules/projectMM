@@ -13,11 +13,11 @@ Uses value noise with bilinear interpolation and smoothstep. Maps noise value to
 
 Animation: time scrolls the noise coordinate space (smooth drift). The scroll speed is scaled by panel width so the perceived speed is the same on any display size — a 16-wide and 128-wide panel look equally fast at the same BPM.
 
-## Lessons from v3 prototype
+## Design notes
 
-- Using noise value as brightness (`fromHSV(n, 255, n)`) made most lights nearly black. Always use full brightness (v=255) and vary hue or use a palette.
-- Scale default of 30 in v3 prototype was too high for small grids. v1 used 4 with a 0.1x multiplier, giving effective scale of 0.4. Needs tuning based on grid size.
-- Using time as a hash seed caused random jumps per frame (not smooth). Fix: use time as a coordinate offset (scrolls the noise field smoothly).
+- The noise value drives hue, not brightness — lights render at full brightness (v=255) so the field stays visible. Driving brightness from the noise value leaves most lights near-black.
+- `scale` defaults to 4 (low spatial frequency) so the pattern reads well on small grids; higher values suit larger panels.
+- Time is applied as a coordinate offset into the noise field, not as a hash seed — this scrolls the field smoothly instead of producing random per-frame jumps.
 
 ## Tests
 
@@ -28,10 +28,13 @@ Animation: time scrolls the noise coordinate space (smooth drift). The scroll sp
 ## Prior art
 
 ### MoonLight — E_MoonLight.h ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h))
+
 Multiple noise effects (Noise2D, Noise3D variants). Uses FastLED noise functions. Time via `millis()`.
 
 ### projectMM v2 — Noise2DEffect ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/effects/Noise2DEffect.h))
+
 Same hash-based value noise as v1. Uses PixelEffectBase spine.
 
-### projectMM v1 — NoiseEffect2D ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/modules/effects/NoiseEffect2D.h))
-Hash-based value noise with trilinear interpolation. Controls: scale (1-32), speed (0-255). Uses `timeMicros()` for animation.
+### projectMM v1 — NoiseEffect2D ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/effects/NoiseEffect2D.h))
+
+Hash-based value noise with trilinear interpolation. Controls: scale (1-32), speed (0-255). Uses `timeMicros()` for animation. v1 ran scale 4 with a 0.1x multiplier (effective 0.4) — v3's default of 4 is informed by this.

@@ -268,7 +268,7 @@ select {
     background: #fff;
 }
 
-button#discover-btn, button#refresh-ports {
+button#discover-btn, button#refresh-ports, button#refresh-devices-btn {
     background: #0f3460;
     border: 1px solid #0f3460;
     color: #e0e0e0;
@@ -277,7 +277,7 @@ button#discover-btn, button#refresh-ports {
     cursor: pointer;
     font-size: 11px;
 }
-button#discover-btn:hover, button#refresh-ports:hover {
+button#discover-btn:hover, button#refresh-ports:hover, button#refresh-devices-btn:hover {
     border-color: #e94560;
     color: #e94560;
 }

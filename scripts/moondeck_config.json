@@ -25,7 +25,7 @@
       "help": "run_desktop",
       "script": "run/run_desktop.py",
       "long_running": true,
-      "process_name": "mmv3"
+      "process_name": "projectMM"
     },
     {
       "id": "check_platform_boundary",
@@ -86,12 +86,30 @@
       "needs_env": true
     },
     {
+      "id": "build_esp32_ethonly",
+      "tab": "esp32",
+      "group": "build",
+      "label": "Build (Ethernet-only)",
+      "help": "build_esp32",
+      "script": "build/build_esp32_ethonly.py",
+      "needs_env": true
+    },
+    {
       "id": "flash_esp32",
       "tab": "esp32",
       "group": "build",
       "label": "Flash",
       "help": "flash_esp32",
       "script": "build/flash_esp32.py",
+      "needs_port": true
+    },
+    {
+      "id": "erase_flash_esp32",
+      "tab": "esp32",
+      "group": "build",
+      "label": "Erase Flash",
+      "help": "erase_flash_esp32",
+      "script": "build/erase_flash_esp32.py",
       "needs_port": true
     },
     {

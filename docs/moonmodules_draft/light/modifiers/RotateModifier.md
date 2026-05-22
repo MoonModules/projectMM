@@ -44,4 +44,5 @@ Not working correctly in testing. Needs debugging.
 ## Prior art
 
 ### MoonLight — M_MoonLight.h Rotate/PinWheel ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h))
+
 Rotate and PinWheel modifiers. Use `modifyXYZ()` virtual for per-light coordinate transformation on hot path. Integer-based where possible.

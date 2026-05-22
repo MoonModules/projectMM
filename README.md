@@ -12,21 +12,22 @@ A high-performance multi-platform system that drives large LED installations and
 
 ## Platforms
 
-- **ESP32** (primary) — ESP-IDF, no Arduino. See [rationale](docs/architecture.md#esp-idf-no-arduino).
+- **ESP32** (primary) — ESP-IDF, no Arduino. See [rationale](docs/architecture.md#esp-idf-no-arduino). Two build profiles: `default` (WiFi + Ethernet) and `eth-only` (`build_esp32.py --profile eth-only` — WiFi compiled out for a smaller image and more free RAM on Ethernet-only installs).
 - **Teensy 4.x** — DMA-based LED output (OctoWS2811)
 - **macOS / Windows / Linux** — development, fast live testing/scenarios, high-speed processing via ArtNet/DDP, and simulation
 - **Raspberry Pi** — GPIO + network output
 
 ## Architecture
 
-Everything is a **MoonModule** — effects, modifiers, layouts, drivers, and system services share the same class structure. Learn the pattern once, apply it everywhere.
+The system is two layers:
 
-The render pipeline: effects write into layer buffers → mapping LUT translates logical to physical positions → drivers output to hardware/network.
+- **Core** — a domain-neutral modular runtime. Everything is a **MoonModule**: effects, modifiers, layouts, drivers, and system services all share the same class structure, lifecycle, and controls. The core knows nothing about lights — it provides modules, controls, scheduling, persistence, and platform abstraction.
+- **Light domain** — built on the core. The render pipeline: effects write into layer buffers → mapping LUT translates logical to physical positions → drivers output to hardware/network.
 
 | Document | Description |
 |----------|-------------|
 | [CLAUDE.md](CLAUDE.md) | Rules, constraints, and development process |
-| [architecture.md](docs/architecture.md) | Core architecture: MoonModule, controls, scheduling, platform abstraction, build system, testing |
+| [architecture.md](docs/architecture.md) | Core architecture: the domain-neutral runtime — MoonModule, controls, scheduling, persistence, platform abstraction, build system, testing |
 | [architecture-light.md](docs/architecture-light.md) | Light domain: pipeline, layouts, layers, effects, modifiers, mapping, drivers, parallelism, memory strategy |
 | [plan.md](docs/plan.md) | What to build next |
 
@@ -69,7 +70,7 @@ Built on years of LED/light system development:
 | **WLED-MoonModules** | WLED fork with advanced features | [MoonModules/WLED](https://github.com/MoonModules/WLED) |
 | **StarLight** | Standalone LED firmware | [ewowi/StarLight](https://github.com/ewowi/StarLight) |
 | **MoonLight** | Ground-up build: 60+ effects, memory-optimized mapping, 11 driver types | [MoonModules/MoonLight](https://github.com/MoonModules/MoonLight) |
-| **projectMM v1** | First agentic build: proved MoonModule pattern, 8 releases | [ewowi/projectMM](https://github.com/ewowi/projectMM) |
+| **projectMM v1** | First agentic build: proved MoonModule pattern, 8 releases | [ewowi/projectMM](https://github.com/ewowi/projectMM-v1) |
 | **projectMM v2** | Lock-free buffers, multi-core scheduling, canvas UI | [ewowi/projectMM-v2](https://github.com/ewowi/projectMM-v2) |
 
 Lessons learned and proven patterns from all projects are distilled in [`docs/history/`](docs/history/):

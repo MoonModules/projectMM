@@ -2,12 +2,36 @@
 
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
+#include "esp_system.h"
+#include "esp_chip_info.h"
+#include "esp_mac.h"
+#include "esp_idf_version.h"
+#include "esp_partition.h"
+#include "esp_ota_ops.h"
+#include "esp_image_format.h"
+#include "esp_flash.h"
+#include "esp_event.h"
+#include "esp_netif.h"
+#include "esp_eth.h"
+#ifndef MM_NO_WIFI
+#include "esp_wifi.h"
+#endif
+#include "esp_log.h"
+#include "mdns.h"
+#include "esp_littlefs.h"
+#include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
 #include "lwip/inet.h"
 
 #include <cstdlib>
+#include <cstdio>
+#include <cstring>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/uio.h>
+#include <unistd.h>
 
 namespace mm::platform {
 
@@ -36,6 +60,14 @@ void yield() {
     vTaskDelay(pdMS_TO_TICKS(1));
 }
 
+void delayMs(uint32_t ms) {
+    vTaskDelay(pdMS_TO_TICKS(ms));
+}
+
+void reboot() {
+    esp_restart();
+}
+
 size_t freeHeap() {
     return heap_caps_get_free_size(MALLOC_CAP_8BIT);
 }
@@ -46,6 +78,520 @@ size_t freeInternalHeap() {
 
 size_t maxAllocBlock() {
     return heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+}
+
+size_t totalHeap() {
+    return heap_caps_get_total_size(MALLOC_CAP_8BIT);
+}
+
+size_t totalInternalHeap() {
+    return heap_caps_get_total_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+
+void getMacAddress(uint8_t mac[6]) {
+    esp_efuse_mac_get_default(mac);
+}
+
+const char* chipModel() {
+    esp_chip_info_t info;
+    esp_chip_info(&info);
+    switch (info.model) {
+        case CHIP_ESP32:   return "ESP32";
+        case CHIP_ESP32S2: return "ESP32-S2";
+        case CHIP_ESP32S3: return "ESP32-S3";
+        case CHIP_ESP32C3: return "ESP32-C3";
+        default:           return "ESP32-?";
+    }
+}
+
+const char* sdkVersion() {
+    return esp_get_idf_version();
+}
+
+const char* resetReason() {
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON:    return "POWERON";
+        case ESP_RST_EXT:        return "EXT";
+        case ESP_RST_SW:         return "SW";
+        case ESP_RST_PANIC:      return "PANIC";
+        case ESP_RST_INT_WDT:    return "INT_WDT";
+        case ESP_RST_TASK_WDT:   return "TASK_WDT";
+        case ESP_RST_WDT:        return "WDT";
+        case ESP_RST_DEEPSLEEP:  return "DEEPSLEEP";
+        case ESP_RST_BROWNOUT:   return "BROWNOUT";
+        case ESP_RST_SDIO:       return "SDIO";
+        default:                 return "UNKNOWN";
+    }
+}
+
+size_t firmwareSize() {
+    // Get actual running image size from the image header
+    const esp_partition_t* part = esp_ota_get_running_partition();
+    if (!part) return 0;
+    esp_partition_pos_t partPos = { .offset = part->address, .size = part->size };
+    esp_image_metadata_t metadata;
+    if (esp_image_get_metadata(&partPos, &metadata) == ESP_OK) {
+        return metadata.image_len;
+    }
+    return 0;
+}
+
+size_t firmwarePartition() {
+    const esp_partition_t* part = esp_ota_get_running_partition();
+    if (part) return part->size;
+    return 0;
+}
+
+size_t flashChipSize() {
+    uint32_t chipSize = 0;
+    esp_flash_get_size(nullptr, &chipSize);
+    return chipSize;
+}
+
+// LittleFS state
+static const char* FS_TAG = "mm_fs";
+static const char* FS_PARTITION_LABEL = "spiffs";  // partition label kept for tooling compat; contents are LittleFS
+static const char* FS_MOUNT_POINT = "/littlefs";    // VFS mount point; not exposed in API paths
+static bool fsMounted_ = false;
+
+// Translate API path "/foo/bar" or "foo/bar" → "/littlefs/foo/bar" into out.
+// Returns false on null input, zero-sized output, or truncation; out[0] is set to 0
+// on any failure so callers don't accidentally consume a partial path.
+static bool fsTranslate(const char* apiPath, char* out, size_t outLen) {
+    if (outLen == 0) return false;
+    if (!apiPath) { out[0] = 0; return false; }
+    const char* sep = (apiPath[0] == '/') ? "" : "/";
+    int n = std::snprintf(out, outLen, "%s%s%s", FS_MOUNT_POINT, sep, apiPath);
+    if (n < 0 || static_cast<size_t>(n) >= outLen) { out[0] = 0; return false; }
+    return true;
+}
+
+void fsSetRoot(const char* /*path*/) {
+    // No-op on ESP32 — LittleFS is mounted at a fixed partition; the FS_MOUNT_POINT
+    // prefix is hard-coded. Provided only so test code can call it portably.
+}
+
+bool fsMount() {
+    if (fsMounted_) return true;
+
+    esp_vfs_littlefs_conf_t conf = {};
+    conf.base_path = FS_MOUNT_POINT;
+    conf.partition_label = FS_PARTITION_LABEL;
+    conf.format_if_mount_failed = true;
+    conf.dont_mount = false;
+
+    esp_err_t err = esp_vfs_littlefs_register(&conf);
+    if (err != ESP_OK) {
+        ESP_LOGE(FS_TAG, "LittleFS mount failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    fsMounted_ = true;
+    ESP_LOGI(FS_TAG, "LittleFS mounted at %s (partition: %s)", FS_MOUNT_POINT, FS_PARTITION_LABEL);
+    return true;
+}
+
+void fsUnmount() {
+    if (!fsMounted_) return;
+    esp_vfs_littlefs_unregister(FS_PARTITION_LABEL);
+    fsMounted_ = false;
+}
+
+bool fsMkdir(const char* path) {
+    if (!fsMounted_) return false;
+    char full[128];
+    if (!fsTranslate(path, full, sizeof(full))) return false;
+    // mkdir -p: walk components, create each if missing
+    char* p = full + std::strlen(FS_MOUNT_POINT) + 1; // skip "/littlefs/"
+    while (*p) {
+        if (*p == '/') {
+            *p = 0;
+            mkdir(full, 0775);  // ignore errors; could already exist
+            *p = '/';
+        }
+        p++;
+    }
+    int rc = mkdir(full, 0775);
+    return rc == 0 || errno == EEXIST;
+}
+
+bool fsExists(const char* path) {
+    if (!fsMounted_) return false;
+    char full[128];
+    if (!fsTranslate(path, full, sizeof(full))) return false;
+    struct stat st;
+    return stat(full, &st) == 0;
+}
+
+bool fsRemove(const char* path) {
+    if (!fsMounted_) return false;
+    char full[128];
+    if (!fsTranslate(path, full, sizeof(full))) return false;
+    return ::remove(full) == 0;
+}
+
+int fsRead(const char* path, char* buf, size_t maxLen) {
+    if (!fsMounted_ || !buf || maxLen == 0) return -1;
+    char full[128];
+    if (!fsTranslate(path, full, sizeof(full))) return -1;
+    FILE* f = std::fopen(full, "rb");
+    if (!f) return -1;
+    size_t n = std::fread(buf, 1, maxLen - 1, f);
+    std::fclose(f);
+    buf[n] = 0;
+    return static_cast<int>(n);
+}
+
+bool fsWriteAtomic(const char* path, const char* data, size_t len) {
+    if (!fsMounted_) return false;
+    char full[128];
+    char tmp[136];
+    if (!fsTranslate(path, full, sizeof(full))) return false;
+    int n = std::snprintf(tmp, sizeof(tmp), "%s.tmp", full);
+    if (n < 0 || static_cast<size_t>(n) >= sizeof(tmp)) return false;
+
+    FILE* f = std::fopen(tmp, "wb");
+    if (!f) return false;
+    size_t written = std::fwrite(data, 1, len, f);
+    if (written != len) {
+        std::fclose(f);
+        ::remove(tmp);
+        return false;
+    }
+    std::fflush(f);
+    int fd = ::fileno(f);
+    if (fd >= 0) ::fsync(fd);
+    std::fclose(f);
+
+    if (::rename(tmp, full) != 0) {
+        ::remove(tmp);
+        return false;
+    }
+    return true;
+}
+
+void fsList(const char* dir, FsListCb cb, void* user) {
+    if (!fsMounted_ || !cb) return;
+    char full[128];
+    if (!fsTranslate(dir, full, sizeof(full))) return;
+    DIR* d = ::opendir(full);
+    if (!d) return;
+    struct dirent* ent;
+    // Sized to hold full ("/littlefs/..." up to 128) + '/' + max 255-byte d_name + null.
+    char childPath[400];
+    struct stat st;
+    while ((ent = ::readdir(d)) != nullptr) {
+        std::snprintf(childPath, sizeof(childPath), "%s/%s", full, ent->d_name);
+        bool isDir = stat(childPath, &st) == 0 && S_ISDIR(st.st_mode);
+        cb(ent->d_name, isDir, user);
+    }
+    ::closedir(d);
+}
+
+size_t filesystemUsed() {
+    if (!fsMounted_) return 0;
+    size_t total = 0, used = 0;
+    if (esp_littlefs_info(FS_PARTITION_LABEL, &total, &used) != ESP_OK) return 0;
+    return used;
+}
+
+size_t filesystemTotal() {
+    if (!fsMounted_) return 0;
+    size_t total = 0, used = 0;
+    if (esp_littlefs_info(FS_PARTITION_LABEL, &total, &used) != ESP_OK) return 0;
+    return total;
+}
+
+// -----------------------------------------------------------------------
+// Network
+// -----------------------------------------------------------------------
+
+static const char* NET_TAG = "mm_net";
+
+// Connection state tracked by event handlers
+static bool ethLinkUp_ = false;
+static bool ethConnected_ = false;
+static esp_netif_t* ethNetif_ = nullptr;
+static bool netifInitDone_ = false;
+
+#ifndef MM_NO_WIFI
+// WiFi-only state — absent in the Ethernet-only build.
+static bool wifiStaConnected_ = false;
+static bool wifiApActive_ = false;
+static esp_netif_t* staNetif_ = nullptr;
+static esp_netif_t* apNetif_ = nullptr;
+static bool wifiInitDone_ = false;
+#endif
+
+static void ensureNetifInit() {
+    if (!netifInitDone_) {
+        ESP_ERROR_CHECK(esp_netif_init());
+        ESP_ERROR_CHECK(esp_event_loop_create_default());
+        netifInitDone_ = true;
+    }
+}
+
+static void ethEventHandler(void* /*arg*/, esp_event_base_t base,
+                            int32_t id, void* data) {
+    if (base == ETH_EVENT) {
+        if (id == ETHERNET_EVENT_CONNECTED) {
+            ESP_LOGI(NET_TAG, "Ethernet link up");
+            ethLinkUp_ = true;
+        } else if (id == ETHERNET_EVENT_DISCONNECTED) {
+            ethLinkUp_ = false;
+            ESP_LOGI(NET_TAG, "Ethernet link down");
+            ethConnected_ = false;
+        } else if (id == ETHERNET_EVENT_START) {
+            ESP_LOGI(NET_TAG, "Ethernet started");
+        }
+    } else if (base == IP_EVENT && id == IP_EVENT_ETH_GOT_IP) {
+        auto* event = static_cast<ip_event_got_ip_t*>(data);
+        ESP_LOGI(NET_TAG, "Ethernet got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        ethConnected_ = true;
+    }
+}
+
+bool ethInit() {
+    ensureNetifInit();
+
+    esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
+    ethNetif_ = esp_netif_new(&netif_cfg);
+
+    // MAC config — Olimex ESP32-Gateway Rev G: RMII clock output on GPIO17
+    eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
+    eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
+    emac_config.clock_config.rmii.clock_mode = EMAC_CLK_OUT;
+    emac_config.clock_config.rmii.clock_gpio = static_cast<int>(GPIO_NUM_17);
+
+    // PHY config — Olimex ESP32-Gateway: LAN8720, addr 0, reset GPIO 5
+    eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
+    phy_config.phy_addr = 0;
+    phy_config.reset_gpio_num = 5;
+
+    esp_eth_mac_t* mac = esp_eth_mac_new_esp32(&emac_config, &mac_config);
+    esp_eth_phy_t* phy = esp_eth_phy_new_generic(&phy_config);
+
+    esp_eth_config_t eth_config = ETH_DEFAULT_CONFIG(mac, phy);
+    esp_eth_handle_t eth_handle = nullptr;
+    esp_err_t err = esp_eth_driver_install(&eth_config, &eth_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(NET_TAG, "Ethernet driver install failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    ESP_ERROR_CHECK(esp_netif_attach(ethNetif_, esp_eth_new_netif_glue(eth_handle)));
+
+    ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID,
+                                               &ethEventHandler, nullptr));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP,
+                                               &ethEventHandler, nullptr));
+
+    err = esp_eth_start(eth_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(NET_TAG, "Ethernet start failed: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    ESP_LOGI(NET_TAG, "Ethernet init done (non-blocking)");
+    return true;
+}
+
+bool ethLinkUp() {
+    return ethLinkUp_;
+}
+
+bool ethConnected() {
+    return ethConnected_;
+}
+
+void ethGetIP(char* buf, size_t len) {
+    if (!ethNetif_ || len == 0) { if (len > 0) buf[0] = 0; return; }
+    esp_netif_ip_info_t info;
+    if (esp_netif_get_ip_info(ethNetif_, &info) == ESP_OK) {
+        std::snprintf(buf, len, IPSTR, IP2STR(&info.ip));
+    } else {
+        buf[0] = 0;
+    }
+}
+
+#ifndef MM_NO_WIFI
+
+// WiFi event handler
+static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
+                             int32_t id, void* data) {
+    if (base == WIFI_EVENT) {
+        if (id == WIFI_EVENT_STA_DISCONNECTED) {
+            ESP_LOGI(NET_TAG, "WiFi STA disconnected");
+            wifiStaConnected_ = false;
+        } else if (id == WIFI_EVENT_AP_STACONNECTED) {
+            ESP_LOGI(NET_TAG, "WiFi AP client connected");
+        } else if (id == WIFI_EVENT_AP_STADISCONNECTED) {
+            ESP_LOGI(NET_TAG, "WiFi AP client disconnected");
+        }
+    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        auto* event = static_cast<ip_event_got_ip_t*>(data);
+        ESP_LOGI(NET_TAG, "WiFi STA got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        wifiStaConnected_ = true;
+    }
+}
+
+static void ensureWifiInit() {
+    if (wifiInitDone_) return;
+    ensureNetifInit();
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                               &wifiEventHandler, nullptr));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                               &wifiEventHandler, nullptr));
+
+    wifiInitDone_ = true;
+}
+
+bool wifiStaInit(const char* ssid, const char* password) {
+    if (!ssid || ssid[0] == 0) return false;
+
+    // Guard against repeated init leaking the previous netif (the cascade can
+    // call wifiStaInit again after an Ethernet drop without a prior stop).
+    // Stop before ensureWifiInit() — wifiStaStop() deinits the WiFi driver.
+    if (staNetif_) wifiStaStop();
+    ensureWifiInit();
+
+    staNetif_ = esp_netif_create_default_wifi_sta();
+
+    wifi_config_t wifi_config = {};
+    std::strncpy(reinterpret_cast<char*>(wifi_config.sta.ssid), ssid, sizeof(wifi_config.sta.ssid) - 1);
+    if (password && password[0] != 0) {
+        std::strncpy(reinterpret_cast<char*>(wifi_config.sta.password), password, sizeof(wifi_config.sta.password) - 1);
+    }
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    esp_err_t err = esp_wifi_connect();
+    if (err != ESP_OK) {
+        ESP_LOGE(NET_TAG, "WiFi STA connect failed: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    ESP_LOGI(NET_TAG, "WiFi STA init done (non-blocking), SSID: %s", ssid);
+    return true;
+}
+
+bool wifiStaConnected() {
+    return wifiStaConnected_;
+}
+
+void wifiStaGetIP(char* buf, size_t len) {
+    if (!staNetif_ || len == 0) { if (len > 0) buf[0] = 0; return; }
+    esp_netif_ip_info_t info;
+    if (esp_netif_get_ip_info(staNetif_, &info) == ESP_OK) {
+        std::snprintf(buf, len, IPSTR, IP2STR(&info.ip));
+    } else {
+        buf[0] = 0;
+    }
+}
+
+void wifiStaStop() {
+    esp_wifi_disconnect();
+    esp_wifi_stop();
+    esp_wifi_deinit();
+    if (staNetif_) {
+        esp_netif_destroy_default_wifi(staNetif_);
+        staNetif_ = nullptr;
+    }
+    wifiStaConnected_ = false;
+    wifiInitDone_ = false;
+    ESP_LOGI(NET_TAG, "WiFi STA stopped + deinit");
+}
+
+bool wifiApInit(const char* apName, const char* ip) {
+    // Guard against repeated init leaking the previous AP netif.
+    // Stop before ensureWifiInit() — wifiApStop() deinits the WiFi driver.
+    if (apNetif_) wifiApStop();
+    ensureWifiInit();
+
+    apNetif_ = esp_netif_create_default_wifi_ap();
+
+    // Set static IP for AP
+    if (ip && ip[0] != 0) {
+        esp_netif_dhcps_stop(apNetif_);
+        esp_netif_ip_info_t ipInfo = {};
+        esp_netif_str_to_ip4(ip, &ipInfo.ip);
+        ipInfo.gw = ipInfo.ip;
+        IP4_ADDR(&ipInfo.netmask, 255, 255, 255, 0);
+        esp_netif_set_ip_info(apNetif_, &ipInfo);
+        esp_netif_dhcps_start(apNetif_);
+    }
+
+    wifi_config_t wifi_config = {};
+    if (apName) {
+        std::strncpy(reinterpret_cast<char*>(wifi_config.ap.ssid), apName, sizeof(wifi_config.ap.ssid) - 1);
+        wifi_config.ap.ssid_len = static_cast<uint8_t>(std::strlen(apName));
+    }
+    wifi_config.ap.channel = 1;
+    wifi_config.ap.max_connection = 4;
+    wifi_config.ap.authmode = WIFI_AUTH_OPEN;
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    wifiApActive_ = true;
+    ESP_LOGI(NET_TAG, "WiFi AP started: %s @ %s", apName ? apName : "?", ip ? ip : "?");
+    return true;
+}
+
+bool wifiApConnected() {
+    return wifiApActive_;
+}
+
+void wifiApStop() {
+    esp_wifi_stop();
+    esp_wifi_deinit();
+    if (apNetif_) {
+        esp_netif_destroy_default_wifi(apNetif_);
+        apNetif_ = nullptr;
+    }
+    wifiApActive_ = false;
+    wifiInitDone_ = false;
+    ESP_LOGI(NET_TAG, "WiFi AP stopped + deinit");
+}
+
+#else // MM_NO_WIFI — Ethernet-only build: WiFi compiled out.
+
+// Stub definitions so the linker is satisfied (platform.h declares these and
+// NetworkModule's discarded `if constexpr (hasWiFi)` branch still ODR-uses them).
+// With hasWiFi==false the calls are not code-generated, so --gc-sections drops
+// these stubs from the final image.
+bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) { return false; }
+bool wifiStaConnected() { return false; }
+void wifiStaGetIP(char* buf, size_t len) { if (len > 0) buf[0] = 0; }
+void wifiStaStop() {}
+bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
+bool wifiApConnected() { return false; }
+void wifiApStop() {}
+
+#endif // MM_NO_WIFI
+
+bool mdnsInit(const char* deviceName) {
+    esp_err_t err = mdns_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(NET_TAG, "mDNS init failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    err = mdns_hostname_set(deviceName);
+    if (err != ESP_OK) {
+        ESP_LOGE(NET_TAG, "mDNS hostname set failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    ESP_LOGI(NET_TAG, "mDNS started: %s.local", deviceName);
+    return true;
+}
+
+void mdnsStop() {
+    mdns_free();
 }
 
 // UdpSocket
@@ -60,17 +606,18 @@ bool UdpSocket::open() {
     return fd_ >= 0;
 }
 
-bool UdpSocket::send(const char* ip, uint16_t port, const uint8_t* data, size_t len) {
+bool UdpSocket::connect(const char* ip, uint16_t port) {
     if (fd_ < 0) return false;
-
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) return false;
+    return ::connect(fd_, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == 0;
+}
 
-    auto sent = sendto(fd_, data, len, 0,
-                       reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
-    return sent >= 0;
+bool UdpSocket::sendTo(const uint8_t* data, size_t len) {
+    if (fd_ < 0) return false;
+    return ::send(fd_, data, len, 0) >= 0;
 }
 
 void UdpSocket::close() {
@@ -109,6 +656,27 @@ bool TcpConnection::write(const uint8_t* data, size_t len) {
         }
     }
     return true;
+}
+
+WriteResult TcpConnection::writeChunks(const WriteChunk* chunks, int count) {
+    if (fd_ < 0) return WriteResult::Error;
+    if (count < 1 || count > MAX_WRITE_CHUNKS) return WriteResult::Error;
+    struct iovec iov[MAX_WRITE_CHUNKS];
+    size_t total = 0;
+    for (int i = 0; i < count; i++) {
+        iov[i].iov_base = const_cast<uint8_t*>(chunks[i].data);
+        iov[i].iov_len = chunks[i].len;
+        total += chunks[i].len;
+    }
+    // Single non-blocking writev — the socket is already O_NONBLOCK.
+    ssize_t n = lwip_writev(fd_, iov, count);
+    if (n < 0) {
+        return (errno == EAGAIN || errno == EWOULDBLOCK)
+                   ? WriteResult::WouldBlock : WriteResult::Error;
+    }
+    if (n == 0) return WriteResult::WouldBlock;
+    if (static_cast<size_t>(n) == total) return WriteResult::Complete;
+    return WriteResult::Partial;
 }
 
 void TcpConnection::close() {

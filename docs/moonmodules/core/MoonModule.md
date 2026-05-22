@@ -6,7 +6,7 @@ The base class for everything in the system. Effects, modifiers, layouts, driver
 
 Aim for the smallest possible base class. Name stored in flash (progmem/constexpr), not in instance memory. Target: zero bytes of instance overhead beyond the vtable pointer and control variables. Every byte costs — on ESP32 without PSRAM, dozens of modules are loaded simultaneously.
 
-Field order optimized for minimal padding: group 8-byte fields, then 4-byte, then 2-byte, then 1-byte. This avoids alignment waste (v2 saved 24 bytes vs naive order).
+Field order optimized for minimal padding: group 8-byte fields, then 4-byte, then 2-byte, then 1-byte. This avoids alignment waste.
 
 ## Lifecycle
 
@@ -39,13 +39,28 @@ Every MoonModule tracks `loopTimeUs()` — average microseconds per tick, comput
 
 `tickTimeUs` is the primary performance metric. FPS is derived from it (`1000000 / tickTimeUs`). This gives per-module cost visibility at any depth in the tree.
 
+## Enabled toggle
+
+Every MoonModule has an `enabled` property (default: true). The UI shows a checkbox in the card header to toggle it. Settable via `POST /api/control` with `control=enabled`. Serialized as `"enabled": true/false` in the module JSON (module-level, not in the controls array).
+
+**Semantics are owned by each module, not by the Scheduler.** The Scheduler always calls `loop()`, `loop20ms()`, and `loop1s()` regardless of `enabled`. Modules decide what "disabled" means:
+
+- **Rendering modules** (Layer, DriverGroup, effects, modifiers): early-return from `loop()` when `enabled()` is false. The buffer keeps its last state; the user sees the layer/driver freeze. This is the typical UX intent of "turn this effect off."
+- **System modules** (HttpServer, Network, Filesystem): typically ignore `enabled` and keep accepting connections / serving requests, since "disable HttpServer" via the UI would lock the user out.
+
+**`onOnOff(bool newEnabled)`** is called once per transition by `setEnabled(b)` when the value actually flips. Override it to start/stop sockets, free buffers, switch driver pins to high-impedance, etc. Default is a no-op. Use this instead of polling `enabled()` in the hot path for one-shot transition work.
+
 ## Parent/child
 
-Modules form a tree. Parent/child relationships only (no arbitrary DAG like v2's AutoWireSpec — simpler, sufficient). Children run in order within their parent. Top-level modules also run in order. UI supports reordering, backed by the backend.
+Modules form a tree. Parent/child relationships only — no arbitrary DAG. Children run in order within their parent. Top-level modules also run in order. UI supports reordering, backed by the backend.
 
 ### Generic children in MoonModule base
 
-Every MoonModule has a dynamic children array. `addChild()` and `removeChild()` are implemented once in the base class — containers (Layer, DriverGroup, LayoutGroup) do not override them. The array starts empty (zero allocation for leaf modules) and grows on demand during setup. This eliminates the per-container typed arrays (`effects_[]`, `drivers_[]`, `layouts_[]`) and typed add methods (`addEffect()`, `addDriver()`, `addLayout()`) that existed in earlier iterations.
+Every MoonModule has a dynamic children array. `addChild()`, `removeChild()`, `replaceChildAt(i, fresh)`, and `moveChildTo(child, newIndex)` are implemented once in the base class — containers (Layer, DriverGroup, LayoutGroup) do not override them. The array starts empty (zero allocation for leaf modules) and grows on demand during setup. This eliminates the per-container typed arrays (`effects_[]`, `drivers_[]`, `layouts_[]`) and typed add methods (`addEffect()`, `addDriver()`, `addLayout()`) that existed in earlier iterations.
+
+`replaceChildAt` is used by [FilesystemModule](FilesystemModule.md) at load time to swap a child whose type differs from the persisted JSON. The caller owns the lifecycle of the returned old child (typically `teardown()` + `Scheduler::deleteTree`).
+
+`moveChildTo(child, newIndex)` reorders a child to an absolute index 0..childCount-1. Intervening siblings shift to fill the vacated slot. Used by the UI's up/down/drag-and-drop reorder via `POST /api/modules/<name>/move {to:N}`. Returns false if `child` isn't found, `newIndex` is out of range, or the child is already at `newIndex`. After a successful move, the caller (currently `HttpServerModule::handleMoveModule`) triggers `Scheduler::rebuild()` so any LUT that depends on modifier/layout order rebuilds.
 
 Children are distinguished by `role()` (Effect, Modifier, Driver, Layout, Generic). Containers that need role-specific iteration (e.g. Layer::loop() only calls loop() on Effects, not Modifiers) filter children by role at the call site.
 
@@ -65,14 +80,11 @@ This is needed for: effect switching, modifier add/remove, driver hot-plug, and 
 
 ## Persistence
 
-Module state (control values) persisted to filesystem. Load on setup, save on change. Format and mechanism to be specified — keep simple (one file per module, or one file for all).
+Module state (control values + `enabled` flag) is persisted to flash by [FilesystemModule](FilesystemModule.md). Modules themselves know nothing about persistence — they just bind variables via `addX(...)` calls in `onBuildControls()`. The Scheduler's phase 2 load hook overlays persisted values onto bound variables before any module's `setup()` runs.
 
-## Deferred
+Conditional controls (e.g. fields only visible under a Select mode) are always bound, with a `hidden` flag toggled via `controls_.setHidden(i, true/false)`. This lets the persistence layer load values regardless of the live conditional state, while the UI hides them. See [FilesystemModule.md](FilesystemModule.md) and [Control.md](Control.md).
 
-- `markDirty()` / `dirty()` / `clearDirty()` — postpone until rebuild propagation is needed in practice.
-- No color picker control (RGB) — not needed for v3 initial scope.
-- No AutoWireSpec — parent/child is sufficient.
-- No `controlAllocBytes()` pre-check — defer until needed.
+`markDirty()` / `dirty()` / `clearDirty()` are set by HttpServerModule on every successful control mutation. FilesystemModule polls dirty flags in `loop1s()` and writes any subtree with a dirty descendant after a 2-second debounce.
 
 ## Tests
 
@@ -81,16 +93,20 @@ Module state (control values) persisted to filesystem. Load on setup, save on ch
 ## Prior art
 
 ### MoonLight — Node ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonBase/Nodes.h))
+
 - Base ~29 bytes + vtable. Effects add only their control variables (uint8_t each).
 - No std::string members (uses `Char<N>` fixed-size strings).
 - `addControl()` binds to class variable by reference, stores `uintptr_t` pointer.
 - `classSize()` reports actual instance size.
 
-### projectMM v1 — StatefulModule ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/core/StatefulModule.h))
+### projectMM v1 — StatefulModule ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/core/StatefulModule.h))
+
 - Same addControl-by-reference pattern.
 
 ### projectMM v2 — MoonModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/MoonModule.h))
+
 - `onBuildControls()` / `onAllocateMemory()` separation.
 - `onChildrenReady()`.
 - Field order optimized 8B→4B→2B→1B, saving 24 bytes.
 - `classSize` set via `register_type<T>()`.
+- `AutoWireSpec` — an arbitrary dependency-graph (DAG) wiring mechanism. v3 deliberately uses parent/child only; the DAG was more than the domain needs.

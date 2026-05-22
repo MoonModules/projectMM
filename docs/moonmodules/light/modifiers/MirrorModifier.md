@@ -53,4 +53,5 @@ Uses nested loops over enabled axes, deduplicates, returns count.
 ## Prior art
 
 ### MoonLight — M_MoonLight.h Mirror ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h))
+
 Mirror, ReverseX/Y/Z, Transpose, Kaleidoscope as separate modifier nodes. Each uses `modifyPosition()` virtual to transform coordinates during layout pass.

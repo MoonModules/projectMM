@@ -41,14 +41,17 @@ public:
     }
 
     void loop() override {
+        // Scheduler already gates the Layer itself by enabled() via respectsEnabled().
+        // We still gate per-effect-child explicitly because Layer iterates its own
+        // children rather than going through the Scheduler.
         elapsed_ = platform::millis();
         buffer_.clear();
         for (uint8_t i = 0; i < childCount(); i++) {
-            if (child(i)->role() == ModuleRole::Effect) {
-                uint32_t start = platform::micros();
-                child(i)->loop();
-                child(i)->addAccumUs(platform::micros() - start);
-            }
+            if (child(i)->role() != ModuleRole::Effect) continue;
+            if (!child(i)->enabled()) continue;
+            uint32_t start = platform::micros();
+            child(i)->loop();
+            child(i)->addAccumUs(platform::micros() - start);
         }
     }
 
@@ -66,6 +69,13 @@ public:
     nrOfLightsType physicalLightCount() const {
         return layoutGroup_ ? layoutGroup_->totalLightCount() : 0;
     }
+
+    // Physical dimensions match the actual LED arrangement (computed in onAllocateMemory from
+    // the LayoutGroup). PreviewDriver and any future driver that needs to describe the LED
+    // shape should read these rather than caching values from main.cpp startup.
+    lengthType physicalWidth() const { return physicalWidth_; }
+    lengthType physicalHeight() const { return physicalHeight_; }
+    lengthType physicalDepth() const { return physicalDepth_; }
 
     bool lutSkipped() const { return lutSkipped_; }
 

@@ -2,7 +2,14 @@
 
 ## The Problem
 
-Drive 10,000+ addressable LEDs and DMX lighting fixtures (RGB(W) pars, moving heads, dimmers) across multiple synchronized devices at high frame rates. Support LED protocols (WS2812, APA102) and DMX/ArtNet/DDP for conventional lighting fixtures. Run the same core logic on ESP32, desktop, and Raspberry Pi and Teensy. Provide a web UI and network APIs for control.
+Build a modular runtime for resource-constrained embedded devices that the same source compiles for, unmodified, on ESP32, Teensy, desktop, and Raspberry Pi. The runtime must:
+
+- Compose behaviour from small, uniform units (modules) that can be created, configured, reordered, and removed at runtime — including from a network API.
+- Expose every module's parameters generically so a single web UI renders any module with zero per-module UI code.
+- Run a hot loop with predictable timing and zero steady-state heap allocation on devices with as little as ~320 KB of RAM.
+- Persist configuration across reboots, exploit multiple CPU cores where present, and keep all platform-specific code behind one boundary.
+
+This document describes that domain-neutral core. It carries no knowledge of what the modules actually do — that is the *domain* layered on top.
 
 ## Core vs Domain
 
@@ -62,13 +69,18 @@ Controls are shown dynamically: when a control value changes, the control set ca
 
 Prefer `uint8_t` (0-255) for slider controls where possible. This minimizes memory per control, aligns with DMX channel values (0-255), and keeps the control range manageable in the UI.
 
-Controls are the bridge between the UI and the engine. The web UI renders them automatically based on what MoonModules declare. The exact control types (slider, toggle, color picker, text input, dropdown) are defined in the UI spec (`docs/moonmodules_draft/core/ui-spec.md`). The principle is: MoonModules declare what they need, the UI renders it.
+Controls are the bridge between the UI and the engine. The web UI renders them automatically based on what MoonModules declare. The exact control types (slider, toggle, color picker, text input, dropdown) are defined in the UI spec (`docs/moonmodules/core/ui.md`). The principle is: MoonModules declare what they need, the UI renders it.
 
-## Rebuild Propagation
+## Persistence
 
-When a control value changes on a layout, the pipeline must rebuild: layers rebuild their LUTs, the DriverGroup reallocates its output buffer. When a modifier control changes, only the affected layer's LUT is rebuilt (the output buffer size doesn't change). This propagation must be built into the framework — not handled by ad-hoc dirty flag checks in the application entry point.
+Control values + each module's `enabled` flag are persisted to flash so settings survive a reboot. The mechanism lives in [FilesystemModule](moonmodules/core/FilesystemModule.md):
 
-The mechanism (observer pattern, signal/slot, or centralized pipeline manager) will be defined in the module spec before implementation.
+- **Storage**: one flat JSON file per top-level module under `/.config/<TypeName>.json`. Children are encoded positionally with `<index>.` key prefixes — no nested objects, no arrays. The parser stays minimal (three flat-JSON helpers in `core/JsonUtil.h`).
+- **Lifecycle**: `Scheduler::setup()` runs four phases — (1) `onBuildControls` binds every module's full control set, (2) the FilesystemModule load hook overlays persisted values onto the bound variables, (2b) `rebuildControls` re-evaluates conditional `hidden` flags against the loaded state, (3) each module's own `setup()` runs with persisted values already in member variables, (4) `onAllocateMemory` sizes buffers. Modules themselves know nothing about persistence — they just bind their variables.
+- **Save trigger**: HttpServerModule marks the target module dirty on every successful control mutation. FilesystemModule debounces 2s in `loop1s()`, walks the tree, and writes any subtree containing a dirty descendant via atomic write-and-rename.
+- **Conditional controls**: every conditional control is always bound; the module sets a `hidden` flag (`controls_.setHidden(i, …)`) to tell the UI not to render it. This means the load path can find persisted values regardless of the live conditional state.
+
+The Scheduler stays independent of FilesystemModule's type via a function-pointer hook (`setLoadAllHook`), so there's no circular include and persistence is opt-in: if no FilesystemModule is registered, the load phase is a no-op and the system runs with member-initialized defaults.
 
 ## Parallelism
 
@@ -82,9 +94,9 @@ Only abstract what you actually need. Currently implemented:
 
 - **Time.** `millis()`, `micros()` — microsecond-resolution monotonic clock. (`esp_timer` / `std::chrono`)
 - **Memory.** `alloc(size)`, `free(ptr)` — allocator that prefers PSRAM on ESP32, falls back to regular heap. `freeHeap()`, `maxAllocBlock()` for diagnostics. (`heap_caps_malloc` / `std::malloc`)
-- **Networking.** `UdpSocket` — UDP send for ArtNet. (`lwip/sockets.h` / BSD sockets)
-- **Scheduling.** `yield()` — cooperative yield to OS/RTOS. (`vTaskDelay` / no-op on desktop)
-- **Platform config.** `platform_config.h` per platform — compile-time constants like `hasPsram`. Each platform provides its own version; `types.h` includes it without `#ifdef`.
+- **Networking.** `UdpSocket` — UDP send for ArtNet. `TcpConnection`/`TcpServer` — HTTP + WebSocket; `TcpConnection::writeChunks` is a non-blocking scatter-gather write so a backpressured browser can't stall the render loop. (`lwip/sockets.h` / BSD sockets)
+- **Scheduling.** `yield()` — cooperative yield to OS/RTOS. `delayMs(ms)` — blocking sleep, outside the hot path only. `reboot()` — restart the device. (`vTaskDelay` / `esp_restart` on ESP32; `std::this_thread::sleep_for` / `std::exit` on desktop)
+- **Platform config.** `platform_config.h` per platform — compile-time constants like `hasPsram` and `hasWiFi`. Each platform provides its own version; `types.h` includes it without `#ifdef`. Core code branches on these via `if constexpr` (e.g. NetworkModule drops its WiFi cascade when `hasWiFi` is false), so the dead branch is removed from the binary with no `#ifdef` outside `src/platform/`.
 
 Abstractions are added when needed by a concrete implementation, not pre-designed. All platform-specific code lives in `src/platform/`. Everything outside it compiles cleanly on every target.
 
@@ -99,7 +111,9 @@ Arduino can be added as an ESP-IDF component later if a specific Arduino library
 
 ### ESP-IDF version
 
-Minimum: ESP-IDF v5.1 (C++20 support via GCC 12+). Recommended: latest stable (v5.4 as of writing). The project also builds on v6.1-dev but that is pre-release — some APIs changed (e.g. `esp_eth_phy_new_lan87xx` → `esp_eth_phy_new_generic`, Ethernet kconfig symbol names). If using a dev version, expect occasional API churn.
+Currently tested on: **ESP-IDF v6.1-dev-399-gd1b91b79b**. This is the reference version — all builds and hardware tests use this exact commit.
+
+Minimum: ESP-IDF v5.1 (C++20 support via GCC 12+). The project targets v6.x APIs (e.g. `esp_eth_phy_new_generic`, component manager for mDNS). Building on v5.x may require API adjustments.
 
 MoonDeck's ESP-IDF setup script (`scripts/build/setup_esp_idf.py`) auto-detects the installed version and creates the required Python environment. Run it once after installing or updating ESP-IDF.
 
@@ -140,8 +154,17 @@ esp32/
 The shared `src/main.cpp` defines `mm_main(keepRunning, gridW, gridH)` — the full pipeline wiring. Each platform provides a thin entry point that does platform-specific init (SIGINT on desktop, Ethernet on ESP32) then calls `mm_main()`.
 
 - **Desktop/RPi:** `cmake -B build && cmake --build build` from the root.
-- **ESP32:** `cd esp32 && idf.py build` — the wrapper pulls in `src/` from the parent directory.
+- **ESP32:** `cd esp32 && idf.py build` — the wrapper pulls in `src/` from the parent directory. Prefer `python scripts/build/build_esp32.py`, which also handles build profiles.
 - **Raspberry Pi:** cross-compile using the root CMakeLists.txt, or build natively on the device.
+
+### ESP32 build profiles
+
+`build_esp32.py` takes a `--profile` argument selecting which sdkconfig fragments are layered:
+
+- `--profile default` (default) — WiFi + Ethernet. The full Ethernet → WiFi STA → WiFi AP cascade.
+- `--profile eth-only` — WiFi compiled out entirely. ESP-IDF v6.x has no `CONFIG_ESP_WIFI_ENABLED` switch (the symbol is non-settable, forced on for WiFi-capable SoCs), so the eth-only profile drops the WiFi components via `-DEXCLUDE_COMPONENTS=esp_wifi;wpa_supplicant;esp_phy;esp_coex` and defines `MM_NO_WIFI` (passed as `-DMM_ETH_ONLY=1`, applied in `esp32/main/CMakeLists.txt`). No WiFi driver/`wpa_supplicant` in the binary, no WiFi FreeRTOS tasks. Smaller image, more free RAM, for Ethernet-only deployments. `build_esp32_ethonly.py` is a thin wrapper (`--profile eth-only` baked in) used by the MoonDeck "Build (Ethernet-only)" button.
+
+Switching profiles forces a clean reconfigure — `build_esp32.py` removes `build/` + `sdkconfig` when the profile changes (tracked via a `build/.mm_profile` marker), so the CMake cache (`EXCLUDE_COMPONENTS`, `MM_ETH_ONLY`) is reseeded correctly. Same-profile rebuilds stay incremental.
 
 The project is structured as a set of CMake libraries:
 - A core library (platform-independent logic)
@@ -149,6 +172,17 @@ The project is structured as a set of CMake libraries:
 - An application target (links both, provides the entry point)
 
 Further decomposition (effects, networking, drivers as separate libraries) will happen when the codebase is large enough to justify it.
+
+### Pre-compilation steps
+
+CMake runs these automatically before compilation when their source files change:
+
+| Step | Source | Generated | Trigger |
+|------|--------|-----------|---------|
+| `version_gen` | `library.json` | `src/core/version.h` | library.json changes |
+| `ui_embed` | `src/ui/index.html`, `app.js`, `style.css` | `src/ui/ui_embedded.h` | any UI file changes |
+
+Both are defined in the root `CMakeLists.txt` (desktop) and `esp32/main/CMakeLists.txt` (ESP32). Generated files are gitignored — they're rebuilt on every clean build.
 
 ## Developer Tooling
 
@@ -257,5 +291,5 @@ These will be specified in module docs before implementation:
 
 - **MoonModule interface.** Draft exists in `docs/moonmodules_draft/core/`. Needs review: virtual modifier interface, rebuild propagation.
 - **Config persistence.** Controls need to be saved/loaded. The storage format and mechanism will be specified when we build that module.
-- **Web UI.** Draft spec exists in `docs/moonmodules_draft/core/ui-spec.md`. Needs review: multiple layers, live preview, WebSocket.
+- **Web UI.** Spec at `docs/moonmodules/core/ui.md` describes the current implementation (status bar, card layout, 9 control types, type picker, theme, WS lifecycle, 3D preview). Open design questions: multi-layer UI, modifier chain visualization, presets, canvas/node-graph view.
 - **File/directory structure.** The platform boundary is fixed. The rest will grow as modules are specified and implemented.

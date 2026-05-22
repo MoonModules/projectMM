@@ -457,6 +457,45 @@ drift that we decided to restart implementation with better specs.
 ### setName must copy, not store pointer
 - HTTP module creation stored a pointer to a stack-local buffer. After the function returned, the name was garbage. Fixed by making name_ a char[24] buffer with memcpy in setName().
 
+### Cycle-1 assessment (May 2026)
+A point-in-time evaluation written during PR #3 ([feature/more-effects](https://github.com/ewowi/projectMM-v3/pull/3)). Captured here because the full doc didn't earn a place in `history/` (160 lines, fast-aging) but the conclusions are worth keeping.
+
+**Where v3 actually stood:** end-to-end pipeline working (layout → layer → effects/modifier → blend/LUT → drivers → HTTP/WebSocket UI), serious testing (unit + scenario + live), ESP32 hardware proven. **Not** a specs-only project. Vertical-slice completeness ~65-70%; Release 1.0 progress ~50%; full architectural vision ~25-30%.
+
+**What was working well:**
+- Engineering discipline holding: CLAUDE.md + architecture docs + `check_platform_boundary.py` + promoted specs that actually match the code. Avoiding the drift v1/v2 hit.
+- MoonModule pattern earning its weight — one lifecycle, generic children, runtime CRUD via factory, no UI rewrites per effect.
+- Memory-conscious by design: `memory-1to1` and `memory-lut` scenarios prove the LUT-vs-no-LUT decision; `performance.md` actively measured.
+- Test ladder mature (unit → scenario → live on hardware) for the project's age.
+- UI philosophy holding: no npm chain, controls render from module state, WebSocket-driven.
+
+**Real technical debt called out:**
+- `HttpServerModule.h` is a monolith — every concern in one header. Functional, but the antithesis of the rest of the codebase's per-file simplicity.
+- `Scheduler::rebuild()` calls `onAllocateMemory()` on **all** top-level modules for every control change. Coarse-grained; the spec'd fine-grained rebuild propagation isn't there.
+- ArtNet UDP dominates ESP32 tick time (~51% at 128×128). Not blocking, but a known scaling cliff.
+- Documentation-vs-reality drift: README still said "implementation starting" when live ESP32 scenarios were passing. Internal docs were good; external were stale.
+
+**Implementation gaps that became plan items:**
+- No System MoonModule in the tree (diagnostics existed in `/api/system` but not as a queryable module). → Landed as part of plan-10's foundation work.
+- No WiFi, no persistence, no UI type picker. → Persistence landed (plan-10); WiFi/AP cascade landed earlier; type picker is plan-12.
+- Multi-layer support documented but not coded. → Backlog (plan.md "Multi-layer pipeline").
+- WS2812/APA102/direct-DMX output absent (only ArtNet). → Out-of-scope for Release 1.0; backlog.
+- Teensy and Raspberry Pi platforms documented but not implemented. → Same.
+
+**Dimension scores given at the time** (for calibration when re-assessing later):
+
+| Dimension | Score | Status |
+|---|---|---|
+| Architecture | 8/10 | Clear core/domain separation, MoonModule everywhere |
+| Core implementation | 7/10 | Pipeline works, tested, hardware-proven |
+| Extensibility | 7/10 | Factory + specs; UI not yet fully generic for "everything from browser" |
+| Testing & quality | 8/10 | Strong for project size |
+| Product/UX (end-user) | 5/10 | Works locally; no WiFi flash flow, no persistence, no type picker |
+| Performance (ESP32) | 6/10 | 128×128 works; ArtNet dominates; no LED DMA path |
+| Documentation | 7/10 | Excellent internally; README/plan out of sync |
+
+**What's already aged since the assessment** (the doc was written pre-plan-10): persistence is done, the 10 effects and `GET /api/types` are imminent via PR #3, more effects in `moonmodules_draft/` are being promoted. Use this entry as the baseline; the next assessment should compare deltas.
+
 ### What to do differently next time
 - Write module specifications BEFORE code (docs/modules/*.md)
 - Write UI specification BEFORE implementing the web UI
@@ -466,3 +505,15 @@ drift that we decided to restart implementation with better specs.
 - Resolve the template/virtual dispatch split in layouts
 - Design a proper modifier interface (virtual methods, not dynamic_cast)
 - Build the rebuild propagation into the framework, not main.cpp
+
+## Lessons from the next-iteration branch (plans 08-12)
+
+The branch covering SystemModule/NetworkModule, persistence, the UI rewrite, the eth-only build, and the side-nav. Brief, actionable takeaways:
+
+- **Plan-09 was right to abandon part of itself.** The first persistence attempt (~1700 LOC) didn't pay for itself; ~700 LOC of genuine foundations (partition scheme, platform fs API, MoonModule additions) were kept and the rest dropped. Plan-10 then succeeded with a far smaller control-list-driven design. Lesson: a plan that produces "keep the foundations, drop the feature, re-plan smaller" is a success, not a failure.
+- **ESP-IDF v6.x removes WiFi via `EXCLUDE_COMPONENTS`, not a Kconfig flag.** `CONFIG_ESP_WIFI_ENABLED` is non-settable in v6.x — setting it `n` is silently ignored. The eth-only profile excludes `esp_wifi`/`wpa_supplicant`/`esp_coex` components (NOT `esp_phy` — the EMAC needs it) plus an `MM_NO_WIFI` define gating `if constexpr` branches in core. Verify a build profile actually changed something (image size, `nm` for symbols), don't trust the config.
+- **The render tick collapses on any blocking network write on the hot path.** The FPS-swing was a blocking 49 KB preview WebSocket write spinning `vTaskDelay` until lwIP drained. Fix: non-blocking scatter-gather write + downsample the payload to fit the send buffer. Any per-tick socket write must be non-blocking and abandon-on-backpressure.
+- **WiFi UDP is ~4× the Ethernet per-packet cost.** ArtNet at 16K lights is ~7 FPS on WiFi vs ~19 on Ethernet — WiFi physics (CSMA/CA, retries, rate adaptation), not a code regression. Recommend Ethernet (or the eth-only profile) for large installations.
+- **No-op wrappers are an "unnecessary abstraction" the Reviewer must catch.** Two were found and removed (`HttpServerModule::parseJsonString` re-namespacing `mm::json::*`; `NetworkModule::rebuildLocalControlsAndPipeline` whose name contradicted its body). A pure pass-through that only renames is the opposite of duplication — a single thing that shouldn't exist. CLAUDE.md's Reviewer definition now names this pattern explicitly.
+- **Always escape strings going into hand-built JSON.** A control value containing `"` or `\` produced malformed JSON in `/api/state` and the persisted config. Hand-rolled JSON serialization must escape on write and un-escape on read — caught by a round-trip test, not the reviewer.
+- **Doc-vs-code drift hides in design changes.** When the password approach changed mid-implementation (length-only → XOR+base64), the docs and one header were updated but a second header's comment was missed — it then documented a security property the code didn't provide. When a design changes, grep for every mention of the old behaviour.

@@ -16,10 +16,6 @@ Yields `(physicalIndex, x, y, z)` for each light in row-major order (X then Y th
 
 Grid with default settings (no serpentine, X-then-Y order) is **1:1 unshuffled** — `oneToOneMapping` flag set, mapping table skipped entirely. Layer buffer and driver buffer are separate when memory allows (for parallelism), shared when memory is tight.
 
-## Deferred
-
-- `serpentine` (toggle) — odd rows run right-to-left. Add when driving LED panels directly (not needed for ArtNet-only output). When enabled, mapping becomes 1:1 shuffled (mapping table needed but direct-table fast path applies).
-
 ## Edge cases
 
 - Width or height = 0: prevented by min=1 on controls.
@@ -32,10 +28,13 @@ Grid with default settings (no serpentine, X-then-Y order) is **1:1 unshuffled**
 ## Prior art
 
 ### MoonLight — L_MoonLight.h Panel ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h))
+
 Panel layout with serpentine, multiple panel arrangements. Uses `addLight()` to define each position.
 
-### projectMM v1 — GridLayout ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/modules/layouts/GridLayout.h))
+### projectMM v1 — GridLayout ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/layouts/GridLayout.h))
+
 Width/height/depth/serpentine controls. Mapping rebuilt in onUpdate(), parent notified via onChildrenReady().
 
 ### projectMM v2 — GridLayoutModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/GridLayoutModule.h))
+
 Same controls. Uses LayoutModule base class.

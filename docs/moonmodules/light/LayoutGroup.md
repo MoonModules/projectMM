@@ -12,7 +12,7 @@ Groups layouts. Shared across all layers and drivers. Defines the physical light
 
 ## Layout interface
 
-Layouts must implement virtual dispatch directly — no adapter boilerplate. The v3 prototype required a `GridAdapter` wrapper class because GridLayout used templates for forEachCoord while LayoutBase needed virtual dispatch. This must be eliminated: all layouts implement the virtual interface directly.
+Layouts implement the virtual interface directly — no adapter or wrapper boilerplate. `forEachCoord` is a virtual method, not a template.
 
 - `lightCount()` — number of lights this layout defines
 - `forEachCoord(callback, ctx)` — yield (idx, x, y, z) for each light

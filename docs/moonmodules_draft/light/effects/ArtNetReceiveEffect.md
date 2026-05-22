@@ -20,8 +20,10 @@ Opens a UDP socket in setup(). In loop(), polls for pending ArtNet packets (non-
 ## Prior art
 
 ### MoonLight — D_NetworkIn ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Drivers/D_NetworkIn.h))
+
 ArtNet/E1.31/DDP receive as a driver node. Supports multiple protocols.
 
-### projectMM v1 — ArtNetInModule ([source](https://github.com/ewowi/projectMM/blob/54b50bc/src/modules/effects/ArtNetInModule.h))
+### projectMM v1 — ArtNetInModule ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/effects/ArtNetInModule.h))
+
 v1 ArtNetInModule (commit 54b50bc). Control: `universe_start` (slider 0-255). Treated as an effect within a layer.
 ArtNet receive as an effect. Control: universe_start.
