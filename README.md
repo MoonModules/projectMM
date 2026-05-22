@@ -2,6 +2,8 @@
 
 A high-performance multi-platform system that drives large LED installations and DMX lighting fixtures.
 
+https://github.com/user-attachments/assets/b12b28ca-7e87-477a-942b-fcae601b721d
+
 ## What it does
 
 - Drives 10,000+ addressable LEDs and DMX fixtures (pars, moving heads, dimmers)
