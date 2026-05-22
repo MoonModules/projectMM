@@ -231,7 +231,7 @@ saveSubtree(m):
 
 | # | Check | Command |
 |---|-------|---------|
-| 1 | Desktop build | `cmake --build /Users/ewoud/Developer/GitHub/ewowi/projectMM-v3/build` (zero warnings) |
+| 1 | Desktop build | `cmake --build /Users/ewoud/Developer/GitHub/ewowi/projectMM/build` (zero warnings) |
 | 2 | Unit tests | `cd build && ctest --output-on-failure` |
 | 3 | Scenario tests | `./build/test/mm_scenarios` (SIGABRT exit pre-existing on HEAD — accept) |
 | 4 | Platform boundary | `python3 scripts/check/check_platform_boundary.py` — verify no platform leakage in FilesystemModule.h |

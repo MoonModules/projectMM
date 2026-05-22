@@ -51,7 +51,6 @@ Side nav (one root visible at a time), hamburger + slide-in drawer, and the nav 
 | Core affinity badge (C0/C1 colored badge for FreeRTOS core pinning) | core pinning not implemented in v3 engine | **Drop** for now. If core pinning is added to v3, this badge re-enters scope. |
 | Memory display: classSize · heap-bytes · psram-bytes (separated) | none | **Adopt-1.0** — `classSize()` + `dynamicBytes()` already on MoonModule. Splitting heap vs PSRAM needs `platform::isPsramPointer(p)` or per-allocation tracking, neither of which exists yet. Start with `dynamicBytes` only, total. |
 | Help link per module (`?` link to `https://ewowi.github.io/projectMM/modules/<type>/`) with TYPE_TO_DOC mapping in JS | none | **Defer-1.x** — needs documentation site to exist for v3 module pages. Mapping is 14 lines of JS — add when docs are published. Cleaner approach: engine exposes `docPath` per type via `/api/types`, defaulting to nothing. |
-| Children indented with left border, depth-based card backgrounds (3 nesting levels visible) | none | **Adopt-1.0** — pure CSS, ~5 rules. Makes the parent/child relationship obvious at a glance. |
 | Replace-type button (✎) | none | **Defer-1.x** — needs `POST /api/modules/replace` endpoint. The UX value is "stays selected, position preserved" which needs an atomic backend operation. |
 
 ### Type picker — research notes
@@ -96,7 +95,7 @@ Side nav (one root visible at a time), hamburger + slide-in drawer, and the nav 
 
 | Cost class | Items |
 |---|---|
-| Tiny (< 30 lines each, no backend work) | category emoji badge, child indent + bg-depth, document.title sync, byte/number formatters |
+| Tiny (< 30 lines each, no backend work) | category emoji badge, document.title sync, byte/number formatters |
 | Small (30–100 lines, no backend) | — (all small items shipped in the baseline) |
 | Medium (needs minor backend change) | help-link mapping (needs docs site), Module replace (needs `/api/modules/replace`), category() field if we ever want it richer than role()-derived |
 | Large (separate plan) | health panel + `/api/test`, log panel + WS log channel, OTA + GitHub-update badge, full multi-layer UI, presets UI |

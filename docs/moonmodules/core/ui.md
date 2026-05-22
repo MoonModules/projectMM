@@ -72,19 +72,30 @@ The WebSocket state push still carries the full module tree; only the selected r
 
 ## Module card
 
-Each MoonModule renders as a card. Children render as nested cards in the same column, visually indented with a left border and progressively lighter backgrounds.
+Each MoonModule renders as a card. **Child cards are nested inside their parent card's box** — the parent's border encloses its children, so the tree shape is visible structurally, not just by indentation. Nesting depth shows as progressively lighter backgrounds and a left border on the children block.
 
 Card structure:
 
 ```text
-[enabled toggle]  [name]  [fps/ms]  [↑ ↓ × ☰]
-[control rows — one per control]
-[+ add child]
+┌─ card ──────────────────────────────────┐
+│ [enabled toggle]  [name]  [fps/ms]  [↑ ↓ × ☰] │
+│ [control rows — one per control]        │
+│ ┌─ child card ────────────────────────┐ │
+│ │ …                                   │ │
+│ └─────────────────────────────────────┘ │
+│ ┌─ child card ────────────────────────┐ │
+│ │ …                                   │ │
+│ └─────────────────────────────────────┘ │
+│ [+ add child]                           │
+└─────────────────────────────────────────┘
 ```
+
+- The parent's own controls render **above** its children; `+ add child` renders **below** them, at the bottom of the parent box.
+- Child cards live in a `.card-children` wrapper appended into the parent card's DOM node — not as flat siblings in the main column. `renderModuleTree` recurses into the parent card, not into `main`.
 
 - **Enabled toggle** at the start of the title row mirrors `MoonModule::enabled()`. Toggling fires `onOnOff()`; the Scheduler skips disabled modules whose `respectsEnabled()` returns true (default).
 - **Stats line is a clickable toggle.** Clicking cycles fps ↔ ms display format. Mode persists in `localStorage['mm_timing_mode']`. Same toggle affects all cards globally.
-- **Up / Down (↑ ↓)** buttons reorder this child within its parent. Drag-and-drop on the whole card (HTML5 DnD) provides the same effect on desktop; mobile uses the buttons.
+- **Up / Down (↑ ↓)** buttons reorder this child within its parent. Drag-and-drop on the whole card (HTML5 DnD) provides the same effect on desktop; mobile uses the buttons. A drag is only accepted when source and target share the same `.card-children` container — i.e. they are true siblings under one parent.
 - **Delete (×)** removes the child. Confirms via `confirm()`.
 - **Drag handle (☰)** is a visual cue; the whole card is the draggable element.
 - **`+ add child`** in the card footer opens the [type picker](#type-picker) filtered to legal child roles for this parent.

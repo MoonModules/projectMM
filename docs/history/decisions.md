@@ -458,7 +458,7 @@ drift that we decided to restart implementation with better specs.
 - HTTP module creation stored a pointer to a stack-local buffer. After the function returned, the name was garbage. Fixed by making name_ a char[24] buffer with memcpy in setName().
 
 ### Cycle-1 assessment (May 2026)
-A point-in-time evaluation written during PR #3 ([feature/more-effects](https://github.com/ewowi/projectMM-v3/pull/3)). Captured here because the full doc didn't earn a place in `history/` (160 lines, fast-aging) but the conclusions are worth keeping.
+A point-in-time evaluation written during PR #3 ([feature/more-effects](https://github.com/ewowi/projectMM/pull/3)). Captured here because the full doc didn't earn a place in `history/` (160 lines, fast-aging) but the conclusions are worth keeping.
 
 **Where v3 actually stood:** end-to-end pipeline working (layout → layer → effects/modifier → blend/LUT → drivers → HTTP/WebSocket UI), serious testing (unit + scenario + live), ESP32 hardware proven. **Not** a specs-only project. Vertical-slice completeness ~65-70%; Release 1.0 progress ~50%; full architectural vision ~25-30%.
 

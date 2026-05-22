@@ -13,7 +13,7 @@ Separately: the v1 repo was renamed on GitHub (`ewowi/projectMM` → `ewowi/proj
 - **Logo delivery:** downscale to 64×64 (~2–4 KB) with `sips`, serve as a real asset (new `/moonlight-logo.png` route + `image/png`), not base64-inlined. 64px covers the ~28px header use at retina and a 32px favicon.
 - **Side nav on wide screens:** static left column; the hamburger collapses/expands it. Narrow (<820px): slide-in over a semi-transparent overlay.
 - **One root visible at a time.** The side nav selects a root module; `renderCards()` renders only the selected root's subtree, not all roots. (This supersedes the draft spec's "show all roots" note — the product owner wants the v1 single-root pattern.) Selection persists in `localStorage['mm_selectedRoot']`.
-- **Footer:** copyright line `© <year> MoonLight` + four social icon links (inline SVG, no extra assets): GitHub `https://github.com/ewowi/projectMM-v3`, Discord `https://discord.gg/TC8NSUSCdV`, Reddit `https://reddit.com/r/moonmodules`, YouTube `https://www.youtube.com/@MoonModulesLighting`. Discord/Reddit/YouTube URLs taken from the v1 frontend.
+- **Footer:** copyright line `© <year> MoonLight` + four social icon links (inline SVG, no extra assets): GitHub `https://github.com/ewowi/projectMM`, Discord `https://discord.gg/TC8NSUSCdV`, Reddit `https://reddit.com/r/moonmodules`, YouTube `https://www.youtube.com/@MoonModulesLighting`. Discord/Reddit/YouTube URLs taken from the v1 frontend.
 - **No root drag-reorder** — root order stays fixed in `main.cpp`.
 - `sips` (built into macOS) does the downscale.
 

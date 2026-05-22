@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MoonDeck — browser-based developer console for projectMM v3."""
+"""MoonDeck — browser-based developer console for projectMM."""
 
 import http.server
 import json
