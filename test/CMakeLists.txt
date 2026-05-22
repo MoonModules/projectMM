@@ -12,6 +12,7 @@ add_executable(mm_tests
     test_blend_map.cpp
     test_filesystem_persistence.cpp
     test_movechild.cpp
+    test_replacechild.cpp
     test_module_factory.cpp
     test_preview_driver.cpp
     test_fire.cpp

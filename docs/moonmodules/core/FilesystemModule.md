@@ -46,6 +46,8 @@ HttpServerModule calls `target->markDirty()` and `FilesystemModule::noteDirty()`
 
 A subtree's dirty flag is cleared only after its write actually succeeds; a failed write leaves the flag set so `loop1s()` retries on the next pass. Losing power before the debounce expires loses the in-flight change — that's the cost of debouncing in exchange for fewer flash writes. For deliberate teardowns, `FilesystemModule::flushPending()` forces all dirty subtrees through synchronously, bypassing the debounce. HttpServerModule's `POST /api/reboot` handler calls it so an add-then-immediate-reboot doesn't lose the change.
 
+FilesystemModule exposes one read-only control, **`lastSaved`** — `"never"` before the first successful save this session, otherwise how long ago the last write happened (`"5s ago"` / `"3m ago"` / `"2h ago"`), refreshed each `loop1s()`. Being a `ReadOnly` control it is itself never persisted.
+
 The serializer emits each child as `"N.type":"TypeName"` followed by that child's controls; the reader (`applyNode`) reconciles the live tree to match — factory-creating, replacing, or trimming children by position so the persisted tree shape is restored on boot.
 
 The singleton pointer used by the static `noteDirty()` / `flushPending()` is bound in `setScheduler()`, **not** the constructor — the factory creates short-lived probe instances (for `/api/types` defaults capture) whose destructor would otherwise clear the singleton.

@@ -10,6 +10,8 @@ namespace mm {
 // Distinct from MetaballsEffect (which is fast, HSV-coloured).
 class LavaLampEffect : public EffectBase {
 public:
+    const char* tags() const override { return "🌋"; }
+
     static constexpr uint8_t NUM_BLOBS = 3;
 
     uint8_t bpm = 8;

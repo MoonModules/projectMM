@@ -7,6 +7,8 @@ namespace mm {
 
 class RainbowEffect : public EffectBase {
 public:
+    const char* tags() const override { return "🌈"; }
+
     uint8_t speed = 60; // BPM
 
     void onBuildControls() override {

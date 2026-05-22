@@ -7,6 +7,8 @@ namespace mm {
 
 class SpiralEffect : public EffectBase {
 public:
+    const char* tags() const override { return "🌀"; }
+
     uint8_t bpm = 40;
     uint8_t twist = 4;
     uint8_t hue_shift = 0;

@@ -10,6 +10,8 @@ namespace mm {
 // position once it leaves the visible area. Multiple ripples overlap.
 class RipplesEffect : public EffectBase {
 public:
+    const char* tags() const override { return "💧"; }
+
     static constexpr uint8_t MAX_RIPPLES = 8;
 
     uint8_t count = 4;

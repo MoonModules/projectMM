@@ -6,6 +6,8 @@ namespace mm {
 
 class MirrorModifier : public ModifierBase {
 public:
+    const char* tags() const override { return "🪞"; }
+
     bool mirrorX = true;
     bool mirrorY = true;
     bool mirrorZ = false;

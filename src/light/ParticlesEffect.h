@@ -10,6 +10,8 @@ namespace mm {
 
 class ParticlesEffect : public EffectBase {
 public:
+    const char* tags() const override { return "✨"; }
+
     static constexpr uint8_t MAX_PARTICLES = 64;
 
     uint8_t count = 32;

@@ -7,6 +7,8 @@ namespace mm {
 
 class PlasmaEffect : public EffectBase {
 public:
+    const char* tags() const override { return "🌊"; }
+
     uint8_t bpm = 30;
     uint8_t scale_x = 16;
     uint8_t scale_y = 16;

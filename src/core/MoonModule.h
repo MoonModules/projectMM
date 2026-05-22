@@ -118,6 +118,12 @@ public:
     // Role for type identification (no RTTI needed)
     virtual ModuleRole role() const { return ModuleRole::Generic; }
 
+    // Curated emoji tags for the module picker's chip filter — extras beyond the
+    // role chip (which the UI derives from role() on its own). A short string of
+    // emoji, e.g. "🔥" or "🌊💧". Default "" — most modules add nothing. The
+    // return value is a flash string literal; no per-instance RAM cost.
+    virtual const char* tags() const { return ""; }
+
     // Generic children — grows on demand, only allocates during setup
     bool addChild(MoonModule* child) {
         if (!child) return false;

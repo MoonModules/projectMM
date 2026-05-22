@@ -65,11 +65,39 @@ public:
                     platform::filesystemUsed(), platform::filesystemTotal());
     }
 
+    // Read-only "last saved" display. Updated every second so the UI shows how
+    // long ago the config was last written (or "never" before the first save).
+    void onBuildControls() override {
+        controls_.addReadOnly("lastSaved", lastSaveStr_, sizeof(lastSaveStr_));
+        MoonModule::onBuildControls();
+    }
+
     void loop1s() override {
         if (!mounted_ || !scheduler_) return;
+        updateLastSavedStr();
         if (!dirtyPending_) return;
         if (platform::millis() - lastDirtyMs_ < DEBOUNCE_MS) return;
         flush();
+    }
+
+    // Refresh the "lastSaved" display string — "never" before the first save,
+    // otherwise how long ago the last successful write happened.
+    void updateLastSavedStr() {
+        if (!everSaved_) {
+            std::snprintf(lastSaveStr_, sizeof(lastSaveStr_), "never");
+            return;
+        }
+        uint32_t agoSec = (platform::millis() - lastSaveMs_) / 1000;
+        if (agoSec < 60) {
+            std::snprintf(lastSaveStr_, sizeof(lastSaveStr_), "%us ago",
+                          static_cast<unsigned>(agoSec));
+        } else if (agoSec < 3600) {
+            std::snprintf(lastSaveStr_, sizeof(lastSaveStr_), "%um ago",
+                          static_cast<unsigned>(agoSec / 60));
+        } else {
+            std::snprintf(lastSaveStr_, sizeof(lastSaveStr_), "%uh ago",
+                          static_cast<unsigned>(agoSec / 3600));
+        }
     }
 
     // Synchronous save of every dirty subtree, bypassing the debounce. Same work loop1s
@@ -87,6 +115,7 @@ public:
                 if (saveSubtree(m)) {
                     clearSubtreeDirty(m);
                     lastSaveMs_ = platform::millis();
+                    everSaved_ = true;
                 } else {
                     allSaved = false;
                 }
@@ -118,8 +147,10 @@ private:
     Scheduler* scheduler_ = nullptr;
     bool mounted_ = false;
     bool dirtyPending_ = false;
+    bool everSaved_ = false;       // false until the first successful save
     uint32_t lastDirtyMs_ = 0;
     uint32_t lastSaveMs_ = 0;
+    char lastSaveStr_[24] = "never";  // "lastSaved" read-only control value
     // Shared load/save buffer — load runs once at boot (phase 2), save runs in loop1s after
     // the 2s debounce. Mutually exclusive, so one buffer is enough. Kept off the task stack
     // since 2KB plus recursive applyNode/writeNode frames is uncomfortably close to the ESP32

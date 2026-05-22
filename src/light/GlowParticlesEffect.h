@@ -10,6 +10,8 @@ namespace mm {
 // chaotic, organic blob look — like metaballs with more freedom.
 class GlowParticlesEffect : public EffectBase {
 public:
+    const char* tags() const override { return "✨💫"; }
+
     static constexpr uint8_t MAX_PARTICLES = 8;
 
     uint8_t count = 5;

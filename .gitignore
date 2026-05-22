@@ -87,6 +87,9 @@ esp32/monitor.log
 .vscode/
 .idea/
 
+# Claude Code — per-machine local settings (absolute paths, not shared)
+.claude/settings.local.json
+
 # OS
 .DS_Store
 Thumbs.db

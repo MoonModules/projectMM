@@ -7,6 +7,8 @@ namespace mm {
 
 class MetaballsEffect : public EffectBase {
 public:
+    const char* tags() const override { return "🫧"; }
+
     uint8_t bpm = 30;
     uint8_t radius = 28;
     uint8_t hue_shift = 0;

@@ -6,15 +6,19 @@ https://github.com/user-attachments/assets/b12b28ca-7e87-477a-942b-fcae601b721d
 
 ## What it is
 
-projectMM is a modular runtime for real-time, resource-constrained systems, engineered for maximum speed and minimal resource usage. A browser UI, scheduling, and persistence are built in. It runs on multiple platforms from the same source — from low-cost ESP32 and Teensy, to Raspberry Pi, to Windows, macOS, and Linux desktops.
+**A modular runtime** for real-time, resource-constrained systems:
 
-Its main domain is **lighting**: it drives LED installations and DMX fixtures, from a single matrix to large multi-fixture rigs and 3D structures. A setup is composed from **MoonModules** — effects, modifiers, layouts, and output drivers — into a render pipeline, configured live from a browser with a real-time 3D preview. The same platform extends to other real-time domains.
-
-- **Modular** — effects, modifiers, layouts, drivers, and system services are all MoonModules, created and reconfigured at runtime.
-- **Native 3D** — coordinates, effects, and layouts operate in 3D space, not only flat grids.
+- **Fast and lean** — engineered for maximum speed and minimal resource usage; predictable frame timing on devices with as little as ~320 KB of RAM.
+- **Modular** — effects, modifiers, layouts, drivers, and system services are all **MoonModules**, created and reconfigured at runtime.
+- **Batteries included** — a browser UI, scheduling, and persistence are built in; control values and module configuration survive a reboot.
 - **Generic web UI** — the [browser interface](docs/moonmodules/core/ui.md) renders any module from its declared controls; new modules need no UI code.
-- **Real-time and embedded** — predictable frame timing on devices with as little as ~320 KB of RAM.
-- **Persistent** — control values and module configuration survive a reboot.
+- **Multi-platform** — one source tree runs on low-cost ESP32 and Teensy, Raspberry Pi, and Windows / macOS / Linux desktops.
+
+**Its main domain is lighting** — built on the runtime, extensible to other real-time domains:
+
+- **Drives LED and DMX** — from a single matrix to large multi-fixture rigs and 3D structures.
+- **Render pipeline** — a setup is composed from MoonModules (effects, modifiers, layouts, output drivers) into a pipeline, configured live from a browser.
+- **Native 3D** — coordinates, effects, and layouts operate in 3D space, not only flat grids, with a real-time 3D preview.
 
 The [commit history](https://github.com/ewowi/projectMM/commits/main) and [`docs/moonmodules/`](docs/moonmodules/) show what exists now.
 

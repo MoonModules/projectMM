@@ -113,6 +113,12 @@ body {
     border-color: var(--red);
     color: var(--red);
 }
+/* Armed reboot: first click of the press-twice-to-reboot confirm. */
+#reboot-btn.armed {
+    background: var(--red);
+    border-color: var(--red);
+    color: white;
+}
 
 /* ============================================================
    Content layout — side nav + main area
@@ -195,11 +201,19 @@ body.nav-open #nav {
     font-size: 11px;
 }
 
+/* The content area right of the nav. Full width — the preview spans all of it.
+   The module card column is capped separately (#main below) so cards stay a
+   readable single-column width while the preview goes edge to edge. */
 .main-area {
+    flex: 1;
+    min-width: 0;
+    padding: 12px;
+}
+
+/* Module cards: capped width, centered under the full-width preview. */
+#main {
     max-width: 500px;
     margin: 0 auto;
-    padding: 12px;
-    width: 100%;
 }
 
 /* ============================================================
@@ -218,10 +232,12 @@ body.nav-open #nav {
 #preview {
     display: block;
     width: 100%;
-    height: 50vh;
-    max-height: 320px;
-    /* --preview-shrink: 0 .. 1 driven by app.js scroll listener.
-       Heights collapse to 50% of natural when fully scrolled. */
+    /* aspect-ratio derives the height from the column width; max-height caps it
+       so on a normal-width column the preview is a wide rectangle (the square
+       clipped to ~half the viewport). The scroll-shrink (app.js) animates
+       max-height down to 50% as the user scrolls. */
+    aspect-ratio: 1 / 1;
+    max-height: 50vh;
     transition: max-height 0.05s linear;
 }
 
@@ -237,15 +253,25 @@ body.nav-open #nav {
     padding: 10px 12px;
 }
 
+/* Depth only sets the background here — the indent lives on .card-children,
+   which physically encloses the child cards. */
 .card[data-depth="1"] {
     background: var(--card-bg-1);
-    margin-left: 12px;
-    border-left: 2px solid var(--accent-soft);
 }
 .card[data-depth="2"] {
     background: var(--card-bg-2);
-    margin-left: 24px;
-    border-left: 2px solid var(--accent-soft);
+}
+
+/* Wrapper for a parent card's child cards. Sits inside the parent's padding so
+   the parent border encloses it; the left margin indents the subtree.
+   :empty collapses it (a parent with no children yet) so + add child sits
+   flush under the controls. */
+.card-children {
+    margin-top: 8px;
+    margin-left: 12px;
+}
+.card-children:empty {
+    display: none;
 }
 
 .card-title {
@@ -261,8 +287,29 @@ body.nav-open #nav {
 }
 
 .card-title .card-name {
-    flex: 1;
     color: var(--accent);
+}
+/* Flex spacer pushes stats/actions to the right; name + help stay left. */
+.card-spacer {
+    flex: 1;
+}
+/* Per-module help link → spec page on GitHub. */
+.card-help {
+    color: var(--fg-muted);
+    text-decoration: none;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    width: 18px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    line-height: 1;
+}
+.card-help:hover {
+    color: var(--fg);
+    border-color: var(--accent);
 }
 
 .card-stats {
@@ -295,6 +342,12 @@ body.nav-open #nav {
 .card-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .card-btn-del { color: var(--red); border-color: var(--red); opacity: 0.7; }
 .card-btn-del:hover { opacity: 1; }
+/* Armed delete: first click of the press-twice-to-delete confirm. */
+.card-btn-del.armed {
+    background: var(--red);
+    color: white;
+    opacity: 1;
+}
 
 .drag-handle {
     cursor: grab;
@@ -436,6 +489,27 @@ body.nav-open #nav {
     border-radius: 4px;
     margin-bottom: 6px;
 }
+/* Emoji chip filter row — toggle chips to narrow the type list. */
+.type-picker-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+.type-picker-chip {
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 14px;
+    cursor: pointer;
+    line-height: 1.2;
+}
+.type-picker-chip:hover { border-color: var(--accent); }
+.type-picker-chip.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+}
 .type-picker-list {
     max-height: 200px;
     overflow-y: auto;
@@ -447,6 +521,9 @@ body.nav-open #nav {
     color: var(--fg);
     display: flex;
     align-items: center;
+}
+.type-picker-item-emoji {
+    margin-right: 6px;
 }
 .type-picker-item:hover,
 .type-picker-item.selected {
@@ -490,8 +567,7 @@ body.nav-open #nav {
 
 @media (max-width: 820px) {
     .main-area { padding: 8px; }
-    .card[data-depth="1"] { margin-left: 8px; }
-    .card[data-depth="2"] { margin-left: 16px; }
+    .card-children { margin-left: 6px; }
 
     /* Narrow screens: the nav is a slide-in drawer, hidden until the hamburger
        opens it. body.nav-open shows the drawer over a dimming overlay. */

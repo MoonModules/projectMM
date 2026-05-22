@@ -202,8 +202,19 @@ async function moveModuleTo(name, toIndex) {
     refetchState();
 }
 
+// swap a module for another type at the same position. The replacement starts
+// with its own default control values — a clean swap, not a value carry-over.
+async function replaceModule(name, newType) {
+    if (!newType) return;
+    await fetch("/api/modules/" + encodeURIComponent(name) + "/replace", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({type: newType})
+    });
+    refetchState();
+}
+
 async function rebootDevice() {
-    if (!confirm("Reboot device?")) return;
     try {
         await fetch("/api/reboot", {method: "POST"});
     } catch { /* connection may drop mid-response — that's the device restarting */ }
@@ -245,7 +256,7 @@ function buildNavFooter() {
     const links = document.createElement("div");
     links.className = "nav-social";
     const SOCIAL = [
-        ["GitHub",  "https://github.com/ewowi/projectMM-v3",
+        ["GitHub",  "https://github.com/ewowi/projectMM",
          "M12 .5C5.65.5.5 5.65.5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.54-3.88-1.54-.53-1.34-1.3-1.7-1.3-1.7-1.06-.72.08-.71.08-.71 1.17.08 1.79 1.2 1.79 1.2 1.04 1.79 2.73 1.27 3.4.97.1-.76.41-1.27.74-1.56-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.25 5.68.42.36.8 1.08.8 2.18v3.23c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"],
         ["Discord", "https://discord.gg/TC8NSUSCdV",
          "M20.32 4.37A19.8 19.8 0 0 0 15.45 2.9a13.6 13.6 0 0 0-.62 1.27 18.3 18.3 0 0 0-5.67 0A13 13 0 0 0 8.54 2.9 19.7 19.7 0 0 0 3.67 4.37C.57 8.96-.27 13.44.15 17.85a19.9 19.9 0 0 0 6 3.03c.49-.66.92-1.36 1.29-2.1-.71-.27-1.39-.6-2.03-.99.17-.12.34-.25.5-.38a14.2 14.2 0 0 0 12.18 0c.16.13.33.26.5.38-.64.39-1.32.72-2.03.99.37.74.8 1.44 1.29 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.1-.85-9.55-3.58-13.48ZM8.02 15.13c-1.18 0-2.15-1.08-2.15-2.41 0-1.33.95-2.42 2.15-2.42 1.2 0 2.17 1.1 2.15 2.42 0 1.33-.95 2.41-2.15 2.41Zm7.96 0c-1.18 0-2.15-1.08-2.15-2.41 0-1.33.95-2.42 2.15-2.42 1.2 0 2.17 1.1 2.15 2.42 0 1.33-.95 2.41-2.15 2.41Z"],
@@ -312,10 +323,13 @@ function renderCards() {
 }
 
 function renderModuleTree(mod, parentEl, depth) {
-    parentEl.appendChild(createCard(mod, depth));
-    if (mod.children && mod.children.length > 0) {
+    const { card, childrenEl } = createCard(mod, depth);
+    parentEl.appendChild(card);
+    // Children render inside this card's .card-children wrapper, not as flat
+    // siblings. childrenEl is null for modules that don't accept children.
+    if (childrenEl && mod.children && mod.children.length > 0) {
         for (const child of mod.children) {
-            renderModuleTree(child, parentEl, depth + 1);
+            renderModuleTree(child, childrenEl, depth + 1);
         }
     }
 }
@@ -346,6 +360,11 @@ function createCard(mod, depth) {
     name.textContent = mod.name;
     title.appendChild(name);
 
+    // Flex spacer so the name stays left and everything else groups on the right.
+    const spacer = document.createElement("span");
+    spacer.className = "card-spacer";
+    title.appendChild(spacer);
+
     // fps/ms toggle on the stats line — global mode, single click cycles all cards
     const stats = document.createElement("span");
     stats.className = "card-stats";
@@ -371,6 +390,21 @@ function createCard(mod, depth) {
         const actions = createActionButtons(mod);
         title.appendChild(actions);
     }
+
+    // Help link → the module's spec page on GitHub, at the far right of the row.
+    // docPath comes from /api/types (relative to docs/moonmodules/); omitted if none.
+    const docPath = docPathForType(mod.type);
+    if (docPath) {
+        const help = document.createElement("a");
+        help.className = "card-help";
+        help.textContent = "?";
+        help.title = "Open module documentation";
+        help.target = "_blank";
+        help.rel = "noopener";
+        help.href = "https://github.com/ewowi/projectMM/blob/main/docs/moonmodules/" + docPath;
+        title.appendChild(help);
+    }
+
     card.appendChild(title);
 
     // -- Controls --
@@ -382,14 +416,36 @@ function createCard(mod, depth) {
         }
     }
 
-    // -- Footer: + add child (only on parents that accept children) --
+    // -- Children block + footer (only on parents that accept children) --
+    // The .card-children wrapper lives inside this card so the parent's border
+    // encloses its children; renderModuleTree recurses into it. + add child
+    // sits below the children block, at the bottom of the parent box.
+    let childrenEl = null;
     if (acceptsChildren(mod)) {
+        childrenEl = document.createElement("div");
+        childrenEl.className = "card-children";
+        childrenEl.dataset.depth = String(depth + 1);
+        card.appendChild(childrenEl);
+
+        // -- Footer: + add child --
         const footer = document.createElement("div");
         footer.className = "card-footer";
         const addBtn = document.createElement("button");
         addBtn.className = "add-btn";
         addBtn.textContent = "+ add child";
-        addBtn.addEventListener("click", () => openTypePicker(mod, footer));
+        addBtn.addEventListener("click", () => {
+            // Hide the button while the picker is open (the picker takes its
+            // place); restore it once the picker is removed (cancel/create/Esc).
+            addBtn.style.display = "none";
+            openTypePicker(mod, footer);
+            const obs = new MutationObserver(() => {
+                if (!footer.querySelector(".type-picker")) {
+                    addBtn.style.display = "";
+                    obs.disconnect();
+                }
+            });
+            obs.observe(footer, {childList: true});
+        });
         footer.appendChild(addBtn);
         card.appendChild(footer);
     }
@@ -399,57 +455,92 @@ function createCard(mod, depth) {
         attachDragHandlers(card, mod);
     }
 
-    return card;
+    return { card, childrenEl };
 }
 
+// Wire a button as a press-twice confirm: the first click arms it (adds the
+// `armed` class, optional armed label/title), a second click runs `onConfirm`.
+// Disarms after 3s or when the pointer leaves. Used by the delete and reboot
+// buttons — no browser confirm() popup. `armedText` is optional (delete swaps
+// × → ✓; reboot keeps its glyph). The pre-arm title is captured live so a
+// title updated elsewhere (e.g. reboot's crashed-state text) restores correctly.
+function armPressTwice(btn, onConfirm, opts = {}) {
+    let armed = false;
+    let disarmTimer = null;
+    let savedText = "";
+    let savedTitle = "";
+    const disarm = () => {
+        armed = false;
+        btn.classList.remove("armed");
+        if (opts.armedText !== undefined) btn.textContent = savedText;
+        btn.title = savedTitle;
+        if (disarmTimer) { clearTimeout(disarmTimer); disarmTimer = null; }
+    };
+    btn.addEventListener("click", () => {
+        if (armed) { onConfirm(); return; }
+        armed = true;
+        savedText = btn.textContent;
+        savedTitle = btn.title;
+        btn.classList.add("armed");
+        if (opts.armedText !== undefined) btn.textContent = opts.armedText;
+        if (opts.armedTitle !== undefined) btn.title = opts.armedTitle;
+        disarmTimer = setTimeout(disarm, 3000);
+    });
+    btn.addEventListener("mouseleave", disarm);
+}
+
+// Compact byte formatter — "B" under 1 KB, "KB" otherwise (one decimal under 10 KB).
+function fmtBytes(n) {
+    if (n < 1024) return n + " B";
+    const k = n / 1024;
+    return (k < 10 ? k.toFixed(1) : Math.round(k)) + " KB";
+}
+
+// Stats line: timing (🕒, fps or µs/ms per the global toggle) + memory
+// (🧠 static, plus "+ dynamic" only when the module allocated heap).
+// Timing is omitted entirely when the module has no measured loop time.
 function formatStats(mod) {
     const us = (mod.loopTimeUs !== undefined) ? mod.loopTimeUs : 0;
-    if (us === 0) return "—";
-    if (timingMode === "fps") {
-        const fps = us > 0 ? Math.round(1_000_000 / us) : 0;
-        return fps >= 1000 ? (fps / 1000).toFixed(1) + "K fps" : fps + " fps";
+    let timing = "";
+    if (us > 0) {
+        if (timingMode === "fps") {
+            const fps = Math.round(1_000_000 / us);
+            timing = "🕒 " + (fps >= 1000 ? (fps / 1000).toFixed(1) + "K fps" : fps + " fps");
+        } else {
+            timing = "🕒 " + (us < 1000 ? us + " µs" : (us / 1000).toFixed(2) + " ms");
+        }
     }
-    return us < 1000 ? us + " µs" : (us / 1000).toFixed(2) + " ms";
+    const stat = mod.classSize || 0;
+    const dyn = mod.dynamicBytes || 0;
+    const mem = "🧠 " + fmtBytes(stat) + (dyn > 0 ? " + " + fmtBytes(dyn) : "");
+    return timing ? timing + "   " + mem : mem;
 }
 
 function createActionButtons(mod) {
     const wrap = document.createElement("span");
     wrap.className = "card-actions";
 
-    // Find current index within parent's reorderable siblings to enable/disable buttons.
-    // Identify by name, not object identity — WS state pushes replace `state` and the
-    // `mod` captured at render time becomes stale within ~1s, breaking indexOf.
-    const parent = findParent(mod.name);
-    const sibs = parent ? (parent.children || []).filter(c => c.role === mod.role) : [];
-    const idx = sibs.findIndex(c => c.name === mod.name);
-    const absIdx = parent ? (parent.children || []).findIndex(c => c.name === mod.name) : -1;
+    // Reorder is drag-and-drop only (works on desktop and mobile) — see the
+    // drag handle below. No up/down buttons.
 
-    const upBtn = document.createElement("button");
-    upBtn.className = "card-btn";
-    upBtn.textContent = "↑";
-    upBtn.title = "Move up";
-    upBtn.disabled = (idx <= 0);
-    upBtn.addEventListener("click", () => moveModuleTo(mod.name, Math.max(0, absIdx - 1)));
-    wrap.appendChild(upBtn);
-
-    const downBtn = document.createElement("button");
-    downBtn.className = "card-btn";
-    downBtn.textContent = "↓";
-    downBtn.title = "Move down";
-    downBtn.disabled = (idx < 0 || idx >= sibs.length - 1);
-    downBtn.addEventListener("click", () => {
-        const total = parent ? (parent.children || []).length : 0;
-        moveModuleTo(mod.name, Math.min(total - 1, absIdx + 1));
+    const replaceBtn = document.createElement("button");
+    replaceBtn.className = "card-btn";
+    replaceBtn.textContent = "✎";
+    replaceBtn.title = "Replace with another type";
+    replaceBtn.addEventListener("click", () => {
+        // Anchor the picker to the card so it drops below the card content,
+        // not inside the cramped 26px action-button row.
+        openReplacePicker(mod, replaceBtn.closest(".card"));
     });
-    wrap.appendChild(downBtn);
+    wrap.appendChild(replaceBtn);
 
+    // Delete: press × once to arm, again to confirm — see armPressTwice.
     const delBtn = document.createElement("button");
     delBtn.className = "card-btn card-btn-del";
     delBtn.textContent = "×";
     delBtn.title = "Delete";
-    delBtn.addEventListener("click", () => {
-        if (confirm(`Delete ${mod.name}?`)) deleteModule(mod.name);
-    });
+    armPressTwice(delBtn, () => deleteModule(mod.name),
+                  {armedText: "✓", armedTitle: "Click again to delete"});
     wrap.appendChild(delBtn);
 
     // Drag handle (HTML5 drag-source; the .card itself is the draggable element)
@@ -502,6 +593,14 @@ function defaultFor(moduleType, ctrlName) {
     const t = availableTypes.find(t => t.name === moduleType);
     if (!t || !t.defaults) return undefined;
     return t.defaults[ctrlName];
+}
+
+// The module type's spec-page path (relative to docs/moonmodules/), from /api/types.
+// Returns "" when the type isn't loaded yet or declares no doc path.
+function docPathForType(moduleType) {
+    if (!moduleType) return "";
+    const t = availableTypes.find(t => t.name === moduleType);
+    return (t && t.docPath) ? t.docPath : "";
 }
 
 function createControl(moduleName, moduleType, ctrl) {
@@ -879,12 +978,66 @@ function cssEscape(s) {
 // 6. Type picker
 // ---------------------------------------------------------------------------
 
+// Role → emoji. The role chip is derived here (zero backend cost); curated
+// extra tags come from the type's `tags` string in /api/types.
+const ROLE_EMOJI = {
+    effect:   "✨",
+    driver:   "💡",
+    modifier: "🔀",
+    layout:   "📐",
+    generic:  "⚙️",
+};
+
+// Split a string into grapheme clusters so multi-codepoint emoji (e.g. 🌫️,
+// which is base char + variation selector) stay whole. Falls back to a plain
+// code-point split if Intl.Segmenter is unavailable.
+const _graphemeSeg = (typeof Intl !== "undefined" && Intl.Segmenter)
+    ? new Intl.Segmenter(undefined, {granularity: "grapheme"})
+    : null;
+function graphemes(s) {
+    if (!s) return [];
+    if (_graphemeSeg) return [..._graphemeSeg.segment(s)].map(seg => seg.segment);
+    return [...s];
+}
+
+// All emoji for a type: its role emoji first, then each curated tag emoji.
+// Deduplicated, order preserved.
+function emojiTagsFor(t) {
+    const out = [];
+    const seen = new Set();
+    const push = (ch) => { if (ch && !seen.has(ch)) { seen.add(ch); out.push(ch); } };
+    push(ROLE_EMOJI[t.role]);
+    for (const ch of graphemes(t.tags || "")) push(ch);
+    return out;
+}
+
+// The type picker serves two modes:
+//  - add (default): pick a type to create as a child of parentMod.
+//  - replace: pick a type to swap parentMod for, at the same position.
+// They differ only in the role filter and the commit action; the search box,
+// list, and keyboard nav are shared.
 function openTypePicker(parentMod, anchorEl) {
+    openPicker(anchorEl, {
+        roles: rolesAcceptedBy(parentMod),
+        actionLabel: "create",
+        commit: (type) => addModule(type, parentMod.name)
+    });
+}
+
+// Replace mode: filter to the target module's own role (effect ↔ effect).
+function openReplacePicker(targetMod, anchorEl) {
+    openPicker(anchorEl, {
+        roles: [targetMod.role],
+        actionLabel: "replace",
+        commit: (type) => replaceModule(targetMod.name, type)
+    });
+}
+
+function openPicker(anchorEl, opts) {
     // Close any existing picker
     document.querySelectorAll(".type-picker").forEach(p => p.remove());
 
-    const accepted = rolesAcceptedBy(parentMod);
-    const filtered = availableTypes.filter(t => accepted.includes(t.role));
+    const filtered = availableTypes.filter(t => opts.roles.includes(t.role));
 
     const picker = document.createElement("div");
     picker.className = "type-picker";
@@ -894,6 +1047,31 @@ function openTypePicker(parentMod, anchorEl) {
     search.placeholder = "search…";
     search.className = "type-picker-search";
     picker.appendChild(search);
+
+    // Emoji chip filter row — every distinct emoji across the role-filtered types.
+    // Toggling chips narrows the list (AND: a type must carry all active chips).
+    const activeChips = new Set();
+    const chipRow = document.createElement("div");
+    chipRow.className = "type-picker-chips";
+    const chipEmoji = [];
+    const chipSeen = new Set();
+    for (const t of filtered) {
+        for (const ch of emojiTagsFor(t)) {
+            if (!chipSeen.has(ch)) { chipSeen.add(ch); chipEmoji.push(ch); }
+        }
+    }
+    for (const emoji of chipEmoji) {
+        const chip = document.createElement("button");
+        chip.className = "type-picker-chip";
+        chip.textContent = emoji;
+        chip.addEventListener("click", () => {
+            if (activeChips.has(emoji)) { activeChips.delete(emoji); chip.classList.remove("active"); }
+            else { activeChips.add(emoji); chip.classList.add("active"); }
+            refresh();
+        });
+        chipRow.appendChild(chip);
+    }
+    if (chipEmoji.length > 0) picker.appendChild(chipRow);
 
     const list = document.createElement("div");
     list.className = "type-picker-list";
@@ -906,7 +1084,7 @@ function openTypePicker(parentMod, anchorEl) {
     cancelBtn.addEventListener("click", () => picker.remove());
     const createBtn = document.createElement("button");
     createBtn.className = "create";
-    createBtn.textContent = "create";
+    createBtn.textContent = opts.actionLabel;
     createBtn.disabled = true;
     actions.appendChild(cancelBtn);
     actions.appendChild(createBtn);
@@ -914,14 +1092,30 @@ function openTypePicker(parentMod, anchorEl) {
 
     let selectedType = null;
 
-    function refresh() {
+    // Types matching the search box AND all active emoji chips.
+    function currentMatches() {
         const q = search.value.toLowerCase();
-        const matches = filtered.filter(t => !q || t.name.toLowerCase().includes(q));
+        return filtered.filter(t => {
+            if (q && !t.name.toLowerCase().includes(q)) return false;
+            if (activeChips.size > 0) {
+                const has = new Set(emojiTagsFor(t));
+                for (const chip of activeChips) if (!has.has(chip)) return false;
+            }
+            return true;
+        });
+    }
+
+    function refresh() {
+        const matches = currentMatches();
         list.innerHTML = "";
         matches.forEach((t, i) => {
             const item = document.createElement("div");
             item.className = "type-picker-item" + (i === 0 ? " selected" : "");
-            item.textContent = t.name;
+            const emoji = document.createElement("span");
+            emoji.className = "type-picker-item-emoji";
+            emoji.textContent = emojiTagsFor(t).join("");
+            item.appendChild(emoji);
+            item.appendChild(document.createTextNode(t.name));
             const role = document.createElement("span");
             role.className = "role";
             role.textContent = t.role;
@@ -933,7 +1127,7 @@ function openTypePicker(parentMod, anchorEl) {
                 createBtn.disabled = false;
             });
             item.addEventListener("dblclick", () => {
-                addModule(t.name, parentMod.name);
+                opts.commit(t.name);
                 picker.remove();
             });
             list.appendChild(item);
@@ -964,7 +1158,7 @@ function openTypePicker(parentMod, anchorEl) {
         } else if (e.key === "Enter") {
             e.preventDefault();
             if (selectedType) {
-                addModule(selectedType, parentMod.name);
+                opts.commit(selectedType);
                 picker.remove();
             }
         } else if (e.key === "Escape") {
@@ -973,13 +1167,12 @@ function openTypePicker(parentMod, anchorEl) {
     });
 
     function filteredAt(i) {
-        const q = search.value.toLowerCase();
-        return filtered.filter(t => !q || t.name.toLowerCase().includes(q))[i];
+        return currentMatches()[i];
     }
 
     createBtn.addEventListener("click", () => {
         if (selectedType) {
-            addModule(selectedType, parentMod.name);
+            opts.commit(selectedType);
             picker.remove();
         }
     });
@@ -1006,10 +1199,14 @@ function attachDragHandlers(card, mod) {
         document.querySelectorAll(".drag-over").forEach(c => c.classList.remove("drag-over"));
     });
     card.addEventListener("dragover", (e) => {
-        // Only allow drop on a sibling of the same role (= same card depth)
+        // Only allow drop on a true sibling — same .card-children container.
+        // Cards now nest, so equal data-depth is no longer enough: two effects
+        // under different Layers share a depth but aren't siblings.
         const src = document.querySelector(".card.dragging");
         if (!src || src === card) return;
-        if (src.dataset.depth === card.dataset.depth) {
+        if (src.parentElement === card.parentElement &&
+            card.parentElement &&
+            card.parentElement.classList.contains("card-children")) {
             e.preventDefault();
             card.classList.add("drag-over");
         }
@@ -1294,21 +1491,22 @@ function buildMVP(ex, ey, ez, aspect) {
 }
 
 // Scroll-shrink preview: 0..1 ratio over 0..300px of main scroll.
+// Shrinks max-height — the CSS aspect-ratio still derives the canvas size
+// underneath the cap, so the preview stays a rectangle (square clipped by the
+// max-height) and collapses smoothly to 50% as the user scrolls.
 function setupPreviewShrink() {
     const canvas = document.getElementById("preview");
     if (!canvas) return;
-    let naturalHeight = null;
+    let naturalMaxH = null;
     let ticking = false;
     const SHRINK_OVER = 300;
     function apply() {
         ticking = false;
-        if (naturalHeight === null) {
-            naturalHeight = canvas.clientHeight || (window.innerHeight * 0.5);
+        if (!naturalMaxH) {
+            naturalMaxH = canvas.getBoundingClientRect().height || (window.innerHeight * 0.5);
         }
         const r = Math.min(1, Math.max(0, window.scrollY / SHRINK_OVER));
-        const h = naturalHeight * (1 - r * 0.5);
-        canvas.style.height = Math.round(h) + "px";
-        canvas.style.maxHeight = Math.round(h) + "px";
+        canvas.style.maxHeight = Math.round(naturalMaxH * (1 - r * 0.5)) + "px";
         if (lastVerts) redrawCached();
     }
     window.addEventListener("scroll", () => {
@@ -1317,7 +1515,11 @@ function setupPreviewShrink() {
             ticking = true;
         }
     }, {passive: true});
-    window.addEventListener("resize", () => { naturalHeight = null; apply(); });
+    window.addEventListener("resize", () => {
+        naturalMaxH = null;
+        canvas.style.maxHeight = "";  // let CSS 50vh cap re-measure
+        apply();
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1330,7 +1532,12 @@ function setupStatusBarButtons() {
         wsRetryMs = 500;
         connectWs();
     });
-    document.getElementById("reboot-btn")?.addEventListener("click", rebootDevice);
+    // Reboot: press once to arm, again to confirm — see armPressTwice. The glyph
+    // stays (no armedText); only the title changes.
+    const rebootBtn = document.getElementById("reboot-btn");
+    if (rebootBtn) {
+        armPressTwice(rebootBtn, rebootDevice, {armedTitle: "Click again to reboot"});
+    }
     document.getElementById("theme-toggle")?.addEventListener("click", () => {
         theme = (theme === "dark") ? "light" : "dark";
         localStorage.setItem(LS_THEME, theme);

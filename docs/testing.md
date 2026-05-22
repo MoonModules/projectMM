@@ -31,6 +31,14 @@ Tests `MoonModule` lifecycle and `Control` binding in `src/core/MoonModule.h` an
 - Pointer binding: changing variable updates control, changing via pointer updates variable
 - ControlList clear and rebuild
 
+### Module tree mutation (`test/test_movechild.cpp`, `test/test_replacechild.cpp`) {#tree-mutation}
+
+Tests the child-array mutations in `src/core/MoonModule.h` that back the UI's reorder and replace operations.
+
+- `moveChildTo`: forward/backward/one-step reorder, no-op when already at target, out-of-range and non-child rejected
+- `replaceChildAt`: swap at the same position with siblings intact, old child detached and replacement parented, out-of-range and null replacement rejected
+- Replace lifecycle: the replacement is built → set up → allocated, then the old module torn down — the order `HttpServerModule::handleReplaceModule` runs
+
 ### Buffer (`test/test_buffer.cpp`) {#buffer}
 
 Tests `Buffer` in `src/light/Buffer.h`.

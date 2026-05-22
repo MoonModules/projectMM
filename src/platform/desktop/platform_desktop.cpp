@@ -80,6 +80,29 @@ const char* chipModel() {
     return "desktop";
 }
 
+const char* hostIp() {
+    // Resolve the outbound-interface address. A UDP socket connect() sends no
+    // packet — it just selects the route — so getsockname() then yields this
+    // host's LAN IP. Cached after the first call. "" if offline.
+    static char ip[INET_ADDRSTRLEN] = {};
+    if (ip[0]) return ip;
+    int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) return "";
+    sockaddr_in probe{};
+    probe.sin_family = AF_INET;
+    probe.sin_port = htons(80);
+    inet_pton(AF_INET, "8.8.8.8", &probe.sin_addr);
+    if (::connect(fd, reinterpret_cast<sockaddr*>(&probe), sizeof(probe)) == 0) {
+        sockaddr_in local{};
+        socklen_t len = sizeof(local);
+        if (::getsockname(fd, reinterpret_cast<sockaddr*>(&local), &len) == 0) {
+            inet_ntop(AF_INET, &local.sin_addr, ip, sizeof(ip));
+        }
+    }
+    ::close(fd);
+    return ip;
+}
+
 const char* sdkVersion() {
 #ifdef __clang__
     return "clang " __clang_version__;

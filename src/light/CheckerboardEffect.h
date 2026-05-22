@@ -7,6 +7,8 @@ namespace mm {
 
 class CheckerboardEffect : public EffectBase {
 public:
+    const char* tags() const override { return "🏁"; }
+
     uint8_t cell_size = 4;
     uint8_t bpm = 60;
     uint8_t hue_a = 0;

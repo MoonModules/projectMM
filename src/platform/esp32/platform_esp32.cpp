@@ -104,6 +104,12 @@ const char* chipModel() {
     }
 }
 
+const char* hostIp() {
+    // The device IP belongs to NetworkModule (WiFi/Ethernet), not the platform
+    // layer — it isn't known until an interface comes up. Empty here.
+    return "";
+}
+
 const char* sdkVersion() {
     return esp_get_idf_version();
 }

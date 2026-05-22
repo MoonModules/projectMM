@@ -10,6 +10,8 @@ namespace mm {
 
 class FireEffect : public EffectBase {
 public:
+    const char* tags() const override { return "🔥"; }
+
     uint8_t cooling = 55;
     uint8_t sparking = 120;
     uint8_t hue_shift = 0;

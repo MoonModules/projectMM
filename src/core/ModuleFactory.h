@@ -20,18 +20,25 @@ public:
     // Template registration: captures sizeof(T) and role() automatically. Role is
     // discovered via a stack-allocated probe instance at registration time — no per-type
     // boilerplate, no member-pointer storage. Registration runs once at boot.
+    // docPath is the module's spec page relative to docs/moonmodules/ (e.g.
+    // "light/effects/NoiseEffect.md"); the UI builds a help link from it. It is a
+    // flash string literal — no per-instance RAM cost. "" means no help link.
     template<typename T>
-    static bool registerType(const char* typeName) {
+    static bool registerType(const char* typeName, const char* docPath = "") {
         T probe;
         ModuleRole role = probe.role();
-        return registerType(typeName, []() -> MoonModule* { return new T(); }, sizeof(T), role);
+        // tags() returns a flash string literal — storing the pointer is safe.
+        const char* tags = probe.tags();
+        return registerType(typeName, []() -> MoonModule* { return new T(); },
+                            sizeof(T), role, docPath, tags);
     }
 
     static bool registerType(const char* typeName, CreateModuleFn fn, size_t classSize = 0,
-                             ModuleRole role = ModuleRole::Generic) {
+                             ModuleRole role = ModuleRole::Generic, const char* docPath = "",
+                             const char* tags = "") {
         if (!typeName || !fn) return false;
         if (!grow()) return false;
-        types_[count_++] = {typeName, fn, classSize, role};
+        types_[count_++] = {typeName, fn, classSize, role, docPath ? docPath : "", tags ? tags : ""};
         return true;
     }
 
@@ -58,6 +65,8 @@ public:
     static uint8_t typeCount() { return count_; }
     static const char* typeName(uint8_t i) { return (types_ && i < count_) ? types_[i].name : nullptr; }
     static ModuleRole typeRole(uint8_t i) { return (types_ && i < count_) ? types_[i].role : ModuleRole::Generic; }
+    static const char* typeDocPath(uint8_t i) { return (types_ && i < count_) ? types_[i].docPath : ""; }
+    static const char* typeTags(uint8_t i) { return (types_ && i < count_) ? types_[i].tags : ""; }
 
 private:
     struct TypeEntry {
@@ -65,6 +74,8 @@ private:
         CreateModuleFn create;
         size_t classSize;
         ModuleRole role;
+        const char* docPath;
+        const char* tags;
     };
 
     static inline TypeEntry* types_ = nullptr;

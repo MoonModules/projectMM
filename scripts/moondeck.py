@@ -17,6 +17,17 @@ UI_DIR = SCRIPTS_DIR / "moondeck_ui"
 ASSETS_DIR = ROOT / "docs" / "assets"
 STATE_FILE = SCRIPTS_DIR / "moondeck.json"
 
+
+def _app_version():
+    """Read the project version from library.json. '?' if unavailable."""
+    try:
+        return json.loads((ROOT / "library.json").read_text()).get("version", "?")
+    except Exception:
+        return "?"
+
+
+APP_VERSION = _app_version()
+
 # ---------------------------------------------------------------------------
 # Script definitions (loaded from scripts.json)
 # ---------------------------------------------------------------------------
@@ -35,17 +46,27 @@ ESP32_ENVS = _scripts_data["envs"]
 # Device discovery
 # ---------------------------------------------------------------------------
 
-def _get_local_subnet():
-    """Try to detect the local subnet (e.g. '192.168.1')."""
+def _lan_ip():
+    """This machine's LAN IP. '' if it can't be determined (offline).
+
+    connect() on a UDP socket sends no packet — it just picks the outbound
+    interface, whose address is the LAN IP.
+    """
     import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ".".join(ip.split(".")[:3])
+        return s.getsockname()[0]
     except Exception:
-        return "192.168.1"
+        return ""
+    finally:
+        s.close()
+
+
+def _get_local_subnet():
+    """The local /24 subnet prefix (e.g. '192.168.1'). Falls back to a default."""
+    ip = _lan_ip()
+    return ".".join(ip.split(".")[:3]) if ip else "192.168.1"
 
 
 def _probe_device(ip, port=8080, timeout=0.4):
@@ -90,18 +111,14 @@ def discover_devices(subnet=""):
             if result:
                 devices.append(result)
 
-    # Deduplicate: if localhost found, remove the Mac's own IP:port (same process)
-    hasLocalhost = any(d["ip"].startswith("localhost") for d in devices)
-    if hasLocalhost:
-        import socket
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            localIp = s.getsockname()[0]
-            s.close()
-            devices = [d for d in devices if not d["ip"].startswith(localIp + ":")]
-        except Exception:
-            pass
+    # The local app answers on both localhost and this machine's LAN IP — the
+    # subnet scan finds the LAN-IP entry, the explicit localhost probe finds the
+    # other. Keep the LAN IP (usable from any device) and drop the redundant
+    # localhost entry so the discovered list shows real network addresses.
+    localIp = _lan_ip()
+    hasLanEntry = localIp and any(d["ip"].startswith(localIp + ":") for d in devices)
+    if hasLanEntry:
+        devices = [d for d in devices if not d["ip"].startswith("localhost:")]
 
     # Sort by IP
     devices.sort(key=lambda d: d["ip"])
@@ -464,6 +481,9 @@ p {{ margin: 2px 0; }}
         content_type = content_types.get(ext, "application/octet-stream")
 
         data = file_path.read_bytes()
+        # index.html carries a {{VERSION}} placeholder filled at serve time.
+        if path == "index.html":
+            data = data.replace(b"{{VERSION}}", APP_VERSION.encode())
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
@@ -477,8 +497,13 @@ p {{ margin: 2px 0; }}
 # ---------------------------------------------------------------------------
 
 def main():
+    # ThreadingHTTPServer binds to "" → all interfaces, so MoonDeck is reachable
+    # from other devices on the LAN, not just this machine.
     server = http.server.ThreadingHTTPServer(("", PORT), MoonDeckHandler)
     print(f"MoonDeck running at http://localhost:{PORT}")
+    ip = _lan_ip()
+    if ip:
+        print(f"  on the network:   http://{ip}:{PORT}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

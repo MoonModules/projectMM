@@ -10,11 +10,97 @@
 
 #include "ui/ui_embedded.h"
 
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
 
 namespace mm {
+
+// Writes JSON with no fixed-buffer size ceiling. Two modes:
+//  - socket mode: a small staging buffer flushes to a TcpConnection as it fills,
+//    so the whole response never lives in RAM at once (used by GET /api/state).
+//  - buffer mode: bytes collect in a heap buffer that doubles on demand, for
+//    callers that need the assembled JSON + its length (the WebSocket push,
+//    whose frame header carries the length up front).
+// Either way, a module tree of any size serializes correctly.
+class JsonSink {
+public:
+    // Socket mode.
+    explicit JsonSink(platform::TcpConnection& conn) : conn_(&conn) {}
+
+    // Buffer mode — collects into a growable heap buffer.
+    JsonSink() = default;
+
+    ~JsonSink() { if (heap_) platform::free(heap_); }
+
+    JsonSink(const JsonSink&) = delete;
+    JsonSink& operator=(const JsonSink&) = delete;
+
+    void append(const char* s) {
+        if (!s) return;
+        while (*s) {
+            if (conn_) {
+                if (pos_ == STAGE_SIZE) flushStage();
+                stage_[pos_++] = *s++;
+            } else {
+                if (!ensureHeap(heapLen_ + 1)) return;  // out of memory: drop
+                heap_[heapLen_++] = *s++;
+            }
+        }
+    }
+
+    // Append a printf-formatted fragment. A single fragment must fit FRAG_MAX;
+    // fragments here are short (one control, one module header) — well within it.
+    void appendf(const char* fmt, ...) __attribute__((format(printf, 2, 3))) {
+        char frag[FRAG_MAX];
+        va_list ap;
+        va_start(ap, fmt);
+        int n = std::vsnprintf(frag, sizeof(frag), fmt, ap);
+        va_end(ap);
+        if (n > 0) append(frag);
+    }
+
+    // Socket mode: flush staged bytes to the socket. Call once at the end.
+    void flush() { flushStage(); }
+
+    // Buffer mode: the collected JSON and its length (null-terminated).
+    const char* data() const { return heap_ ? heap_ : ""; }
+    size_t size() const { return heapLen_; }
+
+private:
+    static constexpr size_t STAGE_SIZE = 1024;
+    static constexpr size_t FRAG_MAX = 256;
+
+    void flushStage() {
+        if (conn_ && pos_ > 0) {
+            conn_->write(reinterpret_cast<const uint8_t*>(stage_), pos_);
+            pos_ = 0;
+        }
+    }
+
+    // Grow the heap buffer to hold at least `need` bytes plus a null terminator.
+    bool ensureHeap(size_t need) {
+        if (need + 1 <= heapCap_) return true;
+        size_t newCap = heapCap_ == 0 ? 2048 : heapCap_ * 2;
+        while (newCap < need + 1) newCap *= 2;
+        char* grown = static_cast<char*>(platform::alloc(newCap));
+        if (!grown) return false;
+        if (heap_) { std::memcpy(grown, heap_, heapLen_); platform::free(heap_); }
+        heap_ = grown;
+        heapCap_ = newCap;
+        heap_[heapLen_] = 0;
+        return true;
+    }
+
+    platform::TcpConnection* conn_ = nullptr;  // socket mode when non-null
+    char stage_[STAGE_SIZE];
+    size_t pos_ = 0;
+
+    char* heap_ = nullptr;                     // buffer mode
+    size_t heapLen_ = 0;
+    size_t heapCap_ = 0;
+};
 
 class HttpServerModule : public MoonModule {
 public:
@@ -72,9 +158,8 @@ private:
     static constexpr int MAX_WS_CLIENTS = 4;
     platform::TcpConnection wsClients_[MAX_WS_CLIENTS];
 
-    // Shared JSON buffer for API responses (one request at a time, so safe to share)
-    static constexpr size_t JSON_BUF_SIZE = 4096;
-    static inline char jsonBuf_[JSON_BUF_SIZE];
+    // All JSON API responses (/api/state, /api/types, /api/system) and the WS
+    // state push stream through a JsonSink — no shared fixed-size buffer.
 
     // XOR key for Password-control obfuscation in /api/state. NOT a secret — the
     // same value lives in src/ui/app.js (PW_XOR_KEY). This only stops the
@@ -160,6 +245,12 @@ private:
                 std::strncmp(path, "/api/modules/", 13) == 0 &&
                 pathLen > 18 &&
                 std::strcmp(path + pathLen - 5, "/move") == 0;
+            // POST /api/modules/<name>/replace with body {"type":"<TypeName>"}.
+            // Strict-suffix check, same as the move route.
+            const bool isReplaceRoute =
+                std::strncmp(path, "/api/modules/", 13) == 0 &&
+                pathLen > 21 &&
+                std::strcmp(path + pathLen - 8, "/replace") == 0;
             if (std::strcmp(path, "/api/control") == 0 && body) {
                 handleSetControl(conn, body);
             } else if (std::strcmp(path, "/api/modules") == 0 && body) {
@@ -171,6 +262,13 @@ private:
                 std::memcpy(nameBuf, path + 13, nameLen);
                 nameBuf[nameLen] = 0;
                 handleMoveModule(conn, nameBuf, body);
+            } else if (isReplaceRoute && body) {
+                char nameBuf[32] = {};
+                size_t nameLen = pathLen - 13 - 8;  // strip "/api/modules/" prefix and "/replace" suffix
+                if (nameLen >= sizeof(nameBuf)) nameLen = sizeof(nameBuf) - 1;
+                std::memcpy(nameBuf, path + 13, nameLen);
+                nameBuf[nameLen] = 0;
+                handleReplaceModule(conn, nameBuf, body);
             } else if (std::strcmp(path, "/api/reboot") == 0) {
                 handleReboot(conn);
             } else {
@@ -270,103 +368,99 @@ private:
     // JSON state
     // -----------------------------------------------------------------------
 
+    // /api/state is streamed through a JsonSink — the module tree can be any
+    // size with no fixed-buffer ceiling. The HTTP response omits Content-Length;
+    // `Connection: close` tells the client the body ends at EOF.
     void serveState(platform::TcpConnection& conn) {
-        int len = buildStateJson(jsonBuf_, JSON_BUF_SIZE);
-        sendResponse(conn, 200, "application/json", jsonBuf_);
-        (void)len;
+        const char* header =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            "Connection: close\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "\r\n";
+        conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
+
+        JsonSink sink(conn);
+        buildStateJson(sink);
+        sink.flush();
     }
 
-    int buildStateJson(char* buf, size_t bufSize) {
-        int pos = 0;
-        auto append = [&](const char* s) {
-            if (static_cast<size_t>(pos) >= bufSize) return;
-            int n = std::snprintf(buf + pos, bufSize - pos, "%s", s);
-            if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
-        };
-
-        append("{\"modules\":[");
+    void buildStateJson(JsonSink& sink) {
+        sink.append("{\"modules\":[");
 
         if (scheduler_) {
+            bool first = true;
             for (uint8_t m = 0; m < scheduler_->moduleCount(); m++) {
                 auto* mod = scheduler_->module(m);
                 if (!mod || mod == this) continue; // skip self
-                if (m > 0 && buf[pos - 1] != '[') append(",");
-                writeModuleJson(buf, bufSize, pos, mod);
+                if (!first) sink.append(",");
+                first = false;
+                writeModuleJson(sink, mod);
             }
         }
 
-        append("]}");
-        buf[pos] = 0;
-        return pos;
+        sink.append("]}");
     }
 
-    void writeModuleJson(char* buf, size_t bufSize, int& pos, MoonModule* mod) {
-        auto append = [&](const char* s) {
-            if (static_cast<size_t>(pos) >= bufSize) return;
-            int n = std::snprintf(buf + pos, bufSize - pos, "%s", s);
-            if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
-        };
-
-        if (static_cast<size_t>(pos) >= bufSize) return;
-        // Per-module header: name, role, enabled, loopTimeUs (for fps/ms display), controls
+    void writeModuleJson(JsonSink& sink, MoonModule* mod) {
+        // Per-module header: name, role, enabled, loopTimeUs (fps/ms display),
+        // classSize (static C++ object bytes) + dynamicBytes (heap), controls
         const char* roleStr = roleName(mod->role());
         const char* type = mod->typeName();
         if (!type) type = "";
-        int n = std::snprintf(buf + pos, bufSize - pos,
-            "{\"name\":\"%s\",\"type\":\"%s\",\"role\":\"%s\",\"enabled\":%s,\"loopTimeUs\":%u,\"controls\":[",
+        sink.appendf(
+            "{\"name\":\"%s\",\"type\":\"%s\",\"role\":\"%s\",\"enabled\":%s,"
+            "\"loopTimeUs\":%u,\"classSize\":%u,\"dynamicBytes\":%u,\"controls\":[",
             mod->name() ? mod->name() : "",
             type,
             roleStr,
             mod->enabled() ? "true" : "false",
-            static_cast<unsigned>(mod->loopTimeUs()));
-        if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
-        writeControls(buf, bufSize, pos, mod);
-        append("]");
+            static_cast<unsigned>(mod->loopTimeUs()),
+            static_cast<unsigned>(mod->classSize()),
+            static_cast<unsigned>(mod->dynamicBytes()));
+        writeControls(sink, mod);
+        sink.append("]");
 
         // Children
         uint8_t cc = mod->childCount();
         if (cc > 0) {
-            append(",\"children\":[");
+            sink.append(",\"children\":[");
             for (uint8_t i = 0; i < cc; i++) {
-                if (i > 0) append(",");
-                writeModuleJson(buf, bufSize, pos, mod->child(i));
+                if (i > 0) sink.append(",");
+                writeModuleJson(sink, mod->child(i));
             }
-            append("]");
+            sink.append("]");
         }
 
-        append("}");
+        sink.append("}");
     }
 
-    void writeControls(char* buf, size_t bufSize, int& pos, MoonModule* mod) {
+    void writeControls(JsonSink& sink, MoonModule* mod) {
         auto& ctrls = mod->controls();
         for (uint8_t i = 0; i < ctrls.count(); i++) {
-            if (i > 0) {
-                int n = std::snprintf(buf + pos, bufSize - pos, ",");
-                if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
-            }
+            if (i > 0) sink.append(",");
             auto& c = ctrls[i];
             // Per-type body emitted WITHOUT the closing }. We append "hidden" then } afterwards.
-            int n = 0;
             switch (c.type) {
                 case ControlType::Uint8:
-                    n = std::snprintf(buf + pos, bufSize - pos,
+                    sink.appendf(
                         "{\"name\":\"%s\",\"type\":\"uint8\",\"value\":%u,\"min\":%u,\"max\":%u",
                         c.name, *static_cast<uint8_t*>(c.ptr), c.min, c.max);
                     break;
                 case ControlType::Uint16:
-                    n = std::snprintf(buf + pos, bufSize - pos,
+                    sink.appendf(
                         "{\"name\":\"%s\",\"type\":\"uint16\",\"value\":%u",
                         c.name, *static_cast<uint16_t*>(c.ptr));
                     break;
                 case ControlType::Bool:
-                    n = std::snprintf(buf + pos, bufSize - pos,
+                    sink.appendf(
                         "{\"name\":\"%s\",\"type\":\"bool\",\"value\":%s",
                         c.name, *static_cast<bool*>(c.ptr) ? "true" : "false");
                     break;
                 case ControlType::Text: {
                     char escaped[128];
                     jsonEscape(static_cast<char*>(c.ptr), escaped, sizeof(escaped));
-                    n = std::snprintf(buf + pos, bufSize - pos,
+                    sink.appendf(
                         "{\"name\":\"%s\",\"type\":\"text\",\"value\":\"%s\"",
                         c.name, escaped);
                     break;
@@ -387,7 +481,7 @@ private:
                     }
                     char encoded[96];
                     base64Encode(scrambled, pwLen, encoded, sizeof(encoded));
-                    n = std::snprintf(buf + pos, bufSize - pos,
+                    sink.appendf(
                         "{\"name\":\"%s\",\"type\":\"password\",\"value\":\"%s\"",
                         c.name, encoded);
                     break;
@@ -395,41 +489,32 @@ private:
                 case ControlType::ReadOnly: {
                     char escaped[128];
                     jsonEscape(static_cast<char*>(c.ptr), escaped, sizeof(escaped));
-                    n = std::snprintf(buf + pos, bufSize - pos,
+                    sink.appendf(
                         "{\"name\":\"%s\",\"type\":\"display\",\"value\":\"%s\"",
                         c.name, escaped);
                     break;
                 }
                 case ControlType::Select: {
-                    n = std::snprintf(buf + pos, bufSize - pos,
+                    sink.appendf(
                         "{\"name\":\"%s\",\"type\":\"select\",\"value\":%u,\"options\":[",
                         c.name, *static_cast<uint8_t*>(c.ptr));
-                    if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
                     auto* options = reinterpret_cast<const char* const*>(c.aux);
                     for (uint8_t o = 0; o < c.max; o++) {
-                        n = std::snprintf(buf + pos, bufSize - pos,
-                            "%s\"%s\"", o > 0 ? "," : "", options[o]);
-                        if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
+                        sink.appendf("%s\"%s\"", o > 0 ? "," : "", options[o]);
                     }
-                    n = std::snprintf(buf + pos, bufSize - pos, "]");
+                    sink.append("]");
                     break;
                 }
                 case ControlType::Progress:
-                    n = std::snprintf(buf + pos, bufSize - pos,
+                    sink.appendf(
                         "{\"name\":\"%s\",\"type\":\"progress\",\"value\":%lu,\"total\":%lu",
                         c.name, static_cast<unsigned long>(*static_cast<uint32_t*>(c.ptr)),
                         static_cast<unsigned long>(c.aux));
                     break;
             }
-            if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
             // Emit "hidden":true only when set (common case is false; omit to save bytes).
             // Then close the per-control object.
-            if (c.hidden) {
-                n = std::snprintf(buf + pos, bufSize - pos, ",\"hidden\":true}");
-            } else {
-                n = std::snprintf(buf + pos, bufSize - pos, "}");
-            }
-            if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
+            sink.append(c.hidden ? ",\"hidden\":true}" : "}");
         }
     }
 
@@ -547,8 +632,19 @@ private:
     // System metrics
     // -----------------------------------------------------------------------
 
+    // /api/system is streamed through a JsonSink — no fixed-buffer ceiling, same
+    // as /api/state and /api/types.
     void serveSystem(platform::TcpConnection& conn) {
-        int pos = std::snprintf(jsonBuf_, JSON_BUF_SIZE,
+        const char* header =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            "Connection: close\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "\r\n";
+        conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
+
+        JsonSink sink(conn);
+        sink.appendf(
             "{\"fps\":%u,\"tickTimeUs\":%u,\"freeHeap\":%u,\"freeInternal\":%u,\"maxBlock\":%u,\"uptime\":%u,\"modules\":[",
             static_cast<unsigned>(scheduler_ ? scheduler_->fps() : 0),
             static_cast<unsigned>(scheduler_ ? scheduler_->tickTimeUs() : 0),
@@ -558,32 +654,29 @@ private:
             static_cast<unsigned>(scheduler_ ? scheduler_->elapsed() / 1000 : 0));
 
         // Per-module timing (walk tree recursively)
-        if (scheduler_ && pos > 0 && static_cast<size_t>(pos) < JSON_BUF_SIZE) {
+        if (scheduler_) {
             bool first = true;
             for (uint8_t i = 0; i < scheduler_->moduleCount(); i++) {
-                writeModuleMetricsJson(jsonBuf_, JSON_BUF_SIZE, pos, scheduler_->module(i), first);
+                writeModuleMetricsJson(sink, scheduler_->module(i), first);
             }
         }
 
-        int n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos, "]}");
-        if (n > 0 && static_cast<size_t>(pos + n) < JSON_BUF_SIZE) pos += n;
-
-        sendResponse(conn, 200, "application/json", jsonBuf_);
+        sink.append("]}");
+        sink.flush();
     }
 
-    void writeModuleMetricsJson(char* buf, size_t bufSize, int& pos, MoonModule* mod, bool& first) {
-        if (!mod || static_cast<size_t>(pos) >= bufSize) return;
-        int n = std::snprintf(buf + pos, bufSize - pos,
+    void writeModuleMetricsJson(JsonSink& sink, MoonModule* mod, bool& first) {
+        if (!mod) return;
+        sink.appendf(
             "%s{\"name\":\"%s\",\"us\":%u,\"classSize\":%u,\"heap\":%u}",
             first ? "" : ",",
             mod->name() ? mod->name() : "?",
             static_cast<unsigned>(mod->loopTimeUs()),
             static_cast<unsigned>(mod->classSize()),
             static_cast<unsigned>(mod->dynamicBytes()));
-        if (n > 0 && static_cast<size_t>(pos + n) < bufSize) pos += n;
         first = false;
         for (uint8_t i = 0; i < mod->childCount(); i++) {
-            writeModuleMetricsJson(buf, bufSize, pos, mod->child(i), first);
+            writeModuleMetricsJson(sink, mod->child(i), first);
         }
     }
 
@@ -687,46 +780,122 @@ private:
         sendResponse(conn, 200, "application/json", "{\"ok\":true}");
     }
 
+    // POST /api/modules/<name>/replace with body {"type":"<TypeName>"}.
+    // Swaps a child's type at the same position: siblings, order, and the parent's
+    // selection are preserved. The replacement starts with its own factory-default
+    // control values — a clean swap, no carry-over. The engine already does this
+    // internally (FilesystemModule::applyNode on a type mismatch); this exposes it
+    // as an explicit user operation.
+    void handleReplaceModule(platform::TcpConnection& conn, const char* moduleName, const char* body) {
+        auto* mod = findModuleByName(moduleName);
+        if (!mod) {
+            sendResponse(conn, 404, "application/json", "{\"error\":\"module not found\"}");
+            return;
+        }
+        auto* parent = mod->parent();
+        if (!parent) {
+            sendResponse(conn, 400, "application/json", "{\"error\":\"top-level modules cannot be replaced\"}");
+            return;
+        }
+        char typeName[32] = {};
+        mm::json::parseString(body, "type", typeName, sizeof(typeName));
+        if (typeName[0] == 0) {
+            sendResponse(conn, 400, "application/json", "{\"error\":\"missing type\"}");
+            return;
+        }
+
+        // Find the child's index within the parent.
+        uint8_t index = 0;
+        bool found = false;
+        for (uint8_t i = 0; i < parent->childCount(); i++) {
+            if (parent->child(i) == mod) { index = i; found = true; break; }
+        }
+        if (!found) {
+            sendResponse(conn, 404, "application/json", "{\"error\":\"module not found\"}");
+            return;
+        }
+
+        // Create the replacement before touching the tree — if the factory fails,
+        // return early and leave the tree intact (never leave a hole).
+        auto* fresh = ModuleFactory::create(typeName);
+        if (!fresh) {
+            sendResponse(conn, 400, "application/json", "{\"error\":\"unknown type\"}");
+            return;
+        }
+
+        // Swap in place; replaceChildAt returns the old module, which we own.
+        MoonModule* old = parent->replaceChildAt(index, fresh);
+
+        // Lifecycle on the fresh module — same phase order as the add path.
+        fresh->onBuildControls();
+        fresh->setup();
+        fresh->onAllocateMemory();
+
+        // Tear down the old subtree (teardown + recursive delete) — same pair
+        // FilesystemModule::applyNode uses; a bare delete would leak its children.
+        if (old) {
+            old->teardown();
+            Scheduler::deleteTree(old);
+        }
+
+        // Re-run onAllocateMemory across the tree so Layer LUT / DriverGroup buffer
+        // wiring re-forms — a replaced effect/driver re-wires like a freshly added one.
+        if (scheduler_) scheduler_->rebuild();
+
+        // Persist: children are encoded positionally, so marking the parent dirty
+        // rewrites "<index>.type" with the new typeName at the same slot.
+        parent->markDirty();
+        FilesystemModule::noteDirty();
+
+        sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+    }
+
     // GET /api/types → {"types":[{"name":"NoiseEffect","role":"effect",
-    //                              "defaults":{"bpm":60,"scale":4,...}}, ...]}.
+    //                  "docPath":"light/effects/NoiseEffect.md","defaults":{...}}, ...]}.
     // The defaults map is captured by factory-creating a fresh probe instance per type,
     // running its onBuildControls(), and reading each bound variable's value-at-rest.
     // The probe is destroyed before the next iteration. UI uses these to render the
-    // ↺ reset-to-default button (active when the live value differs).
+    // ↺ reset-to-default button (active when the live value differs) and the help
+    // link (docPath, relative to docs/moonmodules/ — "" means no help link).
+    // /api/types is streamed through a JsonSink — same as /api/state, no fixed-buffer
+    // ceiling. The HTTP response omits Content-Length; Connection: close ends the body.
     void serveTypes(platform::TcpConnection& conn) {
-        int pos = std::snprintf(jsonBuf_, JSON_BUF_SIZE, "{\"types\":[");
-        if (pos < 0) {
-            sendResponse(conn, 500, "application/json", "{\"error\":\"format\"}");
-            return;
-        }
+        const char* header =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            "Connection: close\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "\r\n";
+        conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
+
+        JsonSink sink(conn);
+        sink.append("{\"types\":[");
         bool first = true;
         for (uint8_t i = 0; i < ModuleFactory::typeCount(); i++) {
             const char* name = ModuleFactory::typeName(i);
             if (!name) continue;
             const char* roleStr = roleName(ModuleFactory::typeRole(i));
-            int n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
-                                  "%s{\"name\":\"%s\",\"role\":\"%s\",\"defaults\":{",
-                                  first ? "" : ",", name, roleStr);
-            if (n < 0 || static_cast<size_t>(pos + n) >= JSON_BUF_SIZE) break;
-            pos += n;
-            writeTypeDefaults(name, pos);
-            n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos, "}}");
-            if (n < 0 || static_cast<size_t>(pos + n) >= JSON_BUF_SIZE) break;
-            pos += n;
+            const char* docPath = ModuleFactory::typeDocPath(i);
+            const char* tags = ModuleFactory::typeTags(i);
+            sink.appendf("%s{\"name\":\"%s\",\"role\":\"%s\",\"docPath\":\"%s\","
+                         "\"tags\":\"%s\",\"defaults\":{",
+                         first ? "" : ",", name, roleStr,
+                         docPath ? docPath : "", tags ? tags : "");
+            writeTypeDefaults(sink, name);
+            sink.append("}}");
             first = false;
         }
-        int n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos, "]}");
-        if (n > 0 && static_cast<size_t>(pos + n) < JSON_BUF_SIZE) pos += n;
-        sendResponse(conn, 200, "application/json", jsonBuf_);
+        sink.append("]}");
+        sink.flush();
     }
 
-    // Emit `"controlName":value, ...` pairs into jsonBuf_ at &pos for a probe of typeName.
+    // Emit `"controlName":value, ...` pairs into the sink for a probe of typeName.
     // The probe is created from the factory, onBuildControls is run, and the bound
     // variables are read at their initial (just-constructed) state. The probe is deleted
     // before return. Only persistable scalar types are emitted (Uint8/Uint16/Bool/Text).
     // Text values are JSON-escaped minimally — typeName-derived control names are
     // alphanumeric so the keys are safe.
-    void writeTypeDefaults(const char* typeName, int& pos) {
+    void writeTypeDefaults(JsonSink& sink, const char* typeName) {
         MoonModule* probe = ModuleFactory::create(typeName);
         if (!probe) return;
         probe->onBuildControls();
@@ -734,41 +903,32 @@ private:
         bool first = true;
         for (uint8_t i = 0; i < cs.count(); i++) {
             auto& c = cs[i];
-            int n = 0;
             switch (c.type) {
                 case ControlType::Uint8:
-                    n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
-                                      "%s\"%s\":%u", first ? "" : ",", c.name,
-                                      *static_cast<uint8_t*>(c.ptr));
+                    sink.appendf("%s\"%s\":%u", first ? "" : ",", c.name,
+                                 *static_cast<uint8_t*>(c.ptr));
                     break;
                 case ControlType::Uint16:
-                    n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
-                                      "%s\"%s\":%u", first ? "" : ",", c.name,
-                                      *static_cast<uint16_t*>(c.ptr));
+                    sink.appendf("%s\"%s\":%u", first ? "" : ",", c.name,
+                                 *static_cast<uint16_t*>(c.ptr));
                     break;
                 case ControlType::Bool:
-                    n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
-                                      "%s\"%s\":%s", first ? "" : ",", c.name,
-                                      *static_cast<bool*>(c.ptr) ? "true" : "false");
+                    sink.appendf("%s\"%s\":%s", first ? "" : ",", c.name,
+                                 *static_cast<bool*>(c.ptr) ? "true" : "false");
                     break;
                 case ControlType::Text: {
                     char escaped[128];
                     jsonEscape(static_cast<char*>(c.ptr), escaped, sizeof(escaped));
-                    n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
-                                      "%s\"%s\":\"%s\"", first ? "" : ",", c.name,
-                                      escaped);
+                    sink.appendf("%s\"%s\":\"%s\"", first ? "" : ",", c.name, escaped);
                     break;
                 }
                 case ControlType::Select:
-                    n = std::snprintf(jsonBuf_ + pos, JSON_BUF_SIZE - pos,
-                                      "%s\"%s\":%u", first ? "" : ",", c.name,
-                                      *static_cast<uint8_t*>(c.ptr));
+                    sink.appendf("%s\"%s\":%u", first ? "" : ",", c.name,
+                                 *static_cast<uint8_t*>(c.ptr));
                     break;
                 default:
                     continue;  // ReadOnly/Progress: no default; Password: never serialized
             }
-            if (n < 0 || static_cast<size_t>(pos + n) >= JSON_BUF_SIZE) break;
-            pos += n;
             first = false;
         }
         probe->teardown();
@@ -880,12 +1040,14 @@ private:
         }
         if (!hasClients) return;
 
-        char json[4096];
-        int len = buildStateJson(json, sizeof(json));
+        // Buffer-mode sink: the WS frame header needs the total length up front,
+        // so the JSON is collected into a growable heap buffer (no size ceiling).
+        JsonSink sink;
+        buildStateJson(sink);
 
         for (auto& ws : wsClients_) {
             if (!ws.valid()) continue;
-            if (!sendWsTextFrame(ws, json, len)) {
+            if (!sendWsTextFrame(ws, sink.data(), static_cast<int>(sink.size()))) {
                 ws.close();
             }
         }

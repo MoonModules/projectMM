@@ -10,7 +10,6 @@ Promote sections from here into the main spec as they ship. When the entire file
 - Health panel (`<details>` + `GET /api/test`)
 - Log panel (`<details>` + WS `{t:"log",m:"…"}`)
 - Update-available badge + OTA panel (requires `/api/firmware`)
-- Module replace (✎) button (additive to add/delete, but needs `POST /api/modules/replace`)
 - Core affinity badge (C0/C1) — only meaningful when core pinning lands
 - Module category() field — adds taxonomy beyond `role()` for the picker (decision: derive from role() for now)
 
@@ -47,18 +46,13 @@ Side nav (one root visible at a time), hamburger + slide-in drawer, and the nav 
 |---|---|---|
 | Header: setup-dot before name | name only | **Defer-1.x** — needs `setupOk()` + `health()` on MoonModule with a real failure mode to report. Today both would always be `true` / `""`. |
 | Module ID shown separately from name in meta line | name only | **Defer-1.x** — v3's typeName is shown in `/api/state` but the UI doesn't display it. Add when module instances need disambiguating (e.g. multiple effects with the same typeName under one Layer). |
-| Category emoji badge (⚙️ 🌐 ✨ 💡 📐) | none | **Adopt-1.0 if `role()` mapping is added in the UI.** Five emojis, zero backend work — the mapping `Effect→✨`, `Driver→💡`, `Modifier→…`, `Layout→📐`, `Generic→none` lives in `app.js` directly. Adds visual scannability for free. |
+| Category emoji badge on the card header (⚙️ ✨ 💡 📐) | role emoji shown in the type picker, not on the card | **Defer-1.x** — the `ROLE_EMOJI` map already exists in `app.js` (used by the picker's chip filter). Showing it as a badge on each card header is a small further step if card scannability needs it. |
 | Core affinity badge (C0/C1 colored badge for FreeRTOS core pinning) | core pinning not implemented in v3 engine | **Drop** for now. If core pinning is added to v3, this badge re-enters scope. |
-| Memory display: classSize · heap-bytes · psram-bytes (separated) | none | **Adopt-1.0** — `classSize()` + `dynamicBytes()` already on MoonModule. Splitting heap vs PSRAM needs `platform::isPsramPointer(p)` or per-allocation tracking, neither of which exists yet. Start with `dynamicBytes` only, total. |
-| Help link per module (`?` link to `https://ewowi.github.io/projectMM/modules/<type>/`) with TYPE_TO_DOC mapping in JS | none | **Defer-1.x** — needs documentation site to exist for v3 module pages. Mapping is 14 lines of JS — add when docs are published. Cleaner approach: engine exposes `docPath` per type via `/api/types`, defaulting to nothing. |
-| Replace-type button (✎) | none | **Defer-1.x** — needs `POST /api/modules/replace` endpoint. The UX value is "stays selected, position preserved" which needs an atomic backend operation. |
+| Memory display split into heap vs PSRAM | static+dynamic shown on the card stats line (`🧠 classSize+dynamicBytes`) | **Defer-1.x** — the per-card `static+dynamic` display shipped. Splitting `dynamicBytes` further into heap vs PSRAM needs `platform::isPsramPointer(p)` or per-allocation tracking, neither of which exists yet. |
 
 ### Type picker — research notes
 
-| v1 feature | v3 today | Recommendation |
-|---|---|---|
-| Emoji "tag" chips for additional filtering | none | **Adopt-1.0** if `tags` is added to `/api/types`. Otherwise **defer**. Tags are nice-to-have; the search box alone is enough for the current type count. |
-| Module replace (`POST /api/modules/replace`) — swap a child's type at the same position without losing siblings | none | **Defer-1.x** — needs backend endpoint. |
+The emoji tag chip filter shipped — see [moonmodules/core/ui.md § Type picker](../../moonmodules/core/ui.md#type-picker). Each type carries a curated `tags` string (its `tags()` method, emitted in `/api/types`); the picker shows role + tag emoji as toggle chips with AND filtering.
 
 ### WebSocket protocol
 
@@ -81,7 +75,7 @@ Side nav (one root visible at a time), hamburger + slide-in drawer, and the nav 
 
 | v1 feature | v3 today | Recommendation |
 |---|---|---|
-| Byte formatting (`X B` / `X KB`) | inconsistent | **Adopt-1.0** — ~5 lines of `fmtBytes()`. Use everywhere memory is shown. |
+| Byte formatting (`X B` / `X KB`) | `fmtBytes()` exists, used by the card stats line | **Adopt-1.0** — reuse `fmtBytes()` anywhere else memory is shown (e.g. status-bar free heap) for consistency. |
 | Numeric formatting with `Number.isInteger()` check (integer→`String(n)`, float→`n.toFixed(1)`) | inconsistent | **Adopt-1.0** — small utility. Already done by `displayControlValue` in v3 partially. |
 | Document title kept in sync with deviceName | none | **Adopt-1.0** — one line in the WS handler. Helps when juggling multiple devices in browser tabs. |
 
@@ -97,7 +91,7 @@ Side nav (one root visible at a time), hamburger + slide-in drawer, and the nav 
 |---|---|
 | Tiny (< 30 lines each, no backend work) | category emoji badge, document.title sync, byte/number formatters |
 | Small (30–100 lines, no backend) | — (all small items shipped in the baseline) |
-| Medium (needs minor backend change) | help-link mapping (needs docs site), Module replace (needs `/api/modules/replace`), category() field if we ever want it richer than role()-derived |
+| Medium (needs minor backend change) | help-link mapping (needs docs site), category() field if we ever want it richer than role()-derived |
 | Large (separate plan) | health panel + `/api/test`, log panel + WS log channel, OTA + GitHub-update badge, full multi-layer UI, presets UI |
 
 ## Loose ends — details from v1 that don't belong in any cluster
@@ -137,7 +131,7 @@ These are smaller mechanisms recorded so we don't have to rediscover them. Each 
 
 **Specifics consciously rejected:**
 - v1's `if (mod.type === 'FirmwareUpdateModule') card.appendChild(buildOtaPanel())` — already called out in "Patterns to NOT carry over." OTA should expose itself via standard controls, not a hand-built panel.
-- v1's `TYPE_TO_DOC` mapping (14 hardcoded type→docs-path entries in JS) — the UI shouldn't know the docs path per type. When help links return, the engine should expose `docPath` per type via `/api/types`, defaulting to nothing.
+- v1's `TYPE_TO_DOC` mapping (14 hardcoded type→docs-path entries in JS) — the UI shouldn't know the docs path per type. v3 instead has the engine expose `docPath` per type via `/api/types` (registered in `ModuleFactory`); the card's help link is built from that. v1's hardcoded JS map was consciously not carried over.
 
 ## Prior art
 
