@@ -5,6 +5,7 @@ add_executable(mm_tests
     test_system_module.cpp
     test_grid_layout.cpp
     test_rainbow.cpp
+    test_extrude.cpp
     test_artnet_packet.cpp
     test_noise.cpp
     test_mapping_lut.cpp

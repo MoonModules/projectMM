@@ -90,7 +90,23 @@ Effects know nothing about hardware, protocols, physical LED layout, or mapping.
 
 **Speed convention:** effects that have a speed control use BPM (beats per minute) as the unit. `uint8_t`, default 60 (= 1 beat per second). This is human-readable, musically meaningful, and DMX-compatible. The effect converts BPM to animation rate internally using elapsed millis.
 
-**Dimensionality:** all effects must be at least 2D (use both x and y). 3D effects (using z) are preferred. 1D-only effects are not accepted — the system is natively 3D and effects should take advantage of that.
+**Dimensionality:** every effect declares its native dimensionality through `EffectBase::dimensions()`, returning `Dim::D1`, `Dim::D2`, or `Dim::D3` (**the default — "I iterate every axis the layer gives me"**). The Layer uses this to **extrude** lower-dimensional output across the unused axes after each effect's `loop()`:
+
+- D1 — effect promises to write only the row at (y=0, z=0). Layer copies that row across every other y in z=0, then copies z=0 across every z.
+- D2 — effect promises to write only the z=0 slice. Layer copies z=0 across every other z.
+- D3 — effect writes every axis itself. Extrude is a one-comparison no-op.
+
+D1/D2 are **opt-in promises**: declaring them tells the framework it can fill the missing axes for you, saving the per-effect work of iterating z (or y and z). Effects that don't make that promise stay at the D3 default and iterate the whole buffer.
+
+Hot-path cost: extrude pays one comparison and returns for the D3 case. For D1/D2 on a layer whose unused axes are size 1 (a D2 effect on a 2D layer, a D1 effect on a 1D layer) the inner loops are guarded by `depth_ > 1` / `height_ > 1` and never run. The only case where real `memcpy` work happens is a D1 or D2 effect on a layer that has more dimensions than the effect writes — exactly the case where you wanted the framework to do the duplication.
+
+Today's declarations:
+- **NoiseEffect**, **PlasmaEffect** — D3. Their math has real z variation (trilinear value noise / a fifth z-driven sine).
+- **RainbowEffect**, **CheckerboardEffect**, **SpiralEffect**, **RipplesEffect**, **GlowParticlesEffect**, **LavaLampEffect**, **MetaballsEffect**, **PlasmaPaletteEffect**, **FireEffect**, **ParticlesEffect** — D2. Their loops iterate y and x only; extrude fills z. The two stateful ones (Fire, Particles) size their dynamic buffers to `w × h × cpl` (z=0 plane) rather than `w × h × d × cpl` (full 3D buffer), saving heap on 3D layers.
+
+Each effect's `dimensions()` is a claim about which axes its loop iterates — not which axes its math could in principle vary along. A "D2 fire" could in future be promoted to D3 by adding z-aware heat propagation; until then declaring it D2 is the honest description of what the loop does today.
+
+The `dim` int (1/2/3 for effects, 1/2/3 for modifiers, 0 for layouts/drivers/generics) is also emitted in `/api/types`, and the UI derives the dimensional emoji (📏/🟦/🧊) from it — modules don't put dimensional emoji in their own `tags()` string.
 
 ## Modifiers
 
@@ -99,6 +115,8 @@ A modifier (MoonModule) lives inside a layer alongside its effects. Modifiers ex
 A modifier can:
 - Transform the mapping LUT via a virtual `transformCoord()` method (rebuilt on the cold path, zero render cost).
 - Transform light values via a virtual `transformLights()` method on the hot path (per-light cost, enables dynamic animations like rotation).
+
+**Dimensionality:** modifiers also declare `dimensions()`, defaulting to `Dim::D3` (a modifier that touches the LUT is assumed to work in all three axes unless it declares otherwise). Unlike for effects, this is purely advisory — the Layer doesn't extrude modifier output. It exists so the UI can render the 📏/🟦/🧊 chip on the card and in the type picker, letting users see at a glance whether a modifier will do anything along z. **MirrorModifier** is D3 (it has independent mirrorX/Y/Z toggles).
 
 ## Mapping and Blending
 
@@ -129,6 +147,56 @@ Each driver (MoonModule) speaks one protocol:
 Drivers read from the DriverGroup's output buffer. Everything before the DriverGroup is platform-independent.
 
 Network-based drivers (ArtNet, E1.31, DDP) must pace their packet output — never blast all universe packets in a tight loop. Requires both FPS limiting (skip frames if called too fast) and inter-packet delay (microsecond pause between universe packets within a frame). Without pacing, receivers drop packets and the output appears broken.
+
+## UI integration (light domain)
+
+The web UI (specified in [moonmodules/core/ui.md](moonmodules/core/ui.md)) is domain-neutral — it renders any MoonModule tree generically. The light domain plugs into that UI in three places.
+
+### Fixed top-level tree
+
+The light pipeline pins its top-level shape in `main.cpp` — the UI shows it but cannot reorder these roots. The order matches the data flow (input → render → output):
+
+```text
+LayoutGroup
+  └─ GridLayout (or other layouts)
+Layer
+  └─ effects (NoiseEffect, RainbowEffect, …)
+  └─ modifiers (MirrorModifier, …)
+DriverGroup
+  └─ ArtNetSendDriver
+  └─ PreviewDriver
+```
+
+System modules (Filesystem, System, Network, HttpServer) sit alongside the light pipeline at the same level — they're independent of the domain but always present. Child reorder *within* a parent (an effect within a Layer, a driver within DriverGroup) is supported via drag-and-drop; root reorder is not.
+
+### 3D preview channel
+
+[PreviewDriver](moonmodules/light/drivers/PreviewDriver.md) streams the rendered grid to the UI over the WebSocket binary channel that `core/ui.md` defines (leading type byte + domain payload). The light-domain frame format is:
+
+```
+[0x02] [dw16] [dh16] [dd16] [ow16] [oh16] [od16] [R G B …]
+```
+
+A 13-byte header: type byte `0x02`, three downsampled grid dims `dw/dh/dd`, three original grid dims `ow/oh/od` (all little-endian uint16). The RGB triples that follow describe the `dw × dh × dd` downsampled grid in `(z, y, x)` order. The original dims drive the UI's `decompress` hint — block-replicate back to the full grid for the WebGL renderer.
+
+The UI renders this frame as a WebGL point cloud: one point per non-black voxel, interleaved float vertex buffer `[x, y, z, r, g, b]`, depth-corrected `gl_PointSize`. Orbit camera (mouse-drag, wheel-zoom, single-finger touch, two-finger pinch). Sticky position below the status bar, scroll-shrink 0→50% over 300px of page scroll. Transparent WebGL clear so the canvas blends into either theme.
+
+The header carrying *both* downsampled and original dims is what makes this light-specific: a domain with no spatial grid (e.g. an audio synth domain) would use a different type byte and a different header. The UI dispatches by leading byte.
+
+### Emoji-key assignments
+
+The UI's chip filter (see [core/ui.md § Type picker](moonmodules/core/ui.md#type-picker)) treats `tags()` as opaque graphemes — each domain assigns its own meanings. The light-domain assignments follow the [MoonLight emoji key](https://moonmodules.org/MoonLight/moonlight/overview/#emoji-key) with one projectMM-specific addition (creator):
+
+| Category | Emoji | Meaning | Source |
+|---|---|---|---|
+| Role | 🔥 / 💎 / 🚥 / ☸️ / ⚙️ | effect / modifier / layout / driver / generic | derived in UI from `role` |
+| Dimensional | 📏 / 🟦 / 🧊 | 1D / 2D / 3D — for effects: which axes it iterates; for modifiers: which axes it can transform | derived in UI from `dim` |
+| Origin | 🐙 / 💫 / ⚡️ | WLED / MoonLight / FastLED | `tags()` |
+| Creator | 🦅 | David Jupijn / Rising Step | `tags()` |
+| Audio reactivity | ♫ / ♪ | FFT / volume | `tags()` |
+| Moving-head | 🚨 / 🗼 | colour / movement | `tags()` |
+
+Role and dimensional emoji are derived (not stored in `tags()`) so the same character isn't repeated in every module's header. Origin, creator, audio, and moving-head emoji live in the module's `tags()` flash string literal.
 
 ## Rebuild Propagation
 

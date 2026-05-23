@@ -63,10 +63,13 @@ The FPS-swing fix (HttpServer ~44,000 → ~850 µs) and the ArtNet send-cost opt
 
 | Configuration | Tick | FPS | Free heap |
 |--------------|------|-----|-----------|
-| Ethernet, mirror XY, browser connected (current) | ~51ms | 19 | 128KB |
+| Ethernet, mirror XY, PlasmaEffect, browser connected | ~44ms | 22 | 132KB |
+| Ethernet, mirror XY, RainbowEffect, browser connected | ~51ms | 19 | 128KB |
 | Ethernet, mirror XY (before FPS-swing + ArtNet fixes) | 69ms | 14 | 124KB |
 | Ethernet, mirror XY (before System/Network) | 58ms | 17 | 153KB |
 | 128x64, Ethernet, mirror XY | 26-30ms | 33-37 | 182-204KB |
+
+The Plasma row is from the dim/extrude refactor snapshot (Plasma is the loaded effect via UI state at capture). PlasmaEffect's loop ran ~4,150 µs per tick on the Olimex board (vs ~3,400 µs for RainbowEffect) — a small per-frame cost increase that the rest of the pipeline (slightly smaller image, dim flow added) absorbs to net 3 FPS faster overall. None of the recent factory/extrude changes touched the hot path; the delta is within run-to-run jitter.
 
 ### Run-to-run tick variance
 

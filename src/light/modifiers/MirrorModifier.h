@@ -1,12 +1,12 @@
 #pragma once
 
-#include "light/ModifierBase.h"
+#include "light/modifiers/ModifierBase.h"
 
 namespace mm {
 
 class MirrorModifier : public ModifierBase {
 public:
-    const char* tags() const override { return "🪞"; }
+    const char* tags() const override { return "💫"; }  // MoonLight origin
 
     bool mirrorX = true;
     bool mirrorY = true;

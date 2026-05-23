@@ -10,6 +10,14 @@ public:
     ModuleRole role() const override { return ModuleRole::Modifier; }
     virtual bool isStatic() const { return true; }
 
+    // Which axes the modifier can transform. Defaults to D3 — a modifier that
+    // touches the LUT is assumed to work in 3D unless it declares otherwise.
+    // The UI uses this to render the 📏/🟦/🧊 chip so the user can see at a
+    // glance whether a modifier will do anything along z. Distinct from
+    // EffectBase::dimensions() (which controls Layer extrusion); here it is
+    // purely an advisory chip, never read in the render path.
+    virtual Dim dimensions() const { return Dim::D3; }
+
     // Max physical destinations per logical light (for LUT allocation estimate)
     virtual uint8_t maxMultiplier() const { return 8; }
 

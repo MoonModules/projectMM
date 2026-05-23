@@ -6,18 +6,18 @@ For deferred items, the open design questions for 1.0, and the gap analysis, see
 
 ## TL;DR
 
-**The UI is three hand-maintained files** (`index.html`, `app.js`, `style.css`) that render any MoonModule tree generically — no per-effect or per-driver code. State updates flow via WebSocket; mutations go through a small REST API.
+**The UI is three hand-maintained files** (`index.html`, `app.js`, `style.css`) that render any MoonModule tree generically — no per-module-type code. State updates flow via WebSocket; mutations go through a small REST API.
 
 **Backend contract** — what the UI depends on:
 - HttpServerModule serves `/api/state`, `/api/types`, `/api/control`, `POST /api/modules`, `DELETE /api/modules/<n>`, `POST /api/modules/<n>/move`, `POST /api/modules/<n>/replace`, `POST /api/reboot`.
-- WebSocket at `/ws` pushes full-tree state JSON and binary preview frames (`[0x02][dw16][dh16][dd16][ow16][oh16][od16][RGB…]` — 13-byte header: downsampled then original grid dims).
+- WebSocket at `/ws` pushes full-tree state JSON and an optional binary preview channel (leading type byte selects the domain renderer; the payload after is domain-defined).
 - Per-control `hidden` flag is supported.
 - Per-module `loopTimeUs`, `classSize`, and `dynamicBytes` are exposed in `/api/state`.
 
 ## Principles
 
 - **Three hand-maintained files**: `index.html`, `app.js`, `style.css`, plus the `moonlight-logo.png` asset. No frameworks, no build tools, no npm. All four are embedded at compile time on ESP32 via `ui_embedded.h` (the logo as a binary byte array).
-- **MoonModule-driven.** The UI has zero hard-coded knowledge of specific effects, layouts, modifiers, or drivers. It queries `/api/types` and `/api/state` (or its WebSocket equivalent) and renders generically.
+- **MoonModule-driven.** The UI has zero hard-coded knowledge of specific module types or domain categories. It queries `/api/types` and `/api/state` (or its WebSocket equivalent) and renders generically — module name, role chip, controls, children — without naming any concrete type in the codebase.
 - **Adding a new MoonModule with new controls requires zero UI changes** — provided the engine uses control types the UI already knows how to render.
 - **WebSocket for updates, REST for mutations.** Real-time state push without polling; user actions are explicit POST/DELETE calls.
 - **Two timescales for inputs.** Local UI feedback (slider value label, toggle state) updates within ~20ms of the input event. Network sends are debounced (150ms slider, 500ms text). Slider feels instant even when the server is busy.
@@ -31,7 +31,7 @@ For deferred items, the open design questions for 1.0, and the gap analysis, see
 │  Status bar: ☰ · logo · brand · device name · sys stats     │
 │              · WS dot · reconnect · reboot · theme toggle   │
 ├──────────────┬──────────────────────────────────────────────┤
-│  Side nav    │  Sticky 3D preview canvas (shrinks on scroll)│
+│  Side nav    │  Sticky preview canvas (shrinks on scroll)   │
 │  (root list) ├──────────────────────────────────────────────┤
 │              │  Cards for the selected root module          │
 │              │    ↳ child cards inline                      │
@@ -43,8 +43,8 @@ For deferred items, the open design questions for 1.0, and the gap analysis, see
 
 - Fixed status bar at top (44px) — hamburger, MoonLight logo, then the rest
 - Side nav: a left column listing root modules; the selected root's card subtree fills the main area (one root visible at a time)
-- Module card column max-width 500px, centered (single-column module list — easier to read on phones). The 3D preview is **not** capped — it spans the full content area width
-- 3D preview is sticky just below the status bar and shrinks 0% → 50% as the user scrolls 0 → 300px
+- Module card column max-width 500px, centered (single-column module list — easier to read on phones). The preview canvas is **not** capped — it spans the full content area width
+- Preview canvas is sticky just below the status bar and shrinks 0% → 50% as the user scrolls 0 → 300px
 
 ## Status bar
 
@@ -54,10 +54,9 @@ Fixed top, 44px. Left-to-right:
 3. Brand wordmark — "projectMM"
 4. Device name (from `System.deviceName` control)
 5. System stats — `uptime · NN K free` (uptime as `Xd Yh Zm Ws`, free heap as KB). Read from the SystemModule controls in the WebSocket state push; no separate polling endpoint.
-6. WebSocket connection dot — green=connected, gray=disconnected
-7. Reconnect button (⟳)
-8. Reboot button (⏻; red border via `data-crashed="true"` when `SystemModule.bootReason` is PANIC / INT_WDT / TASK_WDT / BROWNOUT). Press-twice to confirm: the first click arms it (turns solid red), a second click sends `POST /api/reboot`. Disarms after 3s or when the pointer leaves — no `confirm()` popup.
-9. Theme toggle (☀/🌙) — flips `[data-theme]` on `<body>`; preference in `localStorage['mm_theme']`.
+6. WebSocket connection dot — green=connected, gray=disconnected. The socket auto-reconnects with exponential backoff (500ms → 5s) on close; no manual reconnect button — a page reload covers the rare half-dead-socket case.
+7. Reboot button (⏻; red border via `data-crashed="true"` when `SystemModule.bootReason` is PANIC / INT_WDT / TASK_WDT / BROWNOUT). Press-twice to confirm: the first click arms it (turns solid red), a second click sends `POST /api/reboot`. Disarms after 3s or when the pointer leaves — no `confirm()` popup.
+8. Theme toggle (☀/🌙) — flips `[data-theme]` on `<body>`; preference in `localStorage['mm_theme']`.
 
 ## Side navigation
 
@@ -78,7 +77,7 @@ Card structure:
 
 ```text
 ┌─ card ──────────────────────────────────┐
-│ [enabled toggle]  [name]  [timing · 🧠 mem]  [✎ × ☰]  [? help] │
+│ [name] [emoji]  [timing · 🧠 mem]  [enabled toggle]  [✎ × ☰]  [? help] │
 │ [control rows — one per control]        │
 │ ┌─ child card ────────────────────────┐ │
 │ │ …                                   │ │
@@ -93,11 +92,12 @@ Card structure:
 - The parent's own controls render **above** its children; `+ add child` renders **below** them, at the bottom of the parent box.
 - Child cards live in a `.card-children` wrapper appended into the parent card's DOM node — not as flat siblings in the main column. `renderModuleTree` recurses into the parent card, not into `main`.
 
-- **Enabled toggle** at the start of the title row mirrors `MoonModule::enabled()`. Toggling fires `onOnOff()`; the Scheduler skips disabled modules whose `respectsEnabled()` returns true (default).
+- **Enabled toggle** in the right-hand action cluster (next to ✎ × ?) mirrors `MoonModule::enabled()`. Rendered as a styled `<button>` matching the other action buttons (transparent + muted border, 26×26); state is shown by the glyph alone — accent-coloured **✓** when on, muted **○** when off (`data-checked` carries state, `aria-pressed` reflects it). Toggling fires `onOnOff()`; the Scheduler skips disabled modules whose `respectsEnabled()` returns true (default).
+- **Emoji tags** next to the name show the same set the type picker uses for that type: role emoji + dimensional emoji (both derived in the UI from `role` and `dim`) + the curated `tags()` string from `/api/types`. Identical visual identity across card and picker.
 - **Help link (?)** at the far right of the title row opens the module's spec page on GitHub in a new tab. The path comes from `docPath` in `/api/types` (engine-provided, relative to `docs/moonmodules/`); the link is omitted when the type declares no doc path.
 - **Stats line** shows timing and memory: `🕒 <timing>` then `🧠 <static>[ + <dynamic>]`. Timing is fps or µs/ms per the global toggle (µs under 1 ms, ms above); it is omitted entirely when the module has no measured loop time. Memory is the module's C++ object size (`classSize`); the `+ <dynamic>` part (`dynamicBytes`, heap) is shown only when the module allocated heap. Sizes are compact-formatted (`B` / `KB`). Clicking the line cycles the timing figure fps ↔ ms; the memory figure is unaffected. Mode persists in `localStorage['mm_timing_mode']` and the toggle applies to all cards globally.
-- **Reorder is drag-and-drop** (HTML5 DnD) on the whole card — works on desktop and mobile. A drag is only accepted when source and target share the same `.card-children` container — i.e. they are true siblings under one parent.
-- **Replace (✎)** swaps this module for another type at the same position. Opens the [type picker](#type-picker) filtered to the module's own role (an effect replaces with an effect). The replacement starts with its own default control values — a clean swap, no value carry-over. Siblings, order, and the selected root are preserved.
+- **Reorder is drag-and-drop** (HTML5 DnD) on the whole card — works on desktop and mobile. A drag starting on an interactive control (slider, button, toggle, select, text input, help link) is canceled in `dragstart` so the control's own gesture is used instead; drags from any other part of the card start a reorder. A drag is only accepted when source and target share the same `.card-children` container — i.e. they are true siblings under one parent.
+- **Replace (✎)** swaps this module for another type at the same position. Opens the [type picker](#type-picker) filtered to the module's own role (same-role swap only). The replacement starts with its own default control values — a clean swap, no value carry-over. Siblings, order, and the selected root are preserved.
 - **Delete (×)** removes the child via a press-twice confirm: the first click arms the button (it turns red and shows `✓`), a second click deletes. It disarms after 3s or when the pointer leaves — no browser `confirm()` popup.
 - **Drag handle (☰)** is a visual cue; the whole card is the draggable element.
 - **`+ add child`** in the card footer opens the [type picker](#type-picker) filtered to legal child roles for this parent. The button hides while the picker is open (the picker takes its place) and reappears when it closes.
@@ -109,7 +109,7 @@ Auto-rendered by `controls[].type`. Adding a new MoonModule with these control t
 | Type | Element | Interaction | Debounce |
 |---|---|---|---|
 | `slider` (uint8/uint16) | range + numeric display | drag → label updates instantly; value sent debounced; reset-to-default ↺ if a default is known | 150ms |
-| `toggle` (bool) | checkbox | sends immediately on change | none |
+| `toggle` (bool) | switch (pill track + sliding thumb; visually-hidden `<input type=checkbox>` underneath stays the source of truth) | sends immediately on change | none |
 | `select` | dropdown | sends immediately; server may rebuild controls (dynamic onBuildControls) | none |
 | `text` | text input | sends debounced | 500ms |
 | `password` | password input | masked; hold-to-peek button reveals the stored value | 500ms |
@@ -128,32 +128,17 @@ Auto-rendered by `controls[].type`. Adding a new MoonModule with these control t
 
 The same picker serves two purposes: **add** (triggered by `+ add child`) and **replace** (triggered by the ✎ button on a card). Renders inline inside the card (not a modal).
 
-- **Role filter**: in add mode, filters to roles legal for the parent (e.g. Layer accepts Effect+Modifier; DriverGroup accepts Driver). In replace mode, filters to the target module's own role. The role→child mapping is derived in the UI.
-- **Emoji tag chips**: a row of toggle chips above the list, one per distinct emoji across the role-filtered types. Each type's emoji set is its **role emoji** (derived in the UI from `role`) plus the curated **`tags`** string from `/api/types` (the module's `tags()` — a flash string literal, e.g. `🔥` for FireEffect). Toggling chips narrows the list with **AND** logic: a type shows only if it carries every active chip. Each list row shows the type's emoji before its name.
+- **Role filter**: in add mode, filters to roles legal for the parent (the container declares which child roles it accepts). In replace mode, filters to the target module's own role. The role→child mapping is derived in the UI.
+- **Emoji tag chips**: a row of toggle chips above the list, one per distinct emoji across the role-filtered types. Each type's emoji set has three sources, in this order: a **role chip** (derived in the UI from `role`), a **dimensional chip** (derived in the UI from `dim` when the type declares one — 1/2/3 means 1D/2D/3D), and the curated **`tags`** string from `/api/types` (the module's `tags()` — a flash string literal). The UI treats `tags` as opaque: it splits the string into grapheme clusters and renders each as a chip. The domain that owns this UI assigns each emoji's meaning — see the domain's own architecture page for the assignments (e.g. [architecture-light.md § UI integration](../../architecture-light.md#ui-integration-light-domain) for the role / dim / origin / creator / audio / moving-head assignments used by the light domain shipped today). Toggling chips narrows the list with **AND** logic: a type shows only if it carries every active chip. Each list row shows the type's emoji before its name.
 - **Search box** with substring match on type name. Search and chips combine (both must match).
 - **Keyboard nav**: type to filter, ↓ to enter list, ↑↓ to move, Enter to confirm, Esc to cancel.
 - **Confirm / Cancel** action buttons at the bottom (the confirm button reads `create` or `replace` per mode). Double-click a row to confirm immediately.
 
 ## Module hierarchy
 
-v3 has a fixed top-level shape on first boot:
+Each project pins a fixed top-level shape in its `main.cpp` — the side nav lists those roots in registration order, and the UI does **not** allow root reorder. System modules (Filesystem, System, Network, HttpServer) are always present; the domain modules (the actual data-flow pipeline) sit alongside them. For the light-domain shape see [architecture-light.md § UI integration](../../architecture-light.md#ui-integration-light-domain).
 
-```text
-Filesystem      (persistence)
-System          (read-only diagnostics)
-Network         (WiFi/Ethernet/AP/mDNS)
-LayoutGroup
-  └─ GridLayout (or other layouts)
-Layer
-  └─ effects (NoiseEffect, RainbowEffect, …)
-  └─ modifiers (MirrorModifier, …)
-DriverGroup
-  └─ ArtNetSendDriver
-  └─ PreviewDriver
-HttpServer      (UI lives here)
-```
-
-Reorder of root modules is **not** supported — the order is fixed in `main.cpp`. Child reorder within a parent is by HTML5 drag-and-drop (desktop and mobile), which calls `POST /api/modules/<n>/move {to:N}`.
+Child reorder *within* a parent (a child within a container) is supported via HTML5 drag-and-drop (desktop and mobile), which calls `POST /api/modules/<n>/move {to:N}`.
 
 ## Communication
 
@@ -161,7 +146,7 @@ Reorder of root modules is **not** supported — the order is fixed in `main.cpp
 
 - URL: `ws://<host>/ws` (same port as HTTP)
 - Server pushes full state snapshot as JSON ~1/sec (same shape as `GET /api/state`). The JSON is built through a streaming sink with no fixed-size buffer — a module tree of any size serializes without truncation
-- Server pushes binary preview frames: `[0x02][dw16][dh16][dd16][ow16][oh16][od16][R G B …]` — 13-byte header (downsampled dims `dw/dh/dd`, then original-grid dims `ow/oh/od`), little-endian uint16, then RGB triples for the downsampled grid
+- Server may push **binary frames** on the same socket. The first byte selects the frame type and dispatches to a domain renderer; the rest of the frame is the domain's choice. The UI ignores types it doesn't recognise. See [Domain preview channel](#domain-preview-channel) for the dispatching contract and the domain's own architecture page for the payload (e.g. [architecture-light.md § 3D preview channel](../../architecture-light.md#3d-preview-channel))
 - Client sends `"ping"` every 25s as keepalive (Safari kills idle sockets otherwise)
 - Auto-reconnect on close with exponential backoff (500ms → 5s ceiling)
 - Pause on `document.visibilityState === 'hidden'`; resume on `pageshow` (Safari bfcache survival)
@@ -174,9 +159,12 @@ GET    /api/state             full module tree state — initial load + post-mut
                               loopTimeUs, classSize, dynamicBytes, controls[]
                               streamed to the socket (no Content-Length, Connection: close)
                               so a tree of any size serializes without a fixed-buffer limit
-GET    /api/types             {types:[{name, role, docPath, tags, defaults}]} — for the type picker
+GET    /api/types             {types:[{name, displayName, role, docPath, tags, dim, defaults}]} — for the type picker
+                              name is the stable factory key (e.g. "SomeTypeRole"); use this for create/replace API calls
+                              displayName is the role-suffix-stripped label (e.g. "SomeType") — what the cards and picker rows show
                               docPath is the spec page relative to docs/moonmodules/ ("" if none)
                               tags is a curated emoji string for the picker's chip filter ("" if none)
+                              dim is the dimensionality (1/2/3) when the type declares one; 0 otherwise
                               defaults map is captured from a fresh probe instance per type
 GET    /api/system            fps, tickTimeUs, freeHeap, freeInternal, maxBlock, uptime
 POST   /api/control           {module, control, value} — set a control value
@@ -216,19 +204,19 @@ The `/api/control` shape is `{module: "name", control: "key", value: …}`.
   - Purple (`#a78bfa`/`#c4b5fd`) — accent, brand, active, value
   - Gray (`#6b7280`/`#9ca3af`/`#4b5563`) — secondary text, muted
 
-## 3D preview
+## Domain preview channel
 
-WebGL point cloud rendered to a `<canvas>`.
+The UI dedicates a binary slot on its WebSocket — separate from the JSON state updates — for a domain-specific preview frame. The engine pushes one frame per render; the UI hands it to a domain renderer.
 
-- Server pushes binary frames over the same WebSocket as state updates
-- Frame format: `[0x02][dw16][dh16][dd16][ow16][oh16][od16][R G B …]` — a 13-byte header (downsampled grid dims `dw/dh/dd`, then the original-grid dims `ow/oh/od`, each 16-bit little-endian), then RGB triples for the `dw×dh×dd` downsampled grid in `(z, y, x)` order. The original dims drive the `decompress` UI hint (block-replicate back to the full grid). See [PreviewDriver](light/drivers/PreviewDriver.md).
-- UI builds an interleaved float vertex buffer `[x, y, z, r, g, b]`, **skipping black voxels** so payload-to-GPU is sparse and fast
-- Camera: orbit on mouse-drag, wheel-zoom, touch-orbit on mobile
-- Point size scales with canvas size and grid maxDim (target ~10px per LED at rest)
-- GLSL: `gl_PointSize = uPtSize / gl_Position.w` (depth-corrected), `discard` for fragments outside a 0.25-radius disc, brightness falloff via `smoothstep(0.10, 0.25, r)`
-- Canvas sizing: `width: 100%` + `aspect-ratio: 1 / 1` derives the height from the column width, `max-height: 50vh` caps it — so on a normal column the preview is a wide rectangle (the square clipped to ~half the viewport)
-- Scroll-shrink animates `max-height` from natural down to 50% over 0→300px of page scroll (smooth via `requestAnimationFrame`); `aspect-ratio` still drives the size underneath the shrinking cap
-- Last frame is cached so mouse-drag redraws are instant without a new server frame
+Generic shape: `[type-byte] [domain-specific header] [payload]`. The first byte identifies the frame type and selects the renderer the UI dispatches to; everything after is the domain's choice.
+
+- The canvas is sticky just below the status bar and scroll-shrinks 0→50% over 300px of page scroll
+- `width: 100%` + `aspect-ratio: 1 / 1` derives the height from the column width; `max-height: 50vh` caps it so the canvas never dominates the viewport
+- The last received frame is cached so camera gestures (orbit, pan, zoom) redraw instantly without waiting for a new frame
+- `touch-action: none` so single- and multi-finger gestures don't trigger native page scroll or pinch-zoom
+- WebGL clear color is `(0, 0, 0, 0)` — transparent canvas blends into either theme without per-frame color work
+
+For the light-domain renderer (WebGL point cloud, frame format, orbit camera, downsampling) see [architecture-light.md § 3D preview channel](../../architecture-light.md#3d-preview-channel).
 
 ## State updates — the no-rebuild contract
 
@@ -261,7 +249,7 @@ No other client state persists. Reorder, control values, etc. all live on the de
 
 Everything in this spec is in the live codebase. The 12 features below each link to the section that describes the contract.
 
-1. **Status bar** with hamburger, MoonLight logo, brand, device name, system stats (uptime · free heap), WS dot, reconnect button, reboot button (with crashed-state styling), and theme toggle — see [Status bar](#status-bar).
+1. **Status bar** with hamburger, MoonLight logo, brand, device name, system stats (uptime · free heap), WS dot, reboot button (with crashed-state styling), and theme toggle — see [Status bar](#status-bar).
 2. **Side navigation** — a left column listing root modules; one root visible at a time, selection persisted; footer with social links + copyright; hamburger collapses it (wide) or slides it in over an overlay (<820px) — see [Side navigation](#side-navigation).
 3. **Single-column module card layout** with hierarchy (children inline-indented, depth-based card backgrounds) — see [Module card](#module-card).
 4. **All 9 control types** (uint8 slider, uint16, bool, text, password with hold-to-peek, select, display, time, progress, button) with the `dragTs` + 20ms-feedback + 150/500ms-debounce pattern — see [Control types](#control-types).
@@ -269,7 +257,7 @@ Everything in this spec is in the live codebase. The 12 features below each link
 6. **Reset-to-default ↺** buttons per control with a known default. Defaults are captured from a fresh probe instance per type (factory's probe — no per-control boilerplate) and emitted in `/api/types`.
 7. **Light/dark theme toggle** via `[data-theme]` on `<body>` + CSS variables; preference persists in `localStorage['mm_theme']`.
 8. **WS keepalive ping (25s)** + `visibilitychange` pause + `pageshow` bfcache resume — see [Communication § WebSocket](#websocket-primary-for-state-updates).
-9. **3D preview** with orbit camera (mouse + touch), sticky position, scroll-shrink 0→50% over 300px, sparse vertex buffer (skipping black voxels), and depth-corrected GLSL point size — see [3D preview](#3d-preview).
+9. **Domain preview channel** — a sticky canvas above the cards that scroll-shrinks 0→50% over 300px, fed by a binary frame on the WebSocket and rendered by a domain plugin — see [Domain preview channel](#domain-preview-channel).
 10. **Per-card stats line** — `🕒` timing (clickable to cycle fps↔ms, global mode in `localStorage['mm_timing_mode']`) plus `🧠` memory: `classSize`, and `+ dynamicBytes` only when the module allocated heap.
-11. **Card action buttons** on reorderable children (Effect/Modifier role): ✎ replace-with-another-type, × delete (press-twice). Reorder is HTML5 drag-and-drop on desktop and mobile. Reorder calls `POST /api/modules/<n>/move`, replace calls `POST /api/modules/<n>/replace`.
+11. **Card action buttons** on reorderable children: ✎ replace-with-another-type, × delete (press-twice). Reorder is HTML5 drag-and-drop on desktop and mobile. Reorder calls `POST /api/modules/<n>/move`, replace calls `POST /api/modules/<n>/replace`.
 12. **MoonLight logo + favicon** — the header logo and browser-tab favicon are the same `/moonlight-logo.png` asset, embedded on ESP32.

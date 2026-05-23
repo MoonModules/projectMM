@@ -1,10 +1,10 @@
 #pragma once
 
 #include "light/Buffer.h"
-#include "light/LayoutGroup.h"
-#include "light/EffectBase.h"
+#include "light/layouts/LayoutGroup.h"
+#include "light/effects/EffectBase.h"
 #include "light/MappingLUT.h"
-#include "light/ModifierBase.h"
+#include "light/modifiers/ModifierBase.h"
 #include "platform/platform.h"
 
 #include <cstdio>
@@ -49,9 +49,46 @@ public:
         for (uint8_t i = 0; i < childCount(); i++) {
             if (child(i)->role() != ModuleRole::Effect) continue;
             if (!child(i)->enabled()) continue;
+            auto* eff = static_cast<EffectBase*>(child(i));
             uint32_t start = platform::micros();
-            child(i)->loop();
-            child(i)->addAccumUs(platform::micros() - start);
+            eff->loop();
+            // Extrude a lower-dimensional effect across the unused axes so a D1
+            // or D2 effect "just works" on a higher-dimensional grid. The effect
+            // only writes its own slice (D1 → row y=0,z=0; D2 → slice z=0); the
+            // framework duplicates that across the rest of the buffer.
+            extrude(eff->dimensions());
+            eff->addAccumUs(platform::micros() - start);
+        }
+    }
+
+    // Copy the effect's written slice to fill the unused axes. Called after each
+    // effect's loop(). Buffer layout is (z * h + y) * w + x channels per light.
+    //
+    // Hot-path shape: D3 effects (the default) take the early return and pay
+    // nothing beyond one comparison and a branch. On a 2D layout (depth=1) the
+    // z-fill is naturally a no-op regardless of effectDim — the `depth_ > 1`
+    // guard short-circuits. Same for D1 on a 1D layout. Real work only happens
+    // when the effect declared fewer axes than the layout has.
+    void extrude(Dim effectDim) {
+        if (effectDim == Dim::D3) return;
+        uint8_t* buf = buffer_.data();
+        if (!buf) return;
+        const size_t cpl = channelsPerLight_;
+        const size_t rowBytes = static_cast<size_t>(width_) * cpl;
+        const size_t sliceBytes = rowBytes * height_;
+
+        // D1: the effect wrote row (y=0, z=0). Duplicate it across all y in z=0.
+        if (effectDim == Dim::D1 && height_ > 1) {
+            for (lengthType y = 1; y < height_; y++) {
+                std::memcpy(buf + y * rowBytes, buf, rowBytes);
+            }
+        }
+        // D1 and D2: at this point z=0 holds a complete (possibly extruded) slice.
+        // Duplicate it across all z > 0.
+        if (depth_ > 1) {
+            for (lengthType z = 1; z < depth_; z++) {
+                std::memcpy(buf + z * sliceBytes, buf, sliceBytes);
+            }
         }
     }
 

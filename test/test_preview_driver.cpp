@@ -1,8 +1,8 @@
 #include "doctest.h"
-#include "light/PreviewDriver.h"
+#include "light/drivers/PreviewDriver.h"
 #include "light/Layer.h"
-#include "light/LayoutGroup.h"
-#include "light/GridLayout.h"
+#include "light/layouts/LayoutGroup.h"
+#include "light/layouts/GridLayout.h"
 #include "core/PreviewFrame.h"
 
 // PreviewDriver downsamples the render buffer into a small RGB frame so the

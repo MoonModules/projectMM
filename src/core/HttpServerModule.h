@@ -50,15 +50,32 @@ public:
         }
     }
 
-    // Append a printf-formatted fragment. A single fragment must fit FRAG_MAX;
-    // fragments here are short (one control, one module header) — well within it.
+    // Append a printf-formatted fragment. The common case (one control, one
+    // module header) fits the FRAG_MAX stack buffer; a fragment that would
+    // exceed it — e.g. an unusually long text-control value — is re-formatted
+    // into a heap buffer so the output is never silently truncated.
     void appendf(const char* fmt, ...) __attribute__((format(printf, 2, 3))) {
         char frag[FRAG_MAX];
         va_list ap;
         va_start(ap, fmt);
+        va_list ap2;
+        va_copy(ap2, ap);
         int n = std::vsnprintf(frag, sizeof(frag), fmt, ap);
         va_end(ap);
-        if (n > 0) append(frag);
+        if (n < 0) { va_end(ap2); return; }
+        if (static_cast<size_t>(n) < sizeof(frag)) {
+            va_end(ap2);
+            append(frag);
+            return;
+        }
+        // Fragment longer than the stack buffer — format into an exact heap buffer.
+        char* big = static_cast<char*>(platform::alloc(static_cast<size_t>(n) + 1));
+        if (big) {
+            std::vsnprintf(big, static_cast<size_t>(n) + 1, fmt, ap2);
+            append(big);
+            platform::free(big);
+        }
+        va_end(ap2);
     }
 
     // Socket mode: flush staged bytes to the socket. Call once at the end.
@@ -258,17 +275,25 @@ private:
             } else if (isMoveRoute && body) {
                 char nameBuf[32] = {};
                 size_t nameLen = pathLen - 13 - 5;  // strip "/api/modules/" prefix and "/move" suffix
-                if (nameLen >= sizeof(nameBuf)) nameLen = sizeof(nameBuf) - 1;
-                std::memcpy(nameBuf, path + 13, nameLen);
-                nameBuf[nameLen] = 0;
-                handleMoveModule(conn, nameBuf, body);
+                // Reject rather than truncate — a truncated name could match a
+                // different module than the client intended.
+                if (nameLen >= sizeof(nameBuf)) {
+                    sendResponse(conn, 400, "application/json", "{\"error\":\"module name too long\"}");
+                } else {
+                    std::memcpy(nameBuf, path + 13, nameLen);
+                    nameBuf[nameLen] = 0;
+                    handleMoveModule(conn, nameBuf, body);
+                }
             } else if (isReplaceRoute && body) {
                 char nameBuf[32] = {};
                 size_t nameLen = pathLen - 13 - 8;  // strip "/api/modules/" prefix and "/replace" suffix
-                if (nameLen >= sizeof(nameBuf)) nameLen = sizeof(nameBuf) - 1;
-                std::memcpy(nameBuf, path + 13, nameLen);
-                nameBuf[nameLen] = 0;
-                handleReplaceModule(conn, nameBuf, body);
+                if (nameLen >= sizeof(nameBuf)) {
+                    sendResponse(conn, 400, "application/json", "{\"error\":\"module name too long\"}");
+                } else {
+                    std::memcpy(nameBuf, path + 13, nameLen);
+                    nameBuf[nameLen] = 0;
+                    handleReplaceModule(conn, nameBuf, body);
+                }
             } else if (std::strcmp(path, "/api/reboot") == 0) {
                 handleReboot(conn);
             } else {
@@ -874,13 +899,22 @@ private:
         for (uint8_t i = 0; i < ModuleFactory::typeCount(); i++) {
             const char* name = ModuleFactory::typeName(i);
             if (!name) continue;
-            const char* roleStr = roleName(ModuleFactory::typeRole(i));
+            ModuleRole role = ModuleFactory::typeRole(i);
+            const char* roleStr = roleName(role);
             const char* docPath = ModuleFactory::typeDocPath(i);
             const char* tags = ModuleFactory::typeTags(i);
-            sink.appendf("%s{\"name\":\"%s\",\"role\":\"%s\",\"docPath\":\"%s\","
-                         "\"tags\":\"%s\",\"defaults\":{",
-                         first ? "" : ",", name, roleStr,
-                         docPath ? docPath : "", tags ? tags : "");
+            uint8_t dim = ModuleFactory::typeDim(i);
+            // displayNameFor returns a pointer into a static buffer shared
+            // across calls, so copy it to the stack before another factory
+            // call (or the next loop iteration) overwrites it.
+            char displayName[16];
+            std::strncpy(displayName, ModuleFactory::displayNameFor(name, role), sizeof(displayName) - 1);
+            displayName[sizeof(displayName) - 1] = 0;
+            sink.appendf("%s{\"name\":\"%s\",\"displayName\":\"%s\",\"role\":\"%s\","
+                         "\"docPath\":\"%s\",\"tags\":\"%s\",\"dim\":%u,\"defaults\":{",
+                         first ? "" : ",", name, displayName, roleStr,
+                         docPath ? docPath : "", tags ? tags : "",
+                         static_cast<unsigned>(dim));
             writeTypeDefaults(sink, name);
             sink.append("}}");
             first = false;

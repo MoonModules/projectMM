@@ -4,14 +4,14 @@
 
 #include "core/Scheduler.h"
 #include "core/ModuleFactory.h"
-#include "light/GridLayout.h"
+#include "light/layouts/GridLayout.h"
 #include "light/Layer.h"
-#include "light/LayoutGroup.h"
-#include "light/RainbowEffect.h"
-#include "light/NoiseEffect.h"
-#include "light/MirrorModifier.h"
-#include "light/DriverGroup.h"
-#include "light/ArtNetSendDriver.h"
+#include "light/layouts/LayoutGroup.h"
+#include "light/effects/RainbowEffect.h"
+#include "light/effects/NoiseEffect.h"
+#include "light/modifiers/MirrorModifier.h"
+#include "light/drivers/DriverGroup.h"
+#include "light/drivers/ArtNetSendDriver.h"
 #include "platform/platform.h"
 
 #include <cstdio>

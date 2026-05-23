@@ -210,7 +210,13 @@ protected:
     ControlList controls_;
 
 private:
-    char name_[24] = {};
+    // Display name buffer. Sized to fit the longest stripped name with headroom:
+    // ModuleFactory's displayNameFor strips the role-noun suffix so the longest
+    // names today are 13 chars ("GlowParticles", "PlasmaPalette") + null. char[16]
+    // leaves a few bytes of room for future modules. Names longer than this are
+    // truncated by setName(). 8 bytes saved per module vs the previous char[24]
+    // (~240 bytes total RAM on a typical tree).
+    char name_[16] = {};
     const char* typeName_ = "";  // points into flash (factory string literal); see setTypeName comment
     bool enabled_ = true;
     bool dirty_ = false;

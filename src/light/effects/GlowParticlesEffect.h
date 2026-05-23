@@ -10,7 +10,9 @@ namespace mm {
 // chaotic, organic blob look — like metaballs with more freedom.
 class GlowParticlesEffect : public EffectBase {
 public:
-    const char* tags() const override { return "✨💫"; }
+    const char* tags() const override { return "💫🦅"; }  // MoonLight origin · David Jupijn / Rising Step
+    // Iterates y and x only; Layer::extrude fills z on 3D layers.
+    Dim dimensions() const override { return Dim::D2; }
 
     static constexpr uint8_t MAX_PARTICLES = 8;
 

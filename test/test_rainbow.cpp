@@ -1,6 +1,6 @@
 #include "doctest.h"
-#include "light/RainbowEffect.h"
-#include "light/GridLayout.h"
+#include "light/effects/RainbowEffect.h"
+#include "light/layouts/GridLayout.h"
 
 TEST_CASE("RainbowEffect writes non-zero RGB data to buffer") {
     mm::LayoutGroup layoutGroup;

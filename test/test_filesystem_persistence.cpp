@@ -3,9 +3,9 @@
 #include "core/ModuleFactory.h"
 #include "core/Scheduler.h"
 #include "core/SystemModule.h"
-#include "light/NoiseEffect.h"
-#include "light/RainbowEffect.h"
-#include "light/MirrorModifier.h"
+#include "light/effects/NoiseEffect.h"
+#include "light/effects/RainbowEffect.h"
+#include "light/modifiers/MirrorModifier.h"
 #include "light/Layer.h"
 #include "platform/platform.h"
 

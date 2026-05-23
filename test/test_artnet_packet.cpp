@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "light/ArtNetSendDriver.h"
+#include "light/drivers/ArtNetSendDriver.h"
 
 #include <cstring>
 

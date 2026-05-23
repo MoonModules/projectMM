@@ -1,7 +1,7 @@
 #include "doctest.h"
-#include "light/PlasmaEffect.h"
-#include "light/NoiseEffect.h"
-#include "light/GridLayout.h"
+#include "light/effects/PlasmaEffect.h"
+#include "light/effects/NoiseEffect.h"
+#include "light/layouts/GridLayout.h"
 
 TEST_CASE("PlasmaEffect writes non-zero RGB data to buffer") {
     mm::LayoutGroup layoutGroup;

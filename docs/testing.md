@@ -86,11 +86,13 @@ Tests `ArtNetSendDriver::buildPacket` in `src/light/ArtNetSendDriver.h`.
 
 ### Noise Effect (`test/test_noise.cpp`) {#noise}
 
-Tests `NoiseEffect` in `src/light/NoiseEffect.h`.
+Tests `NoiseEffect` and `PlasmaEffect` in `src/light/`.
 
 - Buffer contains non-zero RGB data after render
 - Different positions produce different colors (spatial variation)
 - Produces different output than RainbowEffect
+- **3D depth:** NoiseEffect produces different output per z-slice when `depth > 1` (8×8×8 grid; adjacent and distant slices both differ — `noise3d` actually samples the third axis)
+- **3D depth:** PlasmaEffect produces different output per z-slice when `depth > 1` (the fifth z-driven sine actually contributes)
 
 ### Plasma Effect (`test/test_plasma.cpp`) {#plasma}
 
@@ -140,14 +142,25 @@ Tests `MappingLUT` in `src/light/MappingLUT.h`.
 
 ### Mirror Modifier (`test/test_mirror.cpp`) {#mirror}
 
-Tests `MirrorModifier` in `src/light/MirrorModifier.h`.
+Tests `MirrorModifier` in `src/light/modifiers/MirrorModifier.h`.
 
+- `dimensions()` returns `Dim::D3` (advertises 3D capability — pins ModifierBase default)
 - logicalDimensions: 128x128 with mirrorXY → 64x64
 - logicalDimensions: odd grid (127x127) → 64x64 (ceiling division)
 - Corner pixel (0,0) produces 4 positions with mirrorXY
 - Centre pixel on odd grid: deduplication (1 position, not 4)
 - No mirrors: 1 position
 - mirrorX only: 2 positions
+
+### Layer extrude / dimensions contract (`test/test_extrude.cpp`) {#extrude}
+
+Pins the contract that `EffectBase::dimensions()` and `Layer::extrude` form: a D2 effect writes only the z=0 slice and the framework duplicates it across z; a D1 effect writes only the y=0,z=0 row and the framework fills y then z; a D3 effect iterates the layer itself. The effect must honour the layer's runtime dimensions even when the layer has fewer axes than the effect's declared D.
+
+- D2 effect (`RainbowEffect`) on 3D grid (8×8×4): every z>0 slice byte-equals z=0 (extrude copied the plane).
+- D1 stub effect on 3D grid (8×4×3): every y>0 row byte-equals y=0 within z=0, then every z>0 slice byte-equals z=0.
+- D3 effects (`NoiseEffect`, `PlasmaEffect`) on a 2D layer (8×8×1): buffer is exactly `w*h*cpl` bytes and is non-zero (proves the effect iterated correctly with depth=1; protects against hardcoded depth bounds).
+- D3 effects (`NoiseEffect`, `PlasmaEffect`) on a 1D layer (16×1×1): same shape, even tighter (`w*cpl` bytes).
+- D2 effects (`CheckerboardEffect`, `FireEffect`, `ParticlesEffect`) on 3D grid (8×8×3): every z>0 slice byte-equals z=0 — proves extrude fills z for all three styles (stateless, stateful with heat grid, stateful with trail buffer). Catches a future regression where a D2 effect's `onAllocateMemory` resizes the dynamic buffer to the full 3D shape but the loop still writes only z=0.
 
 ### BlendMap (`test/test_blend_map.cpp`) {#blendmap}
 

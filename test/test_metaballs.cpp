@@ -1,6 +1,6 @@
 #include "doctest.h"
-#include "light/MetaballsEffect.h"
-#include "light/GridLayout.h"
+#include "light/effects/MetaballsEffect.h"
+#include "light/layouts/GridLayout.h"
 
 TEST_CASE("MetaballsEffect writes non-zero RGB data to buffer") {
     mm::LayoutGroup layoutGroup;

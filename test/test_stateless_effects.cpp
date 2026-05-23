@@ -1,11 +1,11 @@
 #include "doctest.h"
-#include "light/CheckerboardEffect.h"
-#include "light/SpiralEffect.h"
-#include "light/PlasmaPaletteEffect.h"
-#include "light/RipplesEffect.h"
-#include "light/GlowParticlesEffect.h"
-#include "light/LavaLampEffect.h"
-#include "light/GridLayout.h"
+#include "light/effects/CheckerboardEffect.h"
+#include "light/effects/SpiralEffect.h"
+#include "light/effects/PlasmaPaletteEffect.h"
+#include "light/effects/RipplesEffect.h"
+#include "light/effects/GlowParticlesEffect.h"
+#include "light/effects/LavaLampEffect.h"
+#include "light/layouts/GridLayout.h"
 
 namespace {
 

@@ -239,6 +239,10 @@ body.nav-open #nav {
     aspect-ratio: 1 / 1;
     max-height: 50vh;
     transition: max-height 0.05s linear;
+    /* Take touch gestures over from the browser so single-finger orbit and
+       two-finger pinch-zoom (handled in app.js) work — without this the page
+       scrolls/zooms instead of the canvas. */
+    touch-action: none;
 }
 
 /* ============================================================
@@ -282,30 +286,55 @@ body.nav-open #nav {
     margin-bottom: 8px;
 }
 
+/* Enable/disable toggle: styled <button> matching .card-btn's 26×26 frame.
+   Always transparent (no fill) — visual state is conveyed by the glyph alone:
+   ✓ (accent-coloured) when on, ○ (muted) when off. Same weight as the other
+   action buttons in the cluster. */
 .card-title .module-enabled {
-    margin: 0;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--fg-muted);
+    width: 26px;
+    height: 26px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
+.card-title .module-enabled:hover { border-color: var(--accent); }
+.card-title .module-enabled[data-checked="true"] { color: var(--accent); }
 
 .card-title .card-name {
     color: var(--accent);
+}
+.card-name-emoji {
+    /* Tighten the gap to the name (the .card-title flex gap is 8px). */
+    margin-left: -4px;
 }
 /* Flex spacer pushes stats/actions to the right; name + help stay left. */
 .card-spacer {
     flex: 1;
 }
-/* Per-module help link → spec page on GitHub. */
+/* Per-module help link → spec page on GitHub. Styled as a .card-btn so the
+   right-hand cluster (✎ × ☰ ?) is visually uniform — same 26×26 square frame. */
 .card-help {
-    color: var(--fg-muted);
-    text-decoration: none;
+    background: transparent;
     border: 1px solid var(--border);
-    border-radius: 50%;
-    width: 18px;
-    height: 18px;
+    color: var(--fg-muted);
+    width: 26px;
+    height: 26px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    text-decoration: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 12px;
-    line-height: 1;
 }
 .card-help:hover {
     color: var(--fg);
@@ -340,22 +369,33 @@ body.nav-open #nav {
 }
 .card-btn:hover:not(:disabled) { color: var(--fg); border-color: var(--accent); }
 .card-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.card-btn-del { color: var(--red); border-color: var(--red); opacity: 0.7; }
-.card-btn-del:hover { opacity: 1; }
-/* Armed delete: first click of the press-twice-to-delete confirm. */
+/* Delete: same muted border as the other action buttons; only the × is red
+   (semantic color on the symbol, not the box). The armed state still fills
+   with red — that's the loud "you're one click from deleting" signal. */
+.card-btn-del { color: var(--red); }
+.card-btn-del:hover { border-color: var(--red); }
 .card-btn-del.armed {
     background: var(--red);
     color: white;
-    opacity: 1;
+    border-color: var(--red);
 }
 
+/* Same 26×26 frame as the action buttons, so the cluster aligns; grab cursor
+   keeps it readable as a drag affordance rather than a clickable button. */
 .drag-handle {
     cursor: grab;
     color: var(--fg-muted);
     user-select: none;
-    padding: 0 4px;
+    width: 26px;
+    height: 26px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
 }
-.drag-handle:hover { color: var(--fg); }
+.drag-handle:hover { color: var(--fg); border-color: var(--accent); }
 .card.dragging { opacity: 0.5; }
 .card.drag-over { outline: 2px dashed var(--accent); outline-offset: -2px; }
 
@@ -395,6 +435,60 @@ body.nav-open #nav {
 .control-row input[type="checkbox"] {
     accent-color: var(--accent);
 }
+
+/* Modern on/off switch for bool controls. The <input> stays the source of
+   truth (event/sync code targets it); the <span class="switch-track"> draws
+   the pill + thumb and reads the checked state via :has(). Dimensions match
+   the native slider's thumb (height) and rail color (thumb), so the two
+   controls share a visual language. */
+.switch {
+    display: inline-block;
+    position: relative;
+    width: 40px;
+    height: 18px;
+    cursor: pointer;
+}
+.switch input {
+    /* Visually hidden but still focusable/clickable through the label. */
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    margin: 0;
+    cursor: pointer;
+}
+/* Track matches the slider aesthetic: neutral groove off, light accent tint
+   on. The thumb uses --fg (the same near-white tone the native slider's
+   unfilled rail shows), so the switch knob reads like the slider rail. */
+.switch-track {
+    position: absolute;
+    inset: 0;
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    transition: background 0.15s, border-color 0.15s;
+}
+.switch-track::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--fg);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    transition: transform 0.15s;
+}
+.switch:has(input:checked) .switch-track {
+    /* Light accent tint, not flooded — matches the slider's filled-portion look. */
+    background: color-mix(in srgb, var(--accent) 35%, var(--bg-0));
+    border-color: var(--accent);
+}
+.switch:has(input:checked) .switch-track::after {
+    /* width(40) - thumb(12) - left(2) - right(2) = 24px travel */
+    transform: translateX(24px);
+}
+.switch:hover .switch-track { border-color: var(--accent); }
 .control-row progress {
     flex: 1;
     height: 8px;

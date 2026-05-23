@@ -24,6 +24,18 @@ Measure FPS over WiFi STA vs Ethernet at different LED counts. The 128×128 case
 
 This determines the practical LED limit for WiFi-only boards. The 128×128 result already says: recommend Ethernet (or the `eth-only` build profile) for large installations.
 
+## Add real z-axis variation to 2D effects (pending)
+
+Today only **NoiseEffect** and **PlasmaEffect** have z-aware math (declared D3). The other 10 effects are honest D2 — they iterate y,x and Layer::extrude duplicates the z=0 plane across z on 3D layers. Visually this means every z-slice is identical; the effect looks "flat" along z.
+
+Some of these could be promoted to genuine D3 with a small math change:
+- **Metaballs / GlowParticles**: add a z coordinate to each blob; the field summation already generalises.
+- **Plasma palette / Spiral**: add a z-driven phase term (Plasma already shows the pattern with its 5th z-driven sine).
+- **Fire**: heat could rise along y but also drift along z (e.g. for a chimney effect). Needs a z-aware heat grid (`w × h × d` instead of `w × h`).
+- **Ripples / LavaLamp / Checkerboard / Particles**: each ripple/blob/checker/particle gets a z coordinate.
+
+Prioritise after we see real 3D installations. On 2D layers (today's reality) these are visually correct as-is. Each effect that gets promoted to D3 also needs its `dynamicBytes` resizing back up to the full 3D buffer.
+
 ## Additional testing (pending)
 
 - **UI page load time**: add a scenario step that measures HTTP response time for `/` (index.html), `/api/state`, `/api/system` using the live runner's HTTP client. Verifies the web UI loads within acceptable time on ESP32.

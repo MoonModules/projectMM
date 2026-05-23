@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "light/GridLayout.h"
+#include "light/layouts/GridLayout.h"
 
 #include <vector>
 

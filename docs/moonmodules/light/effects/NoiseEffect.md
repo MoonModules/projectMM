@@ -1,6 +1,6 @@
-# Noise 2D Effect
+# Noise Effect
 
-Smooth animated noise on the XY plane.
+Smooth animated noise. Samples a 2D field on flat (`depth == 1`) layouts and a true 3D field on volumetric (`depth > 1`) layouts, so a cube renders as a varied volume rather than stacked identical slices.
 
 ## Controls
 
@@ -9,9 +9,11 @@ Smooth animated noise on the XY plane.
 
 ## Rendering
 
-Uses value noise with bilinear interpolation and smoothstep. Maps noise value to hue via `hsvToRgb(n, 200, 255)` — fixed saturation, full brightness.
+Value noise with smoothstep-eased interpolation. 2D path uses bilinear interpolation over 4 cell corners (`noise2d`); 3D path uses trilinear interpolation over 8 cube corners (`noise3d`). Maps the noise value to hue via `hsvToRgb(n, 200, 255)` — fixed saturation, full brightness.
 
-Animation: time scrolls the noise coordinate space (smooth drift). The scroll speed is scaled by panel width so the perceived speed is the same on any display size — a 16-wide and 128-wide panel look equally fast at the same BPM.
+The effect picks the path at every `loop()` based on `depth()`; `depth == 1` is byte-identical to the previous 2D-only output (no perf regression on flat panels).
+
+Animation: time scrolls the noise coordinate space (smooth drift). The scroll speed is scaled by panel width so the perceived speed is the same on any display size — a 16-wide and 128-wide panel look equally fast at the same BPM. In 3D the z axis scrolls at 1/5 the x-rate so the field flows rather than slides flat.
 
 ## Design notes
 

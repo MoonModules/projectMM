@@ -28,7 +28,20 @@ Hot-path. Called every frame.
 
 1. Creates rendering context with buffer, logical dims, elapsed time
 2. Runs each effect in order (all write to same buffer)
-3. Runs dynamic modifiers in order via virtual `transformLights()` (each transforms the buffer)
+3. **After each effect's `loop()`, calls `extrude(eff->dimensions())`** — duplicates the effect's written slice across the axes it doesn't iterate (see below)
+4. Runs dynamic modifiers in order via virtual `transformLights()` (each transforms the buffer)
+
+### extrude(effectDim)
+
+Lets a low-dimensional effect work on a higher-dimensional layer without per-effect changes. Reads the effect's `dimensions()` declaration and fills the unused axes from the slice the effect wrote:
+
+- `Dim::D3` — early return; no work, no allocation, one comparison + branch.
+- `Dim::D2` — `memcpy` the z=0 slice across every z>0 (guarded by `depth > 1`).
+- `Dim::D1` — `memcpy` the y=0 row across every y>0 within z=0, then duplicate z=0 across z (each guarded).
+
+Hot-path cost is zero for D3 effects (the default) and zero when the layer's unused axes are size 1 (a D2 effect on a 2D layer, a D1 effect on a 1D layer). Real `memcpy` work only happens when the layer has more dimensions than the effect writes — exactly the case the framework is meant to handle.
+
+See [EffectBase § Dimensions and auto-extrusion](EffectBase.md#dimensions-and-auto-extrusion) for the effect-side contract and [test_extrude](../../testing.md#extrude) for the pinned tests.
 
 ## EffectBase overlap
 

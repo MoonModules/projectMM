@@ -1,20 +1,20 @@
 #include "core/Scheduler.h"
-#include "light/GridLayout.h"
-#include "light/RainbowEffect.h"
-#include "light/NoiseEffect.h"
-#include "light/PlasmaEffect.h"
-#include "light/PlasmaPaletteEffect.h"
-#include "light/MetaballsEffect.h"
-#include "light/FireEffect.h"
-#include "light/ParticlesEffect.h"
-#include "light/GlowParticlesEffect.h"
-#include "light/CheckerboardEffect.h"
-#include "light/SpiralEffect.h"
-#include "light/RipplesEffect.h"
-#include "light/LavaLampEffect.h"
-#include "light/MirrorModifier.h"
-#include "light/ArtNetSendDriver.h"
-#include "light/PreviewDriver.h"
+#include "light/layouts/GridLayout.h"
+#include "light/effects/RainbowEffect.h"
+#include "light/effects/NoiseEffect.h"
+#include "light/effects/PlasmaEffect.h"
+#include "light/effects/PlasmaPaletteEffect.h"
+#include "light/effects/MetaballsEffect.h"
+#include "light/effects/FireEffect.h"
+#include "light/effects/ParticlesEffect.h"
+#include "light/effects/GlowParticlesEffect.h"
+#include "light/effects/CheckerboardEffect.h"
+#include "light/effects/SpiralEffect.h"
+#include "light/effects/RipplesEffect.h"
+#include "light/effects/LavaLampEffect.h"
+#include "light/modifiers/MirrorModifier.h"
+#include "light/drivers/ArtNetSendDriver.h"
+#include "light/drivers/PreviewDriver.h"
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
 #include "core/FilesystemModule.h"
@@ -32,7 +32,9 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::LayoutGroup>("LayoutGroup", "light/LayoutGroup.md");
     mm::ModuleFactory::registerType<mm::Layer>("Layer", "light/Layer.md");
     mm::ModuleFactory::registerType<mm::DriverGroup>("DriverGroup", "light/DriverGroup.md");
-    // Concrete modules
+    // Concrete modules. registerType<T> captures the type's dimensions() via
+    // if-constexpr when present — EffectBase and ModifierBase both expose one,
+    // so the UI's 📏/🟦/🧊 chip lights up without any per-domain wrapper.
     mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout", "light/layouts/GridLayout.md");
     mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect", "light/effects/RainbowEffect.md");
     mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect", "light/effects/NoiseEffect.md");
@@ -76,27 +78,31 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
 
     // All modules created via factory (heap-allocated, PSRAM when available, classSize set)
 
+    // Names come from ModuleFactory::create via displayNameFor — strips the
+    // role suffix (Effect/Modifier/Layout/Driver, plus Module for generics) so
+    // e.g. NoiseEffect → "Noise", FilesystemModule → "Filesystem". For drivers,
+    // the Send/Receive part is kept so siblings like ArtNetSendDriver and a
+    // future ArtNetReceiveDriver stay distinguishable as "ArtNetSend" and
+    // "ArtNetReceive". setName() overrides are only needed for genuine renames,
+    // not for default display.
+
     // Filesystem (first — wires the load hook into the scheduler so persisted values
     // overlay into other modules' bound variables before their setup() runs)
     auto* filesystemModule = static_cast<mm::FilesystemModule*>(mm::ModuleFactory::create("FilesystemModule"));
-    filesystemModule->setName("Filesystem");
     filesystemModule->setScheduler(&scheduler);
 
     // System (deviceName needed by other modules)
     auto* systemModule = static_cast<mm::SystemModule*>(mm::ModuleFactory::create("SystemModule"));
-    systemModule->setName("System");
     systemModule->setScheduler(&scheduler);
 
     // Network (platform stubs return false on desktop — module is a no-op)
     auto* networkModule = static_cast<mm::NetworkModule*>(mm::ModuleFactory::create("NetworkModule"));
-    networkModule->setName("Network");
     networkModule->setScheduler(&scheduler);
     networkModule->setSystemModule(systemModule);
 
     // Layout
     auto* layoutGroup = static_cast<mm::LayoutGroup*>(mm::ModuleFactory::create("LayoutGroup"));
     auto* grid = static_cast<mm::GridLayout*>(mm::ModuleFactory::create("GridLayout"));
-    grid->setName("Grid");
     grid->width = gridW;
     grid->height = gridH;
     layoutGroup->addChild(grid);
@@ -106,30 +112,25 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     layer->setChannelsPerLight(3);
 
     auto* noise = mm::ModuleFactory::create("NoiseEffect");
-    noise->setName("Noise");
     layer->addChild(noise);
 
     auto* mirror = mm::ModuleFactory::create("MirrorModifier");
-    mirror->setName("Mirror");
     layer->addChild(mirror);
 
     auto* driverGroup = static_cast<mm::DriverGroup*>(mm::ModuleFactory::create("DriverGroup"));
     driverGroup->setLayer(layer);
 
     auto* artnet = mm::ModuleFactory::create("ArtNetSendDriver");
-    artnet->setName("ArtNet");
-    driverGroup->addChild(artnet);
+    driverGroup->addChild(artnet);  // name = "ArtNetSend" (factory default) — disambiguates from a future ArtNetReceive
 
     auto* previewFrame = new mm::PreviewFrame();
     auto* preview = static_cast<mm::PreviewDriver*>(mm::ModuleFactory::create("PreviewDriver"));
-    preview->setName("Preview");
     // PreviewDriver reads physical dimensions from Layer at frame time (via DriverGroup's
     // setLayer wiring) so runtime grid resizes are reflected in the preview header.
     preview->setPreviewFrame(previewFrame);
     driverGroup->addChild(preview);
 
     auto* httpServer = static_cast<mm::HttpServerModule*>(mm::ModuleFactory::create("HttpServerModule"));
-    httpServer->setName("HttpServer");
     httpServer->port = httpPort;
     httpServer->setScheduler(&scheduler);
     httpServer->setPreviewFrame(previewFrame);

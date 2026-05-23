@@ -1,6 +1,6 @@
-# Plasma 2D Effect
+# Plasma Effect
 
-Animated plasma pattern from four summed sine waves on orthogonal and diagonal axes. Default effect in the desktop and ESP32 pipeline.
+Animated plasma pattern from summed sine waves on orthogonal and diagonal axes. Default effect in the desktop and ESP32 pipeline. 2D on flat (`depth == 1`) layouts, 3D on volumetric (`depth > 1`) layouts so a cube renders as a varied volume.
 
 ## Controls
 
@@ -11,14 +11,15 @@ Animated plasma pattern from four summed sine waves on orthogonal and diagonal a
 
 ## Rendering
 
-Four `sin8` lookups per pixel (256-byte constexpr LUT in flash, no float, no heap). Waves:
+`sin8` lookups per pixel (256-byte constexpr LUT in flash, no float, no heap). Waves:
 
 - Horizontal: `sin8(x * step_x + t1)`
 - Vertical: `sin8(y * step_y + t2)` — hoisted per row
 - Diagonal: `sin8(x * step_x + y * step_x - t3)`
 - Anti-diagonal: `sin8(x * step_y + 128 - y * step_y + t1)`
+- Depth (3D path only): `sin8(z * step_z + t1)` — hoisted per z-slice; `step_z` reuses `scale_y` for spatial frequency
 
-Sum averaged (`>> 2`), add `hue_shift`, map via `hsvToRgb(hue, 255, 255)`.
+On `depth == 1` the four 2D sines are averaged via `>> 2` (byte-identical to the previous 2D-only output). On `depth > 1` the fifth z-sine joins the sum and it is averaged via `/5`. `hue_shift` is added; `hsvToRgb(hue, 255, 255)` produces RGB.
 
 ### Performance
 

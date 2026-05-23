@@ -10,7 +10,10 @@ namespace mm {
 
 class ParticlesEffect : public EffectBase {
 public:
-    const char* tags() const override { return "✨"; }
+    const char* tags() const override { return "💫🦅"; }  // MoonLight origin · David Jupijn / Rising Step
+    // Iterates y and x only; Layer::extrude fills z on 3D layers. The trail
+    // buffer is sized to the z=0 plane (w*h*cpl), not the full 3D buffer.
+    Dim dimensions() const override { return Dim::D2; }
 
     static constexpr uint8_t MAX_PARTICLES = 64;
 
@@ -27,9 +30,10 @@ public:
     }
 
     void onAllocateMemory() override {
-        nrOfLightsType lights = nrOfLights();
+        // D2 effect: trail buffer covers only the z=0 plane (w*h*cpl). Extrude
+        // fills z on 3D layers. Avoids allocating depth× more heap than needed.
         uint8_t cpl = channelsPerLight();
-        size_t needed = static_cast<size_t>(lights) * cpl;
+        size_t needed = static_cast<size_t>(width()) * height() * cpl;
         if (enabled() && needed > 0) {
             if (needed != trailBytes_) {
                 releaseTrail();

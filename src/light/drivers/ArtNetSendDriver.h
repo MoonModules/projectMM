@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/DriverGroup.h"
+#include "light/drivers/DriverGroup.h"
 #include "platform/platform.h"
 
 #include <cstring>

@@ -279,7 +279,7 @@ function buildNavFooter() {
 
     const copy = document.createElement("div");
     copy.className = "nav-copyright";
-    copy.textContent = `© ${new Date().getFullYear()} MoonLight`;
+    copy.textContent = `© ${new Date().getFullYear()} MoonModules`;
     footer.appendChild(copy);
 
     return footer;
@@ -344,21 +344,48 @@ function createCard(mod, depth) {
     const title = document.createElement("div");
     title.className = "card-title";
 
-    const enabled = document.createElement("input");
-    enabled.type = "checkbox";
+    // The enabled toggle is built here but appended later — it joins the
+    // right-hand action cluster (next to ✎ × ?) rather than sitting at the start
+    // of the row, for visual grouping with the other per-card controls.
+    // Rendered as a <button> styled as a 26×26 rounded box (matching .card-btn);
+    // showing ✓ when on, blank when off. Stores its checked state in
+    // data-checked so updateValues can sync from WS pushes. A native <input>
+    // would not match the other buttons' frame and corner radius.
+    const enabled = document.createElement("button");
+    enabled.type = "button";
     enabled.className = "module-enabled";
-    enabled.checked = (mod.enabled === undefined) ? true : !!mod.enabled;
     enabled.dataset.mid = mod.name;
     enabled.dataset.key = "enabled";
-    enabled.addEventListener("change", () => {
-        sendControl(mod.name, "enabled", enabled.checked);
+    enabled.setAttribute("aria-pressed", "true");
+    enabled.title = "Enable / disable";
+    // ✓ when on, ○ when off — both glyphs are smaller than the box so the
+    // visual weight matches the other action buttons (no filled background).
+    const setEnabledUi = (on) => {
+        enabled.dataset.checked = on ? "true" : "false";
+        enabled.textContent = on ? "✓" : "○";
+        enabled.setAttribute("aria-pressed", on ? "true" : "false");
+    };
+    setEnabledUi(mod.enabled === undefined ? true : !!mod.enabled);
+    enabled.addEventListener("click", () => {
+        const next = enabled.dataset.checked !== "true";
+        setEnabledUi(next);
+        sendControl(mod.name, "enabled", next);
     });
-    title.appendChild(enabled);
 
     const name = document.createElement("span");
     name.className = "card-name";
     name.textContent = mod.name;
     title.appendChild(name);
+
+    // Emoji tags (role + curated) shown after the name — same set used by the
+    // type picker's chip filter, so visual identity is consistent across views.
+    const emoji = emojiTagsForMod(mod);
+    if (emoji) {
+        const emojiEl = document.createElement("span");
+        emojiEl.className = "card-name-emoji";
+        emojiEl.textContent = emoji;
+        title.appendChild(emojiEl);
+    }
 
     // Flex spacer so the name stays left and everything else groups on the right.
     const spacer = document.createElement("span");
@@ -383,6 +410,9 @@ function createCard(mod, depth) {
         });
     });
     title.appendChild(stats);
+
+    // Enable checkbox joins the right-hand action cluster, before ✎/×.
+    title.appendChild(enabled);
 
     // Action buttons for reorderable children (Effect/Modifier roles).
     // Top-level modules aren't reorderable in this iteration (fixed in main.cpp).
@@ -477,7 +507,9 @@ function armPressTwice(btn, onConfirm, opts = {}) {
         if (disarmTimer) { clearTimeout(disarmTimer); disarmTimer = null; }
     };
     btn.addEventListener("click", () => {
-        if (armed) { onConfirm(); return; }
+        // Disarm before running the action so a stray second click can't fire
+        // it twice (e.g. two /api/reboot requests).
+        if (armed) { disarm(); onConfirm(); return; }
         armed = true;
         savedText = btn.textContent;
         savedTitle = btn.title;
@@ -491,9 +523,9 @@ function armPressTwice(btn, onConfirm, opts = {}) {
 
 // Compact byte formatter — "B" under 1 KB, "KB" otherwise (one decimal under 10 KB).
 function fmtBytes(n) {
-    if (n < 1024) return n + " B";
+    if (n < 1024) return n + "B";
     const k = n / 1024;
-    return (k < 10 ? k.toFixed(1) : Math.round(k)) + " KB";
+    return (k < 10 ? k.toFixed(1) : Math.round(k)) + "KB";
 }
 
 // Stats line: timing (🕒, fps or µs/ms per the global toggle) + memory
@@ -505,7 +537,7 @@ function formatStats(mod) {
     if (us > 0) {
         if (timingMode === "fps") {
             const fps = Math.round(1_000_000 / us);
-            timing = "🕒 " + (fps >= 1000 ? (fps / 1000).toFixed(1) + "K fps" : fps + " fps");
+            timing = "🕒 " + (fps >= 1000 ? Math.round(fps / 1000) + "K fps" : fps + " fps");
         } else {
             timing = "🕒 " + (us < 1000 ? us + " µs" : (us / 1000).toFixed(2) + " ms");
         }
@@ -603,6 +635,15 @@ function docPathForType(moduleType) {
     return (t && t.docPath) ? t.docPath : "";
 }
 
+// Curated emoji string for a live module — its role emoji plus the type's
+// `tags` from /api/types, deduplicated, in role-first order. "" if the type
+// isn't loaded yet. Used on the card title and in the type picker.
+function emojiTagsForMod(mod) {
+    if (!mod) return "";
+    const t = availableTypes.find(t => t.name === mod.type) || {role: mod.role, tags: ""};
+    return emojiTagsFor(t).join("");
+}
+
 function createControl(moduleName, moduleType, ctrl) {
     const row = document.createElement("div");
     row.className = "control-row";
@@ -656,6 +697,12 @@ function createControl(moduleName, moduleType, ctrl) {
             break;
         }
         case "bool": {
+            // Modern on/off switch: an <input type=checkbox> (kept for the
+            // existing change/sync paths) wrapped in a <label> that draws a
+            // pill-shaped track + sliding thumb via CSS. The checkbox itself
+            // is visually hidden but stays the source of truth.
+            const sw = document.createElement("label");
+            sw.className = "switch";
             const input = document.createElement("input");
             input.type = "checkbox";
             input.checked = !!ctrl.value;
@@ -665,7 +712,11 @@ function createControl(moduleName, moduleType, ctrl) {
                 dragTs[key] = Date.now();
                 sendControl(moduleName, ctrl.name, input.checked);
             });
-            row.appendChild(input);
+            const track = document.createElement("span");
+            track.className = "switch-track";
+            sw.appendChild(input);
+            sw.appendChild(track);
+            row.appendChild(sw);
             appendResetButton(row, moduleName, ctrl, def, () => { input.checked = !!def; });
             break;
         }
@@ -862,12 +913,15 @@ function updateValues() {
         // refresh the stats line for this module if visible
         const statsEl = document.querySelector(`.card-stats[data-mid="${cssEscape(mod.name)}"]`);
         if (statsEl) statsEl.textContent = formatStats(mod);
-        // refresh enabled checkbox
-        const enabledEl = document.querySelector(`input.module-enabled[data-mid="${cssEscape(mod.name)}"]`);
+        // refresh enabled toggle (now a styled <button>, not an <input>)
+        const enabledEl = document.querySelector(`button.module-enabled[data-mid="${cssEscape(mod.name)}"]`);
         if (enabledEl) {
             const ts = dragTs[mod.name + ":enabled"] || 0;
             if (Date.now() - ts > 1000) {
-                enabledEl.checked = (mod.enabled === undefined) ? true : !!mod.enabled;
+                const on = (mod.enabled === undefined) ? true : !!mod.enabled;
+                enabledEl.dataset.checked = on ? "true" : "false";
+                enabledEl.textContent = on ? "✓" : "○";
+                enabledEl.setAttribute("aria-pressed", on ? "true" : "false");
             }
         }
     }
@@ -978,14 +1032,31 @@ function cssEscape(s) {
 // 6. Type picker
 // ---------------------------------------------------------------------------
 
-// Role → emoji. The role chip is derived here (zero backend cost); curated
-// extra tags come from the type's `tags` string in /api/types.
+// Role → emoji. The role part of the MoonLight emoji-key system
+// (https://moonmodules.org/MoonLight/moonlight/overview/#emoji-key):
+// 🔥 effect · 💎 modifier · 🚥 layout · ☸️ driver. The role tag is derived
+// here, not duplicated in every module's tags() string — one source of truth
+// in the UI saves repeating the same character in ~30 module headers and a
+// few bytes per type in /api/types. Each module's tags() then only carries
+// its categorical origin (🐙 WLED · 💫 MoonLight · ⚡️ FastLED) and any
+// feature extras (audio: ♫ FFT · ♪ volume · moving-head: 🚨 colour · 🗼 movement).
+// The dimensional emoji (📏 1D · 🟦 2D · 🧊 3D) is derived from the type's `dim`
+// field — only effects have one. All three are merged in emojiTagsFor().
 const ROLE_EMOJI = {
-    effect:   "✨",
-    driver:   "💡",
-    modifier: "🔀",
-    layout:   "📐",
+    effect:   "🔥",
+    driver:   "☸️",
+    modifier: "💎",
+    layout:   "🚥",
     generic:  "⚙️",
+};
+
+// Dim int → emoji. Only effects carry `dim` (1/2/3); other modules have dim == 0
+// and contribute nothing here. Same MoonLight key. Keeps emojiTagsFor() the
+// single place that assembles the chip set per type.
+const DIM_EMOJI = {
+    1: "📏",
+    2: "🟦",
+    3: "🧊",
 };
 
 // Split a string into grapheme clusters so multi-codepoint emoji (e.g. 🌫️,
@@ -1000,13 +1071,14 @@ function graphemes(s) {
     return [...s];
 }
 
-// All emoji for a type: its role emoji first, then each curated tag emoji.
-// Deduplicated, order preserved.
+// All emoji for a type: role first, then dimensional (effects only), then each
+// curated tag emoji from tags(). Deduplicated, order preserved.
 function emojiTagsFor(t) {
     const out = [];
     const seen = new Set();
     const push = (ch) => { if (ch && !seen.has(ch)) { seen.add(ch); out.push(ch); } };
     push(ROLE_EMOJI[t.role]);
+    push(DIM_EMOJI[t.dim]);
     for (const ch of graphemes(t.tags || "")) push(ch);
     return out;
 }
@@ -1092,11 +1164,17 @@ function openPicker(anchorEl, opts) {
 
     let selectedType = null;
 
-    // Types matching the search box AND all active emoji chips.
+    // Types matching the search box AND all active emoji chips. The query matches
+    // against both the raw typeName ("RainbowEffect") and the displayName
+    // ("Rainbow") supplied by /api/types so typing either form finds the row.
     function currentMatches() {
         const q = search.value.toLowerCase();
         return filtered.filter(t => {
-            if (q && !t.name.toLowerCase().includes(q)) return false;
+            if (q) {
+                const raw = t.name.toLowerCase();
+                const disp = (t.displayName || t.name).toLowerCase();
+                if (!raw.includes(q) && !disp.includes(q)) return false;
+            }
             if (activeChips.size > 0) {
                 const has = new Set(emojiTagsFor(t));
                 for (const chip of activeChips) if (!has.has(chip)) return false;
@@ -1115,7 +1193,10 @@ function openPicker(anchorEl, opts) {
             emoji.className = "type-picker-item-emoji";
             emoji.textContent = emojiTagsFor(t).join("");
             item.appendChild(emoji);
-            item.appendChild(document.createTextNode(t.name));
+            // Show the factory-stripped name ("Rainbow") not the typeName
+            // ("RainbowEffect"); the role text on the right already conveys
+            // "effect", so repeating it in the name would just be noise.
+            item.appendChild(document.createTextNode(t.displayName || t.name));
             const role = document.createElement("span");
             role.className = "role";
             role.textContent = t.role;
@@ -1190,6 +1271,13 @@ function attachDragHandlers(card, mod) {
     card.draggable = true;
 
     card.addEventListener("dragstart", (e) => {
+        // Don't start a card drag when the user grabbed a control — sliders,
+        // buttons, checkboxes, selects, text inputs, and links all use drag
+        // gestures of their own (e.g. slider thumb).
+        if (e.target.closest("input, button, select, textarea, a, .card-help")) {
+            e.preventDefault();
+            return;
+        }
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("text/plain", mod.name);
         card.classList.add("dragging");
@@ -1304,22 +1392,47 @@ function initWebGL() {
         redrawCached();
     }, {passive: false});
 
-    // Touch orbit
+    // Touch: single-finger orbit, two-finger pinch zoom. touch-action: none on
+    // #preview keeps the browser's own scroll/zoom from firing first.
+    let pinchDist = 0;
+    const touchDistance = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+
     canvas.addEventListener("touchstart", (e) => {
-        if (e.touches.length !== 1) return;
-        dragging = true;
-        lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
-    });
-    canvas.addEventListener("touchmove", (e) => {
-        if (!dragging || e.touches.length !== 1) return;
-        const t = e.touches[0];
-        camTheta += (t.clientX - lastX) * 0.01;
-        camPhi = Math.max(-1.5, Math.min(1.5, camPhi + (t.clientY - lastY) * 0.01));
-        lastX = t.clientX; lastY = t.clientY;
-        redrawCached();
-        e.preventDefault();
+        if (e.touches.length === 1) {
+            dragging = true;
+            lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+        } else if (e.touches.length >= 2) {
+            dragging = false;  // hand off from orbit to pinch
+            pinchDist = touchDistance(e.touches[0], e.touches[1]);
+            e.preventDefault();
+        }
     }, {passive: false});
-    canvas.addEventListener("touchend", () => { dragging = false; });
+    canvas.addEventListener("touchmove", (e) => {
+        if (e.touches.length === 1 && dragging) {
+            const t = e.touches[0];
+            camTheta += (t.clientX - lastX) * 0.01;
+            camPhi = Math.max(-1.5, Math.min(1.5, camPhi + (t.clientY - lastY) * 0.01));
+            lastX = t.clientX; lastY = t.clientY;
+            redrawCached();
+            e.preventDefault();
+        } else if (e.touches.length >= 2 && pinchDist > 0) {
+            // Pinch zoom: ratio of finger-distance change scales camDist
+            // (fingers apart → zoom in / camDist down).
+            const d = touchDistance(e.touches[0], e.touches[1]);
+            const ratio = pinchDist / d;
+            camDist = Math.max(0.5, Math.min(10, camDist * ratio));
+            pinchDist = d;
+            redrawCached();
+            e.preventDefault();
+        }
+    }, {passive: false});
+    canvas.addEventListener("touchend", (e) => {
+        if (e.touches.length === 0) { dragging = false; pinchDist = 0; }
+        // 2→1 touches: stay in pinch (let user finish lifting); pinchDist stays
+        // valid for the remaining finger? No — drop pinch, but don't start
+        // orbit either, to avoid a jump when one finger lifts.
+        else if (e.touches.length === 1) { pinchDist = 0; dragging = false; }
+    });
 }
 
 // Read the Preview module's "decompress" control from the latest state push.
@@ -1432,7 +1545,10 @@ function drawVerts() {
     const cz = camDist * Math.cos(camPhi) * Math.cos(camTheta);
     const mvp = buildMVP(cx, cy, cz, canvas.width / Math.max(1, canvas.height));
 
-    gl.clearColor(0.05, 0.07, 0.09, 1);
+    // Transparent clear — the canvas shows the page through. WebGL context is
+    // created with alpha:true by default, so an alpha-0 clear is genuinely
+    // transparent (no opaque fill). Theme changes just work, no recolor needed.
+    gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, glBuffer);
@@ -1527,11 +1643,6 @@ function setupPreviewShrink() {
 // ---------------------------------------------------------------------------
 
 function setupStatusBarButtons() {
-    document.getElementById("ws-reconnect")?.addEventListener("click", () => {
-        try { ws?.close(); } catch {}
-        wsRetryMs = 500;
-        connectWs();
-    });
     // Reboot: press once to arm, again to confirm — see armPressTwice. The glyph
     // stays (no armedText); only the title changes.
     const rebootBtn = document.getElementById("reboot-btn");

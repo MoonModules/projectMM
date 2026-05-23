@@ -1,6 +1,6 @@
 #include "doctest.h"
-#include "light/ParticlesEffect.h"
-#include "light/GridLayout.h"
+#include "light/effects/ParticlesEffect.h"
+#include "light/layouts/GridLayout.h"
 
 TEST_CASE("ParticlesEffect allocates trail buffer when enabled") {
     mm::LayoutGroup layoutGroup;

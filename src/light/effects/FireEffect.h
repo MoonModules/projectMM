@@ -10,7 +10,10 @@ namespace mm {
 
 class FireEffect : public EffectBase {
 public:
-    const char* tags() const override { return "🔥"; }
+    const char* tags() const override { return "⚡️🦅"; }  // FastLED origin (Fire2012-style) · David Jupijn / Rising Step
+    // Iterates y and x only; Layer::extrude fills z on 3D layers. The heat
+    // buffer covers only the z=0 plane (w*h), not the full 3D buffer.
+    Dim dimensions() const override { return Dim::D2; }
 
     uint8_t cooling = 55;
     uint8_t sparking = 120;
@@ -23,7 +26,9 @@ public:
     }
 
     void onAllocateMemory() override {
-        nrOfLightsType count = nrOfLights();
+        // D2 effect: heat grid covers only the z=0 plane (w*h). Extrude fills
+        // z on 3D layers. Avoids allocating depth× more heap than needed.
+        nrOfLightsType count = static_cast<nrOfLightsType>(width()) * height();
         if (enabled() && count > 0) {
             if (count != heatCount_) {
                 releaseHeat();

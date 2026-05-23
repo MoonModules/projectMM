@@ -1,6 +1,6 @@
 #include "doctest.h"
-#include "light/FireEffect.h"
-#include "light/GridLayout.h"
+#include "light/effects/FireEffect.h"
+#include "light/layouts/GridLayout.h"
 
 TEST_CASE("FireEffect allocates heat buffer when enabled") {
     mm::LayoutGroup layoutGroup;
