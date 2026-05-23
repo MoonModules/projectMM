@@ -22,15 +22,15 @@
 // test pattern applied to it will catch it (size check + no-zero-pixels).
 
 TEST_CASE("D2 effect on 3D grid: z-slices are identical (Layer::extrude)") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 8;
     grid.height = 8;
     grid.depth = 4;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     // Rainbow opts into D2 — it writes only z=0 and trusts extrude to fill z.
@@ -76,15 +76,15 @@ public:
 };
 
 TEST_CASE("D1 effect on 3D grid: rows and z-slices are identical (Layer::extrude)") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 8;
     grid.height = 4;
     grid.depth = 3;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     D1StubEffect d1;
@@ -125,15 +125,15 @@ TEST_CASE("D1 effect on 3D grid: rows and z-slices are identical (Layer::extrude
 
 template<typename EffectT>
 static void check_d3_on_2d(const char* tag) {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 8;
     grid.height = 8;
     grid.depth = 1;  // 2D layer
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     EffectT effect;
@@ -157,15 +157,15 @@ static void check_d3_on_2d(const char* tag) {
 
 template<typename EffectT>
 static void check_d3_on_1d(const char* tag) {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 16;
     grid.height = 1;  // 1D layer
     grid.depth = 1;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     EffectT effect;
@@ -211,15 +211,15 @@ TEST_CASE("D3 effect on 1D layer: PlasmaEffect produces a valid 1D strip") {
 
 template<typename EffectT>
 static void check_d2_on_3d(const char* tag) {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 8;
     grid.height = 8;
     grid.depth = 3;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     EffectT effect;

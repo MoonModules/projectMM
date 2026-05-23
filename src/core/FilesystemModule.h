@@ -170,10 +170,42 @@ private:
             mounted_ = true;
             platform::fsMkdir(CONFIG_DIR);
         }
+        migrateRenamedConfigs();
         for (uint8_t i = 0; i < s->moduleCount(); i++) {
             MoonModule* m = s->module(i);
             if (!m || m == this) continue;
             loadSubtree(m);
+        }
+    }
+
+    // One-time cleanup of files whose owning type was renamed. Each migration is
+    // delete-and-warn — per-container controls today are limited to `enabled`
+    // (near-zero loss). A future rename can either grow this list or, if the
+    // settings volume gets non-trivial, become a rename-the-file step.
+    //
+    // **Domain-boundary trade-off (intentional, time-bounded).** The strings
+    // below are light-domain type names embedded in a core module, which
+    // CLAUDE.md's "domain-neutral core" rule discourages. We accept the leak
+    // because (a) the alternative — a `MoonModule::registerRenamedConfig()`
+    // API the light domain calls into — is more abstraction than two entries
+    // justify, and (b) this code's natural lifetime is one or two release
+    // cycles (after that everyone's `.config` is fresh and the entries become
+    // dead code). **Remove these entries** the next time the `next-iteration`
+    // branch is merged to `main` and a release is cut. If the list grows
+    // beyond ~5 entries before then, reach for option (a) instead.
+    void migrateRenamedConfigs() {
+        struct Renamed { const char* oldFile; const char* newType; };
+        static constexpr Renamed kRenamed[] = {
+            {"/.config/LayoutGroup.json", "Layouts"},
+            {"/.config/DriverGroup.json", "Drivers"},
+        };
+        for (const auto& r : kRenamed) {
+            if (platform::fsExists(r.oldFile)) {
+                std::printf("FilesystemModule: removing stale %s "
+                            "(type was renamed to %s) — its previous values are lost\n",
+                            r.oldFile, r.newType);
+                platform::fsRemove(r.oldFile);
+            }
         }
     }
 
@@ -268,6 +300,11 @@ private:
             case ControlType::Uint16: {
                 int v = mm::json::parseInt(json, key);
                 *static_cast<uint16_t*>(c.ptr) = static_cast<uint16_t>(v);
+                break;
+            }
+            case ControlType::Int16: {
+                int v = mm::json::parseInt(json, key);
+                *static_cast<int16_t*>(c.ptr) = static_cast<int16_t>(v);
                 break;
             }
             case ControlType::Bool:
@@ -379,6 +416,10 @@ private:
             case ControlType::Uint16:
                 n = std::snprintf(buf + pos, bufLen - pos, "%u",
                                   *static_cast<uint16_t*>(c.ptr));
+                break;
+            case ControlType::Int16:
+                n = std::snprintf(buf + pos, bufLen - pos, "%d",
+                                  *static_cast<int16_t*>(c.ptr));
                 break;
             case ControlType::Bool:
                 n = std::snprintf(buf + pos, bufLen - pos, "%s",

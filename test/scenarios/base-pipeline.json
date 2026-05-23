@@ -5,15 +5,15 @@
     {
       "name": "add-layout-group",
       "op": "add_module",
-      "id": "LayoutGroup",
-      "type": "LayoutGroup"
+      "id": "Layouts",
+      "type": "Layouts"
     },
     {
       "name": "add-grid",
       "op": "add_module",
       "id": "Grid",
       "type": "GridLayout",
-      "parent_id": "LayoutGroup"
+      "parent_id": "Layouts"
     },
     {
       "name": "add-layer",
@@ -21,7 +21,7 @@
       "id": "Layer",
       "type": "Layer",
       "props": {
-        "layoutGroup": "LayoutGroup",
+        "layouts": "Layouts",
         "channelsPerLight": 3
       }
     },
@@ -35,8 +35,8 @@
     {
       "name": "add-driver-group",
       "op": "add_module",
-      "id": "DriverGroup",
-      "type": "DriverGroup",
+      "id": "Drivers",
+      "type": "Drivers",
       "props": {
         "layer": "Layer"
       }
@@ -46,7 +46,7 @@
       "op": "add_module",
       "id": "ArtNet",
       "type": "ArtNetSendDriver",
-      "parent_id": "DriverGroup",
+      "parent_id": "Drivers",
       "measure": true,
       "bounds": {
         "fps": { "min_pct": 80, "min_fps_led_product": 294912 }

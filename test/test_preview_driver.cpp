@@ -1,7 +1,7 @@
 #include "doctest.h"
 #include "light/drivers/PreviewDriver.h"
 #include "light/Layer.h"
-#include "light/layouts/LayoutGroup.h"
+#include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
 #include "core/PreviewFrame.h"
 
@@ -19,7 +19,7 @@ namespace {
 // there is no allocation outside PreviewDriver's own owned buffer.
 struct PreviewRig {
     mm::GridLayout grid;
-    mm::LayoutGroup group;
+    mm::Layouts group;
     mm::Layer layer;
     mm::Buffer source;
     mm::PreviewFrame frame;
@@ -30,7 +30,7 @@ struct PreviewRig {
         grid.height = h;
         grid.depth = d;
         group.addChild(&grid);
-        layer.setLayoutGroup(&group);
+        layer.setLayouts(&group);
         layer.setChannelsPerLight(cpl);
         layer.onAllocateMemory();
 

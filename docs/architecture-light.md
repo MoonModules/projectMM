@@ -1,6 +1,6 @@
 # Light Domain Architecture
 
-The light domain is built on top of the core (see `architecture.md`). It defines the render pipeline, light types, layouts, layers, effects, modifiers, mapping, blending, and output drivers.
+The light domain is built on top of the core (see `architecture.md`). It defines the render pipeline, light types, the Layouts / Layers / Drivers containers, effects, modifiers, mapping, and blending.
 
 In this document, **light** refers to any controllable light source: an addressable LED pixel (WS2812, APA102), a DMX fixture (RGB par, moving head, dimmer), or any other output that receives color/intensity data. The term is used instead of "pixel" to reflect that the system controls both LEDs and conventional lighting fixtures.
 
@@ -15,25 +15,28 @@ The light domain is everything specific to that goal. The generic module/runtime
 Modules can be added, replaced (e.g. change an effect on a layer), or removed dynamically at runtime.
 
 ```
-              LayoutGroup (shared across layers and drivers)
+              Layouts (shared by every Layer in Layers)
                 ├── GridLayout  ──→ coordinate iterator
                 └── WheelLayout ──→ coordinate iterator
                         │
-          ┌─────────────┼─────────────┐
-          ▼             ▼             ▼
-      Layer A        Layer B       Layer C
-    Effect(s)      Effect(s)     Effect(s)
-    Modifier(s)    Modifier(s)   Modifier(s)
-    Buffer (own)   Buffer (own)  Buffer (own)
-    LUT (own)      LUT (own)     LUT (own)
-          │             │             │
-          └──── Blend+Map ────────────┘
-                    │
-              DriverGroup
+                    Layers
+                ┌───────┼───────┐
+                ▼       ▼       ▼
+            Layer A  Layer B  Layer C
+          Effect(s) Effect(s) Effect(s)
+        Modifier(s) Modifier(s) Modifier(s)
+        Buffer(own) Buffer(own) Buffer(own)
+            LUT(own) LUT(own) LUT(own)
+                │       │       │
+                └── Blend+Map ──┘
+                        │
+                    Drivers
                 ├── WS2812Driver  (consumer buffer / DMA)
                 ├── ArtNetDriver  (UDP packets)
                 └── PreviewDriver (WebSocket)
 ```
+
+**Naming convention.** Capital `Layouts`, `Layers`, `Drivers` are class names (always written capitalised when they refer to the class). Lowercase "layouts", "layers", "drivers" is the English plural — used freely when the sentence makes it clear that multiple instances are meant. Singular "layout", "layer", "driver" is an individual instance. The capitalisation alone disambiguates "the Layers container" from "two layers stacked", so this doc reaches for natural English plurals rather than awkward "Layer instances" / "Layer children" phrasing.
 
 ## 3D From the Core
 
@@ -48,41 +51,45 @@ The smaller `nrOfLightsType` on no-PSRAM devices reduces LUT memory: each destin
 
 All code uses the typedefs consistently to avoid casting.
 
-## LayoutGroup
+## Layouts
 
-A **LayoutGroup** (MoonModule) groups layouts and defines the physical topology of the light installation. It is shared across all layers and drivers — there is one LayoutGroup describing the physical setup, and multiple layers render into it. When a layout changes, all layers rebuild their LUTs.
+**Layouts** (a MoonModule) is the top-level container for one or more layouts, defining the physical topology of the light installation. It is shared by every layer in the Layers container — there is one Layouts describing the physical setup, and every layer renders into it. When a layout changes, every layer rebuilds its LUT.
 
 Note: the term "fixture" is reserved for DMX lighting fixtures (pars, moving heads, etc.) — it is not used for layout grouping.
 
-## Layouts
+## Layout
 
-A layout (MoonModule) defines the physical positions of lights in 3D space. It is a **coordinate iterator** — it yields (physicalIndex, x, y, z) for each light it defines. A layout does not own or build any mapping LUT.
+A **layout** (a `LayoutBase` MoonModule, child of Layouts) defines the physical positions of lights in 3D space. It is a **coordinate iterator** — it yields (physicalIndex, x, y, z) for each light it defines. A layout does not own or build any mapping LUT.
 
-Layouts cover both addressable LEDs and DMX fixtures. An LED strip layout yields one coordinate per LED. A DMX fixture layout yields one coordinate per fixture (a moving head is one point in 3D space).
+Layouts cover both addressable LEDs and DMX fixtures. An LED-strip layout yields one coordinate per LED; a DMX-fixture layout yields one coordinate per fixture (a moving head is one point in 3D space).
 
 Layout positions are computed algorithmically, not stored in memory. Grid is the most commonly used layout, but any geometry is possible: spheres, rings, cones, spirals, arbitrary point clouds. A grid layout is an example of full-density mapping (every position maps to a light). A wheel layout is an example of sparse mapping (only spoke positions are mapped, gaps are unmapped).
 
-Layouts are grouped inside a LayoutGroup. A device contains the same light type within a layout. Support for mixing light types in a single LayoutGroup (e.g. LED strips + par lights) is planned for later.
+Multiple layouts live inside one Layouts container. A device today contains the same light type within each layout. Support for mixing light types in a single Layouts (e.g. LED strips + par lights) is planned for later.
 
 ## Layers
 
-A **layer** owns:
+**Layers** (a MoonModule) is the top-level container for one or more layers. Each layer renders independently into its own buffer; the Drivers container composes those buffers downstream (today: pass through the first active layer; alpha-blend / additive composition is the follow-up).
+
+Today the boot pipeline creates one layer inside Layers, so the container is a thin pass-through. The number of additional layers a device can run is bounded by memory — a device with PSRAM can run many; a device without may be limited to one.
+
+## Layer
+
+A **Layer** (a MoonModule, child of Layers) owns:
 - A **buffer** — the light data effects write into (logical space)
-- A **mapping LUT** — built by the layer from the LayoutGroup's layouts and the layer's static modifiers
+- A **mapping LUT** — built by the layer from the shared Layouts' layouts and the layer's static modifiers
 - **Effects** (MoonModules, ordered list) — write light values into the buffer
 - **Modifiers** (MoonModules, ordered list) — transform the LUT or light values
 
-A layer can have **multiple effects**. Effects are not blended — they write to the buffer sequentially in the order they are listed. Each effect overwrites or adds to what the previous effect wrote. This allows layering patterns (e.g. a base color effect followed by a sparkle effect).
+A layer can have **multiple effects**. Effects are not blended — they write to the buffer sequentially in the order they are listed. Each effect overwrites or adds to what the previous effect wrote. This allows stacked patterns (e.g. a base-colour effect followed by a sparkle effect).
 
-A layer can have **multiple modifiers**. Modifiers run in order, each taking the result of the previous modifier as input. This means the order matters: mirror-then-rotate produces different output than rotate-then-mirror. Static modifiers chain during LUT build, dynamic modifiers chain during rendering.
+A layer can have **multiple modifiers**. Modifiers run in order, each taking the result of the previous modifier as input. Order matters: mirror-then-rotate produces different output than rotate-then-mirror. Static modifiers chain during LUT build; dynamic modifiers chain during rendering.
 
-Each layer references the shared LayoutGroup. The layer builds its own LUT by iterating the LayoutGroup's layout coordinates and applying its static modifiers in order. Different layers can have different modifiers, producing different LUTs from the same LayoutGroup.
-
-The number of active layers depends on available memory — a device with PSRAM can run many layers; a device without may be limited to one.
+Each layer references the shared Layouts. The layer builds its own LUT by iterating the Layouts container's coordinates and applying its static modifiers in order. Different layers in the Layers container can have different modifiers, producing different LUTs from the same Layouts.
 
 ## Effects
 
-Effects produce light colors. They write into the layer's buffer, which represents a logical grid. The layer determines the buffer's dimensions (width, height, depth) from the LayoutGroup and its own start/end position within the physical layout, and its modifiers. Effects receive these logical dimensions and elapsed time (millis) as their rendering context. They compute light positions from the buffer index (e.g. `x = i % width`, `y = i / width`).
+Effects produce light colors. They write into the Layer's buffer, which represents a logical grid. The Layer determines the buffer's dimensions (width, height, depth) from the Layouts and its own start/end percentages within the physical layout, and its modifiers. Effects receive these logical dimensions and elapsed time (millis) as their rendering context. They compute light positions from the buffer index (e.g. `x = i % width`, `y = i / width`).
 
 Effects use elapsed time for animation, not frame count. This makes animation speed independent of frame rate — an effect looks the same at 30fps and 60fps. For multi-device sync, the leader synchronizes elapsed time across devices (same approach as syncing a frame counter, but frame-rate independent).
 
@@ -102,7 +109,7 @@ Hot-path cost: extrude pays one comparison and returns for the D3 case. For D1/D
 
 Today's declarations:
 - **NoiseEffect**, **PlasmaEffect** — D3. Their math has real z variation (trilinear value noise / a fifth z-driven sine).
-- **RainbowEffect**, **CheckerboardEffect**, **SpiralEffect**, **RipplesEffect**, **GlowParticlesEffect**, **LavaLampEffect**, **MetaballsEffect**, **PlasmaPaletteEffect**, **FireEffect**, **ParticlesEffect** — D2. Their loops iterate y and x only; extrude fills z. The two stateful ones (Fire, Particles) size their dynamic buffers to `w × h × cpl` (z=0 plane) rather than `w × h × d × cpl` (full 3D buffer), saving heap on 3D layers.
+- **RainbowEffect**, **CheckerboardEffect**, **SpiralEffect**, **RipplesEffect**, **GlowParticlesEffect**, **LavaLampEffect**, **MetaballsEffect**, **PlasmaPaletteEffect**, **FireEffect**, **ParticlesEffect** — D2. Their loops iterate y and x only; extrude fills z. The two stateful ones (Fire, Particles) size their dynamic buffers to `w × h × cpl` (z=0 plane) rather than `w × h × d × cpl` (full 3D buffer), saving heap on 3D Layers.
 
 Each effect's `dimensions()` is a claim about which axes its loop iterates — not which axes its math could in principle vary along. A "D2 fire" could in future be promoted to D3 by adding z-aware heat propagation; until then declaring it D2 is the honest description of what the loop does today.
 
@@ -132,9 +139,9 @@ The LUT supports four mapping types:
 
 Because mapping and blending happen together in a single pass over each layer, there is no intermediate "mapped but unblended" buffer. The physical buffer is the only output-side allocation.
 
-## DriverGroup
+## Drivers
 
-A **DriverGroup** (MoonModule) groups output drivers. It is the consumer side of the pipeline. The DriverGroup owns a shared output buffer and performs blend+map from all layers into it each frame. Individual drivers then read from this buffer to push to hardware/network.
+**Drivers** (a MoonModule) is the top-level container for one or more drivers. It is the consumer side of the pipeline. The Drivers container owns a shared output buffer and performs blend+map from every layer's buffer into it each frame. Individual drivers then read from this buffer to push to hardware/network.
 
 The shared output buffer is necessary because blend+map writes to arbitrary physical positions (via LUT) — the output is not filled sequentially. A driver cannot read chunk-by-chunk until the full buffer is populated. Direct-to-DMA/packet optimization would only work for the trivial case (1:1 identical mapping with no modifiers).
 
@@ -144,7 +151,7 @@ Each driver (MoonModule) speaks one protocol:
 - **Preview:** streams light data to the web UI via WebSocket.
 - **Desktop output:** SDL2 or terminal for visual preview. Desktop also serves as a high-speed processing node, driving lights via ArtNet/DDP over the network.
 
-Drivers read from the DriverGroup's output buffer. Everything before the DriverGroup is platform-independent.
+Each driver child reads from the Drivers container's output buffer. Everything before the Drivers container is platform-independent.
 
 Network-based drivers (ArtNet, E1.31, DDP) must pace their packet output — never blast all universe packets in a tight loop. Requires both FPS limiting (skip frames if called too fast) and inter-packet delay (microsecond pause between universe packets within a frame). Without pacing, receivers drop packets and the output appears broken.
 
@@ -157,17 +164,18 @@ The web UI (specified in [moonmodules/core/ui.md](moonmodules/core/ui.md)) is do
 The light pipeline pins its top-level shape in `main.cpp` — the UI shows it but cannot reorder these roots. The order matches the data flow (input → render → output):
 
 ```text
-LayoutGroup
+Layouts
   └─ GridLayout (or other layouts)
-Layer
-  └─ effects (NoiseEffect, RainbowEffect, …)
-  └─ modifiers (MirrorModifier, …)
-DriverGroup
+Layers
+  └─ Layer
+       └─ effects (NoiseEffect, RainbowEffect, …)
+       └─ modifiers (MirrorModifier, …)
+Drivers
   └─ ArtNetSendDriver
   └─ PreviewDriver
 ```
 
-System modules (Filesystem, System, Network, HttpServer) sit alongside the light pipeline at the same level — they're independent of the domain but always present. Child reorder *within* a parent (an effect within a Layer, a driver within DriverGroup) is supported via drag-and-drop; root reorder is not.
+System modules (Filesystem, System, Network, HttpServer) sit alongside the light pipeline at the same level — they're independent of the domain but always present. Child reorder *within* a parent (an effect within a Layer, a driver within Drivers, a Layer within Layers) is supported via drag-and-drop; root reorder is not.
 
 ### 3D preview channel
 
@@ -185,11 +193,11 @@ The header carrying *both* downsampled and original dims is what makes this ligh
 
 ### Emoji-key assignments
 
-The UI's chip filter (see [core/ui.md § Type picker](moonmodules/core/ui.md#type-picker)) treats `tags()` as opaque graphemes — each domain assigns its own meanings. The light-domain assignments follow the [MoonLight emoji key](https://moonmodules.org/MoonLight/moonlight/overview/#emoji-key) with one projectMM-specific addition (creator):
+The UI's chip filter (see [core/ui.md § Type picker](moonmodules/core/ui.md#type-picker)) treats `tags()` as opaque graphemes — each domain assigns its own meanings. The light-domain assignments follow the [MoonLight emoji key](https://moonmodules.org/MoonLight/moonlight/overview/#emoji-key) with two projectMM-specific additions (layer role, creator):
 
 | Category | Emoji | Meaning | Source |
 |---|---|---|---|
-| Role | 🔥 / 💎 / 🚥 / ☸️ / ⚙️ | effect / modifier / layout / driver / generic | derived in UI from `role` |
+| Role | 🔥 / 💎 / 🚥 / ☸️ / 🥞 / ⚙️ | effect / modifier / layout / driver / layer / generic | derived in UI from `role` |
 | Dimensional | 📏 / 🟦 / 🧊 | 1D / 2D / 3D — for effects: which axes it iterates; for modifiers: which axes it can transform | derived in UI from `dim` |
 | Origin | 🐙 / 💫 / ⚡️ | WLED / MoonLight / FastLED | `tags()` |
 | Creator | 🦅 | David Jupijn / Rising Step | `tags()` |
@@ -200,7 +208,7 @@ Role and dimensional emoji are derived (not stored in `tags()`) so the same char
 
 ## Rebuild Propagation
 
-When a control value changes on a layout, the pipeline must rebuild: layers rebuild their LUTs, the DriverGroup reallocates its output buffer. When a modifier control changes, only the affected layer's LUT is rebuilt (the output buffer size doesn't change). This propagation is built into the framework — not handled by ad-hoc dirty flag checks in the application entry point.
+When a control value changes on a layout, the pipeline must rebuild: every Layer rebuilds its LUT, and the Drivers container reallocates its output buffer. When a modifier control changes, only the affected Layer's LUT is rebuilt (the output buffer size doesn't change). This propagation is built into the framework — not handled by ad-hoc dirty flag checks in the application entry point.
 
 The current mechanism: `Scheduler::rebuild()` re-runs `onAllocateMemory()` across the module tree, which re-evaluates layout-derived dimensions, LUTs, and buffer sizes. The HTTP handlers that change layout/modifier order or structure trigger `rebuild()` after the mutation.
 
@@ -224,9 +232,9 @@ The core parallelism model (see `architecture.md`) applies to the light pipeline
 
 The logical and physical buffers **are** the double buffer: producers write into logical buffers while consumers read from the physical buffer. At the frame boundary, roles swap via atomic pointer swap — the driver transmits frame N while effects render frame N+1.
 
-When memory is sufficient (even on ESP32 without PSRAM for small layouts up to ~4K lights), the system uses double buffering with a separate physical buffer, mapping, blending, and producer/consumer parallelism — same as devices with PSRAM.
+When memory is sufficient, the system uses double buffering with a separate physical buffer, mapping, blending, and producer/consumer parallelism — same as devices with PSRAM. ESP32 without PSRAM has shown to handle this configuration up to 16K LEDs (128×128 measured live; see [performance.md](performance.md)).
 
-When memory is too tight for double buffering (large layouts on devices without PSRAM), the system is limited to: one layer with 1:1 unshuffled mapping, effects write directly into their layer buffer, drivers read from that same buffer to fill DMA/UDP packets directly. No blend+map step, no mapping, no blending, no parallelism. This is how the 12K LED stretch goal is achieved on ESP32 without PSRAM.
+When memory is too tight for double buffering, the system degrades to: one Layer with 1:1 unshuffled mapping, effects write directly into that Layer's buffer, drivers read from that same buffer to fill DMA/UDP packets directly. No blend+map step, no mapping, no blending, no parallelism. This degraded path is what would let an even larger installation fit on an ESP32 without PSRAM; the full-pipeline path already covers the 16K range.
 
 ## Memory Strategy
 
@@ -264,7 +272,7 @@ Each degradation is observable via `lutSkipped()` and reported in `/api/system` 
 
 **Invariants** (non-negotiable):
 - Effects ALWAYS write to their layer's logical buffer. Never to output, never to physical coordinates.
-- DriverGroup ALWAYS owns the output path (blending, mapping, brightness correction, channel reordering).
+- Drivers ALWAYS owns the output path (blending, mapping, brightness correction, channel reordering).
 - Layer buffer is mandatory — if it doesn't fit, reduce dimensions until it does ("at least see something").
 
 ### Per-module memory reporting
@@ -276,9 +284,8 @@ Every MoonModule reports `classSize()` (sizeof the class instance) and `dynamicB
 | Device | Memory | Typical capability |
 |--------|--------|--------------------|
 | ESP32 + OPI PSRAM | 2-8 MB | Many layers, 10K+ LEDs |
-| ESP32, no PSRAM, small layout | ~320 KB internal | Full pipeline: double buffering, mapping, blending, parallelism. Up to ~4K lights. |
-| ESP32, no PSRAM, large layout | ~320 KB internal | Fallback: single layer, 1:1 direct, no blending/parallelism. 4K-16K lights. |
-| Teensy 4.x | 1 MB internal, no PSRAM | Single/few layers, excellent DMA-based LED output (OctoWS2811), no WiFi (USB or serial control) |
+| ESP32, no PSRAM | ~320 KB internal | Full pipeline: double buffering, mapping, blending, parallelism. Proven up to 16K lights (128×128 measured live on Olimex; see [performance.md](performance.md)). The degraded-fallback path (single Layer, 1:1 direct, no blending) is reserved for installations that grow beyond what the full pipeline fits. |
+| Teensy 4.x | 1 MB internal, no PSRAM | Comfortable headroom for several layers; excellent DMA-based LED output (OctoWS2811). Ethernet optional (4.1 has it built-in; 4.0 doesn't). |
 | Desktop / RPi | Abundant | No constraints |
 
 The architecture does not assume PSRAM is present. Buffer counts and sizes are determined at runtime based on available memory. They are reallocated when configuration changes.

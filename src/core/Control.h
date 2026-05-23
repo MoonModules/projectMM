@@ -8,6 +8,9 @@ namespace mm {
 enum class ControlType : uint8_t {
     Uint8,
     Uint16,
+    Int16,      // signed 16-bit. Used by `lengthType` coordinate controls (Layer
+                // start/end), where negative values are legal — e.g. a Layer
+                // dragged out of the visible area by a future modifier.
     Bool,
     Text,
     Password,   // secret text — /api/state serializes it XOR-obfuscated +
@@ -50,10 +53,12 @@ public:
         controls_[count_++] = {&var, name, 0, ControlType::Uint16, 0, 0};
     }
 
-    // lengthType (int16_t) — same wire format as uint16, values are always positive for dimensions
+    // lengthType (int16_t) — signed wire format so negative values round-trip
+    // correctly. Used by Layer's start/end controls, where a future modifier
+    // could legally drag the Layer to negative coordinates.
     void addInt16(const char* name, int16_t& var) {
         grow();
-        controls_[count_++] = {&var, name, 0, ControlType::Uint16, 0, 0};
+        controls_[count_++] = {&var, name, 0, ControlType::Int16, 0, 0};
     }
 
     void addBool(const char* name, bool& var) {

@@ -10,7 +10,7 @@
 namespace {
 
 struct Ctx {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     mm::Layer layer;
 
@@ -18,8 +18,8 @@ struct Ctx {
         grid.width = static_cast<mm::lengthType>(w);
         grid.height = static_cast<mm::lengthType>(h);
         grid.depth = 1;
-        layoutGroup.addChild(&grid);
-        layer.setLayoutGroup(&layoutGroup);
+        layouts.addChild(&grid);
+        layer.setLayouts(&layouts);
         layer.setChannelsPerLight(3);
     }
 

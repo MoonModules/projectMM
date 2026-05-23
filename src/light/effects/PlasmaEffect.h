@@ -65,6 +65,10 @@ public:
                     uint8_t s3 = sin8(static_cast<uint8_t>(xs + yx_off));
                     uint8_t s4 = sin8(static_cast<uint8_t>(
                         static_cast<uint8_t>(static_cast<uint8_t>(x) * step_y) + yx_neg));
+                    // The 5-term path uses /5 (the 2D path's /4 is the >>2 below); both
+                    // average the sines. /5 is kept literal — -O3 lowers it to magic
+                    // multiply + shift automatically, so hand-rolling the reciprocal
+                    // would produce identical assembly with worse readability.
                     uint8_t hue = is3d
                         ? static_cast<uint8_t>(
                               (static_cast<uint16_t>(s1 + s2_y + s3 + s4 + s5_z) / 5) + hue_shift)

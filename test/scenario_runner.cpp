@@ -6,11 +6,11 @@
 #include "core/ModuleFactory.h"
 #include "light/layouts/GridLayout.h"
 #include "light/Layer.h"
-#include "light/layouts/LayoutGroup.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/NoiseEffect.h"
 #include "light/modifiers/MirrorModifier.h"
-#include "light/drivers/DriverGroup.h"
+#include "light/drivers/Drivers.h"
 #include "light/drivers/ArtNetSendDriver.h"
 #include "platform/platform.h"
 
@@ -144,13 +144,13 @@ static std::string readFile(const char* path) {
 static void registerScenarioTypes() {
     static bool done = false;
     if (done) return;
-    mm::ModuleFactory::registerType<mm::LayoutGroup>("LayoutGroup");
+    mm::ModuleFactory::registerType<mm::Layouts>("Layouts");
     mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout");
     mm::ModuleFactory::registerType<mm::Layer>("Layer");
     mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
     mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect");
     mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier");
-    mm::ModuleFactory::registerType<mm::DriverGroup>("DriverGroup");
+    mm::ModuleFactory::registerType<mm::Drivers>("Drivers");
     mm::ModuleFactory::registerType<mm::ArtNetSendDriver>("ArtNetSendDriver");
     done = true;
 }
@@ -184,17 +184,17 @@ struct ScenarioContext {
             auto& props = step["props"];
             if (std::strcmp(type, "Layer") == 0) {
                 auto* layer = static_cast<mm::Layer*>(mod);
-                if (props.has("layoutGroup")) {
-                    auto* lg = static_cast<mm::LayoutGroup*>(modules[props["layoutGroup"].str]);
-                    if (lg) layer->setLayoutGroup(lg);
+                if (props.has("layouts")) {
+                    auto* lg = static_cast<mm::Layouts*>(modules[props["layouts"].str]);
+                    if (lg) layer->setLayouts(lg);
                 }
                 if (props.has("channelsPerLight")) {
                     layer->setChannelsPerLight(static_cast<uint8_t>(props["channelsPerLight"].num));
                 }
-            } else if (std::strcmp(type, "DriverGroup") == 0) {
+            } else if (std::strcmp(type, "Drivers") == 0) {
                 if (props.has("layer")) {
                     auto* l = static_cast<mm::Layer*>(modules[props["layer"].str]);
-                    if (l) static_cast<mm::DriverGroup*>(mod)->setLayer(l);
+                    if (l) static_cast<mm::Drivers*>(mod)->setLayer(l);
                 }
             }
         }
@@ -323,8 +323,8 @@ static int runScenario(const char* path) {
     // Verify buffer — the render buffer lives on the Layer module.
     auto* layer = static_cast<mm::Layer*>(ctx.modules.count("Layer")
                                               ? ctx.modules["Layer"] : nullptr);
-    auto* driverGroup = static_cast<mm::DriverGroup*>(ctx.modules.count("DriverGroup")
-                                              ? ctx.modules["DriverGroup"] : nullptr);
+    auto* drivers = static_cast<mm::Drivers*>(ctx.modules.count("Drivers")
+                                              ? ctx.modules["Drivers"] : nullptr);
     if (!layer) {
         std::printf("  (no Layer module — skipping buffer checks)\n");
         ctx.scheduler.teardown();
@@ -337,10 +337,10 @@ static int runScenario(const char* path) {
     std::printf("  Buffer: %u lights, %u bytes\n",
                 static_cast<unsigned>(buf.count()),
                 static_cast<unsigned>(buf.bytes()));
-    std::printf("  LUT: %s  dynamicBytes: Layer=%u DriverGroup=%u\n",
+    std::printf("  LUT: %s  dynamicBytes: Layer=%u Drivers=%u\n",
                 layer->lut().hasLUT() ? "has LUT" : "identity",
                 static_cast<unsigned>(layer->dynamicBytes()),
-                static_cast<unsigned>(driverGroup ? driverGroup->dynamicBytes() : 0));
+                static_cast<unsigned>(drivers ? drivers->dynamicBytes() : 0));
 
     // Warmup
     for (int i = 0; i < WARMUP_FRAMES; i++) {

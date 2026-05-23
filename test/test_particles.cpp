@@ -3,15 +3,15 @@
 #include "light/layouts/GridLayout.h"
 
 TEST_CASE("ParticlesEffect allocates trail buffer when enabled") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 16;
     grid.height = 16;
     grid.depth = 1;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     mm::ParticlesEffect particles;
@@ -22,15 +22,15 @@ TEST_CASE("ParticlesEffect allocates trail buffer when enabled") {
 }
 
 TEST_CASE("ParticlesEffect renders non-zero buffer after one frame") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 16;
     grid.height = 16;
     grid.depth = 1;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     mm::ParticlesEffect particles;
@@ -48,15 +48,15 @@ TEST_CASE("ParticlesEffect renders non-zero buffer after one frame") {
 }
 
 TEST_CASE("ParticlesEffect frees trail buffer when disabled") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 8;
     grid.height = 8;
     grid.depth = 1;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     mm::ParticlesEffect particles;

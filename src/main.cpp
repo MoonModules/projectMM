@@ -1,4 +1,5 @@
 #include "core/Scheduler.h"
+#include "light/Layers.h"
 #include "light/layouts/GridLayout.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/NoiseEffect.h"
@@ -29,9 +30,10 @@ static void registerModuleTypes() {
     // Second argument is the module's spec page relative to docs/moonmodules/ —
     // the UI builds a help link from it. Filename always matches the type name.
     // Containers
-    mm::ModuleFactory::registerType<mm::LayoutGroup>("LayoutGroup", "light/LayoutGroup.md");
+    mm::ModuleFactory::registerType<mm::Layouts>("Layouts", "light/Layouts.md");
+    mm::ModuleFactory::registerType<mm::Layers>("Layers", "light/Layers.md");
     mm::ModuleFactory::registerType<mm::Layer>("Layer", "light/Layer.md");
-    mm::ModuleFactory::registerType<mm::DriverGroup>("DriverGroup", "light/DriverGroup.md");
+    mm::ModuleFactory::registerType<mm::Drivers>("Drivers", "light/Drivers.md");
     // Concrete modules. registerType<T> captures the type's dimensions() via
     // if-constexpr when present — EffectBase and ModifierBase both expose one,
     // so the UI's 📏/🟦/🧊 chip lights up without any per-domain wrapper.
@@ -86,6 +88,16 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     // "ArtNetReceive". setName() overrides are only needed for genuine renames,
     // not for default display.
 
+    // Note: ModuleFactory::create can in principle return nullptr (factory entry
+    // missing, OOM at probe construction). We deliberately do not null-check
+    // each result here — these are startup-time allocations and the right
+    // behaviour on failure is "device can't boot the light pipeline; crash with
+    // a clear stack trace so the operator can fix the build/config." On ESP32
+    // the panic handler reports a usable backtrace; on desktop the segfault
+    // surfaces under gdb/lldb just as cleanly. Wrapping every line in an
+    // if(!x) std::abort() pattern would add ~20 lines of boilerplate without
+    // improving the observed failure mode.
+
     // Filesystem (first — wires the load hook into the scheduler so persisted values
     // overlay into other modules' bound variables before their setup() runs)
     auto* filesystemModule = static_cast<mm::FilesystemModule*>(mm::ModuleFactory::create("FilesystemModule"));
@@ -100,16 +112,21 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     networkModule->setScheduler(&scheduler);
     networkModule->setSystemModule(systemModule);
 
-    // Layout
-    auto* layoutGroup = static_cast<mm::LayoutGroup*>(mm::ModuleFactory::create("LayoutGroup"));
+    // Layouts: top-level container; one or more layouts. Today one GridLayout.
+    auto* layouts = static_cast<mm::Layouts*>(mm::ModuleFactory::create("Layouts"));
     auto* grid = static_cast<mm::GridLayout*>(mm::ModuleFactory::create("GridLayout"));
     grid->width = gridW;
     grid->height = gridH;
-    layoutGroup->addChild(grid);
+    layouts->addChild(grid);
 
+    // Layers: top-level container; one or more layers, each rendering
+    // into its own buffer. Today one Layer with one effect + one modifier.
+    auto* layersContainer = static_cast<mm::Layers*>(mm::ModuleFactory::create("Layers"));
     auto* layer = static_cast<mm::Layer*>(mm::ModuleFactory::create("Layer"));
-    layer->setLayoutGroup(layoutGroup);
     layer->setChannelsPerLight(3);
+    layersContainer->addChild(layer);
+    // setLayouts wires the shared Layouts to the container AND propagates to every child Layer.
+    layersContainer->setLayouts(layouts);
 
     auto* noise = mm::ModuleFactory::create("NoiseEffect");
     layer->addChild(noise);
@@ -117,45 +134,50 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     auto* mirror = mm::ModuleFactory::create("MirrorModifier");
     layer->addChild(mirror);
 
-    auto* driverGroup = static_cast<mm::DriverGroup*>(mm::ModuleFactory::create("DriverGroup"));
-    driverGroup->setLayer(layer);
+    // Drivers: top-level container; one or more Driver children. Today wired to
+    // the single active Layer (placeholder); the composition follow-up will read
+    // from the Layers container directly and blend across N Layer buffers.
+    auto* drivers = static_cast<mm::Drivers*>(mm::ModuleFactory::create("Drivers"));
+    drivers->setLayer(layersContainer->activeLayer());
 
     auto* artnet = mm::ModuleFactory::create("ArtNetSendDriver");
-    driverGroup->addChild(artnet);  // name = "ArtNetSend" (factory default) — disambiguates from a future ArtNetReceive
+    drivers->addChild(artnet);  // name = "ArtNetSend" (factory default) — disambiguates from a future ArtNetReceive
 
     auto* previewFrame = new mm::PreviewFrame();
     auto* preview = static_cast<mm::PreviewDriver*>(mm::ModuleFactory::create("PreviewDriver"));
-    // PreviewDriver reads physical dimensions from Layer at frame time (via DriverGroup's
-    // setLayer wiring) so runtime grid resizes are reflected in the preview header.
+    // PreviewDriver reads physical dimensions from the active Layer at frame
+    // time (via Drivers' setLayer wiring) so runtime grid resizes show in the
+    // preview header.
     preview->setPreviewFrame(previewFrame);
-    driverGroup->addChild(preview);
+    drivers->addChild(preview);
 
     auto* httpServer = static_cast<mm::HttpServerModule*>(mm::ModuleFactory::create("HttpServerModule"));
     httpServer->port = httpPort;
     httpServer->setScheduler(&scheduler);
     httpServer->setPreviewFrame(previewFrame);
 
-    // Register top-level modules with scheduler (scheduler deletes on teardown)
+    // Register top-level modules with scheduler (scheduler deletes on teardown).
     // Order matters: filesystem first (load hook runs before any module's setup),
-    // then system (deviceName), network, light pipeline, then HTTP
+    // then system (deviceName), network, light pipeline (Layouts → Layers → Drivers),
+    // then HTTP. The Scheduler walks roots in this order each tick.
     scheduler.addModule(filesystemModule);
     scheduler.addModule(systemModule);
     scheduler.addModule(networkModule);
-    scheduler.addModule(layoutGroup);
-    scheduler.addModule(layer);
-    scheduler.addModule(driverGroup);
+    scheduler.addModule(layouts);
+    scheduler.addModule(layersContainer);
+    scheduler.addModule(drivers);
     scheduler.addModule(httpServer);
 
     scheduler.setup();
 
-    uint32_t lights = layoutGroup->totalLightCount();
+    uint32_t lights = layouts->totalLightCount();
     uint32_t bufBytes = lights * 3;
     std::printf("projectMM running — grid %dx%d, %lu lights, buffer %lu bytes\n",
                 grid->width, grid->height,
                 static_cast<unsigned long>(lights),
                 static_cast<unsigned long>(bufBytes));
-    std::printf("sizeof: MoonModule=%zu Layer=%zu DriverGroup=%zu Grid=%zu HttpServer=%zu\n",
-                sizeof(mm::MoonModule), sizeof(mm::Layer), sizeof(mm::DriverGroup),
+    std::printf("sizeof: MoonModule=%zu Layer=%zu Drivers=%zu Grid=%zu HttpServer=%zu\n",
+                sizeof(mm::MoonModule), sizeof(mm::Layer), sizeof(mm::Drivers),
                 sizeof(mm::GridLayout), sizeof(mm::HttpServerModule));
     std::printf("ArtNet → %s\n", static_cast<mm::ArtNetSendDriver*>(artnet)->ip);
     // The server binds all interfaces (INADDR_ANY) — reachable from other

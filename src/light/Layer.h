@@ -1,30 +1,75 @@
 #pragma once
 
 #include "light/Buffer.h"
-#include "light/layouts/LayoutGroup.h"
+#include "light/layouts/Layouts.h"
 #include "light/effects/EffectBase.h"
 #include "light/MappingLUT.h"
 #include "light/modifiers/ModifierBase.h"
 #include "platform/platform.h"
 
 #include <cstdio>
+#include <cstring>  // std::memcpy in extrude()
 
 namespace mm {
 
 class Layer : public MoonModule {
 public:
-    void setLayoutGroup(LayoutGroup* lg) { layoutGroup_ = lg; }
+    ModuleRole role() const override { return ModuleRole::Layer; }
+
+    // start/end carve a region of the shared Layouts into this Layer's buffer,
+    // expressed as **percentages of the physical extent on each axis** (0..100
+    // for the visible area). Percentages are resilient to physical layout
+    // changes — a `startX=25%` Layer stays at the same relative position when
+    // the panel resizes from 64×64 to 128×128, rather than ending up at the
+    // wrong absolute pixel.
+    //
+    // Sentinel: `start = 0`, `end = 0` means "use the full extent on that axis"
+    // — a zero-width region would be meaningless, so 0 is reused. The defaults
+    // below (all zero) therefore match the full physical layout, byte-identical
+    // to the pre-Layers pipeline.
+    //
+    // Negative values and values > 100 are legal: a future modifier could drag
+    // a Layer in or out of the visible area by shifting start/end past 0% or
+    // 100% (e.g. `startX = -50` means the Layer extends 50% off the left edge
+    // of the layout). ControlType::Int16 is the wire type so negative values
+    // round-trip correctly through /api/state, /api/types, and persistence.
+    // `lengthType` (int16_t) is reused so the type matches width/height/depth
+    // — the *semantics* (percent vs pixel) live in the field name and spec.
+    //
+    // Spec: docs/architecture-light.md § Layer.
+    lengthType startX = 0;
+    lengthType startY = 0;
+    lengthType startZ = 0;
+    lengthType endX = 0;
+    lengthType endY = 0;
+    lengthType endZ = 0;
+
+    void onBuildControls() override {
+        // Names match the field names; the percent semantic lives in the spec
+        // (Layer.md § start/end controls) and is reflected in the comment above.
+        controls_.addInt16("startX", startX);
+        controls_.addInt16("startY", startY);
+        controls_.addInt16("startZ", startZ);
+        controls_.addInt16("endX",   endX);
+        controls_.addInt16("endY",   endY);
+        controls_.addInt16("endZ",   endZ);
+        // Cascade to children (effects and modifiers) — preserves the default
+        // base behaviour we just overrode.
+        MoonModule::onBuildControls();
+    }
+
+    void setLayouts(Layouts* lg) { layouts_ = lg; }
     void setChannelsPerLight(uint8_t cpl) { channelsPerLight_ = cpl; }
 
     void onAllocateMemory() override {
-        if (!layoutGroup_) return;
-        nrOfLightsType physicalCount = layoutGroup_->totalLightCount();
+        if (!layouts_) return;
+        nrOfLightsType physicalCount = layouts_->totalLightCount();
         if (physicalCount == 0) return;
 
         // Compute physical dimensions from layout
         struct DimCtx { lengthType maxX, maxY, maxZ; };
         DimCtx dctx{0, 0, 0};
-        layoutGroup_->forEachCoord([](void* ctx, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
+        layouts_->forEachCoord([](void* ctx, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
             auto* d = static_cast<DimCtx*>(ctx);
             if (x > d->maxX) d->maxX = x;
             if (y > d->maxY) d->maxY = y;
@@ -104,11 +149,11 @@ public:
     uint32_t elapsed() const { return elapsed_; }
 
     nrOfLightsType physicalLightCount() const {
-        return layoutGroup_ ? layoutGroup_->totalLightCount() : 0;
+        return layouts_ ? layouts_->totalLightCount() : 0;
     }
 
     // Physical dimensions match the actual LED arrangement (computed in onAllocateMemory from
-    // the LayoutGroup). PreviewDriver and any future driver that needs to describe the LED
+    // the Layouts). PreviewDriver and any future driver that needs to describe the LED
     // shape should read these rather than caching values from main.cpp startup.
     lengthType physicalWidth() const { return physicalWidth_; }
     lengthType physicalHeight() const { return physicalHeight_; }
@@ -190,7 +235,7 @@ public:
     }
 
 private:
-    LayoutGroup* layoutGroup_ = nullptr;
+    Layouts* layouts_ = nullptr;
     Buffer buffer_;
     MappingLUT lut_;
     uint8_t channelsPerLight_ = 3;

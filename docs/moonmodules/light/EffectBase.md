@@ -4,7 +4,7 @@ Light-domain MoonModule subclass for effects. Adds rendering context.
 
 ## Design
 
-`EffectBase` is a zero-state convenience layer: it holds no data of its own, just accessors (`buffer()`, `width()`, `height()`, `depth()`, `elapsed()`, …) that forward to the parent `Layer`. An effect reads its rendering context through these instead of caching a `Layer*` and the dimensions itself. `DriverBase` plays the same role for drivers against `DriverGroup`.
+`EffectBase` is a zero-state convenience layer: it holds no data of its own, just accessors (`buffer()`, `width()`, `height()`, `depth()`, `elapsed()`, …) that forward to the parent `Layer`. An effect reads its rendering context through these instead of caching a `Layer*` and the dimensions itself. `DriverBase` plays the same role for drivers against `Drivers`.
 
 ## Animation guidelines
 

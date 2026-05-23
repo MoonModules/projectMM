@@ -55,7 +55,7 @@ The firmware always includes Ethernet support — no separate firmware for Ether
 
 ### Boot order: network before light buffers
 
-NetworkModule must be registered with the Scheduler **before** Layer and DriverGroup. The Scheduler runs setup() sequentially by registration order. This ensures network memory is claimed first, and the light pipeline's adaptive allocation (`canAllocate()`) sees the actual remaining heap — not an optimistic number that shrinks later when WiFi starts.
+NetworkModule must be registered with the Scheduler **before** Layer and Drivers. The Scheduler runs setup() sequentially by registration order. This ensures network memory is claimed first, and the light pipeline's adaptive allocation (`canAllocate()`) sees the actual remaining heap — not an optimistic number that shrinks later when WiFi starts.
 
 ### Runtime transitions
 

@@ -93,19 +93,22 @@ public:
     //   Layout   → strip "Layout"   (GridLayout → Grid)
     //   Driver   → strip "Driver"   (PreviewDriver → Preview)
     //   Generic  → strip "Module"   (FilesystemModule → Filesystem)
-    // Names without the suffix are returned unchanged (Layer, LayoutGroup, DriverGroup).
+    //   Layer    → no suffix (the class is literally named "Layer")
+    // Names without the suffix are returned unchanged (Layouts, Layers, Drivers).
     static const char* displayNameFor(const char* typeName, ModuleRole role) {
-        const char* suffix = nullptr;
+        const char* suffix = "";
         switch (role) {
             case ModuleRole::Effect:   suffix = "Effect";   break;
             case ModuleRole::Modifier: suffix = "Modifier"; break;
             case ModuleRole::Layout:   suffix = "Layout";   break;
             case ModuleRole::Driver:   suffix = "Driver";   break;
             case ModuleRole::Generic:  suffix = "Module";   break;
+            case ModuleRole::Layer:    return typeName;     // no suffix to strip
         }
         size_t typeLen = std::strlen(typeName);
         size_t suffixLen = std::strlen(suffix);
-        if (typeLen <= suffixLen || std::strcmp(typeName + typeLen - suffixLen, suffix) != 0) {
+        if (suffixLen == 0 || typeLen <= suffixLen ||
+            std::strcmp(typeName + typeLen - suffixLen, suffix) != 0) {
             return typeName;  // Suffix not present — leave the name untouched.
         }
         // Copy the prefix into a static buffer (reused per create call; setName

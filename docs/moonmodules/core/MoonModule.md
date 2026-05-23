@@ -35,7 +35,7 @@ Controls bind to class variables by reference. Hot-path code reads the variable 
 
 ## Per-module timing
 
-Every MoonModule tracks `loopTimeUs()` — average microseconds per tick, computed over a 1-second window. The Scheduler times top-level modules; containers (Layer, DriverGroup) time their children. `publishTiming(frameCount)` recurses the tree every second to compute averages.
+Every MoonModule tracks `loopTimeUs()` — average microseconds per tick, computed over a 1-second window. The Scheduler times top-level modules; containers (Layer, Drivers) time their children. `publishTiming(frameCount)` recurses the tree every second to compute averages.
 
 `tickTimeUs` is the primary performance metric. FPS is derived from it (`1000000 / tickTimeUs`). This gives per-module cost visibility at any depth in the tree.
 
@@ -45,7 +45,7 @@ Every MoonModule has an `enabled` property (default: true). The UI shows a check
 
 **Semantics are owned by each module, not by the Scheduler.** The Scheduler always calls `loop()`, `loop20ms()`, and `loop1s()` regardless of `enabled`. Modules decide what "disabled" means:
 
-- **Rendering modules** (Layer, DriverGroup, effects, modifiers): early-return from `loop()` when `enabled()` is false. The buffer keeps its last state; the user sees the layer/driver freeze. This is the typical UX intent of "turn this effect off."
+- **Rendering modules** (Layer, Drivers, effects, modifiers): early-return from `loop()` when `enabled()` is false. The buffer keeps its last state; the user sees the layer/driver freeze. This is the typical UX intent of "turn this effect off."
 - **System modules** (HttpServer, Network, Filesystem): typically ignore `enabled` and keep accepting connections / serving requests, since "disable HttpServer" via the UI would lock the user out.
 
 **`onOnOff(bool newEnabled)`** is called once per transition by `setEnabled(b)` when the value actually flips. Override it to start/stop sockets, free buffers, switch driver pins to high-impedance, etc. Default is a no-op. Use this instead of polling `enabled()` in the hot path for one-shot transition work.
@@ -56,7 +56,7 @@ Modules form a tree. Parent/child relationships only — no arbitrary DAG. Child
 
 ### Generic children in MoonModule base
 
-Every MoonModule has a dynamic children array. `addChild()`, `removeChild()`, `replaceChildAt(i, fresh)`, and `moveChildTo(child, newIndex)` are implemented once in the base class — containers (Layer, DriverGroup, LayoutGroup) do not override them. The array starts empty (zero allocation for leaf modules) and grows on demand during setup. This eliminates the per-container typed arrays (`effects_[]`, `drivers_[]`, `layouts_[]`) and typed add methods (`addEffect()`, `addDriver()`, `addLayout()`) that existed in earlier iterations.
+Every MoonModule has a dynamic children array. `addChild()`, `removeChild()`, `replaceChildAt(i, fresh)`, and `moveChildTo(child, newIndex)` are implemented once in the base class — containers (Layer, Drivers, Layouts) do not override them. The array starts empty (zero allocation for leaf modules) and grows on demand during setup. This eliminates the per-container typed arrays (`effects_[]`, `drivers_[]`, `layouts_[]`) and typed add methods (`addEffect()`, `addDriver()`, `addLayout()`) that existed in earlier iterations.
 
 `replaceChildAt` is used by [FilesystemModule](FilesystemModule.md) at load time to swap a child whose type differs from the persisted JSON. The caller owns the lifecycle of the returned old child (typically `teardown()` + `Scheduler::deleteTree`).
 

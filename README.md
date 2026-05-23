@@ -27,14 +27,14 @@ The [commit history](https://github.com/ewowi/projectMM/commits/main) and [`docs
 The system is two layers, kept separate as much as practical:
 
 - **Core** — a domain-neutral modular runtime. Everything is a [MoonModule](docs/moonmodules/core/MoonModule.md): effects, modifiers, layouts, drivers, and system services all share one class structure, lifecycle, and [control](docs/moonmodules/core/Control.md) mechanism. The core provides modules, a [Scheduler](docs/moonmodules/core/Scheduler.md), [persistence](docs/moonmodules/core/FilesystemModule.md), and platform abstraction — it knows nothing about lights. See [architecture.md](docs/architecture.md).
-- **Light domain** — built on the core. Effects write into per-layer [buffers](docs/moonmodules/light/Buffer.md) → a [mapping LUT](docs/moonmodules/light/MappingLUT.md) translates logical to physical positions → [drivers](docs/moonmodules/light/DriverGroup.md) output to hardware or network. See [architecture-light.md](docs/architecture-light.md).
+- **Light domain** — built on the core. Effects write into per-layer [buffers](docs/moonmodules/light/Buffer.md) → a [mapping LUT](docs/moonmodules/light/MappingLUT.md) translates logical to physical positions → [drivers](docs/moonmodules/light/Drivers.md) output to hardware or network. See [architecture-light.md](docs/architecture-light.md).
 
 ### Reference documents
 
 | Document | Description |
 |----------|-------------|
 | [architecture.md](docs/architecture.md) | Core: the domain-neutral runtime — MoonModule, controls, scheduling, persistence, platform abstraction, build, testing |
-| [architecture-light.md](docs/architecture-light.md) | Light domain: pipeline, [layouts](docs/moonmodules/light/LayoutGroup.md), [layers](docs/moonmodules/light/Layer.md), [effects](docs/moonmodules/light/EffectBase.md), modifiers, mapping, drivers, parallelism, memory strategy |
+| [architecture-light.md](docs/architecture-light.md) | Light domain: pipeline, [layouts](docs/moonmodules/light/Layouts.md), [layers](docs/moonmodules/light/Layer.md), [effects](docs/moonmodules/light/EffectBase.md), modifiers, mapping, drivers, parallelism, memory strategy |
 | [moonmodules/](docs/moonmodules/) | One spec page per module — [core](docs/moonmodules/core/) services and [light](docs/moonmodules/light/) effects, layouts, modifiers, drivers |
 | [performance.md](docs/performance.md) | Per-module timing and memory, per platform |
 | [testing.md](docs/testing.md) | Test inventory |

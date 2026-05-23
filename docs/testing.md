@@ -52,14 +52,14 @@ Tests `Buffer` in `src/light/Buffer.h`.
 
 ### GridLayout (`test/test_grid_layout.cpp`) {#gridlayout}
 
-Tests `GridLayout` and `LayoutGroup` in `src/light/GridLayout.h` and `src/light/LayoutGroup.h`.
+Tests `GridLayout` and `Layouts` in `src/light/layouts/GridLayout.h` and `src/light/layouts/Layouts.h`.
 
 - 4x4x1 grid yields 16 coordinates in row-major order (x fastest)
 - Correct (idx, x, y, z) at first, middle, and last positions
 - 2x2x2 grid yields 8 coordinates with correct z values
 - 1x1x1 edge case
-- LayoutGroup with one layout: totalLightCount and forEachCoord
-- LayoutGroup with two layouts: physical indices offset correctly
+- Layouts with one layout: totalLightCount and forEachCoord
+- Layouts with two layouts: physical indices offset correctly
 
 ### RainbowEffect (`test/test_rainbow.cpp`) {#rainbow}
 
@@ -162,6 +162,14 @@ Pins the contract that `EffectBase::dimensions()` and `Layer::extrude` form: a D
 - D3 effects (`NoiseEffect`, `PlasmaEffect`) on a 1D layer (16×1×1): same shape, even tighter (`w*cpl` bytes).
 - D2 effects (`CheckerboardEffect`, `FireEffect`, `ParticlesEffect`) on 3D grid (8×8×3): every z>0 slice byte-equals z=0 — proves extrude fills z for all three styles (stateless, stateful with heat grid, stateful with trail buffer). Catches a future regression where a D2 effect's `onAllocateMemory` resizes the dynamic buffer to the full 3D shape but the loop still writes only z=0.
 
+### Layers container (`test/test_layers_container.cpp`) {#layers-container}
+
+Pins the contract that the new top-level `Layers` container is a thin pass-through when it holds one layer (byte-identical to the pre-container single-layer pipeline), and that with two layers both child loops run and write their own buffers (composition not yet wired — covered separately when composition lands).
+
+- Single child: Layers + one Layer + RainbowEffect produces the same shape and a populated buffer that matches the bare-Layer reference. Bytes can't be exact-compared (RainbowEffect's phase uses `platform::millis()`, advancing between the two `loop()` calls), so structure (size, non-zero) is checked.
+- Two children: Layers + Layer(RainbowEffect) + Layer(CheckerboardEffect) — both child buffers are populated after one `loop()`. Confirms each Layer's `loop()` runs in order.
+- `Layers::activeLayer()` returns the first enabled child, the first child when none are enabled (fallback for dimension queries during boot/toggle-all-off), and `nullptr` when the container is empty.
+
 ### BlendMap (`test/test_blend_map.cpp`) {#blendmap}
 
 Tests `blendMap()` in `src/light/BlendMap.h`.
@@ -176,7 +184,7 @@ Scenario tests verify the integrated pipeline. Defined as JSON in `test/scenario
 
 ### base-pipeline (`test/scenarios/base-pipeline.json`) {#scenario-pipeline}
 
-Sets up the core pipeline: LayoutGroup → GridLayout → Layer → RainbowEffect → DriverGroup → ArtNetSendDriver.
+Sets up the core pipeline: Layouts → GridLayout → Layer → RainbowEffect → Drivers → ArtNetSendDriver.
 
 - Buffer allocated after setup
 - Buffer size matches layout light count
@@ -185,7 +193,7 @@ Sets up the core pipeline: LayoutGroup → GridLayout → Layer → RainbowEffec
 
 ### mirror (`test/scenarios/mirror.json`) {#scenario-mirror}
 
-Pipeline with mirror modifier: LayoutGroup → GridLayout → Layer → NoiseEffect → MirrorModifier → DriverGroup → ArtNetSendDriver. Tests the full LUT-based pipeline with 1:N mapping.
+Pipeline with mirror modifier: Layouts → GridLayout → Layer → NoiseEffect → MirrorModifier → Drivers → ArtNetSendDriver. Tests the full LUT-based pipeline with 1:N mapping.
 
 - Buffer allocated after setup (logical size, not physical)
 - Buffer contains non-zero data after rendering 200 frames
@@ -196,7 +204,7 @@ Pipeline with mirror modifier: LayoutGroup → GridLayout → Layer → NoiseEff
 Verifies 1:1 unshuffled mapping (no modifiers) uses zero intermediate buffers.
 
 - 16×16 grid, rainbow effect, no modifier
-- Asserts: LUT is 1:1, DriverGroup dynamicBytes = 0
+- Asserts: LUT is 1:1, Drivers dynamicBytes = 0
 - Reports per-module sizeof and heap allocation
 
 ### memory-lut (`test/scenarios/memory-lut.json`) {#scenario-memory-lut}
@@ -204,7 +212,7 @@ Verifies 1:1 unshuffled mapping (no modifiers) uses zero intermediate buffers.
 Verifies modifier with LUT allocates mapping table and driver buffer.
 
 - 16×16 grid, noise effect + mirror modifier (1:N multimap)
-- Asserts: LUT allocated (`hasLUT()`), DriverGroup has output buffer
+- Asserts: LUT allocated (`hasLUT()`), Drivers has output buffer
 - Reports LUT size, buffer sizes, per-module metrics
 
 ## Live Scenario Tests

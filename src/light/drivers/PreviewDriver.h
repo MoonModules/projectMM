@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/drivers/DriverGroup.h"
+#include "light/drivers/Drivers.h"
 #include "core/PreviewFrame.h"
 #include "platform/platform.h"
 

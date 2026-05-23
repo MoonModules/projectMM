@@ -12,7 +12,11 @@ public:
     virtual void forEachCoord(CoordCallback cb, void* ctx) const = 0;
 };
 
-class LayoutGroup : public MoonModule {
+// Top-level container for one or more `LayoutBase` children. Walks them in
+// registration order, stitching per-child light indices into a single flat
+// physical address space via `forEachCoord`. Shared by every Layer — there's
+// one Layouts describing the physical setup, multiple Layers render into it.
+class Layouts : public MoonModule {
 public:
     nrOfLightsType totalLightCount() const {
         nrOfLightsType total = 0;

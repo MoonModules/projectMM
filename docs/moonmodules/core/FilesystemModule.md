@@ -15,7 +15,7 @@ One flat JSON file per top-level module under `/.config/`:
   Layer.json            → {"channelsPerLight":3,"enabled":true,
                            "0.type":"NoiseEffect","0.scale":12,"0.bpm":60,
                            "0.enabled":true,...}
-  DriverGroup.json      → {"enabled":true,
+  Drivers.json      → {"enabled":true,
                            "0.type":"ArtNetSendDriver","0.ip":"192.168.1.70",
                            "0.fps":50,"0.enabled":true,...}
 ```

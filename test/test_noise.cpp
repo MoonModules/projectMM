@@ -12,15 +12,15 @@ static uint32_t hashSlice(const uint8_t* data, size_t sliceBytes) {
 }
 
 TEST_CASE("NoiseEffect writes non-zero RGB data to buffer") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 8;
     grid.height = 8;
     grid.depth = 1;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     mm::NoiseEffect noise;
@@ -40,15 +40,15 @@ TEST_CASE("NoiseEffect writes non-zero RGB data to buffer") {
 }
 
 TEST_CASE("NoiseEffect produces spatial variation") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 16;
     grid.height = 16;
     grid.depth = 1;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     mm::NoiseEffect noise;
@@ -66,16 +66,16 @@ TEST_CASE("NoiseEffect produces spatial variation") {
 }
 
 TEST_CASE("NoiseEffect produces different output than RainbowEffect") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 8;
     grid.height = 8;
     grid.depth = 1;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     // Render rainbow
     mm::Layer layer1;
-    layer1.setLayoutGroup(&layoutGroup);
+    layer1.setLayouts(&layouts);
     layer1.setChannelsPerLight(3);
     mm::RainbowEffect rainbow;
     layer1.addChild(&rainbow);
@@ -84,7 +84,7 @@ TEST_CASE("NoiseEffect produces different output than RainbowEffect") {
 
     // Render noise
     mm::Layer layer2;
-    layer2.setLayoutGroup(&layoutGroup);
+    layer2.setLayouts(&layouts);
     layer2.setChannelsPerLight(3);
     mm::NoiseEffect noise;
     layer2.addChild(&noise);
@@ -107,13 +107,13 @@ TEST_CASE("NoiseEffect produces different output than RainbowEffect") {
 // these tests pin the bug fixed.
 
 TEST_CASE("NoiseEffect produces different output per z-slice with depth > 1") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 8; grid.height = 8; grid.depth = 8;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
     mm::NoiseEffect noise;
     layer.addChild(&noise);
@@ -131,13 +131,13 @@ TEST_CASE("NoiseEffect produces different output per z-slice with depth > 1") {
 }
 
 TEST_CASE("PlasmaEffect produces different output per z-slice with depth > 1") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 8; grid.height = 8; grid.depth = 8;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
     mm::PlasmaEffect plasma;
     layer.addChild(&plasma);

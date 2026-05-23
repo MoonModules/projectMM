@@ -17,7 +17,7 @@ public:
     // need it — it just streams bytes.
     //
     // Multi-layer: this is the *active* layer for dimension queries, not a 1:1 wiring
-    // constraint. When the multi-layer pipeline arrives, DriverGroup composes/blends N
+    // constraint. When the multi-layer pipeline arrives, Drivers composes/blends N
     // layer buffers upstream and still hands each driver one Layer for dimensions —
     // the driver outputs to a single physical fixture either way. See plan.md backlog.
     void setLayer(Layer* layer) { layer_ = layer; }
@@ -25,7 +25,7 @@ protected:
     Layer* layer_ = nullptr;
 };
 
-class DriverGroup : public MoonModule {
+class Drivers : public MoonModule {
 public:
     void setLayer(Layer* layer) {
         layer_ = layer;
@@ -50,7 +50,7 @@ public:
     }
 
     void loop() override {
-        // Scheduler gates DriverGroup itself via respectsEnabled() default.
+        // Scheduler gates Drivers itself via respectsEnabled() default.
         if (layer_ && layer_->lut().hasLUT()) {
             blendMap(layer_->buffer(), outputBuffer_, layer_->lut(), layer_->channelsPerLight());
         }

@@ -23,7 +23,7 @@ Grid with default settings (no serpentine, X-then-Y order) is **1:1 unshuffled**
 
 ## Tests
 
-[Module test: GridLayout](../../../testing.md#gridlayout) — row-major coordinate iteration, 3D grids, LayoutGroup multi-layout offset.
+[Module test: GridLayout](../../../testing.md#gridlayout) — row-major coordinate iteration, 3D grids, Layouts multi-layout offset.
 
 ## Prior art
 

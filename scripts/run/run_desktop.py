@@ -29,8 +29,11 @@ def _is_running() -> bool:
     """True iff an instance of the executable is currently running."""
     name = EXECUTABLE.name
     if sys.platform == "win32":
+        # EXECUTABLE already carries the .exe suffix on Windows (see the top of
+        # this file); appending it a second time would produce "projectMM.exe.exe"
+        # and tasklist would match nothing.
         r = subprocess.run(
-            ["tasklist", "/FI", f"IMAGENAME eq {name}.exe"],
+            ["tasklist", "/FI", f"IMAGENAME eq {name}"],
             capture_output=True, text=True)
         return name in r.stdout
     r = subprocess.run(["pgrep", "-f", str(EXECUTABLE)], capture_output=True)

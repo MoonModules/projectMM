@@ -3,15 +3,15 @@
 #include "light/layouts/GridLayout.h"
 
 TEST_CASE("MetaballsEffect writes non-zero RGB data to buffer") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 16;
     grid.height = 16;
     grid.depth = 1;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     mm::MetaballsEffect metaballs;
@@ -31,15 +31,15 @@ TEST_CASE("MetaballsEffect writes non-zero RGB data to buffer") {
 }
 
 TEST_CASE("MetaballsEffect produces spatial variation") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 32;
     grid.height = 32;
     grid.depth = 1;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     mm::MetaballsEffect metaballs;

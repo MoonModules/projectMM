@@ -477,6 +477,11 @@ private:
                         "{\"name\":\"%s\",\"type\":\"uint16\",\"value\":%u",
                         c.name, *static_cast<uint16_t*>(c.ptr));
                     break;
+                case ControlType::Int16:
+                    sink.appendf(
+                        "{\"name\":\"%s\",\"type\":\"int16\",\"value\":%d",
+                        c.name, *static_cast<int16_t*>(c.ptr));
+                    break;
                 case ControlType::Bool:
                     sink.appendf(
                         "{\"name\":\"%s\",\"type\":\"bool\",\"value\":%s",
@@ -586,6 +591,11 @@ private:
                 case ControlType::Uint16: {
                     int v = mm::json::parseInt(body, "value");
                     *static_cast<uint16_t*>(c.ptr) = static_cast<uint16_t>(v);
+                    break;
+                }
+                case ControlType::Int16: {
+                    int v = mm::json::parseInt(body, "value");
+                    *static_cast<int16_t*>(c.ptr) = static_cast<int16_t>(v);
                     break;
                 }
                 case ControlType::Bool: {
@@ -863,7 +873,7 @@ private:
             Scheduler::deleteTree(old);
         }
 
-        // Re-run onAllocateMemory across the tree so Layer LUT / DriverGroup buffer
+        // Re-run onAllocateMemory across the tree so Layer LUT / Drivers buffer
         // wiring re-forms — a replaced effect/driver re-wires like a freshly added one.
         if (scheduler_) scheduler_->rebuild();
 
@@ -945,6 +955,10 @@ private:
                 case ControlType::Uint16:
                     sink.appendf("%s\"%s\":%u", first ? "" : ",", c.name,
                                  *static_cast<uint16_t*>(c.ptr));
+                    break;
+                case ControlType::Int16:
+                    sink.appendf("%s\"%s\":%d", first ? "" : ",", c.name,
+                                 *static_cast<int16_t*>(c.ptr));
                     break;
                 case ControlType::Bool:
                     sink.appendf("%s\"%s\":%s", first ? "" : ",", c.name,
@@ -1156,7 +1170,7 @@ private:
         // The payload chunk points at PreviewDriver's own downsample buffer —
         // PreviewDriver::loop() writes the strided RGB copy there and sets
         // previewFrame_->data to it. No copy here; the buffer is driver-owned
-        // (not a DriverGroup slice — the downsample step owns its own storage).
+        // (not a Drivers slice — the downsample step owns its own storage).
         const platform::WriteChunk chunks[] = {
             { wsHeader,      static_cast<size_t>(wsHeaderLen) },
             { previewHeader, sizeof(previewHeader) },

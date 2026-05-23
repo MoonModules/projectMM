@@ -7,7 +7,7 @@
 
 namespace mm {
 
-enum class ModuleRole : uint8_t { Generic, Effect, Modifier, Driver, Layout };
+enum class ModuleRole : uint8_t { Generic, Effect, Modifier, Driver, Layout, Layer };
 
 // Lowercase role name for JSON/API output. Single source of truth so the role
 // string can't drift between /api/state and /api/types.
@@ -17,6 +17,7 @@ inline const char* roleName(ModuleRole role) {
         case ModuleRole::Modifier: return "modifier";
         case ModuleRole::Driver:   return "driver";
         case ModuleRole::Layout:   return "layout";
+        case ModuleRole::Layer:    return "layer";
         default:                   return "generic";
     }
 }

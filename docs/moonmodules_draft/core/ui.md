@@ -17,7 +17,7 @@ Promote sections from here into the main spec as they ship. When the entire file
 
 These don't block the implemented baseline but should be answered before 1.0 ships:
 
-- **Multi-layer UI** (architecture-light.md plans for N layers blended into one DriverGroup). The current card layout shows one Layer. Likely needs a tab/accordion to switch between layers, or a per-layer column.
+- **Multi-layer UI** (architecture-light.md plans for N layers blended into one Drivers). The current card layout shows one Layer. Likely needs a tab/accordion to switch between layers, or a per-layer column.
 - **Modifier chain visualization** — show the modifier order visually (the order in `children[]` is the order they apply). Today they're just a flat list.
 - **Presets** — save/load named bundles of control values. Persistence already supports the storage; needs a UI surface.
 - **Canvas/node-graph view** — v2 attempted this. Powerful for complex setups but a doubling of UI surface. Reasonable v3 follow-up gated on user demand.
@@ -37,7 +37,7 @@ Side nav (one root visible at a time), hamburger + slide-in drawer, and the nav 
 
 | v1 feature | v3 today | Recommendation |
 |---|---|---|
-| Drag-to-reorder root modules (saves to `/api/modules/reorder`) | not supported | **Drop** — root order is fixed in `main.cpp` and that's correct: System/Network/Layer/DriverGroup are mandatory and have a logical setup order. Children get up/down + drag (already shipped). |
+| Drag-to-reorder root modules (saves to `/api/modules/reorder`) | not supported | **Drop** — root order is fixed in `main.cpp` and that's correct: System/Network/Layer/Drivers are mandatory and have a logical setup order. Children get up/down + drag (already shipped). |
 | `<details>` collapsible panels at bottom (health, log) | none | See dedicated rows below. |
 
 ### Per-card features

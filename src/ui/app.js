@@ -369,6 +369,11 @@ function createCard(mod, depth) {
     enabled.addEventListener("click", () => {
         const next = enabled.dataset.checked !== "true";
         setEnabledUi(next);
+        // Stamp dragTs so a WS state push older than this click can't revert
+        // the toggle before the server has acknowledged. updateValues reads
+        // dragTs[mod.name + ":enabled"] on line ~952 and suppresses stale
+        // patches within the 1s cooldown.
+        dragTs[mod.name + ":enabled"] = Date.now();
         sendControl(mod.name, "enabled", next);
     });
 
@@ -601,16 +606,20 @@ function findParent(childName) {
 }
 
 function acceptsChildren(mod) {
-    // role-based: Layer → effect+modifier, DriverGroup → driver, LayoutGroup → layout.
+    // role-based: Layers → layer, Layer → effect+modifier, Drivers → driver, Layouts → layout.
     // Mapped in JS, not in engine, so no backend allowedChildRoles field needed.
     // Keyed on mod.type (stable factory key) — mod.name is editable per instance.
-    return mod.type === "Layer" || mod.type === "DriverGroup" || mod.type === "LayoutGroup";
+    return mod.type === "Layers" ||
+           mod.type === "Layer"  ||
+           mod.type === "Drivers" ||
+           mod.type === "Layouts";
 }
 
 function rolesAcceptedBy(parentMod) {
-    if (parentMod.type === "Layer")       return ["effect", "modifier"];
-    if (parentMod.type === "DriverGroup") return ["driver"];
-    if (parentMod.type === "LayoutGroup") return ["layout"];
+    if (parentMod.type === "Layers")  return ["layer"];
+    if (parentMod.type === "Layer")   return ["effect", "modifier"];
+    if (parentMod.type === "Drivers") return ["driver"];
+    if (parentMod.type === "Layouts") return ["layout"];
     return [];
 }
 
@@ -694,6 +703,35 @@ function createControl(moduleName, moduleType, ctrl) {
             });
             row.appendChild(input);
             appendResetButton(row, moduleName, ctrl, def, () => { input.value = def; });
+            break;
+        }
+        case "int16": {
+            // Slider with visible value, matching the uint8 path's UX. Range is
+            // -100..+200, the percentage band the only int16 user today (Layer
+            // start/end) needs — 0..100 covers the visible area and -100..0 /
+            // 100..200 gives modifier-shift headroom. Generalise to per-control
+            // min/max if a second int16 user wants a different range.
+            const input = document.createElement("input");
+            input.type = "range";
+            input.min = -100;
+            input.max = 200;
+            input.value = ctrl.value ?? 0;
+            input.dataset.mid = moduleName;
+            input.dataset.key = ctrl.name;
+            const valSpan = document.createElement("span");
+            valSpan.className = "control-value";
+            valSpan.textContent = input.value;
+            input.addEventListener("input", () => {
+                dragTs[key] = Date.now();
+                valSpan.textContent = input.value;
+                debounceSend(key, 150, () => sendControl(moduleName, ctrl.name, parseInt(input.value)));
+            });
+            row.appendChild(input);
+            row.appendChild(valSpan);
+            appendResetButton(row, moduleName, ctrl, def, () => {
+                input.value = def;
+                valSpan.textContent = def;
+            });
             break;
         }
         case "bool": {
@@ -951,7 +989,8 @@ function updateModuleControls(mod) {
 
         switch (ctrl.type) {
             case "uint8":
-            case "uint16": {
+            case "uint16":
+            case "int16": {
                 if (userActive) break;
                 const input = document.querySelector(`input[data-mid="${mid}"][data-key="${k}"]`);
                 if (input && Number(input.value) !== Number(ctrl.value)) {
@@ -1034,19 +1073,21 @@ function cssEscape(s) {
 
 // Role → emoji. The role part of the MoonLight emoji-key system
 // (https://moonmodules.org/MoonLight/moonlight/overview/#emoji-key):
-// 🔥 effect · 💎 modifier · 🚥 layout · ☸️ driver. The role tag is derived
-// here, not duplicated in every module's tags() string — one source of truth
-// in the UI saves repeating the same character in ~30 module headers and a
-// few bytes per type in /api/types. Each module's tags() then only carries
-// its categorical origin (🐙 WLED · 💫 MoonLight · ⚡️ FastLED) and any
-// feature extras (audio: ♫ FFT · ♪ volume · moving-head: 🚨 colour · 🗼 movement).
-// The dimensional emoji (📏 1D · 🟦 2D · 🧊 3D) is derived from the type's `dim`
-// field — only effects have one. All three are merged in emojiTagsFor().
+// 🔥 effect · 💎 modifier · 🚥 layout · ☸️ driver · 🥞 layer (projectMM
+// addition — every Layer instance, child of the Layers container). The role
+// tag is derived here, not duplicated in every module's tags() string — one
+// source of truth in the UI saves repeating the same character in ~30 module
+// headers and a few bytes per type in /api/types. Each module's tags() then
+// only carries its categorical origin (🐙 WLED · 💫 MoonLight · ⚡️ FastLED)
+// and any feature extras (audio: ♫ FFT · ♪ volume · moving-head: 🚨 colour ·
+// 🗼 movement). The dimensional emoji (📏 1D · 🟦 2D · 🧊 3D) is derived from
+// the type's `dim` field. All three are merged in emojiTagsFor().
 const ROLE_EMOJI = {
     effect:   "🔥",
     driver:   "☸️",
     modifier: "💎",
     layout:   "🚥",
+    layer:    "🥞",
     generic:  "⚙️",
 };
 
@@ -1417,12 +1458,18 @@ function initWebGL() {
             e.preventDefault();
         } else if (e.touches.length >= 2 && pinchDist > 0) {
             // Pinch zoom: ratio of finger-distance change scales camDist
-            // (fingers apart → zoom in / camDist down).
+            // (fingers apart → zoom in / camDist down). Guard against the
+            // degenerate case where both fingers report identical coords
+            // (d === 0): division would produce Infinity and snap camDist
+            // to its clamp boundary. Skip the update and let the next move
+            // produce a sane d.
             const d = touchDistance(e.touches[0], e.touches[1]);
-            const ratio = pinchDist / d;
-            camDist = Math.max(0.5, Math.min(10, camDist * ratio));
-            pinchDist = d;
-            redrawCached();
+            if (d > 0) {
+                const ratio = pinchDist / d;
+                camDist = Math.max(0.5, Math.min(10, camDist * ratio));
+                pinchDist = d;
+                redrawCached();
+            }
             e.preventDefault();
         }
     }, {passive: false});
