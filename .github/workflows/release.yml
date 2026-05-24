@@ -216,12 +216,14 @@ jobs:
           # that asks for "latest". Stable tags publish normally.
           prerelease: ${{ contains(github.ref, '-rc') || contains(inputs.tag || '', '-rc') }}
           fail_on_unmatched_files: true
+          # The `files:` block below is a multi-line literal string — every line
+          # is a glob pattern, the action does NOT strip `#` as comment syntax.
+          # Add `dist/projectMM-*.zip` back when build-windows is restored
+          # (see docs/plan.md "Windows desktop port").
           files: |
             dist/firmware-*.bin
             dist/manifest-*.json
             dist/projectMM-*.tar.gz
-            # dist/projectMM-*.zip — re-enable when build-windows is restored
-            # (see docs/plan.md "Windows desktop port").
 
       - id: deploy-pages
         if: ${{ !contains(github.ref, '-rc') && !contains(inputs.tag || '', '-rc') }}
