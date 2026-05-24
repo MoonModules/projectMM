@@ -19,14 +19,11 @@ https://github.com/user-attachments/assets/b12b28ca-7e87-477a-942b-fcae601b721d
 
 ### From a release
 
-Download the firmware for your device from the [releases page](https://github.com/ewowi/projectMM/releases), flash it, and open the device in a browser.
+**ESP32 — flash from your browser.** Open <https://ewowi.github.io/projectMM/install/> in Chrome, Edge, or Opera, plug the device in over USB, pick your board, click Install. After flashing, WiFi builds boot a `projectMM-xxxx` SoftAP for first-time WiFi credentials; Ethernet builds get a DHCP address as soon as you plug the cable in. Four board variants ship: `esp32` (WiFi only), `esp32-eth` (Ethernet only, Olimex pin map), `esp32-eth-wifi` (both), `esp32s3-n16r8` (S3 DevKitC-1 with the N16R8 module).
 
-- **ESP32** — flash `projectMM-esp32.bin` with [esptool](https://github.com/espressif/esptool) or the ESP-IDF flasher. The device joins your WiFi via the SoftAP fallback the first time it boots; open the IP it reports on the serial console.
-- **Teensy 4.x** — flash `projectMM-teensy41.hex` with [Teensy Loader](https://www.pjrc.com/teensy/loader.html). 4.1 has Ethernet built in; 4.0 needs an external module.
-- **Raspberry Pi** — download the binary for your Pi model and run it. The UI listens on port 8080.
-- **Windows / macOS / Linux** — download the desktop build, run it, open `http://localhost:8080/`.
+**Desktop — download and run.** Grab the macOS arm64 tarball or Windows x64 zip from the [releases page](https://github.com/ewowi/projectMM/releases), unpack, run, open `http://localhost:8080/`. Code-signing is on the roadmap — macOS Gatekeeper prompts on first run; right-click → Open, or clear the quarantine flag.
 
-Once running, the UI lets you build a render pipeline visually (layouts → layers with effects + modifiers → drivers), preview the result in 3D, and save it.
+Once running, the UI lets you build a render pipeline visually (layouts → layers with effects + modifiers → drivers), preview the result in 3D, and save it. Teensy, Raspberry Pi, and Linux desktop builds aren't packaged in 1.0 — the source builds for them today, distribution catches up in 2.0.
 
 ### From source
 

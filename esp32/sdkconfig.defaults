@@ -27,11 +27,7 @@ CONFIG_LWIP_TCP_SND_BUF_DEFAULT=11520
 # WiFi
 CONFIG_ESP_WIFI_ENABLED=y
 
-# Ethernet — Olimex ESP32-Gateway (LAN8720 RMII)
-CONFIG_ETH_USE_ESP32_EMAC=y
-CONFIG_ETH_PHY_INTERFACE_RMII=y
-CONFIG_ETH_PHY_ADDR=0
-CONFIG_ETH_PHY_RST_GPIO=5
-CONFIG_ETH_DMA_BUFFER_SIZE=512
-CONFIG_ETH_DMA_RX_BUFFER_NUM=10
-CONFIG_ETH_DMA_TX_BUFFER_NUM=10
+# Ethernet hardware (RMII PHY pins, DMA buffer sizes) lives in
+# sdkconfig.defaults.<board> for boards that have it. The base file is
+# board-neutral so a WiFi-only ESP32 build doesn't reserve RMII GPIOs or
+# allocate Ethernet DMA buffers it can't use.

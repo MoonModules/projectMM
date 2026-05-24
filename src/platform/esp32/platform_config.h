@@ -21,4 +21,14 @@ constexpr bool hasWiFi = false;
 constexpr bool hasWiFi = true;
 #endif
 
+// Ethernet is only available on boards whose sdkconfig fragment enables the
+// ESP32 EMAC (sdkconfig.defaults.eth — Olimex pin map). Other boards (plain
+// ESP32 WiFi-only, ESP32-S3 with no EMAC) define MM_NO_ETH and get stubbed-out
+// platform::eth* functions, mirroring the desktop platform layer.
+#ifdef MM_NO_ETH
+constexpr bool hasEthernet = false;
+#else
+constexpr bool hasEthernet = true;
+#endif
+
 } // namespace mm::platform

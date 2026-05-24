@@ -72,7 +72,7 @@ scripts/moondeck.json
 
 # Generated files
 src/ui/ui_embedded.h
-src/core/version.h
+src/core/build_info.h
 
 # ESP-IDF
 esp32/build/

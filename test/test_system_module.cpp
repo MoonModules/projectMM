@@ -14,12 +14,13 @@ TEST_CASE("SystemModule controls") {
     sys.setup();
     sys.onBuildControls();
 
-    // Desktop control set is exactly 11: deviceName, uptime, fps, tickTimeUs,
-    // maxBlock, filesystem, version, build, chip, sdk, bootReason. The heap/psram/
-    // firmware progress bars are skipped on desktop (totalInternalHeap/firmware
-    // partition report 0); the filesystem bar is present (partition has a total).
-    // Exact count so a removed/renamed control fails the test instead of slipping by.
-    CHECK(sys.controls().count() == 11);
+    // Desktop control set is exactly 12: deviceName, uptime, fps, tickTimeUs,
+    // maxBlock, filesystem, version, build, board, chip, sdk, bootReason. The
+    // heap/psram/firmware progress bars are skipped on desktop (totalInternalHeap/
+    // firmware partition report 0); the filesystem bar is present (partition has
+    // a total). Exact count so a removed/renamed control fails the test instead
+    // of slipping by.
+    CHECK(sys.controls().count() == 12);
 
     // Find deviceName control
     bool found = false;

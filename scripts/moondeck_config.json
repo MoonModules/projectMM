@@ -80,19 +80,37 @@
       "id": "build_esp32",
       "tab": "esp32",
       "group": "build",
-      "label": "Build",
+      "label": "Build esp32",
       "help": "build_esp32",
       "script": "build/build_esp32.py",
-      "needs_env": true
+      "extra_args": ["--board", "esp32"]
     },
     {
-      "id": "build_esp32_ethonly",
+      "id": "build_esp32_eth",
       "tab": "esp32",
       "group": "build",
-      "label": "Build (Ethernet-only)",
+      "label": "Build esp32-eth",
       "help": "build_esp32",
-      "script": "build/build_esp32_ethonly.py",
-      "needs_env": true
+      "script": "build/build_esp32.py",
+      "extra_args": ["--board", "esp32-eth"]
+    },
+    {
+      "id": "build_esp32_eth_wifi",
+      "tab": "esp32",
+      "group": "build",
+      "label": "Build esp32-eth-wifi",
+      "help": "build_esp32",
+      "script": "build/build_esp32.py",
+      "extra_args": ["--board", "esp32-eth-wifi"]
+    },
+    {
+      "id": "build_esp32s3_n16r8",
+      "tab": "esp32",
+      "group": "build",
+      "label": "Build esp32s3-n16r8",
+      "help": "build_esp32",
+      "script": "build/build_esp32.py",
+      "extra_args": ["--board", "esp32s3-n16r8"]
     },
     {
       "id": "flash_esp32",

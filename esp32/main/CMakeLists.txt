@@ -13,12 +13,24 @@ idf_component_register(
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra -Werror)
 
-# Ethernet-only build profile: build_esp32.py --profile eth-only passes
-# -DMM_ETH_ONLY=1 (and EXCLUDE_COMPONENTS for the WiFi components). MM_NO_WIFI
-# makes platform_config.h report hasWiFi=false and #ifdefs-out the WiFi code
-# in platform_esp32.cpp.
+# Build-variant defines, set by scripts/build/build_esp32.py via board_cmake_args().
+#
+# MM_ETH_ONLY  — set on `--board esp32-eth` (no WiFi compiled in).
+#                The script also passes EXCLUDE_COMPONENTS for the WiFi libs;
+#                this define gates the WiFi source paths in platform_esp32.cpp
+#                and the platform::hasWiFi compile-time flag.
+#
+# MM_NO_ETH    — set on boards that don't enable CONFIG_ETH_USE_ESP32_EMAC
+#                (today: `--board esp32`, `--board esp32s3-n16r8`). Without
+#                the EMAC headers, the on-chip Ethernet code in
+#                platform_esp32.cpp won't compile; this define stubs the
+#                eth* platform functions to return false/empty, mirroring
+#                the desktop platform layer.
 if(MM_ETH_ONLY)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_NO_WIFI)
+endif()
+if(MM_NO_ETH)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_NO_ETH)
 endif()
 
 # Embed UI files — regenerate on every build
@@ -31,14 +43,14 @@ add_custom_command(
 )
 add_custom_target(ui_embed DEPENDS ${UI_DIR}/ui_embedded.h)
 
-# Generate version.h from library.json
-set(VERSION_DIR ${COMPONENT_DIR}/../../src/core)
+# Generate build_info.h from library.json (carries version, build date, board name).
+set(BUILD_INFO_DIR ${COMPONENT_DIR}/../../src/core)
 add_custom_command(
-    OUTPUT ${VERSION_DIR}/version.h
-    COMMAND python3 ${COMPONENT_DIR}/../../scripts/build/generate_version.py
-    DEPENDS ${COMPONENT_DIR}/../../library.json ${COMPONENT_DIR}/../../scripts/build/generate_version.py
-    COMMENT "Generating version.h"
+    OUTPUT ${BUILD_INFO_DIR}/build_info.h
+    COMMAND python3 ${COMPONENT_DIR}/../../scripts/build/generate_build_info.py
+    DEPENDS ${COMPONENT_DIR}/../../library.json ${COMPONENT_DIR}/../../scripts/build/generate_build_info.py
+    COMMENT "Generating build_info.h"
 )
-add_custom_target(version_gen DEPENDS ${VERSION_DIR}/version.h)
+add_custom_target(build_info_gen DEPENDS ${BUILD_INFO_DIR}/build_info.h)
 
-add_dependencies(${COMPONENT_LIB} ui_embed version_gen)
+add_dependencies(${COMPONENT_LIB} ui_embed build_info_gen)

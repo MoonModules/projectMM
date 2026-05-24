@@ -5,7 +5,16 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_compile_options(-Wall -Wextra -Werror)
+# Warning flags differ between GCC/Clang and MSVC. Gate by compiler so the
+# desktop build runs cleanly on Windows runners (no -W flags on MSVC) and on
+# macOS/Linux (no /W flags on Clang/GCC).
+if(MSVC)
+    add_compile_options(/W4 /WX)
+    # Static MSVC runtime so the Windows binary doesn't need vcredist.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+else()
+    add_compile_options(-Wall -Wextra -Werror)
+endif()
 
 # Core library. Most modules ship header-only (single .h file with implementation
 # inline). Core service modules that bridge to the platform (HTTP server,
@@ -24,14 +33,14 @@ target_link_libraries(mm_core PUBLIC mm_platform)
 add_library(mm_platform src/platform/desktop/platform_desktop.cpp)
 target_include_directories(mm_platform PUBLIC src/ src/platform/desktop/)
 
-# Generate version.h from library.json
+# Generate build_info.h from library.json (carries version, build date, board name).
 add_custom_command(
-    OUTPUT ${CMAKE_SOURCE_DIR}/src/core/version.h
-    COMMAND ${CMAKE_COMMAND} -E env python3 ${CMAKE_SOURCE_DIR}/scripts/build/generate_version.py
-    DEPENDS ${CMAKE_SOURCE_DIR}/library.json ${CMAKE_SOURCE_DIR}/scripts/build/generate_version.py
-    COMMENT "Generating version.h"
+    OUTPUT ${CMAKE_SOURCE_DIR}/src/core/build_info.h
+    COMMAND ${CMAKE_COMMAND} -E env python3 ${CMAKE_SOURCE_DIR}/scripts/build/generate_build_info.py
+    DEPENDS ${CMAKE_SOURCE_DIR}/library.json ${CMAKE_SOURCE_DIR}/scripts/build/generate_build_info.py
+    COMMENT "Generating build_info.h"
 )
-add_custom_target(version_gen DEPENDS ${CMAKE_SOURCE_DIR}/src/core/version.h)
+add_custom_target(build_info_gen DEPENDS ${CMAKE_SOURCE_DIR}/src/core/build_info.h)
 
 # Embed UI files as C arrays
 add_custom_command(
@@ -49,7 +58,7 @@ add_dependencies(mm_core ui_embed)
 # Application
 add_executable(projectMM src/main.cpp src/platform/desktop/main_desktop.cpp)
 target_link_libraries(projectMM PRIVATE mm_core mm_platform)
-add_dependencies(projectMM ui_embed version_gen)
+add_dependencies(projectMM ui_embed build_info_gen)
 
 # Tests
 enable_testing()

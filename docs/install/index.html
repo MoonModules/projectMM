@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>projectMM — Install</title>
+
+  <!-- ESP Web Tools. Pinned to v10 (the current stable line). Recreate the
+       <esp-web-install-button> on dropdown change instead of mutating the
+       `manifest` attribute — some versions of the component cache the parsed
+       manifest and ignore live attribute writes. -->
+  <script type="module"
+          src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module">
+  </script>
+
+  <style>
+    :root {
+      --bg:     #1a1a2e;
+      --card:   #16213e;
+      --fg:     #e0e0e0;
+      --muted:  #a0a0b0;
+      --accent: #a78bfa;
+      --border: #2a3a6a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 15px;
+      line-height: 1.55;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px 64px;
+    }
+    main { width: 100%; max-width: 640px; }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      color: var(--accent);
+    }
+    p.tag { margin: 0 0 24px; color: var(--muted); }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    label { display: block; font-weight: 600; margin-bottom: 6px; }
+    select {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg);
+      color: var(--fg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font: inherit;
+    }
+    .button-row { margin-top: 16px; }
+    .note { color: var(--muted); font-size: 13px; margin-top: 10px; }
+    a { color: var(--accent); }
+    code {
+      background: rgba(255,255,255,0.06);
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 13px;
+    }
+    .browser-warning {
+      background: #3a2a1a;
+      border: 1px solid #6a4a2a;
+      color: #e6c890;
+      display: none;
+    }
+    ol { padding-left: 22px; }
+    ol li { margin-bottom: 6px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>projectMM</h1>
+    <p class="tag">Plug in your ESP32. Pick the board. Flash. Open in a browser.</p>
+
+    <div class="card browser-warning" id="browser-warning">
+      <strong>This browser can't flash directly.</strong>
+      ESP Web Tools needs Web Serial — open this page in <strong>Chrome</strong>,
+      <strong>Edge</strong>, or <strong>Opera</strong> on a desktop. Firefox and
+      Safari don't support Web Serial. The release page on GitHub has the same
+      binaries for manual flashing.
+    </div>
+
+    <div class="card">
+      <label for="board">Board</label>
+      <select id="board">
+        <option value="esp32">ESP32 — WiFi only</option>
+        <option value="esp32-eth">ESP32 — Ethernet only (Olimex pin map)</option>
+        <option value="esp32-eth-wifi">ESP32 — Ethernet + WiFi (Olimex pin map)</option>
+        <option value="esp32s3-n16r8">ESP32-S3 DevKitC-1 (N16R8) — WiFi only</option>
+      </select>
+
+      <div class="button-row" id="button-host">
+        <!-- <esp-web-install-button> is injected here on each board change. -->
+      </div>
+
+      <p class="note">
+        The Ethernet builds were verified on the
+        <a href="https://www.olimex.com/Products/IoT/ESP32/ESP32-GATEWAY/open-source-hardware"
+           target="_blank" rel="noopener">Olimex ESP32-Gateway</a>
+        (LAN8720 PHY, reset on GPIO 5, MDIO addr 0). Boards with the same PHY
+        but different pins (e.g. WT32-ETH01: reset on GPIO 16) need a local
+        rebuild today.
+      </p>
+    </div>
+
+    <div class="card">
+      <strong>After flashing — WiFi builds:</strong>
+      <ol>
+        <li>The device boots a SoftAP named <code>projectMM-xxxx</code>.</li>
+        <li>Join it from your phone or laptop.</li>
+        <li>Open <code>http://192.168.4.1</code> in a browser, enter your home WiFi credentials.</li>
+        <li>The device reboots, joins your network, and the UI is reachable at its DHCP-assigned IP (visible in your router).</li>
+      </ol>
+      <strong>After flashing — Ethernet builds:</strong>
+      <ol>
+        <li>Plug an Ethernet cable into the device.</li>
+        <li>Open the DHCP-assigned IP in a browser (check your router for new devices). mDNS hostnames work too on most networks.</li>
+      </ol>
+      <p class="note">
+        Source code and releases:
+        <a href="https://github.com/ewowi/projectMM" target="_blank" rel="noopener">github.com/ewowi/projectMM</a>.
+      </p>
+    </div>
+  </main>
+
+  <script>
+    // Recreate the install button whenever the board selection changes.
+    // Mutating the `manifest` attribute on the existing element is flakier
+    // across ESP Web Tools versions than just rebuilding it.
+    const select = document.getElementById("board");
+    const host   = document.getElementById("button-host");
+
+    function renderButton() {
+      const board = select.value;
+      host.innerHTML = "";
+      const btn = document.createElement("esp-web-install-button");
+      btn.setAttribute("manifest", `manifest-${board}.json`);
+      // Slot a labelled button so the default-styled "INSTALL" is replaced
+      // by something that names the board the user picked.
+      const inner = document.createElement("button");
+      inner.slot = "activate";
+      inner.textContent = `Install on ${board}`;
+      inner.style.cssText = [
+        "padding: 12px 20px",
+        "font: inherit",
+        "font-weight: 600",
+        "background: var(--accent)",
+        "color: #1a1a2e",
+        "border: 0",
+        "border-radius: 6px",
+        "cursor: pointer",
+      ].join("; ");
+      btn.appendChild(inner);
+      host.appendChild(btn);
+    }
+
+    select.addEventListener("change", renderButton);
+    renderButton();
+
+    // Show the unsupported-browser banner when Web Serial isn't available.
+    // ESP Web Tools also surfaces its own message, but a card at the top of
+    // the page is more discoverable than the in-button tooltip.
+    if (!("serial" in navigator)) {
+      document.getElementById("browser-warning").style.display = "block";
+    }
+  </script>
+</body>
+</html>

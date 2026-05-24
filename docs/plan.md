@@ -2,15 +2,19 @@
 
 Completed items are removed. This file is deleted when empty.
 
-## 13. README + quick-start
+## Release 2.0 — distribution catches up to the source tree
 
-Update README with: what it does now, how to build/flash, how to connect and open the UI. Include screenshots.
+1.0 ships ESP32 firmware (4 variants) + macOS arm64 + Windows x64 binaries. The source tree builds for Teensy, Raspberry Pi, ESP32-P4, and Linux too — distribution catches up here.
 
----
-
-## Release 1.0 — "connect, open browser, see lights"
-
-Milestone after items 11-13. An end user with an ESP32 can flash the firmware, connect via WiFi, open a browser, see the 3D preview, change effects and controls, and have settings persist across reboots.
+- **ESP32-P4** board variant. New chip target, new sdkconfig fragment, fits the existing `BOARDS` table in `scripts/build/build_esp32.py`.
+- **OTA / FirmwareUpdateModule.** Re-flashing via the web installer works in 1.0 but requires a USB cable. Port the passive-observer pattern from projectMM-v1 — pulls release JSON from GitHub, surfaces availability in the UI, applies on user confirm.
+- **Linux desktop binary** in `release.yml` (third desktop job). Static-linked libstdc++ where the host allows.
+- **Teensy 4.1 release binary.** Toolchain-file build, packaged as `.hex` for Teensy Loader.
+- **Raspberry Pi binary.** ARM64, cross-built or native depending on what the runner offers.
+- **Nightly CI / pre-release channel.** A second workflow on a schedule that produces unstable binaries, separate from the tag-driven `release.yml`.
+- **Improv WiFi.** One-step flash + WiFi credentials from the browser, eliminating the SoftAP detour. ESP Web Tools supports the Improv handshake natively.
+- **Runtime PHY / pin config** for Ethernet (see `WiFi runtime disable` below — same `platform::ethPresent()` hook). Replaces the build-time Olimex-pin baking in `sdkconfig.defaults.eth` with a runtime picker. Once this lands the `esp32-eth*` variants stop being Olimex-specific.
+- **macOS code-signing.** Currently triggers Gatekeeper on first run; signed builds drop the "downloaded from internet" prompt.
 
 ---
 
@@ -51,7 +55,7 @@ The `setup_esp_idf.py` script currently clones or pulls the latest from the ESP-
 
 ## WiFi runtime disable (backlog)
 
-Postponed. A **compile-time** answer already ships: the `eth-only` build profile (`build_esp32.py --profile eth-only`) excludes the WiFi stack entirely. This item is the *runtime* variant — a single default-profile binary that detects at boot whether WiFi is needed and skips bringing it up. The default firmware ships the WiFi stack regardless (the app partition has room for it to live unused).
+Postponed. A **compile-time** answer already ships: the `esp32-eth` board (`build_esp32.py --board esp32-eth`) excludes the WiFi stack entirely. This item is the *runtime* variant — a single `esp32-eth-wifi` binary that detects at boot whether WiFi is needed and skips bringing it up. The default firmware ships the WiFi stack regardless (the app partition has room for it to live unused).
 
 Open design question to address when this is picked up: can the platform detect at runtime whether Ethernet hardware is present (PHY responds on MDIO during `esp_eth_driver_install`)? If yes, the UI can hide WiFi controls — and skip `wifiStaInit()` — when Ethernet hardware is detected. That's a behavior-driven gate rather than a user toggle. Some ESP32 variants (e.g. ESP32-C2, ESP32-H2) don't have WiFi hardware at all, so the gate also needs to handle "WiFi not present" cleanly. Both detections live in `src/platform/`.
 

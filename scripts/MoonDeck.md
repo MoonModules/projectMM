@@ -103,16 +103,29 @@ Removes `esp32/build/` and `esp32/sdkconfig`. Run after ESP-IDF updates, Python 
 
 ### build_esp32
 
-Build for an ESP32 chip target.
+Build one of the shipping ESP32 board variants. Four MoonDeck buttons map to four `--board` values:
+
+| Button | `--board` | Chip | What's in the image |
+|---|---|---|---|
+| **Build esp32** | `esp32` | `esp32` | WiFi only. No Eth pins reserved. |
+| **Build esp32-eth** | `esp32-eth` | `esp32` | Ethernet only (WiFi compiled out → smaller image, more free RAM). Olimex ESP32-Gateway pin defaults (LAN8720 @ MDIO 0, PHY RST GPIO 5). |
+| **Build esp32-eth-wifi** | `esp32-eth-wifi` | `esp32` | Ethernet + WiFi both available. Olimex pin defaults. |
+| **Build esp32s3-n16r8** | `esp32s3-n16r8` | `esp32s3` | ESP32-S3 DevKitC-1 with the N16R8 module (16 MB flash, 8 MB octal PSRAM). WiFi only. |
 
 ```bash
-uv run scripts/build/build_esp32.py --env esp32
-uv run scripts/build/build_esp32.py --env esp32 --profile eth-only
+uv run scripts/build/build_esp32.py --board esp32
+uv run scripts/build/build_esp32.py --board esp32-eth
+uv run scripts/build/build_esp32.py --board esp32-eth-wifi
+uv run scripts/build/build_esp32.py --board esp32s3-n16r8
 ```
 
-Auto-detects ESP-IDF installation, sets target if needed, builds, and shows flash/RAM usage summary.
+Auto-detects ESP-IDF installation, sets target if needed, builds, and shows flash/RAM usage summary. Switching boards cleans `build/` automatically (recorded via `build/.mm_board`).
 
-`--profile` selects the build profile: `default` (WiFi + Ethernet, the full cascade) or `eth-only` (WiFi compiled out — smaller image, more free RAM, for Ethernet-only deployments). Switching profiles cleans `build/` automatically. The MoonDeck **Build (Ethernet-only)** button runs `build_esp32_ethonly.py`, a thin wrapper that bakes in `--profile eth-only`.
+Eth pin map is currently baked in at build time. The `esp32-eth` and `esp32-eth-wifi` builds were verified on the [Olimex ESP32-Gateway](https://www.olimex.com/Products/IoT/ESP32/ESP32-GATEWAY/open-source-hardware) (LAN8720 PHY, reset on GPIO 5, MDIO addr 0). Boards with the same PHY but different pins (e.g. WT32-ETH01: reset on GPIO 16) need a local rebuild today; runtime PHY/pin selection is on the 2.0 roadmap.
+
+Each ESP32-S3 SKU has its own build key because the sdkconfig fragment encodes flash size, partition layout, and PSRAM mode — flashing an `n16r8` binary onto a different module (e.g. N8R2) misaligns the partition table or fails PSRAM init. New SKUs become new keys (e.g. `esp32s3-n8r8`); we don't ship a generic `esp32s3` shortcut.
+
+`--profile` is deprecated and accepted one release for migration: `--profile default` → `--board esp32`, `--profile eth-only` → `--board esp32-eth`. The legacy `build_esp32_ethonly.py` wrapper still works (it now forwards `--board esp32-eth`).
 
 ### flash_esp32
 
