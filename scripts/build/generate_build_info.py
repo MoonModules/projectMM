@@ -29,7 +29,7 @@ version = data["version"]
 content = f'''#pragma once
 
 // Auto-generated from library.json by scripts/build/generate_build_info.py
-// — do not edit by hand. Regenerated when library.json changes.
+// -- do not edit by hand. Regenerated when library.json changes.
 
 #define MM_VERSION    "{version}"
 #define MM_BUILD_DATE __DATE__ " " __TIME__
@@ -38,9 +38,9 @@ content = f'''#pragma once
 // value passes it as a -D, and SystemModule surfaces it on the device card
 // (and the future OTA path reads it to pick a matching release asset).
 //
-//   ESP32:   scripts/build/build_esp32.py board_cmake_args() → -DMM_BOARD_NAME="<key>"
+//   ESP32:   scripts/build/build_esp32.py board_cmake_args() -> -DMM_BOARD_NAME="<key>"
 //   Desktop: scripts/build/package_desktop.py for release builds; local
-//            CMake builds fall through to "unknown" today (no harm —
+//            CMake builds fall through to "unknown" today (no harm:
 //            local builds aren't published).
 #ifndef MM_BOARD_NAME
 #define MM_BOARD_NAME "unknown"
@@ -55,9 +55,12 @@ constexpr const char* kBoardName = MM_BOARD_NAME;
 }} // namespace mm
 '''
 
-# Only write if changed (avoid unnecessary rebuilds)
-if OUT_FILE.exists() and OUT_FILE.read_text() == content:
-    pass
+# Force UTF-8 on both read and write — Python's default on Windows is cp1252,
+# which can't encode anything outside ASCII. Even though the template above is
+# ASCII today, pinning the encoding makes the script robust if a future edit
+# slips a non-ASCII character into the comments.
+if OUT_FILE.exists() and OUT_FILE.read_text(encoding="utf-8") == content:
+    pass  # only write if changed (avoid unnecessary rebuilds)
 else:
-    OUT_FILE.write_text(content)
+    OUT_FILE.write_text(content, encoding="utf-8")
     print(f"Generated build_info.h: version={version}")

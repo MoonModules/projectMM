@@ -84,12 +84,18 @@ jobs:
             ~/.espressif
             ~/esp/esp-idf
           # Bump the suffix when changing the IDF version to invalidate.
-          key: esp-idf-v5.4-${{ runner.os }}-v1
+          key: esp-idf-v6.1-dev-${{ runner.os }}-v1
 
       - name: Build firmware
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.4
+          # Match the local development IDF (v6.1-dev-399-gd1b91b79b5 today).
+          # The project uses v6-era APIs — `esp_eth_phy_new_generic`, the new
+          # mDNS component manager, `int clock_gpio` in the EMAC config (v5.x
+          # had a strongly-typed enum). v5.4 fails to compile platform_esp32.cpp.
+          # `v6.1-dev` is a rolling Docker tag on espressif/idf that tracks the
+          # v6.1 dev line — close enough to the pinned SHA for CI today.
+          esp_idf_version: v6.1-dev
           # Any board whose key starts with `esp32s3` targets the S3.
           target: ${{ startsWith(matrix.board, 'esp32s3') && 'esp32s3' || 'esp32' }}
           path: 'esp32'
@@ -130,23 +136,19 @@ jobs:
           name: desktop-macos
           path: dist/
 
-  build-windows:
-    needs: verify-version
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build + package Windows x64
-        run: python scripts/build/package_desktop.py
-      - uses: actions/upload-artifact@v4
-        with:
-          name: desktop-windows
-          path: dist/
+  # build-windows: pending Windows platform-layer port. See docs/plan.md
+  # "Windows desktop port (blocker for 1.0 Windows binary)". The job was
+  # removed (rather than left red) so the release pipeline can produce a
+  # tagged 1.0 from the matching `dist/projectMM-macos-arm64-vX.Y.Z.tar.gz`
+  # + the four ESP32 firmwares. Re-add the build-windows job and the
+  # corresponding `dist/projectMM-*.zip` glob in `release` once the port
+  # lands; the surrounding scaffolding stays identical.
 
   release:
     # Tag/dispatch only — branch pushes exercise the builds but never
     # publish a GitHub Release or deploy to Pages.
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-    needs: [build-esp32, build-macos, build-windows]
+    needs: [build-esp32, build-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write     # softprops/action-gh-release needs this
@@ -218,7 +220,8 @@ jobs:
             dist/firmware-*.bin
             dist/manifest-*.json
             dist/projectMM-*.tar.gz
-            dist/projectMM-*.zip
+            # dist/projectMM-*.zip — re-enable when build-windows is restored
+            # (see docs/plan.md "Windows desktop port").
 
       - id: deploy-pages
         if: ${{ !contains(github.ref, '-rc') && !contains(inputs.tag || '', '-rc') }}

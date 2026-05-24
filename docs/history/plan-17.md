@@ -1,5 +1,11 @@
 # Plan-17 — Release 1.0 distribution: web installer + GitHub Releases
 
+> **Post-implementation note.** Two divergences from the original draft:
+> 1. Of the desktop matrix this plan called for, only the macOS arm64 binary ships in 1.0. The Windows x64 build failed in CI on the first source file because `src/platform/desktop/platform_desktop.cpp` uses POSIX socket headers (`sys/socket.h`, `sendmsg`, `fcntl`, …) that have no MSVC equivalent. The `build-windows` job and the `dist/projectMM-*.zip` upload are removed from `release.yml` until the Windows platform-layer port lands; see `docs/plan.md` "Windows desktop port".
+> 2. The original draft's `esp_idf_version: v5.4` in `release.yml` fails to compile `platform_esp32.cpp` — the v5.x EMAC config has `emac_rmii_clock_gpio_t clock_gpio` (strong enum), v6 has `int clock_gpio`. Per the plan's risk-1 fallback, CI is pinned to the same v6.1-dev line the local project uses (`esp_idf_version: v6.1-dev` — the rolling Docker tag on `espressif/idf`). The plan's v5.4 references below are historical.
+>
+> Everything else in this plan ships as described: 4 ESP32 board variants, macOS arm64 desktop, install page on Pages, RC tag dry-run flow.
+
 ## Context
 
 projectMM v3 ships today as "clone the repo and run MoonDeck." That works for developers but blocks the end user the README promises: "plug in your ESP32, open a browser, see lights." This plan delivers the missing pieces — pre-built binaries on GitHub Releases for 4 ESP32 board variants + macOS + Windows, an ESP Web Tools installer page on GitHub Pages, and a tag-triggered CI pipeline that produces and publishes everything.

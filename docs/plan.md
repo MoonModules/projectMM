@@ -2,9 +2,32 @@
 
 Completed items are removed. This file is deleted when empty.
 
+## Windows desktop port (blocker for 1.0 Windows binary)
+
+`scripts/build/package_desktop.py` configures + builds + packages on Windows runners successfully through CMake configure, but `src/platform/desktop/platform_desktop.cpp` won't compile under MSVC. It includes POSIX socket headers (`<sys/socket.h>`, `<netinet/in.h>`, `<arpa/inet.h>`, `<unistd.h>`, `<fcntl.h>`) and calls POSIX-only APIs:
+
+- `::socket` / `::connect` / `::bind` / `::accept` exist on both — but Windows needs them via `<winsock2.h>` + `<ws2tcpip.h>`.
+- `::read` / `::write` on socket fds — Windows uses `::recv` / `::send` (file-descriptor I/O doesn't bridge to sockets).
+- `::close(fd)` — Windows uses `::closesocket(SOCKET)`.
+- `::sendmsg(fd, msghdr, MSG_DONTWAIT)` for non-blocking scatter-gather — no direct Windows equivalent; closest is `WSASend(SOCKET, WSABUF*, ...)` with `FIONBIO` mode set via `ioctlsocket`.
+- `fcntl(F_GETFL/F_SETFL, O_NONBLOCK)` — Windows uses `ioctlsocket(FIONBIO)`.
+- `errno` after socket calls — Windows uses `WSAGetLastError()`.
+- WSAStartup must be called once before any socket use; WSACleanup once at shutdown.
+
+The current `release.yml` `build-windows` job fails on the first source file (`platform_desktop.cpp` → `'sys/socket.h': No such file or directory`). The `release` job has `needs: build-windows`, so a tag push currently can't release: the matrix is half-broken.
+
+Two ways to land the port:
+
+1. **Conditional includes/typedefs in `platform_desktop.cpp`** — `#ifdef _WIN32 ... #else ... #endif` blocks around every socket call. Smallest diff, ugliest source. The platform-boundary rule keeps platform code inside `src/platform/`, so this is local damage.
+2. **Split into `platform_desktop_posix.cpp` + `platform_desktop_windows.cpp`** — cleaner, ~2x file count, CMake picks which to compile per host. Mirrors how the ESP32 platform is separate from desktop today; honest separation between two genuinely different syscall worlds.
+
+Either path: 2-3h of careful translation + Windows-side manual testing. The plan-17 CI scaffolding ships ready — once this port lands, `build-windows` flips green automatically and the v1.0.0 release can include the Windows zip.
+
+---
+
 ## Release 2.0 — distribution catches up to the source tree
 
-1.0 ships ESP32 firmware (4 variants) + macOS arm64 + Windows x64 binaries. The source tree builds for Teensy, Raspberry Pi, ESP32-P4, and Linux too — distribution catches up here.
+1.0 ships ESP32 firmware (4 variants) + macOS arm64 binaries (Windows once the platform port above lands). The source tree builds for Teensy, Raspberry Pi, ESP32-P4, and Linux too — distribution catches up here.
 
 - **ESP32-P4** board variant. New chip target, new sdkconfig fragment, fits the existing `BOARDS` table in `scripts/build/build_esp32.py`.
 - **OTA / FirmwareUpdateModule.** Re-flashing via the web installer works in 1.0 but requires a USB cable. Port the passive-observer pattern from projectMM-v1 — pulls release JSON from GitHub, surfaces availability in the UI, applies on user confirm.
