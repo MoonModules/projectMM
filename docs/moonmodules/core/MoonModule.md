@@ -76,7 +76,9 @@ When the UI adds or removes a child at runtime (e.g. switching an effect on a la
 
 This is needed for: effect switching, modifier add/remove, driver hot-plug, and persistence restore after reboot.
 
-`onChildrenReady()` — parent notified when all children finish setup. Keep this minimal.
+## Status slot
+
+`setStatus(msg, severity)` / `status()` / `severity()` / `clearStatus()` carry a short message the module wants the user to see right now — Layer writes "buffer reduced — not enough memory" on memory degradation, NetworkModule writes "Eth: 192.168.1.210" or "No network". Severity is `Status` / `Warning` / `Error` and the UI picks the chip emoji (ℹ️ / ⚠️ / ❌). The slot stores a pointer (no copy), so callers pass flash string literals or a module-owned char buffer with stable lifetime. Wire contract (only emitted when set): `/api/state` and `/api/system` each carry `"status":"…","severity":"status|warning|error"` — see [HttpServerModule.md](HttpServerModule.md).
 
 ## Persistence
 
@@ -106,7 +108,7 @@ Conditional controls (e.g. fields only visible under a Select mode) are always b
 ### projectMM v2 — MoonModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/MoonModule.h))
 
 - `onBuildControls()` / `onAllocateMemory()` separation.
-- `onChildrenReady()`.
+- `onChildrenReady()` — parent-notified-after-children hook. Not carried into v3; child setup ordering is handled by Scheduler's 4-phase boot instead.
 - Field order optimized 8B→4B→2B→1B, saving 24 bytes.
 - `classSize` set via `register_type<T>()`.
 - `AutoWireSpec` — an arbitrary dependency-graph (DAG) wiring mechanism. v3 deliberately uses parent/child only; the DAG was more than the domain needs.

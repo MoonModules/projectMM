@@ -7,7 +7,7 @@
 //   4. Render pipeline: render() → renderNav() → renderCards() → createCard() → createControl()
 //   5. State patching (no-rebuild contract): updateValues() + updateModuleControls()
 //   6. Type picker
-//   7. Drag-to-reorder (HTML5 DnD; desktop only — mobile uses ↑/↓ buttons)
+//   7. Drag-to-reorder (HTML5 DnD on desktop; touchstart-gated on mobile)
 //   8. 3D WebGL preview (sticky + scroll-shrink, sparse vertex buffer, frame cache)
 //   9. Status bar wiring (device name, sys stats, theme, reboot)
 //  10. Boot
@@ -192,7 +192,7 @@ async function deleteModule(name) {
     refetchState();
 }
 
-// move to absolute index (0..siblings.length-1). Called from up/down buttons and drag-drop.
+// move to absolute index (0..siblings.length-1). Called from drag-and-drop.
 async function moveModuleTo(name, toIndex) {
     await fetch("/api/modules/" + encodeURIComponent(name) + "/move", {
         method: "POST",
@@ -500,7 +500,7 @@ function createCard(mod, depth) {
         card.appendChild(footer);
     }
 
-    // -- Drag-to-reorder (desktop HTML5; mobile naturally falls through to ↑/↓) --
+    // -- Drag-to-reorder (HTML5 DnD on desktop; touchstart-gated on mobile) --
     if (depth > 0 && (mod.role === "effect" || mod.role === "modifier")) {
         attachDragHandlers(card, mod);
     }
@@ -582,8 +582,10 @@ function createActionButtons(mod) {
     const wrap = document.createElement("span");
     wrap.className = "card-actions";
 
-    // Reorder is drag-and-drop only (works on desktop and mobile) — see the
-    // drag handle below. No up/down buttons.
+    // Reorder is drag-and-drop only (works on desktop and mobile). The whole
+    // card body is the drag source; the controls region excludes itself via
+    // the mousedown gate in attachDragHandlers. No up/down buttons, no
+    // dedicated drag handle.
 
     const replaceBtn = document.createElement("button");
     replaceBtn.className = "card-btn";
@@ -1328,7 +1330,7 @@ function openPicker(anchorEl, opts) {
 }
 
 // ---------------------------------------------------------------------------
-// 7. Drag-to-reorder (desktop HTML5; mobile falls through to ↑/↓ buttons)
+// 7. Drag-to-reorder (HTML5 DnD on desktop; touchstart-gated on mobile)
 // ---------------------------------------------------------------------------
 
 function attachDragHandlers(card, mod) {

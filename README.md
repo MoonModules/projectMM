@@ -1,6 +1,6 @@
 # projectMM
 
-Drive LED installations and DMX lighting from a small computer in your pocket, on your desk, or in a wall socket. One source tree, multiple targets.
+Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi, Windows, macOS or Linux desktop. One source tree, multiple targets.
 
 https://github.com/user-attachments/assets/b12b28ca-7e87-477a-942b-fcae601b721d
 
