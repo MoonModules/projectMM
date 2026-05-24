@@ -1,5 +1,5 @@
 #include "core/Scheduler.h"
-#include "light/Layers.h"
+#include "light/layers/Layers.h"
 #include "light/layouts/GridLayout.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/NoiseEffect.h"

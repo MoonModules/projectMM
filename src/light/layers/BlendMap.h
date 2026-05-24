@@ -1,7 +1,7 @@
 #pragma once
 
-#include "light/Buffer.h"
-#include "light/MappingLUT.h"
+#include "light/layers/Buffer.h"
+#include "light/layers/MappingLUT.h"
 
 #include <cstring>
 

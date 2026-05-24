@@ -13,6 +13,8 @@ add_compile_options(-Wall -Wextra -Werror)
 # here so both the application and the test binary link them.
 add_library(mm_core STATIC
     src/core/HttpServerModule.cpp
+    src/core/FilesystemModule.cpp
+    src/core/Scheduler.cpp
 )
 target_include_directories(mm_core PUBLIC src/)
 target_link_libraries(mm_core PUBLIC mm_platform)

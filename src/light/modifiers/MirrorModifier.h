@@ -10,7 +10,7 @@ public:
 
     bool mirrorX = true;
     bool mirrorY = true;
-    bool mirrorZ = false;
+    bool mirrorZ = true;
 
     uint8_t maxMultiplier() const override {
         return (mirrorX ? 2 : 1) * (mirrorY ? 2 : 1) * (mirrorZ ? 2 : 1);

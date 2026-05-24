@@ -141,7 +141,7 @@ The light domain is everything specific to driving lights. **Light** here means 
 
 Modules in the light pipeline can be added, replaced, or removed dynamically at runtime.
 
-```
+```text
               Layouts (shared by every Layer in Layers)
                 ├── GridLayout  ──→ coordinate iterator
                 └── WheelLayout ──→ coordinate iterator

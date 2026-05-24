@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "light/MappingLUT.h"
+#include "light/layers/MappingLUT.h"
 
 #include <vector>
 

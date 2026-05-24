@@ -6,7 +6,7 @@
 #include "light/effects/NoiseEffect.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/modifiers/MirrorModifier.h"
-#include "light/Layer.h"
+#include "light/layers/Layer.h"
 #include "platform/platform.h"
 
 #include <cstdio>

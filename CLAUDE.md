@@ -45,7 +45,7 @@ The design rationale for each rule below lives in [docs/architecture.md](docs/ar
 
 **Git: only on explicit request.** Do not `git add`, `git commit`, or `git push` on your own initiative. Only execute these when the product owner explicitly asks (e.g. "commit now", "push it"). The product owner controls when changes are staged, committed, and pushed.
 
-**Gate lists are initiated by the product owner, not by agents. Never start a gate list on your own — always ask first.** The full set of gates (especially the Opus reviewer at push and the ESP32 build at commit) easily takes 10 minutes per event and burns real tokens; agents must not initiate them unprompted. When the product owner says "run pre-commit" / "commit now" / "pre-push" / "pre-merge" / "ready to release" the relevant list below runs. Do NOT start any list automatically because you finished a feature, because tests pass, because a milestone feels reached, because completion seems imminent, or because an earlier instruction implied a sequence ending in "commit". If you finished feature work and are unsure whether the product owner wants to proceed, **ask**: "Feature work is done — should I run pre-commit, or do you want to look first?" Treat each list as a gate the product owner opens; the agent's job is finishing the work and reporting status so the product owner can decide when to open it.
+**Gate lists are initiated by the product owner, not by agents. Never start a gate list on your own — always ask first.** The full set of gates (especially the Opus reviewer at PR-merge and the ESP32 build at commit) easily takes 10 minutes per event and burns real tokens; agents must not initiate them unprompted. When the product owner says "run pre-commit" / "commit now" / "pre-merge" / "ready to release" the relevant list below runs. Do NOT start any list automatically because you finished a feature, because tests pass, because a milestone feels reached, because completion seems imminent, or because an earlier instruction implied a sequence ending in "commit". If you finished feature work and are unsure whether the product owner wants to proceed, **ask**: "Feature work is done — should I run pre-commit, or do you want to look first?" Treat each list as a gate the product owner opens; the agent's job is finishing the work and reporting status so the product owner can decide when to open it.
 
 The full gate lists per lifecycle event (commit, push, PR merge, release) live in **Lifecycle Events** below.
 
@@ -63,12 +63,12 @@ Build one capability at a time. Each commit produces visible output. The product
 2. **Review only the relevant module drafts.** Cherry-pick from `docs/moonmodules_draft/`. Promote only what's needed to `docs/moonmodules/`.
 3. **`/plan` it.** Plan references only the promoted specs + architecture docs. Save the plan as `docs/history/plan-NN.md` (numbered sequentially).
 4. **Implement in a branch** (`next-iteration` or feature branch). Test on hardware. Run the commit gates (see Lifecycle Events below). Commit.
-5. **Push.** Run the push gates. Product owner pushes. CodeRabbit reviews the PR. Process findings.
+5. **Push.** Product owner pushes. CodeRabbit reviews the PR. Process findings.
 6. **Repeat.**
 
 ### Lifecycle Events
 
-The project has **four** gated lifecycle events: **commit**, **push**, **PR merge into `main`**, **release tag**. Each has its own checklist below. Gates within a list run **only when the change makes them applicable** — every conditional gate states its trigger objectively (e.g. "any file under `src/` changed"). A gate that doesn't apply is skipped; a gate that *does* apply but the product owner chooses to skip must have a one-line reason in the commit body / PR description / release notes. The trail stays honest and auditable.
+The project has **three** gated lifecycle events: **commit**, **PR merge into `main`**, **release tag**. (Push has no gate of its own — every check that needs to land before code goes out either lives in the commit gates or is the CodeRabbit / human PR review.) Each event has its own checklist below. Gates within a list run **only when the change makes them applicable** — every conditional gate states its trigger objectively (e.g. "any file under `src/` changed"). A gate that doesn't apply is skipped; a gate that *does* apply but the product owner chooses to skip must have a one-line reason in the commit body / PR description / release notes. The trail stays honest and auditable.
 
 Initiation is always the product owner's call — see the rule above. Agents never start a list on their own.
 
@@ -89,41 +89,29 @@ The narrow safety net: "this snapshot is internally consistent."
 6. ESP32 build — `build_esp32.py` — if any file under `src/` (excluding `src/platform/desktop/`), `esp32/`, `CMakeLists.txt`, or `library.json` changed.
 7. KPI collection — `collect_kpi.py --commit` — if any file under `src/` changed. The one-liner goes as the **first** line of the commit body, full details at the bottom. **The one-liner MUST include `tick:Xus(FPS:Y)` for every supported target** (PC + ESP32 today; Teensy/RPi when added). If a target's tick/FPS is missing — e.g. ESP32 wasn't monitored recently and `esp32/monitor.log` is stale — re-run a short live capture before committing, or note explicitly in the commit body why the value is absent.
 
-**Not at commit-time** (these moved to push or PR-merge): Reviewer agent → push; live perf analysis + `docs/performance.md` update → PR merge; documentation sync sweep → PR merge; permission review → PR merge.
+**Not at commit-time** (these run at PR-merge): Reviewer agent; live perf analysis + `docs/performance.md` update; documentation sync sweep; permission review.
 
-#### Event 2 — Push
+**On-demand reviewer.** The product owner can ask for a reviewer pass mid-branch on a single risky commit — say "run reviewer" before commit — and the agent runs it on the staged diff with the same scope as the merge-time gate. Default is fast (no reviewer); the on-demand path is a safety valve when something specific feels off.
 
-The "external eyes about to see this" moment. Cheap if commit gates passed; the additions are checks that benefit from being run on a complete branch, not per-commit.
-
-**Mandatory:**
-
-1. All commit gates have passed for every commit in the push range (`git log origin/<branch>..HEAD`).
-2. Branch is rebased / up-to-date with its target.
-
-**Conditional:**
-
-3. Reviewer agent — Opus reviewer over the **push range** (`git diff origin/<branch>..HEAD`). Scope: domain boundary, **common patterns first** (flag any new convention — naming scheme, file shape, build flag, control mechanism, UI affordance — that isn't recognisable from a widely-used project / framework / canonical resource; bespoke choices must carry a stated reason at the introduction site, see the principle in § Principles), **unnecessary abstractions** (no-op / pass-through wrappers that only rename or re-namespace an existing function, single-call-site indirection that would read clearer inlined, names that obscure where the real code lives), **duplicated patterns** (same logic in multiple places that belongs in a base class or shared function), hot-path violations, spec conformance, bloat, platform boundary. Must PASS. Skip if the push is a single doc-only or test-only commit.
-
-The PR review (CodeRabbit, human review) happens after push and is outside the local gating system. Complements the Reviewer agent — CodeRabbit handles line-level bugs in the PR; the Reviewer agent handles architectural drift before push.
-
-#### Event 3 — PR merge into `main`
+#### Event 2 — PR merge into `main`
 
 The "this is now trunk" moment. Where the wider hygiene checks live, because once it's in trunk it gets shipped.
 
 **Mandatory:**
 
-1. All push gates passed.
+1. All commit gates passed on every commit in the PR.
 2. PR feedback addressed (CodeRabbit + human review).
 3. **Plan reconciliation** — for each plan in `docs/history/plan-*.md` covered by this branch: was it followed? What changed? Note in `docs/history/decisions.md` if anything is worth carrying forward. Move reviewed plans to `docs/history/archive/`.
 4. **Documentation sync** — every new module / control / API endpoint has matching docs (`docs/moonmodules/*.md`, `docs/testing.md`, `docs/architecture*.md`).
+5. **Reviewer agent** — Opus reviewer over the **whole branch diff** (`git diff main...HEAD`). Scope: domain boundary, **common patterns first** (flag any new convention — naming scheme, file shape, build flag, control mechanism, UI affordance — that isn't recognisable from a widely-used project / framework / canonical resource; bespoke choices must carry a stated reason at the introduction site, see the principle in § Principles), **unnecessary abstractions** (no-op / pass-through wrappers that only rename or re-namespace an existing function, single-call-site indirection that would read clearer inlined, names that obscure where the real code lives), **duplicated patterns** (same logic in multiple places that belongs in a base class or shared function), hot-path violations, spec conformance, bloat, platform boundary. Architectural drift is more visible across N commits than across one — "three commits each added a wrapper" reads as a pattern that one commit hides. Findings either get fixed in additional branch commits before merge, or are accepted with a one-line reason in the PR description. CodeRabbit complements this — CodeRabbit handles line-level bugs in the PR; the Reviewer agent handles architectural drift.
 
 **Conditional:**
 
-5. **Live perf snapshot** — `docs/performance.md` updated — if the branch touches anything under `src/light/`, `src/core/Scheduler.h`, `src/core/HttpServerModule.cpp`, or any platform code that runs in the tick path. Compare new tick/FPS to the previous committed values; explain significant changes.
-6. **Permission review** — scan `.claude/settings.local.json`. The `allow` list grows organically and accumulates one-off entries (specific `sed` line ranges, one-time `lldb` invocations, `/tmp/probe` paths) that will never recur. Propose to the product owner: (a) one-off entries that can be deleted, and (b) clusters of narrow entries that could collapse into one broad pattern (e.g. several `./build/test/mm_tests -tc="..."` lines → `Bash(./build/test/mm_tests:*)`) so routine commands stop prompting. Advisory — agent suggests, product owner approves. Never broaden permissions for destructive or network-mutating commands without explicit approval; err toward keeping the list tight. Not commit-blocking but always worth doing once per merge since this is when noise has accumulated.
-7. **README + quick-start refresh** — if the change altered build, flash, or first-run UX.
+6. **Live perf snapshot** — `docs/performance.md` updated — if the branch touches anything under `src/light/`, `src/core/Scheduler.h`, `src/core/HttpServerModule.cpp`, or any platform code that runs in the tick path. Compare new tick/FPS to the previous committed values; explain significant changes.
+7. **Permission review** — scan `.claude/settings.local.json`. The `allow` list grows organically and accumulates one-off entries (specific `sed` line ranges, one-time `lldb` invocations, `/tmp/probe` paths) that will never recur. Propose to the product owner: (a) one-off entries that can be deleted, and (b) clusters of narrow entries that could collapse into one broad pattern (e.g. several `./build/test/mm_tests -tc="..."` lines → `Bash(./build/test/mm_tests:*)`) so routine commands stop prompting. Advisory — agent suggests, product owner approves. Never broaden permissions for destructive or network-mutating commands without explicit approval; err toward keeping the list tight. Not commit-blocking but always worth doing once per merge since this is when noise has accumulated.
+8. **README + quick-start refresh** — if the change altered build, flash, or first-run UX.
 
-#### Event 4 — Release tag
+#### Event 3 — Release tag
 
 The "end users will use this" moment. Per-release criteria are defined by the product owner; this is the generic envelope.
 
@@ -199,7 +187,7 @@ The project uses Claude Code agents in defined roles. The user is the **Product 
 |--|-------|-------|-------|------|
 | 🤖 | **Architect** | Opus | System design | Reviews against architecture, designs components, validates boundaries |
 | 👽 | **Developer** | Sonnet | Implementation | Writes code in worktrees, follows all rules, one step at a time |
-| 👾 | **Reviewer** | Opus | Pre-PR check | Runs locally at push (Event 2, gate 3) — see that gate for the full review scope. Complements CodeRabbit (which handles line-level bugs in the PR). |
+| 👾 | **Reviewer** | Opus | Pre-merge check | Runs at PR merge over the whole branch diff (Event 2, gate 5); available on-demand pre-commit on the staged diff when the product owner asks. Complements CodeRabbit (which handles line-level bugs in the PR). |
 | 🛸 | **Tester** | Sonnet | Verification | Writes tests, verifies architectural rules in code |
 | 💀 | **Runner** | Haiku | Quick checks | Runs MoonDeck scripts, platform boundary checks, build verification |
 

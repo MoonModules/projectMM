@@ -1,9 +1,9 @@
 #pragma once
 
-#include "light/Buffer.h"
+#include "light/layers/Buffer.h"
 #include "light/layouts/Layouts.h"
 #include "light/effects/EffectBase.h"
-#include "light/MappingLUT.h"
+#include "light/layers/MappingLUT.h"
 #include "light/modifiers/ModifierBase.h"
 #include "platform/platform.h"
 
@@ -75,6 +75,7 @@ public:
             lut_.free();
             buffer_.free();
             setDynamicBytes(0);
+            clearStatus();  // stale "buffer reduced" message would otherwise persist
             MoonModule::onAllocateMemory();
             return;
         }
@@ -177,6 +178,7 @@ public:
     // Precondition: physicalWidth_/Height_/Depth_ must be set (call from onAllocateMemory)
     void rebuildLUT() {
         lutSkipped_ = false;
+        clearStatus();  // re-evaluated below if a degrade path is taken
 
         // Find first modifier (if any)
         ModifierBase* mod = nullptr;
@@ -216,6 +218,7 @@ public:
                         static_cast<unsigned>(lutBytes),
                         static_cast<unsigned>(platform::freeHeap()));
             lutSkipped_ = true;
+            setStatus("modifier LUT skipped — not enough memory", Severity::Warning);
             width_ = physicalWidth_;
             height_ = physicalHeight_;
             depth_ = physicalDepth_;
@@ -273,11 +276,13 @@ private:
 
     void allocateBuffer(nrOfLightsType count) {
         // Try to allocate buffer, halve dimensions if needed
+        bool reduced = false;
         while (count > 0) {
             size_t needed = static_cast<size_t>(count) * channelsPerLight_;
             if (canAllocate(needed)) {
                 if (buffer_.allocate(count, channelsPerLight_)) {
                     setDynamicBytes(buffer_.bytes() + lut_.memoryUsed());
+                    if (reduced) setStatus("buffer reduced — not enough memory", Severity::Warning);
                     return;
                 }
                 // allocate returned false despite canAllocate check — degrade
@@ -289,6 +294,7 @@ private:
             height_ = height_ > 1 ? height_ / 2 : 1;
             depth_ = depth_ > 1 ? depth_ / 2 : 1;
             count = static_cast<nrOfLightsType>(width_) * height_ * depth_;
+            reduced = true;
             std::printf("  DEGRADE  buffer too large, reducing to %dx%dx%d\n",
                         static_cast<int>(width_), static_cast<int>(height_), static_cast<int>(depth_));
             if (width_ <= 8 && height_ <= 8) break; // minimum
@@ -296,6 +302,9 @@ private:
         if (!buffer_.allocate(count, channelsPerLight_)) {
             std::printf("  DEGRADE  buffer_.allocate failed at minimum size %u\n",
                         static_cast<unsigned>(count));
+            setStatus("buffer allocation failed — not enough memory", Severity::Error);
+        } else if (reduced) {
+            setStatus("buffer reduced — not enough memory", Severity::Warning);
         }
         setDynamicBytes(buffer_.bytes() + lut_.memoryUsed());
     }

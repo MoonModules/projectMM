@@ -15,7 +15,9 @@ GET    /moonlight-logo.png        → header logo + favicon
 
 GET    /api/state                 → full module tree JSON: each entry carries
                                     name, type, role, enabled, loopTimeUs,
-                                    classSize, dynamicBytes, controls[]
+                                    classSize, dynamicBytes, controls[],
+                                    status + severity (only when set by the
+                                    module; severity ∈ status/warning/error)
 GET    /api/system                → fps, tickTimeUs, freeHeap, freeInternal,
                                     maxBlock, uptime
 GET    /api/types                 → {types:[{name, displayName, role,

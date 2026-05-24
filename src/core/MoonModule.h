@@ -194,6 +194,25 @@ public:
     size_t dynamicBytes() const { return dynamicBytes_; }
     void setDynamicBytes(size_t b) { dynamicBytes_ = b; }
 
+    // Per-module status slot. A short user-facing message the module wants the
+    // user to see right now — NetworkModule writes "Eth: 192.168.1.210", Layer
+    // writes "buffer reduced — not enough memory". The pointer is owned by the
+    // caller (flash literal or a module-owned char buffer); the slot doesn't
+    // copy. `nullptr` = nothing to show.
+    //
+    // `severity` qualifies the message so the UI can pick the right emoji:
+    //   Status   ℹ️   — neutral info, current state ("connected").
+    //   Warning  ⚠️   — silent degradation ("buffer reduced").
+    //   Error    ❌   — something failed ("WiFi auth failed").
+    enum class Severity : uint8_t { Status, Warning, Error };
+    const char* status() const { return status_; }
+    Severity severity() const { return severity_; }
+    void setStatus(const char* msg, Severity sev = Severity::Status) {
+        status_ = msg;
+        severity_ = sev;
+    }
+    void clearStatus() { status_ = nullptr; severity_ = Severity::Status; }
+
     // Per-module timing: parents time children, Scheduler times top-level
     uint32_t loopTimeUs() const { return loopTimeUs_; }
     void addAccumUs(uint32_t us) { accumUs_ += us; }
@@ -227,6 +246,8 @@ private:
     uint8_t childCapacity_ = 0;
     size_t classSize_ = 0;
     size_t dynamicBytes_ = 0;
+    const char* status_ = nullptr;  // see status() / setStatus()
+    Severity severity_ = Severity::Status;
     uint32_t loopTimeUs_ = 0;
     uint32_t accumUs_ = 0;
 };

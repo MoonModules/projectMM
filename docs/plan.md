@@ -2,19 +2,6 @@
 
 Completed items are removed. This file is deleted when empty.
 
-## Migrate core service modules from header-only to `.h` + `.cpp` (in progress)
-
-CLAUDE.md's split rule says core service modules use `.h` + `.cpp`; the codebase shipped most modules header-only because the earlier rule applied uniformly. Four core service modules still need migration after `HttpServerModule`:
-
-- `FilesystemModule` (477 lines)
-- `NetworkModule` (293 lines)
-- `Scheduler` (253 lines)
-- `SystemModule` (151 lines) — smallest, easiest
-
-Split each one **lazily, when other work touches it**, not as a big-bang refactor commit. Each split: move bodies to `.cpp`, leave a forward-compatible `.h`, add to `CMakeLists.txt`'s `mm_core` STATIC sources list, no behavioural change. One commit per module, mechanical, reviewable.
-
-`MoonModule` stays header-only — it's the base class of every domain MoonModule and consistency with subclasses (every effect/modifier/driver) outweighs the build-time win there. `ModuleFactory` stays header-only because it's template-heavy. The small core utilities (`types.h`, `color.h`, `Control.h`, `JsonUtil.h`, `JsonSink.h`, `Sha1.h`, `Base64.h`, `PreviewFrame.h`, `version.h`) also stay header-only — they're declarations + inline accessors.
-
 ## 13. README + quick-start
 
 Update README with: what it does now, how to build/flash, how to connect and open the UI. Include screenshots.

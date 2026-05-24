@@ -1,6 +1,6 @@
 #include "doctest.h"
-#include "light/Layers.h"
-#include "light/Layer.h"
+#include "light/layers/Layers.h"
+#include "light/layers/Layer.h"
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
 #include "light/effects/RainbowEffect.h"

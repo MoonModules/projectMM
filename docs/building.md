@@ -25,7 +25,7 @@ Script definitions and configuration live in `scripts/moondeck_config.json` (com
 
 CMake is the sole build system. The source tree is shared across every platform, but build entry points are separate because ESP-IDF wraps CMake with its own conventions (`idf_component_register()` instead of `add_library()`).
 
-```
+```text
 CMakeLists.txt                          ← standard CMake: desktop / RPi + tests
 src/
   main.cpp                              ← shared pipeline wiring (mm_main), platform-neutral

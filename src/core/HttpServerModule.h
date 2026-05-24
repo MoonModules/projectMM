@@ -78,6 +78,10 @@ private:
     void buildStateJson(JsonSink& sink);
     void writeModuleJson(JsonSink& sink, MoonModule* mod);
     void writeControls(JsonSink& sink, MoonModule* mod);
+    // Emit `,"status":"…","severity":"…"` for a module that has a status set;
+    // no-op when status is null. Shared by writeModuleJson (/api/state) and
+    // writeModuleMetricsJson (/api/system) so the two endpoints stay in sync.
+    static void writeStatus(JsonSink& sink, MoonModule* mod);
 
     // -----------------------------------------------------------------------
     // Control setter

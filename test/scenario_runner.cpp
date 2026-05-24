@@ -5,7 +5,7 @@
 #include "core/Scheduler.h"
 #include "core/ModuleFactory.h"
 #include "light/layouts/GridLayout.h"
-#include "light/Layer.h"
+#include "light/layers/Layer.h"
 #include "light/layouts/Layouts.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/NoiseEffect.h"

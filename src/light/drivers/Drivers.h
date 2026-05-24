@@ -1,9 +1,9 @@
 #pragma once
 
 #include "core/MoonModule.h"
-#include "light/Buffer.h"
-#include "light/Layer.h"
-#include "light/BlendMap.h"
+#include "light/layers/Buffer.h"
+#include "light/layers/Layer.h"
+#include "light/layers/BlendMap.h"
 #include "platform/platform.h"
 
 namespace mm {

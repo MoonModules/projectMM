@@ -402,7 +402,7 @@ function createCard(mod, depth) {
     stats.className = "card-stats";
     stats.dataset.mid = mod.name;
     stats.dataset.key = "stats";
-    stats.title = "Click to toggle fps/ms";
+    stats.title = formatStatsTitle(mod);
     stats.textContent = formatStats(mod);
     stats.addEventListener("click", () => {
         const idx = TIMING_MODES.indexOf(timingMode);
@@ -411,7 +411,7 @@ function createCard(mod, depth) {
         // Refresh every card's stats line in place — no full re-render needed
         document.querySelectorAll(".card-stats[data-mid]").forEach(s => {
             const m = findModule(s.dataset.mid);
-            if (m) s.textContent = formatStats(m);
+            if (m) { s.textContent = formatStats(m); s.title = formatStatsTitle(m); }
         });
     });
     title.appendChild(stats);
@@ -443,11 +443,26 @@ function createCard(mod, depth) {
     card.appendChild(title);
 
     // -- Controls --
+    // Container modules (those that accept children) get their own controls
+    // wrapped in a <details> so the parent's children are the focus by default
+    // and the parent's settings can be expanded on demand. Leaf modules render
+    // controls inline (no extra wrapper).
+    const hasVisibleControls = mod.controls && mod.controls.some(c => !c.hidden);
+    const wrapInDetails = acceptsChildren(mod) && hasVisibleControls;
+    const controlsHost = wrapInDetails ? (() => {
+        const d = document.createElement("details");
+        d.className = "card-controls-collapse";
+        const s = document.createElement("summary");
+        s.textContent = "controls";
+        d.appendChild(s);
+        card.appendChild(d);
+        return d;
+    })() : card;
     if (mod.controls) {
         for (const ctrl of mod.controls) {
             if (ctrl.hidden) continue;  // plan-10 hidden flag (still respected)
             const row = createControl(mod.name, mod.type, ctrl);
-            if (row) card.appendChild(row);
+            if (row) controlsHost.appendChild(row);
         }
     }
 
@@ -550,7 +565,17 @@ function formatStats(mod) {
     const stat = mod.classSize || 0;
     const dyn = mod.dynamicBytes || 0;
     const mem = "🧠 " + fmtBytes(stat) + (dyn > 0 ? " + " + fmtBytes(dyn) : "");
-    return timing ? timing + "   " + mem : mem;
+    // Status chip: emitted by the engine when a module has something to say.
+    // Severity picks the emoji — ℹ️ neutral (Eth: 192.168.1.210), ⚠️ degraded
+    // (buffer reduced), ❌ error (No network). Tooltip carries the full text.
+    const sev = mod.severity || "status";
+    const sevEmoji = sev === "error" ? "❌" : sev === "warning" ? "⚠️" : "ℹ️";
+    const statusChip = mod.status ? "  " + sevEmoji : "";
+    const head = timing ? timing + "   " + mem : mem;
+    return head + statusChip;
+}
+function formatStatsTitle(mod) {
+    return mod.status ? mod.status : "Click to toggle fps/ms";
 }
 
 function createActionButtons(mod) {
@@ -579,13 +604,6 @@ function createActionButtons(mod) {
     armPressTwice(delBtn, () => deleteModule(mod.name),
                   {armedText: "✓", armedTitle: "Click again to delete"});
     wrap.appendChild(delBtn);
-
-    // Drag handle (HTML5 drag-source; the .card itself is the draggable element)
-    const handle = document.createElement("span");
-    handle.className = "drag-handle";
-    handle.textContent = "☰";
-    handle.title = "Drag to reorder";
-    wrap.appendChild(handle);
 
     return wrap;
 }
@@ -955,7 +973,7 @@ function updateValues() {
         updateModuleControls(mod);
         // refresh the stats line for this module if visible
         const statsEl = document.querySelector(`.card-stats[data-mid="${cssEscape(mod.name)}"]`);
-        if (statsEl) statsEl.textContent = formatStats(mod);
+        if (statsEl) { statsEl.textContent = formatStats(mod); statsEl.title = formatStatsTitle(mod); }
         // refresh enabled toggle (now a styled <button>, not an <input>)
         const enabledEl = document.querySelector(`button.module-enabled[data-mid="${cssEscape(mod.name)}"]`);
         if (enabledEl) {
@@ -1316,14 +1334,23 @@ function openPicker(anchorEl, opts) {
 function attachDragHandlers(card, mod) {
     card.draggable = true;
 
+    // Why we toggle `draggable` on mousedown instead of vetoing in dragstart:
+    // HTML5 dragstart's `e.target` is always the draggable element (the card),
+    // not the deepest element under the mouse — so closest(".control-row")
+    // never matches. The reliable signal is the *mousedown* target. Disable
+    // drag at mousedown when the grab landed on a control, re-enable on
+    // mouseup so the next click on the card body can still drag.
+    const gate = (e) => {
+        card.draggable = !e.target.closest(".control-row, .card-controls-collapse > summary");
+    };
+    card.addEventListener("mousedown", gate, true);   // capture: runs before the input
+    card.addEventListener("touchstart", gate, {capture: true, passive: true});
+
     card.addEventListener("dragstart", (e) => {
-        // Don't start a card drag when the user grabbed a control — sliders,
-        // buttons, checkboxes, selects, text inputs, and links all use drag
-        // gestures of their own (e.g. slider thumb).
-        if (e.target.closest("input, button, select, textarea, a, .card-help")) {
-            e.preventDefault();
-            return;
-        }
+        // Innermost card wins — without stopPropagation a nested child's
+        // dragstart would bubble to the parent and the parent's listener
+        // would overwrite dataTransfer with its own name.
+        e.stopPropagation();
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("text/plain", mod.name);
         card.classList.add("dragging");

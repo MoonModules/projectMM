@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/Layer.h"
+#include "light/layers/Layer.h"
 #include "core/color.h"
 
 namespace mm {

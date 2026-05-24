@@ -299,7 +299,7 @@ void HttpServerModule::writeModuleJson(JsonSink& sink, MoonModule* mod) {
     if (!type) type = "";
     sink.appendf(
         "{\"name\":\"%s\",\"type\":\"%s\",\"role\":\"%s\",\"enabled\":%s,"
-        "\"loopTimeUs\":%u,\"classSize\":%u,\"dynamicBytes\":%u,\"controls\":[",
+        "\"loopTimeUs\":%u,\"classSize\":%u,\"dynamicBytes\":%u",
         mod->name() ? mod->name() : "",
         type,
         roleStr,
@@ -307,6 +307,8 @@ void HttpServerModule::writeModuleJson(JsonSink& sink, MoonModule* mod) {
         static_cast<unsigned>(mod->loopTimeUs()),
         static_cast<unsigned>(mod->classSize()),
         static_cast<unsigned>(mod->dynamicBytes()));
+    writeStatus(sink, mod);
+    sink.append(",\"controls\":[");
     writeControls(sink, mod);
     sink.append("]");
 
@@ -322,6 +324,17 @@ void HttpServerModule::writeModuleJson(JsonSink& sink, MoonModule* mod) {
     }
 
     sink.append("}");
+}
+
+void HttpServerModule::writeStatus(JsonSink& sink, MoonModule* mod) {
+    // Only emit when the module has a status — keeps the common case lean.
+    // Severity strings are stable wire format: "status", "warning", "error"
+    // (matches the C++ enum names lowercased; documented in HttpServerModule.md).
+    const char* s = mod->status();
+    if (!s) return;
+    static const char* sevStr[] = {"status", "warning", "error"};
+    sink.appendf(",\"status\":\"%s\",\"severity\":\"%s\"",
+                 s, sevStr[static_cast<int>(mod->severity())]);
 }
 
 void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
@@ -573,12 +586,14 @@ void HttpServerModule::serveSystem(platform::TcpConnection& conn) {
 void HttpServerModule::writeModuleMetricsJson(JsonSink& sink, MoonModule* mod, bool& first) {
     if (!mod) return;
     sink.appendf(
-        "%s{\"name\":\"%s\",\"us\":%u,\"classSize\":%u,\"heap\":%u}",
+        "%s{\"name\":\"%s\",\"us\":%u,\"classSize\":%u,\"heap\":%u",
         first ? "" : ",",
         mod->name() ? mod->name() : "?",
         static_cast<unsigned>(mod->loopTimeUs()),
         static_cast<unsigned>(mod->classSize()),
         static_cast<unsigned>(mod->dynamicBytes()));
+    writeStatus(sink, mod);
+    sink.append("}");
     first = false;
     for (uint8_t i = 0; i < mod->childCount(); i++) {
         writeModuleMetricsJson(sink, mod->child(i), first);

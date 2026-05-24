@@ -62,7 +62,7 @@ Tests the child-array mutations in `src/core/MoonModule.h` that back the UI's re
 
 ### Buffer (`test/test_buffer.cpp`) {#buffer}
 
-Tests `Buffer` in `src/light/Buffer.h`.
+Tests `Buffer` in `src/light/layers/Buffer.h`.
 
 - Allocate and verify count, channelsPerLight, bytes, data pointer, span
 - Clear zeros all data
@@ -154,7 +154,7 @@ Each effect: buffer contains non-zero RGB after render; corners produce differen
 
 ### MappingLUT (`test/test_mapping_lut.cpp`) {#mappinglut}
 
-Tests `MappingLUT` in `src/light/MappingLUT.h`.
+Tests `MappingLUT` in `src/light/layers/MappingLUT.h`.
 
 - Default state is oneToOne
 - setOneToOne: forEachDestination returns logical index
@@ -211,7 +211,7 @@ Pins that `Layouts::totalLightCount()` and `Layouts::forEachCoord()` skip disabl
 
 ### BlendMap (`test/test_blend_map.cpp`) {#blendmap}
 
-Tests `blendMap()` in `src/light/BlendMap.h`.
+Tests `blendMap()` in `src/light/layers/BlendMap.h`.
 
 - oneToOne: output equals input (memcpy path)
 - 1:N mapping: logical pixel appears at multiple physical positions

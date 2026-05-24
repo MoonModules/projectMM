@@ -278,6 +278,23 @@ body.nav-open #nav {
     display: none;
 }
 
+/* Collapsible "settings" wrapper for a container module's own controls.
+   Native <details>/<summary> — defaults to collapsed; children of the
+   container are visible without a click, parent settings open on demand. */
+.card-controls-collapse {
+    margin-top: 4px;
+}
+.card-controls-collapse > summary {
+    cursor: pointer;
+    user-select: none;
+    color: var(--fg-muted);
+    font-size: 0.85em;
+    padding: 2px 0;
+}
+.card-controls-collapse > summary:hover {
+    color: var(--fg);
+}
+
 .card-title {
     display: flex;
     align-items: center;
@@ -380,22 +397,14 @@ body.nav-open #nav {
     border-color: var(--red);
 }
 
-/* Same 26×26 frame as the action buttons, so the cluster aligns; grab cursor
-   keeps it readable as a drag affordance rather than a clickable button. */
-.drag-handle {
-    cursor: grab;
-    color: var(--fg-muted);
-    user-select: none;
-    width: 26px;
-    height: 26px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 14px;
-}
-.drag-handle:hover { color: var(--fg); border-color: var(--accent); }
+/* Whole-card drag: the card itself is the HTML5 drag source, except for
+   `.card-control` and `.card-controls-collapse` regions (sliders, inputs).
+   The card's grab cursor is the only affordance — buttons and inputs keep
+   their own (pointer / text / etc.) so the boundary is felt by the cursor. */
+.card { cursor: grab; }
+.card:active { cursor: grabbing; }
+.control-row, .control-row * { cursor: auto; }
+.card-controls-collapse > summary { cursor: pointer; }
 .card.dragging { opacity: 0.5; }
 .card.drag-over { outline: 2px dashed var(--accent); outline-offset: -2px; }
 
