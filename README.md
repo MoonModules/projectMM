@@ -1,82 +1,83 @@
 # projectMM
 
-A modular runtime for real-time embedded systems — driving LED installations and DMX lighting. C++20, CMake, ESP32-first.
+Drive LED installations and DMX lighting from a small computer in your pocket, on your desk, or in a wall socket. One source tree, multiple targets.
 
 https://github.com/user-attachments/assets/b12b28ca-7e87-477a-942b-fcae601b721d
 
-## What it is
+## What you get
 
-**A modular runtime** for real-time, resource-constrained systems:
+- **Plug in, open a browser, see lights.** A live 3D preview of every effect, every modifier, every layout, controllable from the same browser tab.
+- **Effects, modifiers, layouts, drivers** — all pluggable, all configurable live, all persisted across reboots.
+- **One firmware, many devices.** ESP32, Teensy, Raspberry Pi, Windows / macOS / Linux desktop — the same source builds for each.
+- **Native 3D** from the start. 2D and 1D are the cases where one or two dimensions are size 1; effects don't pick a mode.
+- **Built-in browser UI.** The interface renders any module from its declared controls — adding a new effect needs zero UI code.
+- **DMX and addressable LEDs in the same setup.** RGB strips, RGBW pixels, multi-channel par lights, moving heads — all addressed through the same pipeline.
 
-- **Fast and lean** — engineered for maximum speed and minimal resource usage; predictable frame timing on devices with as little as ~320 KB of RAM.
-- **Modular** — effects, modifiers, layouts, drivers, and system services are all **MoonModules**, created and reconfigured at runtime.
-- **Batteries included** — a browser UI, scheduling, and persistence are built in; control values and module configuration survive a reboot.
-- **Generic web UI** — the [browser interface](docs/moonmodules/core/ui.md) renders any module from its declared controls; new modules need no UI code.
-- **Multi-platform** — one source tree runs on low-cost ESP32 and Teensy, Raspberry Pi, and Windows / macOS / Linux desktops.
+![Web UI](docs/assets/ui.png)
 
-**Its main domain is lighting** — built on the runtime, extensible to other real-time domains:
+## Getting started
 
-- **Drives LED and DMX** — from a single matrix to large multi-fixture rigs and 3D structures.
-- **Render pipeline** — a setup is composed from MoonModules (effects, modifiers, layouts, output drivers) into a pipeline, configured live from a browser.
-- **Native 3D** — coordinates, effects, and layouts operate in 3D space, not only flat grids, with a real-time 3D preview.
+### From a release
 
-The [commit history](https://github.com/ewowi/projectMM/commits/main) and [`docs/moonmodules/`](docs/moonmodules/) show what exists now.
+Download the firmware for your device from the [releases page](https://github.com/ewowi/projectMM/releases), flash it, and open the device in a browser.
 
-## Architecture
+- **ESP32** — flash `projectMM-esp32.bin` with [esptool](https://github.com/espressif/esptool) or the ESP-IDF flasher. The device joins your WiFi via the SoftAP fallback the first time it boots; open the IP it reports on the serial console.
+- **Teensy 4.x** — flash `projectMM-teensy41.hex` with [Teensy Loader](https://www.pjrc.com/teensy/loader.html). 4.1 has Ethernet built in; 4.0 needs an external module.
+- **Raspberry Pi** — download the binary for your Pi model and run it. The UI listens on port 8080.
+- **Windows / macOS / Linux** — download the desktop build, run it, open `http://localhost:8080/`.
 
-The system is two layers, kept separate as much as practical:
+Once running, the UI lets you build a render pipeline visually (layouts → layers with effects + modifiers → drivers), preview the result in 3D, and save it.
 
-- **Core** — a domain-neutral modular runtime. Everything is a [MoonModule](docs/moonmodules/core/MoonModule.md): effects, modifiers, layouts, drivers, and system services all share one class structure, lifecycle, and [control](docs/moonmodules/core/Control.md) mechanism. The core provides modules, a [Scheduler](docs/moonmodules/core/Scheduler.md), [persistence](docs/moonmodules/core/FilesystemModule.md), and platform abstraction — it knows nothing about lights. See [architecture.md](docs/architecture.md).
-- **Light domain** — built on the core. Effects write into per-layer [buffers](docs/moonmodules/light/Buffer.md) → a [mapping LUT](docs/moonmodules/light/MappingLUT.md) translates logical to physical positions → [drivers](docs/moonmodules/light/Drivers.md) output to hardware or network. See [architecture-light.md](docs/architecture-light.md).
+### From source
 
-### Reference documents
+You need [uv](https://docs.astral.sh/uv/) (Python launcher), CMake 3.20+, and a C++20 compiler. For ESP32 you additionally need [ESP-IDF v6.x](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/).
 
-| Document | Description |
-|----------|-------------|
-| [architecture.md](docs/architecture.md) | Core: the domain-neutral runtime — MoonModule, controls, scheduling, persistence, platform abstraction, build, testing |
-| [architecture-light.md](docs/architecture-light.md) | Light domain: pipeline, [layouts](docs/moonmodules/light/Layouts.md), [layers](docs/moonmodules/light/Layer.md), [effects](docs/moonmodules/light/EffectBase.md), modifiers, mapping, drivers, parallelism, memory strategy |
+```sh
+uv run scripts/moondeck.py
+```
+
+Open `http://localhost:8420` and use the dev console: PC tab to build / run / test, ESP32 tab to flash, Live tab to discover devices. Full per-command reference: [scripts/MoonDeck.md](scripts/MoonDeck.md).
+
+![MoonDeck](docs/assets/moondeck.png)
+
+## Documentation
+
+| Document | What's in it |
+|----------|--------------|
+| [architecture.md](docs/architecture.md) | How the system is put together — core runtime + light domain, pipeline, memory, parallelism |
+| [coding-standards.md](docs/coding-standards.md) | How code in this repo is written — conventions, file shape, static checks |
+| [building.md](docs/building.md) | How to build and flash for every supported target |
+| [testing.md](docs/testing.md) | What tests exist and what they cover |
+| [performance.md](docs/performance.md) | Per-module timing, memory, sizeof — per platform |
 | [moonmodules/](docs/moonmodules/) | One spec page per module — [core](docs/moonmodules/core/) services and [light](docs/moonmodules/light/) effects, layouts, modifiers, drivers |
-| [performance.md](docs/performance.md) | Per-module timing and memory, per platform |
-| [testing.md](docs/testing.md) | Test inventory |
 | [CLAUDE.md](CLAUDE.md) | Rules, constraints, and development process |
 
 ## How we work
 
 projectMM is built with AI agents under tight human direction — the **product owner** decides what to build, reviews every line and every spec, and controls what gets committed. Agents write code in defined roles; they don't make decisions.
 
-Meet the team: 🤖 Architect designs, 👽 Developer implements, 👾 Reviewer checks before merge, 🛸 Tester verifies, and 💀 Runner does quick build and check passes. Full team descriptions in [CLAUDE.md](CLAUDE.md).
+Meet the team: 🤖 Architect designs, 👽 Developer implements, 👾 Reviewer checks before merge, 🛸 Tester verifies, 💀 Runner does quick build and check passes. Full team descriptions in [CLAUDE.md](CLAUDE.md).
 
 A few principles run through everything:
 
-- **Specs before code** — a module is documented in [`docs/moonmodules/`](docs/moonmodules/) — purpose, controls, behavior, edge cases, prior art — well enough to implement from before it is written.
-- **One capability at a time** — each change is small, tested, and produces visible output.
-- **Minimalism** — flat, predictable code; removing code beats adding it; every addition must pay for itself.
+- **Common patterns first** — recognisable practice across code, docs, tests, UI. Bespoke choices need a stated reason.
+- **Specs before code** — a module is documented in [`docs/moonmodules/`](docs/moonmodules/) — purpose, controls, behaviour, edge cases, prior art — well enough to implement from before it's written.
+- **One capability at a time** — each change is small, tested, produces visible output.
+- **Minimalism** — flat, predictable code; removing code beats adding it; every addition pays for itself.
 - **The system as it is** — code and docs describe the present; git history is the changelog.
 
 The full rules and process are in [CLAUDE.md](CLAUDE.md).
 
-## MoonDeck
-
-Everything — build, flash, run, test, monitor, for both desktop and ESP32 — is driven from **MoonDeck**, a browser-based dev console:
-
-```sh
-uv run scripts/moondeck.py
-```
-
-Then open `http://localhost:8420`. See [scripts/MoonDeck.md](scripts/MoonDeck.md) for the full command reference.
-
-![MoonDeck](docs/assets/moondeck.png)
-
 ## History
 
-This is the current iteration of years of LED/light system development. Each prior project proved ideas this one builds on:
+This is the current iteration of years of LED / light system development. Each prior project proved ideas this one builds on:
 
 | Project | Description | Repo |
 |---------|-------------|------|
-| **WLED** | Open-source LED firmware (user/contributor since 2021) | [Aircoookie/WLED](https://github.com/Aircoookie/WLED) |
+| **WLED** | Open-source LED firmware (user / contributor since 2021) | [Aircoookie/WLED](https://github.com/Aircoookie/WLED) |
 | **WLED-MoonModules** | WLED fork with advanced features | [MoonModules/WLED](https://github.com/MoonModules/WLED) |
 | **StarLight** | Standalone LED firmware | [ewowi/StarLight](https://github.com/ewowi/StarLight) |
-| **MoonLight** | Ground-up build: 60+ effects, memory-optimized mapping, 11 driver types | [MoonModules/MoonLight](https://github.com/MoonModules/MoonLight) |
+| **MoonLight** | Ground-up build: 60+ effects, memory-optimised mapping, 11 driver types | [MoonModules/MoonLight](https://github.com/MoonModules/MoonLight) |
 | **projectMM v1** | First agentic build: proved the MoonModule pattern, 8 releases | [ewowi/projectMM-v1](https://github.com/ewowi/projectMM-v1) |
 | **projectMM v2** | Lock-free buffers, multi-core scheduling, canvas UI | [ewowi/projectMM-v2](https://github.com/ewowi/projectMM-v2) |
 
@@ -89,7 +90,7 @@ projectMM is a community project — built in the open, shaped by the people who
 - **Ideas and requests** — an effect, a layout, a driver, a fixture you want supported? [Open an issue](https://github.com/ewowi/projectMM/issues) and tell us.
 - **Help build it** — pick something from the [issues](https://github.com/ewowi/projectMM/issues), or propose a MoonModule. See [How we work](#how-we-work) for the process.
 - **Test on hardware** — run it on your panels, boards, and fixtures, and report what works and what doesn't.
-- **Talk to us** — questions, show-and-tell, and design discussion happen on [Discord](https://discord.gg/TC8NSUSCdV).
+- **Talk to us** — questions, show-and-tell, and design discussion on [Discord](https://discord.gg/TC8NSUSCdV).
 
 Find the MoonModules community on [Discord](https://discord.gg/TC8NSUSCdV), [Reddit](https://reddit.com/r/moonmodules), [YouTube](https://www.youtube.com/@MoonModulesLighting), and [GitHub](https://github.com/MoonModules).
 

@@ -27,5 +27,5 @@ A Layouts container can hold multiple layouts. Example: 16 LED strips making up 
 
 ## What needs improvement
 
-- Layout control changes must propagate to every layer (LUT rebuild) and to the Drivers container (output buffer reallocation). Mechanism: [architecture-light.md § Rebuild Propagation](../../architecture-light.md#rebuild-propagation).
+- Layout control changes must propagate to every layer (LUT rebuild) and to the Drivers container (output buffer reallocation). Mechanism: [architecture.md § Rebuild propagation](../../architecture.md#rebuild-propagation).
 - Runtime add / remove / reorder of layouts.

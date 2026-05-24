@@ -17,7 +17,7 @@ Promote sections from here into the main spec as they ship. When the entire file
 
 These don't block the implemented baseline but should be answered before 1.0 ships:
 
-- **Multi-layer UI** (architecture-light.md plans for N layers blended into one Drivers). The current card layout shows one Layer. Likely needs a tab/accordion to switch between layers, or a per-layer column.
+- **Multi-layer UI** (architecture.md plans for N layers blended into one Drivers). The current card layout shows one Layer. Likely needs a tab/accordion to switch between layers, or a per-layer column.
 - **Modifier chain visualization** — show the modifier order visually (the order in `children[]` is the order they apply). Today they're just a flat list.
 - **Presets** — save/load named bundles of control values. Persistence already supports the storage; needs a UI surface.
 - **Canvas/node-graph view** — v2 attempted this. Powerful for complex setups but a doubling of UI surface. Reasonable v3 follow-up gated on user demand.

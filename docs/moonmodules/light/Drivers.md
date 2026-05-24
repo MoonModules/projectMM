@@ -8,7 +8,7 @@ Top-level container for one or more drivers. The consumer side of the pipeline �
 
 The shared output buffer is necessary because blend+map writes to arbitrary physical positions (via LUT) — the output is not filled sequentially. A driver cannot read chunk-by-chunk until the full buffer is populated.
 
-Exception: when memory is tight AND mapping is 1:1 unshuffled (single layer, grid layout, no serpentine), Drivers can skip its own buffer and let drivers read directly from the layer's buffer at the cost of parallelism. See [architecture-light.md § Parallelism](../../architecture-light.md#parallelism-light-domain).
+Exception: when memory is tight AND mapping is 1:1 unshuffled (single layer, grid layout, no serpentine), Drivers can skip its own buffer and let drivers read directly from the layer's buffer at the cost of parallelism. See [architecture.md § Parallelism](../../architecture.md#parallelism).
 
 ## Buffer type
 

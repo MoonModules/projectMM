@@ -46,7 +46,7 @@ All JSON responses stream through a `JsonSink` — no fixed-buffer ceiling, so a
 `GET /ws` with `Upgrade: websocket` → RFC 6455 handshake (SHA-1 + base64). Up to 4 concurrent clients.
 
 - **Server → client text frames:** full state JSON, pushed by `loop1s()`.
-- **Server → client binary frames:** a domain-defined preview channel. Today only the light domain emits frames — leading byte `0x02`, 13-byte header (`dw/dh/dd/ow/oh/od`, little-endian uint16), RGB triples. Pushed by `loop20ms()` when `PreviewFrame::ready` is set by [PreviewDriver](../light/drivers/PreviewDriver.md). See [architecture-light.md § 3D preview channel](../../architecture-light.md#3d-preview-channel).
+- **Server → client binary frames:** a domain-defined preview channel. Today only the light domain emits frames — leading byte `0x02`, 13-byte header (`dw/dh/dd/ow/oh/od`, little-endian uint16), RGB triples. Pushed by `loop20ms()` when `PreviewFrame::ready` is set by [PreviewDriver](../light/drivers/PreviewDriver.md). See [architecture.md § Web UI](../../architecture.md#web-ui).
 - **Client → server:** none. Mutations go through the REST API.
 
 The preview broadcast uses a single non-blocking scatter-gather write (`TcpConnection::writeChunks` — one `writev`/`sendmsg`) so the render task never blocks on a slow browser. `Complete` and `WouldBlock` both keep the connection open; `Partial` or socket error drops the connection and the browser auto-reconnects. PreviewDriver downsamples the frame to ≤1849 voxels so the whole WebSocket message fits lwIP's TCP send buffer (`CONFIG_LWIP_TCP_SND_BUF_DEFAULT` = 11520 B on ESP32).

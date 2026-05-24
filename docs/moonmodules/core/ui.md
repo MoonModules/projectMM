@@ -129,14 +129,14 @@ Auto-rendered by `controls[].type`. Adding a new MoonModule with these control t
 The same picker serves two purposes: **add** (triggered by `+ add child`) and **replace** (triggered by the ✎ button on a card). Renders inline inside the card (not a modal).
 
 - **Role filter**: in add mode, filters to roles legal for the parent (the container declares which child roles it accepts). In replace mode, filters to the target module's own role. The role→child mapping is derived in the UI.
-- **Emoji tag chips**: a row of toggle chips above the list, one per distinct emoji across the role-filtered types. Each type's emoji set has three sources, in this order: a **role chip** (derived in the UI from `role`), a **dimensional chip** (derived in the UI from `dim` when the type declares one — 1/2/3 means 1D/2D/3D), and the curated **`tags`** string from `/api/types` (the module's `tags()` — a flash string literal). The UI treats `tags` as opaque: it splits the string into grapheme clusters and renders each as a chip. The domain that owns this UI assigns each emoji's meaning — see the domain's own architecture page for the assignments (e.g. [architecture-light.md § UI integration](../../architecture-light.md#ui-integration-light-domain) for the role / dim / origin / creator / audio / moving-head assignments used by the light domain shipped today). Toggling chips narrows the list with **AND** logic: a type shows only if it carries every active chip. Each list row shows the type's emoji before its name.
+- **Emoji tag chips**: a row of toggle chips above the list, one per distinct emoji across the role-filtered types. Each type's emoji set has three sources, in this order: a **role chip** (derived in the UI from `role`), a **dimensional chip** (derived in the UI from `dim` when the type declares one — 1/2/3 means 1D/2D/3D), and the curated **`tags`** string from `/api/types` (the module's `tags()` — a flash string literal). The UI treats `tags` as opaque: it splits the string into grapheme clusters and renders each as a chip. The domain that owns this UI assigns each emoji's meaning — see the domain's own architecture page for the assignments (e.g. [architecture.md § Web UI](../../architecture.md#web-ui) for the role / dim / origin / creator / audio / moving-head assignments used by the light domain shipped today). Toggling chips narrows the list with **AND** logic: a type shows only if it carries every active chip. Each list row shows the type's emoji before its name.
 - **Search box** with substring match on type name. Search and chips combine (both must match).
 - **Keyboard nav**: type to filter, ↓ to enter list, ↑↓ to move, Enter to confirm, Esc to cancel.
 - **Confirm / Cancel** action buttons at the bottom (the confirm button reads `create` or `replace` per mode). Double-click a row to confirm immediately.
 
 ## Module hierarchy
 
-Each project pins a fixed top-level shape in its `main.cpp` — the side nav lists those roots in registration order, and the UI does **not** allow root reorder. System modules (Filesystem, System, Network, HttpServer) are always present; the domain modules (the actual data-flow pipeline) sit alongside them. For the light-domain shape see [architecture-light.md § UI integration](../../architecture-light.md#ui-integration-light-domain).
+Each project pins a fixed top-level shape in its `main.cpp` — the side nav lists those roots in registration order, and the UI does **not** allow root reorder. System modules (Filesystem, System, Network, HttpServer) are always present; the domain modules (the actual data-flow pipeline) sit alongside them. For the light-domain shape see [architecture.md § Web UI](../../architecture.md#web-ui).
 
 Child reorder *within* a parent (a child within a container) is supported via HTML5 drag-and-drop (desktop and mobile), which calls `POST /api/modules/<n>/move {to:N}`.
 
@@ -146,7 +146,7 @@ Child reorder *within* a parent (a child within a container) is supported via HT
 
 - URL: `ws://<host>/ws` (same port as HTTP)
 - Server pushes full state snapshot as JSON ~1/sec (same shape as `GET /api/state`). The JSON is built through a streaming sink with no fixed-size buffer — a module tree of any size serializes without truncation
-- Server may push **binary frames** on the same socket. The first byte selects the frame type and dispatches to a domain renderer; the rest of the frame is the domain's choice. The UI ignores types it doesn't recognise. See [Domain preview channel](#domain-preview-channel) for the dispatching contract and the domain's own architecture page for the payload (e.g. [architecture-light.md § 3D preview channel](../../architecture-light.md#3d-preview-channel))
+- Server may push **binary frames** on the same socket. The first byte selects the frame type and dispatches to a domain renderer; the rest of the frame is the domain's choice. The UI ignores types it doesn't recognise. See [Domain preview channel](#domain-preview-channel) for the dispatching contract and the domain's own architecture page for the payload (e.g. [architecture.md § Web UI](../../architecture.md#web-ui))
 - Client sends `"ping"` every 25s as keepalive (Safari kills idle sockets otherwise)
 - Auto-reconnect on close with exponential backoff (500ms → 5s ceiling)
 - Pause on `document.visibilityState === 'hidden'`; resume on `pageshow` (Safari bfcache survival)
@@ -216,7 +216,7 @@ Generic shape: `[type-byte] [domain-specific header] [payload]`. The first byte 
 - `touch-action: none` so single- and multi-finger gestures don't trigger native page scroll or pinch-zoom
 - WebGL clear color is `(0, 0, 0, 0)` — transparent canvas blends into either theme without per-frame color work
 
-For the light-domain renderer (WebGL point cloud, frame format, orbit camera, downsampling) see [architecture-light.md § 3D preview channel](../../architecture-light.md#3d-preview-channel).
+For the light-domain renderer (WebGL point cloud, frame format, orbit camera, downsampling) see [architecture.md § Web UI](../../architecture.md#web-ui).
 
 ## State updates — the no-rebuild contract
 

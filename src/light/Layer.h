@@ -32,7 +32,7 @@ public:
     // `lengthType` (int16_t) is reused so the type matches width/height/depth
     // — the *semantics* (percent vs pixel) live in the field name and spec.
     //
-    // Spec: docs/architecture-light.md § Layer.
+    // Spec: docs/architecture.md § Layers and Layer.
     lengthType startX = 0;
     lengthType startY = 0;
     lengthType startZ = 0;

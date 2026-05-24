@@ -17,7 +17,7 @@ Each Layer carries six `int16_t` controls — `startX`, `startY`, `startZ`, `end
 
 Negative values and values > 100 are legal: a future modifier could drag a Layer in or out of the visible area by shifting start/end past 0% or 100% (e.g. `startX = -50` means the Layer extends 50% off the left edge of the layout). `ControlType::Int16` is the wire type so negative values round-trip correctly through `/api/state`, `/api/types`, and persistence.
 
-Today (single-Layer pipeline) `rebuildLUT()` ignores the controls — the values are persisted state, not yet wired. They surface in the UI now so the surface stays stable when the composition follow-up activates them. **Rounding rule (when activated):** `start` percentages round toward the lower pixel (floor), `end` percentages round toward the higher pixel (ceiling). This guarantees a non-zero region on small panels (e.g. `start = 33, end = 66` on a 4-wide axis produces pixels 1..3 inclusive, not 1..2 or 2..2). Spec: [architecture-light.md § Layer](../../architecture-light.md#layer).
+Today (single-Layer pipeline) `rebuildLUT()` ignores the controls — the values are persisted state, not yet wired. They surface in the UI now so the surface stays stable when the composition follow-up activates them. **Rounding rule (when activated):** `start` percentages round toward the lower pixel (floor), `end` percentages round toward the higher pixel (ceiling). This guarantees a non-zero region on small panels (e.g. `start = 33, end = 66` on a 4-wide axis produces pixels 1..3 inclusive, not 1..2 or 2..2). Spec: [architecture.md § Layers and Layer](../../architecture.md#layers-and-layer).
 
 ## Key operations
 

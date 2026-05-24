@@ -1,8 +1,29 @@
 # Testing
 
-What we test and how. Each section corresponds to a test file or scenario. Module specs link here so end users can see what is covered.
+What we test and how. Each section corresponds to a test file or scenario. Module specs link here so contributors can see what is covered.
 
-See [architecture.md](architecture.md#testing) for the testing strategy and categories.
+## Testing strategy
+
+Three test categories, each with a clear purpose:
+
+- **Module tests** (desktop, `test/test_*.cpp`) — test individual MoonModules in isolation. Each module has its own test file. Run via doctest (`ctest` or `./build/test/mm_tests -s`). Verify a module's API, edge cases, and output are correct — independent of how the module is wired into a pipeline. Module specs in `docs/moonmodules/` link to their test sections here.
+- **Scenario tests** (desktop, `test/scenarios/*.json`) — test the system as an integrated pipeline. Each scenario is a declarative JSON file with a sequence of steps (`add_module`, `set_control`) and optional performance bounds. The scenario runner (`test/scenario_runner.cpp`) replays steps in-process and checks output and timing. The same JSON files run against a live device through the HTTP API (see Live Scenario Tests below).
+- **Regression tests** — when a bug is found, the fix includes a new test (module test or scenario) that reproduces the bug. References the bug in a comment so the connection stays traceable.
+
+**Performance checks** verify architectural rules at runtime:
+
+- **Zero-allocation render loop** — run N frames, intercept `malloc` / `free` (via overriding or platform allocator hooks), fail if any allocation occurs during steady-state rendering.
+- **Frame time bounds** — scenario tests include `"bounds": {"fps": {"min": N}}` to catch performance regressions.
+
+**Live system tests** (on-device) cover what desktop can't:
+
+- Memory stays within bounds over long runs (no leaks, no fragmentation drift).
+- Light output produces correct signal (protocol-level, verified with logic analyser or known-good reference).
+- Multi-device sync achieves sub-millisecond accuracy.
+
+These are semi-automated for now. Automation strategy will emerge with the hardware.
+
+Per-module timing, memory, and sizeof measurements per platform live in [performance.md](performance.md).
 
 ## Module Tests
 
