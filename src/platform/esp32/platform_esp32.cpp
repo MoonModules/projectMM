@@ -314,9 +314,11 @@ size_t filesystemTotal() {
 static const char* NET_TAG = "mm_net";
 
 // Connection state tracked by event handlers
+#ifndef MM_NO_ETH
 static bool ethLinkUp_ = false;
 static bool ethConnected_ = false;
 static esp_netif_t* ethNetif_ = nullptr;
+#endif
 static bool netifInitDone_ = false;
 
 #ifndef MM_NO_WIFI
@@ -335,6 +337,8 @@ static void ensureNetifInit() {
         netifInitDone_ = true;
     }
 }
+
+#ifndef MM_NO_ETH
 
 static void ethEventHandler(void* /*arg*/, esp_event_base_t base,
                             int32_t id, void* data) {
@@ -417,6 +421,17 @@ void ethGetIP(char* buf, size_t len) {
         buf[0] = 0;
     }
 }
+
+#else // MM_NO_ETH — board has no on-chip EMAC, or the EMAC sdkconfig fragment
+      // wasn't layered. Provide stubs matching the desktop platform's no-eth
+      // behaviour so NetworkModule's cascade falls straight to WiFi (or AP).
+
+bool ethInit()                          { return false; }
+bool ethLinkUp()                        { return false; }
+bool ethConnected()                     { return false; }
+void ethGetIP(char* buf, size_t len)    { if (len > 0) buf[0] = 0; }
+
+#endif // MM_NO_ETH
 
 #ifndef MM_NO_WIFI
 

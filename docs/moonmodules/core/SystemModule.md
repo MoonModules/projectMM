@@ -18,6 +18,7 @@ System-level diagnostics and device identity. Always loaded, always visible in t
 **Static (set at boot):**
 - `version` (read-only) — projectMM version from library.json
 - `build` (read-only) — build date/time
+- `board` (read-only) — build-time board key from `src/core/build_info.h` (`MM_BOARD_NAME`): `esp32`, `esp32-eth`, `esp32-eth-wifi`, `esp32s3-n16r8` for the shipped firmware variants; `desktop-macos-arm64` / `desktop-windows-x64` for packaged desktop binaries; `desktop-dev` for unpackaged local desktop builds. Identifies which release asset matches the device — the same key appears in the firmware filenames published by `release.yml`.
 - `chip` (read-only) — chip model (ESP32, ESP32-S3, etc.)
 - `sdk` (read-only) — ESP-IDF version string (or compiler on desktop)
 - `flash` (read-only) — total flash chip size

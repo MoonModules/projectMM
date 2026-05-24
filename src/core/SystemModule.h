@@ -2,7 +2,7 @@
 
 #include "core/MoonModule.h"
 #include "core/Scheduler.h"
-#include "core/version.h"
+#include "core/build_info.h"
 #include "platform/platform.h"
 
 #include <cstdio>
@@ -32,8 +32,9 @@ public:
         // on the next WebSocket push.
         std::snprintf(chipInfo_, sizeof(chipInfo_), "%s", platform::chipModel());
         std::snprintf(sdkInfo_, sizeof(sdkInfo_), "%s", platform::sdkVersion());
-        std::snprintf(versionStr_, sizeof(versionStr_), "%s", MM_VERSION);
-        std::snprintf(buildStr_, sizeof(buildStr_), "%s", MM_BUILD_DATE);
+        std::snprintf(versionStr_, sizeof(versionStr_), "%s", kVersion);
+        std::snprintf(buildStr_, sizeof(buildStr_), "%s", kBuildDate);
+        std::snprintf(boardStr_, sizeof(boardStr_), "%s", kBoardName);
         std::snprintf(bootReasonStr_, sizeof(bootReasonStr_), "%s", platform::resetReason());
 
         if (chipFlashVal_ > 0) {
@@ -81,6 +82,7 @@ public:
         // Static info
         controls_.addReadOnly("version", versionStr_, sizeof(versionStr_));
         controls_.addReadOnly("build", buildStr_, sizeof(buildStr_));
+        controls_.addReadOnly("board", boardStr_, sizeof(boardStr_));
         controls_.addReadOnly("chip", chipInfo_, sizeof(chipInfo_));
         controls_.addReadOnly("sdk", sdkInfo_, sizeof(sdkInfo_));
         controls_.addReadOnly("bootReason", bootReasonStr_, sizeof(bootReasonStr_));
@@ -138,6 +140,8 @@ private:
     char sdkInfo_[24] = {};
     char versionStr_[16] = {};
     char buildStr_[24] = {};
+    // 24 fits the longest current key ("desktop-macos-arm64" = 19) with headroom.
+    char boardStr_[24] = {};
     char bootReasonStr_[16] = {};
     uint32_t totalInternalVal_ = 0;
     uint32_t totalHeapVal_ = 0;

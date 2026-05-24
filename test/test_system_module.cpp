@@ -14,12 +14,13 @@ TEST_CASE("SystemModule controls") {
     sys.setup();
     sys.onBuildControls();
 
-    // Desktop control set is exactly 11: deviceName, uptime, fps, tickTimeUs,
-    // maxBlock, filesystem, version, build, chip, sdk, bootReason. The heap/psram/
-    // firmware progress bars are skipped on desktop (totalInternalHeap/firmware
-    // partition report 0); the filesystem bar is present (partition has a total).
-    // Exact count so a removed/renamed control fails the test instead of slipping by.
-    CHECK(sys.controls().count() == 11);
+    // Desktop control set is exactly 12: deviceName, uptime, fps, tickTimeUs,
+    // maxBlock, filesystem, version, build, board, chip, sdk, bootReason. The
+    // heap/psram/firmware progress bars are skipped on desktop (totalInternalHeap/
+    // firmware partition report 0); the filesystem bar is present (partition has
+    // a total). Exact count so a removed/renamed control fails the test instead
+    // of slipping by.
+    CHECK(sys.controls().count() == 12);
 
     // Find deviceName control
     bool found = false;
@@ -27,6 +28,29 @@ TEST_CASE("SystemModule controls") {
         if (std::strcmp(sys.controls()[i].name, "deviceName") == 0) {
             CHECK(sys.controls()[i].type == mm::ControlType::Text);
             CHECK(std::strcmp(static_cast<char*>(sys.controls()[i].ptr), "MM-CAFE") == 0);
+            found = true;
+        }
+    }
+    CHECK(found);
+}
+
+TEST_CASE("SystemModule board control populated") {
+    // The board control is wired in setup() from kBoardName (build_info.h).
+    // Local desktop builds fall through to "unknown" because CMake doesn't
+    // pass -DMM_BOARD_NAME; release builds get the real key. Either way,
+    // the control must exist and be non-empty so the future OTA path has
+    // something to read.
+    mm::SystemModule sys;
+    sys.setup();
+    sys.onBuildControls();
+
+    bool found = false;
+    for (uint8_t i = 0; i < sys.controls().count(); i++) {
+        if (std::strcmp(sys.controls()[i].name, "board") == 0) {
+            CHECK(sys.controls()[i].type == mm::ControlType::ReadOnly);
+            const char* val = static_cast<const char*>(sys.controls()[i].ptr);
+            CHECK(val != nullptr);
+            CHECK(val[0] != '\0');  // non-empty (either a real key or "unknown")
             found = true;
         }
     }

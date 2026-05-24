@@ -101,7 +101,7 @@ The "this is now trunk" moment. Where the wider hygiene checks live, because onc
 
 1. All commit gates passed on every commit in the PR.
 2. PR feedback addressed (CodeRabbit + human review).
-3. **Plan reconciliation** — for each plan in `docs/history/plan-*.md` covered by this branch: was it followed? What changed? Note in `docs/history/decisions.md` if anything is worth carrying forward. Move reviewed plans to `docs/history/archive/`.
+3. **Plan reconciliation** — for each plan in `docs/history/plan-*.md` covered by this branch: was it followed? What changed? Note in `docs/history/decisions.md` if anything is worth carrying forward, then `git mv` the reviewed plans to `docs/history/archive/`. **Do this on the branch before the merge commit**, so the `decisions.md` lessons + the archive moves land in the same commit train and the merge brings them into `main`. (Doing it after the merge means an extra tail commit on `main`.)
 4. **Documentation sync** — every new module / control / API endpoint has matching docs (`docs/moonmodules/*.md`, `docs/testing.md`, `docs/architecture*.md`).
 5. **Reviewer agent** — Opus reviewer over the **whole branch diff** (`git diff main...HEAD`). Scope: domain boundary, **common patterns first** (flag any new convention — naming scheme, file shape, build flag, control mechanism, UI affordance — that isn't recognisable from a widely-used project / framework / canonical resource; bespoke choices must carry a stated reason at the introduction site, see the principle in § Principles), **unnecessary abstractions** (no-op / pass-through wrappers that only rename or re-namespace an existing function, single-call-site indirection that would read clearer inlined, names that obscure where the real code lives), **duplicated patterns** (same logic in multiple places that belongs in a base class or shared function), hot-path violations, spec conformance, bloat, platform boundary. Architectural drift is more visible across N commits than across one — "three commits each added a wrapper" reads as a pattern that one commit hides. Findings either get fixed in additional branch commits before merge, or are accepted with a one-line reason in the PR description. CodeRabbit complements this — CodeRabbit handles line-level bugs in the PR; the Reviewer agent handles architectural drift.
 
@@ -126,6 +126,7 @@ The "end users will use this" moment. Per-release criteria are defined by the pr
 
 5. **Changelog / release notes** — drafted in the GitHub release body. Skip only for unreleased pre-1.0 tags.
 6. **Cross-platform smoke** — run scenarios on every supported platform (today: PC + ESP32; later: + Teensy, RPi) — if the release claims new platform support or the version bumps a major or minor.
+7. **Principles audit** — sweep `docs/` (except `docs/plan.md` and `docs/history/`) and `src/` for forward-looking language ("roadmap", "will be", "planned", "in the future", "currently lacks", `TODO`, `FIXME`) and other violations of § Principles. Acceptable hits carry a one-line justification; the rest get rewritten present-tense or moved to `docs/plan.md` / `docs/history/`. The reviewer agent can run this end-to-end. Skip only for releases where the diff against the previous tag is doc-empty.
 
 What the agent reads:
 - Always: `CLAUDE.md`, `architecture.md`

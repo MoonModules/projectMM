@@ -387,7 +387,7 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
                     scrambled[k] = static_cast<uint8_t>(pw[k]) ^ PASSWORD_XOR_KEY;
                 }
                 char encoded[96];
-                base64Encode(scrambled, pwLen, encoded, sizeof(encoded));
+                base64Encode(std::span(scrambled).first(pwLen), std::span(encoded));
                 sink.appendf(
                     "{\"name\":\"%s\",\"type\":\"password\",\"value\":\"%s\"",
                     c.name, encoded);
@@ -613,9 +613,31 @@ void HttpServerModule::handleAddModule(platform::TcpConnection& conn, const char
         return;
     }
 
+    // Top-level modules (Layouts/Layers/Drivers/Filesystem/System/Network/HttpServer)
+    // are policy-fixed and wired in main.cpp at boot. The HTTP surface only
+    // allows adding *child* modules to an existing parent — anything else
+    // would be an orphan (not added to any tree, not registered with the
+    // scheduler, never ticked, leaked). Reject early and symmetrically with
+    // handleDeleteModule / handleReplaceModule (both also 400 on top-level).
+    // Scenario tests adding top-level modules go through scenario_runner.cpp's
+    // in-process path, not this HTTP handler.
+    if (parentId[0] == 0) {
+        sendResponse(conn, 400, "application/json",
+                     "{\"error\":\"parent_id required (top-level modules are policy-fixed in main.cpp)\"}");
+        return;
+    }
+
     // Check if module with this name already exists
     if (id[0] != 0 && findModuleByName(id)) {
         sendResponse(conn, 200, "application/json", "{\"ok\":true,\"note\":\"already exists\"}");
+        return;
+    }
+
+    // Resolve the parent before allocating — failure here means we never
+    // construct an orphan module.
+    auto* parent = findModuleByName(parentId);
+    if (!parent) {
+        sendResponse(conn, 404, "application/json", "{\"error\":\"parent not found\"}");
         return;
     }
 
@@ -627,19 +649,10 @@ void HttpServerModule::handleAddModule(platform::TcpConnection& conn, const char
     }
     if (id[0] != 0) mod->setName(id);
 
-    // Find parent and add as child
-    if (parentId[0] != 0) {
-        auto* parent = findModuleByName(parentId);
-        if (!parent) {
-            delete mod;
-            sendResponse(conn, 404, "application/json", "{\"error\":\"parent not found\"}");
-            return;
-        }
-        if (!parent->addChild(mod)) {
-            delete mod;
-            sendResponse(conn, 400, "application/json", "{\"error\":\"parent rejected child\"}");
-            return;
-        }
+    if (!parent->addChild(mod)) {
+        delete mod;
+        sendResponse(conn, 400, "application/json", "{\"error\":\"parent rejected child\"}");
+        return;
     }
 
     // Disambiguate the name if something else in the tree already carries
@@ -665,11 +678,8 @@ void HttpServerModule::handleAddModule(platform::TcpConnection& conn, const char
     // to write the parent's file with the new child slot included. The save is
     // debounced (2s after the last dirty mark) so an immediate reboot won't catch
     // the write; callers wanting a synchronous save can call FilesystemModule::flush().
-    if (parentId[0] != 0) {
-        if (auto* parent = findModuleByName(parentId)) parent->markDirty();
-    } else {
-        mod->markDirty();
-    }
+    // parent is guaranteed non-null by the top-of-function checks.
+    parent->markDirty();
     FilesystemModule::noteDirty();
 
     sendResponse(conn, 200, "application/json", "{\"ok\":true}");
@@ -695,9 +705,12 @@ void HttpServerModule::handleDeleteModule(platform::TcpConnection& conn, const c
     // Remove from parent
     parent->removeChild(mod);
 
-    // Teardown and delete
+    // Tear down + recursively free the whole subtree. A bare `delete mod`
+    // here would only free mod's children_ pointer array (MoonModule's
+    // destructor calls `delete[] children_`); each child module the array
+    // pointed to would leak. Use the same pair handleReplaceModule does.
     mod->teardown();
-    delete mod;
+    Scheduler::deleteTree(mod);
 
     if (scheduler_) scheduler_->rebuild();
 
@@ -918,7 +931,7 @@ void HttpServerModule::handleWebSocketUpgrade(platform::TcpConnection& conn, con
     uint8_t sha1Hash[20];
     sha1(reinterpret_cast<const uint8_t*>(concat), std::strlen(concat), sha1Hash);
     char acceptKey[32];
-    base64Encode(sha1Hash, 20, acceptKey, sizeof(acceptKey));
+    base64Encode(std::span<const uint8_t>(sha1Hash), std::span(acceptKey));
 
     // Send 101 response
     char response[256];

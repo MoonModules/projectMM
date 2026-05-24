@@ -344,6 +344,13 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         if params.get("host"):
             cmd.extend(["--host", params["host"]])
 
+        # Static per-button args declared in moondeck_config.json. Used by the
+        # three ESP32 board buttons to bake in --board, since the UI exposes
+        # no board picker.
+        extra = script_def.get("extra_args") or []
+        if extra:
+            cmd.extend(str(a) for a in extra)
+
         try:
             popen_kwargs = dict(
                 stdout=subprocess.PIPE,

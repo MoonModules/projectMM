@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the ESP32 target."""
+"""Build the ESP32 target for a specific board variant."""
 
 import argparse
 import os
@@ -18,6 +18,64 @@ IDF_SEARCH_PATHS = [
     Path.home() / ".espressif" / "esp-idf",
     Path("/opt/esp-idf"),
 ]
+
+# Components to drop from an Ethernet-only build. ESP-IDF v6.x has no
+# CONFIG_ESP_WIFI_ENABLED switch (the symbol is non-settable, forced y on
+# WiFi-capable SoCs), so WiFi is removed via EXCLUDE_COMPONENTS instead.
+# All consumers of these use *optional* requires, so excluding them links
+# cleanly as long as our own code never references esp_wifi (it doesn't —
+# the WiFi platform functions are #ifdef-stubbed in the eth-only build).
+#
+# NOTE: esp_phy is NOT excluded — it provides RF/clock init the ESP32 EMAC
+# (Ethernet RMII) depends on. Excluding it leaves Ethernet stuck "started"
+# with no link. Only the genuinely WiFi-side components are dropped.
+ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
+
+# Board catalogue. Each entry describes one shipping firmware variant.
+# Keys combine chip name + feature flags + (for SKU-sensitive chips) module:
+#   esp32           — ESP32 classic, WiFi only
+#   esp32-eth       — ESP32 classic, Ethernet only (WiFi compiled out)
+#   esp32-eth-wifi  — ESP32 classic, Ethernet + WiFi (both available)
+#   esp32s3-n16r8   — ESP32-S3 DevKitC-1 with the N16R8 module
+#                     (16 MB flash, 8 MB octal PSRAM). Other S3 SKUs (N8R2,
+#                     N8R8, …) get their own key — the sdkconfig fragment
+#                     encodes flash size + partition table + PSRAM mode,
+#                     which differ per SKU.
+# The Ethernet variants bake in Olimex ESP32-Gateway pin defaults
+# (sdkconfig.defaults.eth). Runtime PHY/pin selection is on the 2.0 roadmap.
+BOARDS: dict[str, dict] = {
+    "esp32": {
+        "chip": "esp32",
+        "fragments": ["sdkconfig.defaults"],
+        "eth_only": False,
+        "description": "ESP32 classic — WiFi only",
+    },
+    "esp32-eth": {
+        "chip": "esp32",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth"],
+        "eth_only": True,
+        "description": "ESP32 classic — Ethernet only (Olimex pins, WiFi compiled out)",
+    },
+    "esp32-eth-wifi": {
+        "chip": "esp32",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth"],
+        "eth_only": False,
+        "description": "ESP32 classic — Ethernet + WiFi (Olimex pins)",
+    },
+    "esp32s3-n16r8": {
+        "chip": "esp32s3",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32s3-n16r8"],
+        "eth_only": False,
+        "description": "ESP32-S3 DevKitC-1 (N16R8: 16 MB flash, 8 MB octal PSRAM) — WiFi only",
+    },
+}
+
+# Deprecated --profile values → board, kept one release for callers that
+# still pass --profile. Remove once external tooling has migrated.
+PROFILE_ALIASES = {
+    "default": "esp32",
+    "eth-only": "esp32-eth",
+}
 
 
 def find_idf() -> Path | None:
@@ -103,38 +161,77 @@ def idf_cmd(idf_path: Path) -> list[str]:
     return [str(idf_path / "tools" / "idf.py")]
 
 
-# Components to drop from the eth-only build. ESP-IDF v6.x has no
-# CONFIG_ESP_WIFI_ENABLED switch (the symbol is non-settable, forced y on
-# WiFi-capable SoCs), so WiFi is removed via EXCLUDE_COMPONENTS instead.
-# All consumers of these use *optional* requires, so excluding them links
-# cleanly as long as our own code never references esp_wifi (it doesn't —
-# the WiFi platform functions are #ifdef-stubbed in the eth-only build).
-#
-# NOTE: esp_phy is NOT excluded — it provides RF/clock init the ESP32 EMAC
-# (Ethernet RMII) depends on. Excluding it leaves Ethernet stuck "started"
-# with no link. Only the genuinely WiFi-side components are dropped.
-ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
-
-
-def profile_cmake_args(profile: str) -> list[str]:
-    """Extra -D cache args for the requested build profile."""
-    args = ["-DSDKCONFIG_DEFAULTS=sdkconfig.defaults"]
-    if profile == "eth-only":
+def board_cmake_args(board: str) -> list[str]:
+    """Extra -D cache args for the requested board."""
+    spec = BOARDS[board]
+    fragments = ";".join(spec["fragments"])
+    args = [f"-DSDKCONFIG_DEFAULTS={fragments}"]
+    # Burn the board key into the binary so SystemModule can report it and the
+    # future OTA path can pick the matching release asset (every release ships
+    # one .bin per board key — see release.yml).
+    args.append(f'-DMM_BOARD_NAME="{board}"')
+    if spec["eth_only"]:
         # Drop the WiFi components from the link, and tell our code to compile
-        # out the WiFi paths (MM_NO_WIFI → esp32/main/CMakeLists.txt).
+        # out the WiFi paths (MM_ETH_ONLY → esp32/main/CMakeLists.txt).
         args.append("-DEXCLUDE_COMPONENTS=" + ";".join(ETH_ONLY_EXCLUDE))
         args.append("-DMM_ETH_ONLY=1")
+    # Boards that don't include the .eth sdkconfig fragment have no EMAC
+    # config — the on-chip Ethernet headers (`eth_esp32_emac_config_t`, …)
+    # disappear, and platform_esp32.cpp's ethInit() won't compile. Set
+    # MM_NO_ETH so the source provides stub implementations instead.
+    has_eth_fragment = any(f.endswith(".eth") for f in spec["fragments"])
+    if not has_eth_fragment:
+        args.append("-DMM_NO_ETH=1")
     return args
+
+
+def resolve_board(args: argparse.Namespace) -> str:
+    """Resolve the board name from --board or the deprecated --profile alias."""
+    if args.board:
+        if args.board not in BOARDS:
+            valid = ", ".join(sorted(BOARDS))
+            print(f"Unknown --board '{args.board}'. Choose one of: {valid}")
+            sys.exit(2)
+        return args.board
+
+    if args.profile:
+        alias = PROFILE_ALIASES.get(args.profile)
+        if not alias:
+            print(f"Unknown --profile '{args.profile}'. "
+                  f"Use --board instead (one of: {', '.join(sorted(BOARDS))}).")
+            sys.exit(2)
+        print(f"--profile is deprecated; use --board {alias} instead.")
+        return alias
+
+    # No flag → keep the prior default behaviour (WiFi-only ESP32 classic).
+    return "esp32"
+
+
+def read_legacy_marker(build_dir: Path) -> str | None:
+    """Translate a pre-board .mm_profile marker into the equivalent board."""
+    legacy = build_dir / ".mm_profile"
+    if not legacy.exists():
+        return None
+    prev_profile = legacy.read_text().strip()
+    return PROFILE_ALIASES.get(prev_profile, "esp32")
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", default="esp32", help="ESP32 chip type")
-    parser.add_argument("--profile", default="default",
-                        choices=["default", "eth-only"],
-                        help="Build profile: 'default' (WiFi + Ethernet) or "
-                             "'eth-only' (WiFi compiled out)")
+    parser.add_argument("--env", help="ESP32 chip type (legacy; derived from --board)")
+    parser.add_argument("--board", choices=sorted(BOARDS),
+                        help="Board variant. One of: " + ", ".join(sorted(BOARDS)))
+    parser.add_argument("--profile", choices=["default", "eth-only"],
+                        help="Deprecated alias for --board. Use --board instead.")
     args = parser.parse_args()
+
+    board = resolve_board(args)
+    chip = BOARDS[board]["chip"]
+    # --env, if supplied, must agree with the board's chip
+    if args.env and args.env != chip:
+        print(f"--env {args.env} conflicts with --board {board} (chip: {chip}). "
+              f"Drop --env or pass --board for a different chip.")
+        sys.exit(2)
 
     if not ESP32_DIR.exists():
         print(f"ESP32 project directory not found: {ESP32_DIR}")
@@ -151,35 +248,40 @@ def main():
     cmd = idf_cmd(idf_path)
 
     build_dir = ESP32_DIR / "build"
-    marker = build_dir / ".mm_profile"
+    marker = build_dir / ".mm_board"
 
-    # Switching profiles requires a fresh sdkconfig — ESP-IDF only seeds it from
-    # SDKCONFIG_DEFAULTS when no sdkconfig exists. A missing marker is treated as
-    # "default" so pre-existing default builds aren't surprise-cleaned.
+    # Switching boards requires a fresh sdkconfig — ESP-IDF only seeds it from
+    # SDKCONFIG_DEFAULTS when no sdkconfig exists. A missing marker is treated
+    # as the previous default (esp32 = WiFi-only classic) so pre-board builds
+    # aren't surprise-cleaned; the legacy .mm_profile marker is honoured for
+    # one release.
     if build_dir.exists():
-        prev = marker.read_text().strip() if marker.exists() else "default"
-        if prev != args.profile:
-            print(f"Profile change ({prev} -> {args.profile}): cleaning build/ and sdkconfig")
+        if marker.exists():
+            prev = marker.read_text().strip()
+        else:
+            prev = read_legacy_marker(build_dir) or "esp32"
+        if prev != board:
+            print(f"Board change ({prev} -> {board}): cleaning build/ and sdkconfig")
             shutil.rmtree(build_dir, ignore_errors=True)
             sdkconfig = ESP32_DIR / "sdkconfig"
             if sdkconfig.exists():
                 sdkconfig.unlink()
 
-    extra = profile_cmake_args(args.profile)
+    extra = board_cmake_args(board)
 
     if not build_dir.exists():
-        print(f"Setting target to {args.env} (profile: {args.profile})...")
-        r = subprocess.run(cmd + extra + ["set-target", args.env],
+        print(f"Setting target to {chip} (board: {board})...")
+        r = subprocess.run(cmd + extra + ["set-target", chip],
                            cwd=ESP32_DIR, env=env)
         if r.returncode != 0:
             sys.exit(r.returncode)
 
-    print(f"Building for {args.env} (profile: {args.profile})...")
+    print(f"Building for {chip} (board: {board})...")
     r = subprocess.run(cmd + extra + ["build"], cwd=ESP32_DIR, env=env)
     if r.returncode != 0:
         sys.exit(r.returncode)
 
-    marker.write_text(args.profile)
+    marker.write_text(board)
 
     # Show flash/RAM usage summary
     subprocess.run(cmd + ["size"], cwd=ESP32_DIR, env=env)

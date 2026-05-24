@@ -69,19 +69,31 @@ Run `setup_esp_idf.py` once to auto-detect the installed IDF version and create 
 
 ```sh
 uv run scripts/build/setup_esp_idf.py        # one-time
-uv run scripts/build/build_esp32.py          # default profile (WiFi + Ethernet)
-uv run scripts/flash/flash_esp32.py          # flash + monitor
-uv run scripts/monitor/monitor_esp32.py      # monitor only
+uv run scripts/build/build_esp32.py --board esp32          # WiFi-only
+uv run scripts/build/flash_esp32.py --port /dev/tty.usbserial-XXXX
+uv run scripts/run/monitor_esp32.py --port /dev/tty.usbserial-XXXX
 ```
 
-### Build profiles
+### Boards
 
-`build_esp32.py --profile` selects which sdkconfig fragments are layered:
+`build_esp32.py --board` selects one of four shipping variants. The key combines chip name + feature flags + (for SKU-sensitive chips) module:
 
-- **`default`** — WiFi + Ethernet. Full Ethernet → WiFi STA → WiFi AP cascade. The standard binary.
-- **`eth-only`** — WiFi compiled out. ESP-IDF v6.x has no `CONFIG_ESP_WIFI_ENABLED` switch (the symbol is forced on for WiFi-capable SoCs), so the profile drops the WiFi components via `-DEXCLUDE_COMPONENTS=esp_wifi;wpa_supplicant;esp_phy;esp_coex` and defines `MM_NO_WIFI` (passed as `-DMM_ETH_ONLY=1`, applied in `esp32/main/CMakeLists.txt`). No WiFi driver or `wpa_supplicant` in the binary, no WiFi FreeRTOS tasks. Smaller image, more free RAM, for Ethernet-only deployments. `build_esp32_ethonly.py` is a thin wrapper (`--profile eth-only` baked in) for the MoonDeck "Build (Ethernet-only)" button.
+| `--board` | IDF target | `SDKCONFIG_DEFAULTS` | What's in the image |
+|---|---|---|---|
+| `esp32` | `esp32` | `sdkconfig.defaults` | WiFi only. No RMII pins reserved. |
+| `esp32-eth` | `esp32` | `sdkconfig.defaults;sdkconfig.defaults.eth` | Ethernet only. WiFi components dropped via `-DEXCLUDE_COMPONENTS=esp_wifi;wpa_supplicant;esp_coex` and `-DMM_ETH_ONLY=1`. Smaller image, more free RAM. Olimex ESP32-Gateway pins baked in (LAN8720 @ MDIO 0, PHY RST GPIO 5). |
+| `esp32-eth-wifi` | `esp32` | `sdkconfig.defaults;sdkconfig.defaults.eth` | Ethernet + WiFi. Same Olimex pin map. Full Ethernet → WiFi STA → WiFi AP cascade. |
+| `esp32s3-n16r8` | `esp32s3` | `sdkconfig.defaults;sdkconfig.defaults.esp32s3-n16r8` | ESP32-S3 DevKitC-1 with the N16R8 module (16 MB flash, 8 MB octal PSRAM). WiFi only. |
 
-Switching profiles forces a clean reconfigure — `build_esp32.py` removes `build/` and `sdkconfig` when the profile changes (tracked via `build/.mm_profile`), so the CMake cache is reseeded correctly. Same-profile rebuilds stay incremental.
+ESP-IDF v6.x has no `CONFIG_ESP_WIFI_ENABLED` switch (the symbol is forced on for WiFi-capable SoCs), so dropping WiFi at compile time happens via `EXCLUDE_COMPONENTS` plus `MM_NO_WIFI` (set when `MM_ETH_ONLY=1`, applied in `esp32/main/CMakeLists.txt`). The `esp32-eth` variant takes this path; `esp32-eth-wifi` keeps everything compiled in and uses the runtime cascade in `NetworkModule`.
+
+Switching boards forces a clean reconfigure — `build_esp32.py` removes `build/` and `sdkconfig` when the board changes (tracked via `build/.mm_board`), so the CMake cache is reseeded correctly. Same-board rebuilds stay incremental.
+
+Each ESP32-S3 SKU has its own board key because the sdkconfig fragment encodes flash size, partition table, and PSRAM mode — flashing an `n16r8` binary onto a different module (e.g. N8R2) either misaligns the partition table (boot loop) or fails PSRAM init. New SKUs become new keys (e.g. `esp32s3-n8r8`); there is no generic `esp32s3` shortcut.
+
+Eth pin map is currently baked in at build time. Verified on the [Olimex ESP32-Gateway](https://www.olimex.com/Products/IoT/ESP32/ESP32-GATEWAY/open-source-hardware). Boards with the same LAN8720 PHY but different pins (e.g. WT32-ETH01: reset on GPIO 16) need a local rebuild today; runtime PHY/pin selection is on the 2.0 roadmap.
+
+`--profile` is accepted one release for migration: `--profile default` → `--board esp32`, `--profile eth-only` → `--board esp32-eth`. The legacy `build_esp32_ethonly.py` wrapper still works (it now forwards `--board esp32-eth`).
 
 ### Why not Arduino
 
@@ -117,7 +129,7 @@ CMake runs these automatically before compilation when their source files change
 
 | Step | Source | Generated | Trigger |
 |------|--------|-----------|---------|
-| `version_gen` | `library.json` | `src/core/version.h` | `library.json` changes |
+| `build_info_gen` | `library.json` | `src/core/build_info.h` | `library.json` changes |
 | `ui_embed` | `src/ui/index.html`, `app.js`, `style.css` | `src/ui/ui_embedded.h` | any UI file changes |
 
 Both are defined in the root `CMakeLists.txt` (desktop) and `esp32/main/CMakeLists.txt` (ESP32). Generated files are gitignored — rebuilt on every clean build.

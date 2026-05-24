@@ -2,15 +2,42 @@
 
 Completed items are removed. This file is deleted when empty.
 
-## 13. README + quick-start
+## Windows desktop port (blocker for 1.0 Windows binary)
 
-Update README with: what it does now, how to build/flash, how to connect and open the UI. Include screenshots.
+`scripts/build/package_desktop.py` configures + builds + packages on Windows runners successfully through CMake configure, but `src/platform/desktop/platform_desktop.cpp` won't compile under MSVC. It includes POSIX socket headers (`<sys/socket.h>`, `<netinet/in.h>`, `<arpa/inet.h>`, `<unistd.h>`, `<fcntl.h>`) and calls POSIX-only APIs:
+
+- `::socket` / `::connect` / `::bind` / `::accept` exist on both — but Windows needs them via `<winsock2.h>` + `<ws2tcpip.h>`.
+- `::read` / `::write` on socket fds — Windows uses `::recv` / `::send` (file-descriptor I/O doesn't bridge to sockets).
+- `::close(fd)` — Windows uses `::closesocket(SOCKET)`.
+- `::sendmsg(fd, msghdr, MSG_DONTWAIT)` for non-blocking scatter-gather — no direct Windows equivalent; closest is `WSASend(SOCKET, WSABUF*, ...)` with `FIONBIO` mode set via `ioctlsocket`.
+- `fcntl(F_GETFL/F_SETFL, O_NONBLOCK)` — Windows uses `ioctlsocket(FIONBIO)`.
+- `errno` after socket calls — Windows uses `WSAGetLastError()`.
+- WSAStartup must be called once before any socket use; WSACleanup once at shutdown.
+
+The current `release.yml` `build-windows` job fails on the first source file (`platform_desktop.cpp` → `'sys/socket.h': No such file or directory`). The `release` job has `needs: build-windows`, so a tag push currently can't release: the matrix is half-broken.
+
+Two ways to land the port:
+
+1. **Conditional includes/typedefs in `platform_desktop.cpp`** — `#ifdef _WIN32 ... #else ... #endif` blocks around every socket call. Smallest diff, ugliest source. The platform-boundary rule keeps platform code inside `src/platform/`, so this is local damage.
+2. **Split into `platform_desktop_posix.cpp` + `platform_desktop_windows.cpp`** — cleaner, ~2x file count, CMake picks which to compile per host. Mirrors how the ESP32 platform is separate from desktop today; honest separation between two genuinely different syscall worlds.
+
+Either path: 2-3h of careful translation + Windows-side manual testing. The plan-17 CI scaffolding ships ready — once this port lands, `build-windows` flips green automatically and the v1.0.0 release can include the Windows zip.
 
 ---
 
-## Release 1.0 — "connect, open browser, see lights"
+## Release 2.0 — distribution catches up to the source tree
 
-Milestone after items 11-13. An end user with an ESP32 can flash the firmware, connect via WiFi, open a browser, see the 3D preview, change effects and controls, and have settings persist across reboots.
+1.0 ships ESP32 firmware (4 variants) + macOS arm64 binaries (Windows once the platform port above lands). The source tree builds for Teensy, Raspberry Pi, ESP32-P4, and Linux too — distribution catches up here.
+
+- **ESP32-P4** board variant. New chip target, new sdkconfig fragment, fits the existing `BOARDS` table in `scripts/build/build_esp32.py`.
+- **OTA / FirmwareUpdateModule.** Re-flashing via the web installer works in 1.0 but requires a USB cable. Port the passive-observer pattern from projectMM-v1 — pulls release JSON from GitHub, surfaces availability in the UI, applies on user confirm.
+- **Linux desktop binary** in `release.yml` (third desktop job). Static-linked libstdc++ where the host allows.
+- **Teensy 4.1 release binary.** Toolchain-file build, packaged as `.hex` for Teensy Loader.
+- **Raspberry Pi binary.** ARM64, cross-built or native depending on what the runner offers.
+- **Nightly CI / pre-release channel.** A second workflow on a schedule that produces unstable binaries, separate from the tag-driven `release.yml`.
+- **Improv WiFi.** One-step flash + WiFi credentials from the browser, eliminating the SoftAP detour. ESP Web Tools supports the Improv handshake natively.
+- **Runtime PHY / pin config** for Ethernet (see `WiFi runtime disable` below — same `platform::ethPresent()` hook). Replaces the build-time Olimex-pin baking in `sdkconfig.defaults.eth` with a runtime picker. Once this lands the `esp32-eth*` variants stop being Olimex-specific.
+- **macOS code-signing.** Currently triggers Gatekeeper on first run; signed builds drop the "downloaded from internet" prompt.
 
 ---
 
@@ -51,7 +78,7 @@ The `setup_esp_idf.py` script currently clones or pulls the latest from the ESP-
 
 ## WiFi runtime disable (backlog)
 
-Postponed. A **compile-time** answer already ships: the `eth-only` build profile (`build_esp32.py --profile eth-only`) excludes the WiFi stack entirely. This item is the *runtime* variant — a single default-profile binary that detects at boot whether WiFi is needed and skips bringing it up. The default firmware ships the WiFi stack regardless (the app partition has room for it to live unused).
+Postponed. A **compile-time** answer already ships: the `esp32-eth` board (`build_esp32.py --board esp32-eth`) excludes the WiFi stack entirely. This item is the *runtime* variant — a single `esp32-eth-wifi` binary that detects at boot whether WiFi is needed and skips bringing it up. The default firmware ships the WiFi stack regardless (the app partition has room for it to live unused).
 
 Open design question to address when this is picked up: can the platform detect at runtime whether Ethernet hardware is present (PHY responds on MDIO during `esp_eth_driver_install`)? If yes, the UI can hide WiFi controls — and skip `wifiStaInit()` — when Ethernet hardware is detected. That's a behavior-driven gate rather than a user toggle. Some ESP32 variants (e.g. ESP32-C2, ESP32-H2) don't have WiFi hardware at all, so the gate also needs to handle "WiFi not present" cleanly. Both detections live in `src/platform/`.
 
