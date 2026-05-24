@@ -44,17 +44,24 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+# Minimal default permissions for every job (read-only). The release job
+# overrides this locally with the write/id-token scopes it needs to publish
+# the GitHub release + deploy Pages. Verify and build jobs inherit read-only,
+# which is all they need (checkout + artifact upload via OIDC).
+permissions:
+  contents: read
+
 jobs:
   verify-version:
-    # Tag/dispatch only — a branch push has no tag to verify against.
-    # Build jobs `needs: verify-version`; a skipped dependency still allows
-    # downstream jobs to run (the default `needs` operator treats skipped
-    # the same as success unless we explicitly check `.result`).
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    # The job runs on every trigger (so the build jobs' `needs: verify-version`
+    # is satisfied — GitHub's default `needs:` treats a skipped dependency as
+    # a blocking state). The verification step inside only executes on a tag
+    # push or workflow_dispatch, where there's actually a tag to check against.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Verify tag matches library.json version
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         env:
           # Use the workflow_dispatch input when present, else the push ref.
           GITHUB_REF_NAME: ${{ inputs.tag || github.ref_name }}

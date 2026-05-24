@@ -2,21 +2,24 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 namespace mm {
 
 // Base64 encode (RFC 4648). Standard alphabet, `=` padding. Writes a
 // null-terminated string into `out`; truncates rather than overflowing if
-// the encoded form would exceed outMax.
+// the encoded form would exceed `out.size()`.
 //
 // Used in two places: the WebSocket handshake response (encoding the
 // SHA-1 of `client_key + magic_GUID`), and `/api/state`'s Password
 // serialization (XOR-then-base64 obfuscation, see HttpServerModule).
 // Both are short payloads; the encoder is straightforward not optimised.
-inline void base64Encode(const uint8_t* in, size_t inLen, char* out, size_t outMax) {
-    if (outMax == 0) return;  // no room even for the terminator
+inline void base64Encode(std::span<const uint8_t> in, std::span<char> out) {
+    if (out.empty()) return;  // no room even for the terminator
     static constexpr char table[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const size_t inLen = in.size();
+    const size_t outMax = out.size();
     size_t oi = 0;
     for (size_t i = 0; i < inLen && oi + 4 < outMax; i += 3) {
         uint32_t n = static_cast<uint32_t>(in[i]) << 16;

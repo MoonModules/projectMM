@@ -5,12 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>projectMM — Install</title>
 
-  <!-- ESP Web Tools. Pinned to v10 (the current stable line). Recreate the
-       <esp-web-install-button> on dropdown change instead of mutating the
-       `manifest` attribute — some versions of the component cache the parsed
-       manifest and ignore live attribute writes. -->
+  <!-- ESP Web Tools — pinned to an exact version with SRI on the entry file.
+       The bundle's chained module imports are not SRI-covered (each chunk is
+       fetched separately from unpkg with no integrity hash); the entry-file
+       SRI catches a tamper of the entry but not a deeper supply-chain attack.
+       Self-hosting the full bundle is a 2.0-hardening item if the threat model
+       changes. Bump the version + recompute the sha384 when upgrading.
+       Recreate the <esp-web-install-button> on dropdown change instead of
+       mutating the `manifest` attribute — some versions of the component
+       cache the parsed manifest and ignore live attribute writes. -->
   <script type="module"
-          src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module">
+          src="https://unpkg.com/esp-web-tools@10.2.1/dist/web/install-button.js?module"
+          integrity="sha384-2Ea4WL8tjFb0qQKUqBoX45KlPVoUgL+Z3zUqsD0MHmtJ3faDbfNyZulLg/LfYDUZ"
+          crossorigin="anonymous">
   </script>
 
   <style>
