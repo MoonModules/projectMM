@@ -40,6 +40,10 @@ public:
                 heap_[heapLen_++] = *s++;
             }
         }
+        // Keep heap_ null-terminated after every append so data() is a valid
+        // C-string even if the caller skips size(). ensureHeap already reserved
+        // the +1 slot, so this write is in-bounds.
+        if (!conn_ && heap_) heap_[heapLen_] = '\0';
     }
 
     // Append a printf-formatted fragment. The common case (one control, one
@@ -116,6 +120,7 @@ private:
 // overflowing if the escaped form exceeds outMax. Distinct from
 // FilesystemModule::writeJsonString, which appends to a (buf, pos) pair.
 inline void jsonEscape(const char* in, char* out, size_t outMax) {
+    if (outMax == 0) return;  // no room even for the terminator
     size_t oi = 0;
     for (; *in && oi + 2 < outMax; in++) {
         if (*in == '"' || *in == '\\') out[oi++] = '\\';

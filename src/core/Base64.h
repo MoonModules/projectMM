@@ -14,6 +14,7 @@ namespace mm {
 // serialization (XOR-then-base64 obfuscation, see HttpServerModule).
 // Both are short payloads; the encoder is straightforward not optimised.
 inline void base64Encode(const uint8_t* in, size_t inLen, char* out, size_t outMax) {
+    if (outMax == 0) return;  // no room even for the terminator
     static constexpr char table[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     size_t oi = 0;

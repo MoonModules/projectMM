@@ -445,11 +445,22 @@ void HttpServerModule::handleSetControl(platform::TcpConnection& conn, const cha
         switch (c.type) {
             case ControlType::Uint8: {
                 int v = mm::json::parseInt(body, "value");
+                // Out-of-range from a hostile / buggy client: reject with
+                // 400 rather than wrap on the static_cast. Matches the
+                // Select branch below.
+                if (v < c.min || v > c.max) {
+                    sendResponse(conn, 400, "application/json", "{\"error\":\"value out of range\"}");
+                    return;
+                }
                 *static_cast<uint8_t*>(c.ptr) = static_cast<uint8_t>(v);
                 break;
             }
             case ControlType::Uint16: {
                 int v = mm::json::parseInt(body, "value");
+                if (v < c.min || v > c.max) {
+                    sendResponse(conn, 400, "application/json", "{\"error\":\"value out of range\"}");
+                    return;
+                }
                 *static_cast<uint16_t*>(c.ptr) = static_cast<uint16_t>(v);
                 break;
             }
@@ -457,9 +468,15 @@ void HttpServerModule::handleSetControl(platform::TcpConnection& conn, const cha
                 int v = mm::json::parseInt(body, "value");
                 // Clamp before narrowing — parseInt returns int. A
                 // hostile / out-of-range client value would otherwise
-                // wrap (e.g. 40000 → -25536).
+                // wrap (e.g. 40000 → -25536). Then enforce the control's
+                // configured bounds with a 400 (symmetrical with Uint8/Uint16
+                // above), so live and persisted values share one contract.
                 if (v < INT16_MIN) v = INT16_MIN;
                 if (v > INT16_MAX) v = INT16_MAX;
+                if (v < c.min || v > c.max) {
+                    sendResponse(conn, 400, "application/json", "{\"error\":\"value out of range\"}");
+                    return;
+                }
                 *static_cast<int16_t*>(c.ptr) = static_cast<int16_t>(v);
                 break;
             }
@@ -655,11 +672,18 @@ void HttpServerModule::handleDeleteModule(platform::TcpConnection& conn, const c
         return;
     }
 
-    // Remove from parent
+    // Top-level modules (Layouts/Layers/Drivers/Filesystem/System/Network/HttpServer)
+    // have no parent — they're registered via Scheduler::addModule in main.cpp and the
+    // top-level shape is policy-fixed. Reject the delete here instead of teardown+delete'ing
+    // a module that the scheduler still holds a pointer to (which would dangle on next tick).
     auto* parent = mod->parent();
-    if (parent) {
-        parent->removeChild(mod);
+    if (!parent) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"cannot delete top-level module\"}");
+        return;
     }
+
+    // Remove from parent
+    parent->removeChild(mod);
 
     // Teardown and delete
     mod->teardown();
@@ -668,12 +692,10 @@ void HttpServerModule::handleDeleteModule(platform::TcpConnection& conn, const c
     if (scheduler_) scheduler_->rebuild();
 
     // Persist the new tree shape — marking the parent dirty rewrites its file
-    // without the deleted child slot. Root deletes are skipped (no parent to mark);
-    // the top-level shape is fixed in main.cpp anyway.
-    if (parent) {
-        parent->markDirty();
-        FilesystemModule::noteDirty();
-    }
+    // without the deleted child slot. The parent is guaranteed non-null by the
+    // top-of-function check (top-level deletes are rejected as 400).
+    parent->markDirty();
+    FilesystemModule::noteDirty();
 
     sendResponse(conn, 200, "application/json", "{\"ok\":true}");
 }

@@ -231,6 +231,7 @@ private:
     }
 
     static MoonModule* firstInTree(MoonModule* mod, const char* name) {
+        if (!mod) return nullptr;
         if (mod->name() && std::strcmp(mod->name(), name) == 0) return mod;
         for (uint8_t i = 0; i < mod->childCount(); i++) {
             if (auto* m = firstInTree(mod->child(i), name)) return m;
