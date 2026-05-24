@@ -10,6 +10,7 @@
 
 #include "ui/ui_embedded.h"
 
+#include <climits>  // INT16_MIN/MAX in handleSetControl's Int16 clamp
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -595,6 +596,11 @@ private:
                 }
                 case ControlType::Int16: {
                     int v = mm::json::parseInt(body, "value");
+                    // Clamp before narrowing — parseInt returns int. A
+                    // hostile / out-of-range client value would otherwise
+                    // wrap (e.g. 40000 → -25536).
+                    if (v < INT16_MIN) v = INT16_MIN;
+                    if (v > INT16_MAX) v = INT16_MAX;
                     *static_cast<int16_t*>(c.ptr) = static_cast<int16_t>(v);
                     break;
                 }
@@ -760,6 +766,15 @@ private:
                 return;
             }
         }
+
+        // Disambiguate the name if something else in the tree already carries
+        // it. Factory display names like "Layer" collide when a second Layer is
+        // added (factory has no per-instance state), and findModuleByName does
+        // a first-match DFS so the second one becomes unreachable. The
+        // Scheduler also runs the same pass over the whole tree after
+        // persistence load (see Scheduler::setup phase 2a). Single source of
+        // truth — both paths go through Scheduler::ensureUniqueName.
+        if (scheduler_) scheduler_->ensureUniqueName(mod);
 
         // Lifecycle: same phase order as Scheduler::setup() — onBuildControls() first so
         // control buffers are bound, then setup() (which may read those bound members),

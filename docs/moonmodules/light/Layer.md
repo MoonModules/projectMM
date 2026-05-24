@@ -13,9 +13,7 @@ A `Layer` MoonModule (role `ModuleRole::Layer`, child of the [Layers](Layers.md)
 
 ## start/end controls
 
-Each Layer carries six `int16_t` controls — `startX`, `startY`, `startZ`, `endX`, `endY`, `endZ` — that select a region of the shared Layouts **expressed as percentages of the physical extent on each axis** (0 .. 100 for the visible area). Percentages are resilient to physical layout changes: a `startX = 25` Layer stays at the same relative position when the panel resizes from 64×64 to 128×128, rather than ending up at the wrong absolute pixel.
-
-`end == 0` is the sentinel for "use the full extent on that axis" — a zero-width region would be meaningless, so 0 is reused. The defaults are all zero, so a fresh Layer matches the full physical layout byte-identically to a Layer with no controls at all.
+Each Layer carries six `int16_t` controls — `startX`, `startY`, `startZ`, `endX`, `endY`, `endZ` — that select a region of the shared Layouts **expressed as percentages of the physical extent on each axis**. Defaults are `start = 0, end = 100` (the full layout). Percentages are resilient to physical layout changes: a `startX = 25` Layer stays at the same relative position when the panel resizes from 64×64 to 128×128, rather than ending up at the wrong absolute pixel.
 
 Negative values and values > 100 are legal: a future modifier could drag a Layer in or out of the visible area by shifting start/end past 0% or 100% (e.g. `startX = -50` means the Layer extends 50% off the left edge of the layout). `ControlType::Int16` is the wire type so negative values round-trip correctly through `/api/state`, `/api/types`, and persistence.
 

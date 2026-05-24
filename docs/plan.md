@@ -64,7 +64,7 @@ The top-level shape now reads `Layouts → Layers → Drivers`. The `Layers` con
 When picked up:
 
 - `Drivers::loop()` reads from the `Layers` container instead of a single `Layer*`. For each enabled Layer, blend its buffer into the shared output buffer using the Layer's blend mode + opacity (controls to be added on Layer).
-- The `Layer::startX/Y/Z` / `endX/Y/Z` controls — already persisted today, no-op with one Layer — become active in `rebuildLUT`: each Layer carves a region of the shared Layouts. Values are **percentages** of the physical extent on each axis (0..100 visible; negatives and >100 reserved for modifier shift); sentinel `end == 0` means "use the full extent on that axis." Start rounds toward floor, end rounds toward ceiling so small panels still get a non-zero region.
+- The `Layer::startX/Y/Z` / `endX/Y/Z` controls — already persisted today, no-op with one Layer — become active in `rebuildLUT`: each Layer carves a region of the shared Layouts. Values are **percentages** of the physical extent on each axis. Defaults `start = 0, end = 100` = full layout; negatives and values > 100 are reserved for modifier shift. Start rounds toward floor, end rounds toward ceiling so small panels still get a non-zero region.
 - `DriverBase::setLayer` stays as-is — drivers still output to one physical fixture and need that fixture's dimensions; the *active* Layer is what they query. Composition happens upstream in the Drivers container.
 - Per-Layer enable/disable from the UI (already supported by `MoonModule::enabled`); ordering via the child-array order of Layers (already supported by drag-reorder).
 - Memory-aware allocator: at `onAllocateMemory` time, decide how many Layers actually fit and degrade gracefully when PSRAM is absent.

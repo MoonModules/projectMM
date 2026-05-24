@@ -17,16 +17,12 @@ public:
     ModuleRole role() const override { return ModuleRole::Layer; }
 
     // start/end carve a region of the shared Layouts into this Layer's buffer,
-    // expressed as **percentages of the physical extent on each axis** (0..100
-    // for the visible area). Percentages are resilient to physical layout
-    // changes — a `startX=25%` Layer stays at the same relative position when
-    // the panel resizes from 64×64 to 128×128, rather than ending up at the
-    // wrong absolute pixel.
-    //
-    // Sentinel: `start = 0`, `end = 0` means "use the full extent on that axis"
-    // — a zero-width region would be meaningless, so 0 is reused. The defaults
-    // below (all zero) therefore match the full physical layout, byte-identical
-    // to the pre-Layers pipeline.
+    // expressed as **percentages of the physical extent on each axis**.
+    // `start = 0, end = 100` is the full layout — the defaults below — and is
+    // byte-identical to the pre-Layers pipeline. Percentages are resilient to
+    // physical layout changes: a `startX = 25` Layer stays at the same
+    // relative position when the panel resizes from 64×64 to 128×128, rather
+    // than ending up at the wrong absolute pixel.
     //
     // Negative values and values > 100 are legal: a future modifier could drag
     // a Layer in or out of the visible area by shifting start/end past 0% or
@@ -40,9 +36,9 @@ public:
     lengthType startX = 0;
     lengthType startY = 0;
     lengthType startZ = 0;
-    lengthType endX = 0;
-    lengthType endY = 0;
-    lengthType endZ = 0;
+    lengthType endX = 100;
+    lengthType endY = 100;
+    lengthType endZ = 100;
 
     void onBuildControls() override {
         // Names match the field names; the percent semantic lives in the spec

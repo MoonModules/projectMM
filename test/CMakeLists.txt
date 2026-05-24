@@ -7,6 +7,7 @@ add_executable(mm_tests
     test_rainbow.cpp
     test_extrude.cpp
     test_layers_container.cpp
+    test_scheduler_unique_names.cpp
     test_artnet_packet.cpp
     test_noise.cpp
     test_mapping_lut.cpp

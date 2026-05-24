@@ -19,13 +19,15 @@ class Layers : public MoonModule {
 public:
     // Wire the shared Layouts. Propagates to every child Layer so their
     // onAllocateMemory() can size buffers from it. Idempotent — call again
-    // after adding a Layer child to wire the new one.
+    // after adding a Layer child to wire the new one. Non-Layer children
+    // (UI shouldn't allow them; engine doesn't enforce — yet) are skipped
+    // rather than miscast, so a stray child can't UB the cast.
     void setLayouts(Layouts* l) {
         layouts_ = l;
         for (uint8_t i = 0; i < childCount(); i++) {
-            // Every child of Layers is a Layer by construction. Same static_cast
-            // pattern Layouts uses for LayoutBase children — no RTTI on ESP32.
-            static_cast<Layer*>(child(i))->setLayouts(layouts_);
+            MoonModule* c = child(i);
+            if (!c || c->role() != ModuleRole::Layer) continue;
+            static_cast<Layer*>(c)->setLayouts(layouts_);
         }
     }
 
@@ -44,13 +46,16 @@ public:
     // Single-Layer placeholder until composition lands: hand `Drivers` the
     // first enabled Layer to read for buffer + dimensions. Returns nullptr
     // when no Layer is registered (drivers handle that gracefully today).
+    // Non-Layer children are skipped — same guard as setLayouts above.
     Layer* activeLayer() const {
+        MoonModule* fallback = nullptr;
         for (uint8_t i = 0; i < childCount(); i++) {
-            if (child(i)->enabled()) return static_cast<Layer*>(child(i));
+            MoonModule* c = child(i);
+            if (!c || c->role() != ModuleRole::Layer) continue;
+            if (!fallback) fallback = c;
+            if (c->enabled()) return static_cast<Layer*>(c);
         }
-        // No enabled Layer — fall back to first child if any, so dimensions
-        // can still be queried for buffer allocation.
-        return childCount() > 0 ? static_cast<Layer*>(child(0)) : nullptr;
+        return static_cast<Layer*>(fallback);  // nullptr if no Layer children
     }
 
 private:

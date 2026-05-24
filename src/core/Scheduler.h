@@ -4,6 +4,8 @@
 #include "platform/platform.h"
 
 #include <array>
+#include <cstdio>   // std::snprintf in ensureUniqueName
+#include <cstring>  // std::strcmp in firstInTree
 
 namespace mm {
 
@@ -32,6 +34,14 @@ public:
 
         // Phase 2: persistence load. No-op if no hook is set.
         if (loadAllHook_) loadAllHook_(this);
+
+        // Phase 2a: disambiguate any same-name modules introduced by persistence
+        // (positional load gives each freshly-created module the factory's display
+        // name; two Layer instances both get "Layer"). The /api/state UI sends
+        // names back as parent_id, so duplicates break "add child to the second
+        // one". Walks the tree once; first occurrence keeps the name, later ones
+        // get " 2", " 3", … suffixes.
+        deduplicateNamesInTree();
 
         // Phase 2b: re-run onBuildControls with persisted values in place so any conditional
         // hidden flags (e.g. NetworkModule's static-IP fields depending on addressing_) are
@@ -153,7 +163,81 @@ public:
         delete mod;
     }
 
+    // Ensure `mod`'s name is tree-globally unique. If something else already uses
+    // the same name, suffix with " 2", " 3", … until unique. Caller must have
+    // placed `mod` in the tree already (otherwise the lookup wouldn't see it).
+    //
+    // Why this exists: ModuleFactory::create gives every freshly-created module
+    // a display name derived from its type ("NoiseEffect" → "Noise", "Layer"
+    // stays "Layer"). When the user adds two Layers, both factory-default to
+    // "Layer"; the HTTP API uses names as parent_id, and findModuleByName does
+    // a first-match DFS, so the second Layer becomes unreachable. Same problem
+    // happens when persistence rebuilds the tree positionally on boot.
+    //
+    // Called from HttpServerModule after addChild (single-module add) and from
+    // deduplicateNamesInTree after persistence load (whole-tree pass).
+    void ensureUniqueName(MoonModule* mod) {
+        if (!mod) return;
+        const char* base = mod->name();
+        if (!base || base[0] == 0) return;
+        if (firstByName(base) == mod) return;  // we're the first occurrence — keep the name
+
+        // `candidate` is sized to match MoonModule::name_[16] — there's no point
+        // computing a longer name than setName can store. The snprintf check
+        // below refuses to truncate, which means the practical cap depends on
+        // the base length: 99 for ≤ 5-char bases, 9 for 12–13-char bases like
+        // "GlowParticles" or "PlasmaPalette" (where "GlowParticles 10" = 16
+        // chars + NUL doesn't fit). When the cap is hit we keep the duplicate
+        // name rather than truncate; first-match DFS lookups become ambiguous
+        // for that name but the engine doesn't crash. This is unlikely in
+        // practice (10+ same-typed siblings on one tree) — bump name_/candidate
+        // together if it ever bites.
+        char candidate[16];
+        for (int suffix = 2; suffix < 100; suffix++) {
+            int n = std::snprintf(candidate, sizeof(candidate), "%s %d", base, suffix);
+            if (n < 0 || n >= static_cast<int>(sizeof(candidate))) return;  // doesn't fit name_
+            if (firstByName(candidate) == nullptr) {
+                mod->setName(candidate);
+                return;
+            }
+        }
+        // Loop exhausted (would mean 99 same-named siblings) — degrade silently.
+    }
+
+    // Walk the whole tree and disambiguate every duplicated name. First
+    // occurrence keeps its name; later ones get " 2", " 3", … suffixes.
+    // Cold-path: called once after persistence load in setup().
+    void deduplicateNamesInTree() {
+        for (uint8_t i = 0; i < moduleCount_; i++) {
+            walkAndEnsureUnique(modules_[i]);
+        }
+    }
+
+    // First module in tree-walk order with this name, or nullptr if none.
+    MoonModule* firstByName(const char* name) {
+        for (uint8_t i = 0; i < moduleCount_; i++) {
+            if (auto* m = firstInTree(modules_[i], name)) return m;
+        }
+        return nullptr;
+    }
+
 private:
+    void walkAndEnsureUnique(MoonModule* mod) {
+        if (!mod) return;
+        ensureUniqueName(mod);
+        for (uint8_t i = 0; i < mod->childCount(); i++) {
+            walkAndEnsureUnique(mod->child(i));
+        }
+    }
+
+    static MoonModule* firstInTree(MoonModule* mod, const char* name) {
+        if (mod->name() && std::strcmp(mod->name(), name) == 0) return mod;
+        for (uint8_t i = 0; i < mod->childCount(); i++) {
+            if (auto* m = firstInTree(mod->child(i), name)) return m;
+        }
+        return nullptr;
+    }
+
     std::array<MoonModule*, 32> modules_{};
     uint8_t moduleCount_ = 0;
     LoadAllFn loadAllHook_ = nullptr;

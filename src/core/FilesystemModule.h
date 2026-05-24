@@ -22,6 +22,7 @@
 #include "core/JsonUtil.h"
 #include "platform/platform.h"
 
+#include <climits>  // INT16_MIN/MAX in applyValue's Int16 clamp
 #include <cstdio>
 #include <cstring>
 
@@ -304,6 +305,11 @@ private:
             }
             case ControlType::Int16: {
                 int v = mm::json::parseInt(json, key);
+                // Clamp before narrowing — parseInt returns int (up to ±2^31).
+                // A persisted-or-corrupted JSON value outside int16 range
+                // would otherwise wrap (e.g. 40000 → -25536).
+                if (v < INT16_MIN) v = INT16_MIN;
+                if (v > INT16_MAX) v = INT16_MAX;
                 *static_cast<int16_t*>(c.ptr) = static_cast<int16_t>(v);
                 break;
             }

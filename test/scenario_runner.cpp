@@ -185,16 +185,16 @@ struct ScenarioContext {
             if (std::strcmp(type, "Layer") == 0) {
                 auto* layer = static_cast<mm::Layer*>(mod);
                 if (props.has("layouts")) {
-                    auto* lg = static_cast<mm::Layouts*>(modules[props["layouts"].str]);
-                    if (lg) layer->setLayouts(lg);
+                    auto* layoutsModule = static_cast<mm::Layouts*>(modules[props["layouts"].str]);
+                    if (layoutsModule) layer->setLayouts(layoutsModule);
                 }
                 if (props.has("channelsPerLight")) {
                     layer->setChannelsPerLight(static_cast<uint8_t>(props["channelsPerLight"].num));
                 }
             } else if (std::strcmp(type, "Drivers") == 0) {
                 if (props.has("layer")) {
-                    auto* l = static_cast<mm::Layer*>(modules[props["layer"].str]);
-                    if (l) static_cast<mm::Drivers*>(mod)->setLayer(l);
+                    auto* layerModule = static_cast<mm::Layer*>(modules[props["layer"].str]);
+                    if (layerModule) static_cast<mm::Drivers*>(mod)->setLayer(layerModule);
                 }
             }
         }

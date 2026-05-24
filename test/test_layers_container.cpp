@@ -133,3 +133,19 @@ TEST_CASE("Layers::activeLayer returns first enabled child, or nullptr when empt
     first.setEnabled(false);
     CHECK(twoChildren.activeLayer() == &second);
 }
+
+TEST_CASE("Layers::activeLayer returns nullptr when no child has role Layer") {
+    // The role-guard in activeLayer (and setLayouts) skips non-Layer children
+    // rather than miscasting. Today the UI's acceptsChildren mapping keeps
+    // non-Layer children out, but the engine doesn't enforce it — so the
+    // engine must degrade gracefully. Pin the contract: a Layers container
+    // populated only with non-Layer children returns nullptr from
+    // activeLayer(), not a miscast pointer.
+    struct GenericChild : public mm::MoonModule {};
+
+    mm::Layers layers;
+    GenericChild stranger;
+    layers.addChild(&stranger);
+    CHECK(stranger.role() == mm::ModuleRole::Generic);  // sanity check the stub
+    CHECK(layers.activeLayer() == nullptr);             // skipped, not miscast
+}

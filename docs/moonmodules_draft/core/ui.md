@@ -37,7 +37,7 @@ Side nav (one root visible at a time), hamburger + slide-in drawer, and the nav 
 
 | v1 feature | v3 today | Recommendation |
 |---|---|---|
-| Drag-to-reorder root modules (saves to `/api/modules/reorder`) | not supported | **Drop** — root order is fixed in `main.cpp` and that's correct: System/Network/Layer/Drivers are mandatory and have a logical setup order. Children get up/down + drag (already shipped). |
+| Drag-to-reorder root modules (saves to `/api/modules/reorder`) | not supported | **Drop** — root order is fixed in `main.cpp` and that's correct: Layouts/Layers/Drivers (and the system modules) are mandatory and have a logical setup order. Children reorder via drag (already shipped). |
 | `<details>` collapsible panels at bottom (health, log) | none | See dedicated rows below. |
 
 ### Per-card features

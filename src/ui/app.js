@@ -706,16 +706,21 @@ function createControl(moduleName, moduleType, ctrl) {
             break;
         }
         case "int16": {
-            // Slider with visible value, matching the uint8 path's UX. Range is
-            // -100..+200, the percentage band the only int16 user today (Layer
-            // start/end) needs — 0..100 covers the visible area and -100..0 /
-            // 100..200 gives modifier-shift headroom. Generalise to per-control
-            // min/max if a second int16 user wants a different range.
+            // Slider with visible value, matching the uint8 path's UX. Default
+            // range -100..+200 is the percentage band the only int16 user today
+            // (Layer start/end) needs — 0..100 covers the visible area and
+            // -100..0 / 100..200 gives modifier-shift headroom. Engine-supplied
+            // ctrl.min/ctrl.max override when present, so a future int16
+            // control with different bounds works without changing this case.
+            const min = Number(ctrl.min ?? -100);
+            const max = Number(ctrl.max ?? 200);
+            const raw = Number(ctrl.value ?? 0);
+            const clamped = Math.max(min, Math.min(max, raw));
             const input = document.createElement("input");
             input.type = "range";
-            input.min = -100;
-            input.max = 200;
-            input.value = ctrl.value ?? 0;
+            input.min = min;
+            input.max = max;
+            input.value = clamped;
             input.dataset.mid = moduleName;
             input.dataset.key = ctrl.name;
             const valSpan = document.createElement("span");

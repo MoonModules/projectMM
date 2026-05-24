@@ -4,7 +4,7 @@
 
 Rename and re-shape the three light-domain top-level containers from singletons-of-things to plural containers-of-things, so the side-nav reads honestly:
 
-```
+```text
 Layouts             ← was LayoutGroup
   ├─ GridLayout
   └─ (room for more)
@@ -121,6 +121,7 @@ This breaks any persisted `/.config/*.json` from earlier sessions that reference
 ### main.cpp wiring
 
 Old:
+
 ```cpp
 auto* layoutGroup = create("LayoutGroup");
 auto* grid = create("GridLayout"); layoutGroup->addChild(grid);
@@ -137,6 +138,7 @@ scheduler.addModule(driverGroup);
 ```
 
 New:
+
 ```cpp
 auto* layouts = create("Layouts");
 auto* grid = create("GridLayout"); layouts->addChild(grid);
