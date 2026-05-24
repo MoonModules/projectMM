@@ -229,6 +229,17 @@ Each effect's `dimensions()` is a claim about which axes its loop iterates, not 
 
 The `dim` int is also emitted in `/api/types` so the UI derives the dimensional emoji (📏/🟦/🧊) per module — modules don't put dimensional emoji in their own `tags()` strings.
 
+**Effects must run at every grid size.** Modifiers can shrink the logical grid to any size including 0×0×0 (e.g. every layout child is disabled). An effect's `loop()` must produce a correct result for any `(width, height, depth)` — no crashes, no divide-by-zero, no out-of-bounds writes. On a zero grid the loop is a clean no-op. Effects either gate at the top (`if (w <= 0 || h <= 0) return;`) or write their loops so an empty range is naturally a no-op (`for (y = 0; y < h; ...)`).
+
+**Effects must animate at every tick rate.** Per-tick phase math computed as `dt * bpm * K / 60000` truncates to 0 on devices where `dt < 234/bpm` ms — desktop ticks every 0–1 ms, so even bpm=60 freezes. The fix is to keep the raw `dt * bpm` numerator in the phase accumulator and divide only at the read site:
+
+```cpp
+phase_num_ += static_cast<uint64_t>(dt) * bpm;
+uint8_t t = static_cast<uint8_t>((phase_num_ * 256) / 60000);
+```
+
+See NoiseEffect / MetaballsEffect for the canonical pattern. Animation speed must depend only on `bpm` and wallclock — not on tick rate or grid size.
+
 ## Modifiers
 
 A modifier (MoonModule) lives inside a layer alongside its effects. Modifiers expose a virtual interface — the Layer calls modifier methods without knowing the concrete type (no `dynamic_cast`).

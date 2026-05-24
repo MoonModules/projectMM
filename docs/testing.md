@@ -191,6 +191,24 @@ Pins the contract that the new top-level `Layers` container is a thin pass-throu
 - Two children: Layers + Layer(RainbowEffect) + Layer(CheckerboardEffect) — both child buffers are populated after one `loop()`. Confirms each Layer's `loop()` runs in order.
 - `Layers::activeLayer()` returns the first enabled child, the first child when none are enabled (fallback for dimension queries during boot/toggle-all-off), and `nullptr` when the container is empty.
 
+### Drivers container (`test/test_drivers_container.cpp`) {#drivers-container}
+
+Pins that `Drivers::loop()` honours each child driver's `enabled` flag — regression for a bug where toggling an individual driver (ArtNet, Preview) in the UI was a no-op because the container ran every child unconditionally.
+
+- Both children enabled: both `loop()`s run on each container tick.
+- Disable one child: only the other ticks; the disabled child's `loop()` is not called.
+- Disable both: neither ticks.
+- Re-enable a previously-disabled child: it resumes ticking from the next call.
+
+### Layouts container (`test/test_layouts_container.cpp`) {#layouts-container}
+
+Pins that `Layouts::totalLightCount()` and `Layouts::forEachCoord()` skip disabled children, and that the physical indices of subsequent enabled layouts shift down to close the gap (no holes).
+
+- Both enabled (4 + 2 lights): total = 6, indices 0..5 in order.
+- Disable the first child: total = 2, second child's lights now at indices 0..1.
+- Disable both: total = 0, no callback invocations.
+- Re-enable both: original 0..5 ordering restored.
+
 ### BlendMap (`test/test_blend_map.cpp`) {#blendmap}
 
 Tests `blendMap()` in `src/light/BlendMap.h`.

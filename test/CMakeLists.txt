@@ -7,6 +7,11 @@ add_executable(mm_tests
     test_rainbow.cpp
     test_extrude.cpp
     test_layers_container.cpp
+    test_drivers_container.cpp
+    test_phase_animation.cpp
+    test_effects_zero_grid.cpp
+    test_layouts_container.cpp
+    test_layout_toggle_cycle.cpp
     test_scheduler_unique_names.cpp
     test_artnet_packet.cpp
     test_noise.cpp

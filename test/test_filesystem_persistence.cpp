@@ -244,3 +244,43 @@ TEST_CASE("FilesystemModule singleton survives probe construct+destruct") {
     std::filesystem::remove_all(tmpRoot);
     mm::platform::fsSetRoot(".");
 }
+
+// Regression: Int16 controls (GridLayout's width/height/depth, Layer's start/end)
+// round-tripped through the filesystem load path were clamped to c.min/c.max,
+// which default to 0,0 because ControlDescriptor.min/max are uint8_t and can't
+// represent an int16 range. Every Int16 control loaded as 0 — so a 128×128 grid
+// became 0×0×0 after restart and the whole pipeline allocated no buffers.
+TEST_CASE("FilesystemModule Int16 controls round-trip preserves the saved value") {
+    char tmpRoot[256];
+    std::snprintf(tmpRoot, sizeof(tmpRoot), "/tmp/mm_int16_test_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(tmpRoot);
+    std::filesystem::create_directories(std::string(tmpRoot) + "/.config");
+    mm::platform::fsSetRoot(tmpRoot);
+
+    // Hand-write a Layer.json with non-zero Int16 values so the load path is
+    // exercised without needing a save-side step.
+    std::ofstream out(std::string(tmpRoot) + "/.config/Layer.json");
+    out << "{\"enabled\":true,\"startX\":42,\"startY\":-17,\"startZ\":0,"
+        << "\"endX\":100,\"endY\":-100,\"endZ\":0}";
+    out.close();
+
+    mm::Scheduler scheduler;
+    auto* fs = new mm::FilesystemModule();
+    fs->setTypeName("FilesystemModule");
+    fs->setScheduler(&scheduler);
+    auto* layer = new mm::Layer();
+    layer->setTypeName("Layer");
+    scheduler.addModule(fs);
+    scheduler.addModule(layer);
+    scheduler.setup();
+
+    CHECK(layer->startX == 42);
+    CHECK(layer->startY == -17);
+    CHECK(layer->endX == 100);
+    CHECK(layer->endY == -100);
+
+    scheduler.teardown();
+    std::filesystem::remove_all(tmpRoot);
+    mm::platform::fsSetRoot(".");
+}

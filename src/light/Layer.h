@@ -60,7 +60,24 @@ public:
     void onAllocateMemory() override {
         if (!layouts_) return;
         nrOfLightsType physicalCount = layouts_->totalLightCount();
-        if (physicalCount == 0) return;
+
+        // Empty layout (every layout child disabled, or no layouts wired): tear
+        // down the LUT and buffer and report zero dims. Bailing out without
+        // dropping the old state left the LUT sized for the previous layout
+        // while Drivers reallocated its output buffer to 0 bytes (a stale LUT
+        // + null output buffer = blendMap dereferences null on the next tick).
+        // After this branch hasLUT() is false and physicalLightCount() is 0,
+        // so Drivers::onAllocateMemory takes the "no LUT" path and Drivers::loop
+        // skips blendMap entirely.
+        if (physicalCount == 0) {
+            physicalWidth_ = physicalHeight_ = physicalDepth_ = 0;
+            width_ = height_ = depth_ = 0;
+            lut_.free();
+            buffer_.free();
+            setDynamicBytes(0);
+            MoonModule::onAllocateMemory();
+            return;
+        }
 
         // Compute physical dimensions from layout
         struct DimCtx { lengthType maxX, maxY, maxZ; };

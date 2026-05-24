@@ -27,6 +27,8 @@ The design rationale for each rule below lives in [docs/architecture.md](docs/ar
 
 **Hot path discipline.** In the render loop and anything it calls: no heap allocations (`new`, `malloc`, `push_back`, `std::string`), no blocking (`delay`, `sleep`, `mutex.lock()` — use `try_lock`), integer math preferred over `float` per-light. Memory: single contiguous blocks outside the hot path, PSRAM via `heap_caps_malloc(..., MALLOC_CAP_SPIRAM)` for large buffers. Network input: synchronous by default. Full rules + rationale: [architecture.md § Hot path discipline](docs/architecture.md#hot-path-discipline).
 
+**Effects must run at every grid size and tick rate.** No crash on 0×0×0; animation math doesn't truncate to zero on fast devices. Full rule + rationale: [architecture.md § Effects](docs/architecture.md#effects).
+
 ## Process Rules
 
 **Specs before code.** Module docs (`docs/moonmodules/*.md`) and the UI spec must be sufficient to implement from before writing code. What's sufficient is case by case. When in doubt, ask.
@@ -100,7 +102,7 @@ The "external eyes about to see this" moment. Cheap if commit gates passed; the 
 
 **Conditional:**
 
-3. Reviewer agent — Opus reviewer over the **push range** (`git diff origin/<branch>..HEAD`). Scope: domain boundary, **unnecessary abstractions** (no-op / pass-through wrappers that only rename or re-namespace an existing function, single-call-site indirection that would read clearer inlined, names that obscure where the real code lives), **duplicated patterns** (same logic in multiple places that belongs in a base class or shared function), hot-path violations, spec conformance, bloat, platform boundary. Must PASS. Skip if the push is a single doc-only or test-only commit.
+3. Reviewer agent — Opus reviewer over the **push range** (`git diff origin/<branch>..HEAD`). Scope: domain boundary, **common patterns first** (flag any new convention — naming scheme, file shape, build flag, control mechanism, UI affordance — that isn't recognisable from a widely-used project / framework / canonical resource; bespoke choices must carry a stated reason at the introduction site, see the principle in § Principles), **unnecessary abstractions** (no-op / pass-through wrappers that only rename or re-namespace an existing function, single-call-site indirection that would read clearer inlined, names that obscure where the real code lives), **duplicated patterns** (same logic in multiple places that belongs in a base class or shared function), hot-path violations, spec conformance, bloat, platform boundary. Must PASS. Skip if the push is a single doc-only or test-only commit.
 
 The PR review (CodeRabbit, human review) happens after push and is outside the local gating system. Complements the Reviewer agent — CodeRabbit handles line-level bugs in the PR; the Reviewer agent handles architectural drift before push.
 

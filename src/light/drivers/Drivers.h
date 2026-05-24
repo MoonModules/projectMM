@@ -50,11 +50,17 @@ public:
     }
 
     void loop() override {
-        // Scheduler gates Drivers itself via respectsEnabled() default.
+        // Scheduler gates Drivers itself via respectsEnabled() default. The Scheduler
+        // only walks the top-level module list, so it never sees the driver children
+        // here — we have to honour each child's `enabled` flag ourselves, same as
+        // Layer::loop() does for effects and Layers::loop() does for child Layers.
+        // Without this gate the UI's enable/disable on an ArtNet or Preview driver
+        // is a no-op and the driver keeps emitting.
         if (layer_ && layer_->lut().hasLUT()) {
             blendMap(layer_->buffer(), outputBuffer_, layer_->lut(), layer_->channelsPerLight());
         }
         for (uint8_t i = 0; i < childCount(); i++) {
+            if (!child(i)->enabled()) continue;
             uint32_t start = platform::micros();
             child(i)->loop();
             child(i)->addAccumUs(platform::micros() - start);

@@ -457,26 +457,21 @@ void HttpServerModule::handleSetControl(platform::TcpConnection& conn, const cha
             }
             case ControlType::Uint16: {
                 int v = mm::json::parseInt(body, "value");
-                if (v < c.min || v > c.max) {
-                    sendResponse(conn, 400, "application/json", "{\"error\":\"value out of range\"}");
-                    return;
-                }
+                // No c.min/c.max check: those fields are uint8_t and can't
+                // bound a uint16 range (would 400-reject every value > 255).
+                // Clamp to the natural type range to prevent static_cast wrap.
+                if (v < 0) v = 0;
+                if (v > UINT16_MAX) v = UINT16_MAX;
                 *static_cast<uint16_t*>(c.ptr) = static_cast<uint16_t>(v);
                 break;
             }
             case ControlType::Int16: {
                 int v = mm::json::parseInt(body, "value");
-                // Clamp before narrowing — parseInt returns int. A
-                // hostile / out-of-range client value would otherwise
-                // wrap (e.g. 40000 → -25536). Then enforce the control's
-                // configured bounds with a 400 (symmetrical with Uint8/Uint16
-                // above), so live and persisted values share one contract.
+                // Clamp to the natural type range. Same reason as Uint16: c.min
+                // and c.max are uint8_t and can't bound int16, so applying them
+                // would 400-reject every value outside 0..255.
                 if (v < INT16_MIN) v = INT16_MIN;
                 if (v > INT16_MAX) v = INT16_MAX;
-                if (v < c.min || v > c.max) {
-                    sendResponse(conn, 400, "application/json", "{\"error\":\"value out of range\"}");
-                    return;
-                }
                 *static_cast<int16_t*>(c.ptr) = static_cast<int16_t>(v);
                 break;
             }

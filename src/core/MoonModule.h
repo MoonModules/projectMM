@@ -46,8 +46,8 @@ public:
     // Called when enabled flips. Default no-op; override to start/stop sockets, free
     // buffers, etc. The scheduler always invokes loop()/loop20ms()/loop1s() regardless
     // of `enabled` — modules decide what disabled means by checking enabled() inside
-    // their loop fns or by stopping/starting their work in onOnOff().
-    virtual void onOnOff(bool /*newEnabled*/) {}
+    // their loop fns or by stopping/starting their work in onEnabled().
+    virtual void onEnabled(bool /*newEnabled*/) {}
 
     // onBuildControls MUST be idempotent and pure: only `controls_.clear()` + `controls_.addX()`.
     // No platform queries, no I/O, no allocations. HttpServerModule calls it again whenever a
@@ -94,7 +94,7 @@ public:
     void setEnabled(bool e) {
         if (enabled_ == e) return;
         enabled_ = e;
-        onOnOff(e);
+        onEnabled(e);
     }
 
     // Whether the Scheduler should honor `enabled()` for this module's loop callbacks.

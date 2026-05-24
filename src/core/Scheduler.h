@@ -77,7 +77,7 @@ public:
         // Scheduler gates loop callbacks by `enabled()` — disabled modules don't tick.
         // System modules that need to keep running regardless (HttpServer, Network,
         // Filesystem — so users can re-enable other modules through them) override
-        // `respectsEnabled()` to return false. `onOnOff()` fires once per transition
+        // `respectsEnabled()` to return false. `onEnabled()` fires once per transition
         // for custom start/stop semantics; see MoonModule::setEnabled().
         auto shouldRun = [](MoonModule* m) {
             return !m->respectsEnabled() || m->enabled();

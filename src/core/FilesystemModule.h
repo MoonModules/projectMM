@@ -307,14 +307,11 @@ private:
                 int v = mm::json::parseInt(json, key);
                 // Clamp before narrowing — parseInt returns int (up to ±2^31).
                 // A persisted-or-corrupted JSON value outside int16 range
-                // would otherwise wrap (e.g. 40000 → -25536). Then also
-                // clamp to the control's configured min/max so persisted
-                // values respect the same bounds as the live setter
-                // (matches the Uint8 branch above).
+                // would otherwise wrap (e.g. 40000 → -25536). No c.min/c.max
+                // clamp here: those fields are uint8_t and can't bound an int16
+                // range, so applying them zeros every Int16 control on load.
                 if (v < INT16_MIN) v = INT16_MIN;
                 if (v > INT16_MAX) v = INT16_MAX;
-                if (v < c.min) v = c.min;
-                if (v > c.max) v = c.max;
                 *static_cast<int16_t*>(c.ptr) = static_cast<int16_t>(v);
                 break;
             }

@@ -18,17 +18,32 @@ public:
 // one Layouts describing the physical setup, multiple Layers render into it.
 class Layouts : public MoonModule {
 public:
+    // Disabled children are skipped, same gate Layer/Layers/Drivers apply to their
+    // children. Indices of subsequent enabled layouts shift down to close the gap —
+    // disable Layout A and Layout B's lights move to indices 0..N. Users who need
+    // a stable index-to-fixture mapping disable the driver, not the layout.
+    //
+    // Disabling the container itself reports zero lights and an empty iteration —
+    // same effect as disabling every child, so the universal-gate intent ("enabled
+    // on every module means: exclude my contribution") holds for the container too.
+    // The Scheduler can't enforce this for us because Layouts has no loop() — the
+    // work happens in these cold-path methods called from Layer::onAllocateMemory
+    // and Drivers::onAllocateMemory.
     nrOfLightsType totalLightCount() const {
+        if (!enabled()) return 0;
         nrOfLightsType total = 0;
         for (uint8_t i = 0; i < childCount(); i++) {
+            if (!child(i)->enabled()) continue;
             total += static_cast<LayoutBase*>(child(i))->lightCount();
         }
         return total;
     }
 
     void forEachCoord(CoordCallback cb, void* ctx) const {
+        if (!enabled()) return;
         nrOfLightsType offset = 0;
         for (uint8_t i = 0; i < childCount(); i++) {
+            if (!child(i)->enabled()) continue;
             auto* layout = static_cast<LayoutBase*>(child(i));
             // Wrap callback to add physical index offset
             struct WrapCtx {
