@@ -7,9 +7,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_compile_options(-Wall -Wextra -Werror)
 
-# Core library (header-only: all MoonModules are single .h files)
-add_library(mm_core INTERFACE)
-target_include_directories(mm_core INTERFACE src/)
+# Core library. Most modules ship header-only (single .h file with implementation
+# inline). Core service modules that bridge to the platform (HTTP server,
+# filesystem, network, …) ship as .h + .cpp per CLAUDE.md — list those .cpps
+# here so both the application and the test binary link them.
+add_library(mm_core STATIC
+    src/core/HttpServerModule.cpp
+)
+target_include_directories(mm_core PUBLIC src/)
+target_link_libraries(mm_core PUBLIC mm_platform)
+# `add_dependencies(mm_core ui_embed)` is below, after the ui_embed target is defined.
 
 # Platform library (desktop)
 add_library(mm_platform src/platform/desktop/platform_desktop.cpp)
@@ -32,6 +39,10 @@ add_custom_command(
     COMMENT "Embedding UI files"
 )
 add_custom_target(ui_embed DEPENDS ${CMAKE_SOURCE_DIR}/src/ui/ui_embedded.h)
+
+# mm_core's HttpServerModule.cpp consumes ui_embedded.h — wire the dep so a
+# clean build orders them correctly.
+add_dependencies(mm_core ui_embed)
 
 # Application
 add_executable(projectMM src/main.cpp src/platform/desktop/main_desktop.cpp)

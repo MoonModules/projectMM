@@ -47,7 +47,7 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 
 **Git: only on explicit request.** Do not `git add`, `git commit`, or `git push` on your own initiative. Only execute these when the product owner explicitly asks (e.g. "commit now", "push it"). The product owner controls when changes are staged, committed, and pushed.
 
-**Pre-commit is initiated by the product owner, not by agents.** When the product owner says "run pre-commit" / "pre-commit go" / "commit now" the checklist below runs. Do NOT start it automatically because you finished a feature, because tests pass, because a milestone feels reached, or because completion seems imminent. Treat the checklist as a gate the product owner opens; the agent's job is finishing the work and reporting status so the product owner can decide when to open it.
+**Pre-commit is initiated by the product owner, not by agents. Never start the checklist on your own — always ask first.** The full checklist (especially the Opus reviewer in gate 7 and the ESP32 build in gate 6) easily takes 10 minutes and burns real tokens; agents must not initiate it unprompted. When the product owner says "run pre-commit" / "pre-commit go" / "commit now" the checklist below runs. Do NOT start it automatically because you finished a feature, because tests pass, because a milestone feels reached, because completion seems imminent, or because an earlier instruction implied a sequence ending in "commit". If you finished the feature work and are unsure whether the product owner wants to commit now, **ask**: "Feature work is done — should I run pre-commit, or do you want to look first?" Treat the checklist as a gate the product owner opens; the agent's job is finishing the work and reporting status so the product owner can decide when to open it.
 
 **Pre-commit checklist (mandatory, in this order):**
 1. Desktop build — `cmake --build build` (zero warnings)
@@ -123,6 +123,15 @@ docs/
 
 Documentation describes the system as it is. Git commits are the history. Module specs are written before implementation. Doc pages are kept current with the code.
 
+**Module specs are end-user / API-integrator documentation, not tech documentation.** Each `docs/moonmodules/<Name>.md` page exists to answer "what does this module do that I can't trivially read off the source file?" Concretely, it should carry:
+
+- **Wire contracts** — REST URLs, JSON shapes, status codes, WebSocket framing, binary frame layouts. Anything an integrator outside the codebase needs.
+- **Cross-domain wiring** — how this module connects to other modules through plain data structures (e.g. `HttpServerModule` reads a `PreviewFrame` that `PreviewDriver` writes; the wiring happens in `main.cpp`). Things that span multiple files and don't belong as a comment in any single one.
+- **Prior art** — the v1/v2/MoonLight lineage links. History/credits the code can't carry.
+- **At minimum, one mention of every control name** — `scripts/check/check_specs.py` enforces this, so the spec stays minimally accurate to the source.
+
+Do **not** repeat facts the `.h` already states: the controls list (the .h has `controls_.addX(...)`), the method signatures (they're declared), the implementation strategy ("uses a TcpServer abstraction" — visible in the includes), or architectural rules that belong in `architecture.md` / `architecture-light.md` (domain boundary, hot-path discipline, etc.). When in doubt: if a fact is visible in the file's `.h`, the `.md` can drop it. The spec-check script and a comment header in the `.h` together carry the contract; the `.md` carries what the file can't.
+
 The `history/` folder is the distilled experience of years of building LED/light systems — from WLED, WLED-MM, StarLight, MoonLight, through projectMM. It contains proven patterns, memory tricks, control mechanisms, and hard-won lessons. We cherry-pick from it — we never implement it wholesale.
 
 ## Code Style
@@ -132,7 +141,9 @@ The `history/` folder is the distilled experience of years of building LED/light
 - `std::span` over pointer + length
 - Namespace: `mm`, platform code in `mm::platform`
 - No `using namespace` in headers
-- MoonModules are single-file (`.h` only, implementation inline)
+- **Light-domain modules and the `MoonModule` base: header-only.** Every effect, modifier, driver, layout, the light-domain containers (`Layouts`, `Layers`, `Drivers`, `Layer`), and the `MoonModule` base class live in a single `.h` with implementation inline. The benefit is concrete: a contributor copies `RainbowEffect.h`, edits, saves as `MyEffect.h`, registers one line in `main.cpp` — no "where does the `.cpp` go, what does CMake need" friction. The chain `RainbowEffect.h → EffectBase.h → MoonModule.h` is uniform — readers don't pivot to a different file shape at the base. When a light-domain file outgrows one concern, extract a helper into its own header (`BlendMap`, `MappingLUT`) rather than splitting to `.h` + `.cpp`. Header-only is a feature of the light domain.
+- **Core service modules: `.h` + `.cpp`.** Core modules that bridge to the platform layer or implement substantial infrastructure (`HttpServerModule`, `FilesystemModule`, `NetworkModule`, `Scheduler`, `SystemModule`) ship as a `.h` (interface) plus a `.cpp` (implementation). Three reasons that compound: (a) implementation changes recompile only the `.cpp`, not every TU that includes the header — incremental builds are 2-5× faster on the kind of edits that happen in development; (b) readers want the interface separately from the body; (c) symbol bloat and link-time stay bounded. Small core utilities that are *almost entirely declarations or inline accessors* — `types.h`, `color.h`, `version.h`, `PreviewFrame.h`, `JsonUtil.h`, `Control.h`, `JsonSink.h`, `Sha1.h`, `Base64.h` — stay header-only. Templates (e.g. `ModuleFactory::registerType<T>`) also must stay in the header because of C++ instantiation rules; a module that's mostly template can therefore stay header-only.
+- **Exceptions need a one-line comment at the top of the file naming the reason.** Without a stated reason the file is expected to follow the default for its category. When in doubt: light → header-only, core → `.h` + `.cpp`.
 - Semantic variable names — name variables for what they represent, not just their type. `availableHeap` not `available`, `internalHeap` not `internal`, `lutBytes` not `bytes`. A reader should understand the variable without looking at its assignment.
 - No hard line wraps in markdown — let the editor soft-wrap
 

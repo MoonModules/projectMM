@@ -17,6 +17,7 @@
 #include "light/drivers/ArtNetSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
 #include "core/HttpServerModule.h"
+#include "core/PreviewFrame.h"  // used directly here; HttpServerModule.h no longer brings it transitively
 #include "core/SystemModule.h"
 #include "core/FilesystemModule.h"
 #include "core/ModuleFactory.h"
