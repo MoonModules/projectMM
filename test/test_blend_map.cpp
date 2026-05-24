@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "light/BlendMap.h"
+#include "light/layers/BlendMap.h"
 
 TEST_CASE("blendMap identity (no LUT) copies buffer") {
     mm::Buffer src, dst;

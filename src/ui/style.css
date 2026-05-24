@@ -113,6 +113,12 @@ body {
     border-color: var(--red);
     color: var(--red);
 }
+/* Armed reboot: first click of the press-twice-to-reboot confirm. */
+#reboot-btn.armed {
+    background: var(--red);
+    border-color: var(--red);
+    color: white;
+}
 
 /* ============================================================
    Content layout — side nav + main area
@@ -195,11 +201,19 @@ body.nav-open #nav {
     font-size: 11px;
 }
 
+/* The content area right of the nav. Full width — the preview spans all of it.
+   The module card column is capped separately (#main below) so cards stay a
+   readable single-column width while the preview goes edge to edge. */
 .main-area {
+    flex: 1;
+    min-width: 0;
+    padding: 12px;
+}
+
+/* Module cards: capped width, centered under the full-width preview. */
+#main {
     max-width: 500px;
     margin: 0 auto;
-    padding: 12px;
-    width: 100%;
 }
 
 /* ============================================================
@@ -218,11 +232,17 @@ body.nav-open #nav {
 #preview {
     display: block;
     width: 100%;
-    height: 50vh;
-    max-height: 320px;
-    /* --preview-shrink: 0 .. 1 driven by app.js scroll listener.
-       Heights collapse to 50% of natural when fully scrolled. */
+    /* aspect-ratio derives the height from the column width; max-height caps it
+       so on a normal-width column the preview is a wide rectangle (the square
+       clipped to ~half the viewport). The scroll-shrink (app.js) animates
+       max-height down to 50% as the user scrolls. */
+    aspect-ratio: 1 / 1;
+    max-height: 50vh;
     transition: max-height 0.05s linear;
+    /* Take touch gestures over from the browser so single-finger orbit and
+       two-finger pinch-zoom (handled in app.js) work — without this the page
+       scrolls/zooms instead of the canvas. */
+    touch-action: none;
 }
 
 /* ============================================================
@@ -237,15 +257,42 @@ body.nav-open #nav {
     padding: 10px 12px;
 }
 
+/* Depth only sets the background here — the indent lives on .card-children,
+   which physically encloses the child cards. */
 .card[data-depth="1"] {
     background: var(--card-bg-1);
-    margin-left: 12px;
-    border-left: 2px solid var(--accent-soft);
 }
 .card[data-depth="2"] {
     background: var(--card-bg-2);
-    margin-left: 24px;
-    border-left: 2px solid var(--accent-soft);
+}
+
+/* Wrapper for a parent card's child cards. Sits inside the parent's padding so
+   the parent border encloses it; the left margin indents the subtree.
+   :empty collapses it (a parent with no children yet) so + add child sits
+   flush under the controls. */
+.card-children {
+    margin-top: 8px;
+    margin-left: 12px;
+}
+.card-children:empty {
+    display: none;
+}
+
+/* Collapsible "settings" wrapper for a container module's own controls.
+   Native <details>/<summary> — defaults to collapsed; children of the
+   container are visible without a click, parent settings open on demand. */
+.card-controls-collapse {
+    margin-top: 4px;
+}
+.card-controls-collapse > summary {
+    cursor: pointer;
+    user-select: none;
+    color: var(--fg-muted);
+    font-size: 0.85em;
+    padding: 2px 0;
+}
+.card-controls-collapse > summary:hover {
+    color: var(--fg);
 }
 
 .card-title {
@@ -256,13 +303,59 @@ body.nav-open #nav {
     margin-bottom: 8px;
 }
 
+/* Enable/disable toggle: styled <button> matching .card-btn's 26×26 frame.
+   Always transparent (no fill) — visual state is conveyed by the glyph alone:
+   ✓ (accent-coloured) when on, ○ (muted) when off. Same weight as the other
+   action buttons in the cluster. */
 .card-title .module-enabled {
-    margin: 0;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--fg-muted);
+    width: 26px;
+    height: 26px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
+.card-title .module-enabled:hover { border-color: var(--accent); }
+.card-title .module-enabled[data-checked="true"] { color: var(--accent); }
 
 .card-title .card-name {
-    flex: 1;
     color: var(--accent);
+}
+.card-name-emoji {
+    /* Tighten the gap to the name (the .card-title flex gap is 8px). */
+    margin-left: -4px;
+}
+/* Flex spacer pushes stats/actions to the right; name + help stay left. */
+.card-spacer {
+    flex: 1;
+}
+/* Per-module help link → spec page on GitHub. Styled as a .card-btn so the
+   right-hand cluster (✎ × ☰ ?) is visually uniform — same 26×26 square frame. */
+.card-help {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--fg-muted);
+    width: 26px;
+    height: 26px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.card-help:hover {
+    color: var(--fg);
+    border-color: var(--accent);
 }
 
 .card-stats {
@@ -293,16 +386,25 @@ body.nav-open #nav {
 }
 .card-btn:hover:not(:disabled) { color: var(--fg); border-color: var(--accent); }
 .card-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.card-btn-del { color: var(--red); border-color: var(--red); opacity: 0.7; }
-.card-btn-del:hover { opacity: 1; }
-
-.drag-handle {
-    cursor: grab;
-    color: var(--fg-muted);
-    user-select: none;
-    padding: 0 4px;
+/* Delete: same muted border as the other action buttons; only the × is red
+   (semantic color on the symbol, not the box). The armed state still fills
+   with red — that's the loud "you're one click from deleting" signal. */
+.card-btn-del { color: var(--red); }
+.card-btn-del:hover { border-color: var(--red); }
+.card-btn-del.armed {
+    background: var(--red);
+    color: white;
+    border-color: var(--red);
 }
-.drag-handle:hover { color: var(--fg); }
+
+/* Whole-card drag: the card itself is the HTML5 drag source, except for
+   `.card-control` and `.card-controls-collapse` regions (sliders, inputs).
+   The card's grab cursor is the only affordance — buttons and inputs keep
+   their own (pointer / text / etc.) so the boundary is felt by the cursor. */
+.card { cursor: grab; }
+.card:active { cursor: grabbing; }
+.control-row, .control-row * { cursor: auto; }
+.card-controls-collapse > summary { cursor: pointer; }
 .card.dragging { opacity: 0.5; }
 .card.drag-over { outline: 2px dashed var(--accent); outline-offset: -2px; }
 
@@ -342,6 +444,60 @@ body.nav-open #nav {
 .control-row input[type="checkbox"] {
     accent-color: var(--accent);
 }
+
+/* Modern on/off switch for bool controls. The <input> stays the source of
+   truth (event/sync code targets it); the <span class="switch-track"> draws
+   the pill + thumb and reads the checked state via :has(). Dimensions match
+   the native slider's thumb (height) and rail color (thumb), so the two
+   controls share a visual language. */
+.switch {
+    display: inline-block;
+    position: relative;
+    width: 40px;
+    height: 18px;
+    cursor: pointer;
+}
+.switch input {
+    /* Visually hidden but still focusable/clickable through the label. */
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    margin: 0;
+    cursor: pointer;
+}
+/* Track matches the slider aesthetic: neutral groove off, light accent tint
+   on. The thumb uses --fg (the same near-white tone the native slider's
+   unfilled rail shows), so the switch knob reads like the slider rail. */
+.switch-track {
+    position: absolute;
+    inset: 0;
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    transition: background 0.15s, border-color 0.15s;
+}
+.switch-track::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--fg);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    transition: transform 0.15s;
+}
+.switch:has(input:checked) .switch-track {
+    /* Light accent tint, not flooded — matches the slider's filled-portion look. */
+    background: color-mix(in srgb, var(--accent) 35%, var(--bg-0));
+    border-color: var(--accent);
+}
+.switch:has(input:checked) .switch-track::after {
+    /* width(40) - thumb(12) - left(2) - right(2) = 24px travel */
+    transform: translateX(24px);
+}
+.switch:hover .switch-track { border-color: var(--accent); }
 .control-row progress {
     flex: 1;
     height: 8px;
@@ -436,6 +592,27 @@ body.nav-open #nav {
     border-radius: 4px;
     margin-bottom: 6px;
 }
+/* Emoji chip filter row — toggle chips to narrow the type list. */
+.type-picker-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+.type-picker-chip {
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 14px;
+    cursor: pointer;
+    line-height: 1.2;
+}
+.type-picker-chip:hover { border-color: var(--accent); }
+.type-picker-chip.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+}
 .type-picker-list {
     max-height: 200px;
     overflow-y: auto;
@@ -447,6 +624,9 @@ body.nav-open #nav {
     color: var(--fg);
     display: flex;
     align-items: center;
+}
+.type-picker-item-emoji {
+    margin-right: 6px;
 }
 .type-picker-item:hover,
 .type-picker-item.selected {
@@ -490,8 +670,7 @@ body.nav-open #nav {
 
 @media (max-width: 820px) {
     .main-area { padding: 8px; }
-    .card[data-depth="1"] { margin-left: 8px; }
-    .card[data-depth="2"] { margin-left: 16px; }
+    .card-children { margin-left: 6px; }
 
     /* Narrow screens: the nav is a slide-in drawer, hidden until the hamburger
        opens it. body.nav-open shows the drawer over a dimming overlay. */

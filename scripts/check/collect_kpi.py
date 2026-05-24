@@ -363,7 +363,8 @@ def main():
     #   max_tick_us = lights × 1e6 / MIN_ESP32_FPS_LED_PRODUCT
     # so a smaller grid gets proportionally less time (18 FPS at 128×128).
     # An absent ESP32 reading is not a failure — the caller decides whether a
-    # missing measurement is acceptable (see CLAUDE.md pre-commit step 8).
+    # missing measurement is acceptable (see CLAUDE.md Lifecycle Events,
+    # Event 1 gate 7 — KPI collection).
     # Only --commit mode aborts on a breach; a plain interactive report just
     # warns, so viewing KPIs on an unlucky slow sample does not exit non-zero.
     esp32_tick = esp32.get("tick_us")

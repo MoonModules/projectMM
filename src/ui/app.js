@@ -7,7 +7,7 @@
 //   4. Render pipeline: render() → renderNav() → renderCards() → createCard() → createControl()
 //   5. State patching (no-rebuild contract): updateValues() + updateModuleControls()
 //   6. Type picker
-//   7. Drag-to-reorder (HTML5 DnD; desktop only — mobile uses ↑/↓ buttons)
+//   7. Drag-to-reorder (HTML5 DnD on desktop; touchstart-gated on mobile)
 //   8. 3D WebGL preview (sticky + scroll-shrink, sparse vertex buffer, frame cache)
 //   9. Status bar wiring (device name, sys stats, theme, reboot)
 //  10. Boot
@@ -192,7 +192,7 @@ async function deleteModule(name) {
     refetchState();
 }
 
-// move to absolute index (0..siblings.length-1). Called from up/down buttons and drag-drop.
+// move to absolute index (0..siblings.length-1). Called from drag-and-drop.
 async function moveModuleTo(name, toIndex) {
     await fetch("/api/modules/" + encodeURIComponent(name) + "/move", {
         method: "POST",
@@ -202,8 +202,19 @@ async function moveModuleTo(name, toIndex) {
     refetchState();
 }
 
+// swap a module for another type at the same position. The replacement starts
+// with its own default control values — a clean swap, not a value carry-over.
+async function replaceModule(name, newType) {
+    if (!newType) return;
+    await fetch("/api/modules/" + encodeURIComponent(name) + "/replace", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({type: newType})
+    });
+    refetchState();
+}
+
 async function rebootDevice() {
-    if (!confirm("Reboot device?")) return;
     try {
         await fetch("/api/reboot", {method: "POST"});
     } catch { /* connection may drop mid-response — that's the device restarting */ }
@@ -245,7 +256,7 @@ function buildNavFooter() {
     const links = document.createElement("div");
     links.className = "nav-social";
     const SOCIAL = [
-        ["GitHub",  "https://github.com/ewowi/projectMM-v3",
+        ["GitHub",  "https://github.com/ewowi/projectMM",
          "M12 .5C5.65.5.5 5.65.5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.54-3.88-1.54-.53-1.34-1.3-1.7-1.3-1.7-1.06-.72.08-.71.08-.71 1.17.08 1.79 1.2 1.79 1.2 1.04 1.79 2.73 1.27 3.4.97.1-.76.41-1.27.74-1.56-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.25 5.68.42.36.8 1.08.8 2.18v3.23c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"],
         ["Discord", "https://discord.gg/TC8NSUSCdV",
          "M20.32 4.37A19.8 19.8 0 0 0 15.45 2.9a13.6 13.6 0 0 0-.62 1.27 18.3 18.3 0 0 0-5.67 0A13 13 0 0 0 8.54 2.9 19.7 19.7 0 0 0 3.67 4.37C.57 8.96-.27 13.44.15 17.85a19.9 19.9 0 0 0 6 3.03c.49-.66.92-1.36 1.29-2.1-.71-.27-1.39-.6-2.03-.99.17-.12.34-.25.5-.38a14.2 14.2 0 0 0 12.18 0c.16.13.33.26.5.38-.64.39-1.32.72-2.03.99.37.74.8 1.44 1.29 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.1-.85-9.55-3.58-13.48ZM8.02 15.13c-1.18 0-2.15-1.08-2.15-2.41 0-1.33.95-2.42 2.15-2.42 1.2 0 2.17 1.1 2.15 2.42 0 1.33-.95 2.41-2.15 2.41Zm7.96 0c-1.18 0-2.15-1.08-2.15-2.41 0-1.33.95-2.42 2.15-2.42 1.2 0 2.17 1.1 2.15 2.42 0 1.33-.95 2.41-2.15 2.41Z"],
@@ -268,7 +279,7 @@ function buildNavFooter() {
 
     const copy = document.createElement("div");
     copy.className = "nav-copyright";
-    copy.textContent = `© ${new Date().getFullYear()} MoonLight`;
+    copy.textContent = `© ${new Date().getFullYear()} MoonModules`;
     footer.appendChild(copy);
 
     return footer;
@@ -312,10 +323,13 @@ function renderCards() {
 }
 
 function renderModuleTree(mod, parentEl, depth) {
-    parentEl.appendChild(createCard(mod, depth));
-    if (mod.children && mod.children.length > 0) {
+    const { card, childrenEl } = createCard(mod, depth);
+    parentEl.appendChild(card);
+    // Children render inside this card's .card-children wrapper, not as flat
+    // siblings. childrenEl is null for modules that don't accept children.
+    if (childrenEl && mod.children && mod.children.length > 0) {
         for (const child of mod.children) {
-            renderModuleTree(child, parentEl, depth + 1);
+            renderModuleTree(child, childrenEl, depth + 1);
         }
     }
 }
@@ -330,28 +344,65 @@ function createCard(mod, depth) {
     const title = document.createElement("div");
     title.className = "card-title";
 
-    const enabled = document.createElement("input");
-    enabled.type = "checkbox";
+    // The enabled toggle is built here but appended later — it joins the
+    // right-hand action cluster (next to ✎ × ?) rather than sitting at the start
+    // of the row, for visual grouping with the other per-card controls.
+    // Rendered as a <button> styled as a 26×26 rounded box (matching .card-btn);
+    // showing ✓ when on, blank when off. Stores its checked state in
+    // data-checked so updateValues can sync from WS pushes. A native <input>
+    // would not match the other buttons' frame and corner radius.
+    const enabled = document.createElement("button");
+    enabled.type = "button";
     enabled.className = "module-enabled";
-    enabled.checked = (mod.enabled === undefined) ? true : !!mod.enabled;
     enabled.dataset.mid = mod.name;
     enabled.dataset.key = "enabled";
-    enabled.addEventListener("change", () => {
-        sendControl(mod.name, "enabled", enabled.checked);
+    enabled.setAttribute("aria-pressed", "true");
+    enabled.title = "Enable / disable";
+    // ✓ when on, ○ when off — both glyphs are smaller than the box so the
+    // visual weight matches the other action buttons (no filled background).
+    const setEnabledUi = (on) => {
+        enabled.dataset.checked = on ? "true" : "false";
+        enabled.textContent = on ? "✓" : "○";
+        enabled.setAttribute("aria-pressed", on ? "true" : "false");
+    };
+    setEnabledUi(mod.enabled === undefined ? true : !!mod.enabled);
+    enabled.addEventListener("click", () => {
+        const next = enabled.dataset.checked !== "true";
+        setEnabledUi(next);
+        // Stamp dragTs so a WS state push older than this click can't revert
+        // the toggle before the server has acknowledged. updateValues reads
+        // dragTs[mod.name + ":enabled"] on line ~952 and suppresses stale
+        // patches within the 1s cooldown.
+        dragTs[mod.name + ":enabled"] = Date.now();
+        sendControl(mod.name, "enabled", next);
     });
-    title.appendChild(enabled);
 
     const name = document.createElement("span");
     name.className = "card-name";
     name.textContent = mod.name;
     title.appendChild(name);
 
+    // Emoji tags (role + curated) shown after the name — same set used by the
+    // type picker's chip filter, so visual identity is consistent across views.
+    const emoji = emojiTagsForMod(mod);
+    if (emoji) {
+        const emojiEl = document.createElement("span");
+        emojiEl.className = "card-name-emoji";
+        emojiEl.textContent = emoji;
+        title.appendChild(emojiEl);
+    }
+
+    // Flex spacer so the name stays left and everything else groups on the right.
+    const spacer = document.createElement("span");
+    spacer.className = "card-spacer";
+    title.appendChild(spacer);
+
     // fps/ms toggle on the stats line — global mode, single click cycles all cards
     const stats = document.createElement("span");
     stats.className = "card-stats";
     stats.dataset.mid = mod.name;
     stats.dataset.key = "stats";
-    stats.title = "Click to toggle fps/ms";
+    stats.title = formatStatsTitle(mod);
     stats.textContent = formatStats(mod);
     stats.addEventListener("click", () => {
         const idx = TIMING_MODES.indexOf(timingMode);
@@ -360,10 +411,13 @@ function createCard(mod, depth) {
         // Refresh every card's stats line in place — no full re-render needed
         document.querySelectorAll(".card-stats[data-mid]").forEach(s => {
             const m = findModule(s.dataset.mid);
-            if (m) s.textContent = formatStats(m);
+            if (m) { s.textContent = formatStats(m); s.title = formatStatsTitle(m); }
         });
     });
     title.appendChild(stats);
+
+    // Enable checkbox joins the right-hand action cluster, before ✎/×.
+    title.appendChild(enabled);
 
     // Action buttons for reorderable children (Effect/Modifier roles).
     // Top-level modules aren't reorderable in this iteration (fixed in main.cpp).
@@ -371,93 +425,187 @@ function createCard(mod, depth) {
         const actions = createActionButtons(mod);
         title.appendChild(actions);
     }
+
+    // Help link → the module's spec page on GitHub, at the far right of the row.
+    // docPath comes from /api/types (relative to docs/moonmodules/); omitted if none.
+    const docPath = docPathForType(mod.type);
+    if (docPath) {
+        const help = document.createElement("a");
+        help.className = "card-help";
+        help.textContent = "?";
+        help.title = "Open module documentation";
+        help.target = "_blank";
+        help.rel = "noopener";
+        help.href = "https://github.com/ewowi/projectMM/blob/main/docs/moonmodules/" + docPath;
+        title.appendChild(help);
+    }
+
     card.appendChild(title);
 
     // -- Controls --
+    // Container modules (those that accept children) get their own controls
+    // wrapped in a <details> so the parent's children are the focus by default
+    // and the parent's settings can be expanded on demand. Leaf modules render
+    // controls inline (no extra wrapper).
+    const hasVisibleControls = mod.controls && mod.controls.some(c => !c.hidden);
+    const wrapInDetails = acceptsChildren(mod) && hasVisibleControls;
+    const controlsHost = wrapInDetails ? (() => {
+        const d = document.createElement("details");
+        d.className = "card-controls-collapse";
+        const s = document.createElement("summary");
+        s.textContent = "controls";
+        d.appendChild(s);
+        card.appendChild(d);
+        return d;
+    })() : card;
     if (mod.controls) {
         for (const ctrl of mod.controls) {
             if (ctrl.hidden) continue;  // plan-10 hidden flag (still respected)
             const row = createControl(mod.name, mod.type, ctrl);
-            if (row) card.appendChild(row);
+            if (row) controlsHost.appendChild(row);
         }
     }
 
-    // -- Footer: + add child (only on parents that accept children) --
+    // -- Children block + footer (only on parents that accept children) --
+    // The .card-children wrapper lives inside this card so the parent's border
+    // encloses its children; renderModuleTree recurses into it. + add child
+    // sits below the children block, at the bottom of the parent box.
+    let childrenEl = null;
     if (acceptsChildren(mod)) {
+        childrenEl = document.createElement("div");
+        childrenEl.className = "card-children";
+        childrenEl.dataset.depth = String(depth + 1);
+        card.appendChild(childrenEl);
+
+        // -- Footer: + add child --
         const footer = document.createElement("div");
         footer.className = "card-footer";
         const addBtn = document.createElement("button");
         addBtn.className = "add-btn";
         addBtn.textContent = "+ add child";
-        addBtn.addEventListener("click", () => openTypePicker(mod, footer));
+        addBtn.addEventListener("click", () => {
+            // Hide the button while the picker is open (the picker takes its
+            // place); restore it once the picker is removed (cancel/create/Esc).
+            addBtn.style.display = "none";
+            openTypePicker(mod, footer);
+            const obs = new MutationObserver(() => {
+                if (!footer.querySelector(".type-picker")) {
+                    addBtn.style.display = "";
+                    obs.disconnect();
+                }
+            });
+            obs.observe(footer, {childList: true});
+        });
         footer.appendChild(addBtn);
         card.appendChild(footer);
     }
 
-    // -- Drag-to-reorder (desktop HTML5; mobile naturally falls through to ↑/↓) --
+    // -- Drag-to-reorder (HTML5 DnD on desktop; touchstart-gated on mobile) --
     if (depth > 0 && (mod.role === "effect" || mod.role === "modifier")) {
         attachDragHandlers(card, mod);
     }
 
-    return card;
+    return { card, childrenEl };
 }
 
+// Wire a button as a press-twice confirm: the first click arms it (adds the
+// `armed` class, optional armed label/title), a second click runs `onConfirm`.
+// Disarms after 3s or when the pointer leaves. Used by the delete and reboot
+// buttons — no browser confirm() popup. `armedText` is optional (delete swaps
+// × → ✓; reboot keeps its glyph). The pre-arm title is captured live so a
+// title updated elsewhere (e.g. reboot's crashed-state text) restores correctly.
+function armPressTwice(btn, onConfirm, opts = {}) {
+    let armed = false;
+    let disarmTimer = null;
+    let savedText = "";
+    let savedTitle = "";
+    const disarm = () => {
+        armed = false;
+        btn.classList.remove("armed");
+        if (opts.armedText !== undefined) btn.textContent = savedText;
+        btn.title = savedTitle;
+        if (disarmTimer) { clearTimeout(disarmTimer); disarmTimer = null; }
+    };
+    btn.addEventListener("click", () => {
+        // Disarm before running the action so a stray second click can't fire
+        // it twice (e.g. two /api/reboot requests).
+        if (armed) { disarm(); onConfirm(); return; }
+        armed = true;
+        savedText = btn.textContent;
+        savedTitle = btn.title;
+        btn.classList.add("armed");
+        if (opts.armedText !== undefined) btn.textContent = opts.armedText;
+        if (opts.armedTitle !== undefined) btn.title = opts.armedTitle;
+        disarmTimer = setTimeout(disarm, 3000);
+    });
+    btn.addEventListener("mouseleave", disarm);
+}
+
+// Compact byte formatter — "B" under 1 KB, "KB" otherwise (one decimal under 10 KB).
+function fmtBytes(n) {
+    if (n < 1024) return n + "B";
+    const k = n / 1024;
+    return (k < 10 ? k.toFixed(1) : Math.round(k)) + "KB";
+}
+
+// Stats line: timing (🕒, fps or µs/ms per the global toggle) + memory
+// (🧠 static, plus "+ dynamic" only when the module allocated heap).
+// Timing is omitted entirely when the module has no measured loop time.
 function formatStats(mod) {
     const us = (mod.loopTimeUs !== undefined) ? mod.loopTimeUs : 0;
-    if (us === 0) return "—";
-    if (timingMode === "fps") {
-        const fps = us > 0 ? Math.round(1_000_000 / us) : 0;
-        return fps >= 1000 ? (fps / 1000).toFixed(1) + "K fps" : fps + " fps";
+    let timing = "";
+    if (us > 0) {
+        if (timingMode === "fps") {
+            const fps = Math.round(1_000_000 / us);
+            timing = "🕒 " + (fps >= 1000 ? Math.round(fps / 1000) + "K fps" : fps + " fps");
+        } else {
+            timing = "🕒 " + (us < 1000 ? us + " µs" : (us / 1000).toFixed(2) + " ms");
+        }
     }
-    return us < 1000 ? us + " µs" : (us / 1000).toFixed(2) + " ms";
+    const stat = mod.classSize || 0;
+    const dyn = mod.dynamicBytes || 0;
+    const mem = "🧠 " + fmtBytes(stat) + (dyn > 0 ? " + " + fmtBytes(dyn) : "");
+    // Status chip: emitted by the engine when a module has something to say.
+    // Severity picks the emoji — ℹ️ neutral (Eth: 192.168.1.210), ⚠️ degraded
+    // (buffer reduced), ❌ error (No network). Tooltip carries the full text.
+    const sev = mod.severity || "status";
+    const sevEmoji = sev === "error" ? "❌" : sev === "warning" ? "⚠️" : "ℹ️";
+    const statusChip = mod.status ? "  " + sevEmoji : "";
+    const head = timing ? timing + "   " + mem : mem;
+    return head + statusChip;
+}
+function formatStatsTitle(mod) {
+    return mod.status ? mod.status : "Click to toggle fps/ms";
 }
 
 function createActionButtons(mod) {
     const wrap = document.createElement("span");
     wrap.className = "card-actions";
 
-    // Find current index within parent's reorderable siblings to enable/disable buttons.
-    // Identify by name, not object identity — WS state pushes replace `state` and the
-    // `mod` captured at render time becomes stale within ~1s, breaking indexOf.
-    const parent = findParent(mod.name);
-    const sibs = parent ? (parent.children || []).filter(c => c.role === mod.role) : [];
-    const idx = sibs.findIndex(c => c.name === mod.name);
-    const absIdx = parent ? (parent.children || []).findIndex(c => c.name === mod.name) : -1;
+    // Reorder is drag-and-drop only (works on desktop and mobile). The whole
+    // card body is the drag source; the controls region excludes itself via
+    // the mousedown gate in attachDragHandlers. No up/down buttons, no
+    // dedicated drag handle.
 
-    const upBtn = document.createElement("button");
-    upBtn.className = "card-btn";
-    upBtn.textContent = "↑";
-    upBtn.title = "Move up";
-    upBtn.disabled = (idx <= 0);
-    upBtn.addEventListener("click", () => moveModuleTo(mod.name, Math.max(0, absIdx - 1)));
-    wrap.appendChild(upBtn);
-
-    const downBtn = document.createElement("button");
-    downBtn.className = "card-btn";
-    downBtn.textContent = "↓";
-    downBtn.title = "Move down";
-    downBtn.disabled = (idx < 0 || idx >= sibs.length - 1);
-    downBtn.addEventListener("click", () => {
-        const total = parent ? (parent.children || []).length : 0;
-        moveModuleTo(mod.name, Math.min(total - 1, absIdx + 1));
+    const replaceBtn = document.createElement("button");
+    replaceBtn.className = "card-btn";
+    replaceBtn.textContent = "✎";
+    replaceBtn.title = "Replace with another type";
+    replaceBtn.addEventListener("click", () => {
+        // Anchor the picker to the card so it drops below the card content,
+        // not inside the cramped 26px action-button row.
+        openReplacePicker(mod, replaceBtn.closest(".card"));
     });
-    wrap.appendChild(downBtn);
+    wrap.appendChild(replaceBtn);
 
+    // Delete: press × once to arm, again to confirm — see armPressTwice.
     const delBtn = document.createElement("button");
     delBtn.className = "card-btn card-btn-del";
     delBtn.textContent = "×";
     delBtn.title = "Delete";
-    delBtn.addEventListener("click", () => {
-        if (confirm(`Delete ${mod.name}?`)) deleteModule(mod.name);
-    });
+    armPressTwice(delBtn, () => deleteModule(mod.name),
+                  {armedText: "✓", armedTitle: "Click again to delete"});
     wrap.appendChild(delBtn);
-
-    // Drag handle (HTML5 drag-source; the .card itself is the draggable element)
-    const handle = document.createElement("span");
-    handle.className = "drag-handle";
-    handle.textContent = "☰";
-    handle.title = "Drag to reorder";
-    wrap.appendChild(handle);
 
     return wrap;
 }
@@ -478,16 +626,20 @@ function findParent(childName) {
 }
 
 function acceptsChildren(mod) {
-    // role-based: Layer → effect+modifier, DriverGroup → driver, LayoutGroup → layout.
+    // role-based: Layers → layer, Layer → effect+modifier, Drivers → driver, Layouts → layout.
     // Mapped in JS, not in engine, so no backend allowedChildRoles field needed.
     // Keyed on mod.type (stable factory key) — mod.name is editable per instance.
-    return mod.type === "Layer" || mod.type === "DriverGroup" || mod.type === "LayoutGroup";
+    return mod.type === "Layers" ||
+           mod.type === "Layer"  ||
+           mod.type === "Drivers" ||
+           mod.type === "Layouts";
 }
 
 function rolesAcceptedBy(parentMod) {
-    if (parentMod.type === "Layer")       return ["effect", "modifier"];
-    if (parentMod.type === "DriverGroup") return ["driver"];
-    if (parentMod.type === "LayoutGroup") return ["layout"];
+    if (parentMod.type === "Layers")  return ["layer"];
+    if (parentMod.type === "Layer")   return ["effect", "modifier"];
+    if (parentMod.type === "Drivers") return ["driver"];
+    if (parentMod.type === "Layouts") return ["layout"];
     return [];
 }
 
@@ -502,6 +654,23 @@ function defaultFor(moduleType, ctrlName) {
     const t = availableTypes.find(t => t.name === moduleType);
     if (!t || !t.defaults) return undefined;
     return t.defaults[ctrlName];
+}
+
+// The module type's spec-page path (relative to docs/moonmodules/), from /api/types.
+// Returns "" when the type isn't loaded yet or declares no doc path.
+function docPathForType(moduleType) {
+    if (!moduleType) return "";
+    const t = availableTypes.find(t => t.name === moduleType);
+    return (t && t.docPath) ? t.docPath : "";
+}
+
+// Curated emoji string for a live module — its role emoji plus the type's
+// `tags` from /api/types, deduplicated, in role-first order. "" if the type
+// isn't loaded yet. Used on the card title and in the type picker.
+function emojiTagsForMod(mod) {
+    if (!mod) return "";
+    const t = availableTypes.find(t => t.name === mod.type) || {role: mod.role, tags: ""};
+    return emojiTagsFor(t).join("");
 }
 
 function createControl(moduleName, moduleType, ctrl) {
@@ -556,7 +725,47 @@ function createControl(moduleName, moduleType, ctrl) {
             appendResetButton(row, moduleName, ctrl, def, () => { input.value = def; });
             break;
         }
+        case "int16": {
+            // Slider with visible value, matching the uint8 path's UX. Default
+            // range -100..+200 is the percentage band the only int16 user today
+            // (Layer start/end) needs — 0..100 covers the visible area and
+            // -100..0 / 100..200 gives modifier-shift headroom. Engine-supplied
+            // ctrl.min/ctrl.max override when present, so a future int16
+            // control with different bounds works without changing this case.
+            const min = Number(ctrl.min ?? -100);
+            const max = Number(ctrl.max ?? 200);
+            const raw = Number(ctrl.value ?? 0);
+            const clamped = Math.max(min, Math.min(max, raw));
+            const input = document.createElement("input");
+            input.type = "range";
+            input.min = min;
+            input.max = max;
+            input.value = clamped;
+            input.dataset.mid = moduleName;
+            input.dataset.key = ctrl.name;
+            const valSpan = document.createElement("span");
+            valSpan.className = "control-value";
+            valSpan.textContent = input.value;
+            input.addEventListener("input", () => {
+                dragTs[key] = Date.now();
+                valSpan.textContent = input.value;
+                debounceSend(key, 150, () => sendControl(moduleName, ctrl.name, parseInt(input.value)));
+            });
+            row.appendChild(input);
+            row.appendChild(valSpan);
+            appendResetButton(row, moduleName, ctrl, def, () => {
+                input.value = def;
+                valSpan.textContent = def;
+            });
+            break;
+        }
         case "bool": {
+            // Modern on/off switch: an <input type=checkbox> (kept for the
+            // existing change/sync paths) wrapped in a <label> that draws a
+            // pill-shaped track + sliding thumb via CSS. The checkbox itself
+            // is visually hidden but stays the source of truth.
+            const sw = document.createElement("label");
+            sw.className = "switch";
             const input = document.createElement("input");
             input.type = "checkbox";
             input.checked = !!ctrl.value;
@@ -566,7 +775,11 @@ function createControl(moduleName, moduleType, ctrl) {
                 dragTs[key] = Date.now();
                 sendControl(moduleName, ctrl.name, input.checked);
             });
-            row.appendChild(input);
+            const track = document.createElement("span");
+            track.className = "switch-track";
+            sw.appendChild(input);
+            sw.appendChild(track);
+            row.appendChild(sw);
             appendResetButton(row, moduleName, ctrl, def, () => { input.checked = !!def; });
             break;
         }
@@ -762,13 +975,16 @@ function updateValues() {
         updateModuleControls(mod);
         // refresh the stats line for this module if visible
         const statsEl = document.querySelector(`.card-stats[data-mid="${cssEscape(mod.name)}"]`);
-        if (statsEl) statsEl.textContent = formatStats(mod);
-        // refresh enabled checkbox
-        const enabledEl = document.querySelector(`input.module-enabled[data-mid="${cssEscape(mod.name)}"]`);
+        if (statsEl) { statsEl.textContent = formatStats(mod); statsEl.title = formatStatsTitle(mod); }
+        // refresh enabled toggle (now a styled <button>, not an <input>)
+        const enabledEl = document.querySelector(`button.module-enabled[data-mid="${cssEscape(mod.name)}"]`);
         if (enabledEl) {
             const ts = dragTs[mod.name + ":enabled"] || 0;
             if (Date.now() - ts > 1000) {
-                enabledEl.checked = (mod.enabled === undefined) ? true : !!mod.enabled;
+                const on = (mod.enabled === undefined) ? true : !!mod.enabled;
+                enabledEl.dataset.checked = on ? "true" : "false";
+                enabledEl.textContent = on ? "✓" : "○";
+                enabledEl.setAttribute("aria-pressed", on ? "true" : "false");
             }
         }
     }
@@ -798,7 +1014,8 @@ function updateModuleControls(mod) {
 
         switch (ctrl.type) {
             case "uint8":
-            case "uint16": {
+            case "uint16":
+            case "int16": {
                 if (userActive) break;
                 const input = document.querySelector(`input[data-mid="${mid}"][data-key="${k}"]`);
                 if (input && Number(input.value) !== Number(ctrl.value)) {
@@ -879,12 +1096,86 @@ function cssEscape(s) {
 // 6. Type picker
 // ---------------------------------------------------------------------------
 
+// Role → emoji. The role part of the MoonLight emoji-key system
+// (https://moonmodules.org/MoonLight/moonlight/overview/#emoji-key):
+// 🔥 effect · 💎 modifier · 🚥 layout · ☸️ driver · 🥞 layer (projectMM
+// addition — every Layer instance, child of the Layers container). The role
+// tag is derived here, not duplicated in every module's tags() string — one
+// source of truth in the UI saves repeating the same character in ~30 module
+// headers and a few bytes per type in /api/types. Each module's tags() then
+// only carries its categorical origin (🐙 WLED · 💫 MoonLight · ⚡️ FastLED)
+// and any feature extras (audio: ♫ FFT · ♪ volume · moving-head: 🚨 colour ·
+// 🗼 movement). The dimensional emoji (📏 1D · 🟦 2D · 🧊 3D) is derived from
+// the type's `dim` field. All three are merged in emojiTagsFor().
+const ROLE_EMOJI = {
+    effect:   "🔥",
+    driver:   "☸️",
+    modifier: "💎",
+    layout:   "🚥",
+    layer:    "🥞",
+    generic:  "⚙️",
+};
+
+// Dim int → emoji. Only effects carry `dim` (1/2/3); other modules have dim == 0
+// and contribute nothing here. Same MoonLight key. Keeps emojiTagsFor() the
+// single place that assembles the chip set per type.
+const DIM_EMOJI = {
+    1: "📏",
+    2: "🟦",
+    3: "🧊",
+};
+
+// Split a string into grapheme clusters so multi-codepoint emoji (e.g. 🌫️,
+// which is base char + variation selector) stay whole. Falls back to a plain
+// code-point split if Intl.Segmenter is unavailable.
+const _graphemeSeg = (typeof Intl !== "undefined" && Intl.Segmenter)
+    ? new Intl.Segmenter(undefined, {granularity: "grapheme"})
+    : null;
+function graphemes(s) {
+    if (!s) return [];
+    if (_graphemeSeg) return [..._graphemeSeg.segment(s)].map(seg => seg.segment);
+    return [...s];
+}
+
+// All emoji for a type: role first, then dimensional (effects only), then each
+// curated tag emoji from tags(). Deduplicated, order preserved.
+function emojiTagsFor(t) {
+    const out = [];
+    const seen = new Set();
+    const push = (ch) => { if (ch && !seen.has(ch)) { seen.add(ch); out.push(ch); } };
+    push(ROLE_EMOJI[t.role]);
+    push(DIM_EMOJI[t.dim]);
+    for (const ch of graphemes(t.tags || "")) push(ch);
+    return out;
+}
+
+// The type picker serves two modes:
+//  - add (default): pick a type to create as a child of parentMod.
+//  - replace: pick a type to swap parentMod for, at the same position.
+// They differ only in the role filter and the commit action; the search box,
+// list, and keyboard nav are shared.
 function openTypePicker(parentMod, anchorEl) {
+    openPicker(anchorEl, {
+        roles: rolesAcceptedBy(parentMod),
+        actionLabel: "create",
+        commit: (type) => addModule(type, parentMod.name)
+    });
+}
+
+// Replace mode: filter to the target module's own role (effect ↔ effect).
+function openReplacePicker(targetMod, anchorEl) {
+    openPicker(anchorEl, {
+        roles: [targetMod.role],
+        actionLabel: "replace",
+        commit: (type) => replaceModule(targetMod.name, type)
+    });
+}
+
+function openPicker(anchorEl, opts) {
     // Close any existing picker
     document.querySelectorAll(".type-picker").forEach(p => p.remove());
 
-    const accepted = rolesAcceptedBy(parentMod);
-    const filtered = availableTypes.filter(t => accepted.includes(t.role));
+    const filtered = availableTypes.filter(t => opts.roles.includes(t.role));
 
     const picker = document.createElement("div");
     picker.className = "type-picker";
@@ -894,6 +1185,31 @@ function openTypePicker(parentMod, anchorEl) {
     search.placeholder = "search…";
     search.className = "type-picker-search";
     picker.appendChild(search);
+
+    // Emoji chip filter row — every distinct emoji across the role-filtered types.
+    // Toggling chips narrows the list (AND: a type must carry all active chips).
+    const activeChips = new Set();
+    const chipRow = document.createElement("div");
+    chipRow.className = "type-picker-chips";
+    const chipEmoji = [];
+    const chipSeen = new Set();
+    for (const t of filtered) {
+        for (const ch of emojiTagsFor(t)) {
+            if (!chipSeen.has(ch)) { chipSeen.add(ch); chipEmoji.push(ch); }
+        }
+    }
+    for (const emoji of chipEmoji) {
+        const chip = document.createElement("button");
+        chip.className = "type-picker-chip";
+        chip.textContent = emoji;
+        chip.addEventListener("click", () => {
+            if (activeChips.has(emoji)) { activeChips.delete(emoji); chip.classList.remove("active"); }
+            else { activeChips.add(emoji); chip.classList.add("active"); }
+            refresh();
+        });
+        chipRow.appendChild(chip);
+    }
+    if (chipEmoji.length > 0) picker.appendChild(chipRow);
 
     const list = document.createElement("div");
     list.className = "type-picker-list";
@@ -906,7 +1222,7 @@ function openTypePicker(parentMod, anchorEl) {
     cancelBtn.addEventListener("click", () => picker.remove());
     const createBtn = document.createElement("button");
     createBtn.className = "create";
-    createBtn.textContent = "create";
+    createBtn.textContent = opts.actionLabel;
     createBtn.disabled = true;
     actions.appendChild(cancelBtn);
     actions.appendChild(createBtn);
@@ -914,14 +1230,39 @@ function openTypePicker(parentMod, anchorEl) {
 
     let selectedType = null;
 
-    function refresh() {
+    // Types matching the search box AND all active emoji chips. The query matches
+    // against both the raw typeName ("RainbowEffect") and the displayName
+    // ("Rainbow") supplied by /api/types so typing either form finds the row.
+    function currentMatches() {
         const q = search.value.toLowerCase();
-        const matches = filtered.filter(t => !q || t.name.toLowerCase().includes(q));
+        return filtered.filter(t => {
+            if (q) {
+                const raw = t.name.toLowerCase();
+                const disp = (t.displayName || t.name).toLowerCase();
+                if (!raw.includes(q) && !disp.includes(q)) return false;
+            }
+            if (activeChips.size > 0) {
+                const has = new Set(emojiTagsFor(t));
+                for (const chip of activeChips) if (!has.has(chip)) return false;
+            }
+            return true;
+        });
+    }
+
+    function refresh() {
+        const matches = currentMatches();
         list.innerHTML = "";
         matches.forEach((t, i) => {
             const item = document.createElement("div");
             item.className = "type-picker-item" + (i === 0 ? " selected" : "");
-            item.textContent = t.name;
+            const emoji = document.createElement("span");
+            emoji.className = "type-picker-item-emoji";
+            emoji.textContent = emojiTagsFor(t).join("");
+            item.appendChild(emoji);
+            // Show the factory-stripped name ("Rainbow") not the typeName
+            // ("RainbowEffect"); the role text on the right already conveys
+            // "effect", so repeating it in the name would just be noise.
+            item.appendChild(document.createTextNode(t.displayName || t.name));
             const role = document.createElement("span");
             role.className = "role";
             role.textContent = t.role;
@@ -933,7 +1274,7 @@ function openTypePicker(parentMod, anchorEl) {
                 createBtn.disabled = false;
             });
             item.addEventListener("dblclick", () => {
-                addModule(t.name, parentMod.name);
+                opts.commit(t.name);
                 picker.remove();
             });
             list.appendChild(item);
@@ -964,7 +1305,7 @@ function openTypePicker(parentMod, anchorEl) {
         } else if (e.key === "Enter") {
             e.preventDefault();
             if (selectedType) {
-                addModule(selectedType, parentMod.name);
+                opts.commit(selectedType);
                 picker.remove();
             }
         } else if (e.key === "Escape") {
@@ -973,13 +1314,12 @@ function openTypePicker(parentMod, anchorEl) {
     });
 
     function filteredAt(i) {
-        const q = search.value.toLowerCase();
-        return filtered.filter(t => !q || t.name.toLowerCase().includes(q))[i];
+        return currentMatches()[i];
     }
 
     createBtn.addEventListener("click", () => {
         if (selectedType) {
-            addModule(selectedType, parentMod.name);
+            opts.commit(selectedType);
             picker.remove();
         }
     });
@@ -990,13 +1330,29 @@ function openTypePicker(parentMod, anchorEl) {
 }
 
 // ---------------------------------------------------------------------------
-// 7. Drag-to-reorder (desktop HTML5; mobile falls through to ↑/↓ buttons)
+// 7. Drag-to-reorder (HTML5 DnD on desktop; touchstart-gated on mobile)
 // ---------------------------------------------------------------------------
 
 function attachDragHandlers(card, mod) {
     card.draggable = true;
 
+    // Why we toggle `draggable` on mousedown instead of vetoing in dragstart:
+    // HTML5 dragstart's `e.target` is always the draggable element (the card),
+    // not the deepest element under the mouse — so closest(".control-row")
+    // never matches. The reliable signal is the *mousedown* target. Disable
+    // drag at mousedown when the grab landed on a control, re-enable on
+    // mouseup so the next click on the card body can still drag.
+    const gate = (e) => {
+        card.draggable = !e.target.closest(".control-row, .card-controls-collapse > summary");
+    };
+    card.addEventListener("mousedown", gate, true);   // capture: runs before the input
+    card.addEventListener("touchstart", gate, {capture: true, passive: true});
+
     card.addEventListener("dragstart", (e) => {
+        // Innermost card wins — without stopPropagation a nested child's
+        // dragstart would bubble to the parent and the parent's listener
+        // would overwrite dataTransfer with its own name.
+        e.stopPropagation();
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("text/plain", mod.name);
         card.classList.add("dragging");
@@ -1006,10 +1362,14 @@ function attachDragHandlers(card, mod) {
         document.querySelectorAll(".drag-over").forEach(c => c.classList.remove("drag-over"));
     });
     card.addEventListener("dragover", (e) => {
-        // Only allow drop on a sibling of the same role (= same card depth)
+        // Only allow drop on a true sibling — same .card-children container.
+        // Cards now nest, so equal data-depth is no longer enough: two effects
+        // under different Layers share a depth but aren't siblings.
         const src = document.querySelector(".card.dragging");
         if (!src || src === card) return;
-        if (src.dataset.depth === card.dataset.depth) {
+        if (src.parentElement === card.parentElement &&
+            card.parentElement &&
+            card.parentElement.classList.contains("card-children")) {
             e.preventDefault();
             card.classList.add("drag-over");
         }
@@ -1107,22 +1467,53 @@ function initWebGL() {
         redrawCached();
     }, {passive: false});
 
-    // Touch orbit
+    // Touch: single-finger orbit, two-finger pinch zoom. touch-action: none on
+    // #preview keeps the browser's own scroll/zoom from firing first.
+    let pinchDist = 0;
+    const touchDistance = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+
     canvas.addEventListener("touchstart", (e) => {
-        if (e.touches.length !== 1) return;
-        dragging = true;
-        lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
-    });
-    canvas.addEventListener("touchmove", (e) => {
-        if (!dragging || e.touches.length !== 1) return;
-        const t = e.touches[0];
-        camTheta += (t.clientX - lastX) * 0.01;
-        camPhi = Math.max(-1.5, Math.min(1.5, camPhi + (t.clientY - lastY) * 0.01));
-        lastX = t.clientX; lastY = t.clientY;
-        redrawCached();
-        e.preventDefault();
+        if (e.touches.length === 1) {
+            dragging = true;
+            lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+        } else if (e.touches.length >= 2) {
+            dragging = false;  // hand off from orbit to pinch
+            pinchDist = touchDistance(e.touches[0], e.touches[1]);
+            e.preventDefault();
+        }
     }, {passive: false});
-    canvas.addEventListener("touchend", () => { dragging = false; });
+    canvas.addEventListener("touchmove", (e) => {
+        if (e.touches.length === 1 && dragging) {
+            const t = e.touches[0];
+            camTheta += (t.clientX - lastX) * 0.01;
+            camPhi = Math.max(-1.5, Math.min(1.5, camPhi + (t.clientY - lastY) * 0.01));
+            lastX = t.clientX; lastY = t.clientY;
+            redrawCached();
+            e.preventDefault();
+        } else if (e.touches.length >= 2 && pinchDist > 0) {
+            // Pinch zoom: ratio of finger-distance change scales camDist
+            // (fingers apart → zoom in / camDist down). Guard against the
+            // degenerate case where both fingers report identical coords
+            // (d === 0): division would produce Infinity and snap camDist
+            // to its clamp boundary. Skip the update and let the next move
+            // produce a sane d.
+            const d = touchDistance(e.touches[0], e.touches[1]);
+            if (d > 0) {
+                const ratio = pinchDist / d;
+                camDist = Math.max(0.5, Math.min(10, camDist * ratio));
+                pinchDist = d;
+                redrawCached();
+            }
+            e.preventDefault();
+        }
+    }, {passive: false});
+    canvas.addEventListener("touchend", (e) => {
+        if (e.touches.length === 0) { dragging = false; pinchDist = 0; }
+        // 2→1 touches: stay in pinch (let user finish lifting); pinchDist stays
+        // valid for the remaining finger? No — drop pinch, but don't start
+        // orbit either, to avoid a jump when one finger lifts.
+        else if (e.touches.length === 1) { pinchDist = 0; dragging = false; }
+    });
 }
 
 // Read the Preview module's "decompress" control from the latest state push.
@@ -1235,7 +1626,10 @@ function drawVerts() {
     const cz = camDist * Math.cos(camPhi) * Math.cos(camTheta);
     const mvp = buildMVP(cx, cy, cz, canvas.width / Math.max(1, canvas.height));
 
-    gl.clearColor(0.05, 0.07, 0.09, 1);
+    // Transparent clear — the canvas shows the page through. WebGL context is
+    // created with alpha:true by default, so an alpha-0 clear is genuinely
+    // transparent (no opaque fill). Theme changes just work, no recolor needed.
+    gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, glBuffer);
@@ -1294,21 +1688,22 @@ function buildMVP(ex, ey, ez, aspect) {
 }
 
 // Scroll-shrink preview: 0..1 ratio over 0..300px of main scroll.
+// Shrinks max-height — the CSS aspect-ratio still derives the canvas size
+// underneath the cap, so the preview stays a rectangle (square clipped by the
+// max-height) and collapses smoothly to 50% as the user scrolls.
 function setupPreviewShrink() {
     const canvas = document.getElementById("preview");
     if (!canvas) return;
-    let naturalHeight = null;
+    let naturalMaxH = null;
     let ticking = false;
     const SHRINK_OVER = 300;
     function apply() {
         ticking = false;
-        if (naturalHeight === null) {
-            naturalHeight = canvas.clientHeight || (window.innerHeight * 0.5);
+        if (!naturalMaxH) {
+            naturalMaxH = canvas.getBoundingClientRect().height || (window.innerHeight * 0.5);
         }
         const r = Math.min(1, Math.max(0, window.scrollY / SHRINK_OVER));
-        const h = naturalHeight * (1 - r * 0.5);
-        canvas.style.height = Math.round(h) + "px";
-        canvas.style.maxHeight = Math.round(h) + "px";
+        canvas.style.maxHeight = Math.round(naturalMaxH * (1 - r * 0.5)) + "px";
         if (lastVerts) redrawCached();
     }
     window.addEventListener("scroll", () => {
@@ -1317,7 +1712,11 @@ function setupPreviewShrink() {
             ticking = true;
         }
     }, {passive: true});
-    window.addEventListener("resize", () => { naturalHeight = null; apply(); });
+    window.addEventListener("resize", () => {
+        naturalMaxH = null;
+        canvas.style.maxHeight = "";  // let CSS 50vh cap re-measure
+        apply();
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1325,12 +1724,12 @@ function setupPreviewShrink() {
 // ---------------------------------------------------------------------------
 
 function setupStatusBarButtons() {
-    document.getElementById("ws-reconnect")?.addEventListener("click", () => {
-        try { ws?.close(); } catch {}
-        wsRetryMs = 500;
-        connectWs();
-    });
-    document.getElementById("reboot-btn")?.addEventListener("click", rebootDevice);
+    // Reboot: press once to arm, again to confirm — see armPressTwice. The glyph
+    // stays (no armedText); only the title changes.
+    const rebootBtn = document.getElementById("reboot-btn");
+    if (rebootBtn) {
+        armPressTwice(rebootBtn, rebootDevice, {armedTitle: "Click again to reboot"});
+    }
     document.getElementById("theme-toggle")?.addEventListener("click", () => {
         theme = (theme === "dark") ? "light" : "dark";
         localStorage.setItem(LS_THEME, theme);

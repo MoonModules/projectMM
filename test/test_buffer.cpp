@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "light/Buffer.h"
+#include "light/layers/Buffer.h"
 
 TEST_CASE("Buffer allocate and accessors") {
     mm::Buffer buf;

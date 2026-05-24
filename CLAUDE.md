@@ -8,6 +8,7 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 
 ## Principles
 
+- **Common patterns first.** This repo is meant to be a recognisable example of good practice across code, docs, tests, and UI — not a Frankenstein of bespoke conventions only the authors understand. Hold every decision against it, especially in core architecture and documentation. Before introducing a pattern, name a widely-used project / framework / canonical resource that uses it; if you can't, treat it as bespoke and justify the divergence in a one-line comment at the introduction site. A new contributor with general C++/web experience should recognise the pattern within 30 seconds. Bespoke choices are allowed — header-only light modules, the MoonModule lifecycle, present-tense docs — but each carries its reason at the place it's introduced.
 - **Minimalism means simplicity.** Flat, simple, predictable code. Not clever abstractions. Not elegant templates. If a contributor can't understand it in 30 seconds, it's too complex. Every addition must pay for itself. Prefer removing code over adding it.
 - **Data over objects.** Design around data flow, not class hierarchies.
 - **Concrete first, abstract later.** Build one working feature end-to-end before extracting patterns into shared abstractions. Don't build the framework before the domain logic works.
@@ -16,20 +17,17 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 
 ## Hard Rules
 
-**Platform boundary.** All `#ifdef`, platform-specific `#include`s, and hardware API calls live exclusively in `src/platform/`. Everything outside `src/platform/` compiles on every target without modification.
+The design rationale for each rule below lives in [docs/architecture.md](docs/architecture.md). The one-liners here are what the agent holds in working memory.
 
-**Hot path (render loop):**
-- No heap allocations (`new`, `malloc`, `push_back`, `std::string`)
-- No blocking (`delay`, `sleep`, `mutex.lock()` — use `try_lock`)
-- Integer math preferred over `float` in per-light work
+**Tests must pass.** Run `ctest` (unit tests) and `./build/test/mm_scenarios` (scenarios) before considering work complete. New core logic needs a corresponding module test. Full pipeline needs a scenario test. See [docs/testing.md](docs/testing.md) for the strategy and test inventory.
 
-**Memory.** Allocate buffers as single contiguous blocks outside the hot path. Never allocate small scattered objects in loops. On ESP32 with PSRAM, use `heap_caps_malloc(..., MALLOC_CAP_SPIRAM)` for large buffers.
+**Warnings are errors.** Build with `-Wall -Wextra -Werror`. No warning is "harmless" — if it's noise, fix it or silence it explicitly with a `-Wno-…` justified in code.
 
-**Network input.** Default: process synchronously at a defined point in the frame loop. When sufficient memory is available, async input with staging buffers may be used.
+**Platform boundary.** No `#ifdef`, platform-specific `#include`, or hardware API call outside `src/platform/`. Compile-time platform branching uses `if constexpr` on `platform_config.h` flags. Full rule: [architecture.md § Platform Abstraction](docs/architecture.md#platform-abstraction).
 
-**Warnings are errors.** Build with `-Wall -Wextra -Werror`.
+**Hot path discipline.** In the render loop and anything it calls: no heap allocations (`new`, `malloc`, `push_back`, `std::string`), no blocking (`delay`, `sleep`, `mutex.lock()` — use `try_lock`), integer math preferred over `float` per-light. Memory: single contiguous blocks outside the hot path, PSRAM via `heap_caps_malloc(..., MALLOC_CAP_SPIRAM)` for large buffers. Network input: synchronous by default. Full rules + rationale: [architecture.md § Hot path discipline](docs/architecture.md#hot-path-discipline).
 
-**Tests must pass.** Run `ctest` (unit tests) and `./build/test/mm_scenarios` (scenarios) before considering work complete. New core logic needs a corresponding module test. Full pipeline needs a scenario test. See [docs/testing.md](docs/testing.md) for the test inventory and [docs/architecture.md](docs/architecture.md#testing) for the testing strategy.
+**Effects must run at every grid size and tick rate.** No crash on 0×0×0; animation math doesn't truncate to zero on fast devices. Full rule + rationale: [architecture.md § Effects](docs/architecture.md#effects).
 
 ## Process Rules
 
@@ -47,22 +45,9 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 
 **Git: only on explicit request.** Do not `git add`, `git commit`, or `git push` on your own initiative. Only execute these when the product owner explicitly asks (e.g. "commit now", "push it"). The product owner controls when changes are staged, committed, and pushed.
 
-**Pre-commit is initiated by the product owner, not by agents.** When the product owner says "run pre-commit" / "pre-commit go" / "commit now" the checklist below runs. Do NOT start it automatically because you finished a feature, because tests pass, because a milestone feels reached, or because completion seems imminent. Treat the checklist as a gate the product owner opens; the agent's job is finishing the work and reporting status so the product owner can decide when to open it.
+**Gate lists are initiated by the product owner, not by agents. Never start a gate list on your own — always ask first.** The full set of gates (especially the Opus reviewer at PR-merge and the ESP32 build at commit) easily takes 10 minutes per event and burns real tokens; agents must not initiate them unprompted. When the product owner says "run pre-commit" / "commit now" / "pre-merge" / "ready to release" the relevant list below runs. Do NOT start any list automatically because you finished a feature, because tests pass, because a milestone feels reached, because completion seems imminent, or because an earlier instruction implied a sequence ending in "commit". If you finished feature work and are unsure whether the product owner wants to proceed, **ask**: "Feature work is done — should I run pre-commit, or do you want to look first?" Treat each list as a gate the product owner opens; the agent's job is finishing the work and reporting status so the product owner can decide when to open it.
 
-**Pre-commit checklist (mandatory, in this order):**
-1. Desktop build — `cmake --build build` (zero warnings)
-2. Unit tests — `ctest --output-on-failure` (all pass)
-3. Scenario tests — `./build/test/mm_scenarios` (all pass)
-4. Platform boundary — `check_platform_boundary.py` (PASS)
-5. Spec check — `check_specs.py` (all ok)
-6. ESP32 build — `build_esp32.py` (clean)
-7. Reviewer agent — Opus agent reviews staged changes for: domain boundary, **unnecessary abstractions** (no-op / pass-through wrappers that only rename or re-namespace an existing function, single-call-site indirection that would read clearer inlined, names that obscure where the real code lives), **duplicated patterns** (same logic in multiple places that belongs in a base class or shared function), hot-path violations, spec conformance, bloat, platform boundary. Must PASS.
-8. KPI collection — `collect_kpi.py --commit` (include in commit message: one-liner as FIRST line of description, full details at bottom). **The one-liner MUST include `tick:Xus(FPS:Y)` for every supported target** (PC + ESP32 today; Teensy/RPi when added). If a target's tick/FPS is missing — e.g. ESP32 wasn't monitored recently and `esp32/monitor.log` is stale — re-run a short live capture before committing, or note explicitly in the commit message why the value is absent.
-9. Live scenario analysis — run scenarios on both PC and ESP32 (if available), update `docs/performance.md` with new measurements. Compare with previous values and explain significant changes.
-10. Documentation check — verify all new functionality has matching docs: module specs updated, testing.md entries added, architecture docs reflect changes.
-11. Permission review — scan `.claude/settings.local.json`. The `allow` list grows organically and accumulates one-off entries (specific `sed` line ranges, one-time `lldb` invocations, `/tmp/probe` paths) that will never recur. Propose to the product owner: (a) one-off entries that can be deleted, and (b) clusters of narrow entries that could collapse into one broad pattern (e.g. several `./build/test/mm_tests -tc="..."` lines → `Bash(./build/test/mm_tests:*)`) so routine commands stop prompting. This is advisory — the agent suggests, the product owner approves any change. Never broaden permissions for destructive or network-mutating commands without explicit approval; err toward keeping the list tight.
-
-Do not commit until steps 1-10 (the functional gates) all pass. Step 11 (permission review) is advisory and does not block a commit. Do not skip the Reviewer agent.
+The full gate lists per lifecycle event (commit, push, PR merge, release) live in **Lifecycle Events** below.
 
 **Mandatory subtraction.** Periodically review and remove code and docs that no longer earn their place. If nothing can be removed, justify why.
 
@@ -77,29 +62,73 @@ Build one capability at a time. Each commit produces visible output. The product
 1. **Pick what to build.** One layout, one effect, one driver, one modifier, one system module — whatever adds the next useful capability.
 2. **Review only the relevant module drafts.** Cherry-pick from `docs/moonmodules_draft/`. Promote only what's needed to `docs/moonmodules/`.
 3. **`/plan` it.** Plan references only the promoted specs + architecture docs. Save the plan as `docs/history/plan-NN.md` (numbered sequentially).
-4. **Implement in a branch** (`next-iteration` or feature branch). Test on hardware. Run pre-commit checklist. Commit.
+4. **Implement in a branch** (`next-iteration` or feature branch). Test on hardware. Run the commit gates (see Lifecycle Events below). Commit.
 5. **Push.** Product owner pushes. CodeRabbit reviews the PR. Process findings.
 6. **Repeat.**
 
-### Branch merge
+### Lifecycle Events
 
-When a set of features is complete and stable:
-1. Review plans (`docs/history/plan-*.md`) — were they followed? What changed?
-2. Process lessons learned into `docs/history/decisions.md`
-3. Move reviewed plans to `docs/history/archive/`
-4. Merge branch to `main` via PR
-5. Tag if it's a release milestone
+The project has **three** gated lifecycle events: **commit**, **PR merge into `main`**, **release tag**. (Push has no gate of its own — every check that needs to land before code goes out either lives in the commit gates or is the CodeRabbit / human PR review.) Each event has its own checklist below. Gates within a list run **only when the change makes them applicable** — every conditional gate states its trigger objectively (e.g. "any file under `src/` changed"). A gate that doesn't apply is skipped; a gate that *does* apply but the product owner chooses to skip must have a one-line reason in the commit body / PR description / release notes. The trail stays honest and auditable.
 
-### Releases
+Initiation is always the product owner's call — see the rule above. Agents never start a list on their own.
 
-A GitHub release marks a milestone useful to end users. Release criteria are defined in `docs/plan.md` per release. General requirements:
-- All tests and scenarios pass on all target platforms
-- Tested on real hardware
-- README updated with quick-start instructions
-- No known critical bugs
+#### Event 1 — Commit
+
+The narrow safety net: "this snapshot is internally consistent."
+
+**Mandatory (always run):**
+
+1. Desktop build — `cmake --build build` (zero warnings)
+2. Unit tests — `ctest --output-on-failure` (all pass)
+3. Scenario tests — `./build/test/mm_scenarios` (all pass)
+
+**Conditional (run if trigger matches):**
+
+4. Platform boundary — `check_platform_boundary.py` — if any file under `src/` (excluding `src/platform/`) changed.
+5. Spec check — `check_specs.py` — if any `src/` file with controls or any `docs/moonmodules/*.md` changed.
+6. ESP32 build — `build_esp32.py` — if any file under `src/` (excluding `src/platform/desktop/`), `esp32/`, `CMakeLists.txt`, or `library.json` changed.
+7. KPI collection — `collect_kpi.py --commit` — if any file under `src/` changed. The one-liner goes as the **first** line of the commit body, full details at the bottom. **The one-liner MUST include `tick:Xus(FPS:Y)` for every supported target** (PC + ESP32 today; Teensy/RPi when added). If a target's tick/FPS is missing — e.g. ESP32 wasn't monitored recently and `esp32/monitor.log` is stale — re-run a short live capture before committing, or note explicitly in the commit body why the value is absent.
+
+**Not at commit-time** (these run at PR-merge): Reviewer agent; live perf analysis + `docs/performance.md` update; documentation sync sweep; permission review.
+
+**On-demand reviewer.** The product owner can ask for a reviewer pass mid-branch on a single risky commit — say "run reviewer" before commit — and the agent runs it on the staged diff with the same scope as the merge-time gate. Default is fast (no reviewer); the on-demand path is a safety valve when something specific feels off.
+
+#### Event 2 — PR merge into `main`
+
+The "this is now trunk" moment. Where the wider hygiene checks live, because once it's in trunk it gets shipped.
+
+**Mandatory:**
+
+1. All commit gates passed on every commit in the PR.
+2. PR feedback addressed (CodeRabbit + human review).
+3. **Plan reconciliation** — for each plan in `docs/history/plan-*.md` covered by this branch: was it followed? What changed? Note in `docs/history/decisions.md` if anything is worth carrying forward. Move reviewed plans to `docs/history/archive/`.
+4. **Documentation sync** — every new module / control / API endpoint has matching docs (`docs/moonmodules/*.md`, `docs/testing.md`, `docs/architecture*.md`).
+5. **Reviewer agent** — Opus reviewer over the **whole branch diff** (`git diff main...HEAD`). Scope: domain boundary, **common patterns first** (flag any new convention — naming scheme, file shape, build flag, control mechanism, UI affordance — that isn't recognisable from a widely-used project / framework / canonical resource; bespoke choices must carry a stated reason at the introduction site, see the principle in § Principles), **unnecessary abstractions** (no-op / pass-through wrappers that only rename or re-namespace an existing function, single-call-site indirection that would read clearer inlined, names that obscure where the real code lives), **duplicated patterns** (same logic in multiple places that belongs in a base class or shared function), hot-path violations, spec conformance, bloat, platform boundary. Architectural drift is more visible across N commits than across one — "three commits each added a wrapper" reads as a pattern that one commit hides. Findings either get fixed in additional branch commits before merge, or are accepted with a one-line reason in the PR description. CodeRabbit complements this — CodeRabbit handles line-level bugs in the PR; the Reviewer agent handles architectural drift.
+
+**Conditional:**
+
+6. **Live perf snapshot** — `docs/performance.md` updated — if the branch touches anything under `src/light/`, `src/core/Scheduler.h`, `src/core/HttpServerModule.cpp`, or any platform code that runs in the tick path. Compare new tick/FPS to the previous committed values; explain significant changes.
+7. **Permission review** — scan `.claude/settings.local.json`. The `allow` list grows organically and accumulates one-off entries (specific `sed` line ranges, one-time `lldb` invocations, `/tmp/probe` paths) that will never recur. Propose to the product owner: (a) one-off entries that can be deleted, and (b) clusters of narrow entries that could collapse into one broad pattern (e.g. several `./build/test/mm_tests -tc="..."` lines → `Bash(./build/test/mm_tests:*)`) so routine commands stop prompting. Advisory — agent suggests, product owner approves. Never broaden permissions for destructive or network-mutating commands without explicit approval; err toward keeping the list tight. Not commit-blocking but always worth doing once per merge since this is when noise has accumulated.
+8. **README + quick-start refresh** — if the change altered build, flash, or first-run UX.
+
+#### Event 3 — Release tag
+
+The "end users will use this" moment. Per-release criteria are defined by the product owner; this is the generic envelope.
+
+**Mandatory:**
+
+1. All PR-merge gates passed on the trunk commit being tagged.
+2. **Real hardware test** — at minimum one ESP32, plus any other target the release claims to support. Cannot be agent-verified; **product owner only**.
+3. **No known critical bugs** — open issues reviewed; any flagged "release-blocker" closed or downgraded.
+4. **Per-release criteria** — every release criterion set by the product owner for this tag is done.
+
+**Conditional:**
+
+5. **Changelog / release notes** — drafted in the GitHub release body. Skip only for unreleased pre-1.0 tags.
+6. **Cross-platform smoke** — run scenarios on every supported platform (today: PC + ESP32; later: + Teensy, RPi) — if the release claims new platform support or the version bumps a major or minor.
 
 What the agent reads:
-- Always: `CLAUDE.md`, `architecture.md`, `architecture-light.md`
+- Always: `CLAUDE.md`, `architecture.md`
 - For this commit: `docs/moonmodules/<only the promoted specs>`
 - Never automatically: `docs/history/*`, `docs/moonmodules_draft/*`
 
@@ -109,10 +138,11 @@ What the agent reads:
 CLAUDE.md                  ← this file (rules and process)
 docs/
   plan.md                  ← what to build next
-  architecture.md          ← core system design
-  architecture-light.md    ← light domain design
+  architecture.md          ← system design (core + light domain)
+  coding-standards.md      ← how code is written (conventions, file shape, checks)
+  building.md              ← how to build, flash, run for every target
+  testing.md               ← test inventory and strategy
   performance.md           ← per-module timing, memory, sizeof for each platform
-  testing.md               ← test inventory with anchored sections
   history/                 ← accumulated wisdom
     decisions.md           ← actions, lessons, proven patterns
     plan-NN.md             ← plans for each feature (numbered)
@@ -123,18 +153,20 @@ docs/
 
 Documentation describes the system as it is. Git commits are the history. Module specs are written before implementation. Doc pages are kept current with the code.
 
+**Module specs are end-user / API-integrator documentation, not tech documentation.** Each `docs/moonmodules/<Name>.md` page exists to answer "what does this module do that I can't trivially read off the source file?" Concretely, it should carry:
+
+- **Wire contracts** — REST URLs, JSON shapes, status codes, WebSocket framing, binary frame layouts. Anything an integrator outside the codebase needs.
+- **Cross-domain wiring** — how this module connects to other modules through plain data structures (e.g. `HttpServerModule` reads a `PreviewFrame` that `PreviewDriver` writes; the wiring happens in `main.cpp`). Things that span multiple files and don't belong as a comment in any single one.
+- **Prior art** — the v1/v2/MoonLight lineage links. History/credits the code can't carry.
+- **At minimum, one mention of every control name** — `scripts/check/check_specs.py` enforces this, so the spec stays minimally accurate to the source.
+
+Do **not** repeat facts the `.h` already states: the controls list (the .h has `controls_.addX(...)`), the method signatures (they're declared), the implementation strategy ("uses a TcpServer abstraction" — visible in the includes), or architectural rules that belong in `architecture.md` (domain boundary, hot-path discipline, etc.). When in doubt: if a fact is visible in the file's `.h`, the `.md` can drop it. The spec-check script and a comment header in the `.h` together carry the contract; the `.md` carries what the file can't.
+
 The `history/` folder is the distilled experience of years of building LED/light systems — from WLED, WLED-MM, StarLight, MoonLight, through projectMM. It contains proven patterns, memory tricks, control mechanisms, and hard-won lessons. We cherry-pick from it — we never implement it wholesale.
 
 ## Code Style
 
-- `#pragma once`
-- `constexpr` over `#define`
-- `std::span` over pointer + length
-- Namespace: `mm`, platform code in `mm::platform`
-- No `using namespace` in headers
-- MoonModules are single-file (`.h` only, implementation inline)
-- Semantic variable names — name variables for what they represent, not just their type. `availableHeap` not `available`, `internalHeap` not `internal`, `lutBytes` not `bytes`. A reader should understand the variable without looking at its assignment.
-- No hard line wraps in markdown — let the editor soft-wrap
+All coding conventions — general (`#pragma once`, `constexpr`, `std::span`, namespaces, semantic names, markdown wrapping) and structural (header-only vs `.h` + `.cpp` for light vs core modules, exception-reason comment) — live in [docs/coding-standards.md](docs/coding-standards.md).
 
 ## Agent Roles
 
@@ -155,7 +187,7 @@ The project uses Claude Code agents in defined roles. The user is the **Product 
 |--|-------|-------|-------|------|
 | 🤖 | **Architect** | Opus | System design | Reviews against architecture, designs components, validates boundaries |
 | 👽 | **Developer** | Sonnet | Implementation | Writes code in worktrees, follows all rules, one step at a time |
-| 👾 | **Reviewer** | Opus | Pre-PR check | Runs locally before push as pre-commit step 7 — see that step for the full review scope. Complements CodeRabbit (which handles line-level bugs in the PR). |
+| 👾 | **Reviewer** | Opus | Pre-merge check | Runs at PR merge over the whole branch diff (Event 2, gate 5); available on-demand pre-commit on the staged diff when the product owner asks. Complements CodeRabbit (which handles line-level bugs in the PR). |
 | 🛸 | **Tester** | Sonnet | Verification | Writes tests, verifies architectural rules in code |
 | 💀 | **Runner** | Haiku | Quick checks | Runs MoonDeck scripts, platform boundary checks, build verification |
 
@@ -163,4 +195,6 @@ Agents work in parallel on independent steps. Agents never commit — only the p
 
 ## Build
 
-See [scripts/MoonDeck.md](scripts/MoonDeck.md) for all build, run, test, and check commands. Quick start: `uv run scripts/moondeck.py`
+How to build, flash, run, monitor, and check the project for every target: [docs/building.md](docs/building.md). Per-script reference: [scripts/MoonDeck.md](scripts/MoonDeck.md).
+
+Agents use the CLI (`uv run scripts/<group>/<name>.py`); humans typically use MoonDeck (`uv run scripts/moondeck.py`, port 8420). Same scripts under both. Every gate in [Lifecycle Events](#lifecycle-events) ultimately invokes one of these scripts.

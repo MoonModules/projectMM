@@ -1,9 +1,19 @@
 #pragma once
 
+// Scheduler — owns the top-level module list, runs the 4-phase boot, drives the
+// per-tick loop callbacks, and provides tree-walk utilities (delete, name-uniquify).
+//
+// Boot phases: see setup() comment in Scheduler.cpp.
+// Tick: gates each top-level module by enabled() / respectsEnabled() and dispatches
+//   loop / loop20ms / loop1s. Per-second window averages the tick time and publishes
+//   each module's loop time.
+//
+// This is the .h interface. Bodies live in Scheduler.cpp.
+
 #include "core/MoonModule.h"
-#include "platform/platform.h"
 
 #include <array>
+#include <cstdint>
 
 namespace mm {
 
@@ -16,144 +26,39 @@ public:
     using LoadAllFn = void(*)(Scheduler*);
     void setLoadAllHook(LoadAllFn fn) { loadAllHook_ = fn; }
 
-    void addModule(MoonModule* mod) {
-        if (!mod || moduleCount_ >= modules_.size()) return;
-        modules_[moduleCount_++] = mod;
-    }
+    void addModule(MoonModule* mod);
+    void setup();
+    void tick();
+    void teardown();
 
-    void setup() {
-        startTime_ = platform::millis();
-
-        // Phase 1: bind each module's controls. After this, ControlList descriptors hold
-        // (name → variable pointer) so the persistence hook can apply file values.
-        for (uint8_t i = 0; i < moduleCount_; i++) {
-            modules_[i]->onBuildControls();
-        }
-
-        // Phase 2: persistence load. No-op if no hook is set.
-        if (loadAllHook_) loadAllHook_(this);
-
-        // Phase 2b: re-run onBuildControls with persisted values in place so any conditional
-        // hidden flags (e.g. NetworkModule's static-IP fields depending on addressing_) are
-        // evaluated against the loaded state, not the default. rebuildControls clears the
-        // descriptor list before re-binding, so this is idempotent.
-        if (loadAllHook_) {
-            for (uint8_t i = 0; i < moduleCount_; i++) {
-                modules_[i]->rebuildControls();
-            }
-        }
-
-        // Phase 3: each module's own init. Persisted values are already in member variables,
-        // so e.g. NetworkModule sees the persisted ssid_, SystemModule sees an overlaid
-        // deviceName_ (or guards if empty to derive the MAC-based default).
-        for (uint8_t i = 0; i < moduleCount_; i++) {
-            modules_[i]->setup();
-        }
-
-        // Phase 4: allocate buffers sized to final control values.
-        for (uint8_t i = 0; i < moduleCount_; i++) {
-            modules_[i]->onAllocateMemory();
-        }
-
-        lastLoop20ms_ = platform::millis();
-        lastLoop1s_ = platform::millis();
-        lastTimingUpdate_ = platform::millis();
-    }
-
-    void tick() {
-        uint32_t now = platform::millis();
-        uint32_t tickStart = platform::micros();
-
-        // Scheduler gates loop callbacks by `enabled()` — disabled modules don't tick.
-        // System modules that need to keep running regardless (HttpServer, Network,
-        // Filesystem — so users can re-enable other modules through them) override
-        // `respectsEnabled()` to return false. `onOnOff()` fires once per transition
-        // for custom start/stop semantics; see MoonModule::setEnabled().
-        auto shouldRun = [](MoonModule* m) {
-            return !m->respectsEnabled() || m->enabled();
-        };
-        for (uint8_t i = 0; i < moduleCount_; i++) {
-            if (!shouldRun(modules_[i])) continue;
-            uint32_t modStart = platform::micros();
-            modules_[i]->loop();
-            modules_[i]->addAccumUs(platform::micros() - modStart);
-        }
-
-        if (now - lastLoop20ms_ >= 20) {
-            lastLoop20ms_ = now;
-            for (uint8_t i = 0; i < moduleCount_; i++) {
-                if (!shouldRun(modules_[i])) continue;
-                uint32_t modStart = platform::micros();
-                modules_[i]->loop20ms();
-                modules_[i]->addAccumUs(platform::micros() - modStart);
-            }
-        }
-
-        if (now - lastLoop1s_ >= 1000) {
-            lastLoop1s_ = now;
-            for (uint8_t i = 0; i < moduleCount_; i++) {
-                if (!shouldRun(modules_[i])) continue;
-                uint32_t modStart = platform::micros();
-                modules_[i]->loop1s();
-                modules_[i]->addAccumUs(platform::micros() - modStart);
-            }
-        }
-
-        tickAccumUs_ += platform::micros() - tickStart;
-        frameCount_++;
-
-        // Every 1 second: compute averages, recurse into children
-        if (now - lastTimingUpdate_ >= 1000) {
-            tickTimeUs_ = frameCount_ > 0 ? tickAccumUs_ / frameCount_ : 0;
-
-            for (uint8_t i = 0; i < moduleCount_; i++) {
-                modules_[i]->publishTiming(frameCount_);
-            }
-
-            tickAccumUs_ = 0;
-            frameCount_ = 0;
-            lastTimingUpdate_ = now;
-        }
-    }
-
-    void teardown() {
-        // Two passes: tear down all modules first (so a module's teardown can still safely
-        // observe sibling modules' state), then delete the trees. Otherwise the reverse-order
-        // teardown-then-delete pattern would leave a module's teardown looking at already-freed
-        // siblings — relevant for any cross-module cleanup work.
-        for (uint8_t i = moduleCount_; i > 0; i--) {
-            modules_[i - 1]->teardown();
-        }
-        for (uint8_t i = moduleCount_; i > 0; i--) {
-            deleteTree(modules_[i - 1]);
-        }
-        moduleCount_ = 0;
-    }
-
-    uint32_t elapsed() const {
-        return platform::millis() - startTime_;
-    }
-
-    void rebuild() {
-        for (uint8_t i = 0; i < moduleCount_; i++) {
-            modules_[i]->onAllocateMemory();
-        }
-    }
+    uint32_t elapsed() const;
+    void rebuild();
 
     uint32_t tickTimeUs() const { return tickTimeUs_; }
     uint32_t fps() const { return tickTimeUs_ > 0 ? 1000000 / tickTimeUs_ : 0; }
     uint8_t moduleCount() const { return moduleCount_; }
     MoonModule* module(uint8_t i) const { return i < moduleCount_ ? modules_[i] : nullptr; }
 
-    static void deleteTree(MoonModule* mod) {
-        if (!mod) return;
-        for (uint8_t i = 0; i < mod->childCount(); i++) {
-            deleteTree(mod->child(i));
-        }
-        delete mod;
-    }
+    static void deleteTree(MoonModule* mod);
+
+    // Ensure `mod`'s name is tree-globally unique. If something else already uses
+    // the same name, suffix with " 2", " 3", … until unique. Caller must have
+    // placed `mod` in the tree already (otherwise the lookup wouldn't see it).
+    // See Scheduler.cpp for the why and the name-length cap.
+    void ensureUniqueName(MoonModule* mod);
+
+    // Walk the whole tree and disambiguate every duplicated name. First
+    // occurrence keeps its name; later ones get " 2", " 3", … suffixes.
+    // Cold-path: called once after persistence load in setup().
+    void deduplicateNamesInTree();
+
+    // First module in tree-walk order with this name, or nullptr if none.
+    MoonModule* firstByName(const char* name);
 
 private:
+    void walkAndEnsureUnique(MoonModule* mod);
+    static MoonModule* firstInTree(MoonModule* mod, const char* name);
+
     std::array<MoonModule*, 32> modules_{};
     uint8_t moduleCount_ = 0;
     LoadAllFn loadAllHook_ = nullptr;

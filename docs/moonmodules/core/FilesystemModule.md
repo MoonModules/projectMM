@@ -15,7 +15,7 @@ One flat JSON file per top-level module under `/.config/`:
   Layer.json            → {"channelsPerLight":3,"enabled":true,
                            "0.type":"NoiseEffect","0.scale":12,"0.bpm":60,
                            "0.enabled":true,...}
-  DriverGroup.json      → {"enabled":true,
+  Drivers.json      → {"enabled":true,
                            "0.type":"ArtNetSendDriver","0.ip":"192.168.1.70",
                            "0.fps":50,"0.enabled":true,...}
 ```
@@ -45,6 +45,8 @@ The Scheduler exposes `setLoadAllHook(LoadAllFn fn)` as a function pointer so it
 HttpServerModule calls `target->markDirty()` and `FilesystemModule::noteDirty()` on every successful mutation: control changes, **and tree-shape changes** (add / delete / move a module — the parent is marked dirty so its file is rewritten with the new child set). `noteDirty()` stamps `lastDirtyMs_` and sets `dirtyPending_`. In `loop1s()`, FilesystemModule waits `DEBOUNCE_MS` (2000ms) after the last dirty mark, then walks the module tree; any subtree with a dirty descendant is serialized to a flat JSON blob and written atomically (write to `.tmp` then rename).
 
 A subtree's dirty flag is cleared only after its write actually succeeds; a failed write leaves the flag set so `loop1s()` retries on the next pass. Losing power before the debounce expires loses the in-flight change — that's the cost of debouncing in exchange for fewer flash writes. For deliberate teardowns, `FilesystemModule::flushPending()` forces all dirty subtrees through synchronously, bypassing the debounce. HttpServerModule's `POST /api/reboot` handler calls it so an add-then-immediate-reboot doesn't lose the change.
+
+FilesystemModule exposes one read-only control, **`lastSaved`** — `"never"` before the first successful save this session, otherwise how long ago the last write happened (`"5s ago"` / `"3m ago"` / `"2h ago"`), refreshed each `loop1s()`. Being a `ReadOnly` control it is itself never persisted.
 
 The serializer emits each child as `"N.type":"TypeName"` followed by that child's controls; the reader (`applyNode`) reconciles the live tree to match — factory-creating, replacing, or trimming children by position so the persisted tree shape is restored on boot.
 

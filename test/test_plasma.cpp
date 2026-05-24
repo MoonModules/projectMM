@@ -1,18 +1,18 @@
 #include "doctest.h"
-#include "light/PlasmaEffect.h"
-#include "light/NoiseEffect.h"
-#include "light/GridLayout.h"
+#include "light/effects/PlasmaEffect.h"
+#include "light/effects/NoiseEffect.h"
+#include "light/layouts/GridLayout.h"
 
 TEST_CASE("PlasmaEffect writes non-zero RGB data to buffer") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 8;
     grid.height = 8;
     grid.depth = 1;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     mm::PlasmaEffect plasma;
@@ -32,15 +32,15 @@ TEST_CASE("PlasmaEffect writes non-zero RGB data to buffer") {
 }
 
 TEST_CASE("PlasmaEffect produces spatial variation") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 16;
     grid.height = 16;
     grid.depth = 1;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     mm::PlasmaEffect plasma;
@@ -57,15 +57,15 @@ TEST_CASE("PlasmaEffect produces spatial variation") {
 }
 
 TEST_CASE("PlasmaEffect produces different output than NoiseEffect") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 8;
     grid.height = 8;
     grid.depth = 1;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer1;
-    layer1.setLayoutGroup(&layoutGroup);
+    layer1.setLayouts(&layouts);
     layer1.setChannelsPerLight(3);
     mm::PlasmaEffect plasma;
     layer1.addChild(&plasma);
@@ -73,7 +73,7 @@ TEST_CASE("PlasmaEffect produces different output than NoiseEffect") {
     layer1.loop();
 
     mm::Layer layer2;
-    layer2.setLayoutGroup(&layoutGroup);
+    layer2.setLayouts(&layouts);
     layer2.setChannelsPerLight(3);
     mm::NoiseEffect noise;
     layer2.addChild(&noise);

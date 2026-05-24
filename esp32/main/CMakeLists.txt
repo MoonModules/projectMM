@@ -2,6 +2,9 @@ idf_component_register(
     SRCS
         "main.cpp"
         "../../src/main.cpp"
+        "../../src/core/HttpServerModule.cpp"
+        "../../src/core/FilesystemModule.cpp"
+        "../../src/core/Scheduler.cpp"
         "../../src/platform/esp32/platform_esp32.cpp"
     INCLUDE_DIRS
         "../../src"

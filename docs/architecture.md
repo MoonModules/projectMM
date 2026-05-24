@@ -1,6 +1,34 @@
-# Core Architecture
+# Architecture
 
-## The Problem
+This document describes the system as it is. Coding conventions live in [coding-standards.md](coding-standards.md); how to build and run lives in [building.md](building.md); what is tested lives in [testing.md](testing.md).
+
+## Contents
+
+- [The problem](#the-problem)
+- [Core and light domain](#core-and-light-domain)
+- [Core](#core)
+  - [MoonModules](#moonmodules)
+  - [Controls](#controls)
+  - [Persistence](#persistence)
+  - [Parallelism](#parallelism)
+  - [Hot path discipline](#hot-path-discipline)
+  - [Platform abstraction](#platform-abstraction)
+- [Light domain](#light-domain)
+  - [The pipeline](#the-pipeline)
+  - [3D from the start](#3d-from-the-start)
+  - [Layouts and Layout](#layouts-and-layout)
+  - [Layers and Layer](#layers-and-layer)
+  - [Effects](#effects)
+  - [Modifiers](#modifiers)
+  - [Mapping and blending](#mapping-and-blending)
+  - [Drivers](#drivers)
+  - [Memory strategy](#memory-strategy)
+  - [Rebuild propagation](#rebuild-propagation)
+  - [Multi-device sync](#multi-device-sync)
+- [Web UI](#web-ui)
+- [What we leave undesigned](#what-we-leave-undesigned)
+
+## The problem
 
 Build a modular runtime for resource-constrained embedded devices that the same source compiles for, unmodified, on ESP32, Teensy, desktop, and Raspberry Pi. The runtime must:
 
@@ -9,287 +37,330 @@ Build a modular runtime for resource-constrained embedded devices that the same 
 - Run a hot loop with predictable timing and zero steady-state heap allocation on devices with as little as ~320 KB of RAM.
 - Persist configuration across reboots, exploit multiple CPU cores where present, and keep all platform-specific code behind one boundary.
 
-This document describes that domain-neutral core. It carries no knowledge of what the modules actually do — that is the *domain* layered on top.
+The first concrete use of this runtime is lighting: drive 10,000+ addressable LEDs and DMX fixtures (RGB(W) pars, moving heads, dimmers) across multiple synchronised devices at high frame rates. The runtime is general enough that other real-time domains — audio synthesis, motor control — could be layered on the same way; lighting is the only domain implemented today.
 
-## Core vs Domain
+## Core and light domain
 
-The system has two layers:
-- **Core** — MoonModule base, controls, scheduling, platform abstraction, system services (HTTP, WiFi, filesystem). Domain-neutral.
-- **Light domain** — light values, layers, mapping, blending, effects, layouts, modifiers, LED drivers, ArtNet, DDP. Built on top of the core.
+The system is two layers, separated as much as practical:
 
-These are separated as much as practical. When mixing is needed (for performance or simplicity), it must be an explicit decision — consciously choosing minimalism over separation, not accidentally blurring the boundary. Use domain-neutral naming in those cases ("producer buffer" not "LED buffer", "output driver" not "LED driver" in core interfaces) to keep the door open for future separation.
+- **Core** — MoonModule base, controls, scheduling, persistence, platform abstraction, system services (HTTP, WiFi, filesystem). Domain-neutral. Knows nothing about lights.
+- **Light domain** — light values, layouts, layers, mapping, blending, effects, modifiers, LED drivers, ArtNet/DDP. Built on top of the core.
 
-The light domain architecture is in `docs/architecture-light.md`.
+When mixing is needed (for performance or simplicity), it must be an explicit decision — consciously choosing minimalism over separation, not accidentally blurring the boundary. Use domain-neutral naming in those cases ("producer buffer" not "LED buffer", "output driver" not "LED driver" in core interfaces) to keep the door open for future separation.
+
+# Core
+
+The core's job is the runtime: modules, their lifecycle, their parameters, how they're scheduled, how they're persisted, how they reach the platform underneath.
 
 ## MoonModules
 
-The core building block is a **MoonModule**. Everything is a MoonModule — not just effects, modifiers, layouts, and drivers, but also system services: HTTP server, WebSocket server, file server, WiFi, mDNS, OTA updates. The core itself is minimal: MoonModule base, buffer management, and a scheduler. Everything else is loaded as a MoonModule.
+The core building block is a **MoonModule**. Everything is a MoonModule — not just effects, modifiers, layouts, and drivers, but also system services: HTTP server, WebSocket server, file server, WiFi, mDNS, OTA updates. The core itself is minimal: MoonModule base, buffer management, a scheduler.
 
 This means:
-- All MoonModules share the same class structure, lifecycle (setup, loop, teardown), and controls. Learn the pattern once, apply it everywhere.
+
+- Every MoonModule shares the same class structure, lifecycle (`setup`, `loop`, `teardown`), and controls. Learn the pattern once, apply it everywhere.
 - System services get controls for free — HTTP port, WiFi SSID, mDNS hostname are all configurable through the same UI as effect parameters.
-- Capabilities are modular — don't need WiFi? Don't load the WiFi MoonModule. No `#ifdef`s needed.
+- Capabilities are modular — no WiFi? don't load the WiFi MoonModule. No `#ifdef`s needed.
 - System MoonModules that listen (HTTP, WebSocket) poll in their `loop()` — the standard pattern for embedded servers.
 - The scheduler handles init-order dependencies between system MoonModules (e.g. WiFi before HTTP, HTTP before WebSocket).
 
-MoonModules should have a minimal memory footprint. On constrained devices, many modules may be loaded simultaneously.
+Modules can be added, replaced, reordered, or removed at runtime. On removal (teardown), all allocated resources are cleaned up.
 
-### ModuleFactory
-
-A static registry mapping type names (strings) to create functions. Used by the HTTP API to create modules by name at runtime (`POST /api/modules {"type":"NoiseEffect"}`). Registration happens once at startup via a template that also captures `sizeof(T)` for memory reporting:
+**ModuleFactory** is a static registry mapping type names (strings) to create functions. The HTTP API uses it to create modules at runtime (`POST /api/modules {"type":"NoiseEffect"}`); the main pipeline in `main.cpp` constructs modules directly. Registration captures `sizeof(T)` for memory reporting:
 
 ```cpp
 ModuleFactory::registerType<NoiseEffect>("NoiseEffect");
 ```
 
-The factory is only for dynamic creation (HTTP CRUD). The main pipeline in `main.cpp` constructs modules directly. ModuleFactory is not a MoonModule — it's core infrastructure in `src/core/ModuleFactory.h`.
+ModuleFactory is core infrastructure (`src/core/ModuleFactory.h`), not itself a MoonModule.
 
-### Dynamic over fixed-size
-
-Prefer dynamic (grow-on-demand) over fixed-size arrays for structural data like children, module lists, and control sets. Fixed-size arrays impose arbitrary limits, waste memory on instances that don't use the full capacity, and cost memory on instances that need none (e.g. leaf modules with zero children).
-
-Dynamic arrays allocate from the heap during setup. The hot path only iterates these arrays — same pointer arithmetic as a fixed array, no performance difference.
-
-Exception: contiguous data buffers (LED output, LUT tables) are allocated as a single block in `onAllocateMemory()`. These are sized by the layout, not by arbitrary limits, and are already dynamic.
-
-Modules can be added, changed, replaced, or removed dynamically at runtime. When removed (teardown), all allocated resources are cleaned up.
+**Dynamic over fixed-size.** Children, module lists, control sets — anything structural — grow on demand from the heap during `setup()`. Fixed-size arrays impose arbitrary limits, waste memory on instances that don't use the full capacity, and cost memory on instances that need none (e.g. leaf modules with zero children). The hot path only iterates these arrays — same pointer arithmetic as a fixed array, no performance difference.
 
 Each MoonModule is documented in `docs/moonmodules/` as it is built.
 
 ## Controls
 
-Every MoonModule exposes **controls** — runtime-configurable parameters visible in the web UI. Examples:
-- A grid layout exposes width, height, depth.
-- An ArtNet driver exposes destination IP and universe.
-- A fire effect exposes speed, cooling, sparking.
+Every MoonModule exposes **controls** — runtime-configurable parameters visible in the web UI. A grid layout exposes width, height, depth. An ArtNet driver exposes destination IP and universe. A fire effect exposes speed, cooling, sparking.
 
-Controls are linked to MoonModule class variables. The default value of the variable is the default value of the control when the module is created. Hot-path code reads these variables directly — no function call needed to get the latest value. When a control value changes, the system notifies the owning MoonModule for cold-path reactions (e.g. a layout size change triggers a LUT rebuild).
+Controls bind to MoonModule member variables. The variable's default is the control's default. The hot path reads the variable directly — no function call. When a control value changes, the system notifies the owning MoonModule for cold-path reactions (e.g. a layout size change triggers a LUT rebuild).
 
-Controls are shown dynamically: when a control value changes, the control set can be rebuilt. For example, if a control selects a mode, the controls belonging to that mode are shown while others are hidden.
+Controls are dynamic: when a value changes, the control set can be rebuilt. A select control that picks a mode can show/hide other controls based on the choice.
 
-Prefer `uint8_t` (0-255) for slider controls where possible. This minimizes memory per control, aligns with DMX channel values (0-255), and keeps the control range manageable in the UI.
+Prefer `uint8_t` (0–255) for slider controls. Minimises per-control memory, aligns with DMX channel values, keeps the UI range manageable.
 
-Controls are the bridge between the UI and the engine. The web UI renders them automatically based on what MoonModules declare. The exact control types (slider, toggle, color picker, text input, dropdown) are defined in the UI spec (`docs/moonmodules/core/ui.md`). The principle is: MoonModules declare what they need, the UI renders it.
+Controls are the bridge between the UI and the engine. The web UI renders them automatically from what MoonModules declare. The exact control types (slider, toggle, colour picker, text input, dropdown) are defined in the [UI spec](moonmodules/core/ui.md). The principle: modules declare what they need, the UI renders it.
 
 ## Persistence
 
-Control values + each module's `enabled` flag are persisted to flash so settings survive a reboot. The mechanism lives in [FilesystemModule](moonmodules/core/FilesystemModule.md):
+Control values and each module's `enabled` flag are persisted to flash so settings survive a reboot. The mechanism lives in [FilesystemModule](moonmodules/core/FilesystemModule.md):
 
-- **Storage**: one flat JSON file per top-level module under `/.config/<TypeName>.json`. Children are encoded positionally with `<index>.` key prefixes — no nested objects, no arrays. The parser stays minimal (three flat-JSON helpers in `core/JsonUtil.h`).
-- **Lifecycle**: `Scheduler::setup()` runs four phases — (1) `onBuildControls` binds every module's full control set, (2) the FilesystemModule load hook overlays persisted values onto the bound variables, (2b) `rebuildControls` re-evaluates conditional `hidden` flags against the loaded state, (3) each module's own `setup()` runs with persisted values already in member variables, (4) `onAllocateMemory` sizes buffers. Modules themselves know nothing about persistence — they just bind their variables.
-- **Save trigger**: HttpServerModule marks the target module dirty on every successful control mutation. FilesystemModule debounces 2s in `loop1s()`, walks the tree, and writes any subtree containing a dirty descendant via atomic write-and-rename.
-- **Conditional controls**: every conditional control is always bound; the module sets a `hidden` flag (`controls_.setHidden(i, …)`) to tell the UI not to render it. This means the load path can find persisted values regardless of the live conditional state.
+- **Storage** — one flat JSON file per top-level module under `/.config/<TypeName>.json`. Children are encoded positionally with `<index>.` key prefixes — no nested objects, no arrays. The parser stays minimal (three flat-JSON helpers in `core/JsonUtil.h`).
+- **Lifecycle** — `Scheduler::setup()` runs four phases: (1) `onBuildControls` binds every module's full control set, (2) the FilesystemModule load hook overlays persisted values onto the bound variables, (2b) `rebuildControls` re-evaluates conditional `hidden` flags against the loaded state, (3) each module's own `setup()` runs with persisted values already in member variables, (4) `onAllocateMemory` sizes buffers. Modules themselves know nothing about persistence — they just bind their variables.
+- **Save trigger** — HttpServerModule marks the target module dirty on every successful control mutation. FilesystemModule debounces 2 s in `loop1s()`, walks the tree, writes any subtree containing a dirty descendant via atomic write-and-rename.
+- **Conditional controls** — every conditional control is always bound; the module sets a `hidden` flag (`controls_.setHidden(i, …)`) to tell the UI not to render it. The load path can therefore find persisted values regardless of the live conditional state.
 
-The Scheduler stays independent of FilesystemModule's type via a function-pointer hook (`setLoadAllHook`), so there's no circular include and persistence is opt-in: if no FilesystemModule is registered, the load phase is a no-op and the system runs with member-initialized defaults.
+The Scheduler stays independent of FilesystemModule's type via a function-pointer hook (`setLoadAllHook`) — no circular include, persistence is opt-in. With no FilesystemModule registered, the load phase is a no-op and the system runs with member-initialised defaults.
 
 ## Parallelism
 
-On multi-core systems (ESP32 has 2 cores, desktop/RPi have many), the system exploits parallelism by assigning MoonModules to specific cores. Each MoonModule can declare a core affinity. The scheduler respects this when pinning tasks. On single-core or desktop systems, core affinity is ignored and everything runs on available threads.
+On multi-core systems (ESP32 has 2 cores, desktop / RPi have many), the system exploits parallelism by assigning MoonModules to specific cores. Each MoonModule can declare a core affinity. The scheduler respects this when pinning tasks. On single-core or desktop systems, affinity is ignored and everything runs on available threads.
 
-The general model is **producers vs consumers**: producers generate data, consumers process and output it. They run on separate cores with double buffering at the boundary — no locks on the hot path. The domain-specific application of this model (which MoonModules are producers, which are consumers, what is double-buffered) is defined in `architecture-light.md`.
+The model is **producers vs consumers**: producers generate data, consumers process and output it. They run on separate cores with double buffering at the boundary — no locks on the hot path. The light domain instantiates the model concretely: effects are producers, drivers are consumers, the logical and physical buffers are the double buffer (see [Memory strategy](#memory-strategy)).
 
-## Platform Abstraction
+## Hot path discipline
 
-Only abstract what you actually need. Currently implemented:
+The render loop (`Scheduler::tick` and everything it calls — every effect, modifier, driver, layout) is the hot path. It runs roughly 50–10000 times per second depending on light count. Code there obeys three rules:
 
-- **Time.** `millis()`, `micros()` — microsecond-resolution monotonic clock. (`esp_timer` / `std::chrono`)
-- **Memory.** `alloc(size)`, `free(ptr)` — allocator that prefers PSRAM on ESP32, falls back to regular heap. `freeHeap()`, `maxAllocBlock()` for diagnostics. (`heap_caps_malloc` / `std::malloc`)
-- **Networking.** `UdpSocket` — UDP send for ArtNet. `TcpConnection`/`TcpServer` — HTTP + WebSocket; `TcpConnection::writeChunks` is a non-blocking scatter-gather write so a backpressured browser can't stall the render loop. (`lwip/sockets.h` / BSD sockets)
-- **Scheduling.** `yield()` — cooperative yield to OS/RTOS. `delayMs(ms)` — blocking sleep, outside the hot path only. `reboot()` — restart the device. (`vTaskDelay` / `esp_restart` on ESP32; `std::this_thread::sleep_for` / `std::exit` on desktop)
-- **Platform config.** `platform_config.h` per platform — compile-time constants like `hasPsram` and `hasWiFi`. Each platform provides its own version; `types.h` includes it without `#ifdef`. Core code branches on these via `if constexpr` (e.g. NetworkModule drops its WiFi cascade when `hasWiFi` is false), so the dead branch is removed from the binary with no `#ifdef` outside `src/platform/`.
+- **No heap allocations.** `new`, `malloc`, `push_back`, `std::string` constructors, `make_unique`, `make_shared` — none of them on the hot path. Heap fragmentation on a long-running ESP32 kills throughput in minutes. Allocate everything during `setup()` / `onAllocateMemory()`; the loop only reads and writes pre-sized buffers.
+- **No blocking.** No `delay`, no `sleep`, no `mutex.lock()`. If a mutex is unavoidable, use `try_lock` and skip the work this tick. Blocking the render task means a visible glitch on the LEDs.
+- **Integer math preferred over `float` in per-light work.** ESP32's FPU is single-precision and not as cheap as integer ALU; per-light float compounds fast. Use fixed-point or scaled integer math where the visual difference doesn't justify the cost.
 
-Abstractions are added when needed by a concrete implementation, not pre-designed. All platform-specific code lives in `src/platform/`. Everything outside it compiles cleanly on every target.
+**Memory layout** is the corollary: allocate buffers as single contiguous blocks outside the hot path. Never allocate many small scattered objects in a loop — fragmentation catches up even off-path. On ESP32 with PSRAM, use `heap_caps_malloc(..., MALLOC_CAP_SPIRAM)` for large buffers; the `platform::alloc` wrapper does this automatically.
 
-## ESP-IDF, No Arduino
+**Network input** follows the same discipline: process synchronously at a defined point in the frame loop. Async input with staging buffers is allowed when memory is plentiful (desktop, PSRAM-rich ESP32), but the default is synchronous to keep the loop's worst case predictable.
 
-The ESP32 target uses ESP-IDF directly, not the Arduino framework. Rationale:
-- **Direct hardware control.** RMT peripheral for LED protocols, FreeRTOS task pinning with explicit stack sizes, `heap_caps_malloc` with SPIRAM/8BIT caps, `esp_timer` microsecond timing. Arduino wraps these with abstractions that add overhead and hide control.
-- **Native CMake.** ESP-IDF's build system IS CMake (`idf.py` wraps it). No impedance mismatch. Arduino-on-ESP-IDF adds a compatibility layer that complicates the build.
-- **Version stability.** ESP-IDF APIs are stable. Arduino-esp32 version churn caused recurring breakage in MoonLight.
+## Platform abstraction
 
-Arduino can be added as an ESP-IDF component later if a specific Arduino library is needed. This is officially supported by Espressif and doesn't require restructuring.
+Only abstract what you actually need. Currently:
 
-### ESP-IDF version
+- **Time** — `millis()`, `micros()`. Monotonic, microsecond resolution. (`esp_timer` / `std::chrono`)
+- **Memory** — `alloc(size)`, `free(ptr)`. Prefers PSRAM on ESP32, falls back to regular heap. `freeHeap()`, `maxAllocBlock()` for diagnostics. (`heap_caps_malloc` / `std::malloc`)
+- **Networking** — `UdpSocket` for ArtNet send. `TcpConnection` / `TcpServer` for HTTP + WebSocket; `TcpConnection::writeChunks` is a non-blocking scatter-gather write so a backpressured browser can't stall the render loop. (lwIP sockets / BSD sockets)
+- **Scheduling** — `yield()` (cooperative yield to OS/RTOS), `delayMs(ms)` (blocking sleep, off-path only), `reboot()`. (`vTaskDelay` / `esp_restart` on ESP32; `std::this_thread::sleep_for` / `std::exit` on desktop)
+- **Platform config** — `platform_config.h` per platform: compile-time constants like `hasPsram` and `hasWiFi`. Each platform provides its own version; `types.h` includes it without `#ifdef`. Core code branches on these via `if constexpr` (e.g. NetworkModule drops its WiFi cascade when `hasWiFi` is false), so the dead branch is removed from the binary with no `#ifdef` outside `src/platform/`.
 
-Currently tested on: **ESP-IDF v6.1-dev-399-gd1b91b79b**. This is the reference version — all builds and hardware tests use this exact commit.
+Abstractions are added when a concrete implementation needs them, not pre-designed.
 
-Minimum: ESP-IDF v5.1 (C++20 support via GCC 12+). The project targets v6.x APIs (e.g. `esp_eth_phy_new_generic`, component manager for mDNS). Building on v5.x may require API adjustments.
+**Platform boundary (hard rule).** All `#ifdef`, `#if defined`, platform-specific `#include`s, and hardware API calls live exclusively in `src/platform/`. Everything outside `src/platform/` compiles on every target without modification. Compile-time platform branching uses `if constexpr` on `platform_config.h` flags — never a preprocessor `#ifdef`. The boundary is enforced by `scripts/check/check_platform_boundary.py`, a commit gate (see [CLAUDE.md § Lifecycle Events](../CLAUDE.md#lifecycle-events)).
 
-MoonDeck's ESP-IDF setup script (`scripts/build/setup_esp_idf.py`) auto-detects the installed version and creates the required Python environment. Run it once after installing or updating ESP-IDF.
+# Light domain
 
-### Library strategy
+The light domain is everything specific to driving lights. **Light** here means any controllable light source: an addressable LED pixel (WS2812, APA102), a DMX fixture (RGB par, moving head, dimmer), or any other output that takes colour/intensity data. The term is used instead of "pixel" because the system controls both LEDs and conventional lighting fixtures.
 
-Start without third-party libraries. The platform abstraction layer replaces what libraries typically provide:
+## The pipeline
 
-| Previously used | Why not now | v3 approach |
-|----------------|-------------|-------------|
-| [**FastLED**](https://github.com/FastLED/FastLED) | Arduino-dependent. LED protocol drivers (RMT, SPI) are available natively in ESP-IDF. FastLED's color math can be reimplemented in pure C++. | Own color math in core. Own LED drivers per platform in `src/platform/`. |
-| [**ESPAsyncWebServer**](https://github.com/ESP32Async/ESPAsyncWebServer) | Arduino-dependent. Previously had memory leak issues, now under active development and reportedly improved. Still ties us to Arduino framework. | Own HTTP server via ESP-IDF's `esp_http_server` (ESP32) or BSD sockets (desktop). Can reconsider if Arduino-as-component is added. |
-| [**ArduinoJson**](https://github.com/bblanchon/ArduinoJson) | Not Arduino-dependent (works with ESP-IDF), but heavy: dynamic allocation, large footprint. | Own fixed-size control storage. JSON only for API serialization, not internal state. |
+Modules in the light pipeline can be added, replaced, or removed dynamically at runtime.
 
-If a library is genuinely needed later (e.g. FastLED for specific hardware support), it can be added as an ESP-IDF component. The rule: the library lives inside `src/platform/` and is not referenced from core or light domain code.
-
-## Build System
-
-CMake is the sole build system. The source tree is shared across all platforms, but build entry points are separate because ESP-IDF wraps CMake with its own conventions (`idf_component_register()` instead of `add_library()`).
-
-```
-CMakeLists.txt                          ← standard CMake: desktop/RPi build + tests
-src/
-  main.cpp                              ← shared pipeline wiring (mm_main), platform-neutral
-  platform/
-    desktop/
-      main_desktop.cpp                  ← desktop entry point: int main() + SIGINT
-      platform_config.h                 ← desktop platform constants
-    esp32/
-      platform_config.h                 ← ESP32 platform constants (reads sdkconfig)
-esp32/
-  CMakeLists.txt                        ← ESP-IDF project root (thin wrapper)
-  main/
-    CMakeLists.txt                      ← idf_component_register() pointing at src/
-    main.cpp                            ← ESP32 entry point: app_main() + Ethernet init
-  sdkconfig.defaults                    ← board-specific defaults
+```text
+              Layouts (shared by every Layer in Layers)
+                ├── GridLayout  ──→ coordinate iterator
+                └── WheelLayout ──→ coordinate iterator
+                        │
+                    Layers
+                ┌───────┼───────┐
+                ▼       ▼       ▼
+            Layer A  Layer B  Layer C
+          Effect(s) Effect(s) Effect(s)
+        Modifier(s) Modifier(s) Modifier(s)
+        Buffer(own) Buffer(own) Buffer(own)
+            LUT(own) LUT(own) LUT(own)
+                │       │       │
+                └── Blend+Map ──┘
+                        │
+                    Drivers
+                ├── WS2812Driver  (consumer buffer / DMA)
+                ├── ArtNetDriver  (UDP packets)
+                └── PreviewDriver (WebSocket)
 ```
 
-The shared `src/main.cpp` defines `mm_main(keepRunning, gridW, gridH)` — the full pipeline wiring. Each platform provides a thin entry point that does platform-specific init (SIGINT on desktop, Ethernet on ESP32) then calls `mm_main()`.
+**Naming convention.** Capital `Layouts`, `Layers`, `Drivers` are class names (always capitalised when referring to the class). Lowercase "layouts", "layers", "drivers" is the English plural — used freely when context makes it clear. Singular "layout", "layer", "driver" is an individual instance.
 
-- **Desktop/RPi:** `cmake -B build && cmake --build build` from the root.
-- **ESP32:** `cd esp32 && idf.py build` — the wrapper pulls in `src/` from the parent directory. Prefer `python scripts/build/build_esp32.py`, which also handles build profiles.
-- **Raspberry Pi:** cross-compile using the root CMakeLists.txt, or build natively on the device.
+## 3D from the start
 
-### ESP32 build profiles
+The system is natively 3D. Coordinates, effects, layouts, and mappings all operate in 3D space (x, y, z). 2D and 1D are simply the case where one or two dimensions have size 1. There is no separate 2D mode — everything is 3D, and lower dimensions fall out naturally.
 
-`build_esp32.py` takes a `--profile` argument selecting which sdkconfig fragments are layered:
+Two numeric typedefs keep memory tight in LUT tables:
 
-- `--profile default` (default) — WiFi + Ethernet. The full Ethernet → WiFi STA → WiFi AP cascade.
-- `--profile eth-only` — WiFi compiled out entirely. ESP-IDF v6.x has no `CONFIG_ESP_WIFI_ENABLED` switch (the symbol is non-settable, forced on for WiFi-capable SoCs), so the eth-only profile drops the WiFi components via `-DEXCLUDE_COMPONENTS=esp_wifi;wpa_supplicant;esp_phy;esp_coex` and defines `MM_NO_WIFI` (passed as `-DMM_ETH_ONLY=1`, applied in `esp32/main/CMakeLists.txt`). No WiFi driver/`wpa_supplicant` in the binary, no WiFi FreeRTOS tasks. Smaller image, more free RAM, for Ethernet-only deployments. `build_esp32_ethonly.py` is a thin wrapper (`--profile eth-only` baked in) used by the MoonDeck "Build (Ethernet-only)" button.
+- **`nrOfLightsType`** — total light count, light indices, LUT destinations, `width * height * depth` products. `uint16_t` on devices without PSRAM (max 65 K), `uint32_t` with PSRAM (supports large hub75 panels). Selected at compile time via `platform_config.h`.
+- **`lengthType`** — coordinates and dimensions. Always `int16_t` (max 32767 per axis, supports negatives for out-of-bounds effects).
 
-Switching profiles forces a clean reconfigure — `build_esp32.py` removes `build/` + `sdkconfig` when the profile changes (tracked via a `build/.mm_profile` marker), so the CMake cache (`EXCLUDE_COMPONENTS`, `MM_ETH_ONLY`) is reseeded correctly. Same-profile rebuilds stay incremental.
+For 12 K LEDs with a 1:1 LUT, the smaller `nrOfLightsType` on no-PSRAM devices saves 24 KB. All code uses the typedefs consistently to avoid casting.
 
-The project is structured as a set of CMake libraries:
-- A core library (platform-independent logic)
-- A platform library (selected at configure time)
-- An application target (links both, provides the entry point)
+## Layouts and Layout
 
-Further decomposition (effects, networking, drivers as separate libraries) will happen when the codebase is large enough to justify it.
+**Layouts** (a MoonModule) is the top-level container for one or more layouts, defining the physical topology of the installation. It is shared by every layer — there is one Layouts describing the physical setup, and every layer renders into it. When a layout changes, every layer rebuilds its LUT.
 
-### Pre-compilation steps
+A **layout** (a `LayoutBase` MoonModule, child of Layouts) defines the physical positions of lights in 3D space. It is a **coordinate iterator** — it yields `(physicalIndex, x, y, z)` for each light it defines. A layout does not own or build any mapping LUT.
 
-CMake runs these automatically before compilation when their source files change:
+Layouts cover both addressable LEDs and DMX fixtures. An LED-strip layout yields one coordinate per LED; a DMX-fixture layout yields one coordinate per fixture (a moving head is one point in 3D space).
 
-| Step | Source | Generated | Trigger |
-|------|--------|-----------|---------|
-| `version_gen` | `library.json` | `src/core/version.h` | library.json changes |
-| `ui_embed` | `src/ui/index.html`, `app.js`, `style.css` | `src/ui/ui_embedded.h` | any UI file changes |
+Positions are computed algorithmically, not stored. Grid is the most commonly used layout, but any geometry works: spheres, rings, cones, spirals, arbitrary point clouds. Grid is full-density (every position maps to a light); a wheel is sparse (only spoke positions are mapped, gaps are unmapped).
 
-Both are defined in the root `CMakeLists.txt` (desktop) and `esp32/main/CMakeLists.txt` (ESP32). Generated files are gitignored — they're rebuilt on every clean build.
+Multiple layouts can live in one Layouts container. A device today contains the same light type within each layout. Mixing light types in a single Layouts (e.g. LED strips + par lights) is planned for later.
 
-## Developer Tooling
+## Layers and Layer
 
-**MoonDeck** (`scripts/moondeck.py`) is a Python web server providing a browser-based console for all project scripts. Run with `uv run scripts/moondeck.py`, open `http://localhost:8420`.
+**Layers** (a MoonModule) is the top-level container for one or more layers. Each layer renders independently into its own buffer; the Drivers container composes those buffers downstream. Today the boot pipeline creates one layer, so Layers is a thin pass-through; alpha-blend / additive composition lands when more than one layer is wired in.
 
-Three tabs:
-- **PC** — desktop build, run, test. Fast iteration.
-- **ESP32** — chip type and USB port selection. Build, flash, monitor.
-- **Live** — device discovery and monitoring. Select devices for operations.
+A **Layer** (a MoonModule, child of Layers) owns:
 
-Each script is a small card with a `?` help link and a Run button. Output streams to a shared log window. Scripts are individual Python files in `scripts/` — always runnable standalone via `uv run scripts/<name>.py` as well as from MoonDeck.
+- A **buffer** — the light data effects write into (logical space).
+- A **mapping LUT** — built by the layer from the shared Layouts and the layer's static modifiers.
+- **Effects** (ordered list) — write light values into the buffer.
+- **Modifiers** (ordered list) — transform the LUT or light values.
 
-Script definitions and configuration live in `scripts/moondeck_config.json` (committed). Script documentation lives in `scripts/MoonDeck.md`, one section per script. Runtime state (selected devices, ports) persists in `scripts/moondeck.json` (gitignored).
+A layer can have **multiple effects**. Effects are not blended — they write to the buffer sequentially in their listed order, each overwriting or adding to the previous. That allows stacked patterns (a base-colour effect followed by a sparkle effect).
 
-## Testing
+A layer can have **multiple modifiers**. Static modifiers chain during LUT build; dynamic modifiers chain during rendering. Order matters: mirror-then-rotate differs from rotate-then-mirror.
 
-Three test categories, each with a clear purpose. Full inventory of what is tested: [docs/testing.md](testing.md).
+Each layer references the shared Layouts. The layer builds its own LUT by iterating the Layouts container's coordinates and applying its static modifiers in order. Different layers in Layers can have different modifiers, producing different LUTs from the same Layouts.
 
-### Module tests (desktop, `test/test_*.cpp`)
+## Effects
 
-Test individual MoonModules in isolation. Each module has its own test file. Run via doctest (`ctest` or `./build/test/mm_tests -s`). These verify that a module's API, edge cases, and output are correct — independent of how the module is wired into a pipeline.
+Effects produce light colours. They write into the Layer's buffer, which represents a logical grid. The Layer determines the buffer's dimensions (width, height, depth) from the Layouts, its own start/end percentages within the physical layout, and its modifiers. Effects receive these logical dimensions and elapsed time (millis) as their rendering context. They compute light positions from the buffer index (e.g. `x = i % width`, `y = i / width`).
 
-Module specs in `docs/moonmodules/` link to their test sections in `docs/testing.md` so end users can see what is tested for each module.
+Effects use elapsed time for animation, not frame count. Animation speed becomes frame-rate independent — an effect looks the same at 30 fps and 60 fps. For multi-device sync, the leader synchronises elapsed time across followers; same approach as syncing a frame counter, but frame-rate independent.
 
-Core priority areas:
-- MoonModule lifecycle (setup, loop, teardown ordering)
-- Control operations (add, set, bind by reference)
-- Scheduler (module dispatch, timing)
+Effects know nothing about hardware, protocols, physical LED layout, or mapping. They only see the logical grid the layer provides.
 
-Light domain areas are in `architecture-light.md`.
+**Speed convention.** Effects with a speed control use BPM (beats per minute). `uint8_t`, default 60 (= 1 beat per second). Human-readable, musically meaningful, DMX-compatible. The effect converts BPM to animation rate internally using elapsed millis.
 
-### Scenario tests (desktop, `test/scenarios/*.json`)
+**Dimensionality.** Every effect declares its native dimensionality through `EffectBase::dimensions()`, returning `Dim::D1`, `Dim::D2`, or `Dim::D3` (default — "I iterate every axis the layer gives me"). The Layer uses this to **extrude** lower-dimensional output across the unused axes after each effect's `loop()`:
 
-Test the system as an integrated pipeline. Scenarios are declarative JSON files — each defines a sequence of steps (`add_module`, `set_control`) with optional performance bounds. The scenario runner (`test/scenario_runner.cpp`) replays steps in-process and checks output and timing.
+- **D1** — the effect writes only the row at `(y=0, z=0)`. Layer copies that row across every other y in z=0, then copies z=0 across every z.
+- **D2** — the effect writes only the z=0 slice. Layer copies z=0 across every z.
+- **D3** — the effect writes every axis itself. Extrude is a one-comparison no-op.
 
-Currently in-process only. When the HTTP API is added, the same JSON files will work with a Python runner against a live system (same approach as projectMM v1's `deploy/scenario.py`).
+D1/D2 are **opt-in promises**: declaring them tells the framework it can fill the missing axes, saving the per-effect work of iterating z (or y and z). Effects that don't make that promise stay at the D3 default and iterate the whole buffer.
 
-### Regression tests
+Hot-path cost: extrude pays one comparison and returns for the D3 case. For D1/D2 on a layer whose unused axes are size 1 (a D2 effect on a 2D layer, a D1 effect on a 1D layer) the inner loops are guarded by `depth_ > 1` / `height_ > 1` and never run. Real `memcpy` work happens only for a D1 or D2 effect on a layer with more dimensions than the effect writes — exactly the case where you wanted the framework to do the duplication.
 
-When a bug is found, the fix includes a new test (module test or scenario) that reproduces the bug. This ensures the bug stays fixed. The test references the bug in a comment so the connection is traceable.
+Each effect's `dimensions()` is a claim about which axes its loop iterates, not which axes its math could in principle vary along. A "D2 fire" can in future be promoted to D3 by adding z-aware heat propagation; until then declaring it D2 honestly describes what the loop does today.
 
-### Performance tests (desktop)
+The `dim` int is also emitted in `/api/types` so the UI derives the dimensional emoji (📏/🟦/🧊) per module — modules don't put dimensional emoji in their own `tags()` strings.
 
-Automated checks that verify architectural rules at runtime:
-- **Zero-allocation render loop.** Run N frames, intercept `malloc`/`free` (via overriding or platform allocator hooks), fail if any allocation occurs during steady-state rendering.
-- **Frame time bounds.** Scenario tests include `"bounds": {"fps": {"min": N}}` to catch performance regressions.
+**Effects must run at every grid size.** Modifiers can shrink the logical grid to any size including 0×0×0 (e.g. every layout child is disabled). An effect's `loop()` must produce a correct result for any `(width, height, depth)` — no crashes, no divide-by-zero, no out-of-bounds writes. On a zero grid the loop is a clean no-op. Effects either gate at the top (`if (w <= 0 || h <= 0) return;`) or write their loops so an empty range is naturally a no-op (`for (y = 0; y < h; ...)`).
 
-### Live system tests (on-device)
+**Effects must animate at every tick rate.** Per-tick phase math computed as `dt * bpm * K / 60000` truncates to 0 on devices where `dt < 234/bpm` ms — desktop ticks every 0–1 ms, so even bpm=60 freezes. The fix is to keep the raw `dt * bpm` numerator in the phase accumulator and divide only at the read site:
 
-For ESP32 targets, test what desktop can't:
-- Memory stays within bounds over long runs (no leaks, no fragmentation drift).
+```cpp
+phase_num_ += static_cast<uint64_t>(dt) * bpm;
+uint8_t t = static_cast<uint8_t>((phase_num_ * 256) / 60000);
+```
 
-These are manual or semi-automated for now. Automation strategy will emerge with the hardware.
+See NoiseEffect / MetaballsEffect for the canonical pattern. Animation speed must depend only on `bpm` and wallclock — not on tick rate or grid size.
 
-## Linting and Static Analysis
+## Modifiers
 
-### Compiler warnings
+A modifier (MoonModule) lives inside a layer alongside its effects. Modifiers expose a virtual interface — the Layer calls modifier methods without knowing the concrete type (no `dynamic_cast`).
 
-All targets build with `-Wall -Wextra -Werror`. No warnings allowed in CI.
+A modifier can:
 
-### Platform boundary enforcement
+- Transform the mapping LUT via `transformCoord()` — rebuilt on the cold path, zero render cost.
+- Transform light values via `transformLights()` on the hot path — per-light cost, enables dynamic animations like rotation.
 
-An automated check (script or CI step) scans all files outside `src/platform/` for:
-- `#ifdef` / `#if defined` with platform macros
-- `#include` of platform-specific headers (`esp_*`, `freertos/*`, `driver/*`, `SDL.h`, `wiringPi.h`, etc.)
+**Dimensionality** for modifiers defaults to `Dim::D3` (assumed to work in all three axes unless declared otherwise). Unlike for effects, this is purely advisory — the Layer doesn't extrude modifier output. It exists so the UI can render the 📏/🟦/🧊 chip on the card. **MirrorModifier** is D3 (it has independent mirrorX/Y/Z toggles).
 
-Fails the build if any are found.
+## Mapping and blending
 
-### Hot path lint
+The blend+map step walks each layer in turn: reads each logical light, uses that layer's LUT to find the physical position(s), blends the colour into the physical output buffer. This is where logical space meets physical space.
 
-A custom check (clang-tidy plugin, script, or code review rule) flags allocation calls (`new`, `malloc`, `make_unique`, `make_shared`, `push_back`, `std::string` constructors) inside functions identified as hot path (render loop and its callees). This can start as a code review convention and become automated as the codebase grows.
+Each mapping LUT is a flat, contiguous lookup table allocated outside the hot path (at startup or when the layout configuration changes).
 
-### Type casting
+The LUT supports four mapping types:
 
-Use project typedefs (`lengthType`, `nrOfLightsType`) consistently so types match and casts are unnecessary. When casts are needed:
+- **1:1 identical** — logical index equals physical index. No table needed (`hasLUT()` returns false, `setIdentity()` mode). Grid without serpentine, no modifiers.
+- **1:1 shuffled** — logical maps to one physical, but reordered. Table needed. Grid with serpentine.
+- **1:0 unmapped** — logical light has no physical output. Table needed. Sparse layouts (wheel).
+- **1:N multimap** — logical maps to multiple physical positions. Table needed (CSR format). Mirror / clone modifier.
 
-- **`static_cast`** — converts a value between related types. Checked at compile time. Use only at system boundaries: byte protocol packing, OS API return values, overflow-prevention with wider intermediates. If you need `static_cast` between project types, the types should be made to match instead.
-- **`reinterpret_cast`** — reinterprets raw memory as a different type. No conversion, no safety. Avoid. The only legitimate use is raw byte/memory access (e.g. `reinterpret_cast<const sockaddr*>` for socket APIs).
-- **`dynamic_cast`** — runtime-checked cast from base to derived class. Requires RTTI which is disabled on ESP32 (`-fno-rtti`). Not used in this project.
+Because mapping and blending happen in a single pass over each layer, there is no intermediate "mapped but unblended" buffer. The physical buffer is the only output-side allocation.
 
-### Code formatting
+## Drivers
 
-clang-format with a project `.clang-format` file. Applied in CI — code that doesn't match the format fails the check. Developers can run `clang-format` locally or via editor integration.
+**Drivers** (a MoonModule) is the top-level container for one or more drivers. It is the consumer side of the pipeline. The Drivers container owns a shared output buffer and performs blend+map from every layer's buffer into it each frame. Individual drivers then read from this buffer to push to hardware / network.
 
-### When checks run
+The shared output buffer is necessary because blend+map writes to arbitrary physical positions via the LUT — the output is not filled sequentially. A driver cannot read chunk-by-chunk until the full buffer is populated. Direct-to-DMA / packet optimisation only works for the trivial case (1:1 identical mapping, no modifiers).
 
-- **Pre-commit (optional):** clang-format, platform boundary check.
-- **CI (mandatory):** all of the above plus full test suite.
-- Exact CI setup will be configured when we set up the repository's CI pipeline.
+Each driver (a MoonModule) speaks one protocol:
 
-## Web UI
+- **LED drivers** — WS2812 via RMT, APA102 via SPI. Platform-specific.
+- **DMX / ArtNet** — sends DMX over UDP. Supports addressable LEDs and conventional DMX fixtures (pars, moving heads, dimmers).
+- **Preview** — streams light data to the web UI via WebSocket.
+- **Desktop output** — SDL2 or terminal for visual preview. Desktop also serves as a high-speed processing node, driving lights via ArtNet/DDP over the network.
 
-The UI is three hand-maintained files: `index.html`, `app.js`, `style.css`. No frameworks, no build tools, no npm. These files are served directly by the embedded HTTP server.
+Each driver child reads from the Drivers container's output buffer. Everything before the Drivers container is platform-independent.
 
-The UI is **MoonModule-driven**. It does not contain hard-coded knowledge of specific effects, layouts, or drivers. Instead, it queries the system for the current MoonModule tree (layers, their effects, modifiers, layouts, drivers — each with their controls) and renders them generically:
+Network-based drivers (ArtNet, E1.31, DDP) must pace their packet output — never blast all universe packets in a tight loop. Both FPS limiting (skip frames if called too fast) and inter-packet delay (microsecond pause between universes within a frame) are required. Without pacing, receivers drop packets and the output appears broken.
 
-- Each MoonModule is shown with its name and its declared controls.
-- Controls are auto-rendered based on type (slider, toggle, color picker, text input, dropdown).
-- MoonModules can be switched (e.g. change which effect a layer uses) and linked together (e.g. assign a layout to a layer).
+## Memory strategy
 
-Adding a new MoonModule with controls requires **zero changes** to the UI files. The UI discovers and renders whatever MoonModules the system reports.
+All buffers are allocated as single contiguous blocks outside the hot path — at startup or when configuration changes (LED count, layout size, layer count). They are then reused every frame with zero allocations in steady state. Measured per-module timing and memory for each platform: [performance.md](performance.md).
 
-## What We Leave Undesigned
+**Buffer types**
 
-These will be specified in module docs before implementation:
+- **Layer buffers** — one per active layer, holds the logical light data for one effect chain. Allocated in PSRAM when available. On memory-constrained devices, consumers may read from the layer buffer directly (no mapping, no blending, no physical buffer needed).
+- **Physical buffer** — when present, holds the blended+mapped output. Logical + physical together form the double buffer for producer/consumer parallelism.
+- **Mapping LUT** — flat lookup table for logical→physical. Read-only during rendering. PSRAM is fine — sequential reads are cache-friendly.
 
-- **MoonModule interface.** Draft exists in `docs/moonmodules_draft/core/`. Needs review: virtual modifier interface, rebuild propagation.
-- **Config persistence.** Controls need to be saved/loaded. The storage format and mechanism will be specified when we build that module.
-- **Web UI.** Spec at `docs/moonmodules/core/ui.md` describes the current implementation (status bar, card layout, 9 control types, type picker, theme, WS lifecycle, 3D preview). Open design questions: multi-layer UI, modifier chain visualization, presets, canvas/node-graph view.
-- **File/directory structure.** The platform boundary is fixed. The rest will grow as modules are specified and implemented.
+All buffers are raw `uint8_t*` arrays sized `channelsPerLight * nrOfLights`. Supports RGB (3 channels), RGBW (4 channels), and multi-channel DMX fixtures (up to 32 channels per light) without separate code paths. Channel layout is configured via offsets (see MoonLight's [LightsHeader](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/LightsHeader.h) pattern).
+
+Network input (ArtNet receive, WebSocket) is processed synchronously at a defined point in the frame loop. Zero extra buffers, no race conditions. The trade-off is up to one frame of latency (~16 ms at 60 fps), imperceptible for LEDs.
+
+**Adaptive allocation.** The system checks available heap before each allocation and degrades gracefully when memory is insufficient. A minimum reserve (`HEAP_RESERVE = 32 KB`) is kept for stack, HTTP, WiFi, and overhead.
+
+- **Mapping LUT** is created only if all of: modifiers exist on the layer; layout is not a simple non-serpentine grid (where physical == logical); enough heap available after the reserve.
+- **Driver output buffer** is created only if at least one layer has a mapping LUT actually allocated (any layer's LUT triggers the shared output buffer) and enough heap available.
+
+**Degradation cascade** (best to worst):
+
+1. **Full pipeline** — LUT + driver output buffer. Modifier applied, clean separation.
+2. **Skip LUT + driver buffer** — modifier not applied, forced 1:1 mapping. No intermediate buffers. (A LUT without a driver buffer to map into is useless — they're always skipped together.)
+3. **Reduce layer dimensions** — halve width/height until the buffer fits, minimum 8×8.
+
+Each degradation is observable via `lutSkipped()` and reported in `/api/system` per-module metrics.
+
+**Invariants** (non-negotiable):
+
+- Effects always write to their layer's logical buffer. Never to output, never to physical coordinates.
+- Drivers always own the output path (blending, mapping, brightness correction, channel reordering).
+- Layer buffer is mandatory — if it doesn't fit, reduce dimensions until it does ("at least see something").
+
+**Per-module reporting.** Every MoonModule reports `classSize()` (sizeof the class instance) and `dynamicBytes()` (heap allocated during `onAllocateMemory`). Visible in `/api/system`, console output, and scenario tests. Memory scenarios verify that 1:1 pipelines use zero intermediate buffers and that the cascade triggers at the right thresholds.
+
+**Scaling to available memory**
+
+| Device | Memory | Typical capability |
+|--------|--------|--------------------|
+| ESP32 + OPI PSRAM | 2–8 MB | Many layers, 10K+ LEDs |
+| ESP32, no PSRAM | ~320 KB internal | Full pipeline: double buffering, mapping, blending, parallelism. Proven up to 16 K lights (128×128 measured live on Olimex; see [performance.md](performance.md)). The degraded path (single Layer, 1:1 direct, no blending) is reserved for installations that grow beyond what the full pipeline fits. |
+| Teensy 4.x | 1 MB internal, no PSRAM | Comfortable headroom for several layers; excellent DMA-based LED output (OctoWS2811). Ethernet built-in on 4.1, optional on 4.0. |
+| Desktop / RPi | Abundant | No constraints |
+
+The architecture does not assume PSRAM is present. Buffer counts and sizes are determined at runtime based on available memory and reallocated when configuration changes.
+
+## Rebuild propagation
+
+When a control value changes on a layout, the pipeline must rebuild: every Layer rebuilds its LUT, and the Drivers container reallocates its output buffer. When a modifier control changes, only the affected Layer's LUT is rebuilt (the output buffer size doesn't change). Propagation is built into the framework, not handled by ad-hoc dirty flag checks in the application entry point.
+
+Mechanism: `Scheduler::rebuild()` re-runs `onAllocateMemory()` across the module tree, which re-evaluates layout-derived dimensions, LUTs, and buffer sizes. HTTP handlers that change layout / modifier order or structure trigger `rebuild()` after the mutation.
+
+## Multi-device sync
+
+For installations spanning multiple controllers:
+
+1. **Discovery** — devices find each other via mDNS.
+2. **Time sync** — one leader broadcasts its elapsed time (millis). Followers compute their offset. Target: sub-millisecond accuracy. Since effects use elapsed time for animation, synced time means synced visuals — regardless of each device's frame rate.
+3. **Light distribution** — when one device sends light data to another, use ArtNet / E1.31 / DDP. These are the standards, no need to invent a protocol.
+
+# Web UI
+
+The UI is three hand-maintained files: `index.html`, `app.js`, `style.css`. No frameworks, no build tools, no npm. Served directly by the embedded HTTP server.
+
+The UI is **MoonModule-driven**. It contains no hard-coded knowledge of specific effects, layouts, or drivers. It queries the system for the current MoonModule tree (layers, effects, modifiers, layouts, drivers — each with their controls) and renders generically:
+
+- Each MoonModule shows as a card with its name and declared controls.
+- Controls are auto-rendered by type (slider, toggle, colour picker, text input, dropdown).
+- Modules can be switched (change which effect a layer uses) and linked (assign a layout to a layer).
+
+Adding a new MoonModule with controls needs **zero changes** to the UI files.
+
+The light domain plugs into the UI at three points: a fixed top-level tree (Layouts / Layers / Drivers pinned in `main.cpp`, root reorder disabled while child reorder works via drag-and-drop), a binary WebSocket preview channel ([PreviewDriver](moonmodules/light/drivers/PreviewDriver.md) — type byte `0x02`, 13-byte header `dw/dh/dd/ow/oh/od`, RGB triples), and emoji-key assignments for the chip filter (full table in [core/ui.md](moonmodules/core/ui.md)). Full UI spec: [docs/moonmodules/core/ui.md](moonmodules/core/ui.md).
+
+## What we leave undesigned
+
+Filled in by module docs before each module is built:
+
+- **Multi-layer composition** — composing more than one Layer's buffer into the shared output (alpha blend, additive). Today's pipeline ships one Layer and passes through.
+- **Sparse / non-grid 3D preview** — preview today derives `(x, y, z)` from a dense grid index; sparse layouts (rings, spheres, point clouds) render as a clump in the bounding box. The architecture's intended fix is a one-time coordinate message — see [PreviewDriver](moonmodules/light/drivers/PreviewDriver.md).
+- **WiFi runtime disable** — today the eth-only build profile compiles WiFi out; runtime gating based on detected hardware presence is a future addition.

@@ -35,7 +35,7 @@ Controls bind to class variables by reference. Hot-path code reads the variable 
 
 ## Per-module timing
 
-Every MoonModule tracks `loopTimeUs()` — average microseconds per tick, computed over a 1-second window. The Scheduler times top-level modules; containers (Layer, DriverGroup) time their children. `publishTiming(frameCount)` recurses the tree every second to compute averages.
+Every MoonModule tracks `loopTimeUs()` — average microseconds per tick, computed over a 1-second window. The Scheduler times top-level modules; containers (Layer, Drivers) time their children. `publishTiming(frameCount)` recurses the tree every second to compute averages.
 
 `tickTimeUs` is the primary performance metric. FPS is derived from it (`1000000 / tickTimeUs`). This gives per-module cost visibility at any depth in the tree.
 
@@ -45,10 +45,10 @@ Every MoonModule has an `enabled` property (default: true). The UI shows a check
 
 **Semantics are owned by each module, not by the Scheduler.** The Scheduler always calls `loop()`, `loop20ms()`, and `loop1s()` regardless of `enabled`. Modules decide what "disabled" means:
 
-- **Rendering modules** (Layer, DriverGroup, effects, modifiers): early-return from `loop()` when `enabled()` is false. The buffer keeps its last state; the user sees the layer/driver freeze. This is the typical UX intent of "turn this effect off."
+- **Rendering modules** (Layer, Drivers, effects, modifiers): early-return from `loop()` when `enabled()` is false. The buffer keeps its last state; the user sees the layer/driver freeze. This is the typical UX intent of "turn this effect off."
 - **System modules** (HttpServer, Network, Filesystem): typically ignore `enabled` and keep accepting connections / serving requests, since "disable HttpServer" via the UI would lock the user out.
 
-**`onOnOff(bool newEnabled)`** is called once per transition by `setEnabled(b)` when the value actually flips. Override it to start/stop sockets, free buffers, switch driver pins to high-impedance, etc. Default is a no-op. Use this instead of polling `enabled()` in the hot path for one-shot transition work.
+**`onEnabled(bool newEnabled)`** is called once per transition by `setEnabled(b)` when the value actually flips. Override it to start/stop sockets, free buffers, switch driver pins to high-impedance, etc. Default is a no-op. Use this instead of polling `enabled()` in the hot path for one-shot transition work.
 
 ## Parent/child
 
@@ -56,7 +56,7 @@ Modules form a tree. Parent/child relationships only — no arbitrary DAG. Child
 
 ### Generic children in MoonModule base
 
-Every MoonModule has a dynamic children array. `addChild()`, `removeChild()`, `replaceChildAt(i, fresh)`, and `moveChildTo(child, newIndex)` are implemented once in the base class — containers (Layer, DriverGroup, LayoutGroup) do not override them. The array starts empty (zero allocation for leaf modules) and grows on demand during setup. This eliminates the per-container typed arrays (`effects_[]`, `drivers_[]`, `layouts_[]`) and typed add methods (`addEffect()`, `addDriver()`, `addLayout()`) that existed in earlier iterations.
+Every MoonModule has a dynamic children array. `addChild()`, `removeChild()`, `replaceChildAt(i, fresh)`, and `moveChildTo(child, newIndex)` are implemented once in the base class — containers (Layer, Drivers, Layouts) do not override them. The array starts empty (zero allocation for leaf modules) and grows on demand during setup. This eliminates the per-container typed arrays (`effects_[]`, `drivers_[]`, `layouts_[]`) and typed add methods (`addEffect()`, `addDriver()`, `addLayout()`) that existed in earlier iterations.
 
 `replaceChildAt` is used by [FilesystemModule](FilesystemModule.md) at load time to swap a child whose type differs from the persisted JSON. The caller owns the lifecycle of the returned old child (typically `teardown()` + `Scheduler::deleteTree`).
 
@@ -76,7 +76,9 @@ When the UI adds or removes a child at runtime (e.g. switching an effect on a la
 
 This is needed for: effect switching, modifier add/remove, driver hot-plug, and persistence restore after reboot.
 
-`onChildrenReady()` — parent notified when all children finish setup. Keep this minimal.
+## Status slot
+
+`setStatus(msg, severity)` / `status()` / `severity()` / `clearStatus()` carry a short message the module wants the user to see right now — Layer writes "buffer reduced — not enough memory" on memory degradation, NetworkModule writes "Eth: 192.168.1.210" or "No network". Severity is `Status` / `Warning` / `Error` and the UI picks the chip emoji (ℹ️ / ⚠️ / ❌). The slot stores a pointer (no copy), so callers pass flash string literals or a module-owned char buffer with stable lifetime. Wire contract (only emitted when set): `/api/state` and `/api/system` each carry `"status":"…","severity":"status|warning|error"` — see [HttpServerModule.md](HttpServerModule.md).
 
 ## Persistence
 
@@ -106,7 +108,7 @@ Conditional controls (e.g. fields only visible under a Select mode) are always b
 ### projectMM v2 — MoonModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/MoonModule.h))
 
 - `onBuildControls()` / `onAllocateMemory()` separation.
-- `onChildrenReady()`.
+- `onChildrenReady()` — parent-notified-after-children hook. Not carried into v3; child setup ordering is handled by Scheduler's 4-phase boot instead.
 - Field order optimized 8B→4B→2B→1B, saving 24 bytes.
 - `classSize` set via `register_type<T>()`.
 - `AutoWireSpec` — an arbitrary dependency-graph (DAG) wiring mechanism. v3 deliberately uses parent/child only; the DAG was more than the domain needs.

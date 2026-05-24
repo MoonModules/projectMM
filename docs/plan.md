@@ -24,6 +24,18 @@ Measure FPS over WiFi STA vs Ethernet at different LED counts. The 128×128 case
 
 This determines the practical LED limit for WiFi-only boards. The 128×128 result already says: recommend Ethernet (or the `eth-only` build profile) for large installations.
 
+## Add real z-axis variation to 2D effects (pending)
+
+Today only **NoiseEffect** and **PlasmaEffect** have z-aware math (declared D3). The other 10 effects are honest D2 — they iterate y,x and Layer::extrude duplicates the z=0 plane across z on 3D layers. Visually this means every z-slice is identical; the effect looks "flat" along z.
+
+Some of these could be promoted to genuine D3 with a small math change:
+- **Metaballs / GlowParticles**: add a z coordinate to each blob; the field summation already generalises.
+- **Plasma palette / Spiral**: add a z-driven phase term (Plasma already shows the pattern with its 5th z-driven sine).
+- **Fire**: heat could rise along y but also drift along z (e.g. for a chimney effect). Needs a z-aware heat grid (`w × h × d` instead of `w × h`).
+- **Ripples / LavaLamp / Checkerboard / Particles**: each ripple/blob/checker/particle gets a z coordinate.
+
+Prioritise after we see real 3D installations. On 2D layers (today's reality) these are visually correct as-is. Each effect that gets promoted to D3 also needs its `dynamicBytes` resizing back up to the full 3D buffer.
+
 ## Additional testing (pending)
 
 - **UI page load time**: add a scenario step that measures HTTP response time for `/` (index.html), `/api/state`, `/api/system` using the live runner's HTTP client. Verifies the web UI loads within acceptable time on ESP32.
@@ -45,16 +57,18 @@ Open design question to address when this is picked up: can the platform detect 
 
 Planned API for the presence gate: `platform::ethPresent()` and `platform::wifiPresent()` (return bool from a quick, idempotent probe). When implemented, NetworkModule's `onBuildControls()` uses them to flip the `hidden` flag on Ethernet/WiFi-specific controls so absent interfaces don't show as "no link" / "no IP" in the UI.
 
-## Multi-layer pipeline (backlog)
+## Multi-Layer composition (backlog)
 
-Today `DriverGroup` holds one `Layer*` and `DriverBase::setLayer()` takes one layer. The architecture (`docs/architecture-light.md`) plans for multiple layers feeding one DriverGroup, with per-layer LUTs blended into a single output buffer. The number of active layers depends on available memory — a device with PSRAM can run many; a device without may be limited to one.
+The top-level shape now reads `Layouts → Layers → Drivers`. The `Layers` container holds N layers today (one by default); the `Drivers` container reads from a single *active* layer via `setLayer()`. Per-layer composition into a single output buffer is the pending feature — without it, additional layers render their buffers but only the first enabled layer reaches the output.
 
 When picked up:
-- `DriverGroup::passBufferToDrivers` composes/blends N layer buffers upstream (Buffer + Buffer with per-layer blend mode and opacity).
-- `DriverBase::setLayer` stays as-is — drivers still output to one physical fixture and need that fixture's dimensions; the *active* layer is what they query. Multi-layer composition happens upstream of drivers.
-- Per-layer enable/disable from the UI (already supported by `MoonModule::enabled`); ordering via existing child-array order.
-- Memory-aware allocator: decide at `onAllocateMemory` time how many layers actually fit, degrade gracefully if PSRAM is unavailable.
-- Persistence (plan-10) already encodes layers + their children positionally — adding more siblings to a LayoutGroup just works on the file-format side.
+
+- `Drivers::loop()` reads from the `Layers` container instead of a single `Layer*`. For each enabled Layer, blend its buffer into the shared output buffer using the Layer's blend mode + opacity (controls to be added on Layer).
+- The `Layer::startX/Y/Z` / `endX/Y/Z` controls — already persisted today, no-op with one Layer — become active in `rebuildLUT`: each Layer carves a region of the shared Layouts. Values are **percentages** of the physical extent on each axis. Defaults `start = 0, end = 100` = full layout; negatives and values > 100 are reserved for modifier shift. Start rounds toward floor, end rounds toward ceiling so small panels still get a non-zero region.
+- `DriverBase::setLayer` stays as-is — drivers still output to one physical fixture and need that fixture's dimensions; the *active* Layer is what they query. Composition happens upstream in the Drivers container.
+- Per-Layer enable/disable from the UI (already supported by `MoonModule::enabled`); ordering via the child-array order of Layers (already supported by drag-reorder).
+- Memory-aware allocator: at `onAllocateMemory` time, decide how many Layers actually fit and degrade gracefully when PSRAM is absent.
+- Persistence already encodes the Layers container's children positionally — adding more siblings to Layers just works on the file-format side.
 
 ## HTTP file serving blocks the render tick (follow-up)
 
@@ -67,7 +81,7 @@ The 3D preview currently positions every voxel by deriving `(x, y, z)` from a de
 Motivating use case: a layout shaped like a Gigaminx (12-face dodecahedron), each pentagonal face tiled with rings of 24 LEDs, positioned in true 3D space.
 
 The architecture's intended solution (already noted in `docs/moonmodules/light/drivers/PreviewDriver.md`): a **one-time coordinate message**. When picked up:
-- The engine sends, once per layout change and once to each newly-connected WebSocket client, a coordinate table — the real `(x, y, z)` of every light. The data already exists: `LayoutGroup::forEachCoord(callback, ctx)` yields `(index, x, y, z)` per light (it's how `Layer::onAllocateMemory` computes the bounding box).
+- The engine sends, once per layout change and once to each newly-connected WebSocket client, a coordinate table — the real `(x, y, z)` of every light. The data already exists: `Layouts::forEachCoord(callback, ctx)` yields `(index, x, y, z)` per light (it's how `Layer::onAllocateMemory` computes the bounding box).
 - A new binary WS message type (the preview frame is `[0x02]…`; allocate `[0x01]` or `[0x03]` for coordinates). Format roughly `[type][count16][x16 y16 z16]×count` — `lengthType` is int16, so 6 bytes per light.
 - The browser caches the coordinate table and positions preview points from it instead of deriving from a grid index. Per-frame binary frames then stream **only RGB**, indexed by light — for the ring example that is 192×3 ≈ 576 bytes/frame, tiny and fast.
 - `PreviewDriver`'s downsample should switch to **index-based** striding (stride over the light index, not the x/y/z box) once coordinates drive the display — simpler and correct for any shape.

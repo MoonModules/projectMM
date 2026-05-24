@@ -32,13 +32,15 @@ Runs `./build/test/mm_tests -s` (doctest with all test cases shown).
 
 ### run_desktop
 
-Run the desktop executable. Long-running — shows Stop button.
+Launch the desktop executable as a detached background process and exit. The app keeps running across other MoonDeck scripts and outlives MoonDeck itself — the same model as flashing an ESP32, where the device runs independently of this console.
 
 ```bash
 uv run scripts/run/run_desktop.py
 ```
 
-Kills any already-running projectMM, then runs `./build/projectMM`. Build first.
+Re-running is idempotent: any existing `projectMM` instance is stopped first, then a fresh one is launched. Output goes to `build/projectMM.log`. Build first.
+
+While the app is running, MoonDeck shows the button as **Stop** (a 5-second poll on `/api/running` detects the live process via `process_name`). Pressing Stop terminates the app; pressing Run again restarts it. From the CLI: `pkill -f build/projectMM`.
 
 ### check_platform_boundary
 

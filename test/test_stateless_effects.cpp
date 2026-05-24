@@ -1,16 +1,17 @@
 #include "doctest.h"
-#include "light/CheckerboardEffect.h"
-#include "light/SpiralEffect.h"
-#include "light/PlasmaPaletteEffect.h"
-#include "light/RipplesEffect.h"
-#include "light/GlowParticlesEffect.h"
-#include "light/LavaLampEffect.h"
-#include "light/GridLayout.h"
+#include "light/effects/CheckerboardEffect.h"
+#include "light/effects/SpiralEffect.h"
+#include "light/effects/PlasmaPaletteEffect.h"
+#include "light/effects/RipplesEffect.h"
+#include "light/effects/GlowParticlesEffect.h"
+#include "light/effects/LavaLampEffect.h"
+#include "light/layouts/GridLayout.h"
+#include "platform/platform.h"
 
 namespace {
 
 struct Ctx {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     mm::Layer layer;
 
@@ -18,8 +19,8 @@ struct Ctx {
         grid.width = static_cast<mm::lengthType>(w);
         grid.height = static_cast<mm::lengthType>(h);
         grid.depth = 1;
-        layoutGroup.addChild(&grid);
-        layer.setLayoutGroup(&layoutGroup);
+        layouts.addChild(&grid);
+        layer.setLayouts(&layouts);
         layer.setChannelsPerLight(3);
     }
 
@@ -95,7 +96,39 @@ TEST_CASE("CheckerboardEffect spatial variation") {
 STATELESS_EFFECT_TEST(SpiralEffect)
 STATELESS_EFFECT_TEST(PlasmaPaletteEffect)
 STATELESS_EFFECT_TEST(GlowParticlesEffect)
-STATELESS_EFFECT_TEST(LavaLampEffect)
+
+// LavaLampEffect has localised blob features that can land on identical corner
+// palette indices at some t values (corner-pair check is too strict). Scan the
+// whole buffer for any two distinct pixels instead — same approach as
+// RipplesEffect below.
+TEST_CASE("LavaLampEffect writes non-zero RGB") {
+    Ctx ctx(16, 16);
+    mm::LavaLampEffect effect;
+    ctx.layer.addChild(&effect);
+    ctx.layer.onAllocateMemory();
+    ctx.layer.loop();
+    CHECK(ctx.hasNonZero());
+}
+
+TEST_CASE("LavaLampEffect spatial variation") {
+    // LavaLamp's blobs cluster at some t values and produce a near-uniform
+    // saturated frame at the default slow bpm (=8). Sample several frames
+    // across a wider t range — at bpm=60 the blob positions sweep through the
+    // grid quickly enough that at least one frame in the window must have
+    // spatial variety. (If none do, the effect is genuinely broken.)
+    Ctx ctx(32, 32);
+    mm::LavaLampEffect effect;
+    effect.bpm = 60;
+    ctx.layer.addChild(&effect);
+    ctx.layer.onAllocateMemory();
+    bool varied = false;
+    for (int i = 0; i < 10 && !varied; i++) {
+        ctx.layer.loop();
+        if (ctx.hasTwoDistinctColors()) varied = true;
+        mm::platform::delayMs(50);
+    }
+    CHECK(varied);
+}
 
 // RipplesEffect has localised features (thin rings); corner-pair check is
 // too strict, so we scan for any two distinct pixels instead.

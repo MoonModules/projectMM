@@ -7,7 +7,7 @@
 
 namespace mm {
 
-enum class ModuleRole : uint8_t { Generic, Effect, Modifier, Driver, Layout };
+enum class ModuleRole : uint8_t { Generic, Effect, Modifier, Driver, Layout, Layer };
 
 // Lowercase role name for JSON/API output. Single source of truth so the role
 // string can't drift between /api/state and /api/types.
@@ -17,6 +17,7 @@ inline const char* roleName(ModuleRole role) {
         case ModuleRole::Modifier: return "modifier";
         case ModuleRole::Driver:   return "driver";
         case ModuleRole::Layout:   return "layout";
+        case ModuleRole::Layer:    return "layer";
         default:                   return "generic";
     }
 }
@@ -45,8 +46,8 @@ public:
     // Called when enabled flips. Default no-op; override to start/stop sockets, free
     // buffers, etc. The scheduler always invokes loop()/loop20ms()/loop1s() regardless
     // of `enabled` — modules decide what disabled means by checking enabled() inside
-    // their loop fns or by stopping/starting their work in onOnOff().
-    virtual void onOnOff(bool /*newEnabled*/) {}
+    // their loop fns or by stopping/starting their work in onEnabled().
+    virtual void onEnabled(bool /*newEnabled*/) {}
 
     // onBuildControls MUST be idempotent and pure: only `controls_.clear()` + `controls_.addX()`.
     // No platform queries, no I/O, no allocations. HttpServerModule calls it again whenever a
@@ -93,7 +94,7 @@ public:
     void setEnabled(bool e) {
         if (enabled_ == e) return;
         enabled_ = e;
-        onOnOff(e);
+        onEnabled(e);
     }
 
     // Whether the Scheduler should honor `enabled()` for this module's loop callbacks.
@@ -117,6 +118,12 @@ public:
 
     // Role for type identification (no RTTI needed)
     virtual ModuleRole role() const { return ModuleRole::Generic; }
+
+    // Curated emoji tags for the module picker's chip filter — extras beyond the
+    // role chip (which the UI derives from role() on its own). A short string of
+    // emoji, e.g. "🔥" or "🌊💧". Default "" — most modules add nothing. The
+    // return value is a flash string literal; no per-instance RAM cost.
+    virtual const char* tags() const { return ""; }
 
     // Generic children — grows on demand, only allocates during setup
     bool addChild(MoonModule* child) {
@@ -187,6 +194,25 @@ public:
     size_t dynamicBytes() const { return dynamicBytes_; }
     void setDynamicBytes(size_t b) { dynamicBytes_ = b; }
 
+    // Per-module status slot. A short user-facing message the module wants the
+    // user to see right now — NetworkModule writes "Eth: 192.168.1.210", Layer
+    // writes "buffer reduced — not enough memory". The pointer is owned by the
+    // caller (flash literal or a module-owned char buffer); the slot doesn't
+    // copy. `nullptr` = nothing to show.
+    //
+    // `severity` qualifies the message so the UI can pick the right emoji:
+    //   Status   ℹ️   — neutral info, current state ("connected").
+    //   Warning  ⚠️   — silent degradation ("buffer reduced").
+    //   Error    ❌   — something failed ("WiFi auth failed").
+    enum class Severity : uint8_t { Status, Warning, Error };
+    const char* status() const { return status_; }
+    Severity severity() const { return severity_; }
+    void setStatus(const char* msg, Severity sev = Severity::Status) {
+        status_ = msg;
+        severity_ = sev;
+    }
+    void clearStatus() { status_ = nullptr; severity_ = Severity::Status; }
+
     // Per-module timing: parents time children, Scheduler times top-level
     uint32_t loopTimeUs() const { return loopTimeUs_; }
     void addAccumUs(uint32_t us) { accumUs_ += us; }
@@ -204,7 +230,13 @@ protected:
     ControlList controls_;
 
 private:
-    char name_[24] = {};
+    // Display name buffer. Sized to fit the longest stripped name with headroom:
+    // ModuleFactory's displayNameFor strips the role-noun suffix so the longest
+    // names today are 13 chars ("GlowParticles", "PlasmaPalette") + null. char[16]
+    // leaves a few bytes of room for future modules. Names longer than this are
+    // truncated by setName(). 8 bytes saved per module vs the previous char[24]
+    // (~240 bytes total RAM on a typical tree).
+    char name_[16] = {};
     const char* typeName_ = "";  // points into flash (factory string literal); see setTypeName comment
     bool enabled_ = true;
     bool dirty_ = false;
@@ -214,6 +246,8 @@ private:
     uint8_t childCapacity_ = 0;
     size_t classSize_ = 0;
     size_t dynamicBytes_ = 0;
+    const char* status_ = nullptr;  // see status() / setStatus()
+    Severity severity_ = Severity::Status;
     uint32_t loopTimeUs_ = 0;
     uint32_t accumUs_ = 0;
 };

@@ -23,6 +23,11 @@ void getMacAddress(uint8_t mac[6]);
 const char* chipModel();
 const char* sdkVersion();
 
+// This host's LAN IPv4 address as a dotted string, or "" if unavailable.
+// Desktop: the outbound interface address. ESP32: empty — the device IP is
+// owned by NetworkModule (WiFi/Ethernet), not the platform layer.
+const char* hostIp();
+
 // Human-readable reset reason: "POWERON", "SW", "PANIC", "INT_WDT", "TASK_WDT",
 // "BROWNOUT", "DEEPSLEEP", or "UNKNOWN". On desktop always returns "OK". UI uses
 // this to flag a "crashed" prior boot (PANIC / INT_WDT / TASK_WDT / BROWNOUT).

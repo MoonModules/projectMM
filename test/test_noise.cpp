@@ -1,18 +1,26 @@
 #include "doctest.h"
-#include "light/NoiseEffect.h"
-#include "light/RainbowEffect.h"
-#include "light/GridLayout.h"
+#include "light/effects/NoiseEffect.h"
+#include "light/effects/PlasmaEffect.h"
+#include "light/effects/RainbowEffect.h"
+#include "light/layouts/GridLayout.h"
+
+// Hash one z-slice of the layer buffer (used by 3D-depth tests below).
+static uint32_t hashSlice(const uint8_t* data, size_t sliceBytes) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < sliceBytes; i++) { h ^= data[i]; h *= 16777619u; }
+    return h;
+}
 
 TEST_CASE("NoiseEffect writes non-zero RGB data to buffer") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 8;
     grid.height = 8;
     grid.depth = 1;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     mm::NoiseEffect noise;
@@ -32,15 +40,15 @@ TEST_CASE("NoiseEffect writes non-zero RGB data to buffer") {
 }
 
 TEST_CASE("NoiseEffect produces spatial variation") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 16;
     grid.height = 16;
     grid.depth = 1;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     mm::NoiseEffect noise;
@@ -58,16 +66,16 @@ TEST_CASE("NoiseEffect produces spatial variation") {
 }
 
 TEST_CASE("NoiseEffect produces different output than RainbowEffect") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 8;
     grid.height = 8;
     grid.depth = 1;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     // Render rainbow
     mm::Layer layer1;
-    layer1.setLayoutGroup(&layoutGroup);
+    layer1.setLayouts(&layouts);
     layer1.setChannelsPerLight(3);
     mm::RainbowEffect rainbow;
     layer1.addChild(&rainbow);
@@ -76,7 +84,7 @@ TEST_CASE("NoiseEffect produces different output than RainbowEffect") {
 
     // Render noise
     mm::Layer layer2;
-    layer2.setLayoutGroup(&layoutGroup);
+    layer2.setLayouts(&layouts);
     layer2.setChannelsPerLight(3);
     mm::NoiseEffect noise;
     layer2.addChild(&noise);
@@ -92,4 +100,56 @@ TEST_CASE("NoiseEffect produces different output than RainbowEffect") {
         }
     }
     CHECK(differs);
+}
+
+// Z-axis variation tests: with depth > 1 each z-slice must differ from the
+// next. A 2D-only effect (the previous behaviour) produced identical slices —
+// these tests pin the bug fixed.
+
+TEST_CASE("NoiseEffect produces different output per z-slice with depth > 1") {
+    mm::Layouts layouts;
+    mm::GridLayout grid;
+    grid.width = 8; grid.height = 8; grid.depth = 8;
+    layouts.addChild(&grid);
+
+    mm::Layer layer;
+    layer.setLayouts(&layouts);
+    layer.setChannelsPerLight(3);
+    mm::NoiseEffect noise;
+    layer.addChild(&noise);
+    layer.onAllocateMemory();
+    layer.loop();
+
+    const size_t sliceBytes = static_cast<size_t>(grid.width) * grid.height * 3;
+    REQUIRE(layer.buffer().bytes() == sliceBytes * grid.depth);
+
+    uint32_t h0 = hashSlice(layer.buffer().data() + 0 * sliceBytes, sliceBytes);
+    uint32_t h1 = hashSlice(layer.buffer().data() + 1 * sliceBytes, sliceBytes);
+    uint32_t h4 = hashSlice(layer.buffer().data() + 4 * sliceBytes, sliceBytes);
+    CHECK(h0 != h1);  // adjacent slices differ
+    CHECK(h0 != h4);  // distant slices differ
+}
+
+TEST_CASE("PlasmaEffect produces different output per z-slice with depth > 1") {
+    mm::Layouts layouts;
+    mm::GridLayout grid;
+    grid.width = 8; grid.height = 8; grid.depth = 8;
+    layouts.addChild(&grid);
+
+    mm::Layer layer;
+    layer.setLayouts(&layouts);
+    layer.setChannelsPerLight(3);
+    mm::PlasmaEffect plasma;
+    layer.addChild(&plasma);
+    layer.onAllocateMemory();
+    layer.loop();
+
+    const size_t sliceBytes = static_cast<size_t>(grid.width) * grid.height * 3;
+    REQUIRE(layer.buffer().bytes() == sliceBytes * grid.depth);
+
+    uint32_t h0 = hashSlice(layer.buffer().data() + 0 * sliceBytes, sliceBytes);
+    uint32_t h2 = hashSlice(layer.buffer().data() + 2 * sliceBytes, sliceBytes);
+    uint32_t h7 = hashSlice(layer.buffer().data() + 7 * sliceBytes, sliceBytes);
+    CHECK(h0 != h2);
+    CHECK(h0 != h7);
 }

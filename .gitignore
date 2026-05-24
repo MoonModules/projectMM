@@ -87,6 +87,11 @@ esp32/monitor.log
 .vscode/
 .idea/
 
+# Claude Code — per-machine local settings (absolute paths, not shared)
+# and per-session runtime state (lock files for scheduled wakeups, etc.)
+.claude/settings.local.json
+.claude/*.lock
+
 # OS
 .DS_Store
 Thumbs.db

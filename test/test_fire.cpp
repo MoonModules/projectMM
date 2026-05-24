@@ -1,17 +1,17 @@
 #include "doctest.h"
-#include "light/FireEffect.h"
-#include "light/GridLayout.h"
+#include "light/effects/FireEffect.h"
+#include "light/layouts/GridLayout.h"
 
 TEST_CASE("FireEffect allocates heat buffer when enabled") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 16;
     grid.height = 16;
     grid.depth = 1;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     mm::FireEffect fire;
@@ -22,15 +22,15 @@ TEST_CASE("FireEffect allocates heat buffer when enabled") {
 }
 
 TEST_CASE("FireEffect renders non-zero buffer after enough sparks") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 16;
     grid.height = 16;
     grid.depth = 1;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     mm::FireEffect fire;
@@ -52,15 +52,15 @@ TEST_CASE("FireEffect renders non-zero buffer after enough sparks") {
 }
 
 TEST_CASE("FireEffect frees heat buffer when disabled") {
-    mm::LayoutGroup layoutGroup;
+    mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 8;
     grid.height = 8;
     grid.depth = 1;
-    layoutGroup.addChild(&grid);
+    layouts.addChild(&grid);
 
     mm::Layer layer;
-    layer.setLayoutGroup(&layoutGroup);
+    layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
 
     mm::FireEffect fire;

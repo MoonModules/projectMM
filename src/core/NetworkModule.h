@@ -37,14 +37,17 @@ public:
             // Ethernet-only build: no WiFi fallback. Stay Idle until a cable
             // appears (WaitingEth is only entered on a successful ethInit()).
             state_ = State::Idle;
-            std::snprintf(statusStr_, sizeof(statusStr_), "No network (Ethernet only)");
+            std::snprintf(statusStr_, sizeof(statusStr_), "No network (Ethernet only)"); setStatus(statusStr_, Severity::Error);
         }
 
         stateChangeTime_ = platform::millis();
     }
 
     void onBuildControls() override {
-        controls_.addReadOnly("status", statusStr_, sizeof(statusStr_));
+        // statusStr_ surfaces via MoonModule::status() (rendered as a chip on
+        // the card header). No "status" control row — same information, one
+        // less control to scroll past.
+        setStatus(statusStr_);
         // WiFi credential controls are absent in the Ethernet-only build.
         if constexpr (platform::hasWiFi) {
             controls_.addText("ssid", ssid_, sizeof(ssid_));
@@ -89,7 +92,7 @@ public:
                         }
                     } else {
                         // Ethernet-only build: no fallback. Keep polling for a cable.
-                        std::snprintf(statusStr_, sizeof(statusStr_), "No network (Ethernet only)");
+                        std::snprintf(statusStr_, sizeof(statusStr_), "No network (Ethernet only)"); setStatus(statusStr_, Severity::Error);
                         stateChangeTime_ = now;
                     }
                 }
@@ -122,7 +125,7 @@ public:
                         // Ethernet-only build: drop back to polling for the cable.
                         std::printf("NetworkModule: Ethernet dropped\n");
                         platform::mdnsStop();
-                        std::snprintf(statusStr_, sizeof(statusStr_), "No network (Ethernet only)");
+                        std::snprintf(statusStr_, sizeof(statusStr_), "No network (Ethernet only)"); setStatus(statusStr_, Severity::Error);
                         state_ = State::WaitingEth;
                         stateChangeTime_ = now;
                     }
@@ -218,14 +221,15 @@ private:
             state_ = State::AP;
             stateChangeTime_ = platform::millis();
             apShutdownPending_ = true;
-            std::snprintf(statusStr_, sizeof(statusStr_), "AP: %s @ 4.3.2.1", apName);
+            std::snprintf(statusStr_, sizeof(statusStr_), "AP: %s @ 4.3.2.1", apName); setStatus(statusStr_, Severity::Status);
             std::printf("NetworkModule: AP started: %s\n", apName);
         } else {
             state_ = State::Idle;
-            std::snprintf(statusStr_, sizeof(statusStr_), "No network");
+            std::snprintf(statusStr_, sizeof(statusStr_), "No network"); setStatus(statusStr_, Severity::Error);
         }
-        // statusStr_ is a pointer-bound ReadOnly control, so no control rebuild
-        // is needed; just kick the scheduler for any dependent reallocations.
+        // statusStr_ is the buffer MoonModule::status_ points at — no control
+        // rebuild needed (it isn't a control any more); just kick the scheduler
+        // for any dependent reallocations.
         if (scheduler_) scheduler_->rebuild();
     }
 
@@ -255,8 +259,9 @@ private:
 
         syncMdns();
 
-        // statusStr_ is a pointer-bound ReadOnly control, so no control rebuild
-        // is needed; just kick the scheduler for any dependent reallocations.
+        // statusStr_ is the buffer MoonModule::status_ points at — no control
+        // rebuild needed (it isn't a control any more); just kick the scheduler
+        // for any dependent reallocations.
         if (scheduler_) scheduler_->rebuild();
     }
 
@@ -264,11 +269,11 @@ private:
         char ip[16] = {};
         if (state_ == State::ConnectedEth) {
             platform::ethGetIP(ip, sizeof(ip));
-            std::snprintf(statusStr_, sizeof(statusStr_), "Eth: %s", ip);
+            std::snprintf(statusStr_, sizeof(statusStr_), "Eth: %s", ip); setStatus(statusStr_, Severity::Status);
         } else if constexpr (platform::hasWiFi) {
             if (state_ == State::ConnectedSta) {
                 platform::wifiStaGetIP(ip, sizeof(ip));
-                std::snprintf(statusStr_, sizeof(statusStr_), "WiFi: %s", ip);
+                std::snprintf(statusStr_, sizeof(statusStr_), "WiFi: %s", ip); setStatus(statusStr_, Severity::Status);
             }
         }
     }

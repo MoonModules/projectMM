@@ -21,13 +21,13 @@ The code API answers one question: **does this LUT have a mapping table?**
 - **`setIdentity(count)`** — sets identity mode (1:1 identical). No table allocated, `hasLUT()` returns false. `forEachDestination(i, cb)` calls `cb(i)` — logical index IS the physical index.
 - **`build(logicalCount, maxDest)`** — allocates CSR arrays for non-identity mapping. `hasLUT()` returns true.
 
-Callers don't need to know which mapping type is used — they only need to know whether a table exists. DriverGroup checks `hasLUT()` to decide whether to allocate an output buffer. BlendMap checks `hasLUT()` to choose between memcpy (identity) and LUT-based mapping.
+Callers don't need to know which mapping type is used — they only need to know whether a table exists. Drivers checks `hasLUT()` to decide whether to allocate an output buffer. BlendMap checks `hasLUT()` to choose between memcpy (identity) and LUT-based mapping.
 
 Naming: `setIdentity()` / `hasLUT()` are used rather than a "one-to-one" flag because "one-to-one" is ambiguous — it reads as covering all 1:1 mappings, but the table-free fast path applies only to the *sequential identity* case (logical index == physical index).
 
 ## Storage
 
-Uses `nrOfLightsType` typedef (see architecture-light.md): `uint16_t` on no-PSRAM, `uint32_t` on PSRAM.
+Uses `nrOfLightsType` typedef (see [architecture.md § 3D from the start](../../architecture.md#3d-from-the-start)): `uint16_t` on no-PSRAM, `uint32_t` on PSRAM.
 
 CSR (Compressed Sparse Row) format: two arrays — `offsets[logicalCount + 1]` stores where each entry's destinations start, `destinations[]` stores the flat list of physical indices. For entry `i`, destinations are `destinations[offsets[i] .. offsets[i+1])`.
 
@@ -35,7 +35,7 @@ Memory: `estimateBytes(logicalCount, maxDest)` returns the total allocation size
 
 ## Size information
 
-`totalDestinations` (total physical lights) is provided by the LayoutGroup. Used by both layers and driver groups to allocate their buffers. Destinations are therefore always within valid bounds.
+`totalDestinations` (total physical lights) is provided by the Layouts container. Used by each Layer and by the Drivers container to allocate their buffers. Destinations are therefore always within valid bounds.
 
 ## Prior art
 

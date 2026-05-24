@@ -1,5 +1,12 @@
 #include "doctest.h"
-#include "light/MirrorModifier.h"
+#include "light/modifiers/MirrorModifier.h"
+
+TEST_CASE("MirrorModifier advertises D3 dimensions") {
+    // MirrorModifier handles all three axes via mirrorX/Y/Z toggles, so the
+    // factory dim chip should be 🧊. Pins the default for ModifierBase too.
+    mm::MirrorModifier mirror;
+    CHECK(mirror.dimensions() == mm::Dim::D3);
+}
 
 TEST_CASE("MirrorModifier logicalDimensions even grid") {
     mm::MirrorModifier mirror;

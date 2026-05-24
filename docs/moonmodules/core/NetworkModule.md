@@ -21,7 +21,7 @@ When a higher-priority connection becomes available, lower ones are torn down to
 - `addressing` (dropdown: DHCP / Static) — IP addressing mode (applies to both Ethernet and WiFi STA)
 - When Static: `ip`, `gateway`, `subnet` (text controls, shown dynamically via onBuildControls)
 - `dns` (text, optional) — DNS server. Empty = use gateway as DNS.
-- `status` (read-only) — current state: "Ethernet 192.168.1.210", "WiFi STA 192.168.1.100", "AP 4.3.2.1"
+No `status` *control*; the module surfaces its state via the generic `MoonModule::status()` slot — "Eth: 192.168.1.210", "WiFi: 10.0.0.5", "AP: MM-XXX @ 4.3.2.1", or "No network". The UI renders it as a chip in the card header (ℹ️ when connected, ❌ when no network) rather than a control row.
 
 Dynamic controls: when `addressing` changes, onBuildControls is called to show/hide the static IP fields.
 
@@ -55,7 +55,7 @@ The firmware always includes Ethernet support — no separate firmware for Ether
 
 ### Boot order: network before light buffers
 
-NetworkModule must be registered with the Scheduler **before** Layer and DriverGroup. The Scheduler runs setup() sequentially by registration order. This ensures network memory is claimed first, and the light pipeline's adaptive allocation (`canAllocate()`) sees the actual remaining heap — not an optimistic number that shrinks later when WiFi starts.
+NetworkModule must be registered with the Scheduler **before** Layer and Drivers. The Scheduler runs setup() sequentially by registration order. This ensures network memory is claimed first, and the light pipeline's adaptive allocation (`canAllocate()`) sees the actual remaining heap — not an optimistic number that shrinks later when WiFi starts.
 
 ### Runtime transitions
 

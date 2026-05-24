@@ -5,6 +5,14 @@ add_executable(mm_tests
     test_system_module.cpp
     test_grid_layout.cpp
     test_rainbow.cpp
+    test_extrude.cpp
+    test_layers_container.cpp
+    test_drivers_container.cpp
+    test_phase_animation.cpp
+    test_effects_zero_grid.cpp
+    test_layouts_container.cpp
+    test_layout_toggle_cycle.cpp
+    test_scheduler_unique_names.cpp
     test_artnet_packet.cpp
     test_noise.cpp
     test_mapping_lut.cpp
@@ -12,6 +20,7 @@ add_executable(mm_tests
     test_blend_map.cpp
     test_filesystem_persistence.cpp
     test_movechild.cpp
+    test_replacechild.cpp
     test_module_factory.cpp
     test_preview_driver.cpp
     test_fire.cpp

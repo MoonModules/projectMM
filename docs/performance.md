@@ -9,7 +9,7 @@ Measured per-module timing, memory allocation, and sizeof for each platform. Upd
 | Module | Time (us) | % of tick |
 |--------|----------|----------|
 | Noise effect | 50 | 100% |
-| DriverGroup (blendMap + drivers) | ~0 | <1% |
+| Drivers (blendMap + drivers) | ~0 | <1% |
 | ArtNet | ~0 | <1% |
 | **Total tick** | **50** | **FPS: 20,000** |
 
@@ -20,7 +20,7 @@ Desktop ArtNet sends to a non-existent IP so packets complete instantly.
 | Module | dynamicBytes | Breakdown |
 |--------|-------------|-----------|
 | Layer | 92KB | 12KB buffer + 80KB LUT (uint32_t indices on desktop) |
-| DriverGroup | 48KB | output buffer (128x128x3) |
+| Drivers | 48KB | output buffer (128x128x3) |
 
 Desktop `freeHeap` returns 0 (unlimited). No memory constraints.
 
@@ -30,7 +30,7 @@ Desktop `freeHeap` returns 0 (unlimited). No memory constraints.
 |-------|---------------|
 | MoonModule | 104 |
 | Layer | 176 |
-| DriverGroup | 120 |
+| Drivers | 120 |
 | GridLayout | 104 |
 | SystemModule | ~280 |
 | NetworkModule | ~320 |
@@ -48,7 +48,7 @@ Per-module breakdown from `esp32/monitor.log`, eth-only firmware, 16,384 lights:
 
 | Module | Time (us) | % of tick | Notes |
 |--------|----------|----------|-------|
-| DriverGroup (BlendMap LUT traversal) | 45,800 | **89%** | 4096 logical → 16384 physical via CSR LUT, **includes** the ArtNet child |
+| Drivers (BlendMap LUT traversal) | 45,800 | **89%** | 4096 logical → 16384 physical via CSR LUT, **includes** the ArtNet child |
 | &nbsp;&nbsp;↳ ArtNet (97 UDP packets) | 27,700 | 54% | lwIP per-packet overhead (connected socket + core locking) |
 | RainbowEffect | 3,400 | 7% | 4096 logical pixels |
 | Layer | 3,500 | 7% | buffer clear + effect dispatch |
@@ -63,10 +63,13 @@ The FPS-swing fix (HttpServer ~44,000 → ~850 µs) and the ArtNet send-cost opt
 
 | Configuration | Tick | FPS | Free heap |
 |--------------|------|-----|-----------|
-| Ethernet, mirror XY, browser connected (current) | ~51ms | 19 | 128KB |
+| Ethernet, mirror XY, PlasmaEffect, browser connected | ~44ms | 22 | 132KB |
+| Ethernet, mirror XY, RainbowEffect, browser connected | ~51ms | 19 | 128KB |
 | Ethernet, mirror XY (before FPS-swing + ArtNet fixes) | 69ms | 14 | 124KB |
 | Ethernet, mirror XY (before System/Network) | 58ms | 17 | 153KB |
 | 128x64, Ethernet, mirror XY | 26-30ms | 33-37 | 182-204KB |
+
+The Plasma row is from the dim/extrude refactor snapshot (Plasma is the loaded effect via UI state at capture). PlasmaEffect's loop ran ~4,150 µs per tick on the Olimex board (vs ~3,400 µs for RainbowEffect) — a small per-frame cost increase that the rest of the pipeline (slightly smaller image, dim flow added) absorbs to net 3 FPS faster overall. None of the recent factory/extrude changes touched the hot path; the delta is within run-to-run jitter.
 
 ### Run-to-run tick variance
 
@@ -130,7 +133,7 @@ Known, accepted for now: `detail = 3` drops render FPS below the 18 FPS / 16384-
 | Module | dynamicBytes | Breakdown |
 |--------|-------------|-----------|
 | Layer | 52KB | 12KB buffer + 40KB LUT (uint16_t indices on ESP32) |
-| DriverGroup | 48KB | output buffer (128x128x3) |
+| Drivers | 48KB | output buffer (128x128x3) |
 | System + Network | 0 | No dynamic allocation (char buffers in class) |
 
 LUT is half the size of desktop (uint16_t vs uint32_t per entry).
@@ -146,7 +149,7 @@ LUT is half the size of desktop (uint16_t vs uint32_t per entry).
 | Driver output buffer | 49,152 | 128x128x3 (physical) |
 | Preview frame | 0 | Zero-copy: pointer to output buffer |
 | HTTP + WebSocket | ~8,000 | Server + kernel buffers |
-| MoonModule instances | ~3,000 | All modules (System, Network, Layout, Layer, DriverGroup, HttpServer) |
+| MoonModule instances | ~3,000 | All modules (System, Network, Layout, Layer, Drivers, HttpServer) |
 | **Free heap (running)** | **~124,000** | Stable, no leaks observed |
 
 ### Memory during mirror toggle (from live scenario)
@@ -193,7 +196,7 @@ The partition layout matches projectMM v1: app0/app1 = 1.75 MB each, `spiffs` (L
 | Metric | 1:1 identical (no modifier) | With mirror (LUT) |
 |--------|---------------------------|-------------------|
 | Layer dynamicBytes | 49KB (buffer only) | 52KB (buffer + LUT) |
-| DriverGroup dynamicBytes | 0 | 48KB (output buffer) |
+| Drivers dynamicBytes | 0 | 48KB (output buffer) |
 | Total pipeline | 49KB | 100KB |
 | Extra overhead | none | LUT traversal + blendMap |
 
@@ -215,7 +218,7 @@ Downsample preview (every 4th pixel) to reduce frame data. Point cloud still loo
 
 ### Skip output buffer for 1:1 identical
 
-Already implemented: `hasLUT()` returns false, DriverGroup skips output buffer, drivers read Layer buffer directly. Saves 49KB.
+Already implemented: `hasLUT()` returns false, Drivers skips output buffer, drivers read Layer buffer directly. Saves 49KB.
 
 ### Custom partition table
 

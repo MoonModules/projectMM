@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "light/GridLayout.h"
+#include "light/layouts/GridLayout.h"
 
 #include <vector>
 
@@ -100,8 +100,8 @@ TEST_CASE("GridLayout 1x1x1 edge case") {
     CHECK(coords[0].z == 0);
 }
 
-TEST_CASE("LayoutGroup with one layout") {
-    mm::LayoutGroup group;
+TEST_CASE("Layouts with one layout") {
+    mm::Layouts group;
     mm::GridLayout grid;
     grid.width = 4;
     grid.height = 4;
@@ -115,8 +115,8 @@ TEST_CASE("LayoutGroup with one layout") {
     CHECK(coords.size() == 16);
 }
 
-TEST_CASE("LayoutGroup with two layouts offsets physical indices") {
-    mm::LayoutGroup group;
+TEST_CASE("Layouts with two layouts offsets physical indices") {
+    mm::Layouts group;
 
     mm::GridLayout grid1;
     grid1.width = 2;
