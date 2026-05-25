@@ -159,6 +159,15 @@
       "help": "improv_provision",
       "script": "build/improv_provision.py",
       "needs_port": true
+    },
+    {
+      "id": "improv_probe",
+      "tab": "esp32",
+      "group": "run",
+      "label": "Improv Probe",
+      "help": "improv_probe",
+      "script": "build/improv_probe.py",
+      "needs_port": true
     }
   ]
 }

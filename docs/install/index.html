@@ -119,17 +119,18 @@
 <body>
   <main>
     <h1>projectMM</h1>
-    <p class="tag">Plug in your ESP32. Pick the board. Flash. Open in a browser.</p>
+    <p class="tag">Plug in your ESP32. Pick a release + board. Flash. Get the device on your network. Open it in a browser.</p>
 
     <div class="card browser-warning" id="browser-warning">
       <strong>This browser can't flash directly.</strong>
-      ESP Web Tools needs Web Serial — open this page in <strong>Chrome</strong>,
-      <strong>Edge</strong>, or <strong>Opera</strong> on a desktop. Firefox and
-      Safari don't support Web Serial. The release page on GitHub has the same
-      binaries for manual flashing.
+      ESP Web Tools needs Web Serial — open this page in
+      <strong>Chrome</strong> or <strong>Edge</strong> on a desktop. Firefox
+      and Safari don't support Web Serial. The release page on GitHub has the
+      same binaries for manual flashing.
     </div>
 
     <div class="card">
+      <strong>Step 1 — Pick a release + board and flash.</strong>
       <!-- Picker mounts here. Release (newest-first, RCs flagged) →
            Board. Same module the on-device OTA UI uses. -->
       <div id="picker-mount"></div>
@@ -145,28 +146,27 @@
       <div class="button-row" id="button-host" style="display: none"></div>
 
       <p class="note">
-        The Ethernet builds were verified on the
+        Ethernet builds (<code>esp32-eth</code>, <code>esp32-eth-wifi</code>)
+        were verified on the
         <a href="https://www.olimex.com/Products/IoT/ESP32/ESP32-GATEWAY/open-source-hardware"
            target="_blank" rel="noopener">Olimex ESP32-Gateway</a>
         (LAN8720 PHY, reset on GPIO 5, MDIO addr 0). Boards with the same PHY
-        but different pins (e.g. WT32-ETH01: reset on GPIO 16) need a local
-        rebuild today.
+        but different pins (e.g. WT32-ETH01: reset on GPIO 16) need a local rebuild.
       </p>
     </div>
 
     <div class="card">
-      <strong>After flashing — WiFi builds:</strong>
-      <ol>
-        <li>The device boots a SoftAP named <code>projectMM-xxxx</code>.</li>
-        <li>Join it from your phone or laptop.</li>
-        <li>Open <code>http://4.3.2.1</code> in a browser, enter your home WiFi credentials.</li>
-        <li>The device reboots, joins your network, and the UI is reachable at its DHCP-assigned IP (visible in your router).</li>
-      </ol>
-      <strong>After flashing — Ethernet builds:</strong>
-      <ol>
-        <li>Plug an Ethernet cable into the device.</li>
-        <li>Open the DHCP-assigned IP in a browser (check your router for new devices). mDNS hostnames work too on most networks.</li>
-      </ol>
+      <strong>Step 2 — Get the device on your network.</strong>
+      <p><strong>WiFi:</strong> right after flashing, the ESP Web Tools dialog above shows a <em>Configure Wi-Fi</em> step (via Improv) — enter your SSID + password, click <strong>Connect</strong>, the device joins your network. If the dialog didn't appear or you skipped it: the device boots a SoftAP named <code>MM-XXXX</code> (4 hex digits from the chip MAC). Join it from your phone or laptop, open <code>http://4.3.2.1</code>, enter your WiFi credentials. The device reboots and joins your network.</p>
+      <p><strong>Ethernet:</strong> plug a cable in. No credentials needed — the device joins immediately.</p>
+    </div>
+
+    <div class="card">
+      <strong>Step 3 — Open the device's UI in a browser.</strong>
+      <ul>
+        <li><code>http://&lt;devicename&gt;.local</code> — the mDNS hostname tracks the device's name. Out of the box that's <code>MM-XXXX</code> (same 4 hex digits as the SoftAP / the name Improv reports), so <code>http://MM-XXXX.local</code>. Rename the device in its UI and the hostname updates to match. Works on most home networks.</li>
+        <li>or its DHCP-assigned IP, visible in your router's client list.</li>
+      </ul>
       <p class="note">
         Source code and releases:
         <a href="https://github.com/ewowi/projectMM" target="_blank" rel="noopener">github.com/ewowi/projectMM</a>.

@@ -1149,7 +1149,31 @@ static void improvDispatchFrame(const ImprovFrameParser& parser) {
         parser.lastPayload(), parser.lastPayloadLen(), false);
     switch (cmd.command) {
         case improv::GET_CURRENT_STATE:
-            improvSendCurrentState(wifiStaConnected() ? improv::STATE_PROVISIONED : improv::STATE_AUTHORIZED);
+            if (wifiStaConnected()) {
+                improvSendCurrentState(improv::STATE_PROVISIONED);
+                // Follow up the state frame with the device URL on the
+                // WIFI_SETTINGS RPC, the way ESPHome does. The state frame
+                // alone tells a tool the device is on WiFi but doesn't say
+                // *where*; the URL follow-up makes the protocol self-
+                // describing on every reconnect (any future Improv client —
+                // a browser tab post-refresh, a re-run of improv_probe.py,
+                // another tool — can find the device without re-provisioning).
+                // ESP Web Tools' current rich-panel "Visit Device" affordance
+                // is in-session-only, so this doesn't visibly change its UI;
+                // the value is protocol completeness, observable via
+                // improv_probe.py.
+                char ip[32] = {};
+                wifiStaGetIP(ip, sizeof(ip));
+                if (ip[0]) {
+                    char url[64];
+                    std::snprintf(url, sizeof(url), "http://%s/", ip);
+                    std::vector<std::string> urls = { url };
+                    auto rpc = improv::build_rpc_response(improv::WIFI_SETTINGS, urls, false);
+                    improvSend(ImprovFrameType::RpcResponse, rpc);
+                }
+            } else {
+                improvSendCurrentState(improv::STATE_AUTHORIZED);
+            }
             break;
         case improv::GET_DEVICE_INFO: improvSendDeviceInfo(); break;
         case improv::GET_WIFI_NETWORKS:

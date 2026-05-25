@@ -189,3 +189,25 @@ done
 The host-WiFi reader lives at [scripts/build/host_wifi.py](build/host_wifi.py) and runs standalone for diagnosis (`python3 scripts/build/host_wifi.py` prints the detected SSID + password). The first macOS run pops a Keychain access dialog — the OS doing its job; we don't try to bypass it.
 
 Replaces v1's `deploy/wifi.py` + `deploy/flashfs.py --wifi` partition-baking flow — the device stays running, no flash mode required. Full module + protocol details: [docs/moonmodules/core/ImprovProvisioningModule.md](../docs/moonmodules/core/ImprovProvisioningModule.md).
+
+### improv_probe
+
+Non-destructive Improv health check. Sends `GET_DEVICE_INFO` + `GET_CURRENT_STATE` Improv RPCs and prints whatever the device reports — no credentials are exchanged, no WiFi state changes. Useful when ESP Web Tools shows the minimal popup instead of the rich panel and you want to know whether the device's Improv listener is actually answering on the wire.
+
+**One-click flow**: pick the device's port in MoonDeck, hit **Improv Probe**. Typical output on a provisioned device:
+
+```
+==> probing /dev/tty.usbserial-XXXX
+    → GET_DEVICE_INFO
+      firmware: 'projectMM'
+      version: '1.0.0-rc2'
+      chip: 'ESP32'
+      name: 'MM-BD3C'
+    → GET_CURRENT_STATE
+      state: provisioned
+      url: http://192.168.1.207/
+==> Improv healthy (device info + state + URL follow-up)
+```
+
+Exits 0 if both RPCs answered, 1 if the device didn't respond (Improv listener not running, wrong port, or a USB-CDC stall — try power-cycling). Reads `improv_provision.py`'s framing helpers, so the two scripts stay byte-identical on the wire.
+
