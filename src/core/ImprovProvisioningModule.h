@@ -6,6 +6,7 @@
 #include "core/build_info.h"
 #include "platform/platform.h"
 
+#include <atomic>
 #include <cstring>
 
 namespace mm {
@@ -61,16 +62,16 @@ public:
 
     void loop1s() override {
         // The platform task writes credentials into pendingSsid_/pendingPassword_
-        // and flips pendingCredentials_. We forward to NetworkModule on the
-        // scheduler thread so wifiStaInit happens away from the parser task's
-        // small stack. Clear the flag last so the platform task can rearm.
-        if (pendingCredentials_ && networkModule_) {
+        // then publishes via a release-store on pendingCredentials_. We do an
+        // acquire-load here so the buffer writes are visible before we read
+        // them. Pairs with the release-store in platform_esp32.cpp.
+        if (pendingCredentials_.load(std::memory_order_acquire) && networkModule_) {
             networkModule_->setWifiCredentials(pendingSsid_, pendingPassword_);
             // Wipe the on-stack-ish password buffer; status string keeps any
             // error message the platform layer wrote. SSID is non-sensitive,
             // leave it for the next poll if a re-provision arrives.
             std::memset(pendingPassword_, 0, sizeof(pendingPassword_));
-            pendingCredentials_ = false;
+            pendingCredentials_.store(false, std::memory_order_release);
         }
     }
 
@@ -80,12 +81,14 @@ private:
     char statusStr_[64] = "listening";
 
     // Buffers the platform task writes; sized to NetworkModule's storage.
-    // `volatile bool` for the ready flag — read by this module's loop1s()
-    // on the scheduler thread, written by the Improv task. Single-byte
-    // store is atomic on Xtensa; no torn reads possible.
+    // std::atomic<bool> for the ready flag — read by loop1s() on the
+    // scheduler thread, written by the Improv task. Acquire/release fencing
+    // ensures the buffer writes are ordered against the flag publication,
+    // which matters on dual-core Xtensa where the producer and consumer can
+    // run on different cores.
     char pendingSsid_[33] = {};
     char pendingPassword_[64] = {};
-    volatile bool pendingCredentials_ = false;
+    std::atomic<bool> pendingCredentials_{false};
 };
 
 } // namespace mm

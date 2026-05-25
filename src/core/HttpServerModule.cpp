@@ -189,7 +189,16 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
 }
 
 void HttpServerModule::sendResponse(platform::TcpConnection& conn, int status, const char* contentType, const char* body) {
-    const char* statusText = status == 200 ? "OK" : status == 400 ? "Bad Request" : status == 404 ? "Not Found" : status == 405 ? "Method Not Allowed" : "Error";
+    const char* statusText =
+        status == 200 ? "OK" :
+        status == 202 ? "Accepted" :
+        status == 400 ? "Bad Request" :
+        status == 404 ? "Not Found" :
+        status == 405 ? "Method Not Allowed" :
+        status == 409 ? "Conflict" :
+        status == 500 ? "Internal Server Error" :
+        status == 501 ? "Not Implemented" :
+        "Error";
     char header[256];
     int bodyLen = static_cast<int>(std::strlen(body));
     int headerLen = std::snprintf(header, sizeof(header),
@@ -921,6 +930,21 @@ void HttpServerModule::handleFirmwareUrl(platform::TcpConnection& conn, const ch
     if constexpr (!platform::hasOta) {
         sendResponse(conn, 501, "application/json",
                      "{\"error\":\"OTA not supported on this platform\"}");
+        return;
+    }
+
+    // Concurrency guard. esp_https_ota_begin rejects a second concurrent
+    // OTA (ESP_FAIL on partition-already-acquired), but both racing tasks
+    // would write to g_otaStatus/g_otaBytesRead/g_otaBytesTotal and the UI
+    // shows garbled progress. Check g_otaStatus for an in-flight state and
+    // reject early with 409. Successful OTAs reboot, so the only path that
+    // re-enables a new attempt after an in-flight one is an explicit error.
+    if (std::strcmp(g_otaStatus, "starting")    == 0 ||
+        std::strcmp(g_otaStatus, "downloading") == 0 ||
+        std::strcmp(g_otaStatus, "flashing")    == 0 ||
+        std::strcmp(g_otaStatus, "rebooting")   == 0) {
+        sendResponse(conn, 409, "application/json",
+                     "{\"error\":\"ota already in progress\"}");
         return;
     }
 

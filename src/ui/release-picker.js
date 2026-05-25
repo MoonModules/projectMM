@@ -56,32 +56,39 @@ function makeState() {
 // 2. GitHub Releases API + sessionStorage cache
 // ---------------------------------------------------------------------------
 
+// Safe sessionStorage accessor — private/incognito Safari throws on
+// getItem/setItem entirely, not just quota. Wrap every access so a host
+// browser with storage disabled is a cache miss, not an exception.
+function safeStorageGet(key) {
+    try { return sessionStorage.getItem(key); } catch (_) { return null; }
+}
+function safeStorageSet(key, value) {
+    try { sessionStorage.setItem(key, value); } catch (_) { /* ignore */ }
+}
+
 // Returns the parsed releases array, or null on hard failure (network, 403).
 // Stale cache is served on transient failures so the dropdown doesn't go empty.
 async function loadReleases({ bypassCache = false } = {}) {
     if (!bypassCache) {
-        try {
-            const raw = sessionStorage.getItem(CACHE_KEY);
-            if (raw) {
-                const obj = JSON.parse(raw);
-                if (Date.now() - obj.ts < CACHE_TTL_MS) return obj.data;
-            }
-        } catch (_) { /* sessionStorage disabled or quota — fall through to fetch */ }
+        const raw = safeStorageGet(CACHE_KEY);
+        if (raw) try {
+            const obj = JSON.parse(raw);
+            if (Date.now() - obj.ts < CACHE_TTL_MS) return obj.data;
+        } catch (_) { /* corrupt cache — fall through to fetch */ }
     }
     try {
         const res = await fetch(API_URL);
         if (!res.ok) {
             // 403 = anonymous rate-limit (60/hr). Fall back to stale cache if any.
-            const raw = sessionStorage.getItem(CACHE_KEY);
+            const raw = safeStorageGet(CACHE_KEY);
             if (raw) try { return JSON.parse(raw).data; } catch (_) { /* fall through */ }
             return null;
         }
         const data = await res.json();
-        try { sessionStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data })); }
-        catch (_) { /* quota — cache miss is recoverable */ }
+        safeStorageSet(CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
         return data;
     } catch (_) {
-        const raw = sessionStorage.getItem(CACHE_KEY);
+        const raw = safeStorageGet(CACHE_KEY);
         if (raw) try { return JSON.parse(raw).data; } catch (_) { /* fall through */ }
         return null;
     }
@@ -219,11 +226,20 @@ function render(state) {
     // the "is this binary for my chip?" question, so the release dropdown
     // doesn't pre-filter on it — a user can still see every release that
     // exists, even ones whose binaries don't match their board.
-    releaseEl.innerHTML = sorted.map((r, i) => {
+    //
+    // Use textContent rather than innerHTML so a tag name that contains
+    // HTML (a compromised release tag, a typo with a literal `<`) renders
+    // as text instead of getting injected. r.tag_name is GitHub-API-supplied
+    // — outside our control once the picker fetches it.
+    releaseEl.replaceChildren();
+    sorted.forEach((r, i) => {
+        const opt = document.createElement("option");
+        opt.value = String(i);
         const flag = r.prerelease ? " (beta)" : "";
         const age = relativeTime(r.published_at);
-        return `<option value="${i}">${r.tag_name}${flag} — ${age}</option>`;
-    }).join("");
+        opt.textContent = `${r.tag_name}${flag} — ${age}`;
+        releaseEl.appendChild(opt);
+    });
 
     // Smart default: newest stable; fall back to newest prerelease.
     const firstStable = sorted.findIndex(r => !r.prerelease);
@@ -251,9 +267,17 @@ function render(state) {
             installBtn.disabled = true;
             return;
         }
-        boardEl.innerHTML = compatible.map(b =>
-            `<option value="${b.board}">${b.board}</option>`
-        ).join("");
+        // Same XSS guard as the release dropdown: textContent over innerHTML.
+        // b.board comes from parseBoardsFromAssets parsing GitHub asset names
+        // with a strict regex, so the risk is lower here, but consistency
+        // wins.
+        boardEl.replaceChildren();
+        compatible.forEach(b => {
+            const opt = document.createElement("option");
+            opt.value = b.board;
+            opt.textContent = b.board;
+            boardEl.appendChild(opt);
+        });
         state.board = compatible[0].board;
         boardEl.value = state.board;
         installBtn.disabled = false;

@@ -478,7 +478,12 @@ function createCard(mod, depth) {
     if (mod.type === "FirmwareUpdateModule") {
         const ownBoardKey = (() => {
             if (!state || !state.modules) return null;
-            const sys = state.modules.find(m => m.name === "System");
+            // Look up by stable type first; fall back to name for forward
+            // compatibility in case a future spec ever drops `type` from the
+            // wire shape. mod.name is user-editable (in principle) so it's
+            // not load-bearing for this lookup.
+            const sys = state.modules.find(m => m.type === "SystemModule")
+                     || state.modules.find(m => m.name === "System");
             const boardCtrl = sys && (sys.controls || []).find(c => c.name === "board");
             return boardCtrl && boardCtrl.value ? boardCtrl.value : null;
         })();

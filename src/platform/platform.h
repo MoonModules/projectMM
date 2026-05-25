@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <cstddef>
 
@@ -124,7 +125,7 @@ struct ImprovDeviceInfo {
 bool improvProvisioningInit(const ImprovDeviceInfo& info,
                             char* ssidOut, size_t ssidOutLen,
                             char* passwordOut, size_t passwordOutLen,
-                            volatile bool* ready,
+                            std::atomic<bool>* ready,
                             char* statusBuf, size_t statusBufLen);
 
 class UdpSocket {

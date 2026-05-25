@@ -175,7 +175,12 @@ jobs:
         env:
           # workflow_dispatch passes the tag through inputs; push events
           # use the ref directly. Either way TAG is the bare "vX.Y.Z".
+          # REPO is owner/repo, plumbed via env to avoid the static-analyser
+          # flagging the direct ${{ github.repository }} expansion inside a
+          # shell string. (github.repository isn't attacker-controlled, but
+          # keeping the indirection consistent with TAG silences the warning.)
           TAG: ${{ inputs.tag || github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           V=$(jq -r .version library.json)
@@ -187,7 +192,7 @@ jobs:
           #   pages-manifests/*.json    → relative paths (.bin alongside the
           #                               manifest). Used by the web installer,
           #                               which is same-origin-bound by CORS.
-          BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
+          BASE="https://github.com/${REPO}/releases/download/$TAG"
           mkdir -p pages-manifests
           for B in esp32 esp32-eth esp32-eth-wifi esp32s3-n16r8; do
             python scripts/build/generate_manifest.py \

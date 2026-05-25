@@ -2,7 +2,7 @@
 
 OTA flash progress + the `/api/firmware/url` endpoint, surfaced as two read-only controls in the UI.
 
-The module itself is a thin status surface. The actual flash is driven by the HTTP route `POST /api/firmware/url` in `HttpServerModule`, which hands the URL to `mm::platform::http_fetch_to_ota`. That function spawns a FreeRTOS task that downloads the binary (via `esp_https_ota`) and writes it to the next OTA partition. Two file-scope globals — `g_otaStatus` (char buffer) and `g_otaPct` (uint32_t) — carry progress between the task and this module's `loop1s()` poll.
+The module itself is a thin status surface. The actual flash is driven by the HTTP route `POST /api/firmware/url` in `HttpServerModule`, which hands the URL to `mm::platform::http_fetch_to_ota`. That function spawns a FreeRTOS task that downloads the binary (via `esp_https_ota`) and writes it to the next OTA partition. Three file-scope globals — `g_otaStatus` (char buffer), `g_otaBytesRead` (uint32_t) and `g_otaBytesTotal` (uint32_t) — carry progress between the task and this module's `loop1s()` poll. The UI renders the byte pair as "X KB / Y KB".
 
 ## Controls
 

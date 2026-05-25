@@ -363,7 +363,7 @@ void setWifiCredentials(const char* ssid, const char* password) {
 
 **Step 3.6 — Python rack CLI: `scripts/build/improv_provision.py` (0.5 h).** ~150-line pyserial script. Argparse:
 
-```
+```bash
 improv_provision.py --port /dev/tty.usbserial-X --ssid <SSID> --password <PW> [--timeout 30]
 ```
 

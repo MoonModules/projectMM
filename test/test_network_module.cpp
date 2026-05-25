@@ -43,14 +43,17 @@ TEST_CASE("NetworkModule::setWifiCredentials with null password treats it as emp
     CHECK(net.dirty());
 }
 
-TEST_CASE("NetworkModule::setWifiCredentials truncates SSID beyond 32 bytes") {
+TEST_CASE("NetworkModule::setWifiCredentials accepts long SSID without crash") {
     // ssid_ is char[33] (32 chars + NUL). A longer SSID must not overflow.
+    // Bounds-correctness is checked indirectly: ASAN (the test runner has it
+    // available) catches a strncpy overflow; the dirty flag confirms the
+    // function ran the copy path. NetworkModule has no public accessor for
+    // ssid_ so we can't assert the exact truncated value here — adding one
+    // for test purposes only is rejected (see CLAUDE.md "Concrete first").
     mm::NetworkModule net;
     char longSsid[100];
     std::memset(longSsid, 'A', sizeof(longSsid) - 1);
     longSsid[sizeof(longSsid) - 1] = 0;
     net.setWifiCredentials(longSsid, "pw");
-    // If strncpy ran off the end, ASAN would catch it in the test runner.
-    // The dirty flag confirms the function ran the copy path.
     CHECK(net.dirty());
 }

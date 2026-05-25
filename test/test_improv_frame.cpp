@@ -161,6 +161,36 @@ TEST_CASE("ImprovFrameParser resyncs on aborted magic — stray 'I' restarts the
     CHECK(p.feed(improvChecksum(accepted, sizeof(accepted))) == ImprovFeedResult::FrameReady);
 }
 
+TEST_CASE("ImprovFrameParser resyncs on bad version when bad byte is 'I'") {
+    // Specific regression for the State::Version resync branch added in the
+    // fix-pack: when the byte after MagicV isn't kImprovSerialVersion but
+    // happens to be the magic-start 'I', the parser should re-enter the
+    // magic search at Magic1 rather than discarding the 'I' and losing the
+    // start of a new frame that arrives right after a corrupted header.
+    ImprovFrameParser p;
+    // Feed a half-frame followed by a bad version byte that happens to be 'I',
+    // then the rest of a fresh well-formed frame starting at that 'I'.
+    CHECK(p.feed('I') == ImprovFeedResult::NeedMore);    // Magic0 → Magic1
+    CHECK(p.feed('M') == ImprovFeedResult::NeedMore);
+    CHECK(p.feed('P') == ImprovFeedResult::NeedMore);
+    CHECK(p.feed('R') == ImprovFeedResult::NeedMore);
+    CHECK(p.feed('O') == ImprovFeedResult::NeedMore);
+    CHECK(p.feed('V') == ImprovFeedResult::NeedMore);    // → Version state
+    CHECK(p.feed('I') == ImprovFeedResult::NeedMore);    // bad version, but 'I' → Magic1
+    // Now finish a well-formed CurrentState frame from this re-entered 'I':
+    CHECK(p.feed('M') == ImprovFeedResult::NeedMore);
+    CHECK(p.feed('P') == ImprovFeedResult::NeedMore);
+    CHECK(p.feed('R') == ImprovFeedResult::NeedMore);
+    CHECK(p.feed('O') == ImprovFeedResult::NeedMore);
+    CHECK(p.feed('V') == ImprovFeedResult::NeedMore);
+    CHECK(p.feed(kImprovSerialVersion) == ImprovFeedResult::NeedMore);
+    CHECK(p.feed(static_cast<uint8_t>(ImprovFrameType::CurrentState)) == ImprovFeedResult::NeedMore);
+    CHECK(p.feed(0) == ImprovFeedResult::NeedMore);
+    const uint8_t accepted[] = {'I','M','P','R','O','V', kImprovSerialVersion,
+                                static_cast<uint8_t>(ImprovFrameType::CurrentState), 0};
+    CHECK(p.feed(improvChecksum(accepted, sizeof(accepted))) == ImprovFeedResult::FrameReady);
+}
+
 TEST_CASE("ImprovFrameParser round-trips builder output for every frame type") {
     const std::vector<ImprovFrameType> types = {
         ImprovFrameType::CurrentState,

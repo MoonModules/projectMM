@@ -538,6 +538,7 @@ bool wifiStaInit(const char* ssid, const char* password) {
     err = esp_wifi_connect();
     if (err != ESP_OK) {
         ESP_LOGE(NET_TAG, "WiFi STA connect failed: %s", esp_err_to_name(err));
+        wifiStaStop();   // tear down the driver/netif we just stood up
         return false;
     }
 
@@ -562,6 +563,13 @@ void wifiStaGetIP(char* buf, size_t len) {
 void wifiStaStop() {
     esp_wifi_disconnect();
     esp_wifi_stop();
+    // Unregister event handlers before deinit so subsequent init/stop cycles
+    // don't accumulate duplicate registrations. Guard on wifiInitDone_ since
+    // ensureWifiInit() bails before the registration step if init failed.
+    if (wifiInitDone_) {
+        esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifiEventHandler);
+        esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifiEventHandler);
+    }
     esp_wifi_deinit();
     if (staNetif_) {
         esp_netif_destroy_default_wifi(staNetif_);
@@ -628,6 +636,12 @@ bool wifiApConnected() {
 
 void wifiApStop() {
     esp_wifi_stop();
+    // Mirror wifiStaStop(): unregister the event handlers before deinit so
+    // re-init doesn't accumulate duplicate registrations.
+    if (wifiInitDone_) {
+        esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifiEventHandler);
+        esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifiEventHandler);
+    }
     esp_wifi_deinit();
     if (apNetif_) {
         esp_netif_destroy_default_wifi(apNetif_);
@@ -1005,7 +1019,7 @@ struct ImprovTaskState {
     char* passwordOut = nullptr;      // ssid_ / password_ via the module)
     size_t ssidOutLen = 0;
     size_t passwordOutLen = 0;
-    volatile bool* ready = nullptr;   // module polls and clears
+    std::atomic<bool>* ready = nullptr;   // module polls and clears
     char* statusBuf = nullptr;        // module shows as `provision_status`
     size_t statusBufLen = 0;
 };
@@ -1096,7 +1110,11 @@ static void improvHandleProvision(const improv::ImprovCommand& cmd) {
     g_improv.ssidOut[g_improv.ssidOutLen - 1] = 0;
     std::strncpy(g_improv.passwordOut, cmd.password.c_str(), g_improv.passwordOutLen - 1);
     g_improv.passwordOut[g_improv.passwordOutLen - 1] = 0;
-    *g_improv.ready = true;
+    // release-store: pairs with the module's acquire-load in loop1s() so the
+    // SSID/password buffer writes above are visible before the consumer sees
+    // ready=true (matters on the dual-core ESP32-S3; single-core ESP32 is a
+    // no-op but the explicit ordering documents intent).
+    g_improv.ready->store(true, std::memory_order_release);
     improvSendCurrentState(improv::STATE_PROVISIONING);
 
     // Wait up to 30 s for IP. Polls existing platform state — no extra wiring.
@@ -1183,7 +1201,7 @@ static void improvTask(void* /*arg*/) {
 bool improvProvisioningInit(const ImprovDeviceInfo& info,
                             char* ssidOut, size_t ssidOutLen,
                             char* passwordOut, size_t passwordOutLen,
-                            volatile bool* ready,
+                            std::atomic<bool>* ready,
                             char* statusBuf, size_t statusBufLen) {
     if (!info.name || !info.chipFamily || !info.firmwareVersion ||
         !ssidOut || ssidOutLen == 0 ||
@@ -1226,7 +1244,7 @@ namespace mm::platform {
 bool improvProvisioningInit(const ImprovDeviceInfo& /*info*/,
                             char* /*ssidOut*/,    size_t /*ssidOutLen*/,
                             char* /*passwordOut*/, size_t /*passwordOutLen*/,
-                            volatile bool* /*ready*/,
+                            std::atomic<bool>* /*ready*/,
                             char* statusBuf, size_t statusBufLen) {
     if (statusBuf && statusBufLen > 0) {
         std::snprintf(statusBuf, statusBufLen, "not supported (no WiFi)");

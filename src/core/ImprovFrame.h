@@ -80,7 +80,16 @@ public:
                     headerBytes_[6] = byte;
                     state_ = State::Type;
                 } else {
+                    // Bad version — drop and resync. If the bad byte happens
+                    // to be the magic start, re-enter the magic search at
+                    // Magic1 (same handling as the Magic-state resync above)
+                    // so we don't lose an 'I' that begins a new frame
+                    // arriving right after a corrupted header.
                     state_ = State::Magic0;
+                    if (byte == kImprovMagic[0]) {
+                        headerBytes_[0] = byte;
+                        state_ = State::Magic1;
+                    }
                 }
                 return ImprovFeedResult::NeedMore;
             case State::Type:
@@ -147,6 +156,8 @@ inline size_t buildImprovFrame(ImprovFrameType type,
                                const uint8_t* payload, size_t payloadLen,
                                uint8_t* out, size_t outLen) {
     if (payloadLen > kImprovMaxPayload) return 0;
+    if (out == nullptr) return 0;                       // no buffer to write to
+    if (payloadLen > 0 && payload == nullptr) return 0; // can't memcpy from null
     const size_t need = 6 + 1 + 1 + 1 + payloadLen + 1;
     if (outLen < need) return 0;
     size_t p = 0;
