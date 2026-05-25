@@ -21,9 +21,12 @@ on:
     # exercise the builds — no release page, no Pages deploy. Remove this
     # `branches` block once the release pipeline is proven (post-1.0) if CI
     # minutes get tight; tag-driven release is the steady-state shape.
+    # Add the current feature branch when one is in flight (plan-18 today)
+    # so its PR gets CI; remove when the PR merges.
     branches:
       - main
       - next-iteration
+      - plan-18
     paths:
       - 'src/**'
       - 'esp32/**'
@@ -62,10 +65,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify tag matches library.json version
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-        env:
-          # Use the workflow_dispatch input when present, else the push ref.
-          GITHUB_REF_NAME: ${{ inputs.tag || github.ref_name }}
-        run: python scripts/build/verify_version.py
+        # Pass the tag via --tag arg, not via an env var named GITHUB_REF_NAME.
+        # The built-in GITHUB_REF_NAME is "main" on a workflow_dispatch from
+        # main and was shadowing the step-level env: override in practice
+        # (verified on run 26406224226 — env: said v1.0.0-rc1 but Python read
+        # "main"). Explicit CLI arg sidesteps the collision.
+        run: python scripts/build/verify_version.py --tag "${{ inputs.tag || github.ref_name }}"
 
   build-esp32:
     needs: verify-version
