@@ -89,7 +89,23 @@ def parse_frame(ser: "serial.Serial", deadline: float) -> "tuple[int, bytes] | N
     payload = bytearray()
 
     while time.monotonic() < deadline:
-        b = ser.read(1)
+        try:
+            b = ser.read(1)
+        except serial.SerialException as e:
+            # macOS USB CDC driver occasionally throws "Device not configured"
+            # (Errno 6) mid-read when the device transitions WiFi modes (AP→STA,
+            # WiFi power-saving wakes, etc.). The device itself is fine; the
+            # host-side driver just stalled. Drain and retry without giving up
+            # on the whole conversation. Real port loss (cable unplug) keeps
+            # failing forever and the outer deadline catches that.
+            if "Device not configured" in str(e) or "Errno 6" in str(e):
+                time.sleep(0.1)
+                try:
+                    ser.reset_input_buffer()
+                except Exception:
+                    pass
+                continue
+            raise
         if not b:
             continue
         byte = b[0]

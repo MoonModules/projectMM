@@ -139,6 +139,46 @@ What needs to be built (≈4 h):
 
 Deferred to keep this iteration narrow: the picker + URL path is working now, and the dev-flash workflow has the `flash_esp32.py` (USB) fallback. Reopens when a second use case lands or when the iteration time on `esptool reset → flash → reboot` becomes annoying enough to fix. Reference: [plan-18 Notes](history/plan-18.md) — "File-upload OTA route … is skipped. Picker drives `/api/firmware/url` only. v1 had both."
 
+## Post-merge cleanup: remove temporary `plan-18` carve-outs (follow-up)
+
+Two places carry a temporary `plan-18`-named allowance that should be removed once PR #7 merges and the branch is deleted. Both were added so PR #7's CI + Pages deploys could run before merge; neither belongs in steady-state.
+
+1. **`.github/workflows/release.yml`** — the `push: branches:` allowlist contains `plan-18` (added in commit `3e2acb5`, with a comment noting "remove when the PR merges"). Drop that line so the allowlist returns to `main` + `next-iteration`.
+
+2. **GitHub Pages environment branch-policy** — the `github-pages` environment was extended to allow deploys from `plan-18` (was previously `main`-only). The deployment-branch-policy id is **`50239266`**. Remove via:
+
+   ```bash
+   gh api -X DELETE \
+     repos/ewowi/projectMM/environments/github-pages/deployment-branch-policies/50239266
+   ```
+
+   Or via UI: Repo Settings → Environments → `github-pages` → Deployment branches → remove the `plan-18` rule.
+
+Verify after cleanup: a `gh api repos/ewowi/projectMM/environments/github-pages/deployment-branch-policies` call should show only `{ name: main, type: branch }`. The `branches:` allowlist in `release.yml` should match the old plan-17 pattern.
+
+If a future feature branch needs the same allowances, add them under that branch's name and follow this same cleanup pattern on its merge — or set up a `next-iteration`-style convention where every feature branch uses one of the standing names (so neither allowlist needs editing per-PR).
+
+## Build-variant + board WiFi performance matrix (follow-up)
+
+Measured 2026-05-25, default 128×128 grid, `MoonModules` SSID, post-Improv-provisioning. Same source tree, same MCU (ESP32 classic, 160 MHz):
+
+| Board | Build | Tick / FPS | `Drivers/ArtNetSend` | `/api/state` | `/app.js` (77 KB) |
+|---|---|---|---|---|---|
+| Olimex Gateway | `esp32` (WiFi-only) | **220 ms / 4 FPS** | **155 ms** | 0.22 s | 0.29 s |
+| Olimex Gateway | `esp32-eth-wifi` | 85-95 ms / 10-12 FPS | 38 ms | 4.34 s | 1.47 s |
+| Generic ESP32 board | `esp32` | 100 ms / 10 FPS | 45 ms | timeout | 32 s stall |
+| Generic ESP32 board | `esp32-eth-wifi` | 82-97 ms / 10-12 FPS | 28-45 ms | timeout | partial (28 KB in 10 s) |
+
+Two distinct effects visible:
+
+**1. Olimex `esp32` build is 4× slower at Art-Net than the same board's `esp32-eth-wifi`.** Both builds share `sdkconfig.defaults`; the eth variant adds `sdkconfig.defaults.eth` which only touches `CONFIG_ETH_*`. Yet Art-Net send goes from 38 ms to 155 ms. Hypothesis: `CONFIG_ETH_DMA_*` indirectly enlarges a shared LWIP/WiFi buffer pool, so the WiFi-only build runs out of TX buffers and stalls. Lowest-risk fix: bump WiFi TX buffer count in `sdkconfig.defaults` so both variants get the same headroom. Investigation needs `vTaskList` + `heap_caps_print_heap_info` snapshots in both builds.
+
+**2. Generic ESP32 board has much weaker WiFi throughput than the Olimex.** Same `esp32-eth-wifi` build serves the 77 KB `/app.js` in 1.47 s on Olimex vs only 28 KB of it in 10 s on the generic board — **>7× difference in raw WiFi TX**. Independent of the build, this is PCB-antenna and power-supply quality. Practical implication: classic-ESP32 devboards vary wildly. The Olimex Gateway (proper PCB-trace antenna, regulated 3V3) is the reference; generic boards may need Ethernet or be limited to small grids.
+
+Cross-link: line 100 ("Memory ceiling: default grid + Ethernet + WiFi cascade fails on non-PSRAM"). The Olimex `esp32` Art-Net slowdown is likely the same root cause — both point to network-stack memory being marginal on classic ESP32 when both stacks are unused but compiled in.
+
+Practical guidance until fixed: **use `esp32-eth-wifi` for any Art-Net workload on classic ESP32**, even if Ethernet isn't physically connected. The plain `esp32` build is best reserved for UI-only / smaller-grid WiFi use cases.
+
 ## HTTP file serving blocks the render tick (follow-up)
 
 The ESP32 tick-variability swing (FPS collapse when a browser connected) was traced to the blocking 49 KB preview WebSocket broadcast and **fixed** — see `docs/performance.md` "ESP32 tick variability". A lesser, one-shot version of the same issue remains: `HttpServerModule::handleConnection()` serves the embedded UI files (`app.js`, `style.css` — tens of KB) with the plain blocking `TcpConnection::write`, so a page load can briefly stall `loop20ms`. It's one-shot per load rather than per-tick, so lower priority. Fix when convenient: serve large HTTP responses with the same non-blocking `writeChunks` path, or chunk the response across ticks.

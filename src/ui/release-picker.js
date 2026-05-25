@@ -38,6 +38,13 @@ const API_URL = "https://api.github.com/repos/ewowi/projectMM/releases?per_page=
 const CACHE_KEY = "projectMM.releases.v1";
 const CACHE_TTL_MS = 5 * 60 * 1000;  // 5 min — short enough to surface new RCs, long enough to avoid rate-limit thrash
 
+// Persisted user selection — survives page reloads and full browser restarts,
+// so a returning user doesn't have to re-pick their board every time. Keyed
+// separately from the API cache (which is sessionStorage with a TTL); these
+// are intent, not data, and never expire on their own.
+const PREF_RELEASE_KEY = "projectMM.picker.releaseTag";
+const PREF_BOARD_KEY   = "projectMM.picker.board";
+
 // One picker instance per init() call. Each tracks its own state so multiple
 // pickers on a page (unused today but possible) don't fight over selections.
 function makeState() {
@@ -64,6 +71,16 @@ function safeStorageGet(key) {
 }
 function safeStorageSet(key, value) {
     try { sessionStorage.setItem(key, value); } catch (_) { /* ignore */ }
+}
+
+// Same wrappers for localStorage — the persisted user selection (release tag,
+// board) survives across browser sessions. Same try/catch shape so a hostile
+// storage backend is a "no preference" miss, not an exception.
+function safeLocalGet(key) {
+    try { return localStorage.getItem(key); } catch (_) { return null; }
+}
+function safeLocalSet(key, value) {
+    try { localStorage.setItem(key, value); } catch (_) { /* ignore */ }
 }
 
 // Returns the parsed releases array, or null on hard failure (network, 403).
@@ -241,9 +258,16 @@ function render(state) {
         releaseEl.appendChild(opt);
     });
 
-    // Smart default: newest stable; fall back to newest prerelease.
+    // Default selection order:
+    //   1. Last release tag the user picked, if it's still in the list.
+    //   2. Newest stable.
+    //   3. Newest prerelease (falls through when no stable exists yet).
+    const savedTag = safeLocalGet(PREF_RELEASE_KEY);
+    const savedIdx = savedTag ? sorted.findIndex(r => r.tag_name === savedTag) : -1;
     const firstStable = sorted.findIndex(r => !r.prerelease);
-    state.releaseIdx = firstStable >= 0 ? firstStable : 0;
+    state.releaseIdx = savedIdx >= 0 ? savedIdx
+                     : firstStable >= 0 ? firstStable
+                     : 0;
     releaseEl.value = String(state.releaseIdx);
 
     function refreshBoardDropdown() {
@@ -278,7 +302,11 @@ function render(state) {
             opt.textContent = b.board;
             boardEl.appendChild(opt);
         });
-        state.board = compatible[0].board;
+        // Prefer the user's last pick if it's still compatible with this release;
+        // otherwise default to the first option (the existing behaviour).
+        const savedBoard = safeLocalGet(PREF_BOARD_KEY);
+        const savedHere = savedBoard && compatible.find(b => b.board === savedBoard);
+        state.board = savedHere ? savedBoard : compatible[0].board;
         boardEl.value = state.board;
         installBtn.disabled = false;
     }
@@ -286,11 +314,16 @@ function render(state) {
 
     releaseEl.addEventListener("change", () => {
         state.releaseIdx = Number(releaseEl.value);
+        // Persist the tag name (not the index) — indexes shift when new releases
+        // land, but tag names are stable identifiers.
+        const r = sorted[state.releaseIdx];
+        if (r) safeLocalSet(PREF_RELEASE_KEY, r.tag_name);
         refreshBoardDropdown();
     });
 
     boardEl.addEventListener("change", () => {
         state.board = boardEl.value;
+        safeLocalSet(PREF_BOARD_KEY, state.board);
     });
 
     installBtn.addEventListener("click", async () => {
@@ -298,6 +331,12 @@ function render(state) {
         if (!r || !state.board) return;
         const entry = (r.boards || []).find(b => b.board === state.board);
         if (!entry) return;
+        // Install click is the strongest "yes, this is my choice" signal —
+        // remember it explicitly in addition to the on-change writes above, in
+        // case the user reaches this point without having interacted with the
+        // dropdowns (defaults restored, click straight through).
+        safeLocalSet(PREF_RELEASE_KEY, r.tag_name);
+        safeLocalSet(PREF_BOARD_KEY, state.board);
         installBtn.disabled = true;
         statusEl.textContent = `Installing ${r.tag_name} (${state.board})…`;
         try {
