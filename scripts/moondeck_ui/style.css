@@ -72,6 +72,11 @@ nav { display: flex; gap: 4px; }
 
 /* ESP32 controls */
 .esp32-controls {
+    /* Breathing room above each dropdown so the rows feel like new
+       sections rather than crowding the script card above. The first
+       dropdown (Firmware) sits below Setup; the second (Port) sits
+       below Build — both need the same separation. */
+    margin-top: 16px;
     margin-bottom: 12px;
     display: flex;
     flex-direction: column;

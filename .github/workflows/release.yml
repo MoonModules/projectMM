@@ -122,7 +122,11 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           V=$(jq -r .version library.json)
-          B=esp32/build
+          # Per-board build dir under build/esp32-<board>/ (plan-19.1).
+          # build_esp32.py points idf.py at this dir via -B, so the build
+          # tree lives outside esp32/ and multiple boards can coexist —
+          # CI uses one per matrix job, dev machines use as many as built.
+          B=build/esp32-${{ matrix.board }}
           PREFIX="firmware-${{ matrix.board }}-v$V"
           cp "$B/projectMM.bin"                       "dist/${PREFIX}.bin"
           cp "$B/bootloader/bootloader.bin"           "dist/${PREFIX}-bootloader.bin"

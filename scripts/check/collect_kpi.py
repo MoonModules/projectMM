@@ -18,8 +18,15 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-BUILD_DIR = ROOT / "build"
 ESP32_DIR = ROOT / "esp32"
+
+# Per-host desktop build dir (matches build_desktop.py / package_desktop.py).
+# We pick the directory belonging to the OS this script runs on so KPI
+# numbers reflect the binary the developer actually has on disk.
+import platform as _plat
+_HOST = {"Darwin": "macos", "Linux": "linux",
+         "Windows": "windows"}.get(_plat.system(), _plat.system().lower())
+BUILD_DIR = ROOT / "build" / _HOST
 
 # Hard performance floor for the ESP32 render loop, expressed as an FPS ×
 # light-count throughput so it scales to any grid size. Anchored at the 128×128
@@ -102,9 +109,20 @@ def collect_desktop():
 
 def collect_esp32():
     kpi = {}
-    esp32_build = ESP32_DIR / "build"
-    if not esp32_build.exists():
+    # Per-board build dirs under build/esp32-*/ (plan-19.1). Pick the
+    # freshest one — that's the binary the developer most recently
+    # rebuilt and would consider the current KPI source. A developer
+    # who wants a specific board can re-build it to bump the mtime.
+    candidates = sorted((ROOT / "build").glob("esp32-*"),
+                        key=lambda p: p.stat().st_mtime,
+                        reverse=True)
+    candidates = [p for p in candidates if (p / "projectMM.bin").exists()]
+    if not candidates:
         return kpi
+    esp32_build = candidates[0]
+    # Record which board the numbers came from so a multi-board developer
+    # can see whether the KPI reflects what they think it does.
+    kpi["board"] = esp32_build.name[len("esp32-"):]
 
     try:
         from build_esp32 import find_idf, idf_env, idf_cmd
@@ -112,8 +130,12 @@ def collect_esp32():
         if idf_path:
             env = idf_env(idf_path)
             cmd = idf_cmd(idf_path)
-            r = subprocess.run(cmd + ["size"], capture_output=True, text=True,
-                               cwd=ESP32_DIR, env=env, timeout=60)
+            # idf.py -B points at the per-board build dir; without it,
+            # idf.py would default to esp32/build/ (no longer exists).
+            r = subprocess.run(
+                cmd + ["-B", str(esp32_build), "size"],
+                capture_output=True, text=True,
+                cwd=ESP32_DIR, env=env, timeout=60)
             out = r.stdout + r.stderr
 
             flash_total = 0

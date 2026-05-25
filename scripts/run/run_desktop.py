@@ -14,15 +14,43 @@ leaves the device running independently).
 """
 
 import os
+import platform
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-EXECUTABLE = ROOT / "build" / "projectMM"
-if sys.platform == "win32":
-    EXECUTABLE = EXECUTABLE.with_suffix(".exe")
+
+
+def _host_build_dir() -> Path:
+    """Per-host build dir, matching build_desktop.py / package_desktop.py."""
+    return ROOT / "build" / {
+        "Darwin":  "macos",
+        "Linux":   "linux",
+        "Windows": "windows",
+    }.get(platform.system(), platform.system().lower())
+
+
+# MSVC multi-config places the binary under <build>/Release/projectMM.exe;
+# every other generator drops it directly under <build>/projectMM. Pick the
+# first that exists at lookup time so the file works on every host.
+def _resolve_executable() -> Path:
+    bdir = _host_build_dir()
+    candidates = [
+        bdir / "projectMM.exe",
+        bdir / "Release" / "projectMM.exe",
+        bdir / "projectMM",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    # Return the most-likely candidate so the error message points somewhere
+    # informative if the binary genuinely isn't there.
+    return bdir / ("projectMM.exe" if sys.platform == "win32" else "projectMM")
+
+
+EXECUTABLE = _resolve_executable()
 
 
 def _is_running() -> bool:
@@ -71,7 +99,7 @@ def main():
     # Detach: own session, stdio disconnected from this script, output redirected
     # to a log file the user can tail. The app survives this script exiting and
     # is unaffected by MoonDeck terminating other scripts.
-    log_path = ROOT / "build" / "projectMM.log"
+    log_path = _host_build_dir() / "projectMM.log"
     log_fp = open(log_path, "wb")  # closed when this script exits; the child keeps the fd
 
     popen_kwargs = dict(

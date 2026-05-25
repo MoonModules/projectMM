@@ -183,8 +183,8 @@ Practical guidance until fixed: **use `esp32-eth-wifi` for any Art-Net workload 
 
 CodeRabbit flagged the post-plan-18 platform.h surface for using `(buf, len)` pairs in several places where `std::span<char>` / `std::span<uint8_t>` would let the compiler catch length/pointer mismatches. Concrete sites:
 
-- [src/platform/platform.h](src/platform/platform.h) — `http_fetch_to_ota(url, statusBuf, statusBufLen, bytesReadOut, bytesTotalOut)` and friends.
-- [src/platform/platform.h](src/platform/platform.h) — `improvProvisioningInit(info, ready, statusBuf, statusBufLen, ssidOut, ssidOutLen, passwordOut, passwordOutLen)`.
+- [src/platform/platform.h](../src/platform/platform.h) — `http_fetch_to_ota(url, statusBuf, statusBufLen, bytesReadOut, bytesTotalOut)` and friends.
+- [src/platform/platform.h](../src/platform/platform.h) — `improvProvisioningInit(info, ready, statusBuf, statusBufLen, ssidOut, ssidOutLen, passwordOut, passwordOutLen)`.
 - `TcpConnection::read/write` already take `(uint8_t*, size_t)`; keeping those raw is fine (matches the lwip / Berkeley sockets shape) but if we do a span pass, doing it consistently everywhere is the right scope.
 
 Not RC2 / not plan-18 work — touches every caller (modules, scenarios, tests). Worth doing alongside the next platform-API expansion (e.g. when adding Windows desktop sockets per the Windows port, or POST /api/firmware streaming). Estimate ~2 h including ripple updates.

@@ -59,6 +59,8 @@ uv run scripts/test/test_desktop.py          # unit tests
 
 Or use MoonDeck's PC tab for the same operations with a status dot per card. The desktop run detaches and outlives the launching script — the same model as flashing an ESP32, where the device runs independently afterwards.
 
+Each host writes into its own build dir: `build/macos/`, `build/linux/`, `build/windows/`. The per-host layout mirrors the ESP32 side's `build/esp32-<board>/` shape — one directory per target, no cross-target clobbering on a multi-host dev machine.
+
 ## ESP32
 
 The ESP32 target uses ESP-IDF directly, not the Arduino framework.
@@ -68,9 +70,9 @@ The ESP32 target uses ESP-IDF directly, not the Arduino framework.
 Run `setup_esp_idf.py` once to auto-detect the installed IDF version and create the required Python environment.
 
 ```sh
-uv run scripts/build/setup_esp_idf.py        # one-time
-uv run scripts/build/build_esp32.py --board esp32          # WiFi-only
-uv run scripts/build/flash_esp32.py --port /dev/tty.usbserial-XXXX
+uv run scripts/build/setup_esp_idf.py                              # one-time
+uv run scripts/build/build_esp32.py --board esp32                  # WiFi-only
+uv run scripts/build/flash_esp32.py --board esp32 --port /dev/tty.usbserial-XXXX
 uv run scripts/run/monitor_esp32.py --port /dev/tty.usbserial-XXXX
 ```
 
@@ -87,7 +89,7 @@ uv run scripts/run/monitor_esp32.py --port /dev/tty.usbserial-XXXX
 
 ESP-IDF v6.x has no `CONFIG_ESP_WIFI_ENABLED` switch (the symbol is forced on for WiFi-capable SoCs), so dropping WiFi at compile time happens via `EXCLUDE_COMPONENTS` plus `MM_NO_WIFI` (set when `MM_ETH_ONLY=1`, applied in `esp32/main/CMakeLists.txt`). The `esp32-eth` variant takes this path; `esp32-eth-wifi` keeps everything compiled in and uses the runtime cascade in `NetworkModule`.
 
-Switching boards forces a clean reconfigure — `build_esp32.py` removes `build/` and `sdkconfig` when the board changes (tracked via `build/.mm_board`), so the CMake cache is reseeded correctly. Same-board rebuilds stay incremental.
+Each board has its own build dir at `build/esp32-<board>/`, so all four variants can coexist on disk. `build_esp32.py` points `idf.py -B` at the per-board dir; switching boards is just a different `--board` argument, no clean rebuild penalty. Same-board rebuilds stay incremental, as before. Disk usage scales with the number of boards built (≈100 MB each), and a future rename would orphan the old dir — clean with `scripts/build/clean_esp32.py --board <name>` or `--all`.
 
 Each ESP32-S3 SKU has its own board key because the sdkconfig fragment encodes flash size, partition table, and PSRAM mode — flashing an `n16r8` binary onto a different module (e.g. N8R2) either misaligns the partition table (boot loop) or fails PSRAM init. New SKUs become new keys (e.g. `esp32s3-n8r8`); there is no generic `esp32s3` shortcut.
 

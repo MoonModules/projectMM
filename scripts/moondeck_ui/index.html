@@ -26,12 +26,29 @@
             </section>
 
             <section id="tab-esp32" class="tab-content">
+                <!-- ESP32 tab layout, top → bottom:
+                       1. Setup (board-independent: ESP-IDF, Clean).
+                       2. Firmware dropdown — drives Build.
+                       3. Build group.
+                       4. Port dropdown — drives Flash + run-group scripts
+                          (Monitor, Improv, …). Sits between Build and the
+                          downstream actions because every script below it
+                          needs a port; Build doesn't.
+                       5. Flash group + remaining run-group scripts. -->
+                <div id="scripts-esp32-setup" class="script-grid"></div>
                 <div class="esp32-controls">
-                    <label>Chip: <select id="env-select"></select></label>
+                    <label>Firmware: <select id="board-select"></select></label>
+                </div>
+                <div id="scripts-esp32-build" class="script-grid"></div>
+                <div class="esp32-controls">
                     <label>Port:
+                        <!-- Refresh button before the dropdown so the long
+                             /dev/tty.usbserial-XXXX string can extend to the
+                             right edge of the sidebar without pushing the
+                             refresh affordance off-screen. -->
                         <span class="port-row">
-                            <select id="port-select"><option value="">--</option></select>
                             <button id="refresh-ports" title="Refresh">&#x21bb;</button>
+                            <select id="port-select"><option value="">--</option></select>
                         </span>
                     </label>
                 </div>

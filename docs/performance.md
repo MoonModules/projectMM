@@ -188,7 +188,7 @@ Partition layout: app0/app1 = 1.75 MB each, `spiffs` (LittleFS) = 384 KB, coredu
 
 #### What's in the 1.27 MB
 
-Component-level breakdown for `esp32-eth-wifi`, from `idf.py size-components` (run inside `esp32/build/` after a clean build). These numbers shift with IDF version + sdkconfig; treat as rough proportions, not exact values. Re-run the command to refresh.
+Component-level breakdown for `esp32-eth-wifi`, from `idf.py -B build/esp32-esp32-eth-wifi size-components` (run from the project root after a clean build of that board). These numbers shift with IDF version + sdkconfig; treat as rough proportions, not exact values. Re-run the command to refresh.
 
 | Category | Approx weight | What |
 |---|---|---|

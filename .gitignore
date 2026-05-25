@@ -74,7 +74,9 @@ scripts/moondeck.json
 src/ui/ui_embedded.h
 src/core/build_info.h
 
-# ESP-IDF
+# ESP-IDF — note: per-board build dirs live under /build/esp32-*/ (plan-19.1).
+# The legacy esp32/build/ entry stays for one release to silently ignore stale
+# trees on developer machines that still have it from before the layout change.
 esp32/build/
 esp32/sdkconfig
 esp32/sdkconfig.old

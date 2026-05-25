@@ -25,7 +25,12 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-BUILD_DIR = ROOT / "build"
+# Per-host build dirs to match the ESP32 ``build/esp32-<board>/`` shape.
+# Each host gets its own; CI runners use exactly one, but on a developer
+# machine the layout means an experimental Linux build wouldn't clobber a
+# macOS package job.
+BUILD_DIR_MACOS = ROOT / "build" / "macos"
+BUILD_DIR_WIN   = ROOT / "build" / "windows"
 DIST_DIR = ROOT / "dist"
 
 
@@ -43,13 +48,14 @@ def run(cmd: list[str]) -> None:
 
 def configure_and_build_macos() -> Path:
     """Configure + build for macOS arm64. Returns the built binary path."""
+    bdir = str(BUILD_DIR_MACOS.relative_to(ROOT))
     run([
-        "cmake", "-B", "build",
+        "cmake", "-B", bdir,
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_OSX_ARCHITECTURES=arm64",
     ])
-    run(["cmake", "--build", "build", "--config", "Release", "-j"])
-    binary = BUILD_DIR / "projectMM"
+    run(["cmake", "--build", bdir, "--config", "Release", "-j"])
+    binary = BUILD_DIR_MACOS / "projectMM"
     if not binary.exists():
         print(f"package_desktop: expected binary not found at {binary}")
         sys.exit(1)
@@ -58,17 +64,18 @@ def configure_and_build_macos() -> Path:
 
 def configure_and_build_windows() -> Path:
     """Configure + build for Windows x64. Returns the built binary path."""
+    bdir = str(BUILD_DIR_WIN.relative_to(ROOT))
     run([
-        "cmake", "-B", "build",
+        "cmake", "-B", bdir,
         "-G", "Visual Studio 17 2022", "-A", "x64",
         "-DCMAKE_BUILD_TYPE=Release",
     ])
-    run(["cmake", "--build", "build", "--config", "Release"])
-    # MSVC multi-config places binaries under build/Release/.
-    binary = BUILD_DIR / "Release" / "projectMM.exe"
+    run(["cmake", "--build", bdir, "--config", "Release"])
+    # MSVC multi-config places binaries under <build-dir>/Release/.
+    binary = BUILD_DIR_WIN / "Release" / "projectMM.exe"
     if not binary.exists():
-        # Some generators drop it directly under build/.
-        fallback = BUILD_DIR / "projectMM.exe"
+        # Some generators drop it directly under the build dir.
+        fallback = BUILD_DIR_WIN / "projectMM.exe"
         if fallback.exists():
             return fallback
         print(f"package_desktop: expected binary not found at {binary}")
@@ -126,10 +133,12 @@ def main() -> int:
     system = platform.system()
     machine = platform.machine().lower()
 
-    # Clean any stale build dir so the configure step always picks up the
-    # CMake flags this script passes (otherwise a leftover cache wins).
-    if BUILD_DIR.exists():
-        shutil.rmtree(BUILD_DIR, ignore_errors=True)
+    # Clean only THIS host's build dir so a configure-flag change picked
+    # up by this run gets a fresh CMakeCache. We don't touch the other
+    # host's dir; on CI each runner only ever sees its own anyway.
+    host_build = BUILD_DIR_MACOS if system == "Darwin" else BUILD_DIR_WIN
+    if host_build.exists():
+        shutil.rmtree(host_build, ignore_errors=True)
 
     if system == "Darwin":
         if machine not in ("arm64", "aarch64"):
