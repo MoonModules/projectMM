@@ -65,4 +65,4 @@ HTTP via cpp-httplib (PC) / ESPAsyncWebServer (ESP32). WebSocket on separate por
 
 ### projectMM v2 — HttpServerModule + WebSocketModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/network/HttpServerModule.h))
 
-Separate MoonModules for HTTP and WebSocket. v3 combines them into one module.
+Separate MoonModules for HTTP and WebSocket. projectMM combines them into one module.

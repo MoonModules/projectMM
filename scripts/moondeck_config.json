@@ -28,6 +28,16 @@
       "process_name": "projectMM"
     },
     {
+      "id": "preview_installer",
+      "tab": "pc",
+      "group": "run",
+      "label": "Preview Installer",
+      "help": "preview_installer",
+      "script": "run/preview_installer.py",
+      "long_running": true,
+      "process_name": "preview_installer.py"
+    },
+    {
       "id": "check_platform_boundary",
       "tab": "pc",
       "group": "check",
@@ -140,6 +150,15 @@
       "needs_port": true,
       "long_running": true,
       "process_name": "monitor_esp32"
+    },
+    {
+      "id": "improv_provision",
+      "tab": "esp32",
+      "group": "run",
+      "label": "Improv WiFi",
+      "help": "improv_provision",
+      "script": "build/improv_provision.py",
+      "needs_port": true
     }
   ]
 }

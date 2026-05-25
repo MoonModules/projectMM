@@ -14,6 +14,8 @@ add_executable(mm_tests
     test_layout_toggle_cycle.cpp
     test_scheduler_unique_names.cpp
     test_artnet_packet.cpp
+    test_improv_frame.cpp
+    test_network_module.cpp
     test_noise.cpp
     test_mapping_lut.cpp
     test_mirror.cpp

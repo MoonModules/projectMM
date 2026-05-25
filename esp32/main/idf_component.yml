@@ -3,3 +3,5 @@ dependencies:
     version: "*"
   joltwallet/littlefs:
     version: "^1.16.0"
+  improv/improv:
+    version: "^1.2.5"

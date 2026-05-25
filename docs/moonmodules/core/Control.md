@@ -53,7 +53,7 @@ No color picker (RGB) control type — effects use palette index (uint8_t) inste
 
 Controls must be as small as possible. Each control descriptor stores: pointer to variable (4 bytes on ESP32), name pointer to flash (4 bytes), type enum (1 byte), min/max (type-dependent). Target: under 16 bytes per control descriptor.
 
-This 16-byte target is for the in-memory runtime descriptor only. Previous versions used ArduinoJson for control storage which was significantly heavier (JSON object per control, dynamic allocation). The v3 approach: control VALUE lives in the class variable (1-4 bytes, no overhead), control DESCRIPTOR is the lightweight metadata for UI rendering and persistence.
+This 16-byte target is for the in-memory runtime descriptor only. The current approach: control VALUE lives in the class variable (1-4 bytes, no overhead), control DESCRIPTOR is the lightweight metadata for UI rendering and persistence.
 
 Fixed-capacity array per module. No heap allocation per control. Capacity chosen at compile time — if a module needs more controls than the default capacity, it's probably too complex.
 
@@ -85,5 +85,5 @@ Control values must be saved/loaded persistently (filesystem). The mechanism:
 
 ### projectMM v2 — ControlDescriptor ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/MoonModule.h#L40))
 
-- Richer but heavier: key, uiType, CtrlType enum, ptr, min/max, default, options array, ownsOptions flag, system flag. Not all of this weight is justified for v3.
-- Persisted values applied via an `applyPending_` step during `onBuildControls()` — v3 follows the same overlay-in-onBuildControls timing.
+- Richer but heavier: key, uiType, CtrlType enum, ptr, min/max, default, options array, ownsOptions flag, system flag. Not all of this weight is justified here.
+- Persisted values applied via an `applyPending_` step during `onBuildControls()` — projectMM follows the same overlay-in-onBuildControls timing.

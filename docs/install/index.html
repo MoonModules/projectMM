@@ -84,6 +84,36 @@
     }
     ol { padding-left: 22px; }
     ol li { margin-bottom: 6px; }
+
+    /* Minimal mirror of the device UI's control-row shape so the shared
+       release-picker module (src/ui/release-picker.js) renders the same
+       way on the installer page. The picker emits `.control-row` + child
+       `<select>` markup; without these rules the rows wouldn't lay out. */
+    .control-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 10px 0;
+    }
+    .control-label {
+      flex: 0 0 80px;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    .control-row select { flex: 1; }
+    .action-btn {
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      border-radius: 6px;
+      padding: 10px 20px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .rp-status { color: var(--muted); font-size: 13px; }
+    .rp-status-row { min-height: 1.5em; }
   </style>
 </head>
 <body>
@@ -100,17 +130,14 @@
     </div>
 
     <div class="card">
-      <label for="board">Board</label>
-      <select id="board">
-        <option value="esp32">ESP32 — WiFi only</option>
-        <option value="esp32-eth">ESP32 — Ethernet only (Olimex pin map)</option>
-        <option value="esp32-eth-wifi">ESP32 — Ethernet + WiFi (Olimex pin map)</option>
-        <option value="esp32s3-n16r8">ESP32-S3 DevKitC-1 (N16R8) — WiFi only</option>
-      </select>
+      <!-- Picker mounts here. Release (newest-first, RCs flagged) →
+           Board. Same module the on-device OTA UI uses. -->
+      <div id="picker-mount"></div>
 
-      <div class="button-row" id="button-host">
-        <!-- <esp-web-install-button> is injected here on each board change. -->
-      </div>
+      <!-- ESP Web Tools button injected by onInstall (below) — kept on its
+           own host so the picker's UI stays purely a picker, with no install
+           transport baked in. -->
+      <div class="button-row" id="button-host"></div>
 
       <p class="note">
         The Ethernet builds were verified on the
@@ -127,7 +154,7 @@
       <ol>
         <li>The device boots a SoftAP named <code>projectMM-xxxx</code>.</li>
         <li>Join it from your phone or laptop.</li>
-        <li>Open <code>http://192.168.4.1</code> in a browser, enter your home WiFi credentials.</li>
+        <li>Open <code>http://4.3.2.1</code> in a browser, enter your home WiFi credentials.</li>
         <li>The device reboots, joins your network, and the UI is reachable at its DHCP-assigned IP (visible in your router).</li>
       </ol>
       <strong>After flashing — Ethernet builds:</strong>
@@ -142,39 +169,69 @@
     </div>
   </main>
 
-  <script>
-    // Recreate the install button whenever the board selection changes.
-    // Mutating the `manifest` attribute on the existing element is flakier
-    // across ESP Web Tools versions than just rebuilding it.
-    const select = document.getElementById("board");
-    const host   = document.getElementById("button-host");
+  <script type="module">
+    // Shared release-picker (channel → release → board). Same file, same
+    // logic the on-device UI uses for OTA. Both pages run it; only the
+    // onInstall callback differs:
+    //   - Device UI: POST the chosen .bin URL to /api/firmware/url; device
+    //     fetches the binary directly via esp_https_ota.
+    //   - Web installer (here): set the chosen manifest URL on
+    //     <esp-web-install-button>; ESP Web Tools flashes via Web Serial.
+    //
+    // Manifests + binaries must be same-origin with this page (Web Serial
+    // CORS), which is why the release workflow self-hosts the last N
+    // releases into pages/install/releases/<tag>/. The manifest URL the
+    // picker hands us is the absolute GitHub-release URL; we don't fetch
+    // it directly — ESP Web Tools fetches it via the
+    // <esp-web-install-button> shadow DOM, which IS subject to CORS, so
+    // before clicking we rewrite the URL to the same-origin Pages copy.
+    import { releasePicker } from "./release-picker.js";
 
-    function renderButton() {
-      const board = select.value;
-      host.innerHTML = "";
-      const btn = document.createElement("esp-web-install-button");
-      btn.setAttribute("manifest", `manifest-${board}.json`);
-      // Slot a labelled button so the default-styled "INSTALL" is replaced
-      // by something that names the board the user picked.
-      const inner = document.createElement("button");
-      inner.slot = "activate";
-      inner.textContent = `Install on ${board}`;
-      inner.style.cssText = [
-        "padding: 12px 20px",
-        "font: inherit",
-        "font-weight: 600",
-        "background: var(--accent)",
-        "color: #1a1a2e",
-        "border: 0",
-        "border-radius: 6px",
-        "cursor: pointer",
-      ].join("; ");
-      btn.appendChild(inner);
-      host.appendChild(btn);
+    // Map a GitHub release-asset URL to its Pages-hosted mirror.
+    //   https://github.com/ewowi/projectMM/releases/download/<TAG>/<file>
+    //   → ./releases/<TAG>/<file>
+    function toLocalUrl(githubUrl) {
+      const m = /\/releases\/download\/([^/]+)\/([^/]+)$/.exec(githubUrl);
+      if (!m) return githubUrl;  // unrecognised shape: pass through unchanged
+      const [, tag, name] = m;
+      return `./releases/${tag}/${name}`;
     }
 
-    select.addEventListener("change", renderButton);
-    renderButton();
+    const host = document.getElementById("button-host");
+
+    releasePicker.init({
+      container: document.getElementById("picker-mount"),
+      ownBoardKey: null,  // web installer flashes any board
+      onInstall: async (board, manifestUrl /*, binaryUrl */) => {
+        // Rebuild the install button on every click. Mutating `manifest`
+        // on a reused element is flakier across ESP Web Tools versions
+        // than rebuilding; same pattern app.js uses for the device UI.
+        host.innerHTML = "";
+        const btn = document.createElement("esp-web-install-button");
+        btn.setAttribute("manifest", toLocalUrl(manifestUrl));
+        const inner = document.createElement("button");
+        inner.slot = "activate";
+        inner.textContent = `Install on ${board}`;
+        inner.style.cssText = [
+          "padding: 12px 20px",
+          "font: inherit",
+          "font-weight: 600",
+          "background: var(--accent)",
+          "color: #1a1a2e",
+          "border: 0",
+          "border-radius: 6px",
+          "cursor: pointer",
+        ].join("; ");
+        btn.appendChild(inner);
+        host.appendChild(btn);
+        // Auto-click so the user only has to confirm once (the ESP Web
+        // Tools modal prompts for the serial port + Install). The custom
+        // inner button still appears for the next-board case.
+        // Wait one tick for the custom element to upgrade.
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        inner.click();
+      },
+    });
 
     // Show the unsupported-browser banner when Web Serial isn't available.
     // ESP Web Tools also surfaces its own message, but a card at the top of

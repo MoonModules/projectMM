@@ -30,12 +30,11 @@ Either path: 2-3h of careful translation + Windows-side manual testing. The plan
 1.0 ships ESP32 firmware (4 variants) + macOS arm64 binaries (Windows once the platform port above lands). The source tree builds for Teensy, Raspberry Pi, ESP32-P4, and Linux too — distribution catches up here.
 
 - **ESP32-P4** board variant. New chip target, new sdkconfig fragment, fits the existing `BOARDS` table in `scripts/build/build_esp32.py`.
-- **OTA / FirmwareUpdateModule.** Re-flashing via the web installer works in 1.0 but requires a USB cable. Port the passive-observer pattern from projectMM-v1 — pulls release JSON from GitHub, surfaces availability in the UI, applies on user confirm.
 - **Linux desktop binary** in `release.yml` (third desktop job). Static-linked libstdc++ where the host allows.
 - **Teensy 4.1 release binary.** Toolchain-file build, packaged as `.hex` for Teensy Loader.
 - **Raspberry Pi binary.** ARM64, cross-built or native depending on what the runner offers.
-- **Nightly CI / pre-release channel.** A second workflow on a schedule that produces unstable binaries, separate from the tag-driven `release.yml`.
-- **Improv WiFi.** One-step flash + WiFi credentials from the browser, eliminating the SoftAP detour. ESP Web Tools supports the Improv handshake natively.
+- **Nightly channel** (plan-18 Phase 2). New `nightly.yml` on schedule produces unstable binaries tagged `nightly-YYYY-MM-DD` with `prerelease: true`. The picker already recognises any prerelease tag; the workflow change is the missing piece.
+- **Installer UX polish** (plan-18 Phase 3). Clear "this is a pre-release" warning on RC/nightly picks, finer "do not install" affordance (yank-by-asset-tag instead of yank-by-release-deletion), manufacturer-friendly landing copy.
 - **Runtime PHY / pin config** for Ethernet (see `WiFi runtime disable` below — same `platform::ethPresent()` hook). Replaces the build-time Olimex-pin baking in `sdkconfig.defaults.eth` with a runtime picker. Once this lands the `esp32-eth*` variants stop being Olimex-specific.
 - **macOS code-signing.** Currently triggers Gatekeeper on first run; signed builds drop the "downloaded from internet" prompt.
 
@@ -67,6 +66,7 @@ Prioritise after we see real 3D installations. On 2D layers (today's reality) th
 
 - **UI page load time**: add a scenario step that measures HTTP response time for `/` (index.html), `/api/state`, `/api/system` using the live runner's HTTP client. Verifies the web UI loads within acceptable time on ESP32.
 - **Module teardown memory**: add a scenario that tears down all modules (`DELETE /api/modules/*`) and verifies heap returns to pre-setup baseline. Confirms no memory leaks in the full lifecycle.
+- **JavaScript test harness (2.0 roadmap)**: there is no JS unit-test runner today. Pure helpers in [src/ui/release-picker.js](../src/ui/release-picker.js) (`isCompatible`, `parseBoardsFromAssets`, `relativeTime`) and any future picker logic are exercised ad-hoc from DevTools. Adding `vitest` or `node --test` with `jsdom` would cost ~2 h and would mirror the host-side test pattern the C++ side already has at `test/test_improv_frame.cpp`. Deferred until a second non-trivial JS module lands — one file doesn't justify the toolchain weight.
 
 ## mDNS toggle (evaluate)
 
@@ -97,9 +97,64 @@ When picked up:
 - Memory-aware allocator: at `onAllocateMemory` time, decide how many Layers actually fit and degrade gracefully when PSRAM is absent.
 - Persistence already encodes the Layers container's children positionally — adding more siblings to Layers just works on the file-format side.
 
+## Memory ceiling: default grid + Ethernet + WiFi cascade fails on non-PSRAM (backlog)
+
+On the Olimex ESP32-Gateway running `--board esp32-eth-wifi` with the default 128×128 grid:
+
+- Free heap at boot: **~28 KB**, largest contiguous block ~14 KB
+- Layer footprint: pixel buffer `16384 × 3 = 49 KB` + MappingLUT `(16385 + 16384) × sizeof(uint16_t) ≈ 64 KB` = **~113 KB**
+- Drivers buffer: ~48 KB
+- Preview buffer: ~5 KB
+- IDF tasks/stacks/TCP-IP/Ethernet driver: ~120 KB of the ESP32's ~290 KB DRAM
+- **Remaining for WiFi init**: not enough; `esp_wifi_init` needs to claim `10 × 1600 B = 16 KB` of RX buffers, can't, returns `ESP_ERR_NO_MEM`
+
+The cascade path is: boot → Ethernet starts → "link up" briefly → "link down" (no cable / no DHCP) → cascade to WiFi → `esp_wifi_init` runs out of memory. Before today's fix, `ESP_ERROR_CHECK` panicked the device into a reboot loop. Today the failure is reported and the device stays running on whatever connection it has (Ethernet, if available; nothing, if not).
+
+Real fix options, in increasing scope:
+
+- **PSRAM for the Layer buffer + LUT.** ESP32-Gateway has 4 MB PSRAM (unused today on non-S3 builds). `platform::alloc` could prefer PSRAM for buffers larger than some threshold. Pixel buffer at 49 KB and LUT at 64 KB are both clear candidates — moves the bulk of light-pipeline memory out of DRAM and frees ~110 KB for radios. The render loop reads/writes these buffers every tick; PSRAM is slower than DRAM (~12 MB/s vs ~80 MB/s for sequential), so this needs to be measured. Likely ~25% FPS hit on a 16K grid (already at 13 FPS — would drop to ~10).
+- **Persisted-state default cap.** Today the default grid is 128×128. On non-PSRAM ESP32 with both Ethernet *and* WiFi enabled, that's over the ceiling. Either drop the default to 64×64 on the esp32-eth-wifi build (32 KB Layer + ~16 KB LUT = 48 KB, comfortably under) or warn at first boot if the persisted grid would breach a known safe ceiling.
+- **Lazy WiFi init.** The cascade currently `esp_wifi_init`s on Ethernet drop, *always*. If `ssid_` is empty (no credentials stored), the WiFi-STA attempt is pointless; we know it can't succeed. Currently the code goes straight to AP-fallback in that case, but AP-fallback also calls `ensureWifiInit`. Same memory cost. Genuine fix would be to not even attempt WiFi init when no credentials AND no AP-fallback request is pending — but the AP-fallback IS the only way to get credentials onto a fresh device, so this only helps on devices that have credentials but the network is unreachable. Niche.
+
+Path-of-least-surprise: cap the default grid to fit, document the ceiling. The PSRAM offload is more invasive (requires touching `platform::alloc` semantics + measuring the FPS impact) and is on the same axis as plan-10's persistence work.
+
+## POST /api/firmware — direct binary upload OTA (backlog)
+
+Today the only HTTP-driven flash path is `POST /api/firmware/url` — device fetches a binary from a public URL (currently always a GitHub release asset). That covers the end-user "update to a released version" use case (the picker in the Firmware card) but not the developer workflow: build HEAD locally → flash to a board on the LAN → iterate, without round-tripping through `esptool` over USB or publishing to GitHub.
+
+This was deliberately scoped out of [plan-18](history/plan-18.md) ("File-upload OTA route is skipped. Picker drives /api/firmware/url only") because the picker UI didn't need it. Two later use cases pulled it back into scope:
+
+- **Dev-flash from a local build** — `curl -X POST --data-binary @firmware.bin http://<device-ip>/api/firmware` triggers the OTA without esptool / USB / a public URL. Faster iteration loop. Also unblocks any agent / CI driver: a script on the LAN can flash the device the same way it would call `/api/control`.
+- **Browser file-upload affordance** — drag a `.bin` onto the Firmware card and flash it. v1 had this; the picker today doesn't.
+
+Same endpoint serves both: the browser sends `multipart/form-data`, a script sends `application/octet-stream`. Both stream into the same `pal::ota_write_chunk` path. The picker stays as the user-facing default; the file-upload affordance is a `<details>` expander on the Firmware card for "I have a local .bin I want to flash".
+
+What needs to be built (≈4 h):
+
+- **Platform layer** — `pal::ota_begin_streaming()` / `pal::ota_write_chunk()` / `pal::ota_finish_streaming()` in [src/platform/esp32/platform_esp32.cpp](../src/platform/esp32/platform_esp32.cpp). Wrap `esp_ota_*` directly (not `esp_https_ota_*`, which assumes the library does the fetch). These are already **declared** in [src/platform/platform.h](../src/platform/platform.h) as `ota_begin/ota_write/ota_end` per the original plan-18 design but never implemented; today the URL path uses `esp_https_ota_perform` end-to-end and bypasses them.
+- **HTTP route** — `POST /api/firmware` in [src/core/HttpServerModule.cpp](../src/core/HttpServerModule.cpp). Reads `Content-Length`, loops `conn.read(chunkBuf, 4096)` → `pal::ota_write_chunk`, advances `g_otaPct`. On finish, `pal::reboot()`. **Cannot use the existing 2 KB stack request buffer** — must stream from the connection directly. The existing `/api/firmware/url` route shares `g_otaStatus` + `g_otaPct` so the UI shows the same progress for both paths.
+- **`device_ip` in `/api/state`** — read-only control on [src/core/SystemModule.h](../src/core/SystemModule.h), populated in `loop1s()` from `platform::ethGetIP` / `wifiStaGetIP` (the same source `updateStatusIP()` uses for the status chip). Lets a script discover the device without needing mDNS to be reachable from the dev machine.
+- **`scripts/build/flash_over_network.py`** — pyserial-style CLI mirror: `--host <ip>` or `--mdns <hostname>`, finds the most recent `.bin` in `esp32/build/`, POSTs it, polls `/api/state` for `update_status` until `rebooting`. Plus a MoonDeck button alongside the existing Flash.
+- **UI file-upload affordance** — small change to `src/ui/release-picker.js` (or a new sibling) to add a `<input type="file" accept=".bin">` that POSTs to `/api/firmware`. Hidden behind a `<details>` since the picker is the everyday path.
+
+Deferred to keep this iteration narrow: the picker + URL path is working now, and the dev-flash workflow has the `flash_esp32.py` (USB) fallback. Reopens when a second use case lands or when the iteration time on `esptool reset → flash → reboot` becomes annoying enough to fix. Reference: [plan-18 Notes](history/plan-18.md) — "File-upload OTA route … is skipped. Picker drives `/api/firmware/url` only. v1 had both."
+
 ## HTTP file serving blocks the render tick (follow-up)
 
 The ESP32 tick-variability swing (FPS collapse when a browser connected) was traced to the blocking 49 KB preview WebSocket broadcast and **fixed** — see `docs/performance.md` "ESP32 tick variability". A lesser, one-shot version of the same issue remains: `HttpServerModule::handleConnection()` serves the embedded UI files (`app.js`, `style.css` — tens of KB) with the plain blocking `TcpConnection::write`, so a page load can briefly stall `loop20ms`. It's one-shot per load rather than per-tick, so lower priority. Fix when convenient: serve large HTTP responses with the same non-blocking `writeChunks` path, or chunk the response across ticks.
+
+## Task core-pinning (backlog)
+
+ESP32 has two cores; projectMM currently doesn't pin any of its FreeRTOS tasks. The render task runs wherever `app_main` ends up (core 0 by default + FreeRTOS load-balancing); the OTA task (`urlOta`) and Improv task (`improv`) added in plan-18 are created with `xTaskCreate` (unpinned). WiFi internals are already pinned to core 0 via `CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_0=y`.
+
+At 16K LEDs (the current performance ceiling) the render task already takes ~52 ms / tick. If we hit cross-core contention symptoms — tick variance climbs, FPS jitter rises when a long-running task (OTA download, Improv scan) is active — the fix is explicit pinning:
+
+- Render task → core 1 (away from WiFi's core 0).
+- OTA task + Improv task → core 0 (network-adjacent; WiFi is there anyway).
+
+Tools: `xTaskCreatePinnedToCore` instead of `xTaskCreate`. The platform-layer task-spawn sites are in `src/platform/esp32/platform_esp32.cpp` (search for `xTaskCreate`); the render task is created by Scheduler — would need plumbing to set affinity at construction.
+
+Defer until performance data shows actual contention. Today neither OTA nor Improv runs during normal device operation (OTA = explicit user action; Improv = idle UART-blocked task), so the steady-state contention picture is zero.
 
 ## Preview coordinate message — true-shape 3D preview (backlog)
 

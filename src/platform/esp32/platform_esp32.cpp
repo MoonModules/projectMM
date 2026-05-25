@@ -8,6 +8,8 @@
 #include "esp_idf_version.h"
 #include "esp_partition.h"
 #include "esp_ota_ops.h"
+#include "esp_https_ota.h"
+#include "esp_crt_bundle.h"
 #include "esp_image_format.h"
 #include "esp_flash.h"
 #include "esp_event.h"
@@ -25,6 +27,7 @@
 #include "lwip/sockets.h"
 #include "lwip/inet.h"
 
+#include <cstdarg>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
@@ -454,19 +457,45 @@ static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
     }
 }
 
-static void ensureWifiInit() {
-    if (wifiInitDone_) return;
+// Returns true on success. Failures must propagate up to wifiStaInit /
+// wifiApInit so NetworkModule's state machine can react (typically: fall
+// back to whatever path doesn't need WiFi). The pre-fix used
+// ESP_ERROR_CHECK, which aborts the device on any failure — fatal when the
+// heap is too fragmented for esp_wifi_init to claim its RX buffers, which
+// is precisely the case where AP-fallback was meant to kick in. Now WiFi
+// init failure is a recoverable runtime error, not a panic.
+static bool ensureWifiInit() {
+    if (wifiInitDone_) return true;
     ensureNetifInit();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    esp_err_t err = esp_wifi_init(&cfg);
+    if (err != ESP_OK) {
+        ESP_LOGE(NET_TAG, "esp_wifi_init failed: %s (heap %u, largest %u)",
+                 esp_err_to_name(err),
+                 static_cast<unsigned>(esp_get_free_heap_size()),
+                 static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+        return false;
+    }
 
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
-                                               &wifiEventHandler, nullptr));
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
-                                               &wifiEventHandler, nullptr));
+    err = esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                     &wifiEventHandler, nullptr);
+    if (err != ESP_OK) {
+        ESP_LOGE(NET_TAG, "WIFI_EVENT register failed: %s", esp_err_to_name(err));
+        esp_wifi_deinit();
+        return false;
+    }
+    err = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                     &wifiEventHandler, nullptr);
+    if (err != ESP_OK) {
+        ESP_LOGE(NET_TAG, "IP_EVENT register failed: %s", esp_err_to_name(err));
+        esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifiEventHandler);
+        esp_wifi_deinit();
+        return false;
+    }
 
     wifiInitDone_ = true;
+    return true;
 }
 
 bool wifiStaInit(const char* ssid, const char* password) {
@@ -476,7 +505,7 @@ bool wifiStaInit(const char* ssid, const char* password) {
     // call wifiStaInit again after an Ethernet drop without a prior stop).
     // Stop before ensureWifiInit() — wifiStaStop() deinits the WiFi driver.
     if (staNetif_) wifiStaStop();
-    ensureWifiInit();
+    if (!ensureWifiInit()) return false;   // out-of-memory / event register failure
 
     staNetif_ = esp_netif_create_default_wifi_sta();
 
@@ -486,11 +515,27 @@ bool wifiStaInit(const char* ssid, const char* password) {
         std::strncpy(reinterpret_cast<char*>(wifi_config.sta.password), password, sizeof(wifi_config.sta.password) - 1);
     }
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    // From here every call can fail for transient runtime reasons (mode
+    // conflict, driver-state mismatch, etc.). Log + clean up + return false
+    // so NetworkModule's state machine can fall back rather than panic.
+    esp_err_t err;
+    if ((err = esp_wifi_set_mode(WIFI_MODE_STA)) != ESP_OK) {
+        ESP_LOGE(NET_TAG, "WiFi STA set_mode failed: %s", esp_err_to_name(err));
+        wifiStaStop();
+        return false;
+    }
+    if ((err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config)) != ESP_OK) {
+        ESP_LOGE(NET_TAG, "WiFi STA set_config failed: %s", esp_err_to_name(err));
+        wifiStaStop();
+        return false;
+    }
+    if ((err = esp_wifi_start()) != ESP_OK) {
+        ESP_LOGE(NET_TAG, "WiFi STA start failed: %s", esp_err_to_name(err));
+        wifiStaStop();
+        return false;
+    }
 
-    esp_err_t err = esp_wifi_connect();
+    err = esp_wifi_connect();
     if (err != ESP_OK) {
         ESP_LOGE(NET_TAG, "WiFi STA connect failed: %s", esp_err_to_name(err));
         return false;
@@ -531,7 +576,7 @@ bool wifiApInit(const char* apName, const char* ip) {
     // Guard against repeated init leaking the previous AP netif.
     // Stop before ensureWifiInit() — wifiApStop() deinits the WiFi driver.
     if (apNetif_) wifiApStop();
-    ensureWifiInit();
+    if (!ensureWifiInit()) return false;   // out-of-memory / event register failure
 
     apNetif_ = esp_netif_create_default_wifi_ap();
 
@@ -555,9 +600,22 @@ bool wifiApInit(const char* apName, const char* ip) {
     wifi_config.ap.max_connection = 4;
     wifi_config.ap.authmode = WIFI_AUTH_OPEN;
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    esp_err_t err;
+    if ((err = esp_wifi_set_mode(WIFI_MODE_AP)) != ESP_OK) {
+        ESP_LOGE(NET_TAG, "WiFi AP set_mode failed: %s", esp_err_to_name(err));
+        wifiApStop();
+        return false;
+    }
+    if ((err = esp_wifi_set_config(WIFI_IF_AP, &wifi_config)) != ESP_OK) {
+        ESP_LOGE(NET_TAG, "WiFi AP set_config failed: %s", esp_err_to_name(err));
+        wifiApStop();
+        return false;
+    }
+    if ((err = esp_wifi_start()) != ESP_OK) {
+        ESP_LOGE(NET_TAG, "WiFi AP start failed: %s", esp_err_to_name(err));
+        wifiApStop();
+        return false;
+    }
 
     wifiApActive_ = true;
     ESP_LOGI(NET_TAG, "WiFi AP started: %s @ %s", apName ? apName : "?", ip ? ip : "?");
@@ -763,4 +821,419 @@ void TcpServer::close() {
     }
 }
 
+// -----------------------------------------------------------------------
+// OTA — fetch firmware from a URL and flash it to the next OTA partition.
+// -----------------------------------------------------------------------
+
+namespace {
+
+// Heap-allocated task parameters. Task owns this and frees it on exit.
+struct OtaTaskParams {
+    char url[512];
+    char* statusBuf;
+    size_t statusBufLen;
+    uint32_t* bytesReadOut;   // current bytes downloaded
+    uint32_t* bytesTotalOut;  // image size; 0 until esp_https_ota reports it
+};
+
+// Write to the status buffer with bounded length. snprintf truncates safely.
+void otaSetStatus(OtaTaskParams* p, const char* fmt, ...) {
+    if (!p->statusBuf || p->statusBufLen == 0) return;
+    va_list args;
+    va_start(args, fmt);
+    std::vsnprintf(p->statusBuf, p->statusBufLen, fmt, args);
+    va_end(args);
+}
+
+void otaTask(void* arg) {
+    auto* p = static_cast<OtaTaskParams*>(arg);
+
+    otaSetStatus(p, "downloading");
+    *p->bytesReadOut = 0;
+    *p->bytesTotalOut = 0;   // unknown until esp_https_ota reports it
+
+    // `esp_crt_bundle_attach` enables the bundled-trust-anchor mode for TLS
+    // verification — the same mechanism Chrome/curl use for general HTTPS
+    // (api.github.com, objects.githubusercontent.com, …). No baked cert.
+    esp_http_client_config_t http_config = {};
+    http_config.url = p->url;
+    http_config.crt_bundle_attach = esp_crt_bundle_attach;
+    http_config.timeout_ms = 10000;
+    // GitHub release-asset URLs 302-redirect to objects.githubusercontent.com.
+    // Default redirect handling is off in esp_http_client; force-follow.
+    http_config.disable_auto_redirect = false;
+    http_config.max_redirection_count = 10;
+    // ESP-IDF's default HTTP header buffer is 512 bytes per direction. GitHub's
+    // 302 redirect response includes a multi-KB `content-security-policy`
+    // header that overflows it ("HTTP_CLIENT: Out of buffer") and the OTA
+    // fails before the .bin download even starts. Raising both sides to 4 KB
+    // covers GitHub's longest headers with room to spare; the cost is ~7 KB
+    // of heap during the OTA fetch, freed when the OTA task exits.
+    http_config.buffer_size = 4096;
+    http_config.buffer_size_tx = 4096;
+
+    esp_https_ota_config_t ota_config = {};
+    ota_config.http_config = &http_config;
+    // Performs partial-image-write + commit + boot-pointer flip internally.
+
+    esp_https_ota_handle_t handle = nullptr;
+    esp_err_t err = esp_https_ota_begin(&ota_config, &handle);
+    if (err != ESP_OK) {
+        // esp_https_ota_begin collapses ~6 distinct failures (DNS, TLS,
+        // HTTP, partition init, header-buffer overflow) into one ESP_FAIL,
+        // so the only useful detail is in the IDF log on the serial console.
+        // We surface the IDF error name plus a pointer to the log.
+        otaSetStatus(p, "error: ota begin %s (see serial log)",
+                     esp_err_to_name(err));
+        delete p;
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    int total = esp_https_ota_get_image_size(handle);
+    if (total > 0) {
+        // Publish the real total so the UI can render "X KB / Y KB".
+        // FirmwareUpdateModule's loop1s() rebuildControls picks this up on
+        // the next 1 Hz poll (re-binds the progress descriptor with the new
+        // total snapshot).
+        *p->bytesTotalOut = static_cast<uint32_t>(total);
+    }
+    otaSetStatus(p, "flashing");
+
+    while ((err = esp_https_ota_perform(handle)) == ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
+        int got = esp_https_ota_get_image_len_read(handle);
+        if (got >= 0) *p->bytesReadOut = static_cast<uint32_t>(got);
+    }
+    if (err != ESP_OK) {
+        otaSetStatus(p, "error: ota perform %s", esp_err_to_name(err));
+        esp_https_ota_abort(handle);
+        delete p;
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    if (!esp_https_ota_is_complete_data_received(handle)) {
+        otaSetStatus(p, "error: incomplete download");
+        esp_https_ota_abort(handle);
+        delete p;
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    err = esp_https_ota_finish(handle);
+    if (err != ESP_OK) {
+        // After finish, abort isn't valid — handle is consumed. Surface and exit.
+        otaSetStatus(p, "error: ota finish %s", esp_err_to_name(err));
+        delete p;
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    // Final byte count match — pull from the OTA handle one last time so the
+    // UI's last frame before reboot shows a clean "Y KB / Y KB".
+    if (*p->bytesTotalOut > 0) *p->bytesReadOut = *p->bytesTotalOut;
+    otaSetStatus(p, "rebooting");
+    delete p;
+    // 600 ms delay gives the HTTP response time to make it back to the browser
+    // before the device drops the socket on restart.
+    vTaskDelay(pdMS_TO_TICKS(600));
+    esp_restart();
+}
+
+}  // anonymous namespace
+
+bool http_fetch_to_ota(const char* url,
+                       char* statusBuf, size_t statusBufLen,
+                       uint32_t* bytesReadOut, uint32_t* bytesTotalOut) {
+    if (!url || !statusBuf || statusBufLen == 0 || !bytesReadOut || !bytesTotalOut) {
+        return false;
+    }
+
+    auto* p = new OtaTaskParams{};
+    std::strncpy(p->url, url, sizeof(p->url) - 1);
+    p->statusBuf = statusBuf;
+    p->statusBufLen = statusBufLen;
+    p->bytesReadOut = bytesReadOut;
+    p->bytesTotalOut = bytesTotalOut;
+
+    // 12 KB stack matches v1's working number (TLS handshake + HTTPS body
+    // buffering inside esp_https_ota). Priority 5 = above idle, below
+    // FreeRTOS critical drivers.
+    BaseType_t ok = xTaskCreate(&otaTask, "urlOta", 12288, p, 5, nullptr);
+    if (ok != pdPASS) {
+        otaSetStatus(p, "error: task create failed");
+        delete p;
+        return false;
+    }
+    return true;
+}
+
+// -----------------------------------------------------------------------
+// Improv WiFi — provisioning credentials over UART0.
+//
+// Whole section is compiled out on Ethernet-only builds (MM_NO_WIFI):
+//   - The library calls esp_wifi_scan_* / WIFI_AUTH_OPEN etc., which aren't
+//     linked when WiFi is excluded.
+//   - There's no WiFi STA to provision on an Eth-only device anyway.
+//   - hasImprov already evaluates false at the module's call site, so the
+//     `if constexpr (hasImprov)` guard at ImprovProvisioningModule.h
+//     discards the call. We still need the function symbol to exist for
+//     link, hence the stub at the bottom of this section.
+// -----------------------------------------------------------------------
+
 } // namespace mm::platform
+
+#ifndef MM_NO_WIFI
+
+#include "driver/uart.h"
+#include "improv.h"
+#include "core/ImprovFrame.h"
+
+namespace mm::platform {
+namespace {
+
+// Improv-serial framing — see src/core/ImprovFrame.h. That header carries
+// the parser, builder, and checksum, all unit-tested at test/test_improv_frame.cpp.
+// This task only does the IO + RPC dispatch.
+
+// Shared with the Improv task; const after init.
+struct ImprovTaskState {
+    char name[33] = {};               // copied from ImprovDeviceInfo at init
+    char chipFamily[16] = {};
+    char firmwareVersion[16] = {};
+    char* ssidOut = nullptr;          // module-owned buffers (NetworkModule's
+    char* passwordOut = nullptr;      // ssid_ / password_ via the module)
+    size_t ssidOutLen = 0;
+    size_t passwordOutLen = 0;
+    volatile bool* ready = nullptr;   // module polls and clears
+    char* statusBuf = nullptr;        // module shows as `provision_status`
+    size_t statusBufLen = 0;
+};
+static ImprovTaskState g_improv;  // single global — only one Improv task per device
+
+static void improvSetStatus(const char* fmt, ...) {
+    if (!g_improv.statusBuf || g_improv.statusBufLen == 0) return;
+    va_list args;
+    va_start(args, fmt);
+    std::vsnprintf(g_improv.statusBuf, g_improv.statusBufLen, fmt, args);
+    va_end(args);
+}
+
+// Send a framed Improv message. ImprovFrameType values match the upstream
+// improv::ImprovSerialType numerically (we just don't include improv.h in
+// the host-side test path, so the host-only header has its own enum).
+static void improvSend(ImprovFrameType type, const std::vector<uint8_t>& payload) {
+    uint8_t frame[6 + 1 + 1 + 1 + kImprovMaxPayload + 1];
+    size_t n = buildImprovFrame(type, payload.data(), payload.size(),
+                                frame, sizeof(frame));
+    if (n == 0) return;  // oversize payload — caller bug, silently drop
+    uart_write_bytes(UART_NUM_0, reinterpret_cast<const char*>(frame), n);
+}
+
+static void improvSendCurrentState(improv::State state) {
+    improvSend(ImprovFrameType::CurrentState, {static_cast<uint8_t>(state)});
+}
+
+static void improvSendError(improv::Error err) {
+    improvSend(ImprovFrameType::ErrorState, {static_cast<uint8_t>(err)});
+}
+
+static void improvSendDeviceInfo() {
+    // RPC response: [type=GET_DEVICE_INFO][len][n strings].
+    std::vector<std::string> data = {
+        "projectMM",                            // firmware name
+        g_improv.firmwareVersion,
+        g_improv.chipFamily,
+        g_improv.name,
+    };
+    auto rpc = improv::build_rpc_response(improv::GET_DEVICE_INFO, data, false);
+    improvSend(ImprovFrameType::RpcResponse, rpc);
+}
+
+static void improvSendWifiNetworks() {
+    // Synchronous-ish scan. Replies one network per RPC frame per the Improv
+    // spec, then a final empty payload to mark end-of-list. Limit to 10
+    // entries to keep the response set bounded.
+    wifi_scan_config_t scan_cfg = {};
+    if (esp_wifi_scan_start(&scan_cfg, true /*block*/) != ESP_OK) {
+        improvSendError(improv::ERROR_UNKNOWN);
+        return;
+    }
+    uint16_t n = 0;
+    esp_wifi_scan_get_ap_num(&n);
+    if (n > 10) n = 10;
+    wifi_ap_record_t records[10] = {};
+    esp_wifi_scan_get_ap_records(&n, records);
+    for (uint16_t i = 0; i < n; i++) {
+        char rssi[8];
+        std::snprintf(rssi, sizeof(rssi), "%d", static_cast<int>(records[i].rssi));
+        std::vector<std::string> data = {
+            reinterpret_cast<const char*>(records[i].ssid),
+            rssi,
+            records[i].authmode == WIFI_AUTH_OPEN ? "NO" : "YES",
+        };
+        auto rpc = improv::build_rpc_response(improv::GET_WIFI_NETWORKS, data, false);
+        improvSend(ImprovFrameType::RpcResponse, rpc);
+    }
+    // End-of-list sentinel: empty payload.
+    improvSend(ImprovFrameType::RpcResponse,
+               improv::build_rpc_response(improv::GET_WIFI_NETWORKS, {}, false));
+}
+
+// On WIFI_SETTINGS command: stash credentials for the module to consume.
+// The module's loop1s() polls `g_improv.ready` and calls
+// NetworkModule::setWifiCredentials, which writes through to the existing
+// wifiStaInit path. We don't call wifiStaInit from this task because we
+// don't want WiFi-driver work on the Improv parser task's stack.
+static void improvHandleProvision(const improv::ImprovCommand& cmd) {
+    if (wifiStaConnected()) {
+        improvSetStatus("error: already connected");
+        improvSendError(improv::ERROR_UNABLE_TO_CONNECT);
+        return;
+    }
+    improvSetStatus("received credentials");
+    std::strncpy(g_improv.ssidOut, cmd.ssid.c_str(), g_improv.ssidOutLen - 1);
+    g_improv.ssidOut[g_improv.ssidOutLen - 1] = 0;
+    std::strncpy(g_improv.passwordOut, cmd.password.c_str(), g_improv.passwordOutLen - 1);
+    g_improv.passwordOut[g_improv.passwordOutLen - 1] = 0;
+    *g_improv.ready = true;
+    improvSendCurrentState(improv::STATE_PROVISIONING);
+
+    // Wait up to 30 s for IP. Polls existing platform state — no extra wiring.
+    char ip[32] = {};
+    for (int i = 0; i < 300; i++) {  // 30 s @ 100 ms
+        vTaskDelay(pdMS_TO_TICKS(100));
+        if (wifiStaConnected()) {
+            wifiStaGetIP(ip, sizeof(ip));
+            break;
+        }
+    }
+    if (!wifiStaConnected()) {
+        improvSetStatus("error: no IP after 30s");
+        improvSendError(improv::ERROR_UNABLE_TO_CONNECT);
+        return;
+    }
+    improvSetStatus("connected: %s", cmd.ssid.c_str());
+    // Success frame: RPC response carrying the device URL.
+    char url[64];
+    std::snprintf(url, sizeof(url), "http://%s/", ip);
+    std::vector<std::string> urls = { url };
+    auto rpc = improv::build_rpc_response(improv::WIFI_SETTINGS, urls, false);
+    improvSend(ImprovFrameType::RpcResponse, rpc);
+    improvSendCurrentState(improv::STATE_PROVISIONED);
+}
+
+// Dispatch a completed frame from the parser. Only RPC frames carry commands
+// we care about; the spec lets the other types through silently.
+static void improvDispatchFrame(const ImprovFrameParser& parser) {
+    if (parser.lastType() != improv::TYPE_RPC) return;
+    improv::ImprovCommand cmd = improv::parse_improv_data(
+        parser.lastPayload(), parser.lastPayloadLen(), false);
+    switch (cmd.command) {
+        case improv::GET_CURRENT_STATE:
+            improvSendCurrentState(wifiStaConnected() ? improv::STATE_PROVISIONED : improv::STATE_AUTHORIZED);
+            break;
+        case improv::GET_DEVICE_INFO: improvSendDeviceInfo(); break;
+        case improv::GET_WIFI_NETWORKS:
+            // Refuse scans while WiFi STA is connected — esp_wifi_scan_start
+            // puts the radio into scan mode for 2-5 s, dropping inbound ArtNet.
+            // On large installs (16K+ LEDs) that's a visible glitch. The state
+            // returned by GET_CURRENT_STATE already tells the browser the device
+            // is online; a scan adds no new diagnostic value once provisioned.
+            if (wifiStaConnected()) improvSendError(improv::ERROR_UNABLE_TO_CONNECT);
+            else                    improvSendWifiNetworks();
+            break;
+        case improv::WIFI_SETTINGS: improvHandleProvision(cmd); break;
+        default:                    improvSendError(improv::ERROR_UNKNOWN_RPC); break;
+    }
+}
+
+static void improvTask(void* /*arg*/) {
+    // Driver install. UART0 is already configured at 115200-8N1 by the
+    // bootloader; we just claim the interrupt + RX FIFO. RX buf 256 is
+    // plenty (Improv RPC payloads max out around 96 bytes).
+    uart_driver_install(UART_NUM_0, 256, 0, 0, nullptr, 0);
+
+    improvSetStatus("listening");
+
+    ImprovFrameParser parser;  // owns its 128-byte payload buffer; ~150 B on stack
+    uint8_t b;
+    for (;;) {
+        int n = uart_read_bytes(UART_NUM_0, &b, 1, pdMS_TO_TICKS(100));
+        if (n <= 0) continue;
+
+        switch (parser.feed(b)) {
+            case ImprovFeedResult::NeedMore:
+                break;
+            case ImprovFeedResult::FrameReady:
+                improvDispatchFrame(parser);
+                break;
+            case ImprovFeedResult::BadChecksum:
+                improvSendError(improv::ERROR_INVALID_RPC);
+                break;
+            case ImprovFeedResult::OversizePayload:
+                // Length byte > 128 — almost certainly noise / bit-flip; resync silently.
+                break;
+        }
+    }
+}
+
+} // anonymous namespace
+
+bool improvProvisioningInit(const ImprovDeviceInfo& info,
+                            char* ssidOut, size_t ssidOutLen,
+                            char* passwordOut, size_t passwordOutLen,
+                            volatile bool* ready,
+                            char* statusBuf, size_t statusBufLen) {
+    if (!info.name || !info.chipFamily || !info.firmwareVersion ||
+        !ssidOut || ssidOutLen == 0 ||
+        !passwordOut || passwordOutLen == 0 ||
+        !ready || !statusBuf || statusBufLen == 0) {
+        return false;
+    }
+    std::strncpy(g_improv.name, info.name, sizeof(g_improv.name) - 1);
+    std::strncpy(g_improv.chipFamily, info.chipFamily, sizeof(g_improv.chipFamily) - 1);
+    std::strncpy(g_improv.firmwareVersion, info.firmwareVersion, sizeof(g_improv.firmwareVersion) - 1);
+    g_improv.ssidOut = ssidOut;
+    g_improv.ssidOutLen = ssidOutLen;
+    g_improv.passwordOut = passwordOut;
+    g_improv.passwordOutLen = passwordOutLen;
+    g_improv.ready = ready;
+    g_improv.statusBuf = statusBuf;
+    g_improv.statusBufLen = statusBufLen;
+
+    // 6 KB stack: parser is small, scan response uses std::vector + std::string
+    // (some short-string-optimised, some heap). Priority 4 — below OTA (5),
+    // above idle. Single task per device; not pinned to a core.
+    BaseType_t ok = xTaskCreate(&improvTask, "improv", 6144, nullptr, 4, nullptr);
+    if (ok != pdPASS) {
+        improvSetStatus("error: task create failed");
+        return false;
+    }
+    return true;
+}
+
+} // namespace mm::platform
+
+#else // MM_NO_WIFI — Ethernet-only build: no Improv listener.
+
+namespace mm::platform {
+
+// Stub for link parity. ImprovProvisioningModule guards the call with
+// `if constexpr (hasImprov)`, which evaluates false on MM_NO_WIFI builds —
+// so this is never invoked at runtime. Kept as a symbol so the platform.h
+// declaration links cleanly on every build profile.
+bool improvProvisioningInit(const ImprovDeviceInfo& /*info*/,
+                            char* /*ssidOut*/,    size_t /*ssidOutLen*/,
+                            char* /*passwordOut*/, size_t /*passwordOutLen*/,
+                            volatile bool* /*ready*/,
+                            char* statusBuf, size_t statusBufLen) {
+    if (statusBuf && statusBufLen > 0) {
+        std::snprintf(statusBuf, statusBufLen, "not supported (no WiFi)");
+    }
+    return false;
+}
+
+} // namespace mm::platform
+
+#endif // MM_NO_WIFI

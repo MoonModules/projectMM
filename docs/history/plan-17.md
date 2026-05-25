@@ -283,7 +283,7 @@ Page structure:
 <esp-web-install-button id="installer" manifest="manifest-esp32.json"></esp-web-install-button>
 ```
 
-After-flash UX text: "The device boots a SoftAP named `projectMM-xxxx`. Join it, open `http://192.168.4.1`, enter your WiFi credentials."
+After-flash UX text: "The device boots a SoftAP named `projectMM-xxxx`. Join it, open `http://4.3.2.1`, enter your WiFi credentials."
 
 ### Step 7 — Enable GitHub Pages (manual, 0.25 h)
 

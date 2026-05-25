@@ -1,6 +1,6 @@
 // Scenario runner: reads scenario JSON files, replays steps in-process.
 // When HTTP API is added, the same JSON files work with a Python runner
-// against a live system (like projectMM v1's deploy/scenario.py).
+// against a live system.
 
 #include "core/Scheduler.h"
 #include "core/ModuleFactory.h"

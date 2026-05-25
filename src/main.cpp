@@ -19,6 +19,8 @@
 #include "core/HttpServerModule.h"
 #include "core/PreviewFrame.h"  // used directly here; HttpServerModule.h no longer brings it transitively
 #include "core/SystemModule.h"
+#include "core/FirmwareUpdateModule.h"
+#include "core/ImprovProvisioningModule.h"
 #include "core/FilesystemModule.h"
 #include "core/ModuleFactory.h"
 #include "platform/platform.h"
@@ -56,6 +58,8 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers/PreviewDriver.md");
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/HttpServerModule.md");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/SystemModule.md");
+    mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/FirmwareUpdateModule.md");
+    mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/ImprovProvisioningModule.md");
     mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule", "core/NetworkModule.md");
     mm::ModuleFactory::registerType<mm::FilesystemModule>("FilesystemModule", "core/FilesystemModule.md");
 }
@@ -108,10 +112,42 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     auto* systemModule = static_cast<mm::SystemModule*>(mm::ModuleFactory::create("SystemModule"));
     systemModule->setScheduler(&scheduler);
 
+    // FirmwareUpdate — surfaces OTA status as two read-only controls.
+    // The actual flash is driven by POST /api/firmware/url; this module just
+    // polls the shared globals so the WS push picks up progress.
+    // setName("Firmware") overrides the factory-stripped default
+    // ("FirmwareUpdate") — the card hosts the release-picker, so "Firmware"
+    // reads as the user-facing concept (the picker is *how* you update it).
+    auto* firmwareUpdateModule = static_cast<mm::FirmwareUpdateModule*>(
+        mm::ModuleFactory::create("FirmwareUpdateModule"));
+    firmwareUpdateModule->setName("Firmware");
+
     // Network (platform stubs return false on desktop — module is a no-op)
     auto* networkModule = static_cast<mm::NetworkModule*>(mm::ModuleFactory::create("NetworkModule"));
     networkModule->setScheduler(&scheduler);
     networkModule->setSystemModule(systemModule);
+
+    // ImprovProvisioning — listens on UART0 for browser-/CLI-driven WiFi
+    // credentials. Created after NetworkModule so its setter has a valid
+    // pointer; the scheduler runs setup() on both in the same phase, so
+    // construction order is what matters, not addModule order.
+    //
+    // Compile-time gated: on builds without WiFi (--board esp32-eth, and
+    // desktop) the module is not created at all. This is the single
+    // exception to main.cpp's "register everything, let modules guard
+    // themselves" pattern. Rationale: Improv's only purpose is pushing WiFi
+    // credentials; on a WiFi-less build there is no credential surface to
+    // push to. A card showing "not supported" status was rejected as UI
+    // noise that adds nothing actionable on those targets. hasImprov tracks
+    // hasWiFi at compile time (platform_config.h); the discarded branch is
+    // not code-generated.
+    mm::ImprovProvisioningModule* improvModule = nullptr;
+    if constexpr (mm::platform::hasImprov) {
+        improvModule = static_cast<mm::ImprovProvisioningModule*>(
+            mm::ModuleFactory::create("ImprovProvisioningModule"));
+        improvModule->setSystemModule(systemModule);
+        improvModule->setNetworkModule(networkModule);
+    }
 
     // Layouts: top-level container; one or more layouts. Today one GridLayout.
     auto* layouts = static_cast<mm::Layouts*>(mm::ModuleFactory::create("Layouts"));
@@ -163,7 +199,9 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     // then HTTP. The Scheduler walks roots in this order each tick.
     scheduler.addModule(filesystemModule);
     scheduler.addModule(systemModule);
+    scheduler.addModule(firmwareUpdateModule);
     scheduler.addModule(networkModule);
+    if (improvModule) scheduler.addModule(improvModule);
     scheduler.addModule(layouts);
     scheduler.addModule(layersContainer);
     scheduler.addModule(drivers);

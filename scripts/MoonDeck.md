@@ -42,6 +42,19 @@ Re-running is idempotent: any existing `projectMM` instance is stopped first, th
 
 While the app is running, MoonDeck shows the button as **Stop** (a 5-second poll on `/api/running` detects the live process via `process_name`). Pressing Stop terminates the app; pressing Run again restarts it. From the CLI: `pkill -f build/projectMM`.
 
+### preview_installer
+
+Locally preview the web installer page at <https://ewowi.github.io/projectMM/install/> without tagging a release. Stages `docs/install/index.html` + `src/ui/release-picker.js` into `build/install-preview/` and serves them via Python's `http.server` on port 8000.
+
+```bash
+uv run scripts/run/preview_installer.py
+# open http://localhost:8000/ in Chrome / Edge / Opera
+```
+
+Long-running — MoonDeck shows **Stop** while the server is up. This is "Recipe A" from [docs/install/README.md](../docs/install/README.md): the picker populates against the real GitHub Releases API and dropdowns work, but clicking **Install** fails because the local server has no `releases/` tree. Useful for iterating on HTML/CSS/JS. Add `?nocache=1` to the URL to bypass the picker's 5-minute sessionStorage cache while editing.
+
+For an end-to-end preview that can actually flash (Recipe B), follow the script in [docs/install/README.md](../docs/install/README.md) — that flow pulls a CI build's artifacts and is too stateful for a one-click button.
+
 ### check_platform_boundary
 
 Verify that platform-specific code stays inside `src/platform/`.
@@ -144,3 +157,35 @@ uv run scripts/run/monitor_esp32.py --port /dev/tty.usbserial-0001
 ```
 
 Reads serial at 115200 baud. Output streams to MoonDeck's log and is saved to `esp32/monitor.log` for later inspection (useful when crashes flood the output).
+
+### improv_provision
+
+Push WiFi credentials to a running projectMM device over USB-serial. Uses the [Improv-WiFi](https://www.improv-wifi.com/serial/) protocol — the same wire format the browser flow at improv-wifi.com uses. Device must be running a firmware that includes the Improv listener.
+
+**One-click flow**: pick the device's port in MoonDeck, hit **Improv WiFi**. The script auto-detects the host machine's currently-joined WiFi (SSID + password via macOS Keychain / Linux NetworkManager / Windows `netsh`) and sends it to the device. The device replies with its new URL when STA comes up — typically 5-10 s end to end.
+
+```bash
+# Use host's currently-joined WiFi (one click in MoonDeck → equivalent CLI):
+uv run scripts/build/improv_provision.py --port /dev/tty.usbserial-XXXX
+
+# Override SSID + password (rack / CI / different network):
+uv run scripts/build/improv_provision.py \
+  --port /dev/tty.usbserial-XXXX \
+  --ssid "MyWiFi" \
+  --password "hunter2"
+
+# Self-test the framing — no serial port needed (CI / pre-commit):
+uv run scripts/build/improv_provision.py --self-test
+```
+
+Exits 0 with `==> provisioned: http://<ip>/` on success. On a USB hub, shell-loop over the ports:
+
+```bash
+for port in /dev/tty.usbserial-*; do
+  uv run scripts/build/improv_provision.py --port "$port"
+done
+```
+
+The host-WiFi reader lives at [scripts/build/host_wifi.py](build/host_wifi.py) and runs standalone for diagnosis (`python3 scripts/build/host_wifi.py` prints the detected SSID + password). The first macOS run pops a Keychain access dialog — the OS doing its job; we don't try to bypass it.
+
+Replaces v1's `deploy/wifi.py` + `deploy/flashfs.py --wifi` partition-baking flow — the device stays running, no flash mode required. Full module + protocol details: [docs/moonmodules/core/ImprovProvisioningModule.md](../docs/moonmodules/core/ImprovProvisioningModule.md).

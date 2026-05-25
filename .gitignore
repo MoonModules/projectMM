@@ -80,7 +80,6 @@ esp32/sdkconfig
 esp32/sdkconfig.old
 esp32/managed_components/
 esp32/dependencies.lock
-esp32/main/wifi_credentials.h
 esp32/monitor.log
 
 # IDE

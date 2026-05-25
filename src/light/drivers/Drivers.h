@@ -39,8 +39,18 @@ public:
     void onAllocateMemory() override {
         // Output buffer needed if any layer has a LUT (currently single layer).
         // Multi-layer: check all layers, allocate if at least one has a LUT.
+        // If allocation fails (no contiguous heap large enough — a real risk on
+        // ESP32 without PSRAM when the Layer pipeline has fragmented DRAM),
+        // outputBuffer_ stays with data_=nullptr. loop() must check that before
+        // calling blendMap, otherwise blendMap will dereference a null
+        // outputBuffer_.data() and panic with LoadProhibited. Same defensive
+        // pattern Layer::allocateBuffer uses for its pixel buffer.
         if (layer_ && layer_->lut().hasLUT()) {
-            outputBuffer_.allocate(layer_->physicalLightCount(), layer_->channelsPerLight());
+            if (!outputBuffer_.allocate(layer_->physicalLightCount(), layer_->channelsPerLight())) {
+                std::printf("  DEGRADE  Drivers::outputBuffer_ allocate failed for %u lights\n",
+                            static_cast<unsigned>(layer_->physicalLightCount()));
+                outputBuffer_.free();   // leaves data_=nullptr, bytes()=0
+            }
         } else {
             outputBuffer_.free();
         }
@@ -56,7 +66,11 @@ public:
         // Layer::loop() does for effects and Layers::loop() does for child Layers.
         // Without this gate the UI's enable/disable on an ArtNet or Preview driver
         // is a no-op and the driver keeps emitting.
-        if (layer_ && layer_->lut().hasLUT()) {
+        //
+        // outputBuffer_.data() can be null if onAllocateMemory failed to claim
+        // a contiguous block (heap fragmentation). Skip the blend in that case
+        // — drivers run on raw Layer buffer or simply have nothing to send.
+        if (layer_ && layer_->lut().hasLUT() && outputBuffer_.data()) {
             blendMap(layer_->buffer(), outputBuffer_, layer_->lut(), layer_->channelsPerLight());
         }
         for (uint8_t i = 0; i < childCount(); i++) {

@@ -14,6 +14,7 @@
 #include "core/Sha1.h"
 #include "core/Base64.h"
 #include "core/FilesystemModule.h"
+#include "core/FirmwareUpdateModule.h"
 #include "platform/platform.h"
 #include "ui/ui_embedded.h"
 
@@ -119,6 +120,7 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
     if (std::strcmp(method, "GET") == 0) {
         if (std::strcmp(path, "/") == 0) serveFile(conn, "index.html", "text/html");
         else if (std::strcmp(path, "/app.js") == 0) serveFile(conn, "app.js", "application/javascript");
+        else if (std::strcmp(path, "/release-picker.js") == 0) serveFile(conn, "release-picker.js", "application/javascript");
         else if (std::strcmp(path, "/style.css") == 0) serveFile(conn, "style.css", "text/css");
         else if (std::strcmp(path, "/moonlight-logo.png") == 0) serveFile(conn, "moonlight-logo.png", "image/png");
         else if (std::strcmp(path, "/api/state") == 0) serveState(conn);
@@ -167,6 +169,8 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
             }
         } else if (std::strcmp(path, "/api/reboot") == 0) {
             handleReboot(conn);
+        } else if (std::strcmp(path, "/api/firmware/url") == 0 && body) {
+            handleFirmwareUrl(conn, body);
         } else {
             sendResponse(conn, 404, "text/plain", "Not found");
         }
@@ -239,6 +243,7 @@ void HttpServerModule::serveFile(platform::TcpConnection& conn, const char* file
     size_t dataLen = 0;
     if (std::strcmp(filename, "index.html") == 0) { data = ui::indexHtml; dataLen = ui::indexHtmlLen; }
     else if (std::strcmp(filename, "app.js") == 0) { data = ui::appJs; dataLen = ui::appJsLen; }
+    else if (std::strcmp(filename, "release-picker.js") == 0) { data = ui::releasePickerJs; dataLen = ui::releasePickerJsLen; }
     else if (std::strcmp(filename, "style.css") == 0) { data = ui::styleCss; dataLen = ui::styleCssLen; }
     else if (std::strcmp(filename, "moonlight-logo.png") == 0) { data = ui::logoPng; dataLen = ui::logoPngLen; }
 
@@ -910,6 +915,47 @@ void HttpServerModule::handleReboot(platform::TcpConnection& conn) {
     conn.close();
     platform::delayMs(200);
     platform::reboot();  // noreturn
+}
+
+void HttpServerModule::handleFirmwareUrl(platform::TcpConnection& conn, const char* body) {
+    if constexpr (!platform::hasOta) {
+        sendResponse(conn, 501, "application/json",
+                     "{\"error\":\"OTA not supported on this platform\"}");
+        return;
+    }
+
+    char url[512] = {};
+    mm::json::parseString(body, "url", url, sizeof(url));
+    if (url[0] == 0) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"url required\"}");
+        return;
+    }
+    // Cheap URL-shape sanity: only http(s). Stops accidental file:// or
+    // protocol-relative things from reaching the platform layer.
+    if (std::strncmp(url, "http://", 7) != 0 && std::strncmp(url, "https://", 8) != 0) {
+        sendResponse(conn, 400, "application/json",
+                     "{\"error\":\"url must start with http:// or https://\"}");
+        return;
+    }
+
+    // Seed the shared globals so the first WS push after this response shows
+    // "starting" instead of whatever the previous OTA left behind (e.g. an
+    // "error: …" string from a prior failed attempt).
+    std::snprintf(g_otaStatus, sizeof(g_otaStatus), "starting");
+    g_otaBytesRead = 0;
+    g_otaBytesTotal = 0;
+
+    if (!platform::http_fetch_to_ota(url, g_otaStatus, sizeof(g_otaStatus),
+                                     &g_otaBytesRead, &g_otaBytesTotal)) {
+        // The platform may have already written an error string; pass it through.
+        char err[128];
+        std::snprintf(err, sizeof(err),
+                      "{\"error\":\"%s\"}", g_otaStatus[0] ? g_otaStatus : "ota start failed");
+        sendResponse(conn, 500, "application/json", err);
+        return;
+    }
+    // 202 Accepted — task running; UI polls FirmwareUpdate.update_status.
+    sendResponse(conn, 202, "application/json", "{\"ok\":true}");
 }
 
 void HttpServerModule::handleWebSocketUpgrade(platform::TcpConnection& conn, const char* req) {

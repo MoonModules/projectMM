@@ -76,6 +76,57 @@ void wifiApStop();
 bool mdnsInit(const char* deviceName);
 void mdnsStop();
 
+// OTA — fetch a firmware image from `url` and flash it to the next OTA partition.
+// ESP32: spawns a one-shot FreeRTOS task (the call returns immediately; the task
+// runs to completion or error). The task uses `esp_https_ota`, which rolls the
+// download + partition write + boot-pointer flip into one API; on success it
+// calls platform::reboot() so the device boots the new image.
+// Desktop: returns false (no OTA partition to write to); call sites guard with
+// `if constexpr (mm::platform::hasOta)`.
+//
+// `statusBuf` is updated in place by the task with a short progress string
+// (e.g. "downloading", "flashing", "error: HTTP 404"). `bytesReadOut` /
+// `bytesTotalOut` advance as the download proceeds — the UI renders them as
+// "X KB / Y KB". `bytesTotalOut` is 0 until esp_https_ota reports the image
+// size (just after the HTTPS handshake), then holds the real value for the
+// rest of the task's lifetime. FirmwareUpdateModule polls all three at 1 Hz
+// and copies into its Control buffers so the WS state push surfaces progress
+// to the UI without extra wiring.
+bool http_fetch_to_ota(const char* url,
+                       char* statusBuf, size_t statusBufLen,
+                       uint32_t* bytesReadOut, uint32_t* bytesTotalOut);
+
+// Improv WiFi provisioning over UART0.
+// ESP32 only; desktop stub returns false. Spawns a FreeRTOS task that installs
+// a UART driver on UART_NUM_0 (the same channel ESP-IDF logging writes to;
+// they coexist because logging uses direct register writes, not the driver).
+// The task feeds inbound bytes into the `improv/improv` parser.
+//
+// On a provision request the task validates state: if wifiStaConnected() is
+// true it emits Improv's wrong-state error frame. Otherwise it copies the
+// credentials into the caller-owned buffers `ssidOut` / `passwordOut` (sized
+// to hold 33 + 64 bytes, matching NetworkModule's storage) and sets `*ready`
+// to true. The caller's loop1s() polls `ready`, copies the buffers onward,
+// and clears the flag.
+//
+// `statusBuf` mirrors http_fetch_to_ota's pattern: the task writes short
+// strings ("listening", "received credentials", "connecting",
+// "connected: <ssid>", "error: <reason>"). ImprovProvisioningModule polls
+// it into a read-only Control.
+//
+// `info` is borrowed; the task copies the strings on init (pass static
+// storage like `kVersion` and SystemModule::deviceName()).
+struct ImprovDeviceInfo {
+    const char* name;            // device hostname, e.g. "MM-3A7F"
+    const char* chipFamily;      // "ESP32" / "ESP32-S3" / ...
+    const char* firmwareVersion; // e.g. "1.0.0-rc2"
+};
+bool improvProvisioningInit(const ImprovDeviceInfo& info,
+                            char* ssidOut, size_t ssidOutLen,
+                            char* passwordOut, size_t passwordOutLen,
+                            volatile bool* ready,
+                            char* statusBuf, size_t statusBufLen);
+
 class UdpSocket {
 public:
     UdpSocket() = default;

@@ -15,6 +15,24 @@ public:
     void setScheduler(Scheduler* s) { scheduler_ = s; }
     void setSystemModule(SystemModule* s) { systemModule_ = s; }
 
+    // External entry-point for setting WiFi credentials at runtime — used by
+    // ImprovProvisioningModule when the browser/CLI pushes new credentials over
+    // USB-serial. Writes the same buffers the AP-fallback UI flow writes via
+    // POST /api/control on `ssid` / `password`, then kicks off STA init.
+    // The state machine in loop1s() (lines 83-111) handles the 10 s timeout
+    // and AP fallback automatically — this method just primes the pump.
+    void setWifiCredentials(const char* ssid, const char* password) {
+        if (!ssid) return;
+        std::strncpy(ssid_, ssid, sizeof(ssid_) - 1);
+        ssid_[sizeof(ssid_) - 1] = 0;
+        std::strncpy(password_, password ? password : "", sizeof(password_) - 1);
+        password_[sizeof(password_) - 1] = 0;
+        markDirty();   // FilesystemModule picks this up on its next save
+        if constexpr (platform::hasWiFi) {
+            platform::wifiStaInit(ssid_, password_);
+        }
+    }
+
     // Networking is infrastructure — keep the cascade ticking even when the user
     // toggled "enabled" off, otherwise the device would silently drop off the LAN
     // and become unreachable.

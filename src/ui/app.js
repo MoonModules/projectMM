@@ -1,5 +1,10 @@
 // projectMM Web UI — all logic in one hand-maintained file per CLAUDE.md.
-//
+// Loaded as <script type="module"> so it can import the shared release-picker
+// component used by both the device UI (here, OTA flash) and the GitHub Pages
+// installer (first flash via Web Serial). Module loading is deferred by
+// default; entry-point is the WS init at the bottom — no ordering surprises.
+import { releasePicker } from "/release-picker.js";
+
 // Sections (top to bottom):
 //   1. State + storage
 //   2. WebSocket (with keepalive, visibility pause, bfcache, exponential backoff)
@@ -464,6 +469,41 @@ function createCard(mod, depth) {
             const row = createControl(mod.name, mod.type, ctrl);
             if (row) controlsHost.appendChild(row);
         }
+    }
+
+    // FirmwareUpdate card hosts the shared release picker. Mount once per
+    // card-build. The picker reads SystemModule.board (already in /api/state)
+    // to filter to OTA-compatible releases. On install, the device fetches the
+    // binary via /api/firmware/url — no browser CORS in the data path.
+    if (mod.type === "FirmwareUpdateModule") {
+        const ownBoardKey = (() => {
+            if (!state || !state.modules) return null;
+            const sys = state.modules.find(m => m.name === "System");
+            const boardCtrl = sys && (sys.controls || []).find(c => c.name === "board");
+            return boardCtrl && boardCtrl.value ? boardCtrl.value : null;
+        })();
+        const mount = document.createElement("div");
+        mount.className = "release-picker-host";
+        controlsHost.appendChild(mount);
+        releasePicker.init({
+            container: mount,
+            ownBoardKey,
+            onInstall: async (_board, _manifestUrl, binaryUrl) => {
+                const res = await fetch("/api/firmware/url", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ url: binaryUrl }),
+                });
+                if (!res.ok) {
+                    let msg = `HTTP ${res.status}`;
+                    try {
+                        const j = await res.json();
+                        if (j.error) msg = j.error;
+                    } catch (_) { /* non-JSON error response */ }
+                    throw new Error(msg);
+                }
+            },
+        });
     }
 
     // -- Children block + footer (only on parents that accept children) --
