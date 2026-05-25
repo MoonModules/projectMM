@@ -136,8 +136,13 @@
 
       <!-- ESP Web Tools button injected by onInstall (below) — kept on its
            own host so the picker's UI stays purely a picker, with no install
-           transport baked in. -->
-      <div class="button-row" id="button-host"></div>
+           transport baked in. The host is hidden because we auto-click the
+           injected <esp-web-install-button>'s inner activate slot from the
+           onInstall callback (line ~232) — the user only needs the picker's
+           Install button, which is the "decide" affordance. The ESP Web
+           Tools button still has to exist in the DOM for Web Serial to take
+           over after auto-click, but it never needs to be visible. -->
+      <div class="button-row" id="button-host" style="display: none"></div>
 
       <p class="note">
         The Ethernet builds were verified on the
