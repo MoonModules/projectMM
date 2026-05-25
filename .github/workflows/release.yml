@@ -70,7 +70,15 @@ jobs:
         # main and was shadowing the step-level env: override in practice
         # (verified on run 26406224226 — env: said v1.0.0-rc1 but Python read
         # "main"). Explicit CLI arg sidesteps the collision.
-        run: python scripts/build/verify_version.py --tag "${{ inputs.tag || github.ref_name }}"
+        #
+        # The expression is plumbed via a step-level env var so the shell sees
+        # a properly-quoted "$TAG" instead of interpolating template text
+        # directly into the run line — same pattern the release job below
+        # uses for $REPO. Same value either way; the indirection silences
+        # the static analyser's template-injection warning.
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: python scripts/build/verify_version.py --tag "$TAG"
 
   build-esp32:
     needs: verify-version

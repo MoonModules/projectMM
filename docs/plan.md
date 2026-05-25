@@ -179,6 +179,16 @@ Cross-link: line 100 ("Memory ceiling: default grid + Ethernet + WiFi cascade fa
 
 Practical guidance until fixed: **use `esp32-eth-wifi` for any Art-Net workload on classic ESP32**, even if Ethernet isn't physically connected. The plain `esp32` build is best reserved for UI-only / smaller-grid WiFi use cases.
 
+## Platform API: migrate pointer+size pairs to `std::span` (backlog)
+
+CodeRabbit flagged the post-plan-18 platform.h surface for using `(buf, len)` pairs in several places where `std::span<char>` / `std::span<uint8_t>` would let the compiler catch length/pointer mismatches. Concrete sites:
+
+- [src/platform/platform.h](src/platform/platform.h) — `http_fetch_to_ota(url, statusBuf, statusBufLen, bytesReadOut, bytesTotalOut)` and friends.
+- [src/platform/platform.h](src/platform/platform.h) — `improvProvisioningInit(info, ready, statusBuf, statusBufLen, ssidOut, ssidOutLen, passwordOut, passwordOutLen)`.
+- `TcpConnection::read/write` already take `(uint8_t*, size_t)`; keeping those raw is fine (matches the lwip / Berkeley sockets shape) but if we do a span pass, doing it consistently everywhere is the right scope.
+
+Not RC2 / not plan-18 work — touches every caller (modules, scenarios, tests). Worth doing alongside the next platform-API expansion (e.g. when adding Windows desktop sockets per the Windows port, or POST /api/firmware streaming). Estimate ~2 h including ripple updates.
+
 ## HTTP file serving blocks the render tick (follow-up)
 
 The ESP32 tick-variability swing (FPS collapse when a browser connected) was traced to the blocking 49 KB preview WebSocket broadcast and **fixed** — see `docs/performance.md` "ESP32 tick variability". A lesser, one-shot version of the same issue remains: `HttpServerModule::handleConnection()` serves the embedded UI files (`app.js`, `style.css` — tens of KB) with the plain blocking `TcpConnection::write`, so a page load can briefly stall `loop20ms`. It's one-shot per load rather than per-tick, so lower priority. Fix when convenient: serve large HTTP responses with the same non-blocking `writeChunks` path, or chunk the response across ticks.
