@@ -188,7 +188,7 @@ Partition layout: app0/app1 = 1.75 MB each, `spiffs` (LittleFS) = 384 KB, coredu
 
 #### What's in the 1.27 MB
 
-Component-level breakdown for `esp32-eth-wifi`, from `idf.py -B build/esp32-esp32-eth-wifi size-components` (run from the project root after a clean build of that board). These numbers shift with IDF version + sdkconfig; treat as rough proportions, not exact values. Re-run the command to refresh.
+Component-level breakdown for `esp32-eth-wifi`, from `idf.py -B build/esp32-esp32-eth-wifi -DSDKCONFIG=build/esp32-esp32-eth-wifi/sdkconfig size-components` (run from the project root after a clean build of that board). The build dir uses the `esp32-<board>` namespace (so the `esp32-eth-wifi` board lives under `esp32-esp32-eth-wifi/` — the doubled prefix is intentional, see the same pattern in `build_esp32.py`'s `build_dir_for`). These numbers shift with IDF version + sdkconfig; treat as rough proportions, not exact values. Re-run the command to refresh.
 
 | Category | Approx weight | What |
 |---|---|---|
@@ -229,10 +229,16 @@ Quick budget for upcoming items in `docs/plan.md`:
 #### How to update this section
 
 ```bash
-cd esp32
-uv run ../scripts/build/build_esp32.py --board esp32-eth-wifi
-cd build && idf.py size-components | head -40
+uv run scripts/build/build_esp32.py --board esp32-eth-wifi
+cd esp32 && idf.py \
+  -B ../build/esp32-esp32-eth-wifi \
+  -DSDKCONFIG=../build/esp32-esp32-eth-wifi/sdkconfig \
+  size-components | head -40
 ```
+
+`-B` + `-DSDKCONFIG` point idf.py at the per-board build dir + its
+sdkconfig — without them, idf.py looks for `esp32/build/` and
+`esp32/sdkconfig`, neither of which exist under the per-board layout.
 
 The output groups by archive (`libesp_wifi.a`, `libmbedtls.a`, etc.). Re-bucket into the categories above and update the percentages. Capture the variant deltas with `idf.py size` after each `--board` rebuild.
 

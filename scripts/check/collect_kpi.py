@@ -50,23 +50,47 @@ def run(cmd, cwd=None, timeout=30):
 # Collectors — return dicts of KPI data
 # ---------------------------------------------------------------------------
 
+def _pick_first_existing(*paths):
+    """Return the first Path that exists, or None."""
+    for p in paths:
+        if p.exists():
+            return p
+    return None
+
+
 def collect_desktop():
     kpi = {}
 
-    projectMM = BUILD_DIR / "projectMM"
-    if projectMM.exists():
+    # Binary names + locations differ per host: macOS/Linux drop the
+    # executable under <build>/, MSVC multi-config under <build>/Release/.
+    # Cover both forms so KPI on Windows doesn't silently report nothing.
+    # Same fallback shape test_desktop.py uses.
+    projectMM = _pick_first_existing(
+        BUILD_DIR / "projectMM",
+        BUILD_DIR / "projectMM.exe",
+        BUILD_DIR / "Release" / "projectMM.exe",
+    )
+    if projectMM:
         kpi["binary_kb"] = projectMM.stat().st_size // 1024
 
-    test_exe = BUILD_DIR / "test" / "mm_tests"
-    if test_exe.exists():
+    test_exe = _pick_first_existing(
+        BUILD_DIR / "test" / "mm_tests",
+        BUILD_DIR / "test" / "mm_tests.exe",
+        BUILD_DIR / "test" / "Release" / "mm_tests.exe",
+    )
+    if test_exe:
         out, rc = run([str(test_exe)], cwd=BUILD_DIR)
         for line in out.splitlines():
             if "test cases:" in line:
                 kpi["tests"] = line.strip()
                 break
 
-    scenarios = BUILD_DIR / "test" / "mm_scenarios"
-    if scenarios.exists():
+    scenarios = _pick_first_existing(
+        BUILD_DIR / "test" / "mm_scenarios",
+        BUILD_DIR / "test" / "mm_scenarios.exe",
+        BUILD_DIR / "test" / "Release" / "mm_scenarios.exe",
+    )
+    if scenarios:
         out, rc = run([str(scenarios)], cwd=ROOT)
         tick_values = []
         buffer_lights = []
