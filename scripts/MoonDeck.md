@@ -77,6 +77,23 @@ uv run scripts/scenario/run_scenario.py --name base-pipeline   # run one
 
 Scenarios are JSON files in `test/scenarios/`.
 
+### history_report
+
+Generate a human-readable history report from `git log` + `gh release list`. Writes a single markdown file at `build/history.md` (gitignored — the report is an artifact, not source; storing it in the repo would duplicate what git already carries).
+
+```bash
+uv run scripts/report/history_report.py              # default: build/history.md
+uv run scripts/report/history_report.py --out /tmp/h.md
+```
+
+Output shape:
+
+- **Releases** table: the most-recent 10 tagged releases with tag, date, and channel (stable / rc / nightly).
+- **History** section: combined graph + commits, newest first. Each commit row shows its graph-rail (`*`, `| *`, `*   `, …) as a monospace prefix to the SHA + date + subject. Merge commits get a ⤴ badge. The full body lives in a left-bordered blockquote underneath, visually extending the rail's vertical line into the description. Branch connector rows (`|\`, `|/`, `| |`) render as standalone monospace lines between commits. Inside each body, `- foo` lines render as nested bullet lists. Each SHA links to the corresponding GitHub commit page when an origin remote is configured.
+- **Summary** footer: commit count, release count, generation timestamp.
+
+The MoonDeck button writes the file, prints a `MOONDECK_VIEW: /api/history-report` marker that the log renderer auto-opens in the View pane (and renders as an "Open in View pane → …" clickable link). Re-runs on identical git state produce a deterministic file except for the timestamp line in the footer.
+
 ## Live Tab
 
 ### live_scenario

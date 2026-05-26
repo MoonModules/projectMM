@@ -272,6 +272,11 @@ select {
     white-space: pre-wrap;
     word-break: break-all;
 }
+#log a {
+    color: var(--accent);
+    text-decoration: underline;
+}
+#log a:hover { color: #fff; }
 
 #view-frame {
     flex: 1;

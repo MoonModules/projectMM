@@ -415,12 +415,12 @@ function createCard(mod, depth) {
     enabled.dataset.key = "enabled";
     enabled.setAttribute("aria-pressed", "true");
     enabled.title = "Enable / disable";
-    // ✓ when on, ○ when off — both glyphs are smaller than the box so the
-    // visual weight matches the other action buttons (no filled background).
     const setEnabledUi = (on) => {
         enabled.dataset.checked = on ? "true" : "false";
-        enabled.textContent = on ? "✓" : "○";
+        enabled.textContent = "⏻";
+        enabled.classList.toggle("module-enabled--off", !on);
         enabled.setAttribute("aria-pressed", on ? "true" : "false");
+        card.classList.toggle("card--disabled", !on);
     };
     setEnabledUi(mod.enabled === undefined ? true : !!mod.enabled);
     enabled.addEventListener("click", () => {
@@ -791,19 +791,27 @@ function createControl(moduleName, moduleType, ctrl) {
             input.value = ctrl.value ?? 0;
             input.dataset.mid = moduleName;
             input.dataset.key = ctrl.name;
-            const valSpan = document.createElement("span");
-            valSpan.className = "control-value";
-            valSpan.textContent = input.value;
+            const numInput = document.createElement("input");
+            numInput.type = "number";
+            numInput.className = "control-value-input";
+            numInput.min = input.min;
+            numInput.max = input.max;
+            numInput.value = input.value;
             input.addEventListener("input", () => {
                 dragTs[key] = Date.now();
-                valSpan.textContent = input.value;
+                numInput.value = input.value;
                 debounceSend(key, 150, () => sendControl(moduleName, ctrl.name, parseInt(input.value)));
             });
+            numInput.addEventListener("input", () => {
+                const v = Math.max(Number(input.min), Math.min(Number(input.max), parseInt(numInput.value) || 0));
+                input.value = v;
+                debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, v));
+            });
             row.appendChild(input);
-            row.appendChild(valSpan);
+            row.appendChild(numInput);
             appendResetButton(row, moduleName, ctrl, def, () => {
                 input.value = def;
-                valSpan.textContent = def;
+                numInput.value = def;
             });
             break;
         }
@@ -822,14 +830,13 @@ function createControl(moduleName, moduleType, ctrl) {
             break;
         }
         case "int16": {
-            // Slider with visible value, matching the uint8 path's UX. Default
-            // range -100..+200 is the percentage band the only int16 user today
-            // (Layer start/end) needs — 0..100 covers the visible area and
-            // -100..0 / 100..200 gives modifier-shift headroom. Engine-supplied
-            // ctrl.min/ctrl.max override when present, so a future int16
-            // control with different bounds works without changing this case.
-            const min = Number(ctrl.min ?? -100);
-            const max = Number(ctrl.max ?? 200);
+            // ctrl.min/ctrl.max are always present (server sends them). Sentinel
+            // values INT16_MIN (-32768) / INT16_MAX (32767) mean "unbounded" —
+            // fall back to the percentage range used by Layer start/end controls.
+            const rawMin = Number(ctrl.min ?? -32768);
+            const rawMax = Number(ctrl.max ?? 32767);
+            const min = rawMin <= -32768 ? -100 : rawMin;
+            const max = rawMax >= 32767  ?  200 : rawMax;
             const raw = Number(ctrl.value ?? 0);
             const clamped = Math.max(min, Math.min(max, raw));
             const input = document.createElement("input");
@@ -839,19 +846,27 @@ function createControl(moduleName, moduleType, ctrl) {
             input.value = clamped;
             input.dataset.mid = moduleName;
             input.dataset.key = ctrl.name;
-            const valSpan = document.createElement("span");
-            valSpan.className = "control-value";
-            valSpan.textContent = input.value;
+            const numInput = document.createElement("input");
+            numInput.type = "number";
+            numInput.className = "control-value-input";
+            numInput.min = min;
+            numInput.max = max;
+            numInput.value = input.value;
             input.addEventListener("input", () => {
                 dragTs[key] = Date.now();
-                valSpan.textContent = input.value;
+                numInput.value = input.value;
                 debounceSend(key, 150, () => sendControl(moduleName, ctrl.name, parseInt(input.value)));
             });
+            numInput.addEventListener("input", () => {
+                const v = Math.max(min, Math.min(max, parseInt(numInput.value) || 0));
+                input.value = v;
+                debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, v));
+            });
             row.appendChild(input);
-            row.appendChild(valSpan);
+            row.appendChild(numInput);
             appendResetButton(row, moduleName, ctrl, def, () => {
                 input.value = def;
-                valSpan.textContent = def;
+                numInput.value = def;
             });
             break;
         }
@@ -1079,8 +1094,11 @@ function updateValues() {
             if (Date.now() - ts > 1000) {
                 const on = (mod.enabled === undefined) ? true : !!mod.enabled;
                 enabledEl.dataset.checked = on ? "true" : "false";
-                enabledEl.textContent = on ? "✓" : "○";
+                enabledEl.textContent = "⏻";
+                enabledEl.classList.toggle("module-enabled--off", !on);
                 enabledEl.setAttribute("aria-pressed", on ? "true" : "false");
+                const cardEl = document.querySelector(`.card[data-module="${cssEscape(mod.name)}"]`);
+                if (cardEl) cardEl.classList.toggle("card--disabled", !on);
             }
         }
     }
@@ -1117,7 +1135,7 @@ function updateModuleControls(mod) {
                 if (input && Number(input.value) !== Number(ctrl.value)) {
                     input.value = ctrl.value ?? 0;
                     const val = input.nextElementSibling;
-                    if (val && val.classList.contains("control-value")) val.textContent = ctrl.value;
+                    if (val && val.classList.contains("control-value-input")) val.value = ctrl.value ?? 0;
                 }
                 break;
             }
@@ -1496,7 +1514,12 @@ function attachDragHandlers(card, mod) {
 let gl = null;
 let glProgram = null;
 let glBuffer = null;
-let camTheta = 0.5, camPhi = 0.4, camDist = 2.5;
+const _cam = JSON.parse(localStorage.getItem("mm_cam") || "null");
+let camTheta    = _cam ? _cam.t : Math.PI;
+let camPhi      = _cam ? _cam.p : 0.4;
+let camDist     = _cam ? _cam.d : 2.5;
+let camAutoFit  = !_cam;   // fit on first frame when no saved position
+function saveCam() { localStorage.setItem("mm_cam", JSON.stringify({t: camTheta, p: camPhi, d: camDist})); }
 let lastVerts = null;        // cached vertex array for orbit-without-server-frame
 let lastVertCount = 0;
 let lastMaxDim = 1;
@@ -1525,10 +1548,11 @@ function initWebGL() {
         varying vec3 vCol;
         void main() {
             float d = length(gl_PointCoord - vec2(0.5));
-            if (d > 0.25) discard;
-            // Soft circular falloff
-            float a = 1.0 - smoothstep(0.10, 0.25, d);
-            gl_FragColor = vec4(vCol * a, a);
+            if (d > 0.5) discard;
+            float a = 1.0 - smoothstep(0.25, 0.5, d);
+            // Gamma lift so mid-range colours are not muddy
+            vec3 bright = pow(vCol, vec3(0.7));
+            gl_FragColor = vec4(bright * a, a);
         }
     `;
 
@@ -1551,16 +1575,17 @@ function initWebGL() {
     canvas.addEventListener("mousemove", (e) => {
         if (!dragging) return;
         camTheta += (e.clientX - lastX) * 0.01;
-        camPhi = Math.max(-1.5, Math.min(1.5, camPhi + (e.clientY - lastY) * 0.01));
+        camPhi = Math.max(-1.5, Math.min(1.5, camPhi - (e.clientY - lastY) * 0.01));
         lastX = e.clientX; lastY = e.clientY;
         redrawCached();
     });
-    canvas.addEventListener("mouseup",    () => { dragging = false; });
-    canvas.addEventListener("mouseleave", () => { dragging = false; });
+    canvas.addEventListener("mouseup",    () => { dragging = false; saveCam(); });
+    canvas.addEventListener("mouseleave", () => { dragging = false; saveCam(); });
     canvas.addEventListener("wheel", (e) => {
         camDist = Math.max(0.5, Math.min(10, camDist + e.deltaY * 0.005));
         e.preventDefault();
         redrawCached();
+        saveCam();
     }, {passive: false});
 
     // Touch: single-finger orbit, two-finger pinch zoom. touch-action: none on
@@ -1582,7 +1607,7 @@ function initWebGL() {
         if (e.touches.length === 1 && dragging) {
             const t = e.touches[0];
             camTheta += (t.clientX - lastX) * 0.01;
-            camPhi = Math.max(-1.5, Math.min(1.5, camPhi + (t.clientY - lastY) * 0.01));
+            camPhi = Math.max(-1.5, Math.min(1.5, camPhi - (t.clientY - lastY) * 0.01));
             lastX = t.clientX; lastY = t.clientY;
             redrawCached();
             e.preventDefault();
@@ -1604,11 +1629,38 @@ function initWebGL() {
         }
     }, {passive: false});
     canvas.addEventListener("touchend", (e) => {
-        if (e.touches.length === 0) { dragging = false; pinchDist = 0; }
+        if (e.touches.length === 0) { dragging = false; pinchDist = 0; saveCam(); }
         // 2→1 touches: stay in pinch (let user finish lifting); pinchDist stays
         // valid for the remaining finger? No — drop pinch, but don't start
         // orbit either, to avoid a jump when one finger lifts.
-        else if (e.touches.length === 1) { pinchDist = 0; dragging = false; }
+        else if (e.touches.length === 1) { pinchDist = 0; dragging = false; saveCam(); }
+    });
+
+}
+
+// Scroll-shrink preview: 0..1 ratio over 0..300px of main scroll.
+function setupPreviewShrink() {
+    const canvas = document.getElementById("preview");
+    if (!canvas) return;
+    let naturalMaxH = null;
+    let ticking = false;
+    const SHRINK_OVER = 300;
+    function apply() {
+        ticking = false;
+        if (!naturalMaxH) {
+            naturalMaxH = canvas.getBoundingClientRect().height || (window.innerHeight * 0.5);
+        }
+        const r = Math.min(1, Math.max(0, window.scrollY / SHRINK_OVER));
+        canvas.style.maxHeight = Math.round(naturalMaxH * (1 - r * 0.5)) + "px";
+        if (lastVerts) redrawCached();
+    }
+    window.addEventListener("scroll", () => {
+        if (!ticking) { requestAnimationFrame(apply); ticking = true; }
+    }, {passive: true});
+    window.addEventListener("resize", () => {
+        naturalMaxH = null;
+        canvas.style.maxHeight = "";
+        if (lastVerts) redrawCached();
     });
 }
 
@@ -1703,6 +1755,19 @@ function renderPreviewFrame(buf) {
     lastVerts = verts;
     lastVertCount = nonBlack;
     lastMaxDim = maxDim;
+
+    if (camAutoFit) {
+        camAutoFit = false;
+        // Fit the bounding box (half-extent 0.5 along the largest axis) inside
+        // the canvas. The shorter canvas dimension is the constraint.
+        const canvas = document.getElementById("preview");
+        const fov = 0.8;
+        const aspect = canvas ? canvas.clientWidth / Math.max(1, canvas.clientHeight) : 1;
+        const halfExtent = 0.5 * Math.sqrt(w * w + h * h + d * d) / maxDim;
+        const fitDist = halfExtent / Math.tan(fov / 2) * (aspect < 1 ? 1 / aspect : 1) * 1.1;
+        camDist = Math.max(0.5, Math.min(10, fitDist));
+    }
+
     drawVerts();
 }
 
@@ -1713,8 +1778,10 @@ function redrawCached() {
 function drawVerts() {
     if (!gl || !lastVerts) return;
     const canvas = document.getElementById("preview");
-    canvas.width = canvas.clientWidth;
-    canvas.height = canvas.clientHeight;
+    if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+        canvas.width = canvas.clientWidth;
+        canvas.height = canvas.clientHeight;
+    }
     gl.viewport(0, 0, canvas.width, canvas.height);
 
     const cx = camDist * Math.cos(camPhi) * Math.sin(camTheta);
@@ -1739,7 +1806,7 @@ function drawVerts() {
     gl.vertexAttribPointer(aCol, 3, gl.FLOAT, false, 24, 12);
 
     gl.uniformMatrix4fv(gl.getUniformLocation(glProgram, "uMVP"), false, mvp);
-    const pointSize = Math.max(2, canvas.width * 0.5 / lastMaxDim);
+    const pointSize = Math.max(2, canvas.width * 0.8 / lastMaxDim);
     gl.uniform1f(gl.getUniformLocation(glProgram, "uPointSize"), pointSize);
 
     gl.drawArrays(gl.POINTS, 0, lastVertCount);
@@ -1783,43 +1850,19 @@ function buildMVP(ex, ey, ez, aspect) {
     return m;
 }
 
-// Scroll-shrink preview: 0..1 ratio over 0..300px of main scroll.
-// Shrinks max-height — the CSS aspect-ratio still derives the canvas size
-// underneath the cap, so the preview stays a rectangle (square clipped by the
-// max-height) and collapses smoothly to 50% as the user scrolls.
-function setupPreviewShrink() {
-    const canvas = document.getElementById("preview");
-    if (!canvas) return;
-    let naturalMaxH = null;
-    let ticking = false;
-    const SHRINK_OVER = 300;
-    function apply() {
-        ticking = false;
-        if (!naturalMaxH) {
-            naturalMaxH = canvas.getBoundingClientRect().height || (window.innerHeight * 0.5);
-        }
-        const r = Math.min(1, Math.max(0, window.scrollY / SHRINK_OVER));
-        canvas.style.maxHeight = Math.round(naturalMaxH * (1 - r * 0.5)) + "px";
-        if (lastVerts) redrawCached();
-    }
-    window.addEventListener("scroll", () => {
-        if (!ticking) {
-            requestAnimationFrame(apply);
-            ticking = true;
-        }
-    }, {passive: true});
-    window.addEventListener("resize", () => {
-        naturalMaxH = null;
-        canvas.style.maxHeight = "";  // let CSS 50vh cap re-measure
-        apply();
-    });
-}
-
 // ---------------------------------------------------------------------------
 // 9. Status bar wiring
 // ---------------------------------------------------------------------------
 
 function setupStatusBarButtons() {
+    document.getElementById("preview-reset")?.addEventListener("click", () => {
+        localStorage.removeItem("mm_cam");
+        camTheta = Math.PI;
+        camPhi = 0.4;
+        camAutoFit = true;
+        if (lastVerts) redrawCached();
+    });
+
     // Reboot: press once to arm, again to confirm — see armPressTwice. The glyph
     // stays (no armedText); only the title changes.
     const rebootBtn = document.getElementById("reboot-btn");
@@ -1886,9 +1929,16 @@ function updateStatusBar() {
         statsEl.textContent = parts.join(" · ");
     }
 
+    // Hide reboot button on desktop builds — platform::reboot() just exits the process,
+    // which is not useful from the UI and can be mistaken for a crash.
+    const chipCtrl = ctrls.find(c => c.name === "chip");
+    const rebootBtn = document.getElementById("reboot-btn");
+    if (rebootBtn && chipCtrl) {
+        rebootBtn.hidden = chipCtrl.value === "desktop";
+    }
+
     // bootReason → crashed-state styling on reboot button
     const reasonCtrl = ctrls.find(c => c.name === "bootReason");
-    const rebootBtn = document.getElementById("reboot-btn");
     if (rebootBtn && reasonCtrl) {
         const crashed = ["PANIC", "INT_WDT", "TASK_WDT", "BROWNOUT"].includes(reasonCtrl.value);
         rebootBtn.dataset.crashed = crashed ? "true" : "false";

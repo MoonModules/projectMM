@@ -243,18 +243,32 @@ body.nav-open #nav {
 #preview {
     display: block;
     width: 100%;
-    /* aspect-ratio derives the height from the column width; max-height caps it
-       so on a normal-width column the preview is a wide rectangle (the square
-       clipped to ~half the viewport). The scroll-shrink (app.js) animates
-       max-height down to 50% as the user scrolls. */
     aspect-ratio: 1 / 1;
     max-height: 50vh;
     transition: max-height 0.05s linear;
-    /* Take touch gestures over from the browser so single-finger orbit and
-       two-finger pinch-zoom (handled in app.js) work — without this the page
-       scrolls/zooms instead of the canvas. */
     touch-action: none;
 }
+
+#preview-reset {
+    position: absolute;
+    top: 16px;
+    right: 8px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    color: var(--fg-muted);
+    border-radius: 4px;
+    width: 26px;
+    height: 26px;
+    font-size: 15px;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.6;
+}
+#preview-reset:hover { opacity: 1; color: var(--accent); border-color: var(--accent); }
 
 /* ============================================================
    Cards
@@ -266,6 +280,10 @@ body.nav-open #nav {
     border-radius: 6px;
     margin-bottom: 10px;
     padding: 10px 12px;
+}
+
+.card--disabled {
+    opacity: 0.45;
 }
 
 /* Depth only sets the background here — the indent lives on .card-children,
@@ -316,17 +334,17 @@ body.nav-open #nav {
 
 /* Enable/disable toggle: styled <button> matching .card-btn's 26×26 frame.
    Always transparent (no fill) — visual state is conveyed by the glyph alone:
-   ✓ (accent-coloured) when on, ○ (muted) when off. Same weight as the other
+   ⏻ accent-coloured when on, muted when off. Same weight as the other
    action buttons in the cluster. */
 .card-title .module-enabled {
     background: transparent;
     border: 1px solid var(--border);
-    color: var(--fg-muted);
+    color: var(--accent);
     width: 26px;
     height: 26px;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1;
     padding: 0;
     display: inline-flex;
@@ -334,7 +352,7 @@ body.nav-open #nav {
     justify-content: center;
 }
 .card-title .module-enabled:hover { border-color: var(--accent); }
-.card-title .module-enabled[data-checked="true"] { color: var(--accent); }
+.card-title .module-enabled.module-enabled--off { color: var(--fg-muted); border-color: var(--border); }
 
 .card-title .card-name {
     color: var(--accent);
@@ -442,7 +460,7 @@ body.nav-open #nav {
 }
 .control-row input[type="text"],
 .control-row input[type="password"],
-.control-row input[type="number"],
+.control-row input[type="number"]:not(.control-value-input),
 .control-row select {
     flex: 1;
     background: var(--bg-0);
@@ -521,6 +539,25 @@ body.nav-open #nav {
     min-width: 50px;
     text-align: right;
     font-variant-numeric: tabular-nums;
+}
+
+.control-value-input {
+    font-size: 12px;
+    color: var(--fg-muted);
+    width: 4ch;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    background: none;
+    border: none;
+    padding: 0;
+    -moz-appearance: textfield;
+}
+.control-value-input::-webkit-inner-spin-button,
+.control-value-input::-webkit-outer-spin-button { -webkit-appearance: none; }
+.control-value-input:focus {
+    outline: 1px solid var(--accent, #4a9eff);
+    border-radius: 2px;
+    color: var(--fg);
 }
 
 .control-row .display {

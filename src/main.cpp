@@ -1,6 +1,7 @@
 #include "core/Scheduler.h"
 #include "light/layers/Layers.h"
 #include "light/layouts/GridLayout.h"
+#include "light/effects/LinesEffect.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/NoiseEffect.h"
 #include "light/effects/PlasmaEffect.h"
@@ -41,6 +42,7 @@ static void registerModuleTypes() {
     // if-constexpr when present — EffectBase and ModifierBase both expose one,
     // so the UI's 📏/🟦/🧊 chip lights up without any per-domain wrapper.
     mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout", "light/layouts/GridLayout.md");
+    mm::ModuleFactory::registerType<mm::LinesEffect>("LinesEffect", "light/effects/LinesEffect.md");
     mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect", "light/effects/RainbowEffect.md");
     mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect", "light/effects/NoiseEffect.md");
     mm::ModuleFactory::registerType<mm::PlasmaEffect>("PlasmaEffect", "light/effects/PlasmaEffect.md");

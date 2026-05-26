@@ -26,8 +26,8 @@ struct ControlDescriptor {
     const char* name = nullptr;
     uintptr_t aux = 0;      // Progress: total capacity. Select: pointer to options array.
     ControlType type = ControlType::Uint8;
-    uint8_t min = 0;
-    uint8_t max = 255;
+    int16_t min = 0;
+    int16_t max = 255;
     bool hidden = false;    // UI visibility flag. Set via ControlList::setHidden() after addX().
                             // Persistence ignores this — hidden controls are still saved/loaded
                             // so toggling visibility doesn't lose state.
@@ -57,15 +57,13 @@ public:
     }
 
     // lengthType (int16_t) — signed wire format so negative values round-trip
-    // correctly. Used by Layer's start/end controls, where a future modifier
-    // could legally drag the Layer to negative coordinates.
-    //
-    // c.min/c.max are uint8_t so they can't bound an int16 range. Persistence
-    // and the live setter rely on the natural type range (INT16_MIN..INT16_MAX)
-    // here, not on c.min/c.max.
-    void addInt16(const char* name, int16_t& var) {
+    // correctly. min/max default to INT16_MIN/INT16_MAX (no UI constraint) when
+    // omitted; pass explicit bounds (e.g. addInt16("width", w, 1, 512)) to get a
+    // bounded slider in the UI and server-side clamping on write.
+    void addInt16(const char* name, int16_t& var,
+                  int16_t min = INT16_MIN, int16_t max = INT16_MAX) {
         grow();
-        controls_[count_++] = {&var, name, 0, ControlType::Int16, 0, 0};
+        controls_[count_++] = {&var, name, 0, ControlType::Int16, min, max};
     }
 
     void addBool(const char* name, bool& var) {

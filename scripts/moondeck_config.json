@@ -28,6 +28,14 @@
       "process_name": "projectMM"
     },
     {
+      "id": "show_crash_log",
+      "tab": "pc",
+      "group": "run",
+      "label": "Crash Log",
+      "help": "show_crash_log",
+      "script": "run/show_crash_log.py"
+    },
+    {
       "id": "preview_installer",
       "tab": "pc",
       "group": "run",
@@ -60,6 +68,14 @@
       "label": "01 - Pipeline",
       "help": "scenario_pipeline",
       "script": "scenario/run_scenario.py"
+    },
+    {
+      "id": "history_report",
+      "tab": "pc",
+      "group": "report",
+      "label": "History Report",
+      "help": "history_report",
+      "script": "report/history_report.py"
     },
     {
       "id": "live_scenario",

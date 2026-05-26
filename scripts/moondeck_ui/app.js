@@ -467,8 +467,83 @@ async function saveState() {
 // Log
 // ---------------------------------------------------------------------------
 
+// http(s):// and file:// links anywhere in script output get linkified.
+// Everything else stays as plain textContent — script stdout is treated
+// as untrusted, so we never set innerHTML on it; instead we split on URLs
+// and append text nodes + <a> nodes, both of which encode HTML-special
+// chars automatically.
+const URL_RE = /\b((?:https?|file):\/\/[^\s<>"]+)/g;
+
+// `MOONDECK_VIEW: <url>` (relative or absolute) — a marker scripts can
+// emit to route the URL straight into the View pane after a one-tick
+// delay, AND render a clickable "Open in View pane → <url>" link in the
+// log so the user knows what just happened. Same-origin routing without
+// relying on the user clicking through.
+const VIEW_MARKER_RE = /^MOONDECK_VIEW:\s*(\S+)\s*$/;
+
 function appendLog(text) {
-    logEl.textContent += text;
+    // Marker shortcut: if this chunk is a single MOONDECK_VIEW line, swap
+    // it for an explanatory clickable link and auto-open in the View pane.
+    // Strip trailing newlines before matching so the marker survives the
+    // "+ \n" the SSE stream tacks on per line.
+    const stripped = text.replace(/\n+$/, "");
+    const markerMatch = VIEW_MARKER_RE.exec(stripped);
+    if (markerMatch) {
+        const url = markerMatch[1];
+        const a = document.createElement("a");
+        a.href = url;
+        a.textContent = "Open in View pane → " + url;
+        a.addEventListener("click", (ev) => { ev.preventDefault(); showInView(url); });
+        logEl.appendChild(a);
+        logEl.appendChild(document.createTextNode("\n"));
+        logEl.scrollTop = logEl.scrollHeight;
+        // Defer the actual View-pane switch so the log row renders first
+        // (otherwise the user can't see what was just produced when they
+        // tab back to Log).
+        setTimeout(() => showInView(url), 50);
+        return;
+    }
+    // Fast path: no URL in this chunk, plain append.
+    if (!URL_RE.test(text)) {
+        logEl.appendChild(document.createTextNode(text));
+        logEl.scrollTop = logEl.scrollHeight;
+        return;
+    }
+    URL_RE.lastIndex = 0;
+    let lastIdx = 0;
+    let m;
+    while ((m = URL_RE.exec(text)) !== null) {
+        if (m.index > lastIdx) {
+            logEl.appendChild(document.createTextNode(text.slice(lastIdx, m.index)));
+        }
+        const url = m[1];
+        const a = document.createElement("a");
+        a.href = url;
+        // Same-origin URLs (file:// AND http://localhost-the-MoonDeck-server)
+        // open inside the View pane — that's a "show me the rendered content
+        // MoonDeck just produced" gesture, not "leave MoonDeck for an external
+        // site." Cross-origin http(s):// opens in a new tab, the normal
+        // external-link behaviour.
+        const isMoonDeckUrl =
+            url.startsWith("file://") ||
+            url.startsWith(location.origin + "/") ||
+            url.startsWith(location.origin) && url.length === location.origin.length;
+        if (isMoonDeckUrl) {
+            a.addEventListener("click", (ev) => {
+                ev.preventDefault();
+                showInView(url);
+            });
+        } else {
+            a.target = "_blank";
+            a.rel = "noopener";
+        }
+        a.textContent = url;
+        logEl.appendChild(a);
+        lastIdx = m.index + url.length;
+    }
+    if (lastIdx < text.length) {
+        logEl.appendChild(document.createTextNode(text.slice(lastIdx)));
+    }
     logEl.scrollTop = logEl.scrollHeight;
 }
 
