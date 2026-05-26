@@ -114,6 +114,38 @@
     .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .rp-status { color: var(--muted); font-size: 13px; }
     .rp-status-row { min-height: 1.5em; }
+
+    /* "Your devices" card — one row per provisioned device. The row
+       is the picker's `.control-row` flex shape with the device info
+       on the left and action buttons on the right. */
+    .device-row {
+      justify-content: space-between;
+      padding: 8px 0;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+    .device-row:first-child { border-top: 0; }
+    .device-info { min-width: 0; flex: 1; }
+    .device-url {
+      font-family: ui-monospace, monospace;
+      color: var(--muted);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .device-seen { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .device-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .device-btn {
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 4px;
+      padding: 4px 10px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .device-btn:hover { background: rgba(123, 158, 255, 0.08); }
   </style>
 </head>
 <body>
@@ -162,6 +194,15 @@
     </div>
 
     <div class="card">
+      <strong>Your devices</strong>
+      <p class="note" style="margin-top: 4px">
+        Devices you've provisioned via this page are remembered in this
+        browser. <em>Clear browser data</em> wipes the list.
+      </p>
+      <div id="devices-mount"></div>
+    </div>
+
+    <div class="card">
       <strong>Step 3 — Open the device's UI in a browser.</strong>
       <ul>
         <li><code>http://&lt;devicename&gt;.local</code> — the mDNS hostname tracks the device's name. Out of the box that's <code>MM-XXXX</code> (same 4 hex digits as the SoftAP / the name Improv reports), so <code>http://MM-XXXX.local</code>. Rename the device in its UI and the hostname updates to match. Works on most home networks.</li>
@@ -191,6 +232,7 @@
     // <esp-web-install-button> shadow DOM, which IS subject to CORS, so
     // before clicking we rewrite the URL to the same-origin Pages copy.
     import { releasePicker } from "./release-picker.js";
+    import { myDevices }    from "./devices.js";
 
     // Map a GitHub release-asset URL to its Pages-hosted mirror.
     //   https://github.com/ewowi/projectMM/releases/download/<TAG>/<file>
@@ -204,37 +246,79 @@
 
     const host = document.getElementById("button-host");
 
+    // The last manifest URL the user clicked Install on — kept so the
+    // Erase flow below can re-instantiate <esp-web-install-button> with
+    // the same manifest. ESP Web Tools requires a manifest even on the
+    // erase path (its modal offers "Erase + then Install", and Install
+    // needs to know what to install).
+    let lastInstallManifest = null;
+
+    // Build (and auto-click) an <esp-web-install-button>. Used by both
+    // the install path (releasePicker.onInstall below) and the Erase
+    // path (myDevices.onErase). The only difference is `erase-first`,
+    // which makes ESP Web Tools start with the chip-erase step and
+    // offer the install afterwards (the user can cancel that half).
+    async function showInstallModal(manifestUrl, board, { eraseFirst = false } = {}) {
+      host.innerHTML = "";
+      const btn = document.createElement("esp-web-install-button");
+      btn.setAttribute("manifest", manifestUrl);
+      if (eraseFirst) btn.setAttribute("erase-first", "");
+      // Watch for the Improv "PROVISIONED" event so we can remember the
+      // device URL the user just provisioned. ESP Web Tools fires
+      // `state-changed` on the install button as it walks the flow;
+      // the PROVISIONED payload includes the device URL Improv emitted.
+      btn.addEventListener("state-changed", (ev) => {
+        const d = ev.detail || {};
+        if (d.state === "PROVISIONED" && d.improv && d.improv.url) {
+          myDevices.addProvisionedDevice(d.improv.url);
+        }
+      });
+      const inner = document.createElement("button");
+      inner.slot = "activate";
+      inner.textContent = eraseFirst ? `Erase + Install on ${board}` : `Install on ${board}`;
+      inner.style.cssText = [
+        "padding: 12px 20px",
+        "font: inherit",
+        "font-weight: 600",
+        "background: var(--accent)",
+        "color: #1a1a2e",
+        "border: 0",
+        "border-radius: 6px",
+        "cursor: pointer",
+      ].join("; ");
+      btn.appendChild(inner);
+      host.appendChild(btn);
+      // Wait one tick for the custom element to upgrade, then auto-click
+      // so the user only has to confirm once.
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      inner.click();
+    }
+
     releasePicker.init({
       container: document.getElementById("picker-mount"),
       ownBoardKey: null,  // web installer flashes any board
       onInstall: async (board, manifestUrl /*, binaryUrl */) => {
-        // Rebuild the install button on every click. Mutating `manifest`
-        // on a reused element is flakier across ESP Web Tools versions
-        // than rebuilding; same pattern app.js uses for the device UI.
-        host.innerHTML = "";
-        const btn = document.createElement("esp-web-install-button");
-        btn.setAttribute("manifest", toLocalUrl(manifestUrl));
-        const inner = document.createElement("button");
-        inner.slot = "activate";
-        inner.textContent = `Install on ${board}`;
-        inner.style.cssText = [
-          "padding: 12px 20px",
-          "font: inherit",
-          "font-weight: 600",
-          "background: var(--accent)",
-          "color: #1a1a2e",
-          "border: 0",
-          "border-radius: 6px",
-          "cursor: pointer",
-        ].join("; ");
-        btn.appendChild(inner);
-        host.appendChild(btn);
-        // Auto-click so the user only has to confirm once (the ESP Web
-        // Tools modal prompts for the serial port + Install). The custom
-        // inner button still appears for the next-board case.
-        // Wait one tick for the custom element to upgrade.
-        await new Promise(resolve => requestAnimationFrame(resolve));
-        inner.click();
+        const localUrl = toLocalUrl(manifestUrl);
+        lastInstallManifest = { url: localUrl, board };
+        await showInstallModal(localUrl, board);
+      },
+    });
+
+    myDevices.init({
+      container: document.getElementById("devices-mount"),
+      onErase: async (device) => {
+        // Erase reuses the install-modal path. We need a manifest because
+        // ESP Web Tools' API doesn't expose erase-only mode; the user can
+        // cancel the install half of the modal if they only wanted to
+        // wipe the chip. Pick the user's last-installed manifest if we
+        // have it, else the newest release the picker has loaded.
+        const m = lastInstallManifest;
+        if (!m) {
+          alert("Pick a release + board above first (Erase reuses that " +
+                "manifest for the post-erase install option).");
+          return;
+        }
+        await showInstallModal(m.url, m.board, { eraseFirst: true });
       },
     });
 

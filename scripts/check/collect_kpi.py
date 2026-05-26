@@ -130,10 +130,13 @@ def collect_esp32():
         if idf_path:
             env = idf_env(idf_path)
             cmd = idf_cmd(idf_path)
-            # idf.py -B points at the per-board build dir; without it,
-            # idf.py would default to esp32/build/ (no longer exists).
+            # -B + -DSDKCONFIG mirror build_esp32.py so idf.py reads the
+            # per-board sdkconfig (the build dir's own copy), not the
+            # project-root one which may belong to a different board.
             r = subprocess.run(
-                cmd + ["-B", str(esp32_build), "size"],
+                cmd + ["-B", str(esp32_build),
+                       "-DSDKCONFIG=" + str(esp32_build / "sdkconfig"),
+                       "size"],
                 capture_output=True, text=True,
                 cwd=ESP32_DIR, env=env, timeout=60)
             out = r.stdout + r.stderr

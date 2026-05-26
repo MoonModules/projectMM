@@ -68,9 +68,14 @@ def main():
 
     env = idf_env(idf_path)
     cmd = idf_cmd(idf_path)
-    # -B points idf.py at the per-board build dir; without it idf.py defaults
-    # to esp32/build/ (which under plan-19.1 no longer exists).
-    b_arg = ["-B", str(build_dir)]
+    # -B + -DSDKCONFIG mirror build_esp32.py so idf.py flash reads the
+    # per-board sdkconfig (the chip target lives in there). Without
+    # -DSDKCONFIG, idf.py reads esp32/sdkconfig at the project root,
+    # which may belong to a different board.
+    b_arg = [
+        "-B", str(build_dir),
+        "-DSDKCONFIG=" + str(build_dir / "sdkconfig"),
+    ]
 
     r = subprocess.run(cmd + b_arg + ["flash", "-p", args.port],
                        cwd=ESP32_DIR, env=env)

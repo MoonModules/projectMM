@@ -282,6 +282,52 @@ function buildNavFooter() {
     }
     footer.appendChild(links);
 
+    // Diagnostic bundle download. Fetches /api/state + /api/system from
+    // the *same* origin we're on (the device itself) — sidesteps Chrome's
+    // mixed-content blocker that prevents the install page (HTTPS Pages)
+    // from doing the same fetch against the device (HTTP LAN). Output is
+    // a single JSON blob the user can attach to a bug report.
+    const diag = document.createElement("a");
+    diag.href = "#";
+    diag.className = "nav-diag-link";
+    diag.textContent = "Download diagnostics";
+    diag.addEventListener("click", async (ev) => {
+        ev.preventDefault();
+        try {
+            const [stateResp, systemResp] = await Promise.all([
+                fetch("/api/state"),
+                fetch("/api/system"),
+            ]);
+            const [stateJson, systemJson] = await Promise.all([
+                stateResp.json(),
+                systemResp.json(),
+            ]);
+            const bundle = {
+                capturedAt: new Date().toISOString(),
+                origin: location.origin,
+                state: stateJson,
+                system: systemJson,
+            };
+            const blob = new Blob([JSON.stringify(bundle, null, 2)],
+                                  { type: "application/json" });
+            // Devicename comes from system.deviceName if present, else
+            // falls back to the hostname (e.g. "MM-BD3C.local") so the
+            // filename is still useful when SystemModule's wire shape
+            // doesn't include the name field.
+            const devName = (systemJson && systemJson.deviceName)
+                || location.hostname || "device";
+            const fname = `projectMM-diag-${devName}-${Date.now()}.json`;
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = fname;
+            a.click();
+            URL.revokeObjectURL(a.href);
+        } catch (e) {
+            alert(`Diagnostic capture failed: ${e && e.message ? e.message : e}`);
+        }
+    });
+    footer.appendChild(diag);
+
     const copy = document.createElement("div");
     copy.className = "nav-copyright";
     copy.textContent = `© ${new Date().getFullYear()} MoonModules`;

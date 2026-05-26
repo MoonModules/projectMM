@@ -252,14 +252,23 @@ def main():
     cmd = idf_cmd(idf_path)
 
     build_dir = build_dir_for(board)
-    # idf.py's -B accepts either a relative path resolved against the project
-    # (esp32/) or an absolute path. Passing absolute keeps the semantics clear
-    # when the build root lives outside the IDF project dir.
-    b_arg = ["-B", str(build_dir)]
+    # -B points idf.py at the per-board build dir. -DSDKCONFIG keeps each
+    # board's sdkconfig inside its own build dir too — without this idf.py
+    # writes `esp32/sdkconfig` at the project root, and switching boards
+    # poisons it ("project sdkconfig was generated for target X, but
+    # CMakeCache contains Y"). Per-build-dir sdkconfig is the IDF-supported
+    # way to do parallel builds; CMake forwards the variable into the
+    # build component manager. Absolute paths are necessary for SDKCONFIG
+    # because CMake resolves it relative to the build dir, not the project.
+    sdkconfig_path = build_dir / "sdkconfig"
+    b_arg = [
+        "-B", str(build_dir),
+        "-DSDKCONFIG=" + str(sdkconfig_path),
+    ]
 
     # First-time build for this board: idf.py needs `set-target` before
     # `build` so sdkconfig gets seeded from SDKCONFIG_DEFAULTS. On subsequent
-    # builds the sdkconfig inside build_dir already has the chip pinned, so
+    # builds the per-build-dir sdkconfig already has the chip pinned, so
     # set-target is skipped — switching to another board uses a different
     # build_dir entirely, so its sdkconfig is untouched.
     extra = board_cmake_args(board)
