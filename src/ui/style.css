@@ -196,6 +196,17 @@ body.nav-open #nav {
 }
 .nav-social a:hover { color: var(--accent); }
 
+.nav-diag-link {
+    color: var(--fg-muted);
+    font-size: 11px;
+    text-decoration: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 10px;
+    cursor: pointer;
+}
+.nav-diag-link:hover { color: var(--accent); border-color: var(--accent); }
+
 .nav-copyright {
     color: var(--fg-muted);
     font-size: 11px;

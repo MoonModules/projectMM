@@ -182,7 +182,7 @@ The project uses Claude Code agents in defined roles. The user is the **Product 
 - Catches architectural drift, bloat, and unnecessary complexity early
 - Evaluates agent suggestions critically — not everything proposed gets built
 
-**Why this matters:** Previous iterations (v1, v2) gave agents more autonomy. The result was bloat, architectural drift, and compounding bugs. The v3 approach — tight product owner control with agents as tools, not decision-makers — produces cleaner, more predictable code. The agent writes; the product owner thinks.
+**Why this matters:** Earlier in this project's history, agents had more autonomy. The result was bloat, architectural drift, and compounding bugs. The current approach — tight product owner control with agents as tools, not decision-makers — produces cleaner, more predictable code. The agent writes; the product owner thinks.
 
 | | Agent | Model | Focus | Does |
 |--|-------|-------|-------|------|

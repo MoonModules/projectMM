@@ -18,8 +18,15 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-BUILD_DIR = ROOT / "build"
 ESP32_DIR = ROOT / "esp32"
+
+# Per-host desktop build dir (matches build_desktop.py / package_desktop.py).
+# We pick the directory belonging to the OS this script runs on so KPI
+# numbers reflect the binary the developer actually has on disk.
+import platform as _plat
+_HOST = {"Darwin": "macos", "Linux": "linux",
+         "Windows": "windows"}.get(_plat.system(), _plat.system().lower())
+BUILD_DIR = ROOT / "build" / _HOST
 
 # Hard performance floor for the ESP32 render loop, expressed as an FPS ×
 # light-count throughput so it scales to any grid size. Anchored at the 128×128
@@ -43,23 +50,47 @@ def run(cmd, cwd=None, timeout=30):
 # Collectors — return dicts of KPI data
 # ---------------------------------------------------------------------------
 
+def _pick_first_existing(*paths):
+    """Return the first Path that exists, or None."""
+    for p in paths:
+        if p.exists():
+            return p
+    return None
+
+
 def collect_desktop():
     kpi = {}
 
-    projectMM = BUILD_DIR / "projectMM"
-    if projectMM.exists():
+    # Binary names + locations differ per host: macOS/Linux drop the
+    # executable under <build>/, MSVC multi-config under <build>/Release/.
+    # Cover both forms so KPI on Windows doesn't silently report nothing.
+    # Same fallback shape test_desktop.py uses.
+    projectMM = _pick_first_existing(
+        BUILD_DIR / "projectMM",
+        BUILD_DIR / "projectMM.exe",
+        BUILD_DIR / "Release" / "projectMM.exe",
+    )
+    if projectMM:
         kpi["binary_kb"] = projectMM.stat().st_size // 1024
 
-    test_exe = BUILD_DIR / "test" / "mm_tests"
-    if test_exe.exists():
+    test_exe = _pick_first_existing(
+        BUILD_DIR / "test" / "mm_tests",
+        BUILD_DIR / "test" / "mm_tests.exe",
+        BUILD_DIR / "test" / "Release" / "mm_tests.exe",
+    )
+    if test_exe:
         out, rc = run([str(test_exe)], cwd=BUILD_DIR)
         for line in out.splitlines():
             if "test cases:" in line:
                 kpi["tests"] = line.strip()
                 break
 
-    scenarios = BUILD_DIR / "test" / "mm_scenarios"
-    if scenarios.exists():
+    scenarios = _pick_first_existing(
+        BUILD_DIR / "test" / "mm_scenarios",
+        BUILD_DIR / "test" / "mm_scenarios.exe",
+        BUILD_DIR / "test" / "Release" / "mm_scenarios.exe",
+    )
+    if scenarios:
         out, rc = run([str(scenarios)], cwd=ROOT)
         tick_values = []
         buffer_lights = []
@@ -102,9 +133,22 @@ def collect_desktop():
 
 def collect_esp32():
     kpi = {}
-    esp32_build = ESP32_DIR / "build"
-    if not esp32_build.exists():
+    # Per-board build dirs under build/esp32-*/ (plan-19.1). Pick the dir
+    # whose projectMM.bin was written most recently — that's the binary
+    # the developer most recently rebuilt and would consider the current
+    # KPI source. Sort by the firmware mtime, not the dir mtime, because
+    # a sdkconfig save or stray touch can bump the dir mtime without a
+    # rebuild — picking by dir mtime would surface stale binaries.
+    candidates = [p for p in (ROOT / "build").glob("esp32-*")
+                  if (p / "projectMM.bin").exists()]
+    candidates.sort(key=lambda p: (p / "projectMM.bin").stat().st_mtime,
+                    reverse=True)
+    if not candidates:
         return kpi
+    esp32_build = candidates[0]
+    # Record which board the numbers came from so a multi-board developer
+    # can see whether the KPI reflects what they think it does.
+    kpi["board"] = esp32_build.name[len("esp32-"):]
 
     try:
         from build_esp32 import find_idf, idf_env, idf_cmd
@@ -112,8 +156,15 @@ def collect_esp32():
         if idf_path:
             env = idf_env(idf_path)
             cmd = idf_cmd(idf_path)
-            r = subprocess.run(cmd + ["size"], capture_output=True, text=True,
-                               cwd=ESP32_DIR, env=env, timeout=60)
+            # -B + -DSDKCONFIG mirror build_esp32.py so idf.py reads the
+            # per-board sdkconfig (the build dir's own copy), not the
+            # project-root one which may belong to a different board.
+            r = subprocess.run(
+                cmd + ["-B", str(esp32_build),
+                       "-DSDKCONFIG=" + str(esp32_build / "sdkconfig"),
+                       "size"],
+                capture_output=True, text=True,
+                cwd=ESP32_DIR, env=env, timeout=60)
             out = r.stdout + r.stderr
 
             flash_total = 0

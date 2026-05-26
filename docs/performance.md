@@ -173,16 +173,74 @@ mDNS has zero FPS impact. The 5KB heap difference is the mDNS service memory.
 
 ### Firmware size
 
-| Component | Size |
-|-----------|------|
-| Firmware image | ~880KB (partition layout updated; LittleFS available via platform fs API but no module uses it yet — plan-10) |
-| App partition | 1.75MB |
-| Flash chip | 4MB |
-| DRAM used | 41KB |
-| DRAM free | 139KB |
-| `sizeof(MoonModule)` ESP32 | 56 bytes (was 80; saved 24 bytes per instance via const char* typeName_ + dirty bool) |
+Total + partition headroom (board: `esp32-eth-wifi`, the largest variant):
 
-The partition layout matches projectMM v1: app0/app1 = 1.75 MB each, `spiffs` (LittleFS) = 384 KB, coredump = 64 KB. The joltwallet/esp_littlefs component adds ~30KB to the firmware image; plan-10 will use it for blob persistence. Partition is well under 50% used.
+| | Size |
+|---|---|
+| Firmware image | ~1.27 MB (post plan-18 OTA) |
+| App partition | 1.75 MB |
+| Flash chip | 4 MB |
+| DRAM used | 38 KB |
+| DRAM free | 142 KB |
+| `sizeof(MoonModule)` ESP32 | 56 bytes |
+
+Partition layout: app0/app1 = 1.75 MB each, `spiffs` (LittleFS) = 384 KB, coredump = 64 KB. App partition currently ~72% used on the biggest variant; ~28% headroom for further features.
+
+#### What's in the 1.27 MB
+
+Component-level breakdown for `esp32-eth-wifi`, from `idf.py -B build/esp32-esp32-eth-wifi -DSDKCONFIG=build/esp32-esp32-eth-wifi/sdkconfig size-components` (run from the project root after a clean build of that board). The build dir uses the `esp32-<board>` namespace (so the `esp32-eth-wifi` board lives under `esp32-esp32-eth-wifi/` — the doubled prefix is intentional, see the same pattern in `build_esp32.py`'s `build_dir_for`). These numbers shift with IDF version + sdkconfig; treat as rough proportions, not exact values. Re-run the command to refresh.
+
+| Category | Approx weight | What |
+|---|---|---|
+| WiFi stack | ~400 KB | `esp_wifi` driver + `wpa_supplicant` + WPA3/Enterprise crypto + `esp_phy` RF/clock. Roughly 1/3 of the binary. The `esp32-eth` variant drops this entirely via `EXCLUDE_COMPONENTS` (image shrinks to ~602 KB). |
+| TLS + cert bundle | ~170 KB | `mbedtls` + the Mozilla root cert bundle (`mbedtls_crt_bundle`, ~50 KB on its own). Used by `esp_https_ota` + future HTTPS clients. New in plan-18. |
+| lwIP networking | ~180 KB | The TCP/IP stack, DHCP, DNS, ARP, mDNS, SNTP. |
+| Ethernet stack | ~30 KB | `esp_eth` driver + LAN8720 PHY support. `esp32` variant drops this. |
+| FreeRTOS + ESP-IDF core | ~150 KB | Kernel, scheduler, esp_event, esp_timer, heap, logging, partition table, OTA partition ops. Always present. |
+| HTTP server (own) + WS | ~60 KB | `esp_http_server` for the device UI, our HTTP routing in `HttpServerModule`. |
+| Embedded UI assets | ~50 KB | `index.html` + `app.js` + `style.css` + `release-picker.js` + logo PNG, all packed as `constexpr uint8_t[]` arrays (see `src/ui/embed_ui.cmake`). |
+| `esp_https_ota` + `esp_http_client` | ~40 KB | OTA-from-URL machinery. New in plan-18. |
+| LittleFS | ~30 KB | Persistence backend via the joltwallet/esp_littlefs component manager dep. |
+| projectMM application code | ~120 KB | All `src/core/*.cpp` + `src/light/*.h` + `src/platform/esp32/platform_esp32.cpp` + `src/main.cpp`. Roughly 10% of the binary. |
+| Misc + alignment + .rodata strings | ~40 KB | Format strings, error tables, version metadata. |
+
+**Plan-18's OTA contribution: ~220 KB.** Of that, ~170 KB is the mbedTLS + cert bundle pair that any HTTPS client would need; ~50 KB is `esp_https_ota` itself + its `esp_http_client` dependency. The next feature using HTTPS reuses the mbedTLS + cert bundle for free.
+
+**Variant size deltas** (vs `esp32-eth-wifi` baseline):
+
+| Variant | Image size | Delta | What's different |
+|---|---|---|---|
+| `esp32-eth-wifi` | 1.27 MB | (baseline) | Everything compiled in. |
+| `esp32` | 1.00 MB | −270 KB | No Eth driver + RMII config. Same WiFi. |
+| `esp32-eth` | 0.60 MB | −670 KB | No WiFi: `esp_wifi` + `wpa_supplicant` + `esp_coex` excluded. Smallest image. |
+| `esp32s3-n16r8` | ~1.27 MB | similar | Same WiFi + TLS + OTA; different chip target (Xtensa LX7 vs LX6); different partition table (16 MB flash). |
+
+#### Future-feature size estimates
+
+Quick budget for upcoming items in `docs/plan.md`:
+
+| Feature | Est. size | Rationale |
+|---|---|---|
+| **Improv WiFi** | +10-15 KB | The `improv/improv` library (ESP Component Registry) is ~10 KB; reuses existing UART + WiFi APIs. The biggest cost is a new MoonModule + UART-multiplex wiring (~5 KB application code). |
+| **Mozilla cert bundle trimmed** | −40 KB (savings) | `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN` keeps the common roots only. `_NONE` saves ~50 KB but breaks all TLS. Defer unless tight. |
+| **Static IPv6** | +20 KB | lwIP IPv6 component (off by default). Only worth it if a specific deployment needs it. |
+| **WebSocket TLS** (`wss://`) | ~0 KB | Reuses the mbedTLS already linked. The certificate handling adds <5 KB. |
+
+#### How to update this section
+
+```bash
+uv run scripts/build/build_esp32.py --board esp32-eth-wifi
+cd esp32 && idf.py \
+  -B ../build/esp32-esp32-eth-wifi \
+  -DSDKCONFIG=../build/esp32-esp32-eth-wifi/sdkconfig \
+  size-components | head -40
+```
+
+`-B` + `-DSDKCONFIG` point idf.py at the per-board build dir + its
+sdkconfig — without them, idf.py looks for `esp32/build/` and
+`esp32/sdkconfig`, neither of which exist under the per-board layout.
+
+The output groups by archive (`libesp_wifi.a`, `libmbedtls.a`, etc.). Re-bucket into the categories above and update the percentages. Capture the variant deltas with `idf.py size` after each `--board` rebuild.
 
 ### Key limits
 

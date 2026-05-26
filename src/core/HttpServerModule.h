@@ -108,6 +108,10 @@ private:
     void writeTypeDefaults(JsonSink& sink, const char* typeName);
     void handleMoveModule(platform::TcpConnection& conn, const char* moduleName, const char* body);
     void handleReboot(platform::TcpConnection& conn);
+    // OTA: POST /api/firmware/url body={"url":"..."}. Body parsed; URL handed
+    // to platform::http_fetch_to_ota which spawns a task and returns. Caller
+    // gets 202 immediately; progress streams via FirmwareUpdateModule controls.
+    void handleFirmwareUrl(platform::TcpConnection& conn, const char* body);
 
     // -----------------------------------------------------------------------
     // WebSocket

@@ -67,7 +67,7 @@ Consider whether Layer itself can provide the rendering context (buffer, dims, e
 - `virtualChannels` — per-layer buffer.
 - `effectDimension` — 1D/2D/3D.
 - `nodes` vector for effects/modifiers (dynamic, not fixed-capacity).
-- `forEachLight` — per-logical-light iteration that asks the modifier for physical destinations; v3's LUT build uses the same per-light virtual-dispatch pattern.
+- `forEachLight` — per-logical-light iteration that asks the modifier for physical destinations; the LUT build uses the same per-light virtual-dispatch pattern.
 
 ### projectMM v1 — EffectsLayer ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/layers/EffectsLayer.h))
 

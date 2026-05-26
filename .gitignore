@@ -74,13 +74,14 @@ scripts/moondeck.json
 src/ui/ui_embedded.h
 src/core/build_info.h
 
-# ESP-IDF
+# ESP-IDF: per-board build directories live under /build/esp32-*/; legacy
+# esp32/build/ is still ignored so a developer's existing tree doesn't
+# show up as dirty.
 esp32/build/
 esp32/sdkconfig
 esp32/sdkconfig.old
 esp32/managed_components/
 esp32/dependencies.lock
-esp32/main/wifi_credentials.h
 esp32/monitor.log
 
 # IDE
@@ -91,6 +92,12 @@ esp32/monitor.log
 # and per-session runtime state (lock files for scheduled wakeups, etc.)
 .claude/settings.local.json
 .claude/*.lock
+
+# WiFi credentials for the local dev's improv_provision.py auto-detect path.
+# Copy wifi_credentials.example.json → wifi_credentials.json and fill in
+# your SSID + password. wifi_credentials.json is gitignored; the .example
+# is committed as a template. See scripts/build/host_wifi.py.
+scripts/build/wifi_credentials.json
 
 # OS
 .DS_Store

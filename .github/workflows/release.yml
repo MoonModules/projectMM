@@ -15,15 +15,15 @@ on:
   push:
     tags:
       - 'v*'
-    # Pre-1.0 scaffold: also run the build jobs on push to active branches
-    # so we catch breakage before tagging. The release job is gated on
-    # `startsWith(github.ref, 'refs/tags/')` below, so branch pushes only
-    # exercise the builds — no release page, no Pages deploy. Remove this
-    # `branches` block once the release pipeline is proven (post-1.0) if CI
-    # minutes get tight; tag-driven release is the steady-state shape.
+      - 'nightly-*'
+    # On-push CI on main: catches breakage between tags. The release job
+    # below is gated on `startsWith(github.ref, 'refs/tags/')` || dispatch,
+    # so a plain push to main only exercises the builds — no release page,
+    # no Pages deploy. Nightly tags (cron in nightly.yml) cover the
+    # in-between snapshot use case; feature-branch CI is provided by each
+    # PR's own checks (CodeRabbit + reviewer agent), not by this workflow.
     branches:
       - main
-      - next-iteration
     paths:
       - 'src/**'
       - 'esp32/**'
@@ -62,10 +62,20 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify tag matches library.json version
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        # Pass the tag via --tag arg, not via an env var named GITHUB_REF_NAME.
+        # The built-in GITHUB_REF_NAME is "main" on a workflow_dispatch from
+        # main and was shadowing the step-level env: override in practice
+        # (verified on run 26406224226 — env: said v1.0.0-rc1 but Python read
+        # "main"). Explicit CLI arg sidesteps the collision.
+        #
+        # The expression is plumbed via a step-level env var so the shell sees
+        # a properly-quoted "$TAG" instead of interpolating template text
+        # directly into the run line — same pattern the release job below
+        # uses for $REPO. Same value either way; the indirection silences
+        # the static analyser's template-injection warning.
         env:
-          # Use the workflow_dispatch input when present, else the push ref.
-          GITHUB_REF_NAME: ${{ inputs.tag || github.ref_name }}
-        run: python scripts/build/verify_version.py
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: python scripts/build/verify_version.py --tag "$TAG"
 
   build-esp32:
     needs: verify-version
@@ -109,7 +119,11 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           V=$(jq -r .version library.json)
-          B=esp32/build
+          # Per-board build dir under build/esp32-<board>/ (plan-19.1).
+          # build_esp32.py points idf.py at this dir via -B, so the build
+          # tree lives outside esp32/ and multiple boards can coexist —
+          # CI uses one per matrix job, dev machines use as many as built.
+          B=build/esp32-${{ matrix.board }}
           PREFIX="firmware-${{ matrix.board }}-v$V"
           cp "$B/projectMM.bin"                       "dist/${PREFIX}.bin"
           cp "$B/bootloader/bootloader.bin"           "dist/${PREFIX}-bootloader.bin"
@@ -171,15 +185,29 @@ jobs:
           find artifacts -type f -exec mv {} dist/ \;
           ls -la dist/
 
-      - name: Generate ESP Web Tools manifests
+      - name: Generate ESP Web Tools manifests (release-asset + Pages-relative)
         env:
           # workflow_dispatch passes the tag through inputs; push events
           # use the ref directly. Either way TAG is the bare "vX.Y.Z".
+          # REPO is owner/repo, plumbed via env to avoid the static-analyser
+          # flagging the direct ${{ github.repository }} expansion inside a
+          # shell string. (github.repository isn't attacker-controlled, but
+          # keeping the indirection consistent with TAG silences the warning.)
           TAG: ${{ inputs.tag || github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           V=$(jq -r .version library.json)
-          BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
+          # Two sets of manifests:
+          #   dist/manifest-*.json      → absolute GitHub release-asset URLs.
+          #                               Uploaded as release assets; read by
+          #                               the on-device OTA picker (device
+          #                               fetches the .bin directly — no CORS).
+          #   pages-manifests/*.json    → relative paths (.bin alongside the
+          #                               manifest). Used by the web installer,
+          #                               which is same-origin-bound by CORS.
+          BASE="https://github.com/${REPO}/releases/download/$TAG"
+          mkdir -p pages-manifests
           for B in esp32 esp32-eth esp32-eth-wifi esp32s3-n16r8; do
             python scripts/build/generate_manifest.py \
               --board "$B" \
@@ -187,23 +215,73 @@ jobs:
               --release-url "$BASE" \
               --flasher-args "dist/flasher-$B.json" \
               --out "dist/manifest-$B.json"
+            python scripts/build/generate_manifest.py \
+              --board "$B" \
+              --version "$V" \
+              --release-url . \
+              --flasher-args "dist/flasher-$B.json" \
+              --out "pages-manifests/manifest-$B.json"
           done
 
-      # Pages deploy is stable-tags-only. RC tags (vX.Y.Z-rcN) ship binaries
-      # via the GitHub release (used by the local C+ recipe + manual flash),
-      # but skip the Pages publication so the live installer URL keeps showing
-      # the previous stable release and end users never land on an RC.
-      - name: Stage GitHub Pages site
-        if: ${{ !contains(github.ref, '-rc') && !contains(inputs.tag || '', '-rc') }}
+      # Pages deploy: every tag (stable + RC). The web installer page reads
+      # api.github.com to populate its release dropdown; the cumulative-content
+      # step below keeps the last 5 stable + 5 prerelease releases on Pages
+      # so those binaries are flashable (Web Serial is CORS-bound and GitHub
+      # release assets don't return CORS headers — see plan-18 Context).
+      # End users see Stable selected by default; RC is opt-in via the
+      # channel dropdown.
+      - name: Stage cumulative release content
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # Last 5 stable + last 5 prerelease tags.
+          STABLE=$(gh release list --limit 50 --exclude-drafts \
+                   --json tagName,isPrerelease \
+                   | jq -r '.[] | select(.isPrerelease|not) | .tagName' | head -5)
+          PRE=$(gh release list --limit 50 --exclude-drafts \
+                --json tagName,isPrerelease \
+                | jq -r '.[] | select(.isPrerelease) | .tagName' | head -5)
+          KEEP=$(printf '%s\n%s\n' "$STABLE" "$PRE" | sort -u)
+          echo "Releases to keep on Pages:"
+          echo "$KEEP" | sed 's/^/  /'
+
+          for T in $KEEP; do
+            mkdir -p "pages/install/releases/$T"
+            # Tolerate the current tag failing here — its release isn't
+            # published yet (softprops/action-gh-release runs later in this
+            # job); we stage its binaries from local dist/ a few lines below.
+            gh release download "$T" \
+              --dir "pages/install/releases/$T" \
+              --pattern 'firmware-*.bin' \
+              --pattern 'manifest-*.json' \
+              --pattern 'projectMM-*.tar.gz' \
+              || echo "  (skip $T — not yet released or no matching assets)"
+          done
+
+          # Stage the current release from local dist/ + pages-manifests/.
+          # The current tag's release-publish step runs after this, so a
+          # `gh release download` for $TAG would return nothing.
+          mkdir -p "pages/install/releases/$TAG"
+          cp dist/firmware-*.bin                   "pages/install/releases/$TAG/" || true
+          cp pages-manifests/manifest-*.json       "pages/install/releases/$TAG/"
+          cp dist/projectMM-*.tar.gz               "pages/install/releases/$TAG/" || true
+
+          echo "Pages release tree:"
+          find pages/install/releases -maxdepth 2 -type f | sort
+
+      - name: Stage GitHub Pages site
+        run: |
+          set -euo pipefail
+          # Install page + the shared release-picker module sit at the root.
+          # Each release's binaries + manifests live under releases/<tag>/.
           mkdir -p pages/install
           cp -r docs/install/. pages/install/
-          cp dist/manifest-*.json pages/install/
+          cp src/ui/release-picker.js pages/install/
           ls -la pages/install/
 
       - uses: actions/upload-pages-artifact@v3
-        if: ${{ !contains(github.ref, '-rc') && !contains(inputs.tag || '', '-rc') }}
         with:
           path: pages
 
@@ -211,10 +289,20 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
-          # Mark vX.Y.Z-rcN tags as pre-releases — they land on the Releases
-          # page sorted below stable releases and aren't picked up by tooling
-          # that asks for "latest". Stable tags publish normally.
-          prerelease: ${{ contains(github.ref, '-rc') || contains(inputs.tag || '', '-rc') }}
+          # Mark vX.Y.Z-rcN and nightly-* tags as pre-releases — they land
+          # on the Releases page sorted below stable releases and aren't
+          # picked up by tooling that asks for "latest". Stable tags publish
+          # normally. The picker labels both as "(beta)"; the visual
+          # distinction is in the tag name (v1.0.0-rc1 vs nightly-2026-05-26).
+          #
+          # Source the test from `inputs.tag || github.ref_name` once: on
+          # workflow_dispatch github.ref is "refs/heads/<branch>" (the
+          # dispatching branch) and would never match, so a pure github.ref
+          # test would silently mark dispatched RCs as stable. The
+          # `inputs.tag || github.ref_name` expression resolves to the
+          # actual tag in both trigger paths.
+          prerelease: ${{ contains(inputs.tag || github.ref_name, '-rc')
+                          || contains(inputs.tag || github.ref_name, 'nightly-') }}
           fail_on_unmatched_files: true
           # The `files:` block below is a multi-line literal string — every line
           # is a glob pattern, the action does NOT strip `#` as comment syntax.
@@ -226,5 +314,4 @@ jobs:
             dist/projectMM-*.tar.gz
 
       - id: deploy-pages
-        if: ${{ !contains(github.ref, '-rc') && !contains(inputs.tag || '', '-rc') }}
         uses: actions/deploy-pages@v4

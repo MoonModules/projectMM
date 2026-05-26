@@ -1,5 +1,10 @@
 // projectMM Web UI — all logic in one hand-maintained file per CLAUDE.md.
-//
+// Loaded as <script type="module"> so it can import the shared release-picker
+// component used by both the device UI (here, OTA flash) and the GitHub Pages
+// installer (first flash via Web Serial). Module loading is deferred by
+// default; entry-point is the WS init at the bottom — no ordering surprises.
+import { releasePicker } from "/release-picker.js";
+
 // Sections (top to bottom):
 //   1. State + storage
 //   2. WebSocket (with keepalive, visibility pause, bfcache, exponential backoff)
@@ -277,6 +282,58 @@ function buildNavFooter() {
     }
     footer.appendChild(links);
 
+    // Diagnostic bundle download. Fetches /api/state + /api/system from
+    // the *same* origin we're on (the device itself) — sidesteps Chrome's
+    // mixed-content blocker that prevents the install page (HTTPS Pages)
+    // from doing the same fetch against the device (HTTP LAN). Output is
+    // a single JSON blob the user can attach to a bug report.
+    const diag = document.createElement("a");
+    diag.href = "#";
+    diag.className = "nav-diag-link";
+    diag.textContent = "Download diagnostics";
+    diag.addEventListener("click", async (ev) => {
+        ev.preventDefault();
+        try {
+            const [stateResp, systemResp] = await Promise.all([
+                fetch("/api/state"),
+                fetch("/api/system"),
+            ]);
+            const [stateJson, systemJson] = await Promise.all([
+                stateResp.json(),
+                systemResp.json(),
+            ]);
+            const bundle = {
+                capturedAt: new Date().toISOString(),
+                origin: location.origin,
+                state: stateJson,
+                system: systemJson,
+            };
+            const blob = new Blob([JSON.stringify(bundle, null, 2)],
+                                  { type: "application/json" });
+            // Devicename comes from system.deviceName if present, else
+            // falls back to the hostname (e.g. "MM-BD3C.local") so the
+            // filename is still useful when SystemModule's wire shape
+            // doesn't include the name field.
+            const devName = (systemJson && systemJson.deviceName)
+                || location.hostname || "device";
+            const fname = `projectMM-diag-${devName}-${Date.now()}.json`;
+            const a = document.createElement("a");
+            const blobUrl = URL.createObjectURL(blob);
+            a.href = blobUrl;
+            a.download = fname;
+            a.click();
+            // Defer the revoke so the browser has time to start the download.
+            // Revoking immediately after click() is technically race-safe on
+            // recent Chrome / Firefox (the click navigation is synchronous)
+            // but Safari has been observed dropping downloads under a fast
+            // revoke. A few seconds is the canonical workaround.
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
+        } catch (e) {
+            alert(`Diagnostic capture failed: ${e && e.message ? e.message : e}`);
+        }
+    });
+    footer.appendChild(diag);
+
     const copy = document.createElement("div");
     copy.className = "nav-copyright";
     copy.textContent = `© ${new Date().getFullYear()} MoonModules`;
@@ -464,6 +521,45 @@ function createCard(mod, depth) {
             const row = createControl(mod.name, mod.type, ctrl);
             if (row) controlsHost.appendChild(row);
         }
+    }
+
+    // FirmwareUpdate card hosts the shared release picker. Mount once per
+    // card-build. The picker reads SystemModule.board (already in /api/state)
+    // to filter to OTA-compatible releases. On install, the device fetches the
+    // binary via /api/firmware/url — no browser CORS in the data path.
+    if (mod.type === "FirmwareUpdateModule") {
+        const ownBoardKey = (() => {
+            if (!state || !state.modules) return null;
+            // Look up by stable type first; the name fallback is a
+            // belt-and-braces safety net (mod.name is user-editable in
+            // principle, so it's not load-bearing for this lookup).
+            const sys = state.modules.find(m => m.type === "SystemModule")
+                     || state.modules.find(m => m.name === "System");
+            const boardCtrl = sys && (sys.controls || []).find(c => c.name === "board");
+            return boardCtrl && boardCtrl.value ? boardCtrl.value : null;
+        })();
+        const mount = document.createElement("div");
+        mount.className = "release-picker-host";
+        controlsHost.appendChild(mount);
+        releasePicker.init({
+            container: mount,
+            ownBoardKey,
+            onInstall: async (_board, _manifestUrl, binaryUrl) => {
+                const res = await fetch("/api/firmware/url", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ url: binaryUrl }),
+                });
+                if (!res.ok) {
+                    let msg = `HTTP ${res.status}`;
+                    try {
+                        const j = await res.json();
+                        if (j.error) msg = j.error;
+                    } catch (_) { /* non-JSON error response */ }
+                    throw new Error(msg);
+                }
+            },
+        });
     }
 
     // -- Children block + footer (only on parents that accept children) --

@@ -40,7 +40,7 @@ def load_scripts():
 
 _scripts_data = load_scripts()
 SCRIPTS = _scripts_data["scripts"]
-ESP32_ENVS = _scripts_data["envs"]
+BOARDS = _scripts_data["boards"]
 
 # ---------------------------------------------------------------------------
 # Device discovery
@@ -261,7 +261,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/scripts":
-            self._send_json({"scripts": SCRIPTS, "envs": ESP32_ENVS})
+            self._send_json({"scripts": SCRIPTS, "boards": BOARDS})
 
         elif self.path == "/api/ports":
             self._send_json({"ports": list_serial_ports()})
@@ -336,20 +336,16 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         script_path = SCRIPTS_DIR / script_def["script"]
         cmd = ["uv", "run", str(script_path)]
 
-        # Add environment/port/host args
-        if script_def.get("needs_env") and params.get("env"):
-            cmd.extend(["--env", params["env"]])
+        # Forward selector state (board / port / host) when the script
+        # declares it needs them. The UI maintains a single Firmware dropdown
+        # on the ESP32 tab driving every needs_board script; the older
+        # per-board buttons + extra_args plumbing was collapsed into this.
+        if script_def.get("needs_board") and params.get("board"):
+            cmd.extend(["--board", params["board"]])
         if script_def.get("needs_port") and params.get("port"):
             cmd.extend(["--port", params["port"]])
         if params.get("host"):
             cmd.extend(["--host", params["host"]])
-
-        # Static per-button args declared in moondeck_config.json. Used by the
-        # three ESP32 board buttons to bake in --board, since the UI exposes
-        # no board picker.
-        extra = script_def.get("extra_args") or []
-        if extra:
-            cmd.extend(str(a) for a in extra)
 
         try:
             popen_kwargs = dict(
@@ -427,6 +423,12 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 in_code = not in_code
             elif in_code:
                 lines.append(html_mod.escape(line))
+            elif line.startswith("### "):
+                # Script-section headings (e.g. `### improv_probe`). The id must
+                # match the `help` value in moondeck_config.json so the `?`
+                # button can deep-link via MOONDECK_MD + "?" + script.help.
+                slug = line[4:].strip().lower().replace(" ", "_")
+                lines.append(f'<h3 id="{slug}">{html_mod.escape(line[4:])}</h3>')
             elif line.startswith("## "):
                 slug = line[3:].strip().lower().replace(" ", "_")
                 lines.append(f'<h2 id="{slug}">{html_mod.escape(line[3:])}</h2>')
@@ -445,6 +447,7 @@ body {{ font-family: -apple-system, monospace; background: #0d1117; color: #c0c0
        padding: 20px; line-height: 1.6; font-size: 13px; }}
 h1 {{ color: #e94560; font-size: 18px; }}
 h2 {{ color: #e94560; font-size: 15px; border-bottom: 1px solid #0f3460; padding-bottom: 4px; }}
+h3 {{ color: #e94560; font-size: 13px; margin-top: 18px; }}
 pre {{ background: #161b22; padding: 10px; border-radius: 4px; overflow-x: auto; }}
 code {{ font-size: 12px; }}
 p {{ margin: 2px 0; }}

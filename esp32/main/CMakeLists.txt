@@ -6,6 +6,9 @@ idf_component_register(
         "../../src/core/FilesystemModule.cpp"
         "../../src/core/Scheduler.cpp"
         "../../src/platform/esp32/platform_esp32.cpp"
+        "../../src/platform/esp32/platform_esp32_fs.cpp"
+        "../../src/platform/esp32/platform_esp32_ota.cpp"
+        "../../src/platform/esp32/platform_esp32_improv.cpp"
     INCLUDE_DIRS
         "../../src"
         "../../src/platform/esp32"
@@ -14,6 +17,15 @@ idf_component_register(
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra -Werror)
 
 # Build-variant defines, set by scripts/build/build_esp32.py via board_cmake_args().
+#
+# MM_BOARD_NAME — the board key (`esp32`, `esp32-eth`, `esp32-eth-wifi`,
+#                 `esp32s3-n16r8`). Surfaced by SystemModule on the device
+#                 card and used by FirmwareUpdateModule's release picker to
+#                 filter to OTA-compatible binaries. Cache variables in
+#                 ESP-IDF reach this CMakeLists but not the component
+#                 compile line by default, so we forward it explicitly.
+#                 Without this, build_info.h's `#ifndef` fallback kicks in
+#                 and the device reports "board: unknown".
 #
 # MM_ETH_ONLY  — set on `--board esp32-eth` (no WiFi compiled in).
 #                The script also passes EXCLUDE_COMPONENTS for the WiFi libs;
@@ -26,6 +38,14 @@ target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra -Werror)
 #                platform_esp32.cpp won't compile; this define stubs the
 #                eth* platform functions to return false/empty, mirroring
 #                the desktop platform layer.
+if(MM_BOARD_NAME)
+    # build_esp32.py passes -DMM_BOARD_NAME="<board>" where the outer quotes
+    # become part of the CMake variable value (verified via CMakeCache.txt).
+    # So ${MM_BOARD_NAME} already expands to "esp32-eth" *with* the quotes —
+    # don't re-add them here, or the preprocessor sees MM_BOARD_NAME=""esp32""
+    # and fails as if "esp32" were an identifier.
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_BOARD_NAME=${MM_BOARD_NAME})
+endif()
 if(MM_ETH_ONLY)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_NO_WIFI)
 endif()
@@ -38,7 +58,7 @@ set(UI_DIR ${COMPONENT_DIR}/../../src/ui)
 add_custom_command(
     OUTPUT ${UI_DIR}/ui_embedded.h
     COMMAND ${CMAKE_COMMAND} -DUI_DIR=${UI_DIR} -DOUT=${UI_DIR}/ui_embedded.h -P ${UI_DIR}/embed_ui.cmake
-    DEPENDS ${UI_DIR}/index.html ${UI_DIR}/app.js ${UI_DIR}/style.css
+    DEPENDS ${UI_DIR}/index.html ${UI_DIR}/app.js ${UI_DIR}/style.css ${UI_DIR}/release-picker.js
     COMMENT "Embedding UI files"
 )
 add_custom_target(ui_embed DEPENDS ${UI_DIR}/ui_embedded.h)

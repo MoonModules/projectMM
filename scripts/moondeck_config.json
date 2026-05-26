@@ -1,5 +1,5 @@
 {
-  "envs": ["esp32", "esp32s2", "esp32s3", "esp32c3"],
+  "boards": ["esp32", "esp32-eth", "esp32-eth-wifi", "esp32s3-n16r8"],
   "scripts": [
     {
       "id": "build_desktop",
@@ -26,6 +26,16 @@
       "script": "run/run_desktop.py",
       "long_running": true,
       "process_name": "projectMM"
+    },
+    {
+      "id": "preview_installer",
+      "tab": "pc",
+      "group": "run",
+      "label": "Preview Installer",
+      "help": "preview_installer",
+      "script": "run/preview_installer.py",
+      "long_running": true,
+      "process_name": "preview_installer.py"
     },
     {
       "id": "check_platform_boundary",
@@ -80,55 +90,30 @@
       "id": "build_esp32",
       "tab": "esp32",
       "group": "build",
-      "label": "Build esp32",
+      "label": "Build",
       "help": "build_esp32",
       "script": "build/build_esp32.py",
-      "extra_args": ["--board", "esp32"]
-    },
-    {
-      "id": "build_esp32_eth",
-      "tab": "esp32",
-      "group": "build",
-      "label": "Build esp32-eth",
-      "help": "build_esp32",
-      "script": "build/build_esp32.py",
-      "extra_args": ["--board", "esp32-eth"]
-    },
-    {
-      "id": "build_esp32_eth_wifi",
-      "tab": "esp32",
-      "group": "build",
-      "label": "Build esp32-eth-wifi",
-      "help": "build_esp32",
-      "script": "build/build_esp32.py",
-      "extra_args": ["--board", "esp32-eth-wifi"]
-    },
-    {
-      "id": "build_esp32s3_n16r8",
-      "tab": "esp32",
-      "group": "build",
-      "label": "Build esp32s3-n16r8",
-      "help": "build_esp32",
-      "script": "build/build_esp32.py",
-      "extra_args": ["--board", "esp32s3-n16r8"]
+      "needs_board": true
     },
     {
       "id": "flash_esp32",
       "tab": "esp32",
-      "group": "build",
+      "group": "flash",
       "label": "Flash",
       "help": "flash_esp32",
       "script": "build/flash_esp32.py",
-      "needs_port": true
+      "needs_port": true,
+      "needs_board": true
     },
     {
       "id": "erase_flash_esp32",
       "tab": "esp32",
-      "group": "build",
+      "group": "flash",
       "label": "Erase Flash",
       "help": "erase_flash_esp32",
       "script": "build/erase_flash_esp32.py",
-      "needs_port": true
+      "needs_port": true,
+      "destructive": true
     },
     {
       "id": "monitor_esp32",
@@ -140,6 +125,24 @@
       "needs_port": true,
       "long_running": true,
       "process_name": "monitor_esp32"
+    },
+    {
+      "id": "improv_provision",
+      "tab": "esp32",
+      "group": "run",
+      "label": "Improv WiFi",
+      "help": "improv_provision",
+      "script": "build/improv_provision.py",
+      "needs_port": true
+    },
+    {
+      "id": "improv_probe",
+      "tab": "esp32",
+      "group": "run",
+      "label": "Improv Probe",
+      "help": "improv_probe",
+      "script": "build/improv_probe.py",
+      "needs_port": true
     }
   ]
 }

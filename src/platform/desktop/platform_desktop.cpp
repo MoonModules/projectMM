@@ -263,6 +263,34 @@ void wifiApStop() {}
 bool mdnsInit(const char* /*deviceName*/) { return false; }
 void mdnsStop() {}
 
+// OTA — no-op on desktop (no OTA partition). The /api/firmware/url route
+// guards with `if constexpr (mm::platform::hasOta)` and returns 501 here,
+// so this stub exists for compile coverage only.
+bool http_fetch_to_ota(const char* /*url*/,
+                       char* statusBuf, size_t statusBufLen,
+                       uint32_t* bytesReadOut, uint32_t* bytesTotalOut) {
+    if (statusBuf && statusBufLen > 0) {
+        std::snprintf(statusBuf, statusBufLen, "unsupported on desktop");
+    }
+    if (bytesReadOut) *bytesReadOut = 0;
+    if (bytesTotalOut) *bytesTotalOut = 0;
+    return false;
+}
+
+// Improv WiFi — no USB-serial path on desktop. The module gates with
+// `if constexpr (mm::platform::hasImprov)` and never calls this on desktop;
+// the stub exists for compile coverage.
+bool improvProvisioningInit(const ImprovDeviceInfo& /*info*/,
+                            char* /*ssidOut*/, size_t /*ssidOutLen*/,
+                            char* /*passwordOut*/, size_t /*passwordOutLen*/,
+                            std::atomic<bool>* /*ready*/,
+                            char* statusBuf, size_t statusBufLen) {
+    if (statusBuf && statusBufLen > 0) {
+        std::snprintf(statusBuf, statusBufLen, "unsupported on desktop");
+    }
+    return false;
+}
+
 void reboot() {
     // Desktop: the device is the host process. Exit cleanly; the OS user / supervisor
     // can restart it. Matches the "device disappeared from the network" semantics the

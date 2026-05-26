@@ -1,3 +1,22 @@
+// platform_esp32.cpp — ESP32 platform layer core (plan-23 shape).
+//
+// Contains: system primitives (time, alloc, restart, chip info),
+//           network (Ethernet + WiFi STA/AP + mDNS),
+//           sockets (TcpServer, TcpConnection, UdpSocket).
+//
+// Three subsystems live in sibling files since they're self-contained
+// — each owns its private state and talks to this core file only
+// through public symbols declared in platform.h:
+//   - LittleFS    → platform_esp32_fs.cpp
+//   - OTA         → platform_esp32_ota.cpp
+//   - Improv WiFi → platform_esp32_improv.cpp
+//
+// Network stayed here because Eth + WiFi + sockets + mDNS share
+// file-scope state (the event handler, the netif pointers, the
+// init-done flags) — splitting would require either an internal
+// header with `extern` declarations or a singleton refactor. That's
+// a separate plan when it earns its keep.
+
 #include "platform/platform.h"
 
 #include "esp_timer.h"
@@ -7,7 +26,7 @@
 #include "esp_mac.h"
 #include "esp_idf_version.h"
 #include "esp_partition.h"
-#include "esp_ota_ops.h"
+#include "esp_ota_ops.h"     // for esp_ota_get_running_partition (sysInfo)
 #include "esp_image_format.h"
 #include "esp_flash.h"
 #include "esp_event.h"
@@ -18,18 +37,16 @@
 #endif
 #include "esp_log.h"
 #include "mdns.h"
-#include "esp_littlefs.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
 #include "lwip/inet.h"
 
+#include <cstdarg>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
-#include <dirent.h>
-#include <sys/stat.h>
 #include <sys/uio.h>
 #include <unistd.h>
 
@@ -154,158 +171,6 @@ size_t flashChipSize() {
     return chipSize;
 }
 
-// LittleFS state
-static const char* FS_TAG = "mm_fs";
-static const char* FS_PARTITION_LABEL = "spiffs";  // partition label kept for tooling compat; contents are LittleFS
-static const char* FS_MOUNT_POINT = "/littlefs";    // VFS mount point; not exposed in API paths
-static bool fsMounted_ = false;
-
-// Translate API path "/foo/bar" or "foo/bar" → "/littlefs/foo/bar" into out.
-// Returns false on null input, zero-sized output, or truncation; out[0] is set to 0
-// on any failure so callers don't accidentally consume a partial path.
-static bool fsTranslate(const char* apiPath, char* out, size_t outLen) {
-    if (outLen == 0) return false;
-    if (!apiPath) { out[0] = 0; return false; }
-    const char* sep = (apiPath[0] == '/') ? "" : "/";
-    int n = std::snprintf(out, outLen, "%s%s%s", FS_MOUNT_POINT, sep, apiPath);
-    if (n < 0 || static_cast<size_t>(n) >= outLen) { out[0] = 0; return false; }
-    return true;
-}
-
-void fsSetRoot(const char* /*path*/) {
-    // No-op on ESP32 — LittleFS is mounted at a fixed partition; the FS_MOUNT_POINT
-    // prefix is hard-coded. Provided only so test code can call it portably.
-}
-
-bool fsMount() {
-    if (fsMounted_) return true;
-
-    esp_vfs_littlefs_conf_t conf = {};
-    conf.base_path = FS_MOUNT_POINT;
-    conf.partition_label = FS_PARTITION_LABEL;
-    conf.format_if_mount_failed = true;
-    conf.dont_mount = false;
-
-    esp_err_t err = esp_vfs_littlefs_register(&conf);
-    if (err != ESP_OK) {
-        ESP_LOGE(FS_TAG, "LittleFS mount failed: %s", esp_err_to_name(err));
-        return false;
-    }
-    fsMounted_ = true;
-    ESP_LOGI(FS_TAG, "LittleFS mounted at %s (partition: %s)", FS_MOUNT_POINT, FS_PARTITION_LABEL);
-    return true;
-}
-
-void fsUnmount() {
-    if (!fsMounted_) return;
-    esp_vfs_littlefs_unregister(FS_PARTITION_LABEL);
-    fsMounted_ = false;
-}
-
-bool fsMkdir(const char* path) {
-    if (!fsMounted_) return false;
-    char full[128];
-    if (!fsTranslate(path, full, sizeof(full))) return false;
-    // mkdir -p: walk components, create each if missing
-    char* p = full + std::strlen(FS_MOUNT_POINT) + 1; // skip "/littlefs/"
-    while (*p) {
-        if (*p == '/') {
-            *p = 0;
-            mkdir(full, 0775);  // ignore errors; could already exist
-            *p = '/';
-        }
-        p++;
-    }
-    int rc = mkdir(full, 0775);
-    return rc == 0 || errno == EEXIST;
-}
-
-bool fsExists(const char* path) {
-    if (!fsMounted_) return false;
-    char full[128];
-    if (!fsTranslate(path, full, sizeof(full))) return false;
-    struct stat st;
-    return stat(full, &st) == 0;
-}
-
-bool fsRemove(const char* path) {
-    if (!fsMounted_) return false;
-    char full[128];
-    if (!fsTranslate(path, full, sizeof(full))) return false;
-    return ::remove(full) == 0;
-}
-
-int fsRead(const char* path, char* buf, size_t maxLen) {
-    if (!fsMounted_ || !buf || maxLen == 0) return -1;
-    char full[128];
-    if (!fsTranslate(path, full, sizeof(full))) return -1;
-    FILE* f = std::fopen(full, "rb");
-    if (!f) return -1;
-    size_t n = std::fread(buf, 1, maxLen - 1, f);
-    std::fclose(f);
-    buf[n] = 0;
-    return static_cast<int>(n);
-}
-
-bool fsWriteAtomic(const char* path, const char* data, size_t len) {
-    if (!fsMounted_) return false;
-    char full[128];
-    char tmp[136];
-    if (!fsTranslate(path, full, sizeof(full))) return false;
-    int n = std::snprintf(tmp, sizeof(tmp), "%s.tmp", full);
-    if (n < 0 || static_cast<size_t>(n) >= sizeof(tmp)) return false;
-
-    FILE* f = std::fopen(tmp, "wb");
-    if (!f) return false;
-    size_t written = std::fwrite(data, 1, len, f);
-    if (written != len) {
-        std::fclose(f);
-        ::remove(tmp);
-        return false;
-    }
-    std::fflush(f);
-    int fd = ::fileno(f);
-    if (fd >= 0) ::fsync(fd);
-    std::fclose(f);
-
-    if (::rename(tmp, full) != 0) {
-        ::remove(tmp);
-        return false;
-    }
-    return true;
-}
-
-void fsList(const char* dir, FsListCb cb, void* user) {
-    if (!fsMounted_ || !cb) return;
-    char full[128];
-    if (!fsTranslate(dir, full, sizeof(full))) return;
-    DIR* d = ::opendir(full);
-    if (!d) return;
-    struct dirent* ent;
-    // Sized to hold full ("/littlefs/..." up to 128) + '/' + max 255-byte d_name + null.
-    char childPath[400];
-    struct stat st;
-    while ((ent = ::readdir(d)) != nullptr) {
-        std::snprintf(childPath, sizeof(childPath), "%s/%s", full, ent->d_name);
-        bool isDir = stat(childPath, &st) == 0 && S_ISDIR(st.st_mode);
-        cb(ent->d_name, isDir, user);
-    }
-    ::closedir(d);
-}
-
-size_t filesystemUsed() {
-    if (!fsMounted_) return 0;
-    size_t total = 0, used = 0;
-    if (esp_littlefs_info(FS_PARTITION_LABEL, &total, &used) != ESP_OK) return 0;
-    return used;
-}
-
-size_t filesystemTotal() {
-    if (!fsMounted_) return 0;
-    size_t total = 0, used = 0;
-    if (esp_littlefs_info(FS_PARTITION_LABEL, &total, &used) != ESP_OK) return 0;
-    return total;
-}
 
 // -----------------------------------------------------------------------
 // Network
@@ -454,19 +319,45 @@ static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
     }
 }
 
-static void ensureWifiInit() {
-    if (wifiInitDone_) return;
+// Returns true on success. Failures must propagate up to wifiStaInit /
+// wifiApInit so NetworkModule's state machine can react (typically: fall
+// back to whatever path doesn't need WiFi). The pre-fix used
+// ESP_ERROR_CHECK, which aborts the device on any failure — fatal when the
+// heap is too fragmented for esp_wifi_init to claim its RX buffers, which
+// is precisely the case where AP-fallback was meant to kick in. Now WiFi
+// init failure is a recoverable runtime error, not a panic.
+static bool ensureWifiInit() {
+    if (wifiInitDone_) return true;
     ensureNetifInit();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    esp_err_t err = esp_wifi_init(&cfg);
+    if (err != ESP_OK) {
+        ESP_LOGE(NET_TAG, "esp_wifi_init failed: %s (heap %u, largest %u)",
+                 esp_err_to_name(err),
+                 static_cast<unsigned>(esp_get_free_heap_size()),
+                 static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+        return false;
+    }
 
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
-                                               &wifiEventHandler, nullptr));
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
-                                               &wifiEventHandler, nullptr));
+    err = esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                     &wifiEventHandler, nullptr);
+    if (err != ESP_OK) {
+        ESP_LOGE(NET_TAG, "WIFI_EVENT register failed: %s", esp_err_to_name(err));
+        esp_wifi_deinit();
+        return false;
+    }
+    err = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                     &wifiEventHandler, nullptr);
+    if (err != ESP_OK) {
+        ESP_LOGE(NET_TAG, "IP_EVENT register failed: %s", esp_err_to_name(err));
+        esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifiEventHandler);
+        esp_wifi_deinit();
+        return false;
+    }
 
     wifiInitDone_ = true;
+    return true;
 }
 
 bool wifiStaInit(const char* ssid, const char* password) {
@@ -476,7 +367,7 @@ bool wifiStaInit(const char* ssid, const char* password) {
     // call wifiStaInit again after an Ethernet drop without a prior stop).
     // Stop before ensureWifiInit() — wifiStaStop() deinits the WiFi driver.
     if (staNetif_) wifiStaStop();
-    ensureWifiInit();
+    if (!ensureWifiInit()) return false;   // out-of-memory / event register failure
 
     staNetif_ = esp_netif_create_default_wifi_sta();
 
@@ -486,13 +377,30 @@ bool wifiStaInit(const char* ssid, const char* password) {
         std::strncpy(reinterpret_cast<char*>(wifi_config.sta.password), password, sizeof(wifi_config.sta.password) - 1);
     }
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    // From here every call can fail for transient runtime reasons (mode
+    // conflict, driver-state mismatch, etc.). Log + clean up + return false
+    // so NetworkModule's state machine can fall back rather than panic.
+    esp_err_t err;
+    if ((err = esp_wifi_set_mode(WIFI_MODE_STA)) != ESP_OK) {
+        ESP_LOGE(NET_TAG, "WiFi STA set_mode failed: %s", esp_err_to_name(err));
+        wifiStaStop();
+        return false;
+    }
+    if ((err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config)) != ESP_OK) {
+        ESP_LOGE(NET_TAG, "WiFi STA set_config failed: %s", esp_err_to_name(err));
+        wifiStaStop();
+        return false;
+    }
+    if ((err = esp_wifi_start()) != ESP_OK) {
+        ESP_LOGE(NET_TAG, "WiFi STA start failed: %s", esp_err_to_name(err));
+        wifiStaStop();
+        return false;
+    }
 
-    esp_err_t err = esp_wifi_connect();
+    err = esp_wifi_connect();
     if (err != ESP_OK) {
         ESP_LOGE(NET_TAG, "WiFi STA connect failed: %s", esp_err_to_name(err));
+        wifiStaStop();   // tear down the driver/netif we just stood up
         return false;
     }
 
@@ -517,6 +425,13 @@ void wifiStaGetIP(char* buf, size_t len) {
 void wifiStaStop() {
     esp_wifi_disconnect();
     esp_wifi_stop();
+    // Unregister event handlers before deinit so subsequent init/stop cycles
+    // don't accumulate duplicate registrations. Guard on wifiInitDone_ since
+    // ensureWifiInit() bails before the registration step if init failed.
+    if (wifiInitDone_) {
+        esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifiEventHandler);
+        esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifiEventHandler);
+    }
     esp_wifi_deinit();
     if (staNetif_) {
         esp_netif_destroy_default_wifi(staNetif_);
@@ -531,7 +446,7 @@ bool wifiApInit(const char* apName, const char* ip) {
     // Guard against repeated init leaking the previous AP netif.
     // Stop before ensureWifiInit() — wifiApStop() deinits the WiFi driver.
     if (apNetif_) wifiApStop();
-    ensureWifiInit();
+    if (!ensureWifiInit()) return false;   // out-of-memory / event register failure
 
     apNetif_ = esp_netif_create_default_wifi_ap();
 
@@ -555,9 +470,22 @@ bool wifiApInit(const char* apName, const char* ip) {
     wifi_config.ap.max_connection = 4;
     wifi_config.ap.authmode = WIFI_AUTH_OPEN;
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    esp_err_t err;
+    if ((err = esp_wifi_set_mode(WIFI_MODE_AP)) != ESP_OK) {
+        ESP_LOGE(NET_TAG, "WiFi AP set_mode failed: %s", esp_err_to_name(err));
+        wifiApStop();
+        return false;
+    }
+    if ((err = esp_wifi_set_config(WIFI_IF_AP, &wifi_config)) != ESP_OK) {
+        ESP_LOGE(NET_TAG, "WiFi AP set_config failed: %s", esp_err_to_name(err));
+        wifiApStop();
+        return false;
+    }
+    if ((err = esp_wifi_start()) != ESP_OK) {
+        ESP_LOGE(NET_TAG, "WiFi AP start failed: %s", esp_err_to_name(err));
+        wifiApStop();
+        return false;
+    }
 
     wifiApActive_ = true;
     ESP_LOGI(NET_TAG, "WiFi AP started: %s @ %s", apName ? apName : "?", ip ? ip : "?");
@@ -570,6 +498,12 @@ bool wifiApConnected() {
 
 void wifiApStop() {
     esp_wifi_stop();
+    // Mirror wifiStaStop(): unregister the event handlers before deinit so
+    // re-init doesn't accumulate duplicate registrations.
+    if (wifiInitDone_) {
+        esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifiEventHandler);
+        esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifiEventHandler);
+    }
     esp_wifi_deinit();
     if (apNetif_) {
         esp_netif_destroy_default_wifi(apNetif_);

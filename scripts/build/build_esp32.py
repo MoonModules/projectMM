@@ -4,7 +4,6 @@
 import argparse
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -207,13 +206,18 @@ def resolve_board(args: argparse.Namespace) -> str:
     return "esp32"
 
 
-def read_legacy_marker(build_dir: Path) -> str | None:
-    """Translate a pre-board .mm_profile marker into the equivalent board."""
-    legacy = build_dir / ".mm_profile"
-    if not legacy.exists():
-        return None
-    prev_profile = legacy.read_text().strip()
-    return PROFILE_ALIASES.get(prev_profile, "esp32")
+def build_dir_for(board: str) -> Path:
+    """Return the per-board build directory.
+
+    Each board gets its own subdir of ``<ROOT>/build/`` so multiple
+    firmware variants can coexist on disk — switching boards no longer
+    forces a clean rebuild. The ``esp32-`` prefix namespaces ESP32 board
+    keys away from desktop targets (``build/macos/``, ``build/linux/``,
+    ``build/windows/``) that share the same root. Common-patterns
+    rationale: CMake / idf.py ``-B <dir>`` is the documented mechanism
+    for parallel build dirs; the bespoke choice here is just the naming.
+    """
+    return ROOT / "build" / f"esp32-{board}"
 
 
 def main():
@@ -247,44 +251,42 @@ def main():
     env = idf_env(idf_path)
     cmd = idf_cmd(idf_path)
 
-    build_dir = ESP32_DIR / "build"
-    marker = build_dir / ".mm_board"
+    build_dir = build_dir_for(board)
+    # -B points idf.py at the per-board build dir. -DSDKCONFIG keeps each
+    # board's sdkconfig inside its own build dir too — without this idf.py
+    # writes `esp32/sdkconfig` at the project root, and switching boards
+    # poisons it ("project sdkconfig was generated for target X, but
+    # CMakeCache contains Y"). Per-build-dir sdkconfig is the IDF-supported
+    # way to do parallel builds; CMake forwards the variable into the
+    # build component manager. Absolute paths are necessary for SDKCONFIG
+    # because CMake resolves it relative to the build dir, not the project.
+    sdkconfig_path = build_dir / "sdkconfig"
+    b_arg = [
+        "-B", str(build_dir),
+        "-DSDKCONFIG=" + str(sdkconfig_path),
+    ]
 
-    # Switching boards requires a fresh sdkconfig — ESP-IDF only seeds it from
-    # SDKCONFIG_DEFAULTS when no sdkconfig exists. A missing marker is treated
-    # as the previous default (esp32 = WiFi-only classic) so pre-board builds
-    # aren't surprise-cleaned; the legacy .mm_profile marker is honoured for
-    # one release.
-    if build_dir.exists():
-        if marker.exists():
-            prev = marker.read_text().strip()
-        else:
-            prev = read_legacy_marker(build_dir) or "esp32"
-        if prev != board:
-            print(f"Board change ({prev} -> {board}): cleaning build/ and sdkconfig")
-            shutil.rmtree(build_dir, ignore_errors=True)
-            sdkconfig = ESP32_DIR / "sdkconfig"
-            if sdkconfig.exists():
-                sdkconfig.unlink()
-
+    # First-time build for this board: idf.py needs `set-target` before
+    # `build` so sdkconfig gets seeded from SDKCONFIG_DEFAULTS. On subsequent
+    # builds the per-build-dir sdkconfig already has the chip pinned, so
+    # set-target is skipped — switching to another board uses a different
+    # build_dir entirely, so its sdkconfig is untouched.
     extra = board_cmake_args(board)
-
     if not build_dir.exists():
-        print(f"Setting target to {chip} (board: {board})...")
-        r = subprocess.run(cmd + extra + ["set-target", chip],
+        print(f"Setting target to {chip} (board: {board}, build dir: "
+              f"{build_dir.relative_to(ROOT)})...")
+        r = subprocess.run(cmd + b_arg + extra + ["set-target", chip],
                            cwd=ESP32_DIR, env=env)
         if r.returncode != 0:
             sys.exit(r.returncode)
 
     print(f"Building for {chip} (board: {board})...")
-    r = subprocess.run(cmd + extra + ["build"], cwd=ESP32_DIR, env=env)
+    r = subprocess.run(cmd + b_arg + extra + ["build"], cwd=ESP32_DIR, env=env)
     if r.returncode != 0:
         sys.exit(r.returncode)
 
-    marker.write_text(board)
-
     # Show flash/RAM usage summary
-    subprocess.run(cmd + ["size"], cwd=ESP32_DIR, env=env)
+    subprocess.run(cmd + b_arg + ["size"], cwd=ESP32_DIR, env=env)
 
 
 if __name__ == "__main__":

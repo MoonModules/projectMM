@@ -1,26 +1,57 @@
 #!/usr/bin/env python3
-"""Clean the ESP32 build directory."""
+"""Clean one or all ESP32 per-board build directories.
 
+Each board has its own ``build/esp32-<board>/`` (managed by
+``build_esp32.py``). This script removes one at a time, or every
+``build/esp32-*/`` plus a stale legacy ``esp32/build/`` if present.
+"""
+
+import argparse
 import shutil
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 ESP32_DIR = ROOT / "esp32"
+BUILD_ROOT = ROOT / "build"
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from build_esp32 import BOARDS, build_dir_for
+
 
 def main():
-    build_dir = ESP32_DIR / "build"
-    if build_dir.exists():
-        shutil.rmtree(build_dir)
-        print("ESP32 build directory removed.")
-    else:
-        print("Nothing to clean.")
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    g = ap.add_mutually_exclusive_group(required=True)
+    g.add_argument("--board", choices=sorted(BOARDS),
+                   help="Remove build/esp32-<board>/ for the named board.")
+    g.add_argument("--all", action="store_true",
+                   help="Remove every build/esp32-*/ directory plus the "
+                        "legacy esp32/build/ dir if it still exists "
+                        "(left over from the pre-plan-19.1 layout).")
+    args = ap.parse_args()
 
-    # Also remove sdkconfig so set-target runs fresh
-    sdkconfig = ESP32_DIR / "sdkconfig"
-    if sdkconfig.exists():
-        sdkconfig.unlink()
-        print("sdkconfig removed.")
+    targets: list[Path] = []
+    if args.board:
+        targets.append(build_dir_for(args.board))
+    else:
+        if BUILD_ROOT.exists():
+            targets.extend(sorted(BUILD_ROOT.glob("esp32-*")))
+        # Sweep the legacy single-dir layout on its way out.
+        legacy = ESP32_DIR / "build"
+        if legacy.exists():
+            targets.append(legacy)
+
+    if not targets:
+        print("Nothing to clean.")
+        return
+
+    for path in targets:
+        if path.exists():
+            shutil.rmtree(path)
+            print(f"  removed {path.relative_to(ROOT)}")
+        else:
+            print(f"  (skip {path.relative_to(ROOT)} — already gone)")
+
 
 if __name__ == "__main__":
     main()

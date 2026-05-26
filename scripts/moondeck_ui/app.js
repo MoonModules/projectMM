@@ -9,8 +9,8 @@ const MOONDECK_MD = "/api/help";
 // ---------------------------------------------------------------------------
 
 let scripts = [];
-let envs = [];
-let state = { env: "", port: "", devices: [] };
+let boards = [];
+let state = { board: "", port: "", devices: [] };
 
 // ---------------------------------------------------------------------------
 // Init
@@ -20,12 +20,19 @@ async function init() {
     const resp = await fetch("/api/scripts");
     const data = await resp.json();
     scripts = data.scripts;
-    envs = data.envs;
+    boards = data.boards;
 
     const stateResp = await fetch("/api/state");
     state = await stateResp.json();
 
-    renderEnvSelect();
+    // Migrate legacy persisted state: old saves had `env: "esp32"` (a chip
+    // family). The dropdown now holds firmware-board keys
+    // (`esp32` / `esp32-eth` / `esp32-eth-wifi` / `esp32s3-n16r8`). If the
+    // saved board isn't in the new list, drop it so the default selection
+    // (first board) wins.
+    if (!boards.includes(state.board)) state.board = "";
+
+    renderBoardSelect();
     renderScripts();
     try { renderDevices(); } catch (e) { console.error("renderDevices:", e); }
     await updateRunningState();
@@ -123,19 +130,39 @@ function renderScripts() {
         esp32: document.getElementById("scripts-esp32"),
         live: document.getElementById("scripts-live"),
     };
+    // The esp32 tab splits its scripts across three containers so the
+    // dropdowns (Firmware, Port) can sit *between* the script groups they
+    // belong to. Setup → top, Build → after the Firmware dropdown, Flash +
+    // run → after the Port dropdown (the main container). Every other tab
+    // uses a single container.
+    const esp32SetupContainer = document.getElementById("scripts-esp32-setup");
+    const esp32BuildContainer = document.getElementById("scripts-esp32-build");
 
     for (const [tab, container] of Object.entries(containers)) {
         container.innerHTML = "";
+        if (tab === "esp32") {
+            esp32SetupContainer.innerHTML = "";
+            esp32BuildContainer.innerHTML = "";
+        }
         const tabScripts = scripts.filter(s => s.tab === tab);
 
-        let lastGroup = "";
+        // Per-container last-group tracking: each target keeps its own
+        // header state so we don't suppress a header just because the same
+        // group name appeared in the *other* container.
+        const lastGroupByTarget = new WeakMap();
         for (const script of tabScripts) {
+            let target = container;
+            if (tab === "esp32") {
+                if (script.group === "setup") target = esp32SetupContainer;
+                else if (script.group === "build") target = esp32BuildContainer;
+            }
+            const lastGroup = lastGroupByTarget.get(target) || "";
             if (script.group !== lastGroup) {
-                lastGroup = script.group;
+                lastGroupByTarget.set(target, script.group);
                 const header = document.createElement("div");
                 header.className = "group-header";
                 header.textContent = script.group;
-                container.appendChild(header);
+                target.appendChild(header);
             }
             const card = document.createElement("div");
             card.className = "script-card";
@@ -154,7 +181,7 @@ function renderScripts() {
                 runScript(script, e.target);
             });
 
-            container.appendChild(card);
+            target.appendChild(card);
         }
     }
 }
@@ -164,6 +191,14 @@ function renderScripts() {
 // ---------------------------------------------------------------------------
 
 async function runScript(script, btn) {
+    // Destructive actions (erase flash, future reset-to-defaults) require a
+    // confirmation step — native browser confirm() to match MoonDeck's
+    // vanilla style. Done before the long-running / live-tab branches so an
+    // already-running destructive script (none exist today, future-proofing)
+    // can still be stopped without re-confirming.
+    if (script.destructive && !btn.classList.contains("running")) {
+        if (!confirm(`${script.label} is destructive — are you sure?`)) return;
+    }
     // Long-running scripts toggle between Run and Stop
     if (btn.classList.contains("running")) {
         if (script.long_running) {
@@ -198,7 +233,7 @@ async function runScript(script, btn) {
 
 async function runScriptOnce(script, btn, extraParams) {
     const params = { ...extraParams };
-    if (script.needs_env) params.env = state.env;
+    if (script.needs_board) params.board = state.board;
     if (script.needs_port) params.port = state.port;
 
     // Switch to log pane and show output
@@ -272,18 +307,22 @@ async function runScriptOnce(script, btn, extraParams) {
 // ESP32 controls
 // ---------------------------------------------------------------------------
 
-function renderEnvSelect() {
-    const select = document.getElementById("env-select");
+function renderBoardSelect() {
+    const select = document.getElementById("board-select");
     select.innerHTML = "";
-    for (const env of envs) {
+    // If no board persisted (fresh state, or legacy state migrated away),
+    // default to the first option so Build / etc. always have a valid
+    // --board argument to forward.
+    if (!state.board && boards.length > 0) state.board = boards[0];
+    for (const board of boards) {
         const opt = document.createElement("option");
-        opt.value = env;
-        opt.textContent = env;
-        if (env === state.env) opt.selected = true;
+        opt.value = board;
+        opt.textContent = board;
+        if (board === state.board) opt.selected = true;
         select.appendChild(opt);
     }
     select.addEventListener("change", async () => {
-        state.env = select.value;
+        state.board = select.value;
         await saveState();
     });
 }

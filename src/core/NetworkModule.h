@@ -15,6 +15,53 @@ public:
     void setScheduler(Scheduler* s) { scheduler_ = s; }
     void setSystemModule(SystemModule* s) { systemModule_ = s; }
 
+    // External entry-point for setting WiFi credentials at runtime — used by
+    // ImprovProvisioningModule when the browser/CLI pushes new credentials over
+    // USB-serial. Writes the same buffers the AP-fallback UI flow writes via
+    // POST /api/control on `ssid` / `password`, then drives a clean transition
+    // into State::WaitingSta so loop1s() takes over and either reports
+    // connected (onConnected) or falls back to AP after the 10 s timeout.
+    //
+    // Why the explicit AP→STA tear-down (rather than just calling wifiStaInit
+    // and letting esp_wifi_set_mode handle the mode change): in AP-mode the
+    // platform layer's wifiInitDone_ flag is true, which makes ensureWifiInit
+    // return early without registering the IP_EVENT_STA_GOT_IP handler. Without
+    // that handler the wifiStaConnected_ flag never flips, the WaitingSta
+    // state never sees the STA come up, and the device sits in limbo with
+    // STA mode active but the state machine still thinking it's in AP.
+    // wifiApStop() drops wifiInitDone_=false so the next ensureWifiInit
+    // registers handlers cleanly.
+    void setWifiCredentials(const char* ssid, const char* password) {
+        if (!ssid) return;
+        std::strncpy(ssid_, ssid, sizeof(ssid_) - 1);
+        ssid_[sizeof(ssid_) - 1] = 0;
+        std::strncpy(password_, password ? password : "", sizeof(password_) - 1);
+        password_[sizeof(password_) - 1] = 0;
+        markDirty();   // FilesystemModule picks this up on its next save
+        if constexpr (platform::hasWiFi) {
+            // Tear down any prior WiFi state (AP-fallback, mid-flight STA
+            // attempt, or stale init from a previous reconfigure) so the
+            // platform's event-handler registration runs fresh.
+            if (state_ == State::AP) {
+                platform::wifiApStop();
+                apShutdownPending_ = false;
+            }
+            if (state_ == State::WaitingSta || state_ == State::ConnectedSta) {
+                platform::wifiStaStop();
+            }
+            if (platform::wifiStaInit(ssid_, password_)) {
+                state_ = State::WaitingSta;
+                stateChangeTime_ = platform::millis();
+                std::snprintf(statusStr_, sizeof(statusStr_), "WiFi STA: %s", ssid_);
+                setStatus(statusStr_, Severity::Status);
+            } else {
+                // STA init failed (OOM, GPIO conflict). Try to recover via
+                // AP so the user can re-enter credentials manually.
+                startAP();
+            }
+        }
+    }
+
     // Networking is infrastructure — keep the cascade ticking even when the user
     // toggled "enabled" off, otherwise the device would silently drop off the LAN
     // and become unreachable.

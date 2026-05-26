@@ -108,7 +108,7 @@ Conditional controls (e.g. fields only visible under a Select mode) are always b
 ### projectMM v2 — MoonModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/MoonModule.h))
 
 - `onBuildControls()` / `onAllocateMemory()` separation.
-- `onChildrenReady()` — parent-notified-after-children hook. Not carried into v3; child setup ordering is handled by Scheduler's 4-phase boot instead.
+- `onChildrenReady()` — parent-notified-after-children hook. Not carried over; child setup ordering is handled by Scheduler's 4-phase boot instead.
 - Field order optimized 8B→4B→2B→1B, saving 24 bytes.
 - `classSize` set via `register_type<T>()`.
-- `AutoWireSpec` — an arbitrary dependency-graph (DAG) wiring mechanism. v3 deliberately uses parent/child only; the DAG was more than the domain needs.
+- `AutoWireSpec` — an arbitrary dependency-graph (DAG) wiring mechanism. projectMM deliberately uses parent/child only; the DAG was more than the domain needs.
