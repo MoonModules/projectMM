@@ -15,6 +15,7 @@ on:
   push:
     tags:
       - 'v*'
+      - 'nightly-*'
     # Pre-1.0 scaffold: also run the build jobs on push to active branches
     # so we catch breakage before tagging. The release job is gated on
     # `startsWith(github.ref, 'refs/tags/')` below, so branch pushes only
@@ -295,7 +296,11 @@ jobs:
           # Mark vX.Y.Z-rcN tags as pre-releases — they land on the Releases
           # page sorted below stable releases and aren't picked up by tooling
           # that asks for "latest". Stable tags publish normally.
-          prerelease: ${{ contains(github.ref, '-rc') || contains(inputs.tag || '', '-rc') }}
+          # Mark RC and nightly tags as prereleases. The picker labels them
+          # all as "(beta)"; the visual distinction is in the tag name
+          # (v1.0.0-rc1 vs nightly-2026-05-26).
+          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, 'nightly-')
+                          || contains(inputs.tag || '', '-rc') || contains(inputs.tag || '', 'nightly-') }}
           fail_on_unmatched_files: true
           # The `files:` block below is a multi-line literal string — every line
           # is a glob pattern, the action does NOT strip `#` as comment syntax.

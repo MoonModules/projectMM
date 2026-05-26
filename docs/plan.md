@@ -33,7 +33,6 @@ Either path: 2-3h of careful translation + Windows-side manual testing. The plan
 - **Linux desktop binary** in `release.yml` (third desktop job). Static-linked libstdc++ where the host allows.
 - **Teensy 4.1 release binary.** Toolchain-file build, packaged as `.hex` for Teensy Loader.
 - **Raspberry Pi binary.** ARM64, cross-built or native depending on what the runner offers.
-- **Nightly channel** (plan-18 Phase 2). New `nightly.yml` on schedule produces unstable binaries tagged `nightly-YYYY-MM-DD` with `prerelease: true`. The picker already recognises any prerelease tag; the workflow change is the missing piece.
 - **Installer UX polish** (plan-18 Phase 3). Clear "Pre-release (beta)" warning on RC/nightly picks, finer "do not install" affordance (yank-by-asset-tag instead of yank-by-release-deletion), manufacturer-friendly landing copy.
 - **Runtime PHY / pin config** for Ethernet (see `WiFi runtime disable` below — same `platform::ethPresent()` hook). Replaces the build-time Olimex-pin baking in `sdkconfig.defaults.eth` with a runtime picker. Once this lands the `esp32-eth*` variants stop being Olimex-specific.
 - **macOS code-signing.** Currently triggers Gatekeeper on first run; signed builds drop the "downloaded from internet" prompt.
@@ -188,6 +187,46 @@ CodeRabbit flagged the post-plan-18 platform.h surface for using `(buf, len)` pa
 - `TcpConnection::read/write` already take `(uint8_t*, size_t)`; keeping those raw is fine (matches the lwip / Berkeley sockets shape) but if we do a span pass, doing it consistently everywhere is the right scope.
 
 Not RC2 / not plan-18 work — touches every caller (modules, scenarios, tests). Worth doing alongside the next platform-API expansion (e.g. when adding Windows desktop sockets per the Windows port, or POST /api/firmware streaming). Estimate ~2 h including ripple updates.
+
+## Improv as a child of NetworkModule (deferred — needs scheduler work first)
+
+Improv depends on WiFi and has no meaning without it; expressing that
+dependency as a parent-child relationship in the module tree is the
+architecturally right shape (the Network card on the UI shows Improv
+as a sub-row, similar to how Layers sits under Layouts). The bespoke
+`setNetworkModule(networkModule)` pointer-passing becomes a `parent()`
+read.
+
+Attempted in plan-21 (a 30-min spike, 2026-05-26), reverted because
+the change crosses load-bearing scheduler/MoonModule infrastructure
+that isn't ready for it yet:
+
+- `Scheduler::tick()` only walks **top-level** modules for `loop20ms` /
+  `loop1s`. Children don't get those ticks. Today's container modules
+  (Layouts / Layers / Drivers) only need `setup` / `onBuildControls` to
+  propagate (the base class default does that); they don't have any
+  per-tick work that runs on children.
+- `Scheduler::setup` calls each top-level module's `setup` which the
+  base default propagates to children — BUT every NetworkModule
+  override of `setup` / `loop1s` / `onBuildControls` / `teardown`
+  needs to chain to the base, otherwise children silently miss every
+  one of those callbacks.
+
+The minimum-scope refactor to make this safe:
+
+1. **Scheduler walks children too** for `loop20ms` and `loop1s` — or
+   the base `MoonModule::loop20ms` / `loop1s` propagate to children
+   (today they're no-ops). Pick the place that costs the least at runtime.
+2. **Every existing override** of `setup` / `loop1s` / `loop20ms` /
+   `onBuildControls` / `teardown` audited to confirm it chains to the
+   base. NetworkModule, SystemModule, FilesystemModule, HttpServerModule
+   all need this check.
+3. **Then** move Improv under Network — at that point it's a one-line
+   `networkModule->addChild(improvModule)` swap for the top-level
+   `scheduler.addModule(improvModule)`, and the lifecycle just works.
+
+Estimate ~2 h for the whole sequence. Not RC2 work; defer until after
+the plan-18/19/20 PR-merge into main.
 
 ## HTTP file serving blocks the render tick (follow-up)
 
