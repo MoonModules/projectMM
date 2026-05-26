@@ -1,5 +1,16 @@
 # Plan-18 — Release-channel picker + first-boot WiFi provisioning
 
+> **Post-implementation note.** Plan-18 shipped all three tracks (OTA, web installer, Improv) as described. The branch carried six unplanned follow-up plans that landed in the same merge:
+>
+> - **Plan-19 — MoonDeck ESP32 tab refresh.** Replaced the dead "Chip" dropdown with a Firmware-variant picker; collapsed four "Build esp32-X" buttons into one parameterised Build; moved Setup above the dropdowns; separated Flash from Build with the Port dropdown between them; added a "destructive" confirm flag; fixed the `?` help-anchor renderer to emit `<h3 id="…">` so deep links land on the right section.
+> - **Plan-19.1 — Per-target build directories.** `build/esp32-<board>/` + `build/<host>/`. Each board has its own build dir; switching boards is free (no clean rebuild). Mirrors the deployment layout the release workflow already used (`dist/firmware-<board>-v<ver>.bin`). A follow-up commit added `-DSDKCONFIG=…/sdkconfig` to keep per-build-dir sdkconfigs isolated from each other (`esp32/sdkconfig` at the project root no longer exists).
+> - **Plan-20 — Web installer end-user features.** "Your devices" card backed by `localStorage`, with Visit / Erase / Forget buttons. Erase reuses ESP Web Tools' `erase-first` install button. Diagnose intentionally moved to the device UI (same-origin nav-footer link) because Chrome's mixed-content blocker prevents an HTTPS Pages page from fetching `http://<device>/api/state`.
+> - **Plan-21 — Improv as a child of Network module.** Attempted, reverted same session. The architectural shape is right but crosses load-bearing infrastructure: `Scheduler::tick()` only walks top-level modules for `loop20ms`/`loop1s`, so a child module's tick callbacks silently disappear. Carved out for a future plan that fixes the scheduler/MoonModule chain first.
+> - **Plan-22 — Nightly builds.** `.github/workflows/nightly.yml` cron'd at 04:00 UTC tags `nightly-YYYY-MM-DD` if `main` HEAD has moved since the last nightly, prunes nightly releases older than 7 days. Reuses `release.yml` via tag push — zero duplication of build matrix or Pages logic. `verify_version.py` learned to skip the library.json check on `nightly-*` tags (they're snapshot labels, not semver).
+> - **Plan-23 — Split `platform_esp32.cpp` by subsystem.** 1281 lines → 700 (core) + 3 sibling files (FS, OTA, Improv). Network stayed in the core file because Eth + WiFi + sockets + mDNS share file-scope state — splitting would need an internal header with `extern` declarations or a singleton refactor. Desktop's `platform_desktop.cpp` deliberately stayed in one file; its OTA/Improv/FS stubs are 6 lines each. Asymmetry is intentional.
+>
+> The branch also carried a real bug fix the user surfaced mid-implementation: `NetworkModule::setWifiCredentials` did `wifiStaInit` directly without first stopping the AP-mode driver, so the `IP_EVENT_STA_GOT_IP` handler never registered and the state machine sat in limbo. AP→STA tear-down now runs explicitly in `setWifiCredentials`. The bug had been masked because the only callers were the credential-entry-then-reboot UI flow (reboot hides it) — Improv's "set credentials on a running device" flow exposed it.
+
 ## Context
 
 projectMM has three installer surfaces, two of which don't exist in v3 yet:

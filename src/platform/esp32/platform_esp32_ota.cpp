@@ -21,6 +21,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <new>           // std::nothrow for the OtaTaskParams alloc below
 
 namespace mm::platform {
 
@@ -148,8 +149,25 @@ bool http_fetch_to_ota(const char* url,
         return false;
     }
 
-    auto* p = new OtaTaskParams{};
-    std::strncpy(p->url, url, sizeof(p->url) - 1);
+    // Reject oversize URLs explicitly rather than silently truncating with
+    // strncpy — a truncated URL almost always 404s or fetches the wrong
+    // file, with no clue in the status surface.
+    size_t urlLen = std::strlen(url);
+    constexpr size_t kUrlMax = sizeof(OtaTaskParams::url) - 1;
+    if (urlLen > kUrlMax) {
+        std::snprintf(statusBuf, statusBufLen,
+                      "error: url too long (%zu > %zu)", urlLen, kUrlMax);
+        return false;
+    }
+
+    // std::nothrow so OOM doesn't abort the process. Status string carries
+    // the failure back to the route, which returns 500 to the browser.
+    auto* p = new (std::nothrow) OtaTaskParams{};
+    if (!p) {
+        std::snprintf(statusBuf, statusBufLen, "error: out of memory");
+        return false;
+    }
+    std::memcpy(p->url, url, urlLen + 1);   // includes NUL; size already verified
     p->statusBuf = statusBuf;
     p->statusBufLen = statusBufLen;
     p->bytesReadOut = bytesReadOut;

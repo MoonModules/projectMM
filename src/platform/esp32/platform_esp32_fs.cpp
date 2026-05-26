@@ -116,6 +116,10 @@ int fsRead(const char* path, char* buf, size_t maxLen) {
 
 bool fsWriteAtomic(const char* path, const char* data, size_t len) {
     if (!fsMounted_) return false;
+    // Guard the public API: a non-zero len with a null data pointer is UB
+    // in std::fwrite. No current caller passes null, but the boundary is
+    // exposed so the check is cheap insurance.
+    if (len > 0 && !data) return false;
     char full[128];
     char tmp[136];
     if (!fsTranslate(path, full, sizeof(full))) return false;

@@ -318,10 +318,16 @@ function buildNavFooter() {
                 || location.hostname || "device";
             const fname = `projectMM-diag-${devName}-${Date.now()}.json`;
             const a = document.createElement("a");
-            a.href = URL.createObjectURL(blob);
+            const blobUrl = URL.createObjectURL(blob);
+            a.href = blobUrl;
             a.download = fname;
             a.click();
-            URL.revokeObjectURL(a.href);
+            // Defer the revoke so the browser has time to start the download.
+            // Revoking immediately after click() is technically race-safe on
+            // recent Chrome / Firefox (the click navigation is synchronous)
+            // but Safari has been observed dropping downloads under a fast
+            // revoke. A few seconds is the canonical workaround.
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
         } catch (e) {
             alert(`Diagnostic capture failed: ${e && e.message ? e.message : e}`);
         }

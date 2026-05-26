@@ -138,24 +138,20 @@ What needs to be built (≈4 h):
 
 Deferred to keep this iteration narrow: the picker + URL path is working now, and the dev-flash workflow has the `flash_esp32.py` (USB) fallback. Reopens when a second use case lands or when the iteration time on `esptool reset → flash → reboot` becomes annoying enough to fix. Reference: [plan-18 Notes](history/plan-18.md) — "File-upload OTA route … is skipped. Picker drives `/api/firmware/url` only. v1 had both."
 
-## Post-merge cleanup: remove temporary `plan-18` carve-outs (follow-up)
+## Post-merge cleanup: GitHub Pages environment branch-policy (follow-up)
 
-Two places carry a temporary `plan-18`-named allowance that should be removed once PR #7 merges and the branch is deleted. Both were added so PR #7's CI + Pages deploys could run before merge; neither belongs in steady-state.
+The `github-pages` environment was extended to allow deploys from `plan-18` (was previously `main`-only). The deployment-branch-policy id is **`50239266`**. Once PR #7 merges and the branch is deleted, drop the rule via:
 
-1. **`.github/workflows/release.yml`** — the `push: branches:` allowlist contains `plan-18` (added in commit `3e2acb5`, with a comment noting "remove when the PR merges"). Drop that line so the allowlist returns to `main` + `next-iteration`.
+```bash
+gh api -X DELETE \
+  repos/ewowi/projectMM/environments/github-pages/deployment-branch-policies/50239266
+```
 
-2. **GitHub Pages environment branch-policy** — the `github-pages` environment was extended to allow deploys from `plan-18` (was previously `main`-only). The deployment-branch-policy id is **`50239266`**. Remove via:
+Or via UI: Repo Settings → Environments → `github-pages` → Deployment branches → remove the `plan-18` rule.
 
-   ```bash
-   gh api -X DELETE \
-     repos/ewowi/projectMM/environments/github-pages/deployment-branch-policies/50239266
-   ```
+Verify: `gh api repos/ewowi/projectMM/environments/github-pages/deployment-branch-policies` should show only `{ name: main, type: branch }`.
 
-   Or via UI: Repo Settings → Environments → `github-pages` → Deployment branches → remove the `plan-18` rule.
-
-Verify after cleanup: a `gh api repos/ewowi/projectMM/environments/github-pages/deployment-branch-policies` call should show only `{ name: main, type: branch }`. The `branches:` allowlist in `release.yml` should match the old plan-17 pattern.
-
-If a future feature branch needs the same allowances, add them under that branch's name and follow this same cleanup pattern on its merge — or set up a `next-iteration`-style convention where every feature branch uses one of the standing names (so neither allowlist needs editing per-PR).
+The `release.yml` branch allowlist carve-out has been removed already (this branch's commit reducing `branches:` to `[main]` only). Steady-state: main-only on-push CI, nightly tags cover between-RC snapshots, feature branches rely on PR-time review (CodeRabbit + reviewer agent) — no per-branch allowlist edits needed for future PRs.
 
 ## Build-variant + board WiFi performance matrix (follow-up)
 

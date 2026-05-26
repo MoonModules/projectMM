@@ -26,10 +26,12 @@ namespace mm {
 // uniformity but the route returns 501; status stays "idle" forever.
 
 // File-scope globals shared with the OTA route + the platform-layer task.
-// Defined in an anonymous namespace inside the header so multiple translation
-// units that include the header still share one storage instance (the header
-// is included from HttpServerModule.cpp via the route, and from the module
-// instantiation site in main.cpp — both must see the same g_otaStatus).
+// Declared `inline` (C++17) so multiple translation units that include the
+// header still share one storage instance (the header is included from
+// HttpServerModule.cpp via the route, and from the module instantiation
+// site in main.cpp — both must see the same g_otaStatus). An anonymous
+// namespace would do the opposite — per-TU storage — which is why we
+// use `inline` here.
 //
 // g_otaBytesRead / g_otaBytesTotal are the live byte counters the task writes.
 // The UI renders them as "X KB / Y KB" via the existing progress control. The

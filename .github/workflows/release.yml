@@ -16,18 +16,14 @@ on:
     tags:
       - 'v*'
       - 'nightly-*'
-    # Pre-1.0 scaffold: also run the build jobs on push to active branches
-    # so we catch breakage before tagging. The release job is gated on
-    # `startsWith(github.ref, 'refs/tags/')` below, so branch pushes only
-    # exercise the builds — no release page, no Pages deploy. Remove this
-    # `branches` block once the release pipeline is proven (post-1.0) if CI
-    # minutes get tight; tag-driven release is the steady-state shape.
-    # Add the current feature branch when one is in flight (plan-18 today)
-    # so its PR gets CI; remove when the PR merges.
+    # On-push CI on main: catches breakage between tags. The release job
+    # below is gated on `startsWith(github.ref, 'refs/tags/')` || dispatch,
+    # so a plain push to main only exercises the builds — no release page,
+    # no Pages deploy. Nightly tags (cron in nightly.yml) cover the
+    # in-between snapshot use case; feature-branch CI is provided by each
+    # PR's own checks (CodeRabbit + reviewer agent), not by this workflow.
     branches:
       - main
-      - next-iteration
-      - plan-18
     paths:
       - 'src/**'
       - 'esp32/**'
@@ -293,14 +289,20 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
-          # Mark vX.Y.Z-rcN tags as pre-releases — they land on the Releases
-          # page sorted below stable releases and aren't picked up by tooling
-          # that asks for "latest". Stable tags publish normally.
-          # Mark RC and nightly tags as prereleases. The picker labels them
-          # all as "(beta)"; the visual distinction is in the tag name
-          # (v1.0.0-rc1 vs nightly-2026-05-26).
-          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, 'nightly-')
-                          || contains(inputs.tag || '', '-rc') || contains(inputs.tag || '', 'nightly-') }}
+          # Mark vX.Y.Z-rcN and nightly-* tags as pre-releases — they land
+          # on the Releases page sorted below stable releases and aren't
+          # picked up by tooling that asks for "latest". Stable tags publish
+          # normally. The picker labels both as "(beta)"; the visual
+          # distinction is in the tag name (v1.0.0-rc1 vs nightly-2026-05-26).
+          #
+          # Source the test from `inputs.tag || github.ref_name` once: on
+          # workflow_dispatch github.ref is "refs/heads/<branch>" (the
+          # dispatching branch) and would never match, so a pure github.ref
+          # test would silently mark dispatched RCs as stable. The
+          # `inputs.tag || github.ref_name` expression resolves to the
+          # actual tag in both trigger paths.
+          prerelease: ${{ contains(inputs.tag || github.ref_name, '-rc')
+                          || contains(inputs.tag || github.ref_name, 'nightly-') }}
           fail_on_unmatched_files: true
           # The `files:` block below is a multi-line literal string — every line
           # is a glob pattern, the action does NOT strip `#` as comment syntax.

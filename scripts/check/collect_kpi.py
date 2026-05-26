@@ -133,14 +133,16 @@ def collect_desktop():
 
 def collect_esp32():
     kpi = {}
-    # Per-board build dirs under build/esp32-*/ (plan-19.1). Pick the
-    # freshest one — that's the binary the developer most recently
-    # rebuilt and would consider the current KPI source. A developer
-    # who wants a specific board can re-build it to bump the mtime.
-    candidates = sorted((ROOT / "build").glob("esp32-*"),
-                        key=lambda p: p.stat().st_mtime,
-                        reverse=True)
-    candidates = [p for p in candidates if (p / "projectMM.bin").exists()]
+    # Per-board build dirs under build/esp32-*/ (plan-19.1). Pick the dir
+    # whose projectMM.bin was written most recently — that's the binary
+    # the developer most recently rebuilt and would consider the current
+    # KPI source. Sort by the firmware mtime, not the dir mtime, because
+    # a sdkconfig save or stray touch can bump the dir mtime without a
+    # rebuild — picking by dir mtime would surface stale binaries.
+    candidates = [p for p in (ROOT / "build").glob("esp32-*")
+                  if (p / "projectMM.bin").exists()]
+    candidates.sort(key=lambda p: (p / "projectMM.bin").stat().st_mtime,
+                    reverse=True)
     if not candidates:
         return kpi
     esp32_build = candidates[0]

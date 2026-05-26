@@ -170,6 +170,14 @@ export const myDevices = {
      */
     addProvisionedDevice(url) {
         if (!url || typeof url !== "string") return;
+        // Restrict to http/https — the Visit button does window.open(url),
+        // which would happily launch javascript: or file: URLs if a future
+        // state migration or hand-edited localStorage smuggled one in. The
+        // Improv success URL is always http://<ip>/, so this check rejects
+        // nothing legitimate.
+        let parsed;
+        try { parsed = new URL(url); } catch (_) { return; }
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
         const existing = state.devices.find(d => d.url === url);
         const now = new Date().toISOString();
         if (existing) {

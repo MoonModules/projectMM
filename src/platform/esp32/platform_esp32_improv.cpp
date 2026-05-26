@@ -221,7 +221,17 @@ static void improvTask(void* /*arg*/) {
     // Driver install. UART0 is already configured at 115200-8N1 by the
     // bootloader; we just claim the interrupt + RX FIFO. RX buf 256 is
     // plenty (Improv RPC payloads max out around 96 bytes).
-    uart_driver_install(UART_NUM_0, 256, 0, 0, nullptr, 0);
+    esp_err_t uart_err = uart_driver_install(UART_NUM_0, 256, 0, 0, nullptr, 0);
+    if (uart_err != ESP_OK) {
+        // Without the driver, uart_read_bytes returns -1 forever and the
+        // task spins doing nothing useful while reporting "listening".
+        // Surface the failure on the module's status control + park the
+        // task — it'll show up in `provision_status` instead of misleading
+        // a user into thinking Improv is alive.
+        improvSetStatus("error: uart_driver_install %s", esp_err_to_name(uart_err));
+        vTaskDelete(nullptr);
+        return;
+    }
 
     improvSetStatus("listening");
 
