@@ -1,10 +1,17 @@
 name: Nightly
 
-# Daily snapshot of main HEAD. Tags as `nightly-YYYY-MM-DD` and pushes the
-# tag; the tag push fires release.yml (via its `tags: ['v*', 'nightly-*']`
-# trigger), which does the actual build + publish + Pages deploy. Skip
-# when main HEAD hasn't moved since the last nightly. Old nightlies are
+# Daily snapshot of main HEAD. Calls release.yml via workflow_dispatch with
+# tag=nightly-YYYY-MM-DD; release.yml does the actual build + publish + Pages
+# deploy and creates the git tag as a side effect of `softprops/action-gh-release`.
+# Skip when main HEAD hasn't moved since the last nightly. Old nightlies are
 # pruned to seven days so the GitHub releases page stays tidy.
+#
+# WHY NOT push a tag from this workflow and let release.yml's `on: push: tags`
+# fire? Because pushes authenticated with the default GITHUB_TOKEN explicitly
+# DO NOT trigger downstream workflow runs — GitHub's "GITHUB_TOKEN doesn't
+# trigger workflows" rule. workflow_dispatch via the gh API IS exempt from
+# that rule, so dispatching release.yml directly is the canonical fix that
+# doesn't need a personal-access-token secret.
 
 on:
   schedule:
@@ -14,9 +21,9 @@ on:
     - cron: '0 4 * * *'
   workflow_dispatch: {}
 
-# Default GITHUB_TOKEN gets contents: write via the per-job overrides below.
+# Default GITHUB_TOKEN gets the per-job permissions below.
 # Repo Settings → Actions → Workflow permissions must allow write for the
-# tag-push + release-delete calls to succeed.
+# release-delete calls in the cleanup job to succeed.
 permissions:
   contents: read
 
@@ -24,7 +31,7 @@ jobs:
   check-changes:
     runs-on: ubuntu-latest
     outputs:
-      should-tag: ${{ steps.diff.outputs.should-tag }}
+      should-build: ${{ steps.diff.outputs.should-build }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -37,56 +44,60 @@ jobs:
                    | jq -r '.[] | .tagName | select(startswith("nightly-"))' \
                    | head -1)
           if [ -z "$LATEST" ]; then
-            echo "No prior nightly — tagging."
-            echo "should-tag=true" >> "$GITHUB_OUTPUT"
+            echo "No prior nightly — building."
+            echo "should-build=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # If main HEAD == the commit the latest nightly tag points at, skip.
           # Tag may be missing locally (the prior run deleted it; only the
-          # release survives) — treat that as "should re-tag".
+          # release survives) — treat that as "should re-build".
           LATEST_SHA=$(git rev-parse "$LATEST^{commit}" 2>/dev/null || echo "")
           MAIN_SHA=$(git rev-parse origin/main)
           echo "Latest nightly: $LATEST ($LATEST_SHA)"
           echo "main HEAD:      $MAIN_SHA"
           if [ "$LATEST_SHA" = "$MAIN_SHA" ]; then
             echo "main hasn't moved — skipping nightly."
-            echo "should-tag=false" >> "$GITHUB_OUTPUT"
+            echo "should-build=false" >> "$GITHUB_OUTPUT"
           else
-            echo "main has moved — will tag."
-            echo "should-tag=true" >> "$GITHUB_OUTPUT"
+            echo "main has moved — will dispatch release.yml."
+            echo "should-build=true" >> "$GITHUB_OUTPUT"
           fi
 
-  create-tag:
+  dispatch-release:
     needs: check-changes
-    if: needs.check-changes.outputs.should-tag == 'true'
+    if: needs.check-changes.outputs.should-build == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # to push the tag
+      # actions: write is what `gh workflow run` needs against the API.
+      # contents stays read — we don't push tags from this workflow anymore,
+      # release.yml will create the tag as part of `softprops/action-gh-release`.
+      actions: write
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-        with: { ref: main, fetch-depth: 0 }
-      - name: Tag main HEAD and push
+      - name: Dispatch release.yml for today's nightly tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           TAG="nightly-$(date -u +%Y-%m-%d)"
-          # Idempotency: if today's tag already exists (a second dispatch on
-          # the same UTC day), don't try to re-create. The release.yml will
-          # overwrite the assets if you re-dispatch IT with the same tag.
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists — skipping push."
+          # Idempotency: if today's tag already has a release (a second
+          # dispatch on the same UTC day), skip rather than re-publishing.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — skipping dispatch."
             exit 0
           fi
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "$TAG"
-          git push origin "$TAG"
-          echo "Pushed $TAG — release.yml will pick up the tag push."
+          echo "Dispatching release.yml with tag=$TAG ..."
+          # gh workflow run uses the GITHUB_TOKEN; workflow_dispatch via the
+          # API IS exempt from the "GITHUB_TOKEN doesn't trigger workflows"
+          # rule (the rule applies to push/tag events, not API dispatches).
+          gh workflow run release.yml --ref main -f tag="$TAG"
+          echo "release.yml dispatched; it will tag main HEAD via softprops/action-gh-release."
 
   cleanup:
-    # Independent of create-tag — old nightlies should be pruned even on
-    # days where main didn't move (so they age out steadily). Runs in
-    # parallel with create-tag; gh release delete doesn't conflict with
-    # gh release create (different tags).
+    # Independent of dispatch-release — old nightlies should be pruned even
+    # on days where main didn't move (so they age out steadily). Runs in
+    # parallel with dispatch-release; gh release delete doesn't conflict
+    # with the dispatched release.yml's gh release create (different tags).
     runs-on: ubuntu-latest
     permissions:
       contents: write   # gh release delete --cleanup-tag deletes the git tag too
@@ -102,7 +113,6 @@ jobs:
           # need the second branch.
           CUTOFF=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
           echo "Cutoff: $CUTOFF (UTC)"
-          DELETED=0
           gh release list --limit 50 --json tagName,createdAt \
             | jq -r --arg cutoff "$CUTOFF" \
                 '.[] | select(.tagName | startswith("nightly-"))
@@ -113,6 +123,5 @@ jobs:
                 # --cleanup-tag removes both the release and the underlying
                 # git tag. Without it the tags would accumulate forever.
                 gh release delete "$TAG" --yes --cleanup-tag
-                DELETED=$((DELETED + 1))
               done
           echo "Cleanup done."
