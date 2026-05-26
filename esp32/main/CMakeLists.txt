@@ -6,6 +6,9 @@ idf_component_register(
         "../../src/core/FilesystemModule.cpp"
         "../../src/core/Scheduler.cpp"
         "../../src/platform/esp32/platform_esp32.cpp"
+        "../../src/platform/esp32/platform_esp32_fs.cpp"
+        "../../src/platform/esp32/platform_esp32_ota.cpp"
+        "../../src/platform/esp32/platform_esp32_improv.cpp"
     INCLUDE_DIRS
         "../../src"
         "../../src/platform/esp32"
