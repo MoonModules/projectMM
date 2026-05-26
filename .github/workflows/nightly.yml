@@ -77,12 +77,18 @@ jobs:
       - name: Dispatch release.yml for today's nightly tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Explicit --repo on every gh call below. Without it gh tries to
+          # infer the repo from `git remote -v`, which needs a checkout —
+          # and this job deliberately doesn't run actions/checkout (saves
+          # ~5 s; the job only makes API calls). github.repository is
+          # always set in the GitHub Actions environment.
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           TAG="nightly-$(date -u +%Y-%m-%d)"
           # Idempotency: if today's tag already has a release (a second
           # dispatch on the same UTC day), skip rather than re-publishing.
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             echo "Release $TAG already exists — skipping dispatch."
             exit 0
           fi
@@ -90,7 +96,7 @@ jobs:
           # gh workflow run uses the GITHUB_TOKEN; workflow_dispatch via the
           # API IS exempt from the "GITHUB_TOKEN doesn't trigger workflows"
           # rule (the rule applies to push/tag events, not API dispatches).
-          gh workflow run release.yml --ref main -f tag="$TAG"
+          gh workflow run release.yml --repo "$REPO" --ref main -f tag="$TAG"
           echo "release.yml dispatched; it will tag main HEAD via softprops/action-gh-release."
 
   cleanup:
