@@ -1,5 +1,9 @@
 # Plasma Palette 2D Effect
 
+![PlasmaPaletteEffect controls](../../../assets/screenshots/PlasmaPaletteEffect.png)
+
+![PlasmaPaletteEffect preview](../../../assets/screenshots/PlasmaPaletteEffect.gif)
+
 Same four-sine plasma field as `PlasmaEffect`, but colours come from a 256-entry fire-ocean RGB palette in flash instead of `hsvToRgb`.
 
 ## Controls

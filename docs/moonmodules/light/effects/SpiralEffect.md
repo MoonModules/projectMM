@@ -1,5 +1,9 @@
 # Spiral 2D Effect
 
+![SpiralEffect controls](../../../assets/screenshots/SpiralEffect.png)
+
+![SpiralEffect preview](../../../assets/screenshots/SpiralEffect.gif)
+
 Rotating spiral from angle + distance. Uses shared `atan2_8` and `dist8` in `core/color.h`.
 
 ## Controls

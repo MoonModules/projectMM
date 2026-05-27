@@ -1,5 +1,9 @@
 # Checkerboard 2D Effect
 
+![CheckerboardEffect controls](../../../assets/screenshots/CheckerboardEffect.png)
+
+![CheckerboardEffect preview](../../../assets/screenshots/CheckerboardEffect.gif)
+
 Animated checker pattern with two configurable hues.
 
 ## Controls

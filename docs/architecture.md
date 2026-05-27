@@ -345,6 +345,8 @@ For installations spanning multiple controllers:
 
 # Web UI
 
+![UI overview](assets/screenshots/ui_overview.png)
+
 The UI is three hand-maintained files: `index.html`, `app.js`, `style.css`. No frameworks, no build tools, no npm. Served directly by the embedded HTTP server.
 
 The UI is **MoonModule-driven**. It contains no hard-coded knowledge of specific effects, layouts, or drivers. It queries the system for the current MoonModule tree (layers, effects, modifiers, layouts, drivers — each with their controls) and renders generically:

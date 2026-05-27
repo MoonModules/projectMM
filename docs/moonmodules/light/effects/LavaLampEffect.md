@@ -1,5 +1,9 @@
 # Lava Lamp 2D Effect
 
+![LavaLampEffect controls](../../../assets/screenshots/LavaLampEffect.png)
+
+![LavaLampEffect preview](../../../assets/screenshots/LavaLampEffect.gif)
+
 Three slow blobs whose summed field is mapped through a black → red → orange → yellow → white palette. Atmospheric, fluid look — like a real lava lamp rather than the bright HSV of `MetaballsEffect`.
 
 ## Controls

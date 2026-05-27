@@ -79,6 +79,36 @@
       "script": "report/history_report.py"
     },
     {
+      "id": "install_playwright",
+      "tab": "pc",
+      "group": "docs",
+      "label": "Install Playwright",
+      "help": "screenshot_modules",
+      "script": "docs/install_playwright.py"
+    },
+    {
+      "id": "screenshot_modules",
+      "tab": "pc",
+      "group": "docs",
+      "label": "Screenshot Modules",
+      "help": "screenshot_modules",
+      "script": "docs/screenshot_modules.py",
+      "long_running": true,
+      "process_name": "screenshot_modules.py",
+      "flags": [
+        { "id": "gif",   "label": "GIF",   "arg": "--gif",    "default": true },
+        { "id": "force", "label": "Force", "arg": "--force",  "default": false }
+      ]
+    },
+    {
+      "id": "update_module_docs",
+      "tab": "pc",
+      "group": "docs",
+      "label": "Update Module Docs",
+      "help": "update_module_docs",
+      "script": "docs/update_module_docs.py"
+    },
+    {
       "id": "live_scenario",
       "tab": "live",
       "group": "scenario",

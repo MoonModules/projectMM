@@ -1,5 +1,9 @@
 # Ripples 2D Effect
 
+![RipplesEffect controls](../../../assets/screenshots/RipplesEffect.png)
+
+![RipplesEffect preview](../../../assets/screenshots/RipplesEffect.gif)
+
 Expanding concentric rings from random centre points. Each ripple grows outward and respawns once it has expanded past the visible area. Multiple ripples overlap with additive blending.
 
 ## Controls

@@ -1,5 +1,7 @@
 # Grid Layout
 
+![GridLayout controls](../../../assets/screenshots/GridLayout.png)
+
 Arranges lights in a 3D grid (row-major: x varies fastest, then y, then z). Full-density mapping — every position maps to a light.
 
 ## Controls

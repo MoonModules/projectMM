@@ -203,6 +203,21 @@ select {
     width: 100%;
 }
 
+.flag-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.flag-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: #c0c0d0;
+    cursor: pointer;
+    user-select: none;
+}
+
 /* Live tab */
 .live-controls { margin-bottom: 12px; }
 

@@ -1,5 +1,7 @@
 # Layouts
 
+![Layouts controls](../../assets/screenshots/Layouts.png)
+
 Top-level container for one or more layouts. Shared by every layer in the Layers container — defines the physical light topology of the installation.
 
 > **Naming convention.** Capital `Layouts` is the container class; lowercase "layout"/"layouts" is the English singular/plural for individual `LayoutBase` children. Capitalisation disambiguates "the Layouts container" from "two layouts stacked". Same rule for `Layers`/layer and `Drivers`/driver.

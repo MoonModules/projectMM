@@ -2,7 +2,7 @@
 
 Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi, Windows, macOS or Linux desktop. One source tree, multiple targets.
 
-https://github.com/user-attachments/assets/b12b28ca-7e87-477a-942b-fcae601b721d
+![Web UI](docs/assets/screenshots/ui_overview.png)
 
 ## What you get
 
@@ -13,13 +13,14 @@ https://github.com/user-attachments/assets/b12b28ca-7e87-477a-942b-fcae601b721d
 - **Built-in browser UI.** The interface renders any module from its declared controls — adding a new effect needs zero UI code.
 - **DMX and addressable LEDs in the same setup.** RGB strips, RGBW pixels, multi-channel par lights, moving heads — all addressed through the same pipeline.
 
-![Web UI](docs/assets/ui.png)
-
 ## Getting started
 
 ### From a release
 
 **ESP32 — flash from your browser.** Open the [web installer](https://ewowi.github.io/projectMM/install/) in Chrome or Edge — it walks you through board selection, flashing, and network setup. The installer lists stable releases and a `latest` build (published automatically on every merge to main) carrying the newest unreleased changes, labelled *(beta)*.
+
+
+![Installer](docs/assets/screenshots/installer.png)
 
 **Desktop — download and run.** Grab the macOS arm64 tarball from the [releases page](https://github.com/ewowi/projectMM/releases), unpack, run, open `http://localhost:8080/`. The binary is unsigned, so Gatekeeper prompts on first run — right-click → Open, or clear the quarantine flag with `xattr -dr com.apple.quarantine ./projectMM`. Windows desktop binaries are blocked on the Windows platform-layer port (see [docs/plan.md](docs/plan.md)); macOS arm64 is the only desktop binary that ships from 1.0 today.
 
@@ -38,6 +39,9 @@ uv run scripts/moondeck.py
 Open `http://localhost:8420`: PC tab to build / run / test, ESP32 tab to flash, Live tab to discover devices. Full per-command reference: [scripts/MoonDeck.md](scripts/MoonDeck.md).
 
 ![MoonDeck](docs/assets/moondeck.png)
+
+
+![Moondeck Pc](docs/assets/screenshots/moondeck_pc.png)
 
 ## Documentation
 

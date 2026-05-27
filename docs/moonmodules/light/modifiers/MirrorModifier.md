@@ -1,5 +1,9 @@
 # Mirror Modifier
 
+![MirrorModifier controls](../../../assets/screenshots/MirrorModifier.png)
+
+![MirrorModifier preview](../../../assets/screenshots/MirrorModifier.gif)
+
 Static modifier. Mirrors the logical space around centre axes,
 producing a kaleidoscope effect. Each enabled axis doubles the
 physical output from the same logical data.

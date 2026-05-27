@@ -77,12 +77,14 @@ setInterval(updateRunningState, 5000);
 // ---------------------------------------------------------------------------
 
 function setupTabs() {
-    // Restore saved tab
-    if (state.tab) {
+    // ?tab=<name> URL param overrides saved state (used by screenshot automation)
+    const urlTab = new URLSearchParams(location.search).get("tab");
+    const activeTab = urlTab || state.tab;
+    if (activeTab) {
         document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
         document.querySelectorAll(".tab-content").forEach(s => s.classList.remove("active"));
-        const btn = document.querySelector(`.tab[data-tab="${state.tab}"]`);
-        const content = document.getElementById("tab-" + state.tab);
+        const btn = document.querySelector(`.tab[data-tab="${activeTab}"]`);
+        const content = document.getElementById("tab-" + activeTab);
         if (btn && content) {
             btn.classList.add("active");
             content.classList.add("active");
@@ -192,7 +194,8 @@ function renderScripts() {
                 target.appendChild(header);
             }
             const card = document.createElement("div");
-            card.className = "script-card" + (script.needs_scenario ? " script-card--has-select" : "");
+            const hasExtras = script.needs_scenario || (script.flags && script.flags.length > 0);
+            card.className = "script-card" + (hasExtras ? " script-card--has-select" : "");
             card.innerHTML = `
                 <div class="card-row">
                     <span class="status-dot" data-id="${script.id}"></span>
@@ -201,6 +204,7 @@ function renderScripts() {
                     <button class="run-btn" data-id="${script.id}">Run</button>
                 </div>
                 ${script.needs_scenario ? `<select class="scenario-select"></select>` : ""}
+                ${script.flags && script.flags.length > 0 ? `<div class="flag-row"></div>` : ""}
             `;
 
             if (script.needs_scenario) {
@@ -217,6 +221,27 @@ function renderScripts() {
                     sel.appendChild(opt);
                 }
                 sel.addEventListener("change", () => { state.scenario = sel.value; saveState(); });
+            }
+
+            if (script.flags && script.flags.length > 0) {
+                const flagRow = card.querySelector(".flag-row");
+                for (const flag of script.flags) {
+                    const stateKey = `flag_${script.id}_${flag.id}`;
+                    const checked = stateKey in state ? state[stateKey] : flag.default;
+                    const label = document.createElement("label");
+                    label.className = "flag-label";
+                    const cb = document.createElement("input");
+                    cb.type = "checkbox";
+                    cb.checked = checked;
+                    state[stateKey] = checked;
+                    cb.addEventListener("change", () => {
+                        state[stateKey] = cb.checked;
+                        saveState();
+                    });
+                    label.appendChild(cb);
+                    label.append(" " + flag.label);
+                    flagRow.appendChild(label);
+                }
             }
 
             card.querySelector(".help-btn").addEventListener("click", () => {
@@ -282,6 +307,10 @@ async function runScriptOnce(script, btn, extraParams) {
     if (script.needs_board) params.board = state.board;
     if (script.needs_port) params.port = state.port;
     if (script.needs_scenario) params.scenario = state.scenario;
+    for (const flag of (script.flags || [])) {
+        const stateKey = `flag_${script.id}_${flag.id}`;
+        params[`flag_${flag.id}`] = stateKey in state ? state[stateKey] : flag.default;
+    }
 
     // Switch to log pane and show output
     switchPane("log");

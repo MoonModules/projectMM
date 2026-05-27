@@ -1,5 +1,7 @@
 # ArtNet Send Driver
 
+![ArtNetSendDriver controls](../../../assets/screenshots/ArtNetSendDriver.png)
+
 Output driver. Reads from the Drivers container's output buffer and sends ArtNet DMX packets over UDP. The driver doesn't care whether the buffer is a separate composed buffer or a shared Layer buffer — it reads from whatever the Drivers container provides.
 
 The UDP socket is `connect()`-bound to the destination in `setup()`, so each per-universe `sendTo()` skips the address parse + route lookup — a measurable saving when a frame spans dozens of universes (16,384 lights = 97 universes). See [performance.md](../../../performance.md) "ArtNet UDP send cost".

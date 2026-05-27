@@ -1,5 +1,9 @@
 # Plasma Effect
 
+![PlasmaEffect controls](../../../assets/screenshots/PlasmaEffect.png)
+
+![PlasmaEffect preview](../../../assets/screenshots/PlasmaEffect.gif)
+
 Animated plasma pattern from summed sine waves on orthogonal and diagonal axes. Default effect in the desktop and ESP32 pipeline. 2D on flat (`depth == 1`) layouts, 3D on volumetric (`depth > 1`) layouts so a cube renders as a varied volume.
 
 ## Controls

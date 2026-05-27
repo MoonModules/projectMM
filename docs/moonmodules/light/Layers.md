@@ -1,5 +1,7 @@
 # Layers
 
+![Layers controls](../../assets/screenshots/Layers.png)
+
 Top-level container for one or more layers. Each layer renders independently into its own buffer; the Drivers container composes those buffers downstream.
 
 > **Naming convention.** Capital `Layers` is the container class; lowercase "layer"/"layers" is the English singular/plural for individual `Layer` children. Capitalisation disambiguates "the Layers container" from "two layers stacked". Same rule for `Layouts`/layout and `Drivers`/driver.

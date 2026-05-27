@@ -11,6 +11,9 @@
 
 ## PC Tab
 
+
+![Moondeck Pc](../docs/assets/screenshots/moondeck_pc.png)
+
 ### build_desktop
 
 Build the desktop target using CMake.
@@ -44,6 +47,8 @@ Re-running is idempotent: any existing `projectMM` instance is stopped first, th
 While the app is running, MoonDeck shows the button as **Stop** (a 5-second poll on `/api/running` detects the live process via `process_name`). Pressing Stop terminates the app; pressing Run again restarts it. From the CLI: `pkill -f build/<host>/projectMM` (or `pkill projectMM` if you don't have multiple host builds active).
 
 ### preview_installer
+
+![Installer](../docs/assets/screenshots/installer.png)
 
 Locally preview the web installer page at <https://ewowi.github.io/projectMM/install/> without tagging a release. Stages `docs/install/index.html` + `src/ui/release-picker.js` into `build/install-preview/` and serves them via Python's `http.server` on port 8000.
 
@@ -96,7 +101,53 @@ Output shape:
 
 The MoonDeck button writes the file, prints a `MOONDECK_VIEW: /api/history-report` marker that the log renderer auto-opens in the View pane (and renders as an "Open in View pane → …" clickable link). Re-runs on identical git state produce a deterministic file except for the timestamp line in the footer.
 
+### screenshot_modules
+
+Capture UI screenshots of every module that has controls and save them to `docs/assets/screenshots/`.
+
+```bash
+uv run scripts/docs/install_playwright.py    # one-time (or use Install Playwright button in MoonDeck)
+uv run scripts/docs/screenshot_modules.py    # requires projectMM running on localhost:8080
+uv run scripts/docs/screenshot_modules.py --host 192.168.1.210:8080
+uv run scripts/docs/screenshot_modules.py --gif    # also record 3-second GIF previews
+uv run scripts/docs/screenshot_modules.py --force  # re-capture and overwrite existing screenshots
+```
+
+The **GIF** and **Force** checkboxes in MoonDeck toggle these flags.
+
+Connects to a running projectMM server, builds a minimal pipeline scaffold (Layouts → Grid, Layer, Drivers), adds each module, screenshots its card, then removes it. Saves:
+
+- `<TypeName>.png` — module card screenshot for every module in the catalogue
+- `<TypeName>.gif` — 3-second preview animation for effects and modifiers (requires `--gif`)
+- `ui_overview.png` — full-page screenshot of the projectMM UI
+- `moondeck_pc.png`, `moondeck_esp32.png`, `moondeck_live.png` — MoonDeck tab screenshots (requires MoonDeck running on port 8420)
+- `installer.png` — web installer preview (requires `preview_installer` running on port 8000)
+
+Without `--force`, existing screenshots are skipped — only missing files are captured. Run with `--force` to re-capture everything (e.g. after a UI change).
+
+GIF capture uses ffmpeg (install with `brew install ffmpeg`). Each GIF is assembled from frames captured via Playwright — the WebGL canvas is read via `page.screenshot(clip=...)` rather than `canvas.toDataURL()` to work correctly in headless mode.
+
+After capture, run `update_module_docs` to insert the references into the module spec files.
+
+### update_module_docs
+
+Insert screenshot and GIF references into `docs/moonmodules/**/*.md` files.
+
+```bash
+uv run scripts/docs/update_module_docs.py            # update all
+uv run scripts/docs/update_module_docs.py --dry-run  # preview without writing
+```
+
+For each `.md` file, if `docs/assets/screenshots/<TypeName>.png` exists and the file doesn't already contain a screenshot reference, inserts the image after the first heading. If a matching `<TypeName>.gif` also exists, inserts the GIF reference on the next line. Safe to re-run — skips files that already have all references.
+
+Also inserts MoonDeck tab screenshots and the installer screenshot into `scripts/MoonDeck.md` and `README.md` at fixed anchor points (defined in the `EXTRA_SHOTS` list in the script).
+
+Reports unreferenced screenshots — any PNG or GIF in `docs/assets/screenshots/` not mentioned anywhere in `docs/` or `scripts/`.
+
 ## Live Tab
+
+
+![Moondeck Live](../docs/assets/screenshots/moondeck_live.png)
 
 ### live_scenario
 
@@ -115,6 +166,9 @@ Executes scenario steps (add_module, set_control, delete_module) via REST API. C
 For a full description of each scenario, see the [scenario inventory](/api/docs/testing.md?scenario-control-change) in testing.md.
 
 ## ESP32 Tab
+
+
+![Moondeck Esp32](../docs/assets/screenshots/moondeck_esp32.png)
 
 The tab is laid out top-to-bottom along the firmware workflow. Each dropdown sits between the script groups that consume it, so picking a dropdown is the natural prelude to the buttons below it.
 

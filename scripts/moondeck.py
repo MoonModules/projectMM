@@ -295,6 +295,9 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/api/history-report":
             self._serve_history_report()
 
+        elif self.path.startswith("/api/doc-asset/"):
+            self._serve_doc_asset()
+
         else:
             self._serve_static()
 
@@ -359,6 +362,9 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             cmd.extend(["--name", params["scenario"]])
         if params.get("host"):
             cmd.extend(["--host", params["host"]])
+        for flag in script_def.get("flags", []):
+            if params.get("flag_" + flag["id"]):
+                cmd.append(flag["arg"])
 
         try:
             popen_kwargs = dict(
@@ -454,6 +460,33 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             return
         self._serve_markdown_as_html(md_path, "")
 
+    def _serve_doc_asset(self):
+        """Serve a static asset (image, etc.) referenced from a rendered doc.
+
+        Path: /api/doc-asset/<ROOT-relative-path>
+        The renderer resolves relative image src values to ROOT-relative paths
+        before building the URL, so this handler only needs a simple join."""
+        import mimetypes
+        rel = self.path[len("/api/doc-asset/"):]
+        # Resolve against ROOT and ensure no escape.
+        try:
+            asset_path = (ROOT / rel).resolve()
+            ROOT.resolve()  # ensure ROOT itself is resolved
+            asset_path.relative_to(ROOT.resolve())  # raises ValueError if escape
+        except (ValueError, OSError):
+            self.send_error(403, "Forbidden")
+            return
+        if not asset_path.exists() or not asset_path.is_file():
+            self.send_error(404, f"Asset not found: {rel}")
+            return
+        mime, _ = mimetypes.guess_type(str(asset_path))
+        data = asset_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", mime or "application/octet-stream")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def _serve_markdown_as_html(self, md_path, anchor):
         """Render a markdown file to HTML for the View pane. Handles
         headings (with id slugs for deep-linking), fenced code blocks,
@@ -482,6 +515,20 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             HTML tags (no nested-markup confusion in the inputs we see)."""
             # `code` — exclude backticks themselves
             s = re.sub(r'`([^`]+)`', r'<code>\1</code>', s)
+            # ![alt](url) — images (must come before link regex to avoid partial match)
+            def _img_tag(m):
+                alt_, src_ = m.group(1), m.group(2)
+                # Resolve relative path from md file's directory to a
+                # ROOT-relative path, then serve via /api/doc-asset/.
+                if not src_.startswith(("http://", "https://", "/")):
+                    abs_src = (md_path.parent / src_).resolve()
+                    try:
+                        root_rel = abs_src.relative_to(ROOT.resolve())
+                        src_ = str(root_rel)
+                    except ValueError:
+                        pass  # outside ROOT — keep original path
+                return f'<img src="/api/doc-asset/{src_}" alt="{html_mod.escape(alt_)}" style="max-width:100%;margin:4px 0;">'
+            s = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', _img_tag, s)
             # [text](url) — same-origin /api/ links post a message to the
             # parent frame (iframe nav is sandboxed); external links open in
             # a new tab.
@@ -721,9 +768,9 @@ document.addEventListener("click", function(e) {{
 
     def _serve_static(self):
         """Serve files from moondeck_ui/ and docs/assets/."""
-        path = self.path.lstrip("/")
-        if path == "" or path == "/":
-            path = "index.html"
+        # Strip query string before resolving path (e.g. /?tab=pc → /)
+        raw = self.path.split("?", 1)[0].lstrip("/")
+        path = raw if raw else "index.html"
 
         # Serve /assets/* from docs/assets/
         if path.startswith("assets/"):

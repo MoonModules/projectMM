@@ -1,5 +1,7 @@
 # Preview Driver
 
+![PreviewDriver controls](../../../assets/screenshots/PreviewDriver.png)
+
 Streams light data to the web UI via WebSocket for real-time 3D visualization.
 
 ## Controls
