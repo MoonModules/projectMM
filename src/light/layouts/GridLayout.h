@@ -1,5 +1,7 @@
 #pragma once
 
+#include <limits>
+#include <cstdint>
 #include "light/layouts/Layouts.h"
 
 namespace mm {
@@ -17,7 +19,10 @@ public:
     }
 
     nrOfLightsType lightCount() const override {
-        return static_cast<nrOfLightsType>(width) * height * depth;
+        // Multiply in uint32_t to detect overflow before casting.
+        uint32_t n = static_cast<uint32_t>(width) * height * depth;
+        constexpr uint32_t kMax = std::numeric_limits<nrOfLightsType>::max();
+        return static_cast<nrOfLightsType>(n > kMax ? kMax : n);
     }
 
     void forEachCoord(CoordCallback cb, void* ctx) const override {

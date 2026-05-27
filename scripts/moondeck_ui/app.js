@@ -489,18 +489,29 @@ function appendLog(text) {
     const stripped = text.replace(/\n+$/, "");
     const markerMatch = VIEW_MARKER_RE.exec(stripped);
     if (markerMatch) {
-        const url = markerMatch[1];
-        const a = document.createElement("a");
-        a.href = url;
-        a.textContent = "Open in View pane → " + url;
-        a.addEventListener("click", (ev) => { ev.preventDefault(); showInView(url); });
-        logEl.appendChild(a);
-        logEl.appendChild(document.createTextNode("\n"));
-        logEl.scrollTop = logEl.scrollHeight;
-        // Defer the actual View-pane switch so the log row renders first
-        // (otherwise the user can't see what was just produced when they
-        // tab back to Log).
-        setTimeout(() => showInView(url), 50);
+        let safeUrl = null;
+        try {
+            const parsed = new URL(markerMatch[1]);
+            if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+                safeUrl = parsed.href;
+            }
+        } catch (_) { /* relative or invalid — skip */ }
+        if (safeUrl) {
+            const a = document.createElement("a");
+            a.href = safeUrl;
+            a.textContent = "Open in View pane → " + safeUrl;
+            a.addEventListener("click", (ev) => { ev.preventDefault(); showInView(safeUrl); });
+            logEl.appendChild(a);
+            logEl.appendChild(document.createTextNode("\n"));
+            logEl.scrollTop = logEl.scrollHeight;
+            // Defer the actual View-pane switch so the log row renders first
+            // (otherwise the user can't see what was just produced when they
+            // tab back to Log).
+            setTimeout(() => showInView(safeUrl), 50);
+        } else {
+            logEl.appendChild(document.createTextNode(stripped + "\n"));
+            logEl.scrollTop = logEl.scrollHeight;
+        }
         return;
     }
     // Fast path: no URL in this chunk, plain append.

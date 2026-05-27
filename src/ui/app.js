@@ -1514,6 +1514,8 @@ function attachDragHandlers(card, mod) {
 let gl = null;
 let glProgram = null;
 let glBuffer = null;
+let glLocs = null;          // cached attrib/uniform locations
+let glLoopRunning = false;  // continuous rAF render loop active
 const _cam = JSON.parse(localStorage.getItem("mm_cam") || "null");
 let camTheta    = _cam ? _cam.t : Math.PI;
 let camPhi      = _cam ? _cam.p : 0.4;
@@ -1527,7 +1529,7 @@ let lastMaxDim = 1;
 function initWebGL() {
     const canvas = document.getElementById("preview");
     if (!canvas) return;
-    gl = canvas.getContext("webgl");
+    gl = canvas.getContext("webgl", {alpha: false});
     if (!gl) return;
 
     const vsrc = `
@@ -1565,6 +1567,12 @@ function initWebGL() {
     gl.linkProgram(glProgram); gl.useProgram(glProgram);
 
     glBuffer = gl.createBuffer();
+    glLocs = {
+        aPos:      gl.getAttribLocation(glProgram,  "aPos"),
+        aCol:      gl.getAttribLocation(glProgram,  "aCol"),
+        uMVP:      gl.getUniformLocation(glProgram, "uMVP"),
+        uPointSize:gl.getUniformLocation(glProgram, "uPointSize"),
+    };
     gl.enable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -1722,19 +1730,12 @@ function renderPreviewFrame(buf) {
           }
         : (ix, iy, iz) => (iz * dh * dw + iy * dw + ix) * 3;
 
-    // Sparse vertex buffer — skip black voxels. Halves GPU work for typical effects
-    // and avoids drawing invisible points underneath the lit ones.
-    let nonBlack = 0;
-    for (let iz = 0; iz < d; iz++) {
-        for (let iy = 0; iy < h; iy++) {
-            for (let ix = 0; ix < w; ix++) {
-                const o = colorAt(ix, iy, iz);
-                if (pixels[o] | pixels[o + 1] | pixels[o + 2]) nonBlack++;
-            }
-        }
-    }
+    // Single-pass: allocate worst-case, fill, track actual count.
+    // No pre-pass to count non-black — eliminates the double iteration that
+    // caused main-thread stalls, and avoids blank frames when all stride-sampled
+    // voxels happen to be black (coarse detail on sparse effects).
     const maxDim = Math.max(w, h, d);
-    const verts = new Float32Array(nonBlack * 6);
+    const verts = new Float32Array(w * h * d * 6);
     let vi = 0;
     for (let iz = 0; iz < d; iz++) {
         for (let iy = 0; iy < h; iy++) {
@@ -1751,15 +1752,14 @@ function renderPreviewFrame(buf) {
             }
         }
     }
+    const vertCount = vi / 6;
 
     lastVerts = verts;
-    lastVertCount = nonBlack;
+    lastVertCount = vertCount;
     lastMaxDim = maxDim;
 
     if (camAutoFit) {
         camAutoFit = false;
-        // Fit the bounding box (half-extent 0.5 along the largest axis) inside
-        // the canvas. The shorter canvas dimension is the constraint.
         const canvas = document.getElementById("preview");
         const fov = 0.8;
         const aspect = canvas ? canvas.clientWidth / Math.max(1, canvas.clientHeight) : 1;
@@ -1768,19 +1768,32 @@ function renderPreviewFrame(buf) {
         camDist = Math.max(0.5, Math.min(10, fitDist));
     }
 
-    drawVerts();
+    if (!glLoopRunning) startRenderLoop();
 }
 
 function redrawCached() {
-    if (lastVerts) drawVerts();
+    if (!lastVerts) return;
+    if (!glLoopRunning) startRenderLoop();
+}
+
+function startRenderLoop() {
+    if (glLoopRunning) return;
+    glLoopRunning = true;
+    function loop() {
+        if (!lastVerts) { glLoopRunning = false; return; }
+        drawVerts();
+        requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
 }
 
 function drawVerts() {
-    if (!gl || !lastVerts) return;
+    if (!gl || !lastVerts || !glLocs) return;
     const canvas = document.getElementById("preview");
-    if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
-        canvas.width = canvas.clientWidth;
-        canvas.height = canvas.clientHeight;
+    const cw = Math.round(canvas.clientWidth), ch = Math.round(canvas.clientHeight);
+    if (canvas.width !== cw || canvas.height !== ch) {
+        canvas.width = cw;
+        canvas.height = ch;
     }
     gl.viewport(0, 0, canvas.width, canvas.height);
 
@@ -1789,25 +1802,24 @@ function drawVerts() {
     const cz = camDist * Math.cos(camPhi) * Math.cos(camTheta);
     const mvp = buildMVP(cx, cy, cz, canvas.width / Math.max(1, canvas.height));
 
-    // Transparent clear — the canvas shows the page through. WebGL context is
-    // created with alpha:true by default, so an alpha-0 clear is genuinely
-    // transparent (no opaque fill). Theme changes just work, no recolor needed.
-    gl.clearColor(0, 0, 0, 0);
+    // alpha:false context — clear to page background colour so the canvas
+    // blends seamlessly in both light and dark themes.
+    const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg-0").trim();
+    const m = bg.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+    if (m) gl.clearColor(parseInt(m[1],16)/255, parseInt(m[2],16)/255, parseInt(m[3],16)/255, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, glBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, lastVerts, gl.DYNAMIC_DRAW);
 
-    const aPos = gl.getAttribLocation(glProgram, "aPos");
-    const aCol = gl.getAttribLocation(glProgram, "aCol");
-    gl.enableVertexAttribArray(aPos);
-    gl.enableVertexAttribArray(aCol);
-    gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 24, 0);
-    gl.vertexAttribPointer(aCol, 3, gl.FLOAT, false, 24, 12);
+    gl.enableVertexAttribArray(glLocs.aPos);
+    gl.enableVertexAttribArray(glLocs.aCol);
+    gl.vertexAttribPointer(glLocs.aPos, 3, gl.FLOAT, false, 24, 0);
+    gl.vertexAttribPointer(glLocs.aCol, 3, gl.FLOAT, false, 24, 12);
 
-    gl.uniformMatrix4fv(gl.getUniformLocation(glProgram, "uMVP"), false, mvp);
+    gl.uniformMatrix4fv(glLocs.uMVP, false, mvp);
     const pointSize = Math.max(2, canvas.width * 0.8 / lastMaxDim);
-    gl.uniform1f(gl.getUniformLocation(glProgram, "uPointSize"), pointSize);
+    gl.uniform1f(glLocs.uPointSize, pointSize);
 
     gl.drawArrays(gl.POINTS, 0, lastVertCount);
 }
@@ -1901,7 +1913,8 @@ function applyTheme(t) {
 
 function updateStatusBar() {
     if (!state || !state.modules) return;
-    const sys = state.modules.find(m => m.name === "System");
+    const sys = state.modules.find(m => m.type === "SystemModule")
+             || state.modules.find(m => m.name === "System");
     if (!sys) return;
     const ctrls = sys.controls || [];
 

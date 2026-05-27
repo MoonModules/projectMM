@@ -406,7 +406,9 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         if not md_path.exists():
             self.send_error(404, "MoonDeck.md not found")
             return
-        anchor = self.path.split("?", 1)[1] if "?" in self.path else ""
+        raw = self.path.split("?", 1)[1] if "?" in self.path else ""
+        import re as _re
+        anchor = raw if _re.fullmatch(r"[A-Za-z0-9._-]+", raw) else ""
         self._serve_markdown_as_html(md_path, anchor)
 
     def _serve_history_report(self):

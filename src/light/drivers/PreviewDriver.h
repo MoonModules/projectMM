@@ -8,23 +8,23 @@ namespace mm {
 
 class PreviewDriver : public DriverBase {
 public:
-    // 12 fps keeps the preview WebSocket broadcast well within the render-tick
+    // 24 fps keeps the preview WebSocket broadcast well within the render-tick
     // budget while staying visually smooth (the browser caches geometry between
     // frames). User-tunable 1-60 via the "fps" control.
-    uint8_t fps = 12;
+    uint8_t fps = 24;
 
     // Preview detail: 1 = coarse, 2 = medium, 3 = fine. Higher = more voxels in
     // the downsampled frame = a denser point cloud, at the cost of a larger (but
     // still send-buffer-safe) WebSocket payload. Lets both coarse and fine
     // previews be tested live without reflashing.
-    uint8_t detail = 2;
+    uint8_t detail = 3;
 
     // UI render hint: when true the browser reconstructs (block-replicates) the
     // downsampled frame back to the original physical grid resolution, so the
     // preview shows the same voxel count as the real layout. Purely client-side
     // — the wire payload is the downsampled frame either way. The frame always
     // carries the original dimensions; this flag just tells the UI to use them.
-    bool decompress = false;
+    bool decompress = true;
 
     void setPreviewFrame(PreviewFrame* f) { frame_ = f; }
 
@@ -82,34 +82,43 @@ public:
             dd = (d + stride - 1) / stride;
         }
 
-        // Strided copy: take the first 3 (RGB) channels of every Nth voxel.
-        // The light *index* is computed from the bounding-box (x,y,z), but a
-        // sparse layout (wheel, sphere, arbitrary 3D shape) has fewer lights than
-        // its bounding box — so each index is bounded by the real light count to
-        // stay in-buffer. For a dense grid (count == w*h*d) every cell is copied;
-        // for a sparse layout the out-of-range cells are simply skipped.
-        // (Showing non-grid layouts in their true shape needs the planned
-        // one-time coordinate message — see PreviewDriver.md.)
+        // Downsample: for each stride-sized cell, take the brightest voxel
+        // (max per channel across the cell). A simple strided pick misses all
+        // lit pixels whenever the effect pattern falls between stride steps,
+        // producing empty frames. Max-pooling guarantees a cell is non-black
+        // whenever any voxel inside it is lit.
         const uint8_t* src = sourceBuffer_->data();
         uint8_t cpl = sourceBuffer_->channelsPerLight();
         size_t lightCount = sourceBuffer_->count();
         uint8_t* dst = downsampled_.data();
         size_t di = 0;
-        for (lengthType z = 0; z < d; z += stride) {
-            for (lengthType y = 0; y < h; y += stride) {
-                for (lengthType x = 0; x < w; x += stride) {
-                    size_t lightIdx = static_cast<size_t>(z) * h * w
-                                      + static_cast<size_t>(y) * w + x;
-                    size_t srcIdx = lightIdx * cpl;
-                    if (lightIdx < lightCount) {
-                        dst[di * 3 + 0] = src[srcIdx + 0];
-                        dst[di * 3 + 1] = (cpl >= 2) ? src[srcIdx + 1] : 0;
-                        dst[di * 3 + 2] = (cpl >= 3) ? src[srcIdx + 2] : 0;
-                    } else {
-                        dst[di * 3 + 0] = 0;
-                        dst[di * 3 + 1] = 0;
-                        dst[di * 3 + 2] = 0;
+        for (lengthType cz = 0; cz < dd; cz++) {
+            for (lengthType cy = 0; cy < dh; cy++) {
+                for (lengthType cx = 0; cx < dw; cx++) {
+                    // Pool over the stride×stride×stride cell
+                    uint8_t maxR = 0, maxG = 0, maxB = 0;
+                    for (uint8_t sz = 0; sz < stride; sz++) {
+                        lengthType oz = cz * stride + sz;
+                        if (oz >= d) continue;
+                        for (uint8_t sy = 0; sy < stride; sy++) {
+                            lengthType oy = cy * stride + sy;
+                            if (oy >= h) continue;
+                            for (uint8_t sx = 0; sx < stride; sx++) {
+                                lengthType ox = cx * stride + sx;
+                                if (ox >= w) continue;
+                                size_t lightIdx = static_cast<size_t>(oz) * h * w
+                                                + static_cast<size_t>(oy) * w + ox;
+                                if (lightIdx >= lightCount) continue;
+                                size_t srcIdx = lightIdx * cpl;
+                                if (src[srcIdx]     > maxR) maxR = src[srcIdx];
+                                if (cpl >= 2 && src[srcIdx+1] > maxG) maxG = src[srcIdx+1];
+                                if (cpl >= 3 && src[srcIdx+2] > maxB) maxB = src[srcIdx+2];
+                            }
+                        }
                     }
+                    dst[di * 3 + 0] = maxR;
+                    dst[di * 3 + 1] = maxG;
+                    dst[di * 3 + 2] = maxB;
                     di++;
                 }
             }

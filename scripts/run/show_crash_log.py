@@ -44,7 +44,7 @@ def _print_ips(path: Path) -> None:
         data = json.loads(path.read_text())
     except Exception as e:
         print(f"(could not parse: {e})")
-        print(path.read_text()[:2000])
+        print(path.read_bytes().decode("utf-8", errors="replace")[:2000])
         return
 
     exc = data.get("exception", {})

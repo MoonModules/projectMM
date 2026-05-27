@@ -268,3 +268,37 @@ Non-destructive Improv health check. Sends `GET_DEVICE_INFO` + `GET_CURRENT_STAT
 
 Exits 0 if both RPCs answered, 1 if the device didn't respond (Improv listener not running, wrong port, or a USB-CDC stall — try power-cycling). Reads `improv_provision.py`'s framing helpers, so the two scripts stay byte-identical on the wire.
 
+
+### show_crash_log
+
+Print the most recent projectMM crash report and run log.
+
+```bash
+uv run scripts/run/show_crash_log.py
+```
+
+On macOS, finds the newest `projectMM-*.ips` in `~/Library/Logs/DiagnosticReports/`, parses the JSON crash report, and prints the exception type, signal, faulting thread, and top 20 stack frames. If no crash report exists it falls back to the last 40 lines of `build/<host>/projectMM.log` so the run log is always reachable from one place.
+
+Typical output (crash present):
+
+```text
+=== macOS crash report: projectMM-2026-05-27-120000.ips ===
+Type    : EXC_BAD_ACCESS — SIGSEGV
+Subtype : KERN_INVALID_ADDRESS
+PID     : 12345  uptime: 4321 ms
+Captured: 2026-05-27T12:00:00Z
+
+Faulting thread 0 (com.apple.main-thread):
+  #0  mm::PreviewDriver::renderFrame()  +12
+  #1  mm::Scheduler::tick()  +88
+  ...
+```
+
+Typical output (no crash, log tail):
+
+```text
+No projectMM crash reports found in DiagnosticReports.
+
+=== Last 40 lines of projectMM.log ===
+tick: 1234us (FPS: 800)  free: 0  ...
+```
