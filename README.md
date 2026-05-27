@@ -19,7 +19,7 @@ https://github.com/user-attachments/assets/b12b28ca-7e87-477a-942b-fcae601b721d
 
 ### From a release
 
-**ESP32 — flash from your browser.** Open the [web installer](https://ewowi.github.io/projectMM/install/) in Chrome or Edge — it walks you through board selection, flashing, and network setup. The installer lists stable releases and nightly builds (`nightly-YYYY-MM-DD`); nightlies carry the latest unreleased changes and are labelled *(beta)*.
+**ESP32 — flash from your browser.** Open the [web installer](https://ewowi.github.io/projectMM/install/) in Chrome or Edge — it walks you through board selection, flashing, and network setup. The installer lists stable releases and a `latest` build (published automatically on every merge to main) carrying the newest unreleased changes, labelled *(beta)*.
 
 **Desktop — download and run.** Grab the macOS arm64 tarball from the [releases page](https://github.com/ewowi/projectMM/releases), unpack, run, open `http://localhost:8080/`. The binary is unsigned, so Gatekeeper prompts on first run — right-click → Open, or clear the quarantine flag with `xattr -dr com.apple.quarantine ./projectMM`. Windows desktop binaries are blocked on the Windows platform-layer port (see [docs/plan.md](docs/plan.md)); macOS arm64 is the only desktop binary that ships from 1.0 today.
 

@@ -4,8 +4,10 @@ name: Release
 # in parallel, generates 4 ESP Web Tools manifests, attaches everything to the
 # GitHub release, and deploys the installer page to GitHub Pages.
 #
-# Workflow: maintainer bumps library.json → git tag vX.Y.Z → push tag.
-# CI fails fast if the tag and library.json disagree (verify-version job).
+# Two triggers produce a release:
+#   - push to main (src/esp32/CMakeLists.txt changed) → tags/publishes as `latest`
+#     (a moving prerelease, always the newest build from main)
+#   - push of a vX.Y.Z tag → stable/RC release
 #
 # Manual replay: workflow_dispatch with an existing tag, useful for retries
 # after a transient runner failure (CI is the only producer of release assets;
@@ -15,13 +17,6 @@ on:
   push:
     tags:
       - 'v*'
-      - 'nightly-*'
-    # On-push CI on main: catches breakage between tags. The release job
-    # below is gated on `startsWith(github.ref, 'refs/tags/')` || dispatch,
-    # so a plain push to main only exercises the builds — no release page,
-    # no Pages deploy. Nightly tags (cron in nightly.yml) cover the
-    # in-between snapshot use case; feature-branch CI is provided by each
-    # PR's own checks (CodeRabbit + reviewer agent), not by this workflow.
     branches:
       - main
     paths:
@@ -53,26 +48,19 @@ permissions:
 
 jobs:
   verify-version:
-    # The job runs on every trigger (so the build jobs' `needs: verify-version`
-    # is satisfied — GitHub's default `needs:` treats a skipped dependency as
-    # a blocking state). The verification step inside only executes on a tag
-    # push or workflow_dispatch, where there's actually a tag to check against.
+    # Runs on every trigger so downstream `needs:` are always satisfied.
+    # Version check only applies to real version tags — skip for main push
+    # (latest) and workflow_dispatch with a non-version tag.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Verify tag matches library.json version
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v'))
         # Pass the tag via --tag arg, not via an env var named GITHUB_REF_NAME.
-        # The built-in GITHUB_REF_NAME is "main" on a workflow_dispatch from
-        # main and was shadowing the step-level env: override in practice
-        # (verified on run 26406224226 — env: said v1.0.0-rc1 but Python read
-        # "main"). Explicit CLI arg sidesteps the collision.
-        #
-        # The expression is plumbed via a step-level env var so the shell sees
-        # a properly-quoted "$TAG" instead of interpolating template text
-        # directly into the run line — same pattern the release job below
-        # uses for $REPO. Same value either way; the indirection silences
-        # the static analyser's template-injection warning.
+        # The built-in GITHUB_REF_NAME is "main" on a push-to-main and would
+        # shadow a step-level env override. Explicit CLI arg sidesteps the
+        # collision. Plumbed via env to avoid static-analyser template-injection
+        # warning on the direct ${{ }} expansion inside a shell string.
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: python scripts/build/verify_version.py --tag "$TAG"
@@ -159,9 +147,10 @@ jobs:
   # lands; the surrounding scaffolding stays identical.
 
   release:
-    # Tag/dispatch only — branch pushes exercise the builds but never
-    # publish a GitHub Release or deploy to Pages.
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    # Publish a release on: version tag push, main branch push, or workflow_dispatch.
+    # Plain branch push without matching paths is filtered by the top-level `paths:`
+    # so the build jobs already won't run; this condition is the belt to their braces.
+    if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     needs: [build-esp32, build-macos]
     runs-on: ubuntu-latest
     permissions:
@@ -185,15 +174,25 @@ jobs:
           find artifacts -type f -exec mv {} dist/ \;
           ls -la dist/
 
+      - name: Resolve effective tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          IS_MAIN: ${{ github.ref == 'refs/heads/main' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_TAG" ]; then
+            echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+          elif [ "$IS_MAIN" = "true" ]; then
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Generate ESP Web Tools manifests (release-asset + Pages-relative)
         env:
-          # workflow_dispatch passes the tag through inputs; push events
-          # use the ref directly. Either way TAG is the bare "vX.Y.Z".
-          # REPO is owner/repo, plumbed via env to avoid the static-analyser
-          # flagging the direct ${{ github.repository }} expansion inside a
-          # shell string. (github.repository isn't attacker-controlled, but
-          # keeping the indirection consistent with TAG silences the warning.)
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ steps.tag.outputs.tag }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -223,16 +222,16 @@ jobs:
               --out "pages-manifests/manifest-$B.json"
           done
 
-      # Pages deploy: every tag (stable + RC). The web installer page reads
-      # api.github.com to populate its release dropdown; the cumulative-content
-      # step below keeps the last 5 stable + 5 prerelease releases on Pages
-      # so those binaries are flashable (Web Serial is CORS-bound and GitHub
-      # release assets don't return CORS headers — see plan-18 Context).
-      # End users see Stable selected by default; RC is opt-in via the
+      # Pages deploy: every tag (stable + RC + latest). The web installer page
+      # reads api.github.com to populate its release dropdown; the cumulative-
+      # content step below keeps the last 5 stable + 5 prerelease releases on
+      # Pages so those binaries are flashable (Web Serial is CORS-bound and
+      # GitHub release assets don't return CORS headers — see plan-18 Context).
+      # End users see Stable selected by default; latest/RC is opt-in via the
       # channel dropdown.
       - name: Stage cumulative release content
         env:
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ steps.tag.outputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -288,21 +287,11 @@ jobs:
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.tag || github.ref_name }}
-          # Mark vX.Y.Z-rcN and nightly-* tags as pre-releases — they land
-          # on the Releases page sorted below stable releases and aren't
-          # picked up by tooling that asks for "latest". Stable tags publish
-          # normally. The picker labels both as "(beta)"; the visual
-          # distinction is in the tag name (v1.0.0-rc1 vs nightly-2026-05-26).
-          #
-          # Source the test from `inputs.tag || github.ref_name` once: on
-          # workflow_dispatch github.ref is "refs/heads/<branch>" (the
-          # dispatching branch) and would never match, so a pure github.ref
-          # test would silently mark dispatched RCs as stable. The
-          # `inputs.tag || github.ref_name` expression resolves to the
-          # actual tag in both trigger paths.
-          prerelease: ${{ contains(inputs.tag || github.ref_name, '-rc')
-                          || contains(inputs.tag || github.ref_name, 'nightly-') }}
+          tag_name: ${{ steps.tag.outputs.tag }}
+          # latest and vX.Y.Z-rcN tags are prerelease — they sort below stable
+          # on the Releases page and aren't picked up by tooling that asks for
+          # "latest release". Stable vX.Y.Z tags publish normally.
+          prerelease: ${{ steps.tag.outputs.tag == 'latest' || contains(steps.tag.outputs.tag, '-rc') }}
           fail_on_unmatched_files: true
           # The `files:` block below is a multi-line literal string — every line
           # is a glob pattern, the action does NOT strip `#` as comment syntax.
