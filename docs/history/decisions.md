@@ -571,3 +571,36 @@ The plan-18 branch landed plans 17 + 18 + six unplanned follow-ups (19, 19.1, 20
 - **The reviewer agent's job at PR-merge is architectural drift across N commits, not line-level bugs.** CodeRabbit catches line-level bugs in each PR commit; the reviewer agent at Event-2 reads the full branch diff and asks "did three commits each add a wrapper that one commit would hide?". Plan-18 ran into this productively — the in-branch CodeRabbit findings got triaged and either fixed or skipped-with-reason; the reviewer-agent run at merge is the final architectural sanity check. Two agents, two scopes.
 
 - **A 13-commit branch is the upper end of what a single merge should carry.** Plans 18 + 19 + 19.1 + 20 + 20.1 + 21 (reverted) + 22 + 23 in one branch is a lot — the merge commit train is heavy and the reviewer-agent's job gets harder as more commits stack up. Future branches should aim for "ship the first 3-4 plans, merge, start the next branch" rather than "let the branch grow until everything's tidy." This branch worked because the plans were mostly independent (no two of them touched the same files in conflicting ways), but that won't always hold.
+
+## Adaptive memory allocation design (plan-07)
+
+The core rules for how the light pipeline allocates and degrades under memory pressure. These are the invariants the code was designed around; the implementation lives in `Layer.h` and `DriverGroup.h`.
+
+**Allocation rules:**
+- **MappingLUT** is created only when ALL are true: modifiers exist on the layer; layout is not a simple non-serpentine grid (where physical == logical); enough heap available after reserving `HEAP_RESERVE` (32 KB) for stack/HTTP/WiFi.
+- **Driver output buffer** is created only when: at least one layer has a LUT actually allocated (not just "has modifiers") and enough heap is available.
+- Result for 1:1 unshuffled (no modifiers, or grid without serpentine): zero intermediate buffers — ArtNet reads directly from the layer buffer. Maximum LED count at minimum memory.
+
+**Degradation cascade** — when memory is insufficient, degrade in this order:
+1. Full pipeline — LUT + driver output buffer (modifier applied, clean separation)
+2. Skip driver output buffer — LUT exists, DriverGroup does mapping inline (slower, sequential)
+3. Skip LUT — modifier not applied, forced 1:1 mapping
+4. Reduce layer dimensions — halve until buffer fits, minimum 8×8
+
+Each degradation level is observable via flags on the module (`degraded()`, `lutSkipped()`, `outputBufferSkipped()`).
+
+**Predict-measure-compare:** before each allocation, predict memory impact from grid dimensions + channelsPerLight + modifier presence; after allocation, compare heap delta. Variance > 5% signals a leak or accounting error. Buffer sizes: layer = W×H×D×cpl; LUT ≈ `MappingLUT::estimateBytes(logicalCount, maxDest)`; driver buffer = physicalCount×cpl.
+
+## Plan-09 persistence failure — why JSON didn't pay for itself
+
+Plan-09 attempted ~1700 LOC of JSON-based persistence that was fully abandoned. The five root causes are worth keeping because they recur in any persistence design:
+
+1. **Question the format premise.** "Persistence is JSON" was assumed without justification. Neither human-readability nor manual editability were real requirements. For POD-only module state, `memcpy(file, this + sizeof(MoonModule), classSize - sizeof(MoonModule))` is one line and a complete save. Plan-10 took this path and succeeded.
+
+2. **Suspicious helper proliferation signals over-elaborate design.** The plan spawned: `rebuildControls`, `clearControlsRecursive`, `LoadAllFn`, `setLoadAllHook`, `noteDirty`, `loadAll`, `loadTopLevel`, `applyNode`, `applyControls`, `serializeNode`, `serializeControls`, `buildTopLevelPath`, `cleanupTmpFiles_`, `cleanupTmpCb_`, `cleanupTmpLeafCb_`. That list is the system telling you the design is too elaborate for the job.
+
+3. **Persistence forced a Scheduler reorder that bred secondary bugs.** Overlaying persisted values onto bound control variables grew the Scheduler from 3 phases to 5. This required `onBuildControls` to be idempotent, bred a duplicate-children bug, required SystemModule to guard MAC→deviceName derivation with a `deviceName_[0] == 0` check, and caused multiple "device shows nothing" hardware failures. The right approach: load BEFORE any module's setup or onBuildControls, by memcpy'ing into member memory directly.
+
+4. **Defensive guards under memory pressure mask design bugs.** The plan added 5 null guards across BlendMap, DriverGroup, and Layer to handle failure modes that fragmentation produced. Each guard was locally correct; collectively they obscured the design problem (allocate-new-before-free fragmentation). Fix the invariant, not the call site.
+
+5. **Test isolation reveals persistent-state contamination.** Live scenarios that mutated state (mirror toggles, grid size) contaminated each other across runs — failures appeared random until previous runs leaving state in `.config/` was identified. Any persistence layer's tests must reset state explicitly.

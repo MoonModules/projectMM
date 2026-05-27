@@ -28,6 +28,14 @@
       "process_name": "projectMM"
     },
     {
+      "id": "show_crash_log",
+      "tab": "pc",
+      "group": "run",
+      "label": "Crash Log",
+      "help": "show_crash_log",
+      "script": "run/show_crash_log.py"
+    },
+    {
       "id": "preview_installer",
       "tab": "pc",
       "group": "run",
@@ -57,9 +65,18 @@
       "id": "scenario_pipeline",
       "tab": "pc",
       "group": "scenario",
-      "label": "01 - Pipeline",
+      "label": "Scenarios",
       "help": "scenario_pipeline",
-      "script": "scenario/run_scenario.py"
+      "script": "scenario/run_scenario.py",
+      "needs_scenario": true
+    },
+    {
+      "id": "history_report",
+      "tab": "pc",
+      "group": "report",
+      "label": "History Report",
+      "help": "history_report",
+      "script": "report/history_report.py"
     },
     {
       "id": "live_scenario",
@@ -68,7 +85,8 @@
       "label": "Live Scenarios",
       "help": "live_scenario",
       "script": "scenario/run_live_scenario.py",
-      "needs_device": true
+      "needs_device": true,
+      "needs_scenario": true
     },
     {
       "id": "setup_esp_idf",

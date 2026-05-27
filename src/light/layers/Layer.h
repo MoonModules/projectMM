@@ -180,10 +180,10 @@ public:
         lutSkipped_ = false;
         clearStatus();  // re-evaluated below if a degrade path is taken
 
-        // Find first modifier (if any)
+        // Find first enabled modifier (if any)
         ModifierBase* mod = nullptr;
         for (uint8_t i = 0; i < childCount(); i++) {
-            if (child(i)->role() == ModuleRole::Modifier) {
+            if (child(i)->role() == ModuleRole::Modifier && child(i)->enabled()) {
                 mod = static_cast<ModifierBase*>(child(i));
                 break;
             }
@@ -227,7 +227,17 @@ public:
             return;
         }
 
-        lut_.build(logicalCount, maxDest);
+        if (!lut_.build(logicalCount, maxDest)) {
+            // build() failed (allocation) — degrade to 1:1 identity
+            lutSkipped_ = true;
+            setStatus("modifier LUT build failed — not enough memory", Severity::Warning);
+            width_ = physicalWidth_;
+            height_ = physicalHeight_;
+            depth_ = physicalDepth_;
+            lut_.setIdentity(physicalCount);
+            allocateBuffer(physicalCount);
+            return;
+        }
 
         // Fill LUT by iterating all logical coordinates
         nrOfLightsType physicals[8];

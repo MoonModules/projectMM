@@ -360,8 +360,8 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
         switch (c.type) {
             case ControlType::Uint8:
                 sink.appendf(
-                    "{\"name\":\"%s\",\"type\":\"uint8\",\"value\":%u,\"min\":%u,\"max\":%u",
-                    c.name, *static_cast<uint8_t*>(c.ptr), c.min, c.max);
+                    "{\"name\":\"%s\",\"type\":\"uint8\",\"value\":%u,\"min\":%d,\"max\":%d",
+                    c.name, *static_cast<uint8_t*>(c.ptr), (int)c.min, (int)c.max);
                 break;
             case ControlType::Uint16:
                 sink.appendf(
@@ -370,8 +370,8 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
                 break;
             case ControlType::Int16:
                 sink.appendf(
-                    "{\"name\":\"%s\",\"type\":\"int16\",\"value\":%d",
-                    c.name, *static_cast<int16_t*>(c.ptr));
+                    "{\"name\":\"%s\",\"type\":\"int16\",\"value\":%d,\"min\":%d,\"max\":%d",
+                    c.name, *static_cast<int16_t*>(c.ptr), c.min, c.max);
                 break;
             case ControlType::Bool:
                 sink.appendf(
@@ -494,11 +494,8 @@ void HttpServerModule::handleSetControl(platform::TcpConnection& conn, const cha
             }
             case ControlType::Int16: {
                 int v = mm::json::parseInt(body, "value");
-                // Clamp to the natural type range. Same reason as Uint16: c.min
-                // and c.max are uint8_t and can't bound int16, so applying them
-                // would 400-reject every value outside 0..255.
-                if (v < INT16_MIN) v = INT16_MIN;
-                if (v > INT16_MAX) v = INT16_MAX;
+                if (v < c.min) v = c.min;
+                if (v > c.max) v = c.max;
                 *static_cast<int16_t*>(c.ptr) = static_cast<int16_t>(v);
                 break;
             }

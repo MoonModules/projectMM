@@ -10,7 +10,8 @@ const MOONDECK_MD = "/api/help";
 
 let scripts = [];
 let boards = [];
-let state = { board: "", port: "", devices: [] };
+let scenarios = [];
+let state = { board: "", port: "", devices: [], scenario: "" }; // scenario is shared across all needs_scenario cards (PC + Live stay in sync intentionally)
 
 // ---------------------------------------------------------------------------
 // Init
@@ -31,6 +32,10 @@ async function init() {
     // saved board isn't in the new list, drop it so the default selection
     // (first board) wins.
     if (!boards.includes(state.board)) state.board = "";
+
+    const scenResp = await fetch("/api/scenarios");
+    const scenData = await scenResp.json();
+    scenarios = scenData.scenarios || [];
 
     renderBoardSelect();
     renderScripts();
@@ -108,17 +113,39 @@ function setupPaneTabs() {
     });
 }
 
+const viewNav = document.getElementById("view-nav");
+const clearLogBtn = document.getElementById("clear-log");
+
 function switchPane(pane) {
     document.querySelectorAll(".pane-tab").forEach(b => b.classList.remove("active"));
     document.querySelectorAll(".pane-content").forEach(p => p.classList.remove("active"));
     document.querySelector(`.pane-tab[data-pane="${pane}"]`).classList.add("active");
     document.getElementById("pane-" + pane).classList.add("active");
+    viewNav.hidden = (pane !== "view");
+    clearLogBtn.hidden = (pane !== "log");
 }
+
+function viewNavAction(fn) {
+    try { fn(viewFrame.contentWindow); } catch (_) {}
+}
+document.getElementById("view-back").addEventListener("click", () => viewNavAction(w => w.history.back()));
+document.getElementById("view-forward").addEventListener("click", () => viewNavAction(w => w.history.forward()));
+document.getElementById("view-refresh").addEventListener("click", () => {
+    if (viewFrame.src) viewFrame.src = viewFrame.src;
+});
 
 function showInView(url) {
     viewFrame.src = url;
     switchPane("view");
 }
+
+window.addEventListener("message", (e) => {
+    if (e.source !== viewFrame.contentWindow) return;  // only accept from our iframe
+    if (e.data?.type === "moondeck-nav" && typeof e.data.url === "string"
+            && e.data.url.startsWith("/api/")) {
+        showInView(e.data.url);
+    }
+});
 
 // ---------------------------------------------------------------------------
 // Script cards
@@ -165,13 +192,32 @@ function renderScripts() {
                 target.appendChild(header);
             }
             const card = document.createElement("div");
-            card.className = "script-card";
+            card.className = "script-card" + (script.needs_scenario ? " script-card--has-select" : "");
             card.innerHTML = `
-                <span class="status-dot" data-id="${script.id}"></span>
-                <span class="label">${script.label}</span>
-                <button class="help-btn" title="Help">?</button>
-                <button class="run-btn" data-id="${script.id}">Run</button>
+                <div class="card-row">
+                    <span class="status-dot" data-id="${script.id}"></span>
+                    <span class="label">${script.label}</span>
+                    <button class="help-btn" title="Help">?</button>
+                    <button class="run-btn" data-id="${script.id}">Run</button>
+                </div>
+                ${script.needs_scenario ? `<select class="scenario-select"></select>` : ""}
             `;
+
+            if (script.needs_scenario) {
+                const sel = card.querySelector(".scenario-select");
+                const allOpt = document.createElement("option");
+                allOpt.value = "";
+                allOpt.textContent = "all";
+                sel.appendChild(allOpt);
+                for (const name of scenarios) {
+                    const opt = document.createElement("option");
+                    opt.value = name;
+                    opt.textContent = name;
+                    if (name === state.scenario) opt.selected = true;
+                    sel.appendChild(opt);
+                }
+                sel.addEventListener("change", () => { state.scenario = sel.value; saveState(); });
+            }
 
             card.querySelector(".help-btn").addEventListener("click", () => {
                 showInView(MOONDECK_MD + "?" + script.help);
@@ -235,6 +281,7 @@ async function runScriptOnce(script, btn, extraParams) {
     const params = { ...extraParams };
     if (script.needs_board) params.board = state.board;
     if (script.needs_port) params.port = state.port;
+    if (script.needs_scenario) params.scenario = state.scenario;
 
     // Switch to log pane and show output
     switchPane("log");
@@ -467,8 +514,95 @@ async function saveState() {
 // Log
 // ---------------------------------------------------------------------------
 
+// http(s):// and file:// links anywhere in script output get linkified.
+// Everything else stays as plain textContent — script stdout is treated
+// as untrusted, so we never set innerHTML on it; instead we split on URLs
+// and append text nodes + <a> nodes, both of which encode HTML-special
+// chars automatically.
+const URL_RE = /\b((?:https?|file):\/\/[^\s<>"]+)/g;
+
+// `MOONDECK_VIEW: <url>` (relative or absolute) — a marker scripts can
+// emit to route the URL straight into the View pane after a one-tick
+// delay, AND render a clickable "Open in View pane → <url>" link in the
+// log so the user knows what just happened. Same-origin routing without
+// relying on the user clicking through.
+const VIEW_MARKER_RE = /^MOONDECK_VIEW:\s*(\S+)\s*$/;
+
 function appendLog(text) {
-    logEl.textContent += text;
+    // Marker shortcut: if this chunk is a single MOONDECK_VIEW line, swap
+    // it for an explanatory clickable link and auto-open in the View pane.
+    // Strip trailing newlines before matching so the marker survives the
+    // "+ \n" the SSE stream tacks on per line.
+    const stripped = text.replace(/\n+$/, "");
+    const markerMatch = VIEW_MARKER_RE.exec(stripped);
+    if (markerMatch) {
+        let safeUrl = null;
+        try {
+            // Use document.baseURI as base so relative paths like /api/history-report resolve.
+            const parsed = new URL(markerMatch[1], document.baseURI);
+            if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+                safeUrl = parsed.href;
+            }
+        } catch (_) { /* invalid URL — skip */ }
+        if (safeUrl) {
+            const a = document.createElement("a");
+            a.href = safeUrl;
+            a.textContent = "Open in View pane → " + safeUrl;
+            a.addEventListener("click", (ev) => { ev.preventDefault(); showInView(safeUrl); });
+            logEl.appendChild(a);
+            logEl.appendChild(document.createTextNode("\n"));
+            logEl.scrollTop = logEl.scrollHeight;
+            // Defer the actual View-pane switch so the log row renders first
+            // (otherwise the user can't see what was just produced when they
+            // tab back to Log).
+            setTimeout(() => showInView(safeUrl), 50);
+        } else {
+            logEl.appendChild(document.createTextNode(stripped + "\n"));
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+        return;
+    }
+    // Fast path: no URL in this chunk, plain append.
+    if (!URL_RE.test(text)) {
+        logEl.appendChild(document.createTextNode(text));
+        logEl.scrollTop = logEl.scrollHeight;
+        return;
+    }
+    URL_RE.lastIndex = 0;
+    let lastIdx = 0;
+    let m;
+    while ((m = URL_RE.exec(text)) !== null) {
+        if (m.index > lastIdx) {
+            logEl.appendChild(document.createTextNode(text.slice(lastIdx, m.index)));
+        }
+        const url = m[1];
+        const a = document.createElement("a");
+        a.href = url;
+        // Same-origin URLs (file:// AND http://localhost-the-MoonDeck-server)
+        // open inside the View pane — that's a "show me the rendered content
+        // MoonDeck just produced" gesture, not "leave MoonDeck for an external
+        // site." Cross-origin http(s):// opens in a new tab, the normal
+        // external-link behaviour.
+        const isMoonDeckUrl =
+            url.startsWith("file://") ||
+            url.startsWith(location.origin + "/") ||
+            url.startsWith(location.origin) && url.length === location.origin.length;
+        if (isMoonDeckUrl) {
+            a.addEventListener("click", (ev) => {
+                ev.preventDefault();
+                showInView(url);
+            });
+        } else {
+            a.target = "_blank";
+            a.rel = "noopener";
+        }
+        a.textContent = url;
+        logEl.appendChild(a);
+        lastIdx = m.index + url.length;
+    }
+    if (lastIdx < text.length) {
+        logEl.appendChild(document.createTextNode(text.slice(lastIdx)));
+    }
     logEl.scrollTop = logEl.scrollHeight;
 }
 

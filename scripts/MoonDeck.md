@@ -75,7 +75,26 @@ uv run scripts/scenario/run_scenario.py                       # run all
 uv run scripts/scenario/run_scenario.py --name base-pipeline   # run one
 ```
 
-Scenarios are JSON files in `test/scenarios/`.
+Scenarios are JSON files in `test/scenarios/`. Use the dropdown to run a single scenario or leave it on **all** to run the full suite.
+
+For a full description of each scenario, see the [scenario inventory](/api/docs/testing.md?scenario-pipeline) in testing.md.
+
+### history_report
+
+Generate a human-readable history report from `git log` + `gh release list`. Writes a single markdown file at `build/history.md` (gitignored — the report is an artifact, not source; storing it in the repo would duplicate what git already carries).
+
+```bash
+uv run scripts/report/history_report.py              # default: build/history.md
+uv run scripts/report/history_report.py --out /tmp/h.md
+```
+
+Output shape:
+
+- **Releases** table: the most-recent 10 tagged releases with tag, date, and channel (stable / rc / nightly).
+- **History** section: combined graph + commits, newest first. Each commit row shows its graph-rail (`*`, `| *`, `*   `, …) as a monospace prefix to the SHA + date + subject. Merge commits get a ⤴ badge. The full body lives in a left-bordered blockquote underneath, visually extending the rail's vertical line into the description. Branch connector rows (`|\`, `|/`, `| |`) render as standalone monospace lines between commits. Inside each body, `- foo` lines render as nested bullet lists. Each SHA links to the corresponding GitHub commit page when an origin remote is configured.
+- **Summary** footer: commit count, release count, generation timestamp.
+
+The MoonDeck button writes the file, prints a `MOONDECK_VIEW: /api/history-report` marker that the log renderer auto-opens in the View pane (and renders as an "Open in View pane → …" clickable link). Re-runs on identical git state produce a deterministic file except for the timestamp line in the footer.
 
 ## Live Tab
 
@@ -91,7 +110,9 @@ uv run scripts/scenario/run_live_scenario.py --update-baseline                  
 uv run scripts/scenario/run_live_scenario.py --compare-baseline                 # detect regressions
 ```
 
-Executes scenario steps (add_module, set_control, delete_module) via REST API. Collects per-step FPS and heap measurements. Compares against stored baselines to detect performance regressions.
+Executes scenario steps (add_module, set_control, delete_module) via REST API. Collects per-step FPS and heap measurements. Compares against stored baselines to detect performance regressions. Use the dropdown to run a single scenario or leave it on **all** to run the full suite.
+
+For a full description of each scenario, see the [scenario inventory](/api/docs/testing.md?scenario-control-change) in testing.md.
 
 ## ESP32 Tab
 
@@ -251,3 +272,37 @@ Non-destructive Improv health check. Sends `GET_DEVICE_INFO` + `GET_CURRENT_STAT
 
 Exits 0 if both RPCs answered, 1 if the device didn't respond (Improv listener not running, wrong port, or a USB-CDC stall — try power-cycling). Reads `improv_provision.py`'s framing helpers, so the two scripts stay byte-identical on the wire.
 
+
+### show_crash_log
+
+Print the most recent projectMM crash report and run log.
+
+```bash
+uv run scripts/run/show_crash_log.py
+```
+
+On macOS, finds the newest `projectMM-*.ips` in `~/Library/Logs/DiagnosticReports/`, parses the JSON crash report, and prints the exception type, signal, faulting thread, and top 20 stack frames. If no crash report exists it falls back to the last 40 lines of `build/<host>/projectMM.log` so the run log is always reachable from one place.
+
+Typical output (crash present):
+
+```text
+=== macOS crash report: projectMM-2026-05-27-120000.ips ===
+Type    : EXC_BAD_ACCESS — SIGSEGV
+Subtype : KERN_INVALID_ADDRESS
+PID     : 12345  uptime: 4321 ms
+Captured: 2026-05-27T12:00:00Z
+
+Faulting thread 0 (com.apple.main-thread):
+  #0  mm::PreviewDriver::renderFrame()  +12
+  #1  mm::Scheduler::tick()  +88
+  ...
+```
+
+Typical output (no crash, log tail):
+
+```text
+No projectMM crash reports found in DiagnosticReports.
+
+=== Last 40 lines of projectMM.log ===
+tick: 1234us (FPS: 800)  free: 0  ...
+```

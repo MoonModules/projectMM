@@ -142,7 +142,7 @@ TEST_CASE("PreviewDriver channel-agnostic: RGBW source copies RGB only") {
 TEST_CASE("PreviewDriver fps default is the rate-limited preview rate") {
     // fps default is the preview *stream* rate (independent of render FPS).
     mm::PreviewDriver driver;
-    CHECK(driver.fps == 12);
-    CHECK(driver.detail == 2);
-    CHECK(driver.decompress == false);
+    CHECK(driver.fps == 24);
+    CHECK(driver.detail == 3);
+    CHECK(driver.decompress == true);
 }

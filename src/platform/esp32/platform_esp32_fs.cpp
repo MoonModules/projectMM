@@ -22,9 +22,9 @@
 namespace mm::platform {
 
 // LittleFS state
-static const char* FS_TAG = "mm_fs";
-static const char* FS_PARTITION_LABEL = "spiffs";  // partition label kept for tooling compat; contents are LittleFS
-static const char* FS_MOUNT_POINT = "/littlefs";    // VFS mount point; not exposed in API paths
+static constexpr const char* FS_TAG = "mm_fs";
+static constexpr const char* FS_PARTITION_LABEL = "spiffs";  // partition label kept for tooling compat; contents are LittleFS
+static constexpr const char* FS_MOUNT_POINT = "/littlefs";    // VFS mount point; not exposed in API paths
 static bool fsMounted_ = false;
 
 // Translate API path "/foo/bar" or "foo/bar" → "/littlefs/foo/bar" into out.

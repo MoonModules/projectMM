@@ -7,10 +7,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-BUILD_DIR = ROOT / "build"
 SCENARIOS_DIR = ROOT / "test" / "scenarios"
-_RUNNER_BASE = BUILD_DIR / "test" / "mm_scenarios"
-RUNNER = _RUNNER_BASE.with_suffix(".exe") if not _RUNNER_BASE.exists() and sys.platform == "win32" else _RUNNER_BASE
+
+_HOST = {"darwin": "macos", "win32": "windows"}.get(sys.platform, "linux")
+_RUNNER_BASE = ROOT / "build" / _HOST / "test" / "mm_scenarios"
+RUNNER = _RUNNER_BASE.with_suffix(".exe") if sys.platform == "win32" else _RUNNER_BASE
 
 def main():
     parser = argparse.ArgumentParser()
