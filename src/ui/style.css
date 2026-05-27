@@ -566,6 +566,11 @@ body.nav-open #nav {
     font-variant-numeric: tabular-nums;
 }
 
+.status-value { flex: 1; font-size: 12px; }
+.status-value[data-sev="error"]   { color: #e94560; }
+.status-value[data-sev="warning"] { color: #f5a623; }
+.status-value[data-sev="status"]  { color: var(--fg-muted); }
+
 .control-row button.action-btn {
     background: var(--accent);
     border: none;

@@ -91,9 +91,6 @@ public:
     }
 
     void onBuildControls() override {
-        // statusStr_ surfaces via MoonModule::status() (rendered as a chip on
-        // the card header). No "status" control row — same information, one
-        // less control to scroll past.
         setStatus(statusStr_);
         // WiFi credential controls are absent in the Ethernet-only build.
         if constexpr (platform::hasWiFi) {

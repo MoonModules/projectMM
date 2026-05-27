@@ -78,6 +78,18 @@ MODULES = [
 # Container types that exist in the pipeline but are not added via REST
 CONTAINERS = ["Layouts", "Layers", "Drivers"]
 
+# Core modules: always present in the pipeline, never added/deleted via REST.
+# Each entry: type_name — the module's type string as reported by /api/types.
+# The screenshot navigates to the module by its live name from /api/state.
+CORE_MODULES = [
+    "FilesystemModule",
+    "SystemModule",
+    "FirmwareUpdateModule",
+    "NetworkModule",
+    "HttpServerModule",
+    "ImprovProvisioningModule",  # ESP32-only — skipped if not in state
+]
+
 # ---------------------------------------------------------------------------
 # Extra shots: MoonDeck tabs + web installer
 # Each entry: (filename, url, wait_selector, doc_files, anchor_text)
@@ -282,6 +294,19 @@ def find_container_nav_names(host: str) -> dict[str, str]:
     return result
 
 
+def find_core_module_names(host: str) -> dict[str, str]:
+    """Return a map of type → live module name for core (always-present) modules."""
+    r = _get(f"http://{host}/api/state", timeout=5)
+    if not r.ok:
+        return {}
+    result: dict[str, str] = {}
+    for m in r.json().get("modules", []):
+        t = m.get("type", "")
+        if t in CORE_MODULES:
+            result[t] = m.get("name", "")
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Screenshot helpers
 # ---------------------------------------------------------------------------
@@ -457,6 +482,8 @@ def main() -> int:
                         help="Re-capture even if screenshot already exists")
     parser.add_argument("--gif", action="store_true",
                         help="Also capture animated GIF previews for effects/modifiers")
+    parser.add_argument("--filter", default="",
+                        help="Only capture modules whose type name contains this substring (case-insensitive)")
     args = parser.parse_args()
 
     try:
@@ -503,6 +530,9 @@ def main() -> int:
     print(f"  Layouts={parents['Layouts']!r} (nav={nav_roots['Layouts']!r})")
 
     container_names = find_container_nav_names(args.host)
+    core_names = find_core_module_names(args.host)
+
+    filt = args.filter.lower()
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
@@ -513,7 +543,7 @@ def main() -> int:
         try:
             # --- Full-page UI overview screenshot ---
             overview_path = OUT_DIR / "ui_overview.png"
-            if not overview_path.exists() or args.force:
+            if (not overview_path.exists() or args.force) and (not filt or filt in "ui_overview"):
                 print("  ui_overview …", end=" ", flush=True)
                 # Use Layers nav to show a populated view
                 nav = nav_roots.get("Layer", "")
@@ -529,6 +559,8 @@ def main() -> int:
 
             # --- Extra shots: MoonDeck tabs + installer ---
             for filename, url, wait_sel, _doc_files, _anchor in EXTRA_SHOTS:
+                if filt and filt not in filename.lower():
+                    continue
                 out_path = OUT_DIR / filename
                 if out_path.exists() and not args.force:
                     print(f"  skip {filename} (already captured)")
@@ -545,6 +577,8 @@ def main() -> int:
 
             # --- Container cards (Layouts, Layers, Drivers) ---
             for container_type in CONTAINERS:
+                if filt and filt not in container_type.lower():
+                    continue
                 cname = container_names.get(container_type, "")
                 if not cname:
                     continue
@@ -561,8 +595,32 @@ def main() -> int:
                 else:
                     failed.append((container_type, "screenshot failed"))
 
+            # --- Core module cards (always present, never added/deleted) ---
+            for type_name in CORE_MODULES:
+                if filt and filt not in type_name.lower():
+                    continue
+                cname = core_names.get(type_name, "")
+                if not cname:
+                    print(f"  skip {type_name} (not in state — ESP32-only?)")
+                    skipped.append((type_name, "not in state"))
+                    continue
+                out_path = OUT_DIR / f"{type_name}.png"
+                if out_path.exists() and not args.force:
+                    print(f"  skip {type_name} (already captured)")
+                    skipped.append((type_name, "already exists"))
+                    continue
+                print(f"  {type_name} …", end=" ", flush=True)
+                ok = screenshot_container(page, args.host, cname, out_path)
+                print(f"saved → {out_path.relative_to(ROOT)}" if ok else "failed")
+                if ok:
+                    captured.append(type_name)
+                else:
+                    failed.append((type_name, "screenshot failed"))
+
             # --- Individual module cards ---
             for type_name, parent_type, extra_props, want_gif in MODULES:
+                if filt and filt not in type_name.lower():
+                    continue
                 out_path = OUT_DIR / f"{type_name}.png"
                 gif_path = OUT_DIR / f"{type_name}.gif"
                 need_png = not out_path.exists() or args.force

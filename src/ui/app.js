@@ -515,6 +515,22 @@ function createCard(mod, depth) {
         card.appendChild(d);
         return d;
     })() : card;
+    if (mod.status) {
+        const row = document.createElement("div");
+        row.className = "control-row";
+        row.dataset.statusMid = mod.name;
+        const label = document.createElement("span");
+        label.className = "control-label";
+        label.textContent = "status";
+        const val = document.createElement("span");
+        val.className = "status-value";
+        val.dataset.sev = mod.severity || "status";
+        val.textContent = mod.status;
+        row.appendChild(label);
+        row.appendChild(val);
+        controlsHost.appendChild(row);
+    }
+
     if (mod.controls) {
         for (const ctrl of mod.controls) {
             if (ctrl.hidden) continue;  // plan-10 hidden flag (still respected)
@@ -671,7 +687,7 @@ function formatStats(mod) {
     return head + statusChip;
 }
 function formatStatsTitle(mod) {
-    return mod.status ? mod.status : "Click to toggle fps/ms";
+    return "Click to toggle fps/ms";
 }
 
 function createActionButtons(mod) {
@@ -1087,6 +1103,38 @@ function updateValues() {
         // refresh the stats line for this module if visible
         const statsEl = document.querySelector(`.card-stats[data-mid="${cssEscape(mod.name)}"]`);
         if (statsEl) { statsEl.textContent = formatStats(mod); statsEl.title = formatStatsTitle(mod); }
+        // refresh status row — insert it if status appeared after card build
+        let statusRow = document.querySelector(`[data-status-mid="${cssEscape(mod.name)}"]`);
+        if (mod.status) {
+            if (!statusRow) {
+                // Card exists but had no status at build time — insert now before first control.
+                const card = document.querySelector(`.card[data-module="${cssEscape(mod.name)}"]`);
+                const host = card && (card.querySelector(".card-controls-collapse") || card);
+                if (host) {
+                    statusRow = document.createElement("div");
+                    statusRow.className = "control-row";
+                    statusRow.dataset.statusMid = mod.name;
+                    const label = document.createElement("span");
+                    label.className = "control-label";
+                    label.textContent = "status";
+                    const val = document.createElement("span");
+                    val.className = "status-value";
+                    val.dataset.sev = mod.severity || "status";
+                    val.textContent = mod.status;
+                    statusRow.appendChild(label);
+                    statusRow.appendChild(val);
+                    // Insert before first .control-row, or append.
+                    const firstRow = host.querySelector(".control-row");
+                    firstRow ? host.insertBefore(statusRow, firstRow) : host.appendChild(statusRow);
+                }
+            } else {
+                statusRow.style.display = "";
+                const val = statusRow.querySelector(".status-value");
+                if (val) { val.textContent = mod.status; val.dataset.sev = mod.severity || "status"; }
+            }
+        } else if (statusRow) {
+            statusRow.style.display = "none";
+        }
         // refresh enabled toggle (now a styled <button>, not an <input>)
         const enabledEl = document.querySelector(`button.module-enabled[data-mid="${cssEscape(mod.name)}"]`);
         if (enabledEl) {

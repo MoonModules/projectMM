@@ -1,5 +1,7 @@
 # SystemModule
 
+![SystemModule controls](../../assets/screenshots/SystemModule.png)
+
 System-level diagnostics and device identity. Always loaded, always visible in the UI.
 
 ## Controls (ordered by change frequency)
