@@ -60,25 +60,16 @@ public:
     }
 
     void loop() override {
-        // Scheduler gates Drivers itself via respectsEnabled() default. The Scheduler
-        // only walks the top-level module list, so it never sees the driver children
-        // here — we have to honour each child's `enabled` flag ourselves, same as
-        // Layer::loop() does for effects and Layers::loop() does for child Layers.
-        // Without this gate the UI's enable/disable on an ArtNet or Preview driver
-        // is a no-op and the driver keeps emitting.
-        //
         // outputBuffer_.data() can be null if onAllocateMemory failed to claim
         // a contiguous block (heap fragmentation). Skip the blend in that case
         // — drivers run on raw Layer buffer or simply have nothing to send.
         if (layer_ && layer_->lut().hasLUT() && outputBuffer_.data()) {
             blendMap(layer_->buffer(), outputBuffer_, layer_->lut(), layer_->channelsPerLight());
         }
-        for (uint8_t i = 0; i < childCount(); i++) {
-            if (!child(i)->enabled()) continue;
-            uint32_t start = platform::micros();
-            child(i)->loop();
-            child(i)->addAccumUs(platform::micros() - start);
-        }
+        // Option A: parent work first (blendMap), then chain to base to tick
+        // children on the freshly-blended buffer. Per-child enabled gating and
+        // timing accumulation live in MoonModule::tickChildren.
+        MoonModule::loop();
     }
 
 private:

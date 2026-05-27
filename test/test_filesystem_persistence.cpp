@@ -136,6 +136,109 @@ TEST_CASE("FilesystemModule structural reconciliation") {
     mm::platform::fsSetRoot(".");
 }
 
+// Pins the wiredByCode-preserves-child contract that lets a new firmware revision
+// add a code-created child (e.g. ImprovProvisioning under NetworkModule) without
+// the child getting trimmed on every boot for users whose saved Network.json
+// predates the addition.
+//
+// Setup: an on-disk file describes Layer with zero children. Live tree has Layer
+// with a RainbowEffect child that main.cpp would have wired and marked. After
+// scheduler.setup() runs the persistence load, the wired child must survive.
+TEST_CASE("FilesystemModule preserves code-wired children when JSON predates them") {
+    char tmpRoot[256];
+    std::snprintf(tmpRoot, sizeof(tmpRoot), "/tmp/mm_wired_test_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(tmpRoot);
+    std::filesystem::create_directories(std::string(tmpRoot) + "/.config");
+    mm::platform::fsSetRoot(tmpRoot);
+
+    mm::ModuleFactory::registerType<mm::Layer>("Layer");
+    mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
+
+    // Saved file: Layer with no children — the "old release" state.
+    {
+        std::ofstream f(std::string(tmpRoot) + "/.config/Layer.json");
+        f << "{\"channelsPerLight\":3,\"enabled\":true}";
+    }
+
+    mm::Scheduler scheduler;
+    auto* fs = new mm::FilesystemModule();
+    fs->setTypeName("FilesystemModule");
+    fs->setScheduler(&scheduler);
+
+    // Live tree: Layer with a code-wired RainbowEffect child. This mirrors
+    // what main.cpp does for NetworkModule + ImprovProvisioningModule.
+    auto* layer = new mm::Layer();
+    layer->setTypeName("Layer");
+    auto* rainbow = new mm::RainbowEffect();
+    rainbow->setTypeName("RainbowEffect");
+    layer->addChild(rainbow);
+    rainbow->markWiredByCode();
+
+    scheduler.addModule(fs);
+    scheduler.addModule(layer);
+    scheduler.setup();
+
+    // The code-wired RainbowEffect must still be there after persistence load.
+    REQUIRE(layer->childCount() == 1);
+    CHECK(std::strcmp(layer->child(0)->typeName(), "RainbowEffect") == 0);
+    CHECK(layer->child(0)->isWiredByCode() == true);
+
+    scheduler.teardown();
+    std::filesystem::remove_all(tmpRoot);
+    mm::platform::fsSetRoot(".");
+}
+
+// Companion to the wiredByCode case above: when the JSON describes a different
+// type at the position where a code-wired child lives, the position-replacement
+// must NOT kill the code-wired child. Stop reconciliation at that index instead
+// and let the next save re-write the file with the actual tree shape.
+TEST_CASE("FilesystemModule does not replace code-wired child on type mismatch") {
+    char tmpRoot[256];
+    std::snprintf(tmpRoot, sizeof(tmpRoot), "/tmp/mm_wired_replace_test_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(tmpRoot);
+    std::filesystem::create_directories(std::string(tmpRoot) + "/.config");
+    mm::platform::fsSetRoot(tmpRoot);
+
+    mm::ModuleFactory::registerType<mm::Layer>("Layer");
+    mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
+    mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect");
+
+    // Saved file: Layer with a NoiseEffect at position 0 — a stale shape from
+    // before the firmware moved a code-wired effect into that slot.
+    {
+        std::ofstream f(std::string(tmpRoot) + "/.config/Layer.json");
+        f << "{\"channelsPerLight\":3,\"enabled\":true,"
+             "\"0.type\":\"NoiseEffect\",\"0.enabled\":true}";
+    }
+
+    mm::Scheduler scheduler;
+    auto* fs = new mm::FilesystemModule();
+    fs->setTypeName("FilesystemModule");
+    fs->setScheduler(&scheduler);
+
+    auto* layer = new mm::Layer();
+    layer->setTypeName("Layer");
+    auto* rainbow = new mm::RainbowEffect();
+    rainbow->setTypeName("RainbowEffect");
+    layer->addChild(rainbow);
+    rainbow->markWiredByCode();
+
+    scheduler.addModule(fs);
+    scheduler.addModule(layer);
+    scheduler.setup();
+
+    // Code-wired child stays — type mismatch did not trigger a replacement.
+    REQUIRE(layer->childCount() == 1);
+    CHECK(std::strcmp(layer->child(0)->typeName(), "RainbowEffect") == 0);
+    CHECK(layer->child(0)->isWiredByCode() == true);
+
+    scheduler.teardown();
+    std::filesystem::remove_all(tmpRoot);
+    mm::platform::fsSetRoot(".");
+}
+
 // Round-trip persistence with children: write a Layer subtree that contains both
 // controls and child modules with controls of their own, then read the file back as
 // text and verify it parses as valid JSON. Regresses the missing-comma bug between

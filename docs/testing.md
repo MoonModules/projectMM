@@ -54,6 +54,18 @@ Tests `MoonModule` lifecycle and `Control` binding in `src/core/MoonModule.h` an
 - Pointer binding: changing variable updates control, changing via pointer updates variable
 - ControlList clear and rebuild
 
+### lifecycle-propagation
+
+`test/test_lifecycle_propagation.cpp`
+Pins the `MoonModule` base-default behaviour for `loop` / `loop20ms` / `loop1s`: a container with children gets per-child dispatch + gating + timing automatically; a leaf module (no children) is a safe no-op. Regression target: before this propagation existed, every container had to write the same 5-line per-child loop by hand — one missing block meant a child's tick callback silently never ran.
+
+- `loop` default ticks each enabled child exactly once
+- `loop` default skips children with `enabled() == false`
+- `loop` default still ticks children whose `respectsEnabled()` returns false (diagnostics-style modules keep running)
+- `loop20ms` and `loop1s` follow the same gating + dispatch rules
+- Leaf module (childCount_ == 0): default tick callbacks are safe no-ops, no timing accumulated
+- Per-child timing is accumulated on each child's `accumUs_`, surfaced via `publishTiming` → `loopTimeUs()`
+
 ### tree-mutation
 
 `test/test_movechild.cpp`, `test/test_replacechild.cpp`

@@ -500,12 +500,14 @@ function createCard(mod, depth) {
     card.appendChild(title);
 
     // -- Controls --
-    // Container modules (those that accept children) get their own controls
-    // wrapped in a <details> so the parent's children are the focus by default
-    // and the parent's settings can be expanded on demand. Leaf modules render
-    // controls inline (no extra wrapper).
+    // Modules whose primary purpose is hosting user-added children (Layers,
+    // Layer, Drivers, Layouts) collapse their own controls so the children
+    // are the focus by default. Modules that merely host a code-wired child
+    // (Network → Improv) keep their controls expanded — the parent's settings
+    // are the main point, the code-wired child is informational. Leaf modules
+    // render controls inline (no wrapper at all).
     const hasVisibleControls = mod.controls && mod.controls.some(c => !c.hidden);
-    const wrapInDetails = acceptsChildren(mod) && hasVisibleControls;
+    const wrapInDetails = acceptsNewChildren(mod) && hasVisibleControls;
     const controlsHost = wrapInDetails ? (() => {
         const d = document.createElement("details");
         d.className = "card-controls-collapse";
@@ -578,38 +580,42 @@ function createCard(mod, depth) {
         });
     }
 
-    // -- Children block + footer (only on parents that accept children) --
+    // -- Children block + footer --
     // The .card-children wrapper lives inside this card so the parent's border
-    // encloses its children; renderModuleTree recurses into it. + add child
-    // sits below the children block, at the bottom of the parent box.
+    // encloses its children; renderModuleTree recurses into it. The "+ add child"
+    // footer only appears on parents that accept user-created children — a parent
+    // hosting only code-wired children (e.g. Network → Improv) renders the
+    // children block but no add button.
     let childrenEl = null;
-    if (acceptsChildren(mod)) {
+    if (hasNestedChildren(mod)) {
         childrenEl = document.createElement("div");
         childrenEl.className = "card-children";
         childrenEl.dataset.depth = String(depth + 1);
         card.appendChild(childrenEl);
 
-        // -- Footer: + add child --
-        const footer = document.createElement("div");
-        footer.className = "card-footer";
-        const addBtn = document.createElement("button");
-        addBtn.className = "add-btn";
-        addBtn.textContent = "+ add child";
-        addBtn.addEventListener("click", () => {
-            // Hide the button while the picker is open (the picker takes its
-            // place); restore it once the picker is removed (cancel/create/Esc).
-            addBtn.style.display = "none";
-            openTypePicker(mod, footer);
-            const obs = new MutationObserver(() => {
-                if (!footer.querySelector(".type-picker")) {
-                    addBtn.style.display = "";
-                    obs.disconnect();
-                }
+        if (acceptsNewChildren(mod)) {
+            // -- Footer: + add child --
+            const footer = document.createElement("div");
+            footer.className = "card-footer";
+            const addBtn = document.createElement("button");
+            addBtn.className = "add-btn";
+            addBtn.textContent = "+ add child";
+            addBtn.addEventListener("click", () => {
+                // Hide the button while the picker is open (the picker takes its
+                // place); restore it once the picker is removed (cancel/create/Esc).
+                addBtn.style.display = "none";
+                openTypePicker(mod, footer);
+                const obs = new MutationObserver(() => {
+                    if (!footer.querySelector(".type-picker")) {
+                        addBtn.style.display = "";
+                        obs.disconnect();
+                    }
+                });
+                obs.observe(footer, {childList: true});
             });
-            obs.observe(footer, {childList: true});
-        });
-        footer.appendChild(addBtn);
-        card.appendChild(footer);
+            footer.appendChild(addBtn);
+            card.appendChild(footer);
+        }
     }
 
     // -- Drag-to-reorder (HTML5 DnD on desktop; touchstart-gated on mobile) --
@@ -737,10 +743,20 @@ function findParent(childName) {
     return walk(null, state.modules);
 }
 
-function acceptsChildren(mod) {
-    // role-based: Layers → layer, Layer → effect+modifier, Drivers → driver, Layouts → layout.
-    // Mapped in JS, not in engine, so no backend allowedChildRoles field needed.
-    // Keyed on mod.type (stable factory key) — mod.name is editable per instance.
+// Whether this module renders any nested children at all (a "+ add child"
+// button included if it also accepts new ones via the UI). True whenever the
+// module has at least one child today OR is one of the light-pipeline
+// containers that users can add to. This lets code-wired children (e.g.
+// ImprovProvisioning under Network) render without making the parent UI-addable.
+function hasNestedChildren(mod) {
+    return (mod.children && mod.children.length > 0) || acceptsNewChildren(mod);
+}
+
+// Whether the UI's "+ add child" affordance applies to this parent. Light-pipeline
+// containers only — Layers → layer, Layer → effect+modifier, Drivers → driver,
+// Layouts → layout. System modules like Network that host a code-wired child
+// (Improv) are deliberately NOT in this list — the child is fixed-shape.
+function acceptsNewChildren(mod) {
     return mod.type === "Layers" ||
            mod.type === "Layer"  ||
            mod.type === "Drivers" ||

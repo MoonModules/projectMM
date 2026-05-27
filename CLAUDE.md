@@ -13,7 +13,7 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 - **Data over objects.** Design around data flow, not class hierarchies.
 - **Concrete first, abstract later.** Build one working feature end-to-end before extracting patterns into shared abstractions. Don't build the framework before the domain logic works.
 - **Domain-neutral core.** Separate core infrastructure from the light domain as much as practical. When mixing is necessary, use domain-neutral naming so the code stays open to future separation.
-- **Present tense only.** Code, comments, and documentation describe the system as it is now. No changelogs, no roadmaps. History lives in git commits. Exceptions: `docs/plan.md` (what to build next) and `docs/history/` (lessons, plans, inventories).
+- **Present tense only.** Code, comments, and documentation describe the system as it is now. No changelogs, no roadmaps. History lives in git commits. Exceptions: `docs/plan.md` and `docs/history/`.
 
 ## Hard Rules
 
@@ -61,7 +61,7 @@ Build one capability at a time. Each commit produces visible output. The product
 
 1. **Pick what to build.** One layout, one effect, one driver, one modifier, one system module — whatever adds the next useful capability.
 2. **Review only the relevant module drafts.** Cherry-pick from `docs/moonmodules_draft/`. Promote only what's needed to `docs/moonmodules/`.
-3. **`/plan` it.** Plan references only the promoted specs + architecture docs. Save the plan as `docs/history/plan-NN.md` (numbered sequentially).
+3. **`/plan` it.** Plan references only the promoted specs + architecture docs. Plans are not promoted to the repo — the implemented code, docs, and commit message together describe what landed.
 4. **Implement in a branch** (`next-iteration` or feature branch). Test on hardware. Run the commit gates (see Lifecycle Events below). Commit.
 5. **Push.** Product owner pushes. CodeRabbit reviews the PR. Process findings.
 6. **Repeat.**
@@ -119,9 +119,9 @@ The "this is now trunk" moment. Where the wider hygiene checks live, because onc
 
 1. All commit gates passed on every commit in the PR.
 2. PR feedback addressed (CodeRabbit + human review).
-3. **Plan reconciliation** — for each plan in `docs/history/plan-*.md` covered by this branch: was it followed? What changed? Note in `docs/history/decisions.md` if anything is worth carrying forward, then `git mv` the reviewed plans to `docs/history/archive/`. **Do this on the branch before the merge commit**, so the `decisions.md` lessons + the archive moves land in the same commit train and the merge brings them into `main`. (Doing it after the merge means an extra tail commit on `main`.)
+3. **Carry forward lessons** — if the branch produced a hard-won lesson, a proven pattern, or a non-obvious decision worth keeping, note it in `docs/history/decisions.md` as part of the branch's commits — so the lesson lands in `main` with the code that proved it. Do this on the branch before the merge commit.
 4. **Documentation sync** — every new module / control / API endpoint has matching docs (`docs/moonmodules/*.md`, `docs/testing.md`, `docs/architecture*.md`).
-5. **Reviewer agent** — trigger this **first** so it runs while the other checks (docs sync, plan reconciliation, conditional gates) proceed in parallel. Opus reviewer over the **whole branch diff** (`git diff main...HEAD`). Scope: domain boundary, **common patterns first** (flag any new convention — naming scheme, file shape, build flag, control mechanism, UI affordance — that isn't recognisable from a widely-used project / framework / canonical resource; bespoke choices must carry a stated reason at the introduction site, see the principle in § Principles), **unnecessary abstractions** (no-op / pass-through wrappers that only rename or re-namespace an existing function, single-call-site indirection that would read clearer inlined, names that obscure where the real code lives), **duplicated patterns** (same logic in multiple places that belongs in a base class or shared function), hot-path violations, spec conformance, bloat, platform boundary. Architectural drift is more visible across N commits than across one — "three commits each added a wrapper" reads as a pattern that one commit hides. Findings either get fixed in additional branch commits before merge, or are accepted with a one-line reason in the PR description. CodeRabbit complements this — CodeRabbit handles line-level bugs in the PR; the Reviewer agent handles architectural drift.
+5. **Reviewer agent** — trigger this **first** so it runs while the other checks (docs sync, carry-forward lessons, conditional gates) proceed in parallel. Opus reviewer over the **whole branch diff** (`git diff main...HEAD`). Scope: domain boundary, **common patterns first** (flag any new convention — naming scheme, file shape, build flag, control mechanism, UI affordance — that isn't recognisable from a widely-used project / framework / canonical resource; bespoke choices must carry a stated reason at the introduction site, see the principle in § Principles), **unnecessary abstractions** (no-op / pass-through wrappers that only rename or re-namespace an existing function, single-call-site indirection that would read clearer inlined, names that obscure where the real code lives), **duplicated patterns** (same logic in multiple places that belongs in a base class or shared function), hot-path violations, spec conformance, bloat, platform boundary. Architectural drift is more visible across N commits than across one — "three commits each added a wrapper" reads as a pattern that one commit hides. Findings either get fixed in additional branch commits before merge, or are accepted with a one-line reason in the PR description. CodeRabbit complements this — CodeRabbit handles line-level bugs in the PR; the Reviewer agent handles architectural drift.
 6. **PR title and description** — review and update if the work done differs from what the PR title/description says. The description is the permanent record of what landed and why; it should reflect the actual diff, not the original intent.
 
 **Conditional:**
@@ -165,8 +165,7 @@ docs/
   performance.md           ← per-module timing, memory, sizeof for each platform
   history/                 ← accumulated wisdom
     decisions.md           ← actions, lessons, proven patterns
-    plan-NN.md             ← plans for each feature (numbered)
-    archive/               ← reviewed plans moved here after branch merge
+    *-inventory.md         ← prior-project surveys (v1, v2, moonlight)
   moonmodules/             ← one page per MoonModule (specs before code)
   moonmodules_draft/       ← draft specs for unimplemented modules (temporary, will be empty)
 ```

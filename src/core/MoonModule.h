@@ -37,10 +37,22 @@ public:
     MoonModule& operator=(MoonModule&&) = delete;
 
     // Default lifecycle propagates to children. Override to add container-specific logic.
+    //
+    // For loop / loop20ms / loop1s, the default ticks every child that passes the same
+    // enabled gate the Scheduler applies to top-level modules (respectsEnabled() ||
+    // enabled()), and accumulates per-child timing the same way Scheduler does. Leaf
+    // modules (childCount_ == 0) pay one predicted-not-taken branch — sub-nanosecond.
+    //
+    // Override + chain convention for loop callbacks: parent work runs first, then
+    // chain to base to tick children (option A — parent prepares, children consume).
+    // Override + chain for setup runs the other way (chain to base first so children
+    // are initialised before the parent depends on them). teardown's base default
+    // reverse-iterates children; override and chain late so the parent shuts down its
+    // own state first.
     virtual void setup() { for (uint8_t i = 0; i < childCount_; i++) children_[i]->setup(); }
-    virtual void loop() {}
-    virtual void loop20ms() {}
-    virtual void loop1s() {}
+    virtual void loop() { tickChildren(&MoonModule::loop); }
+    virtual void loop20ms() { tickChildren(&MoonModule::loop20ms); }
+    virtual void loop1s() { tickChildren(&MoonModule::loop1s); }
     virtual void teardown() { for (uint8_t i = childCount_; i > 0; i--) children_[i-1]->teardown(); }
 
     // Called when enabled flips. Default no-op; override to start/stop sockets, free
@@ -112,6 +124,20 @@ public:
 
     MoonModule* parent() const { return parent_; }
     void setParent(MoonModule* p) { parent_ = p; }
+
+    // Marks this module as wired-by-code rather than wired-by-persistence. The
+    // FilesystemModule's applyNode trim loop preserves code-wired children even
+    // when the on-disk file doesn't describe them — the upgrade-day case where
+    // a new firmware revision adds a code-created child (e.g. ImprovProvisioning
+    // as a child of NetworkModule) whose existence the device's saved Network.json
+    // predates. Without this flag the child would get trimmed on every boot.
+    //
+    // Convention: only main.cpp's boot wiring calls markWiredByCode(). Children
+    // added via the HTTP add-module API or recreated by applyNode's factory call
+    // stay unmarked — those are user/persistence-driven and should follow the
+    // file's tree shape exactly.
+    void markWiredByCode() { wiredByCode_ = true; }
+    bool isWiredByCode() const { return wiredByCode_; }
 
     ControlList& controls() { return controls_; }
     const ControlList& controls() const { return controls_; }
@@ -229,6 +255,22 @@ public:
 protected:
     ControlList controls_;
 
+    // Shared body for the loop / loop20ms / loop1s base defaults. Iterates children,
+    // gates each by the same rule the Scheduler applies to top-level modules
+    // (respectsEnabled() || enabled()), dispatches the same callback, and accumulates
+    // per-child timing. Pulled out so the three base defaults stay one-liners and the
+    // gating + timing rule lives in exactly one place.
+    void tickChildren(void (MoonModule::*fn)()) {
+        for (uint8_t i = 0; i < childCount_; i++) {
+            MoonModule* c = children_[i];
+            if (!c->respectsEnabled() || c->enabled()) {
+                uint32_t start = platform::micros();
+                (c->*fn)();
+                c->addAccumUs(platform::micros() - start);
+            }
+        }
+    }
+
 private:
     // Display name buffer. Sized to fit the longest stripped name with headroom:
     // ModuleFactory's displayNameFor strips the role-noun suffix so the longest
@@ -240,6 +282,7 @@ private:
     const char* typeName_ = "";  // points into flash (factory string literal); see setTypeName comment
     bool enabled_ = true;
     bool dirty_ = false;
+    bool wiredByCode_ = false;
     MoonModule* parent_ = nullptr;
     MoonModule** children_ = nullptr;
     uint8_t childCount_ = 0;

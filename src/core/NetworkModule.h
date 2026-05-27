@@ -88,6 +88,10 @@ public:
         }
 
         stateChangeTime_ = platform::millis();
+
+        // Chain to base so children (ImprovProvisioningModule on ESP32) get setup()
+        // after we've claimed the network resources we care about.
+        MoonModule::setup();
     }
 
     void onBuildControls() override {
@@ -113,6 +117,9 @@ public:
         controls_.setHidden(controls_.count() - 1, hideStatic);
         controls_.addText("dns", staticDns_, sizeof(staticDns_));
         controls_.setHidden(controls_.count() - 1, hideStatic);
+
+        // Chain to base so children (Improv on ESP32) get their controls built too.
+        MoonModule::onBuildControls();
     }
 
     void loop1s() override {
@@ -215,9 +222,17 @@ public:
         }
 
         syncMdns();
+
+        // Tick children after our own state machine — option A: parent prepares,
+        // children consume. ImprovProvisioningModule (when present) polls a
+        // ready-flag here and may call back into setWifiCredentials().
+        MoonModule::loop1s();
     }
 
     void teardown() override {
+        // Tear down children first (Improv on ESP32) so the platform-side
+        // Improv task stops touching UART0 before we drop the network state.
+        MoonModule::teardown();
         platform::mdnsStop();
         if constexpr (platform::hasWiFi) {
             if (state_ == State::AP) platform::wifiApStop();

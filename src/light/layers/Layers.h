@@ -33,15 +33,10 @@ public:
 
     Layouts* layouts() const { return layouts_; }
 
-    void loop() override {
-        // Scheduler gates Layers itself via respectsEnabled() default.
-        for (uint8_t i = 0; i < childCount(); i++) {
-            if (!child(i)->enabled()) continue;
-            uint32_t start = platform::micros();
-            child(i)->loop();
-            child(i)->addAccumUs(platform::micros() - start);
-        }
-    }
+    // loop() left to the MoonModule base default: tick each enabled child Layer
+    // and accumulate its timing. Layers is a pure container — it has no work of
+    // its own to interleave between siblings, so the base propagation is exactly
+    // what we want.
 
     // Single-Layer placeholder until composition lands: hand `Drivers` the
     // first enabled Layer to read for buffer + dimensions. Returns nullptr

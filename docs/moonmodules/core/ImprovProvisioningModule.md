@@ -2,6 +2,10 @@
 
 Browser-driven WiFi provisioning over USB-serial, using the [Improv-WiFi](https://www.improv-wifi.com/) protocol. Bridges credentials from a Chrome / Edge / Opera tab — or from `scripts/build/improv_provision.py` — into `NetworkModule::setWifiCredentials`, which writes through to the same buffers the AP-fallback UI flow uses.
 
+ImprovProvisioningModule is a **child of NetworkModule** in the module tree (wired in `src/main.cpp`). Its `loop1s()` polls a ready-flag the platform task sets when credentials arrive, then calls back into NetworkModule — the parent-child relationship matches the data flow. NetworkModule's lifecycle methods chain to the base default so Improv participates normally in setup / control binding / teardown.
+
+The wiring calls `markWiredByCode()` on the Improv instance so the persistence-apply step preserves the child across reboots even on devices whose `Network.json` predates the addition (see [Persistence — code-wired children](../../architecture.md#persistence) in the architecture doc).
+
 The protocol parser + UART listener task live in the platform layer (`mm::platform::improvProvisioningInit` at [src/platform/platform.h](../../../src/platform/platform.h)); this module is the status surface plus the bridge that hands credentials off to NetworkModule on the scheduler thread.
 
 The browser flow runs immediately after a Web Serial flash (ESP Web Tools recognises Improv-capable firmware and offers a "Connect to Wi-Fi?" dialog automatically). The CLI flow uses [`scripts/build/improv_provision.py`](../../../scripts/build/improv_provision.py) over the same USB cable for headless or rack provisioning.

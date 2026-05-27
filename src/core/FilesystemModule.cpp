@@ -197,6 +197,14 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
 
         MoonModule* live = m->child(i);
         if (!live || std::strcmp(live->typeName(), typeName) != 0) {
+            // Position-replace can also destroy a code-wired child if the file
+            // describes a different type at this slot. Bail out of further
+            // reconciliation rather than killing it — the trim loop below then
+            // preserves the code-wired tail, and the next save will rewrite the
+            // file with the current (correct) tree shape. The rest of the JSON
+            // past this position is dropped on this boot; that's better than
+            // losing a code-wired child.
+            if (live && live->isWiredByCode()) break;
             MoonModule* created = ModuleFactory::create(typeName);
             if (!created) {
                 // Factory failed (type not registered). Stop here so subsequent JSON
@@ -219,10 +227,25 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
         std::snprintf(childPrefix, sizeof(childPrefix), "%s%u.", prefix, static_cast<unsigned>(i));
         applyNode(m->child(i), json, childPrefix);
     }
-    // Trim any live children beyond what the JSON describes.
-    while (m->childCount() > jsonChildCount) {
-        MoonModule* extra = m->child(m->childCount() - 1);
-        if (!extra) break;
+    // Trim live children beyond what the JSON describes, EXCEPT children that
+    // were wired by code at boot (main.cpp annotates those via markWiredByCode).
+    // A code-wired child is preserved across persistence loads even when the
+    // on-disk file predates its addition — the upgrade-day case where a new
+    // release adds a code-created child (e.g. ImprovProvisioningModule under
+    // NetworkModule) whose existence the device's saved file doesn't yet know
+    // about. Without this exemption the child would get trimmed on every boot.
+    //
+    // Walks back-to-front so removeChild's left-shift of later siblings doesn't
+    // skip an entry. Any code-wired child at index >= jsonChildCount stays; its
+    // position relative to the JSON-described children may not match what the
+    // file expects, but on the first dirty event the next save writes the
+    // current (post-merge) tree shape and from then on the file matches.
+    uint8_t i = m->childCount();
+    while (i > jsonChildCount) {
+        i--;
+        MoonModule* extra = m->child(i);
+        if (!extra) continue;
+        if (extra->isWiredByCode()) continue;
         extra->teardown();
         m->removeChild(extra);
         Scheduler::deleteTree(extra);

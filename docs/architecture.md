@@ -66,6 +66,29 @@ This means:
 
 Modules can be added, replaced, reordered, or removed at runtime. On removal (teardown), all allocated resources are cleaned up.
 
+### Lifecycle propagation to children
+
+A MoonModule that owns children gets the standard lifecycle methods propagated to them automatically:
+
+- `setup()` and `teardown()` — chain into children. Teardown reverse-iterates so children clean up before the parent does.
+- `loop()`, `loop20ms()`, `loop1s()` — tick each child gated by the same rule the Scheduler applies to top-level modules (`respectsEnabled() || enabled()`), with per-child timing accumulated into the child's own `loopTimeUs()`.
+- `onBuildControls()` and `onAllocateMemory()` — chain into children.
+
+This means a container module gets correct lifecycle handling for its children without writing the iteration itself. Leaf modules (no children) pay one predicted-not-taken branch per call — sub-nanosecond.
+
+**Override-and-chain convention.** When a container needs custom work alongside child dispatch, it overrides the method and calls the base. For `loop`/`loop20ms`/`loop1s`, the convention is **option A: parent work first, then chain** — the parent prepares state that its children consume. Example: `Drivers::loop()` blends the layer buffer first, then chains so each driver child reads the fresh data:
+
+```cpp
+void loop() override {
+    if (layer_ && layer_->lut().hasLUT() && outputBuffer_.data()) {
+        blendMap(...);                  // parent's own work
+    }
+    MoonModule::loop();                 // then tick children
+}
+```
+
+For `setup()` the convention is the opposite — chain first so children are initialised before the parent depends on them. For `teardown()` the parent shuts down its own state, then chains. Use option B (children first) or a sandwich pattern only when a specific reason justifies it, and add a one-line comment explaining why.
+
 **ModuleFactory** is a static registry mapping type names (strings) to create functions. The HTTP API uses it to create modules at runtime (`POST /api/modules {"type":"NoiseEffect"}`); the main pipeline in `main.cpp` constructs modules directly. Registration captures `sizeof(T)` for memory reporting:
 
 ```cpp
@@ -98,6 +121,7 @@ Control values and each module's `enabled` flag are persisted to flash so settin
 - **Lifecycle** — `Scheduler::setup()` runs four phases: (1) `onBuildControls` binds every module's full control set, (2) the FilesystemModule load hook overlays persisted values onto the bound variables, (2b) `rebuildControls` re-evaluates conditional `hidden` flags against the loaded state, (3) each module's own `setup()` runs with persisted values already in member variables, (4) `onAllocateMemory` sizes buffers. Modules themselves know nothing about persistence — they just bind their variables.
 - **Save trigger** — HttpServerModule marks the target module dirty on every successful control mutation. FilesystemModule debounces 2 s in `loop1s()`, walks the tree, writes any subtree containing a dirty descendant via atomic write-and-rename.
 - **Conditional controls** — every conditional control is always bound; the module sets a `hidden` flag (`controls_.setHidden(i, …)`) to tell the UI not to render it. The load path can therefore find persisted values regardless of the live conditional state.
+- **Code-wired children survive a stale file** — modules attached by `main.cpp`'s boot wiring (today: `ImprovProvisioningModule` as a child of `NetworkModule`) call `markWiredByCode()` after `addChild()`. The persistence apply step preserves them even when the saved file pre-dates the addition. Without this, every release that added or moved a code-wired child would trim it on the first boot of an existing device, and the user would lose the child until the next save rewrote the file. Children added through the HTTP API or recreated from JSON stay unmarked — those follow the file's tree shape exactly so UI deletes still take effect.
 
 The Scheduler stays independent of FilesystemModule's type via a function-pointer hook (`setLoadAllHook`) — no circular include, persistence is opt-in. With no FilesystemModule registered, the load phase is a no-op and the system runs with member-initialised defaults.
 
