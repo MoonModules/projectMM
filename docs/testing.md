@@ -29,8 +29,9 @@ Per-module timing, memory, and sizeof measurements per platform live in [perform
 
 Module tests verify individual MoonModules in isolation. Run with `./build/test/mm_tests -s` or via MoonDeck (PC → Test).
 
-### Color Math (`test/test_color.cpp`) {#color}
+### color
 
+`test/test_color.cpp`
 Tests `hsvToRgb` and `scale8` in `src/core/color.h`.
 
 - hsvToRgb at cardinal hues (h=0 red, h=85 green, h=170 blue)
@@ -41,8 +42,9 @@ Tests `hsvToRgb` and `scale8` in `src/core/color.h`.
 - scale8 at boundary values (0, 128, 255)
 - scale8 is constexpr
 
-### MoonModule + Control (`test/test_moonmodule.cpp`) {#moonmodule}
+### moonmodule
 
+`test/test_moonmodule.cpp`
 Tests `MoonModule` lifecycle and `Control` binding in `src/core/MoonModule.h` and `src/core/Control.h`.
 
 - Lifecycle methods called (setup, teardown)
@@ -52,16 +54,18 @@ Tests `MoonModule` lifecycle and `Control` binding in `src/core/MoonModule.h` an
 - Pointer binding: changing variable updates control, changing via pointer updates variable
 - ControlList clear and rebuild
 
-### Module tree mutation (`test/test_movechild.cpp`, `test/test_replacechild.cpp`) {#tree-mutation}
+### tree-mutation
 
+`test/test_movechild.cpp`, `test/test_replacechild.cpp`
 Tests the child-array mutations in `src/core/MoonModule.h` that back the UI's reorder and replace operations.
 
 - `moveChildTo`: forward/backward/one-step reorder, no-op when already at target, out-of-range and non-child rejected
 - `replaceChildAt`: swap at the same position with siblings intact, old child detached and replacement parented, out-of-range and null replacement rejected
 - Replace lifecycle: the replacement is built → set up → allocated, then the old module torn down — the order `HttpServerModule::handleReplaceModule` runs
 
-### Buffer (`test/test_buffer.cpp`) {#buffer}
+### buffer
 
+`test/test_buffer.cpp`
 Tests `Buffer` in `src/light/layers/Buffer.h`.
 
 - Allocate and verify count, channelsPerLight, bytes, data pointer, span
@@ -71,8 +75,9 @@ Tests `Buffer` in `src/light/layers/Buffer.h`.
 - Double free is safe (no crash)
 - Allocate with zero count or zero channels returns false
 
-### GridLayout (`test/test_grid_layout.cpp`) {#gridlayout}
+### gridlayout
 
+`test/test_grid_layout.cpp`
 Tests `GridLayout` and `Layouts` in `src/light/layouts/GridLayout.h` and `src/light/layouts/Layouts.h`.
 
 - 4x4x1 grid yields 16 coordinates in row-major order (x fastest)
@@ -82,16 +87,18 @@ Tests `GridLayout` and `Layouts` in `src/light/layouts/GridLayout.h` and `src/li
 - Layouts with one layout: totalLightCount and forEachCoord
 - Layouts with two layouts: physical indices offset correctly
 
-### RainbowEffect (`test/test_rainbow.cpp`) {#rainbow}
+### rainbow
 
+`test/test_rainbow.cpp`
 Tests `RainbowEffect` in `src/light/RainbowEffect.h`.
 
 - Buffer contains non-zero RGB data after render
 - Pixel (0,0) has at least one channel at 255 (full value from hsvToRgb)
 - Different positions produce different hues (spatial variation)
 
-### ArtNet Packet (`test/test_artnet_packet.cpp`) {#artnet}
+### artnet
 
+`test/test_artnet_packet.cpp`
 Tests `ArtNetSendDriver::buildPacket` in `src/light/ArtNetSendDriver.h`.
 
 - Header: "Art-Net\0" at offset 0
@@ -105,8 +112,9 @@ Tests `ArtNetSendDriver::buildPacket` in `src/light/ArtNetSendDriver.h`.
 - Universe splitting: 256 RGB lights → 2 universes (510 + 258 bytes)
 - Length field big-endian for 510 bytes
 
-### Noise Effect (`test/test_noise.cpp`) {#noise}
+### noise
 
+`test/test_noise.cpp`
 Tests `NoiseEffect` and `PlasmaEffect` in `src/light/`.
 
 - Buffer contains non-zero RGB data after render
@@ -115,45 +123,51 @@ Tests `NoiseEffect` and `PlasmaEffect` in `src/light/`.
 - **3D depth:** NoiseEffect produces different output per z-slice when `depth > 1` (8×8×8 grid; adjacent and distant slices both differ — `noise3d` actually samples the third axis)
 - **3D depth:** PlasmaEffect produces different output per z-slice when `depth > 1` (the fifth z-driven sine actually contributes)
 
-### Plasma Effect (`test/test_plasma.cpp`) {#plasma}
+### plasma
 
+`test/test_plasma.cpp`
 Tests `PlasmaEffect` in `src/light/PlasmaEffect.h`.
 
 - Buffer contains non-zero RGB data after render
 - Different positions produce different colors (spatial variation)
 - Produces different output than NoiseEffect
 
-### Metaballs Effect (`test/test_metaballs.cpp`) {#metaballs}
+### metaballs
 
+`test/test_metaballs.cpp`
 Tests `MetaballsEffect` in `src/light/MetaballsEffect.h`.
 
 - Buffer contains non-zero RGB data after render
 - Different positions produce different colors (spatial variation)
 
-### Fire Effect (`test/test_fire.cpp`) {#fire}
+### fire
 
+`test/test_fire.cpp`
 Tests `FireEffect` in `src/light/FireEffect.h`.
 
 - Heat buffer allocated to `width * height` bytes when enabled
 - Buffer non-zero after ~50 frames of high sparking
 - Heat buffer freed when disabled via `setEnabled(false)`
 
-### Particles Effect (`test/test_particles.cpp`) {#particles}
+### particles
 
+`test/test_particles.cpp`
 Tests `ParticlesEffect` in `src/light/ParticlesEffect.h`.
 
 - Trail buffer allocated to `width * height * cpl` bytes when enabled
 - Buffer non-zero after a single render (particles draw immediately)
 - Trail buffer freed when disabled via `setEnabled(false)`
 
-### Stateless effects (`test/test_stateless_effects.cpp`) {#stateless-effects}
+### stateless-effects
 
+`test/test_stateless_effects.cpp`
 Tests zero-heap effects: `CheckerboardEffect`, `SpiralEffect`, `PlasmaPaletteEffect`, `RipplesEffect`, `GlowParticlesEffect`, `LavaLampEffect`.
 
 Each effect: buffer contains non-zero RGB after render; corners produce different colours (spatial variation).
 
-### MappingLUT (`test/test_mapping_lut.cpp`) {#mappinglut}
+### mappinglut
 
+`test/test_mapping_lut.cpp`
 Tests `MappingLUT` in `src/light/layers/MappingLUT.h`.
 
 - Default state is oneToOne
@@ -161,8 +175,9 @@ Tests `MappingLUT` in `src/light/layers/MappingLUT.h`.
 - Build with 1:N mappings: verify correct destinations for each logical index
 - Free and rebuild: clean reset, can re-allocate
 
-### Mirror Modifier (`test/test_mirror.cpp`) {#mirror}
+### mirror
 
+`test/test_mirror.cpp`
 Tests `MirrorModifier` in `src/light/modifiers/MirrorModifier.h`.
 
 - `dimensions()` returns `Dim::D3` (advertises 3D capability — pins ModifierBase default)
@@ -173,8 +188,9 @@ Tests `MirrorModifier` in `src/light/modifiers/MirrorModifier.h`.
 - No mirrors: 1 position
 - mirrorX only: 2 positions
 
-### Layer extrude / dimensions contract (`test/test_extrude.cpp`) {#extrude}
+### extrude
 
+`test/test_extrude.cpp`
 Pins the contract that `EffectBase::dimensions()` and `Layer::extrude` form: a D2 effect writes only the z=0 slice and the framework duplicates it across z; a D1 effect writes only the y=0,z=0 row and the framework fills y then z; a D3 effect iterates the layer itself. The effect must honour the layer's runtime dimensions even when the layer has fewer axes than the effect's declared D.
 
 - D2 effect (`RainbowEffect`) on 3D grid (8×8×4): every z>0 slice byte-equals z=0 (extrude copied the plane).
@@ -183,16 +199,18 @@ Pins the contract that `EffectBase::dimensions()` and `Layer::extrude` form: a D
 - D3 effects (`NoiseEffect`, `PlasmaEffect`) on a 1D layer (16×1×1): same shape, even tighter (`w*cpl` bytes).
 - D2 effects (`CheckerboardEffect`, `FireEffect`, `ParticlesEffect`) on 3D grid (8×8×3): every z>0 slice byte-equals z=0 — proves extrude fills z for all three styles (stateless, stateful with heat grid, stateful with trail buffer). Catches a future regression where a D2 effect's `onAllocateMemory` resizes the dynamic buffer to the full 3D shape but the loop still writes only z=0.
 
-### Layers container (`test/test_layers_container.cpp`) {#layers-container}
+### layers-container
 
+`test/test_layers_container.cpp`
 Pins the contract that the new top-level `Layers` container is a thin pass-through when it holds one layer (byte-identical to the pre-container single-layer pipeline), and that with two layers both child loops run and write their own buffers (composition not yet wired — covered separately when composition lands).
 
 - Single child: Layers + one Layer + RainbowEffect produces the same shape and a populated buffer that matches the bare-Layer reference. Bytes can't be exact-compared (RainbowEffect's phase uses `platform::millis()`, advancing between the two `loop()` calls), so structure (size, non-zero) is checked.
 - Two children: Layers + Layer(RainbowEffect) + Layer(CheckerboardEffect) — both child buffers are populated after one `loop()`. Confirms each Layer's `loop()` runs in order.
 - `Layers::activeLayer()` returns the first enabled child, the first child when none are enabled (fallback for dimension queries during boot/toggle-all-off), and `nullptr` when the container is empty.
 
-### Drivers container (`test/test_drivers_container.cpp`) {#drivers-container}
+### drivers-container
 
+`test/test_drivers_container.cpp`
 Pins that `Drivers::loop()` honours each child driver's `enabled` flag — regression for a bug where toggling an individual driver (ArtNet, Preview) in the UI was a no-op because the container ran every child unconditionally.
 
 - Both children enabled: both `loop()`s run on each container tick.
@@ -200,8 +218,9 @@ Pins that `Drivers::loop()` honours each child driver's `enabled` flag — regre
 - Disable both: neither ticks.
 - Re-enable a previously-disabled child: it resumes ticking from the next call.
 
-### Layouts container (`test/test_layouts_container.cpp`) {#layouts-container}
+### layouts-container
 
+`test/test_layouts_container.cpp`
 Pins that `Layouts::totalLightCount()` and `Layouts::forEachCoord()` skip disabled children, and that the physical indices of subsequent enabled layouts shift down to close the gap (no holes).
 
 - Both enabled (4 + 2 lights): total = 6, indices 0..5 in order.
@@ -209,8 +228,9 @@ Pins that `Layouts::totalLightCount()` and `Layouts::forEachCoord()` skip disabl
 - Disable both: total = 0, no callback invocations.
 - Re-enable both: original 0..5 ordering restored.
 
-### BlendMap (`test/test_blend_map.cpp`) {#blendmap}
+### blendmap
 
+`test/test_blend_map.cpp`
 Tests `blendMap()` in `src/light/layers/BlendMap.h`.
 
 - oneToOne: output equals input (memcpy path)
@@ -221,8 +241,9 @@ Tests `blendMap()` in `src/light/layers/BlendMap.h`.
 
 Scenario tests verify the integrated pipeline. Defined as JSON in `test/scenarios/`. Run with `./build/test/mm_scenarios` or via MoonDeck (PC → 01 - Pipeline).
 
-### base-pipeline (`test/scenarios/base-pipeline.json`) {#scenario-pipeline}
+### scenario-pipeline
 
+`test/scenarios/base-pipeline.json`
 Sets up the core pipeline: Layouts → GridLayout → Layer → RainbowEffect → Drivers → ArtNetSendDriver.
 
 - Buffer allocated after setup
@@ -230,24 +251,27 @@ Sets up the core pipeline: Layouts → GridLayout → Layer → RainbowEffect �
 - Buffer contains non-zero data after rendering 200 frames
 - FPS >= 30 (performance bound)
 
-### mirror (`test/scenarios/mirror.json`) {#scenario-mirror}
+### scenario-mirror
 
+`test/scenarios/mirror.json`
 Pipeline with mirror modifier: Layouts → GridLayout → Layer → NoiseEffect → MirrorModifier → Drivers → ArtNetSendDriver. Tests the full LUT-based pipeline with 1:N mapping.
 
 - Buffer allocated after setup (logical size, not physical)
 - Buffer contains non-zero data after rendering 200 frames
 - FPS >= 30 (performance bound)
 
-### memory-1to1 (`test/scenarios/memory-1to1.json`) {#scenario-memory-1to1}
+### scenario-memory-1to1
 
+`test/scenarios/memory-1to1.json`
 Verifies 1:1 unshuffled mapping (no modifiers) uses zero intermediate buffers.
 
 - 16×16 grid, rainbow effect, no modifier
 - Asserts: LUT is 1:1, Drivers dynamicBytes = 0
 - Reports per-module sizeof and heap allocation
 
-### memory-lut (`test/scenarios/memory-lut.json`) {#scenario-memory-lut}
+### scenario-memory-lut
 
+`test/scenarios/memory-lut.json`
 Verifies modifier with LUT allocates mapping table and driver buffer.
 
 - 16×16 grid, noise effect + mirror modifier (1:N multimap)
@@ -258,8 +282,9 @@ Verifies modifier with LUT allocates mapping table and driver buffer.
 
 Live scenarios run against a running device via HTTP REST API. Same JSON format as in-process scenarios. Run with `scripts/scenario/run_live_scenario.py`.
 
-### control-change (`test/scenarios/control-change.json`) {#scenario-control-change}
+### scenario-control-change
 
+`test/scenarios/control-change.json`
 Tests performance impact of control changes on a running system.
 
 - Measures FPS/heap after each control change
