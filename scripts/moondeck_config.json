@@ -65,9 +65,10 @@
       "id": "scenario_pipeline",
       "tab": "pc",
       "group": "scenario",
-      "label": "01 - Pipeline",
+      "label": "Scenarios",
       "help": "scenario_pipeline",
-      "script": "scenario/run_scenario.py"
+      "script": "scenario/run_scenario.py",
+      "needs_scenario": true
     },
     {
       "id": "history_report",
@@ -84,7 +85,8 @@
       "label": "Live Scenarios",
       "help": "live_scenario",
       "script": "scenario/run_live_scenario.py",
-      "needs_device": true
+      "needs_device": true,
+      "needs_scenario": true
     },
     {
       "id": "setup_esp_idf",

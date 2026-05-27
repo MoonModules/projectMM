@@ -156,7 +156,7 @@ private:
 
     Buffer* sourceBuffer_ = nullptr;
     PreviewFrame* frame_ = nullptr;
-    Buffer downsampled_;          // owned; strided RGB copy of the source buffer
+    Buffer downsampled_;          // owned; max-pooled RGB output buffer (one entry per stride cell)
     uint32_t lastSendTime_ = 0;
 };
 

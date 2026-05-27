@@ -67,7 +67,15 @@ The ESP32 target uses ESP-IDF directly, not the Arduino framework.
 
 **Tested IDF version:** **v6.1-dev-399-gd1b91b79b**. All builds and hardware tests use this exact commit. Minimum: ESP-IDF v5.1 (C++20 via GCC 12+); the project targets v6.x APIs (`esp_eth_phy_new_generic`, component manager for mDNS) so v5.x may need adjustments.
 
-Run `setup_esp_idf.py` once to auto-detect the installed IDF version and create the required Python environment.
+### Prerequisites
+
+You need [uv](https://docs.astral.sh/uv/) (Python launcher), CMake 3.20+, and a C++20 compiler. Clone ESP-IDF into `~/esp/esp-idf` (the path the build scripts expect):
+
+```sh
+git clone --depth 1 --branch v6.0.0 https://github.com/espressif/esp-idf.git ~/esp/esp-idf
+```
+
+Then run the one-time Python environment setup — either open MoonDeck (`uv run scripts/moondeck.py`), go to the ESP32 tab, and click **Setup ESP-IDF**, or run it directly:
 
 ```sh
 uv run scripts/build/setup_esp_idf.py                              # one-time

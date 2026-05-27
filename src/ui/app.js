@@ -1754,7 +1754,7 @@ function renderPreviewFrame(buf) {
     }
     const vertCount = vi / 6;
 
-    lastVerts = verts;
+    lastVerts = verts.subarray(0, vi);  // trim zero-filled tail — bufferData uploads only live verts
     lastVertCount = vertCount;
     lastMaxDim = maxDim;
 

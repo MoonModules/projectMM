@@ -266,6 +266,11 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/api/ports":
             self._send_json({"ports": list_serial_ports()})
 
+        elif self.path == "/api/scenarios":
+            scenarios_dir = ROOT / "test" / "scenarios"
+            names = sorted(p.stem for p in scenarios_dir.glob("*.json")) if scenarios_dir.exists() else []
+            self._send_json({"scenarios": names})
+
         elif self.path == "/api/state":
             self._send_json(load_state())
 
@@ -283,6 +288,9 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
 
         elif self.path.startswith("/api/help"):
             self._serve_help()
+
+        elif self.path.startswith("/api/docs/"):
+            self._serve_doc()
 
         elif self.path == "/api/history-report":
             self._serve_history_report()
@@ -347,6 +355,8 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             cmd.extend(["--board", params["board"]])
         if script_def.get("needs_port") and params.get("port"):
             cmd.extend(["--port", params["port"]])
+        if script_def.get("needs_scenario") and params.get("scenario"):
+            cmd.extend(["--name", params["scenario"]])
         if params.get("host"):
             cmd.extend(["--host", params["host"]])
 
@@ -399,6 +409,25 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         finally:
             with _lock:
                 _running.pop(script_id, None)
+
+    def _serve_doc(self):
+        """Serve any docs/*.md file as styled HTML with deep-link anchor support.
+        URL: /api/docs/<filename>[#anchor] — e.g. /api/docs/testing.md#scenario-mirror"""
+        import re as _re
+        raw_path = self.path[len("/api/docs/"):]
+        parts = raw_path.split("?", 1)
+        filename = parts[0].strip("/")
+        raw_anchor = parts[1] if len(parts) > 1 else ""
+        anchor = raw_anchor if _re.fullmatch(r"[A-Za-z0-9._-]+", raw_anchor) else ""
+        # Restrict to .md files with no path traversal
+        if not filename.endswith(".md") or "/" in filename or ".." in filename:
+            self.send_error(400, "Only .md files in docs/ are served here")
+            return
+        md_path = ROOT / "docs" / filename
+        if not md_path.exists():
+            self.send_error(404, f"{filename} not found")
+            return
+        self._serve_markdown_as_html(md_path, anchor)
 
     def _serve_help(self):
         """Serve MoonDeck.md as styled HTML with deep-link anchor support."""
@@ -453,12 +482,15 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             HTML tags (no nested-markup confusion in the inputs we see)."""
             # `code` — exclude backticks themselves
             s = re.sub(r'`([^`]+)`', r'<code>\1</code>', s)
-            # [text](url) — match URL up to the closing paren
-            s = re.sub(
-                r'\[([^\]]+)\]\(([^)]+)\)',
-                r'<a href="\2" target="_blank" rel="noopener">\1</a>',
-                s,
-            )
+            # [text](url) — same-origin /api/ links post a message to the
+            # parent frame (iframe nav is sandboxed); external links open in
+            # a new tab.
+            def _link_tag(m):
+                text_, url_ = m.group(1), m.group(2)
+                if url_.startswith("/api/"):
+                    return f'<a href="{url_}" data-moondeck-nav="1">{text_}</a>'
+                return f'<a href="{url_}" target="_blank" rel="noopener">{text_}</a>'
+            s = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', _link_tag, s)
             # **bold**
             s = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', s)
             # _italic_ (underscore form only — asterisk-italic is ambiguous
@@ -491,6 +523,14 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             close_list_if_open()
             close_quote_if_open()
             close_table_if_open()
+
+        _explicit_id_re = re.compile(r'\{#([A-Za-z0-9._-]+)\}\s*$')
+
+        def _heading_slug(text: str) -> tuple[str, str]:
+            m_id = _explicit_id_re.search(text)
+            if m_id:
+                return m_id.group(1), text[:m_id.start()].strip()
+            return text.lower().replace(" ", "_"), text
 
         for raw_line in text.splitlines():
             # Fenced code block toggle. Strip the optional language tag.
@@ -597,12 +637,13 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 continue
 
             # Headings, then blank → spacer, then plain paragraph.
+            # {#explicit-id} suffix overrides the auto-slug.
             if raw_line.startswith("### "):
-                slug = raw_line[4:].strip().lower().replace(" ", "_")
-                lines.append(f'<h3 id="{slug}">{render_inline(html_mod.escape(raw_line[4:]))}</h3>')
+                slug, heading_text = _heading_slug(raw_line[4:].strip())
+                lines.append(f'<h3 id="{slug}">{render_inline(html_mod.escape(heading_text))}</h3>')
             elif raw_line.startswith("## "):
-                slug = raw_line[3:].strip().lower().replace(" ", "_")
-                lines.append(f'<h2 id="{slug}">{render_inline(html_mod.escape(raw_line[3:]))}</h2>')
+                slug, heading_text = _heading_slug(raw_line[3:].strip())
+                lines.append(f'<h2 id="{slug}">{render_inline(html_mod.escape(heading_text))}</h2>')
             elif raw_line.startswith("# "):
                 lines.append(f'<h1>{render_inline(html_mod.escape(raw_line[2:]))}</h1>')
             elif raw_line.strip() == "":
@@ -656,6 +697,14 @@ strong {{ color: #fff; }}
 </style></head><body>
 {body_html}
 {f'<script>document.getElementById("{anchor}")?.scrollIntoView();</script>' if anchor else ''}
+<script>
+document.addEventListener("click", function(e) {{
+    var a = e.target.closest("a[data-moondeck-nav]");
+    if (!a) return;
+    e.preventDefault();
+    window.parent.postMessage({{type:"moondeck-nav", url: a.getAttribute("href")}}, "*");
+}});
+</script>
 </body></html>"""
 
         data = page.encode()

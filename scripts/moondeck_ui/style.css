@@ -90,13 +90,14 @@ nav { display: flex; gap: 4px; }
     font-size: 12px;
 }
 
-.esp32-controls .port-row {
+.esp32-controls .port-header {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
+    font-size: 12px;
 }
 
-.esp32-controls .port-row select { flex: 1; }
+.esp32-controls select { width: 100%; }
 
 select {
     background: #1a1a2e;
@@ -131,6 +132,16 @@ select {
     border: 1px solid #0f3460;
     border-radius: 5px;
     padding: 7px 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.script-card--has-select {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+}
+.card-row {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -179,6 +190,17 @@ select {
     background: #e94560;
     color: #fff;
     cursor: pointer;
+}
+
+.script-card .scenario-select {
+    background: #0f3460;
+    border: 1px solid #0f3460;
+    color: #c0c0d0;
+    border-radius: 4px;
+    font-size: 11px;
+    padding: 2px 4px;
+    cursor: pointer;
+    width: 100%;
 }
 
 /* Live tab */
@@ -248,7 +270,17 @@ select {
 .pane-tab:hover { color: #fff; background: #0f3460; }
 .pane-tab.active { background: #e94560; color: #fff; border-color: #e94560; }
 
-.pane-header > button {
+.pane-header-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.view-nav { display: flex; gap: 2px; }
+[hidden] { display: none !important; }
+
+.pane-header-right > button,
+.view-nav > button {
     background: transparent;
     border: 1px solid #0f3460;
     color: #a0a0b0;
@@ -257,7 +289,8 @@ select {
     cursor: pointer;
     font-size: 11px;
 }
-.pane-header > button:hover { color: #e94560; border-color: #e94560; }
+.pane-header-right > button:hover,
+.view-nav > button:hover { color: #e94560; border-color: #e94560; }
 
 .pane-content { display: none; flex: 1; overflow: hidden; }
 .pane-content.active { display: flex; }

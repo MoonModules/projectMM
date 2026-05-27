@@ -87,7 +87,24 @@ The narrow safety net: "this snapshot is internally consistent."
 4. Platform boundary — `check_platform_boundary.py` — if any file under `src/` (excluding `src/platform/`) changed.
 5. Spec check — `check_specs.py` — if any `src/` file with controls or any `docs/moonmodules/*.md` changed.
 6. ESP32 build — `build_esp32.py` — if any file under `src/` (excluding `src/platform/desktop/`), `esp32/`, `CMakeLists.txt`, or `library.json` changed.
-7. KPI collection — `collect_kpi.py --commit` — if any file under `src/` changed. The one-liner goes as the **first** line of the commit body, full details at the bottom. **The one-liner MUST include `tick:Xus(FPS:Y)` for every supported target** (PC + ESP32 today; Teensy/RPi when added). If a target's tick/FPS is missing — e.g. ESP32 wasn't monitored recently and `esp32/monitor.log` is stale — re-run a short live capture before committing, or note explicitly in the commit body why the value is absent.
+7. KPI collection — `collect_kpi.py --commit` — if any file under `src/` changed. **The one-liner MUST include `tick:Xus(FPS:Y)` for every supported target** (PC + ESP32 today; Teensy/RPi when added). If a target's tick/FPS is missing — e.g. ESP32 wasn't monitored recently and `esp32/monitor.log` is stale — re-run a short live capture before committing, or note explicitly in the commit body why the value is absent.
+
+**After all gates pass:** stop and wait for the product owner to explicitly say "commit now" (or equivalent). Do not commit on your own initiative.
+
+**When "commit now" is received** — compile the commit message in this format and execute the commit:
+
+8. Commit message format:
+   - **Title line** — short imperative summary of the change (≤ 72 chars), e.g. `Add MirrorModifier and fix PreviewDriver sampling`
+   - **Short summary** — 1–3 sentences describing what changed and why, in plain language
+   - **KPI one-liner** — the `tick:Xus(FPS:Y)` line from step 7
+   - **Change sections** — one section per applicable category below; omit a section entirely if nothing in that area changed. Each section is a bulleted list, one bullet per module/file, in your own words. **Core and Light domain are the preferred default categories** — a test for a core module goes under Core, a script fix that touches a light driver goes under Light domain. Only use the other categories for changes that have no meaningful connection to Core or Light domain:
+     - **Core** (`src/core/`, `src/platform/`) — e.g. `- HttpServerModule: added 409 guard to prevent overlapping OTA jobs`
+     - **Light domain** (`src/light/`) — e.g. `- PreviewDriver: replaced strided sampling with max-pooling to fix empty frames`
+     - **UI** (`src/ui/`) — e.g. `- app.js: auto-fit camera distance on first preview frame`
+     - **Scripts / MoonDeck** (`scripts/`) — e.g. `- MoonDeck: added per-scenario dropdown to scenario card`
+     - **Tests** (`test/`) — e.g. `- test_preview_driver: updated default assertions for new fps/detail/decompress values`
+     - **Docs / CI** (`docs/`, `README.md`, `CLAUDE.md`, `.github/`, `CMakeLists.txt`) — e.g. `- README: consolidated ESP32 install info to web installer`
+   - Full KPI details block at the bottom (as produced by `collect_kpi.py`)
 
 **Not at commit-time** (these run at PR-merge): Reviewer agent; live perf analysis + `docs/performance.md` update; documentation sync sweep; permission review.
 

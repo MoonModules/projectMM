@@ -41,16 +41,11 @@
                 </div>
                 <div id="scripts-esp32-build" class="script-grid"></div>
                 <div class="esp32-controls">
-                    <label>Port:
-                        <!-- Refresh button before the dropdown so the long
-                             /dev/tty.usbserial-XXXX string can extend to the
-                             right edge of the sidebar without pushing the
-                             refresh affordance off-screen. -->
-                        <span class="port-row">
-                            <button id="refresh-ports" title="Refresh">&#x21bb;</button>
-                            <select id="port-select"><option value="">--</option></select>
-                        </span>
-                    </label>
+                    <div class="port-header">
+                        <span>Port:</span>
+                        <button id="refresh-ports" title="Refresh">&#x21bb;</button>
+                    </div>
+                    <select id="port-select"><option value="">--</option></select>
                 </div>
                 <div id="scripts-esp32" class="script-grid"></div>
             </section>
@@ -71,7 +66,14 @@
                     <button class="pane-tab active" data-pane="log">Log</button>
                     <button class="pane-tab" data-pane="view">View</button>
                 </div>
-                <button id="clear-log">Clear</button>
+                <div class="pane-header-right">
+                    <div id="view-nav" class="view-nav" hidden>
+                        <button id="view-back" title="Back">&#x2190;</button>
+                        <button id="view-forward" title="Forward">&#x2192;</button>
+                        <button id="view-refresh" title="Refresh">&#x21bb;</button>
+                    </div>
+                    <button id="clear-log">Clear</button>
+                </div>
             </div>
             <div id="pane-log" class="pane-content active">
                 <pre id="log"></pre>

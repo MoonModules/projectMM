@@ -10,7 +10,8 @@ const MOONDECK_MD = "/api/help";
 
 let scripts = [];
 let boards = [];
-let state = { board: "", port: "", devices: [] };
+let scenarios = [];
+let state = { board: "", port: "", devices: [], scenario: "" };
 
 // ---------------------------------------------------------------------------
 // Init
@@ -31,6 +32,10 @@ async function init() {
     // saved board isn't in the new list, drop it so the default selection
     // (first board) wins.
     if (!boards.includes(state.board)) state.board = "";
+
+    const scenResp = await fetch("/api/scenarios");
+    const scenData = await scenResp.json();
+    scenarios = scenData.scenarios || [];
 
     renderBoardSelect();
     renderScripts();
@@ -108,17 +113,37 @@ function setupPaneTabs() {
     });
 }
 
+const viewNav = document.getElementById("view-nav");
+const clearLogBtn = document.getElementById("clear-log");
+
 function switchPane(pane) {
     document.querySelectorAll(".pane-tab").forEach(b => b.classList.remove("active"));
     document.querySelectorAll(".pane-content").forEach(p => p.classList.remove("active"));
     document.querySelector(`.pane-tab[data-pane="${pane}"]`).classList.add("active");
     document.getElementById("pane-" + pane).classList.add("active");
+    viewNav.hidden = (pane !== "view");
+    clearLogBtn.hidden = (pane !== "log");
 }
+
+function viewNavAction(fn) {
+    try { fn(viewFrame.contentWindow); } catch (_) {}
+}
+document.getElementById("view-back").addEventListener("click", () => viewNavAction(w => w.history.back()));
+document.getElementById("view-forward").addEventListener("click", () => viewNavAction(w => w.history.forward()));
+document.getElementById("view-refresh").addEventListener("click", () => {
+    if (viewFrame.src) viewFrame.src = viewFrame.src;
+});
 
 function showInView(url) {
     viewFrame.src = url;
     switchPane("view");
 }
+
+window.addEventListener("message", (e) => {
+    if (e.data?.type === "moondeck-nav" && typeof e.data.url === "string") {
+        showInView(e.data.url);
+    }
+});
 
 // ---------------------------------------------------------------------------
 // Script cards
@@ -165,13 +190,32 @@ function renderScripts() {
                 target.appendChild(header);
             }
             const card = document.createElement("div");
-            card.className = "script-card";
+            card.className = "script-card" + (script.needs_scenario ? " script-card--has-select" : "");
             card.innerHTML = `
-                <span class="status-dot" data-id="${script.id}"></span>
-                <span class="label">${script.label}</span>
-                <button class="help-btn" title="Help">?</button>
-                <button class="run-btn" data-id="${script.id}">Run</button>
+                <div class="card-row">
+                    <span class="status-dot" data-id="${script.id}"></span>
+                    <span class="label">${script.label}</span>
+                    <button class="help-btn" title="Help">?</button>
+                    <button class="run-btn" data-id="${script.id}">Run</button>
+                </div>
+                ${script.needs_scenario ? `<select class="scenario-select"></select>` : ""}
             `;
+
+            if (script.needs_scenario) {
+                const sel = card.querySelector(".scenario-select");
+                const allOpt = document.createElement("option");
+                allOpt.value = "";
+                allOpt.textContent = "all";
+                sel.appendChild(allOpt);
+                for (const name of scenarios) {
+                    const opt = document.createElement("option");
+                    opt.value = name;
+                    opt.textContent = name;
+                    if (name === state.scenario) opt.selected = true;
+                    sel.appendChild(opt);
+                }
+                sel.addEventListener("change", () => { state.scenario = sel.value; });
+            }
 
             card.querySelector(".help-btn").addEventListener("click", () => {
                 showInView(MOONDECK_MD + "?" + script.help);
@@ -235,6 +279,7 @@ async function runScriptOnce(script, btn, extraParams) {
     const params = { ...extraParams };
     if (script.needs_board) params.board = state.board;
     if (script.needs_port) params.port = state.port;
+    if (script.needs_scenario) params.scenario = state.scenario;
 
     // Switch to log pane and show output
     switchPane("log");
@@ -491,11 +536,12 @@ function appendLog(text) {
     if (markerMatch) {
         let safeUrl = null;
         try {
-            const parsed = new URL(markerMatch[1]);
+            // Use document.baseURI as base so relative paths like /api/history-report resolve.
+            const parsed = new URL(markerMatch[1], document.baseURI);
             if (parsed.protocol === "http:" || parsed.protocol === "https:") {
                 safeUrl = parsed.href;
             }
-        } catch (_) { /* relative or invalid — skip */ }
+        } catch (_) { /* invalid URL — skip */ }
         if (safeUrl) {
             const a = document.createElement("a");
             a.href = safeUrl;

@@ -75,7 +75,9 @@ uv run scripts/scenario/run_scenario.py                       # run all
 uv run scripts/scenario/run_scenario.py --name base-pipeline   # run one
 ```
 
-Scenarios are JSON files in `test/scenarios/`.
+Scenarios are JSON files in `test/scenarios/`. Use the dropdown to run a single scenario or leave it on **all** to run the full suite.
+
+For a full description of each scenario, see the [scenario inventory](/api/docs/testing.md?scenario-pipeline) in testing.md.
 
 ### history_report
 
@@ -108,7 +110,9 @@ uv run scripts/scenario/run_live_scenario.py --update-baseline                  
 uv run scripts/scenario/run_live_scenario.py --compare-baseline                 # detect regressions
 ```
 
-Executes scenario steps (add_module, set_control, delete_module) via REST API. Collects per-step FPS and heap measurements. Compares against stored baselines to detect performance regressions.
+Executes scenario steps (add_module, set_control, delete_module) via REST API. Collects per-step FPS and heap measurements. Compares against stored baselines to detect performance regressions. Use the dropdown to run a single scenario or leave it on **all** to run the full suite.
+
+For a full description of each scenario, see the [scenario inventory](/api/docs/testing.md?scenario-control-change) in testing.md.
 
 ## ESP32 Tab
 
