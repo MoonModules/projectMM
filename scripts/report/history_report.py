@@ -196,7 +196,7 @@ def render_combined(rails: list[dict], commits: list[dict], repo_url: str | None
     the rail parse came back empty.
     """
     if not rails:
-        return render_commits(commits, repo_url)
+        return "## History\n\n_No commits found._\n\n"
 
     # SHA → full commit record lookup for body rendering.
     by_short = {c["short"]: c for c in commits}
@@ -272,37 +272,6 @@ def render_releases(releases: list[dict]) -> str:
         rows.append(f"| `{tag}` | {date} | {kind} | {name} |")
     rows.append("")
     return "\n".join(rows) + "\n"
-
-
-def render_commits(commits: list[dict], repo_url: str | None) -> str:
-    """Commits section, newest first, grouped by date."""
-    if not commits:
-        return "## Commits\n\n_No commits found._\n\n"
-
-    out = ["## Commits", ""]
-    current_date: str | None = None
-    for c in commits:
-        if c["date"] != current_date:
-            current_date = c["date"]
-            out.append(f"### {current_date}")
-            out.append("")
-        # Merge marker (visual hint, not a filter).
-        marker = "⤴ " if c["is_merge"] else ""
-        # SHA: a GitHub commit URL if we have a repo URL, else plain code.
-        if repo_url:
-            sha_md = f"[`{c['short']}`]({repo_url}/commit/{c['sha']})"
-        else:
-            sha_md = f"`{c['short']}`"
-        subject = c["subject"].replace("|", "\\|")
-        out.append(f"- {marker}{sha_md} **{subject}**")
-        # Full body as a multi-line blockquote, one `>` per source line.
-        # Two-space indent so the quote nests under the list item; empty
-        # source lines become `>` (an empty blockquote line) so paragraph
-        # breaks survive in the rendered output.
-        for line in body_lines(c["body"]):
-            out.append(f"  > {line}" if line else "  >")
-        out.append("")
-    return "\n".join(out) + "\n"
 
 
 def resolve_repo_url() -> str | None:

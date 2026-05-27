@@ -360,8 +360,8 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
         switch (c.type) {
             case ControlType::Uint8:
                 sink.appendf(
-                    "{\"name\":\"%s\",\"type\":\"uint8\",\"value\":%u,\"min\":%u,\"max\":%u",
-                    c.name, *static_cast<uint8_t*>(c.ptr), c.min, c.max);
+                    "{\"name\":\"%s\",\"type\":\"uint8\",\"value\":%u,\"min\":%d,\"max\":%d",
+                    c.name, *static_cast<uint8_t*>(c.ptr), (int)c.min, (int)c.max);
                 break;
             case ControlType::Uint16:
                 sink.appendf(

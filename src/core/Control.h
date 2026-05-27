@@ -26,8 +26,8 @@ struct ControlDescriptor {
     const char* name = nullptr;
     uintptr_t aux = 0;      // Progress: total capacity. Select: pointer to options array.
     ControlType type = ControlType::Uint8;
-    int16_t min = 0;
-    int16_t max = 255;
+    int16_t min = 0;   // Uint8/Int16: UI clamp range. Text/Password/ReadOnly: max = bufSize, min unused.
+    int16_t max = 255; // Uint16/Select: natural range, UI ignores these fields.
     bool hidden = false;    // UI visibility flag. Set via ControlList::setHidden() after addX().
                             // Persistence ignores this — hidden controls are still saved/loaded
                             // so toggling visibility doesn't lose state.

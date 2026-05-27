@@ -1525,6 +1525,7 @@ function saveCam() { localStorage.setItem("mm_cam", JSON.stringify({t: camTheta,
 let lastVerts = null;        // cached vertex array for orbit-without-server-frame
 let lastVertCount = 0;
 let lastMaxDim = 1;
+let vertsBuf = null;         // reused worst-case Float32Array; grows but never shrinks
 
 function initWebGL() {
     const canvas = document.getElementById("preview");
@@ -1552,7 +1553,7 @@ function initWebGL() {
             float d = length(gl_PointCoord - vec2(0.5));
             if (d > 0.5) discard;
             float a = 1.0 - smoothstep(0.25, 0.5, d);
-            // Gamma lift so mid-range colours are not muddy
+            // Gamma 0.7 lifts mid-greys so dim effects stay readable in the preview; not sRGB-correct
             vec3 bright = pow(vCol, vec3(0.7));
             gl_FragColor = vec4(bright * a, a);
         }
@@ -1730,12 +1731,12 @@ function renderPreviewFrame(buf) {
           }
         : (ix, iy, iz) => (iz * dh * dw + iy * dw + ix) * 3;
 
-    // Single-pass: allocate worst-case, fill, track actual count.
-    // No pre-pass to count non-black — eliminates the double iteration that
-    // caused main-thread stalls, and avoids blank frames when all stride-sampled
-    // voxels happen to be black (coarse detail on sparse effects).
+    // Single-pass: reuse a module-scope buffer sized to the worst-case voxel
+    // count; reallocate only when the grid grows. No pre-pass to count
+    // non-black — eliminates double iteration / blank-frame race on sparse effects.
     const maxDim = Math.max(w, h, d);
-    const verts = new Float32Array(w * h * d * 6);
+    const needed = w * h * d * 6;
+    if (!vertsBuf || vertsBuf.length < needed) vertsBuf = new Float32Array(needed);
     let vi = 0;
     for (let iz = 0; iz < d; iz++) {
         for (let iy = 0; iy < h; iy++) {
@@ -1743,18 +1744,19 @@ function renderPreviewFrame(buf) {
                 const idx = colorAt(ix, iy, iz);
                 const r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
                 if (!(r | g | b)) continue;
-                verts[vi++] = (ix / maxDim) - 0.5 * w / maxDim;
-                verts[vi++] = (iy / maxDim) - 0.5 * h / maxDim;
-                verts[vi++] = (iz / maxDim) - 0.5 * d / maxDim;
-                verts[vi++] = r / 255;
-                verts[vi++] = g / 255;
-                verts[vi++] = b / 255;
+                vertsBuf[vi++] = (ix / maxDim) - 0.5 * w / maxDim;
+                vertsBuf[vi++] = (iy / maxDim) - 0.5 * h / maxDim;
+                vertsBuf[vi++] = (iz / maxDim) - 0.5 * d / maxDim;
+                vertsBuf[vi++] = r / 255;
+                vertsBuf[vi++] = g / 255;
+                vertsBuf[vi++] = b / 255;
             }
         }
     }
     const vertCount = vi / 6;
 
-    lastVerts = verts.subarray(0, vi);  // trim zero-filled tail — bufferData uploads only live verts
+    if (vi === 0) return;  // all-black frame — don't update lastVerts, let rAF loop idle
+    lastVerts = vertsBuf.subarray(0, vi);  // trim zero-filled tail — bufferData uploads only live verts
     lastVertCount = vertCount;
     lastMaxDim = maxDim;
 

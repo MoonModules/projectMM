@@ -486,9 +486,13 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             # parent frame (iframe nav is sandboxed); external links open in
             # a new tab.
             def _link_tag(m):
+                import urllib.parse as _up
                 text_, url_ = m.group(1), m.group(2)
                 if url_.startswith("/api/"):
                     return f'<a href="{url_}" data-moondeck-nav="1">{text_}</a>'
+                scheme = _up.urlparse(url_).scheme
+                if scheme not in ("", "http", "https", "mailto"):
+                    return html_mod.escape(text_)  # strip unsafe schemes (e.g. javascript:)
                 return f'<a href="{url_}" target="_blank" rel="noopener">{text_}</a>'
             s = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', _link_tag, s)
             # **bold**
@@ -525,6 +529,10 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             close_table_if_open()
 
         _explicit_id_re = re.compile(r'\{#([A-Za-z0-9._-]+)\}\s*$')
+        _allowed_html_re = re.compile(
+            r'^</?(?:div|p|span|table|thead|tbody|tr|td|th|ul|ol|li|br|hr'
+            r'|strong|em|code|pre|a|h[1-6])[\s>"/]'
+        )
 
         def _heading_slug(text: str) -> tuple[str, str]:
             m_id = _explicit_id_re.search(text)
@@ -623,16 +631,13 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 continue
             close_list_if_open()
 
-            # Pass-through for verbatim HTML blocks. Lines starting with
-            # `<` and ending with `>` (no other characters before/after)
-            # are emitted as-is — useful for generated reports that want
-            # to drop in their own structural HTML (history report's
-            # combined graph + commits section uses this for the
-            # per-commit <div class="commit"> wrapper).
+            # Pass-through for a fixed allowlist of structural HTML tags used
+            # by history_report.py's combined graph+commits output. Narrowed
+            # to known safe tags so arbitrary doc content can't inject scripts.
             stripped_check = raw_line.strip()
             if (stripped_check.startswith("<")
                     and stripped_check.endswith(">")
-                    and not stripped_check.startswith("<!--")):
+                    and _allowed_html_re.match(stripped_check)):
                 lines.append(raw_line)
                 continue
 

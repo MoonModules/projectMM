@@ -11,7 +11,7 @@ const MOONDECK_MD = "/api/help";
 let scripts = [];
 let boards = [];
 let scenarios = [];
-let state = { board: "", port: "", devices: [], scenario: "" };
+let state = { board: "", port: "", devices: [], scenario: "" }; // scenario is shared across all needs_scenario cards (PC + Live stay in sync intentionally)
 
 // ---------------------------------------------------------------------------
 // Init
@@ -140,7 +140,9 @@ function showInView(url) {
 }
 
 window.addEventListener("message", (e) => {
-    if (e.data?.type === "moondeck-nav" && typeof e.data.url === "string") {
+    if (e.source !== viewFrame.contentWindow) return;  // only accept from our iframe
+    if (e.data?.type === "moondeck-nav" && typeof e.data.url === "string"
+            && e.data.url.startsWith("/api/")) {
         showInView(e.data.url);
     }
 });
@@ -214,7 +216,7 @@ function renderScripts() {
                     if (name === state.scenario) opt.selected = true;
                     sel.appendChild(opt);
                 }
-                sel.addEventListener("change", () => { state.scenario = sel.value; });
+                sel.addEventListener("change", () => { state.scenario = sel.value; saveState(); });
             }
 
             card.querySelector(".help-btn").addEventListener("click", () => {

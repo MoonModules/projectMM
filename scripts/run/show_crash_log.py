@@ -12,7 +12,6 @@ so the run log is always visible from one place.
 
 import json
 import platform
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent

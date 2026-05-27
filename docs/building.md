@@ -65,7 +65,7 @@ Each host writes into its own build dir: `build/macos/`, `build/linux/`, `build/
 
 The ESP32 target uses ESP-IDF directly, not the Arduino framework.
 
-**Tested IDF version:** **v6.1-dev-399-gd1b91b79b**. All builds and hardware tests use this exact commit. Minimum: ESP-IDF v5.1 (C++20 via GCC 12+); the project targets v6.x APIs (`esp_eth_phy_new_generic`, component manager for mDNS) so v5.x may need adjustments.
+**Tested IDF version:** **v6.0.0** (`v6.1-dev-399-gd1b91b79b` internally). All builds and hardware tests use this tag. Minimum: ESP-IDF v5.1 (C++20 via GCC 12+); the project targets v6.x APIs (`esp_eth_phy_new_generic`, component manager for mDNS) so v5.x may need adjustments.
 
 ### Prerequisites
 
