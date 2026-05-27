@@ -26,7 +26,7 @@ Either path: ~2–3 h translation + Windows-side testing. Once green, `build-win
 - **Raspberry Pi** — ARM64, cross-built or native.
 - **macOS code-signing** — drops the Gatekeeper "downloaded from internet" prompt.
 - **Runtime PHY / pin config for Ethernet** — replaces build-time Olimex-pin baking in `sdkconfig.defaults.eth` with a runtime picker via `platform::ethPresent()` / `platform::wifiPresent()`. Once landed, `esp32-eth*` variants stop being Olimex-specific; NetworkModule's `onBuildControls()` flips the `hidden` flag on absent-interface controls.
-- **Installer UX polish** — clear "Pre-release (beta)" warning on RC/nightly picks, yank-by-asset-tag instead of yank-by-release-deletion.
+- **Installer UX polish** — clear "Pre-release (beta)" warning on RC/latest picks, yank-by-asset-tag instead of yank-by-release-deletion.
 
 ---
 

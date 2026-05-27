@@ -90,7 +90,7 @@ uv run scripts/report/history_report.py --out /tmp/h.md
 
 Output shape:
 
-- **Releases** table: the most-recent 10 tagged releases with tag, date, and channel (stable / rc / nightly).
+- **Releases** table: the most-recent 10 tagged releases with tag, date, and channel (stable / rc / latest).
 - **History** section: combined graph + commits, newest first. Each commit row shows its graph-rail (`*`, `| *`, `*   `, …) as a monospace prefix to the SHA + date + subject. Merge commits get a ⤴ badge. The full body lives in a left-bordered blockquote underneath, visually extending the rail's vertical line into the description. Branch connector rows (`|\`, `|/`, `| |`) render as standalone monospace lines between commits. Inside each body, `- foo` lines render as nested bullet lists. Each SHA links to the corresponding GitHub commit page when an origin remote is configured.
 - **Summary** footer: commit count, release count, generation timestamp.
 

@@ -8,9 +8,9 @@ filenames lie about the version they ship.
 Tag → version mapping: strip a leading 'v'. Both `v1.0.0` and `1.0.0` are
 accepted as the tag, but the in-tree version is the bare semver.
 
-Nightly tags (`nightly-YYYY-MM-DD`) are snapshot labels, not semver
-releases — library.json keeps the last real release's version. The
-script accepts them and skips the equality check.
+The `latest` tag is a moving prerelease published on every merge to main,
+not a semver release — library.json keeps the last real release's version.
+The script accepts it and skips the equality check.
 
 Inputs:
   GITHUB_REF_NAME  — the tag, set by GitHub Actions on a `push: tags` event
@@ -38,11 +38,9 @@ def main() -> int:
         print("verify_version: no tag supplied (--tag or $GITHUB_REF_NAME).")
         return 2
 
-    # Nightly tags are date snapshots — there's no in-tree version to match
-    # against. Skip the equality check; the rest of release.yml builds and
-    # publishes the binaries with the date in the filename instead.
-    if tag.startswith("nightly-"):
-        print(f"verify_version: nightly tag '{tag}', skipping library.json match.")
+    # `latest` is a moving prerelease — no in-tree version to match against.
+    if tag == "latest":
+        print(f"verify_version: '{tag}' tag, skipping library.json match.")
         return 0
 
     tag_version = tag[1:] if tag.startswith("v") else tag

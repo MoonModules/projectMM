@@ -148,8 +148,8 @@ def fetch_releases() -> list[dict]:
 
 def classify_tag(tag: str) -> str:
     """Map tag-name shape → channel label."""
-    if tag.startswith("nightly-"):
-        return "nightly"
+    if tag == "latest":
+        return "latest"
     if "-rc" in tag:
         return "rc"
     return "stable"
