@@ -61,7 +61,7 @@ struct Ctx {
         Ctx ctx(16, 16); \
         mm::EFFECT effect; \
         ctx.layer.addChild(&effect); \
-        ctx.layer.onAllocateMemory(); \
+        ctx.layer.onBuildState(); \
         ctx.layer.loop(); \
         CHECK(ctx.hasNonZero()); \
     } \
@@ -69,7 +69,7 @@ struct Ctx {
         Ctx ctx(32, 32); \
         mm::EFFECT effect; \
         ctx.layer.addChild(&effect); \
-        ctx.layer.onAllocateMemory(); \
+        ctx.layer.onBuildState(); \
         ctx.layer.loop(); \
         CHECK(ctx.cornersDiffer()); \
     }
@@ -78,7 +78,7 @@ TEST_CASE("CheckerboardEffect writes non-zero RGB") {
     Ctx ctx(16, 16);
     mm::CheckerboardEffect effect;
     ctx.layer.addChild(&effect);
-    ctx.layer.onAllocateMemory();
+    ctx.layer.onBuildState();
     ctx.layer.loop();
     CHECK(ctx.hasNonZero());
 }
@@ -88,7 +88,7 @@ TEST_CASE("CheckerboardEffect spatial variation") {
     mm::CheckerboardEffect effect;
     effect.cell_size = 4;
     ctx.layer.addChild(&effect);
-    ctx.layer.onAllocateMemory();
+    ctx.layer.onBuildState();
     ctx.layer.loop();
     auto* data = ctx.layer.buffer().data();
     CHECK(data[0] != data[4 * 3]);
@@ -105,7 +105,7 @@ TEST_CASE("LavaLampEffect writes non-zero RGB") {
     Ctx ctx(16, 16);
     mm::LavaLampEffect effect;
     ctx.layer.addChild(&effect);
-    ctx.layer.onAllocateMemory();
+    ctx.layer.onBuildState();
     ctx.layer.loop();
     CHECK(ctx.hasNonZero());
 }
@@ -120,7 +120,7 @@ TEST_CASE("LavaLampEffect spatial variation") {
     mm::LavaLampEffect effect;
     effect.bpm = 60;
     ctx.layer.addChild(&effect);
-    ctx.layer.onAllocateMemory();
+    ctx.layer.onBuildState();
     bool varied = false;
     for (int i = 0; i < 10 && !varied; i++) {
         ctx.layer.loop();
@@ -136,7 +136,7 @@ TEST_CASE("RipplesEffect writes non-zero RGB") {
     Ctx ctx(16, 16);
     mm::RipplesEffect effect;
     ctx.layer.addChild(&effect);
-    ctx.layer.onAllocateMemory();
+    ctx.layer.onBuildState();
     ctx.layer.loop();
     CHECK(ctx.hasNonZero());
 }
@@ -145,7 +145,7 @@ TEST_CASE("RipplesEffect spatial variation") {
     Ctx ctx(32, 32);
     mm::RipplesEffect effect;
     ctx.layer.addChild(&effect);
-    ctx.layer.onAllocateMemory();
+    ctx.layer.onBuildState();
     ctx.layer.loop();
     CHECK(ctx.hasTwoDistinctColors());
 }

@@ -458,7 +458,7 @@ void HttpServerModule::handleSetControl(platform::TcpConnection& conn, const cha
         target->setEnabled(mm::json::parseBool(body, "value"));
         target->markDirty();
         FilesystemModule::noteDirty();
-        if (scheduler_) scheduler_->rebuild();
+        if (scheduler_) scheduler_->buildState();
         sendResponse(conn, 200, "application/json", "{\"ok\":true}");
         return;
     }
@@ -528,13 +528,22 @@ void HttpServerModule::handleSetControl(platform::TcpConnection& conn, const cha
             case ControlType::Progress:
                 break; // read-only, skip
         }
-        // Rebuild controls only for Select (dynamic onBuildControls), rebuild pipeline for all
+        // Rebuild controls only for Select (dynamic onBuildControls re-evaluates the
+        // visible set, e.g. NetworkModule's static-IP fields).
         if (c.type == ControlType::Select) {
             target->rebuildControls();
         }
+        // Three-tier control-change reaction (see MoonModule::onUpdate):
+        //   1. onUpdate — always, cheap. Lets the module recompute a small LUT etc.
+        //   2. rebuild — only when the control changes physical dims / mapping shape
+        //      (Layout, Modifier). Most controls (effect values, brightness) skip this,
+        //      so dragging a slider stays fluent with no tree-wide realloc sweep.
+        target->onUpdate(controlName);
         target->markDirty();
         FilesystemModule::noteDirty();
-        if (scheduler_) scheduler_->rebuild();
+        if (target->controlChangeTriggersBuildState(controlName) && scheduler_) {
+            scheduler_->buildState();
+        }
 
         sendResponse(conn, 200, "application/json", "{\"ok\":true}");
         return;
@@ -677,13 +686,13 @@ void HttpServerModule::handleAddModule(platform::TcpConnection& conn, const char
 
     // Lifecycle: same phase order as Scheduler::setup() — onBuildControls() first so
     // control buffers are bound, then setup() (which may read those bound members),
-    // then onAllocateMemory(). Getting this order wrong means a module's setup() sees
+    // then onBuildState(). Getting this order wrong means a module's setup() sees
     // uninitialized control state.
     mod->onBuildControls();
     mod->setup();
-    mod->onAllocateMemory();
+    mod->onBuildState();
 
-    if (scheduler_) scheduler_->rebuild();
+    if (scheduler_) scheduler_->buildState();
 
     // Persist the new tree shape — marking the parent dirty causes saveSubtree
     // to write the parent's file with the new child slot included. The save is
@@ -723,7 +732,7 @@ void HttpServerModule::handleDeleteModule(platform::TcpConnection& conn, const c
     mod->teardown();
     Scheduler::deleteTree(mod);
 
-    if (scheduler_) scheduler_->rebuild();
+    if (scheduler_) scheduler_->buildState();
 
     // Persist the new tree shape — marking the parent dirty rewrites its file
     // without the deleted child slot. The parent is guaranteed non-null by the
@@ -777,7 +786,7 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
     // Lifecycle on the fresh module — same phase order as the add path.
     fresh->onBuildControls();
     fresh->setup();
-    fresh->onAllocateMemory();
+    fresh->onBuildState();
 
     // Tear down the old subtree (teardown + recursive delete) — same pair
     // FilesystemModule::applyNode uses; a bare delete would leak its children.
@@ -786,9 +795,9 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
         Scheduler::deleteTree(old);
     }
 
-    // Re-run onAllocateMemory across the tree so Layer LUT / Drivers buffer
+    // Re-run onBuildState across the tree so Layer LUT / Drivers buffer
     // wiring re-forms — a replaced effect/driver re-wires like a freshly added one.
-    if (scheduler_) scheduler_->rebuild();
+    if (scheduler_) scheduler_->buildState();
 
     // Persist: children are encoded positionally, so marking the parent dirty
     // rewrites "<index>.type" with the new typeName at the same slot.
@@ -907,7 +916,7 @@ void HttpServerModule::handleMoveModule(platform::TcpConnection& conn, const cha
     // file is rewritten with the new order (same as add/delete handlers).
     parent->markDirty();
     FilesystemModule::noteDirty();
-    if (scheduler_) scheduler_->rebuild();
+    if (scheduler_) scheduler_->buildState();
     sendResponse(conn, 200, "application/json", "{\"ok\":true}");
 }
 

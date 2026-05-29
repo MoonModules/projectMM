@@ -289,7 +289,7 @@ private:
         // statusStr_ is the buffer MoonModule::status_ points at — no control
         // rebuild needed (it isn't a control any more); just kick the scheduler
         // for any dependent reallocations.
-        if (scheduler_) scheduler_->rebuild();
+        if (scheduler_) scheduler_->buildState();
     }
 
     void onConnected(const char* via) {
@@ -321,7 +321,7 @@ private:
         // statusStr_ is the buffer MoonModule::status_ points at — no control
         // rebuild needed (it isn't a control any more); just kick the scheduler
         // for any dependent reallocations.
-        if (scheduler_) scheduler_->rebuild();
+        if (scheduler_) scheduler_->buildState();
     }
 
     void updateStatusIP() {

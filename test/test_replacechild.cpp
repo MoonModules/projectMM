@@ -7,7 +7,7 @@
 namespace {
 
 // Records lifecycle calls in order, so a replace can be checked for the
-// onBuildControls → setup → onAllocateMemory sequence the HTTP handler runs.
+// onBuildControls → setup → onBuildState sequence the HTTP handler runs.
 struct Trace {
     std::vector<std::string> calls;
 };
@@ -17,7 +17,7 @@ public:
     Trace* trace = nullptr;
     void onBuildControls() override { if (trace) trace->calls.push_back(std::string(name()) + ":build"); }
     void setup() override { if (trace) trace->calls.push_back(std::string(name()) + ":setup"); }
-    void onAllocateMemory() override { if (trace) trace->calls.push_back(std::string(name()) + ":alloc"); }
+    void onBuildState() override { if (trace) trace->calls.push_back(std::string(name()) + ":alloc"); }
     void teardown() override { if (trace) trace->calls.push_back(std::string(name()) + ":teardown"); }
 };
 
@@ -84,7 +84,7 @@ TEST_CASE("replaceChildAt: null replacement returns nullptr") {
 
 TEST_CASE("replace lifecycle: fresh module is built, set up, allocated in order") {
     // Mirrors what HttpServerModule::handleReplaceModule does to the replacement:
-    // onBuildControls → setup → onAllocateMemory, then teardown on the old module.
+    // onBuildControls → setup → onBuildState, then teardown on the old module.
     Fixture f;
     Trace trace;
     f.b.trace = &trace;
@@ -95,7 +95,7 @@ TEST_CASE("replace lifecycle: fresh module is built, set up, allocated in order"
     mm::MoonModule* old = f.parent.replaceChildAt(1, &fresh);
     fresh.onBuildControls();
     fresh.setup();
-    fresh.onAllocateMemory();
+    fresh.onBuildState();
     old->teardown();
 
     REQUIRE(trace.calls.size() == 4);

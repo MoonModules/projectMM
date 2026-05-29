@@ -26,7 +26,7 @@ Maximum particles is `MAX_PARTICLES = 64` (a compile-time constant). Particle st
 
 ## Memory
 
-Allocates `width * height * channelsPerLight` bytes for the persistent trail buffer in `onAllocateMemory()` when `enabled` is true. Freed in `teardown()` and when disabled.
+Allocates `width * height * channelsPerLight` bytes for the persistent trail buffer in `onBuildState()` when `enabled` is true. Freed in `teardown()` and when disabled.
 
 | Logical size | Trail buffer (RGB) |
 |--------------|--------------------|

@@ -33,6 +33,11 @@ public:
     // — the *semantics* (percent vs pixel) live in the field name and spec.
     //
     // Spec: docs/architecture.md § Layers and Layer.
+    // NOTE: start/end are not yet read in onBuildState/rebuildLUT — they don't
+    // affect the buffer size today, so Layer doesn't override controlChangeTriggersBuildState.
+    // When they become functional (carving a sub-region → different buffer size), add
+    // `bool controlChangeTriggersBuildState(const char*) const override { return true; }` so a
+    // start/end change triggers the pipeline rebuild.
     lengthType startX = 0;
     lengthType startY = 0;
     lengthType startZ = 0;
@@ -57,7 +62,7 @@ public:
     void setLayouts(Layouts* lg) { layouts_ = lg; }
     void setChannelsPerLight(uint8_t cpl) { channelsPerLight_ = cpl; }
 
-    void onAllocateMemory() override {
+    void onBuildState() override {
         if (!layouts_) return;
         nrOfLightsType physicalCount = layouts_->totalLightCount();
 
@@ -67,7 +72,7 @@ public:
         // while Drivers reallocated its output buffer to 0 bytes (a stale LUT
         // + null output buffer = blendMap dereferences null on the next tick).
         // After this branch hasLUT() is false and physicalLightCount() is 0,
-        // so Drivers::onAllocateMemory takes the "no LUT" path and Drivers::loop
+        // so Drivers::onBuildState takes the "no LUT" path and Drivers::loop
         // skips blendMap entirely.
         if (physicalCount == 0) {
             physicalWidth_ = physicalHeight_ = physicalDepth_ = 0;
@@ -76,7 +81,7 @@ public:
             buffer_.free();
             setDynamicBytes(0);
             clearStatus();  // stale "buffer reduced" message would otherwise persist
-            MoonModule::onAllocateMemory();
+            MoonModule::onBuildState();
             return;
         }
 
@@ -96,7 +101,7 @@ public:
         rebuildLUT();
 
         // Children allocate after LUT is built (effects need buffer dimensions)
-        MoonModule::onAllocateMemory();
+        MoonModule::onBuildState();
     }
 
     void loop() override {
@@ -166,7 +171,7 @@ public:
         return layouts_ ? layouts_->totalLightCount() : 0;
     }
 
-    // Physical dimensions match the actual LED arrangement (computed in onAllocateMemory from
+    // Physical dimensions match the actual LED arrangement (computed in onBuildState from
     // the Layouts). PreviewDriver and any future driver that needs to describe the LED
     // shape should read these rather than caching values from main.cpp startup.
     lengthType physicalWidth() const { return physicalWidth_; }
@@ -175,7 +180,7 @@ public:
 
     bool lutSkipped() const { return lutSkipped_; }
 
-    // Precondition: physicalWidth_/Height_/Depth_ must be set (call from onAllocateMemory)
+    // Precondition: physicalWidth_/Height_/Depth_ must be set (call from onBuildState)
     void rebuildLUT() {
         lutSkipped_ = false;
         clearStatus();  // re-evaluated below if a degrade path is taken

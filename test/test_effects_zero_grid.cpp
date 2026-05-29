@@ -30,8 +30,8 @@ void run_with_empty_layout() {
     layer.setChannelsPerLight(3);
     Effect e;
     layer.addChild(&e);
-    layouts.onAllocateMemory();
-    layer.onAllocateMemory();  // logical/physical dims all zero, no buffer
+    layouts.onBuildState();
+    layer.onBuildState();  // logical/physical dims all zero, no buffer
     // The real assertion is "doesn't crash" — if loop() reaches a divide-by-zero
     // or an OOB write the process dies before we get here.
     layer.loop();

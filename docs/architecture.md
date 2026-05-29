@@ -71,8 +71,8 @@ Modules can be added, replaced, reordered, or removed at runtime. On removal (te
 A MoonModule that owns children gets the standard lifecycle methods propagated to them automatically:
 
 - `setup()` and `teardown()` — chain into children. Teardown reverse-iterates so children clean up before the parent does.
-- `loop()`, `loop20ms()`, `loop1s()` — tick each child gated by the same rule the Scheduler applies to top-level modules (`respectsEnabled() || enabled()`), with per-child timing accumulated into the child's own `loopTimeUs()`.
-- `onBuildControls()` and `onAllocateMemory()` — chain into children.
+- `loop()`, `loop20ms()`, `loop1s()` — tick each child gated by the same rule the Scheduler applies to top-level modules (`!respectsEnabled() || enabled()` — modules that opted out of the enabled gate keep ticking, the rest tick only when enabled), with per-child timing accumulated into the child's own `loopTimeUs()`.
+- `onBuildControls()` and `onBuildState()` — chain into children.
 
 This means a container module gets correct lifecycle handling for its children without writing the iteration itself. Leaf modules (no children) pay one predicted-not-taken branch per call — sub-nanosecond.
 
@@ -118,7 +118,7 @@ Controls are the bridge between the UI and the engine. The web UI renders them a
 Control values and each module's `enabled` flag are persisted to flash so settings survive a reboot. The mechanism lives in [FilesystemModule](moonmodules/core/FilesystemModule.md):
 
 - **Storage** — one flat JSON file per top-level module under `/.config/<TypeName>.json`. Children are encoded positionally with `<index>.` key prefixes — no nested objects, no arrays. The parser stays minimal (three flat-JSON helpers in `core/JsonUtil.h`).
-- **Lifecycle** — `Scheduler::setup()` runs four phases: (1) `onBuildControls` binds every module's full control set, (2) the FilesystemModule load hook overlays persisted values onto the bound variables, (2b) `rebuildControls` re-evaluates conditional `hidden` flags against the loaded state, (3) each module's own `setup()` runs with persisted values already in member variables, (4) `onAllocateMemory` sizes buffers. Modules themselves know nothing about persistence — they just bind their variables.
+- **Lifecycle** — `Scheduler::setup()` runs four phases: (1) `onBuildControls` binds every module's full control set, (2) the FilesystemModule load hook overlays persisted values onto the bound variables, (2b) `rebuildControls` re-evaluates conditional `hidden` flags against the loaded state, (3) each module's own `setup()` runs with persisted values already in member variables, (4) `onBuildState` sizes buffers. Modules themselves know nothing about persistence — they just bind their variables.
 - **Save trigger** — HttpServerModule marks the target module dirty on every successful control mutation. FilesystemModule debounces 2 s in `loop1s()`, walks the tree, writes any subtree containing a dirty descendant via atomic write-and-rename.
 - **Conditional controls** — every conditional control is always bound; the module sets a `hidden` flag (`controls_.setHidden(i, …)`) to tell the UI not to render it. The load path can therefore find persisted values regardless of the live conditional state.
 - **Code-wired children survive a stale file** — modules attached by `main.cpp`'s boot wiring (today: `ImprovProvisioningModule` as a child of `NetworkModule`) call `markWiredByCode()` after `addChild()`. The persistence apply step preserves them even when the saved file pre-dates the addition. Without this, every release that added or moved a code-wired child would trim it on the first boot of an existing device, and the user would lose the child until the next save rewrote the file. Children added through the HTTP API or recreated from JSON stay unmarked — those follow the file's tree shape exactly so UI deletes still take effect.
@@ -135,7 +135,7 @@ The model is **producers vs consumers**: producers generate data, consumers proc
 
 The render loop (`Scheduler::tick` and everything it calls — every effect, modifier, driver, layout) is the hot path. It runs roughly 50–10000 times per second depending on light count. Code there obeys three rules:
 
-- **No heap allocations.** `new`, `malloc`, `push_back`, `std::string` constructors, `make_unique`, `make_shared` — none of them on the hot path. Heap fragmentation on a long-running ESP32 kills throughput in minutes. Allocate everything during `setup()` / `onAllocateMemory()`; the loop only reads and writes pre-sized buffers.
+- **No heap allocations.** `new`, `malloc`, `push_back`, `std::string` constructors, `make_unique`, `make_shared` — none of them on the hot path. Heap fragmentation on a long-running ESP32 kills throughput in minutes. Allocate everything during `setup()` / `onBuildState()`; the loop only reads and writes pre-sized buffers.
 - **No blocking.** No `delay`, no `sleep`, no `mutex.lock()`. If a mutex is unavoidable, use `try_lock` and skip the work this tick. Blocking the render task means a visible glitch on the LEDs.
 - **Integer math preferred over `float` in per-light work.** ESP32's FPU is single-precision and not as cheap as integer ALU; per-light float compounds fast. Use fixed-point or scaled integer math where the visual difference doesn't justify the cost.
 
@@ -294,7 +294,7 @@ Because mapping and blending happen in a single pass over each layer, there is n
 
 **Drivers** (a MoonModule) is the top-level container for one or more drivers. It is the consumer side of the pipeline. The Drivers container owns a shared output buffer and performs blend+map from every layer's buffer into it each frame. Individual drivers then read from this buffer to push to hardware / network.
 
-The shared output buffer is necessary because blend+map writes to arbitrary physical positions via the LUT — the output is not filled sequentially. A driver cannot read chunk-by-chunk until the full buffer is populated. Direct-to-DMA / packet optimisation only works for the trivial case (1:1 identical mapping, no modifiers).
+The shared output buffer is necessary when blend+map writes to arbitrary physical positions via the LUT — the output is not filled sequentially, so a driver cannot read chunk-by-chunk until the full buffer is populated. It is *not* needed for the single-layer, no-blend case (identity or serpentine-shuffle mapping): there a driver can fuse map + output correction + protocol encode into one pass straight into its own output (DMA buffer / packet), skipping the shared buffer. Full detail in [the LED-driver design doc](moonmodules/light/leddriver-analysis-top-down.md).
 
 Each driver (a MoonModule) speaks one protocol:
 
@@ -305,6 +305,8 @@ Each driver (a MoonModule) speaks one protocol:
 
 Each driver child reads from the Drivers container's output buffer. Everything before the Drivers container is platform-independent.
 
+**Output correction** turns logical RGB into the physical signal every physical driver needs: **brightness** scaling, channel **reorder** (RGB→GRB etc. via a *light preset*), and **white** derivation for RGBW fixtures. The Drivers container owns the shared correction state — a brightness lookup table (gamma / white-balance fold in later as a per-channel R/G/B split) plus the light-preset — exposed as `brightness` and `lightPreset` controls. Each *physical* driver applies the correction per-light as it reads its source buffer, into its own output buffer/packet. Preview is exempt: it shows the raw logical buffer (the effect's true output, not the dimmed/reordered wire signal). As of this design ArtNet applies the correction; future LED drivers apply the same correction before their protocol encode. The brightness LUT rebuilds on the cheap `onUpdate` tier (see § Rebuild propagation), so the slider stays fluent.
+
 Network-based drivers (ArtNet, E1.31, DDP) must pace their packet output — never blast all universe packets in a tight loop. Both FPS limiting (skip frames if called too fast) and inter-packet delay (microsecond pause between universes within a frame) are required. Without pacing, receivers drop packets and the output appears broken.
 
 ## Memory strategy
@@ -314,7 +316,7 @@ All buffers are allocated as single contiguous blocks outside the hot path — a
 **Buffer types**
 
 - **Layer buffers** — one per active layer, holds the logical light data for one effect chain. Allocated in PSRAM when available. On memory-constrained devices, consumers may read from the layer buffer directly (no mapping, no blending, no physical buffer needed).
-- **Physical buffer** — when present, holds the blended+mapped output. Logical + physical together form the double buffer for producer/consumer parallelism.
+- **Physical buffer** — when present, holds the blended+mapped output. It is a *blend* buffer, needed only for compositing (>1 layer, or any alpha/additive blend); it is not what provides producer/consumer parallelism. Parallelism comes from the consumer's own working copy — the encoded DMA buffer for a clockless LED driver, or the kernel socket buffer for ArtNet — which decouples the producer (filling the next Layer frame) from the consumer (transmitting the previous one).
 - **Mapping LUT** — flat lookup table for logical→physical. Read-only during rendering. PSRAM is fine — sequential reads are cache-friendly.
 
 All buffers are raw `uint8_t*` arrays sized `channelsPerLight * nrOfLights`. Supports RGB (3 channels), RGBW (4 channels), and multi-channel DMX fixtures (up to 32 channels per light) without separate code paths. Channel layout is configured via offsets (see MoonLight's [LightsHeader](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/LightsHeader.h) pattern).
@@ -340,7 +342,7 @@ Each degradation is observable via `lutSkipped()` and reported in `/api/system` 
 - Drivers always own the output path (blending, mapping, brightness correction, channel reordering).
 - Layer buffer is mandatory — if it doesn't fit, reduce dimensions until it does ("at least see something").
 
-**Per-module reporting.** Every MoonModule reports `classSize()` (sizeof the class instance) and `dynamicBytes()` (heap allocated during `onAllocateMemory`). Visible in `/api/system`, console output, and scenario tests. Memory scenarios verify that 1:1 pipelines use zero intermediate buffers and that the cascade triggers at the right thresholds.
+**Per-module reporting.** Every MoonModule reports `classSize()` (sizeof the class instance) and `dynamicBytes()` (heap allocated during `onBuildState`). Visible in `/api/system`, console output, and scenario tests. Memory scenarios verify that 1:1 pipelines use zero intermediate buffers and that the cascade triggers at the right thresholds.
 
 **Scaling to available memory**
 
@@ -355,9 +357,15 @@ The architecture does not assume PSRAM is present. Buffer counts and sizes are d
 
 ## Rebuild propagation
 
-When a control value changes on a layout, the pipeline must rebuild: every Layer rebuilds its LUT, and the Drivers container reallocates its output buffer. When a modifier control changes, only the affected Layer's LUT is rebuilt (the output buffer size doesn't change). Propagation is built into the framework, not handled by ad-hoc dirty flag checks in the application entry point.
+Control changes reach modules through a three-tier split, so a change costs only as much as it has to. From cheapest to most expensive:
 
-Mechanism: `Scheduler::rebuild()` re-runs `onAllocateMemory()` across the module tree, which re-evaluates layout-derived dimensions, LUTs, and buffer sizes. HTTP handlers that change layout / modifier order or structure trigger `rebuild()` after the mutation.
+1. **`onUpdate(controlName)`** — runs on *every* control change. A cheap, per-control reaction: recompute a small LUT, re-bind a socket. Default no-op. This is where a brightness change rebuilds the (256-entry) correction LUT — no reallocation, so dragging the slider stays fluent.
+2. **`controlChangeTriggersBuildState(controlName)`** — a gate, default `false`. Only `true` for controls that change physical dimensions or mapping shape: every Layout control (grid width/height/depth) and every Modifier control (mirror toggles change the LUT shape). When `true`, the framework runs the pipeline-wide rebuild; when `false` (effect speed, driver fps, brightness), it doesn't.
+3. **`onBuildState()`** — the actual (re)allocation, reached via `Scheduler::buildState()` only when tier 2 returns `true`. Re-evaluates layout-derived dimensions, LUTs, and buffer sizes across the tree.
+
+So: a layout control change → every Layer rebuilds its LUT and the Drivers container reallocates its output buffer (tier 2 → tier 3). A modifier control change → the affected Layer rebuilds its LUT. An effect/driver value change → tier 1 only, no realloc. Enable/disable always rebuilds (it changes which children allocate). Propagation is built into the framework, not ad-hoc dirty-flag checks in the application entry point.
+
+This mirrors the three-way split in MoonLight (projectMM's predecessor): `onUpdate` (value reaction) / `requestMappings` via `hasOnLayout`/`hasModifier` (remap) / `onSizeChanged` (realloc).
 
 ## Multi-device sync
 

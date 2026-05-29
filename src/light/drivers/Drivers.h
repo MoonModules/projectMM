@@ -4,7 +4,10 @@
 #include "light/layers/Buffer.h"
 #include "light/layers/Layer.h"
 #include "light/layers/BlendMap.h"
+#include "light/drivers/Correction.h"
 #include "platform/platform.h"
+
+#include <cstring>  // std::strcmp in onUpdate
 
 namespace mm {
 
@@ -21,22 +24,48 @@ public:
     // layer buffers upstream and still hands each driver one Layer for dimensions —
     // the driver outputs to a single physical fixture either way. See plan.md backlog.
     void setLayer(Layer* layer) { layer_ = layer; }
+
+    // Shared output correction (brightness LUT + channel order + white) owned by the
+    // Drivers container. Default no-op so Preview (which shows the raw logical buffer)
+    // and any future preview-style driver opt out for free; only physical drivers
+    // (ArtNet, future LED) override to apply it.
+    virtual void setCorrection(const Correction* /*c*/) {}
 protected:
     Layer* layer_ = nullptr;
 };
 
 class Drivers : public MoonModule {
 public:
+    uint8_t brightness = 255;
+    uint8_t lightPreset = 0;  // index into kLightPresetOptions; 0 = RGB
+
     void setLayer(Layer* layer) {
         layer_ = layer;
     }
 
+    void onBuildControls() override {
+        controls_.addUint8("brightness", brightness, 0, 255);
+        controls_.addSelect("lightPreset", lightPreset, kLightPresetOptions, kLightPresetCount);
+        MoonModule::onBuildControls();  // cascade to driver children
+    }
+
+    // Brightness / light-preset changes only rebuild the (cheap) correction LUT — no
+    // pipeline realloc. This is what keeps the brightness slider fluent: controlChangeTriggersBuildState
+    // stays false for Drivers, so handleSetControl skips scheduler_->buildState().
+    void onUpdate(const char* controlName) override {
+        if (std::strcmp(controlName, "brightness") == 0 ||
+            std::strcmp(controlName, "lightPreset") == 0) {
+            correction_.rebuild(brightness, static_cast<LightPreset>(lightPreset));
+        }
+    }
+
     void setup() override {
+        correction_.rebuild(brightness, static_cast<LightPreset>(lightPreset));
         MoonModule::setup();
         passBufferToDrivers();
     }
 
-    void onAllocateMemory() override {
+    void onBuildState() override {
         // Output buffer needed if any layer has a LUT (currently single layer).
         // Multi-layer: check all layers, allocate if at least one has a LUT.
         // If allocation fails (no contiguous heap large enough — a real risk on
@@ -56,11 +85,11 @@ public:
         }
         setDynamicBytes(outputBuffer_.bytes());
         passBufferToDrivers();
-        MoonModule::onAllocateMemory();
+        MoonModule::onBuildState();
     }
 
     void loop() override {
-        // outputBuffer_.data() can be null if onAllocateMemory failed to claim
+        // outputBuffer_.data() can be null if onBuildState failed to claim
         // a contiguous block (heap fragmentation). Skip the blend in that case
         // — drivers run on raw Layer buffer or simply have nothing to send.
         if (layer_ && layer_->lut().hasLUT() && outputBuffer_.data()) {
@@ -75,6 +104,7 @@ public:
 private:
     Layer* layer_ = nullptr;
     Buffer outputBuffer_;
+    Correction correction_;
 
     void passBufferToDrivers() {
         if (!layer_) return;
@@ -83,6 +113,7 @@ private:
             auto* drv = static_cast<DriverBase*>(child(i));
             drv->setSourceBuffer(buf);
             drv->setLayer(layer_);  // so PreviewDriver can read current physical dimensions
+            drv->setCorrection(&correction_);  // physical drivers apply it; Preview ignores
         }
     }
 };

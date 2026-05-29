@@ -36,6 +36,10 @@ public:
         sourceBuffer_ = buf;
     }
 
+    void setCorrection(const Correction* c) override {
+        correction_ = c;
+    }
+
     void loop() override {
         if (!sourceBuffer_ || !sourceBuffer_->data()) return;
 
@@ -49,9 +53,40 @@ public:
         // Re-bind the socket if the ip control was changed from the UI.
         connectIfIpChanged();
 
+        // Apply output correction (brightness / channel order / RGBW white) into the
+        // owned corrected_ buffer, then send that. If no correction is wired (e.g. a
+        // unit test constructs the driver outside a Drivers parent), fall back to the
+        // raw source buffer — preserves the pre-correction passthrough behaviour.
+        const uint8_t* data;
+        size_t totalBytes;
+        if (correction_) {
+            const nrOfLightsType nLights = sourceBuffer_->count();
+            const uint8_t outCh = correction_->outChannels;
+            // Lazily (re)allocate to fit; grows only when light count or channel count
+            // rises, so a steady-state frame does zero allocation. Cold path.
+            if (corrected_.count() < nLights || corrected_.channelsPerLight() < outCh) {
+                corrected_.allocate(nLights, outCh);
+            }
+            if (corrected_.data() && corrected_.count() >= nLights) {
+                const uint8_t* src = sourceBuffer_->data();
+                const uint8_t srcCh = sourceBuffer_->channelsPerLight();
+                uint8_t* dst = corrected_.data();
+                for (nrOfLightsType i = 0; i < nLights; i++) {
+                    correction_->apply(src + i * srcCh, dst + i * outCh);
+                }
+                data = dst;
+                totalBytes = static_cast<size_t>(nLights) * outCh;
+            } else {
+                // Allocation failed — degrade to raw passthrough rather than drop the frame.
+                data = sourceBuffer_->data();
+                totalBytes = sourceBuffer_->bytes();
+            }
+        } else {
+            data = sourceBuffer_->data();
+            totalBytes = sourceBuffer_->bytes();
+        }
+
         // Send all universes in one burst — receiver expects a complete frame
-        const uint8_t* data = sourceBuffer_->data();
-        size_t totalBytes = sourceBuffer_->bytes();
         uint16_t universe = universeStart;
 
         size_t sent = 0;
@@ -110,6 +145,8 @@ public:
 private:
     platform::UdpSocket socket_;
     Buffer* sourceBuffer_ = nullptr;
+    const Correction* correction_ = nullptr;
+    Buffer corrected_;               // owned: source bytes after brightness/order/white
     uint8_t sequence_ = 0;
     uint32_t lastSendTime_ = 0;
     char lastConnectedIp_[16] = {};  // destination the socket is currently bound to

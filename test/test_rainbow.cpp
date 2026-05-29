@@ -17,7 +17,7 @@ TEST_CASE("RainbowEffect writes non-zero RGB data to buffer") {
     mm::RainbowEffect rainbow;
     layer.addChild(&rainbow);
 
-    layer.onAllocateMemory();
+    layer.onBuildState();
 
     // Simulate a frame at elapsed=0 (effect uses platform::millis())
     layer.loop();
@@ -49,7 +49,7 @@ TEST_CASE("RainbowEffect pixel 0,0 produces valid RGB") {
     mm::RainbowEffect rainbow;
     layer.addChild(&rainbow);
 
-    layer.onAllocateMemory();
+    layer.onBuildState();
     layer.loop();
 
     auto* data = layer.buffer().data();
@@ -76,7 +76,7 @@ TEST_CASE("RainbowEffect different positions produce different hues") {
     mm::RainbowEffect rainbow;
     layer.addChild(&rainbow);
 
-    layer.onAllocateMemory();
+    layer.onBuildState();
     layer.loop();
 
     auto* data = layer.buffer().data();

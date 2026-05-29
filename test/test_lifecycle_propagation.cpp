@@ -1,6 +1,6 @@
 // Pins the MoonModule base-default propagation for loop / loop20ms / loop1s.
 // The three tick callbacks default to iterating children, gating by
-// `respectsEnabled() || enabled()`, dispatching the same callback on each
+// `!respectsEnabled() || enabled()`, dispatching the same callback on each
 // child, and accumulating per-child timing. Containers that need extra work
 // override and chain to the base; leaf modules pay one predicted-not-taken
 // branch on the empty children_ array.
@@ -115,29 +115,28 @@ TEST_CASE("leaf module loop default is a safe no-op (childCount_ == 0)") {
 
 TEST_CASE("per-child timing accumulates on the child, not the parent") {
     // The base default times each child individually (matches what Scheduler
-    // does for top-level modules). After publishTiming(N), each child's
-    // loopTimeUs() should be non-negative; on desktop platform::micros() is
-    // monotonic and the call itself takes a measurable handful of ticks.
+    // does for top-level modules). Rather than depend on what platform::micros()
+    // happens to read between two adjacent calls on a fast desktop (which can
+    // round to 0 µs and make the assertion tautological), inject a known
+    // non-zero accumulation directly via addAccumUs() and verify that
+    // publishTiming surfaces it on the child as loopTimeUs().
     Counting parent;
     Counting a;
     parent.addChild(&a);
 
-    // Tick several times so accumUs_ has a stable non-zero accumulation
-    // (one micros() round-trip per call is plenty above noise on desktop).
-    for (int i = 0; i < 20; i++) parent.loop();
+    // Tick once via the parent so we exercise the propagation path itself
+    // (tickChildren runs addAccumUs on the child as a side-effect; we don't
+    // rely on the magnitude that produces). Then add a deterministic
+    // contribution so the per-frame average lands at a known non-zero value.
+    parent.loop();
+    a.addAccumUs(40);   // 40us across 2 frames = average 20us/frame
 
-    // publishTiming averages accumUs over the frame count and recurses into
-    // children. After this, child a's loopTimeUs() is the average µs per
-    // loop() call. We don't assert a specific µs value — just that timing
-    // got recorded on the child (i.e. parent's tickChildren did the work).
-    parent.publishTiming(20);
+    parent.publishTiming(2);
 
-    CHECK(a.loopCalls == 20);
-    // Lower bound: a.loop() runs real code + chains to base. On desktop the
-    // platform::micros call alone takes a few ticks; >= 0 is the meaningful
-    // assertion (catches regressions that bypass addAccumUs entirely — those
-    // would leave loopTimeUs unchanged at the publishTiming-default of 0).
-    // We can't assert > 0 reliably on a fast desktop (a single loop may
-    // round to 0 µs); the per-frame accumulator is what gets validated.
-    CHECK(a.loopTimeUs() >= 0u);
+    CHECK(a.loopCalls == 1);
+    // Deterministic lower bound: we injected 40us across 2 frames, so the
+    // averaged loopTimeUs() must be at least 20. A regression that bypasses
+    // addAccumUs in tickChildren would still see the manual 40us we injected;
+    // a regression that breaks publishTiming itself would drop to 0.
+    CHECK(a.loopTimeUs() >= 20u);
 }

@@ -38,14 +38,14 @@ public:
         sourceBuffer_ = buf;
     }
 
-    void onAllocateMemory() override {
+    void onBuildState() override {
         // Owned downsample buffer, sized once to the largest possible budget
         // (detail = 3). The preview frame is sent over WebSocket in a single
         // non-blocking write, so even the finest setting must fit lwIP's
         // 11520 B TCP send buffer — MAX_PREVIEW_VOXELS keeps the payload safe.
         downsampled_.allocate(MAX_PREVIEW_VOXELS, 3);
         setDynamicBytes(downsampled_.bytes());
-        MoonModule::onAllocateMemory();
+        MoonModule::onBuildState();
     }
 
     void loop() override {

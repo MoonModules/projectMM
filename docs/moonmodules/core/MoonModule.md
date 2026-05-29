@@ -15,7 +15,7 @@ Field order optimized for minimal padding: group 8-byte fields, then 4-byte, the
 - `loop20ms()` — called every ~20ms (for UI updates, control reads, network polling)
 - `loop1s()` — called every ~1 second (diagnostics, reconnects, housekeeping)
 - `teardown()` — called before destruction, must clean up all allocated resources
-- `onAllocateMemory()` — single hook for dynamic allocation after setup. Sets `moduleAllocBytes_`. Called at setup and on reallocation triggers.
+- `onBuildState()` — single hook for dynamic allocation after setup. Sets `moduleAllocBytes_`. Called at setup and on reallocation triggers.
 - `onBuildControls()` — all addControl() calls here, not in setup(). Supports dynamic rebuild via `clearControls()`.
 
 The Scheduler handles pacing — `loop()` modules don't need to manage timing themselves. `loop20ms` for UI/network. `loop1s` for cold-path housekeeping.
@@ -31,7 +31,7 @@ Controls bind to class variables by reference. Hot-path code reads the variable 
 ## Footprint reporting
 
 - `classSize()` — set once at registration via `register_type<T>()`. No per-class boilerplate.
-- `dynamicMemorySize()` — heap bytes allocated by this module (set by `onAllocateMemory()`).
+- `dynamicMemorySize()` — heap bytes allocated by this module (set by `onBuildState()`).
 
 ## Per-module timing
 
@@ -60,17 +60,17 @@ Every MoonModule has a dynamic children array. `addChild()`, `removeChild()`, `r
 
 `replaceChildAt` is used by [FilesystemModule](FilesystemModule.md) at load time to swap a child whose type differs from the persisted JSON. The caller owns the lifecycle of the returned old child (typically `teardown()` + `Scheduler::deleteTree`).
 
-`moveChildTo(child, newIndex)` reorders a child to an absolute index 0..childCount-1. Intervening siblings shift to fill the vacated slot. Used by the UI's up/down/drag-and-drop reorder via `POST /api/modules/<name>/move {to:N}`. Returns false if `child` isn't found, `newIndex` is out of range, or the child is already at `newIndex`. After a successful move, the caller (currently `HttpServerModule::handleMoveModule`) triggers `Scheduler::rebuild()` so any LUT that depends on modifier/layout order rebuilds.
+`moveChildTo(child, newIndex)` reorders a child to an absolute index 0..childCount-1. Intervening siblings shift to fill the vacated slot. Used by the UI's up/down/drag-and-drop reorder via `POST /api/modules/<name>/move {to:N}`. Returns false if `child` isn't found, `newIndex` is out of range, or the child is already at `newIndex`. After a successful move, the caller (currently `HttpServerModule::handleMoveModule`) triggers `Scheduler::buildState()` so any LUT that depends on modifier/layout order rebuilds.
 
 Children are distinguished by `role()` (Effect, Modifier, Driver, Layout, Generic). Containers that need role-specific iteration (e.g. Layer::loop() only calls loop() on Effects, not Modifiers) filter children by role at the call site.
 
-Parents own their children's lifecycle. Only top-level modules are registered with the Scheduler — parents propagate `setup()`, `onBuildControls()`, `onAllocateMemory()`, `loop()`, and `teardown()` to their children. This means children don't need separate Scheduler registration.
+Parents own their children's lifecycle. Only top-level modules are registered with the Scheduler — parents propagate `setup()`, `onBuildControls()`, `onBuildState()`, `loop()`, and `teardown()` to their children. This means children don't need separate Scheduler registration.
 
 ### Lifecycle-aware add/remove
 
 When the UI adds or removes a child at runtime (e.g. switching an effect on a layer, adding a driver), the caller must handle lifecycle:
 
-- **Add at runtime:** caller calls `setup()` → `onBuildControls()` → `onAllocateMemory()` on the new child (since the parent's own setup has already run).
+- **Add at runtime:** caller calls `setup()` → `onBuildControls()` → `onBuildState()` on the new child (since the parent's own setup has already run).
 - **Remove at runtime:** caller calls `teardown()` on the child before removing it.
 - **Add before setup:** if children are added before `scheduler.setup()` (startup or persistence restore), the parent's own `setup()` propagates to all children — no special handling needed.
 
@@ -107,7 +107,7 @@ Conditional controls (e.g. fields only visible under a Select mode) are always b
 
 ### projectMM v2 — MoonModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/MoonModule.h))
 
-- `onBuildControls()` / `onAllocateMemory()` separation.
+- `onBuildControls()` / `onBuildState()` separation.
 - `onChildrenReady()` — parent-notified-after-children hook. Not carried over; child setup ordering is handled by Scheduler's 4-phase boot instead.
 - Field order optimized 8B→4B→2B→1B, saving 24 bytes.
 - `classSize` set via `register_type<T>()`.

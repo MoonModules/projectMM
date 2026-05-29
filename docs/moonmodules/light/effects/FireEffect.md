@@ -26,7 +26,7 @@ Integer-only, no floats. Internal PRNG (LCG) avoids `rand()`.
 
 ## Memory
 
-Allocates `width * height` bytes for the heat buffer in `onAllocateMemory()` when `enabled` is true. Freed in `teardown()` and when disabled. Toggling `enabled` triggers a scheduler rebuild that (re)allocates.
+Allocates `width * height` bytes for the heat buffer in `onBuildState()` when `enabled` is true. Freed in `teardown()` and when disabled. Toggling `enabled` triggers a scheduler rebuild that (re)allocates.
 
 | Logical size | Heat buffer |
 |--------------|-------------|

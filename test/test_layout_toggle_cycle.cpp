@@ -32,13 +32,13 @@ private:
     mm::Buffer* source_ = nullptr;
 };
 
-// Simulate Scheduler::rebuild() + one tick: walk the top-level modules calling
-// onAllocateMemory() then loop().
+// Simulate Scheduler::buildState() + one tick: walk the top-level modules calling
+// onBuildState() then loop().
 void rebuildAndTick(mm::Layouts& layouts, mm::Layers& layersC, mm::Drivers& driversC) {
-    layouts.onAllocateMemory();
-    layersC.onAllocateMemory();
+    layouts.onBuildState();
+    layersC.onBuildState();
     driversC.setLayer(layersC.activeLayer());
-    driversC.onAllocateMemory();
+    driversC.onBuildState();
     layersC.loop();
     driversC.loop();
 }
@@ -47,7 +47,7 @@ void rebuildAndTick(mm::Layouts& layouts, mm::Layers& layersC, mm::Drivers& driv
 
 TEST_CASE("Toggle a single layout off then on: pipeline survives and renders again") {
     // Regression: disabling the only layout child crashed Drivers::loop with a
-    // null-pointer blendMap on the next tick — Layer::onAllocateMemory bailed
+    // null-pointer blendMap on the next tick — Layer::onBuildState bailed
     // early on physicalCount==0 without dropping the old LUT, while Drivers
     // reallocated its output buffer to 0 bytes. The fix tears down the LUT and
     // buffer on empty so Drivers takes the no-LUT path cleanly.

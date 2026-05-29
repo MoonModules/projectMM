@@ -38,7 +38,7 @@ TEST_CASE("D2 effect on 3D grid: z-slices are identical (Layer::extrude)") {
     mm::RainbowEffect rainbow;
     layer.addChild(&rainbow);
 
-    layer.onAllocateMemory();
+    layer.onBuildState();
     layer.loop();
 
     auto* data = layer.buffer().data();
@@ -90,7 +90,7 @@ TEST_CASE("D1 effect on 3D grid: rows and z-slices are identical (Layer::extrude
     D1StubEffect d1;
     layer.addChild(&d1);
 
-    layer.onAllocateMemory();
+    layer.onBuildState();
     layer.loop();
 
     auto* data = layer.buffer().data();
@@ -139,7 +139,7 @@ static void check_d3_on_2d(const char* tag) {
     EffectT effect;
     layer.addChild(&effect);
 
-    layer.onAllocateMemory();
+    layer.onBuildState();
     layer.loop();
 
     auto* data = layer.buffer().data();
@@ -171,7 +171,7 @@ static void check_d3_on_1d(const char* tag) {
     EffectT effect;
     layer.addChild(&effect);
 
-    layer.onAllocateMemory();
+    layer.onBuildState();
     layer.loop();
 
     auto* data = layer.buffer().data();
@@ -206,7 +206,7 @@ TEST_CASE("D3 effect on 1D layer: PlasmaEffect produces a valid 1D strip") {
 // not from the effect itself. Catches a regression where a D2 effect either
 // fails to write z=0 (everything black) or where extrude no longer fills z
 // (z>0 stays black). Covers one stateless (Checkerboard) and two stateful
-// (Fire, Particles) effects so changes to onAllocateMemory don't silently
+// (Fire, Particles) effects so changes to onBuildState don't silently
 // break the contract.
 
 template<typename EffectT>
@@ -225,7 +225,7 @@ static void check_d2_on_3d(const char* tag) {
     EffectT effect;
     layer.addChild(&effect);
 
-    layer.onAllocateMemory();
+    layer.onBuildState();
     // Some effects (Fire, particles with random sparks) need a few frames
     // before they reliably produce visible output; one frame is enough for
     // the deterministic effects we test here.

@@ -32,7 +32,7 @@ struct PreviewRig {
         group.addChild(&grid);
         layer.setLayouts(&group);
         layer.setChannelsPerLight(cpl);
-        layer.onAllocateMemory();
+        layer.onBuildState();
 
         source.allocate(static_cast<mm::nrOfLightsType>(w) * h * d, cpl);
         // Fill so the strided copy produces non-zero output.
@@ -42,7 +42,7 @@ struct PreviewRig {
         driver.setSourceBuffer(&source);
         driver.setPreviewFrame(&frame);
         driver.onBuildControls();
-        driver.onAllocateMemory();
+        driver.onBuildState();
     }
 
     // Produce one frame deterministically. renderFrame() bypasses loop()'s fps

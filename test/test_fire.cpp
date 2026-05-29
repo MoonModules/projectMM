@@ -17,7 +17,7 @@ TEST_CASE("FireEffect allocates heat buffer when enabled") {
     mm::FireEffect fire;
     layer.addChild(&fire);
 
-    layer.onAllocateMemory();
+    layer.onBuildState();
     CHECK(fire.dynamicBytes() == 16 * 16);
 }
 
@@ -37,7 +37,7 @@ TEST_CASE("FireEffect renders non-zero buffer after enough sparks") {
     fire.sparking = 255;
     layer.addChild(&fire);
 
-    layer.onAllocateMemory();
+    layer.onBuildState();
 
     // Run several frames so sparks emerge and propagate
     bool hasNonZero = false;
@@ -66,10 +66,10 @@ TEST_CASE("FireEffect frees heat buffer when disabled") {
     mm::FireEffect fire;
     layer.addChild(&fire);
 
-    layer.onAllocateMemory();
+    layer.onBuildState();
     CHECK(fire.dynamicBytes() > 0);
 
     fire.setEnabled(false);
-    fire.onAllocateMemory();
+    fire.onBuildState();
     CHECK(fire.dynamicBytes() == 0);
 }

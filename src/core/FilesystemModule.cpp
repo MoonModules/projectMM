@@ -182,7 +182,7 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
     // "<prefix><idx>.type"; if it differs from the live child (or no live child
     // exists), factory-create the JSON type and place it at that position. The
     // newly-created child gets onBuildControls() here so the recursive applyNode
-    // below can overlay its persisted values. Phases 3+4 (setup, onAllocateMemory)
+    // below can overlay its persisted values. Phases 3+4 (setup, onBuildState)
     // cascade into the new child automatically.
     // Walk JSON child positions in order; stop when "<idx>.type" is absent. No fixed cap —
     // the JSON itself terminates the loop. childCount_ is a uint8_t so the practical ceiling

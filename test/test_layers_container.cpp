@@ -28,7 +28,7 @@ TEST_CASE("Layers with one Layer produces the same output as a bare Layer") {
     bareLayer.setChannelsPerLight(3);
     mm::RainbowEffect bareEffect;
     bareLayer.addChild(&bareEffect);
-    bareLayer.onAllocateMemory();
+    bareLayer.onBuildState();
     bareLayer.loop();
 
     // --- New shape: Layers container wrapping one Layer ---
@@ -47,7 +47,7 @@ TEST_CASE("Layers with one Layer produces the same output as a bare Layer") {
     mm::RainbowEffect childEffect;
     childLayer.addChild(&childEffect);
 
-    layersContainer.onAllocateMemory();
+    layersContainer.onBuildState();
     // Layers::loop runs each child Layer in order; for the single-child case
     // that's exactly one bareLayer.loop() equivalent.
     layersContainer.loop();
@@ -92,7 +92,7 @@ TEST_CASE("Layers with two Layers: each child Layer's loop runs and writes its b
     layersContainer.addChild(&layerA);
     layersContainer.addChild(&layerB);
     layersContainer.setLayouts(&layouts);
-    layersContainer.onAllocateMemory();
+    layersContainer.onBuildState();
     layersContainer.loop();
 
     // Both child Layer buffers must be populated — composition isn't wired

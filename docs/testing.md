@@ -209,7 +209,7 @@ Pins the contract that `EffectBase::dimensions()` and `Layer::extrude` form: a D
 - D1 stub effect on 3D grid (8×4×3): every y>0 row byte-equals y=0 within z=0, then every z>0 slice byte-equals z=0.
 - D3 effects (`NoiseEffect`, `PlasmaEffect`) on a 2D layer (8×8×1): buffer is exactly `w*h*cpl` bytes and is non-zero (proves the effect iterated correctly with depth=1; protects against hardcoded depth bounds).
 - D3 effects (`NoiseEffect`, `PlasmaEffect`) on a 1D layer (16×1×1): same shape, even tighter (`w*cpl` bytes).
-- D2 effects (`CheckerboardEffect`, `FireEffect`, `ParticlesEffect`) on 3D grid (8×8×3): every z>0 slice byte-equals z=0 — proves extrude fills z for all three styles (stateless, stateful with heat grid, stateful with trail buffer). Catches a future regression where a D2 effect's `onAllocateMemory` resizes the dynamic buffer to the full 3D shape but the loop still writes only z=0.
+- D2 effects (`CheckerboardEffect`, `FireEffect`, `ParticlesEffect`) on 3D grid (8×8×3): every z>0 slice byte-equals z=0 — proves extrude fills z for all three styles (stateless, stateful with heat grid, stateful with trail buffer). Catches a future regression where a D2 effect's `onBuildState` resizes the dynamic buffer to the full 3D shape but the loop still writes only z=0.
 
 ### layers-container
 
@@ -248,6 +248,20 @@ Tests `blendMap()` in `src/light/layers/BlendMap.h`.
 - oneToOne: output equals input (memcpy path)
 - 1:N mapping: logical pixel appears at multiple physical positions
 - Additive blend with clamping
+
+### correction
+
+`test/test_correction.cpp`
+Tests `Correction` in `src/light/drivers/Correction.h` (per-driver output correction: brightness LUT, channel reorder, RGBW white) and the selective control-change rebuild gate.
+
+- Brightness LUT: full brightness (255) is identity; half (128) halves each value (scale8: 255→128, 128→64)
+- RGB preset: apply is identity at full brightness
+- GRB / BGR presets: channels reordered correctly, 3 output channels
+- RGBW preset: 4 output channels, white = `min(r,g,b)`
+- GRBW preset: reordered RGB + white
+- Brightness applied *before* white derivation (white is min of the scaled channels)
+- rebuild switches output channel count when toggling RGB↔RGBW presets
+- `controlChangeTriggersBuildState`: Layout (`width`) and Modifier (`mirrorX`) opt in (return true); effects (`scale`) and Drivers (`brightness`) do not (return false) — pins the fluent-slider gate
 
 ## Scenario Tests
 

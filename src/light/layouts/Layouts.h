@@ -10,6 +10,10 @@ public:
     ModuleRole role() const override { return ModuleRole::Layout; }
     virtual nrOfLightsType lightCount() const = 0;
     virtual void forEachCoord(CoordCallback cb, void* ctx) const = 0;
+
+    // Every layout control (grid width/height/depth, …) changes the physical light
+    // count and therefore needs the pipeline-wide rebuild. See MoonModule::onUpdate.
+    bool controlChangeTriggersBuildState(const char* /*controlName*/) const override { return true; }
 };
 
 // Top-level container for one or more `LayoutBase` children. Walks them in
@@ -27,8 +31,8 @@ public:
     // same effect as disabling every child, so the universal-gate intent ("enabled
     // on every module means: exclude my contribution") holds for the container too.
     // The Scheduler can't enforce this for us because Layouts has no loop() — the
-    // work happens in these cold-path methods called from Layer::onAllocateMemory
-    // and Drivers::onAllocateMemory.
+    // work happens in these cold-path methods called from Layer::onBuildState
+    // and Drivers::onBuildState.
     nrOfLightsType totalLightCount() const {
         if (!enabled()) return 0;
         nrOfLightsType total = 0;

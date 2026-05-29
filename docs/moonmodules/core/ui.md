@@ -171,7 +171,7 @@ POST   /api/control           {module, control, value} — set a control value
 POST   /api/modules           {type, parent_id?} — create
 POST   /api/modules/<n>/move  {to: N} — reorder to absolute index N within parent
                               strict-suffix match: /movex returns 404
-                              triggers Scheduler::rebuild() so LUT-affecting reorders rebuild
+                              triggers Scheduler::buildState() so LUT-affecting reorders rebuild
 POST   /api/modules/<n>/replace {type} — swap module <n> for another type at the same
                               position. Strict-suffix match. The replacement starts with
                               factory defaults; siblings and order are preserved.

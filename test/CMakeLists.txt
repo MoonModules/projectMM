@@ -21,6 +21,7 @@ add_executable(mm_tests
     test_mapping_lut.cpp
     test_mirror.cpp
     test_blend_map.cpp
+    test_correction.cpp
     test_filesystem_persistence.cpp
     test_movechild.cpp
     test_replacechild.cpp

@@ -66,7 +66,7 @@ When the network mode changes (e.g. STA drops → AP starts, or Ethernet connect
 1. **Check heap**: estimate memory needed for the new network mode
 2. **If heap is tight**: tear down light buffers first (free Layer buffer, LUT, driver buffer) — display goes dark temporarily
 3. **Start new network mode**: WiFi/AP init claims its memory
-4. **Rebuild light pipeline**: `scheduler.rebuild()` re-runs `onAllocateMemory()` — adaptive allocation uses whatever heap remains
+4. **Rebuild light pipeline**: `scheduler.buildState()` re-runs `onBuildState()` — adaptive allocation uses whatever heap remains
 
 This ensures the system never crashes from out-of-memory during WiFi init. Temporarily dropping light buffers (going dark for a few seconds) is acceptable — crashing is not.
 

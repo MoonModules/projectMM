@@ -18,7 +18,7 @@ namespace mm {
 class Layers : public MoonModule {
 public:
     // Wire the shared Layouts. Propagates to every child Layer so their
-    // onAllocateMemory() can size buffers from it. Idempotent — call again
+    // onBuildState() can size buffers from it. Idempotent — call again
     // after adding a Layer child to wire the new one. Non-Layer children
     // (UI shouldn't allow them; engine doesn't enforce — yet) are skipped
     // rather than miscast, so a stray child can't UB the cast.

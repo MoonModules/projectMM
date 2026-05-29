@@ -10,6 +10,11 @@ public:
     ModuleRole role() const override { return ModuleRole::Modifier; }
     virtual bool isStatic() const { return true; }
 
+    // A modifier control change alters the LUT shape, so the owning Layer must rebuild
+    // its LUT — the pipeline-wide rebuild path. See MoonModule::onUpdate. (Even a
+    // future dynamic modifier is harmless to rebuild on a control change.)
+    bool controlChangeTriggersBuildState(const char* /*controlName*/) const override { return true; }
+
     // Which axes the modifier can transform. Defaults to D3 — a modifier that
     // touches the LUT is assumed to work in 3D unless it declares otherwise.
     // The UI uses this to render the 📏/🟦/🧊 chip so the user can see at a

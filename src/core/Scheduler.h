@@ -32,7 +32,7 @@ public:
     void teardown();
 
     uint32_t elapsed() const;
-    void rebuild();
+    void buildState();
 
     uint32_t tickTimeUs() const { return tickTimeUs_; }
     uint32_t fps() const { return tickTimeUs_ > 0 ? 1000000 / tickTimeUs_ : 0; }

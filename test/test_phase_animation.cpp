@@ -37,8 +37,8 @@ bool animates_over_ms(int total_ms) {
     layer.setChannelsPerLight(3);
     Effect e;
     layer.addChild(&e);
-    layouts.onAllocateMemory();
-    layer.onAllocateMemory();
+    layouts.onBuildState();
+    layer.onBuildState();
 
     layer.loop();
     std::vector<uint8_t> baseline(layer.buffer().data(), layer.buffer().data() + layer.buffer().bytes());
@@ -83,17 +83,17 @@ TEST_CASE("Replacing an effect at runtime: new effect still animates") {
     auto* noise = new mm::NoiseEffect();
     layer.addChild(noise);
 
-    layouts.onAllocateMemory();
-    layer.onAllocateMemory();
+    layouts.onBuildState();
+    layer.onBuildState();
     layer.loop();
 
     auto* fresh = new mm::MetaballsEffect();
     mm::MoonModule* old = layer.replaceChildAt(0, fresh);
     fresh->onBuildControls();
     fresh->setup();
-    fresh->onAllocateMemory();
+    fresh->onBuildState();
     if (old) { old->teardown(); delete old; }
-    layer.onAllocateMemory();
+    layer.onBuildState();
 
     layer.loop();
     std::vector<uint8_t> first(layer.buffer().data(), layer.buffer().data() + layer.buffer().bytes());

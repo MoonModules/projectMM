@@ -74,7 +74,7 @@ No FreeRTOS tasks are pinned today. At 16K LEDs the render task takes ~52 ms/tic
 When picked up:
 - `Drivers::loop()` blends each enabled Layer's buffer into the shared output using per-Layer blend mode + opacity (controls to add on Layer).
 - `Layer::startX/Y/Z` / `endX/Y/Z` (already persisted, currently no-op) become active in `rebuildLUT` — each Layer carves a percentage region of the physical extent.
-- Memory-aware allocator at `onAllocateMemory` time decides how many Layers fit and degrades gracefully.
+- Memory-aware allocator at `onBuildState` time decides how many Layers fit and degrades gracefully.
 - Persistence already encodes Layers children positionally — adding siblings just works on the file-format side.
 
 ### Improv as a child of NetworkModule (deferred — needs scheduler work first)
