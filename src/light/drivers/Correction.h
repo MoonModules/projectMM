@@ -51,6 +51,10 @@ struct Correction {
             case LightPreset::BGR:  order[0]=2; order[1]=1; order[2]=0; outChannels=3; deriveWhite=false; break;
             case LightPreset::RGBW: order[0]=0; order[1]=1; order[2]=2; order[3]=3; outChannels=4; deriveWhite=true; break;
             case LightPreset::GRBW: order[0]=1; order[1]=0; order[2]=2; order[3]=3; outChannels=4; deriveWhite=true; break;
+            // Out-of-range preset (e.g. a corrupt persisted lightPreset value cast to the
+            // enum) falls back to plain RGB so order/outChannels/deriveWhite are always set
+            // deterministically — apply() never reads stale fields.
+            default:                order[0]=0; order[1]=1; order[2]=2; outChannels=3; deriveWhite=false; break;
         }
     }
 

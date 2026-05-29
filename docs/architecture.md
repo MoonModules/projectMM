@@ -129,7 +129,7 @@ The Scheduler stays independent of FilesystemModule's type via a function-pointe
 
 On multi-core systems (ESP32 has 2 cores, desktop / RPi have many), the system exploits parallelism by assigning MoonModules to specific cores. Each MoonModule can declare a core affinity. The scheduler respects this when pinning tasks. On single-core or desktop systems, affinity is ignored and everything runs on available threads.
 
-The model is **producers vs consumers**: producers generate data, consumers process and output it. They run on separate cores with double buffering at the boundary — no locks on the hot path. The light domain instantiates the model concretely: effects are producers, drivers are consumers, the logical and physical buffers are the double buffer (see [Memory strategy](#memory-strategy)).
+The model is **producers vs consumers**: producers generate data, consumers process and output it. They run on separate cores with double buffering at the boundary — no locks on the hot path. The light domain instantiates the model concretely: effects are producers, drivers are consumers. The double buffer is the producer's Layer buffer and the consumer's own working copy (the encoded DMA buffer for an LED driver, the socket buffer for ArtNet); the physical/blend buffer, when present, is for compositing, not parallelism (see [Memory strategy](#memory-strategy)).
 
 ## Hot path discipline
 

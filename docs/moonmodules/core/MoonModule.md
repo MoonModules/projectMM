@@ -64,7 +64,7 @@ Every MoonModule has a dynamic children array. `addChild()`, `removeChild()`, `r
 
 Children are distinguished by `role()` (Effect, Modifier, Driver, Layout, Generic). Containers that need role-specific iteration (e.g. Layer::loop() only calls loop() on Effects, not Modifiers) filter children by role at the call site.
 
-Parents own their children's lifecycle. Only top-level modules are registered with the Scheduler — parents propagate `setup()`, `onBuildControls()`, `onBuildState()`, `loop()`, and `teardown()` to their children. This means children don't need separate Scheduler registration.
+Parents own their children's lifecycle. Only top-level modules are registered with the Scheduler — parents propagate `setup()`, `onBuildControls()`, `onBuildState()`, `loop()`, `loop20ms()`, `loop1s()`, and `teardown()` to their children. This means children don't need separate Scheduler registration.
 
 ### Lifecycle-aware add/remove
 

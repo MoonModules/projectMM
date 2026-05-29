@@ -526,7 +526,10 @@ void HttpServerModule::handleSetControl(platform::TcpConnection& conn, const cha
             }
             case ControlType::ReadOnly:
             case ControlType::Progress:
-                break; // read-only, skip
+                // Immutable controls: reject the write before any side effects
+                // (no value change, no onUpdate, no dirty/save, no buildState).
+                sendResponse(conn, 400, "application/json", "{\"error\":\"control is read-only\"}");
+                return;
         }
         // Rebuild controls only for Select (dynamic onBuildControls re-evaluates the
         // visible set, e.g. NetworkModule's static-IP fields).

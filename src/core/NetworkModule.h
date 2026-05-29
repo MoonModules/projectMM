@@ -3,6 +3,7 @@
 #include "core/MoonModule.h"
 #include "core/Scheduler.h"
 #include "core/SystemModule.h"
+#include "core/FilesystemModule.h"
 #include "platform/platform.h"
 
 #include <cstdio>
@@ -37,7 +38,11 @@ public:
         ssid_[sizeof(ssid_) - 1] = 0;
         std::strncpy(password_, password ? password : "", sizeof(password_) - 1);
         password_[sizeof(password_) - 1] = 0;
-        markDirty();   // FilesystemModule picks this up on its next save
+        markDirty();
+        FilesystemModule::noteDirty();   // start the debounce so the change actually flushes
+                                         // (markDirty alone only sets the bit; the save scheduler
+                                         // needs noteDirty to arm — Improv-pushed creds would
+                                         // otherwise persist only if some other control changed)
         if constexpr (platform::hasWiFi) {
             // Tear down any prior WiFi state (AP-fallback, mid-flight STA
             // attempt, or stale init from a previous reconfigure) so the
