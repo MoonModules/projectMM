@@ -28,6 +28,8 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 # Reuse the shared test-metadata parser so scenario discovery stays in one place.
 sys.path.insert(0, str(ROOT / "scripts" / "docs"))
 import _test_metadata as test_meta  # noqa: E402
+sys.path.insert(0, str(ROOT / "scripts" / "scenario"))
+import _observed  # noqa: E402
 
 _HOST = {"darwin": "macos", "win32": "windows"}.get(sys.platform, "linux")
 _RUNNER_BASE = ROOT / "build" / _HOST / "test" / "mm_scenarios"
@@ -99,14 +101,22 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
         name = step.get("name")
         if name not in observations:
             continue
-        # Always write observed.<target> — observations persist on every run.
-        step.setdefault("observed", {})[target] = {
-            "tick_us": observations[name]["tick_us"],
-            "free_heap": observations[name]["free_heap"],
-            "max_alloc_block": observations[name]["max_alloc_block"],
-            "at": today,
-        }
-        touched_observed += 1
+        # observed.<target> stores a rolling [min, max] range per scalar that
+        # only widens when a fresh measurement falls outside the current bounds
+        # — drops JSON churn on routine runs to near-zero while preserving full
+        # drift visibility. When --update-contract was passed, reset the range
+        # to the current single point (the historical range was for the
+        # previous contract). See scripts/scenario/_observed.py.
+        existing_obs = step.get("observed", {}).get(target)
+        if update_contract:
+            new_obs = _observed.reset(observations[name], today)
+            obs_changed = True
+        else:
+            new_obs, obs_changed = _observed.widen(existing_obs, observations[name], today)
+        if obs_changed:
+            step.setdefault("observed", {})[target] = new_obs
+            touched_observed += 1
+
         # Only renegotiate the contract when --update-contract was passed. The
         # max_alloc_block field is *not* copied into the contract by default —
         # it's an opt-in floor that only a few scenarios assert (where LUT-fit

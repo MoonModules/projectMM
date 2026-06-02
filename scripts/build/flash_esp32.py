@@ -79,7 +79,24 @@ def main():
 
     r = subprocess.run(cmd + b_arg + ["flash", "-p", args.port],
                        cwd=ESP32_DIR, env=env)
+    if r.returncode == 0:
+        _record_flash_event(args.port, args.board)
     sys.exit(r.returncode)
+
+
+def _record_flash_event(port: str, board: str) -> None:
+    """Drop a `scripts/.last_flash.json` breadcrumb so MoonDeck can link the
+    just-flashed serial port to whichever device appears online next.
+    MoonDeck's _probe_device consumes it on the next refresh and clears it.
+    Stored as JSON in the same directory as moondeck.json so the entire
+    "MoonDeck state" lives in one place."""
+    import json, time
+    marker = ROOT / "scripts" / ".last_flash.json"
+    marker.write_text(json.dumps({
+        "port": port,
+        "firmware": board,  # firmware variant per moondeck terminology
+        "ts": time.time(),
+    }))
 
 
 if __name__ == "__main__":

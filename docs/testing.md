@@ -164,19 +164,30 @@ Target keys match `SystemModule.board` on a flashed device (`esp32`, `esp32-eth`
 
 #### Persistent observations (`observed[<target>]`)
 
-Alongside `contract`, every measurable step accumulates an `observed.<target>` block on every scenario run — the most recent reading the device actually delivered:
+Alongside `contract`, every measurable step keeps a **rolling [min, max] range** per scalar in the `observed.<target>` block. The range only ever *widens*: a measurement inside the current bounds doesn't change the JSON at all (no diff churn on routine runs); a measurement outside the bounds pushes the relevant end out and updates the timestamp.
 
 ```json
 "observed": {
-  "esp32-eth-wifi": { "tick_us": 89041, "free_heap": 107380, "at": "2026-06-02" },
-  "esp32-eth":      { "tick_us": 99514, "free_heap": 135200, "at": "2026-06-02" },
-  "pc-macos":       { "tick_us": 103,   "free_heap": 0,      "at": "2026-06-02" }
+  "esp32-eth-wifi": {
+    "tick_us":         [80649, 89483],
+    "free_heap":       [95528, 110640],
+    "max_alloc_block": [49152, 53248],
+    "at":              ["2026-06-02", "2026-06-15"]
+  },
+  "esp32-eth": {
+    "tick_us":         [99514, 99514],
+    "free_heap":       [135200, 135200],
+    "max_alloc_block": [49152, 49152],
+    "at":              ["2026-06-02", "2026-06-02"]
+  }
 }
 ```
 
-This is updated by **every** run of `run_scenario.py` or `run_live_scenario.py` for the active target — no flag needed. Other targets' blocks are left untouched. The point is to see drift below the contract, not just whether contracts are met. The `at` date-stamp tells you how recent the reading is; the runner overwrites the same block on each subsequent run so churn is at most one diff per day per target.
+Read directions match the contract semantics: tick contract is a *ceiling*, so the **max** of the observed range is the value that could fail it; heap and block contracts are *floors*, so the **min** of the observed range is the failure-side. The `at` field carries `[first_seen, last_updated]` so a stale range stands out (e.g. "last_updated is six months old → re-sweep this target").
 
-Open any scenario JSON and you can compare contract to reality at a glance — an observation well under the tick contract or well above the heap floor means there's headroom to tighten; one creeping close to the limit means a regression may be imminent.
+Updated by **every** successful run of `run_scenario.py` or `run_live_scenario.py` for the active target — no flag needed. A range that never widens produces no diff. When a contract is renegotiated via `--update-contract` (see below), the observed range *resets* to the new single-point measurement because the previous range belonged to the old contract.
+
+Open any scenario JSON and the range tells you both the typical case (the value sits in the range) and the variance (range width). A wide gap between the max of the observed range and the contract ceiling means there's headroom to tighten the promise; a max creeping up against the ceiling means a regression may be imminent.
 
 #### Renegotiating a contract
 

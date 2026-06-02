@@ -105,37 +105,130 @@ def _fmt_heap(bytes_: int) -> str:
     return f"{bytes_}B"
 
 
-def _format_contract_line(target: str, c: dict) -> str:
-    """One bullet line summarising a per-target contract."""
-    parts = []
-    if c.get("tick_us"):
-        parts.append(f"tick ≤ {_fmt_us(int(c['tick_us']))} ({_fps_from_us(int(c['tick_us']))} FPS)")
-    if c.get("free_heap"):
-        parts.append(f"heap ≥ {_fmt_heap(int(c['free_heap']))}")
-    if c.get("max_alloc_block"):
-        parts.append(f"block ≥ {_fmt_heap(int(c['max_alloc_block']))}")
-    if not parts:
-        return f"`{target}`: (no thresholds)"
-    extra = []
-    if c.get("set_by"):
-        extra.append(f"set {c['set_by']}")
-    if c.get("reason"):
-        extra.append(f"\"{c['reason']}\"")
-    tail = f" — {' · '.join(extra)}" if extra else ""
-    return f"`{target}`: " + " · ".join(parts) + tail
+def _fps_floor_from_contract(tick_us) -> str:
+    """Contract tick ceiling → FPS floor. We store ticks (the assertion unit)
+    but render FPS as the headline number (project convention; see README §
+    Performance)."""
+    if tick_us in (None, 0):
+        return "—"
+    return f"≥ {_fps_from_us(int(tick_us))}"
 
 
-def _format_observed_line(target: str, o: dict) -> str:
-    """One bullet line summarising a per-target observation."""
-    parts = []
-    if o.get("tick_us"):
-        parts.append(f"tick {_fmt_us(int(o['tick_us']))} ({_fps_from_us(int(o['tick_us']))} FPS)")
-    if o.get("free_heap"):
-        parts.append(f"heap {_fmt_heap(int(o['free_heap']))}")
-    if o.get("max_alloc_block"):
-        parts.append(f"block {_fmt_heap(int(o['max_alloc_block']))}")
-    tail = f" — observed {o['at']}" if o.get("at") else ""
-    return f"`{target}`: " + " · ".join(parts) + tail
+def _fps_range_from_observed_range(v) -> str:
+    """Observed tick range [min_us, max_us] → FPS range, inverted (slow tick
+    = low FPS). Collapses when the formatted endpoints would render the same.
+    Returns "—" when the input is missing."""
+    if v is None:
+        return "—"
+    if isinstance(v, list) and len(v) == 2:
+        lo_us, hi_us = int(v[0]), int(v[1])
+        # Higher FPS comes from the lower tick.
+        hi_fps = _fps_from_us(lo_us)
+        lo_fps = _fps_from_us(hi_us)
+        if lo_fps == hi_fps:
+            return lo_fps
+        return f"{lo_fps}-{hi_fps}"
+    return _fps_from_us(int(v))
+
+
+def _heap_contract_cell(v) -> str:
+    """Contract heap/block floor → '≥ N KB'. Missing or 0 → '—'."""
+    if v in (None, 0):
+        return "—"
+    return f"≥ {_fmt_heap(int(v))}"
+
+
+def _heap_observed_cell(v) -> str:
+    """Observed heap/block range → 'N KB' or 'N-M KB'. Missing or both 0 → '—'."""
+    if v is None:
+        return "—"
+    if isinstance(v, list) and len(v) == 2:
+        if int(v[0]) == 0 and int(v[1]) == 0:
+            return "—"
+        return _fmt_heap_range(v)
+    if int(v) == 0:
+        return "—"
+    return _fmt_heap(int(v))
+
+
+def _format_perf_table(step: dict) -> list[str]:
+    """Build a markdown table for a step's contract + observed data, one row
+    per board. Returns [] when neither contract nor observed has anything
+    measurable; otherwise returns the table lines plus any per-board audit
+    footer (set_by / reason / observed-at) below."""
+    contract = step.get("contract") or {}
+    observed = step.get("observed") or {}
+    boards = sorted(set(contract.keys()) | set(observed.keys()))
+    if not boards:
+        return []
+
+    lines: list[str] = []
+    lines.append("**Performance** (contract / observed) — tick stored, FPS shown:")
+    lines.append("")
+    lines.append("| Board | FPS | heap | block |")
+    lines.append("|---|---|---|---|")
+    for b in boards:
+        c = contract.get(b) or {}
+        o = observed.get(b) or {}
+        fps = f"{_fps_floor_from_contract(c.get('tick_us'))} / {_fps_range_from_observed_range(o.get('tick_us'))}"
+        heap = f"{_heap_contract_cell(c.get('free_heap'))} / {_heap_observed_cell(o.get('free_heap'))}"
+        block = f"{_heap_contract_cell(c.get('max_alloc_block'))} / {_heap_observed_cell(o.get('max_alloc_block'))}"
+        lines.append(f"| `{b}` | {fps} | {heap} | {block} |")
+    lines.append("")
+
+    # Audit footer: contract origin + observation timestamps, only when present.
+    audit: list[str] = []
+    for b in boards:
+        c = contract.get(b) or {}
+        o = observed.get(b) or {}
+        bits: list[str] = []
+        if c.get("set_by") or c.get("reason"):
+            sb = c.get("set_by") or "?"
+            rs = f' "{c["reason"]}"' if c.get("reason") else ""
+            bits.append(f"contract set {sb}{rs}")
+        at = o.get("at")
+        if at:
+            bits.append(f"observed {_fmt_at_range(at)}")
+        if bits:
+            audit.append(f"- `{b}`: {' · '.join(bits)}")
+    if audit:
+        lines.extend(audit)
+        lines.append("")
+    return lines
+
+
+def _fmt_us_range(v) -> str:
+    """Pretty-print a [min, max] tick range. Collapses when the *formatted*
+    endpoints would render identically (e.g. 84,500µs and 84,520µs both round
+    to "85µs" at our resolution — showing them as a range adds noise)."""
+    if isinstance(v, list) and len(v) == 2:
+        lo, hi = int(v[0]), int(v[1])
+        lo_s, hi_s = _fmt_us(lo), _fmt_us(hi)
+        lo_fps, hi_fps = _fps_from_us(lo), _fps_from_us(hi)
+        if lo_s == hi_s and lo_fps == hi_fps:
+            return f"{lo_s} ({lo_fps} FPS)"
+        return f"{lo_s}-{hi_s} ({hi_fps}-{lo_fps} FPS)"
+    return f"{_fmt_us(int(v))} ({_fps_from_us(int(v))} FPS)"
+
+
+def _fmt_heap_range(v) -> str:
+    """Pretty-print a [min, max] heap/block range. Collapses when the formatted
+    endpoints would render identically (KB rounding hides sub-KB drift)."""
+    if isinstance(v, list) and len(v) == 2:
+        lo, hi = int(v[0]), int(v[1])
+        lo_s, hi_s = _fmt_heap(lo), _fmt_heap(hi)
+        if lo_s == hi_s:
+            return lo_s
+        return f"{lo_s}-{hi_s}"
+    return _fmt_heap(int(v))
+
+
+def _fmt_at_range(at) -> str:
+    """`at` is `[first_seen, last_updated]`; collapse when equal."""
+    if isinstance(at, list) and len(at) == 2:
+        first, last = at[0], at[1]
+        return f"{first}" if first == last else f"{first} → {last}"
+    return str(at)
 
 
 def _format_bounds(b: dict) -> list[str]:
@@ -232,16 +325,7 @@ def render_scenarios(files: list[dict]) -> str:
                     for b in bounds:
                         lines.append(f"- {b}")
                     lines.append("")
-                if step["contract"]:
-                    lines.append("**Contract** (tick is a ceiling, heap is a floor):")
-                    for tgt in sorted(step["contract"].keys()):
-                        lines.append(f"- {_format_contract_line(tgt, step['contract'][tgt])}")
-                    lines.append("")
-                if step["observed"]:
-                    lines.append("**Observed** (latest reading per target):")
-                    for tgt in sorted(step["observed"].keys()):
-                        lines.append(f"- {_format_observed_line(tgt, step['observed'][tgt])}")
-                    lines.append("")
+                lines.extend(_format_perf_table(step))
             # Trailing prep steps after the last measurement (rare) get their
             # own collapsed bullet list under a "Trailing setup" header.
             if prep_buffer:

@@ -131,6 +131,34 @@ No FreeRTOS tasks are pinned today. At 16K LEDs the render task takes ~52 ms/tic
 
 ## Architecture
 
+### Board vs firmware separation, runtime board presets (multi-commit, started)
+
+Today `--board <variant>` in `scripts/build/build_esp32.py` actually picks a **firmware variant** (`esp32`, `esp32-eth`, `esp32-eth-wifi`, `esp32s3-n16r8`), not a physical board. The eth variants additionally hardcode Olimex Gateway RMII pins in `src/platform/esp32/platform_esp32.cpp::ethInit()`, so they only work on that one PCB. As we add boards (LOLIN D32 tested 2026-06-02, QuinLED variants planned), the conflation gets painful: every new board with different pins would need another firmware. The fix is to **separate physical-board metadata from firmware-variant metadata** and let the device pick up board-specific values (pin assignments, default module config) at runtime.
+
+Started — minimal scope, no catalog yet:
+- `scripts/moondeck.py::_probe_device` now reads `SystemModule.board` as a **firmware** value (the existing control is misnamed; rename in the final phase) and deduces the physical board where the firmware uniquely identifies hardware (`esp32-eth*` ⇒ `olimex-esp32-gateway-rev-g`). MoonDeck device-list shows `<deviceName> · <ip> · fw:<firmware> · board:<board>`.
+- For firmware variants that work on multiple boards (`esp32`), the board picker in the UI lets the user select from a short hardcoded list (LOLIN D32, generic ESP32, Olimex Gateway when running the eth-less firmware, etc.). Selection persists in moondeck.json.
+- `flash_esp32.py` polls for the just-flashed device after a successful flash and writes `last_port` into the matching device record, so MoonDeck shows which serial port a device was last flashed via.
+- Firmware variants stay separate — `esp32-eth` saves ~670 KB flash + ~30 KB DRAM vs `esp32-eth-wifi` (measured); merging would erase that win.
+
+Pin config moves to runtime (next, separate commit):
+- Drop hardcoded `GPIO_NUM_17` from `ethInit()`. NetworkModule reads `Network.eth_rmii_clock_gpio` (new control) and similar pin values, defaulting to current Olimex hardcodes so behaviour is unchanged.
+- Same for any other hardware-pin literal in the firmware.
+
+Board preset catalog + upload (later, when the runtime config has real consumers):
+- Add structured per-board files (location TBD — not `docs/` since they're config not docs; `boards/` at repo root is the strong candidate, matches the PlatformIO convention contributors will recognise).
+- Each file declares chip, flash, PSRAM, Ethernet PHY + pins, default module config.
+- New `/api/board-preset` endpoint accepts the JSON; device persists to LittleFS; bootstrap applies pins + defaults on next boot.
+- MoonDeck "Set board" picker reads the catalog to populate the dropdown.
+- Pin reassignment requires reboot (ESP-IDF can't hot-reconfigure EMAC pins after `esp_eth_driver_install`); document the constraint.
+- A first attempt at this catalog landed and was rolled back in the started-scope commit — the catalog only earns its keep once the device reads it, otherwise it's a docs-shaped file in the wrong place.
+
+Terminology cleanup (last, coordinated rename):
+- `--board` arg in `build_esp32.py` → `--firmware` (and the `BOARDS` dict to `FIRMWARES`).
+- `SystemModule.board` control → `firmware`.
+- Scenario `contract.<target>` keys to match.
+- No behavioural change; block-scope so one commit mechanically sweeps all three layers.
+
 ### Multi-layer composition (backlog)
 
 `Layers` holds N layers; `Drivers` reads from a single active layer today. Composition is the missing piece — additional layers render their buffers but only the first enabled layer reaches output.

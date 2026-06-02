@@ -589,13 +589,22 @@ document.getElementById("discover-btn").addEventListener("click", async () => {
     const existing = state.devices || [];
     const existingByIp = Object.fromEntries(existing.map(d => [d.ip, d]));
     const foundIps = new Set(data.devices.map(d => d.ip));
-    // Update existing devices found in scan
+    // Update existing devices found in scan. Live-readable fields
+    // (deviceName, firmware, deduced board) win from the probe; user-set or
+    // flash-tracked fields (board when not deducible, last_port) survive.
     for (const found of data.devices) {
         if (existingByIp[found.ip]) {
-            existingByIp[found.ip].online = true;
-            existingByIp[found.ip].modules = found.modules;
+            const e = existingByIp[found.ip];
+            e.online = true;
+            e.deviceName = found.deviceName || e.deviceName || "";
+            e.firmware = found.firmware || e.firmware || "";
+            // Probe's deduced board wins when set; otherwise keep the user-set value.
+            if (found.board) e.board = found.board;
+            else if (!e.board) e.board = "";
+            // last_port stays as-is (probe doesn't supply it).
+            delete e.modules;  // legacy field removed; drop on next refresh.
         } else {
-            existing.push({ ...found, online: true, selected: false });
+            existing.push({ ...found, online: true, selected: false, last_port: "" });
         }
     }
     // Mark not-found existing devices as offline
@@ -652,11 +661,46 @@ function renderDevices() {
         });
 
         const text = document.createElement("span");
-        text.textContent = `${device.ip} (${device.modules} modules)`;
-        text.title = device.ip;
+        // Label: <name> · <ip> · fw:<firmware>. Board is rendered separately
+        // as a picker (below) since some firmwares run on multiple boards.
+        // last_port lives in the tooltip — it's flash-history, not identity.
+        const parts = [];
+        if (device.deviceName) parts.push(device.deviceName);
+        parts.push(device.ip);
+        if (device.firmware) parts.push(`fw:${device.firmware}`);
+        text.textContent = parts.join(" · ");
+        const tooltipLines = [device.ip];
+        if (device.last_port) tooltipLines.push(`last flashed via ${device.last_port}`);
+        text.title = tooltipLines.join("\n");
         text.style.cursor = "pointer";
         text.addEventListener("click", (e) => {
             if (e.target === text) showInView("http://" + device.ip);
+        });
+
+        // Board picker — hardcoded list of known boards. Auto-deduced for eth
+        // firmwares (probe sets device.board); user-set for `esp32` since the
+        // firmware can run on multiple boards and the device can't tell us.
+        // Future phase: drive the dropdown options from a structured catalog
+        // when board presets exist; for now this short list is enough.
+        const boardPicker = document.createElement("select");
+        boardPicker.className = "device-board";
+        boardPicker.title = "Physical board (pick when firmware can't tell us)";
+        const boardOptions = [
+            ["", "(unknown board)"],
+            ["olimex-esp32-gateway-rev-g", "Olimex ESP32-Gateway Rev G"],
+            ["lolin-d32", "LOLIN D32"],
+            ["generic-esp32", "Generic ESP32 DevKit"],
+        ];
+        for (const [val, lbl] of boardOptions) {
+            const opt = document.createElement("option");
+            opt.value = val;
+            opt.textContent = lbl;
+            if ((device.board || "") === val) opt.selected = true;
+            boardPicker.appendChild(opt);
+        }
+        boardPicker.addEventListener("change", () => {
+            device.board = boardPicker.value;
+            saveState();
         });
 
         const removeBtn = document.createElement("button");
@@ -673,6 +717,7 @@ function renderDevices() {
         label.appendChild(dot);
         label.appendChild(cb);
         label.appendChild(text);
+        label.appendChild(boardPicker);
         label.appendChild(removeBtn);
         el.appendChild(label);
     }

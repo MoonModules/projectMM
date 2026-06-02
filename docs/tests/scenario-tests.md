@@ -22,15 +22,17 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 **Bounds**:
 - FPS ≥ 80% of baseline
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth`: tick ≤ 700µs (1,429 FPS) · heap ≥ 166KB · block ≥ 88KB — set 2026-06-02 · "anti-regression floor; LUT-fit telemetry baseline"
-- `esp32-eth-wifi`: tick ≤ 700µs (1,429 FPS) · heap ≥ 146KB · block ≥ 49KB — set 2026-06-02 · "initial contract"
-- `pc-macos`: tick ≤ 5µs (200,000 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 547µs (1,828 FPS) · heap 178KB · block 96KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 549µs (1,821 FPS) · heap 139KB · block 52KB — observed 2026-06-02
-- `pc-macos`: tick 1µs (1,000,000 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | ≥ 1,429 / 1,845-1,848 | ≥ 166KB / 178KB | ≥ 88KB / 96KB-100KB |
+| `esp32-eth-wifi` | ≥ 1,429 / 1,821 | ≥ 146KB / 139KB | ≥ 49KB / 52KB |
+| `pc-macos` | ≥ 200,000 / 200,000-1,000,000 | — / — | — / — |
+
+- `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 #### `size-32x32` (set_control)  📏
 
@@ -42,15 +44,17 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 **Bounds**:
 - FPS ≥ 80% of baseline
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth`: tick ≤ 3.3ms (303 FPS) · heap ≥ 161KB · block ≥ 78KB — set 2026-06-02 · "anti-regression floor; LUT-fit telemetry baseline"
-- `esp32-eth-wifi`: tick ≤ 2.5ms (400 FPS) · heap ≥ 142KB · block ≥ 49KB — set 2026-06-02 · "initial contract"
-- `pc-macos`: tick ≤ 10µs (100,000 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 2.6ms (381 FPS) · heap 171KB · block 88KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 2.6ms (390 FPS) · heap 132KB · block 50KB — observed 2026-06-02
-- `pc-macos`: tick 6µs (166,667 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | ≥ 303 / 379-381 | ≥ 161KB / 172KB | ≥ 78KB / 92KB |
+| `esp32-eth-wifi` | ≥ 400 / 390 | ≥ 142KB / 132KB | ≥ 49KB / 50KB |
+| `pc-macos` | ≥ 100,000 / 142,857-166,667 | — / — | — / — |
+
+- `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 #### `size-64x64` (set_control)  📏
 
@@ -62,15 +66,17 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 **Bounds**:
 - FPS ≥ 80% of baseline
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth`: tick ≤ 18.0ms (55.6 FPS) · heap ≥ 137KB · block ≥ 54KB — set 2026-06-02 · "anti-regression floor; LUT-fit telemetry baseline"
-- `esp32-eth-wifi`: tick ≤ 13.0ms (76.9 FPS) · heap ≥ 117KB · block ≥ 44KB — set 2026-06-02 · "initial contract"
-- `pc-macos`: tick ≤ 30µs (33,333 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 13.2ms (75.6 FPS) · heap 147KB · block 60KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 11.7ms (85.7 FPS) · heap 108KB · block 48KB — observed 2026-06-02
-- `pc-macos`: tick 24µs (41,667 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | ≥ 55.6 / 74.5-74.7 | ≥ 137KB / 147KB | ≥ 54KB / 62KB |
+| `esp32-eth-wifi` | ≥ 76.9 / 85.7 | ≥ 117KB / 108KB | ≥ 44KB / 48KB |
+| `pc-macos` | ≥ 33,333 / 41,667-43,478 | — / — | — / — |
+
+- `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 #### `size-128x128` (set_control)  📏
 
@@ -82,15 +88,17 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 **Bounds**:
 - FPS ≥ 70% of baseline
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth`: tick ≤ 110.0ms (9.1 FPS) · heap ≥ 122KB · block ≥ 47KB — set 2026-06-02 · "anti-regression floor; LUT-fit telemetry baseline"
-- `esp32-eth-wifi`: tick ≤ 100.0ms (10.0 FPS) · heap ≥ 103KB · block ≥ 44KB — set 2026-06-02 · "initial contract"
-- `pc-macos`: tick ≤ 120µs (8,333 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 92.8ms (10.8 FPS) · heap 132KB · block 48KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 18.3ms (54.5 FPS) · heap 129KB · block 52KB — observed 2026-06-02
-- `pc-macos`: tick 102µs (9,804 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | ≥ 9.1 / 10.5-10.6 | ≥ 122KB / 132KB | ≥ 47KB / 48KB |
+| `esp32-eth-wifi` | ≥ 10.0 / 54.5 | ≥ 103KB / 129KB | ≥ 44KB / 52KB |
+| `pc-macos` | ≥ 8,333 / 9,009-10,000 | — / — | — / — |
+
+- `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 ### scenario_GridLayout_resize
 
@@ -102,14 +110,17 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 
 Set grid height to 128 (alongside default width 128). Measures the heaviest config as the baseline for the next two steps.
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth-wifi`: tick ≤ 100.0ms (10.0 FPS) · heap ≥ 103KB — set 2026-06-02 · "initial contract"
-- `pc-macos`: tick ≤ 120µs (8,333 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 90.9ms (11.0 FPS) · heap 132KB · block 52KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 80.6ms (12.4 FPS) · heap 93KB · block 48KB — observed 2026-06-02
-- `pc-macos`: tick 107µs (9,346 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 10.7-10.8 | — / 132KB | — / 48KB-52KB |
+| `esp32-eth-wifi` | ≥ 10.0 / 12.4 | ≥ 103KB / 93KB | — / 48KB |
+| `pc-macos` | ≥ 8,333 / 8,772-9,901 | — / — | — / — |
+
+- `esp32-eth`: observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 #### `shrink-to-128x64` (set_control)  📏
 
@@ -118,27 +129,33 @@ Shrink to 128x64. Measured: FPS must stay within 20% of the baseline (proves the
 **Bounds**:
 - FPS ≥ 80% of baseline
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth-wifi`: tick ≤ 45.0ms (22.2 FPS) · heap ≥ 83KB — set 2026-06-02 · "initial contract"
-- `pc-macos`: tick ≤ 60µs (16,667 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 37.3ms (26.8 FPS) · heap 113KB · block 48KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 31.5ms (31.8 FPS) · heap 75KB · block 24KB — observed 2026-06-02
-- `pc-macos`: tick 55µs (18,182 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 26.4-26.5 | — / 114KB | — / 48KB |
+| `esp32-eth-wifi` | ≥ 22.2 / 31.8 | ≥ 83KB / 75KB | — / 24KB |
+| `pc-macos` | ≥ 16,667 / 5,208-20,833 | — / — | — / — |
+
+- `esp32-eth`: observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 #### `grow-to-128x128` (set_control)  📏
 
 Grow back to 128x128. Measured: confirms the heap can return to the heavy baseline after a shrink.
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth-wifi`: tick ≤ 100.0ms (10.0 FPS) · heap ≥ 103KB — set 2026-06-02 · "initial contract"
-- `pc-macos`: tick ≤ 120µs (8,333 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 94.4ms (10.6 FPS) · heap 132KB · block 48KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 82.2ms (12.2 FPS) · heap 93KB · block 52KB — observed 2026-06-02
-- `pc-macos`: tick 238µs (4,202 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 10.4 | — / 132KB | — / 48KB |
+| `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 93KB | — / 52KB |
+| `pc-macos` | ≥ 8,333 / 4,505-9,901 | — / — | — / — |
+
+- `esp32-eth`: observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 ## Layer
 
@@ -163,11 +180,13 @@ Add ArtNetSendDriver and run the bounded FPS measurement (must stay at >=80% of 
 - FPS ≥ 80% of baseline
 - FPS × lights ≥ 294,912
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `pc-macos`: tick ≤ 50µs (20,000 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `pc-macos`: tick 42µs (23,810 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `pc-macos` | ≥ 20,000 / 23,256-28,571 | — / — | — / — |
+
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 ### scenario_Layer_buildup
 
@@ -188,11 +207,13 @@ Baseline: 16x16 grid + Rainbow only. No Drivers yet (Layer renders into its own 
 **Bounds**:
 - FPS ≥ 1 (absolute)
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `pc-macos`: tick ≤ 50µs (20,000 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `pc-macos`: tick 37µs (27,027 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `pc-macos` | ≥ 20,000 / 8,197-28,571 | — / — | — / — |
+
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 #### `measure-full-16x16` (measure)  📏
 
@@ -206,11 +227,13 @@ Full pipeline at 16x16. Heap delta vs previous measure-minimum step should stay 
 - FPS ≥ 1 (absolute)
 - heap growth ≤ 8192B vs previous measure step
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `pc-macos`: tick ≤ 50µs (20,000 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `pc-macos`: tick 39µs (25,641 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `pc-macos` | ≥ 20,000 / 5,464-28,571 | — / — | — / — |
+
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 #### `measure-with-lut-16x16` (measure)  📏
 
@@ -222,11 +245,13 @@ Mirror is on: Layer has a LUT, Drivers has an output buffer. min_fps_led_product
 **Bounds**:
 - FPS × lights ≥ 100,000
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `pc-macos`: tick ≤ 60µs (16,667 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `pc-macos`: tick 48µs (20,833 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `pc-macos` | ≥ 16,667 / 7,407-21,739 | — / — | — / — |
+
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 #### `measure-full-128x128` (measure)  📏
 
@@ -240,11 +265,13 @@ Production-size grid with the full pipeline. Final tick + cumulative heap delta 
 - FPS ≥ 1 (absolute)
 - heap growth ≤ 1048576B vs previous measure step
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `pc-macos`: tick ≤ 60µs (16,667 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `pc-macos`: tick 46µs (21,739 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `pc-macos` | ≥ 16,667 / 18,868-22,727 | — / — | — / — |
+
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 ### scenario_Layer_memory_1to1
 
@@ -266,11 +293,13 @@ Add ArtNetSendDriver and run the bounded FPS measurement on the no-LUT path.
 **Bounds**:
 - FPS ≥ 80% of baseline
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `pc-macos`: tick ≤ 50µs (20,000 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `pc-macos`: tick 37µs (27,027 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `pc-macos` | ≥ 20,000 / 12,500-28,571 | — / — | — / — |
+
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 ## MirrorModifier
 
@@ -295,11 +324,13 @@ Add ArtNetSendDriver and run the bounded FPS measurement on the LUT path.
 **Bounds**:
 - FPS ≥ 80% of baseline
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `pc-macos`: tick ≤ 120µs (8,333 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `pc-macos`: tick 104µs (9,615 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `pc-macos` | ≥ 8,333 / 8,621-9,901 | — / — | — / — |
+
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 ### scenario_MirrorModifier_pipeline
 
@@ -322,11 +353,13 @@ Add ArtNetSendDriver and run the bounded FPS measurement (mirror + LUT path must
 **Bounds**:
 - FPS ≥ 80% of baseline
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `pc-macos`: tick ≤ 120µs (8,333 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `pc-macos`: tick 108µs (9,259 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `pc-macos` | ≥ 8,333 / 9,009-9,901 | — / — | — / — |
+
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 ## MoonModule
 
@@ -343,40 +376,49 @@ Set NoiseEffect.scale=4 and measure baseline FPS (mirror on). Effect controls do
 **Bounds**:
 - FPS ≥ 80% of baseline
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth-wifi`: tick ≤ 100.0ms (10.0 FPS) · heap ≥ 103KB — set 2026-06-02 · "initial contract"
-- `pc-macos`: tick ≤ 120µs (8,333 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 92.9ms (10.8 FPS) · heap 132KB · block 48KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 81.8ms (12.2 FPS) · heap 94KB · block 48KB — observed 2026-06-02
-- `pc-macos`: tick 105µs (9,524 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 10.5-10.6 | — / 133KB | — / 48KB-50KB |
+| `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 94KB | — / 48KB |
+| `pc-macos` | ≥ 8,333 / 8,850-9,901 | — / — | — / — |
+
+- `esp32-eth`: observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 #### `disable-mirrorX` (set_control)  📏
 
 Disable mirrorX. Modifier control triggers a pipeline rebuild — measures the rebuilt path.
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth-wifi`: tick ≤ 100.0ms (10.0 FPS) · heap ≥ 103KB — set 2026-06-02 · "initial contract"
-- `pc-macos`: tick ≤ 200µs (5,000 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 94.8ms (10.5 FPS) · heap 132KB · block 48KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 83.3ms (12.0 FPS) · heap 94KB · block 48KB — observed 2026-06-02
-- `pc-macos`: tick 191µs (5,236 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 10.4 | — / 132KB | — / 48KB-50KB |
+| `esp32-eth-wifi` | ≥ 10.0 / 12.0 | ≥ 103KB / 94KB | — / 48KB |
+| `pc-macos` | ≥ 5,000 / 5,000-5,348 | — / — | — / — |
+
+- `esp32-eth`: observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 #### `disable-mirrorY` (set_control)  📏
 
 Disable mirrorY. Mirror is now fully off — should land on the no-LUT path.
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth-wifi`: tick ≤ 100.0ms (10.0 FPS) · heap ≥ 103KB — set 2026-06-02 · "initial contract"
-- `pc-macos`: tick ≤ 400µs (2,500 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 110.3ms (9.1 FPS) · heap 132KB · block 48KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 89.9ms (11.1 FPS) · heap 94KB · block 48KB — observed 2026-06-02
-- `pc-macos`: tick 364µs (2,747 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 8.9-9.0 | — / 132KB | — / 48KB-50KB |
+| `esp32-eth-wifi` | ≥ 10.0 / 11.1 | ≥ 103KB / 94KB | — / 48KB |
+| `pc-macos` | ≥ 2,500 / 2,740-2,849 | — / — | — / — |
+
+- `esp32-eth`: observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 #### `re-enable-mirrorY` (set_control)  📏
 
@@ -388,14 +430,17 @@ Re-enable mirrorY and measure — the heavy LUT path must recover (FPS within 50
 **Bounds**:
 - FPS ≥ 50% of baseline
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth-wifi`: tick ≤ 100.0ms (10.0 FPS) · heap ≥ 103KB — set 2026-06-02 · "initial contract"
-- `pc-macos`: tick ≤ 120µs (8,333 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 92.7ms (10.8 FPS) · heap 132KB · block 48KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 82.3ms (12.1 FPS) · heap 94KB · block 48KB — observed 2026-06-02
-- `pc-macos`: tick 103µs (9,709 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 10.5-10.6 | — / 132KB | — / 48KB-50KB |
+| `esp32-eth-wifi` | ≥ 10.0 / 12.1 | ≥ 103KB / 94KB | — / 48KB |
+| `pc-macos` | ≥ 8,333 / 9,709-9,901 | — / — | — / — |
+
+- `esp32-eth`: observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 ## NetworkModule
 
@@ -409,23 +454,29 @@ Re-enable mirrorY and measure — the heavy LUT path must recover (FPS within 50
 
 mDNS on (default) — captures the baseline FPS for the next two steps.
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth-wifi`: tick ≤ 100.0ms (10.0 FPS) · heap ≥ 103KB — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 92.7ms (10.8 FPS) · heap 132KB · block 48KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 81.8ms (12.2 FPS) · heap 93KB · block 48KB — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 10.5-10.6 | — / 132KB | — / 48KB-50KB |
+| `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 93KB | — / 48KB |
+
+- `esp32-eth`: observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 #### `mdns-off` (set_control)  📏
 
 mDNS off — measured. Expected to match or exceed the baseline.
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth-wifi`: tick ≤ 100.0ms (10.0 FPS) · heap ≥ 93KB — set 2026-06-02 · "shared heap budget; cumulative sweep state reduces standalone-mDNS-off heap by ~15KB"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 94.1ms (10.6 FPS) · heap 136KB · block 48KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 83.1ms (12.0 FPS) · heap 98KB · block 48KB — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 10.3-10.5 | — / 137KB | — / 48KB-52KB |
+| `esp32-eth-wifi` | ≥ 10.0 / 12.0 | ≥ 93KB / 98KB | — / 48KB |
+
+- `esp32-eth`: observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "shared heap budget; cumulative sweep state reduces standalone-mDNS-off heap by ~15KB" · observed 2026-06-02
 
 #### `mdns-on-again` (set_control)  📏
 
@@ -434,12 +485,15 @@ mDNS on again — measured with a bound: FPS must stay within 20% of the baselin
 **Bounds**:
 - FPS ≥ 80% of baseline
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth-wifi`: tick ≤ 100.0ms (10.0 FPS) · heap ≥ 103KB — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 108.4ms (9.2 FPS) · heap 132KB · block 48KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 94.0ms (10.6 FPS) · heap 93KB · block 48KB — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 9.1 | — / 132KB | — / 48KB-52KB |
+| `esp32-eth-wifi` | ≥ 10.0 / 10.6 | ≥ 103KB / 93KB | — / 48KB |
+
+- `esp32-eth`: observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 ## PreviewDriver
 
@@ -456,14 +510,17 @@ detail=1 (coarsest, 16x16 downsample on a 128 grid). Cheapest preview render.
 **Bounds**:
 - FPS ≥ 80% of baseline
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth-wifi`: tick ≤ 100.0ms (10.0 FPS) · heap ≥ 103KB — set 2026-06-02 · "initial contract"
-- `pc-macos`: tick ≤ 300µs (3,333 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 92.8ms (10.8 FPS) · heap 132KB · block 52KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 81.7ms (12.2 FPS) · heap 93KB · block 48KB — observed 2026-06-02
-- `pc-macos`: tick 321µs (3,115 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 10.5-10.6 | — / 132KB | — / 50KB-52KB |
+| `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 93KB | — / 48KB |
+| `pc-macos` | ≥ 3,333 / 3,247-3,322 | — / — | — / — |
+
+- `esp32-eth`: observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 #### `detail-2-medium` (set_control)  📏
 
@@ -472,14 +529,17 @@ detail=2 (medium, 32x32 downsample). Known accepted cost — must still hit 80% 
 **Bounds**:
 - FPS ≥ 80% of baseline
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth-wifi`: tick ≤ 100.0ms (10.0 FPS) · heap ≥ 103KB — set 2026-06-02 · "initial contract"
-- `pc-macos`: tick ≤ 300µs (3,333 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 95.3ms (10.5 FPS) · heap 132KB · block 52KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 83.1ms (12.0 FPS) · heap 93KB · block 48KB — observed 2026-06-02
-- `pc-macos`: tick 307µs (3,257 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 10.4-10.5 | — / 132KB | — / 50KB-52KB |
+| `esp32-eth-wifi` | ≥ 10.0 / 12.0 | ≥ 103KB / 93KB | — / 48KB |
+| `pc-macos` | ≥ 3,333 / 3,195-3,289 | — / — | — / — |
+
+- `esp32-eth`: observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 #### `detail-3-fine` (set_control)  📏
 
@@ -488,14 +548,17 @@ detail=3 (finest, 43x43 downsample). Looser bound (70%) because the downsample c
 **Bounds**:
 - FPS ≥ 70% of baseline
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth-wifi`: tick ≤ 100.0ms (10.0 FPS) · heap ≥ 103KB — set 2026-06-02 · "initial contract"
-- `pc-macos`: tick ≤ 320µs (3,125 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 103.0ms (9.7 FPS) · heap 132KB · block 52KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 79.1ms (12.6 FPS) · heap 93KB · block 48KB — observed 2026-06-02
-- `pc-macos`: tick 321µs (3,115 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 9.5-9.6 | — / 132KB | — / 50KB-52KB |
+| `esp32-eth-wifi` | ≥ 10.0 / 12.6 | ≥ 103KB / 93KB | — / 48KB |
+| `pc-macos` | ≥ 3,125 / 3,289-3,333 | — / — | — / — |
+
+- `esp32-eth`: observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 #### `decompress-on` (set_control)  📏
 
@@ -504,14 +567,17 @@ decompress=true. Client-side hint — must not affect the render tick.
 **Bounds**:
 - FPS ≥ 80% of baseline
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth-wifi`: tick ≤ 100.0ms (10.0 FPS) · heap ≥ 103KB — set 2026-06-02 · "initial contract"
-- `pc-macos`: tick ≤ 300µs (3,333 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 93.9ms (10.6 FPS) · heap 132KB · block 52KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 81.9ms (12.2 FPS) · heap 93KB · block 48KB — observed 2026-06-02
-- `pc-macos`: tick 300µs (3,333 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 10.5-10.6 | — / 132KB | — / 50KB-52KB |
+| `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 93KB | — / 48KB |
+| `pc-macos` | ≥ 3,333 / 3,226-3,333 | — / — | — / — |
+
+- `esp32-eth`: observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 #### `decompress-off` (set_control)  📏
 
@@ -520,11 +586,14 @@ decompress=false. Same as above — pure client-side, no render impact expected.
 **Bounds**:
 - FPS ≥ 80% of baseline
 
-**Contract** (tick is a ceiling, heap is a floor):
-- `esp32-eth-wifi`: tick ≤ 100.0ms (10.0 FPS) · heap ≥ 103KB — set 2026-06-02 · "initial contract"
-- `pc-macos`: tick ≤ 300µs (3,333 FPS) — set 2026-06-02 · "initial contract"
+**Performance** (contract / observed) — tick stored, FPS shown:
 
-**Observed** (latest reading per target):
-- `esp32-eth`: tick 95.0ms (10.5 FPS) · heap 132KB · block 52KB — observed 2026-06-02
-- `esp32-eth-wifi`: tick 83.2ms (12.0 FPS) · heap 93KB · block 48KB — observed 2026-06-02
-- `pc-macos`: tick 304µs (3,289 FPS) — observed 2026-06-02
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 10.3 | — / 132KB | — / 50KB-52KB |
+| `esp32-eth-wifi` | ≥ 10.0 / 12.0 | ≥ 103KB / 93KB | — / 48KB |
+| `pc-macos` | ≥ 3,333 / 3,077-3,311 | — / — | — / — |
+
+- `esp32-eth`: observed 2026-06-02
+- `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02

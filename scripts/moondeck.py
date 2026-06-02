@@ -22,6 +22,10 @@ STATE_FILE = SCRIPTS_DIR / "moondeck.json"
 # the same source files (HTML in MoonDeck, markdown in docs/tests/) can't drift.
 sys.path.insert(0, str(SCRIPTS_DIR / "docs"))
 import _test_metadata as test_meta  # noqa: E402
+# Re-use the doc generator's perf-table formatter so the MoonDeck step view
+# and the generated scenario-tests.md show the same shape per step (single
+# source of truth — adding/changing a metric updates both surfaces at once).
+import generate_test_docs as test_doc_gen  # noqa: E402
 
 
 def _app_version():
@@ -75,6 +79,13 @@ def _get_local_subnet():
     return ".".join(ip.split(".")[:3]) if ip else "192.168.1"
 
 
+def _walk_modules(modules):
+    """Yield every module in the tree (depth-first), including nested children."""
+    for m in modules or []:
+        yield m
+        yield from _walk_modules(m.get("children", []))
+
+
 def _probe_device(ip, port=8080, timeout=0.4):
     """Probe a single IP for /api/state. Returns device info or None.
 
@@ -82,6 +93,14 @@ def _probe_device(ip, port=8080, timeout=0.4):
     refuses the connection almost instantly; 0.4s only matters for IPs that
     silently drop packets (firewalled hosts), and a subnet scan should not
     stall seconds on those.
+
+    Returns: { ip, deviceName, firmware, board }
+    - `firmware` is the variant flashed (SystemModule.board control value —
+      misnamed; renamed in the terminology-cleanup phase). Used to deduce
+      `board`.
+    - `board` is the physical hardware key — set when the firmware uniquely
+      identifies the board (eth/eth-wifi → Olimex). Empty string otherwise;
+      the user picks via the UI (the saved value survives refresh).
     """
     import urllib.request
     import urllib.error
@@ -90,10 +109,36 @@ def _probe_device(ip, port=8080, timeout=0.4):
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read())
-            module_count = len(data.get("modules", []))
-            return {"ip": f"{ip}:{port}", "modules": module_count}
+            modules = data.get("modules", [])
+            device_name = ""
+            firmware = ""
+            for m in _walk_modules(modules):
+                if m.get("type") == "SystemModule":
+                    for c in m.get("controls", []):
+                        if c.get("name") == "deviceName":
+                            device_name = c.get("value", "") or ""
+                        elif c.get("name") == "board":
+                            firmware = c.get("value", "") or ""
+                    break
+            board = _deduce_board(firmware)
+            return {
+                "ip": f"{ip}:{port}",
+                "deviceName": device_name,
+                "firmware": firmware,
+                "board": board,
+            }
     except Exception:
         return None
+
+
+def _deduce_board(firmware: str) -> str:
+    """Map firmware variant → physical board key when the firmware uniquely
+    identifies the board (the eth firmware variants hardcode Olimex RMII
+    pins). Returns "" when the firmware works on multiple boards — the user
+    fills in `board` manually in that case."""
+    if firmware in ("esp32-eth", "esp32-eth-wifi"):
+        return "olimex-esp32-gateway-rev-g"
+    return ""
 
 
 def discover_devices(subnet=""):
@@ -131,20 +176,78 @@ def discover_devices(subnet=""):
     return devices, subnet
 
 
+_LAST_FLASH_FILE = SCRIPTS_DIR / ".last_flash.json"
+_LAST_FLASH_TTL_S = 5 * 60  # ignore markers older than 5 minutes
+
+
+def _consume_last_flash() -> dict | None:
+    """Read the breadcrumb scripts/.last_flash.json that flash_esp32.py drops
+    after a successful flash. Returns {port, firmware} when the marker is
+    recent (< TTL); deletes the file so the link only happens once. Returns
+    None when there's no recent marker."""
+    if not _LAST_FLASH_FILE.exists():
+        return None
+    try:
+        data = json.loads(_LAST_FLASH_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    import time
+    if time.time() - float(data.get("ts", 0)) > _LAST_FLASH_TTL_S:
+        try: _LAST_FLASH_FILE.unlink()
+        except OSError: pass
+        return None
+    return {"port": data.get("port", ""), "firmware": data.get("firmware", "")}
+
+
 def refresh_devices(known_devices):
-    """Probe known devices to check online/offline status."""
+    """Probe known devices to check online/offline status.
+
+    Preserves user-set fields (`board`, `last_port`) across refreshes: the
+    probe result carries fresh `firmware`/`deviceName` and a deduced `board`
+    (set only when firmware unambiguously identifies hardware), but a user-set
+    `board` for a firmware that can run on multiple boards (e.g. `esp32` on
+    LOLIN D32 vs generic DevKit) must survive a refresh. Same for `last_port`,
+    which is set by the flash-event breadcrumb (see _consume_last_flash).
+    """
     def probe(device):
         ip = device.get("ip", "")
         if ":" in ip:
             host, port = ip.rsplit(":", 1)
-            return _probe_device(host, int(port))
-        return _probe_device(ip)
+            fresh = _probe_device(host, int(port))
+        else:
+            fresh = _probe_device(ip)
+        if not fresh:
+            return None
+        # Merge: probe wins for live-readable fields; known wins for
+        # user-set / flash-tracked fields.
+        if not fresh.get("board") and device.get("board"):
+            fresh["board"] = device["board"]
+        if device.get("last_port"):
+            fresh["last_port"] = device["last_port"]
+        return fresh
 
     if not known_devices:
         return []
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=16) as pool:
-        return [r for r in pool.map(probe, known_devices) if r]
+        refreshed = [r for r in pool.map(probe, known_devices) if r]
+
+    # Link a recent flash event to the device whose firmware matches. The
+    # flash flow writes scripts/.last_flash.json after a successful flash;
+    # here we attribute it to a refreshed device with the same firmware
+    # variant (newest "online with matching firmware" wins — usually the
+    # only candidate). After linking we consume the marker so the same
+    # event doesn't keep applying on every refresh.
+    last_flash = _consume_last_flash()
+    if last_flash and last_flash["firmware"]:
+        matches = [d for d in refreshed if d.get("firmware") == last_flash["firmware"]]
+        if len(matches) == 1:
+            matches[0]["last_port"] = last_flash["port"]
+            try: _LAST_FLASH_FILE.unlink()
+            except OSError: pass
+        # If 0 matches (device hasn't booted yet) or 2+ matches (ambiguous),
+        # leave the marker for the next refresh to retry / re-evaluate.
+    return refreshed
 
 
 # ---------------------------------------------------------------------------
@@ -158,9 +261,25 @@ def load_state():
     return {"env": "esp32", "port": "", "devices": [], "tab": "pc"}
 
 
+_VOLATILE_DEVICE_FIELDS = ("deviceName", "firmware")
+
+
 def save_state(state):
+    """Persist MoonDeck state. Strips per-device fields that the device itself
+    is the source of truth for (`deviceName`, `firmware`) — caching them
+    invites stale values when the device is reflashed/renamed via another
+    host. They are re-read from `/api/state` on each refresh and live only
+    in the in-memory `state.devices` until the next save. User-set fields
+    (`board`, `last_port`, `selected`, `online`) persist."""
+    persisted = dict(state)
+    devices = persisted.get("devices") or []
+    if devices:
+        persisted["devices"] = [
+            {k: v for k, v in d.items() if k not in _VOLATILE_DEVICE_FIELDS}
+            for d in devices
+        ]
     with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2)
+        json.dump(persisted, f, indent=2)
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +354,79 @@ def list_serial_ports() -> list[str]:
             except Exception:
                 pass
     return sorted(ports)
+
+
+# ---------------------------------------------------------------------------
+# Perf-table HTML (shared shape with docs/tests/scenario-tests.md)
+# ---------------------------------------------------------------------------
+
+def _render_perf_table_html(step: dict) -> str:
+    """Render a scenario step's contract+observed data as an HTML table that
+    matches the markdown table emitted by test_doc_gen._format_perf_table.
+    The doc generator owns the cell formatters; we just translate its pipe-
+    delimited markdown to <table><tr><td>. Returns "" when the step has no
+    contract/observed data."""
+    import html as html_mod
+    md_lines = test_doc_gen._format_perf_table(step)
+    if not md_lines:
+        return ""
+    # Lines come in groups:
+    #   header text (`**Performance** ...`)
+    #   blank
+    #   table header row (`| Board | FPS | ... |`)
+    #   separator row (`|---|---|...`)
+    #   N body rows (`| `target` | ... |`)
+    #   blank
+    #   optional footer lines (`- \`target\`: contract set ... · observed ...`)
+    out: list[str] = []
+    in_table = False
+    rendered_header = False
+    for line in md_lines:
+        if not line.strip():
+            if in_table:
+                out.append("</tbody></table>")
+                in_table = False
+            continue
+        if line.startswith("**"):
+            # `**Performance** (contract / observed) — tick stored, FPS shown:`
+            # → strip both the leading `**...**` bold marker (just the markup,
+            # keep the bolded text inside) and the trailing `:` colon.
+            import re as _re
+            txt = _re.sub(r"\*\*(.+?)\*\*", r"\1", line.strip()).rstrip(":").strip()
+            out.append(f'<div class="perf-head"><strong>{html_mod.escape(txt)}</strong></div>')
+            continue
+        if line.startswith("|") and "---" in line:
+            continue  # markdown separator row
+        if line.startswith("|"):
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if not in_table:
+                out.append('<table class="perf-table"><tbody>')
+                in_table = True
+            tag = "th" if not rendered_header else "td"
+            rendered_header = True
+            row = "".join(
+                f"<{tag}>{_inline_code_html(html_mod.escape(c))}</{tag}>"
+                for c in cells
+            )
+            out.append(f"<tr>{row}</tr>")
+            continue
+        if line.lstrip().startswith("-"):
+            # Audit footer line.
+            txt = line.lstrip().lstrip("-").strip()
+            out.append(f'<div class="perf-audit">{_inline_code_html(html_mod.escape(txt))}</div>')
+            continue
+    if in_table:
+        out.append("</tbody></table>")
+    return '<div class="perf">' + "".join(out) + '</div>'
+
+
+def _inline_code_html(s: str) -> str:
+    """Tiny markdown-inline-code → <code> translator. The perf table cells
+    contain `target` and `field` names wrapped in backticks; render as <code>.
+    Doesn't try to be a full markdown parser — just the patterns the perf
+    formatter produces."""
+    import re as _re
+    return _re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
 
 
 # ---------------------------------------------------------------------------
@@ -571,8 +763,13 @@ code {{ background: transparent; color: #8aa6ba; padding: 0; }}
             op = html_mod.escape(str(step.get("op", "?")))
             step_name = html_mod.escape(str(step.get("name", "")))
             step_desc = html_mod.escape(str(step.get("description", "")))
-            # Render every key except op/name/description as <code>key</code> = <code>json-value</code>
-            other = {k: v for k, v in step.items() if k not in ("op", "name", "description")}
+            # `contract` and `observed` are the per-target performance data
+            # and render as a single shared table (same shape as
+            # docs/tests/scenario-tests.md — see test_doc_gen._format_perf_table).
+            # Everything else stays in the JSON-dump key/value list below.
+            perf_html = _render_perf_table_html(step)
+            other = {k: v for k, v in step.items()
+                     if k not in ("op", "name", "description", "contract", "observed")}
             kv_html = ""
             if other:
                 parts = []
@@ -589,7 +786,7 @@ code {{ background: transparent; color: #8aa6ba; padding: 0; }}
                 f'<span class="step-num">{i + 1}.</span> '
                 f'<span class="step-op">{op}</span>'
                 f'{f" <span class=\"step-name\">{step_name}</span>" if step_name else ""}'
-                f'</div>{desc_html}{kv_html}</div>'
+                f'</div>{desc_html}{kv_html}{perf_html}</div>'
             )
         body_html = "\n".join(rows) if rows else "<p><em>(no steps)</em></p>"
 
@@ -614,6 +811,14 @@ h1 {{ color: #e94560; font-size: 18px; margin: 0 0 4px 0; }}
 .also {{ color: #6a7a99; font-size: 11px; margin: 0 0 12px 0; }}
 code {{ background: transparent; color: #c0c0c0; padding: 0; }}
 .step-kv code:first-child {{ color: #8aa6ba; }}
+/* Perf table — same shape as docs/tests/scenario-tests.md per-step table */
+.perf {{ margin-top: 6px; }}
+.perf-head {{ font-size: 12px; color: #9aa6ba; margin: 4px 0 2px 0; }}
+.perf-table {{ border-collapse: collapse; font-size: 12px; margin: 2px 0; }}
+.perf-table th, .perf-table td {{ padding: 2px 8px; text-align: left;
+                                   border-bottom: 1px solid #1c2535; }}
+.perf-table th {{ color: #8aa6ba; font-weight: 500; }}
+.perf-audit {{ font-size: 11px; color: #6a7a99; margin: 2px 0 0 8px; }}
 </style></head><body>
 <h1>{scen_name}</h1>
 {scen_module_html}

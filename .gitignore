@@ -69,6 +69,9 @@ Testing/
 
 # MoonDeck state
 scripts/moondeck.json
+# Flash-event breadcrumb dropped by flash_esp32.py and consumed by MoonDeck
+# on the next device refresh to link last_port → device.
+scripts/.last_flash.json
 
 # Generated files
 src/ui/ui_embedded.h

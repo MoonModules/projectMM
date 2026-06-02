@@ -284,8 +284,13 @@ select {
 }
 .device-status.online { background: #4caf50; }
 .device-status.offline { background: #666; }
+.device-board {
+    margin-left: auto; font-size: 11px; background: #1c2535; color: #c0c0c0;
+    border: 1px solid #2a3548; border-radius: 3px; padding: 1px 4px;
+    max-width: 16ch;
+}
 .device-remove {
-    margin-left: auto; background: none; border: none; color: #666;
+    background: none; border: none; color: #666;
     cursor: pointer; font-size: 11px; padding: 0 4px;
 }
 .device-remove:hover { color: #e94560; }

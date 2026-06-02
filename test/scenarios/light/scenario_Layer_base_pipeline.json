@@ -78,10 +78,22 @@
       },
       "observed": {
         "pc-macos": {
-          "tick_us": 43,
-          "free_heap": 0,
-          "max_alloc_block": 0,
-          "at": "2026-06-02"
+          "tick_us": [
+            35,
+            49
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
         }
       }
     }

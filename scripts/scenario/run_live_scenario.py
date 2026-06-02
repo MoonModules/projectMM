@@ -20,6 +20,8 @@ BASELINE_FILE = ROOT / "test" / "scenario-baseline.json"
 # Reuse the shared test-metadata parser so scenario discovery stays in one place.
 sys.path.insert(0, str(ROOT / "scripts" / "docs"))
 import _test_metadata as test_meta  # noqa: E402
+sys.path.insert(0, str(ROOT / "scripts" / "scenario"))
+import _observed  # noqa: E402
 
 
 class Client:
@@ -406,17 +408,26 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                         print(f"  PASS  max_alloc_block {max_block} >= contract {exp_block} "
                               f"(within -{heap_tol_pct}% tolerance)")
 
-            # observed.<target>: the *observation*, written on every run so the
-            # JSON diff shows drift even when scenarios still pass the contract.
-            # No --reason needed (observations aren't promises). Date-only stamp
-            # keeps churn to one diff per day max.
-            step.setdefault("observed", {})[target] = {
+            # observed.<target> stores a rolling [min, max] range per scalar
+            # that only widens when a fresh measurement falls outside the
+            # current bounds. Routine runs that stay in range produce no JSON
+            # diff. When --update-contract is set, the historical range no
+            # longer reflects the new promise, so reset to the current point.
+            # See scripts/scenario/_observed.py.
+            sample = {
                 "tick_us": int(tick_us),
                 "free_heap": int(heap),
                 "max_alloc_block": int(max_block),
-                "at": _today_iso(),
             }
-            wrote_observations[0] = True
+            existing_obs = step.get("observed", {}).get(target)
+            if update_contract:
+                new_obs = _observed.reset(sample, _today_iso())
+                obs_changed = True
+            else:
+                new_obs, obs_changed = _observed.widen(existing_obs, sample, _today_iso())
+            if obs_changed:
+                step.setdefault("observed", {})[target] = new_obs
+                wrote_observations[0] = True
 
             # --update-contract: rewrite the contract in the scenario JSON for the
             # active target. This is *renegotiating* a contract, not refreshing a
