@@ -77,12 +77,12 @@ Run scenario tests. Replays JSON scenario files in-process.
 
 ```bash
 uv run scripts/scenario/run_scenario.py                       # run all
-uv run scripts/scenario/run_scenario.py --name base-pipeline   # run one
+uv run scripts/scenario/run_scenario.py --name scenario_Layer_base_pipeline   # run one
 ```
 
 Scenarios are JSON files in `test/scenarios/`. Use the dropdown to run a single scenario or leave it on **all** to run the full suite.
 
-For a full description of each scenario, see the [scenario inventory](/api/docs/testing.md?scenario-pipeline) in testing.md.
+For a full description of each scenario, see the [scenario inventory](/api/docs/tests/scenario-tests.md) — auto-generated from the JSON files.
 
 ### history_report
 
@@ -156,14 +156,14 @@ Run scenario tests against a live running device via HTTP.
 ```bash
 uv run scripts/scenario/run_live_scenario.py                                    # all scenarios vs localhost:8080
 uv run scripts/scenario/run_live_scenario.py --host 192.168.1.210               # vs ESP32
-uv run scripts/scenario/run_live_scenario.py --name control-change              # one scenario
+uv run scripts/scenario/run_live_scenario.py --name scenario_MoonModule_control_change   # one scenario
 uv run scripts/scenario/run_live_scenario.py --update-baseline                  # save baseline
 uv run scripts/scenario/run_live_scenario.py --compare-baseline                 # detect regressions
 ```
 
 Executes scenario steps (add_module, set_control, delete_module) via REST API. Collects per-step FPS and heap measurements. Compares against stored baselines to detect performance regressions. Use the dropdown to run a single scenario or leave it on **all** to run the full suite.
 
-For a full description of each scenario, see the [scenario inventory](/api/docs/testing.md?scenario-control-change) in testing.md.
+For a full description of each scenario, see the [scenario inventory](/api/docs/tests/scenario-tests.md) — auto-generated from the JSON files.
 
 ## ESP32 Tab
 

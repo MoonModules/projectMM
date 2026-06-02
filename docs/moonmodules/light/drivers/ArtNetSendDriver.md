@@ -30,9 +30,9 @@ Opened in setup(), closed in teardown(). Uses platform UDP abstraction. Not a ho
 
 ## Tests
 
-[Module test: ArtNet Packet](../../../testing.md#artnet) — header format, byte order, universe splitting.
+[Unit tests: ArtNetSendDriver](../../../tests/unit-tests.md#artnetsenddriver) — header format, byte order, universe splitting.
 
-[Scenario: base-pipeline](../../../testing.md#scenario-pipeline) — full pipeline with ArtNet output, performance bounds.
+[Scenario: scenario_Layer_base_pipeline](../../../tests/scenario-tests.md#scenario_layer_base_pipeline) — full pipeline with ArtNet output, performance bounds.
 
 ## Prior art
 

@@ -10,8 +10,9 @@ const MOONDECK_MD = "/api/help";
 
 let scripts = [];
 let boards = [];
-let scenarios = [];
-let state = { board: "", port: "", devices: [], scenario: "" }; // scenario is shared across all needs_scenario cards (PC + Live stay in sync intentionally)
+let scenarios = [];   // [{name, module, also}]
+let testModules = []; // ["CamelCaseName", ...]
+let state = { board: "", port: "", devices: [], scenario: "", module: "" }; // scenario + module shared across all needs_scenario / needs_module cards
 
 // ---------------------------------------------------------------------------
 // Init
@@ -36,6 +37,10 @@ async function init() {
     const scenResp = await fetch("/api/scenarios");
     const scenData = await scenResp.json();
     scenarios = scenData.scenarios || [];
+
+    const modResp = await fetch("/api/test-modules");
+    const modData = await modResp.json();
+    testModules = modData.modules || [];
 
     renderBoardSelect();
     renderScripts();
@@ -153,6 +158,47 @@ window.addEventListener("message", (e) => {
 // Script cards
 // ---------------------------------------------------------------------------
 
+// Build a module-filter row: <select> with "all modules" + every test module,
+// plus a Tests button that opens the per-module unit-test list. Used both for
+// the shared row above a group and the per-card row inside a script-card.
+// `onChange(mod)` fires after state.module is saved so the caller can refresh
+// dependent scenario dropdowns.
+function buildModuleRow({ rowClass, onChange }) {
+    const row = document.createElement("div");
+    row.className = rowClass;
+    row.innerHTML = `
+        <select class="module-select" title="Filter by module"></select>
+        <button class="tests-btn" title="Show the selected module's unit tests">Tests</button>
+    `;
+    const modSel = row.querySelector(".module-select");
+    const testsBtn = row.querySelector(".tests-btn");
+    const allOpt = document.createElement("option");
+    allOpt.value = "";
+    allOpt.textContent = "all modules";
+    modSel.appendChild(allOpt);
+    for (const name of testModules) {
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        if (name === state.module) opt.selected = true;
+        modSel.appendChild(opt);
+    }
+    // Tests button is meaningful only for a specific module — same shape as
+    // Steps for scenarios. Disabled when "all modules" is selected.
+    const syncTestsBtn = () => { testsBtn.disabled = !modSel.value; };
+    syncTestsBtn();
+    modSel.addEventListener("change", () => {
+        state.module = modSel.value;
+        saveState();
+        syncTestsBtn();
+        if (onChange) onChange(state.module);
+    });
+    testsBtn.addEventListener("click", () => {
+        if (modSel.value) showInView("/api/unit-tests/" + encodeURIComponent(modSel.value));
+    });
+    return row;
+}
+
 function renderScripts() {
     const containers = {
         pc: document.getElementById("scripts-pc"),
@@ -179,6 +225,31 @@ function renderScripts() {
         // header state so we don't suppress a header just because the same
         // group name appeared in the *other* container.
         const lastGroupByTarget = new WeakMap();
+        // Per-(tab,group) shared module row: when >=2 cards in the same group
+        // declare needs_module, we render ONE module dropdown at the top of the
+        // group and skip the per-card module rows. groupModSelects[key] holds
+        // the scenario-select repopulate callbacks the shared dropdown drives.
+        const groupModSelects = {};
+        const groupKey = (script, target) => `${tab}::${script.group}::${target === container ? "main" : "side"}`;
+        const sharedModuleGroup = (script, target) => {
+            const k = groupKey(script, target);
+            return (groupModSelects[k] && groupModSelects[k].count >= 2) ? k : null;
+        };
+
+        // First pass: count needs_module cards per (tab,group,target) so we
+        // know whether to render a shared module row when the group opens.
+        for (const script of tabScripts) {
+            let target = container;
+            if (tab === "esp32") {
+                if (script.group === "setup") target = esp32SetupContainer;
+                else if (script.group === "build") target = esp32BuildContainer;
+            }
+            if (!script.needs_module) continue;
+            const k = groupKey(script, target);
+            if (!groupModSelects[k]) groupModSelects[k] = { count: 0, repopulators: [] };
+            groupModSelects[k].count++;
+        }
+
         for (const script of tabScripts) {
             let target = container;
             if (tab === "esp32") {
@@ -192,9 +263,27 @@ function renderScripts() {
                 header.className = "group-header";
                 header.textContent = script.group;
                 target.appendChild(header);
+                // If this group has a shared module dropdown, render it now —
+                // right under the header, before any card in the group.
+                const sharedKey = sharedModuleGroup(script, target);
+                if (sharedKey) {
+                    const row = buildModuleRow({
+                        rowClass: "shared-module-row",
+                        onChange: (mod) => {
+                            // Re-populate every scenario select wired to this group.
+                            for (const repop of groupModSelects[sharedKey].repopulators) {
+                                repop(mod);
+                            }
+                        },
+                    });
+                    target.appendChild(row);
+                }
             }
+
+            const usesSharedModule = !!sharedModuleGroup(script, target);
+            const renderOwnModuleRow = script.needs_module && !usesSharedModule;
             const card = document.createElement("div");
-            const hasExtras = script.needs_scenario || (script.flags && script.flags.length > 0);
+            const hasExtras = script.needs_scenario || renderOwnModuleRow || (script.flags && script.flags.length > 0);
             card.className = "script-card" + (hasExtras ? " script-card--has-select" : "");
             card.innerHTML = `
                 <div class="card-row">
@@ -203,24 +292,84 @@ function renderScripts() {
                     <button class="help-btn" title="Help">?</button>
                     <button class="run-btn" data-id="${script.id}">Run</button>
                 </div>
-                ${script.needs_scenario ? `<select class="scenario-select"></select>` : ""}
+                ${script.needs_scenario ? `<div class="scenario-row">
+                    <select class="scenario-select"></select>
+                    <button class="steps-btn" title="Show the selected scenario's steps">Steps</button>
+                </div>` : ""}
                 ${script.flags && script.flags.length > 0 ? `<div class="flag-row"></div>` : ""}
             `;
 
-            if (script.needs_scenario) {
-                const sel = card.querySelector(".scenario-select");
+            // Helper: which scenarios apply to the currently-selected module?
+            const filterScenariosByModule = (mod) => {
+                if (!mod) return scenarios;
+                return scenarios.filter(s => s.module === mod || (s.also || []).includes(mod));
+            };
+
+            // Per-card module dropdown — only when this card isn't covered by
+            // a shared module row above its group. Inserted between the card-row
+            // and the scenario-row (if any) using the same builder the shared
+            // row uses, so the two cases stay visually and behaviourally identical.
+            if (renderOwnModuleRow) {
+                const row = buildModuleRow({
+                    rowClass: "module-row",
+                    onChange: (mod) => {
+                        const scenSel = card.querySelector(".scenario-select");
+                        if (scenSel) repopulateScenarioSelect(scenSel, mod);
+                    },
+                });
+                card.insertBefore(row, card.children[1] || null);
+            }
+
+            const repopulateScenarioSelect = (sel, mod) => {
+                const prev = sel.value;
+                sel.innerHTML = "";
                 const allOpt = document.createElement("option");
                 allOpt.value = "";
                 allOpt.textContent = "all";
                 sel.appendChild(allOpt);
-                for (const name of scenarios) {
+                let kept = false;
+                for (const s of filterScenariosByModule(mod)) {
                     const opt = document.createElement("option");
-                    opt.value = name;
-                    opt.textContent = name;
-                    if (name === state.scenario) opt.selected = true;
+                    opt.value = s.name;
+                    opt.textContent = s.name;
+                    if (s.name === prev) { opt.selected = true; kept = true; }
+                    else if (s.name === state.scenario && !prev) { opt.selected = true; kept = true; }
                     sel.appendChild(opt);
                 }
-                sel.addEventListener("change", () => { state.scenario = sel.value; saveState(); });
+                if (!kept) {
+                    // The previously-selected scenario no longer matches the module —
+                    // fall back to "all" and persist so the next render is consistent.
+                    state.scenario = "";
+                    saveState();
+                    sel.value = "";
+                }
+                sel.dispatchEvent(new Event("change"));
+            };
+
+            if (script.needs_scenario) {
+                const sel = card.querySelector(".scenario-select");
+                const stepsBtn = card.querySelector(".steps-btn");
+                repopulateScenarioSelect(sel, script.needs_module ? state.module : "");
+                // Steps button is meaningful only for a specific scenario — the "all"
+                // (empty) value has no single steps file to show.
+                const syncStepsBtn = () => { stepsBtn.disabled = !sel.value; };
+                syncStepsBtn();
+                sel.addEventListener("change", () => {
+                    state.scenario = sel.value;
+                    saveState();
+                    syncStepsBtn();
+                });
+                stepsBtn.addEventListener("click", () => {
+                    if (sel.value) showInView("/api/scenarios/" + encodeURIComponent(sel.value));
+                });
+                // Register with the shared module dropdown (if any) so changing it
+                // re-populates this card's scenario list.
+                const sharedKey = sharedModuleGroup(script, target);
+                if (sharedKey) {
+                    groupModSelects[sharedKey].repopulators.push((mod) => {
+                        repopulateScenarioSelect(sel, mod);
+                    });
+                }
             }
 
             if (script.flags && script.flags.length > 0) {
@@ -270,16 +419,16 @@ async function runScript(script, btn) {
     if (script.destructive && !btn.classList.contains("running")) {
         if (!confirm(`${script.label} is destructive — are you sure?`)) return;
     }
-    // Long-running scripts toggle between Run and Stop
+    // Any running script can be stopped — long_running ones are the typical case
+    // (run_desktop, monitor_esp32, …) but a foreground script that's taking longer
+    // than expected (e.g. a full unit-test run) should also be killable mid-flight.
     if (btn.classList.contains("running")) {
-        if (script.long_running) {
-            appendLog(`\n--- Stopping ${script.label} ---\n`);
-            await fetch("/api/kill/" + script.id, { method: "POST" });
-            btn.classList.remove("running");
-            btn.textContent = "Run";
-            const dot = document.querySelector(`.status-dot[data-id="${script.id}"]`);
-            if (dot) { dot.className = "status-dot"; }
-        }
+        appendLog(`\n--- Stopping ${script.label} ---\n`);
+        await fetch("/api/kill/" + script.id, { method: "POST" });
+        btn.classList.remove("running");
+        btn.textContent = "Run";
+        const dot = document.querySelector(`.status-dot[data-id="${script.id}"]`);
+        if (dot) { dot.className = "status-dot"; }
         return;
     }
 
@@ -307,6 +456,7 @@ async function runScriptOnce(script, btn, extraParams) {
     if (script.needs_board) params.board = state.board;
     if (script.needs_port) params.port = state.port;
     if (script.needs_scenario) params.scenario = state.scenario;
+    if (script.needs_module) params.module = state.module;
     for (const flag of (script.flags || [])) {
         const stateKey = `flag_${script.id}_${flag.id}`;
         params[`flag_${flag.id}`] = stateKey in state ? state[stateKey] : flag.default;
@@ -315,7 +465,8 @@ async function runScriptOnce(script, btn, extraParams) {
     // Switch to log pane and show output
     switchPane("log");
     btn.classList.add("running");
-    btn.textContent = script.long_running ? "Stop" : "...";
+    // Show Stop on every running script so the user can interrupt a slow run.
+    btn.textContent = "Stop";
     const hostLabel = params.host ? ` - ${params.host}` : "";
     appendLog(`\n--- ${script.label}${hostLabel} ---\n`);
 

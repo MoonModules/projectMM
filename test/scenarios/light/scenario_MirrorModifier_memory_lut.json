@@ -1,0 +1,68 @@
+{
+  "name": "scenario_MirrorModifier_memory_lut",
+  "module": "MirrorModifier",
+  "also": ["Layer", "MappingLUT", "BlendMap"],
+  "description": "Verify that adding a MirrorModifier allocates both the mapping LUT and the driver buffer (the heavy memory path). Companion to memory-1to1, which verifies the no-LUT path.",
+  "steps": [
+    {
+      "name": "add-layout-group",
+      "description": "Create the top-level Layouts container.",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "add-grid",
+      "description": "Add a 16x16 GridLayout.",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {"width": 16, "height": 16}
+    },
+    {
+      "name": "add-layer",
+      "description": "Add a Layer wired to Layouts (RGB).",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "props": {"layouts": "Layouts", "channelsPerLight": 3}
+    },
+    {
+      "name": "add-noise",
+      "description": "Add NoiseEffect as the Layer's effect.",
+      "op": "add_module",
+      "id": "Noise",
+      "type": "NoiseEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "add-mirror",
+      "description": "Add MirrorModifier — triggers LUT and driver-buffer allocation.",
+      "op": "add_module",
+      "id": "Mirror",
+      "type": "MirrorModifier",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "add-driver-group",
+      "description": "Add a Drivers container wired to the Layer.",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {"layer": "Layer"}
+    },
+    {
+      "name": "add-artnet",
+      "description": "Add ArtNetSendDriver and run the bounded FPS measurement on the LUT path.",
+      "op": "add_module",
+      "id": "ArtNet",
+      "type": "ArtNetSendDriver",
+      "parent_id": "Drivers",
+      "measure": true,
+      "bounds": {
+        "fps": {"min_pct": 80}
+      }
+    }
+  ]
+}

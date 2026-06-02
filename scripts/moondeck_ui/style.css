@@ -127,6 +127,15 @@ select {
     padding-top: 0;
 }
 
+/* Shared module dropdown sits between a group header and its cards (one
+   filter drives every card in the group, e.g. test + scenarios share the
+   same module). The same select+button shape also appears inside a card
+   when only one card in the group needs a module (.module-row). Both rule
+   sets below select either layout so the visual is identical. */
+.shared-module-row {
+    padding: 0 2px 4px;
+}
+
 .script-card {
     background: #1a1a2e;
     border: 1px solid #0f3460;
@@ -190,7 +199,16 @@ select {
     cursor: pointer;
 }
 
-.script-card .scenario-select {
+.script-card .scenario-row,
+.script-card .module-row,
+.shared-module-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.script-card .scenario-select,
+.script-card .module-select,
+.shared-module-row .module-select {
     background: #0f3460;
     border: 1px solid #0f3460;
     color: #c0c0d0;
@@ -198,8 +216,27 @@ select {
     font-size: 11px;
     padding: 2px 4px;
     cursor: pointer;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
 }
+.script-card .steps-btn,
+.script-card .tests-btn,
+.shared-module-row .tests-btn {
+    background: transparent;
+    border: 1px solid #0f3460;
+    color: #a0a0b0;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    flex: 0 0 auto;
+}
+.script-card .steps-btn:hover:not(:disabled),
+.script-card .tests-btn:hover:not(:disabled),
+.shared-module-row .tests-btn:hover:not(:disabled) { color: #e94560; border-color: #e94560; }
+.script-card .steps-btn:disabled,
+.script-card .tests-btn:disabled,
+.shared-module-row .tests-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .flag-row {
     display: flex;

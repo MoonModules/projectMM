@@ -1,0 +1,52 @@
+{
+  "name": "scenario_GridLayout_resize",
+  "module": "GridLayout",
+  "also": ["MirrorModifier", "Layer"],
+  "description": "Resize the grid via REST while the pipeline is running and verify it reallocates cleanly under memory pressure. Lowers to 128x64 (release memory), increases to 128x128 (heaviest config: mirror + LUT). Each measured step captures tick/FPS/heap so the live runner reports the degrade behaviour.",
+  "steps": [
+    {
+      "name": "reset-mirrorX",
+      "description": "Make sure the mirror is enabled on X before measuring (the test assumes the heaviest LUT path).",
+      "op": "set_control",
+      "id": "Mirror",
+      "key": "mirrorX",
+      "value": true
+    },
+    {
+      "name": "reset-mirrorY",
+      "description": "Make sure the mirror is enabled on Y before measuring.",
+      "op": "set_control",
+      "id": "Mirror",
+      "key": "mirrorY",
+      "value": true
+    },
+    {
+      "name": "size-128x128",
+      "description": "Set grid height to 128 (alongside default width 128). Measures the heaviest config as the baseline for the next two steps.",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true
+    },
+    {
+      "name": "shrink-to-128x64",
+      "description": "Shrink to 128x64. Measured: FPS must stay within 20% of the baseline (proves the pipeline reallocs cleanly and there's no leak path).",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "measure": true,
+      "bounds": { "fps": { "min_pct": 80 } }
+    },
+    {
+      "name": "grow-to-128x128",
+      "description": "Grow back to 128x128. Measured: confirms the heap can return to the heavy baseline after a shrink.",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true
+    }
+  ]
+}

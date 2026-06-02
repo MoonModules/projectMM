@@ -1,0 +1,57 @@
+{
+  "name": "scenario_PreviewDriver_detail",
+  "module": "PreviewDriver",
+  "description": "Toggle the Preview driver's detail and decompress controls on a running system and measure the render-FPS impact. detail 2/3 have a known, accepted downsample cost on the render task; decompress is purely client-side and cannot affect the render tick (see performance.md). All steps assert a relative bound (min_pct) only — a single ESP32 scenario step swings too much for an absolute FPS floor to be meaningful (the absolute throughput floor is enforced in collect_kpi.py --commit, which uses a settled reading). detail 3 gets a looser bound because its downsample cost is real and accepted.",
+  "steps": [
+    {
+      "name": "detail-1-coarse",
+      "description": "detail=1 (coarsest, 16x16 downsample on a 128 grid). Cheapest preview render.",
+      "op": "set_control",
+      "id": "Preview",
+      "key": "detail",
+      "value": 1,
+      "measure": true,
+      "bounds": { "fps": { "min_pct": 80 } }
+    },
+    {
+      "name": "detail-2-medium",
+      "description": "detail=2 (medium, 32x32 downsample). Known accepted cost — must still hit 80% of baseline.",
+      "op": "set_control",
+      "id": "Preview",
+      "key": "detail",
+      "value": 2,
+      "measure": true,
+      "bounds": { "fps": { "min_pct": 80 } }
+    },
+    {
+      "name": "detail-3-fine",
+      "description": "detail=3 (finest, 43x43 downsample). Looser bound (70%) because the downsample cost is real and accepted.",
+      "op": "set_control",
+      "id": "Preview",
+      "key": "detail",
+      "value": 3,
+      "measure": true,
+      "bounds": { "fps": { "min_pct": 70 } }
+    },
+    {
+      "name": "decompress-on",
+      "description": "decompress=true. Client-side hint — must not affect the render tick.",
+      "op": "set_control",
+      "id": "Preview",
+      "key": "decompress",
+      "value": true,
+      "measure": true,
+      "bounds": { "fps": { "min_pct": 80 } }
+    },
+    {
+      "name": "decompress-off",
+      "description": "decompress=false. Same as above — pure client-side, no render impact expected.",
+      "op": "set_control",
+      "id": "Preview",
+      "key": "decompress",
+      "value": false,
+      "measure": true,
+      "bounds": { "fps": { "min_pct": 80 } }
+    }
+  ]
+}

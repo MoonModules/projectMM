@@ -51,7 +51,7 @@ Lets a low-dimensional effect work on a higher-dimensional layer without per-eff
 
 Hot-path cost is zero for D3 effects (the default) and zero when the layer's unused axes are size 1 (a D2 effect on a 2D layer, a D1 effect on a 1D layer). Real `memcpy` work only happens when the layer has more dimensions than the effect writes — exactly the case the framework is meant to handle.
 
-See [EffectBase § Dimensions and auto-extrusion](EffectBase.md#dimensions-and-auto-extrusion) for the effect-side contract and [test_extrude](../../testing.md#extrude) for the pinned tests.
+See [EffectBase § Dimensions and auto-extrusion](EffectBase.md#dimensions-and-auto-extrusion) for the effect-side contract and [Unit tests: Layer](../../tests/unit-tests.md#layer) for the pinned tests (see `unit_layer_extrude.cpp`).
 
 ## EffectBase overlap
 

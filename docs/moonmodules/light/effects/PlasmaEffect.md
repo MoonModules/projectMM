@@ -36,7 +36,7 @@ Phase accumulator matches NoiseEffect pattern — BPM changes do not jump the an
 
 ## Tests
 
-[Module test: PlasmaEffect](../../../testing.md#plasma) — non-zero output, spatial variation, differs from NoiseEffect.
+[Unit tests: PlasmaEffect](../../../tests/unit-tests.md#plasmaeffect) — non-zero output, spatial variation, differs from NoiseEffect.
 
 Default pipeline uses Plasma + MirrorModifier (see `src/main.cpp`).
 

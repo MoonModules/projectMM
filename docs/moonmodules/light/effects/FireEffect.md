@@ -37,7 +37,7 @@ Allocates `width * height` bytes for the heat buffer in `onBuildState()` when `e
 
 ## Tests
 
-[Module test: FireEffect](../../../testing.md#fire) — buffer becomes non-zero after several frames of sparking.
+[Unit tests: FireEffect](../../../tests/unit-tests.md#fireeffect) — buffer becomes non-zero after several frames of sparking.
 
 ## Prior art
 

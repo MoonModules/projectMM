@@ -11,6 +11,8 @@ This document describes the system as it is. Coding conventions live in [coding-
   - [Controls](#controls)
   - [Persistence](#persistence)
   - [Parallelism](#parallelism)
+  - [Data exchange between modules](#data-exchange-between-modules)
+  - [Event triggering between modules](#event-triggering-between-modules)
   - [Hot path discipline](#hot-path-discipline)
   - [Platform abstraction](#platform-abstraction)
 - [Light domain](#light-domain)
@@ -23,7 +25,6 @@ This document describes the system as it is. Coding conventions live in [coding-
   - [Mapping and blending](#mapping-and-blending)
   - [Drivers](#drivers)
   - [Memory strategy](#memory-strategy)
-  - [Rebuild propagation](#rebuild-propagation)
   - [Multi-device sync](#multi-device-sync)
 - [Web UI](#web-ui)
 - [What we leave undesigned](#what-we-leave-undesigned)
@@ -74,20 +75,7 @@ A MoonModule that owns children gets the standard lifecycle methods propagated t
 - `loop()`, `loop20ms()`, `loop1s()` — tick each child gated by the same rule the Scheduler applies to top-level modules (`!respectsEnabled() || enabled()` — modules that opted out of the enabled gate keep ticking, the rest tick only when enabled), with per-child timing accumulated into the child's own `loopTimeUs()`.
 - `onBuildControls()` and `onBuildState()` — chain into children.
 
-This means a container module gets correct lifecycle handling for its children without writing the iteration itself. Leaf modules (no children) pay one predicted-not-taken branch per call — sub-nanosecond.
-
-**Override-and-chain convention.** When a container needs custom work alongside child dispatch, it overrides the method and calls the base. For `loop`/`loop20ms`/`loop1s`, the convention is **option A: parent work first, then chain** — the parent prepares state that its children consume. Example: `Drivers::loop()` blends the layer buffer first, then chains so each driver child reads the fresh data:
-
-```cpp
-void loop() override {
-    if (layer_ && layer_->lut().hasLUT() && outputBuffer_.data()) {
-        blendMap(...);                  // parent's own work
-    }
-    MoonModule::loop();                 // then tick children
-}
-```
-
-For `setup()` the convention is the opposite — chain first so children are initialised before the parent depends on them. For `teardown()` the parent shuts down its own state, then chains. Use option B (children first) or a sandwich pattern only when a specific reason justifies it, and add a one-line comment explaining why.
+This means a container module gets correct lifecycle handling for its children without writing the iteration itself. Leaf modules (no children) pay one predicted-not-taken branch per call — sub-nanosecond. When a container overrides one of these methods to add its own work, the chain-to-base convention (parent-before vs child-before per callback) lives in [coding-standards.md § Override-and-chain convention](coding-standards.md#override-and-chain-convention).
 
 **ModuleFactory** is a static registry mapping type names (strings) to create functions. The HTTP API uses it to create modules at runtime (`POST /api/modules {"type":"NoiseEffect"}`); the main pipeline in `main.cpp` constructs modules directly. Registration captures `sizeof(T)` for memory reporting:
 
@@ -129,7 +117,36 @@ The Scheduler stays independent of FilesystemModule's type via a function-pointe
 
 On multi-core systems (ESP32 has 2 cores, desktop / RPi have many), the system exploits parallelism by assigning MoonModules to specific cores. Each MoonModule can declare a core affinity. The scheduler respects this when pinning tasks. On single-core or desktop systems, affinity is ignored and everything runs on available threads.
 
-The model is **producers vs consumers**: producers generate data, consumers process and output it. They run on separate cores with double buffering at the boundary — no locks on the hot path. The light domain instantiates the model concretely: effects are producers, drivers are consumers. The double buffer is the producer's Layer buffer and the consumer's own working copy (the encoded DMA buffer for an LED driver, the socket buffer for ArtNet); the physical/blend buffer, when present, is for compositing, not parallelism (see [Memory strategy](#memory-strategy)).
+The model is **producers vs consumers**: producers generate data, consumers process and output it. They run on separate cores with double buffering at the boundary — no locks on the hot path. The light domain instantiates the model concretely: effects are producers, drivers are consumers. Which buffers play the double-buffer role is covered in [§ Memory strategy](#memory-strategy).
+
+## Data exchange between modules
+
+When one module produces data another module reads on the hot path — the Layer pixel buffer that drivers send, the `PreviewFrame` the HTTP module broadcasts, the `Correction` table physical drivers apply — the pattern is the same throughout the codebase:
+
+- The **producer owns a small POD struct** as a member, overwritten in place each tick. No allocation per frame.
+- A **plain-data header** declares the struct (`Buffer`, `Correction`, `PreviewFrame`). Both producer and consumer include it; neither needs to know the other's class.
+- The producer exposes the struct via a `const`-returning getter (or a `setX(const Foo*)` setter on the consumer).
+- The **consumer holds a `const Foo*`** received once at wiring time in `main.cpp`, and reads it on the hot path each frame.
+
+No registry, no subscription, no event bus. The consumer reads the latest value when it needs it; if the producer wrote nothing this tick, the consumer sees the previous value (acceptable for the kinds of data this exchanges — frame buffers, periodic captures). Producer and consumer can run on different cores: publisher-write / readers-read with a one-frame staleness tolerance that doesn't need a lock.
+
+Concrete examples: `Drivers` hands every child driver a `Buffer*` (source) plus a `Correction*` (shared brightness/reorder/white); `PreviewDriver` writes a `PreviewFrame` that `HttpServerModule` reads for the WebSocket broadcast; `Layer` exposes its pixel buffer to `Drivers` directly on the identity-mapping fast path.
+
+The shape extends without ceremony to any future producer/consumer pair (a sensor module owning a state struct, an effect reading it through a `const Foo*` set at wiring time). It is deliberately not pub/sub: there's one producer per data kind and the consumer explicitly wants that specific data — the registry overhead and listener-lifecycle complexity of pub/sub buy nothing.
+
+## Event triggering between modules
+
+A control changes, or the module tree is mutated (a child added, deleted, replaced, moved) — and other modules may need to react. The framework provides a three-tier split so each change costs only as much as it has to, from cheapest to most expensive:
+
+1. **`onUpdate(controlName)`** — runs on *every* control change, but only on the module whose own control changed. A cheap, per-control reaction: recompute a small LUT, re-bind a socket. Default no-op. This is where a brightness change rebuilds the (256-entry) correction LUT — no reallocation, so dragging the slider stays fluent.
+2. **`controlChangeTriggersBuildState(controlName)`** — a gate, default `false`. Only `true` for controls that change physical dimensions or mapping shape (a Layout's grid width/height/depth; a Modifier's toggles change the LUT shape). When `true`, the framework runs the pipeline-wide rebuild; when `false` (effect speed, driver fps, brightness), it doesn't.
+3. **`onBuildState()`** — the module (re)builds its derived state (buffers, LUTs) for the current control values. Reached via `Scheduler::buildState()` — the coordinator-driven sweep that walks every module's `onBuildState`.
+
+`Scheduler::buildState()` fires from two triggers: a tier-2 gate returning true after a control change, **and** any tree mutation (HTTP add/delete/replace/move handlers all call it unconditionally — a structural change is rare and unambiguously needs a rebuild). Both triggers funnel through the same sweep; each module's `onBuildState` is idempotent (e.g. an effect only reallocs when its grid count actually changed), so over-rebuilding is wasted work, not a correctness hazard.
+
+This is the recognised layout/prepare-pass pattern: JUCE's `prepareToPlay` and UIKit's `layoutSubviews` work the same way — a framework-driven sweep over every object of the primary type, gated by per-object metadata (WPF's `AffectsMeasure`, here `controlChangeTriggersBuildState`). Not pub/sub: the publisher (HttpServerModule, or the mutation site) explicitly tells the coordinator to run the pass; the coordinator explicitly walks every module. The light domain consumes this mechanism for its mapping rebuild (see [§ Mapping and blending](#mapping-and-blending)) but the mechanism itself is core and applies to any module with derived state.
+
+If a module needs to actively notify a specific other module of an event (rather than publish data for polling, or change its own controls), the pattern is a direct method call from the producer to a known consumer — `ImprovProvisioningModule::loop1s` calls `networkModule_->setWifiCredentials(...)` when credentials arrive over UART. No event bus; the producer holds a pointer to the consumer set at wiring time (`main.cpp`). Pub/sub becomes the right pattern only when there are multiple unknown subscribers per event — projectMM has none today.
 
 ## Hot path discipline
 
@@ -181,10 +198,10 @@ Modules in the light pipeline can be added, replaced, or removed dynamically at 
                 │       │       │
                 └── Blend+Map ──┘
                         │
-                    Drivers
-                ├── WS2812Driver  (consumer buffer / DMA)
-                ├── ArtNetDriver  (UDP packets)
-                └── PreviewDriver (WebSocket)
+                    Drivers          (owns Correction: brightness + lightPreset)
+                ├── WS2812Driver  ─ apply Correction ─→ DMA buffer
+                ├── ArtNetDriver  ─ apply Correction ─→ UDP packets
+                └── PreviewDriver (raw buffer, no Correction) ─→ WebSocket
 ```
 
 **Naming convention.** Capital `Layouts`, `Layers`, `Drivers` are class names (always capitalised when referring to the class). Lowercase "layouts", "layers", "drivers" is the English plural — used freely when context makes it clear. Singular "layout", "layer", "driver" is an individual instance.
@@ -210,11 +227,11 @@ Layouts cover both addressable LEDs and DMX fixtures. An LED-strip layout yields
 
 Positions are computed algorithmically, not stored. Grid is the most commonly used layout, but any geometry works: spheres, rings, cones, spirals, arbitrary point clouds. Grid is full-density (every position maps to a light); a wheel is sparse (only spoke positions are mapped, gaps are unmapped).
 
-Multiple layouts can live in one Layouts container. A device today contains the same light type within each layout. Mixing light types in a single Layouts (e.g. LED strips + par lights) is planned for later.
+Multiple layouts can live in one Layouts container. Each layout describes one light type; mixing light types in a single Layouts (e.g. LED strips + par lights) is listed in [§ What we leave undesigned](#what-we-leave-undesigned).
 
 ## Layers and Layer
 
-**Layers** (a MoonModule) is the top-level container for one or more layers. Each layer renders independently into its own buffer; the Drivers container composes those buffers downstream. Today the boot pipeline creates one layer, so Layers is a thin pass-through; alpha-blend / additive composition lands when more than one layer is wired in.
+**Layers** (a MoonModule) is the top-level container for one or more layers. Each layer renders independently into its own buffer; the Drivers container composes those buffers downstream. With one layer wired (today's boot pipeline) Layers is a thin pass-through; multi-layer composition (alpha-blend / additive) is in [§ What we leave undesigned](#what-we-leave-undesigned).
 
 A **Layer** (a MoonModule, child of Layers) owns:
 
@@ -239,7 +256,9 @@ Effects know nothing about hardware, protocols, physical LED layout, or mapping.
 
 **Speed convention.** Effects with a speed control use BPM (beats per minute). `uint8_t`, default 60 (= 1 beat per second). Human-readable, musically meaningful, DMX-compatible. The effect converts BPM to animation rate internally using elapsed millis.
 
-**Dimensionality.** Every effect declares its native dimensionality through `EffectBase::dimensions()`, returning `Dim::D1`, `Dim::D2`, or `Dim::D3` (default — "I iterate every axis the layer gives me"). The Layer uses this to **extrude** lower-dimensional output across the unused axes after each effect's `loop()`:
+### Dimensionality
+
+Every effect declares its native dimensionality through `EffectBase::dimensions()`, returning `Dim::D1`, `Dim::D2`, or `Dim::D3` (default — "I iterate every axis the layer gives me"). The Layer uses this to **extrude** lower-dimensional output across the unused axes after each effect's `loop()`:
 
 - **D1** — the effect writes only the row at `(y=0, z=0)`. Layer copies that row across every other y in z=0, then copies z=0 across every z.
 - **D2** — the effect writes only the z=0 slice. Layer copies z=0 across every z.
@@ -252,6 +271,8 @@ Hot-path cost: extrude pays one comparison and returns for the D3 case. For D1/D
 Each effect's `dimensions()` is a claim about which axes its loop iterates, not which axes its math could in principle vary along. A "D2 fire" can in future be promoted to D3 by adding z-aware heat propagation; until then declaring it D2 honestly describes what the loop does today.
 
 The `dim` int is also emitted in `/api/types` so the UI derives the dimensional emoji (📏/🟦/🧊) per module — modules don't put dimensional emoji in their own `tags()` strings.
+
+### Robustness rules
 
 **Effects must run at every grid size.** Modifiers can shrink the logical grid to any size including 0×0×0 (e.g. every layout child is disabled). An effect's `loop()` must produce a correct result for any `(width, height, depth)` — no crashes, no divide-by-zero, no out-of-bounds writes. On a zero grid the loop is a clean no-op. Effects either gate at the top (`if (w <= 0 || h <= 0) return;`) or write their loops so an empty range is naturally a no-op (`for (y = 0; y < h; ...)`).
 
@@ -279,7 +300,7 @@ A modifier can:
 
 The blend+map step walks each layer in turn: reads each logical light, uses that layer's LUT to find the physical position(s), blends the colour into the physical output buffer. This is where logical space meets physical space.
 
-Each mapping LUT is a flat, contiguous lookup table allocated outside the hot path (at startup or when the layout configuration changes).
+Each mapping LUT is a flat, contiguous lookup table allocated outside the hot path. It is built in `Layer::onBuildState()` and rebuilt whenever a Layout or Modifier control changes (the controls' `controlChangeTriggersBuildState` returns true) or a Modifier/Layout child is added/removed/replaced/moved — both triggers flow through the same core mechanism, see [§ Event triggering between modules](#event-triggering-between-modules).
 
 The LUT supports four mapping types:
 
@@ -305,7 +326,7 @@ Each driver (a MoonModule) speaks one protocol:
 
 Each driver child reads from the Drivers container's output buffer. Everything before the Drivers container is platform-independent.
 
-**Output correction** turns logical RGB into the physical signal every physical driver needs: **brightness** scaling, channel **reorder** (RGB→GRB etc. via a *light preset*), and **white** derivation for RGBW fixtures. The Drivers container owns the shared correction state — a brightness lookup table (gamma / white-balance fold in later as a per-channel R/G/B split) plus the light-preset — exposed as `brightness` and `lightPreset` controls. Each *physical* driver applies the correction per-light as it reads its source buffer, into its own output buffer/packet. Preview is exempt: it shows the raw logical buffer (the effect's true output, not the dimmed/reordered wire signal). As of this design ArtNet applies the correction; future LED drivers apply the same correction before their protocol encode. The brightness LUT rebuilds on the cheap `onUpdate` tier (see § Rebuild propagation), so the slider stays fluent.
+**Output correction** turns logical RGB into the physical signal every physical driver needs: **brightness** scaling, channel **reorder** (RGB→GRB etc. via a *light preset*), and **white** derivation for RGBW fixtures. The Drivers container owns the shared correction state — a brightness lookup table plus the light-preset — exposed as `brightness` and `lightPreset` controls. Each *physical* driver applies the correction per-light as it reads its source buffer, into its own output buffer/packet. Preview is exempt: it shows the raw logical buffer (the effect's true output, not the dimmed/reordered wire signal). ArtNet consumes the correction today via a `const Correction*` set by `Drivers`; any other physical driver added to `Drivers` consumes the same pointer. The brightness LUT rebuilds on the cheap `onUpdate` tier (see [§ Event triggering between modules](#event-triggering-between-modules)), so the slider stays fluent.
 
 Network-based drivers (ArtNet, E1.31, DDP) must pace their packet output — never blast all universe packets in a tight loop. Both FPS limiting (skip frames if called too fast) and inter-packet delay (microsecond pause between universes within a frame) are required. Without pacing, receivers drop packets and the output appears broken.
 
@@ -313,7 +334,7 @@ Network-based drivers (ArtNet, E1.31, DDP) must pace their packet output — nev
 
 All buffers are allocated as single contiguous blocks outside the hot path — at startup or when configuration changes (LED count, layout size, layer count). They are then reused every frame with zero allocations in steady state. Measured per-module timing and memory for each platform: [performance.md](performance.md).
 
-**Buffer types**
+### Buffer types
 
 - **Layer buffers** — one per active layer, holds the logical light data for one effect chain. Allocated in PSRAM when available. On memory-constrained devices, consumers may read from the layer buffer directly (no mapping, no blending, no physical buffer needed).
 - **Physical buffer** — when present, holds the blended+mapped output. It is a *blend* buffer, needed only for compositing (>1 layer, or any alpha/additive blend); it is not what provides producer/consumer parallelism. Parallelism comes from the consumer's own working copy — the encoded DMA buffer for a clockless LED driver, or the kernel socket buffer for ArtNet — which decouples the producer (filling the next Layer frame) from the consumer (transmitting the previous one).
@@ -323,12 +344,16 @@ All buffers are raw `uint8_t*` arrays sized `channelsPerLight * nrOfLights`. Sup
 
 Network input (ArtNet receive, WebSocket) is processed synchronously at a defined point in the frame loop. Zero extra buffers, no race conditions. The trade-off is up to one frame of latency (~16 ms at 60 fps), imperceptible for LEDs.
 
-**Adaptive allocation.** The system checks available heap before each allocation and degrades gracefully when memory is insufficient. A minimum reserve (`HEAP_RESERVE = 32 KB`) is kept for stack, HTTP, WiFi, and overhead.
+### Adaptive allocation
+
+The system checks available heap before each allocation and degrades gracefully when memory is insufficient. A minimum reserve (`HEAP_RESERVE = 32 KB`) is kept for stack, HTTP, WiFi, and overhead.
 
 - **Mapping LUT** is created only if all of: modifiers exist on the layer; layout is not a simple non-serpentine grid (where physical == logical); enough heap available after the reserve.
-- **Driver output buffer** is created only if at least one layer has a mapping LUT actually allocated (any layer's LUT triggers the shared output buffer) and enough heap available.
+- **Driver output buffer** (see [§ Drivers](#drivers) for what it's for) is created only when at least one layer has a mapping LUT actually allocated and enough heap is available.
 
-**Degradation cascade** (best to worst):
+### Degradation cascade
+
+Best to worst:
 
 1. **Full pipeline** — LUT + driver output buffer. Modifier applied, clean separation.
 2. **Skip LUT + driver buffer** — modifier not applied, forced 1:1 mapping. No intermediate buffers. (A LUT without a driver buffer to map into is useless — they're always skipped together.)
@@ -336,15 +361,19 @@ Network input (ArtNet receive, WebSocket) is processed synchronously at a define
 
 Each degradation is observable via `lutSkipped()` and reported in `/api/system` per-module metrics.
 
-**Invariants** (non-negotiable):
+### Invariants
+
+Non-negotiable:
 
 - Effects always write to their layer's logical buffer. Never to output, never to physical coordinates.
 - Drivers always own the output path (blending, mapping, brightness correction, channel reordering).
 - Layer buffer is mandatory — if it doesn't fit, reduce dimensions until it does ("at least see something").
 
-**Per-module reporting.** Every MoonModule reports `classSize()` (sizeof the class instance) and `dynamicBytes()` (heap allocated during `onBuildState`). Visible in `/api/system`, console output, and scenario tests. Memory scenarios verify that 1:1 pipelines use zero intermediate buffers and that the cascade triggers at the right thresholds.
+### Per-module reporting
 
-**Scaling to available memory**
+Every MoonModule reports `classSize()` (sizeof the class instance) and `dynamicBytes()` (heap allocated during `onBuildState`). Visible in `/api/system`, console output, and scenario tests. Memory scenarios verify that 1:1 pipelines use zero intermediate buffers and that the cascade triggers at the right thresholds.
+
+### Scaling to available memory
 
 | Device | Memory | Typical capability |
 |--------|--------|--------------------|
@@ -354,18 +383,6 @@ Each degradation is observable via `lutSkipped()` and reported in `/api/system` 
 | Desktop / RPi | Abundant | No constraints |
 
 The architecture does not assume PSRAM is present. Buffer counts and sizes are determined at runtime based on available memory and reallocated when configuration changes.
-
-## Rebuild propagation
-
-Control changes reach modules through a three-tier split, so a change costs only as much as it has to. From cheapest to most expensive:
-
-1. **`onUpdate(controlName)`** — runs on *every* control change. A cheap, per-control reaction: recompute a small LUT, re-bind a socket. Default no-op. This is where a brightness change rebuilds the (256-entry) correction LUT — no reallocation, so dragging the slider stays fluent.
-2. **`controlChangeTriggersBuildState(controlName)`** — a gate, default `false`. Only `true` for controls that change physical dimensions or mapping shape: every Layout control (grid width/height/depth) and every Modifier control (mirror toggles change the LUT shape). When `true`, the framework runs the pipeline-wide rebuild; when `false` (effect speed, driver fps, brightness), it doesn't.
-3. **`onBuildState()`** — the actual (re)allocation, reached via `Scheduler::buildState()` only when tier 2 returns `true`. Re-evaluates layout-derived dimensions, LUTs, and buffer sizes across the tree.
-
-So: a layout control change → every Layer rebuilds its LUT and the Drivers container reallocates its output buffer (tier 2 → tier 3). A modifier control change → the affected Layer rebuilds its LUT. An effect/driver value change → tier 1 only, no realloc. Enable/disable always rebuilds (it changes which children allocate). Propagation is built into the framework, not ad-hoc dirty-flag checks in the application entry point.
-
-This mirrors the three-way split in MoonLight (projectMM's predecessor): `onUpdate` (value reaction) / `requestMappings` via `hasOnLayout`/`hasModifier` (remap) / `onSizeChanged` (realloc).
 
 ## Multi-device sync
 

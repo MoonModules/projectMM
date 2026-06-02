@@ -50,9 +50,9 @@ Uses nested loops over enabled axes, deduplicates, returns count.
 
 ## Tests
 
-[Module test: MirrorModifier](../../../testing.md#mirror) — logical dimensions, corner/centre pixel mapping, deduplication, axis combinations.
+[Unit tests: MirrorModifier](../../../tests/unit-tests.md#mirrormodifier) — logical dimensions, corner/centre pixel mapping, deduplication, axis combinations.
 
-[Scenario: mirror](../../../testing.md#scenario-mirror) — full pipeline with mirror kaleidoscope, performance bounds.
+[Scenario: scenario_MirrorModifier_pipeline](../../../tests/scenario-tests.md#scenario_mirrormodifier_pipeline) — full pipeline with mirror kaleidoscope, performance bounds.
 
 ## Prior art
 

@@ -18,9 +18,9 @@ Time-based animation via elapsed millis, converted to BPM phase internally.
 
 ## Tests
 
-[Module test: RainbowEffect](../../../testing.md#rainbow) — non-zero output, valid RGB, spatial variation.
+[Unit tests: RainbowEffect](../../../tests/unit-tests.md#rainboweffect) — non-zero output, valid RGB, spatial variation.
 
-[Scenario: base-pipeline](../../../testing.md#scenario-pipeline) — full pipeline with rainbow effect, performance bounds.
+[Scenario: scenario_Layer_base_pipeline](../../../tests/scenario-tests.md#scenario_layer_base_pipeline) — full pipeline with rainbow effect, performance bounds.
 
 ## Design notes
 

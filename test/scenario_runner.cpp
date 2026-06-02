@@ -414,10 +414,12 @@ static int runScenario(const char* path) {
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        // Run all scenarios in the scenarios/ directory
+        // Run all scenarios in the scenarios/ directory tree.
+        // Recursive so the core/ + light/ split picks up every JSON without
+        // each subfolder needing its own discovery loop.
         int failed = 0;
         int total = 0;
-        for (auto& entry : std::filesystem::directory_iterator("test/scenarios")) {
+        for (auto& entry : std::filesystem::recursive_directory_iterator("test/scenarios")) {
             if (entry.path().extension() == ".json") {
                 total++;
                 if (runScenario(entry.path().c_str()) != 0) failed++;

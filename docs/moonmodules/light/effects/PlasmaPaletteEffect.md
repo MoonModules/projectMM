@@ -19,4 +19,4 @@ Plasma index `((s1+s2+s3+s4)>>2)` maps through `palette_[256]` (768 bytes flash)
 
 ## Tests
 
-[Module test](../../../testing.md#stateless-effects) — non-zero output, spatial variation.
+[Unit tests: CheckerboardEffect](../../../tests/unit-tests.md#checkerboardeffect) (PlasmaPaletteEffect is one of the stateless effects covered) — non-zero output, spatial variation.

@@ -1,0 +1,35 @@
+{
+  "name": "scenario_NetworkModule_mdns_toggle",
+  "module": "NetworkModule",
+  "description": "Toggle the mDNS responder on and off and measure render-FPS impact. Validates that mDNS announcement traffic doesn't degrade the render loop more than 20% on the busiest tick.",
+  "steps": [
+    {
+      "name": "baseline-mdns-on",
+      "description": "mDNS on (default) — captures the baseline FPS for the next two steps.",
+      "op": "set_control",
+      "id": "Network",
+      "key": "mDNS",
+      "value": true,
+      "measure": true
+    },
+    {
+      "name": "mdns-off",
+      "description": "mDNS off — measured. Expected to match or exceed the baseline.",
+      "op": "set_control",
+      "id": "Network",
+      "key": "mDNS",
+      "value": false,
+      "measure": true
+    },
+    {
+      "name": "mdns-on-again",
+      "description": "mDNS on again — measured with a bound: FPS must stay within 20% of the baseline (proves toggling doesn't leave the network task in a degraded state).",
+      "op": "set_control",
+      "id": "Network",
+      "key": "mDNS",
+      "value": true,
+      "measure": true,
+      "bounds": { "fps": { "min_pct": 80 } }
+    }
+  ]
+}

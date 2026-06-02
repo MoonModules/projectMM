@@ -35,6 +35,16 @@ The design rationale for each rule below lives in [docs/architecture.md](docs/ar
 
 **Ask, don't guess.** When uncertain about requirements, behavior, or approach — ask the product owner. Asking is always preferred over guessing. This is the default.
 
+**Sanity-check every request before acting.** When the product owner asks for something, first hold it against three references: does the request make sense, and does it align with [README.md](README.md), this [CLAUDE.md](CLAUDE.md), and [docs/architecture.md](docs/architecture.md)? If it does, proceed. If it doesn't — if the request contradicts a principle, breaks a hard rule, fights the architecture, or just doesn't add up given context the product owner may have missed — push back briefly before doing the work: name what looks off, name which doc says what, and offer the alternative. The product owner can still say "do it anyway" (they often have context the agent doesn't), but the check has happened. This catches bad decisions early instead of after the diff lands.
+
+**Refactor for simplicity.** When the product owner asks to make something simpler, more consistent, or "cleaner," do not start moving files or rewriting code until three questions are answered in writing:
+
+1. **Enumerate alternatives.** List the 2–4 plausible end states. One line each (e.g. "A: split into core/light", "B: split into core/light/platform", "C: keep flat with naming convention").
+2. **For each, name what's gained and what's lost.** Concrete and measurable: lines removed, ambiguities resolved, duplicated parsers eliminated, contributor friction added (every extra subfolder is friction; every empty placeholder dir is friction; every renamed-but-unused alias is friction).
+3. **Pick the leanest that solves the actual problem.** Subtraction beats addition. An empty subfolder, a parser duplicated "for clarity", a renamed alias kept "for compatibility" all add friction without paying for themselves — don't propose them.
+
+Then check the recommendation against [§ Principles](#principles) (minimalism, data over objects, concrete first) and propose it as a question, not a fait accompli. The product owner picks; the agent implements only what was picked. If the picked option turns out to need a follow-up change (e.g. an updated naming convention to make the new layout consistent), surface that *before* starting the move so it's a single coherent refactor, not three round-trips.
+
 **Plan before implementing.** Use `/plan` mode before every feature. Review plans for: unnecessary files, inheritance where structs suffice, modifications outside the relevant directory. Reject and regenerate bad plans.
 
 **Consider extending before creating.** When adding a feature, check if an existing module can be extended cleanly. If a new file is genuinely cleaner, that's fine — but justify it.

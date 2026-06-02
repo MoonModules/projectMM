@@ -20,6 +20,26 @@ Decided once; not re-derived per file.
 - **Core service modules: `.h` + `.cpp`.** Core modules that bridge to the platform layer or implement substantial infrastructure (`HttpServerModule`, `FilesystemModule`, `NetworkModule`, `Scheduler`, `SystemModule`) ship as a `.h` (interface) plus a `.cpp` (implementation). Three reasons that compound: (a) implementation changes recompile only the `.cpp`, not every TU that includes the header — incremental builds are 2–5× faster on the kind of edits that happen in development; (b) readers want the interface separately from the body; (c) symbol bloat and link-time stay bounded. Small core utilities that are *almost entirely declarations or inline accessors* — `types.h`, `color.h`, `version.h`, `PreviewFrame.h`, `JsonUtil.h`, `Control.h`, `JsonSink.h`, `Sha1.h`, `Base64.h` — stay header-only. Templates (e.g. `ModuleFactory::registerType<T>`) also must stay in the header because of C++ instantiation rules; a module that's mostly template can therefore stay header-only.
 - **Exceptions need a one-line comment at the top of the file naming the reason.** Without a stated reason the file is expected to follow the default for its category. When in doubt: light → header-only, core → `.h` + `.cpp`.
 
+## Override-and-chain convention
+
+A MoonModule that owns children gets the standard lifecycle methods (`setup`, `loop`, `loop20ms`, `loop1s`, `teardown`, `onBuildControls`, `onBuildState`) propagated to children by the base class default — see [architecture.md § MoonModules](architecture.md#moonmodules). When a container overrides one of these to add its own work, the convention is **when in the override to call the base**:
+
+- **`loop` / `loop20ms` / `loop1s`** — option A: parent work first, then chain. The parent prepares state that children consume.
+
+  ```cpp
+  void loop() override {
+      if (layer_ && layer_->lut().hasLUT() && outputBuffer_.data()) {
+          blendMap(...);                  // parent's own work
+      }
+      MoonModule::loop();                 // then tick children
+  }
+  ```
+
+- **`setup`** — chain first, then parent work. Children must be initialised before the parent depends on them.
+- **`teardown`** — parent work first, then chain. The parent shuts down its own state before the base reverse-iterates children.
+
+Option B (children first on `loop`) or a sandwich pattern is allowed only when a specific reason justifies it; add a one-line comment at the override explaining why.
+
 ## Casts
 
 Use project typedefs (`lengthType`, `nrOfLightsType`) consistently so types match and casts are unnecessary. When casts are needed:

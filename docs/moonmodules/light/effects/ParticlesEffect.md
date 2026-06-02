@@ -37,7 +37,7 @@ Particle list (`64 * 8` bytes) is part of `sizeof(ParticlesEffect)`, not `dynami
 
 ## Tests
 
-[Module test: ParticlesEffect](../../../testing.md#particles) — buffer becomes non-zero after one frame (particles draw immediately).
+[Unit tests: ParticlesEffect](../../../tests/unit-tests.md#particleseffect) — buffer becomes non-zero after one frame (particles draw immediately).
 
 ## Prior art
 

@@ -13,9 +13,20 @@
       "id": "test_desktop",
       "tab": "pc",
       "group": "test",
-      "label": "Test",
+      "label": "Unit Test",
       "help": "test_desktop",
-      "script": "test/test_desktop.py"
+      "script": "test/test_desktop.py",
+      "needs_module": true
+    },
+    {
+      "id": "scenario_pipeline",
+      "tab": "pc",
+      "group": "test",
+      "label": "Scenarios",
+      "help": "scenario_pipeline",
+      "script": "scenario/run_scenario.py",
+      "needs_module": true,
+      "needs_scenario": true
     },
     {
       "id": "run_desktop",
@@ -39,7 +50,7 @@
       "id": "preview_installer",
       "tab": "pc",
       "group": "run",
-      "label": "Preview Installer",
+      "label": "Installer Preview",
       "help": "preview_installer",
       "script": "run/preview_installer.py",
       "long_running": true,
@@ -62,18 +73,9 @@
       "script": "check/collect_kpi.py"
     },
     {
-      "id": "scenario_pipeline",
-      "tab": "pc",
-      "group": "scenario",
-      "label": "Scenarios",
-      "help": "scenario_pipeline",
-      "script": "scenario/run_scenario.py",
-      "needs_scenario": true
-    },
-    {
       "id": "history_report",
       "tab": "pc",
-      "group": "report",
+      "group": "check",
       "label": "History Report",
       "help": "history_report",
       "script": "report/history_report.py"
@@ -116,6 +118,7 @@
       "help": "live_scenario",
       "script": "scenario/run_live_scenario.py",
       "needs_device": true,
+      "needs_module": true,
       "needs_scenario": true
     },
     {

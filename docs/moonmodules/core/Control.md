@@ -71,7 +71,7 @@ Control values must be saved/loaded persistently (filesystem). The mechanism:
 
 ## Tests
 
-[Module test: MoonModule + Control](../../testing.md#moonmodule) — control binding by reference, pointer read/write, clear and rebuild.
+[Unit tests: MoonModule](../../tests/unit-tests.md#moonmodule) — control binding by reference, pointer read/write, clear and rebuild.
 
 ## Prior art
 

@@ -36,9 +36,9 @@ Frame types:
 
 ## Tests
 
-- [Preview Driver unit test](../../../testing.md#preview-driver) — `detail` strides, original-dimension reporting, send-buffer budget, channel-agnostic copy.
-- [Scenario: preview-detail](../../../testing.md#scenario-preview-detail) — toggles `detail`/`decompress` on a live device, asserts no render-FPS regression.
-- [Scenario: base-pipeline](../../../testing.md#scenario-pipeline) — full pipeline including preview driver.
+- [Unit tests: PreviewDriver](../../../tests/unit-tests.md#previewdriver) — `detail` strides, original-dimension reporting, send-buffer budget, channel-agnostic copy.
+- [Scenario: scenario_PreviewDriver_detail](../../../tests/scenario-tests.md#scenario_previewdriver_detail) — toggles `detail`/`decompress` on a live device, asserts no render-FPS regression.
+- [Scenario: scenario_Layer_base_pipeline](../../../tests/scenario-tests.md#scenario_layer_base_pipeline) — full pipeline including preview driver.
 
 ## Prior art
 

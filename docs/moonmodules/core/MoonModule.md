@@ -90,7 +90,7 @@ Conditional controls (e.g. fields only visible under a Select mode) are always b
 
 ## Tests
 
-[Module test: MoonModule + Control](../../testing.md#moonmodule) — lifecycle, control binding, clear and rebuild.
+[Unit tests: MoonModule](../../tests/unit-tests.md#moonmodule) — lifecycle, control binding, clear and rebuild.
 
 ## Prior art
 

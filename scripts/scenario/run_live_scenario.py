@@ -17,6 +17,10 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 SCENARIOS_DIR = ROOT / "test" / "scenarios"
 BASELINE_FILE = ROOT / "test" / "scenario-baseline.json"
 
+# Reuse the shared test-metadata parser so scenario discovery stays in one place.
+sys.path.insert(0, str(ROOT / "scripts" / "docs"))
+import _test_metadata as test_meta  # noqa: E402
+
 
 class Client:
     def __init__(self, host: str):
@@ -277,6 +281,8 @@ def main():
                         help="Device host:port (default: localhost:8080)")
     parser.add_argument("--name", default=None,
                         help="Scenario name (without .json). Runs all if omitted.")
+    parser.add_argument("--module", default=None,
+                        help="Filter to scenarios whose top-level module / also matches.")
     parser.add_argument("--settle", type=float, default=3.0,
                         help="Settle time in seconds between step and measurement")
     parser.add_argument("--update-baseline", action="store_true",
@@ -296,11 +302,24 @@ def main():
         print(f"Cannot connect to {args.host}: {e}")
         sys.exit(1)
 
-    # Find scenarios
+    # Find scenarios via the shared metadata module (recursive: scenarios live under core/, light/, …)
     if args.name:
-        paths = [SCENARIOS_DIR / f"{args.name}.json"]
+        match = test_meta.find_scenario_path(args.name)
+        if not match:
+            print(f"Scenario not found: {args.name}.json under {test_meta.SCENARIO_DIR}")
+            sys.exit(1)
+        paths = [match]
     else:
-        paths = sorted(SCENARIOS_DIR.glob("*.json"))
+        paths = [s["path"] for s in test_meta.collect_scenario_files()]
+
+    if args.module and args.module.lower() != "all":
+        module_paths = set(test_meta.paths_for_module(args.module))
+        filtered = [p for p in paths if p in module_paths]
+        if not filtered:
+            print(f"No scenarios match module: {args.module}")
+            sys.exit(1)
+        paths = filtered
+        print(f"Module filter: {args.module} ({len(paths)} scenario(s))")
 
     if not paths:
         print("No scenarios found")

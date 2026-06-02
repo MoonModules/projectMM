@@ -32,7 +32,7 @@ Move-constructible, not copyable.
 
 ## Tests
 
-[Module test: Buffer](../../testing.md#buffer) — allocate, clear, move semantics, double-free safety, zero-size edge case.
+[Unit tests: Buffer](../../tests/unit-tests.md#buffer) — allocate, clear, move semantics, double-free safety, zero-size edge case.
 
 ## Prior art
 

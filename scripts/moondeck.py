@@ -17,6 +17,12 @@ UI_DIR = SCRIPTS_DIR / "moondeck_ui"
 ASSETS_DIR = ROOT / "docs" / "assets"
 STATE_FILE = SCRIPTS_DIR / "moondeck.json"
 
+# Shared test-metadata parsers live next to the doc generator. Both this server
+# and scripts/docs/generate_test_docs.py import from there so the two views of
+# the same source files (HTML in MoonDeck, markdown in docs/tests/) can't drift.
+sys.path.insert(0, str(SCRIPTS_DIR / "docs"))
+import _test_metadata as test_meta  # noqa: E402
+
 
 def _app_version():
     """Read the project version from library.json. '?' if unavailable."""
@@ -267,9 +273,16 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"ports": list_serial_ports()})
 
         elif self.path == "/api/scenarios":
-            scenarios_dir = ROOT / "test" / "scenarios"
-            names = sorted(p.stem for p in scenarios_dir.glob("*.json")) if scenarios_dir.exists() else []
-            self._send_json({"scenarios": names})
+            self._send_json({"scenarios": self._list_scenarios()})
+
+        elif self.path.startswith("/api/scenarios/"):
+            self._serve_scenario_steps()
+
+        elif self.path == "/api/test-modules":
+            self._send_json({"modules": test_meta.list_test_modules()})
+
+        elif self.path.startswith("/api/unit-tests/"):
+            self._serve_unit_tests_for_module()
 
         elif self.path == "/api/state":
             self._send_json(load_state())
@@ -360,6 +373,8 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             cmd.extend(["--port", params["port"]])
         if script_def.get("needs_scenario") and params.get("scenario"):
             cmd.extend(["--name", params["scenario"]])
+        if script_def.get("needs_module") and params.get("module"):
+            cmd.extend(["--module", params["module"]])
         if params.get("host"):
             cmd.extend(["--host", params["host"]])
         for flag in script_def.get("flags", []):
@@ -417,23 +432,202 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 _running.pop(script_id, None)
 
     def _serve_doc(self):
-        """Serve any docs/*.md file as styled HTML with deep-link anchor support.
-        URL: /api/docs/<filename>[#anchor] — e.g. /api/docs/testing.md#scenario-mirror"""
+        """Serve any docs/**/*.md file as styled HTML with deep-link anchor support.
+        URL: /api/docs/<path>[?#anchor] — e.g. /api/docs/testing.md, /api/docs/tests/unit-tests.md"""
         import re as _re
         raw_path = self.path[len("/api/docs/"):]
         parts = raw_path.split("?", 1)
         filename = parts[0].strip("/")
         raw_anchor = parts[1] if len(parts) > 1 else ""
         anchor = raw_anchor if _re.fullmatch(r"[A-Za-z0-9._-]+", raw_anchor) else ""
-        # Restrict to .md files with no path traversal
-        if not filename.endswith(".md") or "/" in filename or ".." in filename:
-            self.send_error(400, "Only .md files in docs/ are served here")
+        # Restrict to .md files and resolve under docs/ with a traversal guard:
+        # build the candidate path, resolve symlinks, then verify it sits inside docs/.
+        # Allows subpaths like tests/unit-tests.md while still rejecting ../escape attempts.
+        if not filename.endswith(".md") or ".." in filename.split("/"):
+            self.send_error(400, "Only .md files under docs/ are served here")
             return
-        md_path = ROOT / "docs" / filename
+        docs_root = (ROOT / "docs").resolve()
+        md_path = (docs_root / filename).resolve()
+        try:
+            md_path.relative_to(docs_root)
+        except ValueError:
+            self.send_error(400, "Path escapes docs/")
+            return
         if not md_path.exists():
             self.send_error(404, f"{filename} not found")
             return
         self._serve_markdown_as_html(md_path, anchor)
+
+    def _list_scenarios(self):
+        """Return [{name, module, also}] for every scenario JSON.
+
+        The list endpoint surfaces module so MoonDeck's dropdown can filter
+        without an extra round-trip per scenario."""
+        return [
+            {"name": s["path"].stem, "module": s["module"] or "", "also": s["also"]}
+            for s in test_meta.collect_scenario_files()
+        ]
+
+    def _serve_unit_tests_for_module(self):
+        """Render a per-module list of unit-test cases as an HTML view.
+        URL: /api/unit-tests/<Module> — `Module` is the CamelCase @module name."""
+        import html as html_mod
+
+        raw = self.path[len("/api/unit-tests/"):].split("?", 1)[0].strip("/")
+        if not raw or not all(c.isalnum() or c in "-_" for c in raw):
+            self.send_error(400, "Bad module name")
+            return
+
+        cases = test_meta.cases_for_module(raw)
+        if not cases:
+            self.send_error(404, f"No unit tests found for module {raw}")
+            return
+
+        rows = []
+        for i, c in enumerate(cases):
+            desc_html = html_mod.escape(c["desc"]) if c["desc"] else f'<em>{html_mod.escape(c["name"])}</em>'
+            tag = '' if c["primary"] else ' <span class="also">(also)</span>'
+            rows.append(
+                f'<div class="case"><div class="case-head">'
+                f'<span class="case-num">{i + 1}.</span> '
+                f'<span class="case-name">{html_mod.escape(c["name"])}</span>{tag}'
+                f'</div><div class="case-desc">{desc_html}</div>'
+                f'<div class="case-file"><code>{html_mod.escape(c["file"])}</code></div></div>'
+            )
+
+        body_html = "\n".join(rows)
+        page = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+body {{ font-family: -apple-system, monospace; background: #0d1117; color: #c0c0c0;
+       padding: 20px; line-height: 1.6; font-size: 13px; }}
+h1 {{ color: #e94560; font-size: 18px; margin: 0 0 4px 0; }}
+.sub {{ color: #9aa6ba; margin: 0 0 18px 0; font-size: 12px; }}
+.case {{ margin: 6px 0 10px 0; padding: 6px 10px; background: #161b22;
+         border-radius: 4px; border-left: 3px solid #0f3460; }}
+.case-head {{ font-size: 13px; }}
+.case-num {{ color: #6a7a99; }}
+.case-name {{ color: #e94560; font-weight: 600; }}
+.case-desc {{ margin-top: 2px; color: #c0c0c0; }}
+.case-file {{ margin-top: 2px; color: #6a7a99; font-size: 11px; }}
+.also {{ color: #6a7a99; font-size: 11px; margin-left: 4px; }}
+code {{ background: transparent; color: #8aa6ba; padding: 0; }}
+</style></head><body>
+<h1>{html_mod.escape(raw)} unit tests</h1>
+<div class="sub">{len(cases)} test case(s). "(also)" marks cases from files whose primary @module is a different module.</div>
+{body_html}
+</body></html>"""
+
+        data_bytes = page.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data_bytes)))
+        self.end_headers()
+        self.wfile.write(data_bytes)
+
+    def _serve_scenario_steps(self):
+        """Render a single test/scenarios/<name>.json as an HTML view of its steps.
+        URL: /api/scenarios/<name> — `name` is the file stem (no .json suffix), same
+        names /api/scenarios returns. The view pane gets one card per step showing
+        op, name, and the rest of the step's keys/values verbatim. Lightweight on
+        purpose — the test runner is the source of truth for what each op means."""
+        import html as html_mod
+
+        raw = self.path[len("/api/scenarios/"):].split("?", 1)[0].strip("/")
+        # Restrict to file-stem characters (no path traversal, no .json suffix expected)
+        if not raw or not all(c.isalnum() or c in "-_" for c in raw):
+            self.send_error(400, "Bad scenario name")
+            return
+        # Scenarios live in subfolders (core/, light/, …) — find by stem.
+        path = test_meta.find_scenario_path(raw)
+        if not path:
+            self.send_error(404, f"{raw} not found")
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            self.send_error(500, f"Invalid JSON in {raw}.json: {e}")
+            return
+
+        # Build a compact per-step list. Each step has at minimum an `op`; we render
+        # whatever other keys it carries (id, type, parent_id, key, value, props, bounds, …)
+        # as a small definition list so the schema can evolve without code change.
+        scen_name = html_mod.escape(str(data.get("name", raw)))
+        scen_desc = html_mod.escape(str(data.get("description", "")))
+        scen_module = html_mod.escape(str(data.get("module", "")))
+        scen_also = data.get("also") or []
+        scen_also_html = (
+            f'<div class="also">Also touches: {html_mod.escape(", ".join(scen_also))}</div>'
+            if scen_also else ""
+        )
+        scen_module_html = (
+            f'<div class="module">Module: <strong>{scen_module}</strong></div>'
+            if scen_module else ""
+        )
+        steps = data.get("steps", []) or []
+
+        rows = []
+        for i, step in enumerate(steps):
+            op = html_mod.escape(str(step.get("op", "?")))
+            step_name = html_mod.escape(str(step.get("name", "")))
+            step_desc = html_mod.escape(str(step.get("description", "")))
+            # Render every key except op/name/description as <code>key</code> = <code>json-value</code>
+            other = {k: v for k, v in step.items() if k not in ("op", "name", "description")}
+            kv_html = ""
+            if other:
+                parts = []
+                for k, v in other.items():
+                    v_str = json.dumps(v) if not isinstance(v, str) else v
+                    parts.append(
+                        f'<div><code>{html_mod.escape(k)}</code> = '
+                        f'<code>{html_mod.escape(v_str)}</code></div>'
+                    )
+                kv_html = '<div class="step-kv">' + "".join(parts) + "</div>"
+            desc_html = f'<div class="step-desc">{step_desc}</div>' if step_desc else ""
+            rows.append(
+                f'<div class="step"><div class="step-head">'
+                f'<span class="step-num">{i + 1}.</span> '
+                f'<span class="step-op">{op}</span>'
+                f'{f" <span class=\"step-name\">{step_name}</span>" if step_name else ""}'
+                f'</div>{desc_html}{kv_html}</div>'
+            )
+        body_html = "\n".join(rows) if rows else "<p><em>(no steps)</em></p>"
+
+        page = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+body {{ font-family: -apple-system, monospace; background: #0d1117; color: #c0c0c0;
+       padding: 20px; line-height: 1.6; font-size: 13px; }}
+h1 {{ color: #e94560; font-size: 18px; margin: 0 0 4px 0; }}
+.desc {{ color: #9aa6ba; margin: 0 0 18px 0; font-size: 12px; }}
+.step {{ margin: 6px 0 10px 0; padding: 6px 10px; background: #161b22;
+         border-radius: 4px; border-left: 3px solid #0f3460; }}
+.step-head {{ font-size: 13px; }}
+.step-num {{ color: #6a7a99; }}
+.step-op {{ color: #e94560; font-weight: 600; }}
+.step-name {{ color: #9aa6ba; margin-left: 6px; }}
+.step-desc {{ margin-top: 2px; color: #c0c0c0; }}
+.step-kv {{ margin-top: 4px; padding-left: 14px; font-size: 12px; }}
+.step-kv > div {{ margin: 2px 0; }}
+.module {{ color: #9aa6ba; font-size: 12px; margin: 0 0 2px 0; }}
+.module strong {{ color: #e94560; }}
+.also {{ color: #6a7a99; font-size: 11px; margin: 0 0 12px 0; }}
+code {{ background: transparent; color: #c0c0c0; padding: 0; }}
+.step-kv code:first-child {{ color: #8aa6ba; }}
+</style></head><body>
+<h1>{scen_name}</h1>
+{scen_module_html}
+{f'<div class="desc">{scen_desc}</div>' if scen_desc else ''}
+{scen_also_html}
+{body_html}
+</body></html>"""
+
+        data_bytes = page.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data_bytes)))
+        self.end_headers()
+        self.wfile.write(data_bytes)
 
     def _serve_help(self):
         """Serve MoonDeck.md as styled HTML with deep-link anchor support."""
@@ -748,7 +942,28 @@ strong {{ color: #fff; }}
 .hr-commit blockquote {{ margin-left: 30px; }}
 </style></head><body>
 {body_html}
-{f'<script>document.getElementById("{anchor}")?.scrollIntoView();</script>' if anchor else ''}
+{f'''<script>
+// Wait for images so the anchor lands at the right position. scrollIntoView
+// fired before image load left the viewport on an earlier section once the
+// images finished loading and pushed content down.
+(function() {{
+  var anchor = "{anchor}";
+  function jump() {{
+    var el = document.getElementById(anchor);
+    if (el) el.scrollIntoView();
+  }}
+  var imgs = Array.from(document.images || []);
+  var pending = imgs.filter(function(i) {{ return !i.complete; }});
+  if (pending.length === 0) {{ jump(); return; }}
+  var left = pending.length;
+  pending.forEach(function(img) {{
+    img.addEventListener("load",  function() {{ if (--left === 0) jump(); }});
+    img.addEventListener("error", function() {{ if (--left === 0) jump(); }});
+  }});
+  // Safety net: never wait more than 1.5s for images.
+  setTimeout(jump, 1500);
+}})();
+</script>''' if anchor else ''}
 <script>
 document.addEventListener("click", function(e) {{
     var a = e.target.closest("a[data-moondeck-nav]");
