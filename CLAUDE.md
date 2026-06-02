@@ -19,7 +19,7 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 
 The design rationale for each rule below lives in [docs/architecture.md](docs/architecture.md). The one-liners here are what the agent holds in working memory.
 
-**Tests must pass.** Run `ctest` (unit tests) and `./build/test/mm_scenarios` (scenarios) before considering work complete. New core logic needs a corresponding module test. Full pipeline needs a scenario test. See [docs/testing.md](docs/testing.md) for the strategy and test inventory.
+**Tests must pass.** Run `ctest` (unit tests) and `uv run scripts/scenario/run_scenario.py` (scenarios) before considering work complete. The Python wrapper invokes the C++ runner and persists per-target observations back to each scenario JSON (drift visibility); direct `./build/test/mm_scenarios` is fine for ad-hoc pass/fail checks but skips the JSON write-back. New core logic needs a corresponding module test. Full pipeline needs a scenario test. See [docs/testing.md](docs/testing.md) for the strategy and test inventory.
 
 **Warnings are errors.** Build with `-Wall -Wextra -Werror`. No warning is "harmless" — if it's noise, fix it or silence it explicitly with a `-Wno-…` justified in code.
 
@@ -90,7 +90,7 @@ The narrow safety net: "this snapshot is internally consistent."
 
 1. Desktop build — `cmake --build build` (zero warnings)
 2. Unit tests — `ctest --output-on-failure` (all pass)
-3. Scenario tests — `./build/test/mm_scenarios` (all pass)
+3. Scenario tests — `uv run scripts/scenario/run_scenario.py` (all pass; wraps `mm_scenarios` and persists per-target `observed.<target>` blocks back to each scenario JSON for drift tracking)
 
 **Conditional (run if trigger matches):**
 

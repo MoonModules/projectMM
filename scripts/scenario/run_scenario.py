@@ -6,9 +6,20 @@ Filters compose:
   --module <Name>   run every scenario whose top-level `module` (or `also`) matches
   --name + --module the named scenario must also match the module (otherwise refused)
   (neither)         run every scenario the runner discovers
+
+--update-contract   renegotiate the per-step performance contract. After each
+--reason "..."      scenario, parse its MEASURE lines and write the observed
+                    tick_us / free_heap into contract[<host-target>] along with
+                    set_by + reason. This is the "I want to change the promise"
+                    path, not a routine baseline refresh. Both flags required
+                    together; symmetric with run_live_scenario.py.
 """
 
 import argparse
+import datetime
+import json
+import platform
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +33,100 @@ _HOST = {"darwin": "macos", "win32": "windows"}.get(sys.platform, "linux")
 _RUNNER_BASE = ROOT / "build" / _HOST / "test" / "mm_scenarios"
 RUNNER = _RUNNER_BASE.with_suffix(".exe") if sys.platform == "win32" else _RUNNER_BASE
 
+# Format emitted by scenario_runner.cpp's measure block:
+#   MEASURE <step-name>: tick=Nus FPS=N lights=N heap=±N (step: ±N)
+# `<step-name>` may contain hyphens and underscores. heap is absolute free-heap
+# value (0 on desktop where freeHeap() returns unlimited).
+_MEASURE_RE = re.compile(
+    r"^\s*MEASURE\s+(?P<name>\S+):\s+tick=(?P<tick>\d+)us\s+FPS=\d+\s+lights=\d+\s+heap=(?P<heap>[+-]?\d+)"
+)
+
+
+def _host_target() -> str:
+    """Same shape run_live_scenario.py's _detect_target falls back to on desktop."""
+    return {"Darwin": "pc-macos", "Linux": "pc-linux", "Windows": "pc-windows"}.get(
+        platform.system(), "pc-unknown"
+    )
+
+
+def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> int:
+    """Run one scenario. Always parses MEASURE lines and writes
+    observed.<target> blocks back into the scenario JSON (every run produces a
+    drift record). With --update-contract, also rewrites the contract.
+
+    Symmetric with the live runner's behaviour — observations persist always,
+    contracts only when renegotiated."""
+    # Capture + tee: stream to stdout while collecting MEASURE lines.
+    proc = subprocess.Popen([str(RUNNER), str(path)], cwd=ROOT,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, bufsize=1)
+    observations: dict[str, dict] = {}  # step-name → {tick_us, free_heap}
+    for line in proc.stdout:
+        sys.stdout.write(line)
+        m = _MEASURE_RE.match(line)
+        if m:
+            heap = int(m["heap"])
+            # heap is reported as a signed offset relative to heapBefore; for
+            # the observed/contract blocks we want absolute free-heap. On
+            # desktop freeHeap() returns 0 (unlimited), so the offset is 0 and
+            # we store 0 — which the runner treats as "no heap assertion".
+            observations[m["name"]] = {
+                "tick_us": int(m["tick"]),
+                "free_heap": max(0, heap),
+            }
+    proc.wait()
+    if proc.returncode != 0:
+        # Scenario failed — don't persist observations from a failing run
+        # (would record garbage as the latest reading).
+        return proc.returncode
+
+    if not observations:
+        return 0
+
+    with open(path) as f:
+        scenario = json.load(f)
+    target = _host_target()
+    today = datetime.date.today().isoformat()
+    touched_observed = 0
+    touched_contract = 0
+    for step in scenario.get("steps", []):
+        name = step.get("name")
+        if name not in observations:
+            continue
+        # Always write observed.<target> — observations persist on every run.
+        step.setdefault("observed", {})[target] = {
+            "tick_us": observations[name]["tick_us"],
+            "free_heap": observations[name]["free_heap"],
+            "at": today,
+        }
+        touched_observed += 1
+        # Only renegotiate the contract when --update-contract was passed.
+        if update_contract:
+            existing = step.get("contract", {}).get(target, {})
+            new_block = {
+                "tick_us": observations[name]["tick_us"],
+                "free_heap": observations[name]["free_heap"],
+                "set_by": today,
+                "reason": update_reason or existing.get("reason", "updated"),
+            }
+            for k in ("tick_tolerance_pct", "heap_tolerance_pct", "tolerance_us"):
+                if k in existing:
+                    new_block[k] = existing[k]
+            step.setdefault("contract", {})[target] = new_block
+            touched_contract += 1
+
+    if touched_observed or touched_contract:
+        with open(path, "w") as f:
+            json.dump(scenario, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        what = []
+        if touched_observed:
+            what.append(f"observed[{target}] × {touched_observed}")
+        if touched_contract:
+            what.append(f"contract[{target}] × {touched_contract}")
+        print(f"  WROTE  {path.name} ({', '.join(what)})")
+    return 0
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -29,7 +134,19 @@ def main():
                         help="Scenario name (file stem). Runs all if omitted.")
     parser.add_argument("--module", default=None,
                         help="Module filter. Runs only scenarios that match.")
+    parser.add_argument("--update-contract", action="store_true",
+                        help=("Renegotiate the per-step performance contract: write "
+                              "observed tick/heap into contract[<host-target>] and "
+                              "stamp set_by + reason. Requires --reason."))
+    parser.add_argument("--reason", default=None,
+                        help=("Why the contract is being renegotiated (required with "
+                              "--update-contract). Examples: 'tighter Layer LUT copy', "
+                              "'accepted DMX driver overhead'."))
     args = parser.parse_args()
+
+    if args.update_contract and not args.reason:
+        parser.error("--update-contract requires --reason "
+                     "(e.g. --reason 'tightened after Layer optimisation')")
 
     if not RUNNER.exists():
         print(f"Scenario runner not found: {RUNNER}")
@@ -47,8 +164,7 @@ def main():
         if module_filter and scenario_file not in test_meta.paths_for_module(module_filter):
             print(f"Scenario {args.name} does not match module {module_filter}.")
             sys.exit(1)
-        r = subprocess.run([str(RUNNER), str(scenario_file)], cwd=ROOT, check=False)
-        sys.exit(r.returncode)
+        sys.exit(_run_one(scenario_file, args.update_contract, args.reason))
 
     if module_filter:
         paths = test_meta.paths_for_module(module_filter)
@@ -56,16 +172,15 @@ def main():
             print(f"No scenarios found for module: {module_filter}")
             sys.exit(1)
         print(f"Module filter: {module_filter} ({len(paths)} scenario(s))")
-        failed = 0
-        for p in paths:
-            r = subprocess.run([str(RUNNER), str(p)], cwd=ROOT, check=False)
-            if r.returncode != 0:
-                failed += 1
+        failed = sum(1 for p in paths if _run_one(p, args.update_contract, args.reason) != 0)
         sys.exit(1 if failed else 0)
 
-    # Run all scenarios (runner auto-discovers when no arg given)
-    r = subprocess.run([str(RUNNER)], cwd=ROOT, check=False)
-    sys.exit(r.returncode)
+    # Run all scenarios. We iterate per-file (instead of letting the C++ runner
+    # auto-discover) because _run_one captures MEASURE lines and writes
+    # observed.<target> blocks back into each scenario JSON on every run.
+    paths = sorted((ROOT / "test" / "scenarios").rglob("scenario_*.json"))
+    failed = sum(1 for p in paths if _run_one(p, args.update_contract, args.reason) != 0)
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == "__main__":

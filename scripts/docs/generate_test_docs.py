@@ -77,6 +77,79 @@ def render_unit_tests(files: list[dict]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _fmt_us(us: int) -> str:
+    """Pretty-print microseconds with a friendly unit (us / ms / s)."""
+    if us >= 1_000_000:
+        return f"{us / 1_000_000:.2f}s"
+    if us >= 1_000:
+        return f"{us / 1_000:.1f}ms"
+    return f"{us}µs"
+
+
+def _fps_from_us(us: int) -> str:
+    """Convert tick_us → frames-per-second string (no decimals; for headline display)."""
+    if us <= 0:
+        return "—"
+    fps = 1_000_000 / us
+    if fps >= 100:
+        return f"{int(round(fps)):,}"
+    return f"{fps:.1f}"
+
+
+def _fmt_heap(bytes_: int) -> str:
+    """Pretty-print free-heap bytes (KB once over 1024). 0 = unlimited (desktop)."""
+    if bytes_ == 0:
+        return "unlimited"
+    if bytes_ >= 1024:
+        return f"{bytes_ / 1024:.0f}KB"
+    return f"{bytes_}B"
+
+
+def _format_contract_line(target: str, c: dict) -> str:
+    """One bullet line summarising a per-target contract."""
+    parts = []
+    if c.get("tick_us"):
+        parts.append(f"tick ≤ {_fmt_us(int(c['tick_us']))} ({_fps_from_us(int(c['tick_us']))} FPS)")
+    if c.get("free_heap"):
+        parts.append(f"heap ≥ {_fmt_heap(int(c['free_heap']))}")
+    if not parts:
+        return f"`{target}`: (no thresholds)"
+    extra = []
+    if c.get("set_by"):
+        extra.append(f"set {c['set_by']}")
+    if c.get("reason"):
+        extra.append(f"\"{c['reason']}\"")
+    tail = f" — {' · '.join(extra)}" if extra else ""
+    return f"`{target}`: " + " · ".join(parts) + tail
+
+
+def _format_observed_line(target: str, o: dict) -> str:
+    """One bullet line summarising a per-target observation."""
+    parts = []
+    if o.get("tick_us"):
+        parts.append(f"tick {_fmt_us(int(o['tick_us']))} ({_fps_from_us(int(o['tick_us']))} FPS)")
+    if o.get("free_heap"):
+        parts.append(f"heap {_fmt_heap(int(o['free_heap']))}")
+    tail = f" — observed {o['at']}" if o.get("at") else ""
+    return f"`{target}`: " + " · ".join(parts) + tail
+
+
+def _format_bounds(b: dict) -> list[str]:
+    """One bullet per bound expressed in the JSON."""
+    out: list[str] = []
+    fps = b.get("fps") or {}
+    if "min" in fps:
+        out.append(f"FPS ≥ {fps['min']} (absolute)")
+    if "min_pct" in fps:
+        out.append(f"FPS ≥ {fps['min_pct']}% of baseline")
+    if "min_fps_led_product" in fps:
+        out.append(f"FPS × lights ≥ {fps['min_fps_led_product']:,}")
+    heap = b.get("heap") or {}
+    if "max_delta_bytes" in heap:
+        out.append(f"heap growth ≤ {heap['max_delta_bytes']}B vs previous measure step")
+    return out
+
+
 def render_scenarios(files: list[dict]) -> str:
     by_module: dict[str, list[dict]] = defaultdict(list)
     for f in files:
@@ -90,16 +163,18 @@ def render_scenarios(files: list[dict]) -> str:
     lines.append(
         "Auto-generated from `test/scenarios/{core,light}/scenario_*.json` by "
         "`scripts/docs/generate_test_docs.py`. **Do not edit by hand** — "
-        "update the JSON file's top-level `module` / `also` / `description` "
-        "and per-step `description` fields instead, then regenerate."
+        "update the JSON file's top-level fields and per-step `description` "
+        "/ `bounds` / `contract` / `observed` instead, then regenerate."
     )
     lines.append("")
     lines.append(
         "Scenario tests are the integration tier in the [test strategy](../testing.md): "
         "each one is a JSON script that drives the full pipeline (PC or live ESP32) "
-        "and captures bounded FPS / heap measurements per step. "
+        "and captures tick / heap per step against per-target contracts. "
         "Run them with `scripts/scenario/run_scenario.py` (PC) or "
-        "`scripts/scenario/run_live_scenario.py` (live device)."
+        "`scripts/scenario/run_live_scenario.py` (live device). "
+        "See [testing.md § Performance contracts](../testing.md#performance-contracts-contracttarget) "
+        "for the contract semantics."
     )
     lines.append("")
 
@@ -111,14 +186,69 @@ def render_scenarios(files: list[dict]) -> str:
             lines.append(f"### {f['name']}")
             lines.append("")
             lines.append(f"`{rel}` — {f['description']}")
+            lines.append("")
+            # Top-level scenario flags worth surfacing.
+            meta_bits: list[str] = [f"**Mode**: `{f['mode']}`"]
+            if f["live_only"]:
+                meta_bits.append("**live-only** (skipped in-process)")
             if f["also"]:
+                meta_bits.append(f"**Also touches**: {', '.join(f['also'])}")
+            lines.append(" · ".join(meta_bits))
+            lines.append("")
+            # Per-step expansion. Only measured steps get a `####` heading;
+            # un-measured prep steps (set_control without `measure: true`)
+            # collapse to a "Setup:" bullet list under the next measured step,
+            # since they carry no contract/observed data of their own and
+            # rendering each one as a heading bloats the page without signal.
+            prep_buffer: list[dict] = []
+            for step in f["steps"]:
+                if not step["measure"]:
+                    prep_buffer.append(step)
+                    continue
+                # Flush: render this measured step with any preceding prep.
+                name = step["name"]
+                op = step["op"]
+                lines.append(f"#### `{name}` ({op})  📏")
                 lines.append("")
-                lines.append(f"*Also touches: {', '.join(f['also'])}.*")
-            lines.append("")
-            for name, desc, op in f["steps"]:
-                bullet = desc if desc else f"_{name}_ ({op})"
-                lines.append(f"- **{name}** ({op}) — {bullet}" if desc else f"- **{name}** ({op})")
-            lines.append("")
+                if step["description"]:
+                    lines.append(step["description"])
+                    lines.append("")
+                if prep_buffer:
+                    lines.append("**Setup** (preceding non-measured steps):")
+                    for p in prep_buffer:
+                        bits = [f"`{p['name']}` ({p['op']})"]
+                        if p["description"]:
+                            bits.append(p["description"])
+                        lines.append(f"- {' — '.join(bits)}")
+                    lines.append("")
+                    prep_buffer = []
+                bounds = _format_bounds(step["bounds"])
+                if bounds:
+                    lines.append("**Bounds**:")
+                    for b in bounds:
+                        lines.append(f"- {b}")
+                    lines.append("")
+                if step["contract"]:
+                    lines.append("**Contract** (tick is a ceiling, heap is a floor):")
+                    for tgt in sorted(step["contract"].keys()):
+                        lines.append(f"- {_format_contract_line(tgt, step['contract'][tgt])}")
+                    lines.append("")
+                if step["observed"]:
+                    lines.append("**Observed** (latest reading per target):")
+                    for tgt in sorted(step["observed"].keys()):
+                        lines.append(f"- {_format_observed_line(tgt, step['observed'][tgt])}")
+                    lines.append("")
+            # Trailing prep steps after the last measurement (rare) get their
+            # own collapsed bullet list under a "Trailing setup" header.
+            if prep_buffer:
+                lines.append("#### Trailing setup (no measurement after)")
+                lines.append("")
+                for p in prep_buffer:
+                    bits = [f"`{p['name']}` ({p['op']})"]
+                    if p["description"]:
+                        bits.append(p["description"])
+                    lines.append(f"- {' — '.join(bits)}")
+                lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
 

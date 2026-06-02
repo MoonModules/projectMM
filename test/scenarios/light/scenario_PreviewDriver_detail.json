@@ -1,7 +1,90 @@
 {
   "name": "scenario_PreviewDriver_detail",
   "module": "PreviewDriver",
-  "description": "Toggle the Preview driver's detail and decompress controls on a running system and measure the render-FPS impact. detail 2/3 have a known, accepted downsample cost on the render task; decompress is purely client-side and cannot affect the render tick (see performance.md). All steps assert a relative bound (min_pct) only — a single ESP32 scenario step swings too much for an absolute FPS floor to be meaningful (the absolute throughput floor is enforced in collect_kpi.py --commit, which uses a settled reading). detail 3 gets a looser bound because its downsample cost is real and accepted.",
+  "mode": "mutate",
+  "description": "Toggle the Preview driver's detail and decompress controls and measure the render-FPS impact. detail 2/3 have a known, accepted downsample cost on the render task; decompress is purely client-side and cannot affect the render tick (see performance.md). All steps assert a relative bound (min_pct) only — a single ESP32 scenario step swings too much for an absolute FPS floor to be meaningful (the absolute throughput floor is enforced in collect_kpi.py --commit, which uses a settled reading). detail 3 gets a looser bound because its downsample cost is real and accepted.",
+  "fixture": [
+    {
+      "name": "fix-layouts",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "fix-grid",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 128,
+        "height": 128
+      }
+    },
+    {
+      "name": "fix-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "props": {
+        "layouts": "Layouts",
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "fix-noise",
+      "op": "add_module",
+      "id": "Noise",
+      "type": "NoiseEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "fix-drivers",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "layer": "Layer"
+      }
+    },
+    {
+      "name": "fix-preview",
+      "op": "add_module",
+      "id": "Preview",
+      "type": "PreviewDriver",
+      "parent_id": "Drivers"
+    }
+  ],
+  "reset": [
+    {
+      "name": "reset-grid-width",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "reset-grid-height",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128
+    },
+    {
+      "name": "reset-preview-detail",
+      "op": "set_control",
+      "id": "Preview",
+      "key": "detail",
+      "value": 3
+    },
+    {
+      "name": "reset-preview-decompress",
+      "op": "set_control",
+      "id": "Preview",
+      "key": "decompress",
+      "value": false
+    }
+  ],
   "steps": [
     {
       "name": "detail-1-coarse",
@@ -11,7 +94,42 @@
       "key": "detail",
       "value": 1,
       "measure": true,
-      "bounds": { "fps": { "min_pct": 80 } }
+      "bounds": {
+        "fps": {
+          "min_pct": 80
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 300,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 105000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": 310,
+          "free_heap": 0,
+          "at": "2026-06-02"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 90243,
+          "free_heap": 100212,
+          "at": "2026-06-02"
+        },
+        "esp32-eth": {
+          "tick_us": 113101,
+          "free_heap": 135212,
+          "at": "2026-06-02"
+        }
+      }
     },
     {
       "name": "detail-2-medium",
@@ -21,7 +139,42 @@
       "key": "detail",
       "value": 2,
       "measure": true,
-      "bounds": { "fps": { "min_pct": 80 } }
+      "bounds": {
+        "fps": {
+          "min_pct": 80
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 300,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 105000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": 312,
+          "free_heap": 0,
+          "at": "2026-06-02"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 99881,
+          "free_heap": 100212,
+          "at": "2026-06-02"
+        },
+        "esp32-eth": {
+          "tick_us": 95645,
+          "free_heap": 135212,
+          "at": "2026-06-02"
+        }
+      }
     },
     {
       "name": "detail-3-fine",
@@ -31,7 +184,42 @@
       "key": "detail",
       "value": 3,
       "measure": true,
-      "bounds": { "fps": { "min_pct": 70 } }
+      "bounds": {
+        "fps": {
+          "min_pct": 70
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 320,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 105000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": 309,
+          "free_heap": 0,
+          "at": "2026-06-02"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 91295,
+          "free_heap": 98652,
+          "at": "2026-06-02"
+        },
+        "esp32-eth": {
+          "tick_us": 98053,
+          "free_heap": 135212,
+          "at": "2026-06-02"
+        }
+      }
     },
     {
       "name": "decompress-on",
@@ -41,7 +229,42 @@
       "key": "decompress",
       "value": true,
       "measure": true,
-      "bounds": { "fps": { "min_pct": 80 } }
+      "bounds": {
+        "fps": {
+          "min_pct": 80
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 300,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 105000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": 309,
+          "free_heap": 0,
+          "at": "2026-06-02"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 93181,
+          "free_heap": 97084,
+          "at": "2026-06-02"
+        },
+        "esp32-eth": {
+          "tick_us": 99387,
+          "free_heap": 135212,
+          "at": "2026-06-02"
+        }
+      }
     },
     {
       "name": "decompress-off",
@@ -51,7 +274,42 @@
       "key": "decompress",
       "value": false,
       "measure": true,
-      "bounds": { "fps": { "min_pct": 80 } }
+      "bounds": {
+        "fps": {
+          "min_pct": 80
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 300,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 105000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": 317,
+          "free_heap": 0,
+          "at": "2026-06-02"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 99590,
+          "free_heap": 100212,
+          "at": "2026-06-02"
+        },
+        "esp32-eth": {
+          "tick_us": 116237,
+          "free_heap": 135212,
+          "at": "2026-06-02"
+        }
+      }
     }
   ]
 }

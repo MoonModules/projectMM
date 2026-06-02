@@ -1,25 +1,14 @@
 # Performance & Memory
 
-Measured per-module timing, memory allocation, and sizeof for each platform. Updated from live scenario runs and console output.
+projectMM's per-step **performance contracts** live in the scenario JSONs — each `test/scenarios/*.json` step carries a per-target `contract` block (`tick_us` ceiling + `free_heap` floor) and an `observed` block (the latest reading per target). The scenarios are the source of truth and the assertion surface: every PR runs against them. See [testing.md § Performance contracts](testing.md#performance-contracts-contracttarget) for the contract semantics and renegotiation workflow. The headline numbers users care about are in [README.md § Performance](../README.md#performance).
+
+This document holds what scenarios can't carry: structural sizes (`sizeof`), build-variant deltas, and the WiFi/Ethernet physics that explain *why* a contract comes out where it does.
 
 ---
 
 ## Desktop (macOS, Apple Silicon)
 
-| Module | Time (µs) | % of tick |
-|--------|----------|----------|
-| Noise effect | 50 | 100% |
-| Drivers (blendMap + ArtNet) | ~0 | <1% |
-| **Total tick** | **50** | **FPS: 20,000** |
-
-Desktop ArtNet sends to a non-existent IP so packets complete instantly. `freeHeap` returns 0 (unlimited).
-
-### Memory (128×128 with mirror)
-
-| Module | dynamicBytes | Breakdown |
-|--------|-------------|-----------|
-| Layer | 92 KB | 12 KB buffer + 80 KB LUT (uint32_t indices on 64-bit) |
-| Drivers | 48 KB | output buffer (128×128×3) |
+Desktop ArtNet sends to a non-existent IP so packets complete instantly; `freeHeap` returns 0 (unlimited). Per-step tick budgets live in `contract.pc-macos` blocks across the scenarios.
 
 ### sizeof (desktop, 64-bit)
 
@@ -35,74 +24,44 @@ Desktop ArtNet sends to a non-existent IP so packets complete instantly. `freeHe
 
 Binary: **131 KB**
 
+### Memory at 128×128 with mirror
+
+| Module | dynamicBytes | Breakdown |
+|--------|-------------|-----------|
+| Layer | 92 KB | 12 KB buffer + 80 KB LUT (uint32_t indices on 64-bit) |
+| Drivers | 48 KB | output buffer (128×128×3) |
+
 ---
 
 ## ESP32 — Olimex Gateway Rev G (no PSRAM, 320 KB internal)
 
-### Timing (128×128, mirror XY, RainbowEffect, Ethernet, browser connected)
-
-Per-module breakdown from `esp32/monitor.log`, `esp32-eth-wifi` firmware, 16,384 lights:
-
-| Module | Time (µs) | % of tick | Notes |
-|--------|----------|----------|-------|
-| Drivers (BlendMap + ArtNet) | 45,800 | **89%** | 4096 logical → 16384 physical via LUT; ArtNet is 27,700 µs of this |
-| &nbsp;&nbsp;↳ ArtNet (97 UDP packets) | 27,700 | 54% | connected socket + lwIP core locking |
-| RainbowEffect | 3,400 | 7% | 4096 logical pixels |
-| Layer | 3,500 | 7% | buffer clear + effect dispatch |
-| System + Network | ~900 | 2% | loop1s diagnostics |
-| HttpServer | ~850 | 2% | preview broadcast + state push |
-| Preview | ~340 | <1% | downsample strided copy |
-| **Total tick** | **~51,000** | **FPS: 19** | |
-
-### Timing comparison (128×128, various configurations)
-
-| Configuration | Tick | FPS | Free heap |
-|--------------|------|-----|-----------|
-| Ethernet, mirror XY, PlasmaEffect, browser connected | ~44 ms | 22 | 132 KB |
-| Ethernet, mirror XY, RainbowEffect, browser connected | ~51 ms | 19 | 128 KB |
-| 128×64, Ethernet, mirror XY | 26–30 ms | 33–37 | 182–204 KB |
+Per-step tick/heap live in `contract.esp32-eth-wifi` and `contract.esp32-eth` across the scenarios; see the [README perf table](../README.md#performance) for the headline grid×board matrix. The notes below cover what those rows don't.
 
 ### Run-to-run variance
 
-Individual measurements vary ~50,000–66,000 µs on the Olimex board with no configuration change — inherent ESP32/Ethernet timing jitter (lwIP `tcpip_thread` scheduling, EMAC DMA, Ethernet ACK pacing). When triaging a live-scenario failure, re-run before treating a 1-FPS miss as real; a genuine regression shows up consistently. The `collect_kpi.py --commit` gate parses a single `tick:` line from `esp32/monitor.log` and can flag an unlucky sample — same rule applies.
+Individual measurements vary ~5–10% on the Olimex board with no configuration change — inherent ESP32/Ethernet timing jitter (lwIP `tcpip_thread` scheduling, EMAC DMA, Ethernet ACK pacing). Scenarios use 10% default ESP32 tolerance to absorb this; when a step trips, re-run before treating it as a real regression. The `collect_kpi.py --commit` gate parses a single `tick:` line from `esp32/monitor.log` and can flag an unlucky sample — same rule applies.
 
-### ArtNet over WiFi
+### ArtNet over WiFi vs Ethernet
 
 | | Ethernet | WiFi STA |
 |--|----------|----------|
 | ArtNet (97 UDP packets) | ~27,000 µs | ~110,000 µs |
 | Total tick | ~50,000 µs / 20 FPS | ~130,000 µs / 7 FPS |
 
-WiFi `sendto()` is ~1,140 µs/packet vs Ethernet's ~280 µs — CSMA/CA backoff, rate adaptation, link-layer retries. Not a code regression; WiFi physics. For ArtNet at 16K lights, use Ethernet. See [decisions.md](history/decisions.md) "next-iteration branch" for the root-cause analysis of the preview FPS-swing and ArtNet optimizations.
+WiFi `sendto()` is ~1,140 µs/packet vs Ethernet's ~280 µs — CSMA/CA backoff, rate adaptation, link-layer retries. Not a code regression; WiFi physics. For ArtNet at 16K lights, use Ethernet. Root-cause writeup in [decisions.md](history/decisions.md) under "next-iteration branch".
 
-### Build-variant WiFi comparison (128×128, 2026-05-25)
+### Build-variant note: WiFi-only `esp32` is slow on Olimex
 
 Same source tree, same MCU (ESP32 classic, 160 MHz):
 
-| Board | Build | Tick / FPS | ArtNet send | `/api/state` | `/app.js` (77 KB) |
-|---|---|---|---|---|---|
-| Olimex Gateway | `esp32` (WiFi-only) | 220 ms / 4 FPS | 155 ms | 0.22 s | 0.29 s |
-| Olimex Gateway | `esp32-eth-wifi` | 85–95 ms / 10–12 FPS | 38 ms | 4.34 s | 1.47 s |
-| Generic ESP32 board | `esp32` | 100 ms / 10 FPS | 45 ms | timeout | 32 s stall |
-| Generic ESP32 board | `esp32-eth-wifi` | 82–97 ms / 10–12 FPS | 28–45 ms | timeout | partial (28 KB in 10 s) |
+| Board / build | 128×128 tick | ArtNet send |
+|---|---|---|
+| Olimex Gateway, `esp32` (WiFi-only) | 220 ms (4 FPS) | 155 ms |
+| Olimex Gateway, `esp32-eth-wifi` | 85–95 ms (10–12 FPS) | 38 ms |
 
-Finding: the Olimex `esp32` build is 4× slower at ArtNet than `esp32-eth-wifi` on the same board — `sdkconfig.defaults.eth` likely enlarges a shared lwIP/WiFi buffer pool via `CONFIG_ETH_DMA_*`. Fix tracked in [plan.md](plan.md). Generic boards vary wildly in WiFi TX quality vs the Olimex (PCB-trace antenna, regulated 3V3).
+The Olimex `esp32` build is 4× slower at ArtNet than `esp32-eth-wifi` on the same board — `sdkconfig.defaults.eth` likely enlarges a shared lwIP/WiFi buffer pool via `CONFIG_ETH_DMA_*`. Fix tracked in [plan.md](plan.md). **Use `esp32-eth-wifi` for any ArtNet workload on classic ESP32**, even without Ethernet connected. Generic ESP32 boards (no PCB-trace antenna, less stable 3V3) vary wildly in WiFi TX quality vs the Olimex.
 
-**Use `esp32-eth-wifi` for any ArtNet workload on classic ESP32**, even without Ethernet connected.
-
-### Preview `detail` cost (128×128, live scenario)
-
-| Preview setting | Tick | FPS |
-|-----------------|------|-----|
-| baseline | 51,257 µs | 19 |
-| `detail` 1 (16×16) | 53,769 µs | 18 |
-| `detail` 2 (32×32) | 55,677 µs | 17 |
-| `detail` 3 (43×43) | 65,434 µs | 15 |
-| `decompress` on/off | 54,313 / 54,788 µs | 18 |
-
-`decompress` is client-side only, zero render cost. `detail = 3` adds ~14 ms/tick; the downsample copy runs on the hot path. Accepted for now — the preview is a dev tool. Cap tracked in [plan.md](plan.md).
-
-### Memory (128×128 with mirror)
+### Memory at 128×128 with mirror
 
 | Module | dynamicBytes | Breakdown |
 |--------|-------------|-----------|
@@ -110,7 +69,7 @@ Finding: the Olimex `esp32` build is 4× slower at ArtNet than `esp32-eth-wifi` 
 | Drivers | 48 KB | output buffer (128×128×3) |
 | System + Network | 0 | char buffers in class, no heap |
 
-LUT is half desktop size (uint16_t vs uint32_t per entry).
+LUT is half desktop size (uint16_t vs uint32_t per entry). The 1:1 (no-modifier) path skips the LUT entirely; see `scenario_Layer_memory_1to1` vs `scenario_MirrorModifier_memory_lut`.
 
 ### Heap breakdown (128×128, mirror, RainbowEffect, Ethernet + mDNS)
 
@@ -124,32 +83,7 @@ LUT is half desktop size (uint16_t vs uint32_t per entry).
 | Preview frame | 0 | Zero-copy: pointer to output buffer |
 | HTTP + WebSocket | ~8,000 | server + kernel buffers |
 | MoonModule instances | ~3,000 | all modules combined |
-| **Free heap (running)** | **~124,000** | stable, no leaks |
-
-### Memory during mirror toggle
-
-| State | Free heap | FPS |
-|-------|----------|-----|
-| Mirror XY on | 124 KB | 14 |
-| Mirror X off | 103 KB | 12 |
-| Mirror XY off | 98 KB | 13 |
-| Mirror XY on again | 124 KB | 14 |
-
-Note: tick/FPS here are from a pre-optimization snapshot (before the FPS-swing + ArtNet fixes); current steady-state with mirror XY on is 19 FPS.
-
-### mDNS impact
-
-Zero FPS impact. 5 KB heap difference is the mDNS service memory.
-
-### 1:1 identical vs LUT pipeline
-
-| | 1:1 identical (no modifier) | With mirror (LUT) |
-|--|---------------------------|-------------------|
-| Layer dynamicBytes | 49 KB (buffer only) | 52 KB (buffer + LUT) |
-| Drivers dynamicBytes | 0 | 48 KB (output buffer) |
-| Total pipeline | 49 KB | 100 KB |
-
-1:1 path skips blendMap entirely and saves ~51 KB.
+| **Free heap (running)** | **~104,000** | stable, no leaks |
 
 ---
 

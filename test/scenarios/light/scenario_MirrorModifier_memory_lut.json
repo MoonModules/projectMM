@@ -1,7 +1,12 @@
 {
   "name": "scenario_MirrorModifier_memory_lut",
   "module": "MirrorModifier",
-  "also": ["Layer", "MappingLUT", "BlendMap"],
+  "mode": "construct",
+  "also": [
+    "Layer",
+    "MappingLUT",
+    "BlendMap"
+  ],
   "description": "Verify that adding a MirrorModifier allocates both the mapping LUT and the driver buffer (the heavy memory path). Companion to scenario_Layer_memory_1to1, which verifies the no-LUT path.",
   "steps": [
     {
@@ -18,7 +23,10 @@
       "id": "Grid",
       "type": "GridLayout",
       "parent_id": "Layouts",
-      "props": {"width": 16, "height": 16}
+      "props": {
+        "width": 16,
+        "height": 16
+      }
     },
     {
       "name": "add-layer",
@@ -26,7 +34,10 @@
       "op": "add_module",
       "id": "Layer",
       "type": "Layer",
-      "props": {"layouts": "Layouts", "channelsPerLight": 3}
+      "props": {
+        "layouts": "Layouts",
+        "channelsPerLight": 3
+      }
     },
     {
       "name": "add-noise",
@@ -50,7 +61,9 @@
       "op": "add_module",
       "id": "Drivers",
       "type": "Drivers",
-      "props": {"layer": "Layer"}
+      "props": {
+        "layer": "Layer"
+      }
     },
     {
       "name": "add-artnet",
@@ -61,7 +74,24 @@
       "parent_id": "Drivers",
       "measure": true,
       "bounds": {
-        "fps": {"min_pct": 80}
+        "fps": {
+          "min_pct": 80
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 120,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": 105,
+          "free_heap": 0,
+          "at": "2026-06-02"
+        }
       }
     }
   ]

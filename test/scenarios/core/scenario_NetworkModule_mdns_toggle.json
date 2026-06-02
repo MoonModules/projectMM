@@ -1,7 +1,46 @@
 {
   "name": "scenario_NetworkModule_mdns_toggle",
   "module": "NetworkModule",
+  "mode": "mutate",
+  "live_only": true,
   "description": "Toggle the mDNS responder on and off and measure render-FPS impact. Validates that mDNS announcement traffic doesn't degrade the render loop more than 20% on the busiest tick.",
+  "reset": [
+    {
+      "name": "reset-grid-width",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "reset-grid-height",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128
+    },
+    {
+      "name": "reset-mirrorX",
+      "op": "set_control",
+      "id": "Mirror",
+      "key": "mirrorX",
+      "value": true
+    },
+    {
+      "name": "reset-mirrorY",
+      "op": "set_control",
+      "id": "Mirror",
+      "key": "mirrorY",
+      "value": true
+    },
+    {
+      "name": "reset-mdns",
+      "op": "set_control",
+      "id": "Network",
+      "key": "mDNS",
+      "value": true
+    }
+  ],
   "steps": [
     {
       "name": "baseline-mdns-on",
@@ -10,7 +49,27 @@
       "id": "Network",
       "key": "mDNS",
       "value": true,
-      "measure": true
+      "measure": true,
+      "contract": {
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 105000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "esp32-eth-wifi": {
+          "tick_us": 92564,
+          "free_heap": 98860,
+          "at": "2026-06-02"
+        },
+        "esp32-eth": {
+          "tick_us": 98482,
+          "free_heap": 135208,
+          "at": "2026-06-02"
+        }
+      }
     },
     {
       "name": "mdns-off",
@@ -19,7 +78,27 @@
       "id": "Network",
       "key": "mDNS",
       "value": false,
-      "measure": true
+      "measure": true,
+      "contract": {
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 95000,
+          "set_by": "2026-06-02",
+          "reason": "shared heap budget; cumulative sweep state reduces standalone-mDNS-off heap by ~15KB"
+        }
+      },
+      "observed": {
+        "esp32-eth-wifi": {
+          "tick_us": 106853,
+          "free_heap": 100420,
+          "at": "2026-06-02"
+        },
+        "esp32-eth": {
+          "tick_us": 93891,
+          "free_heap": 139972,
+          "at": "2026-06-02"
+        }
+      }
     },
     {
       "name": "mdns-on-again",
@@ -29,7 +108,31 @@
       "key": "mDNS",
       "value": true,
       "measure": true,
-      "bounds": { "fps": { "min_pct": 80 } }
+      "bounds": {
+        "fps": {
+          "min_pct": 80
+        }
+      },
+      "contract": {
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 105000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "esp32-eth-wifi": {
+          "tick_us": 91708,
+          "free_heap": 98860,
+          "at": "2026-06-02"
+        },
+        "esp32-eth": {
+          "tick_us": 97552,
+          "free_heap": 135072,
+          "at": "2026-06-02"
+        }
+      }
     }
   ]
 }

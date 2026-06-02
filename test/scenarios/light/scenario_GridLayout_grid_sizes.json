@@ -1,12 +1,16 @@
 {
-  "name": "scenario_GridLayout_resize",
+  "name": "scenario_GridLayout_grid_sizes",
   "module": "GridLayout",
   "mode": "mutate",
   "also": [
+    "Layer",
     "MirrorModifier",
-    "Layer"
+    "NoiseEffect",
+    "Drivers",
+    "ArtNetSendDriver",
+    "PreviewDriver"
   ],
-  "description": "Resize the grid while the pipeline is running and verify it reallocates cleanly under memory pressure. Lowers to 128x64 (release memory), increases to 128x128 (heaviest config: mirror + LUT). Each measured step captures tick/FPS/heap so the runner reports the degrade behaviour.",
+  "description": "Walk the grid through 16x16 → 32x32 → 64x64 → 128x128 and assert a per-size FPS floor.",
   "fixture": [
     {
       "name": "fix-layouts",
@@ -21,8 +25,8 @@
       "type": "GridLayout",
       "parent_id": "Layouts",
       "props": {
-        "width": 128,
-        "height": 128
+        "width": 16,
+        "height": 16
       }
     },
     {
@@ -64,6 +68,13 @@
       "id": "ArtNet",
       "type": "ArtNetSendDriver",
       "parent_id": "Drivers"
+    },
+    {
+      "name": "fix-preview",
+      "op": "add_module",
+      "id": "Preview",
+      "type": "PreviewDriver",
+      "parent_id": "Drivers"
     }
   ],
   "reset": [
@@ -98,48 +109,122 @@
   ],
   "steps": [
     {
-      "name": "size-128x128",
-      "description": "Set grid height to 128 (alongside default width 128). Measures the heaviest config as the baseline for the next two steps.",
+      "name": "size-16x16-width",
+      "description": "Start of the 16x16 case: set width first (height still carries over from the reset / previous step). The measurement happens on the NEXT step, after height is also set — otherwise we'd be measuring an N×128 stripe.",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "size-16x16",
+      "description": "16x16 (256 lights) measured — smallest realistic display. Should hit the device's max FPS.",
       "op": "set_control",
       "id": "Grid",
       "key": "height",
-      "value": 128,
+      "value": 16,
       "measure": true,
+      "bounds": {
+        "fps": {
+          "min_pct": 80
+        }
+      },
       "contract": {
         "pc-macos": {
-          "tick_us": 120,
+          "tick_us": 5,
           "free_heap": 0,
           "set_by": "2026-06-02",
           "reason": "initial contract"
         },
         "esp32-eth-wifi": {
-          "tick_us": 100000,
-          "free_heap": 105000,
+          "tick_us": 700,
+          "free_heap": 150000,
           "set_by": "2026-06-02",
           "reason": "initial contract"
         }
       },
       "observed": {
         "pc-macos": {
-          "tick_us": 103,
+          "tick_us": 1,
           "free_heap": 0,
           "at": "2026-06-02"
         },
         "esp32-eth-wifi": {
-          "tick_us": 90766,
-          "free_heap": 98740,
+          "tick_us": 679,
+          "free_heap": 139616,
           "at": "2026-06-02"
         },
         "esp32-eth": {
-          "tick_us": 97842,
-          "free_heap": 135208,
+          "tick_us": 614,
+          "free_heap": 182216,
           "at": "2026-06-02"
         }
       }
     },
     {
-      "name": "shrink-to-128x64",
-      "description": "Shrink to 128x64. Measured: FPS must stay within 20% of the baseline (proves the pipeline reallocs cleanly and there's no leak path).",
+      "name": "size-32x32-width",
+      "description": "32x32 (1024 lights).",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32
+    },
+    {
+      "name": "size-32x32",
+      "description": "32x32 measured. ~4x more lights than 16x16.",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min_pct": 80
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 10,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 2500,
+          "free_heap": 145000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": 6,
+          "free_heap": 0,
+          "at": "2026-06-02"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 2427,
+          "free_heap": 139516,
+          "at": "2026-06-02"
+        },
+        "esp32-eth": {
+          "tick_us": 2314,
+          "free_heap": 175860,
+          "at": "2026-06-02"
+        }
+      }
+    },
+    {
+      "name": "size-64x64-width",
+      "description": "64x64 (4096 lights).",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "size-64x64",
+      "description": "64x64 measured. Real-world mid size. Target: 60 FPS on a fast Ethernet device.",
       "op": "set_control",
       "id": "Grid",
       "key": "height",
@@ -152,44 +237,57 @@
       },
       "contract": {
         "pc-macos": {
-          "tick_us": 60,
+          "tick_us": 30,
           "free_heap": 0,
           "set_by": "2026-06-02",
           "reason": "initial contract"
         },
         "esp32-eth-wifi": {
-          "tick_us": 45000,
-          "free_heap": 85000,
+          "tick_us": 13000,
+          "free_heap": 120000,
           "set_by": "2026-06-02",
           "reason": "initial contract"
         }
       },
       "observed": {
         "pc-macos": {
-          "tick_us": 49,
+          "tick_us": 25,
           "free_heap": 0,
           "at": "2026-06-02"
         },
         "esp32-eth-wifi": {
-          "tick_us": 34357,
-          "free_heap": 80044,
+          "tick_us": 13277,
+          "free_heap": 113960,
           "at": "2026-06-02"
         },
         "esp32-eth": {
-          "tick_us": 38051,
-          "free_heap": 116508,
+          "tick_us": 13931,
+          "free_heap": 150416,
           "at": "2026-06-02"
         }
       }
     },
     {
-      "name": "grow-to-128x128",
-      "description": "Grow back to 128x128. Measured: confirms the heap can return to the heavy baseline after a shrink.",
+      "name": "size-128x128-width",
+      "description": "128x128 (16384 lights) — maximum supported size.",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "size-128x128",
+      "description": "128x128 measured. Real-world full-room size. Target: 20 FPS on a typical Ethernet device. Looser bound (min_pct 70) reflects the wider variance at the largest payload.",
       "op": "set_control",
       "id": "Grid",
       "key": "height",
       "value": 128,
       "measure": true,
+      "bounds": {
+        "fps": {
+          "min_pct": 70
+        }
+      },
       "contract": {
         "pc-macos": {
           "tick_us": 120,
@@ -206,18 +304,18 @@
       },
       "observed": {
         "pc-macos": {
-          "tick_us": 103,
+          "tick_us": 104,
           "free_heap": 0,
           "at": "2026-06-02"
         },
         "esp32-eth-wifi": {
-          "tick_us": 103622,
-          "free_heap": 100312,
+          "tick_us": 92834,
+          "free_heap": 98728,
           "at": "2026-06-02"
         },
         "esp32-eth": {
-          "tick_us": 107381,
-          "free_heap": 135208,
+          "tick_us": 99514,
+          "free_heap": 135200,
           "at": "2026-06-02"
         }
       }

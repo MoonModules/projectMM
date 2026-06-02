@@ -1,7 +1,13 @@
 {
   "name": "scenario_Layer_base_pipeline",
   "module": "Layer",
-  "also": ["GridLayout", "RainbowEffect", "Drivers", "ArtNetSendDriver"],
+  "mode": "construct",
+  "also": [
+    "GridLayout",
+    "RainbowEffect",
+    "Drivers",
+    "ArtNetSendDriver"
+  ],
   "description": "Core pipeline: build Layouts→Grid→Layer→RainbowEffect→Drivers→ArtNetSendDriver from scratch and verify each module wires correctly. Drives the bounded FPS check at the end so a render-path regression is caught.",
   "steps": [
     {
@@ -57,7 +63,25 @@
       "parent_id": "Drivers",
       "measure": true,
       "bounds": {
-        "fps": { "min_pct": 80, "min_fps_led_product": 294912 }
+        "fps": {
+          "min_pct": 80,
+          "min_fps_led_product": 294912
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 50,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": 35,
+          "free_heap": 0,
+          "at": "2026-06-02"
+        }
       }
     }
   ]

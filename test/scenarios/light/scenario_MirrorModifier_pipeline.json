@@ -1,7 +1,12 @@
 {
   "name": "scenario_MirrorModifier_pipeline",
   "module": "MirrorModifier",
-  "also": ["Layer", "NoiseEffect", "ArtNetSendDriver"],
+  "mode": "construct",
+  "also": [
+    "Layer",
+    "NoiseEffect",
+    "ArtNetSendDriver"
+  ],
   "description": "Pipeline with a mirror modifier: NoiseEffect renders one quadrant, MirrorModifier reflects across X and Y to produce a kaleidoscope. Used to verify the MirrorModifier wires into Layer cleanly and that the full pipeline still meets its FPS bound.",
   "steps": [
     {
@@ -65,7 +70,24 @@
       "parent_id": "Drivers",
       "measure": true,
       "bounds": {
-        "fps": { "min_pct": 80 }
+        "fps": {
+          "min_pct": 80
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 120,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": 107,
+          "free_heap": 0,
+          "at": "2026-06-02"
+        }
       }
     }
   ]

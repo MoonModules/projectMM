@@ -1,7 +1,11 @@
 {
   "name": "scenario_Layer_memory_1to1",
   "module": "Layer",
-  "also": ["MappingLUT", "BlendMap"],
+  "mode": "construct",
+  "also": [
+    "MappingLUT",
+    "BlendMap"
+  ],
   "description": "Verify that an unshuffled 1:1 mapping (no modifier) uses no LUT and no driver buffer. Catches a regression where Layer would allocate a passthrough LUT for the identity case.",
   "steps": [
     {
@@ -18,7 +22,10 @@
       "id": "Grid",
       "type": "GridLayout",
       "parent_id": "Layouts",
-      "props": {"width": 16, "height": 16}
+      "props": {
+        "width": 16,
+        "height": 16
+      }
     },
     {
       "name": "add-layer",
@@ -26,7 +33,10 @@
       "op": "add_module",
       "id": "Layer",
       "type": "Layer",
-      "props": {"layouts": "Layouts", "channelsPerLight": 3}
+      "props": {
+        "layouts": "Layouts",
+        "channelsPerLight": 3
+      }
     },
     {
       "name": "add-rainbow",
@@ -42,7 +52,9 @@
       "op": "add_module",
       "id": "Drivers",
       "type": "Drivers",
-      "props": {"layer": "Layer"}
+      "props": {
+        "layer": "Layer"
+      }
     },
     {
       "name": "add-artnet",
@@ -53,7 +65,24 @@
       "parent_id": "Drivers",
       "measure": true,
       "bounds": {
-        "fps": {"min_pct": 80}
+        "fps": {
+          "min_pct": 80
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 50,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": 35,
+          "free_heap": 0,
+          "at": "2026-06-02"
+        }
       }
     }
   ]
