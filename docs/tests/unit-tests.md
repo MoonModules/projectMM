@@ -6,6 +6,13 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 ## ArtNetSendDriver
 
+`test/unit/light/unit_ArtNetSendDriver_no_alloc_in_loop.cpp`
+*Also touches: Drivers, Correction.*
+
+- The size matches what loop() would need on its first send.
+- happens in onCorrectionChanged, off the hot path.
+- still called, but the resize short-circuits (existing buffer already fits).
+
 `test/unit/light/unit_ArtNetSendDriver_packet.cpp`
 
 - The built packet contains the exact header layout the Art-Net spec mandates: ID, OpCode, version, sequence, physical, universe, length, data.
@@ -356,3 +363,9 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - After setup, SystemModule exposes exactly 12 controls on desktop, including a deviceName Text control bound to the MAC-derived name.
 - The `board` control is always present and non-empty (either a real board key from build_info.h or the fallback "unknown").
 - The `bootReason` control is populated from platform::resetReason; on desktop it reports "OK".
+
+## platform
+
+`test/unit/core/unit_platform_clock.cpp`
+
+- the real clock so subsequent test cases see fresh time.

@@ -15,10 +15,12 @@ add_executable(mm_tests
     unit/core/unit_MoonModule_movechild.cpp
     unit/core/unit_MoonModule_replacechild.cpp
     unit/core/unit_NetworkModule.cpp
+    unit/core/unit_platform_clock.cpp
     unit/core/unit_Scheduler_unique_names.cpp
     unit/core/unit_SystemModule.cpp
 
     # light/
+    unit/light/unit_ArtNetSendDriver_no_alloc_in_loop.cpp
     unit/light/unit_ArtNetSendDriver_packet.cpp
     unit/light/unit_BlendMap.cpp
     unit/light/unit_CheckerboardEffect.cpp

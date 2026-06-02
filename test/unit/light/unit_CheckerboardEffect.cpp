@@ -125,18 +125,23 @@ TEST_CASE("LavaLampEffect spatial variation") {
     // saturated frame at the default slow bpm (=8). Sample several frames
     // across a wider t range — at bpm=60 the blob positions sweep through the
     // grid quickly enough that at least one frame in the window must have
-    // spatial variety. (If none do, the effect is genuinely broken.)
+    // spatial variety. (If none do, the effect is genuinely broken.) Time
+    // advances through the platform test-clock seam so the loop is instant
+    // and deterministic — no real sleeps, no CI flakiness.
     Ctx ctx(32, 32);
     mm::LavaLampEffect effect;
     effect.bpm = 60;
     ctx.layer.addChild(&effect);
     ctx.layer.onBuildState();
+    uint32_t virtualNow = 1000;
     bool varied = false;
     for (int i = 0; i < 10 && !varied; i++) {
+        mm::platform::setTestNowMs(virtualNow);
         ctx.layer.loop();
         if (ctx.hasTwoDistinctColors()) varied = true;
-        mm::platform::delayMs(50);
+        virtualNow += 50;
     }
+    mm::platform::setTestNowMs(0);
     CHECK(varied);
 }
 

@@ -6,6 +6,9 @@
 #include "light/layouts/GridLayout.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/CheckerboardEffect.h"
+#include "platform/platform.h"
+
+#include <cstring>
 
 // The Layers container is a thin pass-through with one child Layer: behaviour
 // must match what a bare Layer produced before the shape change. These tests
@@ -19,6 +22,13 @@
 
 // A Layers container with one child Layer must produce the same output as that Layer used directly (no-op container).
 TEST_CASE("Layers with one Layer produces the same output as a bare Layer") {
+    // Pin virtual time so both Layer paths read the same elapsed value from
+    // RainbowEffect's platform::millis() phase. Without this, the two loop()
+    // calls land microseconds apart on the real clock and Rainbow's hue rotates
+    // between them — making byte-exact comparison impossible (the structural
+    // compare this test used to do hid the actual contract).
+    mm::platform::setTestNowMs(1000);
+
     // --- Reference: bare Layer (no Layers container) ---
     mm::Layouts layoutsA;
     mm::GridLayout gridA;
@@ -57,20 +67,13 @@ TEST_CASE("Layers with one Layer produces the same output as a bare Layer") {
     layersContainer.loop();
 
     // --- Both buffers must be byte-identical at the same elapsed time ---
-    // RainbowEffect uses platform::millis() for phase. We can't pin the clock
-    // between the two loop() calls, so compare structurally instead of by
-    // exact bytes: both buffers are populated, same size, and the spatial
-    // gradient produced by Rainbow at corners is present in both.
     auto& bufA = bareLayer.buffer();
     auto& bufB = childLayer.buffer();
     REQUIRE(bufA.bytes() == bufB.bytes());
     REQUIRE(bufA.bytes() == static_cast<size_t>(16 * 16 * 3));
+    CHECK(std::memcmp(bufA.data(), bufB.data(), bufA.bytes()) == 0);
 
-    bool aHasNonZero = false, bHasNonZero = false;
-    for (size_t i = 0; i < bufA.bytes(); i++) if (bufA.data()[i] != 0) { aHasNonZero = true; break; }
-    for (size_t i = 0; i < bufB.bytes(); i++) if (bufB.data()[i] != 0) { bHasNonZero = true; break; }
-    CHECK(aHasNonZero);
-    CHECK(bHasNonZero);
+    mm::platform::setTestNowMs(0);
 }
 
 // With two child Layers, each one's loop() runs and writes its own buffer (the container iterates all enabled children).

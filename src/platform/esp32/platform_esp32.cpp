@@ -43,6 +43,7 @@
 #include "lwip/sockets.h"
 #include "lwip/inet.h"
 
+#include <atomic>
 #include <cstdarg>
 #include <cstdlib>
 #include <cstdio>
@@ -52,7 +53,16 @@
 
 namespace mm::platform {
 
+// Test-only override for millis(); 0 means "use the real clock". Honoured on
+// ESP32 too so a hardware scenario run can freeze time the same way unit tests
+// do (no separate desktop-vs-ESP32 mocking surface).
+static std::atomic<uint32_t> testNowMs{0};
+
+void setTestNowMs(uint32_t ms) { testNowMs.store(ms, std::memory_order_relaxed); }
+
 uint32_t millis() {
+    uint32_t override_ = testNowMs.load(std::memory_order_relaxed);
+    if (override_) return override_;
     return static_cast<uint32_t>(esp_timer_get_time() / 1000);
 }
 

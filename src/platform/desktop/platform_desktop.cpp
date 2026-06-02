@@ -18,8 +18,15 @@
 namespace mm::platform {
 
 static auto startTime = std::chrono::steady_clock::now();
+// Test-only override for millis(); 0 means "use the real clock". std::atomic so
+// a test can set it from one thread while a tested module reads from another.
+static std::atomic<uint32_t> testNowMs{0};
+
+void setTestNowMs(uint32_t ms) { testNowMs.store(ms, std::memory_order_relaxed); }
 
 uint32_t millis() {
+    uint32_t override_ = testNowMs.load(std::memory_order_relaxed);
+    if (override_) return override_;
     auto now = std::chrono::steady_clock::now();
     return static_cast<uint32_t>(
         std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime).count()

@@ -27,6 +27,9 @@ namespace {
 // The robustness matters because some effects' visible state flips on parity of
 // phaseCell (CheckerboardEffect) — a single before/after pair can land on the
 // same parity by accident. Multiple samples across a longer interval can't.
+//
+// Time advances through the platform test-clock seam — no wall-clock sleeps,
+// so the test is deterministic and instant regardless of CI load.
 template <typename Effect>
 bool animates_over_ms(int total_ms) {
     mm::Layouts layouts;
@@ -43,16 +46,21 @@ bool animates_over_ms(int total_ms) {
     layouts.onBuildState();
     layer.onBuildState();
 
+    uint32_t virtualNow = 1000;       // arbitrary non-zero start
+    mm::platform::setTestNowMs(virtualNow);
     layer.loop();
     std::vector<uint8_t> baseline(layer.buffer().data(), layer.buffer().data() + layer.buffer().bytes());
     const int step_ms = 20;
+    bool animated = false;
     for (int elapsed = 0; elapsed < total_ms; elapsed += step_ms) {
-        mm::platform::delayMs(step_ms);
+        virtualNow += step_ms;
+        mm::platform::setTestNowMs(virtualNow);
         layer.loop();
         std::vector<uint8_t> now(layer.buffer().data(), layer.buffer().data() + layer.buffer().bytes());
-        if (now != baseline) return true;
+        if (now != baseline) { animated = true; break; }
     }
-    return false;
+    mm::platform::setTestNowMs(0);  // restore real clock for the next case
+    return animated;
 }
 
 } // namespace
@@ -103,10 +111,12 @@ TEST_CASE("Replacing an effect at runtime: new effect still animates") {
     if (old) { old->teardown(); delete old; }
     layer.onBuildState();
 
+    mm::platform::setTestNowMs(1000);
     layer.loop();
     std::vector<uint8_t> first(layer.buffer().data(), layer.buffer().data() + layer.buffer().bytes());
-    mm::platform::delayMs(100);
+    mm::platform::setTestNowMs(1100);
     layer.loop();
     std::vector<uint8_t> second(layer.buffer().data(), layer.buffer().data() + layer.buffer().bytes());
+    mm::platform::setTestNowMs(0);
     CHECK_FALSE_MESSAGE(first == second, "Replaced Metaballs frozen across 100ms gap");
 }

@@ -9,6 +9,14 @@ namespace mm::platform {
 uint32_t millis();
 uint32_t micros();
 
+// Test-only override: when set to non-zero, millis() returns this value instead
+// of reading the platform clock. Production code never calls this; tests use it
+// to drive virtual time deterministically (replaces the wall-clock delayMs in
+// animation tests). Pass 0 to restore real-clock behaviour — tests must reset
+// in teardown so cases stay independent. ESP32 honours the override too so a
+// scenario-tests run on real hardware can still freeze time if needed.
+void setTestNowMs(uint32_t ms);
+
 void* alloc(size_t bytes);
 void free(void* ptr);
 

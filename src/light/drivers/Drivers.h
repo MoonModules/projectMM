@@ -30,6 +30,14 @@ public:
     // and any future preview-style driver opt out for free; only physical drivers
     // (ArtNet, future LED) override to apply it.
     virtual void setCorrection(const Correction* /*c*/) {}
+
+    // Notified by Drivers when the shared Correction's outChannels may have changed
+    // (a lightPreset switch RGB↔RGBW). Default no-op; physical drivers that own an
+    // intermediate correction-applied buffer override to resize it OFF the hot path.
+    // Topology changes (light count, channels per light) already flow through
+    // onBuildState — this hook is just for the preset-driven channel-count change
+    // that doesn't trigger a structural rebuild.
+    virtual void onCorrectionChanged() {}
 protected:
     Layer* layer_ = nullptr;
 };
@@ -56,6 +64,13 @@ public:
         if (std::strcmp(controlName, "brightness") == 0 ||
             std::strcmp(controlName, "lightPreset") == 0) {
             correction_.rebuild(brightness, static_cast<LightPreset>(lightPreset));
+            // Propagate so physical drivers that maintain a correction-applied
+            // buffer (today: ArtNet) can resize off the hot path. A brightness-
+            // only change is a no-op for resizing (outChannels stays 3); the
+            // RGB↔RGBW preset switch is the case that actually grows/shrinks.
+            for (uint8_t i = 0; i < childCount(); i++) {
+                static_cast<DriverBase*>(child(i))->onCorrectionChanged();
+            }
         }
     }
 
