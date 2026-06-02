@@ -60,13 +60,15 @@
       },
       "observed": {
         "esp32-eth-wifi": {
-          "tick_us": 92564,
-          "free_heap": 98860,
+          "tick_us": 81816,
+          "free_heap": 95632,
+          "max_alloc_block": 49152,
           "at": "2026-06-02"
         },
         "esp32-eth": {
-          "tick_us": 98482,
-          "free_heap": 135208,
+          "tick_us": 94489,
+          "free_heap": 135196,
+          "max_alloc_block": 49152,
           "at": "2026-06-02"
         }
       }
@@ -89,13 +91,15 @@
       },
       "observed": {
         "esp32-eth-wifi": {
-          "tick_us": 106853,
-          "free_heap": 100420,
+          "tick_us": 83137,
+          "free_heap": 100408,
+          "max_alloc_block": 49152,
           "at": "2026-06-02"
         },
         "esp32-eth": {
-          "tick_us": 93891,
-          "free_heap": 139972,
+          "tick_us": 95470,
+          "free_heap": 139964,
+          "max_alloc_block": 49152,
           "at": "2026-06-02"
         }
       }
@@ -123,13 +127,15 @@
       },
       "observed": {
         "esp32-eth-wifi": {
-          "tick_us": 91708,
-          "free_heap": 98860,
+          "tick_us": 93963,
+          "free_heap": 95484,
+          "max_alloc_block": 49152,
           "at": "2026-06-02"
         },
         "esp32-eth": {
-          "tick_us": 97552,
-          "free_heap": 135072,
+          "tick_us": 109767,
+          "free_heap": 135052,
+          "max_alloc_block": 49152,
           "at": "2026-06-02"
         }
       }

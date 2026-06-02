@@ -56,11 +56,19 @@ def parse_unit_file(path: Path) -> dict:
     for m in TEST_CASE_RE.finditer(text):
         case_name = m.group(1)
         line_idx = text[:m.start()].count("\n")  # 0-based index of the TEST_CASE line
-        desc: str | None = None
-        if line_idx > 0:
-            prev = lines[line_idx - 1].strip()
-            if prev.startswith("//") and not prev.startswith("// @"):
-                desc = prev[2:].strip()
+        # Walk back over consecutive `//` (non-`@`) lines so a multi-line
+        # comment block above the TEST_CASE renders as one full description.
+        # Previously only the last line was captured, truncating leading clauses.
+        desc_lines: list[str] = []
+        i = line_idx - 1
+        while i >= 0:
+            prev = lines[i].strip()
+            if not prev.startswith("//") or prev.startswith("// @"):
+                break
+            desc_lines.append(prev[2:].strip())
+            i -= 1
+        desc_lines.reverse()
+        desc: str | None = " ".join(desc_lines) if desc_lines else None
         cases.append((case_name, desc))
 
     return {
@@ -112,14 +120,20 @@ def collect_scenario_files() -> list[dict]:
 
 
 def list_test_modules() -> list[str]:
-    """Union of @module values across unit tests + scenarios, sorted."""
+    """Union of every module name a unit test or scenario primarily exercises
+    (@module / module) OR mentions as a peer (@also / also). MoonDeck's module
+    dropdown filters on this list — a module that only appears under `also`
+    still needs to be selectable so the user can find every test that touches it.
+    """
     modules: set[str] = set()
     for f in collect_unit_files():
         if f["module"]:
             modules.add(f["module"])
+        modules.update(f.get("also") or [])
     for s in collect_scenario_files():
         if s["module"]:
             modules.add(s["module"])
+        modules.update(s.get("also") or [])
     return sorted(modules)
 
 

@@ -34,11 +34,13 @@ _RUNNER_BASE = ROOT / "build" / _HOST / "test" / "mm_scenarios"
 RUNNER = _RUNNER_BASE.with_suffix(".exe") if sys.platform == "win32" else _RUNNER_BASE
 
 # Format emitted by scenario_runner.cpp's measure block:
-#   MEASURE <step-name>: tick=Nus FPS=N lights=N heap=±N (step: ±N)
-# `<step-name>` may contain hyphens and underscores. heap is absolute free-heap
-# value (0 on desktop where freeHeap() returns unlimited).
+#   MEASURE <step-name>: tick=Nus FPS=N lights=N heap=±N (step: ±N) block=N
+# `<step-name>` may contain hyphens and underscores. heap is signed offset
+# (vs heapBefore); block is the absolute largest contiguous block.
+# Both are 0 on desktop where the platform stubs return "unlimited".
 _MEASURE_RE = re.compile(
-    r"^\s*MEASURE\s+(?P<name>\S+):\s+tick=(?P<tick>\d+)us\s+FPS=\d+\s+lights=\d+\s+heap=(?P<heap>[+-]?\d+)"
+    r"^\s*MEASURE\s+(?P<name>\S+):\s+tick=(?P<tick>\d+)us\s+FPS=\d+\s+lights=\d+"
+    r"\s+heap=(?P<heap>[+-]?\d+).*?\bblock=(?P<block>\d+)"
 )
 
 
@@ -60,7 +62,7 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
     proc = subprocess.Popen([str(RUNNER), str(path)], cwd=ROOT,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, bufsize=1)
-    observations: dict[str, dict] = {}  # step-name → {tick_us, free_heap}
+    observations: dict[str, dict] = {}  # step-name → {tick_us, free_heap, max_alloc_block}
     for line in proc.stdout:
         sys.stdout.write(line)
         m = _MEASURE_RE.match(line)
@@ -70,9 +72,11 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
             # the observed/contract blocks we want absolute free-heap. On
             # desktop freeHeap() returns 0 (unlimited), so the offset is 0 and
             # we store 0 — which the runner treats as "no heap assertion".
+            # max_alloc_block is absolute (0 = unlimited / desktop).
             observations[m["name"]] = {
                 "tick_us": int(m["tick"]),
                 "free_heap": max(0, heap),
+                "max_alloc_block": int(m["block"]),
             }
     proc.wait()
     if proc.returncode != 0:
@@ -83,7 +87,9 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
     if not observations:
         return 0
 
-    with open(path) as f:
+    # Explicit utf-8: scenario descriptions contain non-ASCII (→, ×, µ). On
+    # Windows the default encoding is cp1252 and would mojibake those.
+    with open(path, encoding="utf-8") as f:
         scenario = json.load(f)
     target = _host_target()
     today = datetime.date.today().isoformat()
@@ -97,10 +103,15 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
         step.setdefault("observed", {})[target] = {
             "tick_us": observations[name]["tick_us"],
             "free_heap": observations[name]["free_heap"],
+            "max_alloc_block": observations[name]["max_alloc_block"],
             "at": today,
         }
         touched_observed += 1
-        # Only renegotiate the contract when --update-contract was passed.
+        # Only renegotiate the contract when --update-contract was passed. The
+        # max_alloc_block field is *not* copied into the contract by default —
+        # it's an opt-in floor that only a few scenarios assert (where LUT-fit
+        # is part of the workload). Existing max_alloc_block contracts are
+        # preserved if present.
         if update_contract:
             existing = step.get("contract", {}).get(target, {})
             new_block = {
@@ -109,14 +120,15 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
                 "set_by": today,
                 "reason": update_reason or existing.get("reason", "updated"),
             }
-            for k in ("tick_tolerance_pct", "heap_tolerance_pct", "tolerance_us"):
+            for k in ("tick_tolerance_pct", "heap_tolerance_pct", "tolerance_us",
+                      "max_alloc_block"):
                 if k in existing:
                     new_block[k] = existing[k]
             step.setdefault("contract", {})[target] = new_block
             touched_contract += 1
 
     if touched_observed or touched_contract:
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(scenario, f, indent=2, ensure_ascii=False)
             f.write("\n")
         what = []

@@ -112,6 +112,8 @@ def _format_contract_line(target: str, c: dict) -> str:
         parts.append(f"tick ≤ {_fmt_us(int(c['tick_us']))} ({_fps_from_us(int(c['tick_us']))} FPS)")
     if c.get("free_heap"):
         parts.append(f"heap ≥ {_fmt_heap(int(c['free_heap']))}")
+    if c.get("max_alloc_block"):
+        parts.append(f"block ≥ {_fmt_heap(int(c['max_alloc_block']))}")
     if not parts:
         return f"`{target}`: (no thresholds)"
     extra = []
@@ -130,6 +132,8 @@ def _format_observed_line(target: str, o: dict) -> str:
         parts.append(f"tick {_fmt_us(int(o['tick_us']))} ({_fps_from_us(int(o['tick_us']))} FPS)")
     if o.get("free_heap"):
         parts.append(f"heap {_fmt_heap(int(o['free_heap']))}")
+    if o.get("max_alloc_block"):
+        parts.append(f"block {_fmt_heap(int(o['max_alloc_block']))}")
     tail = f" — observed {o['at']}" if o.get("at") else ""
     return f"`{target}`: " + " · ".join(parts) + tail
 

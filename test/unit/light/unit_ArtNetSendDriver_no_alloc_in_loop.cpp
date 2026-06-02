@@ -17,7 +17,8 @@
 #include "light/layers/Buffer.h"
 
 // onBuildState sizes the correction-applied buffer to source-count × out-channels.
-// The size matches what loop() would need on its first send.
+// The size matches what loop() would need on its first send. Calling loop()
+// after onBuildState must not reallocate — pin the data pointer + shape.
 TEST_CASE("ArtNetSendDriver sizes corrected_ in onBuildState, not in loop") {
     mm::Buffer source;
     REQUIRE(source.allocate(64, 3));
@@ -32,6 +33,13 @@ TEST_CASE("ArtNetSendDriver sizes corrected_ in onBuildState, not in loop") {
 
     // After onBuildState the resized buffer is already in place.
     REQUIRE(driver.correctedBuffer().data() != nullptr);
+    CHECK(driver.correctedBuffer().count() == 64);
+    CHECK(driver.correctedBuffer().channelsPerLight() == 3);
+
+    // loop() must not reallocate — same backing pointer, same shape.
+    const uint8_t* dataBefore = driver.correctedBuffer().data();
+    driver.loop();
+    CHECK(driver.correctedBuffer().data() == dataBefore);
     CHECK(driver.correctedBuffer().count() == 64);
     CHECK(driver.correctedBuffer().channelsPerLight() == 3);
 }

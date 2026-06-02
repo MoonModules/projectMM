@@ -10,6 +10,13 @@
 
 #include <cstring>
 
+// RAII guard that restores the platform test clock on scope exit even if a
+// REQUIRE/CHECK throws — without this, a mid-test failure would leave the
+// global setTestNowMs override in place and pollute later test cases.
+struct ClockGuard {
+    ~ClockGuard() { mm::platform::setTestNowMs(0); }
+};
+
 // The Layers container is a thin pass-through with one child Layer: behaviour
 // must match what a bare Layer produced before the shape change. These tests
 // pin that — anyone changing Layers::loop() will know immediately if the
@@ -28,6 +35,7 @@ TEST_CASE("Layers with one Layer produces the same output as a bare Layer") {
     // between them — making byte-exact comparison impossible (the structural
     // compare this test used to do hid the actual contract).
     mm::platform::setTestNowMs(1000);
+    ClockGuard clockGuard;  // restores setTestNowMs(0) even if a REQUIRE below fails
 
     // --- Reference: bare Layer (no Layers container) ---
     mm::Layouts layoutsA;
@@ -72,8 +80,7 @@ TEST_CASE("Layers with one Layer produces the same output as a bare Layer") {
     REQUIRE(bufA.bytes() == bufB.bytes());
     REQUIRE(bufA.bytes() == static_cast<size_t>(16 * 16 * 3));
     CHECK(std::memcmp(bufA.data(), bufB.data(), bufA.bytes()) == 0);
-
-    mm::platform::setTestNowMs(0);
+    // clockGuard restores setTestNowMs(0) on scope exit
 }
 
 // With two child Layers, each one's loop() runs and writes its own buffer (the container iterates all enabled children).

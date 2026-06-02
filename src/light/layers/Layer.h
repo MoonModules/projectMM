@@ -83,7 +83,11 @@ public:
             lut_.free();
             buffer_.free();
             setDynamicBytes(0);
-            clearStatus();  // stale "buffer reduced" message would otherwise persist
+            // Clear stale degrade state from a previous build — both the status
+            // string AND lutSkipped_. Without resetting the flag, lutSkipped()
+            // keeps reporting true even though we just freed the LUT.
+            lutSkipped_ = false;
+            clearStatus();
             MoonModule::onBuildState();
             return;
         }

@@ -223,6 +223,26 @@ public:
                 break;
 
             case State::Idle:
+                // Recovery from a terminal-looking state. We land in Idle when
+                // every bring-up path failed: Ethernet didn't appear within the
+                // boot timeout, WiFi STA wasn't configured (or wasn't reachable),
+                // and AP fallback failed to init. In Ethernet-only builds we
+                // also land here when setup() can't ethInit(). The network
+                // stack keeps running in the background though — if Ethernet
+                // later acquires a DHCP lease (slow DHCP server, cable plugged
+                // in after boot), ethConnected() flips true. Promote when we
+                // see it; symmetric with the State::AP and State::ConnectedSta
+                // upgrade checks above. Same for late WiFi STA in builds with
+                // saved credentials.
+                if (platform::ethConnected()) {
+                    std::printf("NetworkModule: Ethernet up (recovered from Idle)\n");
+                    onConnected("Ethernet");
+                } else if constexpr (platform::hasWiFi) {
+                    if (platform::wifiStaConnected()) {
+                        std::printf("NetworkModule: WiFi STA up (recovered from Idle)\n");
+                        onConnected("WiFi STA");
+                    }
+                }
                 break;
         }
 

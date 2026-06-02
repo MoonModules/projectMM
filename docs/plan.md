@@ -41,6 +41,22 @@ Either path: ~2–3 h translation + Windows-side testing. Once green, `build-win
 
 This determines the practical LED limit for WiFi-only boards. Until the `sdkconfig.defaults` TX-buffer fix lands (identified in the build-variant table), **use `esp32-eth-wifi` for any ArtNet workload on classic ESP32** even if Ethernet isn't physically connected.
 
+### `esp32-eth` slow Ethernet bring-up vs `esp32-eth-wifi` (investigation)
+
+On Olimex ESP32-Gateway flashed with `esp32-eth`, Ethernet sometimes takes **a minute or more** to acquire a DHCP lease at boot. The same hardware flashed with `esp32-eth-wifi` brings Ethernet up in seconds. The B1 Idle-recovery fix in `src/core/NetworkModule.h` masks the symptom (status correctly transitions to "Eth: <ip>" once the lease arrives), but the underlying slow bring-up is a real performance regression on the eth-only build.
+
+What we know:
+- `build/esp32-esp32-eth/sdkconfig` and `build/esp32-esp32-eth-wifi/sdkconfig` are **byte-identical** (3,617 lines each, `cmp -s` confirms). So lwIP buffer pools, DHCP timeouts, and Ethernet driver settings are the same.
+- Same hardware (Olimex ESP32-Gateway Rev G), same RMII pin/clock config (`EMAC_CLK_OUT` on GPIO17), same `ethInit()` code in `src/platform/esp32/platform_esp32.cpp`.
+- The only difference at link time: `esp32-eth` passes `EXCLUDE_COMPONENTS=esp_wifi;wpa_supplicant;esp_coex` to ESP-IDF (see `scripts/build/build_esp32.py:31`).
+- `esp_coex` (WiFi/Bluetooth coexistence) is normally responsible for shared-radio timing arbitration. Hypothesis: even though Ethernet doesn't share the radio, something in `esp_coex` or its early init dependency chain warms a clock path (the shared 26 MHz crystal feeding both WiFi PHY and EMAC PLL) that helps Ethernet auto-negotiation. With it excluded, the EMAC takes longer to stabilise.
+
+What we don't know:
+- Which init step actually consumes the time — link-up (PHY negotiation) vs DHCP (lwIP) vs both?
+- Whether the slow path is reproducible (does it always happen, or only on cold boot / after a reset / etc.)?
+
+Diagnostic to run when picking this up: flash both variants, capture `idf.py monitor` from boot to "got IP" on each, diff the timestamps of `Ethernet link up` and `Ethernet got IP` ESP_LOGI lines. If link-up is fast but DHCP is slow → lwIP init issue (look at `esp_netif_init`'s side effects from excluded components). If link-up itself is slow → PHY/clock path (try re-adding only `esp_coex` to see if it helps).
+
 ### NoiseEffect cost on ESP32 (investigation)
 
 At 128×128 with mirror XY, NoiseEffect renders a 64×64 logical area but still costs **~47 ms/tick** on `esp32-eth-wifi` (Olimex Gateway, 160 MHz) — ~11.5 µs per pixel for 4,096 pixels. That's 55% of the total ~85 ms tick, capping the workload at ~12 FPS. By comparison RainbowEffect on the same pipeline hits ~22 FPS — the simplex math is the dominant cost.
@@ -56,6 +72,17 @@ Worth investigating:
 
 None of these are obviously free. Reaching 18 FPS may require accepting a visual signature change. Defer until there's a real use case (today's "12 FPS at heaviest workload" is fine for the intended deployment scale).
 
+### MoonDeck doc-asset endpoint hardening (backlog)
+
+`scripts/moondeck.py::_serve_doc_asset` accepts any ROOT-relative path and serves the file. Path traversal *is* blocked (`asset_path.relative_to(ROOT.resolve())`), but inside the repo any file is served — including local-only artefacts like `scripts/build/wifi_credentials.json` if present. MoonDeck binds to all interfaces by design (the existing comment in `main()` explicitly enables LAN reach), so anyone on the LAN can hit the endpoint.
+
+Two improvements when this matters:
+- **Subdirectory whitelist** — only serve under `docs/` (and image asset paths the markdown renderer needs). Reject `scripts/build/wifi_credentials.json` etc. with 403.
+- **Extension whitelist** — only image / CSS / JS mime types via a small allowlist.
+- **Optional bind-to-localhost flag** — `--bind 127.0.0.1` for users who don't want LAN reachability. Default stays "" (all interfaces) since the LAN-reach is the documented design.
+
+Not blocking — MoonDeck is a developer tool, not a production server. Pick this up when MoonDeck is in scope for hardening.
+
 ### mDNS toggle (evaluate)
 
 Added as a diagnostic tool during performance investigation; testing showed mDNS has zero FPS impact. Evaluate whether to keep (useful for debugging on other boards) or remove (unnecessary complexity). Decide after WiFi performance testing above.
@@ -68,6 +95,28 @@ Fix options in increasing scope:
 - **Cap the default grid** — drop to 64×64 on `esp32-eth-wifi` (Layer ~32 KB + LUT ~16 KB = 48 KB, comfortably under). Simplest.
 - **PSRAM for Layer buffer + LUT** — ESP32-Gateway has 4 MB PSRAM unused on non-S3 builds. Moving the 49 KB pixel buffer + 64 KB LUT out of DRAM frees ~110 KB for radios. Cost: ~25% FPS hit (PSRAM bandwidth ~12 MB/s vs DRAM ~80 MB/s); needs measurement. See [decisions.md](history/decisions.md) "Adaptive memory allocation design" for the allocation rules.
 - **Lazy WiFi init** — skip `esp_wifi_init` when `ssid_` is empty and no AP-fallback is pending. Helps only when credentials exist but the network is unreachable — niche.
+
+### Mirror LUT silently degrades at 128×128 on no-PSRAM ESP32 (regression — open)
+
+The Layer mirror LUT at 128×128 needs ~72 KB contiguous (4097-entry offsets table + 32768-entry destinations, each `uint16_t`). On Olimex Gateway Rev G the largest contiguous block at runtime is **~52 KB on `esp32-eth-wifi`** and **~53 KB on `esp32-eth`** — see the `observed.<target>.max_alloc_block` field in `test/scenarios/light/scenario_GridLayout_grid_sizes.json` `size-128x128`. Removing the WiFi stack reclaims ~36 KB of *free* heap but only ~4 KB of *contiguous* heap, because the dominant fragmenters are our own allocations (49 KB Layer logical buffer + 49 KB Driver output buffer), not WiFi.
+
+Result: `Layer::rebuildLUT` hits the `canAllocate(72 KB)` failure path, sets status `"modifier LUT skipped — not enough memory"` (severity warning), and degrades to 1:1 mapping. **Mirror has no visible effect at 128×128** on either Olimex build. At 64×64 the LUT only needs ~18 KB, easily fits. At 128×64 the LUT needs ~36 KB, also fits.
+
+**This is a regression.** Commit `7763bf8` ("Add eth-only build, fix FPS swing, optimize ArtNet") documented `128×128 grid, mirror XY, noise effect, Ethernet` with `Noise effect | 11,200 µs | 16% | 4096 logical pixels` and total tick 69,000 µs (14 FPS, free heap 124 KB). That `4096 logical pixels` line proves the mirror LUT was applied — Noise rendered the quadrant, not the full grid. Today the same workload measures `47,000 µs` for NoiseEffect (rendering all 16,384 pixels, because the LUT degraded), and free heap is down to ~97 KB. Net regression: ~27 KB of free heap lost since `7763bf8`, mirror no longer applied, Noise pays 4× the per-pixel cost.
+
+Suspect additions between `7763bf8` and today:
+- `aaf8d98` Per-driver output correction (Correction stage in Drivers path; allocates the 49 KB output buffer that didn't exist before).
+- `4cdc09a` Plan-18: release-channel picker + OTA + Improv WiFi + post-flash fix-pack (FirmwareUpdateModule, ImprovProvisioningModule).
+- HTTP server endpoints accumulated over the same span (WebSocket buffers, route handlers, mDNS service registrations).
+
+The contiguous-block deficit is structural now: even with mDNS off + Preview disabled + Improv deleted at runtime, max block stays at 53 KB (verified live on Olimex 2026-06-02). So toggling features off won't restore it — the per-driver Correction stage in `Drivers.h` lines 92-104 is the dominant non-removable consumer.
+
+Fix options:
+- **Allocate LUT before Driver output buffer** in `Layer::rebuildLUT()` / `Drivers::onBuildState()` — claim the larger contiguous chunk while heap is still less fragmented at startup. Requires reshuffling allocation order (Drivers currently allocates `outputBuffer_` in its own `onBuildState`, independently of Layer). Low risk; should let mirror work at 128×128 on eth-only at least.
+- **Smaller LUT representation for symmetric mirrors** — a "1:1 + axis-mirror suffix" encoding could compress the 72 KB LUT into ~4 KB (just the axis flags + an offset per logical pixel). Significant work but kills the problem outright for any mirror config.
+- **PSRAM** — only helps on PSRAM-equipped boards (Olimex Gateway Rev G has none).
+
+Tracked because surfacing the regression now (with max_alloc_block telemetry in scenarios) makes the next step concrete: pick one of the three options and measure.
 
 ### Preview memory optimizations (backlog)
 

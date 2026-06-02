@@ -9,9 +9,9 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 `test/unit/light/unit_ArtNetSendDriver_no_alloc_in_loop.cpp`
 *Also touches: Drivers, Correction.*
 
-- The size matches what loop() would need on its first send.
-- happens in onCorrectionChanged, off the hot path.
-- still called, but the resize short-circuits (existing buffer already fits).
+- onBuildState sizes the correction-applied buffer to source-count × out-channels. The size matches what loop() would need on its first send. Calling loop() after onBuildState must not reallocate — pin the data pointer + shape.
+- A preset toggle from RGB to RGBW grows outChannels from 3 to 4. The grow happens in onCorrectionChanged, off the hot path.
+- A brightness-only change keeps outChannels at 3 — onCorrectionChanged is still called, but the resize short-circuits (existing buffer already fits).
 
 `test/unit/light/unit_ArtNetSendDriver_packet.cpp`
 
@@ -38,7 +38,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Move-constructing transfers the data pointer and resets the source (no double free, no copy).
 - Move-assigning transfers ownership the same way the move constructor does.
 - Calling free() twice is harmless; pointer and count remain zeroed.
-- buffer left empty so a caller that ignores the bool doesn't get a partial state).
+- allocate() refuses zero-count or zero-channels (returns false, no allocation, buffer left empty so a caller that ignores the bool doesn't get a partial state).
 
 ## CheckerboardEffect
 
@@ -47,9 +47,9 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 - Checkerboard paints at least one non-zero byte on a 16×16 grid (effect actually renders).
 - With cell_size=4, adjacent cells render different colours (the checker pattern is real, not uniform).
-- LavaLamp paints at least one non-zero byte (effect actually renders).
+- LavaLampEffect has localised blob features that can land on identical corner palette indices at some t values (corner-pair check is too strict). Scan the whole buffer for any two distinct pixels instead — same approach as RipplesEffect below. LavaLamp paints at least one non-zero byte (effect actually renders).
 - Across 10 frames at bpm=60, at least one frame shows two distinct colours somewhere in the buffer (blobs move and the field varies).
-- Ripples paints at least one non-zero byte (effect actually renders).
+- RipplesEffect has localised features (thin rings); corner-pair check is too strict, so we scan for any two distinct pixels instead. Ripples paints at least one non-zero byte (effect actually renders).
 - At least two distinct pixels exist somewhere in the buffer (ripples are localised, so corner-pair would be too strict).
 
 ## Color
@@ -91,13 +91,13 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 `test/unit/core/unit_FilesystemModule_persistence.cpp`
 *Also touches: Scheduler, Layer.*
 
-- A control change (deviceName) saved with flush() reappears on the next boot once a fresh Scheduler loads the same path.
-- On load, a Layer's children are reconciled against the saved JSON: position 0 swaps to the saved type, extras at later positions are trimmed.
-- A code-wired child (markWiredByCode) survives a load from older JSON that doesn't mention it — new firmware additions aren't trimmed for existing users.
-- When the saved JSON wants a different type at the position where a code-wired child lives, reconciliation stops at that index instead of destroying the wired child.
-- Saving a Layer with multiple children produces valid JSON — comma separators between child `N.type` and the child's first control field are present.
-- /api/types factory-creates a temporary FilesystemModule probe; its destruction must NOT clear the static singleton (otherwise every later save silently no-ops).
-- Int16 controls (GridLayout width/height, Layer start/end) preserve their saved value across load — no zero-clamping from uint8 min/max bounds.
+- Persistence round-trip: set deviceName → save → recreate Scheduler+modules → load → assert. Uses fsSetRoot to isolate the test from any real /.config/ on disk. A control change (deviceName) saved with flush() reappears on the next boot once a fresh Scheduler loads the same path.
+- Structural persistence: hand-write a Layer.json describing a different tree shape than the one main.cpp builds, then load and verify the live tree reconciles to match the JSON — type swap at position 0, trim of position 1. On load, a Layer's children are reconciled against the saved JSON: position 0 swaps to the saved type, extras at later positions are trimmed.
+- Pins the wiredByCode-preserves-child contract that lets a new firmware revision add a code-created child (e.g. ImprovProvisioning under NetworkModule) without the child getting trimmed on every boot for users whose saved Network.json predates the addition.  Setup: an on-disk file describes Layer with zero children. Live tree has Layer with a RainbowEffect child that main.cpp would have wired and marked. After scheduler.setup() runs the persistence load, the wired child must survive. A code-wired child (markWiredByCode) survives a load from older JSON that doesn't mention it — new firmware additions aren't trimmed for existing users.
+- Companion to the wiredByCode case above: when the JSON describes a different type at the position where a code-wired child lives, the position-replacement must NOT kill the code-wired child. Stop reconciliation at that index instead and let the next save re-write the file with the actual tree shape. When the saved JSON wants a different type at the position where a code-wired child lives, reconciliation stops at that index instead of destroying the wired child.
+- Round-trip persistence with children: write a Layer subtree that contains both controls and child modules with controls of their own, then read the file back as text and verify it parses as valid JSON. Regresses the missing-comma bug between each child's "N.type" field and that child's first control (e.g. "0.type":"X""0.foo":1 instead of "0.type":"X","0.foo":1). Saving a Layer with multiple children produces valid JSON — comma separators between child `N.type` and the child's first control field are present.
+- Singleton survives probe lifecycle: /api/types factory-creates a probe of every registered type (including FilesystemModule) to capture defaults, then deletes it. The probe's destructor must NOT clear the singleton — otherwise every save path (noteDirty, debounced loop1s, flushPending on reboot) silently no-ops for the rest of the device's life. The fix is to register the singleton in setScheduler(), not in the constructor. This test would have caught the bug if it had existed before. /api/types factory-creates a temporary FilesystemModule probe; its destruction must NOT clear the static singleton (otherwise every later save silently no-ops).
+- Regression: Int16 controls (GridLayout's width/height/depth, Layer's start/end) round-tripped through the filesystem load path were clamped to c.min/c.max, which default to 0,0 because ControlDescriptor.min/max are uint8_t and can't represent an int16 range. Every Int16 control loaded as 0 — so a 128×128 grid became 0×0×0 after restart and the whole pipeline allocated no buffers. Int16 controls (GridLayout width/height, Layer start/end) preserve their saved value across load — no zero-clamping from uint8 min/max bounds.
 
 ## FireEffect
 
@@ -159,7 +159,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Checkerboard advances at desktop speed (cells flip across 100ms).
 - LavaLamp animates across 100ms (blobs move).
 - Spiral animates across 100ms (rotation visible).
-- Replacing one effect with another mid-tick (HttpServerModule's swap path) leaves the new effect animating, not frozen.
+- Replace path: swap one effect for another mid-flight (same shape as HttpServerModule::handleReplaceModule) and confirm the new effect animates. Replacing one effect with another mid-tick (HttpServerModule's swap path) leaves the new effect animating, not frozen.
 
 `test/unit/light/unit_Layer_zero_grid.cpp`
 *Also touches: RainbowEffect, NoiseEffect, PlasmaEffect, CheckerboardEffect, SpiralEffect, MetaballsEffect, PlasmaPaletteEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect, FireEffect, ParticlesEffect.*
@@ -368,4 +368,4 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 `test/unit/core/unit_platform_clock.cpp`
 
-- the real clock so subsequent test cases see fresh time.
+- setTestNowMs freezes platform::millis() to the given value; passing 0 restores the real clock so subsequent test cases see fresh time.

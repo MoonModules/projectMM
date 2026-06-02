@@ -70,8 +70,9 @@
       },
       "observed": {
         "pc-macos": {
-          "tick_us": 36,
+          "tick_us": 37,
           "free_heap": 0,
+          "max_alloc_block": 0,
           "at": "2026-06-02"
         }
       }
@@ -117,8 +118,9 @@
       },
       "observed": {
         "pc-macos": {
-          "tick_us": 35,
+          "tick_us": 183,
           "free_heap": 0,
+          "max_alloc_block": 0,
           "at": "2026-06-02"
         }
       }
@@ -151,8 +153,9 @@
       },
       "observed": {
         "pc-macos": {
-          "tick_us": 46,
+          "tick_us": 135,
           "free_heap": 0,
+          "max_alloc_block": 0,
           "at": "2026-06-02"
         }
       }
@@ -196,8 +199,9 @@
       },
       "observed": {
         "pc-macos": {
-          "tick_us": 43,
+          "tick_us": 53,
           "free_heap": 0,
+          "max_alloc_block": 0,
           "at": "2026-06-02"
         }
       }

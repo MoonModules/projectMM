@@ -277,7 +277,7 @@ struct ScenarioContext {
             }
         }
 
-        // Wire props
+        // Wire props (only when the step has any).
         if (step.has("props")) {
             auto& props = step["props"];
             if (std::strcmp(type, "Layer") == 0) {
@@ -294,13 +294,17 @@ struct ScenarioContext {
                     auto* layerModule = static_cast<mm::Layer*>(modules[props["layer"].str]);
                     if (layerModule) static_cast<mm::Drivers*>(mod)->setLayer(layerModule);
                 }
-            } else if (std::strcmp(type, "PreviewDriver") == 0) {
-                // PreviewDriver writes into a PreviewFrame that HttpServerModule
-                // reads in production. The scenario runner has no HttpServer; we
-                // give the driver a process-static frame so its loop() has a
-                // valid write target and tick measurements are honest.
-                static_cast<mm::PreviewDriver*>(mod)->setPreviewFrame(&scenarioPreviewFrame());
             }
+        }
+
+        // PreviewDriver always needs its scenario-static PreviewFrame target
+        // wired — independent of any step "props" the scenario provides. The
+        // driver reads no other init from props (no layouts/parent like Layer
+        // or Drivers do), but its loop() early-outs without a frame_, so
+        // setPreviewFrame must run unconditionally for honest tick measurement.
+        // Production wires this via HttpServerModule on the device.
+        if (std::strcmp(type, "PreviewDriver") == 0) {
+            static_cast<mm::PreviewDriver*>(mod)->setPreviewFrame(&scenarioPreviewFrame());
         }
     }
 };
@@ -535,6 +539,11 @@ static int runScenario(const char* path) {
             uint32_t tickTimeUs = MEASURE_FRAMES > 0 ? elapsedUs / MEASURE_FRAMES : 0;
             uint32_t fps = tickTimeUs > 0 ? 1000000 / tickTimeUs : 0;
             size_t heapAfterMeasure = mm::platform::freeHeap();
+            // Largest contiguous block — diagnoses heap fragmentation, which on
+            // no-PSRAM ESP32 silently degrades the Layer LUT (the buffer needs
+            // 60-90 KB contiguous at 128×128 with mirror; fragmentation drops
+            // mirror without changing free_heap). 0 on desktop = unlimited.
+            size_t maxBlock = mm::platform::maxAllocBlock();
 
             // Buffer state at this measurement (may be empty in early build-up steps).
             auto* layer = static_cast<mm::Layer*>(
@@ -547,10 +556,11 @@ static int runScenario(const char* path) {
             long stepDelta = heapBefore > 0
                 ? static_cast<long>(heapAfter) - static_cast<long>(heapAfterMeasure)
                 : 0;
-            std::printf("  MEASURE %s: tick=%uus FPS=%u lights=%u heap=%+ld (step: %+ld)\n",
+            std::printf("  MEASURE %s: tick=%uus FPS=%u lights=%u heap=%+ld (step: %+ld) block=%u\n",
                         name,
                         static_cast<unsigned>(tickTimeUs), static_cast<unsigned>(fps),
-                        lights, heapDelta, stepDelta);
+                        lights, heapDelta, stepDelta,
+                        static_cast<unsigned>(maxBlock));
             (void)heapBeforeMeasure;  // tracked through heapAfter below
 
             // FPS bound (when set)
@@ -637,6 +647,25 @@ static int runScenario(const char* path) {
                     std::snprintf(msg, sizeof(msg),
                                   "%s free_heap %u vs contract %.0f (drop %.1f%% <= %.0f%%)",
                                   name, static_cast<unsigned>(heapAfterMeasure), expHeap, dropPct, heapTolPct);
+                    result.check(dropPct <= heapTolPct, msg);
+                }
+                // max_alloc_block is also a *floor* — the LUT and driver buffers
+                // need a single contiguous chunk that's much larger than total
+                // free heap when fragmentation kicks in. A scenario can opt into
+                // this assertion when its workload depends on a specific minimum
+                // (mirror LUT silently degrades when the block won't fit; see
+                // src/light/layers/Layer.h Layer::rebuildLUT). Optional field;
+                // skipped on desktop where the value is always 0 (unlimited).
+                if (exp.has("max_alloc_block") && exp["max_alloc_block"].num > 0 &&
+                    maxBlock > 0) {
+                    double expBlock = exp["max_alloc_block"].num;
+                    double dropPct = (maxBlock < expBlock)
+                        ? (expBlock - maxBlock) * 100.0 / expBlock
+                        : 0.0;
+                    char msg[200];
+                    std::snprintf(msg, sizeof(msg),
+                                  "%s max_alloc_block %u vs contract %.0f (drop %.1f%% <= %.0f%%)",
+                                  name, static_cast<unsigned>(maxBlock), expBlock, dropPct, heapTolPct);
                     result.check(dropPct <= heapTolPct, msg);
                 }
             }

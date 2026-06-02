@@ -207,9 +207,14 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
         live_state = client.get("/api/state")
         target = _detect_target(live_state)
         live_names = _collect_module_names(live_state)
-        missing = sorted({step["id"] for step in scenario.get("steps", [])
-                          if step.get("op") in ("set_control", "delete_module") and step.get("id")}
-                         - live_names)
+        # Include reset block ids in the pre-flight — a reset step that
+        # references a missing module would silently no-op and the baseline
+        # would measure unintended state.
+        referenced = {step["id"] for step in scenario.get("steps", [])
+                      if step.get("op") in ("set_control", "delete_module") and step.get("id")}
+        referenced |= {r["id"] for r in scenario.get("reset", [])
+                       if r.get("op") == "set_control" and r.get("id")}
+        missing = sorted(referenced - live_names)
         if missing:
             print(f"\n  FAIL — mutate scenario references ids not on the live device: "
                   f"{', '.join(missing)}. Re-flash, or write the scenario against the "
@@ -316,14 +321,23 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
             results["passed"] = False
 
         # Measure after this step if requested (explicit "measure": true OR op == "measure").
+        # Skip the measurement block when the step itself failed: writing observed
+        # values from a failed-step state would persist garbage as the "latest
+        # reading" and the contract assertion would compare against an
+        # untrustworthy measurement.
+        if step_result.get("status") == "error":
+            results["steps"].append(step_result)
+            continue
         if step.get("measure") or op == "measure":
             metrics = collect_metrics(client, settle_s)
             step_result["metrics"] = metrics
             tick_us = metrics.get("tickTimeUs", 0)
             fps = 1000000 // tick_us if tick_us > 0 else metrics.get("fps", 0)
             heap = metrics.get("freeHeap", 0)
+            max_block = metrics.get("maxBlock", 0)
             model_bytes = metrics.get("dynamicBytesTotal")
-            print(f"  MEASURE  tick={tick_us}us (FPS={fps})  heap={heap}  model={model_bytes}")
+            print(f"  MEASURE  tick={tick_us}us (FPS={fps})  heap={heap}  "
+                  f"block={max_block}  model={model_bytes}")
 
             # Per-step contract: { "contract": { "<target>": { "tick_us": N,
             #   "free_heap": M, "tick_tolerance_pct": P, "heap_tolerance_pct": Q,
@@ -375,6 +389,22 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                     else:
                         print(f"  PASS  free_heap {heap} >= contract {exp_heap} "
                               f"(within -{heap_tol_pct}% tolerance)")
+                # max_alloc_block contract is also a *floor* — opt-in per scenario.
+                # The LUT/buffer allocators need a single contiguous chunk; on a
+                # fragmented heap the largest block can be much smaller than free
+                # heap, and Layer silently degrades to 1:1 (mirror disappears) when
+                # the LUT won't fit. Scenarios that depend on that allocation
+                # succeeding assert a minimum block here.
+                exp_block = contract_block.get("max_alloc_block")
+                if exp_block is not None and exp_block > 0 and max_block > 0:
+                    drop_pct = (exp_block - max_block) * 100.0 / exp_block if max_block < exp_block else 0
+                    if drop_pct > heap_tol_pct:
+                        print(f"  FAIL  max_alloc_block {max_block} dropped {drop_pct:.1f}% "
+                              f"below contract {exp_block}")
+                        results["passed"] = False
+                    else:
+                        print(f"  PASS  max_alloc_block {max_block} >= contract {exp_block} "
+                              f"(within -{heap_tol_pct}% tolerance)")
 
             # observed.<target>: the *observation*, written on every run so the
             # JSON diff shows drift even when scenarios still pass the contract.
@@ -383,6 +413,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
             step.setdefault("observed", {})[target] = {
                 "tick_us": int(tick_us),
                 "free_heap": int(heap),
+                "max_alloc_block": int(max_block),
                 "at": _today_iso(),
             }
             wrote_observations[0] = True
@@ -401,7 +432,8 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                     "set_by": _today_iso(),
                     "reason": update_reason or existing.get("reason", "updated"),
                 }
-                for k in ("tick_tolerance_pct", "heap_tolerance_pct", "tolerance_us"):
+                for k in ("tick_tolerance_pct", "heap_tolerance_pct", "tolerance_us",
+                          "max_alloc_block"):
                     if k in existing:
                         new_block[k] = existing[k]
                 step.setdefault("contract", {})[target] = new_block

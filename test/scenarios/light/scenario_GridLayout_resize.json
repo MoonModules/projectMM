@@ -121,18 +121,21 @@
       },
       "observed": {
         "pc-macos": {
-          "tick_us": 103,
+          "tick_us": 110,
           "free_heap": 0,
+          "max_alloc_block": 0,
           "at": "2026-06-02"
         },
         "esp32-eth-wifi": {
-          "tick_us": 90766,
-          "free_heap": 98740,
+          "tick_us": 80649,
+          "free_heap": 95528,
+          "max_alloc_block": 49152,
           "at": "2026-06-02"
         },
         "esp32-eth": {
-          "tick_us": 97842,
-          "free_heap": 135208,
+          "tick_us": 93168,
+          "free_heap": 135188,
+          "max_alloc_block": 49152,
           "at": "2026-06-02"
         }
       }
@@ -166,18 +169,21 @@
       },
       "observed": {
         "pc-macos": {
-          "tick_us": 49,
+          "tick_us": 52,
           "free_heap": 0,
+          "max_alloc_block": 0,
           "at": "2026-06-02"
         },
         "esp32-eth-wifi": {
-          "tick_us": 34357,
-          "free_heap": 80044,
+          "tick_us": 31476,
+          "free_heap": 76828,
+          "max_alloc_block": 24576,
           "at": "2026-06-02"
         },
         "esp32-eth": {
-          "tick_us": 38051,
-          "free_heap": 116508,
+          "tick_us": 37945,
+          "free_heap": 116488,
+          "max_alloc_block": 49152,
           "at": "2026-06-02"
         }
       }
@@ -206,18 +212,21 @@
       },
       "observed": {
         "pc-macos": {
-          "tick_us": 103,
+          "tick_us": 222,
           "free_heap": 0,
+          "max_alloc_block": 0,
           "at": "2026-06-02"
         },
         "esp32-eth-wifi": {
-          "tick_us": 103622,
-          "free_heap": 100312,
+          "tick_us": 82231,
+          "free_heap": 95528,
+          "max_alloc_block": 53248,
           "at": "2026-06-02"
         },
         "esp32-eth": {
-          "tick_us": 107381,
-          "free_heap": 135208,
+          "tick_us": 95771,
+          "free_heap": 135188,
+          "max_alloc_block": 49152,
           "at": "2026-06-02"
         }
       }

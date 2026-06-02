@@ -115,18 +115,21 @@
       },
       "observed": {
         "pc-macos": {
-          "tick_us": 310,
+          "tick_us": 308,
           "free_heap": 0,
+          "max_alloc_block": 0,
           "at": "2026-06-02"
         },
         "esp32-eth-wifi": {
-          "tick_us": 90243,
-          "free_heap": 100212,
+          "tick_us": 81697,
+          "free_heap": 95528,
+          "max_alloc_block": 49152,
           "at": "2026-06-02"
         },
         "esp32-eth": {
-          "tick_us": 113101,
-          "free_heap": 135212,
+          "tick_us": 94234,
+          "free_heap": 135188,
+          "max_alloc_block": 51200,
           "at": "2026-06-02"
         }
       }
@@ -160,18 +163,21 @@
       },
       "observed": {
         "pc-macos": {
-          "tick_us": 312,
+          "tick_us": 313,
           "free_heap": 0,
+          "max_alloc_block": 0,
           "at": "2026-06-02"
         },
         "esp32-eth-wifi": {
-          "tick_us": 99881,
-          "free_heap": 100212,
+          "tick_us": 83088,
+          "free_heap": 95420,
+          "max_alloc_block": 49152,
           "at": "2026-06-02"
         },
         "esp32-eth": {
-          "tick_us": 95645,
-          "free_heap": 135212,
+          "tick_us": 95647,
+          "free_heap": 135188,
+          "max_alloc_block": 51200,
           "at": "2026-06-02"
         }
       }
@@ -205,18 +211,21 @@
       },
       "observed": {
         "pc-macos": {
-          "tick_us": 309,
+          "tick_us": 304,
           "free_heap": 0,
+          "max_alloc_block": 0,
           "at": "2026-06-02"
         },
         "esp32-eth-wifi": {
-          "tick_us": 91295,
-          "free_heap": 98652,
+          "tick_us": 79135,
+          "free_heap": 95420,
+          "max_alloc_block": 49152,
           "at": "2026-06-02"
         },
         "esp32-eth": {
-          "tick_us": 98053,
-          "free_heap": 135212,
+          "tick_us": 104311,
+          "free_heap": 135188,
+          "max_alloc_block": 51200,
           "at": "2026-06-02"
         }
       }
@@ -250,18 +259,21 @@
       },
       "observed": {
         "pc-macos": {
-          "tick_us": 309,
+          "tick_us": 301,
           "free_heap": 0,
+          "max_alloc_block": 0,
           "at": "2026-06-02"
         },
         "esp32-eth-wifi": {
-          "tick_us": 93181,
-          "free_heap": 97084,
+          "tick_us": 81905,
+          "free_heap": 95420,
+          "max_alloc_block": 49152,
           "at": "2026-06-02"
         },
         "esp32-eth": {
-          "tick_us": 99387,
-          "free_heap": 135212,
+          "tick_us": 94607,
+          "free_heap": 135188,
+          "max_alloc_block": 51200,
           "at": "2026-06-02"
         }
       }
@@ -295,18 +307,21 @@
       },
       "observed": {
         "pc-macos": {
-          "tick_us": 317,
+          "tick_us": 310,
           "free_heap": 0,
+          "max_alloc_block": 0,
           "at": "2026-06-02"
         },
         "esp32-eth-wifi": {
-          "tick_us": 99590,
-          "free_heap": 100212,
+          "tick_us": 83247,
+          "free_heap": 95420,
+          "max_alloc_block": 49152,
           "at": "2026-06-02"
         },
         "esp32-eth": {
-          "tick_us": 116237,
-          "free_heap": 135212,
+          "tick_us": 96978,
+          "free_heap": 135188,
+          "max_alloc_block": 51200,
           "at": "2026-06-02"
         }
       }
