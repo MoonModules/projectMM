@@ -47,7 +47,7 @@ def main():
         if module_filter and scenario_file not in test_meta.paths_for_module(module_filter):
             print(f"Scenario {args.name} does not match module {module_filter}.")
             sys.exit(1)
-        r = subprocess.run([str(RUNNER), str(scenario_file)], cwd=ROOT)
+        r = subprocess.run([str(RUNNER), str(scenario_file)], cwd=ROOT, check=False)
         sys.exit(r.returncode)
 
     if module_filter:
@@ -58,13 +58,13 @@ def main():
         print(f"Module filter: {module_filter} ({len(paths)} scenario(s))")
         failed = 0
         for p in paths:
-            r = subprocess.run([str(RUNNER), str(p)], cwd=ROOT)
+            r = subprocess.run([str(RUNNER), str(p)], cwd=ROOT, check=False)
             if r.returncode != 0:
                 failed += 1
         sys.exit(1 if failed else 0)
 
     # Run all scenarios (runner auto-discovers when no arg given)
-    r = subprocess.run([str(RUNNER)], cwd=ROOT)
+    r = subprocess.run([str(RUNNER)], cwd=ROOT, check=False)
     sys.exit(r.returncode)
 
 

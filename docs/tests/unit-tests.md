@@ -31,7 +31,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Move-constructing transfers the data pointer and resets the source (no double free, no copy).
 - Move-assigning transfers ownership the same way the move constructor does.
 - Calling free() twice is harmless; pointer and count remain zeroed.
-- allocate() refuses zero-count or zero-channels (returns false, no allocation).
+- buffer left empty so a caller that ignores the bool doesn't get a partial state).
 
 ## CheckerboardEffect
 

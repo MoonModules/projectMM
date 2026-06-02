@@ -83,12 +83,16 @@ TEST_CASE("Toggle a single layout off then on: pipeline survives and renders aga
     CHECK_MESSAGE(capture.lastNonZero, "initial frame: driver saw zero pixels");
 
     // Disable the only layout child. Drivers must survive (no crash) and see
-    // an empty source.
+    // an empty source — assert both the structural teardown AND that the driver
+    // actually received an empty buffer (catches a regression where a stale
+    // buffer would forward through to the driver after layer teardown).
     grid.setEnabled(false);
     rebuildAndTick(layouts, layersC, driversC);
     CHECK(layouts.totalLightCount() == 0);
     CHECK(layer.physicalLightCount() == 0);
     CHECK_FALSE(layer.lut().hasLUT());  // LUT torn down, not stale
+    CHECK_MESSAGE(capture.lastBytes == 0, "after disable, driver saw stale buffer");
+    CHECK_FALSE_MESSAGE(capture.lastNonZero, "after disable, driver saw stale pixels");
 
     // Re-enable. Driver MUST see non-zero pixels again.
     grid.setEnabled(true);

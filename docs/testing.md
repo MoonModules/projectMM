@@ -33,7 +33,7 @@ Two principles drive every standard below:
 
 ### File layout
 
-```
+```text
 test/
 ├── CMakeLists.txt
 ├── scenario_runner.cpp                       # replays scenarios in-process
@@ -117,7 +117,7 @@ Every `scenario_*.json` carries top-level metadata plus a `description` per step
 
 ### Generated docs and the shared parser
 
-```
+```text
 scripts/docs/
 ├── _test_metadata.py        # one parser used by both consumers below
 └── generate_test_docs.py    # writes docs/tests/unit-tests.md + scenario-tests.md

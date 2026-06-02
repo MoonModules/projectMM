@@ -64,9 +64,17 @@ TEST_CASE("Buffer double free is safe") {
     CHECK(buf.count() == 0);
 }
 
-// allocate() refuses zero-count or zero-channels (returns false, no allocation).
+// allocate() refuses zero-count or zero-channels (returns false, no allocation,
+// buffer left empty so a caller that ignores the bool doesn't get a partial state).
 TEST_CASE("Buffer allocate with zero returns false") {
     mm::Buffer buf;
     CHECK_FALSE(buf.allocate(0, 3));
+    CHECK(buf.data() == nullptr);
+    CHECK(buf.count() == 0);
+    CHECK(buf.channelsPerLight() == 0);
+
     CHECK_FALSE(buf.allocate(10, 0));
+    CHECK(buf.data() == nullptr);
+    CHECK(buf.count() == 0);
+    CHECK(buf.channelsPerLight() == 0);
 }

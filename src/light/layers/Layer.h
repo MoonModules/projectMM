@@ -63,8 +63,11 @@ public:
     void setChannelsPerLight(uint8_t cpl) { channelsPerLight_ = cpl; }
 
     void onBuildState() override {
-        if (!layouts_) return;
-        nrOfLightsType physicalCount = layouts_->totalLightCount();
+        // Treat "no layouts wired" the same as "every layout child disabled" —
+        // either way the Layer should be empty (no LUT, no buffer, zero dims).
+        // Returning early here used to leave stale state from a previous build,
+        // which Drivers then read as a sized LUT pointing at a null buffer.
+        const nrOfLightsType physicalCount = layouts_ ? layouts_->totalLightCount() : 0;
 
         // Empty layout (every layout child disabled, or no layouts wired): tear
         // down the LUT and buffer and report zero dims. Bailing out without

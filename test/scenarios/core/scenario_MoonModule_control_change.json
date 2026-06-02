@@ -2,7 +2,7 @@
   "name": "scenario_MoonModule_control_change",
   "module": "MoonModule",
   "also": ["MirrorModifier", "NoiseEffect"],
-  "description": "Measure the cost of control changes on a running pipeline. Toggles MirrorModifier's mirrorX/Y at different points and verifies each change is applied without freezing the render loop. Companion to controlChangeTriggersBuildState (unit-tested in Correction) — this is the live equivalent.",
+  "description": "Measure the cost of control changes on a running pipeline. Toggles MirrorModifier's mirrorX/Y at different points and verifies each change is applied without freezing the render loop. Companion to the MoonModule control-change gate unit tests (unit_MoonModule_control_change_gate.cpp) — this is the live equivalent.",
   "steps": [
     {
       "name": "reset-mirrorX",

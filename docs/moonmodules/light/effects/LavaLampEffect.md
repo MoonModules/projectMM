@@ -19,4 +19,4 @@ Three integer-orbited blobs (`sin8` for x/y at independent phases and speeds). P
 
 ## Tests
 
-[Unit tests: CheckerboardEffect](../../../tests/unit-tests.md#checkerboardeffect) (LavaLampEffect is one of the stateless effects covered) — non-zero output, spatial variation.
+[Unit tests: CheckerboardEffect](../../../tests/unit-tests.md#checkerboardeffect) — LavaLampEffect is included in the shared baseline coverage: non-zero output, spatial variation.

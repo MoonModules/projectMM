@@ -36,9 +36,11 @@ A MoonModule that owns children gets the standard lifecycle methods (`setup`, `l
   ```
 
 - **`setup`** — chain first, then parent work. Children must be initialised before the parent depends on them.
+- **`onBuildControls`** — chain first, then parent work. Children register their controls before the parent appends or rewires its own. Lets a parent build a list whose order is "children's controls, then mine."
+- **`onBuildState`** — chain first, then parent work. Children compute their dimensions and dynamic buffers before the parent reads or modifies the shared state (Layer reads child effect/modifier dimensions; Drivers reads Layer output sizing).
 - **`teardown`** — parent work first, then chain. The parent shuts down its own state before the base reverse-iterates children.
 
-Option B (children first on `loop`) or a sandwich pattern is allowed only when a specific reason justifies it; add a one-line comment at the override explaining why.
+Option B (children first on `loop`; parent first on `setup` / `onBuildControls` / `onBuildState`) or a sandwich pattern is allowed only when a specific reason justifies it; add a one-line comment at the override explaining why.
 
 ## Casts
 

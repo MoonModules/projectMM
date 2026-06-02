@@ -2,7 +2,7 @@
   "name": "scenario_MirrorModifier_memory_lut",
   "module": "MirrorModifier",
   "also": ["Layer", "MappingLUT", "BlendMap"],
-  "description": "Verify that adding a MirrorModifier allocates both the mapping LUT and the driver buffer (the heavy memory path). Companion to memory-1to1, which verifies the no-LUT path.",
+  "description": "Verify that adding a MirrorModifier allocates both the mapping LUT and the driver buffer (the heavy memory path). Companion to scenario_Layer_memory_1to1, which verifies the no-LUT path.",
   "steps": [
     {
       "name": "add-layout-group",

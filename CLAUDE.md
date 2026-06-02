@@ -105,7 +105,7 @@ The narrow safety net: "this snapshot is internally consistent."
 
 8. Commit message format:
    - **Title line** — short imperative summary of the change (≤ 72 chars), e.g. `Add MirrorModifier and fix PreviewDriver sampling`
-   - **Short summary** — 1–3 sentences describing what changed and why, in plain language
+   - **Short summary** — a TL;DR for the commit: 1–3 sentences max, end-user readable, plain language. State *what* changed and *why* at the level a release-notes reader cares about — do NOT recap the change sections that follow (the bullets do that), and do NOT enumerate files. If your draft is longer than three sentences or restates section headers, cut it. A reader who only sees the title + this paragraph should know what shipped and why.
    - **KPI one-liner** — the `tick:Xus(FPS:Y)` line from step 7
    - **Change sections** — one section per applicable category below; omit a section entirely if nothing in that area changed. Each section is a bulleted list, one bullet per module/file, in your own words. **Core and Light domain are the preferred default categories** — a test for a core module goes under Core, a script fix that touches a light driver goes under Light domain. Only use the other categories for changes that have no meaningful connection to Core or Light domain:
      - **Core** (`src/core/`, `src/platform/`) — e.g. `- HttpServerModule: added 409 guard to prevent overlapping OTA jobs`

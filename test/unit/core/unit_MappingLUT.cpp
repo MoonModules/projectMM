@@ -79,6 +79,9 @@ TEST_CASE("MappingLUT 1:N mapping") {
     dests.clear();
     lut.forEachDestination(3, [&](mm::nrOfLightsType idx) { dests.push_back(idx); });
     REQUIRE(dests.size() == 3);
+    CHECK(dests[0] == 6);
+    CHECK(dests[1] == 8);
+    CHECK(dests[2] == 9);
 }
 
 // free() releases memory and resets counts; build() can be called again to install a fresh mapping.

@@ -725,13 +725,30 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
             s = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', _img_tag, s)
             # [text](url) — same-origin /api/ links post a message to the
             # parent frame (iframe nav is sandboxed); external links open in
-            # a new tab.
+            # a new tab. Relative `.md` links are rewritten to /api/docs/<path>
+            # so the rendered page stays navigable when served through MoonDeck
+            # (the docs are also valid when read straight from the repo: same
+            # paths, different host).
             def _link_tag(m):
                 import urllib.parse as _up
                 text_, url_ = m.group(1), m.group(2)
                 if url_.startswith("/api/"):
                     return f'<a href="{url_}" data-moondeck-nav="1">{text_}</a>'
-                scheme = _up.urlparse(url_).scheme
+                # Relative .md link (with optional #anchor) → resolve against the
+                # current file's directory, re-anchor under docs/, serve via /api/docs/.
+                parsed = _up.urlparse(url_)
+                if (not parsed.scheme and not url_.startswith("/")
+                        and parsed.path.endswith(".md")):
+                    try:
+                        abs_md = (md_path.parent / parsed.path).resolve()
+                        rel = abs_md.relative_to((ROOT / "docs").resolve())
+                        api_url = "/api/docs/" + str(rel)
+                        if parsed.fragment:
+                            api_url += "?" + parsed.fragment
+                        return f'<a href="{api_url}" data-moondeck-nav="1">{text_}</a>'
+                    except ValueError:
+                        pass  # outside docs/ — fall through to default handling
+                scheme = parsed.scheme
                 if scheme not in ("", "http", "https", "mailto"):
                     return html_mod.escape(text_)  # strip unsafe schemes (e.g. javascript:)
                 return f'<a href="{url_}" target="_blank" rel="noopener">{text_}</a>'

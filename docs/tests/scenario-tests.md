@@ -50,7 +50,7 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 
 ### scenario_MirrorModifier_memory_lut
 
-`test/scenarios/light/scenario_MirrorModifier_memory_lut.json` — Verify that adding a MirrorModifier allocates both the mapping LUT and the driver buffer (the heavy memory path). Companion to memory-1to1, which verifies the no-LUT path.
+`test/scenarios/light/scenario_MirrorModifier_memory_lut.json` — Verify that adding a MirrorModifier allocates both the mapping LUT and the driver buffer (the heavy memory path). Companion to scenario_Layer_memory_1to1, which verifies the no-LUT path.
 
 *Also touches: Layer, MappingLUT, BlendMap.*
 
@@ -80,7 +80,7 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 
 ### scenario_MoonModule_control_change
 
-`test/scenarios/core/scenario_MoonModule_control_change.json` — Measure the cost of control changes on a running pipeline. Toggles MirrorModifier's mirrorX/Y at different points and verifies each change is applied without freezing the render loop. Companion to controlChangeTriggersBuildState (unit-tested in Correction) — this is the live equivalent.
+`test/scenarios/core/scenario_MoonModule_control_change.json` — Measure the cost of control changes on a running pipeline. Toggles MirrorModifier's mirrorX/Y at different points and verifies each change is applied without freezing the render loop. Companion to the MoonModule control-change gate unit tests (unit_MoonModule_control_change_gate.cpp) — this is the live equivalent.
 
 *Also touches: MirrorModifier, NoiseEffect.*
 
