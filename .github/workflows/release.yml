@@ -284,6 +284,24 @@ jobs:
         with:
           path: pages
 
+      - name: Move `latest` tag to current commit
+        # softprops/action-gh-release reuses an existing release's tag rather
+        # than moving it, which freezes `publishedAt` and the compare-view
+        # endpoint on the commit the tag first pointed at. For the moving-tag
+        # case (every main-branch build → `latest`), force-push the tag here
+        # so the action sees a tag-at-new-commit and updates `publishedAt`,
+        # the release sorts to the top of the Releases page, and the
+        # auto-generated compare link spans the actual diff. Version tags
+        # (vX.Y.Z, vX.Y.Z-rcN) are never moved — those are immutable by
+        # contract.
+        if: steps.tag.outputs.tag == 'latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git tag -f latest "$GITHUB_SHA"
+          git push -f origin "refs/tags/latest"
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:

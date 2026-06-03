@@ -86,18 +86,20 @@ Initiation is always the product owner's call — see the rule above. Agents nev
 
 The narrow safety net: "this snapshot is internally consistent."
 
-**Mandatory (always run):**
+**Always run (cheap, applies to every commit):**
 
-1. Desktop build — `cmake --build build` (zero warnings)
-2. Unit tests — `ctest --output-on-failure` (all pass)
-3. Scenario tests — `uv run scripts/scenario/run_scenario.py` (all pass; wraps `mm_scenarios` and persists per-target `observed.<target>` blocks back to each scenario JSON for drift tracking)
+1. Spec check — `check_specs.py` — fast (<1s), catches `docs/moonmodules/*.md` ↔ control-name drift even on doc-only commits.
 
 **Conditional (run if trigger matches):**
 
-4. Platform boundary — `check_platform_boundary.py` — if any file under `src/` (excluding `src/platform/`) changed.
-5. Spec check — `check_specs.py` — if any `src/` file with controls or any `docs/moonmodules/*.md` changed.
+2. Desktop build — `cmake --build build` (zero warnings) — if any file that compiles into the desktop binary changed: `src/`, `test/`, `CMakeLists.txt` (root or `test/`), `library.json`. A YAML / docs / `scripts/` / `.claude/` change cannot break the build.
+3. Unit tests — `ctest --output-on-failure` (all pass) — same trigger as Desktop build. No build, no tests.
+4. Scenario tests — `uv run scripts/scenario/run_scenario.py` (all pass; wraps `mm_scenarios` and persists per-target `observed.<target>` blocks back to each scenario JSON for drift tracking) — same trigger as Desktop build, plus any `test/scenarios/*.json` change.
+5. Platform boundary — `check_platform_boundary.py` — if any file under `src/` (excluding `src/platform/`) changed.
 6. ESP32 build — `build_esp32.py` — if any file under `src/` (excluding `src/platform/desktop/`), `esp32/`, `CMakeLists.txt`, or `library.json` changed.
 7. KPI collection — `collect_kpi.py --commit` — if any file under `src/` changed. **The one-liner MUST include `tick:Xus(FPS:Y)` for every supported target** (PC + ESP32 today; Teensy/RPi when added). If a target's tick/FPS is missing — e.g. ESP32 wasn't monitored recently and `esp32/monitor.log` is stale — re-run a short live capture before committing, or note explicitly in the commit body why the value is absent.
+
+A commit that touches *only* `.github/`, `docs/`, `scripts/` (non-test), `README.md`, `CLAUDE.md`, or `.claude/` therefore runs only the spec check — the rest are no-ops because their triggers don't fire. This is the intended pre-commit cost for CI-only or doc-only changes.
 
 **Recommended (manual, not blocking):**
 
@@ -110,7 +112,7 @@ The narrow safety net: "this snapshot is internally consistent."
 8. Commit message format:
    - **Title line** — short imperative summary of the change (≤ 72 chars), e.g. `Add MirrorModifier and fix PreviewDriver sampling`
    - **Short summary** — a TL;DR for the commit: 1–3 sentences max, end-user readable, plain language. State *what* changed and *why* at the level a release-notes reader cares about — do NOT recap the change sections that follow (the bullets do that), and do NOT enumerate files. If your draft is longer than three sentences or restates section headers, cut it. A reader who only sees the title + this paragraph should know what shipped and why.
-   - **KPI one-liner** — the `tick:Xus(FPS:Y)` line from step 7
+   - **KPI one-liner** — the `tick:Xus(FPS:Y)` line from step 7. Omit if the KPI gate didn't run (no `src/` changes).
    - **Change sections** — one section per applicable category below; omit a section entirely if nothing in that area changed. Each section is a bulleted list, one bullet per module/file, in your own words. **Core and Light domain are the preferred default categories** — a test for a core module goes under Core, a script fix that touches a light driver goes under Light domain. Only use the other categories for changes that have no meaningful connection to Core or Light domain:
      - **Core** (`src/core/`, `src/platform/`) — e.g. `- HttpServerModule: added 409 guard to prevent overlapping OTA jobs`
      - **Light domain** (`src/light/`) — e.g. `- PreviewDriver: replaced strided sampling with max-pooling to fix empty frames`
