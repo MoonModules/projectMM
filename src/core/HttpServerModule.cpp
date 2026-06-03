@@ -415,6 +415,16 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
                     c.name, escaped);
                 break;
             }
+            case ControlType::ReadOnlyInt: {
+                // aux holds a borrowed const char* unit suffix (set via
+                // addReadOnlyInt). Forward the unit so the UI renders
+                // "<value> <unit>" without baking the format on the device.
+                const char* unit = reinterpret_cast<const char*>(c.aux);
+                sink.appendf(
+                    "{\"name\":\"%s\",\"type\":\"display-int\",\"value\":%d,\"unit\":\"%s\"",
+                    c.name, *static_cast<int8_t*>(c.ptr), unit ? unit : "");
+                break;
+            }
             case ControlType::Select: {
                 sink.appendf(
                     "{\"name\":\"%s\",\"type\":\"select\",\"value\":%u,\"options\":[",
@@ -432,6 +442,16 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
                     c.name, static_cast<unsigned long>(*static_cast<uint32_t*>(c.ptr)),
                     static_cast<unsigned long>(c.aux));
                 break;
+            case ControlType::IPv4: {
+                // Serialize the 4-byte octet array as a dotted-quad string.
+                // Keeping the wire shape as a string lets the UI render and
+                // edit it as text without needing dotted-quad logic in JS.
+                char ipStr[16];
+                formatDottedQuad(ipStr, static_cast<const uint8_t*>(c.ptr));
+                sink.appendf("{\"name\":\"%s\",\"type\":\"ipv4\",\"value\":\"%s\"",
+                             c.name, ipStr);
+                break;
+            }
         }
         // Emit "hidden":true only when set (common case is false; omit to save bytes).
         // Then close the per-control object.
@@ -524,7 +544,22 @@ void HttpServerModule::handleSetControl(platform::TcpConnection& conn, const cha
                 *static_cast<uint8_t*>(c.ptr) = static_cast<uint8_t>(v);
                 break;
             }
+            case ControlType::IPv4: {
+                // Accept dotted-quad. Reject anything that fails to parse to
+                // exactly four 0..255 octets — better than silently storing
+                // a half-parsed address that wouldn't route.
+                char v[16] = {};
+                mm::json::parseString(body, "value", v, sizeof(v));
+                uint8_t octets[4] = {};
+                if (!parseDottedQuad(v, octets)) {
+                    sendResponse(conn, 400, "application/json", "{\"error\":\"not a dotted-quad IPv4\"}");
+                    return;
+                }
+                std::memcpy(c.ptr, octets, 4);
+                break;
+            }
             case ControlType::ReadOnly:
+            case ControlType::ReadOnlyInt:
             case ControlType::Progress:
                 // Immutable controls: reject the write before any side effects
                 // (no value change, no onUpdate, no dirty/save, no buildState).
@@ -884,8 +919,17 @@ void HttpServerModule::writeTypeDefaults(JsonSink& sink, const char* typeName) {
                 sink.appendf("%s\"%s\":%u", first ? "" : ",", c.name,
                              *static_cast<uint8_t*>(c.ptr));
                 break;
+            case ControlType::IPv4: {
+                // Defaults for IPv4 are the constructor-time octets (e.g.
+                // 255.255.255.0 for subnet). Emit as a dotted-quad string —
+                // same wire shape as the live serializer.
+                char ipStr[16];
+                formatDottedQuad(ipStr, static_cast<const uint8_t*>(c.ptr));
+                sink.appendf("%s\"%s\":\"%s\"", first ? "" : ",", c.name, ipStr);
+                break;
+            }
             default:
-                continue;  // ReadOnly/Progress: no default; Password: never serialized
+                continue;  // ReadOnly/ReadOnlyInt/Progress: no default; Password: never serialized
         }
         first = false;
     }

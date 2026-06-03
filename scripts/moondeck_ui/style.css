@@ -288,6 +288,14 @@ select {
     margin-left: auto; font-size: 11px; background: #1c2535; color: #c0c0c0;
     border: 1px solid #2a3548; border-radius: 3px; padding: 1px 4px;
     max-width: 16ch;
+    /* Clamp long board labels (e.g. "Olimex ESP32-Gateway Rev G" = 26ch)
+       so the badge stays badge-sized. inline-block + nowrap + ellipsis is
+       the standard truncation triple; the select element honours it on
+       its displayed selection text. */
+    display: inline-block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .device-remove {
     background: none; border: none; color: #666;

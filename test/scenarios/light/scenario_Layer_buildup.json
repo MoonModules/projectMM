@@ -237,7 +237,7 @@
         "pc-macos": {
           "tick_us": [
             43,
-            53
+            170
           ],
           "free_heap": [
             0,

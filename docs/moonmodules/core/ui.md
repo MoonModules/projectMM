@@ -114,8 +114,10 @@ Auto-rendered by `controls[].type`. Adding a new MoonModule with these control t
 | `text` | text input | sends debounced | 500ms |
 | `password` | password input | masked; hold-to-peek button reveals the stored value | 500ms |
 | `display` (read-only) | static text | WS push updates value in place | n/a |
+| `display-int` (read-only int + unit) | formatted text (`-58 dBm`) | WS push updates value; the unit suffix is set device-side at `addReadOnlyInt` time and carried in the descriptor's `aux` slot, not in a per-control string buffer | n/a |
 | `time` (read-only seconds) | formatted text (`1d 4h 27m 13s`) | WS push updates | n/a |
 | `progress` | bar + numeric `X / max` | WS push updates value | n/a |
+| `ipv4` | text input (dotted-quad) | sends on change; server validates (`parseDottedQuad`) and rejects malformed values with 400. 4-byte octet storage device-side instead of a 16-char string. | n/a |
 | `button` | clickable button | sends value=1 on click | none |
 
 **Reset-to-default button (↺).** Appears next to controls whose default is known. Defaults are captured from a fresh probe instance per type (factory's probe — no per-control boilerplate) and emitted in `/api/types`. The button is dim/inactive when value equals default, bright/clickable otherwise. Clicking sends the default value.

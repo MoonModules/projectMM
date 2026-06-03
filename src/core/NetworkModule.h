@@ -57,8 +57,8 @@ public:
             if (platform::wifiStaInit(ssid_, password_)) {
                 state_ = State::WaitingSta;
                 stateChangeTime_ = platform::millis();
-                std::snprintf(statusStr_, sizeof(statusStr_), "WiFi STA: %s", ssid_);
-                setStatus(statusStr_, Severity::Status);
+                std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi STA: %s", ssid_);
+                setStatus(statusBuf_, Severity::Status);
             } else {
                 // STA init failed (OOM, GPIO conflict). Try to recover via
                 // AP so the user can re-enter credentials manually.
@@ -89,7 +89,7 @@ public:
             // Ethernet-only build: no WiFi fallback. Stay Idle until a cable
             // appears (WaitingEth is only entered on a successful ethInit()).
             state_ = State::Idle;
-            std::snprintf(statusStr_, sizeof(statusStr_), "No network (Ethernet only)"); setStatus(statusStr_, Severity::Error);
+            std::snprintf(statusBuf_, sizeof(statusBuf_), "No network (Ethernet only)"); setStatus(statusBuf_, Severity::Error);
         }
 
         stateChangeTime_ = platform::millis();
@@ -100,11 +100,31 @@ public:
     }
 
     void onBuildControls() override {
-        setStatus(statusStr_);
+        setStatus(statusBuf_);
+
+        // Refresh the live-readout values (mode label + rssi + txPower) so a
+        // rebuild triggered mid-state-transition shows the up-to-date numbers.
+        updateMetrics();
+
+        // `mode` reflects the state-machine state in plain language. Always
+        // present (every firmware variant has a mode, even Ethernet-only).
+        controls_.addReadOnly("mode", modeStr_, sizeof(modeStr_));
+
         // WiFi credential controls are absent in the Ethernet-only build.
         if constexpr (platform::hasWiFi) {
             controls_.addText("ssid", ssid_, sizeof(ssid_));
             controls_.addPassword("password", password_, sizeof(password_));
+            // RSSI is meaningful only while associated as a STA. Hide on
+            // Ethernet / AP / Idle to avoid showing a stale 0 dBm reading.
+            controls_.addReadOnlyInt("rssi", rssi_, "dBm");
+            controls_.setHidden(controls_.count() - 1, state_ != State::ConnectedSta);
+            // TX power applies whenever the WiFi radio is active (STA or AP).
+            // Hide on Ethernet / Idle where the radio is off.
+            controls_.addReadOnlyInt("txPower", txPower_, "dBm");
+            const bool radioOn = (state_ == State::ConnectedSta
+                                  || state_ == State::WaitingSta
+                                  || state_ == State::AP);
+            controls_.setHidden(controls_.count() - 1, !radioOn);
         }
         controls_.addSelect("addressing", addressing_, addressingOptions_, 2);
         controls_.addBool("mDNS", mdnsEnabled_);
@@ -114,13 +134,13 @@ public:
         // rebuildControls() in HttpServerModule which re-runs this method and re-evaluates
         // the hidden flags.
         const bool hideStatic = (addressing_ != 1);
-        controls_.addText("ip", staticIp_, sizeof(staticIp_));
+        controls_.addIPv4("ip", staticIp_);
         controls_.setHidden(controls_.count() - 1, hideStatic);
-        controls_.addText("gateway", staticGateway_, sizeof(staticGateway_));
+        controls_.addIPv4("gateway", staticGateway_);
         controls_.setHidden(controls_.count() - 1, hideStatic);
-        controls_.addText("subnet", staticSubnet_, sizeof(staticSubnet_));
+        controls_.addIPv4("subnet", staticSubnet_);
         controls_.setHidden(controls_.count() - 1, hideStatic);
-        controls_.addText("dns", staticDns_, sizeof(staticDns_));
+        controls_.addIPv4("dns", staticDns_);
         controls_.setHidden(controls_.count() - 1, hideStatic);
 
         // Chain to base so children (Improv on ESP32) get their controls built too.
@@ -148,7 +168,7 @@ public:
                         }
                     } else {
                         // Ethernet-only build: no fallback. Keep polling for a cable.
-                        std::snprintf(statusStr_, sizeof(statusStr_), "No network (Ethernet only)"); setStatus(statusStr_, Severity::Error);
+                        std::snprintf(statusBuf_, sizeof(statusBuf_), "No network (Ethernet only)"); setStatus(statusBuf_, Severity::Error);
                         stateChangeTime_ = now;
                     }
                 }
@@ -181,7 +201,7 @@ public:
                         // Ethernet-only build: drop back to polling for the cable.
                         std::printf("NetworkModule: Ethernet dropped\n");
                         platform::mdnsStop();
-                        std::snprintf(statusStr_, sizeof(statusStr_), "No network (Ethernet only)"); setStatus(statusStr_, Severity::Error);
+                        std::snprintf(statusBuf_, sizeof(statusBuf_), "No network (Ethernet only)"); setStatus(statusBuf_, Severity::Error);
                         state_ = State::WaitingEth;
                         stateChangeTime_ = now;
                     }
@@ -248,6 +268,12 @@ public:
 
         syncMdns();
 
+        // Refresh the live-readout values every tick — the UI polls /api/state
+        // for them, so writing the same storage addresses is enough; no
+        // control rebuild needed. (Hidden-flag changes happen on state
+        // transitions via rebuildControls(), not here.)
+        updateMetrics();
+
         // Tick children after our own state machine — option A: parent prepares,
         // children consume. ImprovProvisioningModule (when present) polls a
         // ready-flag here and may call back into setWifiCredentials().
@@ -288,13 +314,31 @@ private:
     char password_[64] = {};
     uint8_t addressing_ = 0; // 0=DHCP, 1=Static
     bool mdnsEnabled_ = true;
-    char statusStr_[48] = {};
+    // Module-owned backing store for the status slot inherited from MoonModule.
+    // The base class only holds a const char* into this buffer (see
+    // MoonModule::status_); the named "Buf" suffix makes the ownership clear
+    // and distinguishes it from MoonModule's own status accessors.
+    char statusBuf_[48] = {};
 
-    // Static IP fields (only shown when addressing_==1)
-    char staticIp_[16] = {};
-    char staticGateway_[16] = {};
-    char staticSubnet_[16] = "255.255.255.0";
-    char staticDns_[16] = {};
+    // Static IP fields. uint8_t[4] octets, not strings — saves 12 bytes per
+    // address vs char[16] dotted-quad, and the wire/persistence layers
+    // (ControlType::IPv4) handle the string conversion at the boundary.
+    // Only shown in the UI when addressing_==1 (Static); always bound for
+    // persistence so toggling DHCP↔Static doesn't lose user-set values.
+    uint8_t staticIp_[4]      = {0, 0, 0, 0};
+    uint8_t staticGateway_[4] = {0, 0, 0, 0};
+    uint8_t staticSubnet_[4]  = {255, 255, 255, 0};
+    uint8_t staticDns_[4]     = {0, 0, 0, 0};
+
+    // Read-only metrics surfaced to the UI.
+    // - modeStr_ stays a buffer (state labels are short strings, no
+    //   precedent for pointer-to-literal controls today).
+    // - rssi_ / txPower_ are int8 — addReadOnlyInt stores them directly
+    //   instead of formatting "<value> dBm" into per-control buffers
+    //   (saves ~22 bytes vs the prior char[12] approach).
+    char modeStr_[20] = {};   // longest label "Ethernet (waiting)" = 19+NUL
+    int8_t rssi_ = 0;
+    int8_t txPower_ = 0;
 
     static constexpr const char* addressingOptions_[] = {"DHCP", "Static"};
 
@@ -305,15 +349,16 @@ private:
             state_ = State::AP;
             stateChangeTime_ = platform::millis();
             apShutdownPending_ = true;
-            std::snprintf(statusStr_, sizeof(statusStr_), "AP: %s @ 4.3.2.1", apName); setStatus(statusStr_, Severity::Status);
+            std::snprintf(statusBuf_, sizeof(statusBuf_), "AP: %s @ 4.3.2.1", apName); setStatus(statusBuf_, Severity::Status);
             std::printf("NetworkModule: AP started: %s\n", apName);
         } else {
             state_ = State::Idle;
-            std::snprintf(statusStr_, sizeof(statusStr_), "No network"); setStatus(statusStr_, Severity::Error);
+            std::snprintf(statusBuf_, sizeof(statusBuf_), "No network"); setStatus(statusBuf_, Severity::Error);
         }
-        // statusStr_ is the buffer MoonModule::status_ points at — no control
-        // rebuild needed (it isn't a control any more); just kick the scheduler
-        // for any dependent reallocations.
+        // statusBuf_ is the buffer MoonModule::status_ points at — no control
+        // rebuild needed for status itself, but rssi/txPower visibility depends
+        // on state_ so rebuildControls() re-evaluates their hidden flags.
+        rebuildControls();
         if (scheduler_) scheduler_->buildState();
     }
 
@@ -339,13 +384,14 @@ private:
         }
 
         updateStatusIP();
-        std::printf("NetworkModule: Connected via %s — %s\n", via, statusStr_);
+        std::printf("NetworkModule: Connected via %s — %s\n", via, statusBuf_);
 
         syncMdns();
 
-        // statusStr_ is the buffer MoonModule::status_ points at — no control
-        // rebuild needed (it isn't a control any more); just kick the scheduler
-        // for any dependent reallocations.
+        // statusBuf_ is the buffer MoonModule::status_ points at — no control
+        // rebuild needed for status itself, but rssi/txPower visibility depends
+        // on state_ so rebuildControls() re-evaluates their hidden flags.
+        rebuildControls();
         if (scheduler_) scheduler_->buildState();
     }
 
@@ -353,11 +399,11 @@ private:
         char ip[16] = {};
         if (state_ == State::ConnectedEth) {
             platform::ethGetIP(ip, sizeof(ip));
-            std::snprintf(statusStr_, sizeof(statusStr_), "Eth: %s", ip); setStatus(statusStr_, Severity::Status);
+            std::snprintf(statusBuf_, sizeof(statusBuf_), "Eth: %s", ip); setStatus(statusBuf_, Severity::Status);
         } else if constexpr (platform::hasWiFi) {
             if (state_ == State::ConnectedSta) {
                 platform::wifiStaGetIP(ip, sizeof(ip));
-                std::snprintf(statusStr_, sizeof(statusStr_), "WiFi: %s", ip); setStatus(statusStr_, Severity::Status);
+                std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi: %s", ip); setStatus(statusBuf_, Severity::Status);
             }
         }
     }
@@ -374,6 +420,38 @@ private:
         } else if (!shouldRun && mdnsRunning_) {
             platform::mdnsStop();
             mdnsRunning_ = false;
+        }
+    }
+
+    // Map State → human label for the `mode` control. Kept here (not a static
+    // table) so a new State enumerator forces a compiler error rather than
+    // silently falling back to "Unknown" in the UI.
+    const char* modeLabel() const {
+        switch (state_) {
+            case State::Idle:         return "Idle";
+            case State::WaitingEth:   return "Ethernet (waiting)";
+            case State::WaitingSta:   return "WiFi STA (waiting)";
+            case State::ConnectedEth: return "Ethernet";
+            case State::ConnectedSta: return "WiFi STA";
+            case State::AP:           return "WiFi AP";
+        }
+        return "Unknown";
+    }
+
+    void updateMetrics() {
+        std::snprintf(modeStr_, sizeof(modeStr_), "%s", modeLabel());
+        if constexpr (platform::hasWiFi) {
+            // rssi_ / txPower_ are hidden in non-WiFi states but we still
+            // refresh them so a transition back to a WiFi state shows fresh
+            // data without a one-tick stale read. Zeroing on non-WiFi states
+            // avoids leaving a stale 5-minute-old reading visible if the
+            // user toggles the hidden flag off via DevTools.
+            rssi_ = (state_ == State::ConnectedSta)
+                    ? static_cast<int8_t>(platform::wifiStaRssi()) : 0;
+            const bool radioOn = (state_ == State::ConnectedSta
+                                  || state_ == State::WaitingSta
+                                  || state_ == State::AP);
+            txPower_ = radioOn ? static_cast<int8_t>(platform::wifiTxPower()) : 0;
         }
     }
 

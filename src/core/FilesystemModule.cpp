@@ -166,7 +166,9 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
     auto& cs = m->controls();
     for (uint8_t i = 0; i < cs.count(); i++) {
         auto& c = cs[i];
-        if (c.type == ControlType::ReadOnly || c.type == ControlType::Progress) continue;
+        if (c.type == ControlType::ReadOnly
+            || c.type == ControlType::ReadOnlyInt
+            || c.type == ControlType::Progress) continue;
         std::snprintf(key, sizeof(key), "%s%s", prefix, c.name);
         applyValue(c, json, key);
     }
@@ -296,6 +298,19 @@ void FilesystemModule::applyValue(const ControlDescriptor& c, const char* json, 
             *static_cast<uint8_t*>(c.ptr) = static_cast<uint8_t>(v);
             break;
         }
+        case ControlType::IPv4: {
+            // Wire format is a dotted-quad string; persistence matches.
+            // On parse failure leave the existing octets untouched — typical
+            // cause is a missing key (first boot before the user set static
+            // IP), which should fall through to the default ctor values.
+            char buf[16] = {};
+            mm::json::parseString(json, key, buf, sizeof(buf));
+            uint8_t octets[4] = {};
+            if (parseDottedQuad(buf, octets)) {
+                std::memcpy(c.ptr, octets, 4);
+            }
+            break;
+        }
         default: break;
     }
 }
@@ -333,7 +348,9 @@ bool FilesystemModule::writeNode(MoonModule* m, char* buf, size_t bufLen, int& p
     auto& cs = m->controls();
     for (uint8_t i = 0; i < cs.count(); i++) {
         auto& c = cs[i];
-        if (c.type == ControlType::ReadOnly || c.type == ControlType::Progress) continue;
+        if (c.type == ControlType::ReadOnly
+            || c.type == ControlType::ReadOnlyInt
+            || c.type == ControlType::Progress) continue;
         int n = std::snprintf(buf + pos, bufLen - pos, "%s\"%s%s\":", first ? "" : ",", prefix, c.name);
         if (n < 0 || static_cast<size_t>(pos + n) >= bufLen) return false;
         pos += n;
@@ -405,6 +422,14 @@ bool FilesystemModule::writeValue(const ControlDescriptor& c, char* buf, size_t 
             n = std::snprintf(buf + pos, bufLen - pos, "%u",
                               *static_cast<uint8_t*>(c.ptr));
             break;
+        case ControlType::IPv4: {
+            // Serialize the 4-byte octet array as a dotted-quad string —
+            // same wire shape as HttpServerModule and the live API.
+            char ipStr[16];
+            formatDottedQuad(ipStr, static_cast<const uint8_t*>(c.ptr));
+            n = std::snprintf(buf + pos, bufLen - pos, "\"%s\"", ipStr);
+            break;
+        }
         default:
             n = std::snprintf(buf + pos, bufLen - pos, "null");
             break;

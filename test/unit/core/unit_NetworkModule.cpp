@@ -63,3 +63,111 @@ TEST_CASE("NetworkModule::setWifiCredentials accepts long SSID without crash") {
     net.setWifiCredentials(longSsid, "pw");
     CHECK(net.dirty());
 }
+
+// After setup(), NetworkModule exposes a `mode` read-only control whose value
+// reflects the current state-machine state. On the desktop platform every
+// network init stub returns false, so the cascade lands on Idle.
+TEST_CASE("NetworkModule mode control reflects current state") {
+    mm::NetworkModule net;
+    net.setup();
+    // setup() falls through to startAP() on the desktop platform (no Eth, no
+    // SSID), which already calls rebuildControls() internally. Calling
+    // onBuildControls() again would duplicate every control; use
+    // rebuildControls() to clear-then-build a single time.
+    net.rebuildControls();
+
+    bool foundMode = false;
+    for (uint8_t i = 0; i < net.controls().count(); i++) {
+        if (std::strcmp(net.controls()[i].name, "mode") == 0) {
+            CHECK(net.controls()[i].type == mm::ControlType::ReadOnly);
+            const char* val = static_cast<const char*>(net.controls()[i].ptr);
+            CHECK(val != nullptr);
+            CHECK(std::strcmp(val, "Idle") == 0);
+            foundMode = true;
+        }
+    }
+    CHECK(foundMode);
+}
+
+// parseDottedQuad (in Control.h) is the validator on every IPv4 write,
+// over both the HTTP API and persistence. Pin the contract.
+TEST_CASE("parseDottedQuad accepts valid dotted-quads and rejects junk") {
+    uint8_t out[4];
+
+    CHECK(mm::parseDottedQuad("0.0.0.0", out));
+    CHECK((out[0] == 0 && out[1] == 0 && out[2] == 0 && out[3] == 0));
+
+    CHECK(mm::parseDottedQuad("192.168.1.42", out));
+    CHECK((out[0] == 192 && out[1] == 168 && out[2] == 1 && out[3] == 42));
+
+    CHECK(mm::parseDottedQuad("255.255.255.255", out));
+    CHECK((out[0] == 255 && out[1] == 255 && out[2] == 255 && out[3] == 255));
+
+    // Out-of-range octet — rejected (would clamp to 255 if we allowed it,
+    // hiding a malformed write rather than surfacing the bug).
+    CHECK_FALSE(mm::parseDottedQuad("1.2.3.256", out));
+    // Negative — rejected.
+    CHECK_FALSE(mm::parseDottedQuad("-1.0.0.0", out));
+    // Wrong shape — rejected.
+    CHECK_FALSE(mm::parseDottedQuad("1.2.3", out));
+    CHECK_FALSE(mm::parseDottedQuad("1.2.3.4.5", out));
+    CHECK_FALSE(mm::parseDottedQuad("", out));
+    CHECK_FALSE(mm::parseDottedQuad("abc.def.ghi.jkl", out));
+    // Trailing junk after a valid quad — rejected. Lets the API surface
+    // "192.168.1.1x" as a 400 instead of silently writing 192.168.1.1.
+    CHECK_FALSE(mm::parseDottedQuad("192.168.1.1x", out));
+}
+
+// The static-IP fields (ip / gateway / subnet / dns) are bound as IPv4
+// controls — 4 bytes of storage each, not 16-char dotted-quad strings.
+// They start hidden because addressing defaults to DHCP.
+TEST_CASE("NetworkModule static-IP fields are IPv4-typed") {
+    mm::NetworkModule net;
+    net.setup();
+    // setup() falls through to startAP() on the desktop platform (no Eth, no
+    // SSID), which already calls rebuildControls() internally. Calling
+    // onBuildControls() again would duplicate every control; use
+    // rebuildControls() to clear-then-build a single time.
+    net.rebuildControls();
+
+    int found = 0;
+    for (uint8_t i = 0; i < net.controls().count(); i++) {
+        const char* name = net.controls()[i].name;
+        if (std::strcmp(name, "ip") == 0
+            || std::strcmp(name, "gateway") == 0
+            || std::strcmp(name, "subnet") == 0
+            || std::strcmp(name, "dns") == 0) {
+            CHECK(net.controls()[i].type == mm::ControlType::IPv4);
+            CHECK(net.controls()[i].hidden);  // DHCP default → hidden
+            found++;
+        }
+    }
+    CHECK(found == 4);
+}
+
+// In WiFi-capable builds (anything other than --firmware esp32-eth), the
+// rssi and txPower controls are present and start hidden — Idle/Ethernet
+// don't expose live WiFi metrics. The Ethernet-only build compiles them out
+// entirely so the iteration finds nothing, which is still a valid pass shape.
+TEST_CASE("NetworkModule rssi/txPower controls hidden in non-WiFi states") {
+    mm::NetworkModule net;
+    net.setup();
+    // setup() falls through to startAP() on the desktop platform (no Eth, no
+    // SSID), which already calls rebuildControls() internally. Calling
+    // onBuildControls() again would duplicate every control; use
+    // rebuildControls() to clear-then-build a single time.
+    net.rebuildControls();
+
+    for (uint8_t i = 0; i < net.controls().count(); i++) {
+        const char* name = net.controls()[i].name;
+        if (std::strcmp(name, "rssi") == 0 || std::strcmp(name, "txPower") == 0) {
+            // ReadOnlyInt = 1-byte int8_t + a "dBm" suffix carried in the
+            // descriptor's aux slot (see Control.h). Tests the control type
+            // we ended up using after the buffer-shrink refactor.
+            CHECK(net.controls()[i].type == mm::ControlType::ReadOnlyInt);
+            // Desktop setup() lands in Idle (no Ethernet, no STA, AP stub
+            // returns false). Both metrics should be hidden in that state.
+            CHECK(net.controls()[i].hidden);
+        }
+    }
+}

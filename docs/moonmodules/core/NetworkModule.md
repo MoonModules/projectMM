@@ -18,14 +18,17 @@ When a higher-priority connection becomes available, lower ones are torn down to
 
 ## Controls
 
+- `mode` (read-only) — current state of the cascade: `Ethernet`, `WiFi STA`, `WiFi AP`, `Ethernet (waiting)`, `WiFi STA (waiting)`, or `Idle`. Always present (every firmware variant has a mode, even Ethernet-only).
 - `ssid` (text) — WiFi STA network name
 - `password` (password) — WiFi STA password. Serialized to the API XOR-obfuscated + base64-encoded, not in plaintext — a first line of defence only, trivially reversible. See [ui.md § Control types](ui.md#control-types).
+- `rssi` (display-int, dBm) — current WiFi STA signal strength (e.g. `-58 dBm`). 1-byte storage on the device; the unit suffix lives in the descriptor, not in a per-control buffer. Hidden in every state except `ConnectedSta` — Ethernet/AP/Idle have no STA association to read from.
+- `txPower` (display-int, dBm) — current WiFi transmit power (e.g. `19 dBm`). 1-byte storage. Hidden when the radio is off (Ethernet, Idle); shown for STA (waiting + connected) and AP modes.
 - `addressing` (dropdown: DHCP / Static) — IP addressing mode (applies to both Ethernet and WiFi STA)
-- When Static: `ip`, `gateway`, `subnet` (text controls, shown dynamically via onBuildControls)
-- `dns` (text, optional) — DNS server. Empty = use gateway as DNS.
+- When Static: `ip`, `gateway`, `subnet`, `dns` (ipv4 controls — 4 bytes of storage each, not 16-char strings; the wire shape is still a dotted-quad string). Shown dynamically via onBuildControls.
+- `mDNS` (bool) — enable/disable mDNS responder
 No `status` *control*; the module surfaces its state via the generic `MoonModule::status()` slot — "Eth: 192.168.1.210", "WiFi: 10.0.0.5", "AP: MM-XXX @ 4.3.2.1", or "No network". The UI renders it as a chip in the card header (ℹ️ when connected, ❌ when no network) rather than a control row.
 
-Dynamic controls: when `addressing` changes, onBuildControls is called to show/hide the static IP fields.
+Dynamic controls: `addressing` toggling shows/hides the static-IP fields. State transitions (cascade up to Ethernet, fall back to AP, STA reconnect) trigger a rebuildControls() so the rssi/txPower hidden flags re-evaluate. The metric strings refresh every loop1s() tick — same buffer addresses, so no rebuild is needed for value updates, only for visibility.
 
 AP always uses fixed IP `4.3.2.1` (easy to remember, avoids 192.168.x.x conflicts with home routers).
 

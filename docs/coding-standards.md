@@ -14,6 +14,25 @@ Decided once; not re-derived per file.
 - **Semantic variable names.** Name variables for what they represent, not just their type. `availableHeap` not `available`, `internalHeap` not `internal`, `lutBytes` not `bytes`. A reader should understand the variable without looking at its assignment.
 - **No hard line wraps in markdown.** Let the editor soft-wrap. Hard wraps make diffs noisier than they need to be.
 
+## Prefer integers, store values in their native shape
+
+**Default to integers.** Pick the smallest unsigned type that fits the natural range — `uint8_t` for percentages and small counts, `uint16_t` for pixels and ports, `uint32_t` for timestamps and byte counts, `int8_t` for signed RSSI-style values. Integers are faster, predictable, branch-free in the hot path, and one byte where they need to be.
+
+**Use `float` only when the value is intrinsically fractional** — geometry positions on a normalised grid, audio amplitudes, ratios that would lose meaning if rounded. Even then, ask whether scaled integers (e.g. fixed-point `uint16_t` for 0..65535 mapping to 0.0..1.0) work. The render loop hits every light every frame; an integer multiply-and-shift dominates a float multiply on ESP32.
+
+**Never use `double`** in firmware code. Xtensa (ESP32 classic) has no hardware FPU for `double` — every `double` operation runs in software emulation, ~30× slower than the same op on `float`. `1.0` is a `double` literal; write `1.0f` if you really meant float. A `double` slipping into the render path silently tanks FPS.
+
+**Store values in their native shape.** When the value is intrinsically numeric, store it as a number. When it is four octets, store it as four octets. **Don't keep a long-lived string buffer just because the UI eventually shows the value as text** — format to string at the output boundary, on the stack, then throw the buffer away. Every "I'll just `char foo[12]` it now and snprintf into it" decision freezes a few bytes into the module's permanent footprint, where the cheaper alternative is one int and a `snprintf` on a local stack buffer at serialization time. On ESP32 with ~180 KB free heap, dozens of those add up.
+
+Guidelines:
+
+- **RSSI, TX power, frame counts, percentages, temperatures, voltages** — store as `int8_t` / `uint8_t` / `uint16_t`. If the UI needs a unit suffix, carry the suffix in the control descriptor (`ControlType::ReadOnlyInt` does this — see [Control.h](../src/core/Control.h)), not in a per-instance string.
+- **IPv4 addresses** — store as `uint8_t[4]`, not `char[16]` dotted-quad. The wire format stays a string at the JSON boundary; the storage stays 4 bytes. See `ControlType::IPv4` for the pattern.
+- **Mode / status labels from a small fixed set** — a `char[20]` buffer is acceptable when the label is short and `snprintf`'d at a transition; for purely constant labels (`"Idle"`, `"Connected"`) a `const char*` pointed at a static literal is even cheaper. Don't combine the two: don't `snprintf` a literal into a buffer.
+- **Dynamic display strings (uptime, FPS, heap KB)** — `char[N]` buffer is the established pattern (see [SystemModule.h](../src/core/SystemModule.h)) because the value changes every second and the UI reads it by stable pointer. Size the buffer to the longest possible value; oversized buffers are waste.
+
+Counter-example to avoid: storing `char rssiStr_[12]` and re-`snprintf`'ing `"-58 dBm"` into it every tick. The right shape is `int8_t rssi_` (1 byte) plus a control type that knows the unit. Saves 11 bytes per metric, scales linearly across the codebase.
+
 ## File shape: header-only vs `.h` + `.cpp`
 
 - **Light-domain modules and the `MoonModule` base: header-only.** Every effect, modifier, driver, layout, the light-domain containers (`Layouts`, `Layers`, `Drivers`, `Layer`), and the `MoonModule` base class live in a single `.h` with implementation inline. The benefit is concrete: a contributor copies `RainbowEffect.h`, edits, saves as `MyEffect.h`, registers one line in `main.cpp` — no "where does the `.cpp` go, what does CMake need" friction. The chain `RainbowEffect.h → EffectBase.h → MoonModule.h` is uniform; readers don't pivot to a different file shape at the base. When a light-domain file outgrows one concern, extract a helper into its own header (`BlendMap`, `MappingLUT`) rather than splitting to `.h` + `.cpp`. Header-only is a feature of the light domain.

@@ -135,22 +135,29 @@ def _fps_range_from_observed_range(v) -> str:
 
 
 def _heap_contract_cell(v) -> str:
-    """Contract heap/block floor → '≥ N KB'. Missing or 0 → '—'."""
-    if v in (None, 0):
+    """Contract heap/block floor → '≥ N KB'. None → '—'. 0 → 'unlimited'
+    (the desktop platform reports free_heap=0 / max_alloc_block=0 to mean
+    "no meaningful ceiling"; rendering them as missing was misleading)."""
+    if v is None:
         return "—"
+    if v == 0:
+        return "unlimited"
     return f"≥ {_fmt_heap(int(v))}"
 
 
 def _heap_observed_cell(v) -> str:
-    """Observed heap/block range → 'N KB' or 'N-M KB'. Missing or both 0 → '—'."""
+    """Observed heap/block range → 'N KB' or 'N-M KB'. None → '—'. 0 →
+    'unlimited' (matches the contract-cell semantics — desktop reports 0
+    for "no meaningful value", which should display as 'unlimited' rather
+    than be silently dropped)."""
     if v is None:
         return "—"
     if isinstance(v, list) and len(v) == 2:
         if int(v[0]) == 0 and int(v[1]) == 0:
-            return "—"
+            return "unlimited"
         return _fmt_heap_range(v)
     if int(v) == 0:
-        return "—"
+        return "unlimited"
     return _fmt_heap(int(v))
 
 

@@ -519,7 +519,10 @@ def main() -> int:
         # Known name prefixes for orphan sweep (first 16 chars of each type name).
         known_prefixes = {t[:16] for t, _, _, _ in MODULES}
 
-        # Sweep orphans from a previous aborted run.
+        # Sweep orphans from a previous aborted run. Per-delete try/except
+        # so one failed cleanup doesn't abort the whole recursion; outer
+        # try/except so a state-fetch failure is reported, not silently
+        # swallowed (silent swallow was hiding real network/HTTP issues).
         try:
             sr = _get(f"http://{args.host}/api/state", timeout=5)
             if sr.ok:
@@ -527,11 +530,14 @@ def main() -> int:
                     for m in modules:
                         n = m.get("name", "")
                         if any(n.startswith(p) for p in known_prefixes):
-                            delete_module(args.host, n)
+                            try:
+                                delete_module(args.host, n)
+                            except Exception as e:
+                                print(f"  orphan-sweep: delete {n!r} on {args.host} failed: {e}")
                         _sweep_orphans(m.get("children", []))
                 _sweep_orphans(sr.json().get("modules", []))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"  orphan-sweep on {args.host} failed: {e}")
 
         print("Discovering pipeline containers …")
         parents, nav_roots = find_parent_ids(args.host)
@@ -563,19 +569,26 @@ def main() -> int:
             # --- Full-page UI overview screenshot --- (needs projectMM)
             if not args.extras_only:
                 overview_path = OUT_DIR / "ui_overview.png"
-                if (not overview_path.exists() or args.force) and (not filt or filt in "ui_overview"):
-                    print("  ui_overview …", end=" ", flush=True)
-                    # Use Layers nav to show a populated view
-                    nav = nav_roots.get("Layer", "")
-                    ok = screenshot_fullpage(page, args.host, overview_path, nav_root=nav)
-                    print(f"saved → {overview_path.relative_to(ROOT)}" if ok else "failed")
-                    if ok:
-                        captured.append("ui_overview")
+                filter_allows = (not filt or filt in "ui_overview")
+                if filter_allows:
+                    if not overview_path.exists() or args.force:
+                        print("  ui_overview …", end=" ", flush=True)
+                        # Use Layers nav to show a populated view
+                        nav = nav_roots.get("Layer", "")
+                        ok = screenshot_fullpage(page, args.host, overview_path, nav_root=nav)
+                        print(f"saved → {overview_path.relative_to(ROOT)}" if ok else "failed")
+                        if ok:
+                            captured.append("ui_overview")
+                        else:
+                            failed.append(("ui_overview", "screenshot failed"))
                     else:
-                        failed.append(("ui_overview", "screenshot failed"))
-                else:
-                    print("  skip ui_overview (already captured)")
-                    skipped.append(("ui_overview", "already exists"))
+                        # File exists, no --force, filter allows → genuinely
+                        # skipped because already captured.
+                        print("  skip ui_overview (already captured)")
+                        skipped.append(("ui_overview", "already exists"))
+                # When the filter excludes ui_overview, print nothing and
+                # don't pollute the skipped count — same shape as the
+                # filtered loop below this block.
 
             # --- Extra shots: MoonDeck tabs + installer ---
             for filename, url, wait_sel, _doc_files, _anchor in EXTRA_SHOTS:
@@ -702,7 +715,12 @@ def main() -> int:
         finally:
             if not args.extras_only:
                 for mid in added_ids:
-                    delete_module(args.host, mid)
+                    try:
+                        delete_module(args.host, mid)
+                    except Exception as e:
+                        print(f"  cleanup: delete {mid!r} on {args.host} failed: {e}")
+                # Final sweep — same per-delete + outer try/except pattern as the
+                # opening sweep so cleanup errors surface instead of being hidden.
                 try:
                     sr = _get(f"http://{args.host}/api/state", timeout=5)
                     if sr.ok:
@@ -710,11 +728,14 @@ def main() -> int:
                             for m in modules:
                                 n = m.get("name", "")
                                 if any(n.startswith(p) for p in known_prefixes):
-                                    delete_module(args.host, n)
+                                    try:
+                                        delete_module(args.host, n)
+                                    except Exception as e:
+                                        print(f"  final-sweep: delete {n!r} on {args.host} failed: {e}")
                                 _sweep(m.get("children", []))
                         _sweep(sr.json().get("modules", []))
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"  final-sweep on {args.host} failed: {e}")
             browser.close()
 
     print(f"\n{'─'*50}")

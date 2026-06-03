@@ -262,10 +262,12 @@ bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) { return false;
 bool wifiStaConnected() { return false; }
 void wifiStaGetIP(char* buf, size_t len) { if (len > 0) buf[0] = 0; }
 void wifiStaStop() {}
+int wifiStaRssi() { return 0; }
 
 bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
 bool wifiApConnected() { return false; }
 void wifiApStop() {}
+int wifiTxPower() { return 0; }
 
 bool mdnsInit(const char* /*deviceName*/) { return false; }
 void mdnsStop() {}

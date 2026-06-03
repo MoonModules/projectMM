@@ -3,19 +3,24 @@
 #include "light/drivers/Drivers.h"
 #include "platform/platform.h"
 
-#include <cstring>
 #include <cstdint>
+#include <cstring>
 
 namespace mm {
 
 class ArtNetSendDriver : public DriverBase {
 public:
-    char ip[16] = "192.168.1.70";
+    // Destination address as 4 octets (not a dotted-quad string) — 4 bytes
+    // vs char[16], per docs/coding-standards.md § Prefer integers, store
+    // values in their native shape. The platform UdpSocket::connect() takes
+    // a string, so connectIfIpChanged() formats on a stack buffer at the
+    // boundary — the long-lived storage stays integer.
+    uint8_t ip[4] = {192, 168, 1, 70};
     uint16_t universeStart = 0;
     uint8_t fps = 50;
 
     void onBuildControls() override {
-        controls_.addText("ip", ip);
+        controls_.addIPv4("ip", ip);
         controls_.addUint16("universe_start", universeStart);
         controls_.addUint8("fps", fps, 1, 120);
     }
@@ -167,16 +172,20 @@ private:
     Buffer corrected_;               // owned: source bytes after brightness/order/white
     uint8_t sequence_ = 0;
     uint32_t lastSendTime_ = 0;
-    char lastConnectedIp_[16] = {};  // destination the socket is currently bound to
+    uint8_t lastConnectedIp_[4] = {};  // destination the socket is currently bound to (4 octets)
 
-    // Re-bind the connected socket when the ip control differs from what it was
-    // last bound to. UDP connect() only sets the destination (no handshake), so
-    // this is cheap; it runs only on an actual change.
+    // Re-bind the connected socket when the ip control differs from what it
+    // was last bound to. UDP connect() only sets the destination (no
+    // handshake), so this is cheap; it runs only on an actual change.
+    // The platform UdpSocket::connect() takes a string IP, so we format the
+    // octets onto a stack buffer at the call site rather than holding a
+    // long-lived char[16] member.
     void connectIfIpChanged() {
-        if (std::strcmp(ip, lastConnectedIp_) == 0) return;
-        socket_.connect(ip, ARTNET_PORT);
-        std::strncpy(lastConnectedIp_, ip, sizeof(lastConnectedIp_) - 1);
-        lastConnectedIp_[sizeof(lastConnectedIp_) - 1] = '\0';
+        if (std::memcmp(ip, lastConnectedIp_, 4) == 0) return;
+        char ipStr[16];
+        formatDottedQuad(ipStr, ip);
+        socket_.connect(ipStr, ARTNET_PORT);
+        std::memcpy(lastConnectedIp_, ip, 4);
     }
 
     void sendUniverse(uint16_t universe, const uint8_t* data, uint16_t dataLen) {

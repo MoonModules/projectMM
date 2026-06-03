@@ -296,6 +296,10 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - A nullptr SSID is silently ignored (no copy, no dirty flag) — guards against a bogus caller.
 - A nullptr password is treated as empty (open networks), still copies SSID and marks dirty.
 - An over-length SSID (100 chars) is truncated cleanly into the 33-byte buffer; ASAN catches any overflow.
+- After setup(), NetworkModule exposes a `mode` read-only control whose value reflects the current state-machine state. On the desktop platform every network init stub returns false, so the cascade lands on Idle.
+- parseDottedQuad (in Control.h) is the validator on every IPv4 write, over both the HTTP API and persistence. Pin the contract.
+- The static-IP fields (ip / gateway / subnet / dns) are bound as IPv4 controls — 4 bytes of storage each, not 16-char dotted-quad strings. They start hidden because addressing defaults to DHCP.
+- In WiFi-capable builds (anything other than --firmware esp32-eth), the rssi and txPower controls are present and start hidden — Idle/Ethernet don't expose live WiFi metrics. The Ethernet-only build compiles them out entirely so the iteration finds nothing, which is still a valid pass shape.
 
 ## NoiseEffect
 

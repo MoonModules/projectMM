@@ -78,9 +78,19 @@ bool wifiStaConnected();
 void wifiStaGetIP(char* buf, size_t len);
 void wifiStaStop();
 
+// STA-side RSSI in dBm (negative, e.g. -58). Returns 0 when the STA isn't
+// associated or the call fails — NetworkModule only surfaces this control
+// while state_ == ConnectedSta so a 0 is effectively unreachable.
+int wifiStaRssi();
+
 bool wifiApInit(const char* apName, const char* ip);
 bool wifiApConnected();
 void wifiApStop();
+
+// Current WiFi transmit power, in dBm (ESP-IDF reports quarter-dBm internally
+// and we round to whole). Returns 0 when WiFi isn't initialised or the call
+// fails. Same value for STA and AP — WiFi has one radio at one TX power.
+int wifiTxPower();
 
 bool mdnsInit(const char* deviceName);
 void mdnsStop();

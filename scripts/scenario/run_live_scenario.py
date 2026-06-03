@@ -190,6 +190,11 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
     results = {"name": name, "steps": [], "passed": True, "skipped": False}
     created_modules = []  # mutate scenarios rarely add modules but the existing cleanup path is still useful
     wrote_observations = [False]  # sentinel; flipped by each measure step that runs
+    # Keyed by (step, target): the original contract block before --update-contract
+    # mutated it (or None if no prior block existed). Used by the post-run gate to
+    # roll mutations back when the run fails, so a renegotiated promise only
+    # lands on a clean run.
+    pending_contract_originals: dict = {}
 
     if mode == "construct":
         print(f"\n  SKIP (mode=construct — runs in-process only; the live device's "
@@ -332,7 +337,18 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
             results["steps"].append(step_result)
             continue
         if step.get("measure") or op == "measure":
-            metrics = collect_metrics(client, settle_s)
+            # collect_metrics hits /api/state — a transient network glitch
+            # shouldn't abort the whole run (cleanup of created modules
+            # happens at the end). On failure, log + treat as a skipped
+            # measurement so subsequent steps still run and cleanup fires.
+            try:
+                metrics = collect_metrics(client, settle_s)
+            except Exception as e:
+                print(f"  WARN  {step_name}: collect_metrics failed: {e} (measurement skipped)")
+                step_result["metrics"] = {}
+                step_result["measure_skipped"] = str(e)
+                results["steps"].append(step_result)
+                continue
             step_result["metrics"] = metrics
             tick_us = metrics.get("tickTimeUs", 0)
             fps = 1000000 // tick_us if tick_us > 0 else metrics.get("fps", 0)
@@ -450,9 +466,19 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
             # last-reading baseline — set_by + reason are stamped so the diff
             # records when and why the promise changed. Caller is responsible for
             # committing the diff intentionally.
+            #
+            # Originals are stashed in pending_contract_originals so the
+            # post-run gate (see below) can roll the in-memory tree back to
+            # disk shape if the run failed — only successful runs get to
+            # commit a renegotiated promise.
             if update_contract:
                 # Preserve any per-step tolerance overrides already in place.
                 existing = step.get("contract", {}).get(target, {})
+                if (step, target) not in pending_contract_originals:
+                    # Deep enough copy: existing is a flat dict of scalars.
+                    pending_contract_originals[(step, target)] = (
+                        dict(existing) if existing else None
+                    )
                 new_block = {
                     "tick_us": int(tick_us),
                     "free_heap": int(heap),
@@ -517,17 +543,35 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
 
     # Write the scenario JSON back if anything changed:
     #   - observed.<target> was updated by any measure step (every run); OR
-    #   - --update-contract renegotiated the contract.
-    # JSON dumps in a stable shape (2-space indent, trailing newline) so the
-    # diff stays readable.
-    if wrote_observations[0] or update_contract:
+    #   - --update-contract renegotiated the contract — AND the run passed
+    #     (don't persist a renegotiated promise from a half-broken run; the
+    #     observed values still land so drift is visible either way).
+    # If the contract was renegotiated but the run failed, the in-memory
+    # mutations stay in `scenario` only until the process exits; the on-disk
+    # contract is preserved.
+    contract_safe_to_write = update_contract and results["passed"]
+    if not contract_safe_to_write and update_contract:
+        # Revert any contract mutations we made to the in-memory tree so the
+        # JSON write below (for observed) doesn't leak them to disk.
+        for step in scenario.get("steps", []):
+            contract = step.get("contract")
+            if contract and target in contract:
+                if (step, target) in pending_contract_originals:
+                    orig = pending_contract_originals[(step, target)]
+                    if orig is None:
+                        del contract[target]
+                    else:
+                        contract[target] = orig
+        print(f"  contract[{target}] NOT written (run failed; observed still saved)")
+
+    if wrote_observations[0] or contract_safe_to_write:
         with open(scenario_path, "w") as f:
             json.dump(scenario, f, indent=2, ensure_ascii=False)
             f.write("\n")
         what = []
         if wrote_observations[0]:
             what.append(f"observed[{target}]")
-        if update_contract:
+        if contract_safe_to_write:
             what.append(f"contract[{target}]")
         print(f"  WROTE  {scenario_path.name} ({' + '.join(what)})")
 

@@ -80,7 +80,7 @@
         "pc-macos": {
           "tick_us": [
             35,
-            59
+            132
           ],
           "free_heap": [
             0,

@@ -29,7 +29,7 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 | `esp32` | — / 1,337 | — / 129KB | — / 48KB |
 | `esp32-eth` | ≥ 1,429 / 1,845-1,848 | ≥ 166KB / 178KB | ≥ 88KB / 96KB-100KB |
 | `esp32-eth-wifi` | ≥ 1,429 / 1,821 | ≥ 146KB / 139KB | ≥ 49KB / 52KB |
-| `pc-macos` | ≥ 200,000 / 200,000-1,000,000 | — / — | — / — |
+| `pc-macos` | ≥ 200,000 / 200,000-1,000,000 | unlimited / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
@@ -53,7 +53,7 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 | `esp32` | — / 147 | — / 121KB | — / 48KB |
 | `esp32-eth` | ≥ 303 / 379-381 | ≥ 161KB / 172KB | ≥ 78KB / 92KB |
 | `esp32-eth-wifi` | ≥ 400 / 390 | ≥ 142KB / 132KB | ≥ 49KB / 50KB |
-| `pc-macos` | ≥ 100,000 / 142,857-166,667 | — / — | — / — |
+| `pc-macos` | ≥ 100,000 / 142,857-166,667 | unlimited / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
@@ -77,12 +77,12 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 | `esp32` | — / 17.5 | — / 97KB | — / 48KB |
 | `esp32-eth` | ≥ 55.6 / 74.5-74.7 | ≥ 137KB / 147KB | ≥ 54KB / 62KB |
 | `esp32-eth-wifi` | ≥ 76.9 / 85.7 | ≥ 117KB / 108KB | ≥ 44KB / 48KB |
-| `pc-macos` | ≥ 33,333 / 35,714-43,478 | — / — | — / — |
+| `pc-macos` | ≥ 33,333 / 33,333-43,478 | unlimited / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 
 #### `size-128x128` (set_control)  📏
 
@@ -101,12 +101,12 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 | `esp32` | — / 4.4 | — / 83KB | — / 52KB |
 | `esp32-eth` | ≥ 9.1 / 10.5-10.6 | ≥ 122KB / 132KB | ≥ 47KB / 48KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 54.5 | ≥ 103KB / 129KB | ≥ 44KB / 52KB |
-| `pc-macos` | ≥ 8,333 / 8,197-10,000 | — / — | — / — |
+| `pc-macos` | ≥ 8,333 / 7,874-10,204 | unlimited / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 
 ### scenario_GridLayout_resize
 
@@ -125,12 +125,12 @@ Set grid height to 128 (alongside default width 128). Measures the heaviest conf
 | `esp32` | — / 4.5 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 10.7-10.8 | — / 132KB | — / 48KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.4 | ≥ 103KB / 93KB | — / 48KB |
-| `pc-macos` | ≥ 8,333 / 3,534-9,901 | — / — | — / — |
+| `pc-macos` | ≥ 8,333 / 3,534-10,526 | unlimited / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 
 #### `shrink-to-128x64` (set_control)  📏
 
@@ -146,7 +146,7 @@ Shrink to 128x64. Measured: FPS must stay within 20% of the baseline (proves the
 | `esp32` | — / 11.1 | — / 63KB | — / 17KB |
 | `esp32-eth` | — / 26.4-26.5 | — / 114KB | — / 48KB |
 | `esp32-eth-wifi` | ≥ 22.2 / 31.8 | ≥ 83KB / 75KB | — / 24KB |
-| `pc-macos` | ≥ 16,667 / 5,208-21,277 | — / — | — / — |
+| `pc-macos` | ≥ 16,667 / 5,208-21,277 | unlimited / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
@@ -164,12 +164,12 @@ Grow back to 128x128. Measured: confirms the heap can return to the heavy baseli
 | `esp32` | — / 4.0 | — / 83KB | — / 52KB |
 | `esp32-eth` | — / 10.4 | — / 132KB | — / 48KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 93KB | — / 52KB |
-| `pc-macos` | ≥ 8,333 / 4,237-9,901 | — / — | — / — |
+| `pc-macos` | ≥ 8,333 / 4,237-10,101 | unlimited / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 
 ## Layer
 
@@ -198,7 +198,7 @@ Add ArtNetSendDriver and run the bounded FPS measurement (must stay at >=80% of 
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | ≥ 20,000 / 16,949-28,571 | — / — | — / — |
+| `pc-macos` | ≥ 20,000 / 7,576-28,571 | unlimited / unlimited | — / unlimited |
 
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 
@@ -225,7 +225,7 @@ Baseline: 16x16 grid + Rainbow only. No Drivers yet (Layer renders into its own 
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | ≥ 20,000 / 8,197-28,571 | — / — | — / — |
+| `pc-macos` | ≥ 20,000 / 8,197-28,571 | unlimited / unlimited | — / unlimited |
 
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
@@ -245,7 +245,7 @@ Full pipeline at 16x16. Heap delta vs previous measure-minimum step should stay 
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | ≥ 20,000 / 5,464-28,571 | — / — | — / — |
+| `pc-macos` | ≥ 20,000 / 5,464-28,571 | unlimited / unlimited | — / unlimited |
 
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
@@ -263,9 +263,9 @@ Mirror is on: Layer has a LUT, Drivers has an output buffer. min_fps_led_product
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | ≥ 16,667 / 7,407-22,222 | — / — | — / — |
+| `pc-macos` | ≥ 16,667 / 7,407-22,727 | unlimited / unlimited | — / unlimited |
 
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 
 #### `measure-full-128x128` (measure)  📏
 
@@ -283,9 +283,9 @@ Production-size grid with the full pipeline. Final tick + cumulative heap delta 
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | ≥ 16,667 / 18,868-22,727 | — / — | — / — |
+| `pc-macos` | ≥ 16,667 / 5,882-23,256 | unlimited / unlimited | — / unlimited |
 
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 
 ### scenario_Layer_memory_1to1
 
@@ -311,7 +311,7 @@ Add ArtNetSendDriver and run the bounded FPS measurement on the no-LUT path.
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | ≥ 20,000 / 12,500-28,571 | — / — | — / — |
+| `pc-macos` | ≥ 20,000 / 12,500-28,571 | unlimited / unlimited | — / unlimited |
 
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
@@ -342,7 +342,7 @@ Add ArtNetSendDriver and run the bounded FPS measurement on the LUT path.
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | ≥ 8,333 / 3,322-9,901 | — / — | — / — |
+| `pc-macos` | ≥ 8,333 / 3,322-9,901 | unlimited / unlimited | — / unlimited |
 
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
@@ -371,9 +371,9 @@ Add ArtNetSendDriver and run the bounded FPS measurement (mirror + LUT path must
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | ≥ 8,333 / 8,850-9,901 | — / — | — / — |
+| `pc-macos` | ≥ 8,333 / 4,695-10,000 | unlimited / unlimited | — / unlimited |
 
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 
 ## MoonModule
 
@@ -397,12 +397,12 @@ Set NoiseEffect.scale=4 and measure baseline FPS (mirror on). Effect controls do
 | `esp32` | — / 3.9 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 10.5-10.6 | — / 133KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 94KB | — / 48KB |
-| `pc-macos` | ≥ 8,333 / 5,952-9,901 | — / — | — / — |
+| `pc-macos` | ≥ 8,333 / 4,808-9,901 | unlimited / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 
 #### `disable-mirrorX` (set_control)  📏
 
@@ -415,12 +415,12 @@ Disable mirrorX. Modifier control triggers a pipeline rebuild — measures the r
 | `esp32` | — / 4.8 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 10.4 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.0 | ≥ 103KB / 94KB | — / 48KB |
-| `pc-macos` | ≥ 5,000 / 4,184-5,405 | — / — | — / — |
+| `pc-macos` | ≥ 5,000 / 4,184-5,525 | unlimited / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 
 #### `disable-mirrorY` (set_control)  📏
 
@@ -433,7 +433,7 @@ Disable mirrorY. Mirror is now fully off — should land on the no-LUT path.
 | `esp32` | — / 4.4 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 8.9-9.0 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 11.1 | ≥ 103KB / 94KB | — / 48KB |
-| `pc-macos` | ≥ 2,500 / 2,481-2,849 | — / — | — / — |
+| `pc-macos` | ≥ 2,500 / 2,481-2,890 | unlimited / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
@@ -457,12 +457,12 @@ Re-enable mirrorY and measure — the heavy LUT path must recover (FPS within 50
 | `esp32` | — / 4.4 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 10.5-10.6 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.1 | ≥ 103KB / 94KB | — / 48KB |
-| `pc-macos` | ≥ 8,333 / 9,009-10,000 | — / — | — / — |
+| `pc-macos` | ≥ 8,333 / 9,009-10,417 | unlimited / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 
 ## NetworkModule
 
@@ -545,12 +545,12 @@ detail=1 (coarsest, 16x16 downsample on a 128 grid). Cheapest preview render.
 | `esp32` | — / 4.0 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 10.5-10.6 | — / 132KB | — / 50KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 93KB | — / 48KB |
-| `pc-macos` | ≥ 3,333 / 2,070-3,322 | — / — | — / — |
+| `pc-macos` | ≥ 3,333 / 2,033-3,322 | unlimited / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 
 #### `detail-2-medium` (set_control)  📏
 
@@ -566,7 +566,7 @@ detail=2 (medium, 32x32 downsample). Known accepted cost — still hits 80% of b
 | `esp32` | — / 4.9 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 10.4-10.5 | — / 132KB | — / 50KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.0 | ≥ 103KB / 93KB | — / 48KB |
-| `pc-macos` | ≥ 3,333 / 2,725-3,289 | — / — | — / — |
+| `pc-macos` | ≥ 3,333 / 2,079-3,333 | unlimited / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
@@ -587,7 +587,7 @@ detail=3 (finest, 43x43 downsample). Looser bound (70%) because the downsample c
 | `esp32` | — / 4.5 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 9.5-9.6 | — / 132KB | — / 50KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.6 | ≥ 103KB / 93KB | — / 48KB |
-| `pc-macos` | ≥ 3,125 / 2,762-3,333 | — / — | — / — |
+| `pc-macos` | ≥ 3,125 / 2,762-3,378 | unlimited / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
@@ -608,7 +608,7 @@ decompress=true. Client-side hint — does not affect the render tick.
 | `esp32` | — / 4.6 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 10.5-10.6 | — / 132KB | — / 50KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 93KB | — / 48KB |
-| `pc-macos` | ≥ 3,333 / 2,703-3,333 | — / — | — / — |
+| `pc-macos` | ≥ 3,333 / 2,703-3,401 | unlimited / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
@@ -629,7 +629,7 @@ decompress=false. Same as above — pure client-side, no render impact expected.
 | `esp32` | — / 4.8 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 10.3 | — / 132KB | — / 50KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.0 | ≥ 103KB / 93KB | — / 48KB |
-| `pc-macos` | ≥ 3,333 / 2,591-3,311 | — / — | — / — |
+| `pc-macos` | ≥ 3,333 / 2,591-3,356 | unlimited / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02

@@ -1002,6 +1002,40 @@ function createControl(moduleName, moduleType, ctrl) {
             row.appendChild(span);
             break;
         }
+        case "display-int": {
+            // Read-only signed int with a unit suffix (e.g. "-58 dBm").
+            // ctrl.unit is the suffix the device chose at addReadOnlyInt time.
+            const span = document.createElement("span");
+            span.className = "display";
+            span.dataset.mid = moduleName;
+            span.dataset.key = ctrl.name;
+            span.dataset.kind = "display-int";
+            span.dataset.unit = ctrl.unit ?? "";
+            span.textContent = fmtDisplayInt(ctrl);
+            row.appendChild(span);
+            break;
+        }
+        case "ipv4": {
+            // Editable dotted-quad. Wire format is the same string the user
+            // types — the device parses + validates server-side and rejects
+            // malformed values with 400. Inline validation on the client is
+            // a future enhancement; today an invalid value goes to the
+            // server and the response surfaces the rejection.
+            const input = document.createElement("input");
+            input.type = "text";
+            input.className = "ipv4-input";
+            input.dataset.mid = moduleName;
+            input.dataset.key = ctrl.name;
+            input.value = ctrl.value ?? "";
+            input.placeholder = "0.0.0.0";
+            input.maxLength = 15;  // "255.255.255.255" = 15
+            input.size = 15;
+            input.addEventListener("change", () => {
+                sendControl(moduleName, ctrl.name, input.value);
+            });
+            row.appendChild(input);
+            break;
+        }
         case "time": {
             // Read-only seconds, rendered as "Xd Yh Zm Ws"
             const span = document.createElement("span");
@@ -1055,8 +1089,7 @@ function appendResetButton(row, moduleName, ctrl, def, applyVisually) {
     btn.dataset.mid = moduleName;
     btn.dataset.key = ctrl.name + ".reset";
     btn.dataset.def = String(def);
-    const eq = (ctrl.type === "bool") ? (!!ctrl.value === !!def)
-                                       : (Number(ctrl.value) === Number(def));
+    const eq = controlValuesEqual(ctrl, def);
     btn.classList.toggle("active", !eq);
     btn.addEventListener("click", () => {
         applyVisually();
@@ -1106,6 +1139,16 @@ function fmtProgressLabel(ctrl) {
     const v = Number(ctrl.value) || 0;
     const t = Number(ctrl.total) || 0;
     return Math.round(v / 1024) + "KB / " + Math.round(t / 1024) + "KB";
+}
+
+// "<value> <unit>" — handles missing/zero values without rendering "0 dBm"
+// when the device is in a state where the metric isn't meaningful (hidden
+// controls still ship a value, so the render path gets called).
+function fmtDisplayInt(ctrl) {
+    const v = ctrl.value;
+    const u = ctrl.unit || "";
+    if (v === null || v === undefined) return "";
+    return u ? `${v} ${u}` : String(v);
 }
 
 // ---------------------------------------------------------------------------
@@ -1235,6 +1278,25 @@ function updateModuleControls(mod) {
                 if (span) span.textContent = ctrl.value ?? "";
                 break;
             }
+            case "display-int": {
+                const span = document.querySelector(`span.display[data-mid="${mid}"][data-key="${k}"]`);
+                if (span) {
+                    // Re-cache the unit in case the device changed it (it
+                    // shouldn't, but the WS path is the authority).
+                    span.dataset.unit = ctrl.unit ?? span.dataset.unit ?? "";
+                    span.textContent = fmtDisplayInt(ctrl);
+                }
+                break;
+            }
+            case "ipv4": {
+                const input = document.querySelector(`input.ipv4-input[data-mid="${mid}"][data-key="${k}"]`);
+                // Don't clobber an input the user is currently editing —
+                // matches how text inputs handle WS pushes elsewhere.
+                if (input && document.activeElement !== input) {
+                    input.value = ctrl.value ?? "";
+                }
+                break;
+            }
             case "time": {
                 const span = document.querySelector(`span.display[data-mid="${mid}"][data-key="${k}"]`);
                 if (span) span.textContent = fmtTime(ctrl.value ?? 0);
@@ -1257,12 +1319,22 @@ function updateModuleControls(mod) {
         if (def !== undefined && def !== null) {
             const btn = document.querySelector(`button.reset-btn[data-mid="${mid}"][data-key="${k}.reset"]`);
             if (btn) {
-                const eq = (ctrl.type === "bool") ? (!!ctrl.value === !!def)
-                                                   : (Number(ctrl.value) === Number(def));
+                const eq = controlValuesEqual(ctrl, def);
                 btn.classList.toggle("active", !eq);
             }
         }
     }
+}
+
+// Per-type equality for reset-button highlighting. bool→boolish, ipv4/text→
+// string compare, everything else → numeric. Centralised so the rules can't
+// drift between createControl and updateModuleControls.
+function controlValuesEqual(ctrl, def) {
+    if (ctrl.type === "bool") return !!ctrl.value === !!def;
+    if (ctrl.type === "ipv4" || ctrl.type === "text" || ctrl.type === "password") {
+        return String(ctrl.value ?? "") === String(def ?? "");
+    }
+    return Number(ctrl.value) === Number(def);
 }
 
 function cssEscape(s) {

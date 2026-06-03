@@ -239,7 +239,16 @@ static bool applySetControl(mm::Scheduler& scheduler,
                 *static_cast<uint8_t*>(c.ptr) = static_cast<uint8_t>(v);
                 break;
             }
+            case mm::ControlType::IPv4: {
+                // Scenario sets accept the same dotted-quad string the wire
+                // format uses. parseDottedQuad rejects anything else.
+                uint8_t octets[4] = {};
+                if (!mm::parseDottedQuad(value.str.c_str(), octets)) return false;
+                std::memcpy(c.ptr, octets, 4);
+                break;
+            }
             case mm::ControlType::ReadOnly:
+            case mm::ControlType::ReadOnlyInt:
             case mm::ControlType::Progress:
                 return false;  // immutable from a setter
         }
@@ -518,8 +527,18 @@ static int runScenario(const char* path) {
             if (step.has("bounds") && step["bounds"].has("fps")) {
                 if (step["bounds"]["fps"].has("min"))
                     fpsBound = step["bounds"]["fps"]["min"].num;
-                else if (step["bounds"]["fps"].has("min_pct"))
-                    fpsBound = 1; // min_pct is for live runner; in-process just checks FPS > 0
+                else if (step["bounds"]["fps"].has("min_pct")) {
+                    // min_pct is relative to a live baseline (the WiFi-vs-Eth
+                    // scenarios use it) and only the live runner has a baseline
+                    // to compare against. In-process can't enforce it — log a
+                    // clear skip so users see *why* the bound wasn't applied
+                    // instead of silently treating it as "FPS > 0".
+                    double pct = step["bounds"]["fps"]["min_pct"].num;
+                    std::printf("  WARN  %s: bounds.fps.min_pct=%g requires a live "
+                                "baseline; in-process runner cannot enforce — skipped\n",
+                                name, pct);
+                    fpsBound = 0;
+                }
                 if (step["bounds"]["fps"].has("min_fps_led_product"))
                     fpsLedProduct = step["bounds"]["fps"]["min_fps_led_product"].num;
             }
@@ -550,18 +569,25 @@ static int runScenario(const char* path) {
                 ctx.modules.count("Layer") ? ctx.modules["Layer"] : nullptr);
             unsigned lights = layer ? static_cast<unsigned>(layer->buffer().count()) : 0;
 
-            long heapDelta = heapBefore > 0
-                ? static_cast<long>(heapBefore) - static_cast<long>(heapAfterMeasure)
-                : 0;
+            // `heap=` is the absolute free-heap after the measurement window
+            // — that's what observed.<target>.free_heap consumes (the rolling
+            // promise is on actual free heap, not on a delta). On desktop
+            // freeHeap() returns 0 ("unlimited") and the value is rendered
+            // as 0, which the runner treats as "no heap assertion".
+            //
+            // `(step: ±N)` is the signed step delta from the pre-step heap to
+            // the post-measurement heap — useful for diagnosing which step
+            // consumed memory, but not what the contract asserts on. Kept
+            // for human-readable diagnostics.
             long stepDelta = heapBefore > 0
                 ? static_cast<long>(heapAfter) - static_cast<long>(heapAfterMeasure)
                 : 0;
-            std::printf("  MEASURE %s: tick=%uus FPS=%u lights=%u heap=%+ld (step: %+ld) block=%u\n",
+            std::printf("  MEASURE %s: tick=%uus FPS=%u lights=%u heap=%u (step: %+ld) block=%u\n",
                         name,
                         static_cast<unsigned>(tickTimeUs), static_cast<unsigned>(fps),
-                        lights, heapDelta, stepDelta,
+                        lights, static_cast<unsigned>(heapAfterMeasure), stepDelta,
                         static_cast<unsigned>(maxBlock));
-            (void)heapBeforeMeasure;  // tracked through heapAfter below
+            (void)heapBeforeMeasure;  // tracked through stepDelta above
 
             // FPS bound (when set)
             if (fpsBound > 0) {

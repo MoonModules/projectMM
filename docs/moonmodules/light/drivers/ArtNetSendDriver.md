@@ -8,7 +8,7 @@ The UDP socket is `connect()`-bound to the destination in `setup()`, so each per
 
 ## Controls
 
-- `ip` (text, default "192.168.1.70") — destination IP address
+- `ip` (ipv4, default "192.168.1.70") — destination IP address. Stored as 4 octets device-side (`uint8_t[4]`), formatted to a dotted-quad string only at the wire boundary. See [coding-standards.md § Prefer integers](../../../coding-standards.md#prefer-integers-store-values-in-their-native-shape).
 - `universe_start` (uint16_t, default 0, range 0-32767) — first ArtNet universe
 - `fps` (uint8_t, default 50, range 1-120) — send frame rate limit. Critical: without FPS limiting, receivers drop packets.
 

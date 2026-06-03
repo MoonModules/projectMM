@@ -452,6 +452,13 @@ void wifiStaStop() {
     ESP_LOGI(NET_TAG, "WiFi STA stopped + deinit");
 }
 
+int wifiStaRssi() {
+    if (!wifiStaConnected_) return 0;
+    wifi_ap_record_t info{};
+    if (esp_wifi_sta_get_ap_info(&info) != ESP_OK) return 0;
+    return info.rssi;
+}
+
 bool wifiApInit(const char* apName, const char* ip) {
     // Guard against repeated init leaking the previous AP netif.
     // Stop before ensureWifiInit() — wifiApStop() deinits the WiFi driver.
@@ -524,6 +531,14 @@ void wifiApStop() {
     ESP_LOGI(NET_TAG, "WiFi AP stopped + deinit");
 }
 
+int wifiTxPower() {
+    if (!wifiInitDone_) return 0;
+    int8_t power = 0;
+    if (esp_wifi_get_max_tx_power(&power) != ESP_OK) return 0;
+    // ESP-IDF returns TX power in units of 0.25 dBm; round to nearest whole dBm.
+    return (power + 2) / 4;
+}
+
 #else // MM_NO_WIFI — Ethernet-only build: WiFi compiled out.
 
 // Stub definitions so the linker is satisfied (platform.h declares these and
@@ -534,9 +549,11 @@ bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) { return false;
 bool wifiStaConnected() { return false; }
 void wifiStaGetIP(char* buf, size_t len) { if (len > 0) buf[0] = 0; }
 void wifiStaStop() {}
+int wifiStaRssi() { return 0; }
 bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
 bool wifiApConnected() { return false; }
 void wifiApStop() {}
+int wifiTxPower() { return 0; }
 
 #endif // MM_NO_WIFI
 

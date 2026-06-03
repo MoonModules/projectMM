@@ -36,13 +36,15 @@ _RUNNER_BASE = ROOT / "build" / _HOST / "test" / "mm_scenarios"
 RUNNER = _RUNNER_BASE.with_suffix(".exe") if sys.platform == "win32" else _RUNNER_BASE
 
 # Format emitted by scenario_runner.cpp's measure block:
-#   MEASURE <step-name>: tick=Nus FPS=N lights=N heap=±N (step: ±N) block=N
-# `<step-name>` may contain hyphens and underscores. heap is signed offset
-# (vs heapBefore); block is the absolute largest contiguous block.
-# Both are 0 on desktop where the platform stubs return "unlimited".
+#   MEASURE <step-name>: tick=Nus FPS=N lights=N heap=N (step: ±N) block=N
+# `<step-name>` may contain hyphens and underscores. heap is the absolute free
+# heap after the measurement (what observed.free_heap consumes); the (step: ±N)
+# fragment is a human-readable delta for diagnostics — not captured here.
+# Both heap and block are 0 on desktop where the platform stubs return
+# "unlimited".
 _MEASURE_RE = re.compile(
     r"^\s*MEASURE\s+(?P<name>\S+):\s+tick=(?P<tick>\d+)us\s+FPS=\d+\s+lights=\d+"
-    r"\s+heap=(?P<heap>[+-]?\d+).*?\bblock=(?P<block>\d+)"
+    r"\s+heap=(?P<heap>\d+).*?\bblock=(?P<block>\d+)"
 )
 
 
@@ -69,15 +71,13 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
         sys.stdout.write(line)
         m = _MEASURE_RE.match(line)
         if m:
-            heap = int(m["heap"])
-            # heap is reported as a signed offset relative to heapBefore; for
-            # the observed/contract blocks we want absolute free-heap. On
-            # desktop freeHeap() returns 0 (unlimited), so the offset is 0 and
-            # we store 0 — which the runner treats as "no heap assertion".
-            # max_alloc_block is absolute (0 = unlimited / desktop).
+            # heap is absolute free-heap after measurement (the value the
+            # observed/contract blocks consume directly). On desktop
+            # freeHeap() returns 0 (unlimited) which the runner treats as
+            # "no heap assertion". max_alloc_block is also absolute.
             observations[m["name"]] = {
                 "tick_us": int(m["tick"]),
-                "free_heap": max(0, heap),
+                "free_heap": int(m["heap"]),
                 "max_alloc_block": int(m["block"]),
             }
     proc.wait()
@@ -118,10 +118,11 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
             touched_observed += 1
 
         # Only renegotiate the contract when --update-contract was passed. The
-        # max_alloc_block field is *not* copied into the contract by default —
-        # it's an opt-in floor that only a few scenarios assert (where LUT-fit
-        # is part of the workload). Existing max_alloc_block contracts are
-        # preserved if present.
+        # max_alloc_block field is *not* added unconditionally — it's an opt-in
+        # floor that only a few scenarios assert (where LUT-fit is part of the
+        # workload). When the existing contract already opts in, refresh the
+        # value from the current run (consistent with tick_us / free_heap);
+        # tolerances are user-set knobs and stay as-is.
         if update_contract:
             existing = step.get("contract", {}).get(target, {})
             new_block = {
@@ -130,10 +131,17 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None) -> in
                 "set_by": today,
                 "reason": update_reason or existing.get("reason", "updated"),
             }
-            for k in ("tick_tolerance_pct", "heap_tolerance_pct", "tolerance_us",
-                      "max_alloc_block"):
+            for k in ("tick_tolerance_pct", "heap_tolerance_pct", "tolerance_us"):
                 if k in existing:
                     new_block[k] = existing[k]
+            # max_alloc_block: opt-in (only carry it over if the existing
+            # contract had it), but refresh the value rather than copying
+            # the stale one. observations[name] always carries this key
+            # because the scenario runner emits it; if it ever doesn't,
+            # fall back to the existing value so we don't drop the opt-in.
+            if "max_alloc_block" in existing:
+                new_block["max_alloc_block"] = observations[name].get(
+                    "max_alloc_block", existing["max_alloc_block"])
             step.setdefault("contract", {})[target] = new_block
             touched_contract += 1
 
