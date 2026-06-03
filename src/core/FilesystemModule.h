@@ -97,7 +97,6 @@ private:
     bool saveSubtree(MoonModule* m);
     bool writeNode(MoonModule* m, char* buf, size_t bufLen, int& pos, const char* prefix,
                    bool firstField = true);
-    static bool writeJsonString(const char* s, char* buf, size_t bufLen, int& pos);
     bool writeValue(const ControlDescriptor& c, char* buf, size_t bufLen, int& pos);
     static bool subtreeDirty(MoonModule* m);
     static void clearSubtreeDirty(MoonModule* m);

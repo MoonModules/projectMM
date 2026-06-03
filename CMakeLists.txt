@@ -21,6 +21,7 @@ endif()
 # filesystem, network, …) ship as .h + .cpp per CLAUDE.md — list those .cpps
 # here so both the application and the test binary link them.
 add_library(mm_core STATIC
+    src/core/Control.cpp
     src/core/HttpServerModule.cpp
     src/core/FilesystemModule.cpp
     src/core/Scheduler.cpp

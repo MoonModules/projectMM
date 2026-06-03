@@ -5,6 +5,7 @@
 #include "core/Scheduler.h"
 #include "core/ModuleFactory.h"
 #include "core/Control.h"
+#include "core/JsonSink.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layers/Layer.h"
 #include "light/layouts/Layouts.h"
@@ -191,7 +192,6 @@ static const char* hostTarget() {
 // does — call onUpdate(), and if controlChangeTriggersBuildState() returns true
 // trigger Scheduler::buildState() so the pipeline reconciles. Returns true if the
 // write applied; false on any lookup miss or unsupported type (caller may want to
-// fail the scenario, but for now we just print and continue).
 static bool applySetControl(mm::Scheduler& scheduler,
                             mm::MoonModule* target,
                             const char* controlName,
@@ -201,57 +201,30 @@ static bool applySetControl(mm::Scheduler& scheduler,
     for (uint8_t i = 0; i < controls.count(); i++) {
         const auto& c = controls[i];
         if (!c.name || std::strcmp(c.name, controlName) != 0) continue;
-        switch (c.type) {
-            case mm::ControlType::Uint8: {
-                int v = static_cast<int>(value.num);
-                if (v < c.min) v = c.min;
-                if (v > c.max) v = c.max;
-                *static_cast<uint8_t*>(c.ptr) = static_cast<uint8_t>(v);
-                break;
-            }
-            case mm::ControlType::Uint16: {
-                int v = static_cast<int>(value.num);
-                if (v < 0) v = 0;
-                if (v > UINT16_MAX) v = UINT16_MAX;
-                *static_cast<uint16_t*>(c.ptr) = static_cast<uint16_t>(v);
-                break;
-            }
-            case mm::ControlType::Int16: {
-                int v = static_cast<int>(value.num);
-                if (v < c.min) v = c.min;
-                if (v > c.max) v = c.max;
-                *static_cast<int16_t*>(c.ptr) = static_cast<int16_t>(v);
-                break;
-            }
-            case mm::ControlType::Bool:
-                *static_cast<bool*>(c.ptr) = value.boolean;
-                break;
-            case mm::ControlType::Text:
-            case mm::ControlType::Password: {
-                uint8_t maxLen = c.max > 0 ? c.max - 1 : 15;
-                std::strncpy(static_cast<char*>(c.ptr), value.str.c_str(), maxLen);
-                static_cast<char*>(c.ptr)[maxLen] = '\0';
-                break;
-            }
-            case mm::ControlType::Select: {
-                int v = static_cast<int>(value.num);
-                if (v < 0 || v >= c.max) return false;
-                *static_cast<uint8_t*>(c.ptr) = static_cast<uint8_t>(v);
-                break;
-            }
-            case mm::ControlType::IPv4: {
-                // Scenario sets accept the same dotted-quad string the wire
-                // format uses. parseDottedQuad rejects anything else.
-                uint8_t octets[4] = {};
-                if (!mm::parseDottedQuad(value.str.c_str(), octets)) return false;
-                std::memcpy(c.ptr, octets, 4);
-                break;
-            }
-            case mm::ControlType::ReadOnly:
-            case mm::ControlType::ReadOnlyInt:
-            case mm::ControlType::Progress:
-                return false;  // immutable from a setter
+        // Bridge JsonVal → raw JSON text → mm::applyControlValue, so this
+        // file no longer hand-rolls the per-ControlType dispatch that
+        // Control.cpp owns. Build a tiny wrapper object `{"v":VALUE}` via
+        // JsonSink (heap-grow mode); writeNumber/writeBool/writeJsonString
+        // produce JSON-correct text per JsonVal::type. Re-serialize-then-
+        // parse cost is irrelevant in test code (≤100 set_control ops per
+        // scenario). Strict policy: out-of-range Uint8/Int16/Select fails
+        // the set_control so scenario-authoring bugs surface instead of
+        // silently clamping into a boundary value. This is stricter than
+        // the pre-refactor behaviour for Uint8/Int16 (which silently
+        // clamped) but matches it for Select/IPv4 (which already failed);
+        // no existing scenario relied on the silent-clamp shape.
+        mm::JsonSink wrapper;
+        wrapper.append("{\"v\":");
+        switch (value.type) {
+            case JsonVal::Number: wrapper.writeNumber(value.num); break;
+            case JsonVal::Bool:   wrapper.writeBool(value.boolean); break;
+            case JsonVal::String: wrapper.writeJsonString(value.str.c_str()); break;
+            default:              wrapper.append("null"); break;
         }
+        wrapper.append("}");
+        mm::ApplyResult r = mm::applyControlValue(c, wrapper.data(), "v",
+                                                  mm::ApplyPolicy::Strict);
+        if (r != mm::ApplyResult::Ok) return false;
         if (c.type == mm::ControlType::Select) target->rebuildControls();
         target->onUpdate(controlName);
         if (target->controlChangeTriggersBuildState(controlName)) {

@@ -356,105 +356,37 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
     for (uint8_t i = 0; i < ctrls.count(); i++) {
         if (i > 0) sink.append(",");
         auto& c = ctrls[i];
-        // Per-type body emitted WITHOUT the closing }. We append "hidden" then } afterwards.
-        switch (c.type) {
-            case ControlType::Uint8:
-                sink.appendf(
-                    "{\"name\":\"%s\",\"type\":\"uint8\",\"value\":%u,\"min\":%d,\"max\":%d",
-                    c.name, *static_cast<uint8_t*>(c.ptr), (int)c.min, (int)c.max);
-                break;
-            case ControlType::Uint16:
-                sink.appendf(
-                    "{\"name\":\"%s\",\"type\":\"uint16\",\"value\":%u",
-                    c.name, *static_cast<uint16_t*>(c.ptr));
-                break;
-            case ControlType::Int16:
-                sink.appendf(
-                    "{\"name\":\"%s\",\"type\":\"int16\",\"value\":%d,\"min\":%d,\"max\":%d",
-                    c.name, *static_cast<int16_t*>(c.ptr), c.min, c.max);
-                break;
-            case ControlType::Bool:
-                sink.appendf(
-                    "{\"name\":\"%s\",\"type\":\"bool\",\"value\":%s",
-                    c.name, *static_cast<bool*>(c.ptr) ? "true" : "false");
-                break;
-            case ControlType::Text: {
-                char escaped[128];
-                jsonEscape(static_cast<char*>(c.ptr), escaped, sizeof(escaped));
-                sink.appendf(
-                    "{\"name\":\"%s\",\"type\":\"text\",\"value\":\"%s\"",
-                    c.name, escaped);
-                break;
+        // Common wrapper for every control: {"name":...,"type":...,"value":VALUE,EXTRAS,"hidden":?}
+        // Per-type VALUE + EXTRAS rendering lives in Control.cpp so the
+        // wire format isn't duplicated across HttpServer/FS/scenario.
+        // Password is the one exception — its API serialization XOR-obfuscates +
+        // base64-encodes (writeControlValue emits plaintext, which is what
+        // FilesystemModule's writeValue wants); handle it here in-line so
+        // writeControlValue stays sink-neutral.
+        sink.appendf("{\"name\":\"%s\",\"type\":\"%s\",\"value\":",
+                     c.name, controlTypeName(c.type));
+        if (c.type == ControlType::Password) {
+            // The password is sent XOR-obfuscated + base64-encoded, NOT
+            // in plaintext. This is deliberate obfuscation, not security:
+            // the XOR key is a fixed shared constant (also in app.js), so
+            // anyone can reverse it. It is a first line of defence — the
+            // value is not readable at a glance in `curl /api/state` — and
+            // it lets the UI's hold-to-peek reveal the stored password.
+            const char* pw = static_cast<char*>(c.ptr);
+            uint8_t scrambled[64];
+            size_t pwLen = std::strlen(pw);
+            if (pwLen > sizeof(scrambled)) pwLen = sizeof(scrambled);
+            for (size_t k = 0; k < pwLen; k++) {
+                scrambled[k] = static_cast<uint8_t>(pw[k]) ^ PASSWORD_XOR_KEY;
             }
-            case ControlType::Password: {
-                // The password is sent XOR-obfuscated + base64-encoded, NOT
-                // in plaintext. This is deliberate obfuscation, not security:
-                // the XOR key is a fixed shared constant (also in app.js), so
-                // anyone can reverse it. It is a first line of defence — the
-                // value is not readable at a glance in `curl /api/state` — and
-                // it lets the UI's hold-to-peek reveal the stored password.
-                const char* pw = static_cast<char*>(c.ptr);
-                uint8_t scrambled[64];
-                size_t pwLen = std::strlen(pw);
-                if (pwLen > sizeof(scrambled)) pwLen = sizeof(scrambled);
-                for (size_t k = 0; k < pwLen; k++) {
-                    scrambled[k] = static_cast<uint8_t>(pw[k]) ^ PASSWORD_XOR_KEY;
-                }
-                char encoded[96];
-                base64Encode(std::span(scrambled).first(pwLen), std::span(encoded));
-                sink.appendf(
-                    "{\"name\":\"%s\",\"type\":\"password\",\"value\":\"%s\"",
-                    c.name, encoded);
-                break;
-            }
-            case ControlType::ReadOnly: {
-                char escaped[128];
-                jsonEscape(static_cast<char*>(c.ptr), escaped, sizeof(escaped));
-                sink.appendf(
-                    "{\"name\":\"%s\",\"type\":\"display\",\"value\":\"%s\"",
-                    c.name, escaped);
-                break;
-            }
-            case ControlType::ReadOnlyInt: {
-                // aux holds a borrowed const char* unit suffix (set via
-                // addReadOnlyInt). Forward the unit so the UI renders
-                // "<value> <unit>" without baking the format on the device.
-                const char* unit = reinterpret_cast<const char*>(c.aux);
-                sink.appendf(
-                    "{\"name\":\"%s\",\"type\":\"display-int\",\"value\":%d,\"unit\":\"%s\"",
-                    c.name, *static_cast<int8_t*>(c.ptr), unit ? unit : "");
-                break;
-            }
-            case ControlType::Select: {
-                sink.appendf(
-                    "{\"name\":\"%s\",\"type\":\"select\",\"value\":%u,\"options\":[",
-                    c.name, *static_cast<uint8_t*>(c.ptr));
-                auto* options = reinterpret_cast<const char* const*>(c.aux);
-                for (uint8_t o = 0; o < c.max; o++) {
-                    sink.appendf("%s\"%s\"", o > 0 ? "," : "", options[o]);
-                }
-                sink.append("]");
-                break;
-            }
-            case ControlType::Progress:
-                sink.appendf(
-                    "{\"name\":\"%s\",\"type\":\"progress\",\"value\":%lu,\"total\":%lu",
-                    c.name, static_cast<unsigned long>(*static_cast<uint32_t*>(c.ptr)),
-                    static_cast<unsigned long>(c.aux));
-                break;
-            case ControlType::IPv4: {
-                // Serialize the 4-byte octet array as a dotted-quad string.
-                // Keeping the wire shape as a string lets the UI render and
-                // edit it as text without needing dotted-quad logic in JS.
-                char ipStr[16];
-                formatDottedQuad(ipStr, static_cast<const uint8_t*>(c.ptr));
-                sink.appendf("{\"name\":\"%s\",\"type\":\"ipv4\",\"value\":\"%s\"",
-                             c.name, ipStr);
-                break;
-            }
+            char encoded[96];
+            base64Encode(std::span(scrambled).first(pwLen), std::span(encoded));
+            sink.appendf("\"%s\"", encoded);
+        } else {
+            writeControlValue(sink, c);
         }
+        writeControlMetadata(sink, c);
         // Emit "hidden":true only when set (common case is false; omit to save bytes).
-        // Then close the per-control object.
         sink.append(c.hidden ? ",\"hidden\":true}" : "}");
     }
 }
@@ -489,80 +421,20 @@ void HttpServerModule::handleSetControl(platform::TcpConnection& conn, const cha
         auto& c = ctrls[i];
         if (std::strcmp(c.name, controlName) != 0) continue;
 
-        switch (c.type) {
-            case ControlType::Uint8: {
-                int v = mm::json::parseInt(body, "value");
-                // Out-of-range from a hostile / buggy client: reject with
-                // 400 rather than wrap on the static_cast. Matches the
-                // Select branch below.
-                if (v < c.min || v > c.max) {
-                    sendResponse(conn, 400, "application/json", "{\"error\":\"value out of range\"}");
-                    return;
-                }
-                *static_cast<uint8_t*>(c.ptr) = static_cast<uint8_t>(v);
+        // Per-type parse + validate + apply lives in Control.cpp. We map
+        // the result to specific HTTP responses; non-Ok results leave the
+        // storage untouched, so no need to roll anything back.
+        ApplyResult r = applyControlValue(c, body, "value");
+        switch (r) {
+            case ApplyResult::Ok:
                 break;
-            }
-            case ControlType::Uint16: {
-                int v = mm::json::parseInt(body, "value");
-                // No c.min/c.max check: those fields are uint8_t and can't
-                // bound a uint16 range (would 400-reject every value > 255).
-                // Clamp to the natural type range to prevent static_cast wrap.
-                if (v < 0) v = 0;
-                if (v > UINT16_MAX) v = UINT16_MAX;
-                *static_cast<uint16_t*>(c.ptr) = static_cast<uint16_t>(v);
-                break;
-            }
-            case ControlType::Int16: {
-                int v = mm::json::parseInt(body, "value");
-                if (v < c.min) v = c.min;
-                if (v > c.max) v = c.max;
-                *static_cast<int16_t*>(c.ptr) = static_cast<int16_t>(v);
-                break;
-            }
-            case ControlType::Bool: {
-                bool v = mm::json::parseBool(body, "value");
-                *static_cast<bool*>(c.ptr) = v;
-                break;
-            }
-            case ControlType::Text:
-            case ControlType::Password: {
-                // Password writes set the real value just like Text; only
-                // serialization (writeControls) hides it.
-                char v[64] = {};
-                mm::json::parseString(body, "value", v, sizeof(v));
-                uint8_t maxLen = c.max > 0 ? c.max - 1 : 15;
-                std::strncpy(static_cast<char*>(c.ptr), v, maxLen);
-                static_cast<char*>(c.ptr)[maxLen] = '\0';
-                break;
-            }
-            case ControlType::Select: {
-                int v = mm::json::parseInt(body, "value");
-                if (v < 0 || v >= c.max) {
-                    sendResponse(conn, 400, "application/json", "{\"error\":\"value out of range\"}");
-                    return;
-                }
-                *static_cast<uint8_t*>(c.ptr) = static_cast<uint8_t>(v);
-                break;
-            }
-            case ControlType::IPv4: {
-                // Accept dotted-quad. Reject anything that fails to parse to
-                // exactly four 0..255 octets — better than silently storing
-                // a half-parsed address that wouldn't route.
-                char v[16] = {};
-                mm::json::parseString(body, "value", v, sizeof(v));
-                uint8_t octets[4] = {};
-                if (!parseDottedQuad(v, octets)) {
-                    sendResponse(conn, 400, "application/json", "{\"error\":\"not a dotted-quad IPv4\"}");
-                    return;
-                }
-                std::memcpy(c.ptr, octets, 4);
-                break;
-            }
-            case ControlType::ReadOnly:
-            case ControlType::ReadOnlyInt:
-            case ControlType::Progress:
-                // Immutable controls: reject the write before any side effects
-                // (no value change, no onUpdate, no dirty/save, no buildState).
+            case ApplyResult::OutOfRange:
+                sendResponse(conn, 400, "application/json", "{\"error\":\"value out of range\"}");
+                return;
+            case ApplyResult::Malformed:
+                sendResponse(conn, 400, "application/json", "{\"error\":\"value malformed\"}");
+                return;
+            case ApplyResult::ReadOnly:
                 sendResponse(conn, 400, "application/json", "{\"error\":\"control is read-only\"}");
                 return;
         }
@@ -892,45 +764,12 @@ void HttpServerModule::writeTypeDefaults(JsonSink& sink, const char* typeName) {
     bool first = true;
     for (uint8_t i = 0; i < cs.count(); i++) {
         auto& c = cs[i];
-        switch (c.type) {
-            case ControlType::Uint8:
-                sink.appendf("%s\"%s\":%u", first ? "" : ",", c.name,
-                             *static_cast<uint8_t*>(c.ptr));
-                break;
-            case ControlType::Uint16:
-                sink.appendf("%s\"%s\":%u", first ? "" : ",", c.name,
-                             *static_cast<uint16_t*>(c.ptr));
-                break;
-            case ControlType::Int16:
-                sink.appendf("%s\"%s\":%d", first ? "" : ",", c.name,
-                             *static_cast<int16_t*>(c.ptr));
-                break;
-            case ControlType::Bool:
-                sink.appendf("%s\"%s\":%s", first ? "" : ",", c.name,
-                             *static_cast<bool*>(c.ptr) ? "true" : "false");
-                break;
-            case ControlType::Text: {
-                char escaped[128];
-                jsonEscape(static_cast<char*>(c.ptr), escaped, sizeof(escaped));
-                sink.appendf("%s\"%s\":\"%s\"", first ? "" : ",", c.name, escaped);
-                break;
-            }
-            case ControlType::Select:
-                sink.appendf("%s\"%s\":%u", first ? "" : ",", c.name,
-                             *static_cast<uint8_t*>(c.ptr));
-                break;
-            case ControlType::IPv4: {
-                // Defaults for IPv4 are the constructor-time octets (e.g.
-                // 255.255.255.0 for subnet). Emit as a dotted-quad string —
-                // same wire shape as the live serializer.
-                char ipStr[16];
-                formatDottedQuad(ipStr, static_cast<const uint8_t*>(c.ptr));
-                sink.appendf("%s\"%s\":\"%s\"", first ? "" : ",", c.name, ipStr);
-                break;
-            }
-            default:
-                continue;  // ReadOnly/ReadOnlyInt/Progress: no default; Password: never serialized
-        }
+        // hasDefault filters out Password (default would defeat the secret),
+        // ReadOnly/ReadOnlyInt/Progress (no user input to seed). Everyone
+        // else emits `"name":value`; value rendering lives in Control.cpp.
+        if (!hasDefault(c.type)) continue;
+        sink.appendf("%s\"%s\":", first ? "" : ",", c.name);
+        writeControlValue(sink, c);
         first = false;
     }
     probe->teardown();

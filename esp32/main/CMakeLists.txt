@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "main.cpp"
         "../../src/main.cpp"
+        "../../src/core/Control.cpp"
         "../../src/core/HttpServerModule.cpp"
         "../../src/core/FilesystemModule.cpp"
         "../../src/core/Scheduler.cpp"

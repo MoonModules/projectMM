@@ -1,6 +1,7 @@
 #include "core/FilesystemModule.h"
 
 #include "core/Control.h"
+#include "core/JsonSink.h"   // fixed-buffer mode used by writeValue()
 #include "core/JsonUtil.h"
 #include "core/ModuleFactory.h"
 #include "core/Scheduler.h"
@@ -166,9 +167,7 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
     auto& cs = m->controls();
     for (uint8_t i = 0; i < cs.count(); i++) {
         auto& c = cs[i];
-        if (c.type == ControlType::ReadOnly
-            || c.type == ControlType::ReadOnlyInt
-            || c.type == ControlType::Progress) continue;
+        if (!isPersistable(c.type)) continue;
         std::snprintf(key, sizeof(key), "%s%s", prefix, c.name);
         applyValue(c, json, key);
     }
@@ -255,64 +254,11 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
 }
 
 void FilesystemModule::applyValue(const ControlDescriptor& c, const char* json, const char* key) {
-    switch (c.type) {
-        case ControlType::Uint8: {
-            int v = mm::json::parseInt(json, key);
-            if (v < c.min) v = c.min;
-            if (v > c.max) v = c.max;
-            *static_cast<uint8_t*>(c.ptr) = static_cast<uint8_t>(v);
-            break;
-        }
-        case ControlType::Uint16: {
-            int v = mm::json::parseInt(json, key);
-            *static_cast<uint16_t*>(c.ptr) = static_cast<uint16_t>(v);
-            break;
-        }
-        case ControlType::Int16: {
-            int v = mm::json::parseInt(json, key);
-            // Clamp before narrowing — parseInt returns int (up to ±2^31).
-            // A persisted-or-corrupted JSON value outside int16 range
-            // would otherwise wrap (e.g. 40000 → -25536). No c.min/c.max
-            // clamp here: those fields are uint8_t and can't bound an int16
-            // range, so applying them zeros every Int16 control on load.
-            if (v < INT16_MIN) v = INT16_MIN;
-            if (v > INT16_MAX) v = INT16_MAX;
-            *static_cast<int16_t*>(c.ptr) = static_cast<int16_t>(v);
-            break;
-        }
-        case ControlType::Bool:
-            *static_cast<bool*>(c.ptr) = mm::json::parseBool(json, key);
-            break;
-        case ControlType::Text:
-        case ControlType::Password: {
-            // Password persists to disk like Text — the leak that mattered
-            // was the network API, not local flash.
-            uint8_t maxLen = c.max > 0 ? c.max : 16;
-            mm::json::parseString(json, key, static_cast<char*>(c.ptr), maxLen);
-            break;
-        }
-        case ControlType::Select: {
-            int v = mm::json::parseInt(json, key);
-            if (v < 0) v = 0;
-            if (c.max > 0 && v >= c.max) v = c.max - 1;
-            *static_cast<uint8_t*>(c.ptr) = static_cast<uint8_t>(v);
-            break;
-        }
-        case ControlType::IPv4: {
-            // Wire format is a dotted-quad string; persistence matches.
-            // On parse failure leave the existing octets untouched — typical
-            // cause is a missing key (first boot before the user set static
-            // IP), which should fall through to the default ctor values.
-            char buf[16] = {};
-            mm::json::parseString(json, key, buf, sizeof(buf));
-            uint8_t octets[4] = {};
-            if (parseDottedQuad(buf, octets)) {
-                std::memcpy(c.ptr, octets, 4);
-            }
-            break;
-        }
-        default: break;
-    }
+    // Per-type parse + validate + apply lives in Control.cpp. Use Clamp:
+    // a stale on-disk value from a schema change should snap to the new
+    // bounds (Uint8 200 → max 100), not silently drop to 0. The HTTP API
+    // uses Strict instead so a bogus client value surfaces as a 400.
+    (void)applyControlValue(c, json, key, ApplyPolicy::Clamp);
 }
 
 // ---- Save ----
@@ -348,9 +294,7 @@ bool FilesystemModule::writeNode(MoonModule* m, char* buf, size_t bufLen, int& p
     auto& cs = m->controls();
     for (uint8_t i = 0; i < cs.count(); i++) {
         auto& c = cs[i];
-        if (c.type == ControlType::ReadOnly
-            || c.type == ControlType::ReadOnlyInt
-            || c.type == ControlType::Progress) continue;
+        if (!isPersistable(c.type)) continue;
         int n = std::snprintf(buf + pos, bufLen - pos, "%s\"%s%s\":", first ? "" : ",", prefix, c.name);
         if (n < 0 || static_cast<size_t>(pos + n) >= bufLen) return false;
         pos += n;
@@ -376,66 +320,16 @@ bool FilesystemModule::writeNode(MoonModule* m, char* buf, size_t bufLen, int& p
     return true;
 }
 
-// Emit a JSON string literal (with surrounding quotes) for `s`, escaping the
-// two characters that would otherwise break JSON: " and \. Returns false if
-// the value (plus quotes/escapes) does not fit the remaining buffer.
-bool FilesystemModule::writeJsonString(const char* s, char* buf, size_t bufLen, int& pos) {
-    if (static_cast<size_t>(pos) >= bufLen) return false;
-    buf[pos++] = '"';
-    for (; *s; s++) {
-        char c = *s;
-        bool escape = (c == '"' || c == '\\');
-        if (static_cast<size_t>(pos) + (escape ? 2 : 1) >= bufLen) return false;
-        if (escape) buf[pos++] = '\\';
-        buf[pos++] = c;
-    }
-    if (static_cast<size_t>(pos) + 1 >= bufLen) return false;
-    buf[pos++] = '"';
-    return true;
-}
-
 bool FilesystemModule::writeValue(const ControlDescriptor& c, char* buf, size_t bufLen, int& pos) {
-    int n = 0;
-    switch (c.type) {
-        case ControlType::Uint8:
-            n = std::snprintf(buf + pos, bufLen - pos, "%u",
-                              *static_cast<uint8_t*>(c.ptr));
-            break;
-        case ControlType::Uint16:
-            n = std::snprintf(buf + pos, bufLen - pos, "%u",
-                              *static_cast<uint16_t*>(c.ptr));
-            break;
-        case ControlType::Int16:
-            n = std::snprintf(buf + pos, bufLen - pos, "%d",
-                              *static_cast<int16_t*>(c.ptr));
-            break;
-        case ControlType::Bool:
-            n = std::snprintf(buf + pos, bufLen - pos, "%s",
-                              *static_cast<bool*>(c.ptr) ? "true" : "false");
-            break;
-        case ControlType::Text:
-        case ControlType::Password:
-            // Escape " and \ so a value like My"SSID can't produce malformed
-            // JSON. Returns false on buffer overflow.
-            return writeJsonString(static_cast<const char*>(c.ptr), buf, bufLen, pos);
-        case ControlType::Select:
-            n = std::snprintf(buf + pos, bufLen - pos, "%u",
-                              *static_cast<uint8_t*>(c.ptr));
-            break;
-        case ControlType::IPv4: {
-            // Serialize the 4-byte octet array as a dotted-quad string —
-            // same wire shape as HttpServerModule and the live API.
-            char ipStr[16];
-            formatDottedQuad(ipStr, static_cast<const uint8_t*>(c.ptr));
-            n = std::snprintf(buf + pos, bufLen - pos, "\"%s\"", ipStr);
-            break;
-        }
-        default:
-            n = std::snprintf(buf + pos, bufLen - pos, "null");
-            break;
-    }
-    if (n < 0 || static_cast<size_t>(pos + n) >= bufLen) return false;
-    pos += n;
+    // Bridge into the shared serializer via JsonSink's fixed-buffer mode:
+    // writeControlValue (in Control.cpp) writes through the JsonSink API,
+    // which writes into our slice and flips overflowed_ if we run out of
+    // capacity. Matches the prior overflow-returns-false contract.
+    if (pos < 0 || static_cast<size_t>(pos) >= bufLen) return false;
+    JsonSink local(buf + pos, bufLen - static_cast<size_t>(pos));
+    writeControlValue(local, c);
+    if (local.overflowed()) return false;
+    pos += static_cast<int>(local.size());
     return true;
 }
 

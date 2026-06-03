@@ -185,4 +185,69 @@ private:
     }
 };
 
+// ---------------------------------------------------------------------------
+// Serialization API — definitions live in Control.cpp.
+//
+// JsonSink is forward-declared so the 20+ MoonModule headers that include
+// Control.h to call addX() don't transitively pull in JsonSink + its
+// dependencies. Only the .cpp files that actually serialize (HttpServerModule,
+// FilesystemModule) include JsonSink.h directly.
+// ---------------------------------------------------------------------------
+
+class JsonSink;
+
+// Wire-format identifier for a control type — "uint8" / "select" / "ipv4" / …
+// Used in the type field of `/api/state` and as the JSON-doc cue for the UI.
+const char* controlTypeName(ControlType t);
+
+// Whether this type round-trips through FilesystemModule's load/save. False
+// for ReadOnly / ReadOnlyInt / Progress (device-derived display values that
+// would just get overwritten on the next loop1s).
+bool isPersistable(ControlType t);
+
+// Whether `/api/types`'s default-values block should emit a default for this
+// type. False for Password (defaults defeat the secret), false for the
+// read-only / derived types (no user input to seed).
+bool hasDefault(ControlType t);
+
+// Emit just the JSON value fragment — 42, "hi", true, "1.2.3.4". No name,
+// no surrounding quotes for the key, no braces. Caller composes the wrapper.
+// Password is rendered as plaintext-JSON-string here (the obfuscation step
+// is HTTP-API-specific and stays at the writeControls call site).
+void writeControlValue(JsonSink& sink, const ControlDescriptor& c);
+
+// Emit the per-type extras that go alongside `value` in `/api/state`:
+//   ,"min":N,"max":M   (Uint8 / Int16)
+//   ,"options":[…]     (Select)
+//   ,"total":N         (Progress)
+//   ,"unit":"…"        (ReadOnlyInt)
+// No leading comma, no trailing brace — caller's responsibility. Most types
+// emit nothing here.
+void writeControlMetadata(JsonSink& sink, const ControlDescriptor& c);
+
+// Outcome of applyControlValue. Caller decides what to do with each:
+// HttpServerModule maps to 400-with-message; FilesystemModule treats
+// non-Ok as "leave existing"; scenario_runner returns false to the caller.
+enum class ApplyResult : uint8_t {
+    Ok,
+    OutOfRange,    // numeric value outside the descriptor's bounds (Strict only)
+    Malformed,     // IPv4 string didn't parse, etc.
+    ReadOnly,      // tried to write a display-only control
+};
+
+// Out-of-range policy for numeric / Select writes. The HTTP API wants
+// strict rejection (a bogus client value should surface as a 400 rather
+// than silently get clamped); persistence load wants tolerant clamping
+// (a stale on-disk value from a schema change should still come close,
+// not silently drop to the default-constructed zero).
+enum class ApplyPolicy : uint8_t { Strict, Clamp };
+
+// Parse the JSON value at `json[key]` and apply it to the control's storage.
+// `json` is the enclosing JSON object's text; the function calls into
+// mm::json::parseInt / parseBool / parseString internally to extract the
+// right shape per ControlType. Non-Ok results leave the storage untouched.
+ApplyResult applyControlValue(const ControlDescriptor& c,
+                              const char* json, const char* key,
+                              ApplyPolicy policy = ApplyPolicy::Strict);
+
 } // namespace mm
