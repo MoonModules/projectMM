@@ -12,9 +12,11 @@
 // fetch()-ing http://192.168.1.X. The device-side Diagnose button (in
 // app.js) does the same job from the right side of the security boundary.
 //
-// State shape: `[{ name, url, lastSeen }]` keyed under
-// `projectMM.devices.v1` in localStorage. A schema bump (v2, …) is how
-// future migrations land.
+// State shape: `[{ name, url, lastSeen, board? }]` keyed under
+// `projectMM.devices.v1` in localStorage. `board` is optional — entries
+// from before Step 3 of the board-injection plan have no board field, and
+// the render path treats it as absent. A schema bump (v2, …) is how future
+// migrations land; additive fields like this one don't need one.
 
 const STORAGE_KEY = "projectMM.devices.v1";
 
@@ -109,7 +111,18 @@ function render() {
         const seenEl = document.createElement("div");
         seenEl.className = "device-seen";
         seenEl.textContent = `Provisioned ${relativeTime(device.lastSeen)}`;
-        info.append(nameEl, urlEl, seenEl);
+        info.append(nameEl, urlEl);
+        // Board line (between URL and last-seen) renders only when set —
+        // legacy entries from before the field was added stay unchanged.
+        // The orchestrator passes board into addProvisionedDevice() when
+        // SET_BOARD succeeded; "(any board)" provisions skip the field.
+        if (device.board) {
+            const boardEl = document.createElement("div");
+            boardEl.className = "device-board-name";
+            boardEl.textContent = device.board;
+            info.append(boardEl);
+        }
+        info.append(seenEl);
 
         const actions = document.createElement("div");
         actions.className = "device-actions";
@@ -167,8 +180,14 @@ export const myDevices = {
      * Add (or refresh) a device the user just provisioned. URL is the
      * post-Improv success URL — typically `http://MM-XXXX.local/` or
      * `http://<ip>/` depending on the firmware.
+     * @param {string} url
+     * @param {string} [board] - physical board name from the picker
+     *   (Step 3 of the board-injection plan). Empty / undefined = user
+     *   picked "(any board)" or the SET_BOARD RPC was skipped; the bookmark
+     *   row omits the board line. Non-empty updates an existing entry's
+     *   board on re-flash; never blanks a previously-set value.
      */
-    addProvisionedDevice(url) {
+    addProvisionedDevice(url, board) {
         if (!url || typeof url !== "string") return;
         // Restrict to http/https — the Visit button does window.open(url),
         // which would happily launch javascript: or file: URLs if a future
@@ -182,8 +201,14 @@ export const myDevices = {
         const now = new Date().toISOString();
         if (existing) {
             existing.lastSeen = now;
+            // Only overwrite board when caller supplied a value — re-flashing
+            // with "(any board)" mustn't blank a previously-set entry.
+            if (board) existing.board = board;
         } else {
-            state.devices.push({ name: nameFromUrl(url), url, lastSeen: now });
+            state.devices.push({
+                name: nameFromUrl(url), url, lastSeen: now,
+                board: board || "",
+            });
         }
         saveDevices(state.devices);
         render();

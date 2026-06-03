@@ -191,11 +191,12 @@ Builds on existing plan items: see [Runtime board presets](#runtime-board-preset
 - **No automatic device push.** Original plan called for a post-`PROVISIONED` HTTP fetch to inject the board, but ESP Web Tools 10.x emits `state-changed` on the internal `ImprovSerial` client (inside the dialog's shadow DOM), not as a bubbling DOM event on `<esp-web-install-button>`. Reading the EWT source (`src/install-dialog.ts`) confirmed there's no public event surface for "Improv just succeeded with URL X". (The pre-existing `devices.js` "Your devices" auto-add silently broke for the same reason — kept as best-effort for compatibility with future EWT releases that may re-expose the event.) Step 3 picks up the push on the Improv Web Serial channel — no DOM events, no mixed-content concern.
 - Net Step 2 win: end users at the public installer pick "LOLIN D32" first and can't accidentally flash `esp32s3-n16r8` on it. MoonDeck remains the working board-injection path until Step 3 lands.
 
-**Step 3 — Improv RPC injection (production path):**
-- Device: ImprovProvisioningModule gains a custom RPC command handler (`RPC_SET_BOARD = 0x80` or similar; vendor-extension range above the standard Improv commands). The handler calls BoardModule's control-write path (same one MoonDeck hits over HTTP today).
-- Installer page: opens its own Improv Web Serial connection to the device — separate from the ESP Web Tools install button, which doesn't expose its `ImprovSerial` client to the host page. This connection sends `RPC_SET_BOARD` after WiFi provisioning succeeds, AND captures the `improv.url` so `myDevices.addProvisionedDevice(url)` finally gets called (it's been silently broken since EWT 10.x for the same root cause — the DOM `state-changed` event doesn't bubble out). Both fixes land in this commit.
-- This is the public-installer path — no network involved, no CORS / mixed-content issues. Works from `ewowi.github.io` over HTTPS.
-- Open question for Step 3: does opening a second Web Serial connection alongside ESP Web Tools cause port-contention issues? May need to share the port via the SDK directly (drop ESP Web Tools' install button and use `esptool-js` + `improv-wifi-serial-sdk` together).
+**Step 3 — Improv RPC injection + full EWT replacement (DONE):**
+- Device: `platform_esp32_improv.cpp::improvHandleSetBoard` dispatches vendor RPC `0xFE` (high end of the 0x80–0xFE vendor range). Payload is a length-prefixed UTF-8 board name (1..23 ASCII-printable bytes). Validates inline; on accept publishes via the same producer/consumer pattern as `SEND_WIFI_CREDENTIALS` (atomic ready flag + buffer); `ImprovProvisioningModule::loop1s()` picks it up on the scheduler thread and calls `BoardModule::setBoard()`. Same dirty-flag + debounced-save chain MoonDeck's HTTP write triggers.
+- Browser: ESP Web Tools' install button was the blocker (OS-level SerialPort exclusivity + shadow-DOM event isolation). Dropped EWT entirely. New `docs/install/install-orchestrator.js` owns the SerialPort across flash (esptool-js) → WiFi provision (improv-wifi-serial-sdk) → SET_BOARD (raw frame bytes written via `port.writable.getWriter()` — the SDK's `writePacketToStream` is private as of 2.5.0). Custom install modal replaces EWT's dialog.
+- Same root cause behind the `devices.js` "Your devices" auto-add — fixed in this commit. `myDevices.addProvisionedDevice(url, board)` now fires from the orchestrator's `onSuccess` callback, populating the bookmark list as designed.
+- Vendor RPC dispatcher is the seed for the "Improv as a general data injector" forward-look. Step 4+ additions reuse the same pattern: new command ID + dispatcher case + orchestrator helper.
+- The future contributor note: don't naively re-add ESP Web Tools — the orchestrator works because it owns the port. Putting EWT back means giving up Improv RPC injection.
 
 **Step 4 — Catalog grows (only when there's a consumer):**
 - Once the device-side runtime board presets work ([Runtime board presets](#runtime-board-presets-multi-commit-partially-landed)) actually lands, `boards.json` entries gain optional `presets` fields (`ethernet.{phy, rmii_clock_gpio, mdio_gpio, …}`, `default_module_config.{Network, Layouts, …}`). MoonDeck pushes the relevant subset alongside the board key via a new `POST /api/system/board-preset` route. Until then, **don't add `presets` fields** — JSON shape grows when a consumer earns its keep, not before.
@@ -204,10 +205,10 @@ Builds on existing plan items: see [Runtime board presets](#runtime-board-preset
 
 Step 3's custom RPC infrastructure is the seed. Plausible follow-on injectables: device name override (skip the `MM-CAFE` default), MQTT broker URL (when MQTT module ever lands), static IP, DMX universe assignments, pre-shared API token. **Don't generalise yet** — building a generic key-value Improv injector before there's a second use case is premature abstraction. If two or three more inject-at-install fields land with the same shape, *then* refactor ImprovProvisioningModule into a generic handler that dispatches by RPC command ID to registered callbacks.
 
-**Risks worth noting:**
-- HTTP injection (step 2) only works in dev — the public installer can't use it. Step 3 is the real path.
-- ESP Web Tools' custom-Improv-RPC sending API needs verification. If it requires dropping below the high-level button to the SDK, that's a bigger lift than a one-line add.
-- `RPC_SET_BOARD` is a custom command ID — collisions with future Improv-spec additions are possible if the standard expands into the vendor range. Before picking the ID: check the latest Improv-serial spec at <https://www.improv-wifi.com/serial/> and survey ESPHome / Home Assistant for de facto vendor uses. Pick conservatively (high end of 0x80-0xFE) and document the choice in a comment at the definition site.
+**Resolved risks (Steps 1-3 done):**
+- ~~HTTP injection only works in dev~~ — Step 3's Improv RPC path works on HTTPS Pages, the dev/prod gap is closed.
+- ~~ESP Web Tools' custom-Improv-RPC sending API~~ — EWT doesn't expose ImprovSerial; Step 3 replaced the install button with our own esptool-js + improv-wifi-serial-sdk orchestrator (`docs/install/install-orchestrator.js`). SDK's `writePacketToStream` was also private; raw frame bytes via `port.writable.getWriter()` solved that.
+- ~~SET_BOARD command ID collision~~ — picked `0xFE` (high end of 0x80-0xFE vendor range), documented at the definition site in `platform_esp32_improv.cpp` and in `BoardModule.md`. Renegotiable if the spec ever expands into the high vendor range.
 
 ---
 

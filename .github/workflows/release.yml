@@ -278,6 +278,9 @@ jobs:
           mkdir -p pages/install
           cp -r docs/install/. pages/install/
           cp src/ui/release-picker.js pages/install/
+          # library.json — install page reads the project version from it.
+          # Same shape preview_installer.py stages locally.
+          cp library.json pages/install/
           ls -la pages/install/
 
       - uses: actions/upload-pages-artifact@v3

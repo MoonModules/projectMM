@@ -49,6 +49,13 @@ struct ImprovTaskState {
     std::atomic<bool>* ready = nullptr;   // module polls and clears
     char* statusBuf = nullptr;        // module shows as `provision_status`
     size_t statusBufLen = 0;
+
+    // Vendor SET_BOARD RPC (command 0xFE): module-owned BoardModule buffer
+    // (24 bytes) + ready flag. Same producer/consumer dance as ssid/password.
+    // Nullable: opt out by leaving null (desktop stub doesn't pass any).
+    char* boardOut = nullptr;
+    size_t boardOutLen = 0;
+    std::atomic<bool>* boardReady = nullptr;
 };
 static ImprovTaskState g_improv;  // single global — only one Improv task per device
 
@@ -168,10 +175,84 @@ static void improvHandleProvision(const improv::ImprovCommand& cmd) {
     improvSendCurrentState(improv::STATE_PROVISIONED);
 }
 
+// SET_BOARD vendor RPC (command 0xFE) — Step 3 of the board-injection plan.
+// The web installer's orchestrator sends this after WiFi provisioning so the
+// device persists its physical-board name (e.g. "LOLIN D32") without needing
+// MoonDeck or an HTTP fetch (which is blocked by mixed-content on Pages).
+//
+// Frame payload layout (after the standard Improv frame header):
+//   [0xFE]              command
+//   [data_len]          number of bytes that follow (= 1 + str_len)
+//   [str_len]           1..23, length of board name in bytes
+//   [str_bytes...]      ASCII-printable 0x20..0x7E only
+//
+// We parse the raw payload directly instead of going through
+// improv::parse_improv_data — that helper is WIFI_SETTINGS-shaped (n
+// length-prefixed strings into cmd.ssid/cmd.password) and may default-empty
+// the fields for unknown command IDs. Single-bytestring vendor commands are
+// cleaner to handle inline.
+//
+// On valid: write into g_improv.boardOut, set boardReady. The module's
+// loop1s() picks it up and calls BoardModule::setBoard which arms
+// FilesystemModule's debounced save. RpcResponse fires immediately —
+// validation already passed.
+//
+// On invalid: ErrorState 0x80 (ERROR_INVALID_BOARD, new vendor error code).
+static constexpr uint8_t IMPROV_CMD_SET_BOARD = 0xFE;
+static constexpr uint8_t IMPROV_ERROR_INVALID_BOARD = 0x80;
+
+static void improvHandleSetBoard(const uint8_t* payload, uint8_t len) {
+    if (!g_improv.boardOut || !g_improv.boardReady) {
+        // Module didn't opt in (no BoardModule wired). Mostly defensive —
+        // production wires it in main.cpp; failing-safe here keeps the dispatch
+        // path well-defined.
+        improvSendError(improv::ERROR_UNKNOWN_RPC);
+        return;
+    }
+    if (len < 3) {
+        improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_BOARD));
+        return;
+    }
+    // payload[0] is the command byte (0xFE) — we already dispatched on it.
+    // payload[1] is data_len; payload[2] is str_len.
+    uint8_t strLen = payload[2];
+    if (strLen == 0 || strLen >= g_improv.boardOutLen || 3u + strLen > len) {
+        improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_BOARD));
+        return;
+    }
+    for (uint8_t i = 0; i < strLen; i++) {
+        uint8_t b = payload[3 + i];
+        if (b < 0x20 || b > 0x7E) {
+            improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_BOARD));
+            return;
+        }
+    }
+    std::memcpy(g_improv.boardOut, payload + 3, strLen);
+    g_improv.boardOut[strLen] = 0;
+    // release-store: pairs with the module's acquire-load in loop1s() so the
+    // buffer write is visible before the consumer sees ready=true.
+    g_improv.boardReady->store(true, std::memory_order_release);
+    // Empty-payload RpcResponse for command 0xFE — signals success. The
+    // browser orchestrator can treat any RpcResponse with cmd=0xFE as ack.
+    auto rpc = improv::build_rpc_response(
+        static_cast<improv::Command>(IMPROV_CMD_SET_BOARD),
+        std::vector<std::string>{}, false);
+    improvSend(ImprovFrameType::RpcResponse, rpc);
+}
+
 // Dispatch a completed frame from the parser. Only RPC frames carry commands
 // we care about; the spec lets the other types through silently.
 static void improvDispatchFrame(const ImprovFrameParser& parser) {
     if (parser.lastType() != improv::TYPE_RPC) return;
+    // SET_BOARD short-circuits the standard improv::parse_improv_data path
+    // because that helper is WIFI_SETTINGS-shaped (n length-prefixed strings).
+    // Peek at the command byte first; vendor-RPC parsing handles its own payload.
+    const uint8_t* raw = parser.lastPayload();
+    uint8_t rawLen = parser.lastPayloadLen();
+    if (rawLen >= 1 && raw[0] == IMPROV_CMD_SET_BOARD) {
+        improvHandleSetBoard(raw, rawLen);
+        return;
+    }
     improv::ImprovCommand cmd = improv::parse_improv_data(
         parser.lastPayload(), parser.lastPayloadLen(), false);
     switch (cmd.command) {
@@ -263,7 +344,9 @@ bool improvProvisioningInit(const ImprovDeviceInfo& info,
                             char* ssidOut, size_t ssidOutLen,
                             char* passwordOut, size_t passwordOutLen,
                             std::atomic<bool>* ready,
-                            char* statusBuf, size_t statusBufLen) {
+                            char* statusBuf, size_t statusBufLen,
+                            char* boardOut, size_t boardOutLen,
+                            std::atomic<bool>* boardReady) {
     if (!info.name || !info.chipFamily || !info.firmwareVersion ||
         !ssidOut || ssidOutLen == 0 ||
         !passwordOut || passwordOutLen == 0 ||
@@ -280,6 +363,10 @@ bool improvProvisioningInit(const ImprovDeviceInfo& info,
     g_improv.ready = ready;
     g_improv.statusBuf = statusBuf;
     g_improv.statusBufLen = statusBufLen;
+    // SET_BOARD opt-in: caller may pass null/0/null to skip vendor-RPC support.
+    g_improv.boardOut = boardOut;
+    g_improv.boardOutLen = boardOutLen;
+    g_improv.boardReady = boardReady;
 
     // 6 KB stack: parser is small, scan response uses std::vector + std::string
     // (some short-string-optimised, some heap). Priority 4 — below OTA (5),
@@ -309,7 +396,9 @@ bool improvProvisioningInit(const ImprovDeviceInfo& /*info*/,
                             char* /*ssidOut*/,    size_t /*ssidOutLen*/,
                             char* /*passwordOut*/, size_t /*passwordOutLen*/,
                             std::atomic<bool>* /*ready*/,
-                            char* statusBuf, size_t statusBufLen) {
+                            char* statusBuf, size_t statusBufLen,
+                            char* /*boardOut*/, size_t /*boardOutLen*/,
+                            std::atomic<bool>* /*boardReady*/) {
     if (statusBuf && statusBufLen > 0) {
         std::snprintf(statusBuf, statusBufLen, "not supported (no WiFi)");
     }

@@ -14,13 +14,30 @@ Today this is a single-control module — a deliberate seed for the planned [Run
 
 ## Injection path
 
-Injection is a regular `POST /api/control` write to the `board` control on BoardModule. The control is bound `Text` with the `readonly` UI flag — so the framework's standard dispatcher copies the value into the buffer, marks the module dirty, and FilesystemModule's debounced save (2 s) writes the new value to disk. No bespoke setter, no bespoke route, no bespoke persistence. The `readonly` flag affects only the device's own UI rendering; it doesn't gate HTTP writes.
+Two transports, one data store. Both end up writing to the same `boardKey_` buffer and arming FilesystemModule's debounced save.
 
-One injector today: **MoonDeck**. It deduces the board from the device's `firmware` control whenever a single catalog entry claims that firmware (e.g. `esp32-eth` / `esp32-eth-wifi` → Olimex Gateway). For ambiguous firmwares (`esp32` runs on LOLIN D32, Generic ESP32 DevKit, …) the user picks via the per-device dropdown in MoonDeck's UI. After every `/api/discover` or `/api/refresh`, and after every dropdown change in MoonDeck (`POST /api/push-board` on the MoonDeck side, which calls `_push_board_to_device`), MoonDeck pushes the value to the device.
+### MoonDeck — HTTP `POST /api/control`
 
-The **web installer** shows a board picker above the firmware picker — picking a board filters the firmware dropdown to that board's `firmwares[]` and pre-selects `default_firmware`. It does NOT push the board to the device automatically: ESP Web Tools 10.x emits its post-Improv `state-changed` event on the internal `ImprovSerial` client (inside the dialog's shadow DOM), so there's no public DOM event for "Improv just succeeded with URL X" — the installer page can't reliably learn the device URL to fetch. End users at the public installer who want their board reflected on the device side fall back to MoonDeck for now.
+MoonDeck deduces the board from the device's `firmware` control whenever a single catalog entry claims that firmware (e.g. `esp32-eth` / `esp32-eth-wifi` → Olimex Gateway). For ambiguous firmwares (`esp32` runs on LOLIN D32, Generic ESP32 DevKit, …) the user picks via the per-device dropdown in MoonDeck's UI. After every `/api/discover` or `/api/refresh`, and after every dropdown change in MoonDeck (`POST /api/push-board` on the MoonDeck side, which calls `_push_board_to_device`), MoonDeck pushes the value to the device. The HTTP write goes through the standard control-write dispatcher; the `readonly` flag on the `board` control is a UI-rendering hint and does not gate the HTTP write.
 
-The Step 3 commit will add Improv RPC injection so the web installer can set the board over the same Web Serial channel that handled WiFi provisioning — no DOM event needed, no cross-origin fetch, works on HTTPS Pages. The device-side handler will call the same control-write path; the only difference is the transport.
+### Web installer — Improv vendor RPC SET_BOARD (0xFE)
+
+The web installer's custom orchestrator (`docs/install/install-orchestrator.js`) owns the SerialPort end-to-end: it flashes via esptool-js, provisions WiFi via the Improv standard `SEND_WIFI_CREDENTIALS` (0x01), then sends our vendor RPC `SET_BOARD` (0xFE) carrying the user's picked board name. The device-side handler at `src/platform/esp32/platform_esp32_improv.cpp::improvHandleSetBoard` validates the payload, signals the scheduler thread via a buffer + atomic flag, and the module's `loop1s()` calls `BoardModule::setBoard()`. Same dirty-flag + debounced-save chain MoonDeck triggers; the only difference is the transport.
+
+This commit replaced ESP Web Tools' install button. EWT 10.x held the SerialPort exclusively and fired its `state-changed` event inside its dialog's shadow DOM (verified by reading `esp-web-tools/src/install-dialog.ts`), which made post-PROVISIONED board injection from the installer page structurally impossible and also silently broke `devices.js`'s "Your devices" auto-add. Owning the SerialPort across flash + provision + RPC lets both fixes land — same dispatcher seeds future Step-4+ injectables (device name override, MQTT broker URL, DMX universe, …) each adding a new vendor command ID + dispatcher case.
+
+### SET_BOARD wire contract
+
+- **Frame type:** `0x03` (RPC) for request, `0x04` (RpcResponse) for success, `0x02` (ErrorState) for failure. Standard Improv framing (see `src/core/ImprovFrame.h`).
+- **RPC command ID:** `0xFE` — high end of the conventional `0x80..0xFE` vendor extension range, chosen to maximize headroom against future Improv-spec expansion into the low vendor range.
+- **Request payload** (within the Improv frame's `payload` field):
+  - `[0xFE]` command
+  - `[data_len]` number of bytes that follow (= 1 + str_len)
+  - `[str_len]` 1..23, length of board name in bytes
+  - `[board_name bytes]` UTF-8, validated as ASCII-printable (0x20..0x7E) only
+- **Success response:** type `0x04`, payload `[0xFE][0x00]` (command + zero-length data).
+- **Error response:** type `0x02`, single-byte payload `0x80 ERROR_INVALID_BOARD` for validation failures (empty, over-length, non-printable, malformed length prefix), or `improv::ERROR_UNKNOWN_RPC` if the device build doesn't have a BoardModule wired.
+- **Behavior:** can be sent any time after the Improv task is running, including post-PROVISIONED. No state-machine restriction. RpcResponse fires immediately from the Improv task; the actual `BoardModule::setBoard()` call is deferred to the next `loop1s()` tick on the scheduler thread (same producer/consumer pattern as `SEND_WIFI_CREDENTIALS`).
 
 ## Catalog
 

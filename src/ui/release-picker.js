@@ -49,6 +49,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000;  // 5 min — short enough to surface new RC
 // are intent, not data, and never expire on their own.
 const PREF_RELEASE_KEY  = "projectMM.picker.releaseTag";
 const PREF_FIRMWARE_KEY = "projectMM.picker.firmware";
+const PREF_BOARD_KEY    = "projectMM.picker.board";
 
 // One picker instance per init() call. Each tracks its own state so multiple
 // pickers on a page (unused today but possible) don't fight over selections.
@@ -66,6 +67,14 @@ function makeState() {
         selectedBoard: null,   // user pick from board <select>; "" for (any board)
     };
 }
+
+// Module-level handle to the most recently mounted picker's state, so the
+// host page can call releasePicker.getSelectedBoard() without threading the
+// state object through every callback. Web installer mounts exactly one
+// picker per page; if a future page mounts multiple, this becomes wrong
+// (returns whichever initialized last). See comment at makeState — pickers
+// are otherwise isolated.
+let _lastState = null;
 
 // ---------------------------------------------------------------------------
 // 2. GitHub Releases API + sessionStorage cache
@@ -293,6 +302,13 @@ function render(state) {
             opt.textContent = b.name;
             boardEl.appendChild(opt);
         }
+        // Restore the user's last picked board if it's still in the catalog
+        // (the catalog may have changed since their last visit; falling
+        // through to "(any board)" if their pick is gone is the safe shape).
+        const savedBoard = safeLocalGet(PREF_BOARD_KEY);
+        if (savedBoard && state.boards.find(b => b.name === savedBoard)) {
+            state.selectedBoard = savedBoard;
+        }
         boardEl.value = state.selectedBoard || "";
     }
 
@@ -426,14 +442,15 @@ function render(state) {
     });
 
     if (boardEl) {
-        // Picking a board narrows the firmware dropdown and may pre-select the
-        // board's default_firmware. Not persisted to localStorage — selecting
-        // a board is per-install-session intent ("today I'm flashing my
-        // LOLIN"), not a returning-user preference. Persisting it would
-        // mis-narrow the firmware dropdown next time the user opens the page
-        // for a different board.
+        // Picking a board narrows the firmware dropdown and may pre-select
+        // the board's default_firmware. Persisted to localStorage so a
+        // returning user (who usually flashes the same board over and over)
+        // doesn't have to re-pick. Same rationale as PREF_FIRMWARE_KEY; if a
+        // user is actually flashing a different board, they pick from the
+        // dropdown and the new choice persists.
         boardEl.addEventListener("change", () => {
             state.selectedBoard = boardEl.value;
+            safeLocalSet(PREF_BOARD_KEY, state.selectedBoard);
             refreshFirmwareDropdown();
         });
     }
@@ -499,6 +516,7 @@ export const releasePicker = {
             enableBoardPicker ? loadBoards() : Promise.resolve([]),
         ]);
         state.boards = boards;
+        _lastState = state;
         if (!data) {
             container.innerHTML =
                 `<div class="control-row"><span class="control-label">Releases</span>` +
@@ -524,5 +542,16 @@ export const releasePicker = {
             return;
         }
         render(state);
+    },
+
+    /**
+     * Returns the user-picked board name (catalog `name` field) from the
+     * most recently mounted picker, or "" when the picker is in
+     * "(any board)" mode, the catalog is unavailable, or the picker isn't
+     * mounted yet. Used by the install-orchestrator to know what to push
+     * via Improv SET_BOARD after WiFi provisioning succeeds.
+     */
+    getSelectedBoard() {
+        return _lastState ? (_lastState.selectedBoard || "") : "";
     },
 };

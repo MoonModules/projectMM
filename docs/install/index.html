@@ -5,20 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>projectMM — Install</title>
 
-  <!-- ESP Web Tools — pinned to an exact version with SRI on the entry file.
-       The bundle's chained module imports are not SRI-covered (each chunk is
-       fetched separately from unpkg with no integrity hash); the entry-file
-       SRI catches a tamper of the entry but not a deeper supply-chain attack.
-       Self-hosting the full bundle is a 2.0-hardening item if the threat model
-       changes. Bump the version + recompute the sha384 when upgrading.
-       Recreate the <esp-web-install-button> on dropdown change instead of
-       mutating the `manifest` attribute — some versions of the component
-       cache the parsed manifest and ignore live attribute writes. -->
-  <script type="module"
-          src="https://unpkg.com/esp-web-tools@10.2.1/dist/web/install-button.js?module"
-          integrity="sha384-2Ea4WL8tjFb0qQKUqBoX45KlPVoUgL+Z3zUqsD0MHmtJ3faDbfNyZulLg/LfYDUZ"
-          crossorigin="anonymous">
-  </script>
+  <!-- ESP Web Tools dropped in Step 3 of the board-injection plan. EWT 10.x
+       held the SerialPort exclusively and didn't expose its internal
+       ImprovSerial client, which made post-PROVISIONED board injection
+       impossible from this page (and silently broke "Your devices"
+       auto-add since the state-changed event never escaped the dialog's
+       shadow DOM). The install flow is now driven by
+       ./install-orchestrator.js — esptool-js for flash + improv-wifi-serial-sdk
+       for WiFi provisioning, both sharing the SerialPort we own end-to-end.
+       The orchestrator is imported by the inline module script at the
+       bottom of <body>; no top-level <script> needed. -->
 
   <style>
     :root {
@@ -44,6 +40,18 @@
       padding: 24px 16px 64px;
     }
     main { width: 100%; max-width: 640px; }
+    .version-chip {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 2px 8px;
+      background: var(--card);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: normal;
+      vertical-align: middle;
+    }
     h1 {
       margin: 0 0 8px;
       font-size: 28px;
@@ -69,6 +77,10 @@
     }
     .button-row { margin-top: 16px; }
     .note { color: var(--muted); font-size: 13px; margin-top: 10px; }
+    .erase-row { margin-top: 12px; font-size: 13px; }
+    .erase-row label { cursor: pointer; }
+    .erase-row input { vertical-align: middle; margin-right: 6px; }
+    .erase-note { display: inline; margin-top: 0; }
     a { color: var(--accent); }
     code {
       background: rgba(255,255,255,0.06);
@@ -145,12 +157,140 @@
       font-size: 12px;
       cursor: pointer;
     }
+    .device-board-name { color: var(--fg); font-size: 12px; margin-top: 2px; }
     .device-btn:hover { background: rgba(123, 158, 255, 0.08); }
+
+    /* Install modal — backdrop + centered card. Replaces the ESP Web Tools
+       <esp-web-install-button> shadow-DOM dialog. Sections show one at a
+       time via .install-section.active. */
+    .install-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0, 0, 0, 0.65);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .install-backdrop.open { display: flex; }
+    .install-modal {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+      max-width: 480px;
+      width: calc(100% - 32px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    }
+    .install-modal h2 {
+      margin: 0 0 16px;
+      font-size: 20px;
+      color: var(--accent);
+    }
+    .install-section { display: none; }
+    .install-section.active { display: block; }
+    .install-status { margin: 8px 0; color: var(--muted); }
+    .install-progress {
+      height: 8px;
+      background: var(--bg);
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 12px 0;
+    }
+    .install-progress-bar {
+      height: 100%;
+      background: var(--accent);
+      width: 0;
+      transition: width 0.2s;
+    }
+    .install-form label {
+      display: block;
+      margin: 12px 0 4px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .install-form input[type="text"],
+    .install-form input[type="password"] {
+      width: 100%;
+      padding: 8px 12px;
+      background: var(--bg);
+      color: var(--fg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font: inherit;
+    }
+    .install-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 16px;
+    }
+    .install-actions button {
+      padding: 8px 16px;
+      font: inherit;
+      font-weight: 600;
+      border: 0;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .install-actions button.primary {
+      background: var(--accent);
+      color: #1a1a2e;
+    }
+    .install-actions button.secondary {
+      background: transparent;
+      color: var(--fg);
+      border: 1px solid var(--border);
+    }
+    .install-error {
+      color: #f8a5a5;
+      font-size: 13px;
+      margin: 12px 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .install-success-url {
+      display: inline-block;
+      margin-top: 8px;
+      color: var(--accent);
+      text-decoration: none;
+      font-family: ui-monospace, monospace;
+    }
+    .install-success-url:hover { text-decoration: underline; }
+    .install-log-wrap {
+      margin-top: 16px;
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+    }
+    .install-log-toggle {
+      background: transparent;
+      color: var(--muted);
+      border: 0;
+      padding: 0;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      text-decoration: underline;
+    }
+    .install-log-toggle:hover { color: var(--fg); }
+    .install-log {
+      margin-top: 8px;
+      max-height: 240px;
+      overflow: auto;
+      background: var(--bg);
+      color: var(--muted);
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
   </style>
 </head>
 <body>
   <main>
-    <h1>projectMM</h1>
+    <h1>projectMM <span class="version-chip" id="version-chip" hidden></span></h1>
     <p class="tag">Plug in your ESP32. Pick a release + board. Flash. Get the device on your network. Open it in a browser.</p>
 
     <div class="card browser-warning" id="browser-warning">
@@ -173,15 +313,29 @@
            Board. Same module the on-device OTA UI uses. -->
       <div id="picker-mount"></div>
 
-      <!-- ESP Web Tools button injected by onInstall (below) — kept on its
-           own host so the picker's UI stays purely a picker, with no install
-           transport baked in. The host is hidden because we auto-click the
-           injected <esp-web-install-button>'s inner activate slot from the
-           onInstall callback (line ~232) — the user only needs the picker's
-           Install button, which is the "decide" affordance. The ESP Web
-           Tools button still has to exist in the DOM for Web Serial to take
-           over after auto-click, but it never needs to be visible. -->
-      <div class="button-row" id="button-host" style="display: none"></div>
+      <!-- Erase opt-in. Default off because a normal re-flash overwrites
+           bootloader+partition-table+app in place (the regions writeFlash
+           touches) and preserves user state (WiFi credentials, board name)
+           on LittleFS, which is what users usually want. Tick the box when:
+             - switching firmware variants whose partition tables differ
+               (esp32 1.3MB app vs esp32s3-n16r8 16MB flash)
+             - wiping persisted user state (a chip that already has saved
+               WiFi boots into PROVISIONED and the installer can't speak
+               Improv to it; erase first avoids that)
+             - clean-slate testing
+           Costs ~12 s of chip-erase time before the flash starts. -->
+      <div class="erase-row">
+        <label>
+          <input type="checkbox" id="erase-before-flash">
+          Erase chip first
+          <span class="note erase-note">— wipes saved WiFi + board, adds ~12 s. Tick when switching firmware variant or starting clean.</span>
+        </label>
+      </div>
+
+      <!-- Install modal mounts at end of body so it overlays everything.
+           Driven by install-orchestrator.js, opened from the picker's
+           onInstall callback. -->
+
 
       <p class="note">
         Ethernet builds (<code>esp32-eth</code>, <code>esp32-eth-wifi</code>)
@@ -195,7 +349,7 @@
 
     <div class="card">
       <strong>Step 2 — Get the device on your network.</strong>
-      <p><strong>WiFi:</strong> right after flashing, the ESP Web Tools dialog above shows a <em>Configure Wi-Fi</em> step (via Improv) — enter your SSID + password, click <strong>Connect</strong>, the device joins your network. If the dialog didn't appear or you skipped it: the device boots a SoftAP named <code>MM-XXXX</code> (4 hex digits from the chip MAC). Join it from your phone or laptop, open <code>http://4.3.2.1</code>, enter your WiFi credentials. The device reboots and joins your network.</p>
+      <p><strong>WiFi:</strong> the installer walks you through a <em>Configure Wi-Fi</em> step right after flashing — enter your SSID + password, click <strong>Connect</strong>, the device joins your network and the installer remembers it under "Your devices" below. If you skipped that step: the device boots a SoftAP named <code>MM-XXXX</code> (4 hex digits from the chip MAC). Join it from your phone or laptop, open <code>http://4.3.2.1</code>, enter your WiFi credentials. The device reboots and joins your network.</p>
       <p><strong>Ethernet:</strong> plug a cable in. No credentials needed — the device joins immediately.</p>
     </div>
 
@@ -221,24 +375,101 @@
     </div>
   </main>
 
+  <!-- Install modal — driven entirely by JS below. Sections show one at a
+       time via .install-section.active toggling. Empty until the user
+       clicks Install in the picker. -->
+  <div class="install-backdrop" id="install-backdrop">
+    <div class="install-modal">
+      <h2 id="install-title">Installing</h2>
+
+      <div class="install-section" id="section-connecting">
+        <div class="install-status">Connecting to device over Web Serial…</div>
+        <div class="install-status" id="connecting-detail"></div>
+      </div>
+
+      <div class="install-section" id="section-flashing">
+        <div class="install-status" id="flashing-status">Preparing to flash…</div>
+        <div class="install-progress"><div class="install-progress-bar" id="flash-bar"></div></div>
+      </div>
+
+      <div class="install-section" id="section-wifi-form">
+        <div class="install-status">Flash done. Enter your WiFi credentials to provision the device.</div>
+        <form id="wifi-form" class="install-form" onsubmit="return false">
+          <label for="wifi-ssid">Network name (SSID)</label>
+          <input type="text" id="wifi-ssid" autocomplete="off" required>
+          <label for="wifi-password">Password</label>
+          <input type="password" id="wifi-password" autocomplete="new-password">
+          <div class="install-actions">
+            <button type="button" class="secondary" id="wifi-skip">Skip</button>
+            <button type="submit" class="primary" id="wifi-connect">Connect</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="install-section" id="section-provisioning">
+        <div class="install-status" id="provisioning-status">Connecting to your WiFi…</div>
+      </div>
+
+      <div class="install-section" id="section-done">
+        <div class="install-status">Device is online!</div>
+        <a class="install-success-url" id="done-url" target="_blank" rel="noopener"></a>
+        <div class="install-actions">
+          <button type="button" class="primary" id="done-close">Close</button>
+        </div>
+      </div>
+
+      <div class="install-section" id="section-error">
+        <div class="install-status">Something went wrong.</div>
+        <div class="install-error" id="error-message"></div>
+        <div class="install-actions">
+          <button type="button" class="secondary" id="error-close">Close</button>
+        </div>
+      </div>
+
+      <!-- Log panel — collapsible, shows esptool-js + ImprovSerial chatter.
+           Mostly for diagnosing flash failures; hidden by default to keep
+           the modal compact. -->
+      <div class="install-log-wrap">
+        <button type="button" class="install-log-toggle" id="log-toggle">Show log</button>
+        <pre class="install-log" id="install-log" hidden></pre>
+      </div>
+    </div>
+  </div>
+
   <script type="module">
-    // Shared release-picker (channel → release → board). Same file, same
-    // logic the on-device UI uses for OTA. Both pages run it; only the
-    // onInstall callback differs:
+    // Shared release-picker (channel → release → board). Same file as the
+    // on-device OTA UI uses; only the onInstall callback differs:
     //   - Device UI: POST the chosen .bin URL to /api/firmware/url; device
     //     fetches the binary directly via esp_https_ota.
-    //   - Web installer (here): set the chosen manifest URL on
-    //     <esp-web-install-button>; ESP Web Tools flashes via Web Serial.
+    //   - Web installer (here): hand the manifest URL to the orchestrator,
+    //     which flashes via esptool-js then provisions WiFi via Improv,
+    //     all over the same SerialPort.
     //
     // Manifests + binaries must be same-origin with this page (Web Serial
-    // CORS), which is why the release workflow self-hosts the last N
-    // releases into pages/install/releases/<tag>/. The manifest URL the
-    // picker hands us is the absolute GitHub-release URL; we don't fetch
-    // it directly — ESP Web Tools fetches it via the
-    // <esp-web-install-button> shadow DOM, which IS subject to CORS, so
-    // before clicking we rewrite the URL to the same-origin Pages copy.
+    // would happily flash from any URL, but the manifest fetch + part
+    // downloads via fetch() are subject to CORS). The release workflow
+    // self-hosts the last N releases into pages/install/releases/<tag>/.
+    // toLocalUrl rewrites the picker's absolute GitHub URLs to the local
+    // copies before handing them to the orchestrator.
     import { releasePicker } from "./release-picker.js";
     import { myDevices }    from "./devices.js";
+    import { installer }    from "./install-orchestrator.js";
+
+    // Show the project version next to the heading. library.json ships
+    // alongside index.html (preview_installer.py + release.yml both copy
+    // it). Fetch silently — if it's missing for any reason, leave the
+    // chip hidden rather than rendering "?" noise.
+    (async () => {
+        try {
+            const res = await fetch("./library.json");
+            if (!res.ok) return;
+            const lib = await res.json();
+            if (!lib || !lib.version) return;
+            const chip = document.getElementById("version-chip");
+            chip.textContent = `v${lib.version}`;
+            chip.hidden = false;
+        } catch (_) { /* silent: cosmetic-only */ }
+    })();
 
     // Map a GitHub release-asset URL to its Pages-hosted mirror.
     //   https://github.com/ewowi/projectMM/releases/download/<TAG>/<file>
@@ -250,99 +481,236 @@
       return `./releases/${tag}/${name}`;
     }
 
-    const host = document.getElementById("button-host");
+    // --- Install modal section toggling ---------------------------------
+    const backdrop = document.getElementById("install-backdrop");
+    const title = document.getElementById("install-title");
+    const sections = {
+      connecting:   document.getElementById("section-connecting"),
+      flashing:     document.getElementById("section-flashing"),
+      wifiForm:     document.getElementById("section-wifi-form"),
+      provisioning: document.getElementById("section-provisioning"),
+      done:         document.getElementById("section-done"),
+      error:        document.getElementById("section-error"),
+    };
+    function showSection(name) {
+      for (const [k, el] of Object.entries(sections)) {
+        el.classList.toggle("active", k === name);
+      }
+    }
+    function openModal(titleText) {
+      title.textContent = titleText;
+      backdrop.classList.add("open");
+      // Reset the log per install session so users see only the current run.
+      document.getElementById("install-log").textContent = "";
+      // Reset toggle to collapsed state.
+      const log = document.getElementById("install-log");
+      const toggle = document.getElementById("log-toggle");
+      log.hidden = true;
+      toggle.textContent = "Show log";
+    }
+    function closeModal() {
+      backdrop.classList.remove("open");
+    }
+    document.getElementById("done-close").addEventListener("click", closeModal);
+    document.getElementById("error-close").addEventListener("click", closeModal);
 
-    // The last manifest URL the user clicked Install on — kept so the
-    // Erase flow below can re-instantiate <esp-web-install-button> with
-    // the same manifest. ESP Web Tools requires a manifest even on the
-    // erase path (its modal offers "Erase + then Install", and Install
-    // needs to know what to install).
-    let lastInstallManifest = null;
-
-    // Build (and auto-click) an <esp-web-install-button>. Used by both
-    // the install path (releasePicker.onInstall below) and the Erase
-    // path (myDevices.onErase). The only difference is `erase-first`,
-    // which makes ESP Web Tools start with the chip-erase step and
-    // offer the install afterwards (the user can cancel that half).
-    async function showInstallModal(manifestUrl, firmware, { eraseFirst = false } = {}) {
-      host.innerHTML = "";
-      const btn = document.createElement("esp-web-install-button");
-      btn.setAttribute("manifest", manifestUrl);
-      if (eraseFirst) btn.setAttribute("erase-first", "");
-      // Watch for the Improv "PROVISIONED" event so we can remember the
-      // device URL the user just provisioned. ESP Web Tools fires
-      // `state-changed` on the install button as it walks the flow;
-      // the PROVISIONED payload includes the device URL Improv emitted.
-      // NB: this listener does not fire on ESP Web Tools 10.x — the
-      // `state-changed` event is emitted internally on the ImprovSerial client
-      // inside the dialog's shadow DOM, not as a bubbling DOM event on the
-      // button. Confirmed by reading the EWT source (src/install-dialog.ts:
-      // `client.addEventListener("state-changed", () => this.requestUpdate())`).
-      // Kept for the legacy <10 fallback the project bundled against. The
-      // board injection from this install page lands in Step 3 of the
-      // board-injection plan, where the Improv Web Serial channel is the
-      // transport (no DOM events involved). Devices the user provisions here
-      // currently don't auto-populate "Your devices" either — same root cause.
-      btn.addEventListener("state-changed", (ev) => {
-        const d = ev.detail || {};
-        if (d.state === "PROVISIONED" && d.improv && d.improv.url) {
-          myDevices.addProvisionedDevice(d.improv.url);
-        }
-      });
-      const inner = document.createElement("button");
-      inner.slot = "activate";
-      inner.textContent = eraseFirst ? `Erase + Install on ${firmware}` : `Install on ${firmware}`;
-      inner.style.cssText = [
-        "padding: 12px 20px",
-        "font: inherit",
-        "font-weight: 600",
-        "background: var(--accent)",
-        "color: #1a1a2e",
-        "border: 0",
-        "border-radius: 6px",
-        "cursor: pointer",
-      ].join("; ");
-      btn.appendChild(inner);
-      host.appendChild(btn);
-      // Wait one tick for the custom element to upgrade, then auto-click
-      // so the user only has to confirm once.
-      await new Promise(resolve => requestAnimationFrame(resolve));
-      inner.click();
+    // Log panel: collapsible, fed by the orchestrator's onLog callback.
+    // Auto-scrolls to bottom on append so the latest line is always visible.
+    const logEl = document.getElementById("install-log");
+    const logToggle = document.getElementById("log-toggle");
+    logToggle.addEventListener("click", () => {
+      logEl.hidden = !logEl.hidden;
+      logToggle.textContent = logEl.hidden ? "Show log" : "Hide log";
+    });
+    function appendLog(line) {
+      logEl.textContent += line + "\n";
+      logEl.scrollTop = logEl.scrollHeight;
     }
 
+    // --- Orchestrator UI bindings --------------------------------------
+    // Mapping from orchestrator's progress stage → which modal section to
+    // show + any per-stage detail rendering. Centralizes the UI ↔ flow
+    // contract so the orchestrator stays UI-agnostic.
+    function handleProgress(stage, detail) {
+      switch (stage) {
+        case "request-port":
+          showSection("connecting");
+          document.getElementById("connecting-detail").textContent =
+            "Pick the serial port the device is connected to.";
+          break;
+        case "connect-flash":
+          showSection("connecting");
+          document.getElementById("connecting-detail").textContent =
+            detail && detail.chipName
+              ? `Detected ${detail.chipName}`
+              : "Detecting chip…";
+          break;
+        case "fetch-firmware":
+          showSection("flashing");
+          document.getElementById("flashing-status").textContent =
+            "Downloading firmware…";
+          document.getElementById("flash-bar").style.width = "0%";
+          break;
+        case "erase":
+          showSection("flashing");
+          document.getElementById("flashing-status").textContent =
+            "Erasing flash (this takes ~10 s)…";
+          document.getElementById("flash-bar").style.width = "0%";
+          break;
+        case "flash": {
+          showSection("flashing");
+          const pct = detail && typeof detail.pct === "number" ? detail.pct : 0;
+          document.getElementById("flashing-status").textContent =
+            `Writing firmware… ${pct}%`;
+          document.getElementById("flash-bar").style.width = `${pct}%`;
+          break;
+        }
+        case "reboot":
+          showSection("connecting");
+          document.getElementById("connecting-detail").textContent =
+            "Rebooting device…";
+          break;
+        case "connect-improv":
+          showSection("connecting");
+          document.getElementById("connecting-detail").textContent =
+            "Connecting over Improv…";
+          break;
+        case "wifi-creds-form":
+          showSection("wifiForm");
+          // Focus SSID for keyboard-driven UX.
+          requestAnimationFrame(() => document.getElementById("wifi-ssid").focus());
+          break;
+        case "provisioning":
+          showSection("provisioning");
+          document.getElementById("provisioning-status").textContent =
+            "Connecting to your WiFi…";
+          break;
+        case "set-board":
+          showSection("provisioning");
+          document.getElementById("provisioning-status").textContent =
+            "Setting board identity…";
+          break;
+        case "done":
+          // onSuccess fires next; section toggles there once URL is known.
+          break;
+      }
+    }
+
+    // Returns a Promise the orchestrator awaits — resolves when the user
+    // submits the WiFi form. The form's Connect button completes via the
+    // form's submit event; the Skip button bypasses WiFi (the device
+    // falls back to its AP). Skip resolves with empty creds — the
+    // orchestrator's provision() with empty SSID will fail fast and the
+    // user falls back to the AP flow as documented in Step 2.
+    function uiWaitForCreds() {
+      return new Promise((resolve) => {
+        const form = document.getElementById("wifi-form");
+        const ssidEl = document.getElementById("wifi-ssid");
+        const passEl = document.getElementById("wifi-password");
+        const skipBtn = document.getElementById("wifi-skip");
+
+        const onSubmit = (e) => {
+          e.preventDefault();
+          cleanup();
+          resolve({ ssid: ssidEl.value.trim(), password: passEl.value });
+        };
+        const onSkip = () => {
+          cleanup();
+          resolve({ ssid: "", password: "" });
+        };
+        const cleanup = () => {
+          form.removeEventListener("submit", onSubmit);
+          skipBtn.removeEventListener("click", onSkip);
+        };
+        form.addEventListener("submit", onSubmit);
+        skipBtn.addEventListener("click", onSkip);
+      });
+    }
+
+    function handleSuccess({ url, board, alreadyOnline }) {
+      showSection("done");
+      const a = document.getElementById("done-url");
+      if (alreadyOnline) {
+        // Device booted with saved WiFi from a previous flash; the SDK's
+        // initialize() failed because the device immediately reports
+        // STATE_PROVISIONED instead of STATE_AUTHORIZED. We can't push
+        // SET_BOARD (no Improv handshake) and we don't know the device URL
+        // (the spec emits it as part of the state frame but the SDK swallows
+        // that on failure). User-visible message: flash succeeded, device
+        // is probably online — visit it and set board via MoonDeck.
+        a.removeAttribute("href");
+        a.textContent =
+          "Flash succeeded. Device may already be online with saved WiFi " +
+          "from a previous install. Find it on your network (look for the " +
+          "MM-XXXX.local hostname or check your router), then set the " +
+          "board name via MoonDeck if you picked one above.";
+        return;
+      }
+      a.href = url;
+      a.textContent = url;
+      // Stash the device + picked board into "Your devices" so the user can
+      // revisit later. This is the part EWT 10.x silently broke
+      // (state-changed never escaped the shadow DOM); we own it now.
+      myDevices.addProvisionedDevice(url, board);
+    }
+
+    function handleError(stage, error) {
+      console.error("[install]", stage, error);
+      showSection("error");
+      document.getElementById("error-message").textContent =
+        `Stage: ${stage}\n${error && error.message ? error.message : error}`;
+    }
+
+    // --- Picker wiring -------------------------------------------------
     releasePicker.init({
       container: document.getElementById("picker-mount"),
       ownFirmwareKey: null,  // web installer flashes any firmware variant
       onInstall: async (firmware, manifestUrl /*, binaryUrl */) => {
         const localUrl = toLocalUrl(manifestUrl);
-        lastInstallManifest = { url: localUrl, firmware };
-        await showInstallModal(localUrl, firmware);
+        const board = releasePicker.getSelectedBoard();
+        openModal(board ? `Installing on ${board}` : `Installing ${firmware}`);
+        showSection("connecting");
+        document.getElementById("connecting-detail").textContent = "";
+        const eraseBefore = document.getElementById("erase-before-flash").checked;
+        await installer.start({
+          manifestUrl: localUrl,
+          board,
+          eraseBefore,
+          onProgress: handleProgress,
+          uiWaitForCreds,
+          onSuccess: handleSuccess,
+          onError: handleError,
+          onLog: appendLog,
+        });
       },
     });
 
     myDevices.init({
       container: document.getElementById("devices-mount"),
       onErase: async (device) => {
-        // Erase reuses the install-modal path. We need a manifest because
-        // ESP Web Tools' API doesn't expose erase-only mode; the user can
-        // cancel the install half of the modal if they only wanted to
-        // wipe the chip. Pick the user's last-installed manifest if we
-        // have it, else the newest release the picker has loaded.
-        const m = lastInstallManifest;
-        if (!m) {
-          alert("Click Install above first (even if you cancel the modal). " +
-                "Erase reuses that manifest for the post-erase install " +
-                "option — selecting a release + firmware in the dropdowns " +
-                "isn't enough; the install flow has to register the choice.");
+        if (!confirm(
+            `Erase ${device.name}? This wipes WiFi credentials and all ` +
+            `module state. You can flash a fresh firmware afterwards.`)) {
           return;
         }
-        await showInstallModal(m.url, m.firmware, { eraseFirst: true });
+        openModal(`Erasing ${device.name}`);
+        showSection("connecting");
+        document.getElementById("connecting-detail").textContent = "";
+        await installer.eraseOnly({
+          onProgress: handleProgress,
+          onSuccess: () => {
+            showSection("done");
+            const a = document.getElementById("done-url");
+            a.removeAttribute("href");
+            a.textContent = "Erase complete — flash a fresh firmware to use the device again.";
+          },
+          onError: handleError,
+          onLog: appendLog,
+        });
       },
     });
 
     // Show the unsupported-browser banner when Web Serial isn't available.
-    // ESP Web Tools also surfaces its own message, but a card at the top of
-    // the page is more discoverable than the in-button tooltip.
     if (!("serial" in navigator)) {
       document.getElementById("browser-warning").style.display = "block";
     }

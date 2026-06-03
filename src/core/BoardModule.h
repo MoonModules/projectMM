@@ -2,20 +2,22 @@
 
 // BoardModule — owns the physical-hardware identity key (e.g.
 // "olimex-esp32-gateway-rev-g"). The device cannot self-identify the
-// board, so the key is INJECTED by MoonDeck (today) and the web installer
-// (Step 2 of the multi-commit board-injection plan).
+// board, so the key is INJECTED by MoonDeck (HTTP /api/control), the web
+// installer (Improv RPC SET_BOARD), or future Step-4+ injectors.
 //
-// Injection uses the standard POST /api/control route — `board` is a Text
-// control, so the existing control-write path copies into the buffer,
-// triggers FilesystemModule's debounced save to /.config/BoardModule.json,
-// and the value survives reboots. No bespoke setter, no bespoke route, no
-// bespoke persistence — the framework already does all of it.
+// Two write paths today:
+//   1. HTTP /api/control — Text control auto-persisted by FilesystemModule.
+//      Used by MoonDeck and any other LAN client.
+//   2. setBoard() — direct setter called by ImprovProvisioningModule when
+//      the vendor RPC SET_BOARD (0xFE) arrives over Improv Serial. Used by
+//      the web installer (the only client speaking Improv to us). Mirrors
+//      NetworkModule::setWifiCredentials' shape: copy + markDirty + noteDirty,
+//      so FilesystemModule's standard debounced save still owns persistence.
 //
-// The "UI shouldn't edit board" property is convention, not enforcement.
-// If a user does edit it manually, MoonDeck's next discover pushes the
-// catalog value back, so it's self-healing. (Future Step 3 — Improv RPC
-// injection — uses the same control-write path on the device side, just
-// invoked from the Improv command dispatcher instead of HTTP.)
+// The setBoard path bypasses the `readonly` UI flag on the `board` control
+// intentionally — that flag is a UI-rendering hint, not a write gate, same
+// as MoonDeck's HTTP write. Both injection paths produce identical persisted
+// state.
 //
 // Lives as a code-wired child of SystemModule, mirroring how Improv lives
 // under NetworkModule. Today this is a single-field module; future commits
@@ -23,6 +25,9 @@
 // controls (see docs/plan.md § Runtime board presets).
 
 #include "core/MoonModule.h"
+#include "core/FilesystemModule.h"
+
+#include <cstring>
 
 namespace mm {
 
@@ -43,6 +48,27 @@ public:
     }
 
     const char* board() const { return boardKey_; }
+
+    // External setter for transports that bypass /api/control (today: Improv
+    // vendor RPC SET_BOARD from the web installer). Validates: 1..23 chars,
+    // ASCII-printable (0x20–0x7E), no embedded NUL. Returns false on
+    // rejection so the Improv handler can map to ErrorState. On accept:
+    // copies into boardKey_ and arms FilesystemModule's debounced save —
+    // same idiom as NetworkModule::setWifiCredentials.
+    bool setBoard(const char* value) {
+        if (!value) return false;
+        size_t n = std::strlen(value);
+        if (n == 0 || n >= sizeof(boardKey_)) return false;
+        for (size_t i = 0; i < n; i++) {
+            unsigned char b = static_cast<unsigned char>(value[i]);
+            if (b < 0x20 || b > 0x7E) return false;
+        }
+        std::strncpy(boardKey_, value, sizeof(boardKey_) - 1);
+        boardKey_[sizeof(boardKey_) - 1] = 0;
+        markDirty();
+        FilesystemModule::noteDirty();
+        return true;
+    }
 
 private:
     char boardKey_[24] = {};

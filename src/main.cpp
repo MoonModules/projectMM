@@ -159,6 +159,11 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
             mm::ModuleFactory::create("ImprovProvisioningModule"));
         improvModule->setSystemModule(systemModule);
         improvModule->setNetworkModule(networkModule);
+        // SET_BOARD vendor RPC (command 0xFE, see platform_esp32_improv.cpp).
+        // ImprovProvisioningModule's loop1s() picks up the validated payload
+        // and forwards to boardModule->setBoard(), which arms the standard
+        // FilesystemModule debounced save — same idiom as MoonDeck's HTTP push.
+        improvModule->setBoardModule(boardModule);
         // Mark wired-by-code so applyNode's trim loop preserves it on devices
         // whose saved Network.json predates the Improv child (the upgrade case).
         improvModule->markWiredByCode();

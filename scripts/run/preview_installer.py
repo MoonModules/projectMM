@@ -94,6 +94,12 @@ def stage_install_page():
             shutil.copy(src, STAGE_DIR / src.name)
     # release-picker.js lives in src/ui/ (shared with the on-device UI).
     shutil.copy(PICKER_JS, STAGE_DIR / "release-picker.js")
+    # library.json — install page reads the project version from it.
+    # Same path the picker fetches relative to (./library.json). Pages
+    # mirror via release.yml's "cp library.json pages/install/" step.
+    library_json = ROOT / "library.json"
+    if library_json.exists():
+        shutil.copy(library_json, STAGE_DIR / "library.json")
 
 
 def find_local_builds() -> list[Path]:

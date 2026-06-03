@@ -140,11 +140,19 @@ struct ImprovDeviceInfo {
     const char* chipFamily;      // "ESP32" / "ESP32-S3" / ...
     const char* firmwareVersion; // e.g. "1.0.0-rc2"
 };
+// Board-extension args (boardOut/boardOutLen/boardReady) are for the vendor
+// SET_BOARD RPC (command 0xFE) — when set, the Improv task validates the RPC
+// payload, writes the board name into boardOut, and publishes via
+// boardReady's release-store. Pass nullptr/0/nullptr to opt out (desktop
+// stub, future targets without BoardModule). Mirrors the ssid/password
+// triple: validate + buffer-write + flag-signal, scheduler thread reads.
 bool improvProvisioningInit(const ImprovDeviceInfo& info,
                             char* ssidOut, size_t ssidOutLen,
                             char* passwordOut, size_t passwordOutLen,
                             std::atomic<bool>* ready,
-                            char* statusBuf, size_t statusBufLen);
+                            char* statusBuf, size_t statusBufLen,
+                            char* boardOut = nullptr, size_t boardOutLen = 0,
+                            std::atomic<bool>* boardReady = nullptr);
 
 class UdpSocket {
 public:
