@@ -116,7 +116,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            299,
+            297,
             492
           ],
           "free_heap": [
@@ -218,7 +218,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            300,
+            299,
             481
           ],
           "free_heap": [
@@ -321,7 +321,7 @@
         "pc-macos": {
           "tick_us": [
             296,
-            362
+            476
           ],
           "free_heap": [
             0,
@@ -423,7 +423,7 @@
         "pc-macos": {
           "tick_us": [
             294,
-            370
+            397
           ],
           "free_heap": [
             0,

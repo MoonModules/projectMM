@@ -24,6 +24,7 @@ System-level diagnostics and device identity. Always loaded, always visible in t
 - `chip` (read-only) — chip model (ESP32, ESP32-S3, etc.)
 - `sdk` (read-only) — ESP-IDF version string (or compiler on desktop)
 - `flash` (read-only) — total flash chip size
+- `firmwarePartition` (read-only, progress) — current app image size / total firmware partition size. Distinct from the `firmware` string control above (which is the build variant identifier); this is how full the partition is. Renamed from the previous shared `firmware` name to avoid the collision that broke `controls.find(c => c.name === "firmware")` callers — see the comment at the binding in [SystemModule.h](../../../src/core/SystemModule.h).
 - `psram` (read-only, progress) — used / total PSRAM (only if present)
 - `filesystem` (read-only, progress) — used / total filesystem
 - `bootReason` (read-only) — human-readable reset reason from `platform::resetReason()` (e.g. `POWERON`, `SW`, `PANIC`, `INT_WDT`, `TASK_WDT`, `BROWNOUT`, `DEEPSLEEP`). Desktop always reports `OK`. The UI flags the reboot button with a red border (`data-crashed="true"`) when the value is one of PANIC / INT_WDT / TASK_WDT / BROWNOUT, indicating the prior boot ended unexpectedly.

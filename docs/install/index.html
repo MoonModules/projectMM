@@ -273,6 +273,16 @@
       // device URL the user just provisioned. ESP Web Tools fires
       // `state-changed` on the install button as it walks the flow;
       // the PROVISIONED payload includes the device URL Improv emitted.
+      // NB: this listener does not fire on ESP Web Tools 10.x — the
+      // `state-changed` event is emitted internally on the ImprovSerial client
+      // inside the dialog's shadow DOM, not as a bubbling DOM event on the
+      // button. Confirmed by reading the EWT source (src/install-dialog.ts:
+      // `client.addEventListener("state-changed", () => this.requestUpdate())`).
+      // Kept for the legacy <10 fallback the project bundled against. The
+      // board injection from this install page lands in Step 3 of the
+      // board-injection plan, where the Improv Web Serial channel is the
+      // transport (no DOM events involved). Devices the user provisions here
+      // currently don't auto-populate "Your devices" either — same root cause.
       btn.addEventListener("state-changed", (ev) => {
         const d = ev.detail || {};
         if (d.state === "PROVISIONED" && d.improv && d.improv.url) {

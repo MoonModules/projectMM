@@ -68,9 +68,15 @@ public:
         }
         controls_.addReadOnly("maxBlock", maxBlockStr_, sizeof(maxBlockStr_));
 
-        // Flash/firmware/filesystem
+        // Flash/firmware/filesystem. The progress bar is named
+        // `firmwarePartition` (not `firmware`) to avoid colliding with the
+        // string `firmware` control bound a few lines below — both shared the
+        // name pre-board-injection, which made any consumer that did
+        // `controls.find(c => c.name === "firmware")` get whichever was bound
+        // first (the progress bar's integer value) and break on string-only
+        // operations like release-picker's isCompatible.
         if (totalFlashVal_ > 0) {
-            controls_.addProgress("firmware", firmwareSizeVal_, totalFlashVal_);
+            controls_.addProgress("firmwarePartition", firmwareSizeVal_, totalFlashVal_);
         }
         if (chipFlashVal_ > 0) {
             controls_.addReadOnly("flash", flashStr_, sizeof(flashStr_));

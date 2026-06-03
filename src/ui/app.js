@@ -563,6 +563,10 @@ function createCard(mod, depth) {
         releasePicker.init({
             container: mount,
             ownFirmwareKey,
+            // Device already knows its board (BoardModule) — picker is for
+            // releases + firmware compatibility only. Showing a board picker
+            // here would invite the user to mis-narrow the firmware list.
+            enableBoardPicker: false,
             onInstall: async (_firmware, _manifestUrl, binaryUrl) => {
                 const res = await fetch("/api/firmware/url", {
                     method: "POST",
