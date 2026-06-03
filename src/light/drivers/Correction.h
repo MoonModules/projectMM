@@ -40,6 +40,14 @@ struct Correction {
         for (int v = 0; v < 256; v++) {
             briLut[v] = static_cast<uint8_t>((v * brightness) / 255);
         }
+        // Clamp out-of-range presets (corrupt persisted lightPreset cast to
+        // the enum) to RGB BEFORE the switch — that way the switch stays
+        // exhaustive, the compiler warns on a missing enumerator if we add
+        // one without handling it (-Wswitch), and apply() always reads
+        // initialised order/outChannels/deriveWhite.
+        if (static_cast<uint8_t>(preset) >= kLightPresetCount) {
+            preset = LightPreset::RGB;
+        }
         // order[] holds the SOURCE channel index to place at each OUTPUT position.
         // Source is always RGB (indices 0=R, 1=G, 2=B), white at index 3.
         switch (preset) {
@@ -51,10 +59,6 @@ struct Correction {
             case LightPreset::BGR:  order[0]=2; order[1]=1; order[2]=0; outChannels=3; deriveWhite=false; break;
             case LightPreset::RGBW: order[0]=0; order[1]=1; order[2]=2; order[3]=3; outChannels=4; deriveWhite=true; break;
             case LightPreset::GRBW: order[0]=1; order[1]=0; order[2]=2; order[3]=3; outChannels=4; deriveWhite=true; break;
-            // Out-of-range preset (e.g. a corrupt persisted lightPreset value cast to the
-            // enum) falls back to plain RGB so order/outChannels/deriveWhite are always set
-            // deterministically — apply() never reads stale fields.
-            default:                order[0]=0; order[1]=1; order[2]=2; outChannels=3; deriveWhite=false; break;
         }
     }
 

@@ -606,11 +606,15 @@ async function refreshPorts() {
         if (port === current) opt.selected = true;
         select.appendChild(opt);
     }
-    select.addEventListener("change", async () => {
+    // `.onchange = ...` (not addEventListener) so the handler is REPLACED on
+    // each refresh rather than stacking — refreshPorts re-runs on every
+    // network switch + every manual Refresh click, so addEventListener
+    // would queue up duplicate saveState calls per user change.
+    select.onchange = async () => {
         const active = getActiveNetwork();
         if (active) active.port = select.value;
         await saveState();
-    });
+    };
 }
 
 document.getElementById("refresh-ports").addEventListener("click", refreshPorts);

@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 from contextlib import suppress
 from pathlib import Path
@@ -333,19 +334,54 @@ def _migrate_to_networks(old_state: dict) -> dict:
 _VOLATILE_DEVICE_FIELDS = ("deviceName", "firmware", "modules")
 
 
+# Serializes save_state() across the threaded HTTP handlers
+# (ThreadingHTTPServer dispatches each request on its own thread; two
+# concurrent /api/state POSTs or /api/discover responses could otherwise
+# interleave json.dump writes and corrupt the file).
+_state_write_lock = threading.Lock()
+
+
 def save_state(state):
     """Persist MoonDeck state. Strips per-device fields that the device itself
     is the source of truth for (`deviceName`, `firmware`) — caching them
     invites stale values when the device is reflashed/renamed via another
     host. They are re-read from `/api/state` on each refresh and live only
     in the in-memory device lists until the next save. User-set fields
-    (`board`, `last_port`, `selected`, `online`) persist. Iterates per network."""
+    (`board`, `last_port`, `selected`, `online`) persist. Iterates per network.
+
+    Write is atomic + serialized: a temp file in the same dir → fsync → rename.
+    The rename is atomic on POSIX (same filesystem); fsync makes the bytes
+    durable before the swap so a crash mid-write never leaves a half-written
+    moondeck.json (the previous version stays intact). The lock ensures two
+    handler threads don't race on the temp file or the rename."""
     persisted = dict(state)
     networks = persisted.get("networks") or []
     if networks:
         persisted["networks"] = [_strip_network_volatiles(n) for n in networks]
-    with open(STATE_FILE, "w") as f:
-        json.dump(persisted, f, indent=2)
+    data = json.dumps(persisted, indent=2)
+    with _state_write_lock:
+        # NamedTemporaryFile in the same dir so os.replace stays on one
+        # filesystem (cross-FS rename is not atomic). delete=False because
+        # we hand the path to os.replace ourselves.
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8",
+            dir=str(STATE_FILE.parent),
+            prefix=STATE_FILE.name + ".",
+            suffix=".tmp",
+            delete=False,
+        )
+        try:
+            tmp.write(data)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+            tmp.close()
+            os.replace(tmp.name, STATE_FILE)
+        except Exception:
+            # On failure, drop the stray temp file so we don't accumulate
+            # .tmp leftovers across crashes. Re-raise so the caller sees it.
+            with suppress(OSError):
+                os.unlink(tmp.name)
+            raise
 
 
 def _strip_network_volatiles(network: dict) -> dict:

@@ -320,8 +320,10 @@
         // have it, else the newest release the picker has loaded.
         const m = lastInstallManifest;
         if (!m) {
-          alert("Pick a release + firmware above first (Erase reuses that " +
-                "manifest for the post-erase install option).");
+          alert("Click Install above first (even if you cancel the modal). " +
+                "Erase reuses that manifest for the post-erase install " +
+                "option — selecting a release + firmware in the dropdowns " +
+                "isn't enough; the install flow has to register the choice.");
           return;
         }
         await showInstallModal(m.url, m.firmware, { eraseFirst: true });

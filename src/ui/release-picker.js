@@ -28,12 +28,12 @@
 //   6. DOM construction + event wiring
 //
 // Tests: the pure helpers below — `isCompatible`, `parseFirmwaresFromAssets`,
-// `relativeTime` — have been exercised ad-hoc from a DevTools console against
-// the real GitHub Releases response and against synthesised assets. There is
-// no JS unit-test harness in this codebase today (no jsdom, no node-based
-// test runner); adding one is on the 2.0 roadmap (`docs/plan.md`). The C++
-// frame parser at src/core/ImprovFrame.h + test/test_improv_frame.cpp is the
-// equivalent test for the only piece of this work that runs on the device side.
+// `relativeTime` — are exercised ad-hoc from a DevTools console against the
+// real GitHub Releases response and against synthesised assets. The repo
+// has no JS unit-test harness (no jsdom, no node-based runner). The C++
+// frame parser at src/core/ImprovFrame.h + test/test_improv_frame.cpp is
+// the equivalent test for the only piece of this work that runs on the
+// device side.
 
 // ---------------------------------------------------------------------------
 // 1. Constants + module state

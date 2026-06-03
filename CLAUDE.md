@@ -99,6 +99,10 @@ The narrow safety net: "this snapshot is internally consistent."
 6. ESP32 build — `build_esp32.py` — if any file under `src/` (excluding `src/platform/desktop/`), `esp32/`, `CMakeLists.txt`, or `library.json` changed.
 7. KPI collection — `collect_kpi.py --commit` — if any file under `src/` changed. **The one-liner MUST include `tick:Xus(FPS:Y)` for every supported target** (PC + ESP32 today; Teensy/RPi when added). If a target's tick/FPS is missing — e.g. ESP32 wasn't monitored recently and `esp32/monitor.log` is stale — re-run a short live capture before committing, or note explicitly in the commit body why the value is absent.
 
+**Recommended (manual, not blocking):**
+
+- **Improv smoke test** — `uv run scripts/build/improv_smoke_test.py --port <port>` (or MoonDeck → ESP32 → **Improv Smoke Test**) — recommended when a connected ESP32 is available and any of these changed: `src/core/ImprovFrame.h`, `src/platform/esp32/platform_esp32_improv.cpp`, `docs/install/index.html`, `src/ui/release-picker.js`, `scripts/build/improv_*.py`. Three-step end-to-end check (probe + WiFi provision + LAN reachability). Not a blocking gate because it needs hardware that isn't always plugged in; pair with `preview_installer`'s flash-ready mode for the browser-side equivalent.
+
 **After all gates pass:** stop and wait for the product owner to explicitly say "commit now" (or equivalent). Do not commit on your own initiative.
 
 **When "commit now" is received** — compile the commit message in this format and execute the commit:

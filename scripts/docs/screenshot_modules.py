@@ -531,7 +531,11 @@ def main() -> int:
                         n = m.get("name", "")
                         if any(n.startswith(p) for p in known_prefixes):
                             try:
-                                delete_module(args.host, n)
+                                # delete_module returns False on HTTP failure
+                                # (4xx/5xx) — log that the same way as a raised
+                                # exception so the orphan stays visible.
+                                if not delete_module(args.host, n):
+                                    print(f"  orphan-sweep: delete {n!r} on {args.host} returned HTTP failure")
                             except Exception as e:
                                 print(f"  orphan-sweep: delete {n!r} on {args.host} failed: {e}")
                         _sweep_orphans(m.get("children", []))
@@ -729,7 +733,11 @@ def main() -> int:
                                 n = m.get("name", "")
                                 if any(n.startswith(p) for p in known_prefixes):
                                     try:
-                                        delete_module(args.host, n)
+                                        # Same False-return check as the
+                                        # opening sweep — HTTP failure is
+                                        # silent without it.
+                                        if not delete_module(args.host, n):
+                                            print(f"  final-sweep: delete {n!r} on {args.host} returned HTTP failure")
                                     except Exception as e:
                                         print(f"  final-sweep: delete {n!r} on {args.host} failed: {e}")
                                 _sweep(m.get("children", []))

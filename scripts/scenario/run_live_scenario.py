@@ -337,18 +337,22 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
             results["steps"].append(step_result)
             continue
         if step.get("measure") or op == "measure":
-            # collect_metrics hits /api/state — a transient network glitch
-            # shouldn't abort the whole run (cleanup of created modules
-            # happens at the end). On failure, log + treat as a skipped
-            # measurement so subsequent steps still run and cleanup fires.
+            # collect_metrics hits /api/state — a missing measurement is a
+            # failed run, not a no-op to skip. Silent-skip would let a broken
+            # device pass a scenario that asserts on observed/contract data
+            # the step never gathered. Fail loudly, record the error on the
+            # step, and break out of the step loop so end-of-run cleanup
+            # (delete created modules) still fires.
             try:
                 metrics = collect_metrics(client, settle_s)
             except Exception as e:
-                print(f"  WARN  {step_name}: collect_metrics failed: {e} (measurement skipped)")
+                print(f"  FAIL  {step_name}: collect_metrics failed: {e}")
+                step_result["status"] = "error"
+                step_result["error"] = f"collect_metrics: {e}"
                 step_result["metrics"] = {}
-                step_result["measure_skipped"] = str(e)
+                results["passed"] = False
                 results["steps"].append(step_result)
-                continue
+                break  # stop step loop; cleanup runs below
             step_result["metrics"] = metrics
             tick_us = metrics.get("tickTimeUs", 0)
             fps = 1000000 // tick_us if tick_us > 0 else metrics.get("fps", 0)
@@ -485,10 +489,15 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                     "set_by": _today_iso(),
                     "reason": update_reason or existing.get("reason", "updated"),
                 }
-                for k in ("tick_tolerance_pct", "heap_tolerance_pct", "tolerance_us",
-                          "max_alloc_block"):
+                for k in ("tick_tolerance_pct", "heap_tolerance_pct", "tolerance_us"):
                     if k in existing:
                         new_block[k] = existing[k]
+                # max_alloc_block: opt-in (only carry it over if the existing
+                # contract had it), but refresh the value from this run rather
+                # than copying the stale one. Mirrors run_scenario.py's update
+                # path — keep both files in sync if you change one.
+                if "max_alloc_block" in existing:
+                    new_block["max_alloc_block"] = int(max_block)
                 step.setdefault("contract", {})[target] = new_block
 
             # Check bounds

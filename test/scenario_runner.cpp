@@ -485,15 +485,21 @@ static int runScenario(const char* path) {
                 std::printf("  SET   %s (%s.%s)\n", name, targetId, key);
             }
         } else if (std::strcmp(op, "measure") == 0) {
-            // Pure measurement step — no side effects. The measurement block
-            // below picks it up via the `measure: true` flag if present, but
-            // for an op:"measure" step we treat measurement as implicit so
-            // scenarios can interleave snapshots without faking a control write.
+            // Pure measurement step — no side effects. op:"measure" is the
+            // implicit-measure shape so scenarios can interleave snapshots
+            // without faking a control write. The measurement block below
+            // honours both `measure: true` AND op:"measure".
             std::printf("  ...   %s\n", name);
         }
 
         // Per-step measurement: warmup + measure + bounded assertions.
-        if (step.has("measure") && step["measure"].boolean) {
+        // Triggered by either `"measure": true` on the step (the explicit
+        // flag, used alongside set_control to measure after a mutation) or
+        // op:"measure" (the implicit-measure shape — a snapshot step with
+        // no other side effects).
+        const bool isMeasure = (step.has("measure") && step["measure"].boolean)
+                            || std::strcmp(op, "measure") == 0;
+        if (isMeasure) {
             ensureStarted();
             double fpsBound = 0;
             double fpsLedProduct = 0;

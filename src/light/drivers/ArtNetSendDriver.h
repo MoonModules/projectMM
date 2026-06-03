@@ -89,8 +89,20 @@ public:
         const uint8_t* data;
         size_t totalBytes;
         const nrOfLightsType nLights = sourceBuffer_->count();
-        if (correction_ && corrected_.data() && corrected_.count() >= nLights) {
-            const uint8_t outCh = correction_->outChannels;
+        // Three guards before applying correction: (a) correction wired,
+        // (b) corrected_ has the row count we need, (c) corrected_'s
+        // per-light stride is at least outChannels — otherwise dst + i *
+        // outCh would overrun the allocation. Falls back to passthrough
+        // when any guard fails (same degradation the old in-loop allocate
+        // had on allocation failure). resizeCorrected() should keep
+        // corrected_'s stride in sync with outChannels off the hot path,
+        // but the hot-path check stays defensive — a stale corrected_
+        // (e.g. correction_ swapped without onCorrectionChanged firing)
+        // should miss the apply, not corrupt memory.
+        const uint8_t outCh = correction_ ? correction_->outChannels : 0;
+        if (correction_ && corrected_.data()
+            && corrected_.count() >= nLights
+            && corrected_.channelsPerLight() >= outCh) {
             const uint8_t* src = sourceBuffer_->data();
             const uint8_t srcCh = sourceBuffer_->channelsPerLight();
             uint8_t* dst = corrected_.data();

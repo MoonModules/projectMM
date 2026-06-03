@@ -167,10 +167,13 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
         }
         case ControlType::Uint16: {
             int v = mm::json::parseInt(json, key);
-            // No c.min/c.max check: uint8 descriptor fields can't bound a
-            // uint16 range. Always clamp to the natural type range to
-            // prevent static_cast wrap (this is type-level safety, not the
-            // policy-driven out-of-range check above).
+            // Strict: out-of-natural-range (uint16 wraps below 0 / above
+            // UINT16_MAX) fails. Clamp: snap into the type range. There's
+            // no c.min/c.max bound here (uint8 descriptor fields can't
+            // bound a uint16 range), only the natural-type bound.
+            if (policy == ApplyPolicy::Strict && (v < 0 || v > UINT16_MAX)) {
+                return ApplyResult::OutOfRange;
+            }
             return clampInto(static_cast<uint16_t*>(c.ptr), v, 0, UINT16_MAX);
         }
         case ControlType::Int16: {

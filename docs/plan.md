@@ -172,6 +172,43 @@ Minimum-scope fix before the move:
 
 Several `platform.h` APIs still use `(buf, len)` pairs where `std::span` would catch length/pointer mismatches at compile time. Concrete sites: `http_fetch_to_ota`, `improvProvisioningInit`, and friends. ~2 h including ripple updates to callers. Do alongside the next platform-API expansion (Windows socket port or POST /api/firmware streaming).
 
+### Board injection + Improv as a general data injector (multi-commit, partially landed)
+
+Today the **firmware** the device runs is baked in at compile time (`MM_FIRMWARE_NAME`) and self-reported via SystemModule. The **board** the firmware runs on (Olimex Gateway, LOLIN D32, generic ESP32, …) the device cannot self-identify — no readable PCB ID on classic ESP32. MoonDeck deduces it from the firmware where the firmware uniquely identifies hardware (`esp32-eth*` ⇒ Olimex) and otherwise asks the user via a picker; the value lives in `scripts/moondeck.json` on the laptop only. The device's own UI and API have no concept of board.
+
+Goal: get the board key onto the device (persisted, reported via `/api/state`) so it survives between MoonDeck sessions and other clients (HomeAssistant, future MQTT, the device's own OTA-picker compatibility filter) can read it. Then make injection a first-class part of the install flow (web installer + Improv) so end users get the right board key without needing MoonDeck at all.
+
+Builds on existing plan items: see [Runtime board presets](#runtime-board-presets-multi-commit-partially-landed) for the longer-term goal of pin maps / module-config defaults living per-board on disk; this section is the prerequisite — getting the *key* onto the device — that unlocks that work.
+
+**Step 1 — Catalog + device control + MoonDeck push:**
+- New `docs/install/boards.json` (catalog, shared between MoonDeck + the web installer + a future device-side preset loader). Schema: `[{ key, label, firmwares[], default_firmware }]`. Initial entries from MoonDeck's current hardcoded `boardOptions`: Olimex Gateway Rev G, LOLIN D32, generic ESP32, ESP32-S3 DevKitC-1 N16R8.
+- Device: SystemModule gains an `addReadOnly("board", board_, ...)` control (40-byte buffer, persisted via the existing FilesystemModule path); new `setBoard()` method; new `POST /api/system/board { "value": "..." }` route (distinct from `/api/control` because ReadOnly rejects writes there — board is metadata, not a control).
+- MoonDeck: loads `boards.json` from disk (no GitHub fetch — local repo is the source); replaces hardcoded `boardOptions` in [moondeck_ui/app.js](../scripts/moondeck_ui/app.js); `_deduce_board` becomes a catalog reverse-lookup (find unique board for firmware → key, else ""); pushes the picked / deduced value via the new route on first reach.
+- UI: device-side renders `board` as a read-only display — no input affordance (board is injected, not user-edited at the device).
+
+**Step 2 — Web installer board picker (HTTP-fetch injection, dev-only):**
+- Installer page loads `boards.json` from the same Pages-relative path.
+- Board dropdown above the existing firmware dropdown. Picking a board filters firmware to `firmwares[]` and selects `default_firmware`. Single-firmware boards show the firmware as a disabled field ("Firmware: esp32 (only option for this board)") rather than a picker.
+- After ESP Web Tools' `PROVISIONED` event fires, `fetch(<device-url>/api/system/board, ...)` to inject the chosen board key.
+- Works on `http://localhost:8000/` (preview_installer + dev) where mixed-content rules don't apply. **Doesn't work** on the public `https://ewowi.github.io/install/` deployment because HTTPS pages can't fetch HTTP device URLs. Document the limitation; step 3 fixes it.
+
+**Step 3 — Improv RPC injection (production path):**
+- Device: ImprovProvisioningModule gains a custom RPC command handler (`RPC_SET_BOARD = 0x80` or similar; vendor-extension range above the standard Improv commands). The handler calls SystemModule's `setBoard()`.
+- Installer page: sends the RPC over the same Web Serial Improv channel that's already open during the flash flow. Verify ESP Web Tools' API for sending custom Improv commands; if `esp-web-install-button` doesn't expose it, drop to `improv-wifi-serial-sdk` (the underlying lib) directly.
+- This is the public-installer path — no network involved, no CORS / mixed-content issues. Works from `ewowi.github.io` over HTTPS.
+
+**Step 4 — Catalog grows (only when there's a consumer):**
+- Once the device-side runtime board presets work ([Runtime board presets](#runtime-board-presets-multi-commit-partially-landed)) actually lands, `boards.json` entries gain optional `presets` fields (`ethernet.{phy, rmii_clock_gpio, mdio_gpio, …}`, `default_module_config.{Network, Layouts, …}`). MoonDeck pushes the relevant subset alongside the board key via a new `POST /api/system/board-preset` route. Until then, **don't add `presets` fields** — JSON shape grows when a consumer earns its keep, not before.
+
+**Improv as a general data injector (deferred until a second use case lands):**
+
+Step 3's custom RPC infrastructure is the seed. Plausible follow-on injectables: device name override (skip the `MM-CAFE` default), MQTT broker URL (when MQTT module ever lands), static IP, DMX universe assignments, pre-shared API token. **Don't generalise yet** — building a generic key-value Improv injector before there's a second use case is premature abstraction. If two or three more inject-at-install fields land with the same shape, *then* refactor ImprovProvisioningModule into a generic handler that dispatches by RPC command ID to registered callbacks.
+
+**Risks worth noting:**
+- HTTP injection (step 2) only works in dev — the public installer can't use it. Step 3 is the real path.
+- ESP Web Tools' custom-Improv-RPC sending API needs verification. If it requires dropping below the high-level button to the SDK, that's a bigger lift than a one-line add.
+- `RPC_SET_BOARD` is a custom command ID — collisions with future Improv-spec additions are possible if the standard expands into the vendor range. Before picking the ID: check the latest Improv-serial spec at <https://www.improv-wifi.com/serial/> and survey ESPHome / Home Assistant for de facto vendor uses. Pick conservatively (high end of 0x80-0xFE) and document the choice in a comment at the definition site.
+
 ---
 
 ## HTTP and OTA
@@ -216,7 +253,8 @@ Design (already noted in [PreviewDriver.md](moonmodules/light/drivers/PreviewDri
 
 - **UI page load time** — scenario step measuring HTTP response time for `/`, `/api/state`, `/api/system` via the live runner. Verifies acceptable load time on ESP32.
 - **Module teardown memory** — scenario that tears down all modules and verifies heap returns to pre-setup baseline. Confirms no lifecycle leaks.
-- **JavaScript test harness** — `vitest` or `node --test` with `jsdom` for pure helpers in `release-picker.js` (`isCompatible`, `parseBoardsFromAssets`, `relativeTime`). Deferred until a second non-trivial JS module lands — one file doesn't justify the toolchain weight.
+- **JavaScript test harness** — `vitest` or `node --test` with `jsdom` for pure helpers in `release-picker.js` (`isCompatible`, `parseFirmwaresFromAssets`, `relativeTime`). Deferred until a second non-trivial JS module lands — one file doesn't justify the toolchain weight.
+- **Browser-level Improv automation** (deferred) — `scripts/build/improv_smoke_test.py` (added 2026-06-03) exercises the device-side Improv listener over plain serial; what's missing is the browser-side equivalent — Playwright driving Chrome's Web Serial, clicking through ESP Web Tools' install modal, filling the WiFi creds form, asserting `PROVISIONED`. Catches "ESP Web Tools changed its Improv handling in a way that broke our manifest format" failures the serial-only smoke test can't see. Hard to set up reliably (headless Chrome with Web Serial is finicky, needs a wired ESP32 in CI). Pick this up if a regression in the browser flow ever escapes the manual dev-environment test (preview_installer flash-ready mode at <http://localhost:8000/>).
 
 ---
 

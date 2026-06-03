@@ -84,18 +84,24 @@ public:
             append(frag);
             return;
         }
-        // Fragment longer than the stack buffer — format into an exact heap buffer.
+        // Fragment longer than the stack buffer.
+        if (fixed_) {
+            // Fixed-buffer mode never heap-allocs — capacity is bounded by
+            // the caller's slice on purpose, and an alloc here would silently
+            // succeed even when the slice is too small for the formatted
+            // fragment. Flag overflow so the caller (e.g. FilesystemModule's
+            // writeValue) aborts the file/response.
+            overflowed_ = true;
+            va_end(ap2);
+            return;
+        }
+        // Socket / heap-grow modes: format into an exact heap buffer so the
+        // long fragment isn't silently truncated.
         char* big = static_cast<char*>(platform::alloc(static_cast<size_t>(n) + 1));
         if (big) {
             std::vsnprintf(big, static_cast<size_t>(n) + 1, fmt, ap2);
             append(big);
             platform::free(big);
-        } else if (fixed_) {
-            // In fixed-buffer mode the caller checks overflowed() to decide
-            // whether the write completed; a silently-dropped fragment would
-            // look like a clean write. Flag the failure so the caller can
-            // abort the file/response.
-            overflowed_ = true;
         }
         va_end(ap2);
     }
@@ -115,26 +121,36 @@ public:
     }
     void writeBool(bool v) { append(v ? "true" : "false"); }
     void writeJsonString(const char* s) {
-        // " and \ get escaped so a value like My"SSID can't break out of
-        // its string. Walks the source char-by-char straight into the
-        // sink — no intermediate fixed buffer, so there's no truncation
-        // ceiling regardless of input length. Each `append("\"")` /
-        // `append("\\")` is a single-byte write that the sink's per-mode
-        // logic handles uniformly (socket flush / heap grow / fixed-buffer
-        // overflow flag).
+        // Walks the source char-by-char straight into the sink — no
+        // intermediate fixed buffer, so there's no truncation ceiling
+        // regardless of input length. Each per-char append is a small
+        // write the sink's per-mode logic handles uniformly (socket flush
+        // / heap grow / fixed-buffer overflow flag).
+        //
+        // RFC 8259 §7: strings MUST escape `"`, `\`, and any byte < 0x20.
+        // Bare control bytes in JSON are a parser error. Named escapes
+        // for the common ones (\n / \r / \t / \b / \f), `\u00XX` for the
+        // rest. Bytes ≥ 0x20 (including UTF-8 continuation bytes) pass
+        // through unmodified — the receiver decodes UTF-8 itself.
         if (!s) s = "";
         append("\"");
-        char one[3] = {0, 0, 0};
+        char buf[8];  // longest emission is "\uXXXX" (6) + NUL; 8 is round
         for (; *s; s++) {
-            if (*s == '"' || *s == '\\') {
-                one[0] = '\\';
-                one[1] = *s;
-                one[2] = 0;
-                append(one);
+            unsigned char c = static_cast<unsigned char>(*s);
+            if (c == '"' || c == '\\') {
+                buf[0] = '\\'; buf[1] = static_cast<char>(c); buf[2] = 0;
+                append(buf);
+            } else if (c == '\n') { append("\\n"); }
+            else if (c == '\r') { append("\\r"); }
+            else if (c == '\t') { append("\\t"); }
+            else if (c == '\b') { append("\\b"); }
+            else if (c == '\f') { append("\\f"); }
+            else if (c < 0x20) {
+                std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+                append(buf);
             } else {
-                one[0] = *s;
-                one[1] = 0;
-                append(one);
+                buf[0] = static_cast<char>(c); buf[1] = 0;
+                append(buf);
             }
         }
         append("\"");

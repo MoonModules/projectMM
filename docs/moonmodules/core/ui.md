@@ -254,7 +254,7 @@ Everything in this spec is in the live codebase. The 12 features below each link
 1. **Status bar** with hamburger, MoonLight logo, brand, device name, system stats (uptime · free heap), WS dot, reboot button (with crashed-state styling), and theme toggle — see [Status bar](#status-bar).
 2. **Side navigation** — a left column listing root modules; one root visible at a time, selection persisted; footer with social links + copyright; hamburger collapses it (wide) or slides it in over an overlay (<820px) — see [Side navigation](#side-navigation).
 3. **Single-column module card layout** with hierarchy (children inline-indented, depth-based card backgrounds) — see [Module card](#module-card).
-4. **All 9 control types** (uint8 slider, uint16, bool, text, password with hold-to-peek, select, display, time, progress, button) with the `dragTs` + 20ms-feedback + 150/500ms-debounce pattern — see [Control types](#control-types).
+4. **All 11 control types** (slider for uint8/uint16, bool, text, password with hold-to-peek, select, display, display-int, time, progress, ipv4, button) with the `dragTs` + 20ms-feedback + 150/500ms-debounce pattern — see [Control types](#control-types).
 5. **Type picker** (role-filtered, emoji tag chip filter, search box, keyboard navigation) on parents that accept children — see [Type picker](#type-picker).
 6. **Reset-to-default ↺** buttons per control with a known default. Defaults are captured from a fresh probe instance per type (factory's probe — no per-control boilerplate) and emitted in `/api/types`.
 7. **Light/dark theme toggle** via `[data-theme]` on `<body>` + CSS variables; preference persists in `localStorage['mm_theme']`.

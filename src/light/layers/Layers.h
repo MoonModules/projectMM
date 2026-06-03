@@ -33,10 +33,22 @@ public:
 
     Layouts* layouts() const { return layouts_; }
 
-    // loop() left to the MoonModule base default: tick each enabled child Layer
-    // and accumulate its timing. Layers is a pure container — it has no work of
-    // its own to interleave between siblings, so the base propagation is exactly
-    // what we want.
+    // Role-filtered loop propagation: only tick children that are Layers.
+    // The factory / UI shouldn't allow non-Layer children of a Layers
+    // container, but if one slips in (test fixture, hand-crafted config),
+    // ticking it through Layers would run its loop at the wrong tree
+    // depth (e.g. an Effect that should be ticked inside a Layer). Matches
+    // the role-filter precedent in setLayouts / activeLayer above.
+    void loop() override {
+        for (uint8_t i = 0; i < childCount(); i++) {
+            MoonModule* c = child(i);
+            if (!c || c->role() != ModuleRole::Layer) continue;
+            if (c->respectsEnabled() && !c->enabled()) continue;
+            uint32_t start = platform::micros();
+            c->loop();
+            c->addAccumUs(platform::micros() - start);
+        }
+    }
 
     // Single-Layer placeholder until composition lands: hand `Drivers` the
     // first enabled Layer to read for buffer + dimensions. Returns nullptr

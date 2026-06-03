@@ -74,7 +74,10 @@ TEST_CASE("FireEffect frees heat buffer when disabled") {
     layer.onBuildState();
     CHECK(fire.dynamicBytes() > 0);
 
+    // Disable + rebuild via the parent's lifecycle — same path the
+    // production scheduler uses, not a direct child call which would
+    // bypass the propagation tested elsewhere.
     fire.setEnabled(false);
-    fire.onBuildState();
+    layer.onBuildState();
     CHECK(fire.dynamicBytes() == 0);
 }

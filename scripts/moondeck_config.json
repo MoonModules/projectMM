@@ -194,6 +194,15 @@
       "help": "improv_probe",
       "script": "build/improv_probe.py",
       "needs_port": true
+    },
+    {
+      "id": "improv_smoke_test",
+      "tab": "esp32",
+      "group": "run",
+      "label": "Improv Smoke Test",
+      "help": "improv_smoke_test",
+      "script": "build/improv_smoke_test.py",
+      "needs_port": true
     }
   ]
 }

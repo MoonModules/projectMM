@@ -17,11 +17,12 @@ TEST_CASE("platform::setTestNowMs freezes and restores millis()") {
     CHECK(mm::platform::millis() == 67890);
 
     mm::platform::setTestNowMs(0);
-    // Real clock returns a non-zero value (process has been alive for some time).
-    // Two consecutive reads must not equal the override values either.
+    // Real clock restored — reads must not equal the override values
+    // (the only stable invariant; the actual value depends on process
+    // uptime which we don't assert on, to keep the test independent of
+    // wall-clock state on CI).
     uint32_t a = mm::platform::millis();
     uint32_t b = mm::platform::millis();
     CHECK(a != 12345);
     CHECK(b != 67890);
-    CHECK(a > 0);
 }
