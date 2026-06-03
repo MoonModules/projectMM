@@ -305,7 +305,7 @@ TEST_CASE("FilesystemModule writes valid JSON with children") {
 // The probe's destructor must NOT clear the singleton — otherwise every save path
 // (noteDirty, debounced loop1s, flushPending on reboot) silently no-ops for the rest
 // of the device's life. The fix is to register the singleton in setScheduler(), not
-// in the constructor. This test would have caught the bug if it had existed before.
+// in the constructor. This test catches that singleton-clear regression.
 // /api/types factory-creates a temporary FilesystemModule probe; its destruction must NOT clear the static singleton (otherwise every later save silently no-ops).
 TEST_CASE("FilesystemModule singleton survives probe construct+destruct") {
     char tmpRoot[256];

@@ -354,6 +354,9 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                 #                realistic case for PC scenarios today).
                 #   esp32-*    — bounded RTOS but lwIP/EMAC jitter, 10% pct + 5us
                 #                absolute floor.
+                # KEEP IN SYNC: the in-process runner re-declares the same defaults
+                # at test/scenario_runner.cpp contract-block handler — tuning one
+                # without the other silently desyncs the two tiers.
                 is_pc = target.startswith("pc-")
                 tick_tol_pct = contract_block.get("tick_tolerance_pct",
                                                   20 if is_pc else 10)
@@ -398,15 +401,27 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                 # the LUT won't fit. Scenarios that depend on that allocation
                 # succeeding assert a minimum block here.
                 exp_block = contract_block.get("max_alloc_block")
-                if exp_block is not None and exp_block > 0 and max_block > 0:
-                    drop_pct = (exp_block - max_block) * 100.0 / exp_block if max_block < exp_block else 0
-                    if drop_pct > heap_tol_pct:
-                        print(f"  FAIL  max_alloc_block {max_block} dropped {drop_pct:.1f}% "
-                              f"below contract {exp_block}")
+                if exp_block is not None and exp_block > 0:
+                    # max_block of 0 always fails when a positive floor is
+                    # asserted: maxBlock is always served by current firmware
+                    # (src/core/HttpServerModule.cpp), so 0 means the device
+                    # reports zero contiguous heap — a real failure, not a
+                    # missing field. (Contrast with free_heap on PC where 0
+                    # is the "unlimited" sentinel — that's a desktop-only
+                    # convention not used by the live runner.)
+                    if max_block <= 0:
+                        print(f"  FAIL  max_alloc_block {max_block} (device reports no "
+                              f"contiguous heap) vs contract {exp_block}")
                         results["passed"] = False
                     else:
-                        print(f"  PASS  max_alloc_block {max_block} >= contract {exp_block} "
-                              f"(within -{heap_tol_pct}% tolerance)")
+                        drop_pct = (exp_block - max_block) * 100.0 / exp_block if max_block < exp_block else 0
+                        if drop_pct > heap_tol_pct:
+                            print(f"  FAIL  max_alloc_block {max_block} dropped {drop_pct:.1f}% "
+                                  f"below contract {exp_block}")
+                            results["passed"] = False
+                        else:
+                            print(f"  PASS  max_alloc_block {max_block} >= contract {exp_block} "
+                                  f"(within -{heap_tol_pct}% tolerance)")
 
             # observed.<target> stores a rolling [min, max] range per scalar
             # that only widens when a fresh measurement falls outside the

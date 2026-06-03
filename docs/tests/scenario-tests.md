@@ -26,10 +26,12 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 1,337 | — / 129KB | — / 48KB |
 | `esp32-eth` | ≥ 1,429 / 1,845-1,848 | ≥ 166KB / 178KB | ≥ 88KB / 96KB-100KB |
 | `esp32-eth-wifi` | ≥ 1,429 / 1,821 | ≥ 146KB / 139KB | ≥ 49KB / 52KB |
 | `pc-macos` | ≥ 200,000 / 200,000-1,000,000 | — / — | — / — |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
@@ -48,10 +50,12 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 147 | — / 121KB | — / 48KB |
 | `esp32-eth` | ≥ 303 / 379-381 | ≥ 161KB / 172KB | ≥ 78KB / 92KB |
 | `esp32-eth-wifi` | ≥ 400 / 390 | ≥ 142KB / 132KB | ≥ 49KB / 50KB |
 | `pc-macos` | ≥ 100,000 / 142,857-166,667 | — / — | — / — |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
@@ -70,10 +74,12 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 17.5 | — / 97KB | — / 48KB |
 | `esp32-eth` | ≥ 55.6 / 74.5-74.7 | ≥ 137KB / 147KB | ≥ 54KB / 62KB |
 | `esp32-eth-wifi` | ≥ 76.9 / 85.7 | ≥ 117KB / 108KB | ≥ 44KB / 48KB |
-| `pc-macos` | ≥ 33,333 / 41,667-43,478 | — / — | — / — |
+| `pc-macos` | ≥ 33,333 / 35,714-43,478 | — / — | — / — |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
@@ -92,10 +98,12 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 4.4 | — / 83KB | — / 52KB |
 | `esp32-eth` | ≥ 9.1 / 10.5-10.6 | ≥ 122KB / 132KB | ≥ 47KB / 48KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 54.5 | ≥ 103KB / 129KB | ≥ 44KB / 52KB |
-| `pc-macos` | ≥ 8,333 / 9,009-10,000 | — / — | — / — |
+| `pc-macos` | ≥ 8,333 / 8,197-10,000 | — / — | — / — |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
@@ -114,10 +122,12 @@ Set grid height to 128 (alongside default width 128). Measures the heaviest conf
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 4.5 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 10.7-10.8 | — / 132KB | — / 48KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.4 | ≥ 103KB / 93KB | — / 48KB |
-| `pc-macos` | ≥ 8,333 / 8,772-9,901 | — / — | — / — |
+| `pc-macos` | ≥ 8,333 / 3,534-9,901 | — / — | — / — |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
@@ -133,10 +143,12 @@ Shrink to 128x64. Measured: FPS must stay within 20% of the baseline (proves the
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 11.1 | — / 63KB | — / 17KB |
 | `esp32-eth` | — / 26.4-26.5 | — / 114KB | — / 48KB |
 | `esp32-eth-wifi` | ≥ 22.2 / 31.8 | ≥ 83KB / 75KB | — / 24KB |
-| `pc-macos` | ≥ 16,667 / 5,208-20,833 | — / — | — / — |
+| `pc-macos` | ≥ 16,667 / 5,208-21,277 | — / — | — / — |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
@@ -149,10 +161,12 @@ Grow back to 128x128. Measured: confirms the heap can return to the heavy baseli
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 4.0 | — / 83KB | — / 52KB |
 | `esp32-eth` | — / 10.4 | — / 132KB | — / 48KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 93KB | — / 52KB |
-| `pc-macos` | ≥ 8,333 / 4,505-9,901 | — / — | — / — |
+| `pc-macos` | ≥ 8,333 / 4,237-9,901 | — / — | — / — |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
@@ -184,7 +198,7 @@ Add ArtNetSendDriver and run the bounded FPS measurement (must stay at >=80% of 
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | ≥ 20,000 / 23,256-28,571 | — / — | — / — |
+| `pc-macos` | ≥ 20,000 / 20,408-28,571 | — / — | — / — |
 
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
@@ -249,7 +263,7 @@ Mirror is on: Layer has a LUT, Drivers has an output buffer. min_fps_led_product
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | ≥ 16,667 / 7,407-21,739 | — / — | — / — |
+| `pc-macos` | ≥ 16,667 / 7,407-22,222 | — / — | — / — |
 
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
@@ -328,7 +342,7 @@ Add ArtNetSendDriver and run the bounded FPS measurement on the LUT path.
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | ≥ 8,333 / 8,621-9,901 | — / — | — / — |
+| `pc-macos` | ≥ 8,333 / 3,322-9,901 | — / — | — / — |
 
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
@@ -357,7 +371,7 @@ Add ArtNetSendDriver and run the bounded FPS measurement (mirror + LUT path must
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | ≥ 8,333 / 9,009-9,901 | — / — | — / — |
+| `pc-macos` | ≥ 8,333 / 8,850-9,901 | — / — | — / — |
 
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
@@ -380,10 +394,12 @@ Set NoiseEffect.scale=4 and measure baseline FPS (mirror on). Effect controls do
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 3.9 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 10.5-10.6 | — / 133KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 94KB | — / 48KB |
-| `pc-macos` | ≥ 8,333 / 8,850-9,901 | — / — | — / — |
+| `pc-macos` | ≥ 8,333 / 5,952-9,901 | — / — | — / — |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
@@ -396,10 +412,12 @@ Disable mirrorX. Modifier control triggers a pipeline rebuild — measures the r
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 4.8 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 10.4 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.0 | ≥ 103KB / 94KB | — / 48KB |
-| `pc-macos` | ≥ 5,000 / 5,000-5,348 | — / — | — / — |
+| `pc-macos` | ≥ 5,000 / 4,184-5,405 | — / — | — / — |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
@@ -412,10 +430,12 @@ Disable mirrorY. Mirror is now fully off — should land on the no-LUT path.
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 4.4 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 8.9-9.0 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 11.1 | ≥ 103KB / 94KB | — / 48KB |
-| `pc-macos` | ≥ 2,500 / 2,740-2,849 | — / — | — / — |
+| `pc-macos` | ≥ 2,500 / 2,532-2,849 | — / — | — / — |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
@@ -434,10 +454,12 @@ Re-enable mirrorY and measure — the heavy LUT path must recover (FPS within 50
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 4.4 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 10.5-10.6 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.1 | ≥ 103KB / 94KB | — / 48KB |
-| `pc-macos` | ≥ 8,333 / 9,709-9,901 | — / — | — / — |
+| `pc-macos` | ≥ 8,333 / 9,009-10,000 | — / — | — / — |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
@@ -458,9 +480,11 @@ mDNS on (default) — captures the baseline FPS for the next two steps.
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 4.4 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 10.5-10.6 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 93KB | — / 48KB |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
@@ -472,9 +496,11 @@ mDNS off — measured. Expected to match or exceed the baseline.
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 3.6 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 10.3-10.5 | — / 137KB | — / 48KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.0 | ≥ 93KB / 98KB | — / 48KB |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "shared heap budget; cumulative sweep state reduces standalone-mDNS-off heap by ~15KB" · observed 2026-06-02
 
@@ -489,9 +515,11 @@ mDNS on again — measured with a bound: FPS must stay within 20% of the baselin
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 4.3 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 9.1 | — / 132KB | — / 48KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 10.6 | ≥ 103KB / 93KB | — / 48KB |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
@@ -514,17 +542,19 @@ detail=1 (coarsest, 16x16 downsample on a 128 grid). Cheapest preview render.
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 4.0 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 10.5-10.6 | — / 132KB | — / 50KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 93KB | — / 48KB |
-| `pc-macos` | ≥ 3,333 / 3,247-3,322 | — / — | — / — |
+| `pc-macos` | ≥ 3,333 / 2,070-3,322 | — / — | — / — |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 #### `detail-2-medium` (set_control)  📏
 
-detail=2 (medium, 32x32 downsample). Known accepted cost — must still hit 80% of baseline.
+detail=2 (medium, 32x32 downsample). Known accepted cost — still hits 80% of baseline.
 
 **Bounds**:
 - FPS ≥ 80% of baseline
@@ -533,10 +563,12 @@ detail=2 (medium, 32x32 downsample). Known accepted cost — must still hit 80% 
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 4.9 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 10.4-10.5 | — / 132KB | — / 50KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.0 | ≥ 103KB / 93KB | — / 48KB |
-| `pc-macos` | ≥ 3,333 / 3,195-3,289 | — / — | — / — |
+| `pc-macos` | ≥ 3,333 / 3,003-3,289 | — / — | — / — |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
@@ -552,17 +584,19 @@ detail=3 (finest, 43x43 downsample). Looser bound (70%) because the downsample c
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 4.5 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 9.5-9.6 | — / 132KB | — / 50KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.6 | ≥ 103KB / 93KB | — / 48KB |
-| `pc-macos` | ≥ 3,125 / 3,289-3,333 | — / — | — / — |
+| `pc-macos` | ≥ 3,125 / 2,967-3,333 | — / — | — / — |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 
 #### `decompress-on` (set_control)  📏
 
-decompress=true. Client-side hint — must not affect the render tick.
+decompress=true. Client-side hint — does not affect the render tick.
 
 **Bounds**:
 - FPS ≥ 80% of baseline
@@ -571,10 +605,12 @@ decompress=true. Client-side hint — must not affect the render tick.
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 4.6 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 10.5-10.6 | — / 132KB | — / 50KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 93KB | — / 48KB |
-| `pc-macos` | ≥ 3,333 / 3,226-3,333 | — / — | — / — |
+| `pc-macos` | ≥ 3,333 / 3,040-3,333 | — / — | — / — |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
@@ -590,10 +626,12 @@ decompress=false. Same as above — pure client-side, no render impact expected.
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 4.8 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 10.3 | — / 132KB | — / 50KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.0 | ≥ 103KB / 93KB | — / 48KB |
-| `pc-macos` | ≥ 3,333 / 3,077-3,311 | — / — | — / — |
+| `pc-macos` | ≥ 3,333 / 2,985-3,311 | — / — | — / — |
 
+- `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02

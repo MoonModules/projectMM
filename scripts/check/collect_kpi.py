@@ -419,7 +419,7 @@ def main():
     # floor. The device reports tick *time* (µs), so compare that directly — no
     # lossy FPS division. The per-grid budget scales with light count:
     #   max_tick_us = lights × 1e6 / MIN_ESP32_FPS_LED_PRODUCT
-    # so a smaller grid gets proportionally less time (18 FPS at 128×128).
+    # so a smaller grid gets proportionally less time (10 FPS at 128×128).
     # An absent ESP32 reading is not a failure — the caller decides whether a
     # missing measurement is acceptable (see CLAUDE.md Lifecycle Events,
     # Event 1 gate 7 — KPI collection).
@@ -432,8 +432,9 @@ def main():
         if esp32_tick > max_tick:
             print()
             label = "FAIL" if args.commit else "WARN"
+            floor_fps = MIN_ESP32_FPS_LED_PRODUCT // 16384
             print(f"{label}: ESP32 render tick {esp32_tick}us exceeds the {max_tick}us "
-                  f"budget for {lights} lights (18 FPS at the 128×128 / 16384-light "
+                  f"budget for {lights} lights ({floor_fps} FPS at the 128×128 / 16384-light "
                   f"reference).")
             if args.commit:
                 sys.exit(1)

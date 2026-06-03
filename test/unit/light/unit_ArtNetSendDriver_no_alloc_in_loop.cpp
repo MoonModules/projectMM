@@ -17,7 +17,7 @@
 #include "light/layers/Buffer.h"
 
 // onBuildState sizes the correction-applied buffer to source-count × out-channels.
-// The size matches what loop() would need on its first send. Calling loop()
+// The size matches what loop() needs on its first send. Calling loop()
 // after onBuildState must not reallocate — pin the data pointer + shape.
 TEST_CASE("ArtNetSendDriver sizes corrected_ in onBuildState, not in loop") {
     mm::Buffer source;
@@ -45,7 +45,7 @@ TEST_CASE("ArtNetSendDriver sizes corrected_ in onBuildState, not in loop") {
 }
 
 // A preset toggle from RGB to RGBW grows outChannels from 3 to 4. The grow
-// happens in onCorrectionChanged, off the hot path.
+// runs in onCorrectionChanged, off the hot path.
 TEST_CASE("ArtNetSendDriver grows corrected_ in onCorrectionChanged on RGB → RGBW") {
     mm::Buffer source;
     REQUIRE(source.allocate(32, 3));

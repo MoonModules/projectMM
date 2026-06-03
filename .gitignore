@@ -96,12 +96,6 @@ esp32/monitor.log
 .claude/settings.local.json
 .claude/*.lock
 
-# WiFi credentials for the local dev's improv_provision.py auto-detect path.
-# Copy wifi_credentials.example.json → wifi_credentials.json and fill in
-# your SSID + password. wifi_credentials.json is gitignored; the .example
-# is committed as a template. See scripts/build/host_wifi.py.
-scripts/build/wifi_credentials.json
-
 # OS
 .DS_Store
 Thumbs.db

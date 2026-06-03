@@ -12,7 +12,20 @@ let scripts = [];
 let boards = [];
 let scenarios = [];   // [{name, module, also}]
 let testModules = []; // ["CamelCaseName", ...]
-let state = { board: "", port: "", devices: [], scenario: "", module: "" }; // scenario + module shared across all needs_scenario / needs_module cards
+// State shape (post-networks refactor):
+//   { networks: [{name, subnet, wifi: {ssid, password}, port, devices: [...]}],
+//     active_network: "Home",
+//     active_network_user_pinned: bool,   // set true when user picks the dropdown
+//     board, scenario, module, tab, flag_* }
+// Devices and the active serial port now live INSIDE the active network.
+// Migration from the legacy flat shape happens server-side in load_state().
+let state = { networks: [], active_network: "", board: "", scenario: "", module: "" };
+
+// Helper: the network record currently selected. Every read that used to
+// touch state.devices or state.port now routes through this.
+function getActiveNetwork() {
+    return (state.networks || []).find(n => n.name === state.active_network) || null;
+}
 
 // ---------------------------------------------------------------------------
 // Init
@@ -44,11 +57,13 @@ async function init() {
 
     renderBoardSelect();
     renderScripts();
+    renderNetworkBar();
     try { renderDevices(); } catch (e) { console.error("renderDevices:", e); }
     await updateRunningState();
     refreshPorts();
     setupTabs();
     setupPaneTabs();
+    setupNetworkBar();
 }
 
 async function updateRunningState() {
@@ -94,6 +109,7 @@ function setupTabs() {
             btn.classList.add("active");
             content.classList.add("active");
         }
+        applyNetworkBarVisibility(activeTab);
     }
 
     document.querySelectorAll(".tab").forEach(btn => {
@@ -104,8 +120,19 @@ function setupTabs() {
             document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
             state.tab = btn.dataset.tab;
             saveState();
+            applyNetworkBarVisibility(btn.dataset.tab);
         });
     });
+}
+
+// The network bar (selector + WiFi panel) only matters when the workflow
+// involves a device on the LAN — ESP32 tab uses the active network's port
+// + WiFi creds (Improv), Live tab uses the device list. The PC tab runs on
+// localhost and has no network concept; hide the bar so it doesn't add noise.
+function applyNetworkBarVisibility(tab) {
+    const bar = document.getElementById("network-bar");
+    if (!bar) return;
+    bar.style.display = (tab === "esp32" || tab === "live") ? "" : "none";
 }
 
 // ---------------------------------------------------------------------------
@@ -432,9 +459,10 @@ async function runScript(script, btn) {
         return;
     }
 
-    // Live tab scripts: run against each selected device
+    // Live tab scripts: run against each selected device in the active network
     if (script.tab === "live" && script.needs_device) {
-        const devices = (state.devices || []).filter(d => d.selected);
+        const active = getActiveNetwork();
+        const devices = ((active && active.devices) || []).filter(d => d.selected);
         if (devices.length === 0) {
             switchPane("log");
             appendLog("\n--- No devices selected. Use Discover and check devices first. ---\n");
@@ -454,7 +482,7 @@ async function runScript(script, btn) {
 async function runScriptOnce(script, btn, extraParams) {
     const params = { ...extraParams };
     if (script.needs_board) params.board = state.board;
-    if (script.needs_port) params.port = state.port;
+    if (script.needs_port) params.port = (getActiveNetwork()?.port) || "";
     if (script.needs_scenario) params.scenario = state.scenario;
     if (script.needs_module) params.module = state.module;
     for (const flag of (script.flags || [])) {
@@ -558,7 +586,10 @@ async function refreshPorts() {
     const resp = await fetch("/api/ports");
     const data = await resp.json();
     const select = document.getElementById("port-select");
-    const current = state.port;
+    // Port is now per-network — read and persist on the active network record.
+    // refreshPorts re-runs on every network switch so the dropdown's selected
+    // value follows the active network's last-used port.
+    const current = getActiveNetwork()?.port || "";
     select.innerHTML = '<option value="">--</option>';
     for (const port of data.ports) {
         const opt = document.createElement("option");
@@ -568,7 +599,8 @@ async function refreshPorts() {
         select.appendChild(opt);
     }
     select.addEventListener("change", async () => {
-        state.port = select.value;
+        const active = getActiveNetwork();
+        if (active) active.port = select.value;
         await saveState();
     });
 }
@@ -583,68 +615,153 @@ document.getElementById("discover-btn").addEventListener("click", async () => {
     appendLog("\n--- Discovering devices ---\n");
     switchPane("log");
     const resp = await fetch("/api/discover", { method: "POST" });
-    const data = await resp.json();
-    appendLog("Scanned subnet: " + (data.subnet || "?") + ".*\n");
-    // Merge: keep existing devices, add new ones, update online status
-    const existing = state.devices || [];
-    const existingByIp = Object.fromEntries(existing.map(d => [d.ip, d]));
-    const foundIps = new Set(data.devices.map(d => d.ip));
-    // Update existing devices found in scan. Live-readable fields
-    // (deviceName, firmware, deduced board) win from the probe; user-set or
-    // flash-tracked fields (board when not deducible, last_port) survive.
-    for (const found of data.devices) {
-        if (existingByIp[found.ip]) {
-            const e = existingByIp[found.ip];
-            e.online = true;
-            e.deviceName = found.deviceName || e.deviceName || "";
-            e.firmware = found.firmware || e.firmware || "";
-            // Probe's deduced board wins when set; otherwise keep the user-set value.
-            if (found.board) e.board = found.board;
-            else if (!e.board) e.board = "";
-            // last_port stays as-is (probe doesn't supply it).
-            delete e.modules;  // legacy field removed; drop on next refresh.
-        } else {
-            existing.push({ ...found, online: true, selected: false, last_port: "" });
-        }
-    }
-    // Mark not-found existing devices as offline
-    for (const d of existing) {
-        if (!foundIps.has(d.ip)) d.online = false;
-    }
-    state.devices = existing;
-    await saveState();
+    // Server attributes found devices to the matching network (or creates a
+    // new one) and returns the whole updated state — the JS just adopts it.
+    // Client-side merging used to live here; moving it server-side keeps the
+    // network-membership rule in one place.
+    state = await resp.json();
+    renderNetworkBar();
     renderDevices();
-    const newCount = data.devices.filter(d => !existingByIp[d.ip]).length;
-    appendLog(`Found ${data.devices.length} device(s)` + (newCount ? `, ${newCount} new` : "") + "\n");
+    refreshPorts();
+    const active = getActiveNetwork();
+    const count = (active && active.devices) ? active.devices.length : 0;
+    const onCount = active ? active.devices.filter(d => d.online).length : 0;
+    appendLog(`Active network "${state.active_network}": ${onCount}/${count} online\n`);
 });
 
 document.getElementById("refresh-devices-btn")?.addEventListener("click", async () => {
-    if (!state.devices || state.devices.length === 0) return;
-    appendLog("\n--- Refreshing device status ---\n");
+    const active = getActiveNetwork();
+    if (!active || !active.devices || active.devices.length === 0) return;
+    appendLog(`\n--- Refreshing network "${active.name}" ---\n`);
     const resp = await fetch("/api/refresh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ devices: state.devices }),
+        body: JSON.stringify({ network: active.name }),
     });
-    const data = await resp.json();
-    const onlineIps = new Set(data.online.map(d => d.ip));
-    for (const device of state.devices) {
-        device.online = onlineIps.has(device.ip);
-    }
-    await saveState();
+    state = await resp.json();
+    renderNetworkBar();
     renderDevices();
-    const onCount = state.devices.filter(d => d.online).length;
-    appendLog(`${onCount}/${state.devices.length} online\n`);
+    const after = getActiveNetwork();
+    const onCount = after ? after.devices.filter(d => d.online).length : 0;
+    appendLog(`${onCount}/${after ? after.devices.length : 0} online\n`);
 });
+
+// Network bar — rebuilds the dropdown options from state.networks and
+// syncs the WiFi panel to the active network's credentials. Called from
+// init and after any state mutation that touches networks (add, rename,
+// discover, refresh).
+function renderNetworkBar() {
+    const select = document.getElementById("network-select");
+    if (!select) return;
+    select.innerHTML = "";
+    const networks = state.networks || [];
+    if (networks.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = ""; opt.textContent = "(no network — click Add)";
+        select.appendChild(opt);
+    } else {
+        for (const n of networks) {
+            const opt = document.createElement("option");
+            opt.value = n.name;
+            opt.textContent = `${n.name} — ${n.subnet || "no subnet"}`;
+            if (n.name === state.active_network) opt.selected = true;
+            select.appendChild(opt);
+        }
+    }
+    // Sync the WiFi panel inputs to the active network.
+    const active = getActiveNetwork();
+    const wifi = (active && active.wifi) || { ssid: "", password: "" };
+    const ssidInput = document.getElementById("network-wifi-ssid");
+    const pwInput = document.getElementById("network-wifi-password");
+    if (ssidInput) ssidInput.value = wifi.ssid || "";
+    if (pwInput) pwInput.value = wifi.password || "";
+    // Hide the WiFi panel when there's no network selected (nothing to bind to).
+    const panel = document.getElementById("network-wifi");
+    if (panel) panel.style.display = active ? "" : "none";
+}
+
+// One-shot wire-up for the network bar's interactive controls. Idempotent —
+// safe to call once at startup; subsequent renders just refresh the option
+// list via renderNetworkBar().
+function setupNetworkBar() {
+    const select = document.getElementById("network-select");
+    const rename = document.getElementById("network-rename");
+    const add = document.getElementById("network-add");
+    const ssidInput = document.getElementById("network-wifi-ssid");
+    const pwInput = document.getElementById("network-wifi-password");
+
+    if (select) select.addEventListener("change", async () => {
+        state.active_network = select.value;
+        state.active_network_user_pinned = true;  // user override sticks
+        await saveState();
+        renderNetworkBar();
+        renderDevices();
+        refreshPorts();
+    });
+
+    if (rename) rename.addEventListener("click", async () => {
+        const active = getActiveNetwork();
+        if (!active) { appendLog("No active network to rename.\n"); return; }
+        const next = prompt("Rename network", active.name);
+        if (!next || next === active.name) return;
+        if ((state.networks || []).some(n => n.name === next)) {
+            appendLog(`A network named "${next}" already exists.\n`);
+            return;
+        }
+        active.name = next;
+        state.active_network = next;
+        await saveState();
+        renderNetworkBar();
+    });
+
+    if (add) add.addEventListener("click", async () => {
+        const name = prompt("Network name", "Network " + ((state.networks || []).length + 1));
+        if (!name) return;
+        if ((state.networks || []).some(n => n.name === name)) {
+            appendLog(`A network named "${name}" already exists.\n`);
+            return;
+        }
+        // We don't know the new network's subnet up front — the user is
+        // probably about to move to it, or they're adding it speculatively.
+        // Discover/refresh will populate the subnet from the actual scan.
+        state.networks = state.networks || [];
+        state.networks.push({
+            name, subnet: "", wifi: { ssid: "", password: "" },
+            port: "", devices: [],
+        });
+        state.active_network = name;
+        state.active_network_user_pinned = true;
+        await saveState();
+        renderNetworkBar();
+        renderDevices();
+        refreshPorts();
+    });
+
+    // WiFi credentials persist on blur — common-case interaction is "paste,
+    // tab out" which fires blur. Avoid input-event saves to keep the JSON
+    // diff minimal (one save per field edit, not per keystroke).
+    function saveWifi() {
+        const active = getActiveNetwork();
+        if (!active) return;
+        active.wifi = active.wifi || {};
+        if (ssidInput) active.wifi.ssid = ssidInput.value;
+        if (pwInput) active.wifi.password = pwInput.value;
+        saveState();
+    }
+    if (ssidInput) ssidInput.addEventListener("blur", saveWifi);
+    if (pwInput) pwInput.addEventListener("blur", saveWifi);
+}
 
 function renderDevices() {
     const el = document.getElementById("device-list");
-    if (!state.devices || state.devices.length === 0) {
+    const active = getActiveNetwork();
+    const devices = (active && active.devices) || [];
+    if (devices.length === 0) {
         el.textContent = "No devices discovered yet.";
         return;
     }
     el.innerHTML = "";
-    for (const device of state.devices) {
+    for (const device of devices) {
         const label = document.createElement("label");
         label.className = "device-item";
 
@@ -682,6 +799,10 @@ function renderDevices() {
         // firmware can run on multiple boards and the device can't tell us.
         // Future phase: drive the dropdown options from a structured catalog
         // when board presets exist; for now this short list is enough.
+        // KEEP IN SYNC: scripts/moondeck.py::_deduce_board carries the
+        // firmware→hardware mapping (currently one entry: esp32-eth* → Olimex).
+        // When a third hardware board with deducible firmware lands, both
+        // sites need an update — collapse into a shared catalog at that point.
         const boardPicker = document.createElement("select");
         boardPicker.className = "device-board";
         boardPicker.title = "Physical board (pick when firmware can't tell us)";
@@ -709,7 +830,10 @@ function renderDevices() {
         removeBtn.title = "Remove device";
         removeBtn.addEventListener("click", (e) => {
             e.preventDefault();
-            state.devices = state.devices.filter(d => d.ip !== device.ip);
+            // Remove from the active network's device list; other networks
+            // are untouched even if (theoretically) the same IP shows up.
+            const a = getActiveNetwork();
+            if (a) a.devices = a.devices.filter(d => d.ip !== device.ip);
             saveState();
             renderDevices();
         });

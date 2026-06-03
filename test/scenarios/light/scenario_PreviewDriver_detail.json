@@ -190,7 +190,7 @@
     },
     {
       "name": "detail-2-medium",
-      "description": "detail=2 (medium, 32x32 downsample). Known accepted cost — must still hit 80% of baseline.",
+      "description": "detail=2 (medium, 32x32 downsample). Known accepted cost — still hits 80% of baseline.",
       "op": "set_control",
       "id": "Preview",
       "key": "detail",
@@ -219,7 +219,7 @@
         "pc-macos": {
           "tick_us": [
             304,
-            319
+            367
           ],
           "free_heap": [
             0,
@@ -231,7 +231,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-02"
+            "2026-06-03"
           ]
         },
         "esp32-eth-wifi": {
@@ -321,7 +321,7 @@
         "pc-macos": {
           "tick_us": [
             300,
-            315
+            362
           ],
           "free_heap": [
             0,
@@ -333,7 +333,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-02"
+            "2026-06-03"
           ]
         },
         "esp32-eth-wifi": {
@@ -394,7 +394,7 @@
     },
     {
       "name": "decompress-on",
-      "description": "decompress=true. Client-side hint — must not affect the render tick.",
+      "description": "decompress=true. Client-side hint — does not affect the render tick.",
       "op": "set_control",
       "id": "Preview",
       "key": "decompress",
@@ -423,7 +423,7 @@
         "pc-macos": {
           "tick_us": [
             300,
-            319
+            370
           ],
           "free_heap": [
             0,
@@ -435,7 +435,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-02"
+            "2026-06-03"
           ]
         },
         "esp32-eth-wifi": {
@@ -525,7 +525,7 @@
         "pc-macos": {
           "tick_us": [
             302,
-            327
+            386
           ],
           "free_heap": [
             0,
@@ -537,7 +537,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-02"
+            "2026-06-03"
           ]
         },
         "esp32-eth-wifi": {

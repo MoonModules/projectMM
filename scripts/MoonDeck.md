@@ -8,6 +8,7 @@
 - **Destructive-action confirm** — scripts flagged `destructive: true` (e.g. Erase Flash) pop a native confirm dialog before running.
 - **Tab persistence** — selected tab survives page refresh.
 - **Process detection** — on page load, checks if projectMM or idf.py is already running and shows Stop button.
+- **Network bar** (top of the sidebar): switch between known networks. Each network holds its own device list, last-used serial port, and WiFi credentials (consumed by Improv). On startup, MoonDeck auto-selects the network whose subnet matches the host's current LAN — moving the laptop between networks usually requires no clicks. Manual override (the dropdown) pins the selection until the pinned network's subnet stops matching the host. Add / Rename buttons next to the dropdown manage the catalog. State persisted in `scripts/moondeck.json` under `networks` + `active_network`.
 
 ## PC Tab
 
@@ -277,7 +278,7 @@ Reads serial at 115200 baud. Output streams to MoonDeck's log and is saved to `e
 
 Push WiFi credentials to a running projectMM device over USB-serial. Uses the [Improv-WiFi](https://www.improv-wifi.com/serial/) protocol — the same wire format the browser flow at improv-wifi.com uses. Device must be running a firmware that includes the Improv listener.
 
-**One-click flow**: pick the device's port in MoonDeck, hit **Improv WiFi**. The script auto-detects the host machine's currently-joined WiFi (SSID + password via macOS Keychain / Linux NetworkManager / Windows `netsh`) and sends it to the device. The device replies with its new URL when STA comes up — typically 5-10 s end to end.
+**One-click flow**: pick the device's port in MoonDeck, hit **Improv WiFi**. The script reads SSID + password from the **active network's WiFi block in `scripts/moondeck.json`** (the one shown in the network bar at the top of the sidebar). If that block is empty, it falls back to detecting the host machine's currently-joined WiFi (macOS Keychain / Linux NetworkManager / Windows `netsh`). The device replies with its new URL when STA comes up — typically 5-10 s end to end.
 
 ```bash
 # Use host's currently-joined WiFi (one click in MoonDeck → equivalent CLI):
@@ -301,7 +302,7 @@ for port in /dev/tty.usbserial-*; do
 done
 ```
 
-The host-WiFi reader lives at [scripts/build/host_wifi.py](build/host_wifi.py) and runs standalone for diagnosis (`python3 scripts/build/host_wifi.py` prints the detected SSID + password). The first macOS run pops a Keychain access dialog — the OS doing its job; we don't try to bypass it.
+The host-WiFi reader lives at [scripts/build/host_wifi.py](build/host_wifi.py) and runs standalone for diagnosis (`python3 scripts/build/host_wifi.py` prints the resolved SSID + password). It first checks `scripts/moondeck.json`'s active network's `wifi` block; if empty, falls back to OS auto-detect. The first macOS auto-detect run pops a Keychain access dialog — the OS doing its job; we don't try to bypass it. The retired `scripts/build/wifi_credentials.json` source is gone — credentials now live per-network in moondeck.json, so moving the laptop between networks is just a dropdown switch.
 
 Replaces v1's `deploy/wifi.py` + `deploy/flashfs.py --wifi` partition-baking flow — the device stays running, no flash mode required. Full module + protocol details: [docs/moonmodules/core/ImprovProvisioningModule.md](../docs/moonmodules/core/ImprovProvisioningModule.md).
 

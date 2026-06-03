@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 import threading
+from contextlib import suppress
 from pathlib import Path
 
 PORT = 8420
@@ -135,7 +136,20 @@ def _deduce_board(firmware: str) -> str:
     """Map firmware variant → physical board key when the firmware uniquely
     identifies the board (the eth firmware variants hardcode Olimex RMII
     pins). Returns "" when the firmware works on multiple boards — the user
-    fills in `board` manually in that case."""
+    fills in `board` manually in that case.
+
+    NAMING COLLISION (transitional): "board" means *firmware variant* in
+    build_esp32.py and SystemModule.board, and *physical hardware* here in
+    MoonDeck device records. The rename to `firmware` everywhere is tracked
+    in docs/plan.md § "Board vs firmware separation, runtime board presets"
+    — do not propagate this overload to new code. New device-record sites
+    should use "board" for hardware only; new build/system sites should
+    avoid the word until the rename lands.
+
+    KEEP IN SYNC: scripts/moondeck_ui/app.js boardOptions carries the human
+    list of hardware boards the picker offers. When a new board lands with
+    a deducible firmware, both sites need an update — collapse into a shared
+    catalog at that point (small lift today; growing cost as boards add)."""
     if firmware in ("esp32-eth", "esp32-eth-wifi"):
         return "olimex-esp32-gateway-rev-g"
     return ""
@@ -193,8 +207,8 @@ def _consume_last_flash() -> dict | None:
         return None
     import time
     if time.time() - float(data.get("ts", 0)) > _LAST_FLASH_TTL_S:
-        try: _LAST_FLASH_FILE.unlink()
-        except OSError: pass
+        with suppress(OSError):
+            _LAST_FLASH_FILE.unlink()
         return None
     return {"port": data.get("port", ""), "firmware": data.get("firmware", "")}
 
@@ -218,8 +232,14 @@ def refresh_devices(known_devices):
             fresh = _probe_device(ip)
         if not fresh:
             return None
-        # Merge: probe wins for live-readable fields; known wins for
-        # user-set / flash-tracked fields.
+        # Merge: probe wins for live-readable fields; user-set / flash-tracked
+        # fields must survive. Without this, `online` (the device responded
+        # → True), `selected` (user checkbox), `board` (user-set when not
+        # deducible), and `last_port` (set by the flash breadcrumb) would
+        # disappear from the persisted record after every refresh.
+        fresh["online"] = True
+        if "selected" in device:
+            fresh["selected"] = device["selected"]
         if not fresh.get("board") and device.get("board"):
             fresh["board"] = device["board"]
         if device.get("last_port"):
@@ -243,8 +263,8 @@ def refresh_devices(known_devices):
         matches = [d for d in refreshed if d.get("firmware") == last_flash["firmware"]]
         if len(matches) == 1:
             matches[0]["last_port"] = last_flash["port"]
-            try: _LAST_FLASH_FILE.unlink()
-            except OSError: pass
+            with suppress(OSError):
+                _LAST_FLASH_FILE.unlink()
         # If 0 matches (device hasn't booted yet) or 2+ matches (ambiguous),
         # leave the marker for the next refresh to retry / re-evaluate.
     return refreshed
@@ -255,13 +275,69 @@ def refresh_devices(known_devices):
 # ---------------------------------------------------------------------------
 
 def load_state():
+    """Load MoonDeck state. Migrates the old flat-list shape (top-level
+    `devices` + `port`) to the new networks-grouped shape on first load
+    after this commit ships; new-shape files load as-is. See _migrate_to_networks."""
     if STATE_FILE.exists():
         with open(STATE_FILE) as f:
-            return json.load(f)
-    return {"env": "esp32", "port": "", "devices": [], "tab": "pc"}
+            state = json.load(f)
+        if "networks" not in state and ("devices" in state or "port" in state):
+            state = _migrate_to_networks(state)
+        return state
+    return {"networks": [], "active_network": "", "tab": "pc"}
 
 
-_VOLATILE_DEVICE_FIELDS = ("deviceName", "firmware")
+def _migrate_to_networks(old_state: dict) -> dict:
+    """One-shot migration of the pre-networks moondeck.json shape:
+        {env, port, devices: [...], tab, board, scenario, module, flag_*}
+    into the networks-grouped shape:
+        {networks: [{name, subnet, wifi, port, devices: [...]}, ...],
+         active_network, tab, board, scenario, module, flag_*}
+
+    Buckets existing devices by `/24` subnet derived from each device's `ip`.
+    Names the largest bucket "Home", subsequent buckets "Network 2", "Network 3",
+    ... User can rename via the dropdown. The old top-level `port` migrates
+    into the bucket that holds the largest device count (heuristic — usually
+    that's where the user was working). Drops the legacy `env` field
+    (already migrated to `board` in app.js).
+    """
+    import sys
+    devices = old_state.get("devices") or []
+    by_subnet: dict[str, list] = {}
+    for d in devices:
+        ip_port = d.get("ip", "")
+        host = ip_port.split(":", 1)[0]
+        parts = host.split(".")
+        subnet = ".".join(parts[:3]) + ".0/24" if len(parts) == 4 else "unknown"
+        by_subnet.setdefault(subnet, []).append(d)
+
+    # Largest bucket first → named "Home"; rest "Network 2", "Network 3", ...
+    ordered = sorted(by_subnet.items(), key=lambda kv: -len(kv[1]))
+    networks = []
+    for i, (subnet, bucket) in enumerate(ordered):
+        name = "Home" if i == 0 else f"Network {i + 1}"
+        networks.append({
+            "name": name,
+            "subnet": subnet,
+            "wifi": {"ssid": "", "password": ""},
+            "port": "",
+            "devices": bucket,
+        })
+    # Old top-level port → largest bucket (which is networks[0] if any).
+    if networks and old_state.get("port"):
+        networks[0]["port"] = old_state["port"]
+
+    new_state = {k: v for k, v in old_state.items()
+                 if k not in ("devices", "port", "env")}
+    new_state["networks"] = networks
+    new_state["active_network"] = networks[0]["name"] if networks else ""
+    new_state.setdefault("tab", "pc")
+    print(f"moondeck: migrated {len(devices)} device(s) into {len(networks)} "
+          f"network(s): {', '.join(n['name'] for n in networks)}", file=sys.stderr)
+    return new_state
+
+
+_VOLATILE_DEVICE_FIELDS = ("deviceName", "firmware", "modules")
 
 
 def save_state(state):
@@ -269,17 +345,84 @@ def save_state(state):
     is the source of truth for (`deviceName`, `firmware`) — caching them
     invites stale values when the device is reflashed/renamed via another
     host. They are re-read from `/api/state` on each refresh and live only
-    in the in-memory `state.devices` until the next save. User-set fields
-    (`board`, `last_port`, `selected`, `online`) persist."""
+    in the in-memory device lists until the next save. User-set fields
+    (`board`, `last_port`, `selected`, `online`) persist. Iterates per network."""
     persisted = dict(state)
-    devices = persisted.get("devices") or []
-    if devices:
-        persisted["devices"] = [
-            {k: v for k, v in d.items() if k not in _VOLATILE_DEVICE_FIELDS}
-            for d in devices
-        ]
+    networks = persisted.get("networks") or []
+    if networks:
+        persisted["networks"] = [_strip_network_volatiles(n) for n in networks]
     with open(STATE_FILE, "w") as f:
         json.dump(persisted, f, indent=2)
+
+
+def _strip_network_volatiles(network: dict) -> dict:
+    """Return a copy of a network with volatile per-device fields stripped.
+
+    `board` is conditionally volatile: when it equals the value `_deduce_board`
+    produces from the device's current firmware, the next probe will re-derive
+    it for free — no need to persist. When the user picked a board manually
+    (firmware doesn't deduce to anything, e.g. `esp32` could be LOLIN D32 or
+    generic), the picker's choice is the only source so we must keep it.
+    """
+    out = dict(network)
+    devs = out.get("devices") or []
+    cleaned = []
+    for d in devs:
+        c = {k: v for k, v in d.items() if k not in _VOLATILE_DEVICE_FIELDS}
+        # `board` strip: drop it when empty (noise) or when it matches the
+        # firmware-deduced value (recomputable). Keep when the user picked
+        # it (firmware deduces "" so the picker's value is the only source).
+        firmware = d.get("firmware") or ""
+        if "board" in c and (not c["board"] or c["board"] == _deduce_board(firmware)):
+            del c["board"]
+        cleaned.append(c)
+    out["devices"] = cleaned
+    return out
+
+
+def _active_network(state: dict) -> dict | None:
+    """Return the dict for state['active_network'] from state['networks'],
+    or None when the name doesn't match or there's no active selection.
+    Every consumer that previously read state['devices'] or state['port']
+    routes through this helper."""
+    name = state.get("active_network") or ""
+    for n in state.get("networks") or []:
+        if n.get("name") == name:
+            return n
+    return None
+
+
+def _subnet_from_host_subnet(host_subnet: str) -> str:
+    """Normalise `_get_local_subnet()` output (e.g. "192.168.1") to the
+    network record's `subnet` field shape ("192.168.1.0/24")."""
+    if not host_subnet:
+        return ""
+    return f"{host_subnet}.0/24"
+
+
+def _auto_select_network(state: dict, host_subnet: str) -> None:
+    """In-place: set state['active_network'] to whichever known network's
+    subnet matches the host's current subnet — but only if the user hasn't
+    pinned a different network. Pinning happens when the user changes the
+    dropdown; cleared when the pinned network's subnet stops matching the
+    host (next time we land on its LAN, auto-select takes over again)."""
+    if not state.get("networks"):
+        return
+    target_subnet = _subnet_from_host_subnet(host_subnet)
+    if not target_subnet:
+        return
+    pinned = state.get("active_network_user_pinned")
+    if pinned:
+        active = _active_network(state)
+        if active and active.get("subnet") == target_subnet:
+            return  # pinned network still matches host — leave as is
+        # Pinned network no longer matches host — release the pin so the
+        # next auto-select picks the right network for where we are now.
+        state["active_network_user_pinned"] = False
+    for n in state["networks"]:
+        if n.get("subnet") == target_subnet:
+            state["active_network"] = n["name"]
+            return
 
 
 # ---------------------------------------------------------------------------
@@ -440,10 +583,9 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         pass
 
     def handle(self):
-        try:
+        # Browser closing the connection is harmless; suppress the noise.
+        with suppress(ConnectionResetError, BrokenPipeError):
             super().handle()
-        except (ConnectionResetError, BrokenPipeError):
-            pass  # Browser closed connection — harmless
 
     def _send_json(self, data, status=200):
         body = json.dumps(data).encode()
@@ -477,7 +619,16 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             self._serve_unit_tests_for_module()
 
         elif self.path == "/api/state":
-            self._send_json(load_state())
+            # Auto-select the network matching the host's current subnet
+            # (unless the user has pinned a different one — see
+            # _auto_select_network). Persist the selection back so the next
+            # load is stable when the host's subnet hasn't changed.
+            state = load_state()
+            before = state.get("active_network")
+            _auto_select_network(state, _get_local_subnet())
+            if state.get("active_network") != before:
+                save_state(state)
+            self._send_json(state)
 
         elif self.path == "/api/running":
             running = {}
@@ -531,14 +682,75 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             params = json.loads(body) if body else {}
             subnet = params.get("subnet", "")
             devices, scanned_subnet = discover_devices(subnet)
-            self._send_json({"devices": devices, "subnet": scanned_subnet})
+            # Attribute found devices to the network whose subnet matches the
+            # scanned one. Creates a new "Network N" if none matches (a future
+            # rename in the UI can adjust the name). Returns the full updated
+            # state so the JS reloads the authoritative shape.
+            target_subnet = _subnet_from_host_subnet(scanned_subnet)
+            state = load_state()
+            net = next((n for n in (state.get("networks") or [])
+                        if n.get("subnet") == target_subnet), None)
+            if net is None and devices:
+                existing = state.setdefault("networks", [])
+                name = "Home" if not existing else f"Network {len(existing) + 1}"
+                net = {"name": name, "subnet": target_subnet,
+                       "wifi": {"ssid": "", "password": ""},
+                       "port": "", "devices": []}
+                existing.append(net)
+            if net is not None:
+                # Merge found devices into the network: keep existing user
+                # fields (board, last_port, selected), update online + probe
+                # fields. Drop devices no longer reachable — they stay
+                # offline elsewhere if previously known, here we trust the
+                # fresh scan as authoritative for what's on this subnet.
+                by_ip = {d["ip"]: d for d in net.get("devices", [])}
+                merged = []
+                for fresh in devices:
+                    ip = fresh.get("ip", "")
+                    keep = by_ip.get(ip, {})
+                    out = {**fresh, "online": True,
+                           "selected": keep.get("selected", False)}
+                    if keep.get("board") and not out.get("board"):
+                        out["board"] = keep["board"]
+                    if keep.get("last_port"):
+                        out["last_port"] = keep["last_port"]
+                    merged.append(out)
+                # Devices that existed previously but weren't found in the
+                # scan stay in the network as offline (the user may want to
+                # keep them around for when the device comes back). Discover
+                # is additive — refresh is the verb that prunes.
+                found_ips = {d.get("ip") for d in devices}
+                for ip, dev in by_ip.items():
+                    if ip not in found_ips:
+                        merged.append({**dev, "online": False})
+                net["devices"] = merged
+                save_state(state)
+            self._send_json(state)
 
         elif self.path == "/api/refresh":
             body = self._read_body()
             params = json.loads(body) if body else {}
-            known = params.get("devices", [])
-            online = refresh_devices(known)
-            self._send_json({"online": online})
+            network_name = params.get("network", "")
+            state = load_state()
+            net = next((n for n in (state.get("networks") or [])
+                        if n.get("name") == network_name), None)
+            if net is None:
+                # No-op when the named network doesn't exist (e.g. it was
+                # renamed mid-flight). Return state so the JS can re-sync.
+                self._send_json(state)
+                return
+            refreshed = refresh_devices(net.get("devices") or [])
+            # refresh_devices returns only devices that responded — devices
+            # marked offline (didn't respond) are dropped from the list it
+            # returns. Carry them forward as offline so the UI doesn't lose
+            # known-but-unreachable entries.
+            refreshed_ips = {d.get("ip") for d in refreshed}
+            for prior in (net.get("devices") or []):
+                if prior.get("ip") not in refreshed_ips:
+                    refreshed.append({**prior, "online": False})
+            net["devices"] = refreshed
+            save_state(state)
+            self._send_json(state)
 
         else:
             self.send_error(404)

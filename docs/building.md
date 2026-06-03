@@ -59,6 +59,8 @@ uv run scripts/test/test_desktop.py          # unit tests
 
 Or use MoonDeck's PC tab for the same operations with a status dot per card. The desktop run detaches and outlives the launching script — the same model as flashing an ESP32, where the device runs independently afterwards.
 
+![MoonDeck PC tab](assets/screenshots/moondeck_pc.png)
+
 Each host writes into its own build dir: `build/macos/`, `build/linux/`, `build/windows/`. The per-host layout mirrors the ESP32 side's `build/esp32-<board>/` shape — one directory per target, no cross-target clobbering on a multi-host dev machine.
 
 ## ESP32
@@ -83,6 +85,10 @@ uv run scripts/build/build_esp32.py --board esp32                  # WiFi-only
 uv run scripts/build/flash_esp32.py --board esp32 --port /dev/tty.usbserial-XXXX
 uv run scripts/run/monitor_esp32.py --port /dev/tty.usbserial-XXXX
 ```
+
+The ESP32 tab in MoonDeck wraps the same steps as cards (Setup → Firmware → Build → Port → Flash → Run). The Network bar at the top is the same one shown on the Live tab — it remembers which serial port and WiFi credentials belong to the current LAN, so moving the laptop between networks doesn't require re-picking.
+
+![MoonDeck ESP32 tab](assets/screenshots/moondeck_esp32.png)
 
 ### Boards
 

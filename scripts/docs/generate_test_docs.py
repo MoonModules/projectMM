@@ -87,7 +87,10 @@ def _fmt_us(us: int) -> str:
 
 
 def _fps_from_us(us: int) -> str:
-    """Convert tick_us → frames-per-second string (no decimals; for headline display)."""
+    """Convert tick_us → frames-per-second string (no decimals for ≥100 FPS,
+    one decimal below; for headline display). Shared core of both
+    `_fps_floor_from_contract` (single scalar → '≥ N FPS') and
+    `_fps_range_from_observed_range` ([min, max] tick → 'lo-hi FPS')."""
     if us <= 0:
         return "—"
     fps = 1_000_000 / us

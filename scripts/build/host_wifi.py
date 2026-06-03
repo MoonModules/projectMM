@@ -12,12 +12,17 @@ shutil, json, pathlib); no extra dependencies. Used by
 push the host's credentials to a fresh ESP32 over USB-serial; also
 re-runnable on its own with `python3 host_wifi.py` for diagnosis.
 
-Local file path: `scripts/build/wifi_credentials.json` (gitignored).
-Schema is the same as `wifi_credentials.example.json` (committed):
-`{"ssid": "...", "password": "..."}`. Copy the example file (drop the
-`.example` suffix) and fill in.
+Primary credentials source: `scripts/moondeck.json` under the active
+network's `wifi` block (`{networks: [{name, wifi: {ssid, password}, …}],
+active_network: "..."}`). When MoonDeck is the entry point the user has
+already picked a network there, so credentials follow that choice — moving
+the laptop between networks just means picking the matching network in the
+MoonDeck dropdown, no separate credentials file to keep in sync. When the
+moondeck.json active network has no wifi set (or no networks exist yet),
+we fall back to OS auto-detect — same behaviour as before, just the
+primary source moved.
 
-Per-platform auto-detect notes (when the local file isn't present):
+Per-platform auto-detect notes (when no moondeck.json wifi is set):
 
   macOS — `system_profiler SPAirPortDataType` is the modern path, but on
           Sonoma+ Apple Silicon non-sudo invocations get the SSID returned
@@ -51,9 +56,6 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Optional, Tuple
-
-LOCAL_CREDENTIALS_FILE = Path(__file__).resolve().parent / "wifi_credentials.json"
-
 
 # ---------------------------------------------------------------------------
 # macOS
@@ -318,41 +320,58 @@ def _windows_credentials() -> Tuple[Optional[str], Optional[str]]:
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def _local_file_credentials() -> Tuple[Optional[str], Optional[str]]:
-    """Read SSID + password from scripts/build/wifi_credentials.json.
+MOONDECK_STATE_FILE = Path(__file__).resolve().parent.parent / "moondeck.json"
 
-    This is the gitignored fallback the user maintains themselves. Schema:
-    `{"ssid": "...", "password": "..."}`. Used when OS auto-detect fails
-    (modern macOS redacts SSIDs from non-sudo subprocesses; Linux NM needs
-    sudo for the PSK in many distros) — and as a deliberate override for
-    users who don't want the auto-detect path at all.
+
+def _moondeck_active_network_credentials() -> Tuple[Optional[str], Optional[str]]:
+    """Read SSID + password from the active network's wifi block in
+    scripts/moondeck.json. Returns (None, None) when moondeck.json is absent,
+    has no networks, or the active network has no wifi set. Never raises —
+    this is the primary credentials source so it must degrade silently to
+    the OS auto-detect fallback.
     """
-    if not LOCAL_CREDENTIALS_FILE.exists():
+    if not MOONDECK_STATE_FILE.exists():
         return None, None
     try:
-        data = json.loads(LOCAL_CREDENTIALS_FILE.read_text())
+        state = json.loads(MOONDECK_STATE_FILE.read_text())
     except (json.JSONDecodeError, OSError):
         return None, None
-    ssid = data.get("ssid") or None
-    password = data.get("password") or None
+    name = state.get("active_network") or ""
+    networks = state.get("networks") or []
+    # Match by active_network name; if no active selection but there's
+    # exactly one network, use it (common at the very first run before the
+    # user has touched the dropdown).
+    chosen = None
+    if name:
+        chosen = next((n for n in networks if n.get("name") == name), None)
+    if chosen is None and len(networks) == 1:
+        chosen = networks[0]
+    if chosen is None:
+        return None, None
+    wifi = chosen.get("wifi") or {}
+    ssid = wifi.get("ssid") or None
+    password = wifi.get("password") or None
     return ssid, password
 
 
 def get_host_wifi() -> Tuple[Optional[str], Optional[str]]:
-    """Return `(ssid, password)` for the host's currently-joined WiFi.
+    """Return `(ssid, password)` for WiFi provisioning.
 
     Resolution order:
-      1. `scripts/build/wifi_credentials.local.json` if present (gitignored
-         user-maintained override; primary path on macOS Sonoma+ where OS
-         detection is structurally limited).
-      2. OS auto-detect (macOS / Linux / Windows).
+      1. `scripts/moondeck.json` active network's `wifi` block — the primary
+         source when MoonDeck is being used. The user picks the network in
+         the MoonDeck dropdown; credentials follow.
+      2. OS auto-detect (macOS / Linux / Windows) — the fallback when
+         moondeck.json has no networks yet or the active network has no
+         wifi set. Same paths as before; structurally limited on modern
+         macOS (Sonoma+ redacts SSIDs from non-sudo subprocesses).
 
     Either field may be None. Never raises — detection failures are normal
     (no WiFi adapter, not joined, locked Keychain, no nmcli, etc.). The
     caller is expected to treat None as "fall back to a prompt."
     """
-    # Local file first. If it exists and gives a real SSID, use it.
-    ssid, password = _local_file_credentials()
+    # MoonDeck active network first. If it gives a real SSID, use it.
+    ssid, password = _moondeck_active_network_credentials()
     if ssid:
         return ssid, password
 
