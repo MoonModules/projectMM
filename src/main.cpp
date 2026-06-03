@@ -134,7 +134,7 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     // pointer; the scheduler runs setup() on both in the same phase, so
     // construction order is what matters, not addModule order.
     //
-    // Compile-time gated: on builds without WiFi (--board esp32-eth, and
+    // Compile-time gated: on firmwares without WiFi (--firmware esp32-eth, and
     // desktop) the module is not created at all. This is the single
     // exception to main.cpp's "register everything, let modules guard
     // themselves" pattern. Rationale: Improv's only purpose is pushing WiFi

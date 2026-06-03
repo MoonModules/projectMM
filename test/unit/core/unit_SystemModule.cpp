@@ -38,20 +38,21 @@ TEST_CASE("SystemModule controls") {
     CHECK(found);
 }
 
-// The `board` control is always present and non-empty (either a real board key from build_info.h or the fallback "unknown").
-TEST_CASE("SystemModule board control populated") {
-    // The board control is wired in setup() from kBoardName (build_info.h).
+// The `firmware` control is always present and non-empty (either a real firmware key from build_info.h or the fallback "unknown").
+TEST_CASE("SystemModule firmware control populated") {
+    // The firmware control is wired in setup() from kFirmwareName (build_info.h).
     // Local desktop builds fall through to "unknown" because CMake doesn't
-    // pass -DMM_BOARD_NAME; release builds get the real key. Either way,
-    // the control must exist and be non-empty so the future OTA path has
-    // something to read.
+    // pass -DMM_FIRMWARE_NAME; release builds get the real key. Either way,
+    // the control must exist and be non-empty so the OTA path has something
+    // to read. (See docs/architecture.md § Firmware vs board — "firmware" is
+    // the compiled-binary variant; the physical board is a separate concept.)
     mm::SystemModule sys;
     sys.setup();
     sys.onBuildControls();
 
     bool found = false;
     for (uint8_t i = 0; i < sys.controls().count(); i++) {
-        if (std::strcmp(sys.controls()[i].name, "board") == 0) {
+        if (std::strcmp(sys.controls()[i].name, "firmware") == 0) {
             CHECK(sys.controls()[i].type == mm::ControlType::ReadOnly);
             const char* val = static_cast<const char*>(sys.controls()[i].ptr);
             CHECK(val != nullptr);

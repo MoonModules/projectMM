@@ -108,7 +108,7 @@ Surfacing hardware presence to the UI (so cards for absent interfaces hide rathe
 
 ## Ethernet-only build
 
-The Ethernet-only build (`build_esp32.py --board esp32-eth`) compiles WiFi out entirely — the platform layer reports `mm::platform::hasWiFi == false`. NetworkModule branches on that constant via `if constexpr`, so in this build:
+The Ethernet-only build (`build_esp32.py --firmware esp32-eth`) compiles WiFi out entirely — the platform layer reports `mm::platform::hasWiFi == false`. NetworkModule branches on that constant via `if constexpr`, so in this build:
 
 - The cascade is **Ethernet-only**: no STA/AP states are reachable. `setup()` enters `WaitingEth` on a successful `ethInit()`; if Ethernet fails or the cable is absent, the status reads "No network (Ethernet only)" and the module keeps polling for a cable (replug works; no reboot needed once a link appears via `WaitingEth`).
 - `onBuildControls()` does **not** bind the `ssid` / `password` controls — they are absent from the UI card.

@@ -361,7 +361,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 - On the desktop platform (MAC DE:AD:BE:EF:CA:FE), the auto-generated device name is "MM-CAFE" (last two MAC bytes).
 - After setup, SystemModule exposes exactly 12 controls on desktop, including a deviceName Text control bound to the MAC-derived name.
-- The `board` control is always present and non-empty (either a real board key from build_info.h or the fallback "unknown").
+- The `firmware` control is always present and non-empty (either a real firmware key from build_info.h or the fallback "unknown").
 - The `bootReason` control is populated from platform::resetReason; on desktop it reports "OK".
 
 ## platform

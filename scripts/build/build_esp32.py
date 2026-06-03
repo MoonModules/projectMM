@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Build the ESP32 target for a specific board variant."""
+"""Build the ESP32 target for a specific firmware variant.
+
+"Firmware" here is the compiled binary variant (chip + radios/peripherals +
+sdkconfig fragments) — separate from "board" (physical hardware: PCB, PHY,
+USB-serial, PSRAM). See docs/architecture.md § Firmware vs board.
+"""
 
 import argparse
 import os
@@ -30,7 +35,7 @@ IDF_SEARCH_PATHS = [
 # with no link. Only the genuinely WiFi-side components are dropped.
 ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
 
-# Board catalogue. Each entry describes one shipping firmware variant.
+# Firmware catalogue. Each entry describes one shipping firmware variant.
 # Keys combine chip name + feature flags + (for SKU-sensitive chips) module:
 #   esp32           — ESP32 classic, WiFi only
 #   esp32-eth       — ESP32 classic, Ethernet only (WiFi compiled out)
@@ -42,7 +47,7 @@ ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
 #                     which differ per SKU.
 # The Ethernet variants bake in Olimex ESP32-Gateway pin defaults
 # (sdkconfig.defaults.eth). Runtime PHY/pin selection is on the 2.0 roadmap.
-BOARDS: dict[str, dict] = {
+FIRMWARES: dict[str, dict] = {
     "esp32": {
         "chip": "esp32",
         "fragments": ["sdkconfig.defaults"],
@@ -69,7 +74,7 @@ BOARDS: dict[str, dict] = {
     },
 }
 
-# Deprecated --profile values → board, kept one release for callers that
+# Deprecated --profile values → firmware, kept one release for callers that
 # still pass --profile. Remove once external tooling has migrated.
 PROFILE_ALIASES = {
     "default": "esp32",
@@ -160,21 +165,21 @@ def idf_cmd(idf_path: Path) -> list[str]:
     return [str(idf_path / "tools" / "idf.py")]
 
 
-def board_cmake_args(board: str) -> list[str]:
-    """Extra -D cache args for the requested board."""
-    spec = BOARDS[board]
+def firmware_cmake_args(firmware: str) -> list[str]:
+    """Extra -D cache args for the requested firmware."""
+    spec = FIRMWARES[firmware]
     fragments = ";".join(spec["fragments"])
     args = [f"-DSDKCONFIG_DEFAULTS={fragments}"]
-    # Burn the board key into the binary so SystemModule can report it and the
-    # future OTA path can pick the matching release asset (every release ships
-    # one .bin per board key — see release.yml).
-    args.append(f'-DMM_BOARD_NAME="{board}"')
+    # Burn the firmware key into the binary so SystemModule can report it and
+    # the OTA path can pick the matching release asset (every release ships
+    # one .bin per firmware key — see release.yml).
+    args.append(f'-DMM_FIRMWARE_NAME="{firmware}"')
     if spec["eth_only"]:
         # Drop the WiFi components from the link, and tell our code to compile
         # out the WiFi paths (MM_ETH_ONLY → esp32/main/CMakeLists.txt).
         args.append("-DEXCLUDE_COMPONENTS=" + ";".join(ETH_ONLY_EXCLUDE))
         args.append("-DMM_ETH_ONLY=1")
-    # Boards that don't include the .eth sdkconfig fragment have no EMAC
+    # Firmwares that don't include the .eth sdkconfig fragment have no EMAC
     # config — the on-chip Ethernet headers (`eth_esp32_emac_config_t`, …)
     # disappear, and platform_esp32.cpp's ethInit() won't compile. Set
     # MM_NO_ETH so the source provides stub implementations instead.
@@ -184,57 +189,57 @@ def board_cmake_args(board: str) -> list[str]:
     return args
 
 
-def resolve_board(args: argparse.Namespace) -> str:
-    """Resolve the board name from --board or the deprecated --profile alias."""
-    if args.board:
-        if args.board not in BOARDS:
-            valid = ", ".join(sorted(BOARDS))
-            print(f"Unknown --board '{args.board}'. Choose one of: {valid}")
+def resolve_firmware(args: argparse.Namespace) -> str:
+    """Resolve the firmware name from --firmware or the deprecated --profile alias."""
+    if args.firmware:
+        if args.firmware not in FIRMWARES:
+            valid = ", ".join(sorted(FIRMWARES))
+            print(f"Unknown --firmware '{args.firmware}'. Choose one of: {valid}")
             sys.exit(2)
-        return args.board
+        return args.firmware
 
     if args.profile:
         alias = PROFILE_ALIASES.get(args.profile)
         if not alias:
             print(f"Unknown --profile '{args.profile}'. "
-                  f"Use --board instead (one of: {', '.join(sorted(BOARDS))}).")
+                  f"Use --firmware instead (one of: {', '.join(sorted(FIRMWARES))}).")
             sys.exit(2)
-        print(f"--profile is deprecated; use --board {alias} instead.")
+        print(f"--profile is deprecated; use --firmware {alias} instead.")
         return alias
 
     # No flag → keep the prior default behaviour (WiFi-only ESP32 classic).
     return "esp32"
 
 
-def build_dir_for(board: str) -> Path:
-    """Return the per-board build directory.
+def build_dir_for(firmware: str) -> Path:
+    """Return the per-firmware build directory.
 
-    Each board gets its own subdir of ``<ROOT>/build/`` so multiple
-    firmware variants can coexist on disk — switching boards no longer
-    forces a clean rebuild. The ``esp32-`` prefix namespaces ESP32 board
-    keys away from desktop targets (``build/macos/``, ``build/linux/``,
-    ``build/windows/``) that share the same root. Common-patterns
-    rationale: CMake / idf.py ``-B <dir>`` is the documented mechanism
-    for parallel build dirs; the bespoke choice here is just the naming.
+    Each firmware variant gets its own subdir of ``<ROOT>/build/`` so multiple
+    variants can coexist on disk — switching firmwares no longer forces a
+    clean rebuild. The ``esp32-`` prefix namespaces ESP32 firmware keys away
+    from desktop targets (``build/macos/``, ``build/linux/``,
+    ``build/windows/``) that share the same root. Common-patterns rationale:
+    CMake / idf.py ``-B <dir>`` is the documented mechanism for parallel
+    build dirs; the bespoke choice here is just the naming.
     """
-    return ROOT / "build" / f"esp32-{board}"
+    return ROOT / "build" / f"esp32-{firmware}"
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", help="ESP32 chip type (legacy; derived from --board)")
-    parser.add_argument("--board", choices=sorted(BOARDS),
-                        help="Board variant. One of: " + ", ".join(sorted(BOARDS)))
+    parser.add_argument("--env", help="ESP32 chip type (legacy; derived from --firmware)")
+    parser.add_argument("--firmware", choices=sorted(FIRMWARES),
+                        help="Firmware variant. One of: " + ", ".join(sorted(FIRMWARES)))
     parser.add_argument("--profile", choices=["default", "eth-only"],
-                        help="Deprecated alias for --board. Use --board instead.")
+                        help="Deprecated alias for --firmware. Use --firmware instead.")
     args = parser.parse_args()
 
-    board = resolve_board(args)
-    chip = BOARDS[board]["chip"]
-    # --env, if supplied, must agree with the board's chip
+    firmware = resolve_firmware(args)
+    chip = FIRMWARES[firmware]["chip"]
+    # --env, if supplied, must agree with the firmware's chip
     if args.env and args.env != chip:
-        print(f"--env {args.env} conflicts with --board {board} (chip: {chip}). "
-              f"Drop --env or pass --board for a different chip.")
+        print(f"--env {args.env} conflicts with --firmware {firmware} (chip: {chip}). "
+              f"Drop --env or pass --firmware for a different chip.")
         sys.exit(2)
 
     if not ESP32_DIR.exists():
@@ -251,10 +256,10 @@ def main():
     env = idf_env(idf_path)
     cmd = idf_cmd(idf_path)
 
-    build_dir = build_dir_for(board)
-    # -B points idf.py at the per-board build dir. -DSDKCONFIG keeps each
-    # board's sdkconfig inside its own build dir too — without this idf.py
-    # writes `esp32/sdkconfig` at the project root, and switching boards
+    build_dir = build_dir_for(firmware)
+    # -B points idf.py at the per-firmware build dir. -DSDKCONFIG keeps each
+    # firmware's sdkconfig inside its own build dir too — without this idf.py
+    # writes `esp32/sdkconfig` at the project root, and switching firmwares
     # poisons it ("project sdkconfig was generated for target X, but
     # CMakeCache contains Y"). Per-build-dir sdkconfig is the IDF-supported
     # way to do parallel builds; CMake forwards the variable into the
@@ -266,21 +271,21 @@ def main():
         "-DSDKCONFIG=" + str(sdkconfig_path),
     ]
 
-    # First-time build for this board: idf.py needs `set-target` before
+    # First-time build for this firmware: idf.py needs `set-target` before
     # `build` so sdkconfig gets seeded from SDKCONFIG_DEFAULTS. On subsequent
     # builds the per-build-dir sdkconfig already has the chip pinned, so
-    # set-target is skipped — switching to another board uses a different
+    # set-target is skipped — switching to another firmware uses a different
     # build_dir entirely, so its sdkconfig is untouched.
-    extra = board_cmake_args(board)
+    extra = firmware_cmake_args(firmware)
     if not build_dir.exists():
-        print(f"Setting target to {chip} (board: {board}, build dir: "
+        print(f"Setting target to {chip} (firmware: {firmware}, build dir: "
               f"{build_dir.relative_to(ROOT)})...")
         r = subprocess.run(cmd + b_arg + extra + ["set-target", chip],
                            cwd=ESP32_DIR, env=env)
         if r.returncode != 0:
             sys.exit(r.returncode)
 
-    print(f"Building for {chip} (board: {board})...")
+    print(f"Building for {chip} (firmware: {firmware})...")
     r = subprocess.run(cmd + b_arg + extra + ["build"], cwd=ESP32_DIR, env=env)
     if r.returncode != 0:
         sys.exit(r.returncode)

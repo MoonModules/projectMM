@@ -51,7 +51,7 @@ def load_scripts():
 
 _scripts_data = load_scripts()
 SCRIPTS = _scripts_data["scripts"]
-BOARDS = _scripts_data["boards"]
+FIRMWARES = _scripts_data["firmwares"]
 
 # ---------------------------------------------------------------------------
 # Device discovery
@@ -96,9 +96,9 @@ def _probe_device(ip, port=8080, timeout=0.4):
     stall seconds on those.
 
     Returns: { ip, deviceName, firmware, board }
-    - `firmware` is the variant flashed (SystemModule.board control value —
-      misnamed; renamed in the terminology-cleanup phase). Used to deduce
-      `board`.
+    - `firmware` is the variant flashed (value of the `firmware` control on
+      SystemModule, set from kFirmwareName in build_info.h). Used to deduce
+      `board`. See docs/architecture.md § Firmware vs board.
     - `board` is the physical hardware key — set when the firmware uniquely
       identifies the board (eth/eth-wifi → Olimex). Empty string otherwise;
       the user picks via the UI (the saved value survives refresh).
@@ -118,7 +118,7 @@ def _probe_device(ip, port=8080, timeout=0.4):
                     for c in m.get("controls", []):
                         if c.get("name") == "deviceName":
                             device_name = c.get("value", "") or ""
-                        elif c.get("name") == "board":
+                        elif c.get("name") == "firmware":
                             firmware = c.get("value", "") or ""
                     break
             board = _deduce_board(firmware)
@@ -136,15 +136,8 @@ def _deduce_board(firmware: str) -> str:
     """Map firmware variant → physical board key when the firmware uniquely
     identifies the board (the eth firmware variants hardcode Olimex RMII
     pins). Returns "" when the firmware works on multiple boards — the user
-    fills in `board` manually in that case.
-
-    NAMING COLLISION (transitional): "board" means *firmware variant* in
-    build_esp32.py and SystemModule.board, and *physical hardware* here in
-    MoonDeck device records. The rename to `firmware` everywhere is tracked
-    in docs/plan.md § "Board vs firmware separation, runtime board presets"
-    — do not propagate this overload to new code. New device-record sites
-    should use "board" for hardware only; new build/system sites should
-    avoid the word until the rename lands.
+    fills in `board` manually in that case. See docs/architecture.md
+    § Firmware vs board for the firmware/board terminology.
 
     KEEP IN SYNC: scripts/moondeck_ui/app.js boardOptions carries the human
     list of hardware boards the picker offers. When a new board lands with
@@ -289,17 +282,17 @@ def load_state():
 
 def _migrate_to_networks(old_state: dict) -> dict:
     """One-shot migration of the pre-networks moondeck.json shape:
-        {env, port, devices: [...], tab, board, scenario, module, flag_*}
+        {env, port, devices: [...], tab, firmware, scenario, module, flag_*}
     into the networks-grouped shape:
         {networks: [{name, subnet, wifi, port, devices: [...]}, ...],
-         active_network, tab, board, scenario, module, flag_*}
+         active_network, tab, firmware, scenario, module, flag_*}
 
     Buckets existing devices by `/24` subnet derived from each device's `ip`.
     Names the largest bucket "Home", subsequent buckets "Network 2", "Network 3",
     ... User can rename via the dropdown. The old top-level `port` migrates
     into the bucket that holds the largest device count (heuristic — usually
     that's where the user was working). Drops the legacy `env` field
-    (already migrated to `board` in app.js).
+    (already migrated to `firmware` in app.js).
     """
     import sys
     devices = old_state.get("devices") or []
@@ -601,7 +594,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/scripts":
-            self._send_json({"scripts": SCRIPTS, "boards": BOARDS})
+            self._send_json({"scripts": SCRIPTS, "firmwares": FIRMWARES})
 
         elif self.path == "/api/ports":
             self._send_json({"ports": list_serial_ports()})
@@ -767,12 +760,12 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         script_path = SCRIPTS_DIR / script_def["script"]
         cmd = ["uv", "run", str(script_path)]
 
-        # Forward selector state (board / port / host) when the script
+        # Forward selector state (firmware / port / host) when the script
         # declares it needs them. The UI maintains a single Firmware dropdown
-        # on the ESP32 tab driving every needs_board script; the older
-        # per-board buttons + extra_args plumbing was collapsed into this.
-        if script_def.get("needs_board") and params.get("board"):
-            cmd.extend(["--board", params["board"]])
+        # on the ESP32 tab driving every needs_firmware script; the older
+        # per-firmware buttons + extra_args plumbing was collapsed into this.
+        if script_def.get("needs_firmware") and params.get("firmware"):
+            cmd.extend(["--firmware", params["firmware"]])
         if script_def.get("needs_port") and params.get("port"):
             cmd.extend(["--port", params["port"]])
         if script_def.get("needs_scenario") and params.get("scenario"):

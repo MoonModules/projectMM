@@ -104,24 +104,25 @@ def count_lights(client: Client) -> int:
 def _detect_target(state: dict) -> str:
     """Identify the build target so per-step contract values can be looked up.
 
-    ESP32: read SystemModule.board (`esp32`, `esp32-eth`, `esp32-eth-wifi`,
-    `esp32s3-n16r8`, …) — set at compile time from MM_BOARD_NAME and exposed
-    through the `board` control. Desktop: same key but reports `unknown`, so
-    we substitute pc-<host-os> using the runtime os name (still distinguishes
-    macOS vs Linux vs Windows builds, which can differ in tick noticeably).
+    ESP32: read SystemModule.firmware (`esp32`, `esp32-eth`, `esp32-eth-wifi`,
+    `esp32s3-n16r8`, …) — set at compile time from MM_FIRMWARE_NAME and
+    exposed through the `firmware` control. Desktop: same key but reports
+    `unknown`, so we substitute pc-<host-os> using the runtime os name (still
+    distinguishes macOS vs Linux vs Windows builds, which can differ in tick
+    noticeably). See docs/architecture.md § Firmware vs board.
     """
     import platform
-    board = None
+    firmware = None
     for m in state.get("modules", []):
         if m.get("type") != "SystemModule":
             continue
         for c in m.get("controls", []):
-            if c.get("name") == "board":
-                board = c.get("value")
+            if c.get("name") == "firmware":
+                firmware = c.get("value")
                 break
         break
-    if board and board != "unknown":
-        return board
+    if firmware and firmware != "unknown":
+        return firmware
     # Desktop fallback
     osmap = {"Darwin": "pc-macos", "Linux": "pc-linux", "Windows": "pc-windows"}
     return osmap.get(platform.system(), "pc-unknown")

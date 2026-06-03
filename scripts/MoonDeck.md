@@ -202,11 +202,11 @@ Clean the ESP32 build directory.
 uv run scripts/build/clean_esp32.py
 ```
 
-Removes one ESP32 per-board build dir (`--board <name>`) or every `build/esp32-*/` plus a leftover `esp32/build/` if present (`--all`). Run a per-board clean after ESP-IDF updates, Python version changes, or anything else that should force a from-scratch build of that board. Other boards' build dirs aren't touched.
+Removes one ESP32 per-firmware build dir (`--firmware <name>`) or every `build/esp32-*/` plus a leftover `esp32/build/` if present (`--all`). Run a per-firmware clean after ESP-IDF updates, Python version changes, or anything else that should force a from-scratch build of that variant. Other firmwares' build dirs aren't touched.
 
 ### build_esp32
 
-Build one of the four shipping ESP32 firmware variants. The MoonDeck **Build** button reads the **Firmware** dropdown and forwards `--board <selected>` to `build_esp32.py`.
+Build one of the four shipping ESP32 firmware variants. The MoonDeck **Build** button reads the **Firmware** dropdown and forwards `--firmware <selected>` to `build_esp32.py`. ("Firmware" is the compiled binary; the physical board is a separate concept — see [architecture.md § Firmware vs board](../docs/architecture.md#firmware-vs-board).)
 
 | Firmware key | Chip | What's in the image |
 |---|---|---|
@@ -218,39 +218,39 @@ Build one of the four shipping ESP32 firmware variants. The MoonDeck **Build** b
 CLI equivalent:
 
 ```bash
-uv run scripts/build/build_esp32.py --board esp32
-uv run scripts/build/build_esp32.py --board esp32-eth
-uv run scripts/build/build_esp32.py --board esp32-eth-wifi
-uv run scripts/build/build_esp32.py --board esp32s3-n16r8
+uv run scripts/build/build_esp32.py --firmware esp32
+uv run scripts/build/build_esp32.py --firmware esp32-eth
+uv run scripts/build/build_esp32.py --firmware esp32-eth-wifi
+uv run scripts/build/build_esp32.py --firmware esp32s3-n16r8
 ```
 
-Auto-detects ESP-IDF installation, sets target if needed, builds, and shows flash/RAM usage summary. Each board writes into `build/esp32-<board>/`, so switching boards (or building all four in one session) keeps every variant on disk — no clean rebuild on switch.
+Auto-detects ESP-IDF installation, sets target if needed, builds, and shows flash/RAM usage summary. Each firmware writes into `build/esp32-<firmware>/`, so switching firmwares (or building all four in one session) keeps every variant on disk — no clean rebuild on switch.
 
 Eth pin map is currently baked in at build time. The `esp32-eth` and `esp32-eth-wifi` builds were verified on the [Olimex ESP32-Gateway](https://www.olimex.com/Products/IoT/ESP32/ESP32-GATEWAY/open-source-hardware) (LAN8720 PHY, reset on GPIO 5, MDIO addr 0). Boards with the same PHY but different pins (e.g. WT32-ETH01: reset on GPIO 16) need a local rebuild today; runtime PHY/pin selection is on the 2.0 roadmap.
 
-Each ESP32-S3 SKU has its own build key because the sdkconfig fragment encodes flash size, partition layout, and PSRAM mode — flashing an `n16r8` binary onto a different module (e.g. N8R2) misaligns the partition table or fails PSRAM init. New SKUs become new keys (e.g. `esp32s3-n8r8`); we don't ship a generic `esp32s3` shortcut.
+Each ESP32-S3 SKU has its own firmware key because the sdkconfig fragment encodes flash size, partition layout, and PSRAM mode — flashing an `n16r8` binary onto a different module (e.g. N8R2) misaligns the partition table or fails PSRAM init. New SKUs become new keys (e.g. `esp32s3-n8r8`); we don't ship a generic `esp32s3` shortcut.
 
-`--profile` is deprecated and accepted one release for migration: `--profile default` → `--board esp32`, `--profile eth-only` → `--board esp32-eth`. The legacy `build_esp32_ethonly.py` wrapper still works (it now forwards `--board esp32-eth`).
+`--profile` is deprecated and accepted one release for migration: `--profile default` → `--firmware esp32`, `--profile eth-only` → `--firmware esp32-eth`. The legacy `build_esp32_ethonly.py` wrapper still works (it now forwards `--firmware esp32-eth`).
 
 ### flash_esp32
 
-Flash firmware to an ESP32 device. Reads `build/esp32-<board>/projectMM.bin` — each board lives in its own dir (plan-19.1), so multiple firmwares can coexist on disk and switching boards is free.
+Flash firmware to an ESP32 device. Reads `build/esp32-<firmware>/projectMM.bin` — each firmware lives in its own dir (plan-19.1), so multiple firmwares can coexist on disk and switching firmwares is free.
 
-The MoonDeck button forwards the Firmware dropdown as `--board`. Flash exits cleanly with a "no build for <board> — run Build first" message when that dir doesn't exist. The log line up front confirms which build is being flashed and how old it is, e.g.:
+The MoonDeck button forwards the Firmware dropdown as `--firmware`. Flash exits cleanly with a "no build for <firmware> — run Build first" message when that dir doesn't exist. The log line up front confirms which build is being flashed and how old it is, e.g.:
 
 ```text
 ==> flashing esp32-eth-wifi build (1267 KB, built 3m ago) to /dev/tty.usbserial-0001
 ```
 
 ```bash
-uv run scripts/build/flash_esp32.py --board esp32-eth-wifi --port /dev/tty.usbserial-0001
+uv run scripts/build/flash_esp32.py --firmware esp32-eth-wifi --port /dev/tty.usbserial-0001
 ```
 
-`--board` is required — there's no longer a single canonical `esp32/build/` to fall back to. For a rack flash, loop over ports AND specify the board explicitly:
+`--firmware` is required — there's no longer a single canonical `esp32/build/` to fall back to. For a rack flash, loop over ports AND specify the firmware explicitly:
 
 ```bash
 for port in /dev/tty.usbserial-*; do
-  uv run scripts/build/flash_esp32.py --board esp32-eth-wifi --port "$port"
+  uv run scripts/build/flash_esp32.py --firmware esp32-eth-wifi --port "$port"
 done
 ```
 

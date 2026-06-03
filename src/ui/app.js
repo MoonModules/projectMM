@@ -542,27 +542,28 @@ function createCard(mod, depth) {
     }
 
     // FirmwareUpdate card hosts the shared release picker. Mount once per
-    // card-build. The picker reads SystemModule.board (already in /api/state)
-    // to filter to OTA-compatible releases. On install, the device fetches the
-    // binary via /api/firmware/url — no browser CORS in the data path.
+    // card-build. The picker reads SystemModule.firmware (already in
+    // /api/state) to filter to OTA-compatible releases. On install, the
+    // device fetches the binary via /api/firmware/url — no browser CORS in
+    // the data path. See docs/architecture.md § Firmware vs board.
     if (mod.type === "FirmwareUpdateModule") {
-        const ownBoardKey = (() => {
+        const ownFirmwareKey = (() => {
             if (!state || !state.modules) return null;
             // Look up by stable type first; the name fallback is a
             // belt-and-braces safety net (mod.name is user-editable in
             // principle, so it's not load-bearing for this lookup).
             const sys = state.modules.find(m => m.type === "SystemModule")
                      || state.modules.find(m => m.name === "System");
-            const boardCtrl = sys && (sys.controls || []).find(c => c.name === "board");
-            return boardCtrl && boardCtrl.value ? boardCtrl.value : null;
+            const fwCtrl = sys && (sys.controls || []).find(c => c.name === "firmware");
+            return fwCtrl && fwCtrl.value ? fwCtrl.value : null;
         })();
         const mount = document.createElement("div");
         mount.className = "release-picker-host";
         controlsHost.appendChild(mount);
         releasePicker.init({
             container: mount,
-            ownBoardKey,
-            onInstall: async (_board, _manifestUrl, binaryUrl) => {
+            ownFirmwareKey,
+            onInstall: async (_firmware, _manifestUrl, binaryUrl) => {
                 const res = await fetch("/api/firmware/url", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },

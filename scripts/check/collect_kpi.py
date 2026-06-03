@@ -99,14 +99,30 @@ def collect_desktop():
     )
     if scenarios:
         out, rc = run([str(scenarios)], cwd=ROOT)
-        tick_values = []
+        # One tick per scenario — the slowest MEASURE step (the contract-
+        # relevant worst-case timing). The KPI one-liner becomes a
+        # 10-number-ish series that maps 1:1 to the scenario list, so a
+        # regression in any scenario shows up as a single bumped digit.
+        # `=== Scenario: name ===` delimits each scenario block; MEASURE
+        # lines inside it carry "tick=Xus".
+        per_scenario_max: list[int] = []
+        current_max = 0
         buffer_lights = []
+        def _flush():
+            nonlocal current_max
+            if current_max > 0:
+                per_scenario_max.append(current_max)
+            current_max = 0
         for line in out.splitlines():
-            if "tick:" in line:
-                # Format: "tick: 108us (FPS: 9259)"
-                m = re.search(r'tick:\s*(\d+)us', line)
+            if line.startswith("=== Scenario:"):
+                _flush()
+                continue
+            if "MEASURE" in line:
+                m = re.search(r'tick=(\d+)us', line)
                 if m:
-                    tick_values.append(int(m.group(1)))
+                    t = int(m.group(1))
+                    if t > current_max:
+                        current_max = t
             if "Buffer:" in line and "lights" in line:
                 parts = line.strip().split()
                 for i, p in enumerate(parts):
@@ -117,9 +133,10 @@ def collect_desktop():
                             pass
             if "scenario(s)" in line:
                 kpi["scenarios"] = line.strip()
-        if tick_values:
-            kpi["tick_us"] = tick_values
-            kpi["fps"] = [1000000 // t if t > 0 else 0 for t in tick_values]
+        _flush()
+        if per_scenario_max:
+            kpi["tick_us"] = per_scenario_max
+            kpi["fps"] = [1000000 // t if t > 0 else 0 for t in per_scenario_max]
         if buffer_lights:
             kpi["lights"] = max(buffer_lights)
 
@@ -140,7 +157,7 @@ def collect_desktop():
 
 def collect_esp32():
     kpi = {}
-    # Per-board build dirs under build/esp32-*/ (plan-19.1). Pick the dir
+    # Per-firmware build dirs under build/esp32-*/ (plan-19.1). Pick the dir
     # whose projectMM.bin was written most recently — that's the binary
     # the developer most recently rebuilt and would consider the current
     # KPI source. Sort by the firmware mtime, not the dir mtime, because
@@ -153,9 +170,10 @@ def collect_esp32():
     if not candidates:
         return kpi
     esp32_build = candidates[0]
-    # Record which board the numbers came from so a multi-board developer
-    # can see whether the KPI reflects what they think it does.
-    kpi["board"] = esp32_build.name[len("esp32-"):]
+    # Record which firmware variant the numbers came from so a developer
+    # with multiple build dirs can see whether the KPI reflects what they
+    # think it does. See docs/architecture.md § Firmware vs board.
+    kpi["firmware"] = esp32_build.name[len("esp32-"):]
 
     try:
         from build_esp32 import find_idf, idf_env, idf_cmd
@@ -164,8 +182,8 @@ def collect_esp32():
             env = idf_env(idf_path)
             cmd = idf_cmd(idf_path)
             # -B + -DSDKCONFIG mirror build_esp32.py so idf.py reads the
-            # per-board sdkconfig (the build dir's own copy), not the
-            # project-root one which may belong to a different board.
+            # per-firmware sdkconfig (the build dir's own copy), not the
+            # project-root one which may belong to a different firmware.
             r = subprocess.run(
                 cmd + ["-B", str(esp32_build),
                        "-DSDKCONFIG=" + str(esp32_build / "sdkconfig"),
@@ -246,7 +264,14 @@ def _live_capture(log, seconds=15):
     if not cfg.exists():
         return False
     try:
-        port = json.loads(cfg.read_text()).get("port")
+        state = json.loads(cfg.read_text())
+        # Port lives inside the active network record (post-networks refactor
+        # in moondeck.py). Fall back to the legacy top-level `port` so an
+        # un-migrated moondeck.json still works.
+        active_name = state.get("active_network")
+        active = next((n for n in (state.get("networks") or [])
+                       if n.get("name") == active_name), None)
+        port = (active or {}).get("port") or state.get("port")
     except Exception:
         return False
     if not port or not Path(port).exists():

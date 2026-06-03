@@ -80,9 +80,9 @@ git clone --depth 1 --branch v6.0.0 https://github.com/espressif/esp-idf.git ~/e
 Then run the one-time Python environment setup — either open MoonDeck (`uv run scripts/moondeck.py`), go to the ESP32 tab, and click **Setup ESP-IDF**, or run it directly:
 
 ```sh
-uv run scripts/build/setup_esp_idf.py                              # one-time
-uv run scripts/build/build_esp32.py --board esp32                  # WiFi-only
-uv run scripts/build/flash_esp32.py --board esp32 --port /dev/tty.usbserial-XXXX
+uv run scripts/build/setup_esp_idf.py                                 # one-time
+uv run scripts/build/build_esp32.py --firmware esp32                  # WiFi-only
+uv run scripts/build/flash_esp32.py --firmware esp32 --port /dev/tty.usbserial-XXXX
 uv run scripts/run/monitor_esp32.py --port /dev/tty.usbserial-XXXX
 ```
 
@@ -90,11 +90,11 @@ The ESP32 tab in MoonDeck wraps the same steps as cards (Setup → Firmware → 
 
 ![MoonDeck ESP32 tab](assets/screenshots/moondeck_esp32.png)
 
-### Boards
+### Firmware variants
 
-`build_esp32.py --board` selects one of four shipping variants. The key combines chip name + feature flags + (for SKU-sensitive chips) module:
+`build_esp32.py --firmware` selects one of four shipping variants. The key combines chip name + feature flags + (for SKU-sensitive chips) module. ("Firmware" here is the compiled binary; the physical board is a separate concept — see [architecture.md § Firmware vs board](architecture.md#firmware-vs-board).)
 
-| `--board` | IDF target | `SDKCONFIG_DEFAULTS` | What's in the image |
+| `--firmware` | IDF target | `SDKCONFIG_DEFAULTS` | What's in the image |
 |---|---|---|---|
 | `esp32` | `esp32` | `sdkconfig.defaults` | WiFi only. No RMII pins reserved. |
 | `esp32-eth` | `esp32` | `sdkconfig.defaults;sdkconfig.defaults.eth` | Ethernet only. WiFi components dropped via `-DEXCLUDE_COMPONENTS=esp_wifi;wpa_supplicant;esp_coex` and `-DMM_ETH_ONLY=1`. Smaller image, more free RAM. Olimex ESP32-Gateway pins baked in (LAN8720 @ MDIO 0, PHY RST GPIO 5). |
@@ -103,13 +103,13 @@ The ESP32 tab in MoonDeck wraps the same steps as cards (Setup → Firmware → 
 
 ESP-IDF v6.x has no `CONFIG_ESP_WIFI_ENABLED` switch (the symbol is forced on for WiFi-capable SoCs), so dropping WiFi at compile time happens via `EXCLUDE_COMPONENTS` plus `MM_NO_WIFI` (set when `MM_ETH_ONLY=1`, applied in `esp32/main/CMakeLists.txt`). The `esp32-eth` variant takes this path; `esp32-eth-wifi` keeps everything compiled in and uses the runtime cascade in `NetworkModule`.
 
-Each board has its own build dir at `build/esp32-<board>/`, so all four variants can coexist on disk. `build_esp32.py` points `idf.py -B` at the per-board dir; switching boards is just a different `--board` argument, no clean rebuild penalty. Same-board rebuilds stay incremental, as before. Disk usage scales with the number of boards built (≈100 MB each), and a future rename would orphan the old dir — clean with `scripts/build/clean_esp32.py --board <name>` or `--all`.
+Each firmware has its own build dir at `build/esp32-<firmware>/`, so all four variants can coexist on disk. `build_esp32.py` points `idf.py -B` at the per-firmware dir; switching firmwares is just a different `--firmware` argument, no clean rebuild penalty. Same-firmware rebuilds stay incremental, as before. Disk usage scales with the number of firmwares built (≈100 MB each), and a future rename would orphan the old dir — clean with `scripts/build/clean_esp32.py --firmware <name>` or `--all`.
 
-Each ESP32-S3 SKU has its own board key because the sdkconfig fragment encodes flash size, partition table, and PSRAM mode — flashing an `n16r8` binary onto a different module (e.g. N8R2) either misaligns the partition table (boot loop) or fails PSRAM init. New SKUs become new keys (e.g. `esp32s3-n8r8`); there is no generic `esp32s3` shortcut.
+Each ESP32-S3 SKU has its own firmware key because the sdkconfig fragment encodes flash size, partition table, and PSRAM mode — flashing an `n16r8` binary onto a different module (e.g. N8R2) either misaligns the partition table (boot loop) or fails PSRAM init. New SKUs become new keys (e.g. `esp32s3-n8r8`); there is no generic `esp32s3` shortcut.
 
 Eth pin map is currently baked in at build time. Verified on the [Olimex ESP32-Gateway](https://www.olimex.com/Products/IoT/ESP32/ESP32-GATEWAY/open-source-hardware). Boards with the same LAN8720 PHY but different pins (e.g. WT32-ETH01: reset on GPIO 16) need a local rebuild today; runtime PHY/pin selection is on the 2.0 roadmap.
 
-`--profile` is accepted one release for migration: `--profile default` → `--board esp32`, `--profile eth-only` → `--board esp32-eth`. The legacy `build_esp32_ethonly.py` wrapper still works (it now forwards `--board esp32-eth`).
+`--profile` is accepted one release for migration: `--profile default` → `--firmware esp32`, `--profile eth-only` → `--firmware esp32-eth`. The legacy `build_esp32_ethonly.py` wrapper still works (it now forwards `--firmware esp32-eth`).
 
 ### Why not Arduino
 

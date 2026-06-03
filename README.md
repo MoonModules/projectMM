@@ -45,7 +45,7 @@ The numbers above are observations. The **contracts** projectMM commits to — w
 
 ### From a release
 
-**ESP32 — flash from your browser.** Open the [web installer](https://ewowi.github.io/projectMM/install/) in Chrome or Edge — it walks you through board selection, flashing, and network setup. The installer lists stable releases and a `latest` build (published automatically on every merge to main) carrying the newest unreleased changes, labelled *(beta)*.
+**ESP32 — flash from your browser.** Open the [web installer](https://ewowi.github.io/projectMM/install/) in Chrome or Edge — it walks you through firmware selection, flashing, and network setup. The installer lists stable releases and a `latest` build (published automatically on every merge to main) carrying the newest unreleased changes, labelled *(beta)*.
 
 
 ![Installer](docs/assets/screenshots/installer.png)

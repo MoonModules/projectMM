@@ -1,5 +1,5 @@
 {
-  "boards": ["esp32", "esp32-eth", "esp32-eth-wifi", "esp32s3-n16r8"],
+  "firmwares": ["esp32", "esp32-eth", "esp32-eth-wifi", "esp32s3-n16r8"],
   "scripts": [
     {
       "id": "build_desktop",
@@ -144,7 +144,7 @@
       "label": "Build",
       "help": "build_esp32",
       "script": "build/build_esp32.py",
-      "needs_board": true
+      "needs_firmware": true
     },
     {
       "id": "flash_esp32",
@@ -154,7 +154,7 @@
       "help": "flash_esp32",
       "script": "build/flash_esp32.py",
       "needs_port": true,
-      "needs_board": true
+      "needs_firmware": true
     },
     {
       "id": "erase_flash_esp32",

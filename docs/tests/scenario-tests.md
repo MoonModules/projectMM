@@ -198,9 +198,9 @@ Add ArtNetSendDriver and run the bounded FPS measurement (must stay at >=80% of 
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | ≥ 20,000 / 20,408-28,571 | — / — | — / — |
+| `pc-macos` | ≥ 20,000 / 16,949-28,571 | — / — | — / — |
 
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 
 ### scenario_Layer_buildup
 
@@ -433,12 +433,12 @@ Disable mirrorY. Mirror is now fully off — should land on the no-LUT path.
 | `esp32` | — / 4.4 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 8.9-9.0 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 11.1 | ≥ 103KB / 94KB | — / 48KB |
-| `pc-macos` | ≥ 2,500 / 2,532-2,849 | — / — | — / — |
+| `pc-macos` | ≥ 2,500 / 2,481-2,849 | — / — | — / — |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 
 #### `re-enable-mirrorY` (set_control)  📏
 
@@ -566,12 +566,12 @@ detail=2 (medium, 32x32 downsample). Known accepted cost — still hits 80% of b
 | `esp32` | — / 4.9 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 10.4-10.5 | — / 132KB | — / 50KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.0 | ≥ 103KB / 93KB | — / 48KB |
-| `pc-macos` | ≥ 3,333 / 3,003-3,289 | — / — | — / — |
+| `pc-macos` | ≥ 3,333 / 2,725-3,289 | — / — | — / — |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 
 #### `detail-3-fine` (set_control)  📏
 
@@ -587,12 +587,12 @@ detail=3 (finest, 43x43 downsample). Looser bound (70%) because the downsample c
 | `esp32` | — / 4.5 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 9.5-9.6 | — / 132KB | — / 50KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.6 | ≥ 103KB / 93KB | — / 48KB |
-| `pc-macos` | ≥ 3,125 / 2,967-3,333 | — / — | — / — |
+| `pc-macos` | ≥ 3,125 / 2,762-3,333 | — / — | — / — |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 
 #### `decompress-on` (set_control)  📏
 
@@ -608,12 +608,12 @@ decompress=true. Client-side hint — does not affect the render tick.
 | `esp32` | — / 4.6 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 10.5-10.6 | — / 132KB | — / 50KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 93KB | — / 48KB |
-| `pc-macos` | ≥ 3,333 / 3,040-3,333 | — / — | — / — |
+| `pc-macos` | ≥ 3,333 / 2,703-3,333 | — / — | — / — |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 
 #### `decompress-off` (set_control)  📏
 
@@ -629,9 +629,9 @@ decompress=false. Same as above — pure client-side, no render impact expected.
 | `esp32` | — / 4.8 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 10.3 | — / 132KB | — / 50KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.0 | ≥ 103KB / 93KB | — / 48KB |
-| `pc-macos` | ≥ 3,333 / 2,985-3,311 | — / — | — / — |
+| `pc-macos` | ≥ 3,333 / 2,591-3,311 | — / — | — / — |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03

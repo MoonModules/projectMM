@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate an ESP Web Tools manifest for one board variant.
+"""Generate an ESP Web Tools manifest for one firmware variant.
 
 ESP Web Tools (https://esphome.github.io/esp-web-tools/) flashes ESP32
 firmware from the browser using Web Serial. It reads a JSON manifest that
@@ -7,19 +7,23 @@ lists which `.bin` parts to write at which offsets, keyed by chip family.
 
 Schema reference: https://esphome.github.io/esp-web-tools/#manifest
 
-The release pipeline calls this once per board. Each board gets its own
-manifest because:
-  * the firmware bundle differs per board (sdkconfig fragments → different
+The release pipeline calls this once per firmware variant. Each variant gets
+its own manifest because:
+  * the firmware bundle differs per variant (sdkconfig fragments → different
     bootloader and partition table),
   * the chip family differs (ESP32 vs ESP32-S3), and so does the bootloader
     offset on flash (0x1000 vs 0x0 — wrong offset bricks visibly).
+
+"Firmware" here is the compiled binary variant — separate from "board" (the
+physical hardware). See docs/architecture.md § Firmware vs board.
 
 We don't hardcode the offsets. ESP-IDF writes them into
 `build/flasher_args.json` for the exact chip it just built. The CI stage
 copies that file alongside the bins, and we parse it here.
 
 Inputs:
-  --board <key>           — board key (matches the firmware filename prefix).
+  --firmware <key>        — firmware variant key (matches the firmware
+                            filename prefix).
   --version <ver>         — release version, e.g. "1.0.0".
   --release-url <url>     — base URL to the GitHub release assets.
   --flasher-args <path>   — esp32/build/flasher_args.json from the build.
@@ -42,7 +46,7 @@ PART_NAME_MAP = {
     "ota_data_initial.bin": "{prefix}-ota-data.bin",
 }
 
-# board → chip family string ESP Web Tools accepts.
+# firmware → chip family string ESP Web Tools accepts.
 # Full list: https://github.com/espressif/esptool-js/blob/main/src/esploader.ts
 CHIP_FAMILIES = {
     "esp32":           "ESP32",
@@ -58,7 +62,7 @@ def parts_from_flasher_args(flasher_args: dict, prefix: str) -> list[dict]:
     parts: list[dict] = []
     for offset_hex, bin_name in flash_files.items():
         # Some entries are full paths (e.g. "bootloader/bootloader.bin"); we
-        # match on basename so the lookup table stays board-neutral.
+        # match on basename so the lookup table stays firmware-neutral.
         basename = Path(bin_name).name
         template = PART_NAME_MAP.get(basename)
         if not template:
@@ -77,7 +81,7 @@ def parts_from_flasher_args(flasher_args: dict, prefix: str) -> list[dict]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--board", required=True, choices=sorted(CHIP_FAMILIES))
+    parser.add_argument("--firmware", required=True, choices=sorted(CHIP_FAMILIES))
     parser.add_argument("--version", required=True)
     parser.add_argument("--release-url", required=True,
                         help="Base URL where the .bin assets live (no trailing slash).")
@@ -94,8 +98,8 @@ def main() -> int:
         print(f"generate_manifest: {args.flasher_args} not valid JSON: {e}")
         return 2
 
-    # Firmware filenames in the release: firmware-<board>-v<version>{,-bootloader,-partition-table,-ota-data}.bin
-    prefix = f"firmware-{args.board}-v{args.version}"
+    # Firmware filenames in the release: firmware-<firmware>-v<version>{,-bootloader,-partition-table,-ota-data}.bin
+    prefix = f"firmware-{args.firmware}-v{args.version}"
     base_url = args.release_url.rstrip("/")
 
     parts = parts_from_flasher_args(flasher_args, prefix)
@@ -119,7 +123,7 @@ def main() -> int:
         "new_install_prompt_erase": True,
         "builds": [
             {
-                "chipFamily": CHIP_FAMILIES[args.board],
+                "chipFamily": CHIP_FAMILIES[args.firmware],
                 "parts": parts,
             }
         ],
@@ -128,7 +132,7 @@ def main() -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"generate_manifest: wrote {args.out} ({len(parts)} parts, "
-          f"{CHIP_FAMILIES[args.board]})")
+          f"{CHIP_FAMILIES[args.firmware]})")
     return 0
 
 

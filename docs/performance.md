@@ -54,7 +54,7 @@ WiFi `sendto()` is ~1,140 µs/packet vs Ethernet's ~280 µs — CSMA/CA backoff,
 
 Same source tree, same MCU (ESP32 classic, 160 MHz):
 
-| Board / build | 128×128 tick | ArtNet send |
+| Board / firmware | 128×128 tick | ArtNet send |
 |---|---|---|
 | Olimex Gateway, `esp32` (WiFi-only) | 220 ms (4 FPS) | 155 ms |
 | Olimex Gateway, `esp32-eth-wifi` | 85–95 ms (10–12 FPS) | 38 ms |
@@ -104,7 +104,7 @@ Board: `esp32-eth-wifi` (largest variant). Partition layout: app0/app1 = 1.75 MB
 Run from project root after a clean build:
 
 ```bash
-uv run scripts/build/build_esp32.py --board esp32-eth-wifi
+uv run scripts/build/build_esp32.py --firmware esp32-eth-wifi
 idf.py -B build/esp32-esp32-eth-wifi \
        -DSDKCONFIG=build/esp32-esp32-eth-wifi/sdkconfig \
        size-components | head -40

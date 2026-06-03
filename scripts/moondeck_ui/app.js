@@ -9,17 +9,21 @@ const MOONDECK_MD = "/api/help";
 // ---------------------------------------------------------------------------
 
 let scripts = [];
-let boards = [];
+let firmwares = [];
 let scenarios = [];   // [{name, module, also}]
 let testModules = []; // ["CamelCaseName", ...]
 // State shape (post-networks refactor):
 //   { networks: [{name, subnet, wifi: {ssid, password}, port, devices: [...]}],
 //     active_network: "Home",
 //     active_network_user_pinned: bool,   // set true when user picks the dropdown
-//     board, scenario, module, tab, flag_* }
+//     firmware, scenario, module, tab, flag_* }
+// `firmware` is the variant flashed onto the ESP32 (esp32 / esp32-eth /
+// esp32-eth-wifi / esp32s3-n16r8) — separate from the per-device `board`
+// (physical hardware) inside each network's devices list. See
+// docs/architecture.md § Firmware vs board.
 // Devices and the active serial port now live INSIDE the active network.
 // Migration from the legacy flat shape happens server-side in load_state().
-let state = { networks: [], active_network: "", board: "", scenario: "", module: "" };
+let state = { networks: [], active_network: "", firmware: "", scenario: "", module: "" };
 
 // Helper: the network record currently selected. Every read that used to
 // touch state.devices or state.port now routes through this.
@@ -35,17 +39,21 @@ async function init() {
     const resp = await fetch("/api/scripts");
     const data = await resp.json();
     scripts = data.scripts;
-    boards = data.boards;
+    firmwares = data.firmwares;
 
     const stateResp = await fetch("/api/state");
     state = await stateResp.json();
 
-    // Migrate legacy persisted state: old saves had `env: "esp32"` (a chip
-    // family). The dropdown now holds firmware-board keys
-    // (`esp32` / `esp32-eth` / `esp32-eth-wifi` / `esp32s3-n16r8`). If the
-    // saved board isn't in the new list, drop it so the default selection
-    // (first board) wins.
-    if (!boards.includes(state.board)) state.board = "";
+    // Migrate legacy persisted state: old saves keyed the firmware variant
+    // as `state.board` (which collided with the per-device `board` field that
+    // means physical hardware). Move it to `state.firmware`. Also drop the
+    // value if it isn't in the new firmwares list so the default selection
+    // (first firmware) wins.
+    if (state.board !== undefined && state.firmware === undefined) {
+        state.firmware = state.board;
+        delete state.board;
+    }
+    if (!firmwares.includes(state.firmware)) state.firmware = "";
 
     const scenResp = await fetch("/api/scenarios");
     const scenData = await scenResp.json();
@@ -55,7 +63,7 @@ async function init() {
     const modData = await modResp.json();
     testModules = modData.modules || [];
 
-    renderBoardSelect();
+    renderFirmwareSelect();
     renderScripts();
     renderNetworkBar();
     try { renderDevices(); } catch (e) { console.error("renderDevices:", e); }
@@ -481,7 +489,7 @@ async function runScript(script, btn) {
 
 async function runScriptOnce(script, btn, extraParams) {
     const params = { ...extraParams };
-    if (script.needs_board) params.board = state.board;
+    if (script.needs_firmware) params.firmware = state.firmware;
     if (script.needs_port) params.port = (getActiveNetwork()?.port) || "";
     if (script.needs_scenario) params.scenario = state.scenario;
     if (script.needs_module) params.module = state.module;
@@ -562,22 +570,22 @@ async function runScriptOnce(script, btn, extraParams) {
 // ESP32 controls
 // ---------------------------------------------------------------------------
 
-function renderBoardSelect() {
-    const select = document.getElementById("board-select");
+function renderFirmwareSelect() {
+    const select = document.getElementById("firmware-select");
     select.innerHTML = "";
-    // If no board persisted (fresh state, or legacy state migrated away),
+    // If no firmware persisted (fresh state, or legacy state migrated away),
     // default to the first option so Build / etc. always have a valid
-    // --board argument to forward.
-    if (!state.board && boards.length > 0) state.board = boards[0];
-    for (const board of boards) {
+    // --firmware argument to forward.
+    if (!state.firmware && firmwares.length > 0) state.firmware = firmwares[0];
+    for (const fw of firmwares) {
         const opt = document.createElement("option");
-        opt.value = board;
-        opt.textContent = board;
-        if (board === state.board) opt.selected = true;
+        opt.value = fw;
+        opt.textContent = fw;
+        if (fw === state.firmware) opt.selected = true;
         select.appendChild(opt);
     }
     select.addEventListener("change", async () => {
-        state.board = select.value;
+        state.firmware = select.value;
         await saveState();
     });
 }

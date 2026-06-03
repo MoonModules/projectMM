@@ -297,7 +297,7 @@ void ethGetIP(char* buf, size_t len) {
     }
 }
 
-#else // MM_NO_ETH — board has no on-chip EMAC, or the EMAC sdkconfig fragment
+#else // MM_NO_ETH — firmware excludes EMAC support (chip-side or sdkconfig fragment
       // wasn't layered. Provide stubs matching the desktop platform's no-eth
       // behaviour so NetworkModule's cascade falls straight to WiFi (or AP).
 

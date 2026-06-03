@@ -6,10 +6,13 @@ exposes through SystemModule:
 
   MM_VERSION       — semver, from library.json. Auto-generated section.
   MM_BUILD_DATE    — __DATE__ " " __TIME__, evaluated by the compiler.
-  MM_BOARD_NAME    — set by the build system as a -D flag (see
-                     scripts/build/build_esp32.py board_cmake_args() and
+  MM_FIRMWARE_NAME — set by the build system as a -D flag (see
+                     scripts/build/build_esp32.py firmware_cmake_args() and
                      scripts/build/package_desktop.py). The header carries an
                      #ifndef "unknown" fallback for builds that didn't set it.
+                     "Firmware" is the compiled-binary variant; the physical
+                     board is a separate concept the device cannot self-identify.
+                     See docs/architecture.md § Firmware vs board.
 
 The generator rewrites the whole file from this template each time
 library.json changes; the #ifndef defaults below are part of the template,
@@ -36,21 +39,26 @@ content = f'''#pragma once
 
 // Compile-time identity from build flags. The build script that knows the
 // value passes it as a -D, and SystemModule surfaces it on the device card
-// (and the future OTA path reads it to pick a matching release asset).
+// (and the OTA path reads it to pick a matching release asset).
 //
-//   ESP32:   scripts/build/build_esp32.py board_cmake_args() -> -DMM_BOARD_NAME="<key>"
+// "Firmware" here is the compiled-binary variant (esp32 / esp32-eth /
+// esp32-eth-wifi / esp32s3-n16r8) — see docs/architecture.md § Firmware
+// vs board. The physical hardware ("board") is a separate concept the
+// device cannot identify on its own.
+//
+//   ESP32:   scripts/build/build_esp32.py firmware_cmake_args() -> -DMM_FIRMWARE_NAME="<key>"
 //   Desktop: scripts/build/package_desktop.py for release builds; local
 //            CMake builds fall through to "unknown" today (no harm:
 //            local builds aren't published).
-#ifndef MM_BOARD_NAME
-#define MM_BOARD_NAME "unknown"
+#ifndef MM_FIRMWARE_NAME
+#define MM_FIRMWARE_NAME "unknown"
 #endif
 
 namespace mm {{
 
-constexpr const char* kVersion   = MM_VERSION;
-constexpr const char* kBuildDate = MM_BUILD_DATE;
-constexpr const char* kBoardName = MM_BOARD_NAME;
+constexpr const char* kVersion      = MM_VERSION;
+constexpr const char* kBuildDate    = MM_BUILD_DATE;
+constexpr const char* kFirmwareName = MM_FIRMWARE_NAME;
 
 }} // namespace mm
 '''

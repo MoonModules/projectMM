@@ -20,7 +20,7 @@ Either path: ~2–3 h translation + Windows-side testing. Once green, `build-win
 
 1.0 ships ESP32 firmware (4 variants) + macOS arm64. Still to add:
 
-- **ESP32-P4** board variant — new chip target, new sdkconfig fragment, fits the existing `BOARDS` table in `build_esp32.py`.
+- **ESP32-P4** firmware variant — new chip target, new sdkconfig fragment, fits the existing `FIRMWARES` table in `build_esp32.py`.
 - **Linux desktop binary** — third desktop job in `release.yml`, static-linked libstdc++.
 - **Teensy 4.1** — toolchain-file build, `.hex` for Teensy Loader.
 - **Raspberry Pi** — ARM64, cross-built or native.
@@ -131,15 +131,11 @@ No FreeRTOS tasks are pinned today. At 16K LEDs the render task takes ~52 ms/tic
 
 ## Architecture
 
-### Board vs firmware separation, runtime board presets (multi-commit, started)
+### Runtime board presets (multi-commit, partially landed)
 
-Today `--board <variant>` in `scripts/build/build_esp32.py` actually picks a **firmware variant** (`esp32`, `esp32-eth`, `esp32-eth-wifi`, `esp32s3-n16r8`), not a physical board. The eth variants additionally hardcode Olimex Gateway RMII pins in `src/platform/esp32/platform_esp32.cpp::ethInit()`, so they only work on that one PCB. As we add boards (LOLIN D32 tested 2026-06-02, QuinLED variants planned), the conflation gets painful: every new board with different pins would need another firmware. The fix is to **separate physical-board metadata from firmware-variant metadata** and let the device pick up board-specific values (pin assignments, default module config) at runtime.
+The firmware-vs-board separation is now in place across the codebase (see [architecture.md § Firmware vs board](architecture.md#firmware-vs-board)). `build_esp32.py --firmware <variant>` picks the compiled binary; MoonDeck deduces the physical board where the firmware uniquely identifies hardware (`esp32-eth*` ⇒ `olimex-esp32-gateway-rev-g`) and lets the user pick from a short hardcoded list otherwise. Firmware variants stay separate — `esp32-eth` saves ~670 KB flash + ~30 KB DRAM vs `esp32-eth-wifi` (measured); merging would erase that win.
 
-Started — minimal scope, no catalog yet:
-- `scripts/moondeck.py::_probe_device` now reads `SystemModule.board` as a **firmware** value (the existing control is misnamed; rename in the final phase) and deduces the physical board where the firmware uniquely identifies hardware (`esp32-eth*` ⇒ `olimex-esp32-gateway-rev-g`). MoonDeck device-list shows `<deviceName> · <ip> · fw:<firmware> · board:<board>`.
-- For firmware variants that work on multiple boards (`esp32`), the board picker in the UI lets the user select from a short hardcoded list (LOLIN D32, generic ESP32, Olimex Gateway when running the eth-less firmware, etc.). Selection persists in moondeck.json.
-- `flash_esp32.py` polls for the just-flashed device after a successful flash and writes `last_port` into the matching device record, so MoonDeck shows which serial port a device was last flashed via.
-- Firmware variants stay separate — `esp32-eth` saves ~670 KB flash + ~30 KB DRAM vs `esp32-eth-wifi` (measured); merging would erase that win.
+What still needs separation: the eth variants hardcode Olimex Gateway RMII pins in `src/platform/esp32/platform_esp32.cpp::ethInit()`, so they only work on that one PCB. As we add boards with different pins (LOLIN D32 tested 2026-06-02, QuinLED variants planned), runtime pin configuration becomes the next step.
 
 Pin config moves to runtime (next, separate commit):
 - Drop hardcoded `GPIO_NUM_17` from `ethInit()`. NetworkModule reads `Network.eth_rmii_clock_gpio` (new control) and similar pin values, defaulting to current Olimex hardcodes so behaviour is unchanged.
@@ -151,13 +147,7 @@ Board preset catalog + upload (later, when the runtime config has real consumers
 - New `/api/board-preset` endpoint accepts the JSON; device persists to LittleFS; bootstrap applies pins + defaults on next boot.
 - MoonDeck "Set board" picker reads the catalog to populate the dropdown.
 - Pin reassignment requires reboot (ESP-IDF can't hot-reconfigure EMAC pins after `esp_eth_driver_install`); document the constraint.
-- A first attempt at this catalog landed and was rolled back in the started-scope commit — the catalog only earns its keep once the device reads it, otherwise it's a docs-shaped file in the wrong place.
-
-Terminology cleanup (last, coordinated rename):
-- `--board` arg in `build_esp32.py` → `--firmware` (and the `BOARDS` dict to `FIRMWARES`).
-- `SystemModule.board` control → `firmware`.
-- Scenario `contract.<target>` keys to match.
-- No behavioural change; block-scope so one commit mechanically sweeps all three layers.
+- A first attempt at this catalog landed and was rolled back during the firmware-vs-board separation work — the catalog only earns its keep once the device reads it, otherwise it's a docs-shaped file in the wrong place.
 
 ### Multi-layer composition (backlog)
 
@@ -238,4 +228,4 @@ Check whether `setup_esp_idf.py` pins to a specific commit/tag or always pulls l
 
 ### WiFi runtime disable (backlog)
 
-Compile-time answer already ships: `--board esp32-eth` excludes the WiFi stack. This item is the runtime variant — a single `esp32-eth-wifi` binary that skips WiFi init when Ethernet hardware is present. Prerequisite: `platform::ethPresent()` / `platform::wifiPresent()` (listed under Release 2.0 above). Defer until that API lands.
+Compile-time answer already ships: `--firmware esp32-eth` excludes the WiFi stack. This item is the runtime variant — a single `esp32-eth-wifi` binary that skips WiFi init when Ethernet hardware is present. Prerequisite: `platform::ethPresent()` / `platform::wifiPresent()` (listed under Release 2.0 above). Defer until that API lands.

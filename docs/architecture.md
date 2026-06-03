@@ -174,6 +174,14 @@ Abstractions are added when a concrete implementation needs them, not pre-design
 
 **Platform boundary (hard rule).** All `#ifdef`, `#if defined`, platform-specific `#include`s, and hardware API calls live exclusively in `src/platform/`. Everything outside `src/platform/` compiles on every target without modification. Compile-time platform branching uses `if constexpr` on `platform_config.h` flags — never a preprocessor `#ifdef`. The boundary is enforced by `scripts/check/check_platform_boundary.py`, a commit gate (see [CLAUDE.md § Lifecycle Events](../CLAUDE.md#lifecycle-events)).
 
+## Firmware vs board
+
+**Firmware** is the compiled binary — chip target plus which radios/peripherals/sdkconfig fragments are included. Today's variants: `esp32` (WiFi only), `esp32-eth` (Ethernet only, WiFi excluded), `esp32-eth-wifi` (both), `esp32s3-n16r8` (S3 with 16 MB flash + 8 MB PSRAM). Selected by `build_esp32.py --firmware <key>`, reported by `SystemModule.firmware`, used as the contract target key in scenarios.
+
+**Board** is the physical hardware — chip + PCB + on-board peripherals (PHY, USB-serial, PSRAM, antenna). Examples: `olimex-esp32-gateway-rev-g`, `lolin-d32`, `generic-esp32`. The device cannot identify its own board (no readable PCB ID on classic ESP32), so MoonDeck deduces it from the firmware when possible (`esp32-eth*` ⇒ Olimex) and otherwise lets the user pick.
+
+A board can run multiple firmwares (Olimex runs all four); a firmware can run on multiple boards (`esp32` runs on any ESP32 dev board). The codebase reserves "board" exclusively for physical hardware and "firmware" exclusively for the compiled binary.
+
 # Light domain
 
 The light domain is everything specific to driving lights. **Light** here means any controllable light source: an addressable LED pixel (WS2812, APA102), a DMX fixture (RGB par, moving head, dimmer), or any other output that takes colour/intensity data. The term is used instead of "pixel" because the system controls both LEDs and conventional lighting fixtures.

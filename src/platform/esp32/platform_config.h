@@ -21,10 +21,10 @@ constexpr bool hasWiFi = false;
 constexpr bool hasWiFi = true;
 #endif
 
-// Ethernet is only available on boards whose sdkconfig fragment enables the
-// ESP32 EMAC (sdkconfig.defaults.eth — Olimex pin map). Other boards (plain
-// ESP32 WiFi-only, ESP32-S3 with no EMAC) define MM_NO_ETH and get stubbed-out
-// platform::eth* functions, mirroring the desktop platform layer.
+// Ethernet is only available on firmware variants whose sdkconfig fragment
+// enables the ESP32 EMAC (sdkconfig.defaults.eth — Olimex pin map). Other
+// firmwares (plain ESP32 WiFi-only, ESP32-S3 with no EMAC) define MM_NO_ETH
+// and get stubbed-out platform::eth* functions, mirroring the desktop layer.
 #ifdef MM_NO_ETH
 constexpr bool hasEthernet = false;
 #else
@@ -38,7 +38,7 @@ constexpr bool hasEthernet = true;
 constexpr bool hasOta = true;
 
 // Improv WiFi listens on UART0 for WiFi credentials. Disabled on Ethernet-only
-// builds (--board esp32-eth) — the WiFi headers and the esp_wifi_scan_* calls
+// firmwares (--firmware esp32-eth) — the WiFi headers and the esp_wifi_scan_* calls
 // the listener uses are not linked there, and there's no WiFi STA to provision
 // either way. The S3's native USB-Serial-JTAG (separate from UART0) is not
 // supported by the Improv listener; see the ImprovProvisioningModule spec for

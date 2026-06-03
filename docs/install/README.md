@@ -76,16 +76,16 @@ RUN_ID=$(gh run list --workflow=release.yml --branch=$(git branch --show-current
 [ -z "$RUN_ID" ] && { echo "no successful CI run on this branch"; exit 1; }
 echo "Using run $RUN_ID"
 
-# Download the 4 board artefacts, flatten, regenerate Pages-relative manifests.
-for B in esp32 esp32-eth esp32-eth-wifi esp32s3-n16r8; do
+# Download the 4 firmware artefacts, flatten, regenerate Pages-relative manifests.
+for F in esp32 esp32-eth esp32-eth-wifi esp32s3-n16r8; do
   TMP=$(mktemp -d)
-  gh run download "$RUN_ID" -n "esp32-$B" -D "$TMP"
+  gh run download "$RUN_ID" -n "esp32-$F" -D "$TMP"
   cp "$TMP"/*.bin "$DIST/releases/$TAG/"
   python3 scripts/build/generate_manifest.py \
-    --board "$B" --version "$V" \
+    --firmware "$F" --version "$V" \
     --release-url . \
-    --flasher-args "$TMP/flasher-$B.json" \
-    --out "$DIST/releases/$TAG/manifest-$B.json"
+    --flasher-args "$TMP/flasher-$F.json" \
+    --out "$DIST/releases/$TAG/manifest-$F.json"
   rm -rf "$TMP"
 done
 

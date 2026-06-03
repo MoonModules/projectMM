@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Clean one or all ESP32 per-board build directories.
+"""Clean one or all ESP32 per-firmware build directories.
 
-Each board has its own ``build/esp32-<board>/`` (managed by
+Each firmware has its own ``build/esp32-<firmware>/`` (managed by
 ``build_esp32.py``). This script removes one at a time, or every
 ``build/esp32-*/`` plus a stale legacy ``esp32/build/`` if present.
 """
@@ -16,14 +16,14 @@ ESP32_DIR = ROOT / "esp32"
 BUILD_ROOT = ROOT / "build"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_esp32 import BOARDS, build_dir_for
+from build_esp32 import FIRMWARES, build_dir_for
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     g = ap.add_mutually_exclusive_group(required=True)
-    g.add_argument("--board", choices=sorted(BOARDS),
-                   help="Remove build/esp32-<board>/ for the named board.")
+    g.add_argument("--firmware", choices=sorted(FIRMWARES),
+                   help="Remove build/esp32-<firmware>/ for the named firmware.")
     g.add_argument("--all", action="store_true",
                    help="Remove every build/esp32-*/ directory plus the "
                         "legacy esp32/build/ dir if it still exists "
@@ -31,8 +31,8 @@ def main():
     args = ap.parse_args()
 
     targets: list[Path] = []
-    if args.board:
-        targets.append(build_dir_for(args.board))
+    if args.firmware:
+        targets.append(build_dir_for(args.firmware))
     else:
         if BUILD_ROOT.exists():
             targets.extend(sorted(BUILD_ROOT.glob("esp32-*")))
