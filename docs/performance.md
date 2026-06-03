@@ -14,15 +14,17 @@ Desktop ArtNet sends to a non-existent IP so packets complete instantly; `freeHe
 
 | Class | sizeof (bytes) |
 |-------|---------------|
-| MoonModule | 104 |
-| Layer | 176 |
-| Drivers | 120 |
-| GridLayout | 104 |
-| SystemModule | ~280 |
-| NetworkModule | ~320 |
-| HttpServerModule | 144 |
+| MoonModule | 120 |
+| Layer | 208 |
+| Drivers | 408 |
+| GridLayout | 128 |
+| SystemModule | 368 |
+| NetworkModule | 336 |
+| HttpServerModule | 168 |
 
-Binary: **131 KB**
+`Drivers` grew from 120 → 408 with the per-driver `Correction` stage (256-entry brightness LUT + channel-order table). Other classes grew ~16-32 bytes each as `MoonModule` itself grew (rolling-range observed slot + wired-by-code flag + per-child `tickChildren` accounting fields).
+
+Binary: **358 KB** (debug-arm64; release-strip yields a smaller number).
 
 ### Memory at 128×128 with mirror
 
