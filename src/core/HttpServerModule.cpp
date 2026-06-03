@@ -386,7 +386,8 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
             writeControlValue(sink, c);
         }
         writeControlMetadata(sink, c);
-        // Emit "hidden":true only when set (common case is false; omit to save bytes).
+        // Emit optional flags only when set (common case is false; omit to save bytes).
+        if (c.readonly) sink.append(",\"readonly\":true");
         sink.append(c.hidden ? ",\"hidden\":true}" : "}");
     }
 }

@@ -87,9 +87,10 @@ def stage_install_page():
     # Mirror release.yml's "cp -r docs/install/. pages/install/" step:
     # take every runtime file in docs/install/ (so devices.js etc. land too,
     # not just index.html). README.md is docs, skip it; .md in general is
-    # docs not runtime.
+    # docs not runtime. `.json` covers the boards.json catalog the picker
+    # fetches; future JSON catalogs land here too.
     for src in INSTALL_DIR.iterdir():
-        if src.is_file() and src.suffix.lower() in (".html", ".js", ".css"):
+        if src.is_file() and src.suffix.lower() in (".html", ".js", ".css", ".json"):
             shutil.copy(src, STAGE_DIR / src.name)
     # release-picker.js lives in src/ui/ (shared with the on-device UI).
     shutil.copy(PICKER_JS, STAGE_DIR / "release-picker.js")

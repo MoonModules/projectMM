@@ -933,10 +933,19 @@ function createControl(moduleName, moduleType, ctrl) {
             input.value = ctrl.value ?? "";
             input.dataset.mid = moduleName;
             input.dataset.key = ctrl.name;
-            input.addEventListener("input", () => {
-                dragTs[key] = Date.now();
-                debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, input.value));
-            });
+            // ctrl.readonly is a UI hint (the server still accepts writes — the
+            // flag exists for values pushed by tooling like MoonDeck or the
+            // web installer, where editing in the device UI is by-convention
+            // disallowed). `readOnly` lets the user select/copy the text but
+            // not modify it; `disabled` would also block copy.
+            if (ctrl.readonly) {
+                input.readOnly = true;
+            } else {
+                input.addEventListener("input", () => {
+                    dragTs[key] = Date.now();
+                    debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, input.value));
+                });
+            }
             row.appendChild(input);
             break;
         }

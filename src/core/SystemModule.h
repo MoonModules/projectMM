@@ -86,6 +86,14 @@ public:
         controls_.addReadOnly("chip", chipInfo_, sizeof(chipInfo_));
         controls_.addReadOnly("sdk", sdkInfo_, sizeof(sdkInfo_));
         controls_.addReadOnly("bootReason", bootReasonStr_, sizeof(bootReasonStr_));
+
+        // Chain into children (BoardModule today). Per the override-and-chain
+        // convention in architecture.md § Lifecycle propagation to children:
+        // `onBuildControls` cascades to children via MoonModule's base default;
+        // overriding the method shadows that default, so we must call it
+        // explicitly. Order doesn't matter here — SystemModule's own controls
+        // don't depend on children's controls.
+        MoonModule::onBuildControls();
     }
 
     void loop1s() override {
