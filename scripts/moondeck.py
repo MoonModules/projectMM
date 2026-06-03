@@ -334,11 +334,34 @@ def _migrate_to_networks(old_state: dict) -> dict:
 _VOLATILE_DEVICE_FIELDS = ("deviceName", "firmware", "modules")
 
 
-# Serializes save_state() across the threaded HTTP handlers
-# (ThreadingHTTPServer dispatches each request on its own thread; two
-# concurrent /api/state POSTs or /api/discover responses could otherwise
-# interleave json.dump writes and corrupt the file).
-_state_write_lock = threading.Lock()
+# Serializes the full load → mutate → save transaction across the threaded
+# HTTP handlers (ThreadingHTTPServer dispatches each request on its own
+# thread). Without this, two concurrent /api/discover requests could both
+# load_state(), mutate their own copies, and each save_state() — last write
+# wins, half the work is lost. RLock (not Lock) so save_state can also be
+# called standalone for the no-mutator path (POST /api/state body merge)
+# without deadlocking when nested inside mutate_state.
+_state_write_lock = threading.RLock()
+
+
+def mutate_state(mutator):
+    """Run a full load → mutator(state) → save cycle under the state lock.
+    Returns the post-mutation state so the handler can echo it to the
+    client. `mutator` receives the loaded state dict, mutates in place
+    (or returns a new dict, which becomes the value to save), and may
+    return None to mean "keep the in-place mutation."
+
+    Slow work (subnet scans, device probes) should happen BEFORE calling
+    mutate_state — pass already-gathered data in by closure. Holding the
+    lock across network I/O would serialise everything behind the slowest
+    scan."""
+    with _state_write_lock:
+        state = load_state()
+        result = mutator(state)
+        if result is not None:
+            state = result
+        save_state(state)
+        return state
 
 
 def save_state(state):
@@ -700,33 +723,43 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
 
         elif self.path == "/api/state":
             body = self._read_body()
-            state = json.loads(body) if body else {}
-            current = load_state()
-            current.update(state)
-            save_state(current)
-            self._send_json(current)
+            patch = json.loads(body) if body else {}
+            # mutate_state holds the lock across load + merge + save so two
+            # concurrent POSTs can't each load the same snapshot, apply
+            # different patches, and clobber each other on save.
+            def _merge(s):
+                s.update(patch)
+            result = mutate_state(_merge)
+            self._send_json(result)
 
         elif self.path == "/api/discover":
             body = self._read_body()
             params = json.loads(body) if body else {}
             subnet = params.get("subnet", "")
+            # Slow part — subnet scan — happens OUTSIDE the state lock so
+            # parallel discovers on different subnets don't serialise behind
+            # each other. The merge into the active network record happens
+            # under the lock via mutate_state.
             devices, scanned_subnet = discover_devices(subnet)
-            # Attribute found devices to the network whose subnet matches the
-            # scanned one. Creates a new "Network N" if none matches (a future
-            # rename in the UI can adjust the name). Returns the full updated
-            # state so the JS reloads the authoritative shape.
             target_subnet = _subnet_from_host_subnet(scanned_subnet)
-            state = load_state()
-            net = next((n for n in (state.get("networks") or [])
-                        if n.get("subnet") == target_subnet), None)
-            if net is None and devices:
-                existing = state.setdefault("networks", [])
-                name = "Home" if not existing else f"Network {len(existing) + 1}"
-                net = {"name": name, "subnet": target_subnet,
-                       "wifi": {"ssid": "", "password": ""},
-                       "port": "", "devices": []}
-                existing.append(net)
-            if net is not None:
+
+            def _merge_discover(state):
+                # Attribute found devices to the network whose subnet matches
+                # the scanned one. Creates a new "Network N" if none matches
+                # (a future rename in the UI can adjust the name). Returns
+                # the full updated state so the JS reloads the authoritative
+                # shape.
+                net = next((n for n in (state.get("networks") or [])
+                            if n.get("subnet") == target_subnet), None)
+                if net is None and devices:
+                    existing = state.setdefault("networks", [])
+                    name = "Home" if not existing else f"Network {len(existing) + 1}"
+                    net = {"name": name, "subnet": target_subnet,
+                           "wifi": {"ssid": "", "password": ""},
+                           "port": "", "devices": []}
+                    existing.append(net)
+                if net is None:
+                    return  # nothing to merge — state unchanged
                 # Merge found devices into the network: keep existing user
                 # fields (board, last_port, selected), update online + probe
                 # fields. Drop devices no longer reachable — they stay
@@ -753,33 +786,51 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                     if ip not in found_ips:
                         merged.append({**dev, "online": False})
                 net["devices"] = merged
-                save_state(state)
-            self._send_json(state)
+
+            result = mutate_state(_merge_discover)
+            self._send_json(result)
 
         elif self.path == "/api/refresh":
             body = self._read_body()
             params = json.loads(body) if body else {}
             network_name = params.get("network", "")
-            state = load_state()
-            net = next((n for n in (state.get("networks") or [])
-                        if n.get("name") == network_name), None)
-            if net is None:
+            # Read the device list snapshot under the lock, release, do the
+            # slow probes outside, then re-enter mutate_state for the merge.
+            # Holding the lock across the probes would serialise every refresh.
+            with _state_write_lock:
+                state = load_state()
+                net = next((n for n in (state.get("networks") or [])
+                            if n.get("name") == network_name), None)
+                snapshot = list(net.get("devices") or []) if net else None
+            if snapshot is None:
                 # No-op when the named network doesn't exist (e.g. it was
                 # renamed mid-flight). Return state so the JS can re-sync.
                 self._send_json(state)
                 return
-            refreshed = refresh_devices(net.get("devices") or [])
-            # refresh_devices returns only devices that responded — devices
-            # marked offline (didn't respond) are dropped from the list it
-            # returns. Carry them forward as offline so the UI doesn't lose
-            # known-but-unreachable entries.
-            refreshed_ips = {d.get("ip") for d in refreshed}
-            for prior in (net.get("devices") or []):
-                if prior.get("ip") not in refreshed_ips:
-                    refreshed.append({**prior, "online": False})
-            net["devices"] = refreshed
-            save_state(state)
-            self._send_json(state)
+            refreshed = refresh_devices(snapshot)
+
+            def _merge_refresh(state):
+                # Re-resolve `net` under the second lock — the network may have
+                # been renamed / re-added by another handler while the probes
+                # ran. If it's gone, drop the refresh result (the user will
+                # see the empty list and re-discover).
+                target = next((n for n in (state.get("networks") or [])
+                               if n.get("name") == network_name), None)
+                if target is None:
+                    return
+                # refresh_devices returns only devices that responded — devices
+                # marked offline (didn't respond) are dropped from the list it
+                # returns. Carry them forward as offline so the UI doesn't lose
+                # known-but-unreachable entries.
+                refreshed_ips = {d.get("ip") for d in refreshed}
+                merged = list(refreshed)
+                for prior in (target.get("devices") or []):
+                    if prior.get("ip") not in refreshed_ips:
+                        merged.append({**prior, "online": False})
+                target["devices"] = merged
+
+            result = mutate_state(_merge_refresh)
+            self._send_json(result)
 
         else:
             self.send_error(404)

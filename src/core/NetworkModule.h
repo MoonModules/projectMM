@@ -59,6 +59,12 @@ public:
                 stateChangeTime_ = platform::millis();
                 std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi STA: %s", ssid_);
                 setStatus(statusBuf_, Severity::Status);
+                // Re-evaluate control visibility — rssi was visible while
+                // state_ was ConnectedSta (any prior call to wifiStaConnected)
+                // and would otherwise stay rendered with a now-stale reading
+                // until the cascade either reconnects (onConnected rebuilds)
+                // or falls back to AP (startAP rebuilds). Match those paths.
+                rebuildControls();
             } else {
                 // STA init failed (OOM, GPIO conflict). Try to recover via
                 // AP so the user can re-enter credentials manually.
@@ -100,6 +106,14 @@ public:
     }
 
     void onBuildControls() override {
+        // Chain to base FIRST so children (Improv on ESP32) register their
+        // controls before NetworkModule appends its own — per the override-
+        // and-chain convention in docs/coding-standards.md § Override-and-
+        // chain ("onBuildControls — chain first, then parent work").
+        // Earlier shape called this at the end, which inverted the order
+        // (parent's controls landed before children's).
+        MoonModule::onBuildControls();
+
         setStatus(statusBuf_);
 
         // Refresh the live-readout values (mode label + rssi + txPower) so a
@@ -142,9 +156,7 @@ public:
         controls_.setHidden(controls_.count() - 1, hideStatic);
         controls_.addIPv4("dns", staticDns_);
         controls_.setHidden(controls_.count() - 1, hideStatic);
-
-        // Chain to base so children (Improv on ESP32) get their controls built too.
-        MoonModule::onBuildControls();
+        // Chain to base is at the top of this method — see comment there.
     }
 
     void loop1s() override {

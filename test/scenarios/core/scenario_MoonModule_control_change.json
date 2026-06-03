@@ -134,7 +134,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            100,
+            99,
             208
           ],
           "free_heap": [

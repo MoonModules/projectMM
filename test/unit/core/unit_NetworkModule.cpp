@@ -158,9 +158,11 @@ TEST_CASE("NetworkModule rssi/txPower controls hidden in non-WiFi states") {
     // rebuildControls() to clear-then-build a single time.
     net.rebuildControls();
 
+    int matchCount = 0;
     for (uint8_t i = 0; i < net.controls().count(); i++) {
         const char* name = net.controls()[i].name;
         if (std::strcmp(name, "rssi") == 0 || std::strcmp(name, "txPower") == 0) {
+            matchCount++;
             // ReadOnlyInt = 1-byte int8_t + a "dBm" suffix carried in the
             // descriptor's aux slot (see Control.h). Tests the control type
             // we ended up using after the buffer-shrink refactor.
@@ -169,5 +171,16 @@ TEST_CASE("NetworkModule rssi/txPower controls hidden in non-WiFi states") {
             // returns false). Both metrics should be hidden in that state.
             CHECK(net.controls()[i].hidden);
         }
+    }
+    // Count assertion catches the silent-fail case where the controls are
+    // missing entirely — without it, a build that dropped both rssi and
+    // txPower would still pass (the loop body never runs). On WiFi-capable
+    // builds both controls must exist; on --firmware esp32-eth they're
+    // compiled out (NetworkModule's `if constexpr (platform::hasWiFi)`)
+    // and the expected count is 0.
+    if constexpr (mm::platform::hasWiFi) {
+        CHECK(matchCount == 2);
+    } else {
+        CHECK(matchCount == 0);
     }
 }

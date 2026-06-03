@@ -110,6 +110,17 @@ public:
     // value (number / bool / string) into the sink. Used by the ControlType
     // serializers (Control.cpp) and by anyone bridging a typed value into
     // wire-format text (scenario_runner's JsonVal → applyControlValue path).
+    // Accepts `double` because the only caller is `scenario_runner.cpp`'s
+    // JsonVal → JSON-text bridge — JsonVal stores numerics as `double` so
+    // it doesn't lose precision parsing scenario fixtures. The runner is
+    // desktop / test-only.
+    //
+    // **Production firmware must not call this** — see docs/coding-standards.md
+    // § Prefer integers: `double` runs in software emulation on ESP32 Xtensa
+    // (~30x slower than `float`). Production code paths use the typed
+    // serializers in `Control.cpp` (writeControlValue) which dispatch on
+    // ControlType and emit integer / bool / string fragments without going
+    // near `double`.
     void writeNumber(double v) {
         // Integer-valued doubles render as ints (avoids "42.0000" noise);
         // genuine fractionals use %g for compact display.

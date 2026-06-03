@@ -239,6 +239,9 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
     # restores those controls to production defaults BEFORE the scenario runs.
     # Without this each scenario's measurements depend on whatever the previous
     # scenario left behind, so contract assertions become coupled to run order.
+    # Reset failures fail-fast: a swallowed reset means the baseline reflects
+    # the wrong state, which silently produces false-positive contract passes
+    # (or false-negative failures) downstream. Better to abort cleanly here.
     reset_steps = scenario.get("reset", [])
     if reset_steps:
         print(f"\n  --- reset ({len(reset_steps)} steps) ---")
@@ -253,7 +256,14 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                 })
                 print(f"  SET   {r_step.get('id','?')}.{r_step.get('key','?')} = {r_step.get('value','?')}")
             except Exception as e:
-                print(f"  WARN  reset {r_step.get('name','?')}: {e}")
+                print(f"  FAIL  reset {r_step.get('name','?')}: {e}", file=sys.stderr)
+                results["passed"] = False
+                results["reset_failed"] = f"{r_step.get('name','?')}: {e}"
+                # Stop the scenario before collect_metrics — baseline would
+                # otherwise reflect an unknown/partial state. No cleanup
+                # needed: created_modules only fills inside the steps loop
+                # below, which hasn't run yet.
+                return results
 
     # Collect baseline AFTER reset so it reflects the normalized state.
     baseline = collect_metrics(client, settle_s=settle_s)

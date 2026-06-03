@@ -1021,6 +1021,12 @@ function createControl(moduleName, moduleType, ctrl) {
             // malformed values with 400. Inline validation on the client is
             // a future enhancement; today an invalid value goes to the
             // server and the response surfaces the rejection.
+            //
+            // Same dragTs + debounceSend pattern as text / password so the
+            // ipv4 input participates in stale-WS-push protection: while
+            // the user is typing, dragTs[key] gets bumped, and an arriving
+            // WS push within the cooldown window won't revert mid-edit
+            // (see updateValues + the dragTs check ~line 1260).
             const input = document.createElement("input");
             input.type = "text";
             input.className = "ipv4-input";
@@ -1030,8 +1036,9 @@ function createControl(moduleName, moduleType, ctrl) {
             input.placeholder = "0.0.0.0";
             input.maxLength = 15;  // "255.255.255.255" = 15
             input.size = 15;
-            input.addEventListener("change", () => {
-                sendControl(moduleName, ctrl.name, input.value);
+            input.addEventListener("input", () => {
+                dragTs[key] = Date.now();
+                debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, input.value));
             });
             row.appendChild(input);
             break;
@@ -1141,13 +1148,18 @@ function fmtProgressLabel(ctrl) {
     return Math.round(v / 1024) + "KB / " + Math.round(t / 1024) + "KB";
 }
 
-// "<value> <unit>" — handles missing/zero values without rendering "0 dBm"
-// when the device is in a state where the metric isn't meaningful (hidden
-// controls still ship a value, so the render path gets called).
+// "<value> <unit>" — treats null / undefined / 0 as "unavailable" so the
+// UI doesn't render bogus "0 dBm" when the device is in a state where the
+// metric isn't meaningful. The device's updateMetrics() writes 0 to rssi /
+// txPower in non-WiFi states; the control is hidden in those states, but
+// if anyone toggles hidden off (DevTools, future code path) the unit-with-
+// zero rendering would still mislead. Real metric values are never zero
+// in practice — RSSI is negative, TX power is 0..127 dBm (zero only on
+// driver-uninitialised reads).
 function fmtDisplayInt(ctrl) {
     const v = ctrl.value;
     const u = ctrl.unit || "";
-    if (v === null || v === undefined) return "";
+    if (v === null || v === undefined || v === 0) return "";
     return u ? `${v} ${u}` : String(v);
 }
 

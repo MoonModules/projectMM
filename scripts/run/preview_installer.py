@@ -198,15 +198,18 @@ def main() -> int:
 
     print(f"==> staged {STAGE_DIR}")
 
-    # Look for local ESP32 builds and stage them as the `local-dev` release.
-    # When none are found, the preview runs in render-only mode (picker
-    # works against the real GitHub API, Install fails for lack of bins).
+    # Look for local ESP32 builds and stage them under LOCAL_TAG (= "latest"
+    # — overlays the real `latest` tag the picker surfaces from the GitHub
+    # API; clicking Install on `latest` then resolves to our local bins via
+    # toLocalUrl). When no builds exist, the preview runs in render-only
+    # mode (picker works against the real GitHub API, Install fails for
+    # lack of bins).
     local_builds = find_local_builds()
     if local_builds:
         firmwares = stage_local_builds(local_builds)
         if firmwares:
-            print(f"==> staged local-dev release with firmwares: {', '.join(firmwares)}")
-            print(f"    pick the `local-dev` tag in the picker to flash a USB-connected ESP32")
+            print(f"==> staged `{LOCAL_TAG}` release with firmwares: {', '.join(firmwares)}")
+            print(f"    pick the `{LOCAL_TAG}` tag in the picker to flash a USB-connected ESP32")
         else:
             print(f"==> no firmwares could be staged (all skipped — see warnings above)")
             print(f"    falling back to render-only mode")
