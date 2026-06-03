@@ -7,7 +7,9 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
+from contextlib import suppress
 from pathlib import Path
 
 PORT = 8420
@@ -16,6 +18,16 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 UI_DIR = SCRIPTS_DIR / "moondeck_ui"
 ASSETS_DIR = ROOT / "docs" / "assets"
 STATE_FILE = SCRIPTS_DIR / "moondeck.json"
+
+# Shared test-metadata parsers live next to the doc generator. Both this server
+# and scripts/docs/generate_test_docs.py import from there so the two views of
+# the same source files (HTML in MoonDeck, markdown in docs/tests/) can't drift.
+sys.path.insert(0, str(SCRIPTS_DIR / "docs"))
+import _test_metadata as test_meta  # noqa: E402
+# Re-use the doc generator's perf-table formatter so the MoonDeck step view
+# and the generated scenario-tests.md show the same shape per step (single
+# source of truth — adding/changing a metric updates both surfaces at once).
+import generate_test_docs as test_doc_gen  # noqa: E402
 
 
 def _app_version():
@@ -40,7 +52,7 @@ def load_scripts():
 
 _scripts_data = load_scripts()
 SCRIPTS = _scripts_data["scripts"]
-BOARDS = _scripts_data["boards"]
+FIRMWARES = _scripts_data["firmwares"]
 
 # ---------------------------------------------------------------------------
 # Device discovery
@@ -69,6 +81,13 @@ def _get_local_subnet():
     return ".".join(ip.split(".")[:3]) if ip else "192.168.1"
 
 
+def _walk_modules(modules):
+    """Yield every module in the tree (depth-first), including nested children."""
+    for m in modules or []:
+        yield m
+        yield from _walk_modules(m.get("children", []))
+
+
 def _probe_device(ip, port=8080, timeout=0.4):
     """Probe a single IP for /api/state. Returns device info or None.
 
@@ -76,6 +95,14 @@ def _probe_device(ip, port=8080, timeout=0.4):
     refuses the connection almost instantly; 0.4s only matters for IPs that
     silently drop packets (firewalled hosts), and a subnet scan should not
     stall seconds on those.
+
+    Returns: { ip, deviceName, firmware, board }
+    - `firmware` is the variant flashed (value of the `firmware` control on
+      SystemModule, set from kFirmwareName in build_info.h). Used to deduce
+      `board`. See docs/architecture.md § Firmware vs board.
+    - `board` is the physical hardware key — set when the firmware uniquely
+      identifies the board (eth/eth-wifi → Olimex). Empty string otherwise;
+      the user picks via the UI (the saved value survives refresh).
     """
     import urllib.request
     import urllib.error
@@ -84,10 +111,42 @@ def _probe_device(ip, port=8080, timeout=0.4):
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read())
-            module_count = len(data.get("modules", []))
-            return {"ip": f"{ip}:{port}", "modules": module_count}
+            modules = data.get("modules", [])
+            device_name = ""
+            firmware = ""
+            for m in _walk_modules(modules):
+                if m.get("type") == "SystemModule":
+                    for c in m.get("controls", []):
+                        if c.get("name") == "deviceName":
+                            device_name = c.get("value", "") or ""
+                        elif c.get("name") == "firmware":
+                            firmware = c.get("value", "") or ""
+                    break
+            board = _deduce_board(firmware)
+            return {
+                "ip": f"{ip}:{port}",
+                "deviceName": device_name,
+                "firmware": firmware,
+                "board": board,
+            }
     except Exception:
         return None
+
+
+def _deduce_board(firmware: str) -> str:
+    """Map firmware variant → physical board key when the firmware uniquely
+    identifies the board (the eth firmware variants hardcode Olimex RMII
+    pins). Returns "" when the firmware works on multiple boards — the user
+    fills in `board` manually in that case. See docs/architecture.md
+    § Firmware vs board for the firmware/board terminology.
+
+    KEEP IN SYNC: scripts/moondeck_ui/app.js boardOptions carries the human
+    list of hardware boards the picker offers. When a new board lands with
+    a deducible firmware, both sites need an update — collapse into a shared
+    catalog at that point (small lift today; growing cost as boards add)."""
+    if firmware in ("esp32-eth", "esp32-eth-wifi"):
+        return "olimex-esp32-gateway-rev-g"
+    return ""
 
 
 def discover_devices(subnet=""):
@@ -125,20 +184,84 @@ def discover_devices(subnet=""):
     return devices, subnet
 
 
+_LAST_FLASH_FILE = SCRIPTS_DIR / ".last_flash.json"
+_LAST_FLASH_TTL_S = 5 * 60  # ignore markers older than 5 minutes
+
+
+def _consume_last_flash() -> dict | None:
+    """Read the breadcrumb scripts/.last_flash.json that flash_esp32.py drops
+    after a successful flash. Returns {port, firmware} when the marker is
+    recent (< TTL); deletes the file so the link only happens once. Returns
+    None when there's no recent marker."""
+    if not _LAST_FLASH_FILE.exists():
+        return None
+    try:
+        data = json.loads(_LAST_FLASH_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    import time
+    if time.time() - float(data.get("ts", 0)) > _LAST_FLASH_TTL_S:
+        with suppress(OSError):
+            _LAST_FLASH_FILE.unlink()
+        return None
+    return {"port": data.get("port", ""), "firmware": data.get("firmware", "")}
+
+
 def refresh_devices(known_devices):
-    """Probe known devices to check online/offline status."""
+    """Probe known devices to check online/offline status.
+
+    Preserves user-set fields (`board`, `last_port`) across refreshes: the
+    probe result carries fresh `firmware`/`deviceName` and a deduced `board`
+    (set only when firmware unambiguously identifies hardware), but a user-set
+    `board` for a firmware that can run on multiple boards (e.g. `esp32` on
+    LOLIN D32 vs generic DevKit) must survive a refresh. Same for `last_port`,
+    which is set by the flash-event breadcrumb (see _consume_last_flash).
+    """
     def probe(device):
         ip = device.get("ip", "")
         if ":" in ip:
             host, port = ip.rsplit(":", 1)
-            return _probe_device(host, int(port))
-        return _probe_device(ip)
+            fresh = _probe_device(host, int(port))
+        else:
+            fresh = _probe_device(ip)
+        if not fresh:
+            return None
+        # Merge: probe wins for live-readable fields; user-set / flash-tracked
+        # fields must survive. Without this, `online` (the device responded
+        # → True), `selected` (user checkbox), `board` (user-set when not
+        # deducible), and `last_port` (set by the flash breadcrumb) would
+        # disappear from the persisted record after every refresh.
+        fresh["online"] = True
+        if "selected" in device:
+            fresh["selected"] = device["selected"]
+        if not fresh.get("board") and device.get("board"):
+            fresh["board"] = device["board"]
+        if device.get("last_port"):
+            fresh["last_port"] = device["last_port"]
+        return fresh
 
     if not known_devices:
         return []
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=16) as pool:
-        return [r for r in pool.map(probe, known_devices) if r]
+        refreshed = [r for r in pool.map(probe, known_devices) if r]
+
+    # Link a recent flash event to the device whose firmware matches. The
+    # flash flow writes scripts/.last_flash.json after a successful flash;
+    # here we attribute it to a refreshed device with the same firmware
+    # variant (newest "online with matching firmware" wins — usually the
+    # only candidate). After linking we consume the marker so the same
+    # event doesn't keep applying on every refresh.
+    last_flash = _consume_last_flash()
+    if last_flash and last_flash["firmware"]:
+        matches = [d for d in refreshed if d.get("firmware") == last_flash["firmware"]]
+        if len(matches) == 1:
+            matches[0]["last_port"] = last_flash["port"]
+            with suppress(OSError):
+                _LAST_FLASH_FILE.unlink()
+        # If 0 matches (device hasn't booted yet) or 2+ matches (ambiguous),
+        # leave the marker for the next refresh to retry / re-evaluate.
+    return refreshed
 
 
 # ---------------------------------------------------------------------------
@@ -146,15 +269,212 @@ def refresh_devices(known_devices):
 # ---------------------------------------------------------------------------
 
 def load_state():
+    """Load MoonDeck state. Migrates the old flat-list shape (top-level
+    `devices` + `port`) to the new networks-grouped shape on first load
+    after this commit ships; new-shape files load as-is. See _migrate_to_networks."""
     if STATE_FILE.exists():
         with open(STATE_FILE) as f:
-            return json.load(f)
-    return {"env": "esp32", "port": "", "devices": [], "tab": "pc"}
+            state = json.load(f)
+        if "networks" not in state and ("devices" in state or "port" in state):
+            state = _migrate_to_networks(state)
+        return state
+    return {"networks": [], "active_network": "", "tab": "pc"}
+
+
+def _migrate_to_networks(old_state: dict) -> dict:
+    """One-shot migration of the pre-networks moondeck.json shape:
+        {env, port, devices: [...], tab, firmware, scenario, module, flag_*}
+    into the networks-grouped shape:
+        {networks: [{name, subnet, wifi, port, devices: [...]}, ...],
+         active_network, tab, firmware, scenario, module, flag_*}
+
+    Buckets existing devices by `/24` subnet derived from each device's `ip`.
+    Names the largest bucket "Home", subsequent buckets "Network 2", "Network 3",
+    ... User can rename via the dropdown. The old top-level `port` migrates
+    into the bucket that holds the largest device count (heuristic — usually
+    that's where the user was working). Drops the legacy `env` field
+    (already migrated to `firmware` in app.js).
+    """
+    import sys
+    devices = old_state.get("devices") or []
+    by_subnet: dict[str, list] = {}
+    for d in devices:
+        ip_port = d.get("ip", "")
+        host = ip_port.split(":", 1)[0]
+        parts = host.split(".")
+        subnet = ".".join(parts[:3]) + ".0/24" if len(parts) == 4 else "unknown"
+        by_subnet.setdefault(subnet, []).append(d)
+
+    # Largest bucket first → named "Home"; rest "Network 2", "Network 3", ...
+    ordered = sorted(by_subnet.items(), key=lambda kv: -len(kv[1]))
+    networks = []
+    for i, (subnet, bucket) in enumerate(ordered):
+        name = "Home" if i == 0 else f"Network {i + 1}"
+        networks.append({
+            "name": name,
+            "subnet": subnet,
+            "wifi": {"ssid": "", "password": ""},
+            "port": "",
+            "devices": bucket,
+        })
+    # Old top-level port → largest bucket (which is networks[0] if any).
+    if networks and old_state.get("port"):
+        networks[0]["port"] = old_state["port"]
+
+    new_state = {k: v for k, v in old_state.items()
+                 if k not in ("devices", "port", "env")}
+    new_state["networks"] = networks
+    new_state["active_network"] = networks[0]["name"] if networks else ""
+    new_state.setdefault("tab", "pc")
+    print(f"moondeck: migrated {len(devices)} device(s) into {len(networks)} "
+          f"network(s): {', '.join(n['name'] for n in networks)}", file=sys.stderr)
+    return new_state
+
+
+_VOLATILE_DEVICE_FIELDS = ("deviceName", "firmware", "modules")
+
+
+# Serializes the full load → mutate → save transaction across the threaded
+# HTTP handlers (ThreadingHTTPServer dispatches each request on its own
+# thread). Without this, two concurrent /api/discover requests could both
+# load_state(), mutate their own copies, and each save_state() — last write
+# wins, half the work is lost. RLock (not Lock) so save_state can also be
+# called standalone for the no-mutator path (POST /api/state body merge)
+# without deadlocking when nested inside mutate_state.
+_state_write_lock = threading.RLock()
+
+
+def mutate_state(mutator):
+    """Run a full load → mutator(state) → save cycle under the state lock.
+    Returns the post-mutation state so the handler can echo it to the
+    client. `mutator` receives the loaded state dict, mutates in place
+    (or returns a new dict, which becomes the value to save), and may
+    return None to mean "keep the in-place mutation."
+
+    Slow work (subnet scans, device probes) should happen BEFORE calling
+    mutate_state — pass already-gathered data in by closure. Holding the
+    lock across network I/O would serialise everything behind the slowest
+    scan."""
+    with _state_write_lock:
+        state = load_state()
+        result = mutator(state)
+        if result is not None:
+            state = result
+        save_state(state)
+        return state
 
 
 def save_state(state):
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2)
+    """Persist MoonDeck state. Strips per-device fields that the device itself
+    is the source of truth for (`deviceName`, `firmware`) — caching them
+    invites stale values when the device is reflashed/renamed via another
+    host. They are re-read from `/api/state` on each refresh and live only
+    in the in-memory device lists until the next save. User-set fields
+    (`board`, `last_port`, `selected`, `online`) persist. Iterates per network.
+
+    Write is atomic + serialized: a temp file in the same dir → fsync → rename.
+    The rename is atomic on POSIX (same filesystem); fsync makes the bytes
+    durable before the swap so a crash mid-write never leaves a half-written
+    moondeck.json (the previous version stays intact). The lock ensures two
+    handler threads don't race on the temp file or the rename."""
+    persisted = dict(state)
+    networks = persisted.get("networks") or []
+    if networks:
+        persisted["networks"] = [_strip_network_volatiles(n) for n in networks]
+    data = json.dumps(persisted, indent=2)
+    with _state_write_lock:
+        # NamedTemporaryFile in the same dir so os.replace stays on one
+        # filesystem (cross-FS rename is not atomic). delete=False because
+        # we hand the path to os.replace ourselves.
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8",
+            dir=str(STATE_FILE.parent),
+            prefix=STATE_FILE.name + ".",
+            suffix=".tmp",
+            delete=False,
+        )
+        try:
+            tmp.write(data)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+            tmp.close()
+            os.replace(tmp.name, STATE_FILE)
+        except Exception:
+            # On failure, drop the stray temp file so we don't accumulate
+            # .tmp leftovers across crashes. Re-raise so the caller sees it.
+            with suppress(OSError):
+                os.unlink(tmp.name)
+            raise
+
+
+def _strip_network_volatiles(network: dict) -> dict:
+    """Return a copy of a network with volatile per-device fields stripped.
+
+    `board` is conditionally volatile: when it equals the value `_deduce_board`
+    produces from the device's current firmware, the next probe will re-derive
+    it for free — no need to persist. When the user picked a board manually
+    (firmware doesn't deduce to anything, e.g. `esp32` could be LOLIN D32 or
+    generic), the picker's choice is the only source so we must keep it.
+    """
+    out = dict(network)
+    devs = out.get("devices") or []
+    cleaned = []
+    for d in devs:
+        c = {k: v for k, v in d.items() if k not in _VOLATILE_DEVICE_FIELDS}
+        # `board` strip: drop it when empty (noise) or when it matches the
+        # firmware-deduced value (recomputable). Keep when the user picked
+        # it (firmware deduces "" so the picker's value is the only source).
+        firmware = d.get("firmware") or ""
+        if "board" in c and (not c["board"] or c["board"] == _deduce_board(firmware)):
+            del c["board"]
+        cleaned.append(c)
+    out["devices"] = cleaned
+    return out
+
+
+def _active_network(state: dict) -> dict | None:
+    """Return the dict for state['active_network'] from state['networks'],
+    or None when the name doesn't match or there's no active selection.
+    Every consumer that previously read state['devices'] or state['port']
+    routes through this helper."""
+    name = state.get("active_network") or ""
+    for n in state.get("networks") or []:
+        if n.get("name") == name:
+            return n
+    return None
+
+
+def _subnet_from_host_subnet(host_subnet: str) -> str:
+    """Normalise `_get_local_subnet()` output (e.g. "192.168.1") to the
+    network record's `subnet` field shape ("192.168.1.0/24")."""
+    if not host_subnet:
+        return ""
+    return f"{host_subnet}.0/24"
+
+
+def _auto_select_network(state: dict, host_subnet: str) -> None:
+    """In-place: set state['active_network'] to whichever known network's
+    subnet matches the host's current subnet — but only if the user hasn't
+    pinned a different network. Pinning happens when the user changes the
+    dropdown; cleared when the pinned network's subnet stops matching the
+    host (next time we land on its LAN, auto-select takes over again)."""
+    if not state.get("networks"):
+        return
+    target_subnet = _subnet_from_host_subnet(host_subnet)
+    if not target_subnet:
+        return
+    pinned = state.get("active_network_user_pinned")
+    if pinned:
+        active = _active_network(state)
+        if active and active.get("subnet") == target_subnet:
+            return  # pinned network still matches host — leave as is
+        # Pinned network no longer matches host — release the pin so the
+        # next auto-select picks the right network for where we are now.
+        state["active_network_user_pinned"] = False
+    for n in state["networks"]:
+        if n.get("subnet") == target_subnet:
+            state["active_network"] = n["name"]
+            return
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +552,79 @@ def list_serial_ports() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Perf-table HTML (shared shape with docs/tests/scenario-tests.md)
+# ---------------------------------------------------------------------------
+
+def _render_perf_table_html(step: dict) -> str:
+    """Render a scenario step's contract+observed data as an HTML table that
+    matches the markdown table emitted by test_doc_gen._format_perf_table.
+    The doc generator owns the cell formatters; we just translate its pipe-
+    delimited markdown to <table><tr><td>. Returns "" when the step has no
+    contract/observed data."""
+    import html as html_mod
+    md_lines = test_doc_gen._format_perf_table(step)
+    if not md_lines:
+        return ""
+    # Lines come in groups:
+    #   header text (`**Performance** ...`)
+    #   blank
+    #   table header row (`| Board | FPS | ... |`)
+    #   separator row (`|---|---|...`)
+    #   N body rows (`| `target` | ... |`)
+    #   blank
+    #   optional footer lines (`- \`target\`: contract set ... · observed ...`)
+    out: list[str] = []
+    in_table = False
+    rendered_header = False
+    for line in md_lines:
+        if not line.strip():
+            if in_table:
+                out.append("</tbody></table>")
+                in_table = False
+            continue
+        if line.startswith("**"):
+            # `**Performance** (contract / observed) — tick stored, FPS shown:`
+            # → strip both the leading `**...**` bold marker (just the markup,
+            # keep the bolded text inside) and the trailing `:` colon.
+            import re as _re
+            txt = _re.sub(r"\*\*(.+?)\*\*", r"\1", line.strip()).rstrip(":").strip()
+            out.append(f'<div class="perf-head"><strong>{html_mod.escape(txt)}</strong></div>')
+            continue
+        if line.startswith("|") and "---" in line:
+            continue  # markdown separator row
+        if line.startswith("|"):
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if not in_table:
+                out.append('<table class="perf-table"><tbody>')
+                in_table = True
+            tag = "th" if not rendered_header else "td"
+            rendered_header = True
+            row = "".join(
+                f"<{tag}>{_inline_code_html(html_mod.escape(c))}</{tag}>"
+                for c in cells
+            )
+            out.append(f"<tr>{row}</tr>")
+            continue
+        if line.lstrip().startswith("-"):
+            # Audit footer line.
+            txt = line.lstrip().lstrip("-").strip()
+            out.append(f'<div class="perf-audit">{_inline_code_html(html_mod.escape(txt))}</div>')
+            continue
+    if in_table:
+        out.append("</tbody></table>")
+    return '<div class="perf">' + "".join(out) + '</div>'
+
+
+def _inline_code_html(s: str) -> str:
+    """Tiny markdown-inline-code → <code> translator. The perf table cells
+    contain `target` and `field` names wrapped in backticks; render as <code>.
+    Doesn't try to be a full markdown parser — just the patterns the perf
+    formatter produces."""
+    import re as _re
+    return _re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
+
+
+# ---------------------------------------------------------------------------
 # HTTP handler
 # ---------------------------------------------------------------------------
 
@@ -242,10 +635,9 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         pass
 
     def handle(self):
-        try:
+        # Browser closing the connection is harmless; suppress the noise.
+        with suppress(ConnectionResetError, BrokenPipeError):
             super().handle()
-        except (ConnectionResetError, BrokenPipeError):
-            pass  # Browser closed connection — harmless
 
     def _send_json(self, data, status=200):
         body = json.dumps(data).encode()
@@ -261,18 +653,34 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/scripts":
-            self._send_json({"scripts": SCRIPTS, "boards": BOARDS})
+            self._send_json({"scripts": SCRIPTS, "firmwares": FIRMWARES})
 
         elif self.path == "/api/ports":
             self._send_json({"ports": list_serial_ports()})
 
         elif self.path == "/api/scenarios":
-            scenarios_dir = ROOT / "test" / "scenarios"
-            names = sorted(p.stem for p in scenarios_dir.glob("*.json")) if scenarios_dir.exists() else []
-            self._send_json({"scenarios": names})
+            self._send_json({"scenarios": self._list_scenarios()})
+
+        elif self.path.startswith("/api/scenarios/"):
+            self._serve_scenario_steps()
+
+        elif self.path == "/api/test-modules":
+            self._send_json({"modules": test_meta.list_test_modules()})
+
+        elif self.path.startswith("/api/unit-tests/"):
+            self._serve_unit_tests_for_module()
 
         elif self.path == "/api/state":
-            self._send_json(load_state())
+            # Auto-select the network matching the host's current subnet
+            # (unless the user has pinned a different one — see
+            # _auto_select_network). Persist the selection back so the next
+            # load is stable when the host's subnet hasn't changed.
+            state = load_state()
+            before = state.get("active_network")
+            _auto_select_network(state, _get_local_subnet())
+            if state.get("active_network") != before:
+                save_state(state)
+            self._send_json(state)
 
         elif self.path == "/api/running":
             running = {}
@@ -315,25 +723,114 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
 
         elif self.path == "/api/state":
             body = self._read_body()
-            state = json.loads(body) if body else {}
-            current = load_state()
-            current.update(state)
-            save_state(current)
-            self._send_json(current)
+            patch = json.loads(body) if body else {}
+            # mutate_state holds the lock across load + merge + save so two
+            # concurrent POSTs can't each load the same snapshot, apply
+            # different patches, and clobber each other on save.
+            def _merge(s):
+                s.update(patch)
+            result = mutate_state(_merge)
+            self._send_json(result)
 
         elif self.path == "/api/discover":
             body = self._read_body()
             params = json.loads(body) if body else {}
             subnet = params.get("subnet", "")
+            # Slow part — subnet scan — happens OUTSIDE the state lock so
+            # parallel discovers on different subnets don't serialise behind
+            # each other. The merge into the active network record happens
+            # under the lock via mutate_state.
             devices, scanned_subnet = discover_devices(subnet)
-            self._send_json({"devices": devices, "subnet": scanned_subnet})
+            target_subnet = _subnet_from_host_subnet(scanned_subnet)
+
+            def _merge_discover(state):
+                # Attribute found devices to the network whose subnet matches
+                # the scanned one. Creates a new "Network N" if none matches
+                # (a future rename in the UI can adjust the name). Returns
+                # the full updated state so the JS reloads the authoritative
+                # shape.
+                net = next((n for n in (state.get("networks") or [])
+                            if n.get("subnet") == target_subnet), None)
+                if net is None and devices:
+                    existing = state.setdefault("networks", [])
+                    name = "Home" if not existing else f"Network {len(existing) + 1}"
+                    net = {"name": name, "subnet": target_subnet,
+                           "wifi": {"ssid": "", "password": ""},
+                           "port": "", "devices": []}
+                    existing.append(net)
+                if net is None:
+                    return  # nothing to merge — state unchanged
+                # Merge found devices into the network: keep existing user
+                # fields (board, last_port, selected), update online + probe
+                # fields. Drop devices no longer reachable — they stay
+                # offline elsewhere if previously known, here we trust the
+                # fresh scan as authoritative for what's on this subnet.
+                by_ip = {d["ip"]: d for d in net.get("devices", [])}
+                merged = []
+                for fresh in devices:
+                    ip = fresh.get("ip", "")
+                    keep = by_ip.get(ip, {})
+                    out = {**fresh, "online": True,
+                           "selected": keep.get("selected", False)}
+                    if keep.get("board") and not out.get("board"):
+                        out["board"] = keep["board"]
+                    if keep.get("last_port"):
+                        out["last_port"] = keep["last_port"]
+                    merged.append(out)
+                # Devices that existed previously but weren't found in the
+                # scan stay in the network as offline (the user may want to
+                # keep them around for when the device comes back). Discover
+                # is additive — refresh is the verb that prunes.
+                found_ips = {d.get("ip") for d in devices}
+                for ip, dev in by_ip.items():
+                    if ip not in found_ips:
+                        merged.append({**dev, "online": False})
+                net["devices"] = merged
+
+            result = mutate_state(_merge_discover)
+            self._send_json(result)
 
         elif self.path == "/api/refresh":
             body = self._read_body()
             params = json.loads(body) if body else {}
-            known = params.get("devices", [])
-            online = refresh_devices(known)
-            self._send_json({"online": online})
+            network_name = params.get("network", "")
+            # Read the device list snapshot under the lock, release, do the
+            # slow probes outside, then re-enter mutate_state for the merge.
+            # Holding the lock across the probes would serialise every refresh.
+            with _state_write_lock:
+                state = load_state()
+                net = next((n for n in (state.get("networks") or [])
+                            if n.get("name") == network_name), None)
+                snapshot = list(net.get("devices") or []) if net else None
+            if snapshot is None:
+                # No-op when the named network doesn't exist (e.g. it was
+                # renamed mid-flight). Return state so the JS can re-sync.
+                self._send_json(state)
+                return
+            refreshed = refresh_devices(snapshot)
+
+            def _merge_refresh(state):
+                # Re-resolve `net` under the second lock — the network may have
+                # been renamed / re-added by another handler while the probes
+                # ran. If it's gone, drop the refresh result (the user will
+                # see the empty list and re-discover).
+                target = next((n for n in (state.get("networks") or [])
+                               if n.get("name") == network_name), None)
+                if target is None:
+                    return
+                # refresh_devices returns only devices that responded — devices
+                # marked offline (didn't respond) are dropped from the list it
+                # returns. Carry them forward as offline so the UI doesn't lose
+                # known-but-unreachable entries.
+                refreshed_ips = {d.get("ip") for d in refreshed}
+                merged = list(refreshed)
+                for prior in (target.get("devices") or []):
+                    if prior.get("ip") not in refreshed_ips:
+                        merged.append({**prior, "online": False})
+                target["devices"] = merged
+
+            result = mutate_state(_merge_refresh)
+            self._send_json(result)
 
         else:
             self.send_error(404)
@@ -350,16 +847,18 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         script_path = SCRIPTS_DIR / script_def["script"]
         cmd = ["uv", "run", str(script_path)]
 
-        # Forward selector state (board / port / host) when the script
+        # Forward selector state (firmware / port / host) when the script
         # declares it needs them. The UI maintains a single Firmware dropdown
-        # on the ESP32 tab driving every needs_board script; the older
-        # per-board buttons + extra_args plumbing was collapsed into this.
-        if script_def.get("needs_board") and params.get("board"):
-            cmd.extend(["--board", params["board"]])
+        # on the ESP32 tab driving every needs_firmware script; the older
+        # per-firmware buttons + extra_args plumbing was collapsed into this.
+        if script_def.get("needs_firmware") and params.get("firmware"):
+            cmd.extend(["--firmware", params["firmware"]])
         if script_def.get("needs_port") and params.get("port"):
             cmd.extend(["--port", params["port"]])
         if script_def.get("needs_scenario") and params.get("scenario"):
             cmd.extend(["--name", params["scenario"]])
+        if script_def.get("needs_module") and params.get("module"):
+            cmd.extend(["--module", params["module"]])
         if params.get("host"):
             cmd.extend(["--host", params["host"]])
         for flag in script_def.get("flags", []):
@@ -417,23 +916,215 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 _running.pop(script_id, None)
 
     def _serve_doc(self):
-        """Serve any docs/*.md file as styled HTML with deep-link anchor support.
-        URL: /api/docs/<filename>[#anchor] — e.g. /api/docs/testing.md#scenario-mirror"""
+        """Serve any docs/**/*.md file as styled HTML with deep-link anchor support.
+        URL: /api/docs/<path>[?#anchor] — e.g. /api/docs/testing.md, /api/docs/tests/unit-tests.md"""
         import re as _re
         raw_path = self.path[len("/api/docs/"):]
         parts = raw_path.split("?", 1)
         filename = parts[0].strip("/")
         raw_anchor = parts[1] if len(parts) > 1 else ""
         anchor = raw_anchor if _re.fullmatch(r"[A-Za-z0-9._-]+", raw_anchor) else ""
-        # Restrict to .md files with no path traversal
-        if not filename.endswith(".md") or "/" in filename or ".." in filename:
-            self.send_error(400, "Only .md files in docs/ are served here")
+        # Restrict to .md files and resolve under docs/ with a traversal guard:
+        # build the candidate path, resolve symlinks, then verify it sits inside docs/.
+        # Allows subpaths like tests/unit-tests.md while still rejecting ../escape attempts.
+        if not filename.endswith(".md") or ".." in filename.split("/"):
+            self.send_error(400, "Only .md files under docs/ are served here")
             return
-        md_path = ROOT / "docs" / filename
+        docs_root = (ROOT / "docs").resolve()
+        md_path = (docs_root / filename).resolve()
+        try:
+            md_path.relative_to(docs_root)
+        except ValueError:
+            self.send_error(400, "Path escapes docs/")
+            return
         if not md_path.exists():
             self.send_error(404, f"{filename} not found")
             return
         self._serve_markdown_as_html(md_path, anchor)
+
+    def _list_scenarios(self):
+        """Return [{name, module, also}] for every scenario JSON.
+
+        The list endpoint surfaces module so MoonDeck's dropdown can filter
+        without an extra round-trip per scenario."""
+        return [
+            {"name": s["path"].stem, "module": s["module"] or "", "also": s["also"]}
+            for s in test_meta.collect_scenario_files()
+        ]
+
+    def _serve_unit_tests_for_module(self):
+        """Render a per-module list of unit-test cases as an HTML view.
+        URL: /api/unit-tests/<Module> — `Module` is the CamelCase @module name."""
+        import html as html_mod
+
+        raw = self.path[len("/api/unit-tests/"):].split("?", 1)[0].strip("/")
+        if not raw or not all(c.isalnum() or c in "-_" for c in raw):
+            self.send_error(400, "Bad module name")
+            return
+
+        cases = test_meta.cases_for_module(raw)
+        if not cases:
+            self.send_error(404, f"No unit tests found for module {raw}")
+            return
+
+        rows = []
+        for i, c in enumerate(cases):
+            desc_html = html_mod.escape(c["desc"]) if c["desc"] else f'<em>{html_mod.escape(c["name"])}</em>'
+            tag = '' if c["primary"] else ' <span class="also">(also)</span>'
+            rows.append(
+                f'<div class="case"><div class="case-head">'
+                f'<span class="case-num">{i + 1}.</span> '
+                f'<span class="case-name">{html_mod.escape(c["name"])}</span>{tag}'
+                f'</div><div class="case-desc">{desc_html}</div>'
+                f'<div class="case-file"><code>{html_mod.escape(c["file"])}</code></div></div>'
+            )
+
+        body_html = "\n".join(rows)
+        page = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+body {{ font-family: -apple-system, monospace; background: #0d1117; color: #c0c0c0;
+       padding: 20px; line-height: 1.6; font-size: 13px; }}
+h1 {{ color: #e94560; font-size: 18px; margin: 0 0 4px 0; }}
+.sub {{ color: #9aa6ba; margin: 0 0 18px 0; font-size: 12px; }}
+.case {{ margin: 6px 0 10px 0; padding: 6px 10px; background: #161b22;
+         border-radius: 4px; border-left: 3px solid #0f3460; }}
+.case-head {{ font-size: 13px; }}
+.case-num {{ color: #6a7a99; }}
+.case-name {{ color: #e94560; font-weight: 600; }}
+.case-desc {{ margin-top: 2px; color: #c0c0c0; }}
+.case-file {{ margin-top: 2px; color: #6a7a99; font-size: 11px; }}
+.also {{ color: #6a7a99; font-size: 11px; margin-left: 4px; }}
+code {{ background: transparent; color: #8aa6ba; padding: 0; }}
+</style></head><body>
+<h1>{html_mod.escape(raw)} unit tests</h1>
+<div class="sub">{len(cases)} test case(s). "(also)" marks cases from files whose primary @module is a different module.</div>
+{body_html}
+</body></html>"""
+
+        data_bytes = page.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data_bytes)))
+        self.end_headers()
+        self.wfile.write(data_bytes)
+
+    def _serve_scenario_steps(self):
+        """Render a single test/scenarios/<name>.json as an HTML view of its steps.
+        URL: /api/scenarios/<name> — `name` is the file stem (no .json suffix), same
+        names /api/scenarios returns. The view pane gets one card per step showing
+        op, name, and the rest of the step's keys/values verbatim. Lightweight on
+        purpose — the test runner is the source of truth for what each op means."""
+        import html as html_mod
+
+        raw = self.path[len("/api/scenarios/"):].split("?", 1)[0].strip("/")
+        # Restrict to file-stem characters (no path traversal, no .json suffix expected)
+        if not raw or not all(c.isalnum() or c in "-_" for c in raw):
+            self.send_error(400, "Bad scenario name")
+            return
+        # Scenarios live in subfolders (core/, light/, …) — find by stem.
+        path = test_meta.find_scenario_path(raw)
+        if not path:
+            self.send_error(404, f"{raw} not found")
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            self.send_error(500, f"Invalid JSON in {raw}.json: {e}")
+            return
+
+        # Build a compact per-step list. Each step has at minimum an `op`; we render
+        # whatever other keys it carries (id, type, parent_id, key, value, props, bounds, …)
+        # as a small definition list so the schema can evolve without code change.
+        scen_name = html_mod.escape(str(data.get("name", raw)))
+        scen_desc = html_mod.escape(str(data.get("description", "")))
+        scen_module = html_mod.escape(str(data.get("module", "")))
+        scen_also = data.get("also") or []
+        scen_also_html = (
+            f'<div class="also">Also touches: {html_mod.escape(", ".join(scen_also))}</div>'
+            if scen_also else ""
+        )
+        scen_module_html = (
+            f'<div class="module">Module: <strong>{scen_module}</strong></div>'
+            if scen_module else ""
+        )
+        steps = data.get("steps", []) or []
+
+        rows = []
+        for i, step in enumerate(steps):
+            op = html_mod.escape(str(step.get("op", "?")))
+            step_name = html_mod.escape(str(step.get("name", "")))
+            step_desc = html_mod.escape(str(step.get("description", "")))
+            # `contract` and `observed` are the per-target performance data
+            # and render as a single shared table (same shape as
+            # docs/tests/scenario-tests.md — see test_doc_gen._format_perf_table).
+            # Everything else stays in the JSON-dump key/value list below.
+            perf_html = _render_perf_table_html(step)
+            other = {k: v for k, v in step.items()
+                     if k not in ("op", "name", "description", "contract", "observed")}
+            kv_html = ""
+            if other:
+                parts = []
+                for k, v in other.items():
+                    v_str = json.dumps(v) if not isinstance(v, str) else v
+                    parts.append(
+                        f'<div><code>{html_mod.escape(k)}</code> = '
+                        f'<code>{html_mod.escape(v_str)}</code></div>'
+                    )
+                kv_html = '<div class="step-kv">' + "".join(parts) + "</div>"
+            desc_html = f'<div class="step-desc">{step_desc}</div>' if step_desc else ""
+            rows.append(
+                f'<div class="step"><div class="step-head">'
+                f'<span class="step-num">{i + 1}.</span> '
+                f'<span class="step-op">{op}</span>'
+                f'{f" <span class=\"step-name\">{step_name}</span>" if step_name else ""}'
+                f'</div>{desc_html}{kv_html}{perf_html}</div>'
+            )
+        body_html = "\n".join(rows) if rows else "<p><em>(no steps)</em></p>"
+
+        page = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+body {{ font-family: -apple-system, monospace; background: #0d1117; color: #c0c0c0;
+       padding: 20px; line-height: 1.6; font-size: 13px; }}
+h1 {{ color: #e94560; font-size: 18px; margin: 0 0 4px 0; }}
+.desc {{ color: #9aa6ba; margin: 0 0 18px 0; font-size: 12px; }}
+.step {{ margin: 6px 0 10px 0; padding: 6px 10px; background: #161b22;
+         border-radius: 4px; border-left: 3px solid #0f3460; }}
+.step-head {{ font-size: 13px; }}
+.step-num {{ color: #6a7a99; }}
+.step-op {{ color: #e94560; font-weight: 600; }}
+.step-name {{ color: #9aa6ba; margin-left: 6px; }}
+.step-desc {{ margin-top: 2px; color: #c0c0c0; }}
+.step-kv {{ margin-top: 4px; padding-left: 14px; font-size: 12px; }}
+.step-kv > div {{ margin: 2px 0; }}
+.module {{ color: #9aa6ba; font-size: 12px; margin: 0 0 2px 0; }}
+.module strong {{ color: #e94560; }}
+.also {{ color: #6a7a99; font-size: 11px; margin: 0 0 12px 0; }}
+code {{ background: transparent; color: #c0c0c0; padding: 0; }}
+.step-kv code:first-child {{ color: #8aa6ba; }}
+/* Perf table — same shape as docs/tests/scenario-tests.md per-step table */
+.perf {{ margin-top: 6px; }}
+.perf-head {{ font-size: 12px; color: #9aa6ba; margin: 4px 0 2px 0; }}
+.perf-table {{ border-collapse: collapse; font-size: 12px; margin: 2px 0; }}
+.perf-table th, .perf-table td {{ padding: 2px 8px; text-align: left;
+                                   border-bottom: 1px solid #1c2535; }}
+.perf-table th {{ color: #8aa6ba; font-weight: 500; }}
+.perf-audit {{ font-size: 11px; color: #6a7a99; margin: 2px 0 0 8px; }}
+</style></head><body>
+<h1>{scen_name}</h1>
+{scen_module_html}
+{f'<div class="desc">{scen_desc}</div>' if scen_desc else ''}
+{scen_also_html}
+{body_html}
+</body></html>"""
+
+        data_bytes = page.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data_bytes)))
+        self.end_headers()
+        self.wfile.write(data_bytes)
 
     def _serve_help(self):
         """Serve MoonDeck.md as styled HTML with deep-link anchor support."""
@@ -531,13 +1222,30 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             s = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', _img_tag, s)
             # [text](url) — same-origin /api/ links post a message to the
             # parent frame (iframe nav is sandboxed); external links open in
-            # a new tab.
+            # a new tab. Relative `.md` links are rewritten to /api/docs/<path>
+            # so the rendered page stays navigable when served through MoonDeck
+            # (the docs are also valid when read straight from the repo: same
+            # paths, different host).
             def _link_tag(m):
                 import urllib.parse as _up
                 text_, url_ = m.group(1), m.group(2)
                 if url_.startswith("/api/"):
                     return f'<a href="{url_}" data-moondeck-nav="1">{text_}</a>'
-                scheme = _up.urlparse(url_).scheme
+                # Relative .md link (with optional #anchor) → resolve against the
+                # current file's directory, re-anchor under docs/, serve via /api/docs/.
+                parsed = _up.urlparse(url_)
+                if (not parsed.scheme and not url_.startswith("/")
+                        and parsed.path.endswith(".md")):
+                    try:
+                        abs_md = (md_path.parent / parsed.path).resolve()
+                        rel = abs_md.relative_to((ROOT / "docs").resolve())
+                        api_url = "/api/docs/" + str(rel)
+                        if parsed.fragment:
+                            api_url += "?" + parsed.fragment
+                        return f'<a href="{api_url}" data-moondeck-nav="1">{text_}</a>'
+                    except ValueError:
+                        pass  # outside docs/ — fall through to default handling
+                scheme = parsed.scheme
                 if scheme not in ("", "http", "https", "mailto"):
                     return html_mod.escape(text_)  # strip unsafe schemes (e.g. javascript:)
                 return f'<a href="{url_}" target="_blank" rel="noopener">{text_}</a>'
@@ -748,7 +1456,28 @@ strong {{ color: #fff; }}
 .hr-commit blockquote {{ margin-left: 30px; }}
 </style></head><body>
 {body_html}
-{f'<script>document.getElementById("{anchor}")?.scrollIntoView();</script>' if anchor else ''}
+{f'''<script>
+// Wait for images so the anchor lands at the right position. scrollIntoView
+// fired before image load left the viewport on an earlier section once the
+// images finished loading and pushed content down.
+(function() {{
+  var anchor = "{anchor}";
+  function jump() {{
+    var el = document.getElementById(anchor);
+    if (el) el.scrollIntoView();
+  }}
+  var imgs = Array.from(document.images || []);
+  var pending = imgs.filter(function(i) {{ return !i.complete; }});
+  if (pending.length === 0) {{ jump(); return; }}
+  var left = pending.length;
+  pending.forEach(function(img) {{
+    img.addEventListener("load",  function() {{ if (--left === 0) jump(); }});
+    img.addEventListener("error", function() {{ if (--left === 0) jump(); }});
+  }});
+  // Safety net: never wait more than 1.5s for images.
+  setTimeout(jump, 1500);
+}})();
+</script>''' if anchor else ''}
 <script>
 document.addEventListener("click", function(e) {{
     var a = e.target.closest("a[data-moondeck-nav]");

@@ -19,4 +19,4 @@ Centre at `(w/2, h/2)`. `hue = atan2_8(dy,dx) + dist*twist - t + hue_shift`. `dy
 
 ## Tests
 
-[Module test](../../../testing.md#stateless-effects) — non-zero output, spatial variation.
+[Unit tests: CheckerboardEffect](../../../tests/unit-tests.md#checkerboardeffect) (SpiralEffect is one of the stateless effects covered) — non-zero output, spatial variation.

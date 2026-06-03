@@ -17,6 +17,12 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 SCENARIOS_DIR = ROOT / "test" / "scenarios"
 BASELINE_FILE = ROOT / "test" / "scenario-baseline.json"
 
+# Reuse the shared test-metadata parser so scenario discovery stays in one place.
+sys.path.insert(0, str(ROOT / "scripts" / "docs"))
+import _test_metadata as test_meta  # noqa: E402
+sys.path.insert(0, str(ROOT / "scripts" / "scenario"))
+import _observed  # noqa: E402
+
 
 class Client:
     def __init__(self, host: str):
@@ -40,10 +46,25 @@ class Client:
             return json.loads(resp.read())
 
 
+def _today_iso() -> str:
+    """ISO date stamp for set_by fields. Local timezone is fine — set_by is a
+    coarse "around when did this contract get blessed" marker, not a timestamp."""
+    import datetime
+    return datetime.date.today().isoformat()
+
+
 def collect_metrics(client: Client, settle_s: float = 1.5) -> dict:
-    """Wait for system to settle, then collect metrics."""
+    """Wait for system to settle, then collect metrics. Augments /api/system with
+    `dynamicBytesTotal` (sum from the module tree) so callers can compare the
+    model's allocation prediction against the observed free heap."""
     time.sleep(settle_s)
-    return client.get("/api/system")
+    metrics = client.get("/api/system")
+    try:
+        state = client.get("/api/state")
+        metrics["dynamicBytesTotal"] = _sum_dynamic_bytes(state)
+    except Exception:
+        metrics["dynamicBytesTotal"] = None
+    return metrics
 
 
 def _control_value(module: dict, name: str):
@@ -80,22 +101,176 @@ def count_lights(client: Client) -> int:
     return sum(walk(m) for m in state.get("modules", []))
 
 
-def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5) -> dict:
-    """Run a scenario against a live device and return results."""
+def _detect_target(state: dict) -> str:
+    """Identify the build target so per-step contract values can be looked up.
+
+    ESP32: read SystemModule.firmware (`esp32`, `esp32-eth`, `esp32-eth-wifi`,
+    `esp32s3-n16r8`, …) — set at compile time from MM_FIRMWARE_NAME and
+    exposed through the `firmware` control. Desktop: same key but reports
+    `unknown`, so we substitute pc-<host-os> using the runtime os name (still
+    distinguishes macOS vs Linux vs Windows builds, which can differ in tick
+    noticeably). See docs/architecture.md § Firmware vs board.
+    """
+    import platform
+    firmware = None
+    for m in state.get("modules", []):
+        if m.get("type") != "SystemModule":
+            continue
+        for c in m.get("controls", []):
+            if c.get("name") == "firmware":
+                firmware = c.get("value")
+                break
+        break
+    if firmware and firmware != "unknown":
+        return firmware
+    # Desktop fallback
+    osmap = {"Darwin": "pc-macos", "Linux": "pc-linux", "Windows": "pc-windows"}
+    return osmap.get(platform.system(), "pc-unknown")
+
+
+def _sum_dynamic_bytes(state: dict) -> int:
+    """Sum dynamicBytes across the live module tree. Returned by /api/state per
+    module; the sum is the model's prediction for how much heap the tree owns.
+
+    NOT the same as (boot_heap - free_heap): the framework (lwIP, WiFi stack,
+    FreeRTOS, HTTP server kernel buffers) consumes heap outside the model.
+    Printed alongside the contract for sanity-checking — a regression here
+    means a module started allocating something the contract didn't budget for.
+    """
+    total = 0
+    def walk(modules):
+        nonlocal total
+        for m in modules:
+            try:
+                total += int(m.get("dynamicBytes", 0))
+            except (TypeError, ValueError):
+                pass
+            walk(m.get("children", []))
+    walk(state.get("modules", []))
+    return total
+
+
+def _collect_module_names(state: dict) -> set:
+    """Collect every module name in the live tree, including nested children.
+    Used by mutate scenarios to pre-flight that every id they touch is wired."""
+    names = set()
+    def walk(modules):
+        for m in modules:
+            n = m.get("name")
+            if n:
+                names.add(n)
+            walk(m.get("children", []))
+    walk(state.get("modules", []))
+    return names
+
+
+def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
+                 update_contract: bool = False,
+                 update_reason: str | None = None) -> dict:
+    """Run a scenario against a live device and return results.
+
+    Mode handling (see docs/testing.md § Scenario modes):
+      construct  — scenario builds the pipeline from scratch. Live device's
+                   main.cpp owns the top-level shape, so construct scenarios
+                   only run in-process. Skip here with a clear note.
+      mutate     — scenario assumes a wired pipeline. Skip the fixture array
+                   (the device IS the fixture) and run only the steps. Steps
+                   that touch ids not present on the device hard-fail (instead
+                   of the old WARN-and-continue which silently produced
+                   meaningless passes).
+    """
     with open(scenario_path) as f:
         scenario = json.load(f)
 
     name = scenario.get("name", scenario_path.stem)
+    mode = scenario.get("mode", "construct")  # back-compat default
     print(f"\n=== Scenario: {name} ===")
     print(scenario.get("description", ""))
 
-    results = {"name": name, "steps": [], "passed": True}
-    created_modules = []  # track newly created modules for cleanup
+    results = {"name": name, "steps": [], "passed": True, "skipped": False}
+    created_modules = []  # mutate scenarios rarely add modules but the existing cleanup path is still useful
+    wrote_observations = [False]  # sentinel; flipped by each measure step that runs
+    # Keyed by (step, target): the original contract block before --update-contract
+    # mutated it (or None if no prior block existed). Used by the post-run gate to
+    # roll mutations back when the run fails, so a renegotiated promise only
+    # lands on a clean run.
+    pending_contract_originals: dict = {}
 
-    # Collect baseline metrics — longer settle to let pipeline stabilize after previous scenario
+    if mode == "construct":
+        print(f"\n  SKIP (mode=construct — runs in-process only; the live device's "
+              f"main.cpp owns the top-level shape)")
+        results["skipped"] = True
+        return results
+    if mode != "mutate":
+        print(f"\n  FAIL — unknown mode: {mode!r} (expected construct or mutate)")
+        results["passed"] = False
+        return results
+
+    # Pre-flight: every id touched by the steps must already exist on the device.
+    # A scenario in mutate mode is meant to tweak the live pipeline; a missing id
+    # means the scenario was written against a different wiring than the device
+    # has, and the old silent-skip path produced meaningless passes.
+    target = "unknown"
+    try:
+        live_state = client.get("/api/state")
+        target = _detect_target(live_state)
+        live_names = _collect_module_names(live_state)
+        # Include reset block ids in the pre-flight — a reset step that
+        # references a missing module would silently no-op and the baseline
+        # would measure unintended state.
+        referenced = {step["id"] for step in scenario.get("steps", [])
+                      if step.get("op") in ("set_control", "delete_module") and step.get("id")}
+        referenced |= {r["id"] for r in scenario.get("reset", [])
+                       if r.get("op") == "set_control" and r.get("id")}
+        missing = sorted(referenced - live_names)
+        if missing:
+            print(f"\n  FAIL — mutate scenario references ids not on the live device: "
+                  f"{', '.join(missing)}. Re-flash, or write the scenario against the "
+                  f"actual wiring.")
+            results["passed"] = False
+            return results
+    except Exception as e:
+        print(f"\n  WARN — couldn't pre-flight live module names: {e}")
+    print(f"  Target: {target}")
+    results["target"] = target
+
+    # Reset block: scenarios that mutate shared controls (Mirror toggles, grid
+    # size, Preview detail, …) declare a `reset` array of set_control steps that
+    # restores those controls to production defaults BEFORE the scenario runs.
+    # Without this each scenario's measurements depend on whatever the previous
+    # scenario left behind, so contract assertions become coupled to run order.
+    # Reset failures fail-fast: a swallowed reset means the baseline reflects
+    # the wrong state, which silently produces false-positive contract passes
+    # (or false-negative failures) downstream. Better to abort cleanly here.
+    reset_steps = scenario.get("reset", [])
+    if reset_steps:
+        print(f"\n  --- reset ({len(reset_steps)} steps) ---")
+        for r_step in reset_steps:
+            if r_step.get("op") != "set_control":
+                continue
+            try:
+                client.post("/api/control", {
+                    "module": r_step["id"],
+                    "control": r_step["key"],
+                    "value": r_step["value"]
+                })
+                print(f"  SET   {r_step.get('id','?')}.{r_step.get('key','?')} = {r_step.get('value','?')}")
+            except Exception as e:
+                print(f"  FAIL  reset {r_step.get('name','?')}: {e}", file=sys.stderr)
+                results["passed"] = False
+                results["reset_failed"] = f"{r_step.get('name','?')}: {e}"
+                # Stop the scenario before collect_metrics — baseline would
+                # otherwise reflect an unknown/partial state. No cleanup
+                # needed: created_modules only fills inside the steps loop
+                # below, which hasn't run yet.
+                return results
+
+    # Collect baseline AFTER reset so it reflects the normalized state.
     baseline = collect_metrics(client, settle_s=settle_s)
     print(f"\n  Baseline: tick={baseline.get('tickTimeUs', '?')}us (FPS={baseline.get('fps', '?')})  heap={baseline.get('freeHeap', '?')}")
 
+    # Live runs `steps` only — `fixture` is the in-process equivalent of what
+    # main.cpp already wired on the device.
     for step in scenario.get("steps", []):
         step_name = step.get("name", "?")
         op = step.get("op", "")
@@ -119,11 +294,24 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5) -> 
                 resp = client.post("/api/control", data)
                 step_result["status"] = "ok" if resp.get("ok") else "error"
                 print(f"  SET   {step.get('id', '?')}.{step.get('key', '?')} = {step.get('value', '?')}")
+                # If this step doesn't measure (so `collect_metrics` won't wait
+                # for us), still give the device a moment — a set_control that
+                # triggers buildState briefly mutates the module tree, and the
+                # very next API call can hit a transient "module not found".
+                # 500 ms is empirically enough on the Olimex; cheap insurance.
+                if not (step.get("measure") or op == "measure"):
+                    time.sleep(0.5)
 
             elif op == "delete_module":
                 resp = client.delete(f"/api/modules/{step['id']}")
                 step_result["status"] = "ok" if resp.get("ok") else "error"
                 print(f"  -     {step.get('id', '?')}")
+
+            elif op == "measure":
+                # Pure measurement step (introduced for the build-up scenario shape).
+                # No REST call; the measure block below picks it up via step["measure"]
+                # or the implicit-measure clause we add to the same dispatcher.
+                step_result["status"] = "ok"
 
             else:
                 step_result["status"] = "skipped"
@@ -138,28 +326,189 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5) -> 
                 msg = str(e)
             step_result["status"] = "error"
             step_result["error"] = msg
-            if op == "add_module":
-                print(f"  WARN  {step_name}: {msg}")
-            else:
-                print(f"  FAIL  {step_name}: {msg}")
-                results["passed"] = False
+            # Every rejected step is a real failure. The old policy WARN'd on
+            # add_module which silently turned "top-level rejected" into a
+            # missing test step — meaningless passes. Mutate scenarios shouldn't
+            # add top-level anyway; if they do, treat it as a scenario bug.
+            print(f"  FAIL  {step_name}: {msg}")
+            results["passed"] = False
         except Exception as e:
             step_result["status"] = "error"
             step_result["error"] = str(e)
-            if op == "add_module":
-                print(f"  WARN  {step_name}: {e}")
-            else:
-                print(f"  FAIL  {step_name}: {e}")
-                results["passed"] = False
+            print(f"  FAIL  {step_name}: {e}")
+            results["passed"] = False
 
-        # Measure after this step if requested
-        if step.get("measure"):
-            metrics = collect_metrics(client, settle_s)
+        # Measure after this step if requested (explicit "measure": true OR op == "measure").
+        # Skip the measurement block when the step itself failed: writing observed
+        # values from a failed-step state would persist garbage as the "latest
+        # reading" and the contract assertion would compare against an
+        # untrustworthy measurement.
+        if step_result.get("status") == "error":
+            results["steps"].append(step_result)
+            continue
+        if step.get("measure") or op == "measure":
+            # collect_metrics hits /api/state — a missing measurement is a
+            # failed run, not a no-op to skip. Silent-skip would let a broken
+            # device pass a scenario that asserts on observed/contract data
+            # the step never gathered. Fail loudly, record the error on the
+            # step, and break out of the step loop so end-of-run cleanup
+            # (delete created modules) still fires.
+            try:
+                metrics = collect_metrics(client, settle_s)
+            except Exception as e:
+                print(f"  FAIL  {step_name}: collect_metrics failed: {e}")
+                step_result["status"] = "error"
+                step_result["error"] = f"collect_metrics: {e}"
+                step_result["metrics"] = {}
+                results["passed"] = False
+                results["steps"].append(step_result)
+                break  # stop step loop; cleanup runs below
             step_result["metrics"] = metrics
             tick_us = metrics.get("tickTimeUs", 0)
             fps = 1000000 // tick_us if tick_us > 0 else metrics.get("fps", 0)
             heap = metrics.get("freeHeap", 0)
-            print(f"  MEASURE  tick={tick_us}us (FPS={fps})  heap={heap}")
+            max_block = metrics.get("maxBlock", 0)
+            model_bytes = metrics.get("dynamicBytesTotal")
+            print(f"  MEASURE  tick={tick_us}us (FPS={fps})  heap={heap}  "
+                  f"block={max_block}  model={model_bytes}")
+
+            # Per-step contract: { "contract": { "<target>": { "tick_us": N,
+            #   "free_heap": M, "tick_tolerance_pct": P, "heap_tolerance_pct": Q,
+            #   "set_by": "YYYY-MM-DD", "reason": "..." } } }
+            # Contracts are hand-set promises — see docs/testing.md § Performance
+            # contracts. `--update-contract --reason "..."` rewrites them.
+            contract_block = step.get("contract", {}).get(target) if step.get("contract") else None
+            if contract_block:
+                # Defaults reflect run-to-run variance, not "I don't care":
+                #   pc-*       — multi-process OS jitter, 20% pct + 200us absolute
+                #                floor. The floor dominates below ~1ms tick (the
+                #                realistic case for PC scenarios today).
+                #   esp32-*    — bounded RTOS but lwIP/EMAC jitter, 10% pct + 5us
+                #                absolute floor.
+                # KEEP IN SYNC: the in-process runner re-declares the same defaults
+                # at test/scenario_runner.cpp contract-block handler — tuning one
+                # without the other silently desyncs the two tiers.
+                is_pc = target.startswith("pc-")
+                tick_tol_pct = contract_block.get("tick_tolerance_pct",
+                                                  20 if is_pc else 10)
+                heap_tol_pct = contract_block.get("heap_tolerance_pct",
+                                                  20 if is_pc else 10)
+                tol_us_abs = contract_block.get("tolerance_us", 200 if is_pc else 5)
+                exp_tick = contract_block.get("tick_us")
+                exp_heap = contract_block.get("free_heap")
+                if exp_tick is not None and exp_tick > 0:
+                    # tick contract is a *ceiling* — faster than contract is good
+                    # news (mirror of heap being a floor). Tolerance absorbs
+                    # upward jitter only; speedups never fail.
+                    overshoot = tick_us - exp_tick
+                    allowed = max(exp_tick * tick_tol_pct / 100.0, tol_us_abs)
+                    if overshoot <= 0:
+                        print(f"  PASS  tick {tick_us}us <= contract {exp_tick}us "
+                              f"(margin {-overshoot:.0f}us)")
+                    elif overshoot > allowed:
+                        print(f"  FAIL  tick {tick_us}us vs contract {exp_tick}us "
+                              f"(over by {overshoot:.0f}us > allowed {allowed:.0f}us)")
+                        results["passed"] = False
+                    else:
+                        print(f"  PASS  tick {tick_us}us vs contract {exp_tick}us "
+                              f"(over by {overshoot:.0f}us within {allowed:.0f}us)")
+                if exp_heap is not None and exp_heap > 0:
+                    # Contract is a *floor* — the device must deliver at least this
+                    # much free heap. More is better; less by more than tolerance is
+                    # a regression. Tolerance applies because of legitimate run-to-
+                    # run drift in lwIP/TCP buffer pools.
+                    drop_pct = (exp_heap - heap) * 100.0 / exp_heap if heap < exp_heap else 0
+                    if drop_pct > heap_tol_pct:
+                        print(f"  FAIL  free_heap {heap} dropped {drop_pct:.1f}% "
+                              f"below contract {exp_heap}")
+                        results["passed"] = False
+                    else:
+                        print(f"  PASS  free_heap {heap} >= contract {exp_heap} "
+                              f"(within -{heap_tol_pct}% tolerance)")
+                # max_alloc_block contract is also a *floor* — opt-in per scenario.
+                # The LUT/buffer allocators need a single contiguous chunk; on a
+                # fragmented heap the largest block can be much smaller than free
+                # heap, and Layer silently degrades to 1:1 (mirror disappears) when
+                # the LUT won't fit. Scenarios that depend on that allocation
+                # succeeding assert a minimum block here.
+                exp_block = contract_block.get("max_alloc_block")
+                if exp_block is not None and exp_block > 0:
+                    # max_block of 0 always fails when a positive floor is
+                    # asserted: maxBlock is always served by current firmware
+                    # (src/core/HttpServerModule.cpp), so 0 means the device
+                    # reports zero contiguous heap — a real failure, not a
+                    # missing field. (Contrast with free_heap on PC where 0
+                    # is the "unlimited" sentinel — that's a desktop-only
+                    # convention not used by the live runner.)
+                    if max_block <= 0:
+                        print(f"  FAIL  max_alloc_block {max_block} (device reports no "
+                              f"contiguous heap) vs contract {exp_block}")
+                        results["passed"] = False
+                    else:
+                        drop_pct = (exp_block - max_block) * 100.0 / exp_block if max_block < exp_block else 0
+                        if drop_pct > heap_tol_pct:
+                            print(f"  FAIL  max_alloc_block {max_block} dropped {drop_pct:.1f}% "
+                                  f"below contract {exp_block}")
+                            results["passed"] = False
+                        else:
+                            print(f"  PASS  max_alloc_block {max_block} >= contract {exp_block} "
+                                  f"(within -{heap_tol_pct}% tolerance)")
+
+            # observed.<target> stores a rolling [min, max] range per scalar
+            # that only widens when a fresh measurement falls outside the
+            # current bounds. Routine runs that stay in range produce no JSON
+            # diff. When --update-contract is set, the historical range no
+            # longer reflects the new promise, so reset to the current point.
+            # See scripts/scenario/_observed.py.
+            sample = {
+                "tick_us": int(tick_us),
+                "free_heap": int(heap),
+                "max_alloc_block": int(max_block),
+            }
+            existing_obs = step.get("observed", {}).get(target)
+            if update_contract:
+                new_obs = _observed.reset(sample, _today_iso())
+                obs_changed = True
+            else:
+                new_obs, obs_changed = _observed.widen(existing_obs, sample, _today_iso())
+            if obs_changed:
+                step.setdefault("observed", {})[target] = new_obs
+                wrote_observations[0] = True
+
+            # --update-contract: rewrite the contract in the scenario JSON for the
+            # active target. This is *renegotiating* a contract, not refreshing a
+            # last-reading baseline — set_by + reason are stamped so the diff
+            # records when and why the promise changed. Caller is responsible for
+            # committing the diff intentionally.
+            #
+            # Originals are stashed in pending_contract_originals so the
+            # post-run gate (see below) can roll the in-memory tree back to
+            # disk shape if the run failed — only successful runs get to
+            # commit a renegotiated promise.
+            if update_contract:
+                # Preserve any per-step tolerance overrides already in place.
+                existing = step.get("contract", {}).get(target, {})
+                if (step, target) not in pending_contract_originals:
+                    # Deep enough copy: existing is a flat dict of scalars.
+                    pending_contract_originals[(step, target)] = (
+                        dict(existing) if existing else None
+                    )
+                new_block = {
+                    "tick_us": int(tick_us),
+                    "free_heap": int(heap),
+                    "set_by": _today_iso(),
+                    "reason": update_reason or existing.get("reason", "updated"),
+                }
+                for k in ("tick_tolerance_pct", "heap_tolerance_pct", "tolerance_us"):
+                    if k in existing:
+                        new_block[k] = existing[k]
+                # max_alloc_block: opt-in (only carry it over if the existing
+                # contract had it), but refresh the value from this run rather
+                # than copying the stale one. Mirrors run_scenario.py's update
+                # path — keep both files in sync if you change one.
+                if "max_alloc_block" in existing:
+                    new_block["max_alloc_block"] = int(max_block)
+                step.setdefault("contract", {})[target] = new_block
 
             # Check bounds
             bounds = step.get("bounds", {})
@@ -210,6 +559,40 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5) -> 
             print(f"  -     {module_id} (cleanup)")
         except Exception:
             pass
+
+    # Write the scenario JSON back if anything changed:
+    #   - observed.<target> was updated by any measure step (every run); OR
+    #   - --update-contract renegotiated the contract — AND the run passed
+    #     (don't persist a renegotiated promise from a half-broken run; the
+    #     observed values still land so drift is visible either way).
+    # If the contract was renegotiated but the run failed, the in-memory
+    # mutations stay in `scenario` only until the process exits; the on-disk
+    # contract is preserved.
+    contract_safe_to_write = update_contract and results["passed"]
+    if not contract_safe_to_write and update_contract:
+        # Revert any contract mutations we made to the in-memory tree so the
+        # JSON write below (for observed) doesn't leak them to disk.
+        for step in scenario.get("steps", []):
+            contract = step.get("contract")
+            if contract and target in contract:
+                if (step, target) in pending_contract_originals:
+                    orig = pending_contract_originals[(step, target)]
+                    if orig is None:
+                        del contract[target]
+                    else:
+                        contract[target] = orig
+        print(f"  contract[{target}] NOT written (run failed; observed still saved)")
+
+    if wrote_observations[0] or contract_safe_to_write:
+        with open(scenario_path, "w") as f:
+            json.dump(scenario, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        what = []
+        if wrote_observations[0]:
+            what.append(f"observed[{target}]")
+        if contract_safe_to_write:
+            what.append(f"contract[{target}]")
+        print(f"  WROTE  {scenario_path.name} ({' + '.join(what)})")
 
     # Summary
     print(f"\n---")
@@ -277,13 +660,29 @@ def main():
                         help="Device host:port (default: localhost:8080)")
     parser.add_argument("--name", default=None,
                         help="Scenario name (without .json). Runs all if omitted.")
+    parser.add_argument("--module", default=None,
+                        help="Filter to scenarios whose top-level module / also matches.")
     parser.add_argument("--settle", type=float, default=3.0,
                         help="Settle time in seconds between step and measurement")
     parser.add_argument("--update-baseline", action="store_true",
                         help="Save results as new baseline")
     parser.add_argument("--compare-baseline", action="store_true",
                         help="Compare results against stored baseline")
+    parser.add_argument("--update-contract", action="store_true",
+                        help=("Renegotiate the per-step performance contract: write "
+                              "observed tick/heap into contract[<target>] and stamp "
+                              "set_by + reason. Requires --reason. Overwrites existing "
+                              "values for the active target only; other targets untouched."))
+    parser.add_argument("--reason", default=None,
+                        help=("Why the contract is being renegotiated (required with "
+                              "--update-contract). Examples: 'tighter Layer LUT copy', "
+                              "'accepted DMX driver overhead'. Written into each updated "
+                              "contract block."))
     args = parser.parse_args()
+
+    if args.update_contract and not args.reason:
+        parser.error("--update-contract requires --reason "
+                     "(e.g. --reason 'tightened after Layer optimisation')")
 
     client = Client(args.host)
 
@@ -296,11 +695,24 @@ def main():
         print(f"Cannot connect to {args.host}: {e}")
         sys.exit(1)
 
-    # Find scenarios
+    # Find scenarios via the shared metadata module (recursive: scenarios live under core/, light/, …)
     if args.name:
-        paths = [SCENARIOS_DIR / f"{args.name}.json"]
+        match = test_meta.find_scenario_path(args.name)
+        if not match:
+            print(f"Scenario not found: {args.name}.json under {test_meta.SCENARIO_DIR}")
+            sys.exit(1)
+        paths = [match]
     else:
-        paths = sorted(SCENARIOS_DIR.glob("*.json"))
+        paths = [s["path"] for s in test_meta.collect_scenario_files()]
+
+    if args.module and args.module.lower() != "all":
+        module_paths = set(test_meta.paths_for_module(args.module))
+        filtered = [p for p in paths if p in module_paths]
+        if not filtered:
+            print(f"No scenarios match module: {args.module}")
+            sys.exit(1)
+        paths = filtered
+        print(f"Module filter: {args.module} ({len(paths)} scenario(s))")
 
     if not paths:
         print("No scenarios found")
@@ -313,7 +725,9 @@ def main():
         if not path.exists():
             print(f"Scenario not found: {path}")
             continue
-        result = run_scenario(client, path, args.settle)
+        result = run_scenario(client, path, args.settle,
+                              update_contract=args.update_contract,
+                              update_reason=args.reason)
         all_results[result["name"]] = result
         if not result["passed"]:
             all_passed = False

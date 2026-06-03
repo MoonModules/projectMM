@@ -20,7 +20,7 @@ Binary WebSocket frames: `[0x02][dw16][dh16][dd16][ow16][oh16][od16][R G B ...]`
 
 ## Downsampling
 
-The preview frame is sent over WebSocket in a single non-blocking write, so it must fit lwIP's TCP send buffer (a backpressured browser must never stall the render task — see [HttpServerModule](../../core/HttpServerModule.md)). PreviewDriver therefore copies every Nth voxel (per axis) into a small owned buffer. The voxel budget is set by the `detail` control (256 / 1024 / 1849 for levels 1 / 2 / 3). The stride N is adaptive — the smallest stride whose downsampled voxel count fits the budget, recomputed each frame so it tracks runtime grid resizes. The frame's `width`/`height`/`depth` describe the downsampled grid; the browser derives positions from those, so no UI change is needed — it simply renders a coarser or finer point cloud. The owned buffer is sized once to the largest budget (`detail = 3`, ~5.5 KB) in `onAllocateMemory()` — PreviewDriver's only allocation.
+The preview frame is sent over WebSocket in a single non-blocking write, so it must fit lwIP's TCP send buffer (a backpressured browser must never stall the render task — see [HttpServerModule](../../core/HttpServerModule.md)). PreviewDriver therefore copies every Nth voxel (per axis) into a small owned buffer. The voxel budget is set by the `detail` control (256 / 1024 / 1849 for levels 1 / 2 / 3). The stride N is adaptive — the smallest stride whose downsampled voxel count fits the budget, recomputed each frame so it tracks runtime grid resizes. The frame's `width`/`height`/`depth` describe the downsampled grid; the browser derives positions from those, so no UI change is needed — it simply renders a coarser or finer point cloud. The owned buffer is sized once to the largest budget (`detail = 3`, ~5.5 KB) in `onBuildState()` — PreviewDriver's only allocation.
 
 The strided copy is fully 3D and channel-agnostic: it copies the first 3 (RGB) channels of each sampled light regardless of `channelsPerLight` (RGBW, RGBCCT, multi-channel DMX all work). The light index is derived from the bounding-box `(x, y, z)` but bounded by the real light count, so a **sparse layout** (wheel, sphere, arbitrary 3D shape — fewer lights than its bounding box) cannot read past the buffer; out-of-range cells render as black. Showing such non-grid layouts in their true shape needs the planned one-time coordinate message (below) — until then they preview as their dense bounding box.
 
@@ -36,9 +36,9 @@ Frame types:
 
 ## Tests
 
-- [Preview Driver unit test](../../../testing.md#preview-driver) — `detail` strides, original-dimension reporting, send-buffer budget, channel-agnostic copy.
-- [Scenario: preview-detail](../../../testing.md#scenario-preview-detail) — toggles `detail`/`decompress` on a live device, asserts no render-FPS regression.
-- [Scenario: base-pipeline](../../../testing.md#scenario-pipeline) — full pipeline including preview driver.
+- [Unit tests: PreviewDriver](../../../tests/unit-tests.md#previewdriver) — `detail` strides, original-dimension reporting, send-buffer budget, channel-agnostic copy.
+- [Scenario: scenario_PreviewDriver_detail](../../../tests/scenario-tests.md#scenario_previewdriver_detail) — toggles `detail`/`decompress` on a live device, asserts no render-FPS regression.
+- [Scenario: scenario_Layer_base_pipeline](../../../tests/scenario-tests.md#scenario_layer_base_pipeline) — full pipeline including preview driver.
 
 ## Prior art
 

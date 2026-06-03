@@ -25,7 +25,7 @@ public:
         controls_.addUint8("hue_shift", hue_shift, 0, 255);
     }
 
-    void onAllocateMemory() override {
+    void onBuildState() override {
         // D2 effect: heat grid covers only the z=0 plane (w*h). Extrude fills
         // z on 3D layers. Avoids allocating depth× more heap than needed.
         nrOfLightsType count = static_cast<nrOfLightsType>(width()) * height();

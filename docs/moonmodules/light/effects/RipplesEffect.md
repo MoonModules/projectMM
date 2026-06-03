@@ -22,4 +22,4 @@ No heap allocations. Per-ripple state: position + radius + hue (~40 bytes total 
 
 ## Tests
 
-[Module test](../../../testing.md#stateless-effects) — non-zero output, spatial variation.
+[Unit tests: CheckerboardEffect](../../../tests/unit-tests.md#checkerboardeffect) — shared rendering/smoke coverage: non-zero output, spatial variation. (RipplesEffect carries per-ripple mutable state — position, radius, hue — with random respawn; that behaviour isn't unit-tested today.)

@@ -20,4 +20,4 @@ Checker bit from `(x/cell + y/cell + phase) & 1`. `dynamicBytes()` = 0.
 
 ## Tests
 
-[Module test](../../../testing.md#stateless-effects) — non-zero output, spatial variation.
+[Unit tests: CheckerboardEffect](../../../tests/unit-tests.md#checkerboardeffect) — non-zero output, spatial variation. The file also covers other stateless effects via a shared macro.

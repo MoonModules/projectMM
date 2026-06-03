@@ -18,7 +18,7 @@ namespace mm {
 class Layers : public MoonModule {
 public:
     // Wire the shared Layouts. Propagates to every child Layer so their
-    // onAllocateMemory() can size buffers from it. Idempotent — call again
+    // onBuildState() can size buffers from it. Idempotent — call again
     // after adding a Layer child to wire the new one. Non-Layer children
     // (UI shouldn't allow them; engine doesn't enforce — yet) are skipped
     // rather than miscast, so a stray child can't UB the cast.
@@ -33,13 +33,20 @@ public:
 
     Layouts* layouts() const { return layouts_; }
 
+    // Role-filtered loop propagation: only tick children that are Layers.
+    // The factory / UI shouldn't allow non-Layer children of a Layers
+    // container, but if one slips in (test fixture, hand-crafted config),
+    // ticking it through Layers would run its loop at the wrong tree
+    // depth (e.g. an Effect that should be ticked inside a Layer). Matches
+    // the role-filter precedent in setLayouts / activeLayer above.
     void loop() override {
-        // Scheduler gates Layers itself via respectsEnabled() default.
         for (uint8_t i = 0; i < childCount(); i++) {
-            if (!child(i)->enabled()) continue;
+            MoonModule* c = child(i);
+            if (!c || c->role() != ModuleRole::Layer) continue;
+            if (c->respectsEnabled() && !c->enabled()) continue;
             uint32_t start = platform::micros();
-            child(i)->loop();
-            child(i)->addAccumUs(platform::micros() - start);
+            c->loop();
+            c->addAccumUs(platform::micros() - start);
         }
     }
 

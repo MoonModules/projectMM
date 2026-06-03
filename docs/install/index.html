@@ -264,7 +264,7 @@
     // path (myDevices.onErase). The only difference is `erase-first`,
     // which makes ESP Web Tools start with the chip-erase step and
     // offer the install afterwards (the user can cancel that half).
-    async function showInstallModal(manifestUrl, board, { eraseFirst = false } = {}) {
+    async function showInstallModal(manifestUrl, firmware, { eraseFirst = false } = {}) {
       host.innerHTML = "";
       const btn = document.createElement("esp-web-install-button");
       btn.setAttribute("manifest", manifestUrl);
@@ -281,7 +281,7 @@
       });
       const inner = document.createElement("button");
       inner.slot = "activate";
-      inner.textContent = eraseFirst ? `Erase + Install on ${board}` : `Install on ${board}`;
+      inner.textContent = eraseFirst ? `Erase + Install on ${firmware}` : `Install on ${firmware}`;
       inner.style.cssText = [
         "padding: 12px 20px",
         "font: inherit",
@@ -302,11 +302,11 @@
 
     releasePicker.init({
       container: document.getElementById("picker-mount"),
-      ownBoardKey: null,  // web installer flashes any board
-      onInstall: async (board, manifestUrl /*, binaryUrl */) => {
+      ownFirmwareKey: null,  // web installer flashes any firmware variant
+      onInstall: async (firmware, manifestUrl /*, binaryUrl */) => {
         const localUrl = toLocalUrl(manifestUrl);
-        lastInstallManifest = { url: localUrl, board };
-        await showInstallModal(localUrl, board);
+        lastInstallManifest = { url: localUrl, firmware };
+        await showInstallModal(localUrl, firmware);
       },
     });
 
@@ -320,11 +320,13 @@
         // have it, else the newest release the picker has loaded.
         const m = lastInstallManifest;
         if (!m) {
-          alert("Pick a release + board above first (Erase reuses that " +
-                "manifest for the post-erase install option).");
+          alert("Click Install above first (even if you cancel the modal). " +
+                "Erase reuses that manifest for the post-erase install " +
+                "option — selecting a release + firmware in the dropdowns " +
+                "isn't enough; the install flow has to register the choice.");
           return;
         }
-        await showInstallModal(m.url, m.board, { eraseFirst: true });
+        await showInstallModal(m.url, m.firmware, { eraseFirst: true });
       },
     });
 

@@ -71,7 +71,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        board: [esp32, esp32-eth, esp32-eth-wifi, esp32s3-n16r8]
+        firmware: [esp32, esp32-eth, esp32-eth-wifi, esp32s3-n16r8]
     steps:
       - uses: actions/checkout@v4
 
@@ -94,36 +94,36 @@ jobs:
           # `v6.1-dev` is a rolling Docker tag on espressif/idf that tracks the
           # v6.1 dev line — close enough to the pinned SHA for CI today.
           esp_idf_version: v6.1-dev
-          # Any board whose key starts with `esp32s3` targets the S3.
-          target: ${{ startsWith(matrix.board, 'esp32s3') && 'esp32s3' || 'esp32' }}
+          # Any firmware whose key starts with `esp32s3` targets the S3.
+          target: ${{ startsWith(matrix.firmware, 'esp32s3') && 'esp32s3' || 'esp32' }}
           path: 'esp32'
           # We run our own builder (not the action's default `idf.py build`)
           # so the sdkconfig fragments and EXCLUDE_COMPONENTS go through the
           # same code path as local builds.
-          command: python ../scripts/build/build_esp32.py --board ${{ matrix.board }}
+          command: python ../scripts/build/build_esp32.py --firmware ${{ matrix.firmware }}
 
       - name: Stage release artifacts
         run: |
           set -euo pipefail
           mkdir -p dist
           V=$(jq -r .version library.json)
-          # Per-board build dir under build/esp32-<board>/ (plan-19.1).
+          # Per-firmware build dir under build/esp32-<firmware>/ (plan-19.1).
           # build_esp32.py points idf.py at this dir via -B, so the build
-          # tree lives outside esp32/ and multiple boards can coexist —
+          # tree lives outside esp32/ and multiple firmwares can coexist —
           # CI uses one per matrix job, dev machines use as many as built.
-          B=build/esp32-${{ matrix.board }}
-          PREFIX="firmware-${{ matrix.board }}-v$V"
+          B=build/esp32-${{ matrix.firmware }}
+          PREFIX="firmware-${{ matrix.firmware }}-v$V"
           cp "$B/projectMM.bin"                       "dist/${PREFIX}.bin"
           cp "$B/bootloader/bootloader.bin"           "dist/${PREFIX}-bootloader.bin"
           cp "$B/partition_table/partition-table.bin" "dist/${PREFIX}-partition-table.bin"
           cp "$B/ota_data_initial.bin"                "dist/${PREFIX}-ota-data.bin"
-          # Per-board flasher_args.json — the release job feeds it to
+          # Per-firmware flasher_args.json — the release job feeds it to
           # generate_manifest.py so offsets come from the real build.
-          cp "$B/flasher_args.json"                   "dist/flasher-${{ matrix.board }}.json"
+          cp "$B/flasher_args.json"                   "dist/flasher-${{ matrix.firmware }}.json"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: esp32-${{ matrix.board }}
+          name: esp32-${{ matrix.firmware }}
           path: dist/
 
   build-macos:
@@ -207,19 +207,19 @@ jobs:
           #                               which is same-origin-bound by CORS.
           BASE="https://github.com/${REPO}/releases/download/$TAG"
           mkdir -p pages-manifests
-          for B in esp32 esp32-eth esp32-eth-wifi esp32s3-n16r8; do
+          for F in esp32 esp32-eth esp32-eth-wifi esp32s3-n16r8; do
             python scripts/build/generate_manifest.py \
-              --board "$B" \
+              --firmware "$F" \
               --version "$V" \
               --release-url "$BASE" \
-              --flasher-args "dist/flasher-$B.json" \
-              --out "dist/manifest-$B.json"
+              --flasher-args "dist/flasher-$F.json" \
+              --out "dist/manifest-$F.json"
             python scripts/build/generate_manifest.py \
-              --board "$B" \
+              --firmware "$F" \
               --version "$V" \
               --release-url . \
-              --flasher-args "dist/flasher-$B.json" \
-              --out "pages-manifests/manifest-$B.json"
+              --flasher-args "dist/flasher-$F.json" \
+              --out "pages-manifests/manifest-$F.json"
           done
 
       # Pages deploy: every tag (stable + RC + latest). The web installer page

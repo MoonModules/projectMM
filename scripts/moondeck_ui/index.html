@@ -21,13 +21,29 @@
 
     <div class="content">
         <aside class="sidebar">
+            <!-- Network bar: app-wide selector for the active LAN. Holds the
+                 active port (serial), WiFi credentials (used by Improv), and
+                 the device list (rendered on the Live tab). Auto-selected
+                 from the host's current subnet on each /api/state load. -->
+            <div id="network-bar" class="network-bar">
+                <label>Network:
+                    <select id="network-select"></select>
+                </label>
+                <button id="network-rename" title="Rename this network">Rename</button>
+                <button id="network-add" title="Add a network for the current host subnet">Add</button>
+                <div id="network-wifi" class="network-wifi">
+                    <label>SSID: <input id="network-wifi-ssid" type="text" autocomplete="off"></label>
+                    <label>Password: <input id="network-wifi-password" type="password" autocomplete="off"></label>
+                </div>
+            </div>
+
             <section id="tab-pc" class="tab-content active">
                 <div id="scripts-pc" class="script-grid"></div>
             </section>
 
             <section id="tab-esp32" class="tab-content">
                 <!-- ESP32 tab layout, top → bottom:
-                       1. Setup (board-independent: ESP-IDF, Clean).
+                       1. Setup (firmware-independent: ESP-IDF, Clean).
                        2. Firmware dropdown — drives Build.
                        3. Build group.
                        4. Port dropdown — drives Flash + run-group scripts
@@ -37,7 +53,7 @@
                        5. Flash group + remaining run-group scripts. -->
                 <div id="scripts-esp32-setup" class="script-grid"></div>
                 <div class="esp32-controls">
-                    <label>Firmware: <select id="board-select"></select></label>
+                    <label>Firmware: <select id="firmware-select"></select></label>
                 </div>
                 <div id="scripts-esp32-build" class="script-grid"></div>
                 <div class="esp32-controls">

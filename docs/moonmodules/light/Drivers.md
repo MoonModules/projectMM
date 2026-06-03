@@ -16,11 +16,22 @@ Exception: when memory is tight AND mapping is 1:1 unshuffled (single layer, gri
 
 Same `Buffer` as a Layer uses — `uint8_t*` sized by `channelsPerLight × nrOfLights` (from the Layouts container). Allocated via `platform::alloc`.
 
+## Output correction
+
+The Drivers container owns the shared output-correction state and exposes two controls; each *physical* driver child (ArtNet today, future LED drivers) applies it per-light as it reads the source buffer. Preview ignores it (shows the raw logical buffer).
+
+| Control | Type | Description |
+|---|---|---|
+| `brightness` | uint8 (0–255) | Global brightness. Scales every channel through a 256-entry LUT (`(v × brightness) / 255`). Changing it rebuilds only the LUT on the cheap `onUpdate` tier — no pipeline realloc, so the slider is fluent. Gamma / white-balance fold into this LUT later as a per-channel R/G/B split. |
+| `lightPreset` | select | The physical wire format: channel order and whether the light is RGBW. Options: `RGB`, `RBG`, `GRB`, `GBR`, `BRG`, `BGR`, `RGBW`, `GRBW`. RGBW presets make each driver emit 4 channels per light with white derived as `min(R,G,B)` from the (brightness-scaled) RGB. |
+
+The correction lives on `Correction` (`src/light/drivers/Correction.h`): a brightness LUT, a channel-order table, output channel count, and a derive-white flag. `Drivers::onUpdate` rebuilds it on a `brightness`/`lightPreset` change; `passBufferToDrivers` hands each child a `const Correction*` via `DriverBase::setCorrection`.
+
 ## API
 
 - `addChild(driver)` — no hard-coded max, dynamic list.
 - `setLayer(layer)` — the active layer to blend from. Today (single-layer pipeline) wired directly; the composition follow-up will read from the Layers container and blend across every layer.
-- `onAllocateMemory()` — allocates the shared output buffer if any active layer has a LUT.
+- `onBuildState()` — allocates the shared output buffer if any active layer has a LUT.
 - `loop()` — blendMap the active layer's buffer into the output buffer, then call each driver's `loop()`.
 
 ## Layer-to-driver assignment

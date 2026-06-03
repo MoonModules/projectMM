@@ -8,6 +8,7 @@
 - **Destructive-action confirm** — scripts flagged `destructive: true` (e.g. Erase Flash) pop a native confirm dialog before running.
 - **Tab persistence** — selected tab survives page refresh.
 - **Process detection** — on page load, checks if projectMM or idf.py is already running and shows Stop button.
+- **Network bar** (top of the sidebar): switch between known networks. Each network holds its own device list, last-used serial port, and WiFi credentials (consumed by Improv). On startup, MoonDeck auto-selects the network whose subnet matches the host's current LAN — moving the laptop between networks usually requires no clicks. Manual override (the dropdown) pins the selection until the pinned network's subnet stops matching the host. Add / Rename buttons next to the dropdown manage the catalog. State persisted in `scripts/moondeck.json` under `networks` + `active_network`.
 
 ## PC Tab
 
@@ -57,9 +58,12 @@ uv run scripts/run/preview_installer.py
 # open http://localhost:8000/ in Chrome / Edge / Opera
 ```
 
-Long-running — MoonDeck shows **Stop** while the server is up. This is "Recipe A" from [docs/install/README.md](../docs/install/README.md): the picker populates against the real GitHub Releases API and dropdowns work, but clicking **Install** fails because the local server has no `releases/` tree. Useful for iterating on HTML/CSS/JS. Add `?nocache=1` to the URL to bypass the picker's 5-minute sessionStorage cache while editing.
+Long-running — MoonDeck shows **Stop** while the server is up. Two modes, picked automatically:
 
-For an end-to-end preview that can actually flash (Recipe B), follow the script in [docs/install/README.md](../docs/install/README.md) — that flow pulls a CI build's artifacts and is too stateful for a one-click button.
+- **Render-only.** When no `build/esp32-*/projectMM.bin` is present, the picker populates against the real GitHub Releases API and dropdowns work, but clicking **Install** fails because the local server has no `releases/` tree. Useful for iterating on HTML / CSS / JS without burning a build. Equivalent to "Recipe A" in [docs/install/README.md](../docs/install/README.md).
+- **Flash-ready.** When at least one ESP32 build exists, the script additionally stages every `build/esp32-*/projectMM.bin` it finds into `releases/local-dev/` and generates matching Pages-relative manifests via the same `generate_manifest.py` the release workflow uses. The picker shows `local-dev` as the newest tag; clicking **Install** flashes a USB-connected ESP32 and opens the ESP Web Tools Improv WiFi modal — end-to-end, same code paths as the public installer. This is the developer's test ground for the install flow before deploying to GitHub Pages: Web Serial works on `http://localhost` without the secure-origin requirement that gates the public site.
+
+Add `?nocache=1` to the URL to bypass the picker's 5-minute sessionStorage cache while editing.
 
 ### check_platform_boundary
 
@@ -77,12 +81,12 @@ Run scenario tests. Replays JSON scenario files in-process.
 
 ```bash
 uv run scripts/scenario/run_scenario.py                       # run all
-uv run scripts/scenario/run_scenario.py --name base-pipeline   # run one
+uv run scripts/scenario/run_scenario.py --name scenario_Layer_base_pipeline   # run one
 ```
 
 Scenarios are JSON files in `test/scenarios/`. Use the dropdown to run a single scenario or leave it on **all** to run the full suite.
 
-For a full description of each scenario, see the [scenario inventory](/api/docs/testing.md?scenario-pipeline) in testing.md.
+For a full description of each scenario, see the [scenario inventory](/api/docs/tests/scenario-tests.md) — auto-generated from the JSON files.
 
 ### history_report
 
@@ -156,14 +160,14 @@ Run scenario tests against a live running device via HTTP.
 ```bash
 uv run scripts/scenario/run_live_scenario.py                                    # all scenarios vs localhost:8080
 uv run scripts/scenario/run_live_scenario.py --host 192.168.1.210               # vs ESP32
-uv run scripts/scenario/run_live_scenario.py --name control-change              # one scenario
+uv run scripts/scenario/run_live_scenario.py --name scenario_MoonModule_control_change   # one scenario
 uv run scripts/scenario/run_live_scenario.py --update-baseline                  # save baseline
 uv run scripts/scenario/run_live_scenario.py --compare-baseline                 # detect regressions
 ```
 
 Executes scenario steps (add_module, set_control, delete_module) via REST API. Collects per-step FPS and heap measurements. Compares against stored baselines to detect performance regressions. Use the dropdown to run a single scenario or leave it on **all** to run the full suite.
 
-For a full description of each scenario, see the [scenario inventory](/api/docs/testing.md?scenario-control-change) in testing.md.
+For a full description of each scenario, see the [scenario inventory](/api/docs/tests/scenario-tests.md) — auto-generated from the JSON files.
 
 ## ESP32 Tab
 
@@ -201,11 +205,11 @@ Clean the ESP32 build directory.
 uv run scripts/build/clean_esp32.py
 ```
 
-Removes one ESP32 per-board build dir (`--board <name>`) or every `build/esp32-*/` plus a leftover `esp32/build/` if present (`--all`). Run a per-board clean after ESP-IDF updates, Python version changes, or anything else that should force a from-scratch build of that board. Other boards' build dirs aren't touched.
+Removes one ESP32 per-firmware build dir (`--firmware <name>`) or every `build/esp32-*/` plus a leftover `esp32/build/` if present (`--all`). Run a per-firmware clean after ESP-IDF updates, Python version changes, or anything else that should force a from-scratch build of that variant. Other firmwares' build dirs aren't touched.
 
 ### build_esp32
 
-Build one of the four shipping ESP32 firmware variants. The MoonDeck **Build** button reads the **Firmware** dropdown and forwards `--board <selected>` to `build_esp32.py`.
+Build one of the four shipping ESP32 firmware variants. The MoonDeck **Build** button reads the **Firmware** dropdown and forwards `--firmware <selected>` to `build_esp32.py`. ("Firmware" is the compiled binary; the physical board is a separate concept — see [architecture.md § Firmware vs board](../docs/architecture.md#firmware-vs-board).)
 
 | Firmware key | Chip | What's in the image |
 |---|---|---|
@@ -217,39 +221,39 @@ Build one of the four shipping ESP32 firmware variants. The MoonDeck **Build** b
 CLI equivalent:
 
 ```bash
-uv run scripts/build/build_esp32.py --board esp32
-uv run scripts/build/build_esp32.py --board esp32-eth
-uv run scripts/build/build_esp32.py --board esp32-eth-wifi
-uv run scripts/build/build_esp32.py --board esp32s3-n16r8
+uv run scripts/build/build_esp32.py --firmware esp32
+uv run scripts/build/build_esp32.py --firmware esp32-eth
+uv run scripts/build/build_esp32.py --firmware esp32-eth-wifi
+uv run scripts/build/build_esp32.py --firmware esp32s3-n16r8
 ```
 
-Auto-detects ESP-IDF installation, sets target if needed, builds, and shows flash/RAM usage summary. Each board writes into `build/esp32-<board>/`, so switching boards (or building all four in one session) keeps every variant on disk — no clean rebuild on switch.
+Auto-detects ESP-IDF installation, sets target if needed, builds, and shows flash/RAM usage summary. Each firmware writes into `build/esp32-<firmware>/`, so switching firmwares (or building all four in one session) keeps every variant on disk — no clean rebuild on switch.
 
 Eth pin map is currently baked in at build time. The `esp32-eth` and `esp32-eth-wifi` builds were verified on the [Olimex ESP32-Gateway](https://www.olimex.com/Products/IoT/ESP32/ESP32-GATEWAY/open-source-hardware) (LAN8720 PHY, reset on GPIO 5, MDIO addr 0). Boards with the same PHY but different pins (e.g. WT32-ETH01: reset on GPIO 16) need a local rebuild today; runtime PHY/pin selection is on the 2.0 roadmap.
 
-Each ESP32-S3 SKU has its own build key because the sdkconfig fragment encodes flash size, partition layout, and PSRAM mode — flashing an `n16r8` binary onto a different module (e.g. N8R2) misaligns the partition table or fails PSRAM init. New SKUs become new keys (e.g. `esp32s3-n8r8`); we don't ship a generic `esp32s3` shortcut.
+Each ESP32-S3 SKU has its own firmware key because the sdkconfig fragment encodes flash size, partition layout, and PSRAM mode — flashing an `n16r8` binary onto a different module (e.g. N8R2) misaligns the partition table or fails PSRAM init. New SKUs become new keys (e.g. `esp32s3-n8r8`); we don't ship a generic `esp32s3` shortcut.
 
-`--profile` is deprecated and accepted one release for migration: `--profile default` → `--board esp32`, `--profile eth-only` → `--board esp32-eth`. The legacy `build_esp32_ethonly.py` wrapper still works (it now forwards `--board esp32-eth`).
+`--profile` is deprecated and accepted one release for migration: `--profile default` → `--firmware esp32`, `--profile eth-only` → `--firmware esp32-eth`. The legacy `build_esp32_ethonly.py` wrapper still works (it now forwards `--firmware esp32-eth`).
 
 ### flash_esp32
 
-Flash firmware to an ESP32 device. Reads `build/esp32-<board>/projectMM.bin` — each board lives in its own dir (plan-19.1), so multiple firmwares can coexist on disk and switching boards is free.
+Flash firmware to an ESP32 device. Reads `build/esp32-<firmware>/projectMM.bin` — each firmware lives in its own dir (plan-19.1), so multiple firmwares can coexist on disk and switching firmwares is free.
 
-The MoonDeck button forwards the Firmware dropdown as `--board`. Flash exits cleanly with a "no build for <board> — run Build first" message when that dir doesn't exist. The log line up front confirms which build is being flashed and how old it is, e.g.:
+The MoonDeck button forwards the Firmware dropdown as `--firmware`. Flash exits cleanly with a "no build for <firmware> — run Build first" message when that dir doesn't exist. The log line up front confirms which build is being flashed and how old it is, e.g.:
 
 ```text
 ==> flashing esp32-eth-wifi build (1267 KB, built 3m ago) to /dev/tty.usbserial-0001
 ```
 
 ```bash
-uv run scripts/build/flash_esp32.py --board esp32-eth-wifi --port /dev/tty.usbserial-0001
+uv run scripts/build/flash_esp32.py --firmware esp32-eth-wifi --port /dev/tty.usbserial-0001
 ```
 
-`--board` is required — there's no longer a single canonical `esp32/build/` to fall back to. For a rack flash, loop over ports AND specify the board explicitly:
+`--firmware` is required — there's no longer a single canonical `esp32/build/` to fall back to. For a rack flash, loop over ports AND specify the firmware explicitly:
 
 ```bash
 for port in /dev/tty.usbserial-*; do
-  uv run scripts/build/flash_esp32.py --board esp32-eth-wifi --port "$port"
+  uv run scripts/build/flash_esp32.py --firmware esp32-eth-wifi --port "$port"
 done
 ```
 
@@ -277,7 +281,7 @@ Reads serial at 115200 baud. Output streams to MoonDeck's log and is saved to `e
 
 Push WiFi credentials to a running projectMM device over USB-serial. Uses the [Improv-WiFi](https://www.improv-wifi.com/serial/) protocol — the same wire format the browser flow at improv-wifi.com uses. Device must be running a firmware that includes the Improv listener.
 
-**One-click flow**: pick the device's port in MoonDeck, hit **Improv WiFi**. The script auto-detects the host machine's currently-joined WiFi (SSID + password via macOS Keychain / Linux NetworkManager / Windows `netsh`) and sends it to the device. The device replies with its new URL when STA comes up — typically 5-10 s end to end.
+**One-click flow**: pick the device's port in MoonDeck, hit **Improv WiFi**. The script reads SSID + password from the **active network's WiFi block in `scripts/moondeck.json`** (the one shown in the network bar at the top of the sidebar). If that block is empty, it falls back to detecting the host machine's currently-joined WiFi (macOS Keychain / Linux NetworkManager / Windows `netsh`). The device replies with its new URL when STA comes up — typically 5-10 s end to end.
 
 ```bash
 # Use host's currently-joined WiFi (one click in MoonDeck → equivalent CLI):
@@ -301,7 +305,7 @@ for port in /dev/tty.usbserial-*; do
 done
 ```
 
-The host-WiFi reader lives at [scripts/build/host_wifi.py](build/host_wifi.py) and runs standalone for diagnosis (`python3 scripts/build/host_wifi.py` prints the detected SSID + password). The first macOS run pops a Keychain access dialog — the OS doing its job; we don't try to bypass it.
+The host-WiFi reader lives at [scripts/build/host_wifi.py](build/host_wifi.py) and runs standalone for diagnosis (`python3 scripts/build/host_wifi.py` prints the resolved SSID + password). It first checks `scripts/moondeck.json`'s active network's `wifi` block; if empty, falls back to OS auto-detect. The first macOS auto-detect run pops a Keychain access dialog — the OS doing its job; we don't try to bypass it. The retired `scripts/build/wifi_credentials.json` source is gone — credentials now live per-network in moondeck.json, so moving the laptop between networks is just a dropdown switch.
 
 Replaces v1's `deploy/wifi.py` + `deploy/flashfs.py --wifi` partition-baking flow — the device stays running, no flash mode required. Full module + protocol details: [docs/moonmodules/core/ImprovProvisioningModule.md](../docs/moonmodules/core/ImprovProvisioningModule.md).
 
@@ -325,6 +329,42 @@ Non-destructive Improv health check. Sends `GET_DEVICE_INFO` + `GET_CURRENT_STAT
 ```
 
 Exits 0 if both RPCs answered, 1 if the device didn't respond (Improv listener not running, wrong port, or a USB-CDC stall — try power-cycling). Reads `improv_provision.py`'s framing helpers, so the two scripts stay byte-identical on the wire.
+
+### improv_smoke_test
+
+End-to-end Improv test against a USB-connected ESP32. Three sequential checks; PASS only when all three pass within timeout:
+
+1. **Probe** — device answers `GET_DEVICE_INFO` + `GET_CURRENT_STATE` (same checks `improv_probe` does standalone).
+2. **Provision** — sends `WIFI_SETTINGS` with the host's resolved SSID + password and waits for the device to reach `PROVISIONED` (same flow `improv_provision` drives standalone).
+3. **Reachable** — HTTP `GET /` on the device's reported URL, confirming the device actually joined the LAN. Skippable with `--no-network` for isolated provisioning networks the host can't route to.
+
+**One-click flow**: pick the device's port in MoonDeck, hit **Improv Smoke Test**. Credentials come from the active network's `wifi` block (same source as Improv WiFi). Typical output:
+
+```text
+==> [1/3] probe   (timeout 10s)
+  ==> probing /dev/tty.usbserial-XXXX
+  ==> Improv healthy (device info + state)
+==> [2/3] provision   (timeout 60s)
+  ==> sending WIFI_SETTINGS to /dev/tty.usbserial-XXXX (SSID: 'MoonModules')
+  ==> provisioned: http://192.168.1.207/
+==> [3/3] network   GET http://192.168.1.207/   (timeout 10s)
+     OK (HTTP 200)
+
+PASS improv smoke test: probe + provision + reachable (took 12.4s)
+     device: http://192.168.1.207/
+```
+
+Exit codes: `0` = all checks passed, `1` = device-side failure (probe or provision didn't complete), `2` = provision succeeded but device unreachable on LAN (distinct so CI can decide whether to retry).
+
+**Why this exists.** The browser-side Improv flow (ESP Web Tools' modal) is awkward to automate and harder to reproduce on demand: needs Chrome, Web Serial, and a click-through. This script exercises the **device-side** Improv implementation — which is the part we own and the part most likely to break across firmware changes. ESP Web Tools' Improv handling is upstream-maintained and stable. Recommended pre-commit test for any change to:
+
+- [src/core/ImprovFrame.h](../src/core/ImprovFrame.h) — the on-device parser
+- [src/platform/esp32/platform_esp32_improv.cpp](../src/platform/esp32/platform_esp32_improv.cpp) — the UART listener task
+- [docs/install/index.html](../docs/install/index.html) — the web installer page
+- [src/ui/release-picker.js](../src/ui/release-picker.js) — the picker driving the install flow
+- [scripts/build/improv_*.py](build/) — the host-side framing helpers
+
+Pair with `preview_installer`'s flash-ready mode (above) for a complete dev-environment proof that the install flow works before deploying to GitHub Pages.
 
 
 ### show_crash_log

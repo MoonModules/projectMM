@@ -1,6 +1,7 @@
 #include "core/FilesystemModule.h"
 
 #include "core/Control.h"
+#include "core/JsonSink.h"   // fixed-buffer mode used by writeValue()
 #include "core/JsonUtil.h"
 #include "core/ModuleFactory.h"
 #include "core/Scheduler.h"
@@ -166,7 +167,7 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
     auto& cs = m->controls();
     for (uint8_t i = 0; i < cs.count(); i++) {
         auto& c = cs[i];
-        if (c.type == ControlType::ReadOnly || c.type == ControlType::Progress) continue;
+        if (!isPersistable(c.type)) continue;
         std::snprintf(key, sizeof(key), "%s%s", prefix, c.name);
         applyValue(c, json, key);
     }
@@ -182,7 +183,7 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
     // "<prefix><idx>.type"; if it differs from the live child (or no live child
     // exists), factory-create the JSON type and place it at that position. The
     // newly-created child gets onBuildControls() here so the recursive applyNode
-    // below can overlay its persisted values. Phases 3+4 (setup, onAllocateMemory)
+    // below can overlay its persisted values. Phases 3+4 (setup, onBuildState)
     // cascade into the new child automatically.
     // Walk JSON child positions in order; stop when "<idx>.type" is absent. No fixed cap —
     // the JSON itself terminates the loop. childCount_ is a uint8_t so the practical ceiling
@@ -197,6 +198,14 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
 
         MoonModule* live = m->child(i);
         if (!live || std::strcmp(live->typeName(), typeName) != 0) {
+            // Position-replace can also destroy a code-wired child if the file
+            // describes a different type at this slot. Bail out of further
+            // reconciliation rather than killing it — the trim loop below then
+            // preserves the code-wired tail, and the next save will rewrite the
+            // file with the current (correct) tree shape. The rest of the JSON
+            // past this position is dropped on this boot; that's better than
+            // losing a code-wired child.
+            if (live && live->isWiredByCode()) break;
             MoonModule* created = ModuleFactory::create(typeName);
             if (!created) {
                 // Factory failed (type not registered). Stop here so subsequent JSON
@@ -219,10 +228,25 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
         std::snprintf(childPrefix, sizeof(childPrefix), "%s%u.", prefix, static_cast<unsigned>(i));
         applyNode(m->child(i), json, childPrefix);
     }
-    // Trim any live children beyond what the JSON describes.
-    while (m->childCount() > jsonChildCount) {
-        MoonModule* extra = m->child(m->childCount() - 1);
-        if (!extra) break;
+    // Trim live children beyond what the JSON describes, EXCEPT children that
+    // were wired by code at boot (main.cpp annotates those via markWiredByCode).
+    // A code-wired child is preserved across persistence loads even when the
+    // on-disk file predates its addition — the upgrade-day case where a new
+    // release adds a code-created child (e.g. ImprovProvisioningModule under
+    // NetworkModule) whose existence the device's saved file doesn't yet know
+    // about. Without this exemption the child would get trimmed on every boot.
+    //
+    // Walks back-to-front so removeChild's left-shift of later siblings doesn't
+    // skip an entry. Any code-wired child at index >= jsonChildCount stays; its
+    // position relative to the JSON-described children may not match what the
+    // file expects, but on the first dirty event the next save writes the
+    // current (post-merge) tree shape and from then on the file matches.
+    uint8_t i = m->childCount();
+    while (i > jsonChildCount) {
+        i--;
+        MoonModule* extra = m->child(i);
+        if (!extra) continue;
+        if (extra->isWiredByCode()) continue;
         extra->teardown();
         m->removeChild(extra);
         Scheduler::deleteTree(extra);
@@ -230,51 +254,11 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
 }
 
 void FilesystemModule::applyValue(const ControlDescriptor& c, const char* json, const char* key) {
-    switch (c.type) {
-        case ControlType::Uint8: {
-            int v = mm::json::parseInt(json, key);
-            if (v < c.min) v = c.min;
-            if (v > c.max) v = c.max;
-            *static_cast<uint8_t*>(c.ptr) = static_cast<uint8_t>(v);
-            break;
-        }
-        case ControlType::Uint16: {
-            int v = mm::json::parseInt(json, key);
-            *static_cast<uint16_t*>(c.ptr) = static_cast<uint16_t>(v);
-            break;
-        }
-        case ControlType::Int16: {
-            int v = mm::json::parseInt(json, key);
-            // Clamp before narrowing — parseInt returns int (up to ±2^31).
-            // A persisted-or-corrupted JSON value outside int16 range
-            // would otherwise wrap (e.g. 40000 → -25536). No c.min/c.max
-            // clamp here: those fields are uint8_t and can't bound an int16
-            // range, so applying them zeros every Int16 control on load.
-            if (v < INT16_MIN) v = INT16_MIN;
-            if (v > INT16_MAX) v = INT16_MAX;
-            *static_cast<int16_t*>(c.ptr) = static_cast<int16_t>(v);
-            break;
-        }
-        case ControlType::Bool:
-            *static_cast<bool*>(c.ptr) = mm::json::parseBool(json, key);
-            break;
-        case ControlType::Text:
-        case ControlType::Password: {
-            // Password persists to disk like Text — the leak that mattered
-            // was the network API, not local flash.
-            uint8_t maxLen = c.max > 0 ? c.max : 16;
-            mm::json::parseString(json, key, static_cast<char*>(c.ptr), maxLen);
-            break;
-        }
-        case ControlType::Select: {
-            int v = mm::json::parseInt(json, key);
-            if (v < 0) v = 0;
-            if (c.max > 0 && v >= c.max) v = c.max - 1;
-            *static_cast<uint8_t*>(c.ptr) = static_cast<uint8_t>(v);
-            break;
-        }
-        default: break;
-    }
+    // Per-type parse + validate + apply lives in Control.cpp. Use Clamp:
+    // a stale on-disk value from a schema change should snap to the new
+    // bounds (Uint8 200 → max 100), not silently drop to 0. The HTTP API
+    // uses Strict instead so a bogus client value surfaces as a 400.
+    (void)applyControlValue(c, json, key, ApplyPolicy::Clamp);
 }
 
 // ---- Save ----
@@ -310,7 +294,7 @@ bool FilesystemModule::writeNode(MoonModule* m, char* buf, size_t bufLen, int& p
     auto& cs = m->controls();
     for (uint8_t i = 0; i < cs.count(); i++) {
         auto& c = cs[i];
-        if (c.type == ControlType::ReadOnly || c.type == ControlType::Progress) continue;
+        if (!isPersistable(c.type)) continue;
         int n = std::snprintf(buf + pos, bufLen - pos, "%s\"%s%s\":", first ? "" : ",", prefix, c.name);
         if (n < 0 || static_cast<size_t>(pos + n) >= bufLen) return false;
         pos += n;
@@ -336,58 +320,16 @@ bool FilesystemModule::writeNode(MoonModule* m, char* buf, size_t bufLen, int& p
     return true;
 }
 
-// Emit a JSON string literal (with surrounding quotes) for `s`, escaping the
-// two characters that would otherwise break JSON: " and \. Returns false if
-// the value (plus quotes/escapes) does not fit the remaining buffer.
-bool FilesystemModule::writeJsonString(const char* s, char* buf, size_t bufLen, int& pos) {
-    if (static_cast<size_t>(pos) >= bufLen) return false;
-    buf[pos++] = '"';
-    for (; *s; s++) {
-        char c = *s;
-        bool escape = (c == '"' || c == '\\');
-        if (static_cast<size_t>(pos) + (escape ? 2 : 1) >= bufLen) return false;
-        if (escape) buf[pos++] = '\\';
-        buf[pos++] = c;
-    }
-    if (static_cast<size_t>(pos) + 1 >= bufLen) return false;
-    buf[pos++] = '"';
-    return true;
-}
-
 bool FilesystemModule::writeValue(const ControlDescriptor& c, char* buf, size_t bufLen, int& pos) {
-    int n = 0;
-    switch (c.type) {
-        case ControlType::Uint8:
-            n = std::snprintf(buf + pos, bufLen - pos, "%u",
-                              *static_cast<uint8_t*>(c.ptr));
-            break;
-        case ControlType::Uint16:
-            n = std::snprintf(buf + pos, bufLen - pos, "%u",
-                              *static_cast<uint16_t*>(c.ptr));
-            break;
-        case ControlType::Int16:
-            n = std::snprintf(buf + pos, bufLen - pos, "%d",
-                              *static_cast<int16_t*>(c.ptr));
-            break;
-        case ControlType::Bool:
-            n = std::snprintf(buf + pos, bufLen - pos, "%s",
-                              *static_cast<bool*>(c.ptr) ? "true" : "false");
-            break;
-        case ControlType::Text:
-        case ControlType::Password:
-            // Escape " and \ so a value like My"SSID can't produce malformed
-            // JSON. Returns false on buffer overflow.
-            return writeJsonString(static_cast<const char*>(c.ptr), buf, bufLen, pos);
-        case ControlType::Select:
-            n = std::snprintf(buf + pos, bufLen - pos, "%u",
-                              *static_cast<uint8_t*>(c.ptr));
-            break;
-        default:
-            n = std::snprintf(buf + pos, bufLen - pos, "null");
-            break;
-    }
-    if (n < 0 || static_cast<size_t>(pos + n) >= bufLen) return false;
-    pos += n;
+    // Bridge into the shared serializer via JsonSink's fixed-buffer mode:
+    // writeControlValue (in Control.cpp) writes through the JsonSink API,
+    // which writes into our slice and flips overflowed_ if we run out of
+    // capacity. Matches the prior overflow-returns-false contract.
+    if (pos < 0 || static_cast<size_t>(pos) >= bufLen) return false;
+    JsonSink local(buf + pos, bufLen - static_cast<size_t>(pos));
+    writeControlValue(local, c);
+    if (local.overflowed()) return false;
+    pos += static_cast<int>(local.size());
     return true;
 }
 

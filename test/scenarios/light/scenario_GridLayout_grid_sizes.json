@@ -1,0 +1,584 @@
+{
+  "name": "scenario_GridLayout_grid_sizes",
+  "module": "GridLayout",
+  "mode": "mutate",
+  "also": [
+    "Layer",
+    "MirrorModifier",
+    "NoiseEffect",
+    "Drivers",
+    "ArtNetSendDriver",
+    "PreviewDriver"
+  ],
+  "description": "Walk the grid through 16x16 → 32x32 → 64x64 → 128x128 and assert a per-size FPS floor.",
+  "fixture": [
+    {
+      "name": "fix-layouts",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "fix-grid",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 16,
+        "height": 16
+      }
+    },
+    {
+      "name": "fix-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "props": {
+        "layouts": "Layouts",
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "fix-noise",
+      "op": "add_module",
+      "id": "Noise",
+      "type": "NoiseEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "fix-mirror",
+      "op": "add_module",
+      "id": "Mirror",
+      "type": "MirrorModifier",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "fix-drivers",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "layer": "Layer"
+      }
+    },
+    {
+      "name": "fix-artnet",
+      "op": "add_module",
+      "id": "ArtNet",
+      "type": "ArtNetSendDriver",
+      "parent_id": "Drivers"
+    },
+    {
+      "name": "fix-preview",
+      "op": "add_module",
+      "id": "Preview",
+      "type": "PreviewDriver",
+      "parent_id": "Drivers"
+    }
+  ],
+  "reset": [
+    {
+      "name": "reset-grid-width",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "reset-grid-height",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128
+    },
+    {
+      "name": "reset-mirrorX",
+      "op": "set_control",
+      "id": "Mirror",
+      "key": "mirrorX",
+      "value": true
+    },
+    {
+      "name": "reset-mirrorY",
+      "op": "set_control",
+      "id": "Mirror",
+      "key": "mirrorY",
+      "value": true
+    }
+  ],
+  "steps": [
+    {
+      "name": "size-16x16-width",
+      "description": "Start of the 16x16 case: set width first (height still carries over from the reset / previous step). The measurement happens on the NEXT step, after height is also set — otherwise we'd be measuring an N×128 stripe.",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "size-16x16",
+      "description": "16x16 (256 lights) measured — smallest realistic display. Should hit the device's max FPS.",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min_pct": 80
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 5,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 700,
+          "free_heap": 150000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract",
+          "max_alloc_block": 50000
+        },
+        "esp32-eth": {
+          "max_alloc_block": 90000,
+          "set_by": "2026-06-02",
+          "reason": "anti-regression floor; LUT-fit telemetry baseline",
+          "tick_us": 700,
+          "free_heap": 170000
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            1,
+            5
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32-eth-wifi": {
+          "tick_us": [
+            549,
+            549
+          ],
+          "free_heap": [
+            142648,
+            142648
+          ],
+          "max_alloc_block": [
+            53248,
+            53248
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            541,
+            542
+          ],
+          "free_heap": [
+            182208,
+            182224
+          ],
+          "max_alloc_block": [
+            98304,
+            102400
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            748,
+            748
+          ],
+          "free_heap": [
+            132004,
+            132004
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        }
+      }
+    },
+    {
+      "name": "size-32x32-width",
+      "description": "32x32 (1024 lights).",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32
+    },
+    {
+      "name": "size-32x32",
+      "description": "32x32 measured. ~4x more lights than 16x16.",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min_pct": 80
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 10,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 2500,
+          "free_heap": 145000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract",
+          "max_alloc_block": 50000
+        },
+        "esp32-eth": {
+          "max_alloc_block": 80000,
+          "set_by": "2026-06-02",
+          "reason": "anti-regression floor; LUT-fit telemetry baseline",
+          "tick_us": 3300,
+          "free_heap": 165000
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            6,
+            7
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32-eth-wifi": {
+          "tick_us": [
+            2565,
+            2565
+          ],
+          "free_heap": [
+            134728,
+            134728
+          ],
+          "max_alloc_block": [
+            51200,
+            51200
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            2626,
+            2637
+          ],
+          "free_heap": [
+            175848,
+            175868
+          ],
+          "max_alloc_block": [
+            94208,
+            94208
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            6802,
+            6802
+          ],
+          "free_heap": [
+            124380,
+            124380
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        }
+      }
+    },
+    {
+      "name": "size-64x64-width",
+      "description": "64x64 (4096 lights).",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "size-64x64",
+      "description": "64x64 measured. Real-world mid size. Target: 60 FPS on a fast Ethernet device.",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min_pct": 80
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 30,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 13000,
+          "free_heap": 120000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract",
+          "max_alloc_block": 45000
+        },
+        "esp32-eth": {
+          "max_alloc_block": 55000,
+          "set_by": "2026-06-02",
+          "reason": "anti-regression floor; LUT-fit telemetry baseline",
+          "tick_us": 18000,
+          "free_heap": 140000
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            23,
+            30
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-03"
+          ]
+        },
+        "esp32-eth-wifi": {
+          "tick_us": [
+            11674,
+            11674
+          ],
+          "free_heap": [
+            110748,
+            110748
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            13394,
+            13420
+          ],
+          "free_heap": [
+            150408,
+            150428
+          ],
+          "max_alloc_block": [
+            63488,
+            63488
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            57109,
+            57109
+          ],
+          "free_heap": [
+            98948,
+            98948
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        }
+      }
+    },
+    {
+      "name": "size-128x128-width",
+      "description": "128x128 (16384 lights) — maximum supported size.",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "size-128x128",
+      "description": "128x128 measured. Real-world full-room size. Target: 20 FPS on a typical Ethernet device. Looser bound (min_pct 70) reflects the wider variance at the largest payload.",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min_pct": 70
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 120,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 105000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract",
+          "max_alloc_block": 45000
+        },
+        "esp32-eth": {
+          "max_alloc_block": 48000,
+          "set_by": "2026-06-02",
+          "reason": "anti-regression floor; LUT-fit telemetry baseline",
+          "tick_us": 110000,
+          "free_heap": 125000
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            98,
+            127
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-03"
+          ]
+        },
+        "esp32-eth-wifi": {
+          "tick_us": [
+            18336,
+            18336
+          ],
+          "free_heap": [
+            132392,
+            132392
+          ],
+          "max_alloc_block": [
+            53248,
+            53248
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            94726,
+            94893
+          ],
+          "free_heap": [
+            135188,
+            135208
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            228413,
+            228413
+          ],
+          "free_heap": [
+            85436,
+            85436
+          ],
+          "max_alloc_block": [
+            53248,
+            53248
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        }
+      }
+    }
+  ]
+}

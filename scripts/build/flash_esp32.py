@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Flash a built ESP32 firmware to a device.
 
-Reads ``build/esp32-<board>/projectMM.bin``. The per-board build dir
-(written by ``build_esp32.py``) makes "which board am I flashing" an
-on-disk fact rather than an in-memory marker — switching boards is a
-``--board`` change, not a clean-rebuild.
+Reads ``build/esp32-<firmware>/projectMM.bin``. The per-firmware build dir
+(written by ``build_esp32.py``) makes "which firmware am I flashing" an
+on-disk fact rather than an in-memory marker — switching firmwares is a
+``--firmware`` change, not a clean-rebuild.
 
 Prints the artifact size + age before flashing so a stale build (one
 from yesterday vs an edit five minutes ago) is visible in the log.
@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 ESP32_DIR = ROOT / "esp32"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_esp32 import find_idf, idf_env, idf_cmd, BOARDS, build_dir_for
+from build_esp32 import find_idf, idf_env, idf_cmd, FIRMWARES, build_dir_for
 
 
 def _fmt_age(seconds: float) -> str:
@@ -35,30 +35,30 @@ def _fmt_age(seconds: float) -> str:
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--port", required=True, help="Serial port")
-    parser.add_argument("--board", required=True, choices=sorted(BOARDS),
+    parser.add_argument("--firmware", required=True, choices=sorted(FIRMWARES),
                         help="Firmware variant to flash. The build for this "
-                             "board must exist at build/esp32-<board>/ — "
+                             "firmware must exist at build/esp32-<firmware>/ — "
                              "i.e. you must have run Build with the same "
-                             "--board first.")
+                             "--firmware first.")
     args = parser.parse_args()
 
     if not ESP32_DIR.exists():
         print(f"ESP32 project directory not found: {ESP32_DIR}")
         sys.exit(1)
 
-    build_dir = build_dir_for(args.board)
+    build_dir = build_dir_for(args.firmware)
     image = build_dir / "projectMM.bin"
 
     if not image.exists():
-        print(f"ERROR: no build for {args.board!r} at "
+        print(f"ERROR: no build for {args.firmware!r} at "
               f"{build_dir.relative_to(ROOT)}/.")
-        print(f"       Run Build with --board {args.board} first, then "
+        print(f"       Run Build with --firmware {args.firmware} first, then "
               f"Flash again.")
         sys.exit(2)
 
     size_kb = image.stat().st_size // 1024
     age = _fmt_age(time.time() - image.stat().st_mtime)
-    print(f"==> flashing {args.board} build ({size_kb} KB, built {age} ago) "
+    print(f"==> flashing {args.firmware} build ({size_kb} KB, built {age} ago) "
           f"to {args.port}")
 
     idf_path = find_idf()
@@ -69,9 +69,9 @@ def main():
     env = idf_env(idf_path)
     cmd = idf_cmd(idf_path)
     # -B + -DSDKCONFIG mirror build_esp32.py so idf.py flash reads the
-    # per-board sdkconfig (the chip target lives in there). Without
+    # per-firmware sdkconfig (the chip target lives in there). Without
     # -DSDKCONFIG, idf.py reads esp32/sdkconfig at the project root,
-    # which may belong to a different board.
+    # which may belong to a different firmware.
     b_arg = [
         "-B", str(build_dir),
         "-DSDKCONFIG=" + str(build_dir / "sdkconfig"),
@@ -79,7 +79,24 @@ def main():
 
     r = subprocess.run(cmd + b_arg + ["flash", "-p", args.port],
                        cwd=ESP32_DIR, env=env)
+    if r.returncode == 0:
+        _record_flash_event(args.port, args.firmware)
     sys.exit(r.returncode)
+
+
+def _record_flash_event(port: str, firmware: str) -> None:
+    """Drop a `scripts/.last_flash.json` breadcrumb so MoonDeck can link the
+    just-flashed serial port to whichever device appears online next.
+    MoonDeck's _probe_device consumes it on the next refresh and clears it.
+    Stored as JSON in the same directory as moondeck.json so the entire
+    "MoonDeck state" lives in one place."""
+    import json, time
+    marker = ROOT / "scripts" / ".last_flash.json"
+    marker.write_text(json.dumps({
+        "port": port,
+        "firmware": firmware,
+        "ts": time.time(),
+    }))
 
 
 if __name__ == "__main__":

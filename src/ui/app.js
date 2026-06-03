@@ -500,12 +500,14 @@ function createCard(mod, depth) {
     card.appendChild(title);
 
     // -- Controls --
-    // Container modules (those that accept children) get their own controls
-    // wrapped in a <details> so the parent's children are the focus by default
-    // and the parent's settings can be expanded on demand. Leaf modules render
-    // controls inline (no extra wrapper).
+    // Modules whose primary purpose is hosting user-added children (Layers,
+    // Layer, Drivers, Layouts) collapse their own controls so the children
+    // are the focus by default. Modules that merely host a code-wired child
+    // (Network → Improv) keep their controls expanded — the parent's settings
+    // are the main point, the code-wired child is informational. Leaf modules
+    // render controls inline (no wrapper at all).
     const hasVisibleControls = mod.controls && mod.controls.some(c => !c.hidden);
-    const wrapInDetails = acceptsChildren(mod) && hasVisibleControls;
+    const wrapInDetails = acceptsNewChildren(mod) && hasVisibleControls;
     const controlsHost = wrapInDetails ? (() => {
         const d = document.createElement("details");
         d.className = "card-controls-collapse";
@@ -540,27 +542,28 @@ function createCard(mod, depth) {
     }
 
     // FirmwareUpdate card hosts the shared release picker. Mount once per
-    // card-build. The picker reads SystemModule.board (already in /api/state)
-    // to filter to OTA-compatible releases. On install, the device fetches the
-    // binary via /api/firmware/url — no browser CORS in the data path.
+    // card-build. The picker reads SystemModule.firmware (already in
+    // /api/state) to filter to OTA-compatible releases. On install, the
+    // device fetches the binary via /api/firmware/url — no browser CORS in
+    // the data path. See docs/architecture.md § Firmware vs board.
     if (mod.type === "FirmwareUpdateModule") {
-        const ownBoardKey = (() => {
+        const ownFirmwareKey = (() => {
             if (!state || !state.modules) return null;
             // Look up by stable type first; the name fallback is a
             // belt-and-braces safety net (mod.name is user-editable in
             // principle, so it's not load-bearing for this lookup).
             const sys = state.modules.find(m => m.type === "SystemModule")
                      || state.modules.find(m => m.name === "System");
-            const boardCtrl = sys && (sys.controls || []).find(c => c.name === "board");
-            return boardCtrl && boardCtrl.value ? boardCtrl.value : null;
+            const fwCtrl = sys && (sys.controls || []).find(c => c.name === "firmware");
+            return fwCtrl && fwCtrl.value ? fwCtrl.value : null;
         })();
         const mount = document.createElement("div");
         mount.className = "release-picker-host";
         controlsHost.appendChild(mount);
         releasePicker.init({
             container: mount,
-            ownBoardKey,
-            onInstall: async (_board, _manifestUrl, binaryUrl) => {
+            ownFirmwareKey,
+            onInstall: async (_firmware, _manifestUrl, binaryUrl) => {
                 const res = await fetch("/api/firmware/url", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -578,38 +581,42 @@ function createCard(mod, depth) {
         });
     }
 
-    // -- Children block + footer (only on parents that accept children) --
+    // -- Children block + footer --
     // The .card-children wrapper lives inside this card so the parent's border
-    // encloses its children; renderModuleTree recurses into it. + add child
-    // sits below the children block, at the bottom of the parent box.
+    // encloses its children; renderModuleTree recurses into it. The "+ add child"
+    // footer only appears on parents that accept user-created children — a parent
+    // hosting only code-wired children (e.g. Network → Improv) renders the
+    // children block but no add button.
     let childrenEl = null;
-    if (acceptsChildren(mod)) {
+    if (hasNestedChildren(mod)) {
         childrenEl = document.createElement("div");
         childrenEl.className = "card-children";
         childrenEl.dataset.depth = String(depth + 1);
         card.appendChild(childrenEl);
 
-        // -- Footer: + add child --
-        const footer = document.createElement("div");
-        footer.className = "card-footer";
-        const addBtn = document.createElement("button");
-        addBtn.className = "add-btn";
-        addBtn.textContent = "+ add child";
-        addBtn.addEventListener("click", () => {
-            // Hide the button while the picker is open (the picker takes its
-            // place); restore it once the picker is removed (cancel/create/Esc).
-            addBtn.style.display = "none";
-            openTypePicker(mod, footer);
-            const obs = new MutationObserver(() => {
-                if (!footer.querySelector(".type-picker")) {
-                    addBtn.style.display = "";
-                    obs.disconnect();
-                }
+        if (acceptsNewChildren(mod)) {
+            // -- Footer: + add child --
+            const footer = document.createElement("div");
+            footer.className = "card-footer";
+            const addBtn = document.createElement("button");
+            addBtn.className = "add-btn";
+            addBtn.textContent = "+ add child";
+            addBtn.addEventListener("click", () => {
+                // Hide the button while the picker is open (the picker takes its
+                // place); restore it once the picker is removed (cancel/create/Esc).
+                addBtn.style.display = "none";
+                openTypePicker(mod, footer);
+                const obs = new MutationObserver(() => {
+                    if (!footer.querySelector(".type-picker")) {
+                        addBtn.style.display = "";
+                        obs.disconnect();
+                    }
+                });
+                obs.observe(footer, {childList: true});
             });
-            obs.observe(footer, {childList: true});
-        });
-        footer.appendChild(addBtn);
-        card.appendChild(footer);
+            footer.appendChild(addBtn);
+            card.appendChild(footer);
+        }
     }
 
     // -- Drag-to-reorder (HTML5 DnD on desktop; touchstart-gated on mobile) --
@@ -737,10 +744,20 @@ function findParent(childName) {
     return walk(null, state.modules);
 }
 
-function acceptsChildren(mod) {
-    // role-based: Layers → layer, Layer → effect+modifier, Drivers → driver, Layouts → layout.
-    // Mapped in JS, not in engine, so no backend allowedChildRoles field needed.
-    // Keyed on mod.type (stable factory key) — mod.name is editable per instance.
+// Whether this module renders any nested children at all (a "+ add child"
+// button included if it also accepts new ones via the UI). True whenever the
+// module has at least one child today OR is one of the light-pipeline
+// containers that users can add to. This lets code-wired children (e.g.
+// ImprovProvisioning under Network) render without making the parent UI-addable.
+function hasNestedChildren(mod) {
+    return (mod.children && mod.children.length > 0) || acceptsNewChildren(mod);
+}
+
+// Whether the UI's "+ add child" affordance applies to this parent. Light-pipeline
+// containers only — Layers → layer, Layer → effect+modifier, Drivers → driver,
+// Layouts → layout. System modules like Network that host a code-wired child
+// (Improv) are deliberately NOT in this list — the child is fixed-shape.
+function acceptsNewChildren(mod) {
     return mod.type === "Layers" ||
            mod.type === "Layer"  ||
            mod.type === "Drivers" ||
@@ -985,6 +1002,47 @@ function createControl(moduleName, moduleType, ctrl) {
             row.appendChild(span);
             break;
         }
+        case "display-int": {
+            // Read-only signed int with a unit suffix (e.g. "-58 dBm").
+            // ctrl.unit is the suffix the device chose at addReadOnlyInt time.
+            const span = document.createElement("span");
+            span.className = "display";
+            span.dataset.mid = moduleName;
+            span.dataset.key = ctrl.name;
+            span.dataset.kind = "display-int";
+            span.dataset.unit = ctrl.unit ?? "";
+            span.textContent = fmtDisplayInt(ctrl);
+            row.appendChild(span);
+            break;
+        }
+        case "ipv4": {
+            // Editable dotted-quad. Wire format is the same string the user
+            // types — the device parses + validates server-side and rejects
+            // malformed values with 400. Inline validation on the client is
+            // a future enhancement; today an invalid value goes to the
+            // server and the response surfaces the rejection.
+            //
+            // Same dragTs + debounceSend pattern as text / password so the
+            // ipv4 input participates in stale-WS-push protection: while
+            // the user is typing, dragTs[key] gets bumped, and an arriving
+            // WS push within the cooldown window won't revert mid-edit
+            // (see updateValues + the dragTs check ~line 1260).
+            const input = document.createElement("input");
+            input.type = "text";
+            input.className = "ipv4-input";
+            input.dataset.mid = moduleName;
+            input.dataset.key = ctrl.name;
+            input.value = ctrl.value ?? "";
+            input.placeholder = "0.0.0.0";
+            input.maxLength = 15;  // "255.255.255.255" = 15
+            input.size = 15;
+            input.addEventListener("input", () => {
+                dragTs[key] = Date.now();
+                debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, input.value));
+            });
+            row.appendChild(input);
+            break;
+        }
         case "time": {
             // Read-only seconds, rendered as "Xd Yh Zm Ws"
             const span = document.createElement("span");
@@ -1038,8 +1096,7 @@ function appendResetButton(row, moduleName, ctrl, def, applyVisually) {
     btn.dataset.mid = moduleName;
     btn.dataset.key = ctrl.name + ".reset";
     btn.dataset.def = String(def);
-    const eq = (ctrl.type === "bool") ? (!!ctrl.value === !!def)
-                                       : (Number(ctrl.value) === Number(def));
+    const eq = controlValuesEqual(ctrl, def);
     btn.classList.toggle("active", !eq);
     btn.addEventListener("click", () => {
         applyVisually();
@@ -1089,6 +1146,21 @@ function fmtProgressLabel(ctrl) {
     const v = Number(ctrl.value) || 0;
     const t = Number(ctrl.total) || 0;
     return Math.round(v / 1024) + "KB / " + Math.round(t / 1024) + "KB";
+}
+
+// "<value> <unit>" — treats null / undefined / 0 as "unavailable" so the
+// UI doesn't render bogus "0 dBm" when the device is in a state where the
+// metric isn't meaningful. The device's updateMetrics() writes 0 to rssi /
+// txPower in non-WiFi states; the control is hidden in those states, but
+// if anyone toggles hidden off (DevTools, future code path) the unit-with-
+// zero rendering would still mislead. Real metric values are never zero
+// in practice — RSSI is negative, TX power is 0..127 dBm (zero only on
+// driver-uninitialised reads).
+function fmtDisplayInt(ctrl) {
+    const v = ctrl.value;
+    const u = ctrl.unit || "";
+    if (v === null || v === undefined || v === 0) return "";
+    return u ? `${v} ${u}` : String(v);
 }
 
 // ---------------------------------------------------------------------------
@@ -1218,6 +1290,25 @@ function updateModuleControls(mod) {
                 if (span) span.textContent = ctrl.value ?? "";
                 break;
             }
+            case "display-int": {
+                const span = document.querySelector(`span.display[data-mid="${mid}"][data-key="${k}"]`);
+                if (span) {
+                    // Re-cache the unit in case the device changed it (it
+                    // shouldn't, but the WS path is the authority).
+                    span.dataset.unit = ctrl.unit ?? span.dataset.unit ?? "";
+                    span.textContent = fmtDisplayInt(ctrl);
+                }
+                break;
+            }
+            case "ipv4": {
+                const input = document.querySelector(`input.ipv4-input[data-mid="${mid}"][data-key="${k}"]`);
+                // Don't clobber an input the user is currently editing —
+                // matches how text inputs handle WS pushes elsewhere.
+                if (input && document.activeElement !== input) {
+                    input.value = ctrl.value ?? "";
+                }
+                break;
+            }
             case "time": {
                 const span = document.querySelector(`span.display[data-mid="${mid}"][data-key="${k}"]`);
                 if (span) span.textContent = fmtTime(ctrl.value ?? 0);
@@ -1240,12 +1331,22 @@ function updateModuleControls(mod) {
         if (def !== undefined && def !== null) {
             const btn = document.querySelector(`button.reset-btn[data-mid="${mid}"][data-key="${k}.reset"]`);
             if (btn) {
-                const eq = (ctrl.type === "bool") ? (!!ctrl.value === !!def)
-                                                   : (Number(ctrl.value) === Number(def));
+                const eq = controlValuesEqual(ctrl, def);
                 btn.classList.toggle("active", !eq);
             }
         }
     }
+}
+
+// Per-type equality for reset-button highlighting. bool→boolish, ipv4/text→
+// string compare, everything else → numeric. Centralised so the rules can't
+// drift between createControl and updateModuleControls.
+function controlValuesEqual(ctrl, def) {
+    if (ctrl.type === "bool") return !!ctrl.value === !!def;
+    if (ctrl.type === "ipv4" || ctrl.type === "text" || ctrl.type === "password") {
+        return String(ctrl.value ?? "") === String(def ?? "");
+    }
+    return Number(ctrl.value) === Number(def);
 }
 
 function cssEscape(s) {

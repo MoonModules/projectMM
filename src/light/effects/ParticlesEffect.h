@@ -29,7 +29,7 @@ public:
         controls_.addUint8("hue_shift", hue_shift, 0, 255);
     }
 
-    void onAllocateMemory() override {
+    void onBuildState() override {
         // D2 effect: trail buffer covers only the z=0 plane (w*h*cpl). Extrude
         // fills z on 3D layers. Avoids allocating depth× more heap than needed.
         uint8_t cpl = channelsPerLight();

@@ -1,0 +1,258 @@
+{
+  "name": "scenario_Layer_buildup",
+  "module": "Layer",
+  "mode": "construct",
+  "also": [
+    "Layouts",
+    "GridLayout",
+    "RainbowEffect",
+    "MirrorModifier",
+    "Drivers",
+    "ArtNetSendDriver"
+  ],
+  "description": "Start empty, add modules step by step, measure tick + heap after each meaningful pipeline state. Surfaces 'how much does each module cost?' so a regression in any one module shows up as a per-step delta instead of a single end-to-end number. Heap bounds catch unintended allocations: each step's delta vs the previous step is asserted against max_delta_bytes (only meaningful on ESP32 where freeHeap() returns a real value).",
+  "steps": [
+    {
+      "name": "add-layout-group",
+      "description": "Top-level Layouts container — no children yet, no lights, no buffer.",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "add-grid-16",
+      "description": "16x16 grid under Layouts. Smallest realistic display.",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 16,
+        "height": 16
+      }
+    },
+    {
+      "name": "add-layer",
+      "description": "Layer wired to Layouts (RGB, 3 channels per light).",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "props": {
+        "layouts": "Layouts",
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "add-rainbow",
+      "description": "RainbowEffect as the only effect. Renderable from this point on.",
+      "op": "add_module",
+      "id": "Rainbow",
+      "type": "RainbowEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "measure-minimum",
+      "description": "Baseline: 16x16 grid + Rainbow only. No Drivers yet (Layer renders into its own buffer).",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min": 1
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 50,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            35,
+            122
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        }
+      }
+    },
+    {
+      "name": "add-drivers",
+      "description": "Drivers container wired to the Layer.",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "layer": "Layer"
+      }
+    },
+    {
+      "name": "add-artnet",
+      "description": "ArtNetSendDriver under Drivers. Full pipeline now end-to-end.",
+      "op": "add_module",
+      "id": "ArtNet",
+      "type": "ArtNetSendDriver",
+      "parent_id": "Drivers"
+    },
+    {
+      "name": "measure-full-16x16",
+      "description": "Full pipeline at 16x16. Heap delta vs previous measure-minimum step should stay within +8KB on ESP32 (Drivers + ArtNet overhead, no LUT yet).",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min": 1
+        },
+        "heap": {
+          "max_delta_bytes": 8192
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 50,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            35,
+            183
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        }
+      }
+    },
+    {
+      "name": "add-mirror",
+      "description": "MirrorModifier under Layer. Triggers a LUT build + Drivers output buffer allocation (the heavy memory path).",
+      "op": "add_module",
+      "id": "Mirror",
+      "type": "MirrorModifier",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "measure-with-lut-16x16",
+      "description": "Mirror is on: Layer has a LUT, Drivers has an output buffer. min_fps_led_product asserts the throughput floor scales correctly to the logical grid size (post-mirror).",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min_fps_led_product": 100000
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 60,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            44,
+            135
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-03"
+          ]
+        }
+      }
+    },
+    {
+      "name": "grow-to-128x128-width",
+      "description": "Grow the grid: 128 wide.",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "grow-to-128x128-height",
+      "description": "Grow the grid: 128 tall. Layer reallocates buffer; with mirror on, LUT also grows. Heap delta caught by max_delta_bytes.",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128
+    },
+    {
+      "name": "measure-full-128x128",
+      "description": "Production-size grid with the full pipeline. Final tick + cumulative heap delta — the line you compare against future commits to catch regressions across the whole pipeline.",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min": 1
+        },
+        "heap": {
+          "max_delta_bytes": 1048576
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 60,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            43,
+            170
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-03"
+          ]
+        }
+      }
+    }
+  ]
+}

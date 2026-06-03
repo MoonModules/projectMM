@@ -30,13 +30,13 @@ On `depth == 1` the four 2D sines are averaged via `>> 2` (byte-identical to the
 - No division or modulo in the inner loop — `step_x`/`step_y` computed once per frame
 - Nested `for (y) for (x)` with row pointer — no `i % w` per pixel
 - Y-dependent terms hoisted outside the x-loop
-- `dynamicBytes()` = 0 — no `onAllocateMemory` override
+- `dynamicBytes()` = 0 — no `onBuildState` override
 
 Phase accumulator matches NoiseEffect pattern — BPM changes do not jump the animation.
 
 ## Tests
 
-[Module test: PlasmaEffect](../../../testing.md#plasma) — non-zero output, spatial variation, differs from NoiseEffect.
+[Unit tests: PlasmaEffect](../../../tests/unit-tests.md#plasmaeffect) — non-zero output, spatial variation, differs from NoiseEffect.
 
 Default pipeline uses Plasma + MirrorModifier (see `src/main.cpp`).
 

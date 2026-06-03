@@ -20,7 +20,7 @@ Either path: ~2–3 h translation + Windows-side testing. Once green, `build-win
 
 1.0 ships ESP32 firmware (4 variants) + macOS arm64. Still to add:
 
-- **ESP32-P4** board variant — new chip target, new sdkconfig fragment, fits the existing `BOARDS` table in `build_esp32.py`.
+- **ESP32-P4** firmware variant — new chip target, new sdkconfig fragment, fits the existing `FIRMWARES` table in `build_esp32.py`.
 - **Linux desktop binary** — third desktop job in `release.yml`, static-linked libstdc++.
 - **Teensy 4.1** — toolchain-file build, `.hex` for Teensy Loader.
 - **Raspberry Pi** — ARM64, cross-built or native.
@@ -41,6 +41,48 @@ Either path: ~2–3 h translation + Windows-side testing. Once green, `build-win
 
 This determines the practical LED limit for WiFi-only boards. Until the `sdkconfig.defaults` TX-buffer fix lands (identified in the build-variant table), **use `esp32-eth-wifi` for any ArtNet workload on classic ESP32** even if Ethernet isn't physically connected.
 
+### `esp32-eth` slow Ethernet bring-up vs `esp32-eth-wifi` (investigation)
+
+On Olimex ESP32-Gateway flashed with `esp32-eth`, Ethernet sometimes takes **a minute or more** to acquire a DHCP lease at boot. The same hardware flashed with `esp32-eth-wifi` brings Ethernet up in seconds. The B1 Idle-recovery fix in `src/core/NetworkModule.h` masks the symptom (status correctly transitions to "Eth: <ip>" once the lease arrives), but the underlying slow bring-up is a real performance regression on the eth-only build.
+
+What we know:
+- `build/esp32-esp32-eth/sdkconfig` and `build/esp32-esp32-eth-wifi/sdkconfig` are **byte-identical** (3,617 lines each, `cmp -s` confirms). So lwIP buffer pools, DHCP timeouts, and Ethernet driver settings are the same.
+- Same hardware (Olimex ESP32-Gateway Rev G), same RMII pin/clock config (`EMAC_CLK_OUT` on GPIO17), same `ethInit()` code in `src/platform/esp32/platform_esp32.cpp`.
+- The only difference at link time: `esp32-eth` passes `EXCLUDE_COMPONENTS=esp_wifi;wpa_supplicant;esp_coex` to ESP-IDF (see `scripts/build/build_esp32.py:31`).
+- `esp_coex` (WiFi/Bluetooth coexistence) is normally responsible for shared-radio timing arbitration. Hypothesis: even though Ethernet doesn't share the radio, something in `esp_coex` or its early init dependency chain warms a clock path (the shared 26 MHz crystal feeding both WiFi PHY and EMAC PLL) that helps Ethernet auto-negotiation. With it excluded, the EMAC takes longer to stabilise.
+
+What we don't know:
+- Which init step actually consumes the time — link-up (PHY negotiation) vs DHCP (lwIP) vs both?
+- Whether the slow path is reproducible (does it always happen, or only on cold boot / after a reset / etc.)?
+
+Diagnostic to run when picking this up: flash both variants, capture `idf.py monitor` from boot to "got IP" on each, diff the timestamps of `Ethernet link up` and `Ethernet got IP` ESP_LOGI lines. If link-up is fast but DHCP is slow → lwIP init issue (look at `esp_netif_init`'s side effects from excluded components). If link-up itself is slow → PHY/clock path (try re-adding only `esp_coex` to see if it helps).
+
+### NoiseEffect cost on ESP32 (investigation)
+
+At 128×128 with mirror XY, NoiseEffect renders a 64×64 logical area but still costs **~47 ms/tick** on `esp32-eth-wifi` (Olimex Gateway, 160 MHz) — ~11.5 µs per pixel for 4,096 pixels. That's 55% of the total ~85 ms tick, capping the workload at ~12 FPS. By comparison RainbowEffect on the same pipeline hits ~22 FPS — the simplex math is the dominant cost.
+
+To reach 18 FPS at 128×128 with mirror + Noise (matching the historic Rainbow headline), total tick must drop to ~56 ms. ArtNet alone is ~28 ms, so Noise needs to drop from 47 ms to ~28 ms — a ~40% cut on the effect itself.
+
+Worth investigating:
+
+- **Q16 fixed-point simplex** instead of float (Xtensa LX6 has no FPU; float math is software-emulated).
+- **Lower-precision hash** — current simplex uses a 256-entry permutation lookup; a smaller / SIMD-friendly hash may be faster on Xtensa.
+- **Strided sampling + interpolation** — render at 32×32, bilinear up to 64×64. Visual quality cost; needs A/B comparison.
+- **Inline / unroll the inner per-pixel loop** to keep the simplex state in registers.
+
+None of these are obviously free. Reaching 18 FPS may require accepting a visual signature change. Defer until there's a real use case (today's "12 FPS at heaviest workload" is fine for the intended deployment scale).
+
+### MoonDeck doc-asset endpoint hardening (backlog)
+
+`scripts/moondeck.py::_serve_doc_asset` accepts any ROOT-relative path and serves the file. Path traversal *is* blocked (`asset_path.relative_to(ROOT.resolve())`), but inside the repo any file is served — including local-only artefacts like `scripts/build/wifi_credentials.json` if present. MoonDeck binds to all interfaces by design (the existing comment in `main()` explicitly enables LAN reach), so anyone on the LAN can hit the endpoint.
+
+Two improvements when this matters:
+- **Subdirectory whitelist** — only serve under `docs/` (and image asset paths the markdown renderer needs). Reject `scripts/build/wifi_credentials.json` etc. with 403.
+- **Extension whitelist** — only image / CSS / JS mime types via a small allowlist.
+- **Optional bind-to-localhost flag** — `--bind 127.0.0.1` for users who don't want LAN reachability. Default stays "" (all interfaces) since the LAN-reach is the documented design.
+
+Not blocking — MoonDeck is a developer tool, not a production server. Pick this up when MoonDeck is in scope for hardening.
+
 ### mDNS toggle (evaluate)
 
 Added as a diagnostic tool during performance investigation; testing showed mDNS has zero FPS impact. Evaluate whether to keep (useful for debugging on other boards) or remove (unnecessary complexity). Decide after WiFi performance testing above.
@@ -53,6 +95,28 @@ Fix options in increasing scope:
 - **Cap the default grid** — drop to 64×64 on `esp32-eth-wifi` (Layer ~32 KB + LUT ~16 KB = 48 KB, comfortably under). Simplest.
 - **PSRAM for Layer buffer + LUT** — ESP32-Gateway has 4 MB PSRAM unused on non-S3 builds. Moving the 49 KB pixel buffer + 64 KB LUT out of DRAM frees ~110 KB for radios. Cost: ~25% FPS hit (PSRAM bandwidth ~12 MB/s vs DRAM ~80 MB/s); needs measurement. See [decisions.md](history/decisions.md) "Adaptive memory allocation design" for the allocation rules.
 - **Lazy WiFi init** — skip `esp_wifi_init` when `ssid_` is empty and no AP-fallback is pending. Helps only when credentials exist but the network is unreachable — niche.
+
+### Mirror LUT silently degrades at 128×128 on no-PSRAM ESP32 (regression — open)
+
+The Layer mirror LUT at 128×128 needs ~72 KB contiguous (4097-entry offsets table + 32768-entry destinations, each `uint16_t`). On Olimex Gateway Rev G the largest contiguous block at runtime is **~52 KB on `esp32-eth-wifi`** and **~53 KB on `esp32-eth`** — see the `observed.<target>.max_alloc_block` field in `test/scenarios/light/scenario_GridLayout_grid_sizes.json` `size-128x128`. Removing the WiFi stack reclaims ~36 KB of *free* heap but only ~4 KB of *contiguous* heap, because the dominant fragmenters are our own allocations (49 KB Layer logical buffer + 49 KB Driver output buffer), not WiFi.
+
+Result: `Layer::rebuildLUT` hits the `canAllocate(72 KB)` failure path, sets status `"modifier LUT skipped — not enough memory"` (severity warning), and degrades to 1:1 mapping. **Mirror has no visible effect at 128×128** on either Olimex build. At 64×64 the LUT only needs ~18 KB, easily fits. At 128×64 the LUT needs ~36 KB, also fits.
+
+**This is a regression.** Commit `7763bf8` ("Add eth-only build, fix FPS swing, optimize ArtNet") documented `128×128 grid, mirror XY, noise effect, Ethernet` with `Noise effect | 11,200 µs | 16% | 4096 logical pixels` and total tick 69,000 µs (14 FPS, free heap 124 KB). That `4096 logical pixels` line proves the mirror LUT was applied — Noise rendered the quadrant, not the full grid. Today the same workload measures `47,000 µs` for NoiseEffect (rendering all 16,384 pixels, because the LUT degraded), and free heap is down to ~97 KB. Net regression: ~27 KB of free heap lost since `7763bf8`, mirror no longer applied, Noise pays 4× the per-pixel cost.
+
+Suspect additions between `7763bf8` and today:
+- `aaf8d98` Per-driver output correction (Correction stage in Drivers path; allocates the 49 KB output buffer that didn't exist before).
+- `4cdc09a` Plan-18: release-channel picker + OTA + Improv WiFi + post-flash fix-pack (FirmwareUpdateModule, ImprovProvisioningModule).
+- HTTP server endpoints accumulated over the same span (WebSocket buffers, route handlers, mDNS service registrations).
+
+The contiguous-block deficit is structural now: even with mDNS off + Preview disabled + Improv deleted at runtime, max block stays at 53 KB (verified live on Olimex 2026-06-02). So toggling features off won't restore it — the per-driver Correction stage in `Drivers.h` lines 92-104 is the dominant non-removable consumer.
+
+Fix options:
+- **Allocate LUT before Driver output buffer** in `Layer::rebuildLUT()` / `Drivers::onBuildState()` — claim the larger contiguous chunk while heap is still less fragmented at startup. Requires reshuffling allocation order (Drivers currently allocates `outputBuffer_` in its own `onBuildState`, independently of Layer). Low risk; should let mirror work at 128×128 on eth-only at least.
+- **Smaller LUT representation for symmetric mirrors** — a "1:1 + axis-mirror suffix" encoding could compress the 72 KB LUT into ~4 KB (just the axis flags + an offset per logical pixel). Significant work but kills the problem outright for any mirror config.
+- **PSRAM** — only helps on PSRAM-equipped boards (Olimex Gateway Rev G has none).
+
+Tracked because surfacing the regression now (with max_alloc_block telemetry in scenarios) makes the next step concrete: pick one of the three options and measure.
 
 ### Preview memory optimizations (backlog)
 
@@ -67,6 +131,24 @@ No FreeRTOS tasks are pinned today. At 16K LEDs the render task takes ~52 ms/tic
 
 ## Architecture
 
+### Runtime board presets (multi-commit, partially landed)
+
+The firmware-vs-board separation is now in place across the codebase (see [architecture.md § Firmware vs board](architecture.md#firmware-vs-board)). `build_esp32.py --firmware <variant>` picks the compiled binary; MoonDeck deduces the physical board where the firmware uniquely identifies hardware (`esp32-eth*` ⇒ `olimex-esp32-gateway-rev-g`) and lets the user pick from a short hardcoded list otherwise. Firmware variants stay separate — `esp32-eth` saves ~670 KB flash + ~30 KB DRAM vs `esp32-eth-wifi` (measured); merging would erase that win.
+
+What still needs separation: the eth variants hardcode Olimex Gateway RMII pins in `src/platform/esp32/platform_esp32.cpp::ethInit()`, so they only work on that one PCB. As we add boards with different pins (LOLIN D32 tested 2026-06-02, QuinLED variants planned), runtime pin configuration becomes the next step.
+
+Pin config moves to runtime (next, separate commit):
+- Drop hardcoded `GPIO_NUM_17` from `ethInit()`. NetworkModule reads `Network.eth_rmii_clock_gpio` (new control) and similar pin values, defaulting to current Olimex hardcodes so behaviour is unchanged.
+- Same for any other hardware-pin literal in the firmware.
+
+Board preset catalog + upload (later, when the runtime config has real consumers):
+- Add structured per-board files (location TBD — not `docs/` since they're config not docs; `boards/` at repo root is the strong candidate, matches the PlatformIO convention contributors will recognise).
+- Each file declares chip, flash, PSRAM, Ethernet PHY + pins, default module config.
+- New `/api/board-preset` endpoint accepts the JSON; device persists to LittleFS; bootstrap applies pins + defaults on next boot.
+- MoonDeck "Set board" picker reads the catalog to populate the dropdown.
+- Pin reassignment requires reboot (ESP-IDF can't hot-reconfigure EMAC pins after `esp_eth_driver_install`); document the constraint.
+- A first attempt at this catalog landed and was rolled back during the firmware-vs-board separation work — the catalog only earns its keep once the device reads it, otherwise it's a docs-shaped file in the wrong place.
+
 ### Multi-layer composition (backlog)
 
 `Layers` holds N layers; `Drivers` reads from a single active layer today. Composition is the missing piece — additional layers render their buffers but only the first enabled layer reaches output.
@@ -74,7 +156,7 @@ No FreeRTOS tasks are pinned today. At 16K LEDs the render task takes ~52 ms/tic
 When picked up:
 - `Drivers::loop()` blends each enabled Layer's buffer into the shared output using per-Layer blend mode + opacity (controls to add on Layer).
 - `Layer::startX/Y/Z` / `endX/Y/Z` (already persisted, currently no-op) become active in `rebuildLUT` — each Layer carves a percentage region of the physical extent.
-- Memory-aware allocator at `onAllocateMemory` time decides how many Layers fit and degrades gracefully.
+- Memory-aware allocator at `onBuildState` time decides how many Layers fit and degrades gracefully.
 - Persistence already encodes Layers children positionally — adding siblings just works on the file-format side.
 
 ### Improv as a child of NetworkModule (deferred — needs scheduler work first)
@@ -89,6 +171,43 @@ Minimum-scope fix before the move:
 ### Platform API: `std::span` migration (backlog)
 
 Several `platform.h` APIs still use `(buf, len)` pairs where `std::span` would catch length/pointer mismatches at compile time. Concrete sites: `http_fetch_to_ota`, `improvProvisioningInit`, and friends. ~2 h including ripple updates to callers. Do alongside the next platform-API expansion (Windows socket port or POST /api/firmware streaming).
+
+### Board injection + Improv as a general data injector (multi-commit, partially landed)
+
+Today the **firmware** the device runs is baked in at compile time (`MM_FIRMWARE_NAME`) and self-reported via SystemModule. The **board** the firmware runs on (Olimex Gateway, LOLIN D32, generic ESP32, …) the device cannot self-identify — no readable PCB ID on classic ESP32. MoonDeck deduces it from the firmware where the firmware uniquely identifies hardware (`esp32-eth*` ⇒ Olimex) and otherwise asks the user via a picker; the value lives in `scripts/moondeck.json` on the laptop only. The device's own UI and API have no concept of board.
+
+Goal: get the board key onto the device (persisted, reported via `/api/state`) so it survives between MoonDeck sessions and other clients (HomeAssistant, future MQTT, the device's own OTA-picker compatibility filter) can read it. Then make injection a first-class part of the install flow (web installer + Improv) so end users get the right board key without needing MoonDeck at all.
+
+Builds on existing plan items: see [Runtime board presets](#runtime-board-presets-multi-commit-partially-landed) for the longer-term goal of pin maps / module-config defaults living per-board on disk; this section is the prerequisite — getting the *key* onto the device — that unlocks that work.
+
+**Step 1 — Catalog + device control + MoonDeck push:**
+- New `docs/install/boards.json` (catalog, shared between MoonDeck + the web installer + a future device-side preset loader). Schema: `[{ key, label, firmwares[], default_firmware }]`. Initial entries from MoonDeck's current hardcoded `boardOptions`: Olimex Gateway Rev G, LOLIN D32, generic ESP32, ESP32-S3 DevKitC-1 N16R8.
+- Device: SystemModule gains an `addReadOnly("board", board_, ...)` control (40-byte buffer, persisted via the existing FilesystemModule path); new `setBoard()` method; new `POST /api/system/board { "value": "..." }` route (distinct from `/api/control` because ReadOnly rejects writes there — board is metadata, not a control).
+- MoonDeck: loads `boards.json` from disk (no GitHub fetch — local repo is the source); replaces hardcoded `boardOptions` in [moondeck_ui/app.js](../scripts/moondeck_ui/app.js); `_deduce_board` becomes a catalog reverse-lookup (find unique board for firmware → key, else ""); pushes the picked / deduced value via the new route on first reach.
+- UI: device-side renders `board` as a read-only display — no input affordance (board is injected, not user-edited at the device).
+
+**Step 2 — Web installer board picker (HTTP-fetch injection, dev-only):**
+- Installer page loads `boards.json` from the same Pages-relative path.
+- Board dropdown above the existing firmware dropdown. Picking a board filters firmware to `firmwares[]` and selects `default_firmware`. Single-firmware boards show the firmware as a disabled field ("Firmware: esp32 (only option for this board)") rather than a picker.
+- After ESP Web Tools' `PROVISIONED` event fires, `fetch(<device-url>/api/system/board, ...)` to inject the chosen board key.
+- Works on `http://localhost:8000/` (preview_installer + dev) where mixed-content rules don't apply. **Doesn't work** on the public `https://ewowi.github.io/install/` deployment because HTTPS pages can't fetch HTTP device URLs. Document the limitation; step 3 fixes it.
+
+**Step 3 — Improv RPC injection (production path):**
+- Device: ImprovProvisioningModule gains a custom RPC command handler (`RPC_SET_BOARD = 0x80` or similar; vendor-extension range above the standard Improv commands). The handler calls SystemModule's `setBoard()`.
+- Installer page: sends the RPC over the same Web Serial Improv channel that's already open during the flash flow. Verify ESP Web Tools' API for sending custom Improv commands; if `esp-web-install-button` doesn't expose it, drop to `improv-wifi-serial-sdk` (the underlying lib) directly.
+- This is the public-installer path — no network involved, no CORS / mixed-content issues. Works from `ewowi.github.io` over HTTPS.
+
+**Step 4 — Catalog grows (only when there's a consumer):**
+- Once the device-side runtime board presets work ([Runtime board presets](#runtime-board-presets-multi-commit-partially-landed)) actually lands, `boards.json` entries gain optional `presets` fields (`ethernet.{phy, rmii_clock_gpio, mdio_gpio, …}`, `default_module_config.{Network, Layouts, …}`). MoonDeck pushes the relevant subset alongside the board key via a new `POST /api/system/board-preset` route. Until then, **don't add `presets` fields** — JSON shape grows when a consumer earns its keep, not before.
+
+**Improv as a general data injector (deferred until a second use case lands):**
+
+Step 3's custom RPC infrastructure is the seed. Plausible follow-on injectables: device name override (skip the `MM-CAFE` default), MQTT broker URL (when MQTT module ever lands), static IP, DMX universe assignments, pre-shared API token. **Don't generalise yet** — building a generic key-value Improv injector before there's a second use case is premature abstraction. If two or three more inject-at-install fields land with the same shape, *then* refactor ImprovProvisioningModule into a generic handler that dispatches by RPC command ID to registered callbacks.
+
+**Risks worth noting:**
+- HTTP injection (step 2) only works in dev — the public installer can't use it. Step 3 is the real path.
+- ESP Web Tools' custom-Improv-RPC sending API needs verification. If it requires dropping below the high-level button to the SDK, that's a bigger lift than a one-line add.
+- `RPC_SET_BOARD` is a custom command ID — collisions with future Improv-spec additions are possible if the standard expands into the vendor range. Before picking the ID: check the latest Improv-serial spec at <https://www.improv-wifi.com/serial/> and survey ESPHome / Home Assistant for de facto vendor uses. Pick conservatively (high end of 0x80-0xFE) and document the choice in a comment at the definition site.
 
 ---
 
@@ -134,7 +253,8 @@ Design (already noted in [PreviewDriver.md](moonmodules/light/drivers/PreviewDri
 
 - **UI page load time** — scenario step measuring HTTP response time for `/`, `/api/state`, `/api/system` via the live runner. Verifies acceptable load time on ESP32.
 - **Module teardown memory** — scenario that tears down all modules and verifies heap returns to pre-setup baseline. Confirms no lifecycle leaks.
-- **JavaScript test harness** — `vitest` or `node --test` with `jsdom` for pure helpers in `release-picker.js` (`isCompatible`, `parseBoardsFromAssets`, `relativeTime`). Deferred until a second non-trivial JS module lands — one file doesn't justify the toolchain weight.
+- **JavaScript test harness** — `vitest` or `node --test` with `jsdom` for pure helpers in `release-picker.js` (`isCompatible`, `parseFirmwaresFromAssets`, `relativeTime`). Deferred until a second non-trivial JS module lands — one file doesn't justify the toolchain weight.
+- **Browser-level Improv automation** (deferred) — `scripts/build/improv_smoke_test.py` (added 2026-06-03) exercises the device-side Improv listener over plain serial; what's missing is the browser-side equivalent — Playwright driving Chrome's Web Serial, clicking through ESP Web Tools' install modal, filling the WiFi creds form, asserting `PROVISIONED`. Catches "ESP Web Tools changed its Improv handling in a way that broke our manifest format" failures the serial-only smoke test can't see. Hard to set up reliably (headless Chrome with Web Serial is finicky, needs a wired ESP32 in CI). Pick this up if a regression in the browser flow ever escapes the manual dev-environment test (preview_installer flash-ready mode at <http://localhost:8000/>).
 
 ---
 
@@ -146,4 +266,4 @@ Check whether `setup_esp_idf.py` pins to a specific commit/tag or always pulls l
 
 ### WiFi runtime disable (backlog)
 
-Compile-time answer already ships: `--board esp32-eth` excludes the WiFi stack. This item is the runtime variant — a single `esp32-eth-wifi` binary that skips WiFi init when Ethernet hardware is present. Prerequisite: `platform::ethPresent()` / `platform::wifiPresent()` (listed under Release 2.0 above). Defer until that API lands.
+Compile-time answer already ships: `--firmware esp32-eth` excludes the WiFi stack. This item is the runtime variant — a single `esp32-eth-wifi` binary that skips WiFi init when Ethernet hardware is present. Prerequisite: `platform::ethPresent()` / `platform::wifiPresent()` (listed under Release 2.0 above). Defer until that API lands.

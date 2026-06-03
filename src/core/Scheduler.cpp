@@ -51,7 +51,7 @@ void Scheduler::setup() {
 
     // Phase 4: allocate buffers sized to final control values.
     for (uint8_t i = 0; i < moduleCount_; i++) {
-        modules_[i]->onAllocateMemory();
+        modules_[i]->onBuildState();
     }
 
     lastLoop20ms_ = platform::millis();
@@ -133,9 +133,9 @@ uint32_t Scheduler::elapsed() const {
     return platform::millis() - startTime_;
 }
 
-void Scheduler::rebuild() {
+void Scheduler::buildState() {
     for (uint8_t i = 0; i < moduleCount_; i++) {
-        modules_[i]->onAllocateMemory();
+        modules_[i]->onBuildState();
     }
 }
 

@@ -1,0 +1,270 @@
+{
+  "name": "scenario_NetworkModule_mdns_toggle",
+  "module": "NetworkModule",
+  "mode": "mutate",
+  "live_only": true,
+  "description": "Toggle the mDNS responder on and off and measure render-FPS impact. Validates that mDNS announcement traffic doesn't degrade the render loop more than 20% on the busiest tick.",
+  "reset": [
+    {
+      "name": "reset-grid-width",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "reset-grid-height",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128
+    },
+    {
+      "name": "reset-mirrorX",
+      "op": "set_control",
+      "id": "Mirror",
+      "key": "mirrorX",
+      "value": true
+    },
+    {
+      "name": "reset-mirrorY",
+      "op": "set_control",
+      "id": "Mirror",
+      "key": "mirrorY",
+      "value": true
+    },
+    {
+      "name": "reset-mdns",
+      "op": "set_control",
+      "id": "Network",
+      "key": "mDNS",
+      "value": true
+    }
+  ],
+  "steps": [
+    {
+      "name": "baseline-mdns-on",
+      "description": "mDNS on (default) — captures the baseline FPS for the next two steps.",
+      "op": "set_control",
+      "id": "Network",
+      "key": "mDNS",
+      "value": true,
+      "measure": true,
+      "contract": {
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 105000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "esp32-eth-wifi": {
+          "tick_us": [
+            81816,
+            81816
+          ],
+          "free_heap": [
+            95632,
+            95632
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            94489,
+            94902
+          ],
+          "free_heap": [
+            135196,
+            135208
+          ],
+          "max_alloc_block": [
+            49152,
+            51200
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            229859,
+            229859
+          ],
+          "free_heap": [
+            90056,
+            90056
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        }
+      }
+    },
+    {
+      "name": "mdns-off",
+      "description": "mDNS off — measured. Expected to match or exceed the baseline.",
+      "op": "set_control",
+      "id": "Network",
+      "key": "mDNS",
+      "value": false,
+      "measure": true,
+      "contract": {
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 95000,
+          "set_by": "2026-06-02",
+          "reason": "shared heap budget; cumulative sweep state reduces standalone-mDNS-off heap by ~15KB"
+        }
+      },
+      "observed": {
+        "esp32-eth-wifi": {
+          "tick_us": [
+            83137,
+            83137
+          ],
+          "free_heap": [
+            100408,
+            100408
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            95470,
+            96714
+          ],
+          "free_heap": [
+            139964,
+            139984
+          ],
+          "max_alloc_block": [
+            49152,
+            53248
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            274639,
+            274639
+          ],
+          "free_heap": [
+            89796,
+            89796
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        }
+      }
+    },
+    {
+      "name": "mdns-on-again",
+      "description": "mDNS on again — measured with a bound: FPS must stay within 20% of the baseline (proves toggling doesn't leave the network task in a degraded state).",
+      "op": "set_control",
+      "id": "Network",
+      "key": "mDNS",
+      "value": true,
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min_pct": 80
+        }
+      },
+      "contract": {
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 105000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "esp32-eth-wifi": {
+          "tick_us": [
+            93963,
+            93963
+          ],
+          "free_heap": [
+            95484,
+            95484
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            109767,
+            109932
+          ],
+          "free_heap": [
+            135052,
+            135072
+          ],
+          "max_alloc_block": [
+            49152,
+            53248
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            234016,
+            234016
+          ],
+          "free_heap": [
+            84848,
+            84848
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        }
+      }
+    }
+  ]
+}

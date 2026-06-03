@@ -127,6 +127,15 @@ select {
     padding-top: 0;
 }
 
+/* Shared module dropdown sits between a group header and its cards (one
+   filter drives every card in the group, e.g. test + scenarios share the
+   same module). The same select+button shape also appears inside a card
+   when only one card in the group needs a module (.module-row). Both rule
+   sets below select either layout so the visual is identical. */
+.shared-module-row {
+    padding: 0 2px 4px;
+}
+
 .script-card {
     background: #1a1a2e;
     border: 1px solid #0f3460;
@@ -190,7 +199,16 @@ select {
     cursor: pointer;
 }
 
-.script-card .scenario-select {
+.script-card .scenario-row,
+.script-card .module-row,
+.shared-module-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.script-card .scenario-select,
+.script-card .module-select,
+.shared-module-row .module-select {
     background: #0f3460;
     border: 1px solid #0f3460;
     color: #c0c0d0;
@@ -198,8 +216,27 @@ select {
     font-size: 11px;
     padding: 2px 4px;
     cursor: pointer;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
 }
+.script-card .steps-btn,
+.script-card .tests-btn,
+.shared-module-row .tests-btn {
+    background: transparent;
+    border: 1px solid #0f3460;
+    color: #a0a0b0;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    flex: 0 0 auto;
+}
+.script-card .steps-btn:hover:not(:disabled),
+.script-card .tests-btn:hover:not(:disabled),
+.shared-module-row .tests-btn:hover:not(:disabled) { color: #e94560; border-color: #e94560; }
+.script-card .steps-btn:disabled,
+.script-card .tests-btn:disabled,
+.shared-module-row .tests-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .flag-row {
     display: flex;
@@ -247,11 +284,50 @@ select {
 }
 .device-status.online { background: #4caf50; }
 .device-status.offline { background: #666; }
+.device-board {
+    margin-left: auto; font-size: 11px; background: #1c2535; color: #c0c0c0;
+    border: 1px solid #2a3548; border-radius: 3px; padding: 1px 4px;
+    max-width: 16ch;
+    /* Clamp long board labels (e.g. "Olimex ESP32-Gateway Rev G" = 26ch)
+       so the badge stays badge-sized. inline-block + nowrap + ellipsis is
+       the standard truncation triple; the select element honours it on
+       its displayed selection text. */
+    display: inline-block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .device-remove {
-    margin-left: auto; background: none; border: none; color: #666;
+    background: none; border: none; color: #666;
     cursor: pointer; font-size: 11px; padding: 0 4px;
 }
 .device-remove:hover { color: #e94560; }
+
+/* Network bar — app-wide selector for the active LAN. Lives above the
+   per-tab content, applies to all tabs. The WiFi sub-panel is the SSID +
+   password the active network uses (consumed by Improv provisioning). */
+.network-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    padding: 6px 10px; margin: 0 0 8px 0;
+    background: #161b22; border-radius: 4px; border-left: 3px solid #0f3460;
+    font-size: 12px;
+}
+.network-bar label { display: inline-flex; align-items: center; gap: 4px; }
+.network-bar select, .network-bar input {
+    background: #1c2535; color: #c0c0c0;
+    border: 1px solid #2a3548; border-radius: 3px; padding: 1px 4px;
+    font-size: 12px;
+}
+.network-bar button {
+    background: #2a3548; color: #c0c0c0; border: none; border-radius: 3px;
+    padding: 2px 8px; cursor: pointer; font-size: 11px;
+}
+.network-bar button:hover { background: #3a4558; }
+.network-wifi {
+    display: flex; flex-wrap: wrap; gap: 8px; width: 100%;
+    margin-top: 2px; padding-top: 4px; border-top: 1px solid #1c2535;
+}
+.network-wifi input { max-width: 18ch; }
 
 /* Main pane */
 .main-pane {

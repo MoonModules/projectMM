@@ -13,13 +13,13 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 - **Data over objects.** Design around data flow, not class hierarchies.
 - **Concrete first, abstract later.** Build one working feature end-to-end before extracting patterns into shared abstractions. Don't build the framework before the domain logic works.
 - **Domain-neutral core.** Separate core infrastructure from the light domain as much as practical. When mixing is necessary, use domain-neutral naming so the code stays open to future separation.
-- **Present tense only.** Code, comments, and documentation describe the system as it is now. No changelogs, no roadmaps. History lives in git commits. Exceptions: `docs/plan.md` (what to build next) and `docs/history/` (lessons, plans, inventories).
+- **Present tense only.** Code, comments, and documentation describe the system as it is now. No changelogs, no roadmaps. History lives in git commits. Exceptions: `docs/plan.md` and `docs/history/`.
 
 ## Hard Rules
 
 The design rationale for each rule below lives in [docs/architecture.md](docs/architecture.md). The one-liners here are what the agent holds in working memory.
 
-**Tests must pass.** Run `ctest` (unit tests) and `./build/test/mm_scenarios` (scenarios) before considering work complete. New core logic needs a corresponding module test. Full pipeline needs a scenario test. See [docs/testing.md](docs/testing.md) for the strategy and test inventory.
+**Tests must pass.** Run `ctest` (unit tests) and `uv run scripts/scenario/run_scenario.py` (scenarios) before considering work complete. The Python wrapper invokes the C++ runner and persists per-target observations back to each scenario JSON (drift visibility); direct `./build/test/mm_scenarios` is fine for ad-hoc pass/fail checks but skips the JSON write-back. New core logic needs a corresponding module test. Full pipeline needs a scenario test. See [docs/testing.md](docs/testing.md) for the strategy and test inventory.
 
 **Warnings are errors.** Build with `-Wall -Wextra -Werror`. No warning is "harmless" — if it's noise, fix it or silence it explicitly with a `-Wno-…` justified in code.
 
@@ -34,6 +34,16 @@ The design rationale for each rule below lives in [docs/architecture.md](docs/ar
 **Specs before code.** Module docs (`docs/moonmodules/*.md`) and the UI spec must be sufficient to implement from before writing code. What's sufficient is case by case. When in doubt, ask.
 
 **Ask, don't guess.** When uncertain about requirements, behavior, or approach — ask the product owner. Asking is always preferred over guessing. This is the default.
+
+**Sanity-check every request before acting.** When the product owner asks for something, first hold it against three references: does the request make sense, and does it align with [README.md](README.md), this [CLAUDE.md](CLAUDE.md), and [docs/architecture.md](docs/architecture.md)? If it does, proceed. If it doesn't — if the request contradicts a principle, breaks a hard rule, fights the architecture, or just doesn't add up given context the product owner may have missed — push back briefly before doing the work: name what looks off, name which doc says what, and offer the alternative. The product owner can still say "do it anyway" (they often have context the agent doesn't), but the check has happened. This catches bad decisions early instead of after the diff lands.
+
+**Refactor for simplicity.** When the product owner asks to make something simpler, more consistent, or "cleaner," do not start moving files or rewriting code until three questions are answered in writing:
+
+1. **Enumerate alternatives.** List the 2–4 plausible end states. One line each (e.g. "A: split into core/light", "B: split into core/light/platform", "C: keep flat with naming convention").
+2. **For each, name what's gained and what's lost.** Concrete and measurable: lines removed, ambiguities resolved, duplicated parsers eliminated, contributor friction added (every extra subfolder is friction; every empty placeholder dir is friction; every renamed-but-unused alias is friction).
+3. **Pick the leanest that solves the actual problem.** Subtraction beats addition. An empty subfolder, a parser duplicated "for clarity", a renamed alias kept "for compatibility" all add friction without paying for themselves — don't propose them.
+
+Then check the recommendation against [§ Principles](#principles) (minimalism, data over objects, concrete first) and propose it as a question, not a fait accompli. The product owner picks; the agent implements only what was picked. If the picked option turns out to need a follow-up change (e.g. an updated naming convention to make the new layout consistent), surface that *before* starting the move so it's a single coherent refactor, not three round-trips.
 
 **Plan before implementing.** Use `/plan` mode before every feature. Review plans for: unnecessary files, inheritance where structs suffice, modifications outside the relevant directory. Reject and regenerate bad plans.
 
@@ -61,7 +71,7 @@ Build one capability at a time. Each commit produces visible output. The product
 
 1. **Pick what to build.** One layout, one effect, one driver, one modifier, one system module — whatever adds the next useful capability.
 2. **Review only the relevant module drafts.** Cherry-pick from `docs/moonmodules_draft/`. Promote only what's needed to `docs/moonmodules/`.
-3. **`/plan` it.** Plan references only the promoted specs + architecture docs. Save the plan as `docs/history/plan-NN.md` (numbered sequentially).
+3. **`/plan` it.** Plan references only the promoted specs + architecture docs. Plans are not promoted to the repo — the implemented code, docs, and commit message together describe what landed.
 4. **Implement in a branch** (`next-iteration` or feature branch). Test on hardware. Run the commit gates (see Lifecycle Events below). Commit.
 5. **Push.** Product owner pushes. CodeRabbit reviews the PR. Process findings.
 6. **Repeat.**
@@ -80,7 +90,7 @@ The narrow safety net: "this snapshot is internally consistent."
 
 1. Desktop build — `cmake --build build` (zero warnings)
 2. Unit tests — `ctest --output-on-failure` (all pass)
-3. Scenario tests — `./build/test/mm_scenarios` (all pass)
+3. Scenario tests — `uv run scripts/scenario/run_scenario.py` (all pass; wraps `mm_scenarios` and persists per-target `observed.<target>` blocks back to each scenario JSON for drift tracking)
 
 **Conditional (run if trigger matches):**
 
@@ -89,13 +99,17 @@ The narrow safety net: "this snapshot is internally consistent."
 6. ESP32 build — `build_esp32.py` — if any file under `src/` (excluding `src/platform/desktop/`), `esp32/`, `CMakeLists.txt`, or `library.json` changed.
 7. KPI collection — `collect_kpi.py --commit` — if any file under `src/` changed. **The one-liner MUST include `tick:Xus(FPS:Y)` for every supported target** (PC + ESP32 today; Teensy/RPi when added). If a target's tick/FPS is missing — e.g. ESP32 wasn't monitored recently and `esp32/monitor.log` is stale — re-run a short live capture before committing, or note explicitly in the commit body why the value is absent.
 
+**Recommended (manual, not blocking):**
+
+- **Improv smoke test** — `uv run scripts/build/improv_smoke_test.py --port <port>` (or MoonDeck → ESP32 → **Improv Smoke Test**) — recommended when a connected ESP32 is available and any of these changed: `src/core/ImprovFrame.h`, `src/platform/esp32/platform_esp32_improv.cpp`, `docs/install/index.html`, `src/ui/release-picker.js`, `scripts/build/improv_*.py`. Three-step end-to-end check (probe + WiFi provision + LAN reachability). Not a blocking gate because it needs hardware that isn't always plugged in; pair with `preview_installer`'s flash-ready mode for the browser-side equivalent.
+
 **After all gates pass:** stop and wait for the product owner to explicitly say "commit now" (or equivalent). Do not commit on your own initiative.
 
 **When "commit now" is received** — compile the commit message in this format and execute the commit:
 
 8. Commit message format:
    - **Title line** — short imperative summary of the change (≤ 72 chars), e.g. `Add MirrorModifier and fix PreviewDriver sampling`
-   - **Short summary** — 1–3 sentences describing what changed and why, in plain language
+   - **Short summary** — a TL;DR for the commit: 1–3 sentences max, end-user readable, plain language. State *what* changed and *why* at the level a release-notes reader cares about — do NOT recap the change sections that follow (the bullets do that), and do NOT enumerate files. If your draft is longer than three sentences or restates section headers, cut it. A reader who only sees the title + this paragraph should know what shipped and why.
    - **KPI one-liner** — the `tick:Xus(FPS:Y)` line from step 7
    - **Change sections** — one section per applicable category below; omit a section entirely if nothing in that area changed. Each section is a bulleted list, one bullet per module/file, in your own words. **Core and Light domain are the preferred default categories** — a test for a core module goes under Core, a script fix that touches a light driver goes under Light domain. Only use the other categories for changes that have no meaningful connection to Core or Light domain:
      - **Core** (`src/core/`, `src/platform/`) — e.g. `- HttpServerModule: added 409 guard to prevent overlapping OTA jobs`
@@ -119,9 +133,9 @@ The "this is now trunk" moment. Where the wider hygiene checks live, because onc
 
 1. All commit gates passed on every commit in the PR.
 2. PR feedback addressed (CodeRabbit + human review).
-3. **Plan reconciliation** — for each plan in `docs/history/plan-*.md` covered by this branch: was it followed? What changed? Note in `docs/history/decisions.md` if anything is worth carrying forward, then `git mv` the reviewed plans to `docs/history/archive/`. **Do this on the branch before the merge commit**, so the `decisions.md` lessons + the archive moves land in the same commit train and the merge brings them into `main`. (Doing it after the merge means an extra tail commit on `main`.)
+3. **Carry forward lessons** — if the branch produced a hard-won lesson, a proven pattern, or a non-obvious decision worth keeping, note it in `docs/history/decisions.md` as part of the branch's commits — so the lesson lands in `main` with the code that proved it. Do this on the branch before the merge commit.
 4. **Documentation sync** — every new module / control / API endpoint has matching docs (`docs/moonmodules/*.md`, `docs/testing.md`, `docs/architecture*.md`).
-5. **Reviewer agent** — trigger this **first** so it runs while the other checks (docs sync, plan reconciliation, conditional gates) proceed in parallel. Opus reviewer over the **whole branch diff** (`git diff main...HEAD`). Scope: domain boundary, **common patterns first** (flag any new convention — naming scheme, file shape, build flag, control mechanism, UI affordance — that isn't recognisable from a widely-used project / framework / canonical resource; bespoke choices must carry a stated reason at the introduction site, see the principle in § Principles), **unnecessary abstractions** (no-op / pass-through wrappers that only rename or re-namespace an existing function, single-call-site indirection that would read clearer inlined, names that obscure where the real code lives), **duplicated patterns** (same logic in multiple places that belongs in a base class or shared function), hot-path violations, spec conformance, bloat, platform boundary. Architectural drift is more visible across N commits than across one — "three commits each added a wrapper" reads as a pattern that one commit hides. Findings either get fixed in additional branch commits before merge, or are accepted with a one-line reason in the PR description. CodeRabbit complements this — CodeRabbit handles line-level bugs in the PR; the Reviewer agent handles architectural drift.
+5. **Reviewer agent** — trigger this **first** so it runs while the other checks (docs sync, carry-forward lessons, conditional gates) proceed in parallel. Opus reviewer over the **whole branch diff** (`git diff main...HEAD`). Scope: domain boundary, **common patterns first** (flag any new convention — naming scheme, file shape, build flag, control mechanism, UI affordance — that isn't recognisable from a widely-used project / framework / canonical resource; bespoke choices must carry a stated reason at the introduction site, see the principle in § Principles), **unnecessary abstractions** (no-op / pass-through wrappers that only rename or re-namespace an existing function, single-call-site indirection that would read clearer inlined, names that obscure where the real code lives), **duplicated patterns** (same logic in multiple places that belongs in a base class or shared function), hot-path violations, spec conformance, bloat, platform boundary. Architectural drift is more visible across N commits than across one — "three commits each added a wrapper" reads as a pattern that one commit hides. Findings either get fixed in additional branch commits before merge, or are accepted with a one-line reason in the PR description. CodeRabbit complements this — CodeRabbit handles line-level bugs in the PR; the Reviewer agent handles architectural drift.
 6. **PR title and description** — review and update if the work done differs from what the PR title/description says. The description is the permanent record of what landed and why; it should reflect the actual diff, not the original intent.
 
 **Conditional:**
@@ -165,8 +179,7 @@ docs/
   performance.md           ← per-module timing, memory, sizeof for each platform
   history/                 ← accumulated wisdom
     decisions.md           ← actions, lessons, proven patterns
-    plan-NN.md             ← plans for each feature (numbered)
-    archive/               ← reviewed plans moved here after branch merge
+    *-inventory.md         ← prior-project surveys (v1, v2, moonlight)
   moonmodules/             ← one page per MoonModule (specs before code)
   moonmodules_draft/       ← draft specs for unimplemented modules (temporary, will be empty)
 ```

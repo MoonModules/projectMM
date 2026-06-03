@@ -43,6 +43,7 @@
 #include "lwip/sockets.h"
 #include "lwip/inet.h"
 
+#include <atomic>
 #include <cstdarg>
 #include <cstdlib>
 #include <cstdio>
@@ -52,7 +53,16 @@
 
 namespace mm::platform {
 
+// Test-only override for millis(); 0 means "use the real clock". Honoured on
+// ESP32 too so a hardware scenario run can freeze time the same way unit tests
+// do (no separate desktop-vs-ESP32 mocking surface).
+static std::atomic<uint32_t> testNowMs{0};
+
+void setTestNowMs(uint32_t ms) { testNowMs.store(ms, std::memory_order_relaxed); }
+
 uint32_t millis() {
+    uint32_t override_ = testNowMs.load(std::memory_order_relaxed);
+    if (override_) return override_;
     return static_cast<uint32_t>(esp_timer_get_time() / 1000);
 }
 
@@ -287,7 +297,7 @@ void ethGetIP(char* buf, size_t len) {
     }
 }
 
-#else // MM_NO_ETH — board has no on-chip EMAC, or the EMAC sdkconfig fragment
+#else // MM_NO_ETH — firmware excludes EMAC support (chip-side or sdkconfig fragment
       // wasn't layered. Provide stubs matching the desktop platform's no-eth
       // behaviour so NetworkModule's cascade falls straight to WiFi (or AP).
 
@@ -442,6 +452,13 @@ void wifiStaStop() {
     ESP_LOGI(NET_TAG, "WiFi STA stopped + deinit");
 }
 
+int wifiStaRssi() {
+    if (!wifiStaConnected_) return 0;
+    wifi_ap_record_t info{};
+    if (esp_wifi_sta_get_ap_info(&info) != ESP_OK) return 0;
+    return info.rssi;
+}
+
 bool wifiApInit(const char* apName, const char* ip) {
     // Guard against repeated init leaking the previous AP netif.
     // Stop before ensureWifiInit() — wifiApStop() deinits the WiFi driver.
@@ -514,6 +531,14 @@ void wifiApStop() {
     ESP_LOGI(NET_TAG, "WiFi AP stopped + deinit");
 }
 
+int wifiTxPower() {
+    if (!wifiInitDone_) return 0;
+    int8_t power = 0;
+    if (esp_wifi_get_max_tx_power(&power) != ESP_OK) return 0;
+    // ESP-IDF returns TX power in units of 0.25 dBm; round to nearest whole dBm.
+    return (power + 2) / 4;
+}
+
 #else // MM_NO_WIFI — Ethernet-only build: WiFi compiled out.
 
 // Stub definitions so the linker is satisfied (platform.h declares these and
@@ -524,9 +549,11 @@ bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) { return false;
 bool wifiStaConnected() { return false; }
 void wifiStaGetIP(char* buf, size_t len) { if (len > 0) buf[0] = 0; }
 void wifiStaStop() {}
+int wifiStaRssi() { return 0; }
 bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
 bool wifiApConnected() { return false; }
 void wifiApStop() {}
+int wifiTxPower() { return 0; }
 
 #endif // MM_NO_WIFI
 

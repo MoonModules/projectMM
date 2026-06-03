@@ -8,7 +8,7 @@ The UDP socket is `connect()`-bound to the destination in `setup()`, so each per
 
 ## Controls
 
-- `ip` (text, default "192.168.1.70") — destination IP address
+- `ip` (ipv4, default "192.168.1.70") — destination IP address. Stored as 4 octets device-side (`uint8_t[4]`), formatted to a dotted-quad string only at the wire boundary. See [coding-standards.md § Prefer integers](../../../coding-standards.md#prefer-integers-store-values-in-their-native-shape).
 - `universe_start` (uint16_t, default 0, range 0-32767) — first ArtNet universe
 - `fps` (uint8_t, default 50, range 1-120) — send frame rate limit. Critical: without FPS limiting, receivers drop packets.
 
@@ -30,9 +30,9 @@ Opened in setup(), closed in teardown(). Uses platform UDP abstraction. Not a ho
 
 ## Tests
 
-[Module test: ArtNet Packet](../../../testing.md#artnet) — header format, byte order, universe splitting.
+[Unit tests: ArtNetSendDriver](../../../tests/unit-tests.md#artnetsenddriver) — header format, byte order, universe splitting.
 
-[Scenario: base-pipeline](../../../testing.md#scenario-pipeline) — full pipeline with ArtNet output, performance bounds.
+[Scenario: scenario_Layer_base_pipeline](../../../tests/scenario-tests.md#scenario_layer_base_pipeline) — full pipeline with ArtNet output, performance bounds.
 
 ## Prior art
 

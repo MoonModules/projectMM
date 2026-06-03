@@ -1,0 +1,107 @@
+{
+  "name": "scenario_MirrorModifier_pipeline",
+  "module": "MirrorModifier",
+  "mode": "construct",
+  "also": [
+    "Layer",
+    "NoiseEffect",
+    "ArtNetSendDriver"
+  ],
+  "description": "Pipeline with a mirror modifier: NoiseEffect renders one quadrant, MirrorModifier reflects across X and Y to produce a kaleidoscope. Used to verify the MirrorModifier wires into Layer cleanly and that the full pipeline still meets its FPS bound.",
+  "steps": [
+    {
+      "name": "add-layout-group",
+      "description": "Create the top-level Layouts container.",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "add-grid",
+      "description": "Add a GridLayout child to Layouts.",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts"
+    },
+    {
+      "name": "add-layer",
+      "description": "Add a Layer wired to Layouts (RGB).",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "props": {
+        "layouts": "Layouts",
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "add-noise",
+      "description": "Add NoiseEffect as the Layer's effect.",
+      "op": "add_module",
+      "id": "Noise",
+      "type": "NoiseEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "add-mirror",
+      "description": "Add MirrorModifier so logical pixels reflect across X and Y in the physical grid.",
+      "op": "add_module",
+      "id": "Mirror",
+      "type": "MirrorModifier",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "add-driver-group",
+      "description": "Add a Drivers container wired to the Layer's output buffer.",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "layer": "Layer"
+      }
+    },
+    {
+      "name": "add-artnet",
+      "description": "Add ArtNetSendDriver and run the bounded FPS measurement (mirror + LUT path must stay at >=80% of the rated FPS).",
+      "op": "add_module",
+      "id": "ArtNet",
+      "type": "ArtNetSendDriver",
+      "parent_id": "Drivers",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min_pct": 80
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 120,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            100,
+            213
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-03"
+          ]
+        }
+      }
+    }
+  ]
+}

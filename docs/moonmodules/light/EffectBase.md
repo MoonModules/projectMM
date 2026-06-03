@@ -36,7 +36,7 @@ Two contracts to honour in `loop()`:
 1. **Use `width()`, `height()`, `depth()` at frame time.** Never hardcode a maximum (no `for z < SOMETHING`). A D3 effect may run on a D1 or D2 layer; its loop must iterate whatever the layer provides. Writing past `width × height × depth × channels` is a buffer overrun.
 2. **A D2/D1 effect is an opt-in promise.** Declaring D2 tells the framework it can `memcpy` your z = 0 slice across z; declaring D1 lets it fill y and z. Stateful effects (own dynamic buffers) should size those to the same slice the loop writes — `w × h × cpl` for D2, `w × cpl` for D1 — not the full 3D buffer.
 
-The `dim` int (1/2/3) is emitted in `/api/types`; the UI derives the 📏/🟦/🧊 chip from it. See [architecture.md § Effects](../../architecture.md#effects) for the live declarations per shipped effect, and [test_extrude](../../testing.md#extrude) for the pinned contract tests.
+The `dim` int (1/2/3) is emitted in `/api/types`; the UI derives the 📏/🟦/🧊 chip from it. See [architecture.md § Effects](../../architecture.md#effects) for the live declarations per shipped effect, and [Unit tests: Layer](../../tests/unit-tests.md#layer) (see `unit_Layer_extrude.cpp`) for the pinned contract tests.
 
 ## Prior art
 

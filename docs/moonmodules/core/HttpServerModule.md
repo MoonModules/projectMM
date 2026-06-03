@@ -30,7 +30,7 @@ POST   /api/control               → {module, control, value}
 POST   /api/modules               → {type, id?, parent_id?} — create
 POST   /api/modules/{name}/move   → {to: N} — reorder to absolute index N
                                     within parent. Strict-suffix match;
-                                    /movex → 404. Triggers Scheduler::rebuild()
+                                    /movex → 404. Triggers Scheduler::buildState()
                                     so LUT-affecting reorders rebuild.
 POST   /api/modules/{name}/replace → {type} — swap at the same position.
                                     Strict-suffix. Replacement starts with

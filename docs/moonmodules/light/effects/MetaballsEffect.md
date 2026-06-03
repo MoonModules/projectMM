@@ -27,7 +27,7 @@ Four divisions per pixel — acceptable for desktop and ESP32 LX7. No floats, no
 
 ## Tests
 
-[Module test: MetaballsEffect](../../../testing.md#metaballs) — non-zero output, spatial variation.
+[Unit tests: MetaballsEffect](../../../tests/unit-tests.md#metaballseffect) — non-zero output, spatial variation.
 
 ## Prior art
 

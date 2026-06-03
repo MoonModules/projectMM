@@ -37,10 +37,23 @@ public:
     MoonModule& operator=(MoonModule&&) = delete;
 
     // Default lifecycle propagates to children. Override to add container-specific logic.
+    //
+    // For loop / loop20ms / loop1s, the default ticks every child that passes the same
+    // enabled gate the Scheduler applies to top-level modules (!respectsEnabled() ||
+    // enabled() — i.e. tick when the module opted out of the gate, otherwise honour
+    // enabled()), and accumulates per-child timing the same way Scheduler does. Leaf
+    // modules (childCount_ == 0) pay one predicted-not-taken branch — sub-nanosecond.
+    //
+    // Override + chain convention for loop callbacks: parent work runs first, then
+    // chain to base to tick children (option A — parent prepares, children consume).
+    // Override + chain for setup runs the other way (chain to base first so children
+    // are initialised before the parent depends on them). teardown's base default
+    // reverse-iterates children; override and chain late so the parent shuts down its
+    // own state first.
     virtual void setup() { for (uint8_t i = 0; i < childCount_; i++) children_[i]->setup(); }
-    virtual void loop() {}
-    virtual void loop20ms() {}
-    virtual void loop1s() {}
+    virtual void loop() { tickChildren(&MoonModule::loop); }
+    virtual void loop20ms() { tickChildren(&MoonModule::loop20ms); }
+    virtual void loop1s() { tickChildren(&MoonModule::loop1s); }
     virtual void teardown() { for (uint8_t i = childCount_; i > 0; i--) children_[i-1]->teardown(); }
 
     // Called when enabled flips. Default no-op; override to start/stop sockets, free
@@ -48,6 +61,30 @@ public:
     // of `enabled` — modules decide what disabled means by checking enabled() inside
     // their loop fns or by stopping/starting their work in onEnabled().
     virtual void onEnabled(bool /*newEnabled*/) {}
+
+    // Control-change reactions form a three-tier split (mirrors MoonLight's
+    // onUpdate / requestMappings / onSizeChanged; see architecture.md § Rebuild
+    // propagation):
+    //
+    //   1. onUpdate(name)            — cheap per-control reaction, runs on EVERY change.
+    //                                  Recompute a small LUT, re-bind a socket, etc.
+    //   2. controlChangeTriggersBuildState — gate for the pipeline-wide onBuildState() sweep.
+    //                                  Only true for controls that change physical
+    //                                  dimensions or mapping shape (Layout, Modifier).
+    //   3. onBuildState()               — build the module's derived state (buffers, LUTs)
+    //                                  to match current control values, reached via
+    //                                  Scheduler::buildState() when tier 2 returns true.
+    //
+    // Called after a control's value is written from the UI/API. `controlName` is the
+    // changed control's name (stable; points into the descriptor). Default no-op.
+    virtual void onUpdate(const char* /*controlName*/) {}
+
+    // Whether a value change to one of this module's controls triggers the pipeline-wide
+    // onBuildState() sweep. Default false — most controls are values read in the hot
+    // path that need no realloc. Layout and Modifier override to return true (their
+    // controls change physical dimensions / LUT shape). Most overriders ignore the name
+    // and return true for every control they expose.
+    virtual bool controlChangeTriggersBuildState(const char* /*controlName*/) const { return false; }
 
     // onBuildControls MUST be idempotent and pure: only `controls_.clear()` + `controls_.addX()`.
     // No platform queries, no I/O, no allocations. HttpServerModule calls it again whenever a
@@ -70,7 +107,30 @@ public:
         for (uint8_t i = 0; i < childCount_; i++) children_[i]->clearControlsRecursive();
     }
 
-    virtual void onAllocateMemory() { for (uint8_t i = 0; i < childCount_; i++) children_[i]->onAllocateMemory(); }
+    // Tier-3 of the control-change split (see onUpdate above): the module (re)allocates
+    // / recomputes whatever derived state it owns — an effect's heap, a Layer's mapping
+    // LUT, the Drivers output buffer. Default propagates to children. Reached via
+    // Scheduler::buildState() (whole-tree) when a tier-2 gate returns true.
+    //
+    // Same role as JUCE's `prepareToPlay` or UIKit's `layoutSubviews` — a framework-driven
+    // "set up your derived state for the current config" hook with a no-op default. The verb
+    // is "build" (not "rebuild") on purpose: the operation is idempotent and history-agnostic
+    // — it builds the correct state from current values whether or not it ran before, so boot
+    // and a later control change are the same call, not "build" then "rebuild". The whole
+    // chain shares the verb: controlChangeTriggersBuildState → Scheduler::buildState() →
+    // onBuildState(). Mirrors the onBuildControls precedent (build the surface vs build the
+    // state) and the canonical hooks (prepareToPlay/layoutSubviews never say "re" either).
+    //
+    // Intentionally coarse: each module builds its whole derived state, and the Scheduler
+    // sweeps the whole tree. That's fine because structural changes are rare and the builds
+    // are idempotent (e.g. FireEffect only reallocs when count != heatCount_). If a module
+    // ever grows two independently-buildable aspects where one control touches only one of
+    // them (e.g. `width` reshapes a LUT but `gamma` only re-tints a cache, both expensive),
+    // the cheapest upgrade is to forward the changed control name —
+    // `onBuildState(const char* changedControl)` — and branch inside. The tier-2 gate
+    // (controlChangeTriggersBuildState) already carries the name, so it's a one-parameter change.
+    // Don't add it pre-emptively; no module needs the distinction today.
+    virtual void onBuildState() { for (uint8_t i = 0; i < childCount_; i++) children_[i]->onBuildState(); }
 
     const char* name() const { return name_; }
     void setName(const char* n) {
@@ -112,6 +172,20 @@ public:
 
     MoonModule* parent() const { return parent_; }
     void setParent(MoonModule* p) { parent_ = p; }
+
+    // Marks this module as wired-by-code rather than wired-by-persistence. The
+    // FilesystemModule's applyNode trim loop preserves code-wired children even
+    // when the on-disk file doesn't describe them — the upgrade-day case where
+    // a new firmware revision adds a code-created child (e.g. ImprovProvisioning
+    // as a child of NetworkModule) whose existence the device's saved Network.json
+    // predates. Without this flag the child would get trimmed on every boot.
+    //
+    // Convention: only main.cpp's boot wiring calls markWiredByCode(). Children
+    // added via the HTTP add-module API or recreated by applyNode's factory call
+    // stay unmarked — those are user/persistence-driven and should follow the
+    // file's tree shape exactly.
+    void markWiredByCode() { wiredByCode_ = true; }
+    bool isWiredByCode() const { return wiredByCode_; }
 
     ControlList& controls() { return controls_; }
     const ControlList& controls() const { return controls_; }
@@ -229,6 +303,23 @@ public:
 protected:
     ControlList controls_;
 
+    // Shared body for the loop / loop20ms / loop1s base defaults. Iterates children,
+    // gates each by the same rule the Scheduler applies to top-level modules
+    // (!respectsEnabled() || enabled() — children that opted out of the enabled
+    // gate keep ticking; the rest tick only when enabled), dispatches the same
+    // callback, and accumulates per-child timing. Pulled out so the three base
+    // defaults stay one-liners and the gating + timing rule lives in one place.
+    void tickChildren(void (MoonModule::*fn)()) {
+        for (uint8_t i = 0; i < childCount_; i++) {
+            MoonModule* c = children_[i];
+            if (!c->respectsEnabled() || c->enabled()) {
+                uint32_t start = platform::micros();
+                (c->*fn)();
+                c->addAccumUs(platform::micros() - start);
+            }
+        }
+    }
+
 private:
     // Display name buffer. Sized to fit the longest stripped name with headroom:
     // ModuleFactory's displayNameFor strips the role-noun suffix so the longest
@@ -240,6 +331,7 @@ private:
     const char* typeName_ = "";  // points into flash (factory string literal); see setTypeName comment
     bool enabled_ = true;
     bool dirty_ = false;
+    bool wiredByCode_ = false;
     MoonModule* parent_ = nullptr;
     MoonModule** children_ = nullptr;
     uint8_t childCount_ = 0;

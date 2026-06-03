@@ -154,7 +154,7 @@ For projectMM, this means: **the LED driver task lives on core 1** (the quiet co
 A driver does five things, in order:
 
 1. **Configure** peripheral timing for a chipset variant (WS2812B vs SK6812 RGBW vs APA102) at setup.
-2. **Encode** logical `Buffer` (linear RGB/RGBW, GRB order applied here, gamma applied earlier in the pipeline) into a peripheral-native bit pattern.
+2. **Correct + encode** the logical `Buffer` into a peripheral-native bit pattern. The source buffer is linear RGB; the driver applies the shared **output correction** (brightness, channel reorder, RGBW white — see § 4.6) per light, then encodes the corrected, wire-ordered bytes into the bit pattern. Correction and encode fuse into one pass.
 3. **Start** the DMA / peripheral, point it at the encoded buffer.
 4. **Wait** for completion (or signal completion via callback / semaphore).
 5. **Enforce** the inter-frame reset gap (≥ 300 µs).
@@ -168,9 +168,11 @@ That's it. The five steps are the same on every MCU; what changes is *who* does 
 namespace mm {
 
 struct LedFrame {
-    std::span<const uint8_t> bytes;  // bytes already in chip wire order (GRB / GRBW)
+    std::span<const uint8_t> bytes;  // logical RGB (3 ch); driver applies Correction (brightness,
+                                     // reorder to GRB/…, RGBW white) per light during encode
     uint16_t lightCount;             // pixels (not bytes)
-    uint8_t channelsPerLight;        // 3 (WS2812, SK6812 RGB) or 4 (SK6812 RGBW)
+    uint8_t channelsPerLight;        // source channels (3 = RGB today); output channels come
+                                     // from the Correction's light-preset (3 or 4)
 };
 
 struct LedDriverConfig {
@@ -229,7 +231,7 @@ Shared, in `src/light/`:
 - `LedDriverBase` interface.
 - `Buffer` (already exists), `MappingLUT` (already exists).
 - Chipset descriptors (WS2812B, SK6812 RGB, SK6812 RGBW, APA102) — pure data: GRB order, channels, default timing.
-- Color/gamma/dither logic — already in the pipeline upstream.
+- Output correction — already exists: `Correction` (`src/light/drivers/Correction.h`), owned by the `Drivers` container, applies brightness / channel reorder / RGBW white per light. The LED driver applies it in step 2 (§ 4.6), the same `const Correction*` ArtNet already uses. Gamma / dither fold into the same LUT later.
 
 Platform-specific, in `src/platform/<target>/`:
 
@@ -244,6 +246,16 @@ Putting 74HC595 (or similar) on the data lines is **not** a new driver layer —
 In the architecture above, an expander variant is a configuration of an existing driver (e.g. `TeensyFlexIoDriver` with `expanderChains = 32`), not a new class. The transpose step gets a wider stride; everything else is unchanged.
 
 For projectMM this is **third-priority** behind WS2812 and SK6812: design the interface so it could host it (the K-lane abstraction is already general enough), but don't ship it day one.
+
+### 4.6 Output correction (already shipped)
+
+The brightness / channel-reorder / RGBW-white stage is **not** specific to LED drivers and is **already implemented** — ArtNet uses it today. It is a per-driver stage shared by every *physical* driver, with the shared state owned by the `Drivers` container:
+
+- `Correction` (`src/light/drivers/Correction.h`) holds a 256-entry brightness LUT, a channel-order table (the `lightPreset`: RGB / GRB / … / RGBW / GRBW), an output-channel count (3 or 4), and a derive-white flag. `Correction::apply(src, out)` transforms one logical RGB light into the wire form: brightness via LUT, then reorder, then (for RGBW presets) `W = min(r,g,b)` of the brightness-scaled channels.
+- `Drivers` exposes `brightness` and `lightPreset` controls and rebuilds the LUT on the cheap `onUpdate` tier (no pipeline rebuild — the slider stays fluent). It hands each child a `const Correction*` via `DriverBase::setCorrection`; Preview ignores it (shows the raw logical buffer).
+- An LED driver consumes the *same* `const Correction*`. In the fused single-pass case (§ 4.3, identity / shuffle, no blend) it calls `correction_->apply(...)` per light and encodes the result straight into the DMA buffer — F/G/H and the WS2812 encode are one pass, never a second sweep over encoded bytes.
+
+So the LED driver does **not** re-invent brightness/reorder/white — it reuses the shipped `Correction`. Gamma and white-balance fold into the same LUT later as a per-channel R/G/B split (the field is `briLut`, not `gammaLut`, so that's a fill change, not a rename). See [architecture.md § Drivers](../../architecture.md#drivers) for the cross-driver picture.
 
 ## 5. Testing architecture
 

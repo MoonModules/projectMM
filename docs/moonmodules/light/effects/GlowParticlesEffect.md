@@ -22,4 +22,4 @@ No heap allocations. Per-particle state: 8 bytes × 8 = 64 bytes.
 
 ## Tests
 
-[Module test](../../../testing.md#stateless-effects) — non-zero output, spatial variation.
+[Unit tests: CheckerboardEffect](../../../tests/unit-tests.md#checkerboardeffect) (GlowParticlesEffect shares the same baseline assertions — non-zero output, spatial variation — alongside other effects).

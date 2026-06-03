@@ -134,7 +134,7 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     // pointer; the scheduler runs setup() on both in the same phase, so
     // construction order is what matters, not addModule order.
     //
-    // Compile-time gated: on builds without WiFi (--board esp32-eth, and
+    // Compile-time gated: on firmwares without WiFi (--firmware esp32-eth, and
     // desktop) the module is not created at all. This is the single
     // exception to main.cpp's "register everything, let modules guard
     // themselves" pattern. Rationale: Improv's only purpose is pushing WiFi
@@ -149,6 +149,9 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
             mm::ModuleFactory::create("ImprovProvisioningModule"));
         improvModule->setSystemModule(systemModule);
         improvModule->setNetworkModule(networkModule);
+        // Mark wired-by-code so applyNode's trim loop preserves it on devices
+        // whose saved Network.json predates the Improv child (the upgrade case).
+        improvModule->markWiredByCode();
     }
 
     // Layouts: top-level container; one or more layouts. Today one GridLayout.
@@ -197,15 +200,16 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
 
     // Register top-level modules with scheduler (scheduler deletes on teardown).
     // Order matters: filesystem first (load hook runs before any module's setup),
-    // then system (deviceName), firmwareUpdate (status surface, no deps), network,
-    // improvProvision (after network — needs setNetworkModule pointer), light
-    // pipeline (Layouts → Layers → Drivers), then HTTP. The Scheduler walks
-    // roots in this order each tick.
+    // then system (deviceName), firmwareUpdate (status surface, no deps), network
+    // (hosts ImprovProvisioning as a child — same lifecycle, one less top-level
+    // entry, conceptually right since Improv only exists to feed Network credentials),
+    // light pipeline (Layouts → Layers → Drivers), then HTTP. The Scheduler walks
+    // roots in this order each tick; child propagation happens inside each root.
     scheduler.addModule(filesystemModule);
     scheduler.addModule(systemModule);
     scheduler.addModule(firmwareUpdateModule);
+    if (improvModule) networkModule->addChild(improvModule);
     scheduler.addModule(networkModule);
-    if (improvModule) scheduler.addModule(improvModule);
     scheduler.addModule(layouts);
     scheduler.addModule(layersContainer);
     scheduler.addModule(drivers);

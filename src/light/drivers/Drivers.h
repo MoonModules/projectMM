@@ -4,7 +4,10 @@
 #include "light/layers/Buffer.h"
 #include "light/layers/Layer.h"
 #include "light/layers/BlendMap.h"
+#include "light/drivers/Correction.h"
 #include "platform/platform.h"
+
+#include <cstring>  // std::strcmp in onUpdate
 
 namespace mm {
 
@@ -21,22 +24,63 @@ public:
     // layer buffers upstream and still hands each driver one Layer for dimensions —
     // the driver outputs to a single physical fixture either way. See plan.md backlog.
     void setLayer(Layer* layer) { layer_ = layer; }
+
+    // Shared output correction (brightness LUT + channel order + white) owned by the
+    // Drivers container. Default no-op so Preview (which shows the raw logical buffer)
+    // and any future preview-style driver opt out for free; only physical drivers
+    // (ArtNet, future LED) override to apply it.
+    virtual void setCorrection(const Correction* /*c*/) {}
+
+    // Notified by Drivers when the shared Correction's outChannels may have changed
+    // (a lightPreset switch RGB↔RGBW). Default no-op; physical drivers that own an
+    // intermediate correction-applied buffer override to resize it OFF the hot path.
+    // Topology changes (light count, channels per light) already flow through
+    // onBuildState — this hook is just for the preset-driven channel-count change
+    // that doesn't trigger a structural rebuild.
+    virtual void onCorrectionChanged() {}
 protected:
     Layer* layer_ = nullptr;
 };
 
 class Drivers : public MoonModule {
 public:
+    uint8_t brightness = 255;
+    uint8_t lightPreset = 0;  // index into kLightPresetOptions; 0 = RGB
+
     void setLayer(Layer* layer) {
         layer_ = layer;
     }
 
+    void onBuildControls() override {
+        controls_.addUint8("brightness", brightness, 0, 255);
+        controls_.addSelect("lightPreset", lightPreset, kLightPresetOptions, kLightPresetCount);
+        MoonModule::onBuildControls();  // cascade to driver children
+    }
+
+    // Brightness / light-preset changes only rebuild the (cheap) correction LUT — no
+    // pipeline realloc. This is what keeps the brightness slider fluent: controlChangeTriggersBuildState
+    // stays false for Drivers, so handleSetControl skips scheduler_->buildState().
+    void onUpdate(const char* controlName) override {
+        if (std::strcmp(controlName, "brightness") == 0 ||
+            std::strcmp(controlName, "lightPreset") == 0) {
+            correction_.rebuild(brightness, static_cast<LightPreset>(lightPreset));
+            // Propagate so physical drivers that maintain a correction-applied
+            // buffer (today: ArtNet) can resize off the hot path. A brightness-
+            // only change is a no-op for resizing (outChannels stays 3); the
+            // RGB↔RGBW preset switch is the case that actually grows/shrinks.
+            for (uint8_t i = 0; i < childCount(); i++) {
+                static_cast<DriverBase*>(child(i))->onCorrectionChanged();
+            }
+        }
+    }
+
     void setup() override {
+        correction_.rebuild(brightness, static_cast<LightPreset>(lightPreset));
         MoonModule::setup();
         passBufferToDrivers();
     }
 
-    void onAllocateMemory() override {
+    void onBuildState() override {
         // Output buffer needed if any layer has a LUT (currently single layer).
         // Multi-layer: check all layers, allocate if at least one has a LUT.
         // If allocation fails (no contiguous heap large enough — a real risk on
@@ -56,34 +100,26 @@ public:
         }
         setDynamicBytes(outputBuffer_.bytes());
         passBufferToDrivers();
-        MoonModule::onAllocateMemory();
+        MoonModule::onBuildState();
     }
 
     void loop() override {
-        // Scheduler gates Drivers itself via respectsEnabled() default. The Scheduler
-        // only walks the top-level module list, so it never sees the driver children
-        // here — we have to honour each child's `enabled` flag ourselves, same as
-        // Layer::loop() does for effects and Layers::loop() does for child Layers.
-        // Without this gate the UI's enable/disable on an ArtNet or Preview driver
-        // is a no-op and the driver keeps emitting.
-        //
-        // outputBuffer_.data() can be null if onAllocateMemory failed to claim
+        // outputBuffer_.data() can be null if onBuildState failed to claim
         // a contiguous block (heap fragmentation). Skip the blend in that case
         // — drivers run on raw Layer buffer or simply have nothing to send.
         if (layer_ && layer_->lut().hasLUT() && outputBuffer_.data()) {
             blendMap(layer_->buffer(), outputBuffer_, layer_->lut(), layer_->channelsPerLight());
         }
-        for (uint8_t i = 0; i < childCount(); i++) {
-            if (!child(i)->enabled()) continue;
-            uint32_t start = platform::micros();
-            child(i)->loop();
-            child(i)->addAccumUs(platform::micros() - start);
-        }
+        // Option A: parent work first (blendMap), then chain to base to tick
+        // children on the freshly-blended buffer. Per-child enabled gating and
+        // timing accumulation live in MoonModule::tickChildren.
+        MoonModule::loop();
     }
 
 private:
     Layer* layer_ = nullptr;
     Buffer outputBuffer_;
+    Correction correction_;
 
     void passBufferToDrivers() {
         if (!layer_) return;
@@ -92,6 +128,7 @@ private:
             auto* drv = static_cast<DriverBase*>(child(i));
             drv->setSourceBuffer(buf);
             drv->setLayer(layer_);  // so PreviewDriver can read current physical dimensions
+            drv->setCorrection(&correction_);  // physical drivers apply it; Preview ignores
         }
     }
 };

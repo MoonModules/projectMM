@@ -10,7 +10,7 @@
 //   Scheduler phase 1: onBuildControls (every module binds full control set incl. hidden ones)
 //   Scheduler phase 2: this module's loadAllHook reads each file and overlays bound variables
 //   Scheduler phase 3: modules' own setup() runs with persisted values in member vars
-//   Scheduler phase 4: onAllocateMemory
+//   Scheduler phase 4: onBuildState
 //
 // Save flow:
 //   HttpServerModule::handleSetControl calls target->markDirty() on every mutation
@@ -97,7 +97,6 @@ private:
     bool saveSubtree(MoonModule* m);
     bool writeNode(MoonModule* m, char* buf, size_t bufLen, int& pos, const char* prefix,
                    bool firstField = true);
-    static bool writeJsonString(const char* s, char* buf, size_t bufLen, int& pos);
     bool writeValue(const ControlDescriptor& c, char* buf, size_t bufLen, int& pos);
     static bool subtreeDirty(MoonModule* m);
     static void clearSubtreeDirty(MoonModule* m);

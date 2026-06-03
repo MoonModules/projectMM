@@ -13,11 +13,39 @@ Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi,
 - **Built-in browser UI.** The interface renders any module from its declared controls — adding a new effect needs zero UI code.
 - **DMX and addressable LEDs in the same setup.** RGB strips, RGBW pixels, multi-channel par lights, moving heads — all addressed through the same pipeline.
 
+## Performance
+
+What projectMM delivers — pipeline: NoiseEffect → MirrorModifier XY → ArtNet over Ethernet, captured per-grid-size on each supported platform. **FPS shown is computed from the underlying tick measurement (FPS = 1,000,000 / tick_us)** — tick is the unit the contracts and assertions actually use; FPS is the headline number.
+
+Every measurement below comes from a real scenario run on the listed board — `test/scenarios/light/scenario_GridLayout_grid_sizes.json` is the canonical sweep. Per-step `contract.<target>` blocks carry the promises the device must hit; per-step `observed.<target>` blocks carry the latest reading.
+
+### Frames per second
+
+| Grid | Lights | Apple Silicon (M-series) | Olimex `esp32-eth-wifi` | Olimex `esp32-eth` |
+|---|---:|---:|---:|---:|
+| 16×16 | 256 | — *(below host clock resolution)* | 1,543 | 1,628 |
+| 32×32 | 1,024 | 166,667 | 447 | 432 |
+| 64×64 | 4,096 | 40,000 | 81 | 71 |
+| 128×128 | 16,384 | 9,708 | 11 | 10 |
+
+### Free heap
+
+| Grid | Apple Silicon (M-series) | Olimex `esp32-eth-wifi` | Olimex `esp32-eth` |
+|---|---:|---:|---:|
+| 16×16 | unlimited | 150 KB | 178 KB |
+| 32×32 | unlimited | 144 KB | 171 KB |
+| 64×64 | unlimited | 119 KB | 146 KB |
+| 128×128 | unlimited | 104 KB | 132 KB |
+
+Build variants differ structurally: `esp32-eth-wifi` includes the WiFi stack (~270 KB flash, ~28 KB heap). `esp32-eth` drops WiFi for ~28 KB more free heap, at the cost of slightly slower tick on large grids (lwIP buffer-pool sizing is tuned for the eth-wifi sdkconfig). The right variant depends on whether the deployment needs WiFi.
+
+The numbers above are observations. The **contracts** projectMM commits to — what the device must hit on every CI run — live in [`test/scenarios/*.json`](test/scenarios/) as per-step `contract.<target>` blocks; see [docs/testing.md § Performance contracts](docs/testing.md#performance-contracts-contracttarget) for how they're set and renegotiated. The [docs/performance.md](docs/performance.md) page covers the *why* (WiFi vs Ethernet physics, sizeof tables, build-variant deltas).
+
 ## Getting started
 
 ### From a release
 
-**ESP32 — flash from your browser.** Open the [web installer](https://ewowi.github.io/projectMM/install/) in Chrome or Edge — it walks you through board selection, flashing, and network setup. The installer lists stable releases and a `latest` build (published automatically on every merge to main) carrying the newest unreleased changes, labelled *(beta)*.
+**ESP32 — flash from your browser.** Open the [web installer](https://ewowi.github.io/projectMM/install/) in Chrome or Edge — it walks you through firmware selection, flashing, and network setup. The installer lists stable releases and a `latest` build (published automatically on every merge to main) carrying the newest unreleased changes, labelled *(beta)*.
 
 
 ![Installer](docs/assets/screenshots/installer.png)

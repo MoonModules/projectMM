@@ -1,0 +1,397 @@
+{
+  "name": "scenario_GridLayout_resize",
+  "module": "GridLayout",
+  "mode": "mutate",
+  "also": [
+    "MirrorModifier",
+    "Layer"
+  ],
+  "description": "Resize the grid while the pipeline is running and verify it reallocates cleanly under memory pressure. Lowers to 128x64 (release memory), increases to 128x128 (heaviest config: mirror + LUT). Each measured step captures tick/FPS/heap so the runner reports the degrade behaviour.",
+  "fixture": [
+    {
+      "name": "fix-layouts",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "fix-grid",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 128,
+        "height": 128
+      }
+    },
+    {
+      "name": "fix-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "props": {
+        "layouts": "Layouts",
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "fix-noise",
+      "op": "add_module",
+      "id": "Noise",
+      "type": "NoiseEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "fix-mirror",
+      "op": "add_module",
+      "id": "Mirror",
+      "type": "MirrorModifier",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "fix-drivers",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "layer": "Layer"
+      }
+    },
+    {
+      "name": "fix-artnet",
+      "op": "add_module",
+      "id": "ArtNet",
+      "type": "ArtNetSendDriver",
+      "parent_id": "Drivers"
+    }
+  ],
+  "reset": [
+    {
+      "name": "reset-grid-width",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "reset-grid-height",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128
+    },
+    {
+      "name": "reset-mirrorX",
+      "op": "set_control",
+      "id": "Mirror",
+      "key": "mirrorX",
+      "value": true
+    },
+    {
+      "name": "reset-mirrorY",
+      "op": "set_control",
+      "id": "Mirror",
+      "key": "mirrorY",
+      "value": true
+    }
+  ],
+  "steps": [
+    {
+      "name": "size-128x128",
+      "description": "Set grid height to 128 (alongside default width 128). Measures the heaviest config as the baseline for the next two steps.",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true,
+      "contract": {
+        "pc-macos": {
+          "tick_us": 120,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 105000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            95,
+            283
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-03"
+          ]
+        },
+        "esp32-eth-wifi": {
+          "tick_us": [
+            80649,
+            80649
+          ],
+          "free_heap": [
+            95528,
+            95528
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            92905,
+            93168
+          ],
+          "free_heap": [
+            135188,
+            135208
+          ],
+          "max_alloc_block": [
+            49152,
+            53248
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            224420,
+            224420
+          ],
+          "free_heap": [
+            85252,
+            85252
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        }
+      }
+    },
+    {
+      "name": "shrink-to-128x64",
+      "description": "Shrink to 128x64. Measured: FPS must stay within 20% of the baseline (proves the pipeline reallocs cleanly and there's no leak path).",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min_pct": 80
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 60,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 45000,
+          "free_heap": 85000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            47,
+            192
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32-eth-wifi": {
+          "tick_us": [
+            31476,
+            31476
+          ],
+          "free_heap": [
+            76828,
+            76828
+          ],
+          "max_alloc_block": [
+            24576,
+            24576
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            37745,
+            37945
+          ],
+          "free_heap": [
+            116488,
+            116508
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            90162,
+            90162
+          ],
+          "free_heap": [
+            64992,
+            64992
+          ],
+          "max_alloc_block": [
+            17408,
+            17408
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        }
+      }
+    },
+    {
+      "name": "grow-to-128x128",
+      "description": "Grow back to 128x128. Measured: confirms the heap can return to the heavy baseline after a shrink.",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true,
+      "contract": {
+        "pc-macos": {
+          "tick_us": 120,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 105000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            99,
+            236
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-03"
+          ]
+        },
+        "esp32-eth-wifi": {
+          "tick_us": [
+            82231,
+            82231
+          ],
+          "free_heap": [
+            95528,
+            95528
+          ],
+          "max_alloc_block": [
+            53248,
+            53248
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            95771,
+            95965
+          ],
+          "free_heap": [
+            135188,
+            135208
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            252703,
+            252703
+          ],
+          "free_heap": [
+            85252,
+            85252
+          ],
+          "max_alloc_block": [
+            53248,
+            53248
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        }
+      }
+    }
+  ]
+}

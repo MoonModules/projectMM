@@ -3,19 +3,24 @@
 #include "light/drivers/Drivers.h"
 #include "platform/platform.h"
 
-#include <cstring>
 #include <cstdint>
+#include <cstring>
 
 namespace mm {
 
 class ArtNetSendDriver : public DriverBase {
 public:
-    char ip[16] = "192.168.1.70";
+    // Destination address as 4 octets (not a dotted-quad string) — 4 bytes
+    // vs char[16], per docs/coding-standards.md § Prefer integers, store
+    // values in their native shape. The platform UdpSocket::connect() takes
+    // a string, so connectIfIpChanged() formats on a stack buffer at the
+    // boundary — the long-lived storage stays integer.
+    uint8_t ip[4] = {192, 168, 1, 70};
     uint16_t universeStart = 0;
     uint8_t fps = 50;
 
     void onBuildControls() override {
-        controls_.addText("ip", ip);
+        controls_.addIPv4("ip", ip);
         controls_.addUint16("universe_start", universeStart);
         controls_.addUint8("fps", fps, 1, 120);
     }
@@ -34,6 +39,31 @@ public:
 
     void setSourceBuffer(Buffer* buf) override {
         sourceBuffer_ = buf;
+        // setSourceBuffer / setCorrection / setLayer are all called from
+        // Drivers::passBufferToDrivers, which runs inside Drivers::onBuildState
+        // (and once at setup). resizeCorrected() is a no-op while correction_
+        // is still null on the first call; the second call (after setCorrection)
+        // lands the actual allocation. All off the hot path.
+        resizeCorrected();
+    }
+
+    void setCorrection(const Correction* c) override {
+        correction_ = c;
+        resizeCorrected();
+    }
+
+    // Topology change (light count, channels per light, or LUT path swap) — the
+    // framework calls onBuildState after Layer/Drivers reshape. Resize off the
+    // hot path so loop() never allocates.
+    void onBuildState() override {
+        resizeCorrected();
+        MoonModule::onBuildState();
+    }
+
+    // Preset toggle (RGB↔RGBW) changes correction_->outChannels without
+    // triggering a structural rebuild. Drivers::onUpdate forwards this hook.
+    void onCorrectionChanged() override {
+        resizeCorrected();
     }
 
     void loop() override {
@@ -49,9 +79,44 @@ public:
         // Re-bind the socket if the ip control was changed from the UI.
         connectIfIpChanged();
 
+        // Apply output correction (brightness / channel order / RGBW white) into the
+        // pre-sized corrected_ buffer, then send that. Pure reader — sizing happens
+        // in resizeCorrected() off the hot path (onBuildState / onCorrectionChanged
+        // / setSourceBuffer / setCorrection). If correction isn't wired (e.g. a unit
+        // test constructs the driver outside a Drivers parent) or its buffer doesn't
+        // match the source size, fall back to passthrough — same degradation the
+        // earlier in-loop allocate had if the allocation itself failed.
+        const uint8_t* data;
+        size_t totalBytes;
+        const nrOfLightsType nLights = sourceBuffer_->count();
+        // Three guards before applying correction: (a) correction wired,
+        // (b) corrected_ has the row count we need, (c) corrected_'s
+        // per-light stride is at least outChannels — otherwise dst + i *
+        // outCh would overrun the allocation. Falls back to passthrough
+        // when any guard fails (same degradation the old in-loop allocate
+        // had on allocation failure). resizeCorrected() should keep
+        // corrected_'s stride in sync with outChannels off the hot path,
+        // but the hot-path check stays defensive — a stale corrected_
+        // (e.g. correction_ swapped without onCorrectionChanged firing)
+        // should miss the apply, not corrupt memory.
+        const uint8_t outCh = correction_ ? correction_->outChannels : 0;
+        if (correction_ && corrected_.data()
+            && corrected_.count() >= nLights
+            && corrected_.channelsPerLight() >= outCh) {
+            const uint8_t* src = sourceBuffer_->data();
+            const uint8_t srcCh = sourceBuffer_->channelsPerLight();
+            uint8_t* dst = corrected_.data();
+            for (nrOfLightsType i = 0; i < nLights; i++) {
+                correction_->apply(src + i * srcCh, dst + i * outCh);
+            }
+            data = dst;
+            totalBytes = static_cast<size_t>(nLights) * outCh;
+        } else {
+            data = sourceBuffer_->data();
+            totalBytes = sourceBuffer_->bytes();
+        }
+
         // Send all universes in one burst — receiver expects a complete frame
-        const uint8_t* data = sourceBuffer_->data();
-        size_t totalBytes = sourceBuffer_->bytes();
         uint16_t universe = universeStart;
 
         size_t sent = 0;
@@ -107,27 +172,50 @@ public:
     static constexpr size_t MAX_CHANNELS_PER_UNIVERSE = 510; // 170 RGB lights
     static constexpr size_t ARTNET_HEADER_SIZE = 18;
 
+    // Test-only accessor for the correction-applied buffer. Lets the unit
+    // tests pin the no-allocation-in-loop contract (size set in onBuildState
+    // / onCorrectionChanged, never in loop). Not part of any runtime API.
+    const Buffer& correctedBuffer() const { return corrected_; }
+
 private:
     platform::UdpSocket socket_;
     Buffer* sourceBuffer_ = nullptr;
+    const Correction* correction_ = nullptr;
+    Buffer corrected_;               // owned: source bytes after brightness/order/white
     uint8_t sequence_ = 0;
     uint32_t lastSendTime_ = 0;
-    char lastConnectedIp_[16] = {};  // destination the socket is currently bound to
+    uint8_t lastConnectedIp_[4] = {};  // destination the socket is currently bound to (4 octets)
 
-    // Re-bind the connected socket when the ip control differs from what it was
-    // last bound to. UDP connect() only sets the destination (no handshake), so
-    // this is cheap; it runs only on an actual change.
+    // Re-bind the connected socket when the ip control differs from what it
+    // was last bound to. UDP connect() only sets the destination (no
+    // handshake), so this is cheap; it runs only on an actual change.
+    // The platform UdpSocket::connect() takes a string IP, so we format the
+    // octets onto a stack buffer at the call site rather than holding a
+    // long-lived char[16] member.
     void connectIfIpChanged() {
-        if (std::strcmp(ip, lastConnectedIp_) == 0) return;
-        socket_.connect(ip, ARTNET_PORT);
-        std::strncpy(lastConnectedIp_, ip, sizeof(lastConnectedIp_) - 1);
-        lastConnectedIp_[sizeof(lastConnectedIp_) - 1] = '\0';
+        if (std::memcmp(ip, lastConnectedIp_, 4) == 0) return;
+        char ipStr[16];
+        formatDottedQuad(ipStr, ip);
+        socket_.connect(ipStr, ARTNET_PORT);
+        std::memcpy(lastConnectedIp_, ip, 4);
     }
 
     void sendUniverse(uint16_t universe, const uint8_t* data, uint16_t dataLen) {
         uint8_t packet[ARTNET_HEADER_SIZE + MAX_CHANNELS_PER_UNIVERSE];
         size_t packetLen = buildPacket(packet, universe, sequence_, data, dataLen);
         socket_.sendTo(packet, packetLen);
+    }
+
+    // Called off the hot path (onBuildState, onCorrectionChanged, setters) to
+    // make sure corrected_ is sized for the current source + correction. Skips
+    // when nothing is wired yet, or when the existing allocation already fits.
+    void resizeCorrected() {
+        if (!correction_ || !sourceBuffer_) return;
+        const nrOfLightsType n = sourceBuffer_->count();
+        const uint8_t ch = correction_->outChannels;
+        if (n == 0 || ch == 0) return;
+        if (corrected_.count() >= n && corrected_.channelsPerLight() >= ch) return;
+        corrected_.allocate(n, ch);
     }
 };
 

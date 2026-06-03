@@ -22,7 +22,7 @@ One flat JSON file per top-level module under `/.config/`:
                            "0.fps":50,"0.enabled":true,...}
 ```
 
-Filename comes from `MoonModule::typeName()`. Child modules are encoded **positionally** with a `<index>.` key prefix — no nested objects, no arrays. The `type` field per child drives **structural reconciliation** at load time: when the JSON describes a child type at position N that differs from the live tree's child at N (built by `main.cpp`), the loader factory-creates the JSON type, calls its `onBuildControls()`, and swaps it into place. Children present in the live tree but missing from the JSON are torn down and deleted; children in the JSON beyond the live tree's end are appended. Phases 3+4 (`setup`, `onAllocateMemory`) cascade into the reconciled tree, so newly-created children are fully initialized like any other.
+Filename comes from `MoonModule::typeName()`. Child modules are encoded **positionally** with a `<index>.` key prefix — no nested objects, no arrays. The `type` field per child drives **structural reconciliation** at load time: when the JSON describes a child type at position N that differs from the live tree's child at N (built by `main.cpp`), the loader factory-creates the JSON type, calls its `onBuildControls()`, and swaps it into place. Children present in the live tree but missing from the JSON are torn down and deleted; children in the JSON beyond the live tree's end are appended. Phases 3+4 (`setup`, `onBuildState`) cascade into the reconciled tree, so newly-created children are fully initialized like any other.
 
 `ReadOnly` and `Progress` controls are never persisted — they are derived values, not state.
 
@@ -37,7 +37,7 @@ phase 2b rebuildControls()     re-runs onBuildControls so conditional hidden fla
                                the persisted values (e.g. NetworkModule's static-IP
                                fields become visible after a persisted addressing=1)
 phase 3  setup()               modules' own init runs with persisted values in members
-phase 4  onAllocateMemory()    buffers sized to final values
+phase 4  onBuildState()    buffers sized to final values
 ```
 
 The Scheduler exposes `setLoadAllHook(LoadAllFn fn)` as a function pointer so it stays independent of FilesystemModule's type (no circular include). FilesystemModule wires the hook from `setScheduler()`.

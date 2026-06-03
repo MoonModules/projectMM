@@ -69,6 +69,9 @@ Testing/
 
 # MoonDeck state
 scripts/moondeck.json
+# Flash-event breadcrumb dropped by flash_esp32.py and consumed by MoonDeck
+# on the next device refresh to link last_port → device.
+scripts/.last_flash.json
 
 # Generated files
 src/ui/ui_embedded.h
@@ -92,12 +95,6 @@ esp32/monitor.log
 # and per-session runtime state (lock files for scheduled wakeups, etc.)
 .claude/settings.local.json
 .claude/*.lock
-
-# WiFi credentials for the local dev's improv_provision.py auto-detect path.
-# Copy wifi_credentials.example.json → wifi_credentials.json and fill in
-# your SSID + password. wifi_credentials.json is gitignored; the .example
-# is committed as a template. See scripts/build/host_wifi.py.
-scripts/build/wifi_credentials.json
 
 # OS
 .DS_Store

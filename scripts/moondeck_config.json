@@ -1,5 +1,5 @@
 {
-  "boards": ["esp32", "esp32-eth", "esp32-eth-wifi", "esp32s3-n16r8"],
+  "firmwares": ["esp32", "esp32-eth", "esp32-eth-wifi", "esp32s3-n16r8"],
   "scripts": [
     {
       "id": "build_desktop",
@@ -13,9 +13,20 @@
       "id": "test_desktop",
       "tab": "pc",
       "group": "test",
-      "label": "Test",
+      "label": "Unit Test",
       "help": "test_desktop",
-      "script": "test/test_desktop.py"
+      "script": "test/test_desktop.py",
+      "needs_module": true
+    },
+    {
+      "id": "scenario_pipeline",
+      "tab": "pc",
+      "group": "test",
+      "label": "Scenarios",
+      "help": "scenario_pipeline",
+      "script": "scenario/run_scenario.py",
+      "needs_module": true,
+      "needs_scenario": true
     },
     {
       "id": "run_desktop",
@@ -39,7 +50,7 @@
       "id": "preview_installer",
       "tab": "pc",
       "group": "run",
-      "label": "Preview Installer",
+      "label": "Installer Preview",
       "help": "preview_installer",
       "script": "run/preview_installer.py",
       "long_running": true,
@@ -62,18 +73,9 @@
       "script": "check/collect_kpi.py"
     },
     {
-      "id": "scenario_pipeline",
-      "tab": "pc",
-      "group": "scenario",
-      "label": "Scenarios",
-      "help": "scenario_pipeline",
-      "script": "scenario/run_scenario.py",
-      "needs_scenario": true
-    },
-    {
       "id": "history_report",
       "tab": "pc",
-      "group": "report",
+      "group": "check",
       "label": "History Report",
       "help": "history_report",
       "script": "report/history_report.py"
@@ -116,6 +118,7 @@
       "help": "live_scenario",
       "script": "scenario/run_live_scenario.py",
       "needs_device": true,
+      "needs_module": true,
       "needs_scenario": true
     },
     {
@@ -141,7 +144,7 @@
       "label": "Build",
       "help": "build_esp32",
       "script": "build/build_esp32.py",
-      "needs_board": true
+      "needs_firmware": true
     },
     {
       "id": "flash_esp32",
@@ -151,7 +154,7 @@
       "help": "flash_esp32",
       "script": "build/flash_esp32.py",
       "needs_port": true,
-      "needs_board": true
+      "needs_firmware": true
     },
     {
       "id": "erase_flash_esp32",
@@ -190,6 +193,15 @@
       "label": "Improv Probe",
       "help": "improv_probe",
       "script": "build/improv_probe.py",
+      "needs_port": true
+    },
+    {
+      "id": "improv_smoke_test",
+      "tab": "esp32",
+      "group": "run",
+      "label": "Improv Smoke Test",
+      "help": "improv_smoke_test",
+      "script": "build/improv_smoke_test.py",
       "needs_port": true
     }
   ]

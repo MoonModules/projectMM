@@ -114,8 +114,10 @@ Auto-rendered by `controls[].type`. Adding a new MoonModule with these control t
 | `text` | text input | sends debounced | 500ms |
 | `password` | password input | masked; hold-to-peek button reveals the stored value | 500ms |
 | `display` (read-only) | static text | WS push updates value in place | n/a |
+| `display-int` (read-only int + unit) | formatted text (`-58 dBm`) | WS push updates value; the unit suffix is set device-side at `addReadOnlyInt` time and carried in the descriptor's `aux` slot, not in a per-control string buffer | n/a |
 | `time` (read-only seconds) | formatted text (`1d 4h 27m 13s`) | WS push updates | n/a |
 | `progress` | bar + numeric `X / max` | WS push updates value | n/a |
+| `ipv4` | text input (dotted-quad) | sends on change; server validates (`parseDottedQuad`) and rejects malformed values with 400. 4-byte octet storage device-side instead of a 16-char string. | n/a |
 | `button` | clickable button | sends value=1 on click | none |
 
 **Reset-to-default button (↺).** Appears next to controls whose default is known. Defaults are captured from a fresh probe instance per type (factory's probe — no per-control boilerplate) and emitted in `/api/types`. The button is dim/inactive when value equals default, bright/clickable otherwise. Clicking sends the default value.
@@ -171,7 +173,7 @@ POST   /api/control           {module, control, value} — set a control value
 POST   /api/modules           {type, parent_id?} — create
 POST   /api/modules/<n>/move  {to: N} — reorder to absolute index N within parent
                               strict-suffix match: /movex returns 404
-                              triggers Scheduler::rebuild() so LUT-affecting reorders rebuild
+                              triggers Scheduler::buildState() so LUT-affecting reorders rebuild
 POST   /api/modules/<n>/replace {type} — swap module <n> for another type at the same
                               position. Strict-suffix match. The replacement starts with
                               factory defaults; siblings and order are preserved.
@@ -252,7 +254,7 @@ Everything in this spec is in the live codebase. The 12 features below each link
 1. **Status bar** with hamburger, MoonLight logo, brand, device name, system stats (uptime · free heap), WS dot, reboot button (with crashed-state styling), and theme toggle — see [Status bar](#status-bar).
 2. **Side navigation** — a left column listing root modules; one root visible at a time, selection persisted; footer with social links + copyright; hamburger collapses it (wide) or slides it in over an overlay (<820px) — see [Side navigation](#side-navigation).
 3. **Single-column module card layout** with hierarchy (children inline-indented, depth-based card backgrounds) — see [Module card](#module-card).
-4. **All 9 control types** (uint8 slider, uint16, bool, text, password with hold-to-peek, select, display, time, progress, button) with the `dragTs` + 20ms-feedback + 150/500ms-debounce pattern — see [Control types](#control-types).
+4. **All 11 control types** (slider for uint8/uint16, bool, text, password with hold-to-peek, select, display, display-int, time, progress, ipv4, button) with the `dragTs` + 20ms-feedback + 150/500ms-debounce pattern — see [Control types](#control-types).
 5. **Type picker** (role-filtered, emoji tag chip filter, search box, keyboard navigation) on parents that accept children — see [Type picker](#type-picker).
 6. **Reset-to-default ↺** buttons per control with a known default. Defaults are captured from a fresh probe instance per type (factory's probe — no per-control boilerplate) and emitted in `/api/types`.
 7. **Light/dark theme toggle** via `[data-theme]` on `<body>` + CSS variables; preference persists in `localStorage['mm_theme']`.

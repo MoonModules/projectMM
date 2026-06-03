@@ -29,7 +29,7 @@ A Layouts container can hold multiple layouts. Example: 16 LED strips making up 
 
 ## Disabling a layout
 
-Disabling a layout child (the `enabled` toggle in the UI) removes its lights from the LUT entirely. Indices of any layouts after it shift down to close the gap: with two grids of 4 and 2 lights, disabling the first leaves the second at indices 0–1, and `totalLightCount` drops from 6 to 2. A `Scheduler::rebuild()` fires from the HTTP handler so the LUT, layer buffer, and driver output buffer reallocate.
+Disabling a layout child (the `enabled` toggle in the UI) removes its lights from the LUT entirely. Indices of any layouts after it shift down to close the gap: with two grids of 4 and 2 lights, disabling the first leaves the second at indices 0–1, and `totalLightCount` drops from 6 to 2. A `Scheduler::buildState()` fires from the HTTP handler so the LUT, layer buffer, and driver output buffer reallocate.
 
 Side effect: ArtNet universe assignments shift with the indices. To keep driver-to-fixture mapping stable across enable changes, disable the driver instead of the layout.
 

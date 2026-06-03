@@ -1,0 +1,514 @@
+{
+  "name": "scenario_MoonModule_control_change",
+  "module": "MoonModule",
+  "mode": "mutate",
+  "also": [
+    "MirrorModifier",
+    "NoiseEffect"
+  ],
+  "description": "Measure the cost of control changes on a running pipeline. Toggles MirrorModifier's mirrorX/Y at different points and verifies each change is applied without freezing the render loop. Companion to the MoonModule control-change gate unit tests (unit_MoonModule_control_change_gate.cpp) — this is the live equivalent.",
+  "fixture": [
+    {
+      "name": "fix-layouts",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "fix-grid",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 128,
+        "height": 128
+      }
+    },
+    {
+      "name": "fix-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "props": {
+        "layouts": "Layouts",
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "fix-noise",
+      "op": "add_module",
+      "id": "Noise",
+      "type": "NoiseEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "fix-mirror",
+      "op": "add_module",
+      "id": "Mirror",
+      "type": "MirrorModifier",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "fix-drivers",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "layer": "Layer"
+      }
+    },
+    {
+      "name": "fix-artnet",
+      "op": "add_module",
+      "id": "ArtNet",
+      "type": "ArtNetSendDriver",
+      "parent_id": "Drivers"
+    }
+  ],
+  "reset": [
+    {
+      "name": "reset-grid-width",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "reset-grid-height",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128
+    },
+    {
+      "name": "reset-mirrorX",
+      "op": "set_control",
+      "id": "Mirror",
+      "key": "mirrorX",
+      "value": true
+    },
+    {
+      "name": "reset-mirrorY",
+      "op": "set_control",
+      "id": "Mirror",
+      "key": "mirrorY",
+      "value": true
+    },
+    {
+      "name": "reset-noise-scale",
+      "op": "set_control",
+      "id": "Noise",
+      "key": "scale",
+      "value": 4
+    }
+  ],
+  "steps": [
+    {
+      "name": "baseline",
+      "description": "Set NoiseEffect.scale=4 and measure baseline FPS (mirror on). Effect controls don't rebuild the pipeline — slider stutter check.",
+      "op": "set_control",
+      "id": "Noise",
+      "key": "scale",
+      "value": 4,
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min_pct": 80
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 120,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 105000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            99,
+            208
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-03"
+          ]
+        },
+        "esp32-eth-wifi": {
+          "tick_us": [
+            81756,
+            81756
+          ],
+          "free_heap": [
+            96168,
+            96168
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            94382,
+            95557
+          ],
+          "free_heap": [
+            136036,
+            136056
+          ],
+          "max_alloc_block": [
+            49152,
+            51200
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            253513,
+            253513
+          ],
+          "free_heap": [
+            90488,
+            90488
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        }
+      }
+    },
+    {
+      "name": "disable-mirrorX",
+      "description": "Disable mirrorX. Modifier control triggers a pipeline rebuild — measures the rebuilt path.",
+      "op": "set_control",
+      "id": "Mirror",
+      "key": "mirrorX",
+      "value": false,
+      "measure": true,
+      "contract": {
+        "pc-macos": {
+          "tick_us": 200,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 105000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            181,
+            239
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-03"
+          ]
+        },
+        "esp32-eth-wifi": {
+          "tick_us": [
+            83290,
+            83290
+          ],
+          "free_heap": [
+            95744,
+            95744
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            96061,
+            96068
+          ],
+          "free_heap": [
+            135400,
+            135420
+          ],
+          "max_alloc_block": [
+            49152,
+            51200
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            209451,
+            209451
+          ],
+          "free_heap": [
+            90356,
+            90356
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        }
+      }
+    },
+    {
+      "name": "disable-mirrorY",
+      "description": "Disable mirrorY. Mirror is now fully off — should land on the no-LUT path.",
+      "op": "set_control",
+      "id": "Mirror",
+      "key": "mirrorY",
+      "value": false,
+      "measure": true,
+      "contract": {
+        "pc-macos": {
+          "tick_us": 400,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 105000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            346,
+            403
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-03"
+          ]
+        },
+        "esp32-eth-wifi": {
+          "tick_us": [
+            89895,
+            89895
+          ],
+          "free_heap": [
+            95744,
+            95744
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            111731,
+            112922
+          ],
+          "free_heap": [
+            135176,
+            135208
+          ],
+          "max_alloc_block": [
+            49152,
+            51200
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            226151,
+            226151
+          ],
+          "free_heap": [
+            90052,
+            90052
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        }
+      }
+    },
+    {
+      "name": "re-enable-mirrors",
+      "description": "Re-enable mirrorX (rebuild back to LUT path).",
+      "op": "set_control",
+      "id": "Mirror",
+      "key": "mirrorX",
+      "value": true
+    },
+    {
+      "name": "re-enable-mirrorY",
+      "description": "Re-enable mirrorY and measure — the heavy LUT path must recover (FPS within 50% of baseline) without staying degraded.",
+      "op": "set_control",
+      "id": "Mirror",
+      "key": "mirrorY",
+      "value": true,
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min_pct": 50
+        }
+      },
+      "contract": {
+        "pc-macos": {
+          "tick_us": 120,
+          "free_heap": 0,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        },
+        "esp32-eth-wifi": {
+          "tick_us": 100000,
+          "free_heap": 105000,
+          "set_by": "2026-06-02",
+          "reason": "initial contract"
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            96,
+            111
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-03"
+          ]
+        },
+        "esp32-eth-wifi": {
+          "tick_us": [
+            82306,
+            82306
+          ],
+          "free_heap": [
+            95744,
+            95744
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            94498,
+            95615
+          ],
+          "free_heap": [
+            135196,
+            135208
+          ],
+          "max_alloc_block": [
+            49152,
+            51200
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            229353,
+            229353
+          ],
+          "free_heap": [
+            90344,
+            90344
+          ],
+          "max_alloc_block": [
+            49152,
+            49152
+          ],
+          "at": [
+            "2026-06-02",
+            "2026-06-02"
+          ]
+        }
+      }
+    }
+  ]
+}

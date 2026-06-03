@@ -25,7 +25,7 @@ These operate on individual channel values, not on a struct. They live in core (
 
 ## Tests
 
-[Module test: Color Math](../../testing.md#color) — hsvToRgb at cardinal hues, white/black edge cases, scale8, constexpr verification.
+[Unit tests: Color](../../tests/unit-tests.md#color) — hsvToRgb at cardinal hues, white/black edge cases, scale8, constexpr verification.
 
 ## Prior art
 
