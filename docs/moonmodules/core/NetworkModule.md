@@ -45,7 +45,7 @@ Included in NetworkModule (not separate). Registers the deviceName on whichever 
 
 ## Ethernet
 
-Ethernet init is part of NetworkModule::setup(). Board-specific GPIO config (MAC, PHY, clock pin, reset pin) will be handled by a future IO module. For now, hardcoded per board via compile-time defines.
+Ethernet init is part of NetworkModule::setup(). Board-specific GPIO config (MAC, PHY, clock pin, reset pin) is hardcoded per board via compile-time defines in `sdkconfig.defaults.<board>`.
 
 The firmware always includes Ethernet support — no separate firmware for Ethernet vs WiFi boards. On boards without Ethernet hardware, the init fails silently and WiFi STA becomes Plan A. The code overhead of unused Ethernet support is minimal (no runtime memory cost when not initialized).
 

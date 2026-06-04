@@ -144,8 +144,8 @@ release is visible only to those who opt into the Pre-release channel.
 #   - Deploys Pages with the new release available immediately.
 ```
 
-ESP Web Tools requires Chrome, Edge, or Opera on desktop. Firefox and Safari
-don't ship Web Serial.
+Web Serial requires Chrome, Edge, or Opera on desktop. Firefox and Safari
+don't ship the API.
 
 ## Deployment
 

@@ -272,7 +272,15 @@ bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
 bool wifiApConnected() { return false; }
 void wifiApStop() {}
 int wifiTxPower() { return 0; }
-bool wifiSetTxPower(int8_t /*quarterDbm*/) { return false; }
+// Match the API contract: 0 is a successful no-op (matches ESP-IDF
+// MM_NO_WIFI stub semantics). Any non-zero value returns false since
+// there's no radio to set on the desktop. The 0-as-success branch
+// matters because NetworkModule's syncTxPower passes the ESP-IDF
+// "no override" sentinel (80 quarter-dBm → full power, which maps to
+// txPowerSetting_==0 in user-facing dBm) through this setter to lift
+// any prior cap; on desktop the radio doesn't exist so "the cap is
+// lifted" is trivially true.
+bool wifiSetTxPower(int8_t quarterDbm) { return quarterDbm == 0; }
 
 bool mdnsInit(const char* /*deviceName*/) { return false; }
 void mdnsStop() {}
