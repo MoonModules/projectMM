@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>projectMM — Install</title>
+  <title>projectMM Installer</title>
+  <link rel="icon" type="image/png" href="./favicon.png">
 
   <!-- ESP Web Tools dropped in Step 3 of the board-injection plan. EWT 10.x
        held the SerialPort exclusively and didn't expose its internal
@@ -96,9 +97,18 @@
     }
     ol { padding-left: 22px; }
     ol li { margin-bottom: 6px; }
+    .credits {
+      max-width: 720px;
+      margin: 32px auto 24px;
+      padding: 0 16px;
+      text-align: center;
+      border-top: 1px solid var(--border);
+      padding-top: 16px;
+    }
+    .credits .note { margin-top: 0; }
 
     /* Minimal mirror of the device UI's control-row shape so the shared
-       release-picker module (src/ui/release-picker.js) renders the same
+       install-picker module (src/ui/install-picker.js) renders the same
        way on the installer page. The picker emits `.control-row` + child
        `<select>` markup; without these rules the rows wouldn't lay out. */
     .control-row {
@@ -138,13 +148,16 @@
     .device-row:first-child { border-top: 0; }
     .device-info { min-width: 0; flex: 1; }
     .device-url {
+      display: block;
       font-family: ui-monospace, monospace;
       color: var(--muted);
       font-size: 12px;
+      text-decoration: none;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .device-url:hover { color: var(--accent); text-decoration: underline; }
     .device-seen { color: var(--muted); font-size: 12px; margin-top: 2px; }
     .device-actions { display: flex; gap: 6px; flex-shrink: 0; }
     .device-btn {
@@ -189,6 +202,7 @@
     .install-section { display: none; }
     .install-section.active { display: block; }
     .install-status { margin: 8px 0; color: var(--muted); }
+    .install-warn { color: #d4a052; font-size: 12px; margin-top: 8px; }
     .install-progress {
       height: 8px;
       background: var(--bg);
@@ -201,6 +215,27 @@
       background: var(--accent);
       width: 0;
       transition: width 0.2s;
+    }
+    /* Indeterminate state — esptool-js's eraseFlash() doesn't report
+       progress (12 s of "wait and hope"), so we animate a marquee-style
+       bar to confirm the page hasn't hung. Toggled by adding the
+       .indeterminate class to .install-progress-bar; width set to 100%
+       so the animation has something to clip. */
+    .install-progress-bar.indeterminate {
+      width: 100%;
+      background: linear-gradient(
+        90deg,
+        var(--bg) 0%,
+        var(--accent) 40%,
+        var(--accent) 60%,
+        var(--bg) 100%);
+      background-size: 200% 100%;
+      animation: install-marquee 1.4s linear infinite;
+      transition: none;
+    }
+    @keyframes install-marquee {
+      from { background-position: 100% 0; }
+      to   { background-position: -100% 0; }
     }
     .install-form label {
       display: block;
@@ -290,7 +325,7 @@
 </head>
 <body>
   <main>
-    <h1>projectMM <span class="version-chip" id="version-chip" hidden></span></h1>
+    <h1>projectMM Installer <span class="version-chip" id="version-chip" hidden></span></h1>
     <p class="tag">Plug in your ESP32. Pick a release + board. Flash. Get the device on your network. Open it in a browser.</p>
 
     <div class="card browser-warning" id="browser-warning">
@@ -309,6 +344,20 @@
         <em>(beta)</em> except stables. Newest stable is the default; pick
         <code>latest</code> to try the newest unreleased changes.
       </p>
+      <!-- Port picker — optional pre-pick, matching the install-picker
+           dropdown shape. Populated from navigator.serial.getPorts() (ports
+           the user has previously granted; empty list on first visit). The
+           final "Pick another port…" option triggers the browser's native
+           picker. Web Serial doesn't expose an enumeration API outside the
+           user-gesture picker, so this is as close to a "live dropdown of
+           plugged-in devices" as the platform allows. If the user clicks
+           Install without picking, the orchestrator falls back to its own
+           requestPort() prompt — current behaviour preserved. -->
+      <div class="control-row" id="port-row">
+        <span class="control-label">USB Port</span>
+        <select id="port-select" class="rp-select"></select>
+      </div>
+
       <!-- Picker mounts here. Release (newest-first, RCs flagged) →
            Board. Same module the on-device OTA UI uses. -->
       <div id="picker-mount"></div>
@@ -375,6 +424,20 @@
     </div>
   </main>
 
+  <!-- Credits / acknowledgements. Loaded as CDN ES modules straight from
+       unpkg — pinned versions in install-orchestrator.js. -->
+  <footer class="credits">
+    <p class="note">
+      Powered by
+      <a href="https://github.com/espressif/esptool-js" target="_blank" rel="noopener">esptool-js</a>
+      (Web Serial flasher),
+      <a href="https://github.com/improv-wifi/sdk-js" target="_blank" rel="noopener">improv-wifi-serial-sdk</a>
+      (WiFi provisioning), and the
+      <a href="https://www.improv-wifi.com/serial/" target="_blank" rel="noopener">Improv-Serial protocol</a>
+      for the secure handshake.
+    </p>
+  </footer>
+
   <!-- Install modal — driven entirely by JS below. Sections show one at a
        time via .install-section.active toggling. Empty until the user
        clicks Install in the picker. -->
@@ -390,15 +453,29 @@
       <div class="install-section" id="section-flashing">
         <div class="install-status" id="flashing-status">Preparing to flash…</div>
         <div class="install-progress"><div class="install-progress-bar" id="flash-bar"></div></div>
+        <p class="note install-warn">Don't close this window or unplug the device until flash completes — interrupting mid-write leaves the chip in a half-flashed state that needs a full re-flash to recover.</p>
       </div>
 
       <div class="install-section" id="section-wifi-form">
         <div class="install-status">Flash done. Enter your WiFi credentials to provision the device.</div>
         <form id="wifi-form" class="install-form" onsubmit="return false">
           <label for="wifi-ssid">Network name (SSID)</label>
-          <input type="text" id="wifi-ssid" autocomplete="off" required>
+          <!-- data-lpignore / data-1p-ignore: vendor-specific opt-outs that
+               stop LastPass / 1Password from injecting fill icons + popups.
+               `autocomplete="off"` covers Chrome's built-in autofill; the
+               vendor attrs cover the password-manager extensions. The WiFi
+               creds form is a one-shot installer step, not a credential
+               vault — fill prompts are pure noise here. -->
+          <input type="text" id="wifi-ssid" autocomplete="off"
+                 data-lpignore="true" data-1p-ignore required>
           <label for="wifi-password">Password</label>
-          <input type="password" id="wifi-password" autocomplete="new-password">
+          <!-- autocomplete="off" rather than "new-password": "new-password"
+               actively tells the browser this is a credential being created,
+               which prompts 1Password / Chrome to offer a generated value.
+               "off" is the closest signal we have to "this is a one-off
+               credential, not a login I want saved". -->
+          <input type="password" id="wifi-password" autocomplete="off"
+                 data-lpignore="true" data-1p-ignore>
           <div class="install-actions">
             <button type="button" class="secondary" id="wifi-skip">Skip</button>
             <button type="submit" class="primary" id="wifi-connect">Connect</button>
@@ -408,6 +485,33 @@
 
       <div class="install-section" id="section-provisioning">
         <div class="install-status" id="provisioning-status">Connecting to your WiFi…</div>
+      </div>
+
+      <!-- Needs-IP form: shown when the device didn't speak Improv back
+           (alreadyOnline branch, or an Improv-less firmware like esp32-eth).
+           User types the IP/hostname so we can still add the device to
+           "Your devices" and hand the picked board off through the Visit
+           click's same-origin URL (?board=…). -->
+      <div class="install-section" id="section-needs-ip">
+        <div class="install-status" id="needs-ip-status">
+          Flash done. The device didn't respond over USB — that's normal for
+          Ethernet-only firmware (e.g. <code>esp32-eth</code>) or when the
+          device booted with previously-saved WiFi credentials.
+        </div>
+        <form id="needs-ip-form" class="install-form" onsubmit="return false">
+          <label for="needs-ip-input">Device IP or hostname</label>
+          <input type="text" id="needs-ip-input" autocomplete="off"
+                 placeholder="192.168.1.42 or MM-XXXX.local" required>
+          <p class="note">
+            Find it on your router's admin page or the device's USB serial log
+            (right after boot). Leave blank and Skip to finish without adding
+            the device to <em>Your devices</em>.
+          </p>
+          <div class="install-actions">
+            <button type="button" class="secondary" id="needs-ip-skip">Skip</button>
+            <button type="submit" class="primary" id="needs-ip-add">Add device</button>
+          </div>
+        </form>
       </div>
 
       <div class="install-section" id="section-done">
@@ -437,7 +541,7 @@
   </div>
 
   <script type="module">
-    // Shared release-picker (channel → release → board). Same file as the
+    // Shared install-picker (release → board → firmware). Same file as the
     // on-device OTA UI uses; only the onInstall callback differs:
     //   - Device UI: POST the chosen .bin URL to /api/firmware/url; device
     //     fetches the binary directly via esp_https_ota.
@@ -451,7 +555,7 @@
     // self-hosts the last N releases into pages/install/releases/<tag>/.
     // toLocalUrl rewrites the picker's absolute GitHub URLs to the local
     // copies before handing them to the orchestrator.
-    import { releasePicker } from "./release-picker.js";
+    import { installPicker } from "./install-picker.js";
     import { myDevices }    from "./devices.js";
     import { installer }    from "./install-orchestrator.js";
 
@@ -489,6 +593,7 @@
       flashing:     document.getElementById("section-flashing"),
       wifiForm:     document.getElementById("section-wifi-form"),
       provisioning: document.getElementById("section-provisioning"),
+      needsIp:      document.getElementById("section-needs-ip"),
       done:         document.getElementById("section-done"),
       error:        document.getElementById("section-error"),
     };
@@ -507,9 +612,29 @@
       const toggle = document.getElementById("log-toggle");
       log.hidden = true;
       toggle.textContent = "Show log";
+      // Guard against accidental tab-close mid-flash. Browser shows a
+      // generic "leave site?" prompt (Chrome ignores the custom text since
+      // 2017 — security hardening). disarmUnloadGuard() runs on done /
+      // error / cancel so the user can close the page when it's safe.
+      armUnloadGuard();
     }
     function closeModal() {
       backdrop.classList.remove("open");
+      disarmUnloadGuard();
+    }
+    let unloadGuard = null;
+    function armUnloadGuard() {
+      if (unloadGuard) return;
+      unloadGuard = (e) => {
+        e.preventDefault();
+        e.returnValue = "";  // legacy contract — Chrome ignores the string
+      };
+      window.addEventListener("beforeunload", unloadGuard);
+    }
+    function disarmUnloadGuard() {
+      if (!unloadGuard) return;
+      window.removeEventListener("beforeunload", unloadGuard);
+      unloadGuard = null;
     }
     document.getElementById("done-close").addEventListener("click", closeModal);
     document.getElementById("error-close").addEventListener("click", closeModal);
@@ -551,18 +676,31 @@
             "Downloading firmware…";
           document.getElementById("flash-bar").style.width = "0%";
           break;
-        case "erase":
+        case "erase": {
           showSection("flashing");
           document.getElementById("flashing-status").textContent =
-            "Erasing flash (this takes ~10 s)…";
-          document.getElementById("flash-bar").style.width = "0%";
+            "Erasing flash (this takes ~12 s)…";
+          // esptool-js's eraseFlash doesn't report progress — animate the
+          // bar so the user sees the page isn't hung. flash stage clears
+          // the class below and switches to determinate progress.
+          //
+          // Clear the inline width set by an earlier stage (fetch-firmware
+          // forces `style.width = "0%"`); inline style beats the CSS class's
+          // `width: 100%` rule, so the animation would run invisibly on a
+          // zero-width bar without this reset.
+          const bar = document.getElementById("flash-bar");
+          bar.style.width = "";
+          bar.classList.add("indeterminate");
           break;
+        }
         case "flash": {
           showSection("flashing");
           const pct = detail && typeof detail.pct === "number" ? detail.pct : 0;
+          const bar = document.getElementById("flash-bar");
+          bar.classList.remove("indeterminate");
           document.getElementById("flashing-status").textContent =
             `Writing firmware… ${pct}%`;
-          document.getElementById("flash-bar").style.width = `${pct}%`;
+          bar.style.width = `${pct}%`;
           break;
         }
         case "reboot":
@@ -575,11 +713,21 @@
           document.getElementById("connecting-detail").textContent =
             "Connecting over Improv…";
           break;
-        case "wifi-creds-form":
+        case "wifi-creds-form": {
           showSection("wifiForm");
-          // Focus SSID for keyboard-driven UX.
-          requestAnimationFrame(() => document.getElementById("wifi-ssid").focus());
+          // Prefill the last-used SSID (not password — that stays out of
+          // localStorage as a privacy / security-scanner concession). Focus
+          // password if SSID is prefilled (user only needs to type the
+          // password), else focus SSID.
+          const ssidEl = document.getElementById("wifi-ssid");
+          const passEl = document.getElementById("wifi-password");
+          try {
+            const saved = localStorage.getItem("projectMM.installer.lastSsid");
+            if (saved) ssidEl.value = saved;
+          } catch (_) { /* hostile storage */ }
+          requestAnimationFrame(() => (ssidEl.value ? passEl : ssidEl).focus());
           break;
+        }
         case "provisioning":
           showSection("provisioning");
           document.getElementById("provisioning-status").textContent =
@@ -589,6 +737,14 @@
           showSection("provisioning");
           document.getElementById("provisioning-status").textContent =
             "Setting board identity…";
+          break;
+        case "needs-ip":
+          showSection("needsIp");
+          // Focus the input so the user can start typing immediately.
+          requestAnimationFrame(() => {
+            const el = document.getElementById("needs-ip-input");
+            if (el) el.focus();
+          });
           break;
         case "done":
           // onSuccess fires next; section toggles there once URL is known.
@@ -612,7 +768,14 @@
         const onSubmit = (e) => {
           e.preventDefault();
           cleanup();
-          resolve({ ssid: ssidEl.value.trim(), password: passEl.value });
+          const ssid = ssidEl.value.trim();
+          // Save SSID only — password stays out of localStorage. WiFi SSIDs
+          // are network-visible anyway (any scanning device sees them);
+          // passwords are not.
+          try {
+            if (ssid) localStorage.setItem("projectMM.installer.lastSsid", ssid);
+          } catch (_) { /* hostile storage */ }
+          resolve({ ssid, password: passEl.value });
         };
         const onSkip = () => {
           cleanup();
@@ -627,57 +790,162 @@
       });
     }
 
-    function handleSuccess({ url, board, alreadyOnline }) {
-      showSection("done");
-      const a = document.getElementById("done-url");
-      if (alreadyOnline) {
-        // Device booted with saved WiFi from a previous flash; the SDK's
-        // initialize() failed because the device immediately reports
-        // STATE_PROVISIONED instead of STATE_AUTHORIZED. We can't push
-        // SET_BOARD (no Improv handshake) and we don't know the device URL
-        // (the spec emits it as part of the state frame but the SDK swallows
-        // that on failure). User-visible message: flash succeeded, device
-        // is probably online — visit it and set board via MoonDeck.
-        a.removeAttribute("href");
-        a.textContent =
-          "Flash succeeded. Device may already be online with saved WiFi " +
-          "from a previous install. Find it on your network (look for the " +
-          "MM-XXXX.local hostname or check your router), then set the " +
-          "board name via MoonDeck if you picked one above.";
+    // Returns a Promise that resolves with the typed device URL (or empty
+    // for Skip). Symmetric with uiWaitForCreds. Normalisation of the typed
+    // value lives in the orchestrator so the host page stays UI-only.
+    function uiWaitForIp() {
+      return new Promise((resolve) => {
+        const form = document.getElementById("needs-ip-form");
+        const input = document.getElementById("needs-ip-input");
+        const skipBtn = document.getElementById("needs-ip-skip");
+
+        const onSubmit = (e) => {
+          e.preventDefault();
+          cleanup();
+          resolve({ url: input.value.trim() });
+        };
+        const onSkip = () => {
+          cleanup();
+          resolve({ url: "" });
+        };
+        const cleanup = () => {
+          form.removeEventListener("submit", onSubmit);
+          skipBtn.removeEventListener("click", onSkip);
+        };
+        form.addEventListener("submit", onSubmit);
+        skipBtn.addEventListener("click", onSkip);
+      });
+    }
+
+    function handleSuccess({ url, board, viaHttp, httpBoardOk, alreadyOnline }) {
+      disarmUnloadGuard();
+      if (!url) {
+        // User skipped the IP prompt. They've already read the
+        // needs-ip section's hints ("find it on your router's admin page",
+        // "Leave blank and Skip…"), so a second consolation screen would
+        // just add a click — close the modal directly.
+        closeModal();
         return;
       }
+      showSection("done");
+      const a = document.getElementById("done-url");
       a.href = url;
       a.textContent = url;
-      // Stash the device + picked board into "Your devices" so the user can
-      // revisit later. This is the part EWT 10.x silently broke
-      // (state-changed never escaped the shadow DOM); we own it now.
-      myDevices.addProvisionedDevice(url, board);
+      // Pending-board flag: set when the URL came from the user-typed IP
+      // form AND the in-orchestrator HTTP push didn't succeed (HTTPS Pages
+      // blocked it, OR localhost preview hit a timeout). devices.js then
+      // decorates the Visit link with `?board=<encoded>` so the device UI
+      // can finish the push same-origin. Improv-success path leaves this
+      // false — SET_BOARD already wrote the value over the serial link.
+      const pendingBoardPush = !!(viaHttp && board && !httpBoardOk);
+      myDevices.addProvisionedDevice(url, board, { pendingBoardPush });
     }
 
     function handleError(stage, error) {
+      disarmUnloadGuard();
       console.error("[install]", stage, error);
       showSection("error");
       document.getElementById("error-message").textContent =
         `Stage: ${stage}\n${error && error.message ? error.message : error}`;
     }
 
+    // --- Pre-pick port -------------------------------------------------
+    // Two-option dropdown: the currently-picked port (or a "Pick a port…"
+    // placeholder), and a "Pick another port…" sentinel that opens the
+    // browser's Web Serial picker. We never list multiple previously-
+    // granted ports — Web Serial doesn't expose OS device names, so a list
+    // of "Port 1 / Port 2 / Port 3" is just confusing. The native picker
+    // is the only place where the user can match a port to a physical
+    // device (it shows the OS device name there).
+    //
+    // We also don't pre-select from `navigator.serial.getPorts()` on page
+    // load. A surviving grant is not a guarantee the port is still openable
+    // — if the device re-enumerated (reboot, replug, host sleep), `open()`
+    // fails with "Failed to open serial port" mid-install. Cheaper UX to
+    // always have the user re-pick this session than to chase a confusing
+    // mid-flash error. installer.start() falls back to its own requestPort()
+    // prompt if the user clicks Install without pre-picking.
+    let pickedPort = null;
+    const portSelect = document.getElementById("port-select");
+    const PICK_NEW = "__pick_new__"; // sentinel value for the "pick another" option
+
+    function rebuildPortSelect() {
+      portSelect.replaceChildren();
+      // No-port state: a single "Pick a port…" option. The select-as-button
+      // shape lets the change-event fire when the user re-picks the same
+      // option after cancelling the picker (so the picker can be reopened
+      // without an extra "Pick another" row to collapse to). Browsers fire
+      // `change` when the chosen <option> changes; clicking the lone option
+      // when it's already selected doesn't fire — handled by the click
+      // listener below.
+      if (!pickedPort) {
+        const pickOpt = document.createElement("option");
+        pickOpt.value = PICK_NEW;
+        pickOpt.textContent = "Pick a port…";
+        portSelect.appendChild(pickOpt);
+        portSelect.value = PICK_NEW;
+        return;
+      }
+      // Picked state: "Port selected" + "Pick another port…" sentinel.
+      const currentOpt = document.createElement("option");
+      currentOpt.value = "current";
+      currentOpt.textContent = "Port selected";
+      portSelect.appendChild(currentOpt);
+      const pickOpt = document.createElement("option");
+      pickOpt.value = PICK_NEW;
+      pickOpt.textContent = "Pick another port…";
+      portSelect.appendChild(pickOpt);
+      portSelect.value = "current";
+    }
+
+    rebuildPortSelect();
+
+    async function openPortPicker() {
+      try {
+        pickedPort = await navigator.serial.requestPort({});
+      } catch (_) {
+        // User cancelled the picker — keep whatever was picked before.
+      }
+      rebuildPortSelect();
+    }
+
+    portSelect.addEventListener("change", () => {
+      if (portSelect.value === PICK_NEW) openPortPicker();
+    });
+    // Mousedown rather than click — `change` won't fire when the only
+    // option (the "Pick a port…" entry in the no-port state) is "re-chosen",
+    // and click on a <select> opens the native list before our handler
+    // runs. Mousedown fires before the list pops up; we preventDefault to
+    // suppress the list and open the Web Serial picker instead. Only
+    // applies in the no-port state — once a port is picked the regular
+    // change-event path handles it.
+    portSelect.addEventListener("mousedown", (e) => {
+      if (!pickedPort) {
+        e.preventDefault();
+        openPortPicker();
+      }
+    });
+
     // --- Picker wiring -------------------------------------------------
-    releasePicker.init({
+    installPicker.init({
       container: document.getElementById("picker-mount"),
       ownFirmwareKey: null,  // web installer flashes any firmware variant
       onInstall: async (firmware, manifestUrl /*, binaryUrl */) => {
         const localUrl = toLocalUrl(manifestUrl);
-        const board = releasePicker.getSelectedBoard();
-        openModal(board ? `Installing on ${board}` : `Installing ${firmware}`);
+        const board = installPicker.getSelectedBoard();
+        openModal(board ? `Installing projectMM on ${board}` : `Installing ${firmware}`);
         showSection("connecting");
         document.getElementById("connecting-detail").textContent = "";
         const eraseBefore = document.getElementById("erase-before-flash").checked;
         await installer.start({
+          // pickedPort may be null — orchestrator falls back to requestPort.
+          port: pickedPort,
           manifestUrl: localUrl,
           board,
           eraseBefore,
           onProgress: handleProgress,
           uiWaitForCreds,
+          uiWaitForIp,
           onSuccess: handleSuccess,
           onError: handleError,
           onLog: appendLog,
@@ -697,6 +965,7 @@
         showSection("connecting");
         document.getElementById("connecting-detail").textContent = "";
         await installer.eraseOnly({
+          port: pickedPort,
           onProgress: handleProgress,
           onSuccess: () => {
             showSection("done");

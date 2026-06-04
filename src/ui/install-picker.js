@@ -1,14 +1,16 @@
-// projectMM release-channel picker — shared by the on-device UI (OTA flash)
-// and the GitHub Pages installer (first flash via Web Serial).
+// projectMM install picker — shared by the on-device UI (OTA flash) and the
+// GitHub Pages installer (first flash via Web Serial). Renders Release +
+// Board + Firmware dropdowns and an Install button; the caller wires the
+// onInstall callback to the right install transport.
 //
 // Same data source, two install transports:
 //   - Device UI: caller POSTs the chosen .bin URL to /api/firmware/url; the
 //     device's HTTPS client downloads + writes to the OTA partition. No CORS
 //     in the data path.
-//   - Web installer: caller sets the chosen manifest URL on
-//     <esp-web-install-button>; ESP Web Tools flashes via Web Serial. Manifest
-//     and binaries must be same-origin with the page (CORS), which is why the
-//     Pages site self-hosts the last N releases.
+//   - Web installer: caller hands the chosen manifest URL to the custom
+//     install-orchestrator.js (which drives esptool-js + improv-wifi-serial-sdk
+//     over Web Serial). Manifest and binaries must be same-origin with the
+//     page (CORS), which is why the Pages site self-hosts the last N releases.
 //
 // The picker is a presentation+state machine; it does not decide *how* to
 // install. The caller passes an onInstall(firmware, manifestUrl, binaryUrl)
@@ -69,7 +71,7 @@ function makeState() {
 }
 
 // Module-level handle to the most recently mounted picker's state, so the
-// host page can call releasePicker.getSelectedBoard() without threading the
+// host page can call installPicker.getSelectedBoard() without threading the
 // state object through every callback. Web installer mounts exactly one
 // picker per page; if a future page mounts multiple, this becomes wrong
 // (returns whichever initialized last). See comment at makeState — pickers
@@ -391,24 +393,30 @@ function render(state) {
             opt.textContent = f.firmware;
             firmwareEl.appendChild(opt);
         });
-        // Precedence: own firmware > board default > last user pick > first
+        // Precedence: own firmware > last user pick > board default > first
         // compatible.
         //   1. The device's currently-flashed firmware (ownFirmwareKey) wins
         //      because the OTA picker's natural default is "re-flash what
         //      I'm running" — even if last week the user flashed something
         //      else. Only present on the on-device picker; the web installer
         //      passes null so this branch falls through.
-        //   2. The board's default_firmware wins next because picking a board
-        //      is the strongest contextual signal on the web installer ("the
-        //      user just told me this is a LOLIN D32, use its default").
-        //   3. localStorage saved pick — returning user's last choice when no
-        //      stronger signal exists.
-        //   4. First option in the narrowed list — fallback.
+        //   2. localStorage saved pick wins next: a returning user expects
+        //      their last choice to stick across page loads, including the
+        //      case where they hit board.default_firmware once but actually
+        //      want a non-default variant (e.g. esp32-eth-wifi on Olimex,
+        //      where the catalog's default is esp32-eth). Filtered through
+        //      `compatible` so a stale saved value (release dropped that
+        //      firmware) falls through harmlessly.
+        //   3. The board's default_firmware — fallback for first-time
+        //      visitors who haven't picked anything yet.
+        //   4. First option in the narrowed list — last-resort fallback.
         const savedFirmware = safeLocalGet(PREF_FIRMWARE_KEY);
         const savedHere = savedFirmware && compatible.find(f => f.firmware === savedFirmware);
         let preferred = null;
         if (state.ownFirmwareKey && compatible.find(f => f.firmware === state.ownFirmwareKey)) {
             preferred = state.ownFirmwareKey;
+        } else if (savedHere) {
+            preferred = savedFirmware;
         } else if (state.selectedBoard) {
             const board = state.boards.find(b => b.name === state.selectedBoard);
             if (board && board.default_firmware
@@ -416,7 +424,7 @@ function render(state) {
                 preferred = board.default_firmware;
             }
         }
-        state.firmware = preferred || (savedHere ? savedFirmware : compatible[0].firmware);
+        state.firmware = preferred || compatible[0].firmware;
         firmwareEl.value = state.firmware;
         // Single-firmware UX: when the narrow leaves exactly one option, the
         // <select> reads as a fixed badge (user sees what's being flashed but
@@ -483,7 +491,7 @@ function render(state) {
 // Public entry point
 // ---------------------------------------------------------------------------
 
-export const releasePicker = {
+export const installPicker = {
     /**
      * Mount a picker into the given container.
      * @param {object} opts

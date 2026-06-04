@@ -128,7 +128,7 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     // The actual flash is driven by POST /api/firmware/url; this module just
     // polls the shared globals so the WS push picks up progress.
     // setName("Firmware") overrides the factory-stripped default
-    // ("FirmwareUpdate") — the card hosts the release-picker, so "Firmware"
+    // ("FirmwareUpdate") — the card hosts the install-picker, so "Firmware"
     // reads as the user-facing concept (the picker is *how* you update it).
     auto* firmwareUpdateModule = static_cast<mm::FirmwareUpdateModule*>(
         mm::ModuleFactory::create("FirmwareUpdateModule"));

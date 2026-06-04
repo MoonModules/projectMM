@@ -2,21 +2,33 @@
   {
     "name": "Olimex ESP32-Gateway Rev G",
     "firmwares": ["esp32-eth", "esp32-eth-wifi"],
-    "default_firmware": "esp32-eth-wifi"
+    "default_firmware": "esp32-eth-wifi",
+    "controls": {
+      "Board": { "board": "Olimex ESP32-Gateway Rev G" }
+    }
   },
   {
     "name": "LOLIN D32",
     "firmwares": ["esp32"],
-    "default_firmware": "esp32"
+    "default_firmware": "esp32",
+    "controls": {
+      "Board": { "board": "LOLIN D32" }
+    }
   },
   {
     "name": "Generic ESP32 DevKit",
     "firmwares": ["esp32"],
-    "default_firmware": "esp32"
+    "default_firmware": "esp32",
+    "controls": {
+      "Board": { "board": "Generic ESP32 DevKit" }
+    }
   },
   {
     "name": "ESP32-S3 N16R8 DevKit",
     "firmwares": ["esp32s3-n16r8"],
-    "default_firmware": "esp32s3-n16r8"
+    "default_firmware": "esp32s3-n16r8",
+    "controls": {
+      "Board": { "board": "ESP32-S3 N16R8 DevKit" }
+    }
   }
 ]

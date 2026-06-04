@@ -74,7 +74,7 @@ public:
         // name pre-board-injection, which made any consumer that did
         // `controls.find(c => c.name === "firmware")` get whichever was bound
         // first (the progress bar's integer value) and break on string-only
-        // operations like release-picker's isCompatible.
+        // operations like install-picker's isCompatible.
         if (totalFlashVal_ > 0) {
             controls_.addProgress("firmwarePartition", firmwareSizeVal_, totalFlashVal_);
         }

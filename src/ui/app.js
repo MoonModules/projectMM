@@ -1,9 +1,9 @@
 // projectMM Web UI — all logic in one hand-maintained file per CLAUDE.md.
-// Loaded as <script type="module"> so it can import the shared release-picker
+// Loaded as <script type="module"> so it can import the shared install-picker
 // component used by both the device UI (here, OTA flash) and the GitHub Pages
 // installer (first flash via Web Serial). Module loading is deferred by
 // default; entry-point is the WS init at the bottom — no ordering surprises.
-import { releasePicker } from "/release-picker.js";
+import { installPicker } from "/install-picker.js";
 
 // Sections (top to bottom):
 //   1. State + storage
@@ -139,6 +139,16 @@ async function init() {
     try {
         const resp = await fetch("/api/state");
         state = await resp.json();
+        // Pending-board handoff from the web installer. The installer page
+        // (docs/install/devices.js → Inject button) opens us with
+        // `?board=<name>` when the orchestrator couldn't push the board
+        // itself (HTTPS Pages → HTTP device blocked by mixed-content, OR
+        // an Improv-less firmware variant). We consume it once, fetch the
+        // boards.json entry from Pages, fan out every `controls.*` field
+        // via the standard `/api/control` write, then strip the param via
+        // history.replaceState. Fire-and-forget — the WS state push driven
+        // by sendControl re-renders the affected fields.
+        consumePendingBoardParam();
         const savedSel = lsRead(LS_SELECTED, "mm.selectedModule", null);
         if (state.modules && state.modules.length > 0) {
             const exists = savedSel && state.modules.some(m => m.name === savedSel);
@@ -169,6 +179,71 @@ async function sendControl(moduleName, controlName, value) {
             body: JSON.stringify({module: moduleName, control: controlName, value: value})
         });
     } catch { /* server may be busy */ }
+}
+
+// Public Pages URL of the board catalog. The installer page also serves
+// this at `./boards.json` (same-origin from the installer's perspective),
+// but the device UI is on a different origin (the device's HTTP server),
+// so we fetch the canonical Pages copy. CORS: GitHub Pages static assets
+// ship `Access-Control-Allow-Origin: *`, so a cross-origin fetch from
+// http://<device>/ to https://ewowi.github.io succeeds without proxying.
+// Hardcoded rather than configurable: the catalog is project-global, not
+// per-installation. During local development, flip this to
+// `http://localhost:8000/boards.json` and re-flash; preview_installer.py
+// sends the same `Access-Control-Allow-Origin: *` header production does.
+const BOARDS_JSON_URL = "https://ewowi.github.io/projectMM/install/boards.json";
+
+// Consume an installer-emitted `?board=<name>` query param: look the name
+// up in boards.json on Pages, then push every field under `controls.<mod>.<ctrl>`
+// via the standard `/api/control` channel so each module's validation runs.
+// Strip the query param BEFORE the network round-trip so a mid-fetch
+// refresh doesn't double-push. No retry — failures (network, rejection)
+// leave the device unchanged; user re-runs the Inject button or sets the
+// fields manually via MoonDeck.
+//
+// See docs/moonmodules/core/BoardModule.md (Injection paths) for the
+// boards.json schema and the full handoff sequence.
+async function consumePendingBoardParam() {
+    const params = new URLSearchParams(location.search);
+    const pendingBoard = params.get("board");
+    if (!pendingBoard) return;
+    // Strip the param up-front so a refresh during the async fetch doesn't
+    // re-trigger the injection.
+    params.delete("board");
+    const qs = params.toString();
+    history.replaceState({}, "",
+        location.pathname + (qs ? "?" + qs : "") + location.hash);
+
+    let entry;
+    try {
+        const res = await fetch(BOARDS_JSON_URL);
+        if (!res.ok) throw new Error(`boards.json HTTP ${res.status}`);
+        const catalog = await res.json();
+        entry = Array.isArray(catalog)
+            ? catalog.find(b => b && b.name === pendingBoard)
+            : null;
+    } catch (e) {
+        // Network down, Pages outage, or boards.json missing the entry.
+        // Surface in the console so a user with devtools open can see why
+        // injection didn't take; don't show a modal since the rest of the
+        // UI is operational and most users just want to use the device.
+        console.warn("[board-inject] failed to fetch boards.json:", e);
+        return;
+    }
+    if (!entry || !entry.controls) {
+        console.warn(`[board-inject] no controls for board "${pendingBoard}"`);
+        return;
+    }
+    // entry.controls shape: { "<ModuleName>": { "<controlName>": <value>, ... }, ... }
+    // e.g. { "Board": { "board": "Olimex ESP32-Gateway Rev G" } }
+    // Iterate sequentially so each FilesystemModule debounced-save sees the
+    // full set; parallel fires could race the dirty flag on the same module.
+    for (const [moduleName, controls] of Object.entries(entry.controls)) {
+        if (!controls || typeof controls !== "object") continue;
+        for (const [controlName, value] of Object.entries(controls)) {
+            await sendControl(moduleName, controlName, value);
+        }
+    }
 }
 
 async function refetchState() {
@@ -541,7 +616,7 @@ function createCard(mod, depth) {
         }
     }
 
-    // FirmwareUpdate card hosts the shared release picker. Mount once per
+    // FirmwareUpdate card hosts the shared install picker. Mount once per
     // card-build. The picker reads SystemModule.firmware (already in
     // /api/state) to filter to OTA-compatible releases. On install, the
     // device fetches the binary via /api/firmware/url — no browser CORS in
@@ -558,9 +633,9 @@ function createCard(mod, depth) {
             return fwCtrl && fwCtrl.value ? fwCtrl.value : null;
         })();
         const mount = document.createElement("div");
-        mount.className = "release-picker-host";
+        mount.className = "install-picker-host";
         controlsHost.appendChild(mount);
-        releasePicker.init({
+        installPicker.init({
             container: mount,
             ownFirmwareKey,
             // Device already knows its board (BoardModule) — picker is for

@@ -105,8 +105,8 @@ private:
     std::atomic<bool> pendingCredentials_{false};
 
     // SET_BOARD RPC buffer + ready flag — same producer/consumer dance as
-    // pendingCredentials_, sized to BoardModule's storage (24 bytes).
-    char pendingBoard_[24] = {};
+    // pendingCredentials_, sized to BoardModule's storage (32 bytes).
+    char pendingBoard_[32] = {};
     std::atomic<bool> pendingBoardReady_{false};
 };
 

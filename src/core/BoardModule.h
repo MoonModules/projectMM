@@ -50,7 +50,7 @@ public:
     const char* board() const { return boardKey_; }
 
     // External setter for transports that bypass /api/control (today: Improv
-    // vendor RPC SET_BOARD from the web installer). Validates: 1..23 chars,
+    // vendor RPC SET_BOARD from the web installer). Validates: 1..31 chars,
     // ASCII-printable (0x20–0x7E), no embedded NUL. Returns false on
     // rejection so the Improv handler can map to ErrorState. On accept:
     // copies into boardKey_ and arms FilesystemModule's debounced save —
@@ -71,7 +71,13 @@ public:
     }
 
 private:
-    char boardKey_[24] = {};
+    // 32-byte buffer fits the longest catalog entries with modest headroom.
+    // `Olimex ESP32-Gateway Rev G` (26 chars) is the longest current entry
+    // and visibly truncated at the original 24-byte size. Cost: 8 extra
+    // bytes of DRAM per device vs the original 24. The Improv RPC handler
+    // caps `str_len` against this size dynamically (g_improv.boardOutLen
+    // mirrors sizeof(boardKey_)), so the wire spec adapts automatically.
+    char boardKey_[32] = {};
 };
 
 } // namespace mm

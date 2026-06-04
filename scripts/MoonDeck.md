@@ -9,7 +9,7 @@
 - **Tab persistence** — selected tab survives page refresh.
 - **Process detection** — on page load, checks if projectMM or idf.py is already running and shows Stop button.
 - **Network bar** (top of the sidebar): switch between known networks. Each network holds its own device list, last-used serial port, and WiFi credentials (consumed by Improv). On startup, MoonDeck auto-selects the network whose subnet matches the host's current LAN — moving the laptop between networks usually requires no clicks. Manual override (the dropdown) pins the selection until the pinned network's subnet stops matching the host. Add / Rename buttons next to the dropdown manage the catalog. State persisted in `scripts/moondeck.json` under `networks` + `active_network`.
-- **Board picker** on each device row: dropdown of physical boards from [docs/install/boards.json](../docs/install/boards.json) — the same catalog the web installer will use. When the device's firmware uniquely identifies one board (e.g. `esp32-eth-wifi` → Olimex Gateway), MoonDeck auto-deduces and mirrors the value to the device's [BoardModule](../docs/moonmodules/core/BoardModule.md) via `POST /api/control` on next discover. For firmwares with no unique board (`esp32` runs on multiple), the user picks; MoonDeck pushes that value too. A device-reported board not in the catalog still shows up as `<key> (unknown)` so the value survives.
+- **Board picker** on each device row: dropdown of physical boards from [docs/install/boards.json](../docs/install/boards.json) — the same catalog the web installer uses. When the device's firmware uniquely identifies one board (e.g. `esp32-eth-wifi` → Olimex Gateway), MoonDeck auto-deduces and mirrors the value to the device's [BoardModule](../docs/moonmodules/core/BoardModule.md) via `POST /api/control` on next discover. For firmwares with no unique board (`esp32` runs on multiple), the user picks; MoonDeck pushes that value too. A device-reported board not in the catalog still shows up as `<key> (unknown)` so the value survives.
 
 ## PC Tab
 
@@ -52,7 +52,7 @@ While the app is running, MoonDeck shows the button as **Stop** (a 5-second poll
 
 ![Installer](../docs/assets/screenshots/installer.png)
 
-Locally preview the web installer page at <https://ewowi.github.io/projectMM/install/> without tagging a release. Stages `docs/install/index.html` + `src/ui/release-picker.js` into `build/install-preview/` and serves them via Python's `http.server` on port 8000.
+Locally preview the web installer page at <https://ewowi.github.io/projectMM/install/> without tagging a release. Stages `docs/install/index.html` + `src/ui/install-picker.js` into `build/install-preview/` and serves them via Python's `http.server` on port 8000.
 
 ```bash
 uv run scripts/run/preview_installer.py
@@ -362,7 +362,7 @@ Exit codes: `0` = all checks passed, `1` = device-side failure (probe or provisi
 - [src/core/ImprovFrame.h](../src/core/ImprovFrame.h) — the on-device parser
 - [src/platform/esp32/platform_esp32_improv.cpp](../src/platform/esp32/platform_esp32_improv.cpp) — the UART listener task
 - [docs/install/index.html](../docs/install/index.html) — the web installer page
-- [src/ui/release-picker.js](../src/ui/release-picker.js) — the picker driving the install flow
+- [src/ui/install-picker.js](../src/ui/install-picker.js) — the picker driving the install flow
 - [scripts/build/improv_*.py](build/) — the host-side framing helpers
 
 Pair with `preview_installer`'s flash-ready mode (above) for a complete dev-environment proof that the install flow works before deploying to GitHub Pages.

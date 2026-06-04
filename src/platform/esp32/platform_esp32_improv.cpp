@@ -183,7 +183,7 @@ static void improvHandleProvision(const improv::ImprovCommand& cmd) {
 // Frame payload layout (after the standard Improv frame header):
 //   [0xFE]              command
 //   [data_len]          number of bytes that follow (= 1 + str_len)
-//   [str_len]           1..23, length of board name in bytes
+//   [str_len]           1..(BoardModule buffer - 1), length of board name in bytes
 //   [str_bytes...]      ASCII-printable 0x20..0x7E only
 //
 // We parse the raw payload directly instead of going through

@@ -128,12 +128,16 @@ function buildImprovFrame(type, payload) {
 // RPC payload (inside the Improv frame, before the checksum):
 //   [0xFE]          command
 //   [data_len]      1 + str_len
-//   [str_len]       1..23, length of board name in bytes
+//   [str_len]       1..31, length of board name in bytes
 //   [str_bytes]     ASCII-printable 0x20..0x7E only
+//
+// The 31-char cap mirrors BoardModule::boardKey_'s 32-byte buffer
+// (sizeof - 1 for NUL); the device-side handler validates against
+// g_improv.boardOutLen dynamically, so the wire spec follows the buffer.
 function encodeSetBoardPayload(board) {
     const nameBytes = new TextEncoder().encode(board);
-    if (nameBytes.length === 0 || nameBytes.length > 23) {
-        throw new Error(`board name length ${nameBytes.length}: must be 1..23`);
+    if (nameBytes.length === 0 || nameBytes.length > 31) {
+        throw new Error(`board name length ${nameBytes.length}: must be 1..31`);
     }
     const out = new Uint8Array(3 + nameBytes.length);
     out[0] = IMPROV_CMD_SET_BOARD;
@@ -163,6 +167,87 @@ async function sendSetBoardFrame(port, board) {
 }
 
 // ---------------------------------------------------------------------------
+// HTTP fallback for Improv-less paths (alreadyOnline, esp32-eth)
+// ---------------------------------------------------------------------------
+
+// User types `192.168.1.42` or `MM-XXXX.local` (or even a full `http://…/`);
+// normalize to a trailing-slash http URL that `new URL(path, base)` can resolve
+// against. Bare hostnames default to http (the device serves http only).
+function normalizeDeviceUrl(input) {
+    let s = String(input || "").trim();
+    if (!s) return "";
+    if (!/^https?:\/\//i.test(s)) s = "http://" + s;
+    try {
+        const u = new URL(s);
+        // Drop any path/query the user pasted — they're typing an address,
+        // not a deep link. Trailing slash is what new URL("api/control", u)
+        // wants for clean resolution.
+        u.pathname = "/";
+        u.search = "";
+        u.hash = "";
+        return u.toString();
+    } catch (_) {
+        return "";
+    }
+}
+
+// Mixed-content guard: the installer page can only fetch() a plain http://
+// device URL when the page itself is on http:// (i.e. localhost preview).
+// On https://ewowi.github.io the browser blocks the fetch silently — caller
+// must fall through to the query-param handoff via the Visit button. file:
+// pages count as http for this purpose.
+function canFetchHttp(deviceUrl) {
+    if (!deviceUrl) return false;
+    let target;
+    try { target = new URL(deviceUrl); } catch (_) { return false; }
+    if (target.protocol !== "http:") return true;  // https device → no block
+    return window.location.protocol !== "https:";
+}
+
+// Fan out every `controls.<Module>.<control>` field for `board` from the
+// same-origin `./boards.json` into the device's `/api/control`. Mirrors
+// what the device UI's `consumePendingBoardParam()` does for the Inject-
+// button path — keeps preview-mode parity with production. Returns true
+// if every POST returned 2xx, false otherwise (any failure short-circuits
+// further pushes so a half-applied state is visible in the logs).
+// 5s per-request timeout — generous for the bench; a typo'd IP fails fast.
+async function tryHttpInjectBoard(deviceUrl, board) {
+    let entry;
+    try {
+        const res = await fetch("./boards.json", { signal: AbortSignal.timeout(5000) });
+        if (!res.ok) return false;
+        const catalog = await res.json();
+        entry = Array.isArray(catalog)
+            ? catalog.find(b => b && b.name === board)
+            : null;
+    } catch (_) {
+        return false;
+    }
+    if (!entry || !entry.controls) return false;
+    for (const [moduleName, controls] of Object.entries(entry.controls)) {
+        if (!controls || typeof controls !== "object") continue;
+        for (const [controlName, value] of Object.entries(controls)) {
+            try {
+                const res = await fetch(new URL("api/control", deviceUrl), {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        module: moduleName,
+                        control: controlName,
+                        value,
+                    }),
+                    signal: AbortSignal.timeout(5000),
+                });
+                if (!res.ok) return false;
+            } catch (_) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -188,20 +273,36 @@ export const installer = {
      *   { chipName } once detection succeeds.
      * @param {() => Promise<{ssid: string, password: string}>} opts.uiWaitForCreds
      *   Host page resolves this when the user fills in the WiFi form.
-     * @param {(detail: {url: string, board: string, alreadyOnline?: boolean}) => void} opts.onSuccess
+     * @param {() => Promise<{url: string}>} [opts.uiWaitForIp]
+     *   Host page resolves this when the user types the device IP/hostname
+     *   on the fallback "needs-ip" form. Only invoked when Improv didn't
+     *   produce a URL (alreadyOnline branch, or an Improv-less firmware like
+     *   esp32-eth). Resolve with `url:""` to skip — host then shows the
+     *   legacy "find on network" message and doesn't add the device.
+     * @param {(detail: {url: string, board: string, viaHttp?: boolean, httpBoardOk?: boolean, alreadyOnline?: boolean}) => void} opts.onSuccess
      *   `alreadyOnline:true` is set when the device booted into
      *   STATE_PROVISIONED (saved WiFi from a previous flash) — the SDK's
-     *   initialize() fails and the orchestrator skips both the WiFi form
-     *   and the SET_BOARD push. `url` and `board` are empty in that case;
-     *   the host page shows a "device may already be online" message.
+     *   initialize() fails and the orchestrator falls through to the
+     *   needs-ip prompt. `viaHttp:true` is set whenever the URL came from
+     *   the user-typed IP form (alreadyOnline OR Improv-less firmware).
+     *   `httpBoardOk:true` is set when an HTTP `/api/control` push of the
+     *   picked board succeeded inside the orchestrator — only possible in
+     *   localhost preview, since HTTPS Pages can't fetch the device's HTTP
+     *   URL (mixed-content). Host uses `httpBoardOk` to skip the pending-
+     *   board query-param handoff in `addProvisionedDevice`.
      * @param {(stage: string, error: Error) => void} opts.onError
      * @param {(line: string) => void} [opts.onLog] - optional: each line
      *   esptool-js writes to its "terminal" gets forwarded here. Host
      *   appends them to a collapsible <pre> in the modal so the user can
      *   see what happened on a failure.
+     * @param {SerialPort} [opts.port] - optional pre-picked SerialPort.
+     *   When provided the orchestrator skips its own requestPort() prompt
+     *   and uses this handle directly. Falls back to requestPort() when
+     *   omitted/null OR when opening this handle fails (stale grant after
+     *   the device was unplugged and replugged).
      */
-    async start({ manifestUrl, board, eraseBefore = false,
-                   onProgress, uiWaitForCreds, onSuccess, onError, onLog }) {
+    async start({ manifestUrl, board, eraseBefore = false, port: prePickedPort,
+                   onProgress, uiWaitForCreds, uiWaitForIp, onSuccess, onError, onLog }) {
         if (!navigator.serial) {
             onError("setup", new Error("Web Serial API not available — use Chrome, Edge, or Opera"));
             return;
@@ -225,18 +326,38 @@ export const installer = {
             writeLine: (s) => onLog(s),
             write: (s) => onLog(s),
         } : undefined;
-        // ImprovSerial's logger arg is a console-shape object. We pass
-        // `console` directly (proven working in the prior commit). A custom
-        // wrapper here broke initialize() in testing — the SDK calls more
-        // methods than just log/warn/error/debug (likely .info or .trace)
-        // and undefined-method calls throw inside the SDK's await chain.
-        // If we ever want SDK lines in the modal log too, wire a Proxy that
-        // forwards every method to console and tees log/info to onLog.
-        const improvLogger = console;
+        // ImprovSerial's logger arg is a console-shape object. We need
+        // every method (.log, .info, .warn, .error, .debug, .trace, …) to
+        // be defined — the SDK may call any of them, and an undefined-method
+        // call would throw inside its await chain and look like a timeout
+        // (this exact regression hit during testing when the orchestrator
+        // passed a hand-rolled object). A Proxy forwarding everything to
+        // console + teeing log/info/debug to onLog gives us both: the
+        // SDK never sees a missing method, AND its chatter reaches the
+        // modal's log panel.
+        const improvLogger = new Proxy(console, {
+            get(target, prop) {
+                const fn = target[prop];
+                if (typeof fn !== "function") return fn;
+                if (onLog && (prop === "log" || prop === "info" || prop === "debug")) {
+                    return (...args) => {
+                        fn.apply(target, args);
+                        try { onLog("[improv] " + args.map(String).join(" ")); }
+                        catch (_) { /* don't let log errors break the SDK */ }
+                    };
+                }
+                return fn.bind(target);
+            },
+        });
 
         try {
             trackProgress("request-port");
-            port = await navigator.serial.requestPort({});
+            // Use the pre-picked port when the host page provided one (the
+            // "Select device port…" button on the install page). Otherwise
+            // surface the native picker here. requestPort is user-gesture
+            // protected; we can call it because Install click is itself
+            // a user gesture (chained through onInstall → installer.start).
+            port = prePickedPort || await navigator.serial.requestPort({});
 
             trackProgress("connect-flash");
             transport = new Transport(port, false);
@@ -339,78 +460,138 @@ export const installer = {
             // 115200 is the standard Improv-Serial baudrate; the device's
             // ImprovProvisioningModule listens on UART0 at this rate (see
             // src/platform/esp32/platform_esp32_improv.cpp).
-            await port.open({ baudRate: 115200 });
+            //
+            // Some USB-serial chips (rare CH340 silicon revisions, mis-driven
+            // adapters) don't survive the close+reopen cleanly — the OS handle
+            // ends up stale and port.open() throws. Catch that and prompt for
+            // a fresh requestPort(); the browser's permission grant from the
+            // earlier requestPort means it surfaces a picker but no auth
+            // dialog. User picks the same physical port; we get a fresh
+            // SerialPort handle. Slightly worse UX (extra click) than the
+            // transparent reopen, but never silently fails.
+            try {
+                await port.open({ baudRate: 115200 });
+            } catch (openErr) {
+                if (onLog) onLog(`[orchestrator] port.open() failed (${openErr.message}); falling back to requestPort()`);
+                port = await navigator.serial.requestPort({});
+                await port.open({ baudRate: 115200 });
+            }
             improvClient = new ImprovSerial(port, improvLogger);
             // ImprovSerial's initialize() throws "Improv Wi-Fi Serial not
-            // detected" when the device is already on WiFi (saved credentials
-            // from a previous flash). The device reports STATE_PROVISIONED
-            // immediately in that case; the SDK expects STATE_AUTHORIZED.
-            // Treat this as a soft-success: skip WiFi provisioning and the
-            // SET_BOARD push, surface a status message, and let the user
-            // visit the device manually. They can set board via MoonDeck.
+            // detected" in two distinct cases that look identical to the SDK
+            // but mean different things to us:
+            //   1. Device booted with saved WiFi credentials — it's at
+            //      STATE_PROVISIONED already; SDK expects STATE_AUTHORIZED.
+            //   2. Firmware doesn't include the Improv listener at all
+            //      (esp32-eth and other Improv-less builds — no UART RPC
+            //      task is running).
+            // Both share the same fallback path: skip provisioning + RPC
+            // push, prompt the user for the device IP/hostname, and let
+            // the post-flash flow (HTTP push in preview, query-param hand-
+            // off via Visit in production) handle the board injection.
+            let needsIp = false;
             let alreadyOnline = false;
             try {
                 await improvClient.initialize();
             } catch (e) {
+                // String-match against the SDK's error message. Tied to the
+                // pinned `improv-wifi-serial-sdk` version at the top of this
+                // file — if you bump the SDK, re-verify the exact text of
+                // its "not detected" path (the SDK doesn't currently expose
+                // a typed error or error code we could match on instead).
                 const msg = (e && e.message) ? String(e.message) : String(e);
                 if (msg.includes("Improv Wi-Fi Serial not detected")) {
-                    alreadyOnline = true;
+                    needsIp = true;
+                    alreadyOnline = true;  // best-guess label for the modal copy
                 } else {
                     throw e;
                 }
             }
 
-            if (alreadyOnline) {
-                // Best-effort cleanup of the SDK that didn't complete its
-                // handshake, then exit via the success path with a flag
-                // the UI uses to render the "already online" message.
+            let deviceUrl = "";
+            let viaHttp = false;
+
+            if (needsIp) {
+                // Drop the SDK before we leave the Improv stage; we won't
+                // need it again. uiWaitForIp may be omitted on older host
+                // pages — degrade gracefully to the legacy empty-URL exit.
                 try { if (improvClient) await improvClient.close(); } catch (_) { /* ignore */ }
                 improvClient = null;
-                trackProgress("done");
-                onSuccess({
-                    url: "",   // unknown — device didn't speak Improv back
-                    board: "",
-                    alreadyOnline: true,
-                });
-                return;
+                if (!uiWaitForIp) {
+                    trackProgress("done");
+                    onSuccess({ url: "", board: "", alreadyOnline: true });
+                    return;
+                }
+                trackProgress("needs-ip");
+                const ipResult = await uiWaitForIp();
+                if (!ipResult || !ipResult.url) {
+                    // User skipped the IP prompt; mirror the old behaviour.
+                    trackProgress("done");
+                    onSuccess({ url: "", board: "", alreadyOnline });
+                    return;
+                }
+                deviceUrl = normalizeDeviceUrl(ipResult.url);
+                viaHttp = true;
+            } else {
+                trackProgress("wifi-creds-form");
+                const { ssid, password } = await uiWaitForCreds();
+
+                trackProgress("provisioning");
+                // provision() throws on failure (timeout, bad creds). 30s
+                // timeout matches the device-side wait at
+                // platform_esp32_improv.cpp::improvHandleProvision.
+                await improvClient.provision(ssid, password, 30000);
+                deviceUrl = improvClient.nextUrl;
+                if (!deviceUrl) {
+                    throw new Error("provision succeeded but no device URL returned");
+                }
+
+                // Push SET_BOARD vendor RPC if the user picked a board.
+                // ImprovSerial holds the writable lock — close it first so
+                // we can write our own raw frame. We're done with
+                // ImprovSerial anyway (provision is the last standard
+                // command we need).
+                if (board) {
+                    trackProgress("set-board");
+                    await improvClient.close();
+                    improvClient = null;
+                    await sendSetBoardFrame(port, board);
+                    // The device-side handler responds with RpcResponse,
+                    // but we don't wait for it — failures (validation
+                    // rejection, etc.) are reported via ErrorState which
+                    // we'd need to re-open a reader to see. Best-effort:
+                    // device persists in next 2s via FilesystemModule's
+                    // debounced save. If push silently failed, the field
+                    // stays empty and the user can pick the board via
+                    // MoonDeck later.
+                    // Small grace period so the device's UART task
+                    // finishes processing before we close the port.
+                    await new Promise(r => setTimeout(r, 200));
+                }
             }
 
-            trackProgress("wifi-creds-form");
-            const { ssid, password } = await uiWaitForCreds();
-
-            trackProgress("provisioning");
-            // provision() throws on failure (timeout, bad creds). 30s
-            // timeout matches the device-side wait at
-            // platform_esp32_improv.cpp::improvHandleProvision.
-            await improvClient.provision(ssid, password, 30000);
-            const deviceUrl = improvClient.nextUrl;
-            if (!deviceUrl) {
-                throw new Error("provision succeeded but no device URL returned");
-            }
-
-            // Push SET_BOARD vendor RPC if the user picked a board.
-            // ImprovSerial holds the writable lock — close it first so we
-            // can write our own raw frame. We're done with ImprovSerial
-            // anyway (provision is the last standard command we need).
-            if (board) {
-                trackProgress("set-board");
-                await improvClient.close();
-                improvClient = null;
-                await sendSetBoardFrame(port, board);
-                // The device-side handler responds with RpcResponse, but we
-                // don't wait for it — failures (validation rejection, etc.)
-                // are reported via ErrorState which we'd need to re-open a
-                // reader to see. Best-effort: device persists in next 2s
-                // via FilesystemModule's debounced save. If push silently
-                // failed, the field stays empty and the user can pick the
-                // board via MoonDeck later.
-                // Small grace period so the device's UART task finishes
-                // processing before we close the port.
-                await new Promise(r => setTimeout(r, 200));
+            // HTTP injection attempt for the needs-ip path (preview mode only —
+            // HTTPS Pages can't fetch the device's HTTP URL; canFetchHttp
+            // gates the call). Fans out the boards.json `controls.*` entries
+            // exactly the way the device UI's consumePendingBoardParam does,
+            // so preview parity with production is exact. Successful push
+            // tells the host page to skip the Inject-button handoff via
+            // `pendingBoard`.
+            let httpBoardOk = false;
+            if (viaHttp && board && canFetchHttp(deviceUrl)) {
+                if (onLog) onLog(`[orchestrator] attempting HTTP inject for board="${board}" to ${deviceUrl}`);
+                httpBoardOk = await tryHttpInjectBoard(deviceUrl, board);
+                if (onLog) onLog(`[orchestrator] HTTP inject ${httpBoardOk ? "succeeded" : "failed"}`);
             }
 
             trackProgress("done");
-            onSuccess({ url: deviceUrl, board: board || "" });
+            onSuccess({
+                url: deviceUrl,
+                board: board || "",
+                viaHttp,
+                httpBoardOk,
+                alreadyOnline,
+            });
         } catch (e) {
             // Best-effort cleanup on error so subsequent attempts can
             // re-request the same port without it being stuck open.
@@ -437,7 +618,7 @@ export const installer = {
      * @param {() => void} opts.onSuccess
      * @param {(stage: string, error: Error) => void} opts.onError
      */
-    async eraseOnly({ onProgress, onSuccess, onError, onLog }) {
+    async eraseOnly({ port: prePickedPort, onProgress, onSuccess, onError, onLog }) {
         if (!navigator.serial) {
             onError("setup", new Error("Web Serial API not available — use Chrome, Edge, or Opera"));
             return;
@@ -456,7 +637,9 @@ export const installer = {
 
         try {
             trackProgress("request-port");
-            port = await navigator.serial.requestPort({});
+            // Pre-picked port (from the host page's "Select device port…"
+            // button) bypasses the native picker. Same fallback as start().
+            port = prePickedPort || await navigator.serial.requestPort({});
 
             trackProgress("connect-flash");
             transport = new Transport(port, false);

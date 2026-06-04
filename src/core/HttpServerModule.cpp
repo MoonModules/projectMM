@@ -103,6 +103,14 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
     char method[8] = {};
     char path[128] = {};
     std::sscanf(req, "%7s %127s", method, path);
+    // Strip any query string before route matching — every strcmp() below
+    // expects a bare path. RFC 3986 §3.4: the query starts at the first '?'
+    // and is not part of the path. Browsers send `/?foo=bar` for query-on-
+    // root; without this split the GET / route falls through to 404. The web
+    // installer's Inject button hits us as `/?board=<name>` to hand off the
+    // boards.json entry — see docs/moonmodules/core/BoardModule.md.
+    char* queryStart = std::strchr(path, '?');
+    if (queryStart) *queryStart = 0;
 
     // Check for WebSocket upgrade (case-insensitive header check)
     if (std::strcmp(method, "GET") == 0 && std::strcmp(path, "/ws") == 0 &&
@@ -120,7 +128,7 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
     if (std::strcmp(method, "GET") == 0) {
         if (std::strcmp(path, "/") == 0) serveFile(conn, "index.html", "text/html");
         else if (std::strcmp(path, "/app.js") == 0) serveFile(conn, "app.js", "application/javascript");
-        else if (std::strcmp(path, "/release-picker.js") == 0) serveFile(conn, "release-picker.js", "application/javascript");
+        else if (std::strcmp(path, "/install-picker.js") == 0) serveFile(conn, "install-picker.js", "application/javascript");
         else if (std::strcmp(path, "/style.css") == 0) serveFile(conn, "style.css", "text/css");
         else if (std::strcmp(path, "/moonlight-logo.png") == 0) serveFile(conn, "moonlight-logo.png", "image/png");
         else if (std::strcmp(path, "/api/state") == 0) serveState(conn);
@@ -252,7 +260,7 @@ void HttpServerModule::serveFile(platform::TcpConnection& conn, const char* file
     size_t dataLen = 0;
     if (std::strcmp(filename, "index.html") == 0) { data = ui::indexHtml; dataLen = ui::indexHtmlLen; }
     else if (std::strcmp(filename, "app.js") == 0) { data = ui::appJs; dataLen = ui::appJsLen; }
-    else if (std::strcmp(filename, "release-picker.js") == 0) { data = ui::releasePickerJs; dataLen = ui::releasePickerJsLen; }
+    else if (std::strcmp(filename, "install-picker.js") == 0) { data = ui::installPickerJs; dataLen = ui::installPickerJsLen; }
     else if (std::strcmp(filename, "style.css") == 0) { data = ui::styleCss; dataLen = ui::styleCssLen; }
     else if (std::strcmp(filename, "moonlight-logo.png") == 0) { data = ui::logoPng; dataLen = ui::logoPngLen; }
 

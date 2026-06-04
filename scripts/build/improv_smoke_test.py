@@ -29,7 +29,7 @@ Recommended developer test before any commit touching:
   - src/core/ImprovFrame.h
   - src/platform/esp32/platform_esp32_improv.cpp
   - docs/install/index.html
-  - src/ui/release-picker.js
+  - src/ui/install-picker.js
   - scripts/build/improv_*.py
 
 Usage:

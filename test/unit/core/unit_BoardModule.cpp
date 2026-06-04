@@ -15,7 +15,7 @@
 #include <cstring>
 
 // After onBuildControls, BoardModule exposes exactly one `board` control,
-// bound as Text to a 24-byte buffer.
+// bound as Text to a 32-byte buffer.
 TEST_CASE("BoardModule binds `board` as a Text control") {
     mm::BoardModule board;
     board.onBuildControls();
@@ -27,9 +27,9 @@ TEST_CASE("BoardModule binds `board` as a Text control") {
     // The control's ptr points at the module's internal boardKey_ buffer;
     // accessor returns the same address so we can confirm wiring.
     CHECK(static_cast<const char*>(c.ptr) == board.board());
-    // Buffer is 24 bytes (max 23 chars + NUL); the control's max field
+    // Buffer is 32 bytes (max 31 chars + NUL); the control's max field
     // carries the buffer size for the persistence + UI layers.
-    CHECK(c.max == 24);
+    CHECK(c.max == 32);
 }
 
 // Default state is the empty string — MoonDeck pushes a value on first reach.
@@ -76,18 +76,18 @@ TEST_CASE("BoardModule::setBoard rejects empty string") {
     CHECK_FALSE(board.dirty());
 }
 
-// 24+ char value is rejected (buffer is 24 bytes including NUL, so 23 max).
+// 32+ char value is rejected (buffer is 32 bytes including NUL, so 31 max).
 TEST_CASE("BoardModule::setBoard rejects over-length value") {
     mm::BoardModule board;
     board.onBuildControls();
-    // 24-char value (would need 25 bytes with NUL — exceeds buffer).
-    CHECK_FALSE(board.setBoard("123456789012345678901234"));
+    // 32-char value (would need 33 bytes with NUL — exceeds buffer).
+    CHECK_FALSE(board.setBoard("12345678901234567890123456789012"));
     CHECK(board.board()[0] == '\0');
     CHECK_FALSE(board.dirty());
 
-    // 23-char value (max valid) accepted as the boundary check.
-    CHECK(board.setBoard("12345678901234567890123"));
-    CHECK(std::strlen(board.board()) == 23);
+    // 31-char value (max valid) accepted as the boundary check.
+    CHECK(board.setBoard("1234567890123456789012345678901"));
+    CHECK(std::strlen(board.board()) == 31);
 }
 
 // Non-printable bytes are rejected. Catches accidental binary smuggling
