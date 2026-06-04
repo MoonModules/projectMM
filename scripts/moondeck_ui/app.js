@@ -12,6 +12,11 @@ let scripts = [];
 let firmwares = [];
 let scenarios = [];   // [{name, module, also}]
 let testModules = []; // ["CamelCaseName", ...]
+// Boards catalog loaded from /api/boards (served by moondeck.py from
+// docs/install/boards.json). Replaces the previously-hardcoded boardOptions
+// list — same file the web installer (Step 2) will fetch directly from
+// GitHub Pages. Empty until init() loads it; renderDevices waits on init.
+let boards = []; // [{ key, label, firmwares: [...], default_firmware }]
 // State shape (post-networks refactor):
 //   { networks: [{name, subnet, wifi: {ssid, password}, port, devices: [...]}],
 //     active_network: "Home",
@@ -62,6 +67,14 @@ async function init() {
     const modResp = await fetch("/api/test-modules");
     const modData = await modResp.json();
     testModules = modData.modules || [];
+
+    try {
+        const boardsResp = await fetch("/api/boards");
+        const boardsData = await boardsResp.json();
+        boards = boardsData.boards || [];
+    } catch {
+        boards = [];   // empty catalog → picker shows only "(unknown board)"
+    }
 
     renderFirmwareSelect();
     renderScripts();
@@ -789,51 +802,72 @@ function renderDevices() {
             saveState();
         });
 
-        const text = document.createElement("span");
-        // Label: <name> · <ip> · fw:<firmware>. Board is rendered separately
-        // as a picker (below) since some firmwares run on multiple boards.
-        // last_port lives in the tooltip — it's flash-history, not identity.
-        const parts = [];
-        if (device.deviceName) parts.push(device.deviceName);
-        parts.push(device.ip);
-        if (device.firmware) parts.push(`fw:${device.firmware}`);
-        text.textContent = parts.join(" · ");
+        // Two-row layout: row 1 carries identity at-a-glance (dot, checkbox,
+        // IP). Row 2 carries secondary info (deviceName + fw:<firmware>) plus
+        // the board picker + remove button. Splitting keeps the IP — the
+        // single most-clicked-on field — next to the checkbox and stops the
+        // board picker from being pushed off the right edge by long
+        // device-name / firmware strings.
+        const ipText = document.createElement("span");
+        ipText.textContent = device.ip;
         const tooltipLines = [device.ip];
         if (device.last_port) tooltipLines.push(`last flashed via ${device.last_port}`);
-        text.title = tooltipLines.join("\n");
-        text.style.cursor = "pointer";
-        text.addEventListener("click", (e) => {
-            if (e.target === text) showInView("http://" + device.ip);
+        ipText.title = tooltipLines.join("\n");
+        ipText.style.cursor = "pointer";
+        ipText.addEventListener("click", (e) => {
+            if (e.target === ipText) showInView("http://" + device.ip);
         });
 
-        // Board picker — hardcoded list of known boards. Auto-deduced for eth
-        // firmwares (probe sets device.board); user-set for `esp32` since the
-        // firmware can run on multiple boards and the device can't tell us.
-        // Future phase: drive the dropdown options from a structured catalog
-        // when board presets exist; for now this short list is enough.
-        // KEEP IN SYNC: scripts/moondeck.py::_deduce_board carries the
-        // firmware→hardware mapping (currently one entry: esp32-eth* → Olimex).
-        // When a third hardware board with deducible firmware lands, both
-        // sites need an update — collapse into a shared catalog at that point.
+        const infoText = document.createElement("span");
+        infoText.className = "device-info";
+        // last_port lives in the tooltip — it's flash-history, not identity.
+        const infoParts = [];
+        if (device.deviceName) infoParts.push(device.deviceName);
+        if (device.firmware) infoParts.push(`fw:${device.firmware}`);
+        infoText.textContent = infoParts.join(" · ");
+
+        // Board picker — options derived from boards.json (loaded via
+        // /api/boards). Auto-deduced for firmwares that map to a single
+        // board (probe sets device.board); user-set when the firmware can
+        // run on multiple boards (e.g. `esp32` on LOLIN D32 vs generic
+        // DevKit). A device-reported value that isn't in the catalog gets
+        // prepended as <key> (unknown) so the selection survives — without
+        // that, <select> would silently snap to "" and the next saveState
+        // would clobber the device's stored value with empty.
         const boardPicker = document.createElement("select");
         boardPicker.className = "device-board";
         boardPicker.title = "Physical board (pick when firmware can't tell us)";
         const boardOptions = [
             ["", "(unknown board)"],
-            ["olimex-esp32-gateway-rev-g", "Olimex ESP32-Gateway Rev G"],
-            ["lolin-d32", "LOLIN D32"],
-            ["generic-esp32", "Generic ESP32 DevKit"],
+            // Each entry is [value, label] for the <select>; with the
+            // single-name catalog (no separate key/label), they're identical.
+            ...boards.map(b => [b.name, b.name]),
         ];
+        const deviceBoard = device.board || "";
+        if (deviceBoard && !boardOptions.some(([k]) => k === deviceBoard)) {
+            boardOptions.push([deviceBoard, `${deviceBoard} (unknown)`]);
+        }
         for (const [val, lbl] of boardOptions) {
             const opt = document.createElement("option");
             opt.value = val;
             opt.textContent = lbl;
-            if ((device.board || "") === val) opt.selected = true;
+            if (deviceBoard === val) opt.selected = true;
             boardPicker.appendChild(opt);
         }
         boardPicker.addEventListener("change", () => {
             device.board = boardPicker.value;
             saveState();
+            // Mirror the change to the device immediately. Without this, the
+            // device's BoardModule wouldn't hear about the picker until the
+            // next discover/refresh probe — and the user expects the device
+            // UI to update right after they pick. Fire-and-forget; failure
+            // (timeout / device offline) is recovered on the next refresh
+            // when discover/refresh's bulk push catches up.
+            fetch("/api/push-board", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ip: device.ip, board: boardPicker.value}),
+            }).catch(() => { /* best-effort */ });
         });
 
         const removeBtn = document.createElement("button");
@@ -850,11 +884,32 @@ function renderDevices() {
             renderDevices();
         });
 
-        label.appendChild(dot);
-        label.appendChild(cb);
-        label.appendChild(text);
-        label.appendChild(boardPicker);
-        label.appendChild(removeBtn);
+        // Three-row layout, each row a flex-basis:100% wrapper inside
+        // .device-item (which is flex-wrap:wrap):
+        //   row 1 — dot · checkbox · IP · X        (identity + remove)
+        //   row 2 — deviceName · fw:firmware        (secondary info)
+        //   row 3 — [board picker]                  (right-aligned)
+        // Splitting like this keeps each row narrow enough to fit the
+        // sidebar without truncation, and puts the most-clicked items
+        // (checkbox, IP, board picker) at predictable y-positions.
+        const row1 = document.createElement("div");
+        row1.className = "device-row device-row-identity";
+        row1.appendChild(dot);
+        row1.appendChild(cb);
+        row1.appendChild(ipText);
+        row1.appendChild(removeBtn);
+
+        const row2 = document.createElement("div");
+        row2.className = "device-row device-row-info";
+        row2.appendChild(infoText);
+
+        const row3 = document.createElement("div");
+        row3.className = "device-row device-row-board";
+        row3.appendChild(boardPicker);
+
+        label.appendChild(row1);
+        label.appendChild(row2);
+        label.appendChild(row3);
         el.appendChild(label);
     }
 }

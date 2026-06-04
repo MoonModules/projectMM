@@ -1,14 +1,16 @@
-// projectMM release-channel picker — shared by the on-device UI (OTA flash)
-// and the GitHub Pages installer (first flash via Web Serial).
+// projectMM install picker — shared by the on-device UI (OTA flash) and the
+// GitHub Pages installer (first flash via Web Serial). Renders Release +
+// Board + Firmware dropdowns and an Install button; the caller wires the
+// onInstall callback to the right install transport.
 //
 // Same data source, two install transports:
 //   - Device UI: caller POSTs the chosen .bin URL to /api/firmware/url; the
 //     device's HTTPS client downloads + writes to the OTA partition. No CORS
 //     in the data path.
-//   - Web installer: caller sets the chosen manifest URL on
-//     <esp-web-install-button>; ESP Web Tools flashes via Web Serial. Manifest
-//     and binaries must be same-origin with the page (CORS), which is why the
-//     Pages site self-hosts the last N releases.
+//   - Web installer: caller hands the chosen manifest URL to the custom
+//     install-orchestrator.js (which drives esptool-js + improv-wifi-serial-sdk
+//     over Web Serial). Manifest and binaries must be same-origin with the
+//     page (CORS), which is why the Pages site self-hosts the last N releases.
 //
 // The picker is a presentation+state machine; it does not decide *how* to
 // install. The caller passes an onInstall(firmware, manifestUrl, binaryUrl)
@@ -49,6 +51,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000;  // 5 min — short enough to surface new RC
 // are intent, not data, and never expire on their own.
 const PREF_RELEASE_KEY  = "projectMM.picker.releaseTag";
 const PREF_FIRMWARE_KEY = "projectMM.picker.firmware";
+const PREF_BOARD_KEY    = "projectMM.picker.board";
 
 // One picker instance per init() call. Each tracks its own state so multiple
 // pickers on a page (unused today but possible) don't fight over selections.
@@ -57,12 +60,32 @@ function makeState() {
         container: null,
         ownFirmwareKey: null,
         onInstall: null,
+        enableBoardPicker: true, // true on web installer, false on on-device OTA
+        // Optional caller-owned DOM element rendered just above the Install
+        // button row. The web installer uses this to slot its "Erase chip
+        // first" checkbox between the firmware dropdown and the Install
+        // button without giving the picker any erase-specific knowledge —
+        // keeps the picker reusable on the on-device OTA UI (where erase
+        // makes no sense). The picker takes ownership: it appendChild's
+        // the node on every render(), so the same instance survives the
+        // re-renders triggered by release-list reloads.
+        installRowExtras: null,
         releases: [],          // normalised release records from the API
         sortedReleases: [],    // releases sorted newest-first; render() fills this
         releaseIdx: 0,         // index into sortedReleases
         firmware: null,        // selected firmware key
+        boards: [],            // parsed docs/install/boards.json, [] if unavailable
+        selectedBoard: null,   // user pick from board <select>; "" for (any board)
     };
 }
+
+// Module-level handle to the most recently mounted picker's state, so the
+// host page can call installPicker.getSelectedBoard() without threading the
+// state object through every callback. Web installer mounts exactly one
+// picker per page; if a future page mounts multiple, this becomes wrong
+// (returns whichever initialized last). See comment at makeState — pickers
+// are otherwise isolated.
+let _lastState = null;
 
 // ---------------------------------------------------------------------------
 // 2. GitHub Releases API + sessionStorage cache
@@ -113,6 +136,22 @@ async function loadReleases({ bypassCache = false } = {}) {
         const raw = safeStorageGet(CACHE_KEY);
         if (raw) try { return JSON.parse(raw).data; } catch (_) { /* fall through */ }
         return null;
+    }
+}
+
+// Boards catalog — same-origin docs/install/boards.json. ~1 KB, no rate-limit
+// concern (CDN serves it on the public site, preview_installer serves it
+// from disk locally), so no sessionStorage cache: caching adds invalidation
+// bugs without saving bytes. Graceful degradation: any fetch / parse failure
+// returns [] and the picker silently omits the board <select>.
+async function loadBoards() {
+    try {
+        const res = await fetch("./boards.json");
+        if (!res.ok) return [];
+        const data = await res.json();
+        return Array.isArray(data) ? data : [];
+    } catch (_) {
+        return [];
     }
 }
 
@@ -219,16 +258,30 @@ function render(state) {
     });
     state.sortedReleases = sorted;
 
+    // Row order: Release → Board → Firmware. Release first because it's the
+    // version the user wants to flash (the picker's primary identity);
+    // Board second so the firmware narrowing happens in front of Firmware;
+    // Firmware last so it shows the narrowed list immediately below the
+    // board that filtered it. The board row only renders when (a) the
+    // caller didn't opt out and (b) the catalog actually loaded —
+    // on-device OTA passes enableBoardPicker:false (the device already
+    // knows its board); catalog-missing on the web installer (rare) falls
+    // back to a two-row Release+Firmware layout with no board narrowing.
+    const boardRow = (state.enableBoardPicker && state.boards.length > 0) ? `
+        <div class="control-row">
+            <span class="control-label">Board</span>
+            <select id="rp-board" class="rp-select"></select>
+        </div>` : "";
     state.container.innerHTML = `
         <div class="control-row">
             <span class="control-label">Release</span>
             <select id="rp-release" class="rp-select"></select>
-        </div>
+        </div>` + boardRow + `
         <div class="control-row">
             <span class="control-label">Firmware</span>
             <select id="rp-firmware" class="rp-select"></select>
         </div>
-        <div class="control-row">
+        <div class="control-row" id="rp-install-row">
             <span class="control-label"></span>
             <button id="rp-install" class="action-btn" type="button">Install</button>
         </div>
@@ -237,11 +290,47 @@ function render(state) {
             <span id="rp-status" class="rp-status"></span>
         </div>
     `;
+    // installRowExtras: caller-owned element slotted right before the
+    // Install row. Re-attached on every render() so the row survives the
+    // innerHTML reset above. insertBefore moves the existing DOM node
+    // rather than cloning — the caller wires the listeners once and they
+    // keep firing across renders.
+    if (state.installRowExtras) {
+        const installRow = state.container.querySelector("#rp-install-row");
+        state.container.insertBefore(state.installRowExtras, installRow);
+    }
 
+    const boardEl = state.container.querySelector("#rp-board");
     const releaseEl = state.container.querySelector("#rp-release");
     const firmwareEl = state.container.querySelector("#rp-firmware");
     const installBtn = state.container.querySelector("#rp-install");
     const statusEl = state.container.querySelector("#rp-status");
+
+    if (boardEl) {
+        // "(any board)" is the no-filter pass-through: firmware dropdown shows
+        // every compatible firmware in the release, just as if the board picker
+        // didn't exist. Named option (not blank) so the user knows it's a
+        // deliberate choice, not an empty placeholder.
+        boardEl.replaceChildren();
+        const anyOpt = document.createElement("option");
+        anyOpt.value = "";
+        anyOpt.textContent = "(any board)";
+        boardEl.appendChild(anyOpt);
+        for (const b of state.boards) {
+            const opt = document.createElement("option");
+            opt.value = b.name;
+            opt.textContent = b.name;
+            boardEl.appendChild(opt);
+        }
+        // Restore the user's last picked board if it's still in the catalog
+        // (the catalog may have changed since their last visit; falling
+        // through to "(any board)" if their pick is gone is the safe shape).
+        const savedBoard = safeLocalGet(PREF_BOARD_KEY);
+        if (savedBoard && state.boards.find(b => b.name === savedBoard)) {
+            state.selectedBoard = savedBoard;
+        }
+        boardEl.value = state.selectedBoard || "";
+    }
 
     // One option per release, newest-first. RC tags carry a "(beta)" suffix
     // and a different colour so a casual user can't mistake them for a
@@ -277,13 +366,25 @@ function render(state) {
     releaseEl.value = String(state.releaseIdx);
 
     function refreshFirmwareDropdown() {
+        firmwareEl.disabled = false;  // re-enable in case prior state had a single-firmware board
         const r = sorted[state.releaseIdx];
         if (!r) {
             firmwareEl.innerHTML = `<option value="">—</option>`;
             installBtn.disabled = true;
             return;
         }
-        const compatible = (r.firmwares || []).filter(f => isCompatible(state.ownFirmwareKey, f.firmware));
+        let compatible = (r.firmwares || []).filter(f => isCompatible(state.ownFirmwareKey, f.firmware));
+        // Narrow by selected board (web installer only — selectedBoard stays
+        // null on the on-device picker since the board <select> isn't rendered).
+        // Defensive: a board the user picked that isn't in the catalog (e.g.
+        // catalog edited mid-session) skips the narrow — better than rejecting
+        // every firmware silently.
+        if (state.selectedBoard) {
+            const board = state.boards.find(b => b.name === state.selectedBoard);
+            if (board) {
+                compatible = compatible.filter(f => board.firmwares.includes(f.firmware));
+            }
+        }
         if (compatible.length === 0) {
             // Distinguish two no-match reasons: device reports its firmware
             // but this release has nothing matching it, vs device's firmware
@@ -292,7 +393,9 @@ function render(state) {
             // bug — surface it so a developer can spot it.
             const reason = state.ownFirmwareKey === "unknown"
                 ? "device firmware is 'unknown' — rebuild with MM_FIRMWARE_NAME set"
-                : "no compatible firmwares in this release";
+                : state.selectedBoard
+                    ? `no compatible firmwares for ${state.selectedBoard} in this release`
+                    : "no compatible firmwares in this release";
             firmwareEl.innerHTML = `<option value="">— ${reason} —</option>`;
             installBtn.disabled = true;
             return;
@@ -308,12 +411,44 @@ function render(state) {
             opt.textContent = f.firmware;
             firmwareEl.appendChild(opt);
         });
-        // Prefer the user's last pick if it's still compatible with this release;
-        // otherwise default to the first option (the existing behaviour).
+        // Precedence: own firmware > last user pick > board default > first
+        // compatible.
+        //   1. The device's currently-flashed firmware (ownFirmwareKey) wins
+        //      because the OTA picker's natural default is "re-flash what
+        //      I'm running" — even if last week the user flashed something
+        //      else. Only present on the on-device picker; the web installer
+        //      passes null so this branch falls through.
+        //   2. localStorage saved pick wins next: a returning user expects
+        //      their last choice to stick across page loads, including the
+        //      case where they hit board.default_firmware once but actually
+        //      want a non-default variant (e.g. esp32-eth-wifi on Olimex,
+        //      where the catalog's default is esp32-eth). Filtered through
+        //      `compatible` so a stale saved value (release dropped that
+        //      firmware) falls through harmlessly.
+        //   3. The board's default_firmware — fallback for first-time
+        //      visitors who haven't picked anything yet.
+        //   4. First option in the narrowed list — last-resort fallback.
         const savedFirmware = safeLocalGet(PREF_FIRMWARE_KEY);
         const savedHere = savedFirmware && compatible.find(f => f.firmware === savedFirmware);
-        state.firmware = savedHere ? savedFirmware : compatible[0].firmware;
+        let preferred = null;
+        if (state.ownFirmwareKey && compatible.find(f => f.firmware === state.ownFirmwareKey)) {
+            preferred = state.ownFirmwareKey;
+        } else if (savedHere) {
+            preferred = savedFirmware;
+        } else if (state.selectedBoard) {
+            const board = state.boards.find(b => b.name === state.selectedBoard);
+            if (board && board.default_firmware
+                && compatible.find(f => f.firmware === board.default_firmware)) {
+                preferred = board.default_firmware;
+            }
+        }
+        state.firmware = preferred || compatible[0].firmware;
         firmwareEl.value = state.firmware;
+        // Single-firmware UX: when the narrow leaves exactly one option, the
+        // <select> reads as a fixed badge (user sees what's being flashed but
+        // can't change it — there's nothing to change to). Re-enabled at the
+        // top of refreshFirmwareDropdown for the next call.
+        firmwareEl.disabled = (compatible.length === 1);
         installBtn.disabled = false;
     }
     refreshFirmwareDropdown();
@@ -331,6 +466,20 @@ function render(state) {
         state.firmware = firmwareEl.value;
         safeLocalSet(PREF_FIRMWARE_KEY, state.firmware);
     });
+
+    if (boardEl) {
+        // Picking a board narrows the firmware dropdown and may pre-select
+        // the board's default_firmware. Persisted to localStorage so a
+        // returning user (who usually flashes the same board over and over)
+        // doesn't have to re-pick. Same rationale as PREF_FIRMWARE_KEY; if a
+        // user is actually flashing a different board, they pick from the
+        // dropdown and the new choice persists.
+        boardEl.addEventListener("change", () => {
+            state.selectedBoard = boardEl.value;
+            safeLocalSet(PREF_BOARD_KEY, state.selectedBoard);
+            refreshFirmwareDropdown();
+        });
+    }
 
     installBtn.addEventListener("click", async () => {
         const r = sorted[state.releaseIdx];
@@ -360,7 +509,7 @@ function render(state) {
 // Public entry point
 // ---------------------------------------------------------------------------
 
-export const releasePicker = {
+export const installPicker = {
     /**
      * Mount a picker into the given container.
      * @param {object} opts
@@ -370,18 +519,37 @@ export const releasePicker = {
      * @param {(firmware: string, manifestUrl: string, binaryUrl: string) => Promise<void>} opts.onInstall
      *   - Called when the user clicks Install. The picker doesn't decide how
      *     to install — the caller decides.
+     * @param {boolean} [opts.enableBoardPicker=true] - true on the web
+     *   installer (renders a board <select> above firmware, narrows firmware
+     *   list to the board's compatible variants); false on the on-device OTA
+     *   picker where the device already knows its board (BoardModule).
+     * @param {HTMLElement} [opts.installRowExtras] - optional caller-owned
+     *   element rendered just above the Install button row. Web installer
+     *   uses this for the "Erase chip first" checkbox; on-device OTA omits
+     *   it. The picker re-attaches the SAME node on every render(), so
+     *   listeners the caller wired on the element keep firing.
      */
-    async init({ container, ownFirmwareKey, onInstall }) {
+    async init({ container, ownFirmwareKey, onInstall, enableBoardPicker = true,
+                 installRowExtras = null }) {
         const state = makeState();
         state.container = container;
         state.ownFirmwareKey = ownFirmwareKey || null;
         state.onInstall = onInstall;
+        state.enableBoardPicker = enableBoardPicker;
+        state.installRowExtras = installRowExtras;
 
         container.innerHTML =
             `<div class="control-row"><span class="control-label">Releases</span>` +
             `<span class="rp-status">Loading…</span></div>`;
         const bypass = new URLSearchParams(location.search).get("nocache") === "1";
-        const data = await loadReleases({ bypassCache: bypass });
+        // Parallel: GitHub Releases API (slow, ~200ms) + local boards.json
+        // (fast, ~5ms). Boards-disabled path skips the fetch entirely.
+        const [data, boards] = await Promise.all([
+            loadReleases({ bypassCache: bypass }),
+            enableBoardPicker ? loadBoards() : Promise.resolve([]),
+        ]);
+        state.boards = boards;
+        _lastState = state;
         if (!data) {
             container.innerHTML =
                 `<div class="control-row"><span class="control-label">Releases</span>` +
@@ -407,5 +575,16 @@ export const releasePicker = {
             return;
         }
         render(state);
+    },
+
+    /**
+     * Returns the user-picked board name (catalog `name` field) from the
+     * most recently mounted picker, or "" when the picker is in
+     * "(any board)" mode, the catalog is unavailable, or the picker isn't
+     * mounted yet. Used by the install-orchestrator to know what to push
+     * via Improv SET_BOARD after WiFi provisioning succeeds.
+     */
+    getSelectedBoard() {
+        return _lastState ? (_lastState.selectedBoard || "") : "";
     },
 };

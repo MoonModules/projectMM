@@ -103,7 +103,7 @@ A commit that touches *only* `.github/`, `docs/`, `scripts/` (non-test), `README
 
 **Recommended (manual, not blocking):**
 
-- **Improv smoke test** — `uv run scripts/build/improv_smoke_test.py --port <port>` (or MoonDeck → ESP32 → **Improv Smoke Test**) — recommended when a connected ESP32 is available and any of these changed: `src/core/ImprovFrame.h`, `src/platform/esp32/platform_esp32_improv.cpp`, `docs/install/index.html`, `src/ui/release-picker.js`, `scripts/build/improv_*.py`. Three-step end-to-end check (probe + WiFi provision + LAN reachability). Not a blocking gate because it needs hardware that isn't always plugged in; pair with `preview_installer`'s flash-ready mode for the browser-side equivalent.
+- **Improv smoke test** — `uv run scripts/build/improv_smoke_test.py --port <port>` (or MoonDeck → ESP32 → **Improv Smoke Test**) — recommended when a connected ESP32 is available and any of these changed: `src/core/ImprovFrame.h`, `src/platform/esp32/platform_esp32_improv.cpp`, `docs/install/index.html`, `src/ui/install-picker.js`, `scripts/build/improv_*.py`. Three-step end-to-end check (probe + WiFi provision + LAN reachability). Not a blocking gate because it needs hardware that isn't always plugged in; pair with `preview_installer`'s flash-ready mode for the browser-side equivalent.
 
 **After all gates pass:** stop and wait for the product owner to explicitly say "commit now" (or equivalent). Do not commit on your own initiative.
 

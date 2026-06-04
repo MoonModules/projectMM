@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Locally preview the web installer at docs/install/index.html.
 
-Stages a small directory (the install page + the shared release-picker
-module) and serves it with `python -m http.server`. Two modes depending
-on what's been built locally:
+Stages a small directory (the install page + the shared install-picker
+module) and serves it with `python -m http.server`, plus the
+`Access-Control-Allow-Origin: *` header that GitHub Pages serves on its
+static assets by default — needed so the device UI's
+`consumePendingBoardParam` can cross-origin-fetch a localhost-served
+boards.json the same way it would fetch the production one. Two modes
+depending on what's been built locally:
 
   - **render-only** (no `build/esp32-*/projectMM.bin` present): the
     picker populates against the real GitHub Releases API, dropdowns
@@ -21,7 +25,7 @@ on what's been built locally:
 
 The flash-ready mode is the developer's test ground for the install
 flow before deploying to GitHub Pages: any change to the installer
-page or release-picker.js can be verified against a real ESP32 over
+page or install-picker.js can be verified against a real ESP32 over
 `http://localhost:8000/` (Web Serial works on localhost without the
 secure-origin requirement that gates the public site).
 
@@ -39,7 +43,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 INSTALL_DIR = ROOT / "docs" / "install"
-PICKER_JS = ROOT / "src" / "ui" / "release-picker.js"
+PICKER_JS = ROOT / "src" / "ui" / "install-picker.js"
 STAGE_DIR = ROOT / "build" / "install-preview"
 BUILD_ROOT = ROOT / "build"
 GENERATE_MANIFEST = ROOT / "scripts" / "build" / "generate_manifest.py"
@@ -69,7 +73,7 @@ def stage_install_page():
 
     Stages every browser-loadable file under docs/install/ (.html / .js
     / .css), not just index.html, so future additions land in the
-    preview for free. The release-picker module lives separately under
+    preview for free. The install-picker module lives separately under
     src/ui/ (it's shared with the on-device UI) and is copied over
     alongside. README.md is skipped — docs only.
     """
@@ -81,18 +85,25 @@ def stage_install_page():
         print(f"ERROR: install source not found at {INSTALL_DIR}", file=sys.stderr)
         sys.exit(1)
     if not PICKER_JS.exists():
-        print(f"ERROR: release-picker.js not found at {PICKER_JS}", file=sys.stderr)
+        print(f"ERROR: install-picker.js not found at {PICKER_JS}", file=sys.stderr)
         sys.exit(1)
 
     # Mirror release.yml's "cp -r docs/install/. pages/install/" step:
     # take every runtime file in docs/install/ (so devices.js etc. land too,
     # not just index.html). README.md is docs, skip it; .md in general is
-    # docs not runtime.
+    # docs not runtime. `.json` covers the boards.json catalog the picker
+    # fetches; future JSON catalogs land here too.
     for src in INSTALL_DIR.iterdir():
-        if src.is_file() and src.suffix.lower() in (".html", ".js", ".css"):
+        if src.is_file() and src.suffix.lower() in (".html", ".js", ".css", ".json", ".png", ".ico"):
             shutil.copy(src, STAGE_DIR / src.name)
-    # release-picker.js lives in src/ui/ (shared with the on-device UI).
-    shutil.copy(PICKER_JS, STAGE_DIR / "release-picker.js")
+    # install-picker.js lives in src/ui/ (shared with the on-device UI).
+    shutil.copy(PICKER_JS, STAGE_DIR / "install-picker.js")
+    # library.json — install page reads the project version from it.
+    # Same path the picker fetches relative to (./library.json). Pages
+    # mirror via release.yml's "cp library.json pages/install/" step.
+    library_json = ROOT / "library.json"
+    if library_json.exists():
+        shutil.copy(library_json, STAGE_DIR / "library.json")
 
 
 def find_local_builds() -> list[Path]:
@@ -100,7 +111,7 @@ def find_local_builds() -> list[Path]:
 
     Multiple firmware variants can coexist on disk (each in its own
     `build/esp32-<firmware>/` dir per build_esp32.py). We stage them all
-    so the release-picker can offer the right one based on the device's
+    so the install-picker can offer the right one based on the device's
     reported firmware key during Improv probe — same shape as production
     where every release publishes every variant.
     """
@@ -224,7 +235,20 @@ def main() -> int:
     print()
     sys.stdout.flush()
 
-    handler = http.server.SimpleHTTPRequestHandler
+    # Mirror GitHub Pages' default static-asset CORS behaviour
+    # (`Access-Control-Allow-Origin: *`). The device-UI's
+    # `consumePendingBoardParam` fetches boards.json cross-origin
+    # (http://<device>/ → https://ewowi.github.io/…). In dev we point that
+    # constant at this preview server so we can iterate on the schema; the
+    # device's browser will refuse the fetch unless we serve the same CORS
+    # header production does. Doesn't affect the production firmware — only
+    # the developer's local-preview flow.
+    class CorsHandler(http.server.SimpleHTTPRequestHandler):
+        def end_headers(self):
+            self.send_header("Access-Control-Allow-Origin", "*")
+            super().end_headers()
+
+    handler = CorsHandler
 
     class QuietTCPServer(socketserver.ThreadingTCPServer):
         allow_reuse_address = True   # avoids "Address already in use" on quick restart

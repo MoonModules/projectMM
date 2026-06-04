@@ -537,11 +537,14 @@ static int runScenario(const char* path) {
             uint32_t tickTimeUs = MEASURE_FRAMES > 0 ? elapsedUs / MEASURE_FRAMES : 0;
             uint32_t fps = tickTimeUs > 0 ? 1000000 / tickTimeUs : 0;
             size_t heapAfterMeasure = mm::platform::freeHeap();
-            // Largest contiguous block — diagnoses heap fragmentation, which on
-            // no-PSRAM ESP32 silently degrades the Layer LUT (the buffer needs
-            // 60-90 KB contiguous at 128×128 with mirror; fragmentation drops
-            // mirror without changing free_heap). 0 on desktop = unlimited.
-            size_t maxBlock = mm::platform::maxAllocBlock();
+            // Largest contiguous block in INTERNAL RAM — diagnoses internal-
+            // heap fragmentation, which silently degrades the Layer LUT
+            // (the buffer needs 60-90 KB contiguous at 128×128 with mirror;
+            // fragmentation drops mirror without changing free_heap). Use
+            // the internal-only variant so the signal works on PSRAM boards
+            // too — maxAllocBlock would report ~8 MB regardless of internal
+            // pressure. 0 on desktop = unlimited.
+            size_t maxBlock = mm::platform::maxInternalAllocBlock();
 
             // Buffer state at this measurement (may be empty in early build-up steps).
             auto* layer = static_cast<mm::Layer*>(

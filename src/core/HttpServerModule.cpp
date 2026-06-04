@@ -103,6 +103,14 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
     char method[8] = {};
     char path[128] = {};
     std::sscanf(req, "%7s %127s", method, path);
+    // Strip any query string before route matching — every strcmp() below
+    // expects a bare path. RFC 3986 §3.4: the query starts at the first '?'
+    // and is not part of the path. Browsers send `/?foo=bar` for query-on-
+    // root; without this split the GET / route falls through to 404. The web
+    // installer's Inject button hits us as `/?board=<name>` to hand off the
+    // boards.json entry — see docs/moonmodules/core/BoardModule.md.
+    char* queryStart = std::strchr(path, '?');
+    if (queryStart) *queryStart = 0;
 
     // Check for WebSocket upgrade (case-insensitive header check)
     if (std::strcmp(method, "GET") == 0 && std::strcmp(path, "/ws") == 0 &&
@@ -120,7 +128,7 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
     if (std::strcmp(method, "GET") == 0) {
         if (std::strcmp(path, "/") == 0) serveFile(conn, "index.html", "text/html");
         else if (std::strcmp(path, "/app.js") == 0) serveFile(conn, "app.js", "application/javascript");
-        else if (std::strcmp(path, "/release-picker.js") == 0) serveFile(conn, "release-picker.js", "application/javascript");
+        else if (std::strcmp(path, "/install-picker.js") == 0) serveFile(conn, "install-picker.js", "application/javascript");
         else if (std::strcmp(path, "/style.css") == 0) serveFile(conn, "style.css", "text/css");
         else if (std::strcmp(path, "/moonlight-logo.png") == 0) serveFile(conn, "moonlight-logo.png", "image/png");
         else if (std::strcmp(path, "/api/state") == 0) serveState(conn);
@@ -181,11 +189,45 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         } else {
             sendResponse(conn, 404, "text/plain", "Not found");
         }
+    } else if (std::strcmp(method, "OPTIONS") == 0) {
+        // CORS preflight. The browser sends OPTIONS before any cross-origin
+        // POST with a non-simple Content-Type (e.g. application/json), which
+        // covers every /api/control and /api/modules write the web installer
+        // makes from preview / localhost. Without this branch the dispatcher
+        // fell through to 405 Method Not Allowed and the browser silently
+        // blocked the subsequent POST. The response carries the same
+        // Access-Control-Allow-Origin: * the actual response already does,
+        // plus the methods + headers we accept on the API surface. 204 (no
+        // body) is the conventional preflight reply.
+        //
+        // Path-agnostic: we return 204 for OPTIONS to ANY path, even ones
+        // that would 404 on a real GET/POST. Most public servers narrow
+        // preflight to known API routes; we don't bother because the
+        // device's HTTP surface is tiny and lives behind the user's LAN.
+        // A scanner hitting OPTIONS /random gets a CORS-OK 204 rather
+        // than a 404 — informational only, no behaviour change.
+        sendPreflightResponse(conn);
     } else {
         sendResponse(conn, 405, "text/plain", "Method not allowed");
     }
 
     conn.close();
+}
+
+void HttpServerModule::sendPreflightResponse(platform::TcpConnection& conn) {
+    // 204 No Content is the standard preflight success reply. The
+    // Access-Control-Allow-* headers tell the browser what cross-origin
+    // requests we accept on the API. Max-Age caches the preflight for an
+    // hour so subsequent same-session POSTs go straight through.
+    const char* response =
+        "HTTP/1.1 204 No Content\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS\r\n"
+        "Access-Control-Allow-Headers: Content-Type\r\n"
+        "Access-Control-Max-Age: 3600\r\n"
+        "Connection: close\r\n"
+        "\r\n";
+    conn.write(reinterpret_cast<const uint8_t*>(response), std::strlen(response));
 }
 
 void HttpServerModule::sendResponse(platform::TcpConnection& conn, int status, const char* contentType, const char* body) {
@@ -252,7 +294,7 @@ void HttpServerModule::serveFile(platform::TcpConnection& conn, const char* file
     size_t dataLen = 0;
     if (std::strcmp(filename, "index.html") == 0) { data = ui::indexHtml; dataLen = ui::indexHtmlLen; }
     else if (std::strcmp(filename, "app.js") == 0) { data = ui::appJs; dataLen = ui::appJsLen; }
-    else if (std::strcmp(filename, "release-picker.js") == 0) { data = ui::releasePickerJs; dataLen = ui::releasePickerJsLen; }
+    else if (std::strcmp(filename, "install-picker.js") == 0) { data = ui::installPickerJs; dataLen = ui::installPickerJsLen; }
     else if (std::strcmp(filename, "style.css") == 0) { data = ui::styleCss; dataLen = ui::styleCssLen; }
     else if (std::strcmp(filename, "moonlight-logo.png") == 0) { data = ui::logoPng; dataLen = ui::logoPngLen; }
 
@@ -386,7 +428,8 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
             writeControlValue(sink, c);
         }
         writeControlMetadata(sink, c);
-        // Emit "hidden":true only when set (common case is false; omit to save bytes).
+        // Emit optional flags only when set (common case is false; omit to save bytes).
+        if (c.readonly) sink.append(",\"readonly\":true");
         sink.append(c.hidden ? ",\"hidden\":true}" : "}");
     }
 }
@@ -492,13 +535,16 @@ void HttpServerModule::serveSystem(platform::TcpConnection& conn) {
     conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
 
     JsonSink sink(conn);
+    // maxBlock = internal-only (maxInternalAllocBlock) — the all-memory
+    // variant reports ~8 MB on PSRAM boards and is meaningless as a
+    // pressure signal. Same rationale as main.cpp's tick log line.
     sink.appendf(
         "{\"fps\":%u,\"tickTimeUs\":%u,\"freeHeap\":%u,\"freeInternal\":%u,\"maxBlock\":%u,\"uptime\":%u,\"modules\":[",
         static_cast<unsigned>(scheduler_ ? scheduler_->fps() : 0),
         static_cast<unsigned>(scheduler_ ? scheduler_->tickTimeUs() : 0),
         static_cast<unsigned>(platform::freeHeap()),
         static_cast<unsigned>(platform::freeInternalHeap()),
-        static_cast<unsigned>(platform::maxAllocBlock()),
+        static_cast<unsigned>(platform::maxInternalAllocBlock()),
         static_cast<unsigned>(scheduler_ ? scheduler_->elapsed() / 1000 : 0));
 
     // Per-module timing (walk tree recursively)

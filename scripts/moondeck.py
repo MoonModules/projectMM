@@ -41,6 +41,28 @@ def _app_version():
 APP_VERSION = _app_version()
 
 # ---------------------------------------------------------------------------
+# Boards catalog (single source of truth, shared with the web installer)
+# ---------------------------------------------------------------------------
+
+BOARDS_FILE = ROOT / "docs" / "install" / "boards.json"
+
+
+def _load_boards():
+    """Load docs/install/boards.json. Returns [] on missing/malformed file —
+    `_deduce_board` then always returns "" (no firmware uniquely identifies
+    a board), MoonDeck JS shows only the empty default. The web installer
+    Step 2 picker will share this file.
+    """
+    try:
+        return json.loads(BOARDS_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+BOARDS = _load_boards()
+
+
+# ---------------------------------------------------------------------------
 # Script definitions (loaded from scripts.json)
 # ---------------------------------------------------------------------------
 
@@ -99,10 +121,14 @@ def _probe_device(ip, port=8080, timeout=0.4):
     Returns: { ip, deviceName, firmware, board }
     - `firmware` is the variant flashed (value of the `firmware` control on
       SystemModule, set from kFirmwareName in build_info.h). Used to deduce
-      `board`. See docs/architecture.md § Firmware vs board.
-    - `board` is the physical hardware key — set when the firmware uniquely
-      identifies the board (eth/eth-wifi → Olimex). Empty string otherwise;
-      the user picks via the UI (the saved value survives refresh).
+      `board` when the device hasn't been told its board yet. See
+      docs/architecture.md § Firmware vs board.
+    - `board` is the physical hardware key. Preferred source: the device's
+      own `board` control on BoardModule (the value MoonDeck pushed earlier
+      and the device persisted). Fall back to firmware-based deduction
+      (catalog lookup) when the device hasn't been told yet — then MoonDeck
+      pushes the deduced value on next discover, the device persists it,
+      and subsequent probes read it back from the device.
     """
     import urllib.request
     import urllib.error
@@ -114,6 +140,7 @@ def _probe_device(ip, port=8080, timeout=0.4):
             modules = data.get("modules", [])
             device_name = ""
             firmware = ""
+            device_board = ""
             for m in _walk_modules(modules):
                 if m.get("type") == "SystemModule":
                     for c in m.get("controls", []):
@@ -121,32 +148,110 @@ def _probe_device(ip, port=8080, timeout=0.4):
                             device_name = c.get("value", "") or ""
                         elif c.get("name") == "firmware":
                             firmware = c.get("value", "") or ""
-                    break
-            board = _deduce_board(firmware)
+                elif m.get("type") == "BoardModule":
+                    for c in m.get("controls", []):
+                        if c.get("name") == "board":
+                            device_board = c.get("value", "") or ""
             return {
                 "ip": f"{ip}:{port}",
                 "deviceName": device_name,
                 "firmware": firmware,
-                "board": board,
+                "board": device_board or _deduce_board(firmware),
             }
     except Exception:
         return None
 
 
 def _deduce_board(firmware: str) -> str:
-    """Map firmware variant → physical board key when the firmware uniquely
-    identifies the board (the eth firmware variants hardcode Olimex RMII
-    pins). Returns "" when the firmware works on multiple boards — the user
-    fills in `board` manually in that case. See docs/architecture.md
-    § Firmware vs board for the firmware/board terminology.
+    """Firmware → board name when exactly one catalog entry claims this
+    firmware. Returns "" when zero (unknown firmware) or multiple boards
+    claim it (ambiguous — user picks). Catalog lives at
+    docs/install/boards.json; see docs/architecture.md § Firmware vs board.
+    """
+    if not firmware:
+        return ""
+    matches = [b["name"] for b in BOARDS if firmware in b.get("firmwares", [])]
+    return matches[0] if len(matches) == 1 else ""
 
-    KEEP IN SYNC: scripts/moondeck_ui/app.js boardOptions carries the human
-    list of hardware boards the picker offers. When a new board lands with
-    a deducible firmware, both sites need an update — collapse into a shared
-    catalog at that point (small lift today; growing cost as boards add)."""
-    if firmware in ("esp32-eth", "esp32-eth-wifi"):
-        return "olimex-esp32-gateway-rev-g"
-    return ""
+
+def _push_board_to_device(ip: str, board: str) -> bool:
+    """POST /api/control on the device for every per-board control in boards.json.
+
+    For boards that have a catalog entry in docs/install/boards.json: fans
+    out the full `controls.<Module>.<control>` block (matching the web
+    installer's and the device-side `?board=` Inject path — same generic
+    iteration, so adding a new field to a board entry Just Works without
+    code changes here). For boards without a catalog entry (custom names,
+    unknown firmware): still pushes `Board.board` so the bare name lands —
+    keeps the legacy single-field behaviour as the fallback.
+
+    Returns True iff EVERY POST returned 200. False on any failure (timeout,
+    non-2xx, network error) — partial state may have been applied; the next
+    refresh re-attempts. Same best-effort semantics as the prior single-
+    field shape.
+
+    `ip` is the "host:port" string from the device record (already includes
+    the port discovery picked). `board` is the catalog key MoonDeck wants
+    the device to remember (empty string means "clear" — no push).
+    """
+    if not board:
+        return True   # nothing to push; not a failure
+    import urllib.request
+    import urllib.error
+    # Look up the catalog entry. BOARDS is loaded at module init; we don't
+    # re-read boards.json per push so a tight discover-refresh cycle
+    # doesn't hammer the disk. If the user edits boards.json, restart
+    # MoonDeck (same as every other catalog change).
+    entry = next((b for b in BOARDS if b.get("name") == board), None)
+    controls = (entry or {}).get("controls") or {}
+    if not controls:
+        # Custom / unknown board: just push the bare name. Mirrors the
+        # legacy behaviour, so existing custom-board users don't regress.
+        controls = {"Board": {"board": board}}
+
+    def _post(module_name: str, control_name: str, value) -> bool:
+        body = json.dumps({
+            "module": module_name,
+            "control": control_name,
+            "value": value,
+        }).encode()
+        try:
+            req = urllib.request.Request(
+                f"http://{ip}/api/control",
+                data=body, method="POST",
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=0.6) as resp:
+                return resp.status == 200
+        except (urllib.error.URLError, OSError):
+            return False
+
+    # Iterate the same shape the web installer + device UI use:
+    # entry.controls.<Module>.<control> = <value>. Sequential is plenty
+    # for the 1-3 leaves typical entries carry today.
+    for module_name, ctrls in controls.items():
+        if not isinstance(ctrls, dict):
+            continue
+        for control_name, value in ctrls.items():
+            if not _post(module_name, control_name, value):
+                return False
+    return True
+
+
+def _push_boards_in_parallel(pushes):
+    """Fire _push_board_to_device for each (ip, board) tuple in parallel.
+
+    Discovery + refresh probe a /24, so the push count is bounded by the
+    device count (single digits in practice). A small thread pool keeps
+    total latency near the slowest single push instead of summing. Result
+    is fire-and-forget: callers don't act on the bool returned by each
+    push — failures are recoverable on the next refresh cycle.
+    """
+    if not pushes:
+        return
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        # list() forces all futures to start; the with-block waits for them.
+        list(pool.map(lambda p: _push_board_to_device(*p), pushes))
 
 
 def discover_devices(subnet=""):
@@ -331,7 +436,13 @@ def _migrate_to_networks(old_state: dict) -> dict:
     return new_state
 
 
-_VOLATILE_DEVICE_FIELDS = ("deviceName", "firmware", "modules")
+# `modules` is the full module tree from /api/state — kilobytes per device, no
+# UI consumer between probes; strip on save to keep moondeck.json small.
+# `deviceName` and `firmware` ARE displayed in the device row label, so keep
+# them persisted: stripping made the row show only an IP after every server
+# restart until the user clicked Discover. Both fields are correctly
+# overwritten by the next probe (no staleness drift problem).
+_VOLATILE_DEVICE_FIELDS = ("modules",)
 
 
 # Serializes the full load → mutate → save transaction across the threaded
@@ -667,6 +778,13 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/api/test-modules":
             self._send_json({"modules": test_meta.list_test_modules()})
 
+        elif self.path == "/api/boards":
+            # Serves docs/install/boards.json (loaded at startup). The web
+            # installer (Step 2) will fetch the same file directly from
+            # Pages; MoonDeck reads it locally and exposes it here so the
+            # JS UI shares one source of truth with the Python deduce path.
+            self._send_json({"boards": BOARDS})
+
         elif self.path.startswith("/api/unit-tests/"):
             self._serve_unit_tests_for_module()
 
@@ -732,6 +850,24 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             result = mutate_state(_merge)
             self._send_json(result)
 
+        elif self.path == "/api/push-board":
+            # Push a single (ip, board) to a device. Called by the JS when the
+            # user picks a board from the per-device dropdown — saveState
+            # alone persists the value in moondeck.json but the device also
+            # needs to hear about it (BoardModule on the device persists its
+            # own /.config/BoardModule.json). The bulk push from discover /
+            # refresh covers the multi-device case; this covers the
+            # one-device-at-a-time UI mutation.
+            body = self._read_body()
+            params = json.loads(body) if body else {}
+            ip = params.get("ip", "")
+            board = params.get("board", "")
+            if not ip:
+                self._send_json({"error": "ip required"}, 400)
+                return
+            ok = _push_board_to_device(ip, board)
+            self._send_json({"ok": ok})
+
         elif self.path == "/api/discover":
             body = self._read_body()
             params = json.loads(body) if body else {}
@@ -742,6 +878,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             # under the lock via mutate_state.
             devices, scanned_subnet = discover_devices(subnet)
             target_subnet = _subnet_from_host_subnet(scanned_subnet)
+            pushes = []   # (ip, board) tuples populated by _merge_discover
 
             def _merge_discover(state):
                 # Attribute found devices to the network whose subnet matches
@@ -777,6 +914,15 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                     if keep.get("last_port"):
                         out["last_port"] = keep["last_port"]
                     merged.append(out)
+                    # The device's `board` (from probe) is what's persisted
+                    # device-side. If the merged value differs — typically
+                    # because MoonDeck just deduced one from firmware on a
+                    # device that hadn't been told yet — schedule a push so
+                    # the next probe reads the value back from the device.
+                    device_board = (fresh.get("board") or "")
+                    merged_board = (out.get("board") or "")
+                    if merged_board and merged_board != device_board:
+                        pushes.append((ip, merged_board))
                 # Devices that existed previously but weren't found in the
                 # scan stay in the network as offline (the user may want to
                 # keep them around for when the device comes back). Discover
@@ -788,6 +934,9 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 net["devices"] = merged
 
             result = mutate_state(_merge_discover)
+            # Fire pushes outside the lock — the state write has already
+            # landed; pushes are best-effort device-side mirroring.
+            _push_boards_in_parallel(pushes)
             self._send_json(result)
 
         elif self.path == "/api/refresh":
@@ -808,6 +957,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json(state)
                 return
             refreshed = refresh_devices(snapshot)
+            pushes = []   # (ip, board) tuples populated by _merge_refresh
 
             def _merge_refresh(state):
                 # Re-resolve `net` under the second lock — the network may have
@@ -828,8 +978,18 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                     if prior.get("ip") not in refreshed_ips:
                         merged.append({**prior, "online": False})
                 target["devices"] = merged
+                # Schedule a board push for every online device with a
+                # non-empty board. Redundant writes are cheap on the device
+                # (Text-control write hits a 2s debounce — repeated identical
+                # writes coalesce into one disk write). Catches the case
+                # where the device lost its persisted value but MoonDeck
+                # still has the user-set / deduced one.
+                for dev in merged:
+                    if dev.get("online") and dev.get("board") and dev.get("ip"):
+                        pushes.append((dev["ip"], dev["board"]))
 
             result = mutate_state(_merge_refresh)
+            _push_boards_in_parallel(pushes)
             self._send_json(result)
 
         else:

@@ -75,6 +75,13 @@ struct ControlDescriptor {
     bool hidden = false;    // UI visibility flag. Set via ControlList::setHidden() after addX().
                             // Persistence ignores this — hidden controls are still saved/loaded
                             // so toggling visibility doesn't lose state.
+    bool readonly = false;  // UI editability flag, INDEPENDENT of ControlType. The Text/Password/etc
+                            // types are persistable but normally editable; this flag asks the UI
+                            // to render the control as display-only (no input affordance). Used for
+                            // values that must persist but are pushed by tooling, not edited by
+                            // users (e.g. BoardModule.board, which MoonDeck and the web installer
+                            // inject via POST /api/control). HTTP writes still succeed — the flag
+                            // is a UI rendering hint, not a write gate. Set via setReadOnly().
 };
 
 class ControlList {
@@ -167,6 +174,14 @@ public:
     // remain bound for persistence — toggling visibility doesn't lose state.
     void setHidden(uint8_t i, bool hidden) {
         if (i < count_) controls_[i].hidden = hidden;
+    }
+
+    // Flip the readonly flag on a previously-added control. Typical use: call addText()
+    // then setReadOnly(count() - 1, true) for a value that's persisted via the standard
+    // path but pushed by tooling rather than user-edited (e.g. BoardModule.board).
+    // The UI renders the control display-only; HTTP /api/control writes still apply.
+    void setReadOnly(uint8_t i, bool readonly) {
+        if (i < count_) controls_[i].readonly = readonly;
     }
 
 private:

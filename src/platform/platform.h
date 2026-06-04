@@ -24,7 +24,12 @@ void yield();
 void delayMs(uint32_t ms);  // blocking sleep; only use outside the hot path
 size_t freeHeap();          // total free (internal + PSRAM if present)
 size_t freeInternalHeap();  // internal RAM only (for stack/HTTP/WiFi reserve check)
-size_t maxAllocBlock();     // largest contiguous block (any memory type)
+size_t maxAllocBlock();     // largest contiguous block (any memory type — incl PSRAM)
+size_t maxInternalAllocBlock(); // largest contiguous block in INTERNAL RAM only
+                                // (scarce; use this as the memory-pressure KPI).
+                                // PSRAM blocks dominate on S3/S2 boards and make
+                                // maxAllocBlock useless as a stress signal —
+                                // it'll report ~8 MB even when DRAM is exhausted.
 size_t totalHeap();         // total heap capacity (internal + PSRAM)
 size_t totalInternalHeap(); // total internal heap capacity
 
@@ -92,6 +97,16 @@ void wifiApStop();
 // fails. Same value for STA and AP — WiFi has one radio at one TX power.
 int wifiTxPower();
 
+// Cap the WiFi transmit power. `quarterDbm` is in ESP-IDF's quarter-dBm units
+// (valid range 8..84 → 2..21 dBm); pass 0 to skip the override and let the
+// stack use its default. Used by NetworkModule to apply the LOLIN WiFi fix:
+// some LOLIN-branded boards (S2/S3 minis) brown-out the on-module LDO at
+// full TX power, dropping WiFi during association — capping to 8 dBm
+// (32 quarter-dBm, the value `boards.json` injects for the LOLIN entries)
+// keeps them stable. Returns true on success or when called with 0 (no-op).
+// Call after esp_wifi_start() — earlier calls are silently ignored by ESP-IDF.
+bool wifiSetTxPower(int8_t quarterDbm);
+
 bool mdnsInit(const char* deviceName);
 void mdnsStop();
 
@@ -140,11 +155,19 @@ struct ImprovDeviceInfo {
     const char* chipFamily;      // "ESP32" / "ESP32-S3" / ...
     const char* firmwareVersion; // e.g. "1.0.0-rc2"
 };
+// Board-extension args (boardOut/boardOutLen/boardReady) are for the vendor
+// SET_BOARD RPC (command 0xFE) — when set, the Improv task validates the RPC
+// payload, writes the board name into boardOut, and publishes via
+// boardReady's release-store. Pass nullptr/0/nullptr to opt out (desktop
+// stub, future targets without BoardModule). Mirrors the ssid/password
+// triple: validate + buffer-write + flag-signal, scheduler thread reads.
 bool improvProvisioningInit(const ImprovDeviceInfo& info,
                             char* ssidOut, size_t ssidOutLen,
                             char* passwordOut, size_t passwordOutLen,
                             std::atomic<bool>* ready,
-                            char* statusBuf, size_t statusBufLen);
+                            char* statusBuf, size_t statusBufLen,
+                            char* boardOut = nullptr, size_t boardOutLen = 0,
+                            std::atomic<bool>* boardReady = nullptr);
 
 class UdpSocket {
 public:

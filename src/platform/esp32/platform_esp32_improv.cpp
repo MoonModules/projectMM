@@ -18,10 +18,25 @@
 #include "core/ImprovFrame.h"
 
 #include "driver/uart.h"
+#include "esp_log.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "improv.h"
+#include "soc/soc_caps.h"
+
+// USB-Serial-JTAG: ESP32-S3 / S2 / C3 / C6 have a built-in USB-Serial-JTAG
+// peripheral that exposes a USB-CDC endpoint without an external bridge chip.
+// LOLIN S3 mini / N16R8 and many cheap S3 dev boards wire the USB-C port to
+// this peripheral, not to UART0 — meaning Improv RPC bytes from the host
+// arrive on USB-Serial-JTAG, not UART0. Listen on BOTH so the same firmware
+// works on boards with an external USB-Serial bridge (UART0) AND boards
+// with native USB (USB-Serial-JTAG). Soft-fail: if the driver install
+// errors (rare; usually means the secondary console grabbed it first), we
+// just skip the JTAG path and keep UART0.
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+#include "driver/usb_serial_jtag.h"
+#endif
 
 #include <atomic>
 #include <cstdarg>
@@ -49,8 +64,20 @@ struct ImprovTaskState {
     std::atomic<bool>* ready = nullptr;   // module polls and clears
     char* statusBuf = nullptr;        // module shows as `provision_status`
     size_t statusBufLen = 0;
+
+    // Vendor SET_BOARD RPC (command 0xFE): module-owned BoardModule buffer
+    // sized by BoardModule::boardKey_ at the caller (see boardOutLen). The
+    // Improv handler caps str_len dynamically against boardOutLen so the
+    // wire spec adapts when the buffer resizes. Same producer/consumer
+    // dance as ssid/password.
+    // Nullable: opt out by leaving null (desktop stub doesn't pass any).
+    char* boardOut = nullptr;
+    size_t boardOutLen = 0;
+    std::atomic<bool>* boardReady = nullptr;
 };
 static ImprovTaskState g_improv;  // single global — only one Improv task per device
+
+static const char* IMPROV_TAG = "mm_improv";  // ESP_LOG* tag for the Improv task
 
 static void improvSetStatus(const char* fmt, ...) {
     if (!g_improv.statusBuf || g_improv.statusBufLen == 0) return;
@@ -60,15 +87,65 @@ static void improvSetStatus(const char* fmt, ...) {
     va_end(args);
 }
 
+// Tracks whether the USB-Serial-JTAG read driver is up. Set by improvTask
+// after a successful install; gates the JTAG TX in improvSend so a board
+// without the driver (install failed, or ESP32-classic) doesn't write
+// into a dead peripheral. Read+write happen on the same task so plain bool
+// is fine — no cross-task memory ordering concerns.
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+static bool g_jtagReady = false;
+#endif
+
+// Source-transport routing for replies. improvSend uses this to send a
+// reply ONLY on the transport that received the request that triggered
+// it, rather than broadcasting to both. The Improv task is single-
+// threaded and processes one frame at a time, so a single static here
+// is sufficient — set before improvDispatchFrame fires, read by every
+// improvSend* call within the dispatch (including the synchronous
+// pre-WiFi-result sends inside improvHandleProvision's 30 s wait, since
+// that wait blocks the same task and no other dispatch can start).
+// Broadcast-to-both stays available as the SourceBoth value for use
+// during init (improvSetStatus("listening") etc. — no specific source).
+enum class ImprovSource : uint8_t { Both, Uart, Jtag };
+static ImprovSource g_replySource = ImprovSource::Both;
+
 // Send a framed Improv message. ImprovFrameType values match the upstream
 // improv::ImprovSerialType numerically (we just don't include improv.h in
 // the host-side test path, so the host-only header has its own enum).
+// Routes to the transport that received the request being replied to
+// (g_replySource, set at the top of improvDispatchFrame). Falls back to
+// broadcast on both transports when no specific source is set — used
+// during init for status-state broadcasts that aren't replies to a
+// specific request.
 static void improvSend(ImprovFrameType type, const std::vector<uint8_t>& payload) {
     uint8_t frame[6 + 1 + 1 + 1 + kImprovMaxPayload + 1];
     size_t n = buildImprovFrame(type, payload.data(), payload.size(),
                                 frame, sizeof(frame));
     if (n == 0) return;  // oversize payload — caller bug, silently drop
-    uart_write_bytes(UART_NUM_0, reinterpret_cast<const char*>(frame), n);
+    const bool toUart =
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+        (g_replySource != ImprovSource::Jtag);
+#else
+        true;
+#endif
+    if (toUart) {
+        uart_write_bytes(UART_NUM_0, reinterpret_cast<const char*>(frame), n);
+    }
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+    if (g_jtagReady && g_replySource != ImprovSource::Uart) {
+        // Non-blocking: a host that opened the JTAG endpoint but isn't
+        // draining must not stall the Improv task — the task also services
+        // UART0 reads (10 ms blocking poll) and any TX-side wait here
+        // would compound that into laggy RX. usb_serial_jtag_write_bytes
+        // returns the byte count actually queued; on a backed-up host we
+        // drop the reply silently. Improv on USB-JTAG is opportunistic —
+        // the caller (web installer) retries on timeout via its own SDK
+        // path. ticks_to_wait=0 means "fill what fits in the TX FIFO
+        // headroom, drop the rest". Replies are small (<128 B) and fit
+        // in one transaction on any healthy host.
+        usb_serial_jtag_write_bytes(frame, n, 0);
+    }
+#endif
 }
 
 static void improvSendCurrentState(improv::State state) {
@@ -168,10 +245,92 @@ static void improvHandleProvision(const improv::ImprovCommand& cmd) {
     improvSendCurrentState(improv::STATE_PROVISIONED);
 }
 
+// SET_BOARD vendor RPC (command 0xFE) — Step 3 of the board-injection plan.
+// The web installer's orchestrator sends this after WiFi provisioning so the
+// device persists its physical-board name (e.g. "LOLIN D32") without needing
+// MoonDeck or an HTTP fetch (which is blocked by mixed-content on Pages).
+//
+// Frame payload layout (after the standard Improv frame header):
+//   [0xFE]              command
+//   [data_len]          number of bytes that follow (= 1 + str_len)
+//   [str_len]           1..(BoardModule buffer - 1), length of board name in bytes
+//   [str_bytes...]      ASCII-printable 0x20..0x7E only
+//
+// We parse the raw payload directly instead of going through
+// improv::parse_improv_data — that helper is WIFI_SETTINGS-shaped (n
+// length-prefixed strings into cmd.ssid/cmd.password) and may default-empty
+// the fields for unknown command IDs. Single-bytestring vendor commands are
+// cleaner to handle inline.
+//
+// On valid: write into g_improv.boardOut, set boardReady. The module's
+// loop1s() picks it up and calls BoardModule::setBoard which arms
+// FilesystemModule's debounced save. RpcResponse fires immediately —
+// validation already passed.
+//
+// On invalid: ErrorState 0x80 (ERROR_INVALID_BOARD, new vendor error code).
+static constexpr uint8_t IMPROV_CMD_SET_BOARD = 0xFE;
+static constexpr uint8_t IMPROV_ERROR_INVALID_BOARD = 0x80;
+
+static void improvHandleSetBoard(const uint8_t* payload, uint8_t len) {
+    if (!g_improv.boardOut || !g_improv.boardReady) {
+        // Module didn't opt in (no BoardModule wired). Mostly defensive —
+        // production wires it in main.cpp; failing-safe here keeps the dispatch
+        // path well-defined.
+        improvSendError(improv::ERROR_UNKNOWN_RPC);
+        return;
+    }
+    if (len < 3) {
+        improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_BOARD));
+        return;
+    }
+    // payload[0] is the command byte (0xFE) — we already dispatched on it.
+    // payload[1] is data_len (RPC framing); payload[2] is str_len.
+    // Cross-check the three lengths so a malformed frame (e.g. data_len
+    // disagreeing with str_len, or extra trailing bytes inside the
+    // framing-level payload) is rejected rather than silently accepted.
+    // The outer framing parser already validated `len` against the
+    // wire-level length byte; these checks enforce internal consistency.
+    uint8_t dataLen = payload[1];
+    uint8_t strLen = payload[2];
+    if (strLen == 0 || strLen >= g_improv.boardOutLen
+            || dataLen != static_cast<uint8_t>(1u + strLen)
+            || len != static_cast<size_t>(3u + strLen)) {
+        improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_BOARD));
+        return;
+    }
+    for (uint8_t i = 0; i < strLen; i++) {
+        uint8_t b = payload[3 + i];
+        if (b < 0x20 || b > 0x7E) {
+            improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_BOARD));
+            return;
+        }
+    }
+    std::memcpy(g_improv.boardOut, payload + 3, strLen);
+    g_improv.boardOut[strLen] = 0;
+    // release-store: pairs with the module's acquire-load in loop1s() so the
+    // buffer write is visible before the consumer sees ready=true.
+    g_improv.boardReady->store(true, std::memory_order_release);
+    // Empty-payload RpcResponse for command 0xFE — signals success. The
+    // browser orchestrator can treat any RpcResponse with cmd=0xFE as ack.
+    auto rpc = improv::build_rpc_response(
+        static_cast<improv::Command>(IMPROV_CMD_SET_BOARD),
+        std::vector<std::string>{}, false);
+    improvSend(ImprovFrameType::RpcResponse, rpc);
+}
+
 // Dispatch a completed frame from the parser. Only RPC frames carry commands
 // we care about; the spec lets the other types through silently.
 static void improvDispatchFrame(const ImprovFrameParser& parser) {
     if (parser.lastType() != improv::TYPE_RPC) return;
+    // SET_BOARD short-circuits the standard improv::parse_improv_data path
+    // because that helper is WIFI_SETTINGS-shaped (n length-prefixed strings).
+    // Peek at the command byte first; vendor-RPC parsing handles its own payload.
+    const uint8_t* raw = parser.lastPayload();
+    uint8_t rawLen = parser.lastPayloadLen();
+    if (rawLen >= 1 && raw[0] == IMPROV_CMD_SET_BOARD) {
+        improvHandleSetBoard(raw, rawLen);
+        return;
+    }
     improv::ImprovCommand cmd = improv::parse_improv_data(
         parser.lastPayload(), parser.lastPayloadLen(), false);
     switch (cmd.command) {
@@ -217,42 +376,142 @@ static void improvDispatchFrame(const ImprovFrameParser& parser) {
     }
 }
 
+// Feed one byte into the parser and dispatch / error as needed. The
+// `source` argument identifies which transport the byte arrived on;
+// improvSend reads it via g_replySource to route the reply back to the
+// requesting transport only, avoiding broadcast to the silent side.
+// Reset to Both after dispatch so any subsequent unsolicited send
+// (e.g. from a future async path) broadcasts as before.
+static void improvFeedByte(ImprovFrameParser& parser, uint8_t b, ImprovSource source) {
+    switch (parser.feed(b)) {
+        case ImprovFeedResult::NeedMore:
+            break;
+        case ImprovFeedResult::FrameReady:
+            g_replySource = source;
+            improvDispatchFrame(parser);
+            g_replySource = ImprovSource::Both;
+            break;
+        case ImprovFeedResult::BadChecksum:
+            g_replySource = source;
+            improvSendError(improv::ERROR_INVALID_RPC);
+            g_replySource = ImprovSource::Both;
+            break;
+        case ImprovFeedResult::OversizePayload:
+            // Length byte > 128 — almost certainly noise / bit-flip; resync silently.
+            break;
+    }
+}
+
 static void improvTask(void* /*arg*/) {
-    // Driver install. UART0 is already configured at 115200-8N1 by the
-    // bootloader; we just claim the interrupt + RX FIFO. RX buf 256 is
+    // UART0 driver install. UART0 is already configured at 115200-8N1 by
+    // the bootloader; we just claim the interrupt + RX FIFO. RX buf 256 is
     // plenty (Improv RPC payloads max out around 96 bytes).
+    bool uartReady = false;
     esp_err_t uart_err = uart_driver_install(UART_NUM_0, 256, 0, 0, nullptr, 0);
-    if (uart_err != ESP_OK) {
-        // Without the driver, uart_read_bytes returns -1 forever and the
-        // task spins doing nothing useful while reporting "listening".
-        // Surface the failure on the module's status control + park the
-        // task — it'll show up in `provision_status` instead of misleading
-        // a user into thinking Improv is alive.
-        improvSetStatus("error: uart_driver_install %s", esp_err_to_name(uart_err));
+    if (uart_err == ESP_OK) {
+        uartReady = true;
+    } else {
+        // Don't park the task: if USB-Serial-JTAG works on this board,
+        // the task is still useful — Improv just won't reach via UART.
+        // ESP_LOGW lands in the serial log so a developer reading the
+        // monitor sees the cause; the compound status set below also
+        // surfaces it in the UI's `provision_status` control.
+        ESP_LOGW(IMPROV_TAG, "uart_driver_install failed: %s",
+                 esp_err_to_name(uart_err));
+    }
+
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+    // USB-Serial-JTAG driver install. On native-USB boards (LOLIN S3 mini /
+    // N16R8 etc.) this is the interface the host actually talks to; UART0
+    // is unwired. Best-effort install — secondary console may have grabbed
+    // the peripheral first on some sdkconfig combinations; if so, skip and
+    // rely on UART0.
+    if (!usb_serial_jtag_is_driver_installed()) {
+        usb_serial_jtag_driver_config_t jtag_cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+        esp_err_t jtag_err = usb_serial_jtag_driver_install(&jtag_cfg);
+        if (jtag_err == ESP_OK) {
+            g_jtagReady = true;
+        } else {
+            ESP_LOGW(IMPROV_TAG, "usb_serial_jtag_install failed: %s",
+                     esp_err_to_name(jtag_err));
+        }
+    } else {
+        // Someone else already installed it (rare). We can still read +
+        // write through it.
+        g_jtagReady = true;
+    }
+#endif
+
+    // If both installs failed, the task has nothing to do. Park it.
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+    const bool anyReady = uartReady || g_jtagReady;
+#else
+    const bool anyReady = uartReady;
+#endif
+    if (!anyReady) {
+        improvSetStatus("error: no transport (uart + jtag install both failed)");
         vTaskDelete(nullptr);
         return;
     }
 
+    // Compound status so a user inspecting `provision_status` can see
+    // partial failures (one transport up, the other failed). Without this
+    // the listening-state status overwrites any prior warn line and the
+    // failure is invisible in the UI.
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+    if (uartReady && g_jtagReady)         improvSetStatus("listening");
+    else if (uartReady)                   improvSetStatus("listening (jtag unavailable)");
+    else                                   improvSetStatus("listening (uart unavailable)");
+#else
     improvSetStatus("listening");
+#endif
 
-    ImprovFrameParser parser;  // owns its 128-byte payload buffer; ~150 B on stack
+    // One parser per transport. Each parser keeps its own framing state
+    // and 128-byte payload buffer (~150 B per instance on stack). With a
+    // shared parser, a partial frame on UART would be corrupted by bytes
+    // arriving on JTAG (and vice versa) — the parser's state machine
+    // doesn't know they came from different sources. Two parsers keep
+    // the framing per-transport so a half-received frame on one side
+    // can't be confused by traffic on the other.
+    ImprovFrameParser parser_uart;
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+    ImprovFrameParser parser_jtag;
+#endif
     uint8_t b;
     for (;;) {
-        int n = uart_read_bytes(UART_NUM_0, &b, 1, pdMS_TO_TICKS(100));
-        if (n <= 0) continue;
-
-        switch (parser.feed(b)) {
-            case ImprovFeedResult::NeedMore:
-                break;
-            case ImprovFeedResult::FrameReady:
-                improvDispatchFrame(parser);
-                break;
-            case ImprovFeedResult::BadChecksum:
-                improvSendError(improv::ERROR_INVALID_RPC);
-                break;
-            case ImprovFeedResult::OversizePayload:
-                // Length byte > 128 — almost certainly noise / bit-flip; resync silently.
-                break;
+        // Symmetric non-blocking poll of both transports. Each round
+        // drains up to 64 bytes from whichever side has data, then yields
+        // 10 ms once if both came up empty. Previous shape (10 ms blocking
+        // on UART, 0 ms drain on JTAG) introduced lumpy throughput on
+        // dual-transport boards because UART's blocking wait paused JTAG
+        // drainage; symmetric polling reads either side promptly without
+        // either starving the other.
+        bool anyRead = false;
+        if (uartReady) {
+            for (int drained = 0; drained < 64; ++drained) {
+                int n = uart_read_bytes(UART_NUM_0, &b, 1, 0);
+                if (n <= 0) break;
+                improvFeedByte(parser_uart, b, ImprovSource::Uart);
+                anyRead = true;
+            }
+        }
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+        if (g_jtagReady) {
+            for (int drained = 0; drained < 64; ++drained) {
+                int n = usb_serial_jtag_read_bytes(&b, 1, 0);
+                if (n <= 0) break;
+                improvFeedByte(parser_jtag, b, ImprovSource::Jtag);
+                anyRead = true;
+            }
+        }
+#endif
+        if (!anyRead) {
+            // Nothing on either side — yield so FreeRTOS can schedule the
+            // idle task and lower-priority work. 10 ms is the same wait
+            // the previous UART-blocking-poll achieved; we're trading
+            // an interrupt-driven wait for a scheduled delay, which is
+            // identical from the task's perspective.
+            vTaskDelay(pdMS_TO_TICKS(10));
         }
     }
 }
@@ -263,7 +522,9 @@ bool improvProvisioningInit(const ImprovDeviceInfo& info,
                             char* ssidOut, size_t ssidOutLen,
                             char* passwordOut, size_t passwordOutLen,
                             std::atomic<bool>* ready,
-                            char* statusBuf, size_t statusBufLen) {
+                            char* statusBuf, size_t statusBufLen,
+                            char* boardOut, size_t boardOutLen,
+                            std::atomic<bool>* boardReady) {
     if (!info.name || !info.chipFamily || !info.firmwareVersion ||
         !ssidOut || ssidOutLen == 0 ||
         !passwordOut || passwordOutLen == 0 ||
@@ -280,6 +541,10 @@ bool improvProvisioningInit(const ImprovDeviceInfo& info,
     g_improv.ready = ready;
     g_improv.statusBuf = statusBuf;
     g_improv.statusBufLen = statusBufLen;
+    // SET_BOARD opt-in: caller may pass null/0/null to skip vendor-RPC support.
+    g_improv.boardOut = boardOut;
+    g_improv.boardOutLen = boardOutLen;
+    g_improv.boardReady = boardReady;
 
     // 6 KB stack: parser is small, scan response uses std::vector + std::string
     // (some short-string-optimised, some heap). Priority 4 — below OTA (5),
@@ -309,7 +574,9 @@ bool improvProvisioningInit(const ImprovDeviceInfo& /*info*/,
                             char* /*ssidOut*/,    size_t /*ssidOutLen*/,
                             char* /*passwordOut*/, size_t /*passwordOutLen*/,
                             std::atomic<bool>* /*ready*/,
-                            char* statusBuf, size_t statusBufLen) {
+                            char* statusBuf, size_t statusBufLen,
+                            char* /*boardOut*/, size_t /*boardOutLen*/,
+                            std::atomic<bool>* /*boardReady*/) {
     if (statusBuf && statusBufLen > 0) {
         std::snprintf(statusBuf, statusBufLen, "not supported (no WiFi)");
     }

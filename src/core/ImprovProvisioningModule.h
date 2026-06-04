@@ -3,6 +3,7 @@
 #include "core/MoonModule.h"
 #include "core/NetworkModule.h"
 #include "core/SystemModule.h"
+#include "core/BoardModule.h"
 #include "core/build_info.h"
 #include "platform/platform.h"
 
@@ -31,6 +32,7 @@ class ImprovProvisioningModule : public MoonModule {
 public:
     void setSystemModule(SystemModule* s) { systemModule_ = s; }
     void setNetworkModule(NetworkModule* n) { networkModule_ = n; }
+    void setBoardModule(BoardModule* b) { boardModule_ = b; }
 
     // Diagnostics keep ticking; matches FirmwareUpdateModule / SystemModule.
     bool respectsEnabled() const override { return false; }
@@ -50,7 +52,9 @@ public:
                 pendingSsid_, sizeof(pendingSsid_),
                 pendingPassword_, sizeof(pendingPassword_),
                 &pendingCredentials_,
-                statusStr_, sizeof(statusStr_));
+                statusStr_, sizeof(statusStr_),
+                pendingBoard_, sizeof(pendingBoard_),
+                &pendingBoardReady_);
         } else {
             std::strncpy(statusStr_, "not supported on this platform", sizeof(statusStr_) - 1);
         }
@@ -73,11 +77,21 @@ public:
             std::memset(pendingPassword_, 0, sizeof(pendingPassword_));
             pendingCredentials_.store(false, std::memory_order_release);
         }
+        // Mirror for vendor SET_BOARD RPC. The Improv task validated the
+        // payload on the wire (length, ASCII-printable) and wrote it here;
+        // BoardModule::setBoard re-validates (returns false on rejection)
+        // so a malformed value never reaches the persisted buffer.
+        if (pendingBoardReady_.load(std::memory_order_acquire) && boardModule_) {
+            boardModule_->setBoard(pendingBoard_);
+            std::memset(pendingBoard_, 0, sizeof(pendingBoard_));
+            pendingBoardReady_.store(false, std::memory_order_release);
+        }
     }
 
 private:
     SystemModule*  systemModule_  = nullptr;
     NetworkModule* networkModule_ = nullptr;
+    BoardModule*   boardModule_   = nullptr;
     char statusStr_[64] = "listening";
 
     // Buffers the platform task writes; sized to NetworkModule's storage.
@@ -89,6 +103,11 @@ private:
     char pendingSsid_[33] = {};
     char pendingPassword_[64] = {};
     std::atomic<bool> pendingCredentials_{false};
+
+    // SET_BOARD RPC buffer + ready flag — same producer/consumer dance as
+    // pendingCredentials_, sized to BoardModule's storage (32 bytes).
+    char pendingBoard_[32] = {};
+    std::atomic<bool> pendingBoardReady_{false};
 };
 
 } // namespace mm

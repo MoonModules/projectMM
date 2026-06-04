@@ -270,10 +270,23 @@ select {
     border-radius: 4px;
     padding: 6px 10px;
     font-size: 12px;
+    /* Children are .device-row blocks (full-width flex containers); the
+       outer .device-item just stacks them vertically. */
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* Each device card uses three rows: identity (dot/cb/ip/x), info (name + fw),
+   board (picker). Sized full-width and laid out with flex so each row can
+   align its own children independently. */
+.device-row {
     display: flex;
     align-items: center;
     gap: 8px;
+    width: 100%;
 }
+.device-row-identity .device-remove { margin-left: auto; }
 .device-item:hover { border-color: #e94560; }
 .device-item input[type="checkbox"] { margin: 0; cursor: pointer; }
 .device-item span { cursor: pointer; }
@@ -284,14 +297,20 @@ select {
 }
 .device-status.online { background: #4caf50; }
 .device-status.offline { background: #666; }
+.device-info {
+    color: #7a8a9a;
+    font-size: 11px;
+}
+
 .device-board {
-    margin-left: auto; font-size: 11px; background: #1c2535; color: #c0c0c0;
+    font-size: 11px; background: #1c2535; color: #c0c0c0;
     border: 1px solid #2a3548; border-radius: 3px; padding: 1px 4px;
-    max-width: 16ch;
-    /* Clamp long board labels (e.g. "Olimex ESP32-Gateway Rev G" = 26ch)
-       so the badge stays badge-sized. inline-block + nowrap + ellipsis is
-       the standard truncation triple; the select element honours it on
-       its displayed selection text. */
+    /* Picker lives alone in its own row (.device-row-board) and aligns
+       left. max-width clamps long labels (e.g. "Olimex ESP32-Gateway Rev G"
+       = 26ch) so the dropdown text doesn't overflow the card's right edge;
+       ellipsis triple handles the truncation on the selected option's
+       display text when collapsed. */
+    max-width: 100%;
     display: inline-block;
     overflow: hidden;
     text-overflow: ellipsis;

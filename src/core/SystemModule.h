@@ -63,14 +63,28 @@ public:
         if (totalInternalVal_ > 0) {
             controls_.addProgress("heap", heapUsedVal_, totalInternalVal_);
         }
+        // PSRAM detection — derived, not flagged. ESP-IDF auto-detects the
+        // PSRAM chip at boot (`I (...) esp_psram: Found NMB PSRAM device`)
+        // and merges its pool into the heap allocator. After that
+        // `totalHeap()` reports internal + PSRAM combined while
+        // `totalInternalHeap()` reports internal only — so `totalHeap >
+        // totalInternal` IS the "PSRAM present" signal. No explicit flag,
+        // no per-platform code path; boards without PSRAM (or with PSRAM
+        // disabled in sdkconfig) skip this control naturally.
         if (totalHeapVal_ > totalInternalVal_) {
             controls_.addProgress("psram", psramUsedVal_, totalHeapVal_ - totalInternalVal_);
         }
         controls_.addReadOnly("maxBlock", maxBlockStr_, sizeof(maxBlockStr_));
 
-        // Flash/firmware/filesystem
+        // Flash/firmware/filesystem. The progress bar is named
+        // `firmwarePartition` (not `firmware`) to avoid colliding with the
+        // string `firmware` control bound a few lines below — both shared the
+        // name pre-board-injection, which made any consumer that did
+        // `controls.find(c => c.name === "firmware")` get whichever was bound
+        // first (the progress bar's integer value) and break on string-only
+        // operations like install-picker's isCompatible.
         if (totalFlashVal_ > 0) {
-            controls_.addProgress("firmware", firmwareSizeVal_, totalFlashVal_);
+            controls_.addProgress("firmwarePartition", firmwareSizeVal_, totalFlashVal_);
         }
         if (chipFlashVal_ > 0) {
             controls_.addReadOnly("flash", flashStr_, sizeof(flashStr_));
@@ -86,6 +100,14 @@ public:
         controls_.addReadOnly("chip", chipInfo_, sizeof(chipInfo_));
         controls_.addReadOnly("sdk", sdkInfo_, sizeof(sdkInfo_));
         controls_.addReadOnly("bootReason", bootReasonStr_, sizeof(bootReasonStr_));
+
+        // Chain into children (BoardModule today). Per the override-and-chain
+        // convention in architecture.md § Lifecycle propagation to children:
+        // `onBuildControls` cascades to children via MoonModule's base default;
+        // overriding the method shadows that default, so we must call it
+        // explicitly. Order doesn't matter here — SystemModule's own controls
+        // don't depend on children's controls.
+        MoonModule::onBuildControls();
     }
 
     void loop1s() override {
@@ -114,8 +136,11 @@ public:
 
         fsUsedVal_ = static_cast<uint32_t>(platform::filesystemUsed());
 
+        // maxInternalAllocBlock — NOT maxAllocBlock. The internal-RAM block
+        // is the scarce-resource KPI; the all-memory variant reports ~8 MB
+        // on PSRAM-equipped boards (S3/S2) and tells the user nothing.
         std::snprintf(maxBlockStr_, sizeof(maxBlockStr_), "%uKB",
-                      static_cast<unsigned>(platform::maxAllocBlock() / 1024));
+                      static_cast<unsigned>(platform::maxInternalAllocBlock() / 1024));
     }
 
     const char* deviceName() const { return deviceName_; }

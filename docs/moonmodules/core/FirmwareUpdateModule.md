@@ -36,7 +36,7 @@ The route returns immediately. Real progress streams via `update_status` + `upda
 
 ### Compatibility
 
-The OTA caller is responsible for picking a binary compatible with the running device. The web UI's release-picker enforces this via `src/ui/release-picker.js`'s `isCompatible()` — strip `-eth*` from both sides, equal identities are compatible. So `esp32` / `esp32-eth` / `esp32-eth-wifi` are mutually OTA-compatible (same chip, different feature flags); `esp32s3-n16r8` is only itself. Flashing the wrong firmware's binary fails at `esp_https_ota_begin` (chip family mismatch) or boot (partition table mismatch) — recoverable by re-flashing over USB, not the brick.
+The OTA caller is responsible for picking a binary compatible with the running device. The web UI's install-picker enforces this via `src/ui/install-picker.js`'s `isCompatible()` — strip `-eth*` from both sides, equal identities are compatible. So `esp32` / `esp32-eth` / `esp32-eth-wifi` are mutually OTA-compatible (same chip, different feature flags); `esp32s3-n16r8` is only itself. Flashing the wrong firmware's binary fails at `esp_https_ota_begin` (chip family mismatch) or boot (partition table mismatch) — recoverable by re-flashing over USB, not the brick.
 
 ## Lifecycle on flash
 
@@ -63,4 +63,4 @@ After an error, `update_status` stays on the error message until the next `/api/
 ## Prior art
 
 - **projectMM-v1** had this module + the route + the platform helper, structured the same way: `src/modules/system/FirmwareUpdateModule.h` (display surface), `src/core/OtaState.h` (shared globals), `src/core/AppRoutes.cpp:174-210` (the route), `src/pal/Pal.h` (`pal::http_fetch_to_ota`).
-- **`esp_https_ota`** is the standard ESP-IDF OTA-from-HTTP component, used by every OTA flow on ESP32 since IDF v4.x. The release-picker UI is the new layer on top.
+- **`esp_https_ota`** is the standard ESP-IDF OTA-from-HTTP component, used by every OTA flow on ESP32 since IDF v4.x. The install-picker UI is the new layer on top.

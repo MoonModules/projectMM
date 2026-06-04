@@ -273,11 +273,14 @@ jobs:
       - name: Stage GitHub Pages site
         run: |
           set -euo pipefail
-          # Install page + the shared release-picker module sit at the root.
+          # Install page + the shared install-picker module sit at the root.
           # Each release's binaries + manifests live under releases/<tag>/.
           mkdir -p pages/install
           cp -r docs/install/. pages/install/
-          cp src/ui/release-picker.js pages/install/
+          cp src/ui/install-picker.js pages/install/
+          # library.json — install page reads the project version from it.
+          # Same shape preview_installer.py stages locally.
+          cp library.json pages/install/
           ls -la pages/install/
 
       - uses: actions/upload-pages-artifact@v3

@@ -69,6 +69,10 @@ size_t maxAllocBlock() {
     return 0; // Not meaningful on desktop (0 = unlimited)
 }
 
+size_t maxInternalAllocBlock() {
+    return 0; // Not meaningful on desktop (0 = unlimited)
+}
+
 size_t totalHeap() {
     return 0; // Not meaningful on desktop
 }
@@ -268,6 +272,15 @@ bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
 bool wifiApConnected() { return false; }
 void wifiApStop() {}
 int wifiTxPower() { return 0; }
+// Match the API contract: 0 is a successful no-op (matches ESP-IDF
+// MM_NO_WIFI stub semantics). Any non-zero value returns false since
+// there's no radio to set on the desktop. The 0-as-success branch
+// matters because NetworkModule's syncTxPower passes the ESP-IDF
+// "no override" sentinel (80 quarter-dBm → full power, which maps to
+// txPowerSetting_==0 in user-facing dBm) through this setter to lift
+// any prior cap; on desktop the radio doesn't exist so "the cap is
+// lifted" is trivially true.
+bool wifiSetTxPower(int8_t quarterDbm) { return quarterDbm == 0; }
 
 bool mdnsInit(const char* /*deviceName*/) { return false; }
 void mdnsStop() {}
@@ -293,7 +306,9 @@ bool improvProvisioningInit(const ImprovDeviceInfo& /*info*/,
                             char* /*ssidOut*/, size_t /*ssidOutLen*/,
                             char* /*passwordOut*/, size_t /*passwordOutLen*/,
                             std::atomic<bool>* /*ready*/,
-                            char* statusBuf, size_t statusBufLen) {
+                            char* statusBuf, size_t statusBufLen,
+                            char* /*boardOut*/, size_t /*boardOutLen*/,
+                            std::atomic<bool>* /*boardReady*/) {
     if (statusBuf && statusBufLen > 0) {
         std::snprintf(statusBuf, statusBufLen, "unsupported on desktop");
     }

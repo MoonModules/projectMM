@@ -89,6 +89,39 @@ LUT is half desktop size (uint16_t vs uint32_t per entry). The 1:1 (no-modifier)
 
 ---
 
+## ESP32-S3 — LOLIN S3 N16R8 (16 MB flash, 8 MB octal PSRAM)
+
+`esp32s3-n16r8` firmware on LOLIN S3 N16R8 at `Network.txPowerSetting=8` dBm (the brown-out cap injected by `boards.json`). 128×128 grid, RainbowEffect + Mirror, ArtNet over WiFi STA. Per-step tick/heap live in `contract.esp32s3-n16r8` across the scenarios.
+
+| Metric | Value | Notes |
+|---|---|---|
+| Total tick | ~138 ms / 7 FPS | Dominated by ArtNet at the 8 dBm cap |
+| ArtNetSend | ~93 ms (97 UDP packets) | ~960 µs/packet — slower than full-power WiFi (cf. Olimex `esp32-eth-wifi` at 38 ms) because the cap cuts radio TX margin, association-rate adaptation lands at a lower MCS rate, and packets retry more |
+| Layers | ~13 ms | RainbowEffect compute |
+| Drivers | ~125 ms incl. ArtNet | Driver-loop budget |
+| Free heap | ~8,358 KB | PSRAM merged with internal heap (`totalHeap` reports 8 MB combined) |
+| maxBlock (internal) | ~160 KB | Internal-RAM largest contiguous block — the scarce-resource KPI. `maxAllocBlock` (any-memory) reports ~8 MB on PSRAM boards and is meaningless as a pressure signal; SystemModule + scenario_runner use `maxInternalAllocBlock` instead. |
+| Layer buffer | 92 KB | In PSRAM (auto by heap_caps preference) |
+| Image | 1,307 KB | ~30% larger than `esp32-eth-wifi` due to USB-Serial-JTAG driver + Improv-dual-transport listener |
+
+### Why ArtNet is slower at 8 dBm
+
+The LOLIN brown-out fix caps TX power 12 dB below default (8 dBm vs ~20 dBm). At lower TX power, the WiFi PHY rate-adaptation algorithm picks a slower MCS rate to maintain link margin — for a frame burst this means more time on-air per packet. ~960 µs/packet × 97 packets = the ~93 ms ArtNet budget. The cap is the price of a stable association on this hardware; without it the radio brown-outs and ArtNet doesn't get sent at all.
+
+**Use Ethernet-capable boards for high-FPS ArtNet workloads.** The LOLIN S3 N16R8 fits the "lots of PSRAM, accept WiFi compromise" niche — large pixel buffers or feature-heavy effects that wouldn't fit in 320 KB internal RAM.
+
+### Memory at 128×128 with mirror
+
+| Module | dynamicBytes | Notes |
+|--------|-------------|-------|
+| Layer | 92 KB | Buffer lives in PSRAM (vs 12 KB on Olimex internal) — full uint32_t LUT instead of halved uint16_t |
+| Drivers | 48 KB | Output buffer (128×128×3) |
+| Free internal | ~160 KB largest block | Plenty of headroom for WiFi + lwIP + Improv-on-both-transports |
+
+The PSRAM-merged heap (`totalHeap() > totalInternalHeap()`) is auto-detected — SystemModule binds the `psram` progress control only when this comparison is true. See `docs/moonmodules/core/SystemModule.md`.
+
+---
+
 ## ESP32 firmware size
 
 Board: `esp32-eth-wifi` (largest variant). Partition layout: app0/app1 = 1.75 MB each, LittleFS = 384 KB, coredump = 64 KB.
@@ -122,7 +155,7 @@ These numbers shift with IDF version + sdkconfig — treat as rough proportions.
 | FreeRTOS + IDF core | ~150 KB | Kernel, esp_event, esp_timer, heap, logging, partition ops. Always present. |
 | projectMM code | ~120 KB | `src/core/` + `src/light/` + `src/platform/esp32/` + `src/main.cpp`. ~10% of the binary. |
 | HTTP server + WS | ~60 KB | `esp_http_server` + `HttpServerModule` routing. |
-| Embedded UI assets | ~50 KB | `index.html`, `app.js`, `style.css`, `release-picker.js`, logo PNG — packed as `constexpr uint8_t[]`. |
+| Embedded UI assets | ~50 KB | `index.html`, `app.js`, `style.css`, `install-picker.js`, logo PNG — packed as `constexpr uint8_t[]`. |
 | `esp_https_ota` + HTTP client | ~40 KB | OTA-from-URL machinery. |
 | LittleFS | ~30 KB | `joltwallet/esp_littlefs` component. |
 | Ethernet stack | ~30 KB | `esp_eth` + LAN8720 PHY. `esp32` variant drops this. |

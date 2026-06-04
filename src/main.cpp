@@ -20,6 +20,7 @@
 #include "core/HttpServerModule.h"
 #include "core/PreviewFrame.h"  // used directly here; HttpServerModule.h no longer brings it transitively
 #include "core/SystemModule.h"
+#include "core/BoardModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/ImprovProvisioningModule.h"
 #include "core/FilesystemModule.h"
@@ -60,6 +61,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers/PreviewDriver.md");
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/HttpServerModule.md");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/SystemModule.md");
+    mm::ModuleFactory::registerType<mm::BoardModule>("BoardModule", "core/BoardModule.md");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/FirmwareUpdateModule.md");
     mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/ImprovProvisioningModule.md");
     mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule", "core/NetworkModule.md");
@@ -114,11 +116,19 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     auto* systemModule = static_cast<mm::SystemModule*>(mm::ModuleFactory::create("SystemModule"));
     systemModule->setScheduler(&scheduler);
 
+    // BoardModule — owns the physical-board identity (e.g. "olimex-esp32-gateway-rev-g").
+    // Code-wired child of System; markWiredByCode preserves it on devices whose
+    // saved SystemModule.json predates the addition (same mechanic that kept
+    // Improv alive under Network).
+    auto* boardModule = static_cast<mm::BoardModule*>(mm::ModuleFactory::create("BoardModule"));
+    systemModule->addChild(boardModule);
+    boardModule->markWiredByCode();
+
     // FirmwareUpdate — surfaces OTA status as two read-only controls.
     // The actual flash is driven by POST /api/firmware/url; this module just
     // polls the shared globals so the WS push picks up progress.
     // setName("Firmware") overrides the factory-stripped default
-    // ("FirmwareUpdate") — the card hosts the release-picker, so "Firmware"
+    // ("FirmwareUpdate") — the card hosts the install-picker, so "Firmware"
     // reads as the user-facing concept (the picker is *how* you update it).
     auto* firmwareUpdateModule = static_cast<mm::FirmwareUpdateModule*>(
         mm::ModuleFactory::create("FirmwareUpdateModule"));
@@ -149,6 +159,11 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
             mm::ModuleFactory::create("ImprovProvisioningModule"));
         improvModule->setSystemModule(systemModule);
         improvModule->setNetworkModule(networkModule);
+        // SET_BOARD vendor RPC (command 0xFE, see platform_esp32_improv.cpp).
+        // ImprovProvisioningModule's loop1s() picks up the validated payload
+        // and forwards to boardModule->setBoard(), which arms the standard
+        // FilesystemModule debounced save — same idiom as MoonDeck's HTTP push.
+        improvModule->setBoardModule(boardModule);
         // Mark wired-by-code so applyNode's trim loop preserves it on devices
         // whose saved Network.json predates the Improv child (the upgrade case).
         improvModule->markWiredByCode();
@@ -256,9 +271,12 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
             std::printf("tick: %uus (FPS: %u)", static_cast<unsigned>(scheduler.tickTimeUs()),
                         static_cast<unsigned>(scheduler.fps()));
             if (heap > 0) {
+                // maxInternalAllocBlock — internal RAM only. The all-memory
+                // variant reports ~8 MB on S3/S2 PSRAM boards and is useless
+                // as a memory-pressure KPI. See platform.h for the split.
                 std::printf("  free: %u  maxBlock: %u",
                             static_cast<unsigned>(heap),
-                            static_cast<unsigned>(mm::platform::maxAllocBlock()));
+                            static_cast<unsigned>(mm::platform::maxInternalAllocBlock()));
             }
             // Per-module timing (walk tree recursively)
             for (uint8_t i = 0; i < scheduler.moduleCount(); i++) {

@@ -69,6 +69,7 @@ private:
     // -----------------------------------------------------------------------
     void handleConnection(platform::TcpConnection& conn);
     void sendResponse(platform::TcpConnection& conn, int status, const char* contentType, const char* body);
+    void sendPreflightResponse(platform::TcpConnection& conn);
     void serveFile(platform::TcpConnection& conn, const char* filename, const char* contentType);
 
     // -----------------------------------------------------------------------
