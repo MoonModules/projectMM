@@ -65,7 +65,7 @@ The full gate lists per lifecycle event (commit, push, PR merge, release) live i
 
 ## Implementation Process
 
-Build one capability at a time. Each commit produces visible output. The product owner picks what to build next.
+Each commit produces visible output. The product owner picks what to build next.
 
 ### Per-feature workflow
 

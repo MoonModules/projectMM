@@ -7,7 +7,7 @@ Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi,
 ## What you get
 
 - **Plug in, open a browser, see lights.** A live 3D preview of every effect, every modifier, every layout, controllable from the same browser tab.
-- **Effects, modifiers, layouts, drivers** — all pluggable, all configurable live, all persisted across reboots.
+- **Effects, modifiers, layouts, drivers** (output currently ArtNet, plus the built-in 3D preview) — all pluggable, all configurable live, all persisted across reboots.
 - **One firmware, many devices.** ESP32, Teensy, Raspberry Pi, Windows / macOS / Linux desktop — the same source builds for each.
 - **Native 3D** from the start. 2D and 1D are the cases where one or two dimensions are size 1; effects don't pick a mode.
 - **Built-in browser UI.** The interface renders any module from its declared controls — adding a new effect needs zero UI code.
@@ -15,29 +15,35 @@ Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi,
 
 ## Performance
 
-What projectMM delivers — pipeline: NoiseEffect → MirrorModifier XY → ArtNet over Ethernet, captured per-grid-size on each supported platform. **FPS shown is computed from the underlying tick measurement (FPS = 1,000,000 / tick_us)** — tick is the unit the contracts and assertions actually use; FPS is the headline number.
+What projectMM delivers, measured end-to-end through a full render pipeline — an effect, a modifier, and an output driver (the canonical sweep runs NoiseEffect → MirrorModifier XY → ArtNet, but any effect/modifier/driver combination runs the same path). **FPS shown is computed from the underlying tick measurement (FPS = 1,000,000 / tick_us)** — tick is the unit the contracts and assertions actually use; FPS is the headline number.
 
 Every measurement below comes from a real scenario run on the listed board — `test/scenarios/light/scenario_GridLayout_grid_sizes.json` is the canonical sweep. Per-step `contract.<target>` blocks carry the promises the device must hit; per-step `observed.<target>` blocks carry the latest reading.
 
 ### Frames per second
 
-| Grid | Lights | Apple Silicon (M-series) | Olimex `esp32-eth-wifi` | Olimex `esp32-eth` |
-|---|---:|---:|---:|---:|
-| 16×16 | 256 | — *(below host clock resolution)* | 1,543 | 1,628 |
-| 32×32 | 1,024 | 166,667 | 447 | 432 |
-| 64×64 | 4,096 | 40,000 | 81 | 71 |
-| 128×128 | 16,384 | 9,708 | 11 | 10 |
+| Grid | Lights | Apple Silicon (M-series) | Olimex `esp32-eth-wifi` | Olimex `esp32-eth` | LOLIN S3 N16R8 `esp32s3-n16r8` |
+|---|---:|---:|---:|---:|---:|
+| 16×16 | 256 | — *(below host clock resolution)* | 1,543 | 1,628 | 1,672 |
+| 32×32 | 1,024 | 166,667 | 447 | 432 | 287 |
+| 64×64 | 4,096 | 40,000 | 81 | 71 | 25 |
+| 128×128 | 16,384 | 9,708 | 11 | 10 | 6 |
+
+The LOLIN S3 N16R8 is WiFi-only and runs with `Network.txPowerSetting` capped to 8 dBm (the brown-out fix — see below). At 128×128 it's bound by ArtNet over WiFi at reduced TX power (~93 ms of the ~164 ms tick), which is why it trails the Ethernet boards despite a faster core. The board's niche is PSRAM headroom (8 MB) for large pixel buffers, not raw ArtNet FPS — use an Ethernet board when frame rate matters.
 
 ### Free heap
 
-| Grid | Apple Silicon (M-series) | Olimex `esp32-eth-wifi` | Olimex `esp32-eth` |
-|---|---:|---:|---:|
-| 16×16 | unlimited | 150 KB | 178 KB |
-| 32×32 | unlimited | 144 KB | 171 KB |
-| 64×64 | unlimited | 119 KB | 146 KB |
-| 128×128 | unlimited | 104 KB | 132 KB |
+Each cell is **free internal RAM / largest contiguous internal-RAM block**. Internal RAM is the scarce, comparable resource across all boards — so for PSRAM boards (the S3) this is internal-only, NOT the PSRAM-merged total (we assume the 8 MB PSRAM pool is large enough that it isn't the constraint). The block size is the memory-pressure signal that matters: free RAM can be ample while fragmentation leaves no single block big enough for the next allocation.
 
-Build variants differ structurally: `esp32-eth-wifi` includes the WiFi stack (~270 KB flash, ~28 KB heap). `esp32-eth` drops WiFi for ~28 KB more free heap, at the cost of slightly slower tick on large grids (lwIP buffer-pool sizing is tuned for the eth-wifi sdkconfig). The right variant depends on whether the deployment needs WiFi.
+| Grid | Apple Silicon (M-series) | Olimex `esp32-eth-wifi` | Olimex `esp32-eth` | LOLIN S3 N16R8 `esp32s3-n16r8` |
+|---|---:|---:|---:|---:|
+| 16×16 | unlimited | 139 KB / 52 KB | 178 KB / 100 KB | 238 KB / 160 KB |
+| 32×32 | unlimited | 132 KB / 50 KB | 172 KB / 92 KB | 240 KB / 152 KB |
+| 64×64 | unlimited | 108 KB / 48 KB | 147 KB / 62 KB | 236 KB / 152 KB |
+| 128×128 | unlimited | 129 KB / 52 KB | 132 KB / 48 KB | 240 KB / 164 KB |
+
+The S3's internal-free stays flat across grid sizes because its Layer buffer + LUT live in PSRAM — growing the grid consumes PSRAM, not internal RAM. The Olimex boards hold those buffers in internal RAM, so their free heap drops as the grid grows.
+
+Build variants differ structurally: `esp32-eth-wifi` includes the WiFi stack (~270 KB flash, ~28 KB heap). `esp32-eth` drops WiFi for more free heap, at the cost of slightly slower tick on large grids (lwIP buffer-pool sizing is tuned for the eth-wifi sdkconfig). The right variant depends on whether the deployment needs WiFi, Ethernet, or large buffers.
 
 The numbers above are observations. The **contracts** projectMM commits to — what the device must hit on every CI run — live in [`test/scenarios/*.json`](test/scenarios/) as per-step `contract.<target>` blocks; see [docs/testing.md § Performance contracts](docs/testing.md#performance-contracts-contracttarget) for how they're set and renegotiated. The [docs/performance.md](docs/performance.md) page covers the *why* (WiFi vs Ethernet physics, sizeof tables, build-variant deltas).
 
@@ -45,7 +51,7 @@ The numbers above are observations. The **contracts** projectMM commits to — w
 
 ### From a release
 
-**ESP32 — flash from your browser.** Open the [web installer](https://ewowi.github.io/projectMM/install/) in Chrome or Edge — it walks you through firmware selection, flashing, and network setup. The installer lists stable releases and a `latest` build (published automatically on every merge to main) carrying the newest unreleased changes, labelled *(beta)*.
+**ESP32 — flash from your browser.** Open the [web installer](https://ewowi.github.io/projectMM/install/) in Chrome or Edge — it walks you through release, board, and firmware selection, flashing, and network setup. The installer lists stable releases and a `latest` build (published automatically on every merge to main) carrying the newest unreleased changes, labelled *(beta)*.
 
 
 ![Installer](docs/assets/screenshots/installer.png)
@@ -65,9 +71,6 @@ uv run scripts/moondeck.py
 ```
 
 Open `http://localhost:8420`: PC tab to build / run / test, ESP32 tab to flash, Live tab to discover devices. Full per-command reference: [scripts/MoonDeck.md](scripts/MoonDeck.md).
-
-![MoonDeck](docs/assets/moondeck.png)
-
 
 ![Moondeck Pc](docs/assets/screenshots/moondeck_pc.png)
 
@@ -93,7 +96,7 @@ A few principles run through everything:
 
 - **Common patterns first** — recognisable practice across code, docs, tests, UI. Bespoke choices need a stated reason.
 - **Specs before code** — a module is documented in [`docs/moonmodules/`](docs/moonmodules/) — purpose, controls, behaviour, edge cases, prior art — well enough to implement from before it's written.
-- **One capability at a time** — each change is small, tested, produces visible output.
+- **Working software at every commit** — each commit builds, passes the test + scenario gates, and produces something you can see run; never a broken intermediate state.
 - **Minimalism** — flat, predictable code; removing code beats adding it; every addition pays for itself.
 - **The system as it is** — code and docs describe the present; git history is the changelog.
 
@@ -109,8 +112,6 @@ This is the current iteration of years of LED / light system development. Each p
 | **WLED-MoonModules** | WLED fork with advanced features | [MoonModules/WLED](https://github.com/MoonModules/WLED) |
 | **StarLight** | Standalone LED firmware | [ewowi/StarLight](https://github.com/ewowi/StarLight) |
 | **MoonLight** | Ground-up build: 60+ effects, memory-optimised mapping, 11 driver types | [MoonModules/MoonLight](https://github.com/MoonModules/MoonLight) |
-| **projectMM v1** | First agentic build: proved the MoonModule pattern, 8 releases | [ewowi/projectMM-v1](https://github.com/ewowi/projectMM-v1) |
-| **projectMM v2** | Lock-free buffers, multi-core scheduling, canvas UI | [ewowi/projectMM-v2](https://github.com/ewowi/projectMM-v2) |
 
 Their lessons and proven patterns are distilled in [`docs/history/`](docs/history/) — the codebase this project cherry-picks from, never porting wholesale.
 

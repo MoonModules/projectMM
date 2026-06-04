@@ -51,6 +51,8 @@ While the app is running, MoonDeck shows the button as **Stop** (a 5-second poll
 ### preview_installer
 
 ![Installer](../docs/assets/screenshots/installer.png)
+![Installer2](../docs/assets/screenshots/installer2.png)
+![Installer3](../docs/assets/screenshots/installer3.png)
 
 Locally preview the web installer page at <https://ewowi.github.io/projectMM/install/> without tagging a release. Stages `docs/install/index.html` + `src/ui/install-picker.js` into `build/install-preview/` and serves them via Python's `http.server` on port 8000.
 
