@@ -287,23 +287,48 @@ jobs:
         with:
           path: pages
 
-      - name: Move `latest` tag to current commit
-        # softprops/action-gh-release reuses an existing release's tag rather
-        # than moving it, which freezes `publishedAt` and the compare-view
-        # endpoint on the commit the tag first pointed at. For the moving-tag
-        # case (every main-branch build → `latest`), force-push the tag here
-        # so the action sees a tag-at-new-commit and updates `publishedAt`,
-        # the release sorts to the top of the Releases page, and the
-        # auto-generated compare link spans the actual diff. Version tags
-        # (vX.Y.Z, vX.Y.Z-rcN) are never moved — those are immutable by
-        # contract.
+      - name: Re-create the `latest` release fresh
+        # The `latest` tag is a moving prerelease: every main-branch build
+        # republishes it pointing at the new commit. Two things have to
+        # happen for the Releases page to show the right state:
+        #
+        #   1. The tag must point at the new commit. Force-push it.
+        #   2. The release's `published_at` must reset to now. This is the
+        #      subtle one: softprops/action-gh-release reuses an existing
+        #      release (PATCH) rather than recreating it, and GitHub keeps
+        #      the original `published_at` on a PATCH of an already-
+        #      published release. Result: assets update to today's build
+        #      but the Releases page still sorts/displays the release at
+        #      last week's date (the date it was first published). The
+        #      action exposes no `published_at` input, and PATCHing it
+        #      directly is ignored by the API for published releases — so
+        #      the only reliable reset is to DELETE the release here and
+        #      let the publish step below create it fresh (new release
+        #      object → `published_at` = now).
+        #
+        # Deleting the release does NOT delete the tag (we keep the tag,
+        # force-pushed above). The window between delete and recreate is
+        # sub-second within this job; the web installer's release-dropdown
+        # read from api.github.com tolerates it.
+        #
+        # Version tags (vX.Y.Z, vX.Y.Z-rcN) are never touched here — those
+        # are immutable by contract and their releases are created once.
         if: steps.tag.outputs.tag == 'latest'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # 1. Move the tag to the new commit.
           git tag -f latest "$GITHUB_SHA"
           git push -f origin "refs/tags/latest"
+          # 2. Delete the existing `latest` RELEASE (not the tag) so the
+          #    publish step recreates it with a fresh published_at.
+          #    `gh release delete` keeps the tag by default (only removes
+          #    it if --cleanup-tag is passed), so the tag we force-pushed
+          #    above survives. Tolerate "release not found" — first-ever
+          #    latest build, or a prior run that already removed it.
+          gh release delete latest --repo "$GITHUB_REPOSITORY" --yes \
+            || echo "  (no existing latest release to delete — first build or already gone)"
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
