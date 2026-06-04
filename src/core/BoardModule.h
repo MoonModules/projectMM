@@ -51,15 +51,18 @@ public:
 
     // External setter for transports that bypass /api/control (today: Improv
     // vendor RPC SET_BOARD from the web installer). Validates: 1..31 chars,
-    // ASCII-printable (0x20–0x7E), no embedded NUL. The ASCII-printable
-    // floor protects every downstream consumer: JSON serialization (no
-    // escaping required for the wire + persistence layer), the device UI
-    // (rendered verbatim — control characters would corrupt the rendering),
-    // and C-string handling everywhere else (no embedded NUL means strlen
-    // / strcpy round-trip cleanly). Returns false on rejection so the
-    // Improv handler can map to ErrorState. On accept: copies into
-    // boardKey_ and arms FilesystemModule's debounced save — same idiom as
-    // NetworkModule::setWifiCredentials.
+    // ASCII-printable (0x20–0x7E), no embedded NUL. The printable-floor
+    // rejects control bytes and embedded NULs that would corrupt downstream
+    // consumers: JSON serialization (control bytes need \u escaping at best,
+    // break naive emitters at worst), the device UI (rendered verbatim —
+    // a 0x07 BEL or 0x1B ESC would mangle the page), and C-string handling
+    // throughout (no embedded NUL means strlen / strcpy round-trip cleanly).
+    // Note: printable ASCII still contains `"` and `\`, which JSON
+    // serializers must escape normally — the floor isn't a license to skip
+    // escaping, just a guarantee against the worse hazards above. Returns
+    // false on rejection so the Improv handler can map to ErrorState. On
+    // accept: copies into boardKey_ and arms FilesystemModule's debounced
+    // save — same idiom as NetworkModule::setWifiCredentials.
     bool setBoard(const char* value) {
         if (!value) return false;
         size_t n = std::strlen(value);

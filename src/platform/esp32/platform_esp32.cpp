@@ -579,7 +579,10 @@ bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
 bool wifiApConnected() { return false; }
 void wifiApStop() {}
 int wifiTxPower() { return 0; }
-bool wifiSetTxPower(int8_t /*quarterDbm*/) { return false; }
+// Match the API contract: 0 is a successful no-op even when WiFi isn't
+// compiled in. Any non-zero value (actual cap attempt) returns false
+// because there's no radio to set.
+bool wifiSetTxPower(int8_t quarterDbm) { return quarterDbm == 0; }
 
 #endif // MM_NO_WIFI
 

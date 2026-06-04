@@ -293,12 +293,14 @@ export const myDevices = {
             // with "(any board)" mustn't blank a previously-set entry.
             if (board) existing.board = board;
             // pendingBoard tracks "an Inject-button handoff is still owed."
-            // Set on push-failure, clear on push-success — otherwise a
-            // re-install after a failed push leaves the flag stranded and
-            // buildInjectUrl keeps offering the stale name from the prior
-            // attempt. Cleared explicitly here on every successful add too.
-            if (pendingBoardPush) existing.pendingBoard = board;
-            else                  delete existing.pendingBoard;
+            // Set on push-failure (for the just-pushed board); clear on
+            // push-success — otherwise a re-install after a failed push
+            // leaves the flag stranded and buildInjectUrl keeps offering
+            // the stale name. Gate the clear on `board` truthy too: an
+            // "(any board)" refresh is not a board change, so it must not
+            // clear an outstanding-injection flag from a prior real push.
+            if (pendingBoardPush)         existing.pendingBoard = board;
+            else if (board)               delete existing.pendingBoard;
         } else {
             const entry = {
                 name: nameFromUrl(url), url, lastSeen: now,

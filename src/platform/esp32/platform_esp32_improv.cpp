@@ -261,9 +261,17 @@ static void improvHandleSetBoard(const uint8_t* payload, uint8_t len) {
         return;
     }
     // payload[0] is the command byte (0xFE) — we already dispatched on it.
-    // payload[1] is data_len; payload[2] is str_len.
+    // payload[1] is data_len (RPC framing); payload[2] is str_len.
+    // Cross-check the three lengths so a malformed frame (e.g. data_len
+    // disagreeing with str_len, or extra trailing bytes inside the
+    // framing-level payload) is rejected rather than silently accepted.
+    // The outer framing parser already validated `len` against the
+    // wire-level length byte; these checks enforce internal consistency.
+    uint8_t dataLen = payload[1];
     uint8_t strLen = payload[2];
-    if (strLen == 0 || strLen >= g_improv.boardOutLen || 3u + strLen > len) {
+    if (strLen == 0 || strLen >= g_improv.boardOutLen
+            || dataLen != static_cast<uint8_t>(1u + strLen)
+            || len != static_cast<size_t>(3u + strLen)) {
         improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_BOARD));
         return;
     }
@@ -427,7 +435,17 @@ static void improvTask(void* /*arg*/) {
     improvSetStatus("listening");
 #endif
 
-    ImprovFrameParser parser;  // owns its 128-byte payload buffer; ~150 B on stack
+    // One parser per transport. Each parser keeps its own framing state
+    // and 128-byte payload buffer (~150 B per instance on stack). With a
+    // shared parser, a partial frame on UART would be corrupted by bytes
+    // arriving on JTAG (and vice versa) — the parser's state machine
+    // doesn't know they came from different sources. Two parsers keep
+    // the framing per-transport so a half-received frame on one side
+    // can't be confused by traffic on the other.
+    ImprovFrameParser parser_uart;
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+    ImprovFrameParser parser_jtag;
+#endif
     uint8_t b;
     for (;;) {
         // Symmetric non-blocking poll of both transports. Each round
@@ -442,7 +460,7 @@ static void improvTask(void* /*arg*/) {
             for (int drained = 0; drained < 64; ++drained) {
                 int n = uart_read_bytes(UART_NUM_0, &b, 1, 0);
                 if (n <= 0) break;
-                improvFeedByte(parser, b);
+                improvFeedByte(parser_uart, b);
                 anyRead = true;
             }
         }
@@ -451,7 +469,7 @@ static void improvTask(void* /*arg*/) {
             for (int drained = 0; drained < 64; ++drained) {
                 int n = usb_serial_jtag_read_bytes(&b, 1, 0);
                 if (n <= 0) break;
-                improvFeedByte(parser, b);
+                improvFeedByte(parser_jtag, b);
                 anyRead = true;
             }
         }

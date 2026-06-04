@@ -613,9 +613,21 @@ export const installer = {
                     return;
                 }
                 if (ipResult.action === "ip") {
+                    // normalizeDeviceUrl returns "" on whitespace-only or
+                    // unparseable input. The `required` attribute on the
+                    // input element catches empty submits, but a trim
+                    // here means a value like "   " still escapes that
+                    // guard — treat the empty result as "user didn't
+                    // give us a usable address" and stay in the loop
+                    // so they can try again rather than fall through
+                    // to a downstream fetch that would fail differently.
                     deviceUrl = normalizeDeviceUrl(ipResult.url || "");
-                    viaHttp = true;
-                    break;
+                    if (deviceUrl) {
+                        viaHttp = true;
+                        break;
+                    }
+                    if (onLog) onLog(`[orchestrator] empty / unparseable IP — re-prompting`);
+                    continue;
                 }
                 // action === "retry": rebuild the SDK on the same port.
                 // The port stays open across improvClient.close() (close

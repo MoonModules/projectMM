@@ -49,10 +49,12 @@ public:
             // platform's event-handler registration runs fresh.
             if (state_ == State::AP) {
                 platform::wifiApStop();
+                noteRadioStopped();
                 apShutdownPending_ = false;
             }
             if (state_ == State::WaitingSta || state_ == State::ConnectedSta) {
                 platform::wifiStaStop();
+                noteRadioStopped();
             }
             if (platform::wifiStaInit(ssid_, password_)) {
                 state_ = State::WaitingSta;
@@ -202,6 +204,7 @@ public:
                     } else if (elapsed > 10000) {
                         // WiFi STA didn't connect in 10s, start AP
                         platform::wifiStaStop();
+                        noteRadioStopped();
                         startAP();
                     }
                 }
@@ -245,6 +248,7 @@ public:
                         std::printf("NetworkModule: WiFi STA dropped, starting AP\n");
                         platform::mdnsStop();
                         platform::wifiStaStop();
+                        noteRadioStopped();
                         startAP();
                     } else {
                         updateStatusIP();
@@ -308,8 +312,11 @@ public:
         MoonModule::teardown();
         platform::mdnsStop();
         if constexpr (platform::hasWiFi) {
-            if (state_ == State::AP) platform::wifiApStop();
-            if (state_ == State::ConnectedSta || state_ == State::WaitingSta) platform::wifiStaStop();
+            if (state_ == State::AP) { platform::wifiApStop(); noteRadioStopped(); }
+            if (state_ == State::ConnectedSta || state_ == State::WaitingSta) {
+                platform::wifiStaStop();
+                noteRadioStopped();
+            }
         }
     }
 
@@ -407,11 +414,13 @@ private:
             if (apShutdownPending_ || platform::wifiApConnected()) {
                 std::printf("NetworkModule: Shutting down AP (higher priority connected)\n");
                 platform::wifiApStop();
+                noteRadioStopped();
                 apShutdownPending_ = false;
             }
             if (state_ == State::ConnectedEth && platform::wifiStaConnected()) {
                 std::printf("NetworkModule: Shutting down WiFi STA (Ethernet connected)\n");
                 platform::wifiStaStop();
+                noteRadioStopped();
             }
         }
 
@@ -467,6 +476,17 @@ private:
             appliedTxPowerSetting_ = txPowerSetting_;
         }
     }
+
+    // Invalidate the "last applied" tracker so the next syncTxPower()
+    // re-applies the cap. Must be called every time the WiFi stack stops
+    // (wifiStaStop / wifiApStop / teardown): ESP-IDF resets the radio's
+    // TX-power state on stop, so our cached `applied` value no longer
+    // reflects what the radio thinks. Without this, the equality check
+    // in syncTxPower() short-circuits and the cap never lands on the
+    // restarted radio — the LOLIN board would associate at full power
+    // (brown-out hazard) until the user touched the control to force a
+    // resync.
+    void noteRadioStopped() { appliedTxPowerSetting_ = -1; }
 
     void syncMdns() {
         bool shouldRun = mdnsEnabled_ && (state_ == State::ConnectedEth || state_ == State::ConnectedSta);

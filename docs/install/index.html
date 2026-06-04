@@ -1105,6 +1105,18 @@
 
     async function openMonitor() {
       if (_monitor.port) return;  // already open (Monitor clicked twice fast)
+      // Browser-support gate: Safari / Firefox have no Web Serial API.
+      // The page-load banner (#browser-warning) already tells the user,
+      // but the Monitor button is still rendered and clickable; without
+      // this guard we'd hit `navigator.serial.requestPort()` and the
+      // resulting TypeError would be swallowed by openPortPicker's
+      // catch, leaving the user with a non-responsive button. Show the
+      // existing banner explicitly so a click here surfaces the cause.
+      if (!("serial" in navigator)) {
+        document.getElementById("browser-warning").style.display = "block";
+        document.getElementById("browser-warning").scrollIntoView({behavior: "smooth"});
+        return;
+      }
       if (!pickedPort) {
         // Trigger the port picker; openMonitor was called from a user
         // gesture (Monitor button click), so requestPort() is allowed.
