@@ -12,7 +12,7 @@ The earlier study at [leddriver-analysis-bottom-up.md](leddriver-analysis-bottom
 - The peripheral that hosts that DMA engine is what changes per device: RMT on ESP32, I2S/LCD_CAM/PARLIO on the newer ESPs, FlexIO on Teensy 4.x, PIO (via RP1) on Raspberry Pi 5.
 - The WiFi-glitch problem is, almost without exception, an ISR-latency problem: a refill ISR that misses a deadline by &gt; ~5 µs corrupts one bit and shifts every downstream pixel. The standard fix is to take the CPU out of the refill entirely (DMA-only ping-pong) and pin everything else to the other core.
 - Architecture: one tiny abstract `LedDriver` interface; per-platform implementations live in `src/platform/<target>/` and are picked by `if constexpr (platform::…)` switches at compile time. No `#ifdef` outside `src/platform/`.
-- Testing: on-board GPIO loopback is the cheap CI workhorse (RMT-RX on ESP32, FlexPWM-capture on Teensy). A $12 fx2lafw + sigrok-cli adds an independent-clock cross-check. A $149 DSLogic Plus is the right "later" upgrade when timing-margin tests start to matter.
+- Testing: on-board GPIO loopback is the cheap CI workhorse (RMT-RX on ESP32, FlexPWM-capture on Teensy). A $12 fx2lafw clone (the project uses a NanoDLA v1.3) + sigrok-cli adds an independent-clock cross-check. A $149 DSLogic Plus is the right "later" upgrade when timing-margin tests start to matter.
 - Hello-world order: ESP32 classic → ESP32-S3 → ESP32-P4 → Teensy 4.x → Raspberry Pi 5 (via PIO/RP1 — and seriously consider just bridging to an MCU on the Pi 5).
 
 ## 1. The protocol, in detail
@@ -281,7 +281,7 @@ This is the **primary CI signal-verification method** for the project. It runs o
 
 ### 5.3 fx2lafw + sigrok-cli (the $12 independent cross-check)
 
-A $10–15 fx2lafw clone gives 24 MS/s on 8 channels, sigrok-compatible. The libsigrokdecode tree has a WS2812 protocol decoder ([logic-ws2812](https://github.com/dustin/logic-ws2812)) that emits RGB triples; [sigrok-cli](https://sigrok.org/wiki/Sigrok-cli) runs it headless:
+A $10–15 fx2lafw clone gives 24 MS/s on 8 channels, sigrok-compatible. The project's reference device is the **NanoDLA v1.3** (CY7C68013A-based, 24 MHz / 8 channels, fx2lafw firmware), but any board the sigrok `fx2lafw` driver enumerates works the same way. The libsigrokdecode tree has a WS2812 protocol decoder ([logic-ws2812](https://github.com/dustin/logic-ws2812)) that emits RGB triples; [sigrok-cli](https://sigrok.org/wiki/Sigrok-cli) runs it headless:
 
 ```bash
 sigrok-cli -d fx2lafw -c samplerate=24m --samples 100000 \
@@ -289,6 +289,43 @@ sigrok-cli -d fx2lafw -c samplerate=24m --samples 100000 \
 ```
 
 Why bother when 5.2 exists: the loopback method trusts the *MCU's own clock*. An independent analyzer with its own clock crosses the verification — if loopback and analyzer disagree, you have a real bug. 24 MS/s = 41 ns/sample, enough to *correctness*-check WS2812 (350 vs 700 ns) but marginal for *timing-margin* tests (320 vs 380 ns).
+
+#### 5.3.1 Wiring the NanoDLA v1.3 to an ESP32 and capturing one frame
+
+**Wiring** (any fx2lafw clone follows the same pattern; only the labels differ):
+
+- **Common ground.** Tie the analyzer's `GND` pin to an ESP32 `GND` pin. Without this the analyzer reads garbage — every other concern is downstream of this one. Use the shortest jumper you have.
+- **Signal.** Tie analyzer channel `D0` (NanoDLA labels them `CH0..CH7`) to the ESP32 GPIO that drives WS2812 data. For the on-board loopback rig from §5.2 that's the `GPIO_TX` side of the loopback jumper — keep the loopback in place and tap the same line with a second jumper into `D0`. The analyzer is high-impedance; it doesn't load the line.
+- **Do NOT power the ESP32 from the analyzer's 5 V / 3.3 V rail.** The CY7C68013A's regulator can't carry an ESP32 under WiFi load. Power the ESP32 over its own USB cable; the analyzer's USB is data-only as far as the ESP32 is concerned.
+- **Strand power.** If a real WS2812 strand is on the line too, give it its own 5 V supply with the supply ground also tied to the common ground above. The analyzer taps the signal; it does not drive the strand.
+
+**Voltage levels.** ESP32 GPIO is 3.3 V CMOS. fx2lafw boards specify 3.3 V logic (5 V tolerant inputs). 3.3 V → 3.3 V is a direct connection — no level shifter, no series resistor. Skip every "is it safe?" worry; this is the well-understood case.
+
+**Sample-rate vs strand length.** At 24 MS/s, 8 channels (the NanoDLA's max), the host-side buffer fills at ~24 MB/s. A 30-LED strand is one full frame ≈ 0.9 ms wire-time + reset — well inside one sigrok-cli `--samples` capture window. For larger strands either bump `--samples` proportionally or trigger on the first edge so you only capture the active wire-time.
+
+**Capture + decode (single frame, one strand):**
+
+```bash
+# 1. Plug in: NanoDLA via USB, ESP32 via its own USB cable, jumpers as above.
+# 2. Confirm sigrok sees the device. Should print one fx2lafw entry.
+sigrok-cli --scan
+
+# 3. Capture ~4 ms at 24 MS/s — enough for any reasonable WS2812 frame
+#    plus the 50–280 µs idle that latches it.
+sigrok-cli -d fx2lafw -c samplerate=24m --samples 100000 \
+           -P ws2812:data=D0 -A ws2812=rgb
+
+# 4. The output is one line per pixel, with RGB triples in transmit
+#    order. Compare against the byte stream the firmware claims to have
+#    sent: that's the cross-check the doc above describes.
+```
+
+**Common gotchas, in the order you'll hit them:**
+
+1. **No common ground** — capture looks like random toggling. Re-seat the GND jumper.
+2. **Wrong channel** — `-P ws2812:data=D0` vs the channel you actually wired. Re-check the NanoDLA label; CH0 = D0 in the sigrok driver.
+3. **Sample rate too low** — at 8 MS/s a 350 ns "0" pulse becomes 3 samples and the decoder will start mistaking 0s for 1s. Always pass `samplerate=24m` explicitly; the driver's default is lower.
+4. **PulseView for debugging.** When `sigrok-cli` says "no frames decoded," open the same capture in [PulseView](https://sigrok.org/wiki/PulseView) and look at the raw waveform — usually it's an idle-low gap missing or a stuck bit, both obvious by eye.
 
 ### 5.4 DSLogic Plus ($149) — the "later" upgrade
 
@@ -309,7 +346,7 @@ Skip for CI:
 | ----- | ------ | ---- | --------------- | ---- |
 | Unit  | Encoder tests, host-side | $0 | Encoding bugs, color order, RGBW, off-by-one | Every push, CI |
 | Module | Loopback (RMT-RX / FlexPWM-capture) | $0 | Wrong bits emitted, wrong timing on real silicon | Every device-test push |
-| Scenario | fx2lafw + sigrok-cli | $12 | Cross-check vs MCU clock; reset gap; bus traffic | Per release |
+| Scenario | NanoDLA v1.3 (or any fx2lafw clone) + sigrok-cli | $12 | Cross-check vs MCU clock; reset gap; bus traffic | Per release |
 | Margin   | DSLogic Plus + sigrok-cli | $149 | Sub-50 ns timing drift, jitter under WiFi load   | When a specific failure motivates it |
 
 Layers 1–2 ship day one. Layer 3 ships when the first non-trivial driver lands. Layer 4 is reactive — buy it when you have a bug that 24 MS/s can't see.

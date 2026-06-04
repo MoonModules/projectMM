@@ -63,6 +63,20 @@ public:
     // false on rejection so the Improv handler can map to ErrorState. On
     // accept: copies into boardKey_ and arms FilesystemModule's debounced
     // save — same idiom as NetworkModule::setWifiCredentials.
+    //
+    // Known asymmetry: HTTP POST /api/control writes to `board` go through
+    // the generic Text-control write in applyControlValue() (Control.cpp),
+    // which does NO printable-ASCII check. A malicious LAN client could
+    // write control bytes / NUL via that path. Acceptable today because
+    // the HTTP-write callers (MoonDeck, web installer's HTTP inject)
+    // source the value from `boards.json`, which the project controls;
+    // there is no end-user-typed input on this field. If the threat model
+    // grows (e.g. an integration that accepts arbitrary external input
+    // and POSTs it through), the right fix is a per-control validator
+    // hook on ControlDescriptor — not a board-specific HTTP dispatch
+    // exception. Until then this validation lives only on the
+    // SET_BOARD-over-Improv path because that's the only path where
+    // wire-untrusted bytes can arrive.
     bool setBoard(const char* value) {
         if (!value) return false;
         size_t n = std::strlen(value);

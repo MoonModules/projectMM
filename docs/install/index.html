@@ -921,8 +921,21 @@
 
         const onSubmit = (e) => {
           e.preventDefault();
+          // Reject whitespace-only input here so the user sees the
+          // browser's built-in validation tooltip on the same field
+          // instead of a silent re-prompt after the orchestrator
+          // discovers an empty normalized URL downstream. `required`
+          // on the input catches empty submits but not "   " — trim
+          // first, then use setCustomValidity to surface the same UI.
+          const trimmed = input.value.trim();
+          if (!trimmed) {
+            input.setCustomValidity("Enter an IP address or hostname.");
+            input.reportValidity();
+            input.setCustomValidity("");  // clear so the next valid submit proceeds
+            return;
+          }
           cleanup();
-          resolve({ action: "ip", url: input.value.trim() });
+          resolve({ action: "ip", url: trimmed });
         };
         const onSkip = () => {
           cleanup();

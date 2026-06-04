@@ -96,20 +96,43 @@ static void improvSetStatus(const char* fmt, ...) {
 static bool g_jtagReady = false;
 #endif
 
+// Source-transport routing for replies. improvSend uses this to send a
+// reply ONLY on the transport that received the request that triggered
+// it, rather than broadcasting to both. The Improv task is single-
+// threaded and processes one frame at a time, so a single static here
+// is sufficient — set before improvDispatchFrame fires, read by every
+// improvSend* call within the dispatch (including the synchronous
+// pre-WiFi-result sends inside improvHandleProvision's 30 s wait, since
+// that wait blocks the same task and no other dispatch can start).
+// Broadcast-to-both stays available as the SourceBoth value for use
+// during init (improvSetStatus("listening") etc. — no specific source).
+enum class ImprovSource : uint8_t { Both, Uart, Jtag };
+static ImprovSource g_replySource = ImprovSource::Both;
+
 // Send a framed Improv message. ImprovFrameType values match the upstream
 // improv::ImprovSerialType numerically (we just don't include improv.h in
 // the host-side test path, so the host-only header has its own enum).
-// Mirrors to both UART0 and USB-Serial-JTAG (when available + installed)
-// so the host gets the reply regardless of which interface it's using to
-// reach the device.
+// Routes to the transport that received the request being replied to
+// (g_replySource, set at the top of improvDispatchFrame). Falls back to
+// broadcast on both transports when no specific source is set — used
+// during init for status-state broadcasts that aren't replies to a
+// specific request.
 static void improvSend(ImprovFrameType type, const std::vector<uint8_t>& payload) {
     uint8_t frame[6 + 1 + 1 + 1 + kImprovMaxPayload + 1];
     size_t n = buildImprovFrame(type, payload.data(), payload.size(),
                                 frame, sizeof(frame));
     if (n == 0) return;  // oversize payload — caller bug, silently drop
-    uart_write_bytes(UART_NUM_0, reinterpret_cast<const char*>(frame), n);
+    const bool toUart =
 #if SOC_USB_SERIAL_JTAG_SUPPORTED
-    if (g_jtagReady) {
+        (g_replySource != ImprovSource::Jtag);
+#else
+        true;
+#endif
+    if (toUart) {
+        uart_write_bytes(UART_NUM_0, reinterpret_cast<const char*>(frame), n);
+    }
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+    if (g_jtagReady && g_replySource != ImprovSource::Uart) {
         // Non-blocking: a host that opened the JTAG endpoint but isn't
         // draining must not stall the Improv task — the task also services
         // UART0 reads (10 ms blocking poll) and any TX-side wait here
@@ -353,17 +376,25 @@ static void improvDispatchFrame(const ImprovFrameParser& parser) {
     }
 }
 
-// Feed one byte into the parser and dispatch / error as needed. Factored
-// out so both read paths (UART0 + USB-Serial-JTAG) share the same handling.
-static void improvFeedByte(ImprovFrameParser& parser, uint8_t b) {
+// Feed one byte into the parser and dispatch / error as needed. The
+// `source` argument identifies which transport the byte arrived on;
+// improvSend reads it via g_replySource to route the reply back to the
+// requesting transport only, avoiding broadcast to the silent side.
+// Reset to Both after dispatch so any subsequent unsolicited send
+// (e.g. from a future async path) broadcasts as before.
+static void improvFeedByte(ImprovFrameParser& parser, uint8_t b, ImprovSource source) {
     switch (parser.feed(b)) {
         case ImprovFeedResult::NeedMore:
             break;
         case ImprovFeedResult::FrameReady:
+            g_replySource = source;
             improvDispatchFrame(parser);
+            g_replySource = ImprovSource::Both;
             break;
         case ImprovFeedResult::BadChecksum:
+            g_replySource = source;
             improvSendError(improv::ERROR_INVALID_RPC);
+            g_replySource = ImprovSource::Both;
             break;
         case ImprovFeedResult::OversizePayload:
             // Length byte > 128 — almost certainly noise / bit-flip; resync silently.
@@ -460,7 +491,7 @@ static void improvTask(void* /*arg*/) {
             for (int drained = 0; drained < 64; ++drained) {
                 int n = uart_read_bytes(UART_NUM_0, &b, 1, 0);
                 if (n <= 0) break;
-                improvFeedByte(parser_uart, b);
+                improvFeedByte(parser_uart, b, ImprovSource::Uart);
                 anyRead = true;
             }
         }
@@ -469,7 +500,7 @@ static void improvTask(void* /*arg*/) {
             for (int drained = 0; drained < 64; ++drained) {
                 int n = usb_serial_jtag_read_bytes(&b, 1, 0);
                 if (n <= 0) break;
-                improvFeedByte(parser_jtag, b);
+                improvFeedByte(parser_jtag, b, ImprovSource::Jtag);
                 anyRead = true;
             }
         }

@@ -59,6 +59,14 @@ public:
             if (platform::wifiStaInit(ssid_, password_)) {
                 state_ = State::WaitingSta;
                 stateChangeTime_ = platform::millis();
+                // Apply the TX-power cap NOW, before the radio's first
+                // probe / auth / assoc burst — that's the window the
+                // LOLIN brown-out fix exists to protect. Waiting for the
+                // next loop1s() tick to syncTxPower would leave up to
+                // 1 s of full-power TX during association, the exact
+                // failure mode the cap defends against. syncTxPower
+                // itself is cheap and idempotent.
+                syncTxPower();
                 std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi STA: %s", ssid_);
                 setStatus(statusBuf_, Severity::Status);
                 // Re-evaluate control visibility — rssi was visible while
@@ -89,6 +97,7 @@ public:
             // Ethernet not available, fall back to WiFi (STA → AP).
             if (ssid_[0] != 0 && platform::wifiStaInit(ssid_, password_)) {
                 state_ = State::WaitingSta;
+                syncTxPower();  // see setWifiCredentials's syncTxPower comment
                 std::printf("NetworkModule: WiFi STA init started, SSID: %s\n", ssid_);
             } else {
                 startAP();
@@ -186,6 +195,7 @@ public:
                         if (ssid_[0] != 0 && platform::wifiStaInit(ssid_, password_)) {
                             state_ = State::WaitingSta;
                             stateChangeTime_ = now;
+                            syncTxPower();  // see setWifiCredentials's syncTxPower comment
                         } else {
                             startAP();
                         }
@@ -218,6 +228,7 @@ public:
                         if (ssid_[0] != 0 && platform::wifiStaInit(ssid_, password_)) {
                             state_ = State::WaitingSta;
                             stateChangeTime_ = now;
+                            syncTxPower();  // see setWifiCredentials's syncTxPower comment
                         } else {
                             startAP();
                         }
@@ -388,6 +399,7 @@ private:
             state_ = State::AP;
             stateChangeTime_ = platform::millis();
             apShutdownPending_ = true;
+            syncTxPower();  // see setWifiCredentials's syncTxPower comment
             std::snprintf(statusBuf_, sizeof(statusBuf_), "AP: %s @ 4.3.2.1", apName); setStatus(statusBuf_, Severity::Status);
             std::printf("NetworkModule: AP started: %s\n", apName);
         } else {
