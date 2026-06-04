@@ -273,12 +273,28 @@ export const installer = {
      *   { chipName } once detection succeeds.
      * @param {() => Promise<{ssid: string, password: string}>} opts.uiWaitForCreds
      *   Host page resolves this when the user fills in the WiFi form.
-     * @param {() => Promise<{url: string}>} [opts.uiWaitForIp]
-     *   Host page resolves this when the user types the device IP/hostname
-     *   on the fallback "needs-ip" form. Only invoked when Improv didn't
-     *   produce a URL (alreadyOnline branch, or an Improv-less firmware like
-     *   esp32-eth). Resolve with `url:""` to skip — host then shows the
-     *   legacy "find on network" message and doesn't add the device.
+     * @param {() => Promise<{action: "ip"|"skip"|"retry", url?: string}>} [opts.uiWaitForIp]
+     *   Host page resolves this when the user picks an action on the fallback
+     *   "needs-ip" form. Only invoked when Improv didn't produce a URL
+     *   (alreadyOnline branch, or an Improv-less firmware like esp32-eth).
+     *   Actions:
+     *     - "ip"    — `url` is the typed value; orchestrator continues with
+     *                 HTTP-injection path.
+     *     - "skip"  — host shows the legacy "find on network" message; device
+     *                 is not added.
+     *     - "retry" — re-run Improv `initialize()` on a fresh client; on
+     *                 success continue to the wifi-creds form, on failure
+     *                 re-prompt. Cheap second chance for slow-booting boards
+     *                 (LOLIN S3 mini etc.) that lost the post-flash race.
+     * @param {(retrying: boolean) => void} [opts.uiShowNeedsIpRetrying]
+     *   Host page toggles the dialog into "retry in flight" mode (inputs +
+     *   buttons disabled, spinner visible). Called with `true` before each
+     *   retry attempt, then with `false` if the retry came back as a
+     *   transient failure (so the next prompt is interactable). Retry
+     *   success doesn't call back — the host's next render takes over
+     *   (the wifi-creds form section replaces the needs-ip section).
+     *   Optional; degrade gracefully when omitted (older host pages still
+     *   get retry behaviour, just without the spinner).
      * @param {(detail: {url: string, board: string, viaHttp?: boolean, httpBoardOk?: boolean, alreadyOnline?: boolean}) => void} opts.onSuccess
      *   `alreadyOnline:true` is set when the device booted into
      *   STATE_PROVISIONED (saved WiFi from a previous flash) — the SDK's
@@ -302,7 +318,8 @@ export const installer = {
      *   the device was unplugged and replugged).
      */
     async start({ manifestUrl, board, eraseBefore = false, port: prePickedPort,
-                   onProgress, uiWaitForCreds, uiWaitForIp, onSuccess, onError, onLog }) {
+                   onProgress, uiWaitForCreds, uiWaitForIp, uiShowNeedsIpRetrying,
+                   onSuccess, onError, onLog }) {
         if (!navigator.serial) {
             onError("setup", new Error("Web Serial API not available — use Chrome, Edge, or Opera"));
             return;
@@ -357,7 +374,30 @@ export const installer = {
             // surface the native picker here. requestPort is user-gesture
             // protected; we can call it because Install click is itself
             // a user gesture (chained through onInstall → installer.start).
-            port = prePickedPort || await navigator.serial.requestPort({});
+            //
+            // Stale-handle fallback: a saved prePickedPort may point at a
+            // device that was unplugged + replugged since the user picked
+            // it. The handle survives but esploader.main() / transport
+            // operations on it raise an obscure error mid-flow. Probe the
+            // handle by opening it briefly here — if open() throws, drop
+            // the handle and re-prompt. The browser's permission grant from
+            // the prior pick means requestPort surfaces a picker but no
+            // permission dialog (mirrors the post-flash Improv reopen
+            // path's fallback shape).
+            if (prePickedPort) {
+                try {
+                    await prePickedPort.open({ baudRate: 115200 });
+                    // Probe succeeded — close so Transport can claim it.
+                    try { await prePickedPort.close(); } catch (_) { /* ignore */ }
+                    port = prePickedPort;
+                } catch (e) {
+                    if (onLog) onLog(`[orchestrator] pre-picked port stale (${e.message || e}); re-prompting`);
+                    prePickedPort = null;
+                }
+            }
+            if (!port) {
+                port = await navigator.serial.requestPort({});
+            }
 
             trackProgress("connect-flash");
             transport = new Transport(port, false);
@@ -452,8 +492,14 @@ export const installer = {
 
             // Wait for the device's bootloader → app handoff + USB re-enum.
             // Without this, port.open() raises before the kernel re-attaches
-            // the new endpoint.
-            await new Promise(r => setTimeout(r, 2000));
+            // the new endpoint. 3 s rather than 2 s because the ESP32-S3
+            // native-USB path reaches "app ready, Improv task installed"
+            // at ~1.85 s after reset (boot log measurement on LOLIN S3
+            // N16R8), and the original 2 s window left no margin for host-
+            // side USB re-enum (extra ~100-300 ms on macOS). The retry
+            // button on the needs-ip dialog still catches the long tail —
+            // this just makes the common case land without a retry click.
+            await new Promise(r => setTimeout(r, 3000));
 
             trackProgress("connect-improv");
             // Reopen the same SerialPort handle for the Improv connection.
@@ -489,18 +535,43 @@ export const installer = {
             // push, prompt the user for the device IP/hostname, and let
             // the post-flash flow (HTTP push in preview, query-param hand-
             // off via Visit in production) handle the board injection.
+            // Try Improv `initialize()` once. On the "not detected" error
+            // we drop into a retry loop: show the needs-ip dialog, let the
+            // user choose retry / typed-IP / skip. Retry tears the SDK
+            // down, re-opens the port, and runs `initialize()` again on
+            // a fresh ImprovSerial. Cheap second chance for slow-booting
+            // boards (LOLIN S3 mini etc.) that lose the post-flash race —
+            // the device-side Improv task isn't installed until after
+            // NetworkModule::setup() completes (~1.8 s on ESP32-S3), and
+            // the host's 2 s reopen wait can land before it's ready.
             let needsIp = false;
             let alreadyOnline = false;
+            const isImprovNotDetected = (e) => {
+                // Tied to the pinned `improv-wifi-serial-sdk` version at
+                // the top of this file — if you bump the SDK, re-verify
+                // the exact text of its "not detected" path (the SDK
+                // doesn't currently expose a typed error or error code we
+                // could match on instead).
+                const msg = (e && e.message) ? String(e.message) : String(e);
+                return msg.includes("Improv Wi-Fi Serial not detected");
+            };
+            // Errors we treat as retryable on the needs-ip dialog —
+            // device-side timing race, host-side port-lock race, or
+            // SDK reader-lock not-yet-released. All correspond to "try
+            // again in a moment" rather than "something is structurally
+            // broken." Centralised so future SDK bumps have one site to
+            // update; otherwise these strings drift across the file.
+            const isTransientImprovError = (e) => {
+                if (isImprovNotDetected(e)) return true;
+                const msg = (e && e.message) ? String(e.message) : String(e);
+                return msg.includes("Port is not ready")
+                    || msg.includes("PortNotReady")
+                    || msg.includes("locked");
+            };
             try {
                 await improvClient.initialize();
             } catch (e) {
-                // String-match against the SDK's error message. Tied to the
-                // pinned `improv-wifi-serial-sdk` version at the top of this
-                // file — if you bump the SDK, re-verify the exact text of
-                // its "not detected" path (the SDK doesn't currently expose
-                // a typed error or error code we could match on instead).
-                const msg = (e && e.message) ? String(e.message) : String(e);
-                if (msg.includes("Improv Wi-Fi Serial not detected")) {
+                if (isImprovNotDetected(e)) {
                     needsIp = true;
                     alreadyOnline = true;  // best-guess label for the modal copy
                 } else {
@@ -511,30 +582,99 @@ export const installer = {
             let deviceUrl = "";
             let viaHttp = false;
 
-            if (needsIp) {
-                // Drop the SDK before we leave the Improv stage; we won't
-                // need it again. uiWaitForIp may be omitted on older host
-                // pages — degrade gracefully to the legacy empty-URL exit.
+            // Retry loop. Entered when the first initialize() failed and
+            // exited either:
+            //   - user clicks Retry and a fresh initialize() succeeds
+            //     → needsIp flips back to false, fall through to the
+            //       normal wifi-creds-form path below.
+            //   - user types an IP + Add → break with viaHttp=true.
+            //   - user clicks Skip → early return.
+            while (needsIp) {
+                // Drop the current SDK before showing the dialog so a Retry
+                // click can rebuild a fresh client. Same teardown the
+                // original code did unconditionally — now also runs at the
+                // top of each retry iteration.
                 try { if (improvClient) await improvClient.close(); } catch (_) { /* ignore */ }
                 improvClient = null;
                 if (!uiWaitForIp) {
+                    // uiWaitForIp may be omitted on older host pages —
+                    // degrade gracefully to the legacy empty-URL exit
+                    // (no retry button without the dialog to host it).
                     trackProgress("done");
                     onSuccess({ url: "", board: "", alreadyOnline: true });
                     return;
                 }
                 trackProgress("needs-ip");
                 const ipResult = await uiWaitForIp();
-                if (!ipResult || !ipResult.url) {
+                if (!ipResult || ipResult.action === "skip") {
                     // User skipped the IP prompt; mirror the old behaviour.
                     trackProgress("done");
                     onSuccess({ url: "", board: "", alreadyOnline });
                     return;
                 }
-                deviceUrl = normalizeDeviceUrl(ipResult.url);
-                viaHttp = true;
-            } else {
+                if (ipResult.action === "ip") {
+                    deviceUrl = normalizeDeviceUrl(ipResult.url || "");
+                    viaHttp = true;
+                    break;
+                }
+                // action === "retry": rebuild the SDK on the same port.
+                // The port stays open across improvClient.close() (close
+                // only releases the SDK's reader); the 250 ms sleep lets
+                // the SDK's disconnect event fire and the reader-lock on
+                // port.readable release before we acquire a new reader.
+                // Empirically tuned — browsers sometimes need a microtask
+                // flush past cancel-return before getReader() sees the
+                // unlocked state.
+                if (uiShowNeedsIpRetrying) uiShowNeedsIpRetrying(true);
+                await new Promise(r => setTimeout(r, 250));
+                try {
+                    improvClient = new ImprovSerial(port, improvLogger);
+                    await improvClient.initialize();
+                    // Retry succeeded — exit the loop and continue into
+                    // the normal wifi-creds-form path. uiShowNeedsIpRetrying
+                    // is left in `true` state; the host page's next render
+                    // (the WiFi creds form) replaces the dialog content.
+                    needsIp = false;
+                } catch (e) {
+                    // Transient → re-show the dialog so the user can try
+                    // again. Anything else is genuinely broken and bubbles.
+                    const msg = (e && e.message) ? String(e.message) : String(e);
+                    if (isTransientImprovError(e)) {
+                        if (onLog) onLog(`[orchestrator] retry failed (${msg}); re-prompting`);
+                        if (uiShowNeedsIpRetrying) uiShowNeedsIpRetrying(false);
+                    } else {
+                        throw e;
+                    }
+                }
+            }
+
+            if (!needsIp && !viaHttp) {
                 trackProgress("wifi-creds-form");
                 const { ssid, password } = await uiWaitForCreds();
+
+                // Skip path: user clicked Skip in the creds form (or
+                // submitted an empty SSID). Don't call provision() with
+                // empty creds — the device-side handler rejects empty
+                // SSIDs as ErrorState, which would surface as a misleading
+                // "provisioning failed" error. Instead exit cleanly with
+                // no deviceUrl; the host's onSuccess handler treats an
+                // empty url as "user opted into AP fallback, walk them
+                // through joining MM-XXXX manually" (see Step 2 in
+                // docs/install/index.html and the closeModal path in
+                // handleSuccess).
+                //
+                // Note on the two "skip" shapes: `uiWaitForIp()` returns
+                // a tagged union ({action: "skip"|"ip"|"retry"}) because
+                // the needs-ip dialog has three distinct outcomes the
+                // orchestrator dispatches on. `onSuccess({url:""})` is a
+                // sentinel because the outbound result has only two
+                // outcomes ("we got a URL" vs "we didn't"). Different
+                // shapes for different cardinalities, not drift.
+                if (!ssid) {
+                    trackProgress("done");
+                    onSuccess({ url: "", board: "", alreadyOnline: false });
+                    return;
+                }
 
                 trackProgress("provisioning");
                 // provision() throws on failure (timeout, bad creds). 30s
@@ -570,18 +710,32 @@ export const installer = {
                 }
             }
 
-            // HTTP injection attempt for the needs-ip path (preview mode only —
-            // HTTPS Pages can't fetch the device's HTTP URL; canFetchHttp
-            // gates the call). Fans out the boards.json `controls.*` entries
-            // exactly the way the device UI's consumePendingBoardParam does,
-            // so preview parity with production is exact. Successful push
-            // tells the host page to skip the Inject-button handoff via
-            // `pendingBoard`.
+            // HTTP injection attempt — fans out the boards.json `controls.*`
+            // entries to the device's `/api/control`, mirroring what the
+            // device UI's `consumePendingBoardParam` does for the Inject-
+            // button path. Runs for BOTH paths:
+            //   - needsIp (typed IP): the only board-injection path, since
+            //     SET_BOARD over serial wasn't possible.
+            //   - Improv-success: SET_BOARD already pushed `Board.board` over
+            //     serial, but every OTHER field in `controls.*` (e.g.
+            //     `Network.txPowerSetting` for the LOLIN WiFi fix) needs
+            //     this fan-out to reach the device. Without it the board
+            //     identifier lands but the per-board tweaks don't.
+            // Gated by `canFetchHttp(deviceUrl)` — on HTTPS Pages the
+            // browser blocks fetches to http:// device URLs (mixed-content);
+            // those users get the controls via the `?board=` query-param
+            // handoff after clicking Visit. Successful HTTP push tells the
+            // host page to skip the pending-board handoff via `httpBoardOk`.
             let httpBoardOk = false;
-            if (viaHttp && board && canFetchHttp(deviceUrl)) {
+            if (board && canFetchHttp(deviceUrl)) {
                 if (onLog) onLog(`[orchestrator] attempting HTTP inject for board="${board}" to ${deviceUrl}`);
                 httpBoardOk = await tryHttpInjectBoard(deviceUrl, board);
                 if (onLog) onLog(`[orchestrator] HTTP inject ${httpBoardOk ? "succeeded" : "failed"}`);
+            } else if (board && onLog) {
+                // Skipped — most commonly HTTPS Pages → http:// device URL
+                // blocked by mixed-content. The `?board=` handoff via the
+                // Visit button picks up the controls fan-out same-origin.
+                onLog(`[orchestrator] HTTP inject skipped (cross-origin / mixed-content); relying on ?board= handoff`);
             }
 
             trackProgress("done");
@@ -638,8 +792,23 @@ export const installer = {
         try {
             trackProgress("request-port");
             // Pre-picked port (from the host page's "Select device port…"
-            // button) bypasses the native picker. Same fallback as start().
-            port = prePickedPort || await navigator.serial.requestPort({});
+            // button) bypasses the native picker. Same fallback as start(),
+            // including the stale-handle probe: if open() throws on the
+            // pre-picked port (device was unplugged + replugged), drop the
+            // handle and re-prompt — see the comment in start() for why.
+            if (prePickedPort) {
+                try {
+                    await prePickedPort.open({ baudRate: 115200 });
+                    try { await prePickedPort.close(); } catch (_) { /* ignore */ }
+                    port = prePickedPort;
+                } catch (e) {
+                    if (onLog) onLog(`[orchestrator] pre-picked port stale (${e.message || e}); re-prompting`);
+                    prePickedPort = null;
+                }
+            }
+            if (!port) {
+                port = await navigator.serial.requestPort({});
+            }
 
             trackProgress("connect-flash");
             transport = new Transport(port, false);

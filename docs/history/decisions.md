@@ -620,3 +620,20 @@ Plan-09 attempted ~1700 LOC of JSON-based persistence that was fully abandoned. 
 4. **Defensive guards under memory pressure mask design bugs.** The plan added 5 null guards across BlendMap, DriverGroup, and Layer to handle failure modes that fragmentation produced. Each guard was locally correct; collectively they obscured the design problem (allocate-new-before-free fragmentation). Fix the invariant, not the call site.
 
 5. **Test isolation reveals persistent-state contamination.** Live scenarios that mutated state (mirror toggles, grid size) contaminated each other across runs — failures appeared random until previous runs leaving state in `.config/` was identified. Any persistence layer's tests must reset state explicitly.
+
+## Board-injection pipeline timing constraint
+
+The web installer's `boards.json` catalog ships per-board control values that the orchestrator pushes to the device. SET_BOARD over Improv-Serial carries only the board name (one vendor RPC, one Text control on BoardModule); every other field in `controls.*` ships via HTTP after WiFi association.
+
+This split works because every per-board control we ship today applies *post-association*: `Network.txPowerSetting` (LOLIN brown-out fix), and the future Ethernet pin maps, default-config overrides, etc. The radio briefly runs at the wrong setting for the ~1 s between association and HTTP fan-out completion — acceptable for power capping, would be unacceptable for:
+
+- **Country code.** Governs which channels the radio scans; a wrong code at scan time picks wrong channels.
+- **Antenna selector.** Wrong RF path at radio init makes the device deaf.
+- **Pre-association TX-power.** Some chips need the power cap applied before the first probe request, not after association.
+
+If we ever add such a control, **don't extend SET_BOARD's wire format to carry it** — that would couple unrelated controls to the board-name lifecycle and obscure the timing constraint. The two escape hatches are:
+
+1. **Add a second vendor Improv RPC** (`SET_<control>` analogue of SET_BOARD) and dispatch it from the orchestrator BEFORE `SEND_WIFI_CREDENTIALS`. One RPC per pre-association control keeps the timing contract explicit.
+2. **Bake the value into firmware** via a board-specific sdkconfig fragment. Works when the value is truly board-static (country code per region) and not user-configurable.
+
+Pick (1) for user-configurable controls; (2) for truly fixed-per-board values. Avoid the implicit option C ("just push it earlier in SET_BOARD") — it tangles the lifecycle.

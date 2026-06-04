@@ -61,6 +61,15 @@ function makeState() {
         ownFirmwareKey: null,
         onInstall: null,
         enableBoardPicker: true, // true on web installer, false on on-device OTA
+        // Optional caller-owned DOM element rendered just above the Install
+        // button row. The web installer uses this to slot its "Erase chip
+        // first" checkbox between the firmware dropdown and the Install
+        // button without giving the picker any erase-specific knowledge —
+        // keeps the picker reusable on the on-device OTA UI (where erase
+        // makes no sense). The picker takes ownership: it appendChild's
+        // the node on every render(), so the same instance survives the
+        // re-renders triggered by release-list reloads.
+        installRowExtras: null,
         releases: [],          // normalised release records from the API
         sortedReleases: [],    // releases sorted newest-first; render() fills this
         releaseIdx: 0,         // index into sortedReleases
@@ -272,7 +281,7 @@ function render(state) {
             <span class="control-label">Firmware</span>
             <select id="rp-firmware" class="rp-select"></select>
         </div>
-        <div class="control-row">
+        <div class="control-row" id="rp-install-row">
             <span class="control-label"></span>
             <button id="rp-install" class="action-btn" type="button">Install</button>
         </div>
@@ -281,6 +290,15 @@ function render(state) {
             <span id="rp-status" class="rp-status"></span>
         </div>
     `;
+    // installRowExtras: caller-owned element slotted right before the
+    // Install row. Re-attached on every render() so the row survives the
+    // innerHTML reset above. insertBefore moves the existing DOM node
+    // rather than cloning — the caller wires the listeners once and they
+    // keep firing across renders.
+    if (state.installRowExtras) {
+        const installRow = state.container.querySelector("#rp-install-row");
+        state.container.insertBefore(state.installRowExtras, installRow);
+    }
 
     const boardEl = state.container.querySelector("#rp-board");
     const releaseEl = state.container.querySelector("#rp-release");
@@ -505,13 +523,20 @@ export const installPicker = {
      *   installer (renders a board <select> above firmware, narrows firmware
      *   list to the board's compatible variants); false on the on-device OTA
      *   picker where the device already knows its board (BoardModule).
+     * @param {HTMLElement} [opts.installRowExtras] - optional caller-owned
+     *   element rendered just above the Install button row. Web installer
+     *   uses this for the "Erase chip first" checkbox; on-device OTA omits
+     *   it. The picker re-attaches the SAME node on every render(), so
+     *   listeners the caller wired on the element keep firing.
      */
-    async init({ container, ownFirmwareKey, onInstall, enableBoardPicker = true }) {
+    async init({ container, ownFirmwareKey, onInstall, enableBoardPicker = true,
+                 installRowExtras = null }) {
         const state = makeState();
         state.container = container;
         state.ownFirmwareKey = ownFirmwareKey || null;
         state.onInstall = onInstall;
         state.enableBoardPicker = enableBoardPicker;
+        state.installRowExtras = installRowExtras;
 
         container.innerHTML =
             `<div class="control-row"><span class="control-label">Releases</span>` +

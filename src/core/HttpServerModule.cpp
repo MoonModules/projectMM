@@ -189,11 +189,45 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         } else {
             sendResponse(conn, 404, "text/plain", "Not found");
         }
+    } else if (std::strcmp(method, "OPTIONS") == 0) {
+        // CORS preflight. The browser sends OPTIONS before any cross-origin
+        // POST with a non-simple Content-Type (e.g. application/json), which
+        // covers every /api/control and /api/modules write the web installer
+        // makes from preview / localhost. Without this branch the dispatcher
+        // fell through to 405 Method Not Allowed and the browser silently
+        // blocked the subsequent POST. The response carries the same
+        // Access-Control-Allow-Origin: * the actual response already does,
+        // plus the methods + headers we accept on the API surface. 204 (no
+        // body) is the conventional preflight reply.
+        //
+        // Path-agnostic: we return 204 for OPTIONS to ANY path, even ones
+        // that would 404 on a real GET/POST. Most public servers narrow
+        // preflight to known API routes; we don't bother because the
+        // device's HTTP surface is tiny and lives behind the user's LAN.
+        // A scanner hitting OPTIONS /random gets a CORS-OK 204 rather
+        // than a 404 — informational only, no behaviour change.
+        sendPreflightResponse(conn);
     } else {
         sendResponse(conn, 405, "text/plain", "Method not allowed");
     }
 
     conn.close();
+}
+
+void HttpServerModule::sendPreflightResponse(platform::TcpConnection& conn) {
+    // 204 No Content is the standard preflight success reply. The
+    // Access-Control-Allow-* headers tell the browser what cross-origin
+    // requests we accept on the API. Max-Age caches the preflight for an
+    // hour so subsequent same-session POSTs go straight through.
+    const char* response =
+        "HTTP/1.1 204 No Content\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS\r\n"
+        "Access-Control-Allow-Headers: Content-Type\r\n"
+        "Access-Control-Max-Age: 3600\r\n"
+        "Connection: close\r\n"
+        "\r\n";
+    conn.write(reinterpret_cast<const uint8_t*>(response), std::strlen(response));
 }
 
 void HttpServerModule::sendResponse(platform::TcpConnection& conn, int status, const char* contentType, const char* body) {
@@ -501,13 +535,16 @@ void HttpServerModule::serveSystem(platform::TcpConnection& conn) {
     conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
 
     JsonSink sink(conn);
+    // maxBlock = internal-only (maxInternalAllocBlock) — the all-memory
+    // variant reports ~8 MB on PSRAM boards and is meaningless as a
+    // pressure signal. Same rationale as main.cpp's tick log line.
     sink.appendf(
         "{\"fps\":%u,\"tickTimeUs\":%u,\"freeHeap\":%u,\"freeInternal\":%u,\"maxBlock\":%u,\"uptime\":%u,\"modules\":[",
         static_cast<unsigned>(scheduler_ ? scheduler_->fps() : 0),
         static_cast<unsigned>(scheduler_ ? scheduler_->tickTimeUs() : 0),
         static_cast<unsigned>(platform::freeHeap()),
         static_cast<unsigned>(platform::freeInternalHeap()),
-        static_cast<unsigned>(platform::maxAllocBlock()),
+        static_cast<unsigned>(platform::maxInternalAllocBlock()),
         static_cast<unsigned>(scheduler_ ? scheduler_->elapsed() / 1000 : 0));
 
     // Per-module timing (walk tree recursively)

@@ -139,6 +139,15 @@ public:
                                   || state_ == State::WaitingSta
                                   || state_ == State::AP);
             controls_.setHidden(controls_.count() - 1, !radioOn);
+            // Writable TX-power cap (LOLIN WiFi fix). Range 0..21 dBm.
+            // 0 = "no override" (sentinel — syncTxPower then writes the
+            // ESP-IDF ceiling, ~20 dBm, to actively lift any prior cap;
+            // setting back to 0 truly restores default power). 1 is in
+            // the bound but the platform layer clamps it up to 2 dBm
+            // (ESP-IDF's minimum) — write 2 or higher for predictable
+            // behavior. Always bound on radio-capable builds; the
+            // boards.json catalog injects 8 dBm for LOLIN boards.
+            controls_.addInt16("txPowerSetting", txPowerSetting_, 0, 21);
         }
         controls_.addSelect("addressing", addressing_, addressingOptions_, 2);
         controls_.addBool("mDNS", mdnsEnabled_);
@@ -279,6 +288,7 @@ public:
         }
 
         syncMdns();
+        syncTxPower();
 
         // Refresh the live-readout values every tick — the UI polls /api/state
         // for them, so writing the same storage addresses is enough; no
@@ -352,6 +362,16 @@ private:
     int8_t rssi_ = 0;
     int8_t txPower_ = 0;
 
+    // User-settable TX-power cap in whole dBm (0..21). Default 0 = "no
+    // override". Persisted via the control binding. The platform setter
+    // takes quarter-dBm (ESP-IDF's native unit), so syncTxPower() multiplies
+    // by 4 at the call site. appliedTxPowerSetting_ tracks the last value
+    // pushed to the radio so syncTxPower() in loop1s() detects changes (UI
+    // write or board-injected value) and re-applies without needing a
+    // per-control change callback.
+    int16_t txPowerSetting_ = 0;
+    int16_t appliedTxPowerSetting_ = -1;   // -1 = never applied, forces first sync
+
     static constexpr const char* addressingOptions_[] = {"DHCP", "Static"};
 
     void startAP() {
@@ -417,6 +437,34 @@ private:
                 platform::wifiStaGetIP(ip, sizeof(ip));
                 std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi: %s", ip); setStatus(statusBuf_, Severity::Status);
             }
+        }
+    }
+
+    // Apply txPowerSetting_ to the radio whenever it changes (UI write,
+    // board-injected value, or first time it lands after STA/AP comes up).
+    // Mirrors syncMdns()'s shape: cheap idempotent check, called from
+    // loop1s(). esp_wifi_set_max_tx_power requires the WiFi stack started
+    // — wifiSetTxPower() guards on that and returns false otherwise, which
+    // leaves appliedTxPowerSetting_ untouched so the next tick (post-STA-
+    // up) retries cleanly.
+    void syncTxPower() {
+        if constexpr (!platform::hasWiFi) return;
+        if (txPowerSetting_ == appliedTxPowerSetting_) return;
+        const bool radioUp = (state_ == State::ConnectedSta
+                              || state_ == State::WaitingSta
+                              || state_ == State::AP);
+        if (!radioUp) return;
+        // Convert dBm (user-facing) → quarter-dBm (ESP-IDF native). The
+        // 0 sentinel ("no override") needs to actively undo any prior cap
+        // — esp_wifi_set_max_tx_power has no "reset to default" call, so
+        // we push the ceiling (80 = 20 dBm) instead. Without this the
+        // cap would be sticky until reboot: setting back to 0 in the UI
+        // would silently leave the radio at the prior cap.
+        const int8_t quarterDbm = (txPowerSetting_ == 0)
+                                  ? static_cast<int8_t>(80)
+                                  : static_cast<int8_t>(txPowerSetting_ * 4);
+        if (platform::wifiSetTxPower(quarterDbm)) {
+            appliedTxPowerSetting_ = txPowerSetting_;
         }
     }
 

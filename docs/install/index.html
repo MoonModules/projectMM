@@ -358,11 +358,14 @@
         <select id="port-select" class="rp-select"></select>
       </div>
 
-      <!-- Picker mounts here. Release (newest-first, RCs flagged) →
-           Board. Same module the on-device OTA UI uses. -->
-      <div id="picker-mount"></div>
-
-      <!-- Erase opt-in. Default off because a normal re-flash overwrites
+      <!-- Erase opt-in. Lives here in the source DOM (outside the picker
+           mount) so the picker module stays installer-agnostic — its
+           render() does NOT know about erase semantics. The picker hoists
+           this element into its tree just above the Install button row via
+           the `installRowExtras` option below; the picker re-attaches the
+           same node on every re-render (release-list reload, board pick),
+           so the listener wired on the checkbox in index.html keeps firing.
+           Default off because a normal re-flash overwrites
            bootloader+partition-table+app in place (the regions writeFlash
            touches) and preserves user state (WiFi credentials, board name)
            on LittleFS, which is what users usually want. Tick the box when:
@@ -373,12 +376,31 @@
                Improv to it; erase first avoids that)
              - clean-slate testing
            Costs ~12 s of chip-erase time before the flash starts. -->
-      <div class="erase-row">
+      <div class="erase-row" id="erase-row">
         <label>
           <input type="checkbox" id="erase-before-flash">
           Erase chip first
           <span class="note erase-note">— wipes saved WiFi + board, adds ~12 s. Tick when switching firmware variant or starting clean.</span>
         </label>
+      </div>
+
+      <!-- Picker mounts here. Release (newest-first, RCs flagged) →
+           Board. Same module the on-device OTA UI uses. The picker slots
+           #erase-row into its tree at render time via the
+           installRowExtras option below. -->
+      <div id="picker-mount"></div>
+
+      <!-- Monitor button: pre/post install serial viewer. Renders as a
+           separate row below the picker so the picker stays installer-
+           agnostic (on-device OTA UI doesn't have Web Serial, so no
+           monitor there). Disabled until a port is picked — same gate
+           the Install button uses (orchestrator falls back to
+           requestPort() if missing, but the monitor needs an existing
+           handle since it doesn't drive a user-gesture-triggered open).
+           Clicking opens #monitor-backdrop. -->
+      <div class="control-row">
+        <span class="control-label"></span>
+        <button id="monitor-btn" class="action-btn" type="button">Monitor serial port</button>
       </div>
 
       <!-- Install modal mounts at end of body so it overlays everything.
@@ -456,32 +478,18 @@
         <p class="note install-warn">Don't close this window or unplug the device until flash completes — interrupting mid-write leaves the chip in a half-flashed state that needs a full re-flash to recover.</p>
       </div>
 
-      <div class="install-section" id="section-wifi-form">
-        <div class="install-status">Flash done. Enter your WiFi credentials to provision the device.</div>
-        <form id="wifi-form" class="install-form" onsubmit="return false">
-          <label for="wifi-ssid">Network name (SSID)</label>
-          <!-- data-lpignore / data-1p-ignore: vendor-specific opt-outs that
-               stop LastPass / 1Password from injecting fill icons + popups.
-               `autocomplete="off"` covers Chrome's built-in autofill; the
-               vendor attrs cover the password-manager extensions. The WiFi
-               creds form is a one-shot installer step, not a credential
-               vault — fill prompts are pure noise here. -->
-          <input type="text" id="wifi-ssid" autocomplete="off"
-                 data-lpignore="true" data-1p-ignore required>
-          <label for="wifi-password">Password</label>
-          <!-- autocomplete="off" rather than "new-password": "new-password"
-               actively tells the browser this is a credential being created,
-               which prompts 1Password / Chrome to offer a generated value.
-               "off" is the closest signal we have to "this is a one-off
-               credential, not a login I want saved". -->
-          <input type="password" id="wifi-password" autocomplete="off"
-                 data-lpignore="true" data-1p-ignore>
-          <div class="install-actions">
-            <button type="button" class="secondary" id="wifi-skip">Skip</button>
-            <button type="submit" class="primary" id="wifi-connect">Connect</button>
-          </div>
-        </form>
-      </div>
+      <!-- WiFi-creds form: rendered LAZILY by buildWifiForm() the first time
+           showSection("wifiForm") runs, NOT in the static HTML.
+           Why: a `<input type="password">` present in the DOM at page load
+           triggers macOS iCloud Passwords / 1Password / LastPass autofill
+           prompts every refresh — even when the install modal isn't open —
+           because those scanners walk the DOM, not the visible region. The
+           `autocomplete="off"` + `data-*-ignore` attributes we used before
+           handle the extension popups but not the OS-level keychain prompt.
+           Deferring the form means the password field doesn't exist until
+           the user is actually mid-install, at which point the prompt is
+           contextually appropriate (it's a password they just typed). -->
+      <div class="install-section" id="section-wifi-form"></div>
 
       <div class="install-section" id="section-provisioning">
         <div class="install-status" id="provisioning-status">Connecting to your WiFi…</div>
@@ -491,12 +499,20 @@
            (alreadyOnline branch, or an Improv-less firmware like esp32-eth).
            User types the IP/hostname so we can still add the device to
            "Your devices" and hand the picked board off through the Visit
-           click's same-origin URL (?board=…). -->
+           click's same-origin URL (?board=…).
+           Retry button: cheap second chance at Improv before falling back
+           to manual IP entry. Some boards (LOLIN S3 mini, slow-booting
+           variants) lose the race against the post-flash 2 s reopen window;
+           a click two seconds later usually catches the now-ready UART
+           task. Unlimited clicks — user-driven, no policy. -->
       <div class="install-section" id="section-needs-ip">
         <div class="install-status" id="needs-ip-status">
           Flash done. The device didn't respond over USB — that's normal for
           Ethernet-only firmware (e.g. <code>esp32-eth</code>) or when the
           device booted with previously-saved WiFi credentials.
+        </div>
+        <div class="install-status" id="needs-ip-retry-status" hidden>
+          Trying Improv again…
         </div>
         <form id="needs-ip-form" class="install-form" onsubmit="return false">
           <label for="needs-ip-input">Device IP or hostname</label>
@@ -508,6 +524,7 @@
             the device to <em>Your devices</em>.
           </p>
           <div class="install-actions">
+            <button type="button" class="secondary" id="needs-ip-retry">Try Improv again</button>
             <button type="button" class="secondary" id="needs-ip-skip">Skip</button>
             <button type="submit" class="primary" id="needs-ip-add">Add device</button>
           </div>
@@ -536,6 +553,28 @@
       <div class="install-log-wrap">
         <button type="button" class="install-log-toggle" id="log-toggle">Show log</button>
         <pre class="install-log" id="install-log" hidden></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Monitor modal — live serial-port viewer. Reuses .install-backdrop /
+       .install-modal CSS so the look matches the install dialog. The
+       monitor opens its own Web Serial read loop (the install flow opens
+       its own); only one consumer at a time can hold a port, so the
+       monitor closes automatically if the user clicks Install while it's
+       running, and vice versa. The Reset button pulses RTS to trigger a
+       device reset so boot logs land in the visible buffer (Web Serial
+       can only see bytes sent AFTER it opens the port — flashing first
+       then opening the monitor would miss the boot log without a reset). -->
+  <div class="install-backdrop" id="monitor-backdrop">
+    <div class="install-modal" style="max-width: 720px;">
+      <h2>Serial monitor</h2>
+      <div class="install-status" id="monitor-status">Opening port…</div>
+      <pre class="install-log" id="monitor-output" style="max-height: 420px; display: block;"></pre>
+      <div class="install-actions" style="margin-top: 12px;">
+        <button type="button" class="secondary" id="monitor-reset">Reset device</button>
+        <button type="button" class="secondary" id="monitor-clear">Clear</button>
+        <button type="button" class="primary" id="monitor-close">Close</button>
       </div>
     </div>
   </div>
@@ -612,6 +651,17 @@
       const toggle = document.getElementById("log-toggle");
       log.hidden = true;
       toggle.textContent = "Show log";
+      // Reset the needs-ip dialog to its idle state — covers the case where
+      // a prior install ended in retry-success (which leaves the disabled +
+      // spinner state intact, since the WiFi-creds form took over the
+      // visible card) and the next install hits the needs-ip path again.
+      showNeedsIpRetrying(false);
+      // Lock out the monitor button while an install runs. Web Serial
+      // grants exclusive port access; a Monitor click mid-flash would
+      // race the install for the SerialPort and either steal it
+      // (corrupting the flash) or get a misleading "already open" error.
+      // closeModal re-enables.
+      monitorBtn.disabled = true;
       // Guard against accidental tab-close mid-flash. Browser shows a
       // generic "leave site?" prompt (Chrome ignores the custom text since
       // 2017 — security hardening). disarmUnloadGuard() runs on done /
@@ -621,6 +671,20 @@
     function closeModal() {
       backdrop.classList.remove("open");
       disarmUnloadGuard();
+      monitorBtn.disabled = false;
+      // Wipe the password field on every modal close — success, cancel,
+      // or error. The form is built lazily and re-used across installs in
+      // the same page session; without this the typed password lingers
+      // in the live `.value`. (We don't clear `defaultValue` — it stayed
+      // as the form's initial empty string from buildWifiForm's innerHTML
+      // assignment; setting `.value` clears the rendered value, which is
+      // the only thing visible to a script reading the DOM after close.)
+      // Same wipe runs at the start of each `wifi-creds-form` show, but
+      // having both belts ensures the wipe runs even when the user
+      // bypasses the form via Skip or the install fails before reaching
+      // the creds step.
+      const passEl = document.getElementById("wifi-password");
+      if (passEl) passEl.value = "";
     }
     let unloadGuard = null;
     function armUnloadGuard() {
@@ -714,6 +778,7 @@
             "Connecting over Improv…";
           break;
         case "wifi-creds-form": {
+          buildWifiForm();
           showSection("wifiForm");
           // Prefill the last-used SSID (not password — that stays out of
           // localStorage as a privacy / security-scanner concession). Focus
@@ -721,6 +786,13 @@
           // password), else focus SSID.
           const ssidEl = document.getElementById("wifi-ssid");
           const passEl = document.getElementById("wifi-password");
+          // Clear the password input on every show. The form is built
+          // lazily once and re-used across multiple installs in the same
+          // page session; without this clear, a re-install would show the
+          // previous install's typed password in plaintext (well, dotted)
+          // inside the field. Don't leave that sitting in the DOM longer
+          // than the active install.
+          passEl.value = "";
           try {
             const saved = localStorage.getItem("projectMM.installer.lastSsid");
             if (saved) ssidEl.value = saved;
@@ -750,6 +822,47 @@
           // onSuccess fires next; section toggles there once URL is known.
           break;
       }
+    }
+
+    // Render the WiFi-creds form into #section-wifi-form on first use.
+    // Idempotent — re-installs after the first run are no-ops. See the
+    // comment on #section-wifi-form's empty div for why this is deferred
+    // (avoids the macOS iCloud Passwords prompt on page load).
+    //
+    // Attributes on the injected inputs:
+    // - autocomplete="off": defeats Chrome's built-in field-fill (the
+    //   browser's own offer; not the OS keychain).
+    // - data-lpignore / data-1p-ignore: vendor opt-outs for LastPass /
+    //   1Password's browser-extension fill icons.
+    // - autocomplete="off" on the password (NOT "new-password"):
+    //   "new-password" actively signals password managers "credential
+    //   being created, offer a generated value", which is wrong here —
+    //   the user is typing their existing home-WiFi password, not
+    //   creating a new account.
+    //
+    // The OS keychain prompt (iCloud Passwords) ignores all of the above
+    // when it scans the DOM at page load; deferring the form is the only
+    // reliable way to keep it quiet until the user is actually mid-install.
+    let _wifiFormBuilt = false;
+    function buildWifiForm() {
+      if (_wifiFormBuilt) return;
+      _wifiFormBuilt = true;
+      const section = document.getElementById("section-wifi-form");
+      section.innerHTML = `
+        <div class="install-status">Flash done. Enter your WiFi credentials to provision the device.</div>
+        <form id="wifi-form" class="install-form" onsubmit="return false">
+          <label for="wifi-ssid">Network name (SSID)</label>
+          <input type="text" id="wifi-ssid" autocomplete="off"
+                 data-lpignore="true" data-1p-ignore required>
+          <label for="wifi-password">Password</label>
+          <input type="password" id="wifi-password" autocomplete="off"
+                 data-lpignore="true" data-1p-ignore>
+          <div class="install-actions">
+            <button type="button" class="secondary" id="wifi-skip">Skip</button>
+            <button type="submit" class="primary" id="wifi-connect">Connect</button>
+          </div>
+        </form>
+      `;
     }
 
     // Returns a Promise the orchestrator awaits — resolves when the user
@@ -790,31 +903,65 @@
       });
     }
 
-    // Returns a Promise that resolves with the typed device URL (or empty
-    // for Skip). Symmetric with uiWaitForCreds. Normalisation of the typed
-    // value lives in the orchestrator so the host page stays UI-only.
+    // Returns a Promise that resolves with one of:
+    //   { action: "ip", url: "<typed value>" }    — user typed an IP + Add
+    //   { action: "skip" }                        — user clicked Skip
+    //   { action: "retry" }                       — user clicked Try Improv again
+    // Symmetric with uiWaitForCreds. Normalisation of the typed value lives
+    // in the orchestrator so the host page stays UI-only. The retry action
+    // is the orchestrator's signal to re-run Improv `initialize()`; while
+    // that's in flight the host re-shows the dialog via showNeedsIpRetrying()
+    // (input + buttons disabled, "Trying Improv again…" status visible).
     function uiWaitForIp() {
       return new Promise((resolve) => {
         const form = document.getElementById("needs-ip-form");
         const input = document.getElementById("needs-ip-input");
         const skipBtn = document.getElementById("needs-ip-skip");
+        const retryBtn = document.getElementById("needs-ip-retry");
 
         const onSubmit = (e) => {
           e.preventDefault();
           cleanup();
-          resolve({ url: input.value.trim() });
+          resolve({ action: "ip", url: input.value.trim() });
         };
         const onSkip = () => {
           cleanup();
-          resolve({ url: "" });
+          resolve({ action: "skip" });
+        };
+        const onRetry = () => {
+          cleanup();
+          resolve({ action: "retry" });
         };
         const cleanup = () => {
           form.removeEventListener("submit", onSubmit);
           skipBtn.removeEventListener("click", onSkip);
+          retryBtn.removeEventListener("click", onRetry);
         };
         form.addEventListener("submit", onSubmit);
         skipBtn.addEventListener("click", onSkip);
+        retryBtn.addEventListener("click", onRetry);
       });
+    }
+
+    // Toggle the needs-ip dialog into "retry in flight" mode: input + all
+    // three buttons disabled, retry status line visible, input field
+    // cleared so the user starts fresh if retry fails. The orchestrator
+    // calls this before re-running Improv `initialize()`; on completion
+    // (success or failure) it returns to the normal `uiWaitForIp()` call,
+    // which by re-rendering the dialog implicitly re-enables everything.
+    function showNeedsIpRetrying(retrying) {
+      const form = document.getElementById("needs-ip-form");
+      const input = document.getElementById("needs-ip-input");
+      const skipBtn = document.getElementById("needs-ip-skip");
+      const retryBtn = document.getElementById("needs-ip-retry");
+      const addBtn = document.getElementById("needs-ip-add");
+      const status = document.getElementById("needs-ip-retry-status");
+      input.disabled = retrying;
+      skipBtn.disabled = retrying;
+      retryBtn.disabled = retrying;
+      addBtn.disabled = retrying;
+      status.hidden = !retrying;
+      if (retrying) input.value = "";
     }
 
     function handleSuccess({ url, board, viaHttp, httpBoardOk, alreadyOnline }) {
@@ -831,13 +978,20 @@
       const a = document.getElementById("done-url");
       a.href = url;
       a.textContent = url;
-      // Pending-board flag: set when the URL came from the user-typed IP
-      // form AND the in-orchestrator HTTP push didn't succeed (HTTPS Pages
-      // blocked it, OR localhost preview hit a timeout). devices.js then
-      // decorates the Visit link with `?board=<encoded>` so the device UI
-      // can finish the push same-origin. Improv-success path leaves this
-      // false — SET_BOARD already wrote the value over the serial link.
-      const pendingBoardPush = !!(viaHttp && board && !httpBoardOk);
+      // Pending-board flag: set whenever the in-orchestrator HTTP push
+      // didn't succeed AND there's a board name to push. Covers both
+      // paths now:
+      //   - viaHttp (needs-ip / typed-IP): HTTP push is the ONLY board-
+      //     injection channel, so if it failed nothing landed.
+      //   - Improv-success: SET_BOARD over serial already wrote
+      //     Board.board, but the per-board controls in `controls.*`
+      //     (e.g. Network.txPowerSetting for the LOLIN WiFi-power fix)
+      //     only ship via the HTTP fan-out. If that fan-out failed —
+      //     exactly the failure mode the fix exists to defend against —
+      //     `pendingBoard` ensures the Inject button decorates the
+      //     row and the device-side `?board=` consume path can land
+      //     the controls on first visit.
+      const pendingBoardPush = !!(board && !httpBoardOk);
       myDevices.addProvisionedDevice(url, board, { pendingBoardPush });
     }
 
@@ -926,11 +1080,136 @@
       }
     });
 
+    // --- Serial monitor -------------------------------------------------
+    // Live read-only viewer of the picked port at 115200 baud. Web Serial
+    // owns the port exclusively, so the monitor mutex'es with the
+    // install/erase flows in both directions (see openModal /
+    // closeModal for the button-disable side, and the closeMonitor
+    // calls in onInstall / the Erase handler for the port-release side).
+    const _monitor = { port: null, reader: null, closing: false };
+    const monitorBackdrop = document.getElementById("monitor-backdrop");
+    const monitorOutput = document.getElementById("monitor-output");
+    const monitorStatus = document.getElementById("monitor-status");
+    const monitorBtn = document.getElementById("monitor-btn");
+
+    function setMonitorStatus(text) { monitorStatus.textContent = text; }
+
+    function appendMonitor(text) {
+      // Autoscroll only when the user is at the bottom — otherwise they're
+      // scrolled up reading something and we shouldn't yank them down.
+      const atBottom = monitorOutput.scrollTop + monitorOutput.clientHeight
+                       >= monitorOutput.scrollHeight - 4;
+      monitorOutput.textContent += text;
+      if (atBottom) monitorOutput.scrollTop = monitorOutput.scrollHeight;
+    }
+
+    async function openMonitor() {
+      if (_monitor.port) return;  // already open (Monitor clicked twice fast)
+      if (!pickedPort) {
+        // Trigger the port picker; openMonitor was called from a user
+        // gesture (Monitor button click), so requestPort() is allowed.
+        await openPortPicker();
+        if (!pickedPort) return;  // user cancelled
+      }
+      monitorOutput.textContent = "";
+      setMonitorStatus("Opening port at 115200…");
+      monitorBackdrop.classList.add("open");
+      try {
+        await pickedPort.open({ baudRate: 115200 });
+      } catch (e) {
+        // Already-open errors get caught here — the orchestrator opens
+        // the port at flash time; if a prior install left it open we just
+        // proceed (the reader still works on an open port).
+        if (!String(e.message || "").includes("already open")) {
+          setMonitorStatus(`Failed to open: ${e.message || e}`);
+          return;
+        }
+      }
+      _monitor.port = pickedPort;
+      setMonitorStatus("Reading (115200 8N1)…");
+      readLoop().catch(e => {
+        // Read errors land here once — surface and shut down. Don't loop
+        // forever on a dead port.
+        if (!_monitor.closing) setMonitorStatus(`Read error: ${e.message || e}`);
+      });
+    }
+
+    async function readLoop() {
+      const decoder = new TextDecoder("utf-8", { fatal: false });
+      _monitor.reader = _monitor.port.readable.getReader();
+      try {
+        while (true) {
+          const { value, done } = await _monitor.reader.read();
+          if (done) break;
+          if (value && value.length) appendMonitor(decoder.decode(value, { stream: true }));
+        }
+      } finally {
+        try { _monitor.reader.releaseLock(); } catch (_) { /* already released */ }
+        _monitor.reader = null;
+      }
+    }
+
+    async function closeMonitor() {
+      if (_monitor.closing) return;
+      _monitor.closing = true;
+      monitorBackdrop.classList.remove("open");
+      try {
+        if (_monitor.reader) {
+          // cancel() makes the pending read() return {done:true}; the read
+          // loop then exits and releases the lock in its finally.
+          await _monitor.reader.cancel();
+        }
+      } catch (_) { /* ignore */ }
+      try {
+        if (_monitor.port) await _monitor.port.close();
+      } catch (_) { /* ignore */ }
+      _monitor.port = null;
+      _monitor.closing = false;
+    }
+
+    // Pulse RTS low → high to trigger the device's auto-reset circuit
+    // (DTR/RTS combo mirrors what esptool does pre-flash; for a bare
+    // reset, toggling RTS alone is enough on most USB-Serial bridges).
+    // setSignals() requires the port to be open — we are, since the
+    // monitor is running. After the pulse the device reboots and its
+    // boot log starts streaming through the read loop already in place.
+    async function monitorReset() {
+      if (!_monitor.port) return;
+      try {
+        await _monitor.port.setSignals({ dataTerminalReady: false, requestToSend: true });
+        await new Promise(r => setTimeout(r, 100));
+        await _monitor.port.setSignals({ dataTerminalReady: false, requestToSend: false });
+        appendMonitor("\n--- reset ---\n");
+      } catch (e) {
+        setMonitorStatus(`Reset failed: ${e.message || e}`);
+      }
+    }
+
+    monitorBtn.addEventListener("click", openMonitor);
+    document.getElementById("monitor-close").addEventListener("click", closeMonitor);
+    document.getElementById("monitor-clear").addEventListener("click", () => {
+      monitorOutput.textContent = "";
+    });
+    document.getElementById("monitor-reset").addEventListener("click", monitorReset);
+    // Esc closes the monitor (same affordance the install modal has via
+    // closeModal — keeps the two dialogs symmetric).
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && monitorBackdrop.classList.contains("open")) {
+        closeMonitor();
+      }
+    });
+
     // --- Picker wiring -------------------------------------------------
     installPicker.init({
       container: document.getElementById("picker-mount"),
       ownFirmwareKey: null,  // web installer flashes any firmware variant
+      installRowExtras: document.getElementById("erase-row"),
       onInstall: async (firmware, manifestUrl /*, binaryUrl */) => {
+        // If the monitor is open it holds the port — release it before
+        // esptool tries to claim it. The reverse lock (monitor button
+        // disabled for the install's duration) lives in openModal /
+        // closeModal so the user can't reopen the monitor mid-flash.
+        if (_monitor.port) await closeMonitor();
         const localUrl = toLocalUrl(manifestUrl);
         const board = installPicker.getSelectedBoard();
         openModal(board ? `Installing projectMM on ${board}` : `Installing ${firmware}`);
@@ -946,6 +1225,7 @@
           onProgress: handleProgress,
           uiWaitForCreds,
           uiWaitForIp,
+          uiShowNeedsIpRetrying: showNeedsIpRetrying,
           onSuccess: handleSuccess,
           onError: handleError,
           onLog: appendLog,
@@ -961,6 +1241,9 @@
             `module state. You can flash a fresh firmware afterwards.`)) {
           return;
         }
+        // Same port-lock concern as install: release the monitor before
+        // esptool tries to claim the port.
+        if (_monitor.port) await closeMonitor();
         openModal(`Erasing ${device.name}`);
         showSection("connecting");
         document.getElementById("connecting-detail").textContent = "";

@@ -175,34 +175,66 @@ def _deduce_board(firmware: str) -> str:
 
 
 def _push_board_to_device(ip: str, board: str) -> bool:
-    """POST /api/control on the device to set BoardModule.board.
+    """POST /api/control on the device for every per-board control in boards.json.
 
-    Routes through the standard control-write endpoint — `board` is a Text
-    control on BoardModule, so the existing applyControlValue + dirty +
-    debounced-save chain handles the rest. Returns True on 200, False on
-    any failure (timeout, non-2xx, network error). Best-effort: failure
-    leaves MoonDeck's view authoritative and the next refresh re-attempts.
+    For boards that have a catalog entry in docs/install/boards.json: fans
+    out the full `controls.<Module>.<control>` block (matching the web
+    installer's and the device-side `?board=` Inject path — same generic
+    iteration, so adding a new field to a board entry Just Works without
+    code changes here). For boards without a catalog entry (custom names,
+    unknown firmware): still pushes `Board.board` so the bare name lands —
+    keeps the legacy single-field behaviour as the fallback.
+
+    Returns True iff EVERY POST returned 200. False on any failure (timeout,
+    non-2xx, network error) — partial state may have been applied; the next
+    refresh re-attempts. Same best-effort semantics as the prior single-
+    field shape.
 
     `ip` is the "host:port" string from the device record (already includes
     the port discovery picked). `board` is the catalog key MoonDeck wants
-    the device to remember.
+    the device to remember (empty string means "clear" — no push).
     """
+    if not board:
+        return True   # nothing to push; not a failure
     import urllib.request
     import urllib.error
-    body = json.dumps({
-        "module": "Board",
-        "control": "board",
-        "value": board,
-    }).encode()
-    try:
-        req = urllib.request.Request(
-            f"http://{ip}/api/control",
-            data=body, method="POST",
-            headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=0.6) as resp:
-            return resp.status == 200
-    except (urllib.error.URLError, OSError):
-        return False
+    # Look up the catalog entry. BOARDS is loaded at module init; we don't
+    # re-read boards.json per push so a tight discover-refresh cycle
+    # doesn't hammer the disk. If the user edits boards.json, restart
+    # MoonDeck (same as every other catalog change).
+    entry = next((b for b in BOARDS if b.get("name") == board), None)
+    controls = (entry or {}).get("controls") or {}
+    if not controls:
+        # Custom / unknown board: just push the bare name. Mirrors the
+        # legacy behaviour, so existing custom-board users don't regress.
+        controls = {"Board": {"board": board}}
+
+    def _post(module_name: str, control_name: str, value) -> bool:
+        body = json.dumps({
+            "module": module_name,
+            "control": control_name,
+            "value": value,
+        }).encode()
+        try:
+            req = urllib.request.Request(
+                f"http://{ip}/api/control",
+                data=body, method="POST",
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=0.6) as resp:
+                return resp.status == 200
+        except (urllib.error.URLError, OSError):
+            return False
+
+    # Iterate the same shape the web installer + device UI use:
+    # entry.controls.<Module>.<control> = <value>. Sequential is plenty
+    # for the 1-3 leaves typical entries carry today.
+    for module_name, ctrls in controls.items():
+        if not isinstance(ctrls, dict):
+            continue
+        for control_name, value in ctrls.items():
+            if not _post(module_name, control_name, value):
+                return False
+    return True
 
 
 def _push_boards_in_parallel(pushes):

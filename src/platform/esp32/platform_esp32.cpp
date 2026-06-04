@@ -107,6 +107,14 @@ size_t maxAllocBlock() {
     return heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
 }
 
+size_t maxInternalAllocBlock() {
+    // MALLOC_CAP_INTERNAL excludes PSRAM. The internal heap is the scarce
+    // resource (WiFi, TCP/IP, FreeRTOS stacks all draw from it); PSRAM is
+    // huge by construction so its largest-free-block tells you nothing
+    // about memory pressure.
+    return heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+
 size_t totalHeap() {
     return heap_caps_get_total_size(MALLOC_CAP_8BIT);
 }
@@ -539,6 +547,23 @@ int wifiTxPower() {
     return (power + 2) / 4;
 }
 
+bool wifiSetTxPower(int8_t quarterDbm) {
+    if (quarterDbm == 0) return true;       // 0 = "no override", caller-friendly skip
+    if (!wifiInitDone_) return false;       // esp_wifi_set_max_tx_power requires the stack started
+    // ESP-IDF accepts 8..84 (2..21 dBm); clamp into range so a bad injected
+    // value doesn't make esp_wifi_set_max_tx_power return ESP_ERR_INVALID_ARG
+    // and leave the radio at default power without anyone noticing.
+    if (quarterDbm < 8)  quarterDbm = 8;
+    if (quarterDbm > 84) quarterDbm = 84;
+    esp_err_t err = esp_wifi_set_max_tx_power(quarterDbm);
+    if (err != ESP_OK) {
+        ESP_LOGW(NET_TAG, "WiFi set TX power %d (q-dBm) failed: %s", quarterDbm, esp_err_to_name(err));
+        return false;
+    }
+    ESP_LOGI(NET_TAG, "WiFi TX power capped to %d (q-dBm) ≈ %d dBm", quarterDbm, (quarterDbm + 2) / 4);
+    return true;
+}
+
 #else // MM_NO_WIFI — Ethernet-only build: WiFi compiled out.
 
 // Stub definitions so the linker is satisfied (platform.h declares these and
@@ -554,6 +579,7 @@ bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
 bool wifiApConnected() { return false; }
 void wifiApStop() {}
 int wifiTxPower() { return 0; }
+bool wifiSetTxPower(int8_t /*quarterDbm*/) { return false; }
 
 #endif // MM_NO_WIFI
 

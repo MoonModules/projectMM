@@ -172,13 +172,23 @@ async function init() {
 }
 
 async function sendControl(moduleName, controlName, value) {
+    // Best-effort by design — failures are not retried here (see
+    // consumePendingBoardParam's "No retry" contract). The query param is
+    // single-shot. Non-ok responses + network errors are logged to console
+    // so a user with devtools open can see what went wrong (e.g. a board-
+    // injected control value that the device-side validator rejected).
     try {
-        await fetch("/api/control", {
+        const res = await fetch("/api/control", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({module: moduleName, control: controlName, value: value})
         });
-    } catch { /* server may be busy */ }
+        if (!res.ok) {
+            console.warn(`[control] POST ${moduleName}.${controlName} failed (status=${res.status})`);
+        }
+    } catch (e) {
+        console.warn(`[control] POST ${moduleName}.${controlName} failed (error=${e && e.message ? e.message : e})`);
+    }
 }
 
 // Public Pages URL of the board catalog. The installer page also serves

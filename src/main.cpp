@@ -271,9 +271,12 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
             std::printf("tick: %uus (FPS: %u)", static_cast<unsigned>(scheduler.tickTimeUs()),
                         static_cast<unsigned>(scheduler.fps()));
             if (heap > 0) {
+                // maxInternalAllocBlock — internal RAM only. The all-memory
+                // variant reports ~8 MB on S3/S2 PSRAM boards and is useless
+                // as a memory-pressure KPI. See platform.h for the split.
                 std::printf("  free: %u  maxBlock: %u",
                             static_cast<unsigned>(heap),
-                            static_cast<unsigned>(mm::platform::maxAllocBlock()));
+                            static_cast<unsigned>(mm::platform::maxInternalAllocBlock()));
             }
             // Per-module timing (walk tree recursively)
             for (uint8_t i = 0; i < scheduler.moduleCount(); i++) {

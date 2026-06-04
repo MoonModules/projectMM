@@ -69,6 +69,10 @@ size_t maxAllocBlock() {
     return 0; // Not meaningful on desktop (0 = unlimited)
 }
 
+size_t maxInternalAllocBlock() {
+    return 0; // Not meaningful on desktop (0 = unlimited)
+}
+
 size_t totalHeap() {
     return 0; // Not meaningful on desktop
 }
@@ -268,6 +272,7 @@ bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
 bool wifiApConnected() { return false; }
 void wifiApStop() {}
 int wifiTxPower() { return 0; }
+bool wifiSetTxPower(int8_t /*quarterDbm*/) { return false; }
 
 bool mdnsInit(const char* /*deviceName*/) { return false; }
 void mdnsStop() {}

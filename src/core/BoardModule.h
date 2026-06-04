@@ -51,10 +51,15 @@ public:
 
     // External setter for transports that bypass /api/control (today: Improv
     // vendor RPC SET_BOARD from the web installer). Validates: 1..31 chars,
-    // ASCII-printable (0x20–0x7E), no embedded NUL. Returns false on
-    // rejection so the Improv handler can map to ErrorState. On accept:
-    // copies into boardKey_ and arms FilesystemModule's debounced save —
-    // same idiom as NetworkModule::setWifiCredentials.
+    // ASCII-printable (0x20–0x7E), no embedded NUL. The ASCII-printable
+    // floor protects every downstream consumer: JSON serialization (no
+    // escaping required for the wire + persistence layer), the device UI
+    // (rendered verbatim — control characters would corrupt the rendering),
+    // and C-string handling everywhere else (no embedded NUL means strlen
+    // / strcpy round-trip cleanly). Returns false on rejection so the
+    // Improv handler can map to ErrorState. On accept: copies into
+    // boardKey_ and arms FilesystemModule's debounced save — same idiom as
+    // NetworkModule::setWifiCredentials.
     bool setBoard(const char* value) {
         if (!value) return false;
         size_t n = std::strlen(value);

@@ -30,6 +30,11 @@ TEST_CASE("BoardModule binds `board` as a Text control") {
     // Buffer is 32 bytes (max 31 chars + NUL); the control's max field
     // carries the buffer size for the persistence + UI layers.
     CHECK(c.max == 32);
+    // UI-readonly hint: BoardModule pushes the value via MoonDeck / Improv
+    // SET_BOARD, never via direct UI edit. Regressions that flip this back
+    // to editable would silently restore the typing-into-the-UI failure
+    // mode the readonly flag exists to prevent.
+    CHECK(c.readonly == true);
 }
 
 // Default state is the empty string — MoonDeck pushes a value on first reach.

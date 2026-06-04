@@ -23,6 +23,7 @@ When a higher-priority connection becomes available, lower ones are torn down to
 - `password` (password) — WiFi STA password. Serialized to the API XOR-obfuscated + base64-encoded, not in plaintext — a first line of defence only, trivially reversible. See [ui.md § Control types](ui.md#control-types).
 - `rssi` (display-int, dBm) — current WiFi STA signal strength (e.g. `-58 dBm`). 1-byte storage on the device; the unit suffix lives in the descriptor, not in a per-control buffer. Hidden in every state except `ConnectedSta` — Ethernet/AP/Idle have no STA association to read from.
 - `txPower` (display-int, dBm) — current WiFi transmit power (e.g. `19 dBm`). 1-byte storage. Hidden when the radio is off (Ethernet, Idle); shown for STA (waiting + connected) and AP modes.
+- `txPowerSetting` (int16, 0..21 dBm) — user-settable cap on WiFi transmit power. 0 = no override (default). Applied after `esp_wifi_start()` and re-applied on change. Used by the LOLIN WiFi fix: `boards.json` injects `8` for boards whose on-module LDO brown-outs at full power (e.g. `LOLIN S3 N16R8`).
 - `addressing` (dropdown: DHCP / Static) — IP addressing mode (applies to both Ethernet and WiFi STA)
 - When Static: `ip`, `gateway`, `subnet`, `dns` (ipv4 controls — 4 bytes of storage each, not 16-char strings; the wire shape is still a dotted-quad string). Shown dynamically via onBuildControls.
 - `mDNS` (bool) — enable/disable mDNS responder

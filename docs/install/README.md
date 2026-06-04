@@ -1,10 +1,13 @@
 # projectMM web installer
 
-This directory holds the source for the **ESP Web Tools installer page** at
+This directory holds the source for the **custom installer page** (driven by
+`install-orchestrator.js`, not ESP Web Tools) at
 <https://ewowi.github.io/projectMM/install/>.
 
 End users land here, pick a channel + board, click Install. The browser flashes
-the device over USB (Web Serial → ESP32).
+the device over USB (Web Serial → ESP32), then runs Improv-Serial provisioning,
+SET_BOARD, and HTTP control fan-out — all from the same orchestrator,
+end-to-end, no ESP Web Tools dependency on the install path.
 
 ## What's in this directory
 

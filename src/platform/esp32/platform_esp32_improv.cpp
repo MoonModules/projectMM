@@ -18,10 +18,25 @@
 #include "core/ImprovFrame.h"
 
 #include "driver/uart.h"
+#include "esp_log.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "improv.h"
+#include "soc/soc_caps.h"
+
+// USB-Serial-JTAG: ESP32-S3 / S2 / C3 / C6 have a built-in USB-Serial-JTAG
+// peripheral that exposes a USB-CDC endpoint without an external bridge chip.
+// LOLIN S3 mini / N16R8 and many cheap S3 dev boards wire the USB-C port to
+// this peripheral, not to UART0 — meaning Improv RPC bytes from the host
+// arrive on USB-Serial-JTAG, not UART0. Listen on BOTH so the same firmware
+// works on boards with an external USB-Serial bridge (UART0) AND boards
+// with native USB (USB-Serial-JTAG). Soft-fail: if the driver install
+// errors (rare; usually means the secondary console grabbed it first), we
+// just skip the JTAG path and keep UART0.
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+#include "driver/usb_serial_jtag.h"
+#endif
 
 #include <atomic>
 #include <cstdarg>
@@ -51,13 +66,18 @@ struct ImprovTaskState {
     size_t statusBufLen = 0;
 
     // Vendor SET_BOARD RPC (command 0xFE): module-owned BoardModule buffer
-    // (24 bytes) + ready flag. Same producer/consumer dance as ssid/password.
+    // sized by BoardModule::boardKey_ at the caller (see boardOutLen). The
+    // Improv handler caps str_len dynamically against boardOutLen so the
+    // wire spec adapts when the buffer resizes. Same producer/consumer
+    // dance as ssid/password.
     // Nullable: opt out by leaving null (desktop stub doesn't pass any).
     char* boardOut = nullptr;
     size_t boardOutLen = 0;
     std::atomic<bool>* boardReady = nullptr;
 };
 static ImprovTaskState g_improv;  // single global — only one Improv task per device
+
+static const char* IMPROV_TAG = "mm_improv";  // ESP_LOG* tag for the Improv task
 
 static void improvSetStatus(const char* fmt, ...) {
     if (!g_improv.statusBuf || g_improv.statusBufLen == 0) return;
@@ -67,15 +87,42 @@ static void improvSetStatus(const char* fmt, ...) {
     va_end(args);
 }
 
+// Tracks whether the USB-Serial-JTAG read driver is up. Set by improvTask
+// after a successful install; gates the JTAG TX in improvSend so a board
+// without the driver (install failed, or ESP32-classic) doesn't write
+// into a dead peripheral. Read+write happen on the same task so plain bool
+// is fine — no cross-task memory ordering concerns.
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+static bool g_jtagReady = false;
+#endif
+
 // Send a framed Improv message. ImprovFrameType values match the upstream
 // improv::ImprovSerialType numerically (we just don't include improv.h in
 // the host-side test path, so the host-only header has its own enum).
+// Mirrors to both UART0 and USB-Serial-JTAG (when available + installed)
+// so the host gets the reply regardless of which interface it's using to
+// reach the device.
 static void improvSend(ImprovFrameType type, const std::vector<uint8_t>& payload) {
     uint8_t frame[6 + 1 + 1 + 1 + kImprovMaxPayload + 1];
     size_t n = buildImprovFrame(type, payload.data(), payload.size(),
                                 frame, sizeof(frame));
     if (n == 0) return;  // oversize payload — caller bug, silently drop
     uart_write_bytes(UART_NUM_0, reinterpret_cast<const char*>(frame), n);
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+    if (g_jtagReady) {
+        // Non-blocking: a host that opened the JTAG endpoint but isn't
+        // draining must not stall the Improv task — the task also services
+        // UART0 reads (10 ms blocking poll) and any TX-side wait here
+        // would compound that into laggy RX. usb_serial_jtag_write_bytes
+        // returns the byte count actually queued; on a backed-up host we
+        // drop the reply silently. Improv on USB-JTAG is opportunistic —
+        // the caller (web installer) retries on timeout via its own SDK
+        // path. ticks_to_wait=0 means "fill what fits in the TX FIFO
+        // headroom, drop the rest". Replies are small (<128 B) and fit
+        // in one transaction on any healthy host.
+        usb_serial_jtag_write_bytes(frame, n, 0);
+    }
+#endif
 }
 
 static void improvSendCurrentState(improv::State state) {
@@ -298,42 +345,124 @@ static void improvDispatchFrame(const ImprovFrameParser& parser) {
     }
 }
 
+// Feed one byte into the parser and dispatch / error as needed. Factored
+// out so both read paths (UART0 + USB-Serial-JTAG) share the same handling.
+static void improvFeedByte(ImprovFrameParser& parser, uint8_t b) {
+    switch (parser.feed(b)) {
+        case ImprovFeedResult::NeedMore:
+            break;
+        case ImprovFeedResult::FrameReady:
+            improvDispatchFrame(parser);
+            break;
+        case ImprovFeedResult::BadChecksum:
+            improvSendError(improv::ERROR_INVALID_RPC);
+            break;
+        case ImprovFeedResult::OversizePayload:
+            // Length byte > 128 — almost certainly noise / bit-flip; resync silently.
+            break;
+    }
+}
+
 static void improvTask(void* /*arg*/) {
-    // Driver install. UART0 is already configured at 115200-8N1 by the
-    // bootloader; we just claim the interrupt + RX FIFO. RX buf 256 is
+    // UART0 driver install. UART0 is already configured at 115200-8N1 by
+    // the bootloader; we just claim the interrupt + RX FIFO. RX buf 256 is
     // plenty (Improv RPC payloads max out around 96 bytes).
+    bool uartReady = false;
     esp_err_t uart_err = uart_driver_install(UART_NUM_0, 256, 0, 0, nullptr, 0);
-    if (uart_err != ESP_OK) {
-        // Without the driver, uart_read_bytes returns -1 forever and the
-        // task spins doing nothing useful while reporting "listening".
-        // Surface the failure on the module's status control + park the
-        // task — it'll show up in `provision_status` instead of misleading
-        // a user into thinking Improv is alive.
-        improvSetStatus("error: uart_driver_install %s", esp_err_to_name(uart_err));
+    if (uart_err == ESP_OK) {
+        uartReady = true;
+    } else {
+        // Don't park the task: if USB-Serial-JTAG works on this board,
+        // the task is still useful — Improv just won't reach via UART.
+        // ESP_LOGW lands in the serial log so a developer reading the
+        // monitor sees the cause; the compound status set below also
+        // surfaces it in the UI's `provision_status` control.
+        ESP_LOGW(IMPROV_TAG, "uart_driver_install failed: %s",
+                 esp_err_to_name(uart_err));
+    }
+
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+    // USB-Serial-JTAG driver install. On native-USB boards (LOLIN S3 mini /
+    // N16R8 etc.) this is the interface the host actually talks to; UART0
+    // is unwired. Best-effort install — secondary console may have grabbed
+    // the peripheral first on some sdkconfig combinations; if so, skip and
+    // rely on UART0.
+    if (!usb_serial_jtag_is_driver_installed()) {
+        usb_serial_jtag_driver_config_t jtag_cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+        esp_err_t jtag_err = usb_serial_jtag_driver_install(&jtag_cfg);
+        if (jtag_err == ESP_OK) {
+            g_jtagReady = true;
+        } else {
+            ESP_LOGW(IMPROV_TAG, "usb_serial_jtag_install failed: %s",
+                     esp_err_to_name(jtag_err));
+        }
+    } else {
+        // Someone else already installed it (rare). We can still read +
+        // write through it.
+        g_jtagReady = true;
+    }
+#endif
+
+    // If both installs failed, the task has nothing to do. Park it.
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+    const bool anyReady = uartReady || g_jtagReady;
+#else
+    const bool anyReady = uartReady;
+#endif
+    if (!anyReady) {
+        improvSetStatus("error: no transport (uart + jtag install both failed)");
         vTaskDelete(nullptr);
         return;
     }
 
+    // Compound status so a user inspecting `provision_status` can see
+    // partial failures (one transport up, the other failed). Without this
+    // the listening-state status overwrites any prior warn line and the
+    // failure is invisible in the UI.
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+    if (uartReady && g_jtagReady)         improvSetStatus("listening");
+    else if (uartReady)                   improvSetStatus("listening (jtag unavailable)");
+    else                                   improvSetStatus("listening (uart unavailable)");
+#else
     improvSetStatus("listening");
+#endif
 
     ImprovFrameParser parser;  // owns its 128-byte payload buffer; ~150 B on stack
     uint8_t b;
     for (;;) {
-        int n = uart_read_bytes(UART_NUM_0, &b, 1, pdMS_TO_TICKS(100));
-        if (n <= 0) continue;
-
-        switch (parser.feed(b)) {
-            case ImprovFeedResult::NeedMore:
-                break;
-            case ImprovFeedResult::FrameReady:
-                improvDispatchFrame(parser);
-                break;
-            case ImprovFeedResult::BadChecksum:
-                improvSendError(improv::ERROR_INVALID_RPC);
-                break;
-            case ImprovFeedResult::OversizePayload:
-                // Length byte > 128 — almost certainly noise / bit-flip; resync silently.
-                break;
+        // Symmetric non-blocking poll of both transports. Each round
+        // drains up to 64 bytes from whichever side has data, then yields
+        // 10 ms once if both came up empty. Previous shape (10 ms blocking
+        // on UART, 0 ms drain on JTAG) introduced lumpy throughput on
+        // dual-transport boards because UART's blocking wait paused JTAG
+        // drainage; symmetric polling reads either side promptly without
+        // either starving the other.
+        bool anyRead = false;
+        if (uartReady) {
+            for (int drained = 0; drained < 64; ++drained) {
+                int n = uart_read_bytes(UART_NUM_0, &b, 1, 0);
+                if (n <= 0) break;
+                improvFeedByte(parser, b);
+                anyRead = true;
+            }
+        }
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+        if (g_jtagReady) {
+            for (int drained = 0; drained < 64; ++drained) {
+                int n = usb_serial_jtag_read_bytes(&b, 1, 0);
+                if (n <= 0) break;
+                improvFeedByte(parser, b);
+                anyRead = true;
+            }
+        }
+#endif
+        if (!anyRead) {
+            // Nothing on either side — yield so FreeRTOS can schedule the
+            // idle task and lower-priority work. 10 ms is the same wait
+            // the previous UART-blocking-poll achieved; we're trading
+            // an interrupt-driven wait for a scheduled delay, which is
+            // identical from the task's perspective.
+            vTaskDelay(pdMS_TO_TICKS(10));
         }
     }
 }

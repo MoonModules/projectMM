@@ -63,6 +63,14 @@ public:
         if (totalInternalVal_ > 0) {
             controls_.addProgress("heap", heapUsedVal_, totalInternalVal_);
         }
+        // PSRAM detection — derived, not flagged. ESP-IDF auto-detects the
+        // PSRAM chip at boot (`I (...) esp_psram: Found NMB PSRAM device`)
+        // and merges its pool into the heap allocator. After that
+        // `totalHeap()` reports internal + PSRAM combined while
+        // `totalInternalHeap()` reports internal only — so `totalHeap >
+        // totalInternal` IS the "PSRAM present" signal. No explicit flag,
+        // no per-platform code path; boards without PSRAM (or with PSRAM
+        // disabled in sdkconfig) skip this control naturally.
         if (totalHeapVal_ > totalInternalVal_) {
             controls_.addProgress("psram", psramUsedVal_, totalHeapVal_ - totalInternalVal_);
         }
@@ -128,8 +136,11 @@ public:
 
         fsUsedVal_ = static_cast<uint32_t>(platform::filesystemUsed());
 
+        // maxInternalAllocBlock — NOT maxAllocBlock. The internal-RAM block
+        // is the scarce-resource KPI; the all-memory variant reports ~8 MB
+        // on PSRAM-equipped boards (S3/S2) and tells the user nothing.
         std::snprintf(maxBlockStr_, sizeof(maxBlockStr_), "%uKB",
-                      static_cast<unsigned>(platform::maxAllocBlock() / 1024));
+                      static_cast<unsigned>(platform::maxInternalAllocBlock() / 1024));
     }
 
     const char* deviceName() const { return deviceName_; }
