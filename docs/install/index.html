@@ -472,6 +472,28 @@
         <div class="install-status" id="connecting-detail"></div>
       </div>
 
+      <!-- Shown when the user's picked port doesn't open (probe failed):
+           wrong device (e.g. they picked Bluetooth-Incoming-Port from the
+           OS list) OR a stale handle (device unplugged + replugged since
+           the grant). The OS port picker is modal and covers the install
+           modal, so any guidance written into #connecting-detail and
+           followed immediately by requestPort() is invisible — the user
+           never sees it. This section gates the re-prompt behind a Try
+           again button so the message lands before the OS picker covers
+           the page. -->
+      <div class="install-section" id="section-wrong-port">
+        <div class="install-status">That port didn't respond.</div>
+        <div class="install-status">
+          Pick the USB-Serial entry your ESP32 is on (look for
+          <code>usbmodem…</code> on macOS, <code>COMxx</code> on Windows,
+          <code>ttyUSB…</code> on Linux). Bluetooth ports and debug
+          consoles aren't it.
+        </div>
+        <div class="install-actions">
+          <button type="button" class="primary" id="wrong-port-retry">Try again</button>
+        </div>
+      </div>
+
       <div class="install-section" id="section-flashing">
         <div class="install-status" id="flashing-status">Preparing to flash…</div>
         <div class="install-progress"><div class="install-progress-bar" id="flash-bar"></div></div>
@@ -629,6 +651,7 @@
     const title = document.getElementById("install-title");
     const sections = {
       connecting:   document.getElementById("section-connecting"),
+      wrongPort:    document.getElementById("section-wrong-port"),
       flashing:     document.getElementById("section-flashing"),
       wifiForm:     document.getElementById("section-wifi-form"),
       provisioning: document.getElementById("section-provisioning"),
@@ -726,6 +749,14 @@
           showSection("connecting");
           document.getElementById("connecting-detail").textContent =
             "Pick the serial port the device is connected to.";
+          break;
+        case "wrong-port-retry":
+          // Distinct section with a Try-again button gates the OS-picker
+          // re-prompt so the user reads the guidance BEFORE the OS modal
+          // covers the page (the picker's a native dialog, no way around
+          // its overlay; if we just updated connecting-detail and went
+          // straight to requestPort(), the message would never be seen).
+          showSection("wrongPort");
           break;
         case "connect-flash":
           showSection("connecting");
@@ -907,6 +938,23 @@
     //   { action: "ip", url: "<typed value>" }    — user typed an IP + Add
     //   { action: "skip" }                        — user clicked Skip
     //   { action: "retry" }                       — user clicked Try Improv again
+    // Shown when the orchestrator's probe-open on the user's pre-picked
+    // port fails. The OS port picker is modal and covers the install
+    // modal, so any guidance written and immediately followed by
+    // requestPort() is invisible — gate the re-prompt behind a Try
+    // again click so the message lands before the OS picker covers
+    // the page. Resolves when the user clicks Try again.
+    function uiWaitForPortRetry() {
+      return new Promise((resolve) => {
+        const btn = document.getElementById("wrong-port-retry");
+        const onClick = () => {
+          btn.removeEventListener("click", onClick);
+          resolve();
+        };
+        btn.addEventListener("click", onClick);
+      });
+    }
+
     // Symmetric with uiWaitForCreds. Normalisation of the typed value lives
     // in the orchestrator so the host page stays UI-only. The retry action
     // is the orchestrator's signal to re-run Improv `initialize()`; while
@@ -1251,6 +1299,7 @@
           uiWaitForCreds,
           uiWaitForIp,
           uiShowNeedsIpRetrying: showNeedsIpRetrying,
+          uiWaitForPortRetry,
           onSuccess: handleSuccess,
           onError: handleError,
           onLog: appendLog,
@@ -1275,6 +1324,7 @@
         await installer.eraseOnly({
           port: pickedPort,
           onProgress: handleProgress,
+          uiWaitForPortRetry,
           onSuccess: () => {
             showSection("done");
             const a = document.getElementById("done-url");

@@ -247,6 +247,32 @@ async function tryHttpInjectBoard(deviceUrl, board) {
     return true;
 }
 
+// Inline of esptool-js@0.4.7's ESPLoader.main, with attempts=2 instead of
+// the default 7. The default takes ~60 s to fail when the user picks a
+// non-ESP32 serial port (e.g. Bluetooth-Incoming-Port on macOS — opens
+// fine, just doesn't speak the ESP32 ROM bootloader protocol); 2 attempts
+// brings that to ~10 s while still allowing one retry for legitimately-
+// flaky USB-Serial bridges (the LOLIN D32's CH340 sometimes needs a
+// second go on the RTS/DTR pulse). The rest of the body is reproduced
+// verbatim from esptool-js's ESPLoader.main — when the SDK pin bumps,
+// re-verify the sequence still matches upstream.
+async function connectAndDescribeChip(esploader) {
+    await esploader.connect("default_reset", 2);
+    const chipName = await esploader.chip.getChipDescription(esploader);
+    esploader.info("Chip is " + chipName);
+    esploader.info("Features: " + (await esploader.chip.getChipFeatures(esploader)));
+    esploader.info("Crystal is " + (await esploader.chip.getCrystalFreq(esploader)) + "MHz");
+    esploader.info("MAC: " + (await esploader.chip.readMac(esploader)));
+    if (typeof esploader.chip.postConnect !== "undefined") {
+        await esploader.chip.postConnect(esploader);
+    }
+    await esploader.runStub();
+    if (esploader.romBaudrate !== esploader.baudrate) {
+        await esploader.changeBaud();
+    }
+    return chipName;
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -295,6 +321,15 @@ export const installer = {
      *   (the wifi-creds form section replaces the needs-ip section).
      *   Optional; degrade gracefully when omitted (older host pages still
      *   get retry behaviour, just without the spinner).
+     * @param {() => Promise<void>} [opts.uiWaitForPortRetry]
+     *   Host resolves this when the user clicks the Try-again button in
+     *   the wrong-port section. Fires after the orchestrator's probe-open
+     *   on the user's pre-picked port fails (wrong device picked from the
+     *   OS list, or stale unplugged-and-replugged handle). Gating the OS-
+     *   picker re-prompt behind this click lets the user actually see the
+     *   guidance message — the OS picker is modal and covers the install
+     *   modal. Optional; degrade gracefully to a silent re-prompt when
+     *   omitted (older host pages just lose the guidance section).
      * @param {(detail: {url: string, board: string, viaHttp?: boolean, httpBoardOk?: boolean, alreadyOnline?: boolean}) => void} opts.onSuccess
      *   `alreadyOnline:true` is set when the device booted into
      *   STATE_PROVISIONED (saved WiFi from a previous flash) — the SDK's
@@ -319,6 +354,7 @@ export const installer = {
      */
     async start({ manifestUrl, board, eraseBefore = false, port: prePickedPort,
                    onProgress, uiWaitForCreds, uiWaitForIp, uiShowNeedsIpRetrying,
+                   uiWaitForPortRetry,
                    onSuccess, onError, onLog }) {
         if (!navigator.serial) {
             onError("setup", new Error("Web Serial API not available — use Chrome, Edge, or Opera"));
@@ -341,7 +377,14 @@ export const installer = {
         const espTerminal = onLog ? {
             clean: () => {},
             writeLine: (s) => onLog(s),
-            write: (s) => onLog(s),
+            // Filter single-character writes — esptool's _connectAttempt
+            // emits "." per sync packet and "_" per attempt boundary,
+            // which fills the log with noise that looks bogus to a user
+            // (one column of dots, then underscores, no context). The
+            // writeLine path still carries the actual progress lines
+            // ("esptool.js", "Serial port", "Connecting...", chip-info,
+            // erase / write progress, baud-rate switch).
+            write: (s) => { if (s && s.length > 1) onLog(s); },
         } : undefined;
         // ImprovSerial's logger arg is a console-shape object. We need
         // every method (.log, .info, .warn, .error, .debug, .trace, …) to
@@ -370,32 +413,67 @@ export const installer = {
         try {
             trackProgress("request-port");
             // Use the pre-picked port when the host page provided one (the
-            // "Select device port…" button on the install page). Otherwise
-            // surface the native picker here. requestPort is user-gesture
+            // "USB Port" dropdown on the install page). Otherwise surface
+            // the native picker here. requestPort is user-gesture
             // protected; we can call it because Install click is itself
             // a user gesture (chained through onInstall → installer.start).
             //
-            // Stale-handle fallback: a saved prePickedPort may point at a
-            // device that was unplugged + replugged since the user picked
-            // it. The handle survives but esploader.main() / transport
-            // operations on it raise an obscure error mid-flow. Probe the
-            // handle by opening it briefly here — if open() throws, drop
-            // the handle and re-prompt. The browser's permission grant from
-            // the prior pick means requestPort surfaces a picker but no
-            // permission dialog (mirrors the post-flash Improv reopen
-            // path's fallback shape).
+            // Probe the pre-picked handle by opening + closing it before
+            // handing to esptool-js. Two kinds of failure get caught here:
+            //   - Wrong port: user picked a non-ESP32 entry from the OS
+            //     list (Bluetooth-Incoming-Port, LG Monitor Controls,
+            //     debug consoles — Web Serial's requestPort doesn't
+            //     filter, so the user can grant any serial-shaped device).
+            //     open() throws because nothing is listening or the OS
+            //     reserves the device.
+            //   - Stale handle: device was unplugged + replugged since
+            //     the user picked it; the SerialPort object survives but
+            //     the underlying USB endpoint is gone.
+            // On either failure we surface wrong-port-retry to the host
+            // (so the modal renders specific guidance) and re-prompt with
+            // `requestPort()`. The browser's existing permission grant
+            // means the picker pops without an authorization dialog;
+            // the user picks a different port (wrong-port case) or the
+            // same port now replugged (stale case).
+            let probeFailed = false;
             if (prePickedPort) {
                 try {
                     await prePickedPort.open({ baudRate: 115200 });
-                    // Probe succeeded — close so Transport can claim it.
-                    try { await prePickedPort.close(); } catch (_) { /* ignore */ }
+                    // Reset RTS/DTR to the inactive (high) state esptool-js
+                    // expects on a fresh port. Without this, the probe-
+                    // close transition can leave the bridge chip's
+                    // control lines in an indeterminate state, and
+                    // esptool's subsequent bootloader-entry RTS/DTR
+                    // pulse fails to trigger a reset — symptom: "Detecting
+                    // chip…" hangs ~60 s then "Failed to connect with the
+                    // device" on a port that's actually a healthy ESP32.
+                    try {
+                        await prePickedPort.setSignals({
+                            requestToSend: true,
+                            dataTerminalReady: true,
+                        });
+                    } catch (_) { /* not all platforms expose setSignals; harmless to skip */ }
+                    await prePickedPort.close();
                     port = prePickedPort;
                 } catch (e) {
-                    if (onLog) onLog(`[orchestrator] pre-picked port stale (${e.message || e}); re-prompting`);
-                    prePickedPort = null;
+                    if (onLog) onLog(`[orchestrator] picked port doesn't open (${e.message || e}); re-prompting — pick a different one`);
+                    probeFailed = true;
                 }
             }
             if (!port) {
+                // Probe-failed path: the OS port picker is modal and
+                // covers the install modal, so any guidance set in
+                // #connecting-detail and immediately followed by
+                // requestPort() is invisible. Gate the re-prompt
+                // behind a host-rendered "Try again" section so the
+                // user sees the wrong-port guidance BEFORE the OS
+                // picker covers the page. Host omits the callback on
+                // older versions — degrade to the silent re-prompt.
+                if (probeFailed) {
+                    trackProgress("wrong-port-retry");
+                    if (uiWaitForPortRetry) await uiWaitForPortRetry();
+                    trackProgress("request-port");
+                }
                 port = await navigator.serial.requestPort({});
             }
 
@@ -412,10 +490,7 @@ export const installer = {
                 romBaudrate: 115200,
                 terminal: espTerminal,
             });
-            // main() returns the human-readable chip identification, e.g.
-            // "ESP32-D0WD-V3". Surface it in the modal so the user sees
-            // detection succeeded before the 10-30s download + flash wait.
-            const chipName = await esploader.main();
+            const chipName = await connectAndDescribeChip(esploader);
             trackProgress("connect-flash", { chipName });
 
             // Fetch the manifest + all part binaries before erasing flash.
@@ -784,7 +859,8 @@ export const installer = {
      * @param {() => void} opts.onSuccess
      * @param {(stage: string, error: Error) => void} opts.onError
      */
-    async eraseOnly({ port: prePickedPort, onProgress, onSuccess, onError, onLog }) {
+    async eraseOnly({ port: prePickedPort, onProgress, uiWaitForPortRetry,
+                       onSuccess, onError, onLog }) {
         if (!navigator.serial) {
             onError("setup", new Error("Web Serial API not available — use Chrome, Edge, or Opera"));
             return;
@@ -798,27 +874,46 @@ export const installer = {
         const espTerminal = onLog ? {
             clean: () => {},
             writeLine: (s) => onLog(s),
-            write: (s) => onLog(s),
+            // Filter single-character writes — esptool's _connectAttempt
+            // emits "." per sync packet and "_" per attempt boundary,
+            // which fills the log with noise that looks bogus to a user
+            // (one column of dots, then underscores, no context). The
+            // writeLine path still carries the actual progress lines
+            // ("esptool.js", "Serial port", "Connecting...", chip-info,
+            // erase / write progress, baud-rate switch).
+            write: (s) => { if (s && s.length > 1) onLog(s); },
         } : undefined;
 
         try {
             trackProgress("request-port");
-            // Pre-picked port (from the host page's "Select device port…"
-            // button) bypasses the native picker. Same fallback as start(),
-            // including the stale-handle probe: if open() throws on the
-            // pre-picked port (device was unplugged + replugged), drop the
-            // handle and re-prompt — see the comment in start() for why.
+            // Pre-picked port: same probe-and-settle pattern as start().
+            // See the comment there for the wrong-port / stale-handle
+            // cases this catches and why the post-close settling wait
+            // matters on macOS.
+            let probeFailed = false;
             if (prePickedPort) {
                 try {
                     await prePickedPort.open({ baudRate: 115200 });
-                    try { await prePickedPort.close(); } catch (_) { /* ignore */ }
+                    // See start() for why this signal-reset matters.
+                    try {
+                        await prePickedPort.setSignals({
+                            requestToSend: true,
+                            dataTerminalReady: true,
+                        });
+                    } catch (_) { /* setSignals optional */ }
+                    await prePickedPort.close();
                     port = prePickedPort;
                 } catch (e) {
-                    if (onLog) onLog(`[orchestrator] pre-picked port stale (${e.message || e}); re-prompting`);
-                    prePickedPort = null;
+                    if (onLog) onLog(`[orchestrator] picked port doesn't open (${e.message || e}); re-prompting — pick a different one`);
+                    probeFailed = true;
                 }
             }
             if (!port) {
+                if (probeFailed) {
+                    trackProgress("wrong-port-retry");
+                    if (uiWaitForPortRetry) await uiWaitForPortRetry();
+                    trackProgress("request-port");
+                }
                 port = await navigator.serial.requestPort({});
             }
 
@@ -831,7 +926,7 @@ export const installer = {
                 romBaudrate: 115200,
                 terminal: espTerminal,
             });
-            await esploader.main();
+            await connectAndDescribeChip(esploader);
 
             trackProgress("erase");
             await esploader.eraseFlash();
