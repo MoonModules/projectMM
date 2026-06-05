@@ -97,10 +97,9 @@ Card structure:
 - **Help link (?)** at the far right of the title row opens the module's spec page on GitHub in a new tab. The path comes from `docPath` in `/api/types` (engine-provided, relative to `docs/moonmodules/`); the link is omitted when the type declares no doc path.
 - **Stats line** shows timing and memory: `🕒 <timing>` then `🧠 <static>[ + <dynamic>]`. Timing is fps or µs/ms per the global toggle (µs under 1 ms, ms above); it is omitted entirely when the module has no measured loop time. Memory is the module's C++ object size (`classSize`); the `+ <dynamic>` part (`dynamicBytes`, heap) is shown only when the module allocated heap. Sizes are compact-formatted (`B` / `KB`). Clicking the line cycles the timing figure fps ↔ ms; the memory figure is unaffected. Mode persists in `localStorage['mm_timing_mode']` and the toggle applies to all cards globally.
 - **Reorder is drag-and-drop** (HTML5 DnD) on the whole card — works on desktop and mobile. A drag starting on an interactive control (slider, button, toggle, select, text input, help link) is canceled in `dragstart` so the control's own gesture is used instead; drags from any other part of the card start a reorder. A drag is only accepted when source and target share the same `.card-children` container — i.e. they are true siblings under one parent.
-- **Replace (✎)** swaps this module for another type at the same position. Opens the [type picker](#type-picker) filtered to the module's own role (same-role swap only). The replacement starts with its own default control values — a clean swap, no value carry-over. Siblings, order, and the selected root are preserved.
-- **Delete (×)** removes the child via a press-twice confirm: the first click arms the button (it turns red and shows `✓`), a second click deletes. It disarms after 3s or when the pointer leaves — no browser `confirm()` popup.
+- **Replace (✎) / Delete (×) / drag-reorder** apply to *user-managed children* — any module whose role is one a container accepts (`acceptsChildRoles`) and that hasn't opted out via `userEditable: false`. Replace swaps for another type at the same position (type picker filtered to the module's own role; replacement starts at its own defaults; siblings/order/root preserved). Delete is a press-twice confirm (first click arms — red `✓` — second deletes; disarms after 3s or on pointer-leave; no browser `confirm()`). A child with `userEditable: false` (e.g. PreviewDriver, which feeds the live preview) shows none of these — it's fixed-shape like a code-wired child.
 - **Drag handle (☰)** is a visual cue; the whole card is the draggable element.
-- **`+ add child`** in the card footer opens the [type picker](#type-picker) filtered to legal child roles for this parent. The button hides while the picker is open (the picker takes its place) and reappears when it closes.
+- **`+ add child`** renders in a parent's footer when its type declares `acceptsChildRoles` (non-empty). Opens the [type picker](#type-picker) filtered to those roles. The button hides while the picker is open and reappears when it closes.
 
 ## Control types
 
@@ -130,7 +129,7 @@ Auto-rendered by `controls[].type`. Adding a new MoonModule with these control t
 
 The same picker serves two purposes: **add** (triggered by `+ add child`) and **replace** (triggered by the ✎ button on a card). Renders inline inside the card (not a modal).
 
-- **Role filter**: in add mode, filters to roles legal for the parent (the container declares which child roles it accepts). In replace mode, filters to the target module's own role. The role→child mapping is derived in the UI.
+- **Role filter**: in add mode, filters to the parent's `acceptsChildRoles` (the device declares it per-type in `/api/types` — the UI hardcodes no container→role mapping). In replace mode, filters to the target module's own role.
 - **Emoji tag chips**: a row of toggle chips above the list, one per distinct emoji across the role-filtered types. Each type's emoji set has three sources, in this order: a **role chip** (derived in the UI from `role`), a **dimensional chip** (derived in the UI from `dim` when the type declares one — 1/2/3 means 1D/2D/3D), and the curated **`tags`** string from `/api/types` (the module's `tags()` — a flash string literal). The UI treats `tags` as opaque: it splits the string into grapheme clusters and renders each as a chip. The domain that owns this UI assigns each emoji's meaning — see the domain's own architecture page for the assignments (e.g. [architecture.md § Web UI](../../architecture.md#web-ui) for the role / dim / origin / creator / audio / moving-head assignments used by the light domain shipped today). Toggling chips narrows the list with **AND** logic: a type shows only if it carries every active chip. Each list row shows the type's emoji before its name.
 - **Search box** with substring match on type name. Search and chips combine (both must match).
 - **Keyboard nav**: type to filter, ↓ to enter list, ↑↓ to move, Enter to confirm, Esc to cancel.
@@ -159,14 +158,18 @@ Child reorder *within* a parent (a child within a container) is supported via HT
 GET    /api/state             full module tree state — initial load + post-mutation refresh
                               each module entry includes name, type, role, enabled,
                               loopTimeUs, classSize, dynamicBytes, controls[]
+                              plus userEditable:false ONLY when the module opts out of
+                              UI delete/replace (omitted = editable, the common case)
                               streamed to the socket (no Content-Length, Connection: close)
                               so a tree of any size serializes without a fixed-buffer limit
-GET    /api/types             {types:[{name, displayName, role, docPath, tags, dim, defaults}]} — for the type picker
+GET    /api/types             {types:[{name, displayName, role, docPath, tags, dim, acceptsChildRoles, defaults}]} — for the type picker
                               name is the stable factory key (e.g. "SomeTypeRole"); use this for create/replace API calls
                               displayName is the role-suffix-stripped label (e.g. "SomeType") — what the cards and picker rows show
                               docPath is the spec page relative to docs/moonmodules/ ("" if none)
                               tags is a curated emoji string for the picker's chip filter ("" if none)
                               dim is the dimensionality (1/2/3) when the type declares one; 0 otherwise
+                              acceptsChildRoles is a comma-separated list of child roles this type
+                              accepts ("" = none) — drives the "+ add child" affordance + picker filter
                               defaults map is captured from a fresh probe instance per type
 GET    /api/system            fps, tickTimeUs, freeHeap, freeInternal, maxBlock, uptime
 POST   /api/control           {module, control, value} — set a control value

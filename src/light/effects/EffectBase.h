@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/MoonModule.h"
-#include "core/types.h"
+#include "light/light_types.h" // lengthType, nrOfLightsType, Dim
 
 #include <cstdint>
 
@@ -9,9 +9,9 @@ namespace mm {
 
 class Layer; // forward declaration
 
-// Dim enum lives in core/types.h so both EffectBase and ModifierBase can refer
-// to it without including each other. Used by Layer::extrude to fill unused axes
-// (D1 row → y and z; D2 slice → z; D3 native) and by the UI to derive the
+// Dim enum lives in light/light_types.h so both EffectBase and ModifierBase can
+// refer to it without including each other. Used by Layer::extrude to fill unused
+// axes (D1 row → y and z; D2 slice → z; D3 native) and by the UI to derive the
 // 📏/🟦/🧊 dimensional emoji (so it isn't repeated in each module's tags()).
 // ModuleFactory::registerType<T> captures dim from a probe via if-constexpr —
 // no per-domain registration wrapper is needed.

@@ -1,10 +1,37 @@
 # Generate C header with embedded UI files as byte arrays
 # Usage: cmake -P embed_ui.cmake -DUI_DIR=src/ui -DOUT=src/ui/ui_embedded.h
+#
+# Text assets are gzipped at build time and served with Content-Encoding: gzip
+# (HttpServerModule); the browser inflates natively, so the firmware carries the
+# UI ~3.5x smaller with no device-side or front-end decompressor. Standard
+# embedded-web-UI practice (WLED, ESPHome, ESP-IDF examples all pre-gzip assets).
+# Compression runs on the BUILD HOST via python3's gzip module — stdlib,
+# guaranteed on every ESP-IDF/desktop build host (chosen over a `gzip` binary
+# that Windows toolchains may lack). The PNG is already compressed, so it stays
+# raw.
 
-file(READ "${UI_DIR}/index.html" INDEX_HTML HEX)
-file(READ "${UI_DIR}/app.js" APP_JS HEX)
-file(READ "${UI_DIR}/style.css" STYLE_CSS HEX)
-file(READ "${UI_DIR}/install-picker.js" INSTALL_PICKER_JS HEX)
+# Gzip ${UI_DIR}/<name> to ${OUT_DIR}/<name>.gz and HEX-read it into OUT_VAR.
+function(gzip_file_hex NAME OUT_VAR)
+    set(src "${UI_DIR}/${NAME}")
+    # Write the temp .gz next to the generated header (a writable build dir).
+    get_filename_component(out_dir "${OUT}" DIRECTORY)
+    set(gz "${out_dir}/${NAME}.gz")
+    execute_process(
+        COMMAND python3 -c "import sys,gzip; open(sys.argv[2],'wb').write(gzip.compress(open(sys.argv[1],'rb').read(),9))" "${src}" "${gz}"
+        RESULT_VARIABLE rc)
+    if(NOT rc EQUAL 0)
+        message(FATAL_ERROR "gzip of ${src} failed (python3 rc=${rc})")
+    endif()
+    file(READ "${gz}" hex HEX)
+    file(REMOVE "${gz}")
+    set(${OUT_VAR} "${hex}" PARENT_SCOPE)
+endfunction()
+
+gzip_file_hex("index.html" INDEX_HTML)
+gzip_file_hex("app.js" APP_JS)
+gzip_file_hex("style.css" STYLE_CSS)
+gzip_file_hex("install-picker.js" INSTALL_PICKER_JS)
+gzip_file_hex("preview3d.js" PREVIEW3D_JS)
 file(READ "${UI_DIR}/moonlight-logo.png" LOGO_PNG HEX)
 
 # Convert hex string to C array initializer
@@ -26,17 +53,20 @@ hex_to_c_array("${INDEX_HTML}" "indexHtml" INDEX_ARRAY)
 hex_to_c_array("${APP_JS}" "appJs" APP_ARRAY)
 hex_to_c_array("${STYLE_CSS}" "styleCss" STYLE_ARRAY)
 hex_to_c_array("${INSTALL_PICKER_JS}" "installPickerJs" INSTALL_PICKER_ARRAY)
+hex_to_c_array("${PREVIEW3D_JS}" "preview3dJs" PREVIEW3D_ARRAY)
 hex_to_c_array("${LOGO_PNG}" "logoPng" LOGO_ARRAY)
 
 string(LENGTH "${INDEX_HTML}" INDEX_HEX_LEN)
 string(LENGTH "${APP_JS}" APP_HEX_LEN)
 string(LENGTH "${STYLE_CSS}" STYLE_HEX_LEN)
 string(LENGTH "${INSTALL_PICKER_JS}" INSTALL_PICKER_HEX_LEN)
+string(LENGTH "${PREVIEW3D_JS}" PREVIEW3D_HEX_LEN)
 string(LENGTH "${LOGO_PNG}" LOGO_HEX_LEN)
 math(EXPR INDEX_LEN "${INDEX_HEX_LEN} / 2")
 math(EXPR APP_LEN "${APP_HEX_LEN} / 2")
 math(EXPR STYLE_LEN "${STYLE_HEX_LEN} / 2")
 math(EXPR INSTALL_PICKER_LEN "${INSTALL_PICKER_HEX_LEN} / 2")
+math(EXPR PREVIEW3D_LEN "${PREVIEW3D_HEX_LEN} / 2")
 math(EXPR LOGO_LEN "${LOGO_HEX_LEN} / 2")
 
 file(WRITE "${OUT}" "// Auto-generated — do not edit. Rebuild to update.\n")
@@ -49,6 +79,8 @@ file(APPEND "${OUT}" "constexpr uint8_t styleCss[] = {${STYLE_ARRAY}};\n")
 file(APPEND "${OUT}" "constexpr size_t styleCssLen = ${STYLE_LEN};\n")
 file(APPEND "${OUT}" "constexpr uint8_t installPickerJs[] = {${INSTALL_PICKER_ARRAY}};\n")
 file(APPEND "${OUT}" "constexpr size_t installPickerJsLen = ${INSTALL_PICKER_LEN};\n")
+file(APPEND "${OUT}" "constexpr uint8_t preview3dJs[] = {${PREVIEW3D_ARRAY}};\n")
+file(APPEND "${OUT}" "constexpr size_t preview3dJsLen = ${PREVIEW3D_LEN};\n")
 file(APPEND "${OUT}" "constexpr uint8_t logoPng[] = {${LOGO_ARRAY}};\n")
 file(APPEND "${OUT}" "constexpr size_t logoPngLen = ${LOGO_LEN};\n")
 file(APPEND "${OUT}" "} // namespace mm::ui\n")

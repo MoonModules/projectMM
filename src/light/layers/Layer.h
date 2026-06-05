@@ -15,6 +15,7 @@ namespace mm {
 class Layer : public MoonModule {
 public:
     ModuleRole role() const override { return ModuleRole::Layer; }
+    const char* acceptsChildRoles() const override { return "effect,modifier"; }
 
     // start/end carve a region of the shared Layouts into this Layer's buffer,
     // expressed as **percentages of the physical extent on each axis**.
@@ -60,6 +61,9 @@ public:
     }
 
     void setLayouts(Layouts* lg) { layouts_ = lg; }
+    // The active Layouts, for consumers that need per-light coordinates (e.g.
+    // PreviewDriver builds its coordinate table from layouts()->forEachCoord).
+    Layouts* layouts() const { return layouts_; }
     void setChannelsPerLight(uint8_t cpl) { channelsPerLight_ = cpl; }
 
     void onBuildState() override {
@@ -201,14 +205,35 @@ public:
             }
         }
 
+        // Box vs real-light count. The render grid is the layout's bounding box
+        // (physicalWidth_×Height_×Depth_); the DRIVER buffer holds only the real
+        // lights (Layouts::totalLightCount). For a dense GridLayout every box
+        // cell is a light → boxCount == driverCount and the LUT is identity (the
+        // fast memcpy path). For a sparse layout (sphere, ring) driverCount <
+        // boxCount: most box cells map to NO light, so we always build a LUT
+        // whose destinations are DRIVER indices [0..driverCount). This makes the
+        // driver/output buffer — what ArtNet, LEDs, and the preview consume —
+        // exactly the real lights, never the padded box.
+        nrOfLightsType boxCount = static_cast<nrOfLightsType>(physicalWidth_) * physicalHeight_ * physicalDepth_;
+        nrOfLightsType driverCount = physicalLightCount();   // == Layouts::totalLightCount()
+        const bool sparse = (driverCount != boxCount);
+
         if (!mod) {
-            // No modifiers: 1:1 unshuffled, logical == physical
+            // No modifier: logical == physical box. Effects render into the dense
+            // box buffer; the LUT extracts the real lights into the driver buffer.
             width_ = physicalWidth_;
             height_ = physicalHeight_;
             depth_ = physicalDepth_;
-            nrOfLightsType count = static_cast<nrOfLightsType>(width_) * height_ * depth_;
-            lut_.setIdentity(count);
-            allocateBuffer(count);
+            if (!sparse) {
+                // Dense grid: box cell i IS light i. Identity (memcpy) — unchanged.
+                lut_.setIdentity(boxCount);
+                allocateBuffer(boxCount);
+                return;
+            }
+            // Sparse: build box→driver LUT (each box cell → its driver index, or
+            // nothing). logicalCount = boxCount, ≤1 destination per cell.
+            buildSparseIdentityLUT(boxCount, driverCount);
+            allocateBuffer(boxCount);   // layer (render) buffer stays the dense box
             return;
         }
 
@@ -217,39 +242,51 @@ public:
                                width_, height_, depth_);
 
         nrOfLightsType logicalCount = static_cast<nrOfLightsType>(width_) * height_ * depth_;
-        nrOfLightsType physicalCount = static_cast<nrOfLightsType>(physicalWidth_) * physicalHeight_ * physicalDepth_;
 
-        // Estimate max destinations from modifier's multiplier
+        // Degrade target on OOM: a sparse layout degrades to the (cheaper)
+        // box→driver identity LUT so the driver buffer stays the real lights; a
+        // dense grid degrades to the plain identity/memcpy path as before.
+        auto degradeIdentity = [&]() {
+            width_ = physicalWidth_;
+            height_ = physicalHeight_;
+            depth_ = physicalDepth_;
+            if (sparse) { buildSparseIdentityLUT(boxCount, driverCount); }
+            else        { lut_.setIdentity(boxCount); }
+            allocateBuffer(boxCount);
+        };
+
+        // maxDest in DRIVER-index terms. The modifier's multiplier bounds how
+        // many destinations a logical cell fans out to; clamp to 2× the real
+        // light count (was box count — driverCount is the true ceiling now).
         nrOfLightsType maxDest = logicalCount * mod->maxMultiplier();
-        if (maxDest > physicalCount * 2) maxDest = physicalCount * 2;
+        if (maxDest > driverCount * 2) maxDest = driverCount * 2;
 
         size_t lutBytes = MappingLUT::estimateBytes(logicalCount, maxDest);
         if (!canAllocate(lutBytes)) {
-            // Not enough memory for LUT — degrade to 1:1
             std::printf("  DEGRADE  LUT skipped (need %u, free %u)\n",
                         static_cast<unsigned>(lutBytes),
                         static_cast<unsigned>(platform::freeHeap()));
             lutSkipped_ = true;
             setStatus("modifier LUT skipped — not enough memory", Severity::Warning);
-            width_ = physicalWidth_;
-            height_ = physicalHeight_;
-            depth_ = physicalDepth_;
-            lut_.setIdentity(physicalCount);
-            allocateBuffer(physicalCount);
+            degradeIdentity();
             return;
         }
 
         if (!lut_.build(logicalCount, maxDest)) {
-            // build() failed (allocation) — degrade to 1:1 identity
             lutSkipped_ = true;
             setStatus("modifier LUT build failed — not enough memory", Severity::Warning);
-            width_ = physicalWidth_;
-            height_ = physicalHeight_;
-            depth_ = physicalDepth_;
-            lut_.setIdentity(physicalCount);
-            allocateBuffer(physicalCount);
+            degradeIdentity();
             return;
         }
+
+        // Box→driver translation: the modifier reasons in box geometry and emits
+        // box-cell indices; the driver buffer is indexed by real-light index. A
+        // box→driver map (driverIdx per box cell, or "none") translates the
+        // modifier's output into driver-index space. For a dense grid this map
+        // is identity; for a sparse layout it drops box cells that aren't lights
+        // (e.g. a mirror destination landing off the sphere shell). Built from
+        // Layouts::forEachCoord. nullptr → dense grid → no translation needed.
+        nrOfLightsType* boxToDriver = sparse ? buildBoxToDriver(boxCount) : nullptr;
 
         // Fill LUT by iterating all logical coordinates
         nrOfLightsType physicals[8];
@@ -262,14 +299,68 @@ public:
                     count = 0;
                     mod->mapToPhysical(x, y, z, physicalWidth_, physicalHeight_, physicalDepth_,
                                        physicals, count, 8);
+                    if (boxToDriver) {
+                        // Translate box indices → driver indices, dropping cells
+                        // that map to no real light (kNoDriver).
+                        nrOfLightsType kept = 0;
+                        for (nrOfLightsType i = 0; i < count; i++) {
+                            nrOfLightsType d = (physicals[i] < boxCount) ? boxToDriver[physicals[i]] : kNoDriver;
+                            if (d != kNoDriver) physicals[kept++] = d;
+                        }
+                        count = kept;
+                    }
                     lut_.setMapping(logIdx, physicals, count);
                     logIdx++;
                 }
             }
         }
+        if (boxToDriver) platform::free(boxToDriver);
 
         lut_.finalize();
         allocateBuffer(logicalCount);
+    }
+
+    // Sentinel: a box cell that is not a real light (no driver index).
+    static constexpr nrOfLightsType kNoDriver = static_cast<nrOfLightsType>(-1);
+
+    // Allocate + fill a box-cell → driver-index map from the layout's real
+    // lights (Layouts::forEachCoord emits (driverIdx, x, y, z) in driver order).
+    // Cells with no light hold kNoDriver. Caller owns the returned block
+    // (platform::free). Returns nullptr on OOM. Box index = z*W*H + y*W + x.
+    nrOfLightsType* buildBoxToDriver(nrOfLightsType boxCount) const {
+        auto* map = static_cast<nrOfLightsType*>(platform::alloc(static_cast<size_t>(boxCount) * sizeof(nrOfLightsType)));
+        if (!map) return nullptr;
+        for (nrOfLightsType i = 0; i < boxCount; i++) map[i] = kNoDriver;
+        struct Ctx { nrOfLightsType* map; lengthType w, h; nrOfLightsType box; };
+        Ctx ctx{map, physicalWidth_, physicalHeight_, boxCount};
+        layouts_->forEachCoord([](void* c, nrOfLightsType driverIdx, lengthType x, lengthType y, lengthType z) {
+            auto* k = static_cast<Ctx*>(c);
+            nrOfLightsType box = static_cast<nrOfLightsType>(z) * k->w * k->h
+                               + static_cast<nrOfLightsType>(y) * k->w + x;
+            if (box < k->box) k->map[box] = driverIdx;
+        }, &ctx);
+        return map;
+    }
+
+    // No-modifier sparse case: LUT maps each box cell → its driver index (≤1
+    // destination), so the driver buffer holds only the real lights. logicalCount
+    // = boxCount; built in box order so setMapping's sequential contract holds.
+    void buildSparseIdentityLUT(nrOfLightsType boxCount, nrOfLightsType driverCount) {
+        nrOfLightsType* boxToDriver = buildBoxToDriver(boxCount);
+        if (!boxToDriver || !lut_.build(boxCount, driverCount)) {
+            // OOM — fall back to dense identity (sends the box; correct-not-crash).
+            if (boxToDriver) platform::free(boxToDriver);
+            lutSkipped_ = true;
+            setStatus("sparse LUT build failed — not enough memory", Severity::Warning);
+            lut_.setIdentity(boxCount);
+            return;
+        }
+        for (nrOfLightsType box = 0; box < boxCount; box++) {
+            nrOfLightsType d = boxToDriver[box];
+            lut_.setMapping(box, &d, d == kNoDriver ? 0 : 1);
+        }
+        lut_.finalize();
+        platform::free(boxToDriver);
     }
 
 private:
@@ -291,8 +382,8 @@ private:
         size_t availableHeap = platform::freeHeap();
         if (availableHeap == 0) return true; // desktop: unlimited
         size_t internalHeap = platform::freeInternalHeap();
-        if (internalHeap > 0 && internalHeap <= HEAP_RESERVE) return false;
-        size_t budget = availableHeap > HEAP_RESERVE ? availableHeap - HEAP_RESERVE : 0;
+        if (internalHeap > 0 && internalHeap <= platform::HEAP_RESERVE) return false;
+        size_t budget = availableHeap > platform::HEAP_RESERVE ? availableHeap - platform::HEAP_RESERVE : 0;
         return budget >= bytesNeeded && platform::maxAllocBlock() >= bytesNeeded;
     }
 

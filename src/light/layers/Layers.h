@@ -17,6 +17,8 @@ namespace mm {
 // pipeline byte-for-byte. The container itself owns no buffer.
 class Layers : public MoonModule {
 public:
+    const char* acceptsChildRoles() const override { return "layer"; }
+
     // Wire the shared Layouts. Propagates to every child Layer so their
     // onBuildState() can size buffers from it. Idempotent — call again
     // after adding a Layer child to wire the new one. Non-Layer children

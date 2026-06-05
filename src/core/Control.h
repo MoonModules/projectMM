@@ -44,9 +44,10 @@ inline void formatDottedQuad(char out[16], const uint8_t ip[4]) {
 enum class ControlType : uint8_t {
     Uint8,
     Uint16,
-    Int16,      // signed 16-bit. Used by `lengthType` coordinate controls (Layer
-                // start/end), where negative values are legal — e.g. a Layer
-                // dragged out of the visible area by a future modifier.
+    Int16,      // signed 16-bit. For coordinate-style controls where negative
+                // values are legal — e.g. a Layer's start/end dragged out of the
+                // visible area by a future modifier. (The light domain's grid
+                // coordinate type is int16 for this reason.)
     Bool,
     Text,
     Password,   // secret text — /api/state serializes it XOR-obfuscated +

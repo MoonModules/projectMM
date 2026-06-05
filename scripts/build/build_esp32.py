@@ -165,8 +165,13 @@ def idf_cmd(idf_path: Path) -> list[str]:
     return [str(idf_path / "tools" / "idf.py")]
 
 
-def firmware_cmake_args(firmware: str) -> list[str]:
-    """Extra -D cache args for the requested firmware."""
+def firmware_cmake_args(firmware: str, release: str = "") -> list[str]:
+    """Extra -D cache args for the requested firmware.
+
+    `release` is the release-channel tag (e.g. "latest", "v1.0.0") to burn
+    into the binary as MM_RELEASE. Empty for local builds — SystemModule
+    then shows the bare semver with no channel suffix.
+    """
     spec = FIRMWARES[firmware]
     fragments = ";".join(spec["fragments"])
     args = [f"-DSDKCONFIG_DEFAULTS={fragments}"]
@@ -174,6 +179,11 @@ def firmware_cmake_args(firmware: str) -> list[str]:
     # the OTA path can pick the matching release asset (every release ships
     # one .bin per firmware key — see release.yml).
     args.append(f'-DMM_FIRMWARE_NAME="{firmware}"')
+    # Burn the release-channel tag too, when the build pipeline supplies one.
+    # Same -D mechanism; empty default left to build_info.h's #ifndef so a
+    # local build needs no flag.
+    if release:
+        args.append(f'-DMM_RELEASE="{release}"')
     if spec["eth_only"]:
         # Drop the WiFi components from the link, and tell our code to compile
         # out the WiFi paths (MM_ETH_ONLY → esp32/main/CMakeLists.txt).
@@ -232,6 +242,10 @@ def main():
                         help="Firmware variant. One of: " + ", ".join(sorted(FIRMWARES)))
     parser.add_argument("--profile", choices=["default", "eth-only"],
                         help="Deprecated alias for --firmware. Use --firmware instead.")
+    parser.add_argument("--release", default="",
+                        help="Release-channel tag to burn into the binary as "
+                             "MM_RELEASE (e.g. 'latest', 'v1.0.0'). Set by the "
+                             "release workflow; omit for local builds.")
     args = parser.parse_args()
 
     firmware = resolve_firmware(args)
@@ -276,7 +290,7 @@ def main():
     # builds the per-build-dir sdkconfig already has the chip pinned, so
     # set-target is skipped — switching to another firmware uses a different
     # build_dir entirely, so its sdkconfig is untouched.
-    extra = firmware_cmake_args(firmware)
+    extra = firmware_cmake_args(firmware, args.release)
     if not build_dir.exists():
         print(f"Setting target to {chip} (firmware: {firmware}, build dir: "
               f"{build_dir.relative_to(ROOT)})...")

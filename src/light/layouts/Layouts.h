@@ -1,9 +1,14 @@
 #pragma once
 
 #include "core/MoonModule.h"
-#include "core/types.h"
+#include "light/light_types.h" // lengthType, nrOfLightsType
 
 namespace mm {
+
+// Callback for layout coordinate iteration — a layout walks its positions and
+// invokes this per light with the physical index and (x,y,z). Owned by
+// LayoutBase: it's the signature of forEachCoord, which every layout overrides.
+using CoordCallback = void(*)(void* ctx, nrOfLightsType idx, lengthType x, lengthType y, lengthType z);
 
 class LayoutBase : public MoonModule {
 public:
@@ -22,6 +27,8 @@ public:
 // one Layouts describing the physical setup, multiple Layers render into it.
 class Layouts : public MoonModule {
 public:
+    const char* acceptsChildRoles() const override { return "layout"; }
+
     // Disabled children are skipped, same gate Layer/Layers/Drivers apply to their
     // children. Indices of subsequent enabled layouts shift down to close the gap —
     // disable Layout A and Layout B's lights move to indices 0..N. Users who need

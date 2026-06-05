@@ -121,18 +121,20 @@ The model is **producers vs consumers**: producers generate data, consumers proc
 
 ## Data exchange between modules
 
-When one module produces data another module reads on the hot path — the Layer pixel buffer that drivers send, the `PreviewFrame` the HTTP module broadcasts, the `Correction` table physical drivers apply — the pattern is the same throughout the codebase:
+When one module produces data another module reads on the hot path, the pattern is the same throughout the codebase. Two shapes, both core-defined and domain-neutral:
+
+**Shared-struct (pull).** The reader holds a pointer to the producer's data and reads it when it needs it.
 
 - The **producer owns a small POD struct** as a member, overwritten in place each tick. No allocation per frame.
-- A **plain-data header** declares the struct (`Buffer`, `Correction`, `PreviewFrame`). Both producer and consumer include it; neither needs to know the other's class.
+- A **plain-data header** declares the struct. Both producer and consumer include it; neither needs to know the other's class.
 - The producer exposes the struct via a `const`-returning getter (or a `setX(const Foo*)` setter on the consumer).
 - The **consumer holds a `const Foo*`** received once at wiring time in `main.cpp`, and reads it on the hot path each frame.
 
 No registry, no subscription, no event bus. The consumer reads the latest value when it needs it; if the producer wrote nothing this tick, the consumer sees the previous value (acceptable for the kinds of data this exchanges — frame buffers, periodic captures). Producer and consumer can run on different cores: publisher-write / readers-read with a one-frame staleness tolerance that doesn't need a lock.
 
-Concrete examples: `Drivers` hands every child driver a `Buffer*` (source) plus a `Correction*` (shared brightness/reorder/white); `PreviewDriver` writes a `PreviewFrame` that `HttpServerModule` reads for the WebSocket broadcast; `Layer` exposes its pixel buffer to `Drivers` directly on the identity-mapping fast path.
+**Push through a domain-neutral sink.** When the producer should hand bytes to a generic core service rather than expose a struct, the core defines a narrow interface and the producer pushes to it. The producer owns the data and its wire format; the core sink (the interface's implementer) knows only "take these bytes and do my generic job" — it has zero knowledge of what the bytes mean or which domain produced them. `BinaryBroadcaster` (`HttpServerModule` implements it: "broadcast these bytes to all WebSocket clients") is the example — the producer side lives in the light domain (see [§ The pipeline](#the-pipeline)).
 
-The shape extends without ceremony to any future producer/consumer pair (a sensor module owning a state struct, an effect reading it through a `const Foo*` set at wiring time). It is deliberately not pub/sub: there's one producer per data kind and the consumer explicitly wants that specific data — the registry overhead and listener-lifecycle complexity of pub/sub buy nothing.
+Both shapes extend without ceremony to any future producer/consumer pair (a sensor module owning a state struct, an effect reading it through a `const Foo*` set at wiring time; or a module pushing bytes to a core sink). Neither is pub/sub: there's one producer per data kind and the consumer explicitly wants that specific data — the registry overhead and listener-lifecycle complexity of pub/sub buy nothing.
 
 ## Event triggering between modules
 
@@ -211,6 +213,11 @@ Modules in the light pipeline can be added, replaced, or removed dynamically at 
                 ├── ArtNetDriver  ─ apply Correction ─→ UDP packets
                 └── PreviewDriver (raw buffer, no Correction) ─→ WebSocket
 ```
+
+**Data flow.** The pipeline instantiates both core data-exchange shapes (see [§ Data exchange between modules](#data-exchange-between-modules)):
+
+- *Shared-struct (pull):* `Drivers` hands every child driver a `Buffer*` (source) plus a `Correction*` (shared brightness/reorder/white), and `Layer` exposes its pixel buffer to `Drivers` directly on the identity-mapping fast path — each consumer holds a `const`-pointer set once at wiring time and reads it per frame.
+- *Push to a core sink:* `PreviewDriver` owns the preview wire format (a one-time coordinate table + per-frame RGB point list) and pushes the bytes to a `BinaryBroadcaster` (the core HTTP server). The server broadcasts them over WebSocket without knowing they're a preview — the format and the light types stay entirely in the driver. See [PreviewDriver](moonmodules/light/drivers/PreviewDriver.md).
 
 **Naming convention.** Capital `Layouts`, `Layers`, `Drivers` are class names (always capitalised when referring to the class). Lowercase "layouts", "layers", "drivers" is the English plural — used freely when context makes it clear. Singular "layout", "layer", "driver" is an individual instance.
 
@@ -412,7 +419,7 @@ The UI is **MoonModule-driven**. It contains no hard-coded knowledge of specific
 - Controls are auto-rendered by type (slider, toggle, colour picker, text input, dropdown).
 - Modules can be switched (change which effect a layer uses) and linked (assign a layout to a layer).
 
-Adding a new MoonModule with controls needs **zero changes** to the UI files.
+Adding a new MoonModule with controls needs **zero changes** to the UI files. This extends to the tree-mutation affordances: which modules accept children (and of what role) comes from each type's `acceptsChildRoles()`, and whether a module can be deleted/replaced comes from its `userEditable()` — both declared on the C++ side and reported in `/api/types` + `/api/state`. The UI hardcodes no list of "which types are containers" or "which roles are editable"; a new container type or a fixed child is a one-line C++ override.
 
 The light domain plugs into the UI at three points: a fixed top-level tree (Layouts / Layers / Drivers pinned in `main.cpp`, root reorder disabled while child reorder works via drag-and-drop), a binary WebSocket preview channel ([PreviewDriver](moonmodules/light/drivers/PreviewDriver.md) — type byte `0x02`, 13-byte header `dw/dh/dd/ow/oh/od`, RGB triples), and emoji-key assignments for the chip filter (full table in [core/ui.md](moonmodules/core/ui.md)). Full UI spec: [docs/moonmodules/core/ui.md](moonmodules/core/ui.md).
 

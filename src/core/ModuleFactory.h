@@ -1,10 +1,8 @@
 #pragma once
 
 #include "core/MoonModule.h"
-#include "core/types.h"
 #include "platform/platform.h"
 
-#include <concepts>
 #include <cstring>
 
 namespace mm {
@@ -29,13 +27,18 @@ public:
     // dim is captured via `if constexpr` only when T declares `dimensions()`
     // (EffectBase and ModifierBase do; everything else doesn't). Modules without
     // it get dim=0 ("not applicable") and the UI skips their dimensional chip.
+    // The probe detects the method and reduces its result to a byte — it does
+    // NOT name the return type, so the dimensionality enum (a light-domain
+    // concept, `Dim` in light_types.h) stays out of core. Any type exposing a
+    // `dimensions()` convertible to uint8_t is captured; only EffectBase /
+    // ModifierBase do, so the loose constraint matches exactly them.
     template<typename T>
     static bool registerType(const char* typeName, const char* docPath = "") {
         if (!typeName) return false;
         if (!grow()) return false;
         T probe;
         uint8_t dim = 0;
-        if constexpr (requires(const T& t) { { t.dimensions() } -> std::same_as<Dim>; }) {
+        if constexpr (requires(const T& t) { static_cast<uint8_t>(t.dimensions()); }) {
             dim = static_cast<uint8_t>(probe.dimensions());
         }
         types_[count_++] = {typeName,
@@ -43,7 +46,8 @@ public:
                             sizeof(T), probe.role(),
                             docPath ? docPath : "",
                             probe.tags() ? probe.tags() : "",
-                            dim};
+                            dim,
+                            probe.acceptsChildRoles() ? probe.acceptsChildRoles() : ""};
         return true;
     }
 
@@ -56,7 +60,10 @@ public:
                              const char* tags = "") {
         if (!typeName || !fn) return false;
         if (!grow()) return false;
-        types_[count_++] = {typeName, fn, classSize, role, docPath ? docPath : "", tags ? tags : "", 0};
+        // Hand-built entries can't probe an instance for acceptsChildRoles, so
+        // they default to "" (accepts no children). No hand-built type is a
+        // container today; if one ever is, add a parameter here.
+        types_[count_++] = {typeName, fn, classSize, role, docPath ? docPath : "", tags ? tags : "", 0, ""};
         return true;
     }
 
@@ -130,6 +137,11 @@ public:
     // does (EffectBase/ModifierBase today). The UI uses this to derive 📏/🟦/🧊
     // alongside the role chip and origin emoji from tags().
     static uint8_t typeDim(uint8_t i) { return (types_ && i < count_) ? types_[i].dim : 0; }
+    // Comma-separated child roles this type accepts ("" = none). The UI reads
+    // this per-type to know which modules show a "+ add child" affordance and
+    // what role the add-picker should offer — replacing the old hardcoded
+    // list of container type names in app.js.
+    static const char* typeAcceptsChildRoles(uint8_t i) { return (types_ && i < count_) ? types_[i].acceptsChildRoles : ""; }
 
 private:
     struct TypeEntry {
@@ -140,6 +152,7 @@ private:
         const char* docPath;
         const char* tags;
         uint8_t dim;  // 0 = N/A; 1/2/3 for types whose probe.dimensions() returns a Dim
+        const char* acceptsChildRoles;  // comma-separated roles this type accepts as children; "" = none
     };
 
     static inline TypeEntry* types_ = nullptr;

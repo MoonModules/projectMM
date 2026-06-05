@@ -130,8 +130,9 @@ body {
     align-items: flex-start;
 }
 
-/* Side nav: a static left column on wide screens. The hamburger toggles the
-   body.nav-open class — see the wide-screen and <820px rules below. */
+/* Side nav: a static left column on wide screens (always visible — no toggle
+   needed, so the hamburger is hidden here; see #nav-toggle below). On <820px
+   it becomes a slide-in drawer the hamburger opens (see the @media block). */
 #nav {
     position: sticky;
     top: 44px;
@@ -145,10 +146,9 @@ body {
     overflow-y: auto;
 }
 
-/* Wide screens: nav shown by default; body.nav-open collapses it. */
-body.nav-open #nav {
-    display: none;
-}
+/* Wide screens: the nav is permanently present, so the hamburger is redundant
+   chrome — hide it. It reappears only at <820px where the nav is a drawer. */
+#nav-toggle { display: none; }
 
 #nav-overlay { display: none; }
 
@@ -724,6 +724,9 @@ body.nav-open #nav {
 @media (max-width: 820px) {
     .main-area { padding: 8px; }
     .card-children { margin-left: 6px; }
+
+    /* Narrow screens: the nav is a drawer, so the hamburger is needed again. */
+    #nav-toggle { display: revert; }
 
     /* Narrow screens: the nav is a slide-in drawer, hidden until the hamburger
        opens it. body.nav-open shows the drawer over a dimming overlay. */

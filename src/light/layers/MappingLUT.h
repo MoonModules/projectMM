@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/types.h"
+#include "light/light_types.h"  // nrOfLightsType
 #include "platform/platform.h"
 
 #include <cstring>

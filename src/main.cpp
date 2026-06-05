@@ -1,6 +1,7 @@
 #include "core/Scheduler.h"
 #include "light/layers/Layers.h"
 #include "light/layouts/GridLayout.h"
+#include "light/layouts/SphereLayout.h"
 #include "light/effects/LinesEffect.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/NoiseEffect.h"
@@ -14,11 +15,11 @@
 #include "light/effects/SpiralEffect.h"
 #include "light/effects/RipplesEffect.h"
 #include "light/effects/LavaLampEffect.h"
+#include "light/effects/GameOfLifeEffect.h"
 #include "light/modifiers/MirrorModifier.h"
 #include "light/drivers/ArtNetSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
 #include "core/HttpServerModule.h"
-#include "core/PreviewFrame.h"  // used directly here; HttpServerModule.h no longer brings it transitively
 #include "core/SystemModule.h"
 #include "core/BoardModule.h"
 #include "core/FirmwareUpdateModule.h"
@@ -43,6 +44,7 @@ static void registerModuleTypes() {
     // if-constexpr when present — EffectBase and ModifierBase both expose one,
     // so the UI's 📏/🟦/🧊 chip lights up without any per-domain wrapper.
     mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout", "light/layouts/GridLayout.md");
+    mm::ModuleFactory::registerType<mm::SphereLayout>("SphereLayout", "light/layouts/SphereLayout.md");
     mm::ModuleFactory::registerType<mm::LinesEffect>("LinesEffect", "light/effects/LinesEffect.md");
     mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect", "light/effects/RainbowEffect.md");
     mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect", "light/effects/NoiseEffect.md");
@@ -56,6 +58,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::SpiralEffect>("SpiralEffect", "light/effects/SpiralEffect.md");
     mm::ModuleFactory::registerType<mm::RipplesEffect>("RipplesEffect", "light/effects/RipplesEffect.md");
     mm::ModuleFactory::registerType<mm::LavaLampEffect>("LavaLampEffect", "light/effects/LavaLampEffect.md");
+    mm::ModuleFactory::registerType<mm::GameOfLifeEffect>("GameOfLifeEffect", "light/effects/GameOfLifeEffect.md");
     mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier", "light/modifiers/MirrorModifier.md");
     mm::ModuleFactory::registerType<mm::ArtNetSendDriver>("ArtNetSendDriver", "light/drivers/ArtNetSendDriver.md");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers/PreviewDriver.md");
@@ -83,7 +86,7 @@ static void printModuleMetrics(mm::MoonModule* mod, int depth) {
     }
 }
 
-void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gridH, uint16_t httpPort) {
+void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     registerModuleTypes();
     mm::Scheduler scheduler;
 
@@ -169,11 +172,11 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
         improvModule->markWiredByCode();
     }
 
-    // Layouts: top-level container; one or more layouts. Today one GridLayout.
+    // Layouts: top-level container; one or more layouts. Today one GridLayout,
+    // which self-initialises to defaultGridSize (persistence overlays any saved
+    // size before setup()). No boot-time dimensions threaded in here.
     auto* layouts = static_cast<mm::Layouts*>(mm::ModuleFactory::create("Layouts"));
     auto* grid = static_cast<mm::GridLayout*>(mm::ModuleFactory::create("GridLayout"));
-    grid->width = gridW;
-    grid->height = gridH;
     layouts->addChild(grid);
 
     // Layers: top-level container; one or more layers, each rendering
@@ -199,19 +202,26 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
 
     auto* artnet = mm::ModuleFactory::create("ArtNetSendDriver");
     drivers->addChild(artnet);  // name = "ArtNetSend" (factory default) — disambiguates from a future ArtNetReceive
+    artnet->markWiredByCode();
 
-    auto* previewFrame = new mm::PreviewFrame();
     auto* preview = static_cast<mm::PreviewDriver*>(mm::ModuleFactory::create("PreviewDriver"));
-    // PreviewDriver reads physical dimensions from the active Layer at frame
-    // time (via Drivers' setLayer wiring) so runtime grid resizes show in the
-    // preview header.
-    preview->setPreviewFrame(previewFrame);
+    // PreviewDriver reads the active Layer (via Drivers' setLayer wiring) for the
+    // light positions and the sparse driver buffer it streams; it owns its own
+    // scratch buffers, so no externally-owned frame is needed.
     drivers->addChild(preview);
+    // These two drivers are wired by code here (preview gets its broadcaster set
+    // below, once httpServer exists; ArtNet its IP). Mark them wired-by-code so a
+    // persistence load can't replace the wired instances with fresh factory ones
+    // that lost that wiring — same protection BoardModule / ImprovProvisioning use.
+    preview->markWiredByCode();
 
     auto* httpServer = static_cast<mm::HttpServerModule*>(mm::ModuleFactory::create("HttpServerModule"));
     httpServer->port = httpPort;
     httpServer->setScheduler(&scheduler);
-    httpServer->setPreviewFrame(previewFrame);
+    // PreviewDriver pushes the coordinate table + per-frame RGB to the HTTP
+    // server's WS broadcaster (HttpServerModule is-a BinaryBroadcaster). Light
+    // owns the preview wire format end to end; core just writes the bytes.
+    preview->setBroadcaster(httpServer);
 
     // Register top-level modules with scheduler (scheduler deletes on teardown).
     // Order matters: filesystem first (load hook runs before any module's setup),
@@ -291,5 +301,4 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
 
     std::printf("\nShutting down.\n");
     scheduler.teardown();
-    delete previewFrame;
 }

@@ -84,6 +84,23 @@ jobs:
           # Bump the suffix when changing the IDF version to invalidate.
           key: esp-idf-v6.1-dev-${{ runner.os }}-v1
 
+      # The release-channel tag burned into the binary as MM_RELEASE (shown by
+      # SystemModule alongside the semver). Same resolution as the release
+      # job's "Resolve effective tag" step — kept here because this build job
+      # runs before that one. workflow_dispatch tag wins; main push → latest;
+      # a vX.Y.Z tag push → that tag.
+      - name: Resolve release tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          IS_MAIN: ${{ github.ref == 'refs/heads/main' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_TAG" ]; then echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+          elif [ "$IS_MAIN" = "true" ]; then echo "tag=latest" >> "$GITHUB_OUTPUT"
+          else echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"; fi
+
       - name: Build firmware
         uses: espressif/esp-idf-ci-action@v1
         with:
@@ -99,8 +116,8 @@ jobs:
           path: 'esp32'
           # We run our own builder (not the action's default `idf.py build`)
           # so the sdkconfig fragments and EXCLUDE_COMPONENTS go through the
-          # same code path as local builds.
-          command: python ../scripts/build/build_esp32.py --firmware ${{ matrix.firmware }}
+          # same code path as local builds. --release burns the channel tag in.
+          command: python ../scripts/build/build_esp32.py --firmware ${{ matrix.firmware }} --release "${{ steps.tag.outputs.tag }}"
 
       - name: Stage release artifacts
         run: |

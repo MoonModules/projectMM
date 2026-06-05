@@ -19,11 +19,15 @@
     },
     {
       "name": "add-grid",
-      "description": "Add a GridLayout child to Layouts (default 16x16x1).",
+      "description": "Add a 128x128 GridLayout child to Layouts. Set explicitly (the module default is 16x16x1) so the tick is above the host's microsecond clock resolution — a 16x16 grid renders in <1us on desktop, flooring tick to 0.",
       "op": "add_module",
       "id": "Grid",
       "type": "GridLayout",
-      "parent_id": "Layouts"
+      "parent_id": "Layouts",
+      "props": {
+        "width": 128,
+        "height": 128
+      }
     },
     {
       "name": "add-layer",
@@ -56,7 +60,7 @@
     },
     {
       "name": "add-artnet",
-      "description": "Add ArtNetSendDriver and run the bounded FPS measurement (must stay at >=80% of the rated FPS for grid size 16x16).",
+      "description": "Add ArtNetSendDriver and run the bounded FPS measurement (expected to stay at >=80% of the rated FPS for the 128x128 grid this scenario builds; min_pct needs a live baseline, so it gates only on hardware and is skipped with a WARN in the desktop runner).",
       "op": "add_module",
       "id": "ArtNet",
       "type": "ArtNetSendDriver",
@@ -79,7 +83,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            35,
+            0,
             132
           ],
           "free_heap": [
@@ -92,7 +96,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-03"
+            "2026-06-05"
           ]
         }
       }

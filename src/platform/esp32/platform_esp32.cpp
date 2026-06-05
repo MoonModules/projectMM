@@ -687,7 +687,48 @@ WriteResult TcpConnection::writeChunks(const WriteChunk* chunks, int count) {
     }
     if (n == 0) return WriteResult::WouldBlock;
     if (static_cast<size_t>(n) == total) return WriteResult::Complete;
-    return WriteResult::Partial;
+
+    // Partial: some bytes of this WS frame went out, so we MUST finish the rest
+    // — a half-sent frame corrupts the stream and the caller would otherwise
+    // drop the connection. This happens under backpressure when the link is
+    // saturated (e.g. ArtNet + a large preview frame on a slow 128×128 tick):
+    // the lwIP send buffer can't take the whole frame at once but drains in
+    // microseconds. Drain the unsent tail with a bounded retry loop; only if it
+    // still can't complete (a genuinely stuck socket) do we report Partial so
+    // the caller closes. lwIP exposes no free-TX-space query (SO_SNDBUF is
+    // unimplemented), so a pre-check isn't possible — finishing the write is the
+    // way to keep the stream intact without dropping.
+    size_t sent = static_cast<size_t>(n);
+    // Small cap: a partial tail (a few KB) drains in 1-2 ms as TCP ACKs arrive;
+    // 8 ms is plenty for a transient. A genuinely saturated link blows past it —
+    // then we give up (report Partial → caller closes, browser reconnects),
+    // rather than stall the render tick. Bounds the worst-case tick hit to ~8 ms.
+    constexpr int kMaxDrainTries = 8;    // each yields up to 1ms
+    for (int tries = 0; sent < total && tries < kMaxDrainTries; ) {
+        // Locate the chunk + offset where `sent` lands, write its remaining tail.
+        size_t acc = 0;
+        const uint8_t* p = nullptr; size_t remain = 0;
+        for (int i = 0; i < count; i++) {
+            if (sent < acc + chunks[i].len) {
+                size_t off = sent - acc;
+                p = chunks[i].data + off;
+                remain = chunks[i].len - off;
+                break;
+            }
+            acc += chunks[i].len;
+        }
+        if (!p) break;  // shouldn't happen (sent < total)
+        ssize_t w = lwip_write(fd_, p, remain);
+        if (w > 0) {
+            sent += static_cast<size_t>(w);
+        } else if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            vTaskDelay(pdMS_TO_TICKS(1));   // buffer full — let it drain
+            tries++;
+        } else {
+            return WriteResult::Error;       // real socket error
+        }
+    }
+    return (sent == total) ? WriteResult::Complete : WriteResult::Partial;
 }
 
 void TcpConnection::close() {

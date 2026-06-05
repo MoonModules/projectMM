@@ -18,7 +18,7 @@ System-level diagnostics and device identity. Always loaded, always visible in t
 - `deviceName` (text, default `MM-XXXX` where XXXX = last 4 hex of MAC) — device name. Used as hostname for mDNS, AP SSID, and UI display. Persisted after item 11.
 
 **Static (set at boot):**
-- `version` (read-only) — projectMM version from library.json
+- `version` (read-only) — semver from library.json (`MM_VERSION`), plus the release channel in parentheses when the build was published under one: `1.0.0-rc2 (latest)`, `1.0.0 (v1.0.0)`. The channel (`MM_RELEASE`) is burned in by `release.yml` via `build_esp32.py --release <tag>`; a local / dev build has no channel and shows the bare semver. Semver answers *what code*; the channel answers *which release this device was flashed from* — a moving `latest` build and a tagged release can share a semver but differ in channel. Desktop builds show the bare semver today (the desktop packager doesn't set the channel).
 - `build` (read-only) — build date/time
 - `firmware` (read-only) — build-time firmware variant key from `src/core/build_info.h` (`MM_FIRMWARE_NAME`): `esp32`, `esp32-eth`, `esp32-eth-wifi`, `esp32s3-n16r8` for the shipped firmware variants; `desktop-macos-arm64` / `desktop-windows-x64` for packaged desktop binaries; `desktop-dev` for unpackaged local desktop builds. Identifies which release asset matches the device — the same key appears in the firmware filenames published by `release.yml`. "Firmware" is the compiled binary; the physical board the firmware runs on lives on the [BoardModule](BoardModule.md) child (code-wired in `main.cpp`, mirrors how Improv sits under Network).
 - `chip` (read-only) — chip model (ESP32, ESP32-S3, etc.)

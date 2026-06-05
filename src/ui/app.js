@@ -4,6 +4,7 @@
 // installer (first flash via Web Serial). Module loading is deferred by
 // default; entry-point is the WS init at the bottom — no ordering surprises.
 import { installPicker } from "/install-picker.js";
+import { preview } from "/preview3d.js";
 
 // Sections (top to bottom):
 //   1. State + storage
@@ -13,9 +14,9 @@ import { installPicker } from "/install-picker.js";
 //   5. State patching (no-rebuild contract): updateValues() + updateModuleControls()
 //   6. Type picker
 //   7. Drag-to-reorder (HTML5 DnD on desktop; touchstart-gated on mobile)
-//   8. 3D WebGL preview (sticky + scroll-shrink, sparse vertex buffer, frame cache)
-//   9. Status bar wiring (device name, sys stats, theme, reboot)
-//  10. Boot
+//   (3D WebGL preview lives in preview3d.js — imported as `preview`)
+//   8. Status bar wiring (device name, sys stats, theme, reboot)
+//   9. Boot
 //
 // Load-bearing invariants:
 //   - dragTs[mid:key] cooldown: ignore WS pushes for a control the user has touched
@@ -87,7 +88,7 @@ function connectWs() {
     ws.onmessage = (e) => {
         if (wsPaused) return;
         if (e.data instanceof ArrayBuffer) {
-            renderPreviewFrame(e.data);
+            preview.onBinaryMessage(e.data);
             return;
         }
         try {
@@ -167,8 +168,8 @@ async function init() {
         document.getElementById("main").textContent = "Error: " + err.message;
     }
     connectWs();
-    initWebGL();
-    setupPreviewShrink();
+    preview.init();
+    preview.setupShrink();
 }
 
 async function sendControl(moduleName, controlName, value) {
@@ -561,9 +562,11 @@ function createCard(mod, depth) {
     // Enable checkbox joins the right-hand action cluster, before ✎/×.
     title.appendChild(enabled);
 
-    // Action buttons for reorderable children (Effect/Modifier roles).
-    // Top-level modules aren't reorderable in this iteration (fixed in main.cpp).
-    if (depth > 0 && (mod.role === "effect" || mod.role === "modifier")) {
+    // Delete / replace buttons for user-managed children (any role a container
+    // accepts, minus modules that opted out via userEditable=false). Top-level
+    // modules are fixed in main.cpp; code-wired children declare userEditable
+    // false or carry a role no container accepts. See isUserEditableChild.
+    if (isUserEditableChild(mod, depth)) {
         const actions = createActionButtons(mod);
         title.appendChild(actions);
     }
@@ -709,7 +712,9 @@ function createCard(mod, depth) {
     }
 
     // -- Drag-to-reorder (HTML5 DnD on desktop; touchstart-gated on mobile) --
-    if (depth > 0 && (mod.role === "effect" || mod.role === "modifier")) {
+    // Same gate as the delete/replace buttons: a user-managed child is also
+    // reorderable within its parent.
+    if (isUserEditableChild(mod, depth)) {
         attachDragHandlers(card, mod);
     }
 
@@ -842,23 +847,54 @@ function hasNestedChildren(mod) {
     return (mod.children && mod.children.length > 0) || acceptsNewChildren(mod);
 }
 
-// Whether the UI's "+ add child" affordance applies to this parent. Light-pipeline
-// containers only — Layers → layer, Layer → effect+modifier, Drivers → driver,
-// Layouts → layout. System modules like Network that host a code-wired child
-// (Improv) are deliberately NOT in this list — the child is fixed-shape.
-function acceptsNewChildren(mod) {
-    return mod.type === "Layers" ||
-           mod.type === "Layer"  ||
-           mod.type === "Drivers" ||
-           mod.type === "Layouts";
+// Roles this parent accepts as user-added children, from the device's
+// `acceptsChildRoles` (per-type in /api/types — e.g. Layer → "effect,modifier").
+// Domain-neutral: the UI no longer hardcodes which module types are containers;
+// the device declares it via MoonModule::acceptsChildRoles(). "" → [] (accepts
+// none), which is also the default for modules whose type isn't loaded yet.
+function rolesAcceptedBy(parentMod) {
+    const t = availableTypes.find(t => t.name === parentMod.type);
+    const csv = (t && t.acceptsChildRoles) ? t.acceptsChildRoles : "";
+    return csv ? csv.split(",") : [];
 }
 
-function rolesAcceptedBy(parentMod) {
-    if (parentMod.type === "Layers")  return ["layer"];
-    if (parentMod.type === "Layer")   return ["effect", "modifier"];
-    if (parentMod.type === "Drivers") return ["driver"];
-    if (parentMod.type === "Layouts") return ["layout"];
-    return [];
+// Whether the "+ add child" affordance applies — derived from acceptsChildRoles
+// being non-empty, so there's a single source of truth (no separate list).
+function acceptsNewChildren(mod) {
+    return rolesAcceptedBy(mod).length > 0;
+}
+
+// The set of child roles ANY loaded type accepts — the union of every type's
+// acceptsChildRoles. A module is "user-managed as a child" iff its role is in
+// this set, which is how the UI decides to show delete/replace/drag without
+// hardcoding role names. Code-wired children (ImprovProvisioning, BoardModule
+// — roles no container declares) correctly fall outside it.
+function allAcceptedChildRoles() {
+    const roles = new Set();
+    for (const t of availableTypes) {
+        const csv = t.acceptsChildRoles || "";
+        if (csv) csv.split(",").forEach(r => roles.add(r));
+    }
+    return roles;
+}
+
+// Whether the UI shows delete / replace / drag for this module. True when it's
+// a nested module (depth > 0) whose role is one some container accepts AND it
+// hasn't opted out via the device's userEditable=false (e.g. PreviewDriver).
+// Replaces the old hardcoded `role === "effect" || "modifier"` gate — now any
+// add-accepted role (driver, layout, …) is editable, and the child itself can
+// veto via userEditable.
+//
+// We test mod.role against the UNION of all containers' acceptsChildRoles, not
+// against this module's specific parent. That's exact while the role→container
+// mapping is 1:1 (effect→Layer, driver→Drivers, layout→Layouts, layer→Layers) —
+// a child of an add-accepted role is always under the one container that
+// accepts it. If a role ever becomes accepted by more than one container, this
+// would need the parent threaded in to scope the check to the actual parent.
+function isUserEditableChild(mod, depth) {
+    return depth > 0
+        && mod.userEditable !== false
+        && allAcceptedChildRoles().has(mod.role);
 }
 
 // ---------------------------------------------------------------------------
@@ -1755,373 +1791,12 @@ function attachDragHandlers(card, mod) {
 }
 
 // ---------------------------------------------------------------------------
-// 8. 3D WebGL preview
-// ---------------------------------------------------------------------------
-
-let gl = null;
-let glProgram = null;
-let glBuffer = null;
-let glLocs = null;          // cached attrib/uniform locations
-let glLoopRunning = false;  // continuous rAF render loop active
-const _cam = JSON.parse(localStorage.getItem("mm_cam") || "null");
-let camTheta    = _cam ? _cam.t : Math.PI;
-let camPhi      = _cam ? _cam.p : 0.4;
-let camDist     = _cam ? _cam.d : 2.5;
-let camAutoFit  = !_cam;   // fit on first frame when no saved position
-function saveCam() { localStorage.setItem("mm_cam", JSON.stringify({t: camTheta, p: camPhi, d: camDist})); }
-let lastVerts = null;        // cached vertex array for orbit-without-server-frame
-let lastVertCount = 0;
-let lastMaxDim = 1;
-let vertsBuf = null;         // reused worst-case Float32Array; grows but never shrinks
-
-function initWebGL() {
-    const canvas = document.getElementById("preview");
-    if (!canvas) return;
-    gl = canvas.getContext("webgl", {alpha: false});
-    if (!gl) return;
-
-    const vsrc = `
-        attribute vec3 aPos;
-        attribute vec3 aCol;
-        varying vec3 vCol;
-        uniform mat4 uMVP;
-        uniform float uPointSize;
-        void main() {
-            vCol = aCol;
-            gl_Position = uMVP * vec4(aPos, 1.0);
-            // Depth-corrected point size — closer LEDs render larger
-            gl_PointSize = uPointSize / gl_Position.w;
-        }
-    `;
-    const fsrc = `
-        precision mediump float;
-        varying vec3 vCol;
-        void main() {
-            float d = length(gl_PointCoord - vec2(0.5));
-            if (d > 0.5) discard;
-            float a = 1.0 - smoothstep(0.25, 0.5, d);
-            // Gamma 0.7 lifts mid-greys so dim effects stay readable in the preview; not sRGB-correct
-            vec3 bright = pow(vCol, vec3(0.7));
-            gl_FragColor = vec4(bright * a, a);
-        }
-    `;
-
-    const vs = gl.createShader(gl.VERTEX_SHADER);
-    gl.shaderSource(vs, vsrc); gl.compileShader(vs);
-    const fs = gl.createShader(gl.FRAGMENT_SHADER);
-    gl.shaderSource(fs, fsrc); gl.compileShader(fs);
-    glProgram = gl.createProgram();
-    gl.attachShader(glProgram, vs); gl.attachShader(glProgram, fs);
-    gl.linkProgram(glProgram); gl.useProgram(glProgram);
-
-    glBuffer = gl.createBuffer();
-    glLocs = {
-        aPos:      gl.getAttribLocation(glProgram,  "aPos"),
-        aCol:      gl.getAttribLocation(glProgram,  "aCol"),
-        uMVP:      gl.getUniformLocation(glProgram, "uMVP"),
-        uPointSize:gl.getUniformLocation(glProgram, "uPointSize"),
-    };
-    gl.enable(gl.DEPTH_TEST);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-
-    // Orbit controls (mouse + touch)
-    let dragging = false, lastX = 0, lastY = 0;
-    canvas.addEventListener("mousedown", (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
-    canvas.addEventListener("mousemove", (e) => {
-        if (!dragging) return;
-        camTheta += (e.clientX - lastX) * 0.01;
-        camPhi = Math.max(-1.5, Math.min(1.5, camPhi - (e.clientY - lastY) * 0.01));
-        lastX = e.clientX; lastY = e.clientY;
-        redrawCached();
-    });
-    canvas.addEventListener("mouseup",    () => { dragging = false; saveCam(); });
-    canvas.addEventListener("mouseleave", () => { dragging = false; saveCam(); });
-    canvas.addEventListener("wheel", (e) => {
-        camDist = Math.max(0.5, Math.min(10, camDist + e.deltaY * 0.005));
-        e.preventDefault();
-        redrawCached();
-        saveCam();
-    }, {passive: false});
-
-    // Touch: single-finger orbit, two-finger pinch zoom. touch-action: none on
-    // #preview keeps the browser's own scroll/zoom from firing first.
-    let pinchDist = 0;
-    const touchDistance = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-
-    canvas.addEventListener("touchstart", (e) => {
-        if (e.touches.length === 1) {
-            dragging = true;
-            lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
-        } else if (e.touches.length >= 2) {
-            dragging = false;  // hand off from orbit to pinch
-            pinchDist = touchDistance(e.touches[0], e.touches[1]);
-            e.preventDefault();
-        }
-    }, {passive: false});
-    canvas.addEventListener("touchmove", (e) => {
-        if (e.touches.length === 1 && dragging) {
-            const t = e.touches[0];
-            camTheta += (t.clientX - lastX) * 0.01;
-            camPhi = Math.max(-1.5, Math.min(1.5, camPhi - (t.clientY - lastY) * 0.01));
-            lastX = t.clientX; lastY = t.clientY;
-            redrawCached();
-            e.preventDefault();
-        } else if (e.touches.length >= 2 && pinchDist > 0) {
-            // Pinch zoom: ratio of finger-distance change scales camDist
-            // (fingers apart → zoom in / camDist down). Guard against the
-            // degenerate case where both fingers report identical coords
-            // (d === 0): division would produce Infinity and snap camDist
-            // to its clamp boundary. Skip the update and let the next move
-            // produce a sane d.
-            const d = touchDistance(e.touches[0], e.touches[1]);
-            if (d > 0) {
-                const ratio = pinchDist / d;
-                camDist = Math.max(0.5, Math.min(10, camDist * ratio));
-                pinchDist = d;
-                redrawCached();
-            }
-            e.preventDefault();
-        }
-    }, {passive: false});
-    canvas.addEventListener("touchend", (e) => {
-        if (e.touches.length === 0) { dragging = false; pinchDist = 0; saveCam(); }
-        // 2→1 touches: stay in pinch (let user finish lifting); pinchDist stays
-        // valid for the remaining finger? No — drop pinch, but don't start
-        // orbit either, to avoid a jump when one finger lifts.
-        else if (e.touches.length === 1) { pinchDist = 0; dragging = false; saveCam(); }
-    });
-
-}
-
-// Scroll-shrink preview: 0..1 ratio over 0..300px of main scroll.
-function setupPreviewShrink() {
-    const canvas = document.getElementById("preview");
-    if (!canvas) return;
-    let naturalMaxH = null;
-    let ticking = false;
-    const SHRINK_OVER = 300;
-    function apply() {
-        ticking = false;
-        if (!naturalMaxH) {
-            naturalMaxH = canvas.getBoundingClientRect().height || (window.innerHeight * 0.5);
-        }
-        const r = Math.min(1, Math.max(0, window.scrollY / SHRINK_OVER));
-        canvas.style.maxHeight = Math.round(naturalMaxH * (1 - r * 0.5)) + "px";
-        if (lastVerts) redrawCached();
-    }
-    window.addEventListener("scroll", () => {
-        if (!ticking) { requestAnimationFrame(apply); ticking = true; }
-    }, {passive: true});
-    window.addEventListener("resize", () => {
-        naturalMaxH = null;
-        canvas.style.maxHeight = "";
-        if (lastVerts) redrawCached();
-    });
-}
-
-// Read the Preview module's "decompress" control from the latest state push.
-function previewDecompressOn() {
-    if (!state || !state.modules) return false;
-    let found = false;
-    (function walk(mods) {
-        for (const m of mods) {
-            // Match on type only — the name is user-editable, the type is not.
-            if (m.type === "PreviewDriver") {
-                const c = (m.controls || []).find(c => c.name === "decompress");
-                if (c) found = !!c.value;
-            }
-            if (m.children) walk(m.children);
-        }
-    })(state.modules);
-    return found;
-}
-
-function renderPreviewFrame(buf) {
-    if (!gl) initWebGL();
-    if (!gl) return;
-
-    // 13-byte header: [0x02][dw16][dh16][dd16][ow16][oh16][od16], little-endian.
-    // dw/dh/dd = dimensions of the data in this frame; ow/oh/od = original grid.
-    if (buf.byteLength < 13) return;
-    const view = new DataView(buf);
-    if (view.getUint8(0) !== 0x02) return;
-    const dw = view.getUint16(1, true);
-    const dh = view.getUint16(3, true);
-    const dd = view.getUint16(5, true);
-    const ow = view.getUint16(7, true);
-    const oh = view.getUint16(9, true);
-    const od = view.getUint16(11, true);
-    if (dw === 0 || dh === 0 || dd === 0) return;
-    const total = dw * dh * dd;
-    if (buf.byteLength < 13 + total * 3) return;
-    const pixels = new Uint8Array(buf, 13);
-
-    // Decompress: when on, reconstruct the original grid by block-replicating
-    // each received voxel across its stride×stride×stride original cells, so the
-    // preview shows the same voxel count as the real layout. When off, render the
-    // downsampled cloud directly.
-    const decompress = previewDecompressOn()
-        && ow >= dw && oh >= dh && od >= dd
-        && (ow > dw || oh > dh || od > dd);
-    const w = decompress ? ow : dw;
-    const h = decompress ? oh : dh;
-    const d = decompress ? od : dd;
-
-    const colorAt = decompress
-        // map original cell (ix,iy,iz) → nearest downsampled voxel
-        ? (ix, iy, iz) => {
-              const sx = Math.min(dw - 1, (ix * dw / ow) | 0);
-              const sy = Math.min(dh - 1, (iy * dh / oh) | 0);
-              const sz = Math.min(dd - 1, (iz * dd / od) | 0);
-              return (sz * dh * dw + sy * dw + sx) * 3;
-          }
-        : (ix, iy, iz) => (iz * dh * dw + iy * dw + ix) * 3;
-
-    // Single-pass: reuse a module-scope buffer sized to the worst-case voxel
-    // count; reallocate only when the grid grows. No pre-pass to count
-    // non-black — eliminates double iteration / blank-frame race on sparse effects.
-    const maxDim = Math.max(w, h, d);
-    const needed = w * h * d * 6;
-    if (!vertsBuf || vertsBuf.length < needed) vertsBuf = new Float32Array(needed);
-    let vi = 0;
-    for (let iz = 0; iz < d; iz++) {
-        for (let iy = 0; iy < h; iy++) {
-            for (let ix = 0; ix < w; ix++) {
-                const idx = colorAt(ix, iy, iz);
-                const r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
-                if (!(r | g | b)) continue;
-                vertsBuf[vi++] = (ix / maxDim) - 0.5 * w / maxDim;
-                vertsBuf[vi++] = (iy / maxDim) - 0.5 * h / maxDim;
-                vertsBuf[vi++] = (iz / maxDim) - 0.5 * d / maxDim;
-                vertsBuf[vi++] = r / 255;
-                vertsBuf[vi++] = g / 255;
-                vertsBuf[vi++] = b / 255;
-            }
-        }
-    }
-    const vertCount = vi / 6;
-
-    if (vi === 0) return;  // all-black frame — don't update lastVerts, let rAF loop idle
-    lastVerts = vertsBuf.subarray(0, vi);  // trim zero-filled tail — bufferData uploads only live verts
-    lastVertCount = vertCount;
-    lastMaxDim = maxDim;
-
-    if (camAutoFit) {
-        camAutoFit = false;
-        const canvas = document.getElementById("preview");
-        const fov = 0.8;
-        const aspect = canvas ? canvas.clientWidth / Math.max(1, canvas.clientHeight) : 1;
-        const halfExtent = 0.5 * Math.sqrt(w * w + h * h + d * d) / maxDim;
-        const fitDist = halfExtent / Math.tan(fov / 2) * (aspect < 1 ? 1 / aspect : 1) * 1.1;
-        camDist = Math.max(0.5, Math.min(10, fitDist));
-    }
-
-    if (!glLoopRunning) startRenderLoop();
-}
-
-function redrawCached() {
-    if (!lastVerts) return;
-    if (!glLoopRunning) startRenderLoop();
-}
-
-function startRenderLoop() {
-    if (glLoopRunning) return;
-    glLoopRunning = true;
-    function loop() {
-        if (!lastVerts) { glLoopRunning = false; return; }
-        drawVerts();
-        requestAnimationFrame(loop);
-    }
-    requestAnimationFrame(loop);
-}
-
-function drawVerts() {
-    if (!gl || !lastVerts || !glLocs) return;
-    const canvas = document.getElementById("preview");
-    const cw = Math.round(canvas.clientWidth), ch = Math.round(canvas.clientHeight);
-    if (canvas.width !== cw || canvas.height !== ch) {
-        canvas.width = cw;
-        canvas.height = ch;
-    }
-    gl.viewport(0, 0, canvas.width, canvas.height);
-
-    const cx = camDist * Math.cos(camPhi) * Math.sin(camTheta);
-    const cy = camDist * Math.sin(camPhi);
-    const cz = camDist * Math.cos(camPhi) * Math.cos(camTheta);
-    const mvp = buildMVP(cx, cy, cz, canvas.width / Math.max(1, canvas.height));
-
-    // alpha:false context — clear to page background colour so the canvas
-    // blends seamlessly in both light and dark themes.
-    const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg-0").trim();
-    const m = bg.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
-    if (m) gl.clearColor(parseInt(m[1],16)/255, parseInt(m[2],16)/255, parseInt(m[3],16)/255, 1.0);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, glBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, lastVerts, gl.DYNAMIC_DRAW);
-
-    gl.enableVertexAttribArray(glLocs.aPos);
-    gl.enableVertexAttribArray(glLocs.aCol);
-    gl.vertexAttribPointer(glLocs.aPos, 3, gl.FLOAT, false, 24, 0);
-    gl.vertexAttribPointer(glLocs.aCol, 3, gl.FLOAT, false, 24, 12);
-
-    gl.uniformMatrix4fv(glLocs.uMVP, false, mvp);
-    const pointSize = Math.max(2, canvas.width * 0.8 / lastMaxDim);
-    gl.uniform1f(glLocs.uPointSize, pointSize);
-
-    gl.drawArrays(gl.POINTS, 0, lastVertCount);
-}
-
-function buildMVP(ex, ey, ez, aspect) {
-    const fLen = Math.sqrt(ex*ex + ey*ey + ez*ez) || 1;
-    const fx = -ex/fLen, fy = -ey/fLen, fz = -ez/fLen;
-    // Right = cross(forward, (0,1,0))
-    let rx = fz, ry = 0, rz = -fx;
-    const rLen = Math.sqrt(rx*rx + ry*ry + rz*rz) || 1;
-    rx /= rLen; ry /= rLen; rz /= rLen;
-    // Up = cross(right, forward)
-    const ux = ry*fz - rz*fy, uy = rz*fx - rx*fz, uz = rx*fy - ry*fx;
-
-    const view = [
-        rx, ux, -fx, 0,
-        ry, uy, -fy, 0,
-        rz, uz, -fz, 0,
-        -(rx*ex+ry*ey+rz*ez), -(ux*ex+uy*ey+uz*ez), (fx*ex+fy*ey+fz*ez), 1
-    ];
-
-    const near = 0.1, far = 50, fov = 0.8;
-    const f = 1 / Math.tan(fov / 2);
-    const proj = [
-        f/aspect, 0, 0, 0,
-        0, f, 0, 0,
-        0, 0, (far+near)/(near-far), -1,
-        0, 0, 2*far*near/(near-far), 0
-    ];
-
-    const m = new Float32Array(16);
-    for (let i = 0; i < 4; i++) {
-        for (let j = 0; j < 4; j++) {
-            m[j*4+i] = 0;
-            for (let k = 0; k < 4; k++) {
-                m[j*4+i] += proj[k*4+i] * view[j*4+k];
-            }
-        }
-    }
-    return m;
-}
-
-// ---------------------------------------------------------------------------
-// 9. Status bar wiring
+// 8. Status bar wiring
 // ---------------------------------------------------------------------------
 
 function setupStatusBarButtons() {
     document.getElementById("preview-reset")?.addEventListener("click", () => {
-        localStorage.removeItem("mm_cam");
-        camTheta = Math.PI;
-        camPhi = 0.4;
-        camAutoFit = true;
-        if (lastVerts) redrawCached();
+        preview.resetCamera();
     });
 
     // Reboot: press once to arm, again to confirm — see armPressTwice. The glyph
@@ -2177,16 +1852,27 @@ function updateStatusBar() {
         }
     }
 
-    // System stats: "uptime · NN KB heap"
+    // System stats: "uptime · 🧠 NNK · 🧱 NNKB"
+    // 🧠 = internal-RAM free (heap progress total−used); 🧱 = largest contiguous
+    // internal-RAM block (the maxBlock control, already maxInternalAllocBlock).
+    // Both matter: free can be ample while fragmentation leaves no single block
+    // big enough for the next allocation.
     const uptimeCtrl = ctrls.find(c => c.name === "uptime");
     const heapCtrl = ctrls.find(c => c.name === "heap");
+    const blockCtrl = ctrls.find(c => c.name === "maxBlock");
     const statsEl = document.getElementById("sys-stats");
     if (statsEl) {
         const parts = [];
         if (uptimeCtrl) parts.push(uptimeCtrl.value);
         if (heapCtrl && heapCtrl.value !== undefined && heapCtrl.total) {
             const freeKb = Math.round((heapCtrl.total - heapCtrl.value) / 1024);
-            parts.push(freeKb + "K free");
+            parts.push("🧠 " + freeKb + "K");
+        }
+        // Skip on desktop, where the platform stub reports "0KB" (no real
+        // block measurement / unlimited heap) — same reason heap free above
+        // only shows when the heap progress control is present.
+        if (blockCtrl && blockCtrl.value && blockCtrl.value !== "0KB") {
+            parts.push("🧱 " + blockCtrl.value);
         }
         statsEl.textContent = parts.join(" · ");
     }
@@ -2210,7 +1896,7 @@ function updateStatusBar() {
 }
 
 // ---------------------------------------------------------------------------
-// 10. Boot
+// 9. Boot
 // ---------------------------------------------------------------------------
 
 document.addEventListener("DOMContentLoaded", init);

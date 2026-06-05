@@ -7,7 +7,6 @@
 #include "core/HttpServerModule.h"
 
 #include "core/Scheduler.h"
-#include "core/PreviewFrame.h"
 #include "core/ModuleFactory.h"
 #include "core/JsonUtil.h"
 #include "core/JsonSink.h"
@@ -49,11 +48,9 @@ void HttpServerModule::loop20ms() {
         return; // don't broadcast in same tick as accept (WebSocket needs time to process 101)
     }
 
-    // Broadcast preview frame if ready
-    if (previewFrame_ && previewFrame_->ready) {
-        broadcastPreviewFrame();
-        previewFrame_->ready = false;
-    }
+    // Binary frames (e.g. the 3D preview) are no longer polled here — their
+    // producer (PreviewDriver) pushes them via broadcastBinary() from its own
+    // loop. HttpServer owns only the transport, not the content.
 }
 
 void HttpServerModule::loop1s() {
@@ -129,6 +126,7 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         if (std::strcmp(path, "/") == 0) serveFile(conn, "index.html", "text/html");
         else if (std::strcmp(path, "/app.js") == 0) serveFile(conn, "app.js", "application/javascript");
         else if (std::strcmp(path, "/install-picker.js") == 0) serveFile(conn, "install-picker.js", "application/javascript");
+        else if (std::strcmp(path, "/preview3d.js") == 0) serveFile(conn, "preview3d.js", "application/javascript");
         else if (std::strcmp(path, "/style.css") == 0) serveFile(conn, "style.css", "text/css");
         else if (std::strcmp(path, "/moonlight-logo.png") == 0) serveFile(conn, "moonlight-logo.png", "image/png");
         else if (std::strcmp(path, "/api/state") == 0) serveState(conn);
@@ -289,13 +287,18 @@ void HttpServerModule::serveFile(platform::TcpConnection& conn, const char* file
         return;
     }
 
-    // Fall back to embedded data (ESP32 or when disk files not found)
+    // Fall back to embedded data (ESP32 or when disk files not found). The text
+    // assets are embedded gzipped (see embed_ui.cmake) and served with
+    // Content-Encoding: gzip — the browser inflates them. gzipped is false only
+    // for already-compressed binaries (the PNG), which are embedded raw.
     const uint8_t* data = nullptr;
     size_t dataLen = 0;
-    if (std::strcmp(filename, "index.html") == 0) { data = ui::indexHtml; dataLen = ui::indexHtmlLen; }
-    else if (std::strcmp(filename, "app.js") == 0) { data = ui::appJs; dataLen = ui::appJsLen; }
-    else if (std::strcmp(filename, "install-picker.js") == 0) { data = ui::installPickerJs; dataLen = ui::installPickerJsLen; }
-    else if (std::strcmp(filename, "style.css") == 0) { data = ui::styleCss; dataLen = ui::styleCssLen; }
+    bool gzipped = false;
+    if (std::strcmp(filename, "index.html") == 0) { data = ui::indexHtml; dataLen = ui::indexHtmlLen; gzipped = true; }
+    else if (std::strcmp(filename, "app.js") == 0) { data = ui::appJs; dataLen = ui::appJsLen; gzipped = true; }
+    else if (std::strcmp(filename, "install-picker.js") == 0) { data = ui::installPickerJs; dataLen = ui::installPickerJsLen; gzipped = true; }
+    else if (std::strcmp(filename, "preview3d.js") == 0) { data = ui::preview3dJs; dataLen = ui::preview3dJsLen; gzipped = true; }
+    else if (std::strcmp(filename, "style.css") == 0) { data = ui::styleCss; dataLen = ui::styleCssLen; gzipped = true; }
     else if (std::strcmp(filename, "moonlight-logo.png") == 0) { data = ui::logoPng; dataLen = ui::logoPngLen; }
 
     if (!data) {
@@ -308,10 +311,12 @@ void HttpServerModule::serveFile(platform::TcpConnection& conn, const char* file
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: %s\r\n"
         "Content-Length: %zu\r\n"
+        "%s"
         "Connection: close\r\n"
         "Cache-Control: no-cache\r\n"
         "\r\n",
-        contentType, dataLen);
+        contentType, dataLen,
+        gzipped ? "Content-Encoding: gzip\r\n" : "");
     conn.write(reinterpret_cast<const uint8_t*>(header), headerLen);
     conn.write(data, dataLen);
 }
@@ -364,6 +369,11 @@ void HttpServerModule::writeModuleJson(JsonSink& sink, MoonModule* mod) {
         static_cast<unsigned>(mod->classSize()),
         static_cast<unsigned>(mod->dynamicBytes()));
     writeStatus(sink, mod);
+    // userEditable: omit when true (the common case) to save bytes — the UI
+    // treats absent as editable, same convention as the control hidden/readonly
+    // flags. Emitted only for modules that opt out (e.g. PreviewDriver), so the
+    // UI hides their delete/replace affordance.
+    if (!mod->userEditable()) sink.append(",\"userEditable\":false");
     sink.append(",\"controls\":[");
     writeControls(sink, mod);
     sink.append("]");
@@ -783,6 +793,7 @@ void HttpServerModule::serveTypes(platform::TcpConnection& conn) {
         const char* docPath = ModuleFactory::typeDocPath(i);
         const char* tags = ModuleFactory::typeTags(i);
         uint8_t dim = ModuleFactory::typeDim(i);
+        const char* childRoles = ModuleFactory::typeAcceptsChildRoles(i);
         // displayNameFor returns a pointer into a static buffer shared
         // across calls, so copy it to the stack before another factory
         // call (or the next loop iteration) overwrites it.
@@ -790,10 +801,12 @@ void HttpServerModule::serveTypes(platform::TcpConnection& conn) {
         std::strncpy(displayName, ModuleFactory::displayNameFor(name, role), sizeof(displayName) - 1);
         displayName[sizeof(displayName) - 1] = 0;
         sink.appendf("%s{\"name\":\"%s\",\"displayName\":\"%s\",\"role\":\"%s\","
-                     "\"docPath\":\"%s\",\"tags\":\"%s\",\"dim\":%u,\"defaults\":{",
+                     "\"docPath\":\"%s\",\"tags\":\"%s\",\"dim\":%u,"
+                     "\"acceptsChildRoles\":\"%s\",\"defaults\":{",
                      first ? "" : ",", name, displayName, roleStr,
                      docPath ? docPath : "", tags ? tags : "",
-                     static_cast<unsigned>(dim));
+                     static_cast<unsigned>(dim),
+                     childRoles ? childRoles : "");
         writeTypeDefaults(sink, name);
         sink.append("}}");
         first = false;
@@ -1004,28 +1017,13 @@ bool HttpServerModule::sendWsTextFrame(platform::TcpConnection& conn, const char
     return conn.write(reinterpret_cast<const uint8_t*>(data), len);
 }
 
-void HttpServerModule::broadcastPreviewFrame() {
-    if (!previewFrame_ || !previewFrame_->data || previewFrame_->dataLen == 0) return;
+void HttpServerModule::broadcastBinary(const platform::WriteChunk* payload, int chunkCount) {
+    if (!payload || chunkCount <= 0) return;
 
-    // Build 13-byte preview header on stack:
-    //   [0x02][dw16][dh16][dd16][ow16][oh16][od16]
-    // dw/dh/dd = dimensions of the (downsampled) data in the payload;
-    // ow/oh/od = original physical grid dimensions, for optional UI upscale.
-    // All uint16 little-endian.
-    uint8_t previewHeader[13];
-    previewHeader[0] = 0x02;
-    auto put16 = [&](int at, lengthType v) {
-        previewHeader[at]     = static_cast<uint8_t>(v & 0xFF);
-        previewHeader[at + 1] = static_cast<uint8_t>(v >> 8);
-    };
-    put16(1, previewFrame_->width);
-    put16(3, previewFrame_->height);
-    put16(5, previewFrame_->depth);
-    put16(7, previewFrame_->origWidth);
-    put16(9, previewFrame_->origHeight);
-    put16(11, previewFrame_->origDepth);
-
-    size_t totalLen = 13 + previewFrame_->dataLen;
+    // Total payload length = sum of the caller's chunks.
+    size_t totalLen = 0;
+    for (int i = 0; i < chunkCount; i++) totalLen += payload[i].len;
+    if (totalLen == 0) return;
 
     // WebSocket frame header for a binary message of totalLen bytes.
     uint8_t wsHeader[4];
@@ -1043,21 +1041,21 @@ void HttpServerModule::broadcastPreviewFrame() {
         return; // frame too large for the 16-bit length form
     }
 
-    // One scatter-gather chunk list: WS header + preview header + payload.
-    // The payload chunk points at PreviewDriver's own downsample buffer —
-    // PreviewDriver::loop() writes the strided RGB copy there and sets
-    // previewFrame_->data to it. No copy here; the buffer is driver-owned
-    // (not a Drivers slice — the downsample step owns its own storage).
-    const platform::WriteChunk chunks[] = {
-        { wsHeader,      static_cast<size_t>(wsHeaderLen) },
-        { previewHeader, sizeof(previewHeader) },
-        { previewFrame_->data, previewFrame_->dataLen },
-    };
-    constexpr int chunkCount = sizeof(chunks) / sizeof(chunks[0]);
+    // Scatter-gather: our WS header, then the caller's payload chunks. The
+    // payload buffers are caller-owned (e.g. PreviewDriver's downsample buffer);
+    // no copy here. Stack array sized for WS header + a small fixed payload
+    // (the preview uses 2 chunks). MAX_PAYLOAD_CHUNKS caps it so this stays a
+    // stack array, not an allocation in the broadcast path.
+    static constexpr int MAX_PAYLOAD_CHUNKS = 4;
+    if (chunkCount > MAX_PAYLOAD_CHUNKS) return;  // caller bug; don't allocate
+    platform::WriteChunk chunks[1 + MAX_PAYLOAD_CHUNKS];
+    chunks[0] = { wsHeader, static_cast<size_t>(wsHeaderLen) };
+    for (int i = 0; i < chunkCount; i++) chunks[1 + i] = payload[i];
+    const int totalChunks = 1 + chunkCount;
 
     for (auto& ws : wsClients_) {
         if (!ws.valid()) continue;
-        switch (ws.writeChunks(chunks, chunkCount)) {
+        switch (ws.writeChunks(chunks, totalChunks)) {
             case platform::WriteResult::Complete:
             case platform::WriteResult::WouldBlock:
                 // WouldBlock: browser is backpressured — skip this frame,

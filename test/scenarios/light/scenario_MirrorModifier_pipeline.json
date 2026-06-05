@@ -18,11 +18,15 @@
     },
     {
       "name": "add-grid",
-      "description": "Add a GridLayout child to Layouts.",
+      "description": "Add a 128x128 GridLayout child to Layouts. Set explicitly (the module default is 16x16x1) so the tick is measurable above the host's microsecond clock.",
       "op": "add_module",
       "id": "Grid",
       "type": "GridLayout",
-      "parent_id": "Layouts"
+      "parent_id": "Layouts",
+      "props": {
+        "width": 128,
+        "height": 128
+      }
     },
     {
       "name": "add-layer",
@@ -85,7 +89,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            99,
+            1,
             246
           ],
           "free_heap": [
@@ -98,7 +102,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-03"
+            "2026-06-05"
           ]
         }
       }

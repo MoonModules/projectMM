@@ -51,6 +51,13 @@ if(MM_FIRMWARE_NAME)
     # and fails as if "esp32" were an identifier.
     target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_FIRMWARE_NAME=${MM_FIRMWARE_NAME})
 endif()
+if(MM_RELEASE)
+    # Same quoting note as MM_FIRMWARE_NAME above — the value arrives with its
+    # quotes already baked in. Release-channel tag (latest / vX.Y.Z); only the
+    # release workflow sets it, so local builds fall through to build_info.h's
+    # #ifndef "" default.
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_RELEASE=${MM_RELEASE})
+endif()
 if(MM_ETH_ONLY)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_NO_WIFI)
 endif()
@@ -63,7 +70,7 @@ set(UI_DIR ${COMPONENT_DIR}/../../src/ui)
 add_custom_command(
     OUTPUT ${UI_DIR}/ui_embedded.h
     COMMAND ${CMAKE_COMMAND} -DUI_DIR=${UI_DIR} -DOUT=${UI_DIR}/ui_embedded.h -P ${UI_DIR}/embed_ui.cmake
-    DEPENDS ${UI_DIR}/index.html ${UI_DIR}/app.js ${UI_DIR}/style.css ${UI_DIR}/install-picker.js
+    DEPENDS ${UI_DIR}/index.html ${UI_DIR}/app.js ${UI_DIR}/style.css ${UI_DIR}/install-picker.js ${UI_DIR}/preview3d.js ${UI_DIR}/moonlight-logo.png ${UI_DIR}/embed_ui.cmake
     COMMENT "Embedding UI files"
 )
 add_custom_target(ui_embed DEPENDS ${UI_DIR}/ui_embedded.h)

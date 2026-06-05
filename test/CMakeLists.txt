@@ -28,12 +28,16 @@ add_executable(mm_tests
     unit/light/unit_Correction.cpp
     unit/light/unit_Drivers_container.cpp
     unit/light/unit_FireEffect.cpp
+    unit/light/unit_GameOfLifeEffect.cpp
     unit/light/unit_GridLayout.cpp
+    unit/light/unit_SphereLayout.cpp
     unit/light/unit_Layer_extrude.cpp
+    unit/light/unit_Layer_sparse_mapping.cpp
     unit/light/unit_Layer_phase_animation.cpp
     unit/light/unit_Layer_zero_grid.cpp
     unit/light/unit_Layers_container.cpp
     unit/light/unit_Layouts_container.cpp
+    unit/light/unit_Layouts_mutation.cpp
     unit/light/unit_Layouts_toggle_cycle.cpp
     unit/light/unit_MetaballsEffect.cpp
     unit/light/unit_MirrorModifier.cpp
