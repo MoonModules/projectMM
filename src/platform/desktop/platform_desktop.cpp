@@ -481,4 +481,57 @@ void TcpServer::close() {
     }
 }
 
+// -----------------------------------------------------------------------
+// I2C — MPU6050-shaped simulation so GyroDriver and unit tests get live
+// rotation values on desktop without hardware. Not a generic bus emulator.
+// -----------------------------------------------------------------------
+
+static bool i2cSimReady_ = false;
+
+static void putBe16(uint8_t* dst, int16_t v) {
+    dst[0] = static_cast<uint8_t>((static_cast<uint16_t>(v) >> 8) & 0xFF);
+    dst[1] = static_cast<uint8_t>(v & 0xFF);
+}
+
+bool i2cInit(uint8_t /*sdaPin*/, uint8_t /*sclPin*/) {
+    i2cSimReady_ = true;
+    return true;
+}
+
+bool i2cWriteReg(uint8_t devAddr, uint8_t reg, uint8_t /*value*/) {
+    if (!i2cSimReady_ || devAddr != 0x68) return false;
+    // Accept wake writes to PWR_MGMT_1 (0x6B); no other register state needed.
+    return reg == 0x6B;
+}
+
+bool i2cReadRegs(uint8_t devAddr, uint8_t reg, uint8_t* buf, size_t len) {
+    if (!i2cSimReady_ || devAddr != 0x68 || !buf) return false;
+
+    if (reg == 0x75 && len >= 1) {
+        buf[0] = 0x68;  // WHO_AM_I
+        return true;
+    }
+
+    if (reg == 0x3B && len >= 14) {
+        // Deterministic slow motion: gyro ramps, accel tilted for non-zero pitch/roll.
+        uint32_t t = millis() / 100;
+        int16_t ax = static_cast<int16_t>(8192 + static_cast<int32_t>((t % 20) * 100));
+        int16_t ay = 100;
+        int16_t az = 16384;
+        int16_t gx = static_cast<int16_t>(static_cast<int32_t>((t % 10) * 50));
+        int16_t gy = static_cast<int16_t>(static_cast<int32_t>(((t + 3) % 10) * 30));
+        int16_t gz = static_cast<int16_t>(static_cast<int32_t>(((t + 7) % 10) * 20));
+        putBe16(buf + 0, ax);
+        putBe16(buf + 2, ay);
+        putBe16(buf + 4, az);
+        putBe16(buf + 6, 0);   // temperature — unused
+        putBe16(buf + 8, gx);
+        putBe16(buf + 10, gy);
+        putBe16(buf + 12, gz);
+        return true;
+    }
+
+    return false;
+}
+
 } // namespace mm::platform

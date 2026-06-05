@@ -250,4 +250,11 @@ private:
 // Does not return.
 [[noreturn]] void reboot();
 
+// I2C master — generic register read/write for sensor/peripheral modules.
+// ESP32: ESP-IDF i2c_master driver. Desktop: MPU6050-shaped simulation for preview/tests.
+// `devAddr` is the 7-bit I2C address (e.g. 0x68 for MPU6050). Idempotent init.
+bool i2cInit(uint8_t sdaPin, uint8_t sclPin);
+bool i2cWriteReg(uint8_t devAddr, uint8_t reg, uint8_t value);
+bool i2cReadRegs(uint8_t devAddr, uint8_t reg, uint8_t* buf, size_t len);
+
 } // namespace mm::platform

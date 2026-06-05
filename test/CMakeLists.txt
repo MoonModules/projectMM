@@ -41,6 +41,7 @@ add_executable(mm_tests
     unit/light/unit_ParticlesEffect.cpp
     unit/light/unit_PlasmaEffect.cpp
     unit/light/unit_PreviewDriver.cpp
+    unit/light/unit_GyroDriver.cpp
     unit/light/unit_RainbowEffect.cpp
 )
 

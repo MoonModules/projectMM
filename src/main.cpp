@@ -17,6 +17,7 @@
 #include "light/modifiers/MirrorModifier.h"
 #include "light/drivers/ArtNetSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
+#include "light/drivers/GyroDriver.h"
 #include "core/HttpServerModule.h"
 #include "core/PreviewFrame.h"  // used directly here; HttpServerModule.h no longer brings it transitively
 #include "core/SystemModule.h"
@@ -59,6 +60,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier", "light/modifiers/MirrorModifier.md");
     mm::ModuleFactory::registerType<mm::ArtNetSendDriver>("ArtNetSendDriver", "light/drivers/ArtNetSendDriver.md");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers/PreviewDriver.md");
+    mm::ModuleFactory::registerType<mm::GyroDriver>("GyroDriver", "light/drivers/GyroDriver.md");
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/HttpServerModule.md");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/SystemModule.md");
     mm::ModuleFactory::registerType<mm::BoardModule>("BoardModule", "core/BoardModule.md");
@@ -207,6 +209,9 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     // preview header.
     preview->setPreviewFrame(previewFrame);
     drivers->addChild(preview);
+
+    auto* gyro = mm::ModuleFactory::create("GyroDriver");
+    drivers->addChild(gyro);
 
     auto* httpServer = static_cast<mm::HttpServerModule*>(mm::ModuleFactory::create("HttpServerModule"));
     httpServer->port = httpPort;
