@@ -13,7 +13,15 @@ let glProgram = null;
 let glBuffer = null;
 let glLocs = null;          // cached attrib/uniform locations
 let glLoopRunning = false;  // continuous rAF render loop active
-const _cam = JSON.parse(localStorage.getItem("mm_cam") || "null");
+// Parse the persisted camera, tolerating a malformed/corrupt value so a bad
+// localStorage entry can't throw during module init. Falls back to defaults.
+const _cam = (() => {
+    try {
+        const c = JSON.parse(localStorage.getItem("mm_cam") || "null");
+        if (c && typeof c.t === "number" && typeof c.p === "number" && typeof c.d === "number") return c;
+    } catch { /* corrupt value — ignore, use defaults */ }
+    return null;
+})();
 let camTheta    = _cam ? _cam.t : Math.PI;
 let camPhi      = _cam ? _cam.p : 0.4;
 let camDist     = _cam ? _cam.d : 2.5;

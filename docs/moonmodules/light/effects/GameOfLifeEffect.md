@@ -38,13 +38,17 @@ layer's dimensions change. At 128×128 that is 32 KB. Freed in `teardown` and th
 destructor. Reported via `setDynamicBytes` so the per-effect heap figure is
 honest.
 
-## Extending
+## Extension seams
 
-The simulation step and the colouring are decoupled (colour is one render
-line). A future ruleset control swaps the hardcoded B3/S23 predicate for a
-birth/survival bitmask; a future palette feature replaces the `hsvToRgb` call
-with a palette lookup. Neither exists yet and neither is stubbed — see the
-*concrete first* principle in [architecture.md](../../../architecture.md).
+The simulation step and the colouring are decoupled: the rule lives in one
+predicate (B3/S23 — birth on 3 neighbours, survival on 2 or 3) and the colour
+in one render line (`hsvToRgb`). A different birth/survival mask drops into the
+predicate without touching the rest; a palette lookup drops into the render
+line in place of `hsvToRgb`. Nothing else is coupled to either.
+
+## Tests
+
+[Unit tests: GameOfLifeEffect](../../../tests/unit-tests.md#gameoflifeeffect) — B3/S23 rule (blinker oscillates, block is a still-life, lone cell dies), wraparound, grid (re)allocation and free, 0×0 survival, bpm pacing, and the renders-every-frame regression.
 
 ## Prior art
 

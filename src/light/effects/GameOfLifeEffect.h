@@ -81,7 +81,12 @@ public:
         //    1/s, 60 → ~7.5/s, 255 → ~32/s). Numerator-only accumulator, divide
         //    at the read site — same shape as CheckerboardEffect.
         uint32_t now = elapsed();
-        uint32_t dt = now - lastElapsed_;
+        // Bootstrap on the first frame: lastElapsed_ starts at 0, so a raw
+        // now-0 would be a huge dt that pins stepAccum_ above the beat threshold
+        // for good (max-rate forever, bpm ignored). Seed the baseline and take
+        // dt=0 this frame instead.
+        uint32_t dt = startedClock_ ? (now - lastElapsed_) : 0;
+        startedClock_ = true;
         lastElapsed_ = now;
         stepAccum_ += static_cast<uint64_t>(dt) * bpm;
         constexpr uint64_t kMsPerBeat = 8000;  // 8000 ms·bpm == one generation
@@ -179,9 +184,9 @@ private:
         }
         // Stagnation: if the live count barely moves over a window, the colony
         // has settled into still-lifes + oscillators. Re-seed to revive it.
-        uint16_t delta = (alive > lastAlive_)
-            ? static_cast<uint16_t>(alive - lastAlive_)
-            : static_cast<uint16_t>(lastAlive_ - alive);
+        nrOfLightsType delta = (alive > lastAlive_)
+            ? static_cast<nrOfLightsType>(alive - lastAlive_)
+            : static_cast<nrOfLightsType>(lastAlive_ - alive);
         if (delta <= (cellCount_ / 256 + 1)) {  // <0.4% change this generation
             if (++stagnantGens_ >= 32) reseed();
         } else {
@@ -256,6 +261,7 @@ private:
 
     // Generation-pacing + liveliness state.
     uint32_t lastElapsed_ = 0;
+    bool startedClock_ = false;    // false until the first loop seeds lastElapsed_
     uint64_t stepAccum_ = 0;       // accumulated dt*bpm (ms·bpm)
     bool seeded_ = false;          // first reseed derives from `seed`
     uint32_t generation_ = 0;

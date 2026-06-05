@@ -29,6 +29,19 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - One logical light routed to multiple physical positions copies the colour to each (mirror-style mappings work).
 - Two logical lights writing into the same physical light add and clamp at 255 (no overflow).
 
+## BoardModule
+
+`test/unit/core/unit_BoardModule.cpp`
+
+- After onBuildControls, BoardModule exposes exactly one `board` control, bound as Text to a 32-byte buffer.
+- Default state is the empty string — MoonDeck pushes a value on first reach.
+- respectsEnabled() returns false so the `board` value stays visible even when the module is disabled — identity-class data shouldn't vanish.
+- setBoard happy path: valid value lands in the buffer + marks dirty so FilesystemModule's debounced save picks it up. Mirrors the shape of NetworkModule::setWifiCredentials' unit-test pattern.
+- Empty string is rejected — no buffer write, no dirty flag.
+- 32+ char value is rejected (buffer is 32 bytes including NUL, so 31 max).
+- Non-printable bytes are rejected. Catches accidental binary smuggling (would also break the persistence JSON encoder).
+- nullptr is rejected (defensive — a bogus caller shouldn't crash the device).
+
 ## Buffer
 
 `test/unit/core/unit_Buffer.cpp`
@@ -107,6 +120,21 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - With sparking at max, the buffer contains non-zero pixels within 50 frames (sparks emerge and propagate).
 - Disabling the effect releases its heat buffer back (dynamicBytes drops to 0).
 
+## GameOfLifeEffect
+
+`test/unit/light/unit_GameOfLifeEffect.cpp`
+
+- Two cell grids of width × height bytes each.
+- Disabling releases both grids (dynamicBytes drops to 0) via the parent lifecycle.
+- A blinker (horizontal 3-in-a-row) oscillates with period 2 under B3/S23: it becomes a vertical 3-in-a-row, then back. Pins both birth (B3) and survival (S23) on a known pattern.
+- A 2×2 block is a still-life: every live cell has 3 neighbours (S3), no dead cell has exactly 3 (no B3), so stepOnce leaves it unchanged.
+- A lone cell dies (underpopulation: 0 neighbours, not S2/S3) → extinction.
+- Wraparound: a blinker on the right edge stays a valid 3-cell pattern because neighbours wrap, rather than losing cells to a hard edge.
+- Reallocation on dimension change: grids resize, byte count tracks new w×h.
+- Must not crash on a zero-size grid (no allocation, loop is a no-op).
+- bpm time-gates the generation rate: a low bpm advances fewer generations per unit time than a high bpm over the same elapsed window. Drives time via the desktop millis() test seam (Layer reads platform::millis in loop()).
+- Regression: the Layer clears the buffer before every effect frame, so the grid must be re-painted on EVERY frame, not just on the (rarer) beats where a generation advances. A bpm gate that skipped the paint left non-step frames black — visible as "a flash now and then" at low bpm. Drive several frames at a slow bpm (most are non-step) and require the buffer stays lit on all of them.
+
 ## GridLayout
 
 `test/unit/light/unit_GridLayout.cpp`
@@ -161,6 +189,12 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Spiral animates across 100ms (rotation visible).
 - Replace path: swap one effect for another mid-flight (same shape as HttpServerModule::handleReplaceModule) and confirm the new effect animates. Replacing one effect with another mid-tick (HttpServerModule's swap path) leaves the new effect animating, not frozen.
 
+`test/unit/light/unit_Layer_sparse_mapping.cpp`
+
+- Dense grid: every box cell is a light, so no LUT — the identity/memcpy fast path is preserved exactly (the grid short-circuit).
+- Sparse sphere: a LUT is built; its destinations are driver indices in [0, lightCount), and the render buffer stays the dense bounding box.
+- Sphere + Mirror: the modifier's box-coordinate destinations are translated into driver-index space; no destination escapes [0, lightCount).
+
 `test/unit/light/unit_Layer_zero_grid.cpp`
 *Also touches: RainbowEffect, NoiseEffect, PlasmaEffect, CheckerboardEffect, SpiralEffect, MetaballsEffect, PlasmaPaletteEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect, FireEffect, ParticlesEffect.*
 
@@ -193,6 +227,13 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 - Disabled layouts contribute nothing; enabled siblings shift down to close the gap (no index holes).
 - Disabling the Layouts container itself zeroes totalLightCount and yields no coordinates.
+
+`test/unit/light/unit_Layouts_mutation.cpp`
+
+- Add a single layout: the container reports its light count and iterates it.
+- Add more than one layout (mixed types): counts sum, indices stitch end-to-end.
+- Replace a layout with a different type at the same slot: the other layouts and their order are preserved; only the replaced slot's contribution changes.
+- Remove a layout: it leaves the tree, the remaining layouts shift to close the gap, and the total drops by exactly the removed layout's light count.
 
 `test/unit/light/unit_Layouts_toggle_cycle.cpp`
 *Also touches: Layer, Drivers.*
@@ -333,12 +374,11 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 `test/unit/light/unit_PreviewDriver.cpp`
 
-- The three `detail` levels (1/2/3) downsample a 128-axis grid into 16/32/43 axes — distinct strides so the levels are visibly different.
-- Even when downsampled, the frame carries the original grid dimensions so the UI's `decompress` hint can block-replicate back.
-- detail=3 (largest payload) stays under lwIP's ~5.7 KB TCP send buffer so writeChunks completes in one whole pass.
-- A small grid (≤ budget) is copied 1:1 with no downsampling — preview matches the original exactly.
-- On RGBW (4-channel) sources the preview keeps only the first 3 channels — the wire frame is always 3 bytes per voxel.
-- Default controls: fps=24 (preview stream rate), detail=3 (finest), decompress=true.
+- A sphere sends its SHELL lights (210), not the dense 9x9x9 box (729).
+- Per-frame 0x02 RGB count matches the coordinate-table count.
+- A small grid sends every light at its grid position (stride 1, exact).
+- A large layout is index-downsampled (stride > 1) so the payload fits the send-buffer cap — but at REAL positions, not a padded box.
+- Default fps is the rate-limited preview stream rate.
 
 ## RainbowEffect
 
@@ -359,12 +399,23 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - firstByName(name) returns the first match in DFS order, or nullptr if no module carries that name.
 - If the disambiguating suffix would overflow the 16-byte name buffer, ensureUniqueName refuses to truncate and keeps the colliding name (sharp edge, documented).
 
+## SphereLayout
+
+`test/unit/light/unit_SphereLayout.cpp`
+
+- lightCount() must equal the number of points forEachCoord emits — they share one shell predicate, so allocation and fill can never disagree.
+- The sphere is HOLLOW: the centre lattice point (r,r,r) is never emitted, and neither is any interior point (distance < radius-0.5 from centre).
+- radius = 1 is the smallest hollow sphere: the 6 axis neighbours (d^2=1) plus the 12 edge points (d^2=2) of the centre — 18 lights, no centre.
+- The shell is symmetric about the centre: for every emitted point its mirror through the centre is also emitted (a sphere has no preferred direction).
+- Physical indices are sequential 0..N-1 over the emitted shell points (no gaps from the unindexed lattice voids), so the buffer maps 1:1 to emitted lights.
+- Default radius is a sensible small sphere (not 0, not huge).
+
 ## SystemModule
 
 `test/unit/core/unit_SystemModule.cpp`
 
 - On the desktop platform (MAC DE:AD:BE:EF:CA:FE), the auto-generated device name is "MM-CAFE" (last two MAC bytes).
-- After setup, SystemModule exposes exactly 12 controls on desktop, including a deviceName Text control bound to the MAC-derived name.
+- deviceName is bound as a Text control to the MAC-derived default ("MM-CAFE" on the desktop platform).
 - The `firmware` control is always present and non-empty (either a real firmware key from build_info.h or the fallback "unknown").
 - The `bootReason` control is populated from platform::resetReason; on desktop it reports "OK".
 
