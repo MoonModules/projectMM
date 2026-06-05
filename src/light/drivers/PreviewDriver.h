@@ -8,6 +8,13 @@ namespace mm {
 
 class PreviewDriver : public DriverBase {
 public:
+    // The 3D preview the web UI renders streams from this driver. Deleting or
+    // replacing it from the UI would silently kill that preview, so it opts
+    // out of user-editing — it stays a fixed child of Drivers. (A user who
+    // genuinely wants it gone can still remove it via persistence / MoonDeck;
+    // this only hides the UI delete/replace affordance.)
+    bool userEditable() const override { return false; }
+
     // 24 fps keeps the preview WebSocket broadcast well within the render-tick
     // budget while staying visually smooth (the browser caches geometry between
     // frames). User-tunable 1-60 via the "fps" control.

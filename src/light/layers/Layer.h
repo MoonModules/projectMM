@@ -15,6 +15,7 @@ namespace mm {
 class Layer : public MoonModule {
 public:
     ModuleRole role() const override { return ModuleRole::Layer; }
+    const char* acceptsChildRoles() const override { return "effect,modifier"; }
 
     // start/end carve a region of the shared Layouts into this Layer's buffer,
     // expressed as **percentages of the physical extent on each axis**.

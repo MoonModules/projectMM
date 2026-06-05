@@ -364,6 +364,11 @@ void HttpServerModule::writeModuleJson(JsonSink& sink, MoonModule* mod) {
         static_cast<unsigned>(mod->classSize()),
         static_cast<unsigned>(mod->dynamicBytes()));
     writeStatus(sink, mod);
+    // userEditable: omit when true (the common case) to save bytes — the UI
+    // treats absent as editable, same convention as the control hidden/readonly
+    // flags. Emitted only for modules that opt out (e.g. PreviewDriver), so the
+    // UI hides their delete/replace affordance.
+    if (!mod->userEditable()) sink.append(",\"userEditable\":false");
     sink.append(",\"controls\":[");
     writeControls(sink, mod);
     sink.append("]");
@@ -783,6 +788,7 @@ void HttpServerModule::serveTypes(platform::TcpConnection& conn) {
         const char* docPath = ModuleFactory::typeDocPath(i);
         const char* tags = ModuleFactory::typeTags(i);
         uint8_t dim = ModuleFactory::typeDim(i);
+        const char* childRoles = ModuleFactory::typeAcceptsChildRoles(i);
         // displayNameFor returns a pointer into a static buffer shared
         // across calls, so copy it to the stack before another factory
         // call (or the next loop iteration) overwrites it.
@@ -790,10 +796,12 @@ void HttpServerModule::serveTypes(platform::TcpConnection& conn) {
         std::strncpy(displayName, ModuleFactory::displayNameFor(name, role), sizeof(displayName) - 1);
         displayName[sizeof(displayName) - 1] = 0;
         sink.appendf("%s{\"name\":\"%s\",\"displayName\":\"%s\",\"role\":\"%s\","
-                     "\"docPath\":\"%s\",\"tags\":\"%s\",\"dim\":%u,\"defaults\":{",
+                     "\"docPath\":\"%s\",\"tags\":\"%s\",\"dim\":%u,"
+                     "\"acceptsChildRoles\":\"%s\",\"defaults\":{",
                      first ? "" : ",", name, displayName, roleStr,
                      docPath ? docPath : "", tags ? tags : "",
-                     static_cast<unsigned>(dim));
+                     static_cast<unsigned>(dim),
+                     childRoles ? childRoles : "");
         writeTypeDefaults(sink, name);
         sink.append("}}");
         first = false;

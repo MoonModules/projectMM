@@ -64,6 +64,8 @@ Every MoonModule has a dynamic children array. `addChild()`, `removeChild()`, `r
 
 Children are distinguished by `role()` (Effect, Modifier, Driver, Layout, Generic). Containers that need role-specific iteration (e.g. Layer::loop() only calls loop() on Effects, not Modifiers) filter children by role at the call site.
 
+Two virtuals govern UI tree-mutation, keeping that policy on the device rather than hardcoded in the web UI (see [architecture.md § Web UI](../../architecture.md#web-ui)): `acceptsChildRoles()` — comma-separated roles this module accepts as user-added children (`""` default; a container like Layer returns `"effect,modifier"`), surfaced per-type in `/api/types`, drives the UI's `+ add child` affordance and picker filter. `userEditable()` — whether the user may delete/replace this module (`true` default; a load-bearing child like PreviewDriver returns `false`), surfaced per-instance in `/api/state` (emitted only when false). The `+ add child` policy lives on the parent; the deletable/replaceable policy lives on the child.
+
 Parents own their children's lifecycle. Only top-level modules are registered with the Scheduler — parents propagate `setup()`, `onBuildControls()`, `onBuildState()`, `loop()`, `loop20ms()`, `loop1s()`, and `teardown()` to their children. This means children don't need separate Scheduler registration.
 
 ### Lifecycle-aware add/remove

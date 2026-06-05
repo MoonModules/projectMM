@@ -199,6 +199,24 @@ public:
     // return value is a flash string literal; no per-instance RAM cost.
     virtual const char* tags() const { return ""; }
 
+    // Comma-separated role names this module accepts as user-added children
+    // (e.g. "effect,modifier"). "" = accepts none — the default, covering
+    // leaf modules and fixed-shape containers. A container overrides this to
+    // tell the UI's "+ add child" picker what to offer. Comma-separated
+    // string (not a bitmask) so it serialises straight into /api/types and a
+    // multi-role parent (Layer → "effect,modifier") needs no enum-set type.
+    // This is what makes the UI domain-neutral: it reads the accepted roles
+    // from here instead of hardcoding which module types are containers.
+    virtual const char* acceptsChildRoles() const { return ""; }
+
+    // Whether the user may delete or replace this module from the UI. Default
+    // true — most user-added modules are freely editable. A load-bearing or
+    // code-wired child overrides to false (e.g. PreviewDriver, whose deletion
+    // would kill the live 3D preview). The flag lives on the CHILD because the
+    // child knows whether it's safe to remove; the parent only decides what
+    // can be added (acceptsChildRoles). Surfaced per-instance in /api/state.
+    virtual bool userEditable() const { return true; }
+
     // Generic children — grows on demand, only allocates during setup
     bool addChild(MoonModule* child) {
         if (!child) return false;

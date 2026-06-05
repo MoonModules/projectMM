@@ -44,6 +44,8 @@ protected:
 
 class Drivers : public MoonModule {
 public:
+    const char* acceptsChildRoles() const override { return "driver"; }
+
     uint8_t brightness = 255;
     uint8_t lightPreset = 0;  // index into kLightPresetOptions; 0 = RGB
 

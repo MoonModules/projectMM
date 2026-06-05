@@ -412,7 +412,7 @@ The UI is **MoonModule-driven**. It contains no hard-coded knowledge of specific
 - Controls are auto-rendered by type (slider, toggle, colour picker, text input, dropdown).
 - Modules can be switched (change which effect a layer uses) and linked (assign a layout to a layer).
 
-Adding a new MoonModule with controls needs **zero changes** to the UI files.
+Adding a new MoonModule with controls needs **zero changes** to the UI files. This extends to the tree-mutation affordances: which modules accept children (and of what role) comes from each type's `acceptsChildRoles()`, and whether a module can be deleted/replaced comes from its `userEditable()` — both declared on the C++ side and reported in `/api/types` + `/api/state`. The UI hardcodes no list of "which types are containers" or "which roles are editable"; a new container type or a fixed child is a one-line C++ override.
 
 The light domain plugs into the UI at three points: a fixed top-level tree (Layouts / Layers / Drivers pinned in `main.cpp`, root reorder disabled while child reorder works via drag-and-drop), a binary WebSocket preview channel ([PreviewDriver](moonmodules/light/drivers/PreviewDriver.md) — type byte `0x02`, 13-byte header `dw/dh/dd/ow/oh/od`, RGB triples), and emoji-key assignments for the chip filter (full table in [core/ui.md](moonmodules/core/ui.md)). Full UI spec: [docs/moonmodules/core/ui.md](moonmodules/core/ui.md).
 

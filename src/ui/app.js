@@ -561,9 +561,11 @@ function createCard(mod, depth) {
     // Enable checkbox joins the right-hand action cluster, before ✎/×.
     title.appendChild(enabled);
 
-    // Action buttons for reorderable children (Effect/Modifier roles).
-    // Top-level modules aren't reorderable in this iteration (fixed in main.cpp).
-    if (depth > 0 && (mod.role === "effect" || mod.role === "modifier")) {
+    // Delete / replace buttons for user-managed children (any role a container
+    // accepts, minus modules that opted out via userEditable=false). Top-level
+    // modules are fixed in main.cpp; code-wired children declare userEditable
+    // false or carry a role no container accepts. See isUserEditableChild.
+    if (isUserEditableChild(mod, depth)) {
         const actions = createActionButtons(mod);
         title.appendChild(actions);
     }
@@ -709,7 +711,9 @@ function createCard(mod, depth) {
     }
 
     // -- Drag-to-reorder (HTML5 DnD on desktop; touchstart-gated on mobile) --
-    if (depth > 0 && (mod.role === "effect" || mod.role === "modifier")) {
+    // Same gate as the delete/replace buttons: a user-managed child is also
+    // reorderable within its parent.
+    if (isUserEditableChild(mod, depth)) {
         attachDragHandlers(card, mod);
     }
 
@@ -842,23 +846,47 @@ function hasNestedChildren(mod) {
     return (mod.children && mod.children.length > 0) || acceptsNewChildren(mod);
 }
 
-// Whether the UI's "+ add child" affordance applies to this parent. Light-pipeline
-// containers only — Layers → layer, Layer → effect+modifier, Drivers → driver,
-// Layouts → layout. System modules like Network that host a code-wired child
-// (Improv) are deliberately NOT in this list — the child is fixed-shape.
-function acceptsNewChildren(mod) {
-    return mod.type === "Layers" ||
-           mod.type === "Layer"  ||
-           mod.type === "Drivers" ||
-           mod.type === "Layouts";
+// Roles this parent accepts as user-added children, from the device's
+// `acceptsChildRoles` (per-type in /api/types — e.g. Layer → "effect,modifier").
+// Domain-neutral: the UI no longer hardcodes which module types are containers;
+// the device declares it via MoonModule::acceptsChildRoles(). "" → [] (accepts
+// none), which is also the default for modules whose type isn't loaded yet.
+function rolesAcceptedBy(parentMod) {
+    const t = availableTypes.find(t => t.name === parentMod.type);
+    const csv = (t && t.acceptsChildRoles) ? t.acceptsChildRoles : "";
+    return csv ? csv.split(",") : [];
 }
 
-function rolesAcceptedBy(parentMod) {
-    if (parentMod.type === "Layers")  return ["layer"];
-    if (parentMod.type === "Layer")   return ["effect", "modifier"];
-    if (parentMod.type === "Drivers") return ["driver"];
-    if (parentMod.type === "Layouts") return ["layout"];
-    return [];
+// Whether the "+ add child" affordance applies — derived from acceptsChildRoles
+// being non-empty, so there's a single source of truth (no separate list).
+function acceptsNewChildren(mod) {
+    return rolesAcceptedBy(mod).length > 0;
+}
+
+// The set of child roles ANY loaded type accepts — the union of every type's
+// acceptsChildRoles. A module is "user-managed as a child" iff its role is in
+// this set, which is how the UI decides to show delete/replace/drag without
+// hardcoding role names. Code-wired children (ImprovProvisioning, BoardModule
+// — roles no container declares) correctly fall outside it.
+function allAcceptedChildRoles() {
+    const roles = new Set();
+    for (const t of availableTypes) {
+        const csv = t.acceptsChildRoles || "";
+        if (csv) csv.split(",").forEach(r => roles.add(r));
+    }
+    return roles;
+}
+
+// Whether the UI shows delete / replace / drag for this module. True when it's
+// a nested module (depth > 0) whose role is one some container accepts AND it
+// hasn't opted out via the device's userEditable=false (e.g. PreviewDriver).
+// Replaces the old hardcoded `role === "effect" || "modifier"` gate — now any
+// add-accepted role (driver, layout, …) is editable, and the child itself can
+// veto via userEditable.
+function isUserEditableChild(mod, depth) {
+    return depth > 0
+        && mod.userEditable !== false
+        && allAcceptedChildRoles().has(mod.role);
 }
 
 // ---------------------------------------------------------------------------

@@ -22,6 +22,8 @@ public:
 // one Layouts describing the physical setup, multiple Layers render into it.
 class Layouts : public MoonModule {
 public:
+    const char* acceptsChildRoles() const override { return "layout"; }
+
     // Disabled children are skipped, same gate Layer/Layers/Drivers apply to their
     // children. Indices of subsequent enabled layouts shift down to close the gap —
     // disable Layout A and Layout B's lights move to indices 0..N. Users who need
