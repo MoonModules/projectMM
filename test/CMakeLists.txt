@@ -28,6 +28,7 @@ add_executable(mm_tests
     unit/light/unit_Correction.cpp
     unit/light/unit_Drivers_container.cpp
     unit/light/unit_FireEffect.cpp
+    unit/light/unit_GameOfLifeEffect.cpp
     unit/light/unit_GridLayout.cpp
     unit/light/unit_SphereLayout.cpp
     unit/light/unit_Layer_extrude.cpp

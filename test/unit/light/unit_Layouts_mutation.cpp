@@ -46,7 +46,10 @@ TEST_CASE("Layouts add multiple layouts of different types") {
     mm::GridLayout g;
     g.width = 4; g.height = 1; g.depth = 1;   // 4 lights, indices 0..3
     mm::SphereLayout s;
-    s.radius = 1;                              // 18-light shell, indices 4..21
+    // SphereLayout radius=1: the shell band [r-0.5, r+0.5) holds the 6 axis
+    // neighbours (d^2=1) plus the 12 edge points (d^2=2) of the centre = 18
+    // lights; stitched after the grid's 4, indices 4..21.
+    s.radius = 1;
 
     REQUIRE(layouts.addChild(&g));
     REQUIRE(layouts.addChild(&s));

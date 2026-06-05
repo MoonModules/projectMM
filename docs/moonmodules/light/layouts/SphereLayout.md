@@ -4,7 +4,7 @@ Arranges lights on the **surface of a hollow sphere** — a one-light-thick shel
 
 ## Controls
 
-- `radius` (default 4, range 1–64) — surface radius in light-units. A lattice point is on the shell when its distance from the centre rounds to `radius` (it falls in the half-open band `[radius−0.5, radius+0.5)`). `radius = 1` is the smallest hollow sphere — the 6 axis-neighbours of the centre.
+- `radius` (default 4, range 1–64) — surface radius in light-units. A lattice point is on the shell when its distance from the centre rounds to `radius` (it falls in the half-open band `[radius−0.5, radius+0.5)`). `radius = 1` is the smallest hollow sphere — 18 lights: the 6 axis-neighbours (d²=1) plus the 12 edge-neighbours (d²=2) of the centre, all of which round to distance 1.
 
 ## Coordinate Iterator
 

@@ -19,8 +19,9 @@ namespace mm {
 // uniformly across the codebase.
 class SphereLayout : public LayoutBase {
 public:
-    // Surface radius in light-units. Min 1 (a radius-1 shell is the 6 axis
-    // neighbours of the centre — the smallest recognisable hollow sphere).
+    // Surface radius in light-units. Min 1 (the smallest hollow sphere: 18
+    // lights — the 6 axis-neighbours at d^2=1 plus the 12 edge-neighbours at
+    // d^2=2, all rounding to distance 1 under the band predicate below).
     // Max 64 keeps the (2*64+1)^3 bounding-box scan bounded.
     lengthType radius = 4;
 

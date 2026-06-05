@@ -60,7 +60,7 @@
     },
     {
       "name": "add-artnet",
-      "description": "Add ArtNetSendDriver and run the bounded FPS measurement (must stay at >=80% of the rated FPS for the 128x128 grid this scenario builds).",
+      "description": "Add ArtNetSendDriver and run the bounded FPS measurement (expected to stay at >=80% of the rated FPS for the 128x128 grid this scenario builds; min_pct needs a live baseline, so it gates only on hardware and is skipped with a WARN in the desktop runner).",
       "op": "add_module",
       "id": "ArtNet",
       "type": "ArtNetSendDriver",
