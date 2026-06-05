@@ -292,8 +292,8 @@ private:
         size_t availableHeap = platform::freeHeap();
         if (availableHeap == 0) return true; // desktop: unlimited
         size_t internalHeap = platform::freeInternalHeap();
-        if (internalHeap > 0 && internalHeap <= HEAP_RESERVE) return false;
-        size_t budget = availableHeap > HEAP_RESERVE ? availableHeap - HEAP_RESERVE : 0;
+        if (internalHeap > 0 && internalHeap <= platform::HEAP_RESERVE) return false;
+        size_t budget = availableHeap > platform::HEAP_RESERVE ? availableHeap - platform::HEAP_RESERVE : 0;
         return budget >= bytesNeeded && platform::maxAllocBlock() >= bytesNeeded;
     }
 

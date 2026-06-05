@@ -883,6 +883,13 @@ function allAcceptedChildRoles() {
 // Replaces the old hardcoded `role === "effect" || "modifier"` gate — now any
 // add-accepted role (driver, layout, …) is editable, and the child itself can
 // veto via userEditable.
+//
+// We test mod.role against the UNION of all containers' acceptsChildRoles, not
+// against this module's specific parent. That's exact while the role→container
+// mapping is 1:1 (effect→Layer, driver→Drivers, layout→Layouts, layer→Layers) —
+// a child of an add-accepted role is always under the one container that
+// accepts it. If a role ever becomes accepted by more than one container, this
+// would need the parent threaded in to scope the check to the actual parent.
 function isUserEditableChild(mod, depth) {
     return depth > 0
         && mod.userEditable !== false

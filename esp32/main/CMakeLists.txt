@@ -51,6 +51,13 @@ if(MM_FIRMWARE_NAME)
     # and fails as if "esp32" were an identifier.
     target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_FIRMWARE_NAME=${MM_FIRMWARE_NAME})
 endif()
+if(MM_RELEASE)
+    # Same quoting note as MM_FIRMWARE_NAME above — the value arrives with its
+    # quotes already baked in. Release-channel tag (latest / vX.Y.Z); only the
+    # release workflow sets it, so local builds fall through to build_info.h's
+    # #ifndef "" default.
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_RELEASE=${MM_RELEASE})
+endif()
 if(MM_ETH_ONLY)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_NO_WIFI)
 endif()

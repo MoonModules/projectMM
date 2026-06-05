@@ -12,6 +12,8 @@ Streams light data to the web UI via WebSocket for real-time 3D visualization.
 
 ## Protocol
 
+PreviewDriver owns the preview wire format end to end. It builds each frame's bytes and pushes them to a `BinaryBroadcaster` (the core [HttpServerModule](../../core/HttpServerModule.md) implements that interface) via `broadcastBinary`. The HTTP server only sends the bytes to its WebSocket clients — it has no knowledge of `PreviewFrame` or the format below. `main.cpp` wires the driver's broadcaster to the HTTP server instance.
+
 Binary WebSocket frames: `[0x02][dw16][dh16][dd16][ow16][oh16][od16][R G B ...]`
 
 - 13-byte header: opcode, then the downsampled `dw/dh/dd` and the original-grid `ow/oh/od`, each a little-endian uint16

@@ -1,10 +1,32 @@
 #pragma once
 
 #include "light/drivers/Drivers.h"
-#include "core/PreviewFrame.h"
+#include "light/light_types.h"  // lengthType
+#include "core/BinaryBroadcaster.h"
 #include "platform/platform.h"
 
 namespace mm {
+
+// Zero-copy preview frame: the latest downsampled RGB output plus the
+// dimensions the UI needs. PreviewDriver fills it each frame and pushes it to
+// the WS broadcaster (it owns the wire format); no other module reads it.
+// Lives here, with its only producer/consumer — single-threaded scheduler, no
+// lock needed.
+struct PreviewFrame {
+    const uint8_t* data = nullptr;  // points to PreviewDriver's downsample buffer (no ownership)
+    size_t dataLen = 0;
+    // Dimensions of the (downsampled) data actually in `data`.
+    lengthType width = 0;
+    lengthType height = 0;
+    lengthType depth = 0;
+    // Dimensions of the original physical grid before downsampling. Equal to
+    // width/height/depth when no downsampling occurred. Sent so the UI can
+    // optionally reconstruct (block-replicate) the preview at full resolution.
+    lengthType origWidth = 0;
+    lengthType origHeight = 0;
+    lengthType origDepth = 0;
+    uint8_t fps = 20;
+};
 
 class PreviewDriver : public DriverBase {
 public:
@@ -34,6 +56,11 @@ public:
     bool decompress = true;
 
     void setPreviewFrame(PreviewFrame* f) { frame_ = f; }
+
+    // The sink each produced frame is pushed to (HttpServerModule, as a
+    // BinaryBroadcaster). Wired in main.cpp. Light depends only on the
+    // BinaryBroadcaster interface, not the concrete HTTP server.
+    void setBroadcaster(BinaryBroadcaster* b) { broadcaster_ = b; }
 
     void onBuildControls() override {
         controls_.addUint8("fps", fps, 1, 60);
@@ -140,7 +167,36 @@ public:
         frame_->origHeight = h;
         frame_->origDepth = d;
         frame_->fps = fps;
-        frame_->ready = true;
+
+        pushFrame();
+    }
+
+    // Build the 13-byte preview header and push header+payload to the WS
+    // broadcaster. The preview wire format lives here (light domain), not in
+    // the HTTP server — HttpServer only knows "broadcast these bytes".
+    //   [0x02][dw16][dh16][dd16][ow16][oh16][od16] then the RGB payload.
+    // All dimensions uint16 little-endian. The payload chunk points at our own
+    // downsample buffer (no copy); broadcastBinary writes it before returning.
+    void pushFrame() {
+        if (!broadcaster_ || !frame_->data || frame_->dataLen == 0) return;
+        uint8_t header[13];
+        header[0] = 0x02;
+        auto put16 = [&](int at, lengthType v) {
+            header[at]     = static_cast<uint8_t>(v & 0xFF);
+            header[at + 1] = static_cast<uint8_t>(v >> 8);
+        };
+        put16(1, frame_->width);
+        put16(3, frame_->height);
+        put16(5, frame_->depth);
+        put16(7, frame_->origWidth);
+        put16(9, frame_->origHeight);
+        put16(11, frame_->origDepth);
+
+        const platform::WriteChunk payload[] = {
+            { header,       sizeof(header) },
+            { frame_->data, frame_->dataLen },
+        };
+        broadcaster_->broadcastBinary(payload, 2);
     }
 
 private:
@@ -163,6 +219,7 @@ private:
 
     Buffer* sourceBuffer_ = nullptr;
     PreviewFrame* frame_ = nullptr;
+    BinaryBroadcaster* broadcaster_ = nullptr;
     Buffer downsampled_;          // owned; max-pooled RGB output buffer (one entry per stride cell)
     uint32_t lastSendTime_ = 0;
 };

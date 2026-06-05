@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/MoonModule.h"
-#include "core/types.h"
+#include "light/light_types.h" // lengthType, nrOfLightsType, Dim
 
 namespace mm {
 

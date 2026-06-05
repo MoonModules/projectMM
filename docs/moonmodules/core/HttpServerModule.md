@@ -48,14 +48,14 @@ All JSON responses stream through a `JsonSink` — no fixed-buffer ceiling, so a
 `GET /ws` with `Upgrade: websocket` → RFC 6455 handshake (SHA-1 + base64). Up to 4 concurrent clients.
 
 - **Server → client text frames:** full state JSON, pushed by `loop1s()`.
-- **Server → client binary frames:** a domain-defined preview channel. Today only the light domain emits frames — leading byte `0x02`, 13-byte header (`dw/dh/dd/ow/oh/od`, little-endian uint16), RGB triples. Pushed by `loop20ms()` when `PreviewFrame::ready` is set by [PreviewDriver](../light/drivers/PreviewDriver.md). See [architecture.md § Web UI](../../architecture.md#web-ui).
+- **Server → client binary frames:** `broadcastBinary(chunks)` sends one binary WS message (FIN+binary opcode) to every connected client — it prepends the WS frame header and writes; the payload bytes are the caller's. Domain-neutral: the server doesn't know what the bytes mean. Today the only caller is the light domain's [PreviewDriver](../light/drivers/PreviewDriver.md), whose frame format (leading byte `0x02`, 13-byte header, RGB triples) lives in the driver, not here.
 - **Client → server:** none. Mutations go through the REST API.
 
-The preview broadcast uses a single non-blocking scatter-gather write (`TcpConnection::writeChunks` — one `writev`/`sendmsg`) so the render task never blocks on a slow browser. `Complete` and `WouldBlock` both keep the connection open; `Partial` or socket error drops the connection and the browser auto-reconnects. PreviewDriver downsamples the frame to ≤1849 voxels so the whole WebSocket message fits lwIP's TCP send buffer (`CONFIG_LWIP_TCP_SND_BUF_DEFAULT` = 11520 B on ESP32).
+`broadcastBinary` uses a single non-blocking scatter-gather write (`TcpConnection::writeChunks` — one `writev`/`sendmsg`) so the render task never blocks on a slow browser. `Complete` and `WouldBlock` both keep the connection open; `Partial` or socket error drops the connection and the browser auto-reconnects.
 
 ## Cross-domain wiring
 
-HttpServerModule is core infrastructure with no light-domain dependencies. It walks the module tree via the generic `MoonModule::childCount()` / `child()` interface. For the 3D preview it reads from a `PreviewFrame` (`src/core/PreviewFrame.h`) — a plain struct with a `const uint8_t*` pointer + dimensions, no light types. The light-domain `PreviewDriver` writes to `PreviewFrame`; HttpServerModule reads it. The wiring happens in `main.cpp`, which is the only file that knows both domains.
+HttpServerModule is core infrastructure with **no** light-domain dependencies — no `PreviewFrame`, no light types, no light includes. It exposes the `BinaryBroadcaster` interface (`broadcastBinary`); the light-domain `PreviewDriver` holds a `BinaryBroadcaster*` and pushes each downsampled frame's bytes to it. `main.cpp` wires `PreviewDriver`'s broadcaster to the HttpServerModule instance — the only file that knows both. The preview's voxel budget (≤1849, fitting lwIP's TCP send buffer) and wire format are PreviewDriver's concern, documented there.
 
 ## Prior art
 

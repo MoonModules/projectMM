@@ -3,8 +3,15 @@
 #include <limits>
 #include <cstdint>
 #include "light/layouts/Layouts.h"
+#include "light/light_types.h"  // lengthType, nrOfLightsType
 
 namespace mm {
+
+// Default grid edge. Small by default so a fresh device shows a manageable
+// 16×16×1 (and the desktop boot grid the same); users scale up. Owned by
+// GridLayout — it's this layout's default, also read by the composition roots
+// (main.cpp / main_desktop.cpp) to size the boot grid.
+constexpr lengthType defaultGridSize = 16;
 
 class GridLayout : public LayoutBase {
 public:

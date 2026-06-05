@@ -207,6 +207,10 @@ public:
     // multi-role parent (Layer → "effect,modifier") needs no enum-set type.
     // This is what makes the UI domain-neutral: it reads the accepted roles
     // from here instead of hardcoding which module types are containers.
+    // Like tags(), overrides MUST return static-lifetime storage (a string
+    // literal or static const char[]): ModuleFactory::registerType<T>() probes
+    // the type once and stores this pointer in the static type registry, so a
+    // pointer to a temporary or member buffer would dangle.
     virtual const char* acceptsChildRoles() const { return ""; }
 
     // Whether the user may delete or replace this module from the UI. Default

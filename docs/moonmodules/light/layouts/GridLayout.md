@@ -6,9 +6,8 @@ Arranges lights in a 3D grid (row-major: x varies fastest, then y, then z). Full
 
 ## Controls
 
-- `width` (lengthType, default 16 no-PSRAM / 128 PSRAM, range 1-1024)
-- `height` (lengthType, default 16 no-PSRAM / 128 PSRAM, range 1-1024)
-- `depth` (lengthType, default 1, range 1-32)
+- `width`, `height` (default `defaultGridSize` = 16, range 1–512)
+- `depth` (default 1, range 1–512)
 
 ## Coordinate Iterator
 

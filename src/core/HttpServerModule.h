@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/MoonModule.h"
+#include "core/BinaryBroadcaster.h"
 #include "platform/platform.h"
 
 #include <cstdint>
@@ -10,7 +11,6 @@ namespace mm {
 // Forward declarations — bodies in HttpServerModule.cpp include the real headers.
 class JsonSink;
 class Scheduler;
-struct PreviewFrame;
 
 // HttpServerModule serves the UI's REST API, the static UI assets, and the
 // WebSocket channel that pushes state JSON + binary preview frames. Implementation
@@ -27,13 +27,17 @@ struct PreviewFrame;
 //   - base64Encode() (WS handshake + Password obfuscation) → core/Base64.h
 // They live in `namespace mm` so the call sites in HttpServerModule.cpp are
 // unchanged.
-class HttpServerModule : public MoonModule {
+class HttpServerModule : public MoonModule, public BinaryBroadcaster {
 public:
     uint16_t port = 8080;
 
     void setScheduler(Scheduler* s) { scheduler_ = s; }
     void setUiPath(const char* path) { uiPath_ = path; }
-    void setPreviewFrame(PreviewFrame* f) { previewFrame_ = f; }
+
+    // BinaryBroadcaster — send a binary WS frame to every connected client.
+    // Producers (PreviewDriver) build the payload chunks; this prepends the WS
+    // header. Domain-neutral: no knowledge of what the bytes carry.
+    void broadcastBinary(const platform::WriteChunk* payload, int chunkCount) override;
 
     // Keep running even when "disabled" via the UI — otherwise the user has no way
     // to re-enable themselves through the same UI. The `enabled` checkbox on this
@@ -49,7 +53,6 @@ public:
 private:
     platform::TcpServer server_;
     Scheduler* scheduler_ = nullptr;
-    PreviewFrame* previewFrame_ = nullptr;
     const char* uiPath_ = "src/ui";
 
     static constexpr int MAX_WS_CLIENTS = 4;
@@ -120,7 +123,6 @@ private:
     void handleWebSocketUpgrade(platform::TcpConnection& conn, const char* req);
     void pushStateToWebSockets();
     static bool sendWsTextFrame(platform::TcpConnection& conn, const char* data, int len);
-    void broadcastPreviewFrame();
 };
 
 } // namespace mm

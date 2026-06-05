@@ -1,10 +1,8 @@
 #pragma once
 
 #include "core/MoonModule.h"
-#include "core/types.h"
 #include "platform/platform.h"
 
-#include <concepts>
 #include <cstring>
 
 namespace mm {
@@ -29,13 +27,18 @@ public:
     // dim is captured via `if constexpr` only when T declares `dimensions()`
     // (EffectBase and ModifierBase do; everything else doesn't). Modules without
     // it get dim=0 ("not applicable") and the UI skips their dimensional chip.
+    // The probe detects the method and reduces its result to a byte — it does
+    // NOT name the return type, so the dimensionality enum (a light-domain
+    // concept, `Dim` in light_types.h) stays out of core. Any type exposing a
+    // `dimensions()` convertible to uint8_t is captured; only EffectBase /
+    // ModifierBase do, so the loose constraint matches exactly them.
     template<typename T>
     static bool registerType(const char* typeName, const char* docPath = "") {
         if (!typeName) return false;
         if (!grow()) return false;
         T probe;
         uint8_t dim = 0;
-        if constexpr (requires(const T& t) { { t.dimensions() } -> std::same_as<Dim>; }) {
+        if constexpr (requires(const T& t) { static_cast<uint8_t>(t.dimensions()); }) {
             dim = static_cast<uint8_t>(probe.dimensions());
         }
         types_[count_++] = {typeName,

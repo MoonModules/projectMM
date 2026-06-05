@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstddef>
+#include "platform_config.h"  // hasOta / hasPsram / … — flags this header's contract refers to
 
 namespace mm::platform {
 
@@ -32,6 +33,11 @@ size_t maxInternalAllocBlock(); // largest contiguous block in INTERNAL RAM only
                                 // it'll report ~8 MB even when DRAM is exhausted.
 size_t totalHeap();         // total heap capacity (internal + PSRAM)
 size_t totalInternalHeap(); // total internal heap capacity
+
+// Heap to keep free for stack, HTTP, WiFi, and overhead when sizing buffers —
+// a platform memory constraint, not a domain one (it guards core subsystems).
+// Any allocator checks free heap against this reserve before committing.
+constexpr size_t HEAP_RESERVE = 32768;
 
 void getMacAddress(uint8_t mac[6]);
 const char* chipModel();

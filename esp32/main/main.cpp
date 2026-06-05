@@ -4,9 +4,7 @@
 
 #include <cstdio>
 
-#include "core/types.h"
-
-extern void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gridH, uint16_t httpPort);
+extern void mm_main(volatile bool& keepRunning, uint16_t httpPort);
 
 static volatile bool running = true;
 
@@ -25,5 +23,5 @@ extern "C" void app_main() {
 
     // Network init moved to platform layer (NetworkModule calls ethInit/wifiStaInit/wifiApInit)
 
-    mm_main(running, mm::defaultGridSize, mm::defaultGridSize, 80);
+    mm_main(running, 80);
 }

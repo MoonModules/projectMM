@@ -16,7 +16,6 @@
 #include "light/drivers/Drivers.h"
 #include "light/drivers/ArtNetSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
-#include "core/PreviewFrame.h"
 #include "platform/platform.h"
 
 #include <cstdint>
@@ -276,6 +275,16 @@ struct ScenarioContext {
                     auto* layerModule = static_cast<mm::Layer*>(modules[props["layer"].str]);
                     if (layerModule) static_cast<mm::Drivers*>(mod)->setLayer(layerModule);
                 }
+            } else if (std::strcmp(type, "GridLayout") == 0) {
+                // Grid dimensions set at construct time (the fixture phase runs
+                // before the scheduler starts, so set_control can't apply them
+                // yet). Without this, props.width/height were silently ignored
+                // and the grid stayed at GridLayout's default — masking the real
+                // scenario size.
+                auto* grid = static_cast<mm::GridLayout*>(mod);
+                if (props.has("width"))  grid->width  = static_cast<mm::lengthType>(props["width"].num);
+                if (props.has("height")) grid->height = static_cast<mm::lengthType>(props["height"].num);
+                if (props.has("depth"))  grid->depth  = static_cast<mm::lengthType>(props["depth"].num);
             }
         }
 
@@ -284,7 +293,10 @@ struct ScenarioContext {
         // driver reads no other init from props (no layouts/parent like Layer
         // or Drivers do), but its loop() early-outs without a frame_, so
         // setPreviewFrame must run unconditionally for honest tick measurement.
-        // Production wires this via HttpServerModule on the device.
+        // No broadcaster is wired here: the scenario harness has no WS server,
+        // and pushFrame() early-returns when the broadcaster is null — the
+        // downsample work (the part we measure) still runs. Production wires the
+        // broadcaster to HttpServerModule in main.cpp.
         if (std::strcmp(type, "PreviewDriver") == 0) {
             static_cast<mm::PreviewDriver*>(mod)->setPreviewFrame(&scenarioPreviewFrame());
         }

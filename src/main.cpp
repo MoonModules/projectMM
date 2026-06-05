@@ -18,7 +18,6 @@
 #include "light/drivers/ArtNetSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
 #include "core/HttpServerModule.h"
-#include "core/PreviewFrame.h"  // used directly here; HttpServerModule.h no longer brings it transitively
 #include "core/SystemModule.h"
 #include "core/BoardModule.h"
 #include "core/FirmwareUpdateModule.h"
@@ -83,7 +82,7 @@ static void printModuleMetrics(mm::MoonModule* mod, int depth) {
     }
 }
 
-void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gridH, uint16_t httpPort) {
+void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     registerModuleTypes();
     mm::Scheduler scheduler;
 
@@ -169,11 +168,11 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
         improvModule->markWiredByCode();
     }
 
-    // Layouts: top-level container; one or more layouts. Today one GridLayout.
+    // Layouts: top-level container; one or more layouts. Today one GridLayout,
+    // which self-initialises to defaultGridSize (persistence overlays any saved
+    // size before setup()). No boot-time dimensions threaded in here.
     auto* layouts = static_cast<mm::Layouts*>(mm::ModuleFactory::create("Layouts"));
     auto* grid = static_cast<mm::GridLayout*>(mm::ModuleFactory::create("GridLayout"));
-    grid->width = gridW;
-    grid->height = gridH;
     layouts->addChild(grid);
 
     // Layers: top-level container; one or more layers, each rendering
@@ -211,7 +210,10 @@ void mm_main(volatile bool& keepRunning, mm::lengthType gridW, mm::lengthType gr
     auto* httpServer = static_cast<mm::HttpServerModule*>(mm::ModuleFactory::create("HttpServerModule"));
     httpServer->port = httpPort;
     httpServer->setScheduler(&scheduler);
-    httpServer->setPreviewFrame(previewFrame);
+    // PreviewDriver pushes each frame to the HTTP server's WS broadcaster
+    // (HttpServerModule is-a BinaryBroadcaster). The server no longer reads the
+    // PreviewFrame — light owns the preview wire format end to end.
+    preview->setBroadcaster(httpServer);
 
     // Register top-level modules with scheduler (scheduler deletes on teardown).
     // Order matters: filesystem first (load hook runs before any module's setup),

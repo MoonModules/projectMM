@@ -5,7 +5,6 @@
 #include "light/layers/Layer.h"
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
-#include "core/PreviewFrame.h"
 
 // PreviewDriver downsamples the render buffer into a small RGB frame so the
 // whole WebSocket message fits lwIP's TCP send buffer. These tests verify that
@@ -16,6 +15,19 @@
 
 namespace {
 
+// Records each broadcastBinary call so tests can assert a frame was produced
+// AND pushed (replacing the old PreviewFrame::ready poll flag). Captures the
+// last payload's total length too, to cross-check header + data size.
+struct RecordingBroadcaster : mm::BinaryBroadcaster {
+    int calls = 0;
+    size_t lastTotalLen = 0;
+    void broadcastBinary(const mm::platform::WriteChunk* payload, int chunkCount) override {
+        calls++;
+        lastTotalLen = 0;
+        for (int i = 0; i < chunkCount; i++) lastTotalLen += payload[i].len;
+    }
+};
+
 // Build a populated PreviewDriver against a GridLayout of the given size.
 // Returns by wiring the caller's objects — keeps every object on the stack so
 // there is no allocation outside PreviewDriver's own owned buffer.
@@ -25,6 +37,7 @@ struct PreviewRig {
     mm::Layer layer;
     mm::Buffer source;
     mm::PreviewFrame frame;
+    RecordingBroadcaster broadcaster;
     mm::PreviewDriver driver;
 
     PreviewRig(mm::lengthType w, mm::lengthType h, mm::lengthType d, uint8_t cpl) {
@@ -43,12 +56,14 @@ struct PreviewRig {
         driver.setLayer(&layer);
         driver.setSourceBuffer(&source);
         driver.setPreviewFrame(&frame);
+        driver.setBroadcaster(&broadcaster);
         driver.onBuildControls();
         driver.onBuildState();
     }
 
     // Produce one frame deterministically. renderFrame() bypasses loop()'s fps
     // rate-limit, so the test never sleeps and never depends on wall-clock time.
+    // renderFrame() also pushes to the broadcaster, so broadcaster.calls rises.
     void produceFrame() {
         driver.renderFrame();
     }
@@ -72,7 +87,7 @@ TEST_CASE("PreviewDriver detail levels select distinct strides on a 128 grid") {
         rig.driver.detail = c.detail;
         rig.produceFrame();
 
-        REQUIRE(rig.frame.ready);
+        REQUIRE(rig.broadcaster.calls > 0);  // frame produced AND pushed to the WS broadcaster
         CHECK(rig.frame.width == c.expectDim);
         CHECK(rig.frame.height == c.expectDim);
         CHECK(rig.frame.depth == 1);
@@ -90,7 +105,7 @@ TEST_CASE("PreviewDriver frame carries the original grid dimensions") {
     rig.driver.detail = 1; // coarse → downsampled dims differ from original
     rig.produceFrame();
 
-    REQUIRE(rig.frame.ready);
+    REQUIRE(rig.broadcaster.calls > 0);  // frame produced AND pushed to the WS broadcaster
     CHECK(rig.frame.origWidth == 128);
     CHECK(rig.frame.origHeight == 64);
     CHECK(rig.frame.origDepth == 1);
@@ -111,7 +126,7 @@ TEST_CASE("PreviewDriver finest detail stays within the send-buffer budget") {
     rig.driver.detail = 3;
     rig.produceFrame();
 
-    REQUIRE(rig.frame.ready);
+    REQUIRE(rig.broadcaster.calls > 0);  // frame produced AND pushed to the WS broadcaster
     size_t voxels = static_cast<size_t>(rig.frame.width) *
                     rig.frame.height * rig.frame.depth;
     CHECK(voxels <= MAX_VOXELS);
@@ -126,7 +141,7 @@ TEST_CASE("PreviewDriver small grid is copied 1:1 (stride 1)") {
     rig.driver.detail = 2;
     rig.produceFrame();
 
-    REQUIRE(rig.frame.ready);
+    REQUIRE(rig.broadcaster.calls > 0);  // frame produced AND pushed to the WS broadcaster
     CHECK(rig.frame.width == 8);
     CHECK(rig.frame.height == 8);
     CHECK(rig.frame.dataLen == 8 * 8 * 3);
@@ -140,7 +155,7 @@ TEST_CASE("PreviewDriver channel-agnostic: RGBW source copies RGB only") {
     rig.driver.detail = 3;        // small grid → stride 1, full copy
     rig.produceFrame();
 
-    REQUIRE(rig.frame.ready);
+    REQUIRE(rig.broadcaster.calls > 0);  // frame produced AND pushed to the WS broadcaster
     CHECK(rig.frame.width == 16);
     CHECK(rig.frame.height == 16);
     CHECK(rig.frame.dataLen == 16 * 16 * 3); // 3 B/voxel even with 4-ch source

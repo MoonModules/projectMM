@@ -13,6 +13,10 @@ exposes through SystemModule:
                      "Firmware" is the compiled-binary variant; the physical
                      board is a separate concept the device cannot self-identify.
                      See docs/architecture.md § Firmware vs board.
+  MM_RELEASE       — release-channel tag (`latest`, `v1.0.0`), set by the
+                     release workflow as a -D flag. #ifndef "" fallback for
+                     local/dev builds (no channel). MM_VERSION = what code;
+                     MM_RELEASE = which channel.
 
 The generator rewrites the whole file from this template each time
 library.json changes; the #ifndef defaults below are part of the template,
@@ -54,11 +58,23 @@ content = f'''#pragma once
 #define MM_FIRMWARE_NAME "unknown"
 #endif
 
+// MM_RELEASE — the release-channel tag this binary was published under
+// (`latest`, `v1.0.0`, `v1.0.0-rc2`). Set by the release workflow as a -D
+// flag (same mechanism as MM_FIRMWARE_NAME). MM_VERSION is the semver from
+// library.json — what code this is; MM_RELEASE is which channel it shipped
+// on — a moving `latest` build and a tagged release can share a semver but
+// differ in channel. Empty default: a local / dev build has no channel, and
+// SystemModule shows just the bare semver in that case.
+#ifndef MM_RELEASE
+#define MM_RELEASE ""
+#endif
+
 namespace mm {{
 
 constexpr const char* kVersion      = MM_VERSION;
 constexpr const char* kBuildDate    = MM_BUILD_DATE;
 constexpr const char* kFirmwareName = MM_FIRMWARE_NAME;
+constexpr const char* kRelease      = MM_RELEASE;
 
 }} // namespace mm
 '''

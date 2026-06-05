@@ -32,7 +32,15 @@ public:
         // on the next WebSocket push.
         std::snprintf(chipInfo_, sizeof(chipInfo_), "%s", platform::chipModel());
         std::snprintf(sdkInfo_, sizeof(sdkInfo_), "%s", platform::sdkVersion());
-        std::snprintf(versionStr_, sizeof(versionStr_), "%s", kVersion);
+        // version = semver (what code) + release channel (which channel) when
+        // the build pipeline burned one in: "1.0.0-rc2 (latest)". kRelease is
+        // "" on local / dev builds, where we show the bare semver. See
+        // build_info.h for the MM_VERSION vs MM_RELEASE split.
+        if (kRelease[0] != 0) {
+            std::snprintf(versionStr_, sizeof(versionStr_), "%s (%s)", kVersion, kRelease);
+        } else {
+            std::snprintf(versionStr_, sizeof(versionStr_), "%s", kVersion);
+        }
         std::snprintf(buildStr_, sizeof(buildStr_), "%s", kBuildDate);
         std::snprintf(firmwareStr_, sizeof(firmwareStr_), "%s", kFirmwareName);
         std::snprintf(bootReasonStr_, sizeof(bootReasonStr_), "%s", platform::resetReason());
@@ -163,7 +171,7 @@ private:
     // Static (set in setup)
     char chipInfo_[16] = {};
     char sdkInfo_[24] = {};
-    char versionStr_[16] = {};
+    char versionStr_[32] = {};  // semver + " (channel)" — e.g. "1.0.0-rc2 (latest)"
     char buildStr_[24] = {};
     // 24 fits the longest current key ("desktop-macos-arm64" = 19) with headroom.
     char firmwareStr_[24] = {};

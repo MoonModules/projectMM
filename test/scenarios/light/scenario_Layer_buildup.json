@@ -52,14 +52,9 @@
     },
     {
       "name": "measure-minimum",
-      "description": "Baseline: 16x16 grid + Rainbow only. No Drivers yet (Layer renders into its own buffer).",
+      "description": "Baseline: 16x16 grid + Rainbow only. No Drivers yet (Layer renders into its own buffer). No fps floor asserted — a 16x16 grid renders in <1us on desktop, flooring the integer-us tick (and thus FPS) to 0; the tick contract + heap delta are the meaningful checks at this size.",
       "op": "measure",
       "measure": true,
-      "bounds": {
-        "fps": {
-          "min": 1
-        }
-      },
       "contract": {
         "pc-macos": {
           "tick_us": 50,
@@ -71,7 +66,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            35,
+            0,
             122
           ],
           "free_heap": [
@@ -84,7 +79,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-02"
+            "2026-06-05"
           ]
         }
       }
@@ -109,13 +104,10 @@
     },
     {
       "name": "measure-full-16x16",
-      "description": "Full pipeline at 16x16. Heap delta vs previous measure-minimum step should stay within +8KB on ESP32 (Drivers + ArtNet overhead, no LUT yet).",
+      "description": "Full pipeline at 16x16. Heap delta vs previous measure-minimum step should stay within +8KB on ESP32 (Drivers + ArtNet overhead, no LUT yet). No fps floor — 16x16 ticks below the host's microsecond resolution on desktop; heap delta is the check here.",
       "op": "measure",
       "measure": true,
       "bounds": {
-        "fps": {
-          "min": 1
-        },
         "heap": {
           "max_delta_bytes": 8192
         }
@@ -131,7 +123,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            35,
+            0,
             183
           ],
           "free_heap": [
@@ -144,7 +136,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-02"
+            "2026-06-05"
           ]
         }
       }
@@ -178,7 +170,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            44,
+            0,
             150
           ],
           "free_heap": [
@@ -191,7 +183,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-03"
+            "2026-06-05"
           ]
         }
       }
