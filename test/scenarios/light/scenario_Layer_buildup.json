@@ -52,7 +52,7 @@
     },
     {
       "name": "measure-minimum",
-      "description": "Baseline: 16x16 grid + Rainbow only. No Drivers yet (Layer renders into its own buffer). No fps floor asserted — a 16x16 grid renders in <1us on desktop, flooring the integer-us tick (and thus FPS) to 0; the tick contract + heap delta are the meaningful checks at this size.",
+      "description": "Baseline: 16x16 grid + Rainbow only. No Drivers yet (Layer renders into its own buffer). No fps floor asserted — a 16x16 grid renders in <1us on desktop, flooring the integer-us tick (and thus FPS) to 0; the per-target tick contract is the meaningful check here (heap deltas are asserted on the later buildup steps that add Drivers/LUT).",
       "op": "measure",
       "measure": true,
       "contract": {

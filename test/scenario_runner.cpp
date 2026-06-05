@@ -7,6 +7,7 @@
 #include "core/Control.h"
 #include "core/JsonSink.h"
 #include "light/layouts/GridLayout.h"
+#include "light/layouts/SphereLayout.h"
 #include "light/layers/Layer.h"
 #include "light/layouts/Layouts.h"
 #include "light/layers/Layers.h"
@@ -152,6 +153,7 @@ static void registerScenarioTypes() {
     if (done) return;
     mm::ModuleFactory::registerType<mm::Layouts>("Layouts");
     mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout");
+    mm::ModuleFactory::registerType<mm::SphereLayout>("SphereLayout");
     mm::ModuleFactory::registerType<mm::Layers>("Layers");
     mm::ModuleFactory::registerType<mm::Layer>("Layer");
     mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
@@ -163,13 +165,6 @@ static void registerScenarioTypes() {
     done = true;
 }
 
-// PreviewDriver needs a frame to write into; main.cpp owns it. In the scenario
-// runner we own a single static frame so mutate scenarios with PreviewDriver in
-// their fixture work without a separate `setPreviewFrame` step.
-static mm::PreviewFrame& scenarioPreviewFrame() {
-    static mm::PreviewFrame frame;
-    return frame;
-}
 
 // Target key for the per-step expected[<target>] lookup. The in-process runner
 // builds for the host only — there's no cross-compiled scenario_runner — so the
@@ -288,18 +283,12 @@ struct ScenarioContext {
             }
         }
 
-        // PreviewDriver always needs its scenario-static PreviewFrame target
-        // wired — independent of any step "props" the scenario provides. The
-        // driver reads no other init from props (no layouts/parent like Layer
-        // or Drivers do), but its loop() early-outs without a frame_, so
-        // setPreviewFrame must run unconditionally for honest tick measurement.
-        // No broadcaster is wired here: the scenario harness has no WS server,
-        // and pushFrame() early-returns when the broadcaster is null — the
-        // downsample work (the part we measure) still runs. Production wires the
-        // broadcaster to HttpServerModule in main.cpp.
-        if (std::strcmp(type, "PreviewDriver") == 0) {
-            static_cast<mm::PreviewDriver*>(mod)->setPreviewFrame(&scenarioPreviewFrame());
-        }
+        // PreviewDriver needs no scenario-specific wiring: it reads its Layer +
+        // sparse source buffer through Drivers' passBufferToDrivers (set when a
+        // Drivers fixture exists), and owns its own scratch buffers. No
+        // broadcaster is wired here (the harness has no WS server) — sendFrame /
+        // sendCoordTable early-return when the broadcaster is null, but the
+        // light-extraction work still runs for honest tick measurement.
     }
 };
 
@@ -496,6 +485,56 @@ static int runScenario(const char* path) {
             } else {
                 std::printf("  SET   %s (%s.%s)\n", name, targetId, key);
             }
+        } else if (std::strcmp(op, "remove_module") == 0) {
+            // Remove a child module from its parent — mirrors
+            // HttpServerModule::handleDeleteModule (remove from parent,
+            // teardown + recursive delete, rebuild pipeline state). Only child
+            // modules can be removed; top-level modules are policy-fixed.
+            const char* targetId = step["id"].c_str();
+            auto* target = ctx.modules.count(targetId) ? ctx.modules[targetId] : nullptr;
+            if (!target || !target->parent()) {
+                std::printf("  -     %s — %s not found or top-level, skipped\n", name, targetId);
+                continue;
+            }
+            auto* parent = target->parent();
+            parent->removeChild(target);
+            target->teardown();
+            mm::Scheduler::deleteTree(target);
+            ctx.modules.erase(targetId);
+            if (schedulerStarted) ctx.scheduler.buildState();
+            std::printf("  -     %s (%s)\n", name, targetId);
+        } else if (std::strcmp(op, "replace_module") == 0) {
+            // Replace a child with a fresh module of another type at the same
+            // slot — mirrors HttpServerModule::handleReplaceModule. The new
+            // module re-registers under the SAME scenario id so later steps
+            // (set_control, remove) still address it by that id.
+            const char* targetId = step["id"].c_str();
+            const char* newType = step["type"].c_str();
+            auto* target = ctx.modules.count(targetId) ? ctx.modules[targetId] : nullptr;
+            if (!target || !target->parent()) {
+                std::printf("  ~     %s — %s not found or top-level, skipped\n", name, targetId);
+                continue;
+            }
+            auto* parent = target->parent();
+            uint8_t index = 0; bool found = false;
+            for (uint8_t i = 0; i < parent->childCount(); i++) {
+                if (parent->child(i) == target) { index = i; found = true; break; }
+            }
+            auto* fresh = ctx.createModule(newType);
+            if (!found || !fresh) {
+                if (fresh) mm::Scheduler::deleteTree(fresh);
+                std::printf("  ~     %s — slot not found or unknown type %s, skipped\n", name, newType);
+                continue;
+            }
+            fresh->setName(targetId);
+            mm::MoonModule* old = parent->replaceChildAt(index, fresh);
+            fresh->onBuildControls();
+            fresh->setup();
+            fresh->onBuildState();
+            if (old) { old->teardown(); mm::Scheduler::deleteTree(old); }
+            ctx.modules[targetId] = fresh;
+            if (schedulerStarted) ctx.scheduler.buildState();
+            std::printf("  ~     %s (%s → %s)\n", name, targetId, newType);
         } else if (std::strcmp(op, "measure") == 0) {
             // Pure measurement step — no side effects. op:"measure" is the
             // implicit-measure shape so scenarios can interleave snapshots

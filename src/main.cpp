@@ -1,6 +1,7 @@
 #include "core/Scheduler.h"
 #include "light/layers/Layers.h"
 #include "light/layouts/GridLayout.h"
+#include "light/layouts/SphereLayout.h"
 #include "light/effects/LinesEffect.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/NoiseEffect.h"
@@ -42,6 +43,7 @@ static void registerModuleTypes() {
     // if-constexpr when present — EffectBase and ModifierBase both expose one,
     // so the UI's 📏/🟦/🧊 chip lights up without any per-domain wrapper.
     mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout", "light/layouts/GridLayout.md");
+    mm::ModuleFactory::registerType<mm::SphereLayout>("SphereLayout", "light/layouts/SphereLayout.md");
     mm::ModuleFactory::registerType<mm::LinesEffect>("LinesEffect", "light/effects/LinesEffect.md");
     mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect", "light/effects/RainbowEffect.md");
     mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect", "light/effects/NoiseEffect.md");
@@ -198,21 +200,25 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
 
     auto* artnet = mm::ModuleFactory::create("ArtNetSendDriver");
     drivers->addChild(artnet);  // name = "ArtNetSend" (factory default) — disambiguates from a future ArtNetReceive
+    artnet->markWiredByCode();
 
-    auto* previewFrame = new mm::PreviewFrame();
     auto* preview = static_cast<mm::PreviewDriver*>(mm::ModuleFactory::create("PreviewDriver"));
-    // PreviewDriver reads physical dimensions from the active Layer at frame
-    // time (via Drivers' setLayer wiring) so runtime grid resizes show in the
-    // preview header.
-    preview->setPreviewFrame(previewFrame);
+    // PreviewDriver reads the active Layer (via Drivers' setLayer wiring) for the
+    // light positions and the sparse driver buffer it streams; it owns its own
+    // scratch buffers, so no externally-owned frame is needed.
     drivers->addChild(preview);
+    // These two drivers are wired by code here (preview gets its broadcaster set
+    // below, once httpServer exists; ArtNet its IP). Mark them wired-by-code so a
+    // persistence load can't replace the wired instances with fresh factory ones
+    // that lost that wiring — same protection BoardModule / ImprovProvisioning use.
+    preview->markWiredByCode();
 
     auto* httpServer = static_cast<mm::HttpServerModule*>(mm::ModuleFactory::create("HttpServerModule"));
     httpServer->port = httpPort;
     httpServer->setScheduler(&scheduler);
-    // PreviewDriver pushes each frame to the HTTP server's WS broadcaster
-    // (HttpServerModule is-a BinaryBroadcaster). The server no longer reads the
-    // PreviewFrame — light owns the preview wire format end to end.
+    // PreviewDriver pushes the coordinate table + per-frame RGB to the HTTP
+    // server's WS broadcaster (HttpServerModule is-a BinaryBroadcaster). Light
+    // owns the preview wire format end to end; core just writes the bytes.
     preview->setBroadcaster(httpServer);
 
     // Register top-level modules with scheduler (scheduler deletes on teardown).
@@ -293,5 +299,4 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
 
     std::printf("\nShutting down.\n");
     scheduler.teardown();
-    delete previewFrame;
 }

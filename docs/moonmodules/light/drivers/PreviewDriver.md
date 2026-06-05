@@ -2,51 +2,50 @@
 
 ![PreviewDriver controls](../../../assets/screenshots/PreviewDriver.png)
 
-Streams light data to the web UI via WebSocket for real-time 3D visualization.
+Streams a true-shape 3D preview to the web UI over WebSocket. The preview is a **point list** — only the real lights, at their real positions — not a dense grid. So a sphere, ring, or arbitrary fixture map shows in its true shape, and the per-frame data is just the lights that exist (much less than a padded bounding box).
 
 ## Controls
 
-- `fps` (uint8_t, default 12, range 1-60) — preview frame rate (independent of render loop)
-- `detail` (uint8_t, default 2, range 1-3) — downsample detail. Sets the voxel budget for the strided copy: 1 = coarse (256 voxels), 2 = medium (1024), 3 = fine (1849). Higher = a denser point cloud and a larger WebSocket payload, capped so even `detail = 3` (~5.5 KB) fits lwIP's TCP send buffer.
-- `decompress` (bool, default false) — UI render hint. When on, the browser reconstructs the downsampled frame back to the original physical grid resolution by block-replicating each received voxel across its original cells, so the preview shows the same voxel count as the real layout. Purely client-side — the wire payload is the downsampled frame either way.
+- `fps` (uint8_t, default 24, range 1-60) — preview stream rate (independent of the render loop)
 
 ## Protocol
 
-PreviewDriver owns the preview wire format end to end. It builds each frame's bytes and pushes them to a `BinaryBroadcaster` (the core [HttpServerModule](../../core/HttpServerModule.md) implements that interface) via `broadcastBinary`. The HTTP server only sends the bytes to its WebSocket clients — it has no knowledge of `PreviewFrame` or the format below. `main.cpp` wires the driver's broadcaster to the HTTP server instance.
+PreviewDriver owns both wire formats end to end and pushes the bytes to a `BinaryBroadcaster` (the core [HttpServerModule](../../core/HttpServerModule.md) implements it via `broadcastBinary`). The HTTP server only writes the bytes to its WebSocket clients — it has no knowledge of the preview, the light domain, or the formats below. `main.cpp` wires the driver's broadcaster to the HTTP server instance. This mirrors MoonLight's model: positions sent once at mapping time, channels per frame.
 
-Binary WebSocket frames: `[0x02][dw16][dh16][dd16][ow16][oh16][od16][R G B ...]`
+Two binary message types (first byte selects):
 
-- 13-byte header: opcode, then the downsampled `dw/dh/dd` and the original-grid `ow/oh/od`, each a little-endian uint16
-- RGB data: 3 bytes per voxel of the downsampled grid, row-major order
-- The UI renders this as a 3D point cloud using WebGL with orbit camera controls. With `decompress` off it draws the `dw×dh×dd` cloud directly; with `decompress` on it block-replicates to the `ow×oh×od` grid.
+- **`0x03` coordinate table** — sent on every LUT rebuild (layout add/replace/remove, resize, modifier change) and re-broadcast ~once per second so a newly-connected client catches up. Layout:
 
-## Downsampling
+  `[0x03][count:u16][bx:u8][by:u8][bz:u8][stride:u16][ (x:u8, y:u8, z:u8) × count ]`
 
-The preview frame is sent over WebSocket in a single non-blocking write, so it must fit lwIP's TCP send buffer (a backpressured browser must never stall the render task — see [HttpServerModule](../../core/HttpServerModule.md)). PreviewDriver therefore copies every Nth voxel (per axis) into a small owned buffer. The voxel budget is set by the `detail` control (256 / 1024 / 1849 for levels 1 / 2 / 3). The stride N is adaptive — the smallest stride whose downsampled voxel count fits the budget, recomputed each frame so it tracks runtime grid resizes. The frame's `width`/`height`/`depth` describe the downsampled grid; the browser derives positions from those, so no UI change is needed — it simply renders a coarser or finer point cloud. The owned buffer is sized once to the largest budget (`detail = 3`, ~5.5 KB) in `onBuildState()` — PreviewDriver's only allocation.
+  `count` = points actually sent; `bx/by/bz` = bounding-box extent (the browser centres the cloud on it); positions are **1 byte per axis** (a layout's bounding box is ≤255/axis in practice; clamped on build). `stride` is the index-downsample factor (see Large layouts).
 
-The strided copy is fully 3D and channel-agnostic: it copies the first 3 (RGB) channels of each sampled light regardless of `channelsPerLight` (RGBW, RGBCCT, multi-channel DMX all work). The light index is derived from the bounding-box `(x, y, z)` but bounded by the real light count, so a **sparse layout** (wheel, sphere, arbitrary 3D shape — fewer lights than its bounding box) cannot read past the buffer; out-of-range cells render as black. Showing such non-grid layouts in their true shape needs the planned one-time coordinate message (below) — until then they preview as their dense bounding box.
+- **`0x02` per-frame channels** — RGB by driver-light index, in the same order as the coordinate table:
 
-## Non-grid layouts
+  `[0x02][count:u16][stride:u16][ (r, g, b) × count ]`
 
-For grid layouts, the browser derives 3D positions from the index (`x = i % w`). For non-grid layouts (wheel, ring, sphere, arbitrary point clouds), positions can't be derived — the browser needs actual coordinates.
+  The browser colours coordinate-table entry `i` with RGB triple `i`. It holds `0x02` frames until a `0x03` table has arrived.
 
-Solution: **one-time coordinate message**. When the layout changes, send a separate WebSocket message with the coordinate table per light. The browser caches it. Binary pixel frames continue to stream only RGB data — coordinates sent once, then only pixel data streams.
+## Sparse layouts & where the data comes from
 
-Frame types:
-- `0x02` — pixel data (every frame)
-- `0x03` — coordinate table (on layout change only): `[0x03][count_lo][count_hi][x16 y16 z16 ...]`
+The driver reads the **sparse driver buffer** — the `Layer`'s `MappingLUT` extracts the real lights from the dense render grid into a buffer of exactly `Layouts::totalLightCount()` entries (a radius-4 sphere → 210, not its 9×9×9 = 729 box). That same buffer is what ArtNet sends. PreviewDriver reads it flat by light index and builds the coordinate table from `Layouts::forEachCoord` (same driver order), so RGB index `i` and coordinate `i` always refer to the same light. See [Layer](../Layer.md) / [MappingLUT](../MappingLUT.md) for the box→driver mapping.
+
+## Large layouts (index downsample)
+
+A preview message is one non-blocking `writev`; it must fit lwIP's TCP send buffer (`CONFIG_LWIP_TCP_SND_BUF_DEFAULT` = 11520 B), or the connection is dropped. Sparse layouts (sphere ≈ 634 B) send every light exactly (`stride` = 1). A large dense grid (128² = 16384 lights × 3 ≈ 48 KB) is **index-downsampled**: `stride` = smallest factor whose sent-point count (≤ 1800, ≈ 5.4 KB — well under half the send buffer, since the render task shares it and a payload near the ceiling would partial-write and drop the connection) fits the cap. Both `0x03` and `0x02` carry `stride`, and the browser plots every `stride`-th light **at its real position** — far better than the old dense-box block-replicate (which this replaces; there is no `decompress` / `detail` control anymore).
+
+Positions are 1 byte per axis. A layout whose bounding box exceeds 255 on any axis (e.g. a 512-wide grid) is **scaled** so the largest box edge maps to 255, preserving aspect ratio (the `0x03` header carries the scaled box extents, which the browser normalises against). Boxes ≤255/axis — every sparse layout and any grid up to 255 — are sent at exact integer positions (scale factor 1). So large grids preview at their true proportions, not flattened onto the 255 plane.
 
 ## Tests
 
-- [Unit tests: PreviewDriver](../../../tests/unit-tests.md#previewdriver) — `detail` strides, original-dimension reporting, send-buffer budget, channel-agnostic copy.
-- [Scenario: scenario_PreviewDriver_detail](../../../tests/scenario-tests.md#scenario_previewdriver_detail) — toggles `detail`/`decompress` on a live device, asserts no render-FPS regression.
-- [Scenario: scenario_Layer_base_pipeline](../../../tests/scenario-tests.md#scenario_layer_base_pipeline) — full pipeline including preview driver.
+- [Unit tests: PreviewDriver](../../../tests/unit-tests.md#previewdriver) — coordinate table = real-light count (sphere → 210, not 729), per-frame RGB count matches the table, large layout strides down, small layout exact.
+- [Scenario: scenario_Layer_base_pipeline](../../../tests/scenario-tests.md#scenario_layer_base_pipeline) — full pipeline including the preview driver.
 
 ## Prior art
 
-### MoonLight — PhysicalLayer + WebSocket
+### MoonLight — PhysicalLayer + WebSocket ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h))
 
-Light preview sent via WebSocket binary frames directly from PhysicalLayer's display buffer. 3D WebGL renderer in frontend. No intermediate copy.
+The model this implements: virtual(logical grid) → physical(sparse lights) via a mapping table; light **positions sent once** at mapping time (`monitorPass`, `packCoord3DInto3Bytes` = 1 byte/axis, `isPositions` header state), **channels streamed per frame**. 3D WebGL renderer in the frontend.
 
 ### projectMM v1 — PreviewModule ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/drivers/PreviewModule.h))
 

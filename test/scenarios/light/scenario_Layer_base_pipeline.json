@@ -60,7 +60,7 @@
     },
     {
       "name": "add-artnet",
-      "description": "Add ArtNetSendDriver and run the bounded FPS measurement (must stay at >=80% of the rated FPS for grid size 16x16).",
+      "description": "Add ArtNetSendDriver and run the bounded FPS measurement (must stay at >=80% of the rated FPS for the 128x128 grid this scenario builds).",
       "op": "add_module",
       "id": "ArtNet",
       "type": "ArtNetSendDriver",

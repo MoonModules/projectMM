@@ -87,7 +87,7 @@ function connectWs() {
     ws.onmessage = (e) => {
         if (wsPaused) return;
         if (e.data instanceof ArrayBuffer) {
-            renderPreviewFrame(e.data);
+            renderPreviewBinary(e.data);
             return;
         }
         try {
@@ -1808,6 +1808,12 @@ let lastVerts = null;        // cached vertex array for orbit-without-server-fra
 let lastVertCount = 0;
 let lastMaxDim = 1;
 let vertsBuf = null;         // reused worst-case Float32Array; grows but never shrinks
+// True-shape preview geometry, set from the 0x03 coordinate table and reused
+// across 0x02 colour frames (positions change only on a layout/LUT rebuild).
+let previewCoords_ = null;   // Float32Array[count*3], normalised + box-centred positions
+let previewCoordCount_ = 0;
+let previewMaxDim_ = 1;
+let previewBox_ = null;      // {x,y,z} bounding-box extent for camera auto-fit
 
 function initWebGL() {
     const canvas = document.getElementById("preview");
@@ -1955,99 +1961,83 @@ function setupPreviewShrink() {
     });
 }
 
-// Read the Preview module's "decompress" control from the latest state push.
-function previewDecompressOn() {
-    if (!state || !state.modules) return false;
-    let found = false;
-    (function walk(mods) {
-        for (const m of mods) {
-            // Match on type only — the name is user-editable, the type is not.
-            if (m.type === "PreviewDriver") {
-                const c = (m.controls || []).find(c => c.name === "decompress");
-                if (c) found = !!c.value;
-            }
-            if (m.children) walk(m.children);
-        }
-    })(state.modules);
-    return found;
+// True-shape preview: two binary message types on the preview WebSocket.
+//   0x03 coordinate table (once per layout/LUT rebuild + ~1 Hz keepalive):
+//        [0x03][count:u16][bx:u8][by:u8][bz:u8][stride:u16][(x,y,z):u8×3 × count]
+//        Stores the real lights' normalised positions in previewCoords_ (the
+//        geometry); per-frame 0x02 messages then just recolour those points.
+//   0x02 per-frame channels: [0x02][count:u16][stride:u16][(r,g,b) × count]
+//        Colour for light i sits at position previewCoords_[i].
+// Light index i in the 0x02 stream matches coordinate-table entry i (both are
+// every stride-th driver light, in the same order) — no dense grid, no decompress.
+function renderPreviewBinary(buf) {
+    if (buf.byteLength < 1) return;
+    const view = new DataView(buf);
+    const type = view.getUint8(0);
+    if (type === 0x03) { parsePreviewCoords(view, buf); return; }
+    if (type === 0x02) { renderPreviewFrame(view, buf); return; }
 }
 
-function renderPreviewFrame(buf) {
+// Parse + cache the coordinate table: normalised (x,y,z) per point, centred on
+// the bounding box so the cloud sits around the origin like the old grid did.
+function parsePreviewCoords(view, buf) {
+    if (buf.byteLength < 8) return;
+    const count = view.getUint16(1, true);
+    const bx = view.getUint8(3), by = view.getUint8(4), bz = view.getUint8(5);
+    if (buf.byteLength < 8 + count * 3) return;
+    const pos = new Uint8Array(buf, 8);
+    const maxDim = Math.max(1, bx, by, bz);
+    previewMaxDim_ = maxDim;
+    previewCoords_ = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+        previewCoords_[i * 3 + 0] = (pos[i * 3 + 0] / maxDim) - 0.5 * bx / maxDim;
+        previewCoords_[i * 3 + 1] = (pos[i * 3 + 1] / maxDim) - 0.5 * by / maxDim;
+        previewCoords_[i * 3 + 2] = (pos[i * 3 + 2] / maxDim) - 0.5 * bz / maxDim;
+    }
+    previewCoordCount_ = count;
+    previewBox_ = { x: bx, y: by, z: bz };
+}
+
+function renderPreviewFrame(view, buf) {
     if (!gl) initWebGL();
     if (!gl) return;
+    // Hold frames until positions have arrived (the table is sent on rebuild +
+    // ~1 Hz, so a fresh client catches up within a second).
+    if (!previewCoords_ || previewCoordCount_ === 0) return;
+    if (buf.byteLength < 5) return;
+    const count = view.getUint16(1, true);
+    if (buf.byteLength < 5 + count * 3) return;
+    const rgb = new Uint8Array(buf, 5);
+    // RGB[i] colours the light at previewCoords_[i]. If the frame and table
+    // counts disagree (a rebuild in flight), plot the overlap only.
+    const n = Math.min(count, previewCoordCount_);
 
-    // 13-byte header: [0x02][dw16][dh16][dd16][ow16][oh16][od16], little-endian.
-    // dw/dh/dd = dimensions of the data in this frame; ow/oh/od = original grid.
-    if (buf.byteLength < 13) return;
-    const view = new DataView(buf);
-    if (view.getUint8(0) !== 0x02) return;
-    const dw = view.getUint16(1, true);
-    const dh = view.getUint16(3, true);
-    const dd = view.getUint16(5, true);
-    const ow = view.getUint16(7, true);
-    const oh = view.getUint16(9, true);
-    const od = view.getUint16(11, true);
-    if (dw === 0 || dh === 0 || dd === 0) return;
-    const total = dw * dh * dd;
-    if (buf.byteLength < 13 + total * 3) return;
-    const pixels = new Uint8Array(buf, 13);
-
-    // Decompress: when on, reconstruct the original grid by block-replicating
-    // each received voxel across its stride×stride×stride original cells, so the
-    // preview shows the same voxel count as the real layout. When off, render the
-    // downsampled cloud directly.
-    const decompress = previewDecompressOn()
-        && ow >= dw && oh >= dh && od >= dd
-        && (ow > dw || oh > dh || od > dd);
-    const w = decompress ? ow : dw;
-    const h = decompress ? oh : dh;
-    const d = decompress ? od : dd;
-
-    const colorAt = decompress
-        // map original cell (ix,iy,iz) → nearest downsampled voxel
-        ? (ix, iy, iz) => {
-              const sx = Math.min(dw - 1, (ix * dw / ow) | 0);
-              const sy = Math.min(dh - 1, (iy * dh / oh) | 0);
-              const sz = Math.min(dd - 1, (iz * dd / od) | 0);
-              return (sz * dh * dw + sy * dw + sx) * 3;
-          }
-        : (ix, iy, iz) => (iz * dh * dw + iy * dw + ix) * 3;
-
-    // Single-pass: reuse a module-scope buffer sized to the worst-case voxel
-    // count; reallocate only when the grid grows. No pre-pass to count
-    // non-black — eliminates double iteration / blank-frame race on sparse effects.
-    const maxDim = Math.max(w, h, d);
-    const needed = w * h * d * 6;
-    if (!vertsBuf || vertsBuf.length < needed) vertsBuf = new Float32Array(needed);
+    if (!vertsBuf || vertsBuf.length < n * 6) vertsBuf = new Float32Array(n * 6);
     let vi = 0;
-    for (let iz = 0; iz < d; iz++) {
-        for (let iy = 0; iy < h; iy++) {
-            for (let ix = 0; ix < w; ix++) {
-                const idx = colorAt(ix, iy, iz);
-                const r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
-                if (!(r | g | b)) continue;
-                vertsBuf[vi++] = (ix / maxDim) - 0.5 * w / maxDim;
-                vertsBuf[vi++] = (iy / maxDim) - 0.5 * h / maxDim;
-                vertsBuf[vi++] = (iz / maxDim) - 0.5 * d / maxDim;
-                vertsBuf[vi++] = r / 255;
-                vertsBuf[vi++] = g / 255;
-                vertsBuf[vi++] = b / 255;
-            }
-        }
+    for (let i = 0; i < n; i++) {
+        const r = rgb[i * 3], g = rgb[i * 3 + 1], b = rgb[i * 3 + 2];
+        if (!(r | g | b)) continue;          // skip dark points
+        vertsBuf[vi++] = previewCoords_[i * 3 + 0];
+        vertsBuf[vi++] = previewCoords_[i * 3 + 1];
+        vertsBuf[vi++] = previewCoords_[i * 3 + 2];
+        vertsBuf[vi++] = r / 255;
+        vertsBuf[vi++] = g / 255;
+        vertsBuf[vi++] = b / 255;
     }
     const vertCount = vi / 6;
 
-    if (vi === 0) return;  // all-black frame — don't update lastVerts, let rAF loop idle
-    lastVerts = vertsBuf.subarray(0, vi);  // trim zero-filled tail — bufferData uploads only live verts
+    if (vi === 0) return;  // all-dark frame — keep the last geometry, let rAF idle
+    lastVerts = vertsBuf.subarray(0, vi);
     lastVertCount = vertCount;
-    lastMaxDim = maxDim;
+    lastMaxDim = previewMaxDim_;
 
-    if (camAutoFit) {
+    if (camAutoFit && previewBox_) {
         camAutoFit = false;
         const canvas = document.getElementById("preview");
         const fov = 0.8;
         const aspect = canvas ? canvas.clientWidth / Math.max(1, canvas.clientHeight) : 1;
-        const halfExtent = 0.5 * Math.sqrt(w * w + h * h + d * d) / maxDim;
+        const bx = previewBox_.x, by = previewBox_.y, bz = previewBox_.z;
+        const halfExtent = 0.5 * Math.sqrt(bx * bx + by * by + bz * bz) / previewMaxDim_;
         const fitDist = halfExtent / Math.tan(fov / 2) * (aspect < 1 ? 1 / aspect : 1) * 1.1;
         camDist = Math.max(0.5, Math.min(10, fitDist));
     }
@@ -2212,16 +2202,27 @@ function updateStatusBar() {
         }
     }
 
-    // System stats: "uptime · NN KB heap"
+    // System stats: "uptime · 🧠 NNK · 🧱 NNKB"
+    // 🧠 = internal-RAM free (heap progress total−used); 🧱 = largest contiguous
+    // internal-RAM block (the maxBlock control, already maxInternalAllocBlock).
+    // Both matter: free can be ample while fragmentation leaves no single block
+    // big enough for the next allocation.
     const uptimeCtrl = ctrls.find(c => c.name === "uptime");
     const heapCtrl = ctrls.find(c => c.name === "heap");
+    const blockCtrl = ctrls.find(c => c.name === "maxBlock");
     const statsEl = document.getElementById("sys-stats");
     if (statsEl) {
         const parts = [];
         if (uptimeCtrl) parts.push(uptimeCtrl.value);
         if (heapCtrl && heapCtrl.value !== undefined && heapCtrl.total) {
             const freeKb = Math.round((heapCtrl.total - heapCtrl.value) / 1024);
-            parts.push(freeKb + "K free");
+            parts.push("🧠 " + freeKb + "K");
+        }
+        // Skip on desktop, where the platform stub reports "0KB" (no real
+        // block measurement / unlimited heap) — same reason heap free above
+        // only shows when the heap progress control is present.
+        if (blockCtrl && blockCtrl.value && blockCtrl.value !== "0KB") {
+            parts.push("🧱 " + blockCtrl.value);
         }
         statsEl.textContent = parts.join(" · ");
     }

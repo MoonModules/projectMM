@@ -17,12 +17,14 @@
 namespace mm {
 
 // A grid coordinate. int16_t everywhere — int8_t can't hold a 128-edge grid,
-// and the savings would only matter in MappingLUT (not yet implemented).
+// and a smaller type would only save in MappingLUT, which doesn't yet do that
+// size optimisation (it stores nrOfLightsType indices, not coordinates).
 using lengthType = int16_t;
 
-// Count of lights. uint32_t with PSRAM (10K+ lights, large installations),
-// uint16_t without to keep the (not-yet-implemented) MappingLUT small.
-// PSRAM availability is a platform_config.h flag.
+// Count of lights, and the index type MappingLUT stores. uint32_t with PSRAM
+// (10K+ lights, large installations), uint16_t without — the narrower index
+// keeps MappingLUT's CSR arrays half the size on no-PSRAM boards. Selected at
+// compile time from platform_config.h's hasPsram flag.
 using nrOfLightsType = std::conditional_t<platform::hasPsram, uint32_t, uint16_t>;
 
 // Dimensional support. Effects use this to declare which axes they iterate so the

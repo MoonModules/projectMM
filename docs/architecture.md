@@ -217,7 +217,7 @@ Modules in the light pipeline can be added, replaced, or removed dynamically at 
 **Data flow.** The pipeline instantiates both core data-exchange shapes (see [§ Data exchange between modules](#data-exchange-between-modules)):
 
 - *Shared-struct (pull):* `Drivers` hands every child driver a `Buffer*` (source) plus a `Correction*` (shared brightness/reorder/white), and `Layer` exposes its pixel buffer to `Drivers` directly on the identity-mapping fast path — each consumer holds a `const`-pointer set once at wiring time and reads it per frame.
-- *Push to a core sink:* `PreviewDriver` owns its `PreviewFrame` and the binary wire format, and pushes each frame's bytes to a `BinaryBroadcaster` (the core HTTP server). The server broadcasts the bytes over WebSocket without knowing they're a preview — the format and the light types stay entirely in the driver. See [PreviewDriver](moonmodules/light/drivers/PreviewDriver.md).
+- *Push to a core sink:* `PreviewDriver` owns the preview wire format (a one-time coordinate table + per-frame RGB point list) and pushes the bytes to a `BinaryBroadcaster` (the core HTTP server). The server broadcasts them over WebSocket without knowing they're a preview — the format and the light types stay entirely in the driver. See [PreviewDriver](moonmodules/light/drivers/PreviewDriver.md).
 
 **Naming convention.** Capital `Layouts`, `Layers`, `Drivers` are class names (always capitalised when referring to the class). Lowercase "layouts", "layers", "drivers" is the English plural — used freely when context makes it clear. Singular "layout", "layer", "driver" is an individual instance.
 

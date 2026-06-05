@@ -1,0 +1,218 @@
+{
+  "name": "scenario_Layouts_mutation",
+  "module": "Layouts",
+  "mode": "mutate",
+  "also": [
+    "GridLayout",
+    "SphereLayout",
+    "Layer",
+    "RainbowEffect",
+    "Drivers",
+    "ArtNetSendDriver"
+  ],
+  "description": "Tree mutation on the Layouts container while the pipeline runs: add a second layout (multiple layouts under one Layouts), replace a layout with a different type, and remove a layout. The check is that each mutation leaves the pipeline RENDERING — Layer + Drivers re-wire via buildState and the buffer stays non-null and non-zero. Mirrors the HTTP add/replace/delete handlers; exercises the runner's add_module / replace_module / remove_module ops. NOTE: the Layer renders a dense bounding-box buffer sized by the layouts' coordinate EXTENT, not the summed light count — layouts that overlap in coordinate space share voxels (two 64x64 grids both occupy x,y in 0..63). Independent placement awaits per-layout coordinate offsets (see docs/plan.md), so these steps assert liveness, not buffer-size arithmetic. Grids are 64x64 so the tick stays above the host's microsecond clock at every step.",
+  "fixture": [
+    {
+      "name": "fix-layouts",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "fix-grid-a",
+      "description": "First layout: a 64x64 grid.",
+      "op": "add_module",
+      "id": "GridA",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 64,
+        "height": 64
+      }
+    },
+    {
+      "name": "fix-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "props": {
+        "layouts": "Layouts",
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "fix-rainbow",
+      "op": "add_module",
+      "id": "Rainbow",
+      "type": "RainbowEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "fix-drivers",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "layer": "Layer"
+      }
+    },
+    {
+      "name": "fix-artnet",
+      "op": "add_module",
+      "id": "ArtNet",
+      "type": "ArtNetSendDriver",
+      "parent_id": "Drivers"
+    }
+  ],
+  "steps": [
+    {
+      "name": "measure-one-layout",
+      "description": "Baseline: a single 64x64 grid layout drives the pipeline.",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min": 1
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            8,
+            34
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-05",
+            "2026-06-05"
+          ]
+        }
+      }
+    },
+    {
+      "name": "add-second-layout",
+      "description": "Add a SECOND layout (a 64x64 grid) under Layouts — two layouts now live under one container. buildState re-runs; the pipeline must still render. (Both grids share the 0..63 coordinate box, so the Layer buffer stays 64x64 — see the scenario NOTE.)",
+      "op": "add_module",
+      "id": "GridB",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 64,
+        "height": 64
+      }
+    },
+    {
+      "name": "measure-two-layouts",
+      "description": "Pipeline still renders with two layouts wired (buffer non-null, fps measurable).",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min": 1
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            9,
+            30
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-05",
+            "2026-06-05"
+          ]
+        }
+      }
+    },
+    {
+      "name": "replace-second-layout",
+      "description": "Replace the second grid with a SphereLayout (different type, same slot). The first grid is untouched; the pipeline re-wires to the new layout's light count.",
+      "op": "replace_module",
+      "id": "GridB",
+      "type": "SphereLayout"
+    },
+    {
+      "name": "measure-after-replace",
+      "description": "Pipeline still renders after replacing a grid with a sphere (different layout type, same slot) — buffer re-wires without crashing.",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min": 1
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            10,
+            87
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-05",
+            "2026-06-05"
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove-second-layout",
+      "description": "Remove the sphere — back to a single grid layout. Layer/Drivers shrink their buffers via buildState.",
+      "op": "remove_module",
+      "id": "GridB"
+    },
+    {
+      "name": "measure-after-remove",
+      "description": "Pipeline renders with the single remaining grid, same as the baseline.",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min": 1
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            8,
+            59
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-05",
+            "2026-06-05"
+          ]
+        }
+      }
+    }
+  ]
+}

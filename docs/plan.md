@@ -159,6 +159,12 @@ When picked up:
 - Memory-aware allocator at `onBuildState` time decides how many Layers fit and degrades gracefully.
 - Persistence already encodes Layers children positionally — adding siblings just works on the file-format side.
 
+### Per-layout coordinate offset for independent placement (backlog)
+
+`Layouts` stitches multiple child layouts into one physical light space, but only their *indices* are stitched (offset sequentially in `forEachCoord`) — their *coordinates* are not translated. Two layouts therefore overlap in the same coordinate box: two 64×64 grids both occupy x,y ∈ 0..63, so the Layer's dense bounding-box buffer is 64×64 (4096 voxels) even though the container reports 8192 lights, and the second layout's lights land on the first's positions. `scenario_Layouts_mutation` documents this (its steps assert pipeline liveness, not buffer-size arithmetic).
+
+When picked up: add `offsetX/Y/Z` (lengthType) controls to `LayoutBase`; `Layouts::forEachCoord` translates each child's emitted coords by its offset so layouts occupy disjoint regions of the physical extent (a 64-wide grid at offsetX=64 sits beside another at offsetX=0 → a 128×64 combined extent). `Layer::onBuildState` already derives physical dims from the max emitted coordinate, so it would pick up the wider extent automatically. Until then, "multiple layouts" means "multiple layouts sharing a coordinate box", which is only useful when they genuinely overlap (e.g. a sphere inscribed in a grid).
+
 ### Improv as a child of NetworkModule (deferred — needs scheduler work first)
 
 Architecturally the right shape; attempted in plan-21, reverted. Blocker: `Scheduler::tick()` only walks top-level modules for `loop20ms`/`loop1s` — children silently miss those callbacks. See [decisions.md](history/decisions.md) "Trying to add a child module to NetworkModule".
@@ -241,14 +247,15 @@ What to build (~4 h):
 
 Only **NoiseEffect** and **PlasmaEffect** have z-aware math. The other 10 effects are honest D2 — `Layer::extrude` duplicates the z=0 plane, so every z-slice is identical on 3D layers. Candidates for genuine D3 promotion: Metaballs/GlowParticles (add z to blob coordinates), Plasma palette/Spiral (add z-driven phase term), Fire (z-drift heat grid), Ripples/LavaLamp/Checkerboard/Particles (add z to each element). Prioritise after seeing real 3D installations; each promoted effect also needs its `dynamicBytes` budget for the full 3D buffer.
 
-### Preview coordinate message — true-shape 3D preview (backlog)
+### Full-density interpolated preview for large layouts (backlog)
 
-The 3D preview derives `(x, y, z)` from a dense grid index — correct only for grid layouts. For rings, spheres, or arbitrary point clouds the preview shows a wrong dense bounding box.
+The preview index-downsamples a large layout to fit the WS send budget (e.g. 128×128 = 16384 lights → ~1639 sent at stride 10), so the UI shows a sparse sample, not every light. To show **all** lights at their real positions with **interpolated** colours for the unsent ones:
 
-Design (already noted in [PreviewDriver.md](moonmodules/light/drivers/PreviewDriver.md)):
-- Engine sends a one-time coordinate table per layout change and per new WS client: `[type][count16][x16 y16 z16]×count` (~6 bytes/light). Data source: `Layouts::forEachCoord`.
-- Browser positions preview points from the table instead of the grid formula; per-frame frames stream RGB-only indexed by light.
-- PreviewDriver downsample switches to index-based striding (simpler, correct for any shape).
+- Decouple the `0x03` coordinate-table density from the per-frame `0x02` stride. Positions are static and sent once, so the table can carry **all** light coordinates (16384 × 3 = ~48 KB one-time — acceptable off the per-frame path, possibly chunked) while the per-frame RGB stays strided to protect ArtNet/the link.
+- The browser holds the full position set and, per frame, interpolates each unsent light's colour from its nearest sent neighbours (the sent indices are known from the stride). True positions, guessed colours — better than the removed dense-box block-replicate because positions are exact.
+- Open questions: 48 KB one-time table vs `MAX_WRITE_CHUNKS` / send-buffer (needs chunked send or a raised cap, with the same partial-write care as `writeChunks`' drain); interpolation cost on a 16384-point cloud each frame in JS; whether nearest-neighbour or weighted is worth it.
+
+Not simple — own planning pass. Until then the preview is a faithful strided *sample* (correct shape/colour/motion, not per-pixel). A cheap interim (point-size scaled by stride to fatten samples into their cells) was tried and reverted as not what's wanted — it filled the volume but didn't add real points.
 
 ---
 
