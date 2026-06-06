@@ -36,7 +36,7 @@ public:
     static constexpr nrOfLightsType kPageEntries = 4096;
     static constexpr nrOfLightsType kPageShift = 12;          // 1<<12 == 4096
     static constexpr nrOfLightsType kPageMask = kPageEntries - 1;
-    static constexpr int kMaxPages = 64;                      // 64 × 8 KB = 512 K dests cap
+    static constexpr int kMaxPages = 64;                      // 64 × 4096 = 256 K dests (512 KB) cap
     static_assert((kPageEntries & kPageMask) == 0, "kPageEntries must be a power of two");
 
     // Fast path: logical == physical, no table needed

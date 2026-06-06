@@ -30,6 +30,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - A paged LUT (forced via the maxAllocBlock test cap) must produce a byte-identical dst to a single-alloc LUT with the same mapping. Paging is an allocation detail; blendMap output must not depend on it. This is the end-to-end pin for the no-PSRAM-fragmentation fix.
 - An additive (overwrites=false) LUT folding two sources onto one physical light adds and clamps at 255 (no overflow). overwrites=false is the opt-in for the rare overlap case (future multi-layer compositing); the default copy path would instead overwrite, so this pins the additive contract explicitly.
 - The default (overwrites=true) path plain-copies: two sources mapped to the same physical means the LAST writer wins, no addition. Pins the fast path.
+- Sparse overwrite mapping clears untouched physical cells. A sphere-style layout maps only a subset of the physical box to a source; the rest must end up black, not retain stale data from a previous frame. Pre-fills dst dirty and asserts unmapped cells are zeroed — fails if BlendMap's dst.clear() is removed (the regression target).
 
 ## BoardModule
 
@@ -43,6 +44,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - 32+ char value is rejected (buffer is 32 bytes including NUL, so 31 max).
 - Non-printable bytes are rejected. Catches accidental binary smuggling (would also break the persistence JSON encoder).
 - nullptr is rejected (defensive — a bogus caller shouldn't crash the device).
+- BoardModule is a code-wired System child and must NOT be user-deletable — now that SystemModule accepts user add/remove of (peripheral) children, the board identity opts out via userEditable() == false so the user can't delete it.
 
 ## Buffer
 
@@ -422,6 +424,9 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - deviceName is bound as a Text control to the MAC-derived default ("MM-CAFE" on the desktop platform).
 - The `firmware` control is always present and non-empty (either a real firmware key from build_info.h or the fallback "unknown").
 - The `bootReason` control is populated from platform::resetReason; on desktop it reports "OK".
+- SystemModule accepts user-added Peripheral children (sensors/actuators the user solders on); the role string drives the type-picker filter + add policy.
+- Regression: SystemModule overrides setup() and loop1s(); both must chain to MoonModule's base so a Peripheral child's setup()/loop1s() actually fire. Without the chain a sensor would never init or poll (the "children miss callbacks" trap from history/decisions.md). loop20ms() isn't overridden, so the base default already propagates it.
+- roleName maps the new Peripheral enum to its lowercase API string.
 
 ## platform
 
