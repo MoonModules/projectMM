@@ -88,4 +88,4 @@ A board name that doesn't appear in the catalog renders in MoonDeck's picker as 
 
 ## Prior art
 
-This is the device-side seed of a feature that started in MoonLight as the "IO module" (a grab-bag for board presets + I²S peripherals + sensor inputs). projectMM splits the lifecycle: BoardModule owns boot-time hardware identity; a future `PeripheralsModule` or similar will own runtime-attached devices. Conflating the two under "IO" makes the lifecycle layer (boot-time set once vs runtime hot-pluggable) hard to reason about.
+This is the device-side seed of a feature that started in MoonLight as the "IO module" (a grab-bag for board presets + I²S peripherals + sensor inputs). projectMM splits the lifecycle by concern: BoardModule owns boot-time hardware *identity* (set once), while runtime-attached devices are individual [peripherals](../../architecture.md#peripherals) — each its own MoonModule under SystemModule, user-add/deletable. Conflating identity and hot-pluggable devices under one "IO" module makes the lifecycle layer (boot-time-set vs runtime-managed) hard to reason about, so they stay separate module kinds.

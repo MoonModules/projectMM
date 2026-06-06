@@ -165,3 +165,36 @@ TEST_CASE("blendMap overwrite path: last write wins, no add") {
     CHECK(dst.data()[1] == 50);
     CHECK(dst.data()[2] == 50);
 }
+
+// Sparse overwrite mapping clears untouched physical cells. A sphere-style
+// layout maps only a subset of the physical box to a source; the rest must end
+// up black, not retain stale data from a previous frame. Pre-fills dst dirty
+// and asserts unmapped cells are zeroed — fails if BlendMap's dst.clear() is
+// removed (the regression target).
+TEST_CASE("blendMap overwrite path clears untouched cells (sparse mapping)") {
+    mm::Buffer src, dst;
+    src.allocate(2, 3);   // 2 logical lights
+    dst.allocate(4, 3);   // 4 physical; only 2 are mapped
+    src.data()[0] = 10; src.data()[1] = 20; src.data()[2] = 30;   // logical 0
+    src.data()[3] = 40; src.data()[4] = 50; src.data()[5] = 60;   // logical 1
+
+    // Dirty the whole dst so a missing clear would leave stale bytes behind.
+    for (size_t i = 0; i < dst.bytes(); i++) dst.data()[i] = 0xFF;
+
+    mm::MappingLUT lut;
+    lut.build(2, 2);                 // overwrites_ defaults true
+    mm::nrOfLightsType m0[] = {0};   // logical 0 → physical 0
+    mm::nrOfLightsType m1[] = {2};   // logical 1 → physical 2 (1 and 3 unmapped)
+    lut.setMapping(0, m0, 1);
+    lut.setMapping(1, m1, 1);
+    lut.finalize();
+
+    mm::blendMap(src, dst, lut, 3);
+
+    // Mapped cells hold their source values.
+    CHECK(dst.data()[0] == 10); CHECK(dst.data()[1] == 20); CHECK(dst.data()[2] == 30);
+    CHECK(dst.data()[6] == 40); CHECK(dst.data()[7] == 50); CHECK(dst.data()[8] == 60);
+    // Unmapped cells (physical 1 and 3) were cleared, not left dirty.
+    CHECK(dst.data()[3] == 0); CHECK(dst.data()[4] == 0); CHECK(dst.data()[5] == 0);
+    CHECK(dst.data()[9] == 0); CHECK(dst.data()[10] == 0); CHECK(dst.data()[11] == 0);
+}

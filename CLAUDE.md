@@ -173,7 +173,7 @@ What the agent reads:
 
 ## Documentation
 
-```
+```text
 CLAUDE.md                  ← this file (rules and process)
 docs/
   architecture.md          ← system design (core + light domain)

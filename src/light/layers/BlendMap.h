@@ -8,7 +8,11 @@
 namespace mm {
 
 // Reads from logical buffer (src), writes to physical buffer (dst) via LUT.
-// Additive blending with clamping (for future multi-layer support).
+// Two paths chosen by MappingLUT::overwrites(): when true (every current
+// layout/modifier — each physical light written at most once), it overwrite-
+// copies src→dst (fast, no read-back); when false, it additively blends with
+// clamping (for multi-layer composition where sources overlap on a destination).
+// Either way dst is cleared first so physical cells with no source stay black.
 inline void blendMap(const Buffer& src, Buffer& dst, const MappingLUT& lut, uint8_t channelsPerLight) {
     if (!lut.hasLUT()) {
         std::memcpy(dst.data(), src.data(), src.bytes());

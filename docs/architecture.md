@@ -15,6 +15,8 @@ This document describes the system as it is. Coding conventions live in [coding-
   - [Event triggering between modules](#event-triggering-between-modules)
   - [Hot path discipline](#hot-path-discipline)
   - [Platform abstraction](#platform-abstraction)
+  - [Firmware vs board](#firmware-vs-board)
+  - [Peripherals](#peripherals)
 - [Light domain](#light-domain)
   - [The pipeline](#the-pipeline)
   - [3D from the start](#3d-from-the-start)
@@ -55,7 +57,7 @@ The core's job is the runtime: modules, their lifecycle, their parameters, how t
 
 ## MoonModules
 
-The core building block is a **MoonModule**. Everything is a MoonModule — not just effects, modifiers, layouts, and drivers, but also system services: HTTP server, WebSocket server, file server, WiFi, mDNS, OTA updates. The core itself is minimal: MoonModule base, buffer management, a scheduler.
+The core building block is a **MoonModule**. Everything is a MoonModule — not just effects, modifiers, layouts, and drivers, but also system services (HTTP server, WebSocket server, file server, WiFi, mDNS, OTA updates) and [peripherals](#peripherals) (sensors and actuators bridging to hardware/network). The core itself is minimal: MoonModule base, buffer management, a scheduler.
 
 This means:
 
@@ -183,6 +185,26 @@ Abstractions are added when a concrete implementation needs them, not pre-design
 **Board** is the physical hardware — chip + PCB + on-board peripherals (PHY, USB-serial, PSRAM, antenna). Examples: `Olimex ESP32-Gateway Rev G`, `LOLIN D32`, `Generic ESP32 DevKit`. The device cannot identify its own board (no readable PCB ID on classic ESP32), so MoonDeck deduces it from the firmware where unambiguous (`esp32-eth*` ⇒ Olimex) and otherwise lets the user pick. The board name is stored on the device by [BoardModule](moonmodules/core/BoardModule.md) — a code-wired child of SystemModule that holds a single `board` Text control with the `readonly` UI flag (renders display-only on the device's own UI; HTTP `/api/control` writes still apply). MoonDeck mirrors the picked / deduced value to the device via `POST /api/control` after each discover and after every dropdown change. The catalog of valid board names lives at [docs/install/boards.json](install/boards.json), shared between MoonDeck and the web installer — MoonDeck reads it for its dropdown and HTTP `/api/control` push; the web installer reads it for its picker, pushes the picked board via Improv RPC `SET_BOARD` on first flash, and provides an HTTP fallback (Inject button on *Your devices*) when Improv isn't available on the firmware variant.
 
 A board can run multiple firmwares (Olimex runs all four); a firmware can run on multiple boards (`esp32` runs on any ESP32 dev board). The codebase reserves "board" exclusively for physical hardware and "firmware" exclusively for the compiled binary.
+
+## Peripherals
+
+A **peripheral** is a MoonModule (role `ModuleRole::Peripheral`) that bridges to the outside world — hardware or network — *independently of the light pipeline*. Examples: a gyro/IMU read over I²C, a microphone or line-in read over I²S, a relay or GPIO toggled out, a status push to Home Assistant. Peripherals are **domain-neutral and live in core** — they know nothing about lights; the platform transport they use (I²C, UART, GPIO) is itself a domain-neutral platform primitive.
+
+The defining property is the **data relationship, not the connector**: a peripheral does not consume or produce the light pipeline's output buffer. This is the clean line between a peripheral and a driver — *does the module consume the light output buffer?* If yes it is a **driver** (ArtNet, DMX, SPI-LED all consume the buffer and differ only in transport); if no it is a **peripheral**. A DMX sender uses a peripheral-style transport (UART/RS-485) but is a driver, because it sends the rendered buffer.
+
+Peripherals are **user-add/deletable children of SystemModule**. The firmware is identical whether or not the device has the peripheral wired, so the user manages it at runtime — solder a gyro on, add the module; remove it later. This reuses the generic child add/replace/delete + persistence machinery; SystemModule simply declares `acceptsChildRoles("peripheral")`, and `SystemModule::userEditable()` defaults to allowing deletion (BoardModule, also a System child, opts out with `userEditable() == false` because the board identity is code-wired, not user-discretionary). Automatic detection — probing a bus and adding the matching peripheral module — is a future convenience on top; the manual path is the foundation.
+
+**Reader vs writer is a per-module decision, not a role.** A peripheral may read (gyro), write (relay), or both (read a mic, drive a relay on a beat). Core affinity (which core a module's polling runs on, for load balancing) is likewise a per-module choice. Encoding direction in the role would force a false binary and split modules that do both, so one `Peripheral` role spans the category and direction lives in the module's behaviour.
+
+**File shape and location.** A peripheral is core (domain-neutral), so it follows the *core* file convention — `.h` + `.cpp` under `src/core/` — not the light-domain header-only convention. Its hardware access goes through a domain-neutral platform primitive (`platform::i2c*`, a future `platform::uart*`), never a direct device call (the [platform boundary](#platform-abstraction) applies). It polls in `loop20ms` / `loop1s` (the render hot path is for the light pipeline only) and formats its readings into controls. Each peripheral gets a spec in `docs/moonmodules/core/` like any other core module (enforced by `check_specs.py`).
+
+**Reading a peripheral's data from an effect** uses the shared-struct pull pattern from [§ Data exchange between modules](#data-exchange-between-modules) — the same shape effects/drivers already use, no new mechanism:
+
+- The peripheral owns a small POD struct (e.g. `ImuState { float pitch, roll, gyroX, … }`) declared in a plain-data header, overwritten in place each poll — no per-frame allocation.
+- It exposes the struct via a `const`-returning getter: `const ImuState* state() const`.
+- The consuming effect holds a `const ImuState*`, set once at wiring time in `main.cpp` (`effect->setImu(gyro->state())`), and reads it on the hot path each frame. Producer and consumer can sit on different cores — publisher-writes / reader-reads with one-poll staleness, no lock.
+
+A peripheral that only *displays* its readings (controls, no effect consumer) simply skips the getter + wiring — it's the producer with no consumer yet. Today's peripherals are display-only; the struct-getter + effect-wiring is what an audio-reactive or motion-reactive effect adds on top (tracked in the backlog).
 
 # Light domain
 

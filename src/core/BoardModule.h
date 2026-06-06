@@ -36,6 +36,11 @@ public:
     // (matches SystemModule's same call — diagnostics shouldn't vanish).
     bool respectsEnabled() const override { return false; }
 
+    // Code-wired board identity — not user-deletable. SystemModule now accepts
+    // user-added/removed Peripheral children; without this opt-out the user
+    // could delete the board identity from the same child list.
+    bool userEditable() const override { return false; }
+
     void onBuildControls() override {
         controls_.addText("board", boardKey_, sizeof(boardKey_));
         // Mark display-only in the UI — `board` is pushed by tooling

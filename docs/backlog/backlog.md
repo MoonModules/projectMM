@@ -214,6 +214,36 @@ Step 3's custom RPC infrastructure is the seed. Plausible follow-on injectables:
 
 ---
 
+## Sensors and audio-reactive input
+
+### Sensor input on Raspberry Pi 5 — microphone, IMU, line-in (post-1.0, multi-commit)
+
+Audio-reactive lighting (and motion-reactive) is core to what WLED-MM / MoonLight are known for. The Pi 5 is the right host for it: it has the CPU and RAM for real FFT-based audio analysis that the Xtensa ESP32 struggles with, and a full Linux audio + I²C stack. None of this exists today — the codebase has no sensor, audio, or IMU concept, and the Pi currently runs the **desktop** platform backend (there is no `src/platform/rpi/`), which has no hardware access. So this is a domain expansion built on a real platform-backend prerequisite, not a small add.
+
+**Target sensors and their Pi 5 interfaces:**
+
+- **Microphone** — I²S MEMS mic, or a USB audio device read via ALSA. The high-value one: FFT → frequency bands + beat detection drive audio-reactive effects.
+- **Line-in** — the Pi 5 has no native analog input, so this is a USB audio interface / DAC HAT feeding the same audio pipeline as the mic; only the source differs.
+- **IMU / gyro** — an I²C device (MPU-6050 / 9250-class) on the Pi's I²C bus; tilt / motion → effect parameters.
+
+**How it fits the architecture (the load-bearing part):**
+
+1. **The module category exists — `ModuleRole::Peripheral`.** Peripherals are user-add/deletable children of SystemModule (a gyro `Peripheral` already lands there via the GyroDriver→core move). What's missing for audio-reactive is the *consumption* side: a sensor reads hardware and *produces* values (audio bands, IMU axes) that effects consume — the producer side of the [producer/consumer data-exchange model](../architecture.md#data-exchange-between-modules) (a sensor produces an `AudioFrame` / `ImuState` the way effects produce a buffer that drivers consume). Define the producer struct domain-neutrally so it isn't audio-specific. Today's peripherals are display-only; wiring them into effects is the new work.
+2. **All hardware access stays behind the platform boundary.** New `platform::` APIs (e.g. `readAudio()` returning PCM/FFT, `readImu()` returning axes) with the ALSA / I²S / I²C implementation in a real `src/platform/rpi/` backend — which is itself the prerequisite that doesn't exist yet (the Pi uses the desktop backend today). No ALSA/I²C include or call outside `src/platform/`.
+3. **Effects consume sensor data the same way they read the layer.** An audio-reactive effect reads the current `AudioFrame` (bands/level/beat) the way `PreviewDriver` reads what `Layer` produces — through a plain data structure wired in `main.cpp`, not a direct hardware call.
+
+**Increments (each a normal domain addition, picked up one at a time):**
+
+1. A real `src/platform/rpi/` hardware backend (GPIO/I²C/I²S/ALSA) — the prerequisite; until it lands, the Pi runs the desktop backend with no sensors.
+2. The producer struct(s) (`AudioFrame` / `ImuState`) + the `platform::read*` APIs. (The `Peripheral` role + SystemModule add/delete already exist.)
+3. The first audio peripheral — **MicrophoneModule** (canonical, highest value: FFT bands + beat).
+4. The first audio-reactive effect(s) consuming it.
+5. IMU and line-in slot into the same source-module + platform-API shape afterwards.
+
+Cherry-pick the proven audio pipeline from MoonLight / WLED-MM (FFT band layout, AGC, beat detection) — reference, don't port wholesale, per [history](../history/) practice. Specs before code: a `MicrophoneModule.md` (and the source-category contract) get written and reviewed before implementation.
+
+---
+
 ## HTTP and OTA
 
 ### POST /api/firmware — direct binary upload OTA (backlog)

@@ -3,6 +3,21 @@
 #include "doctest.h"
 #include "core/SystemModule.h"
 
+namespace {
+// Stand-in Peripheral child: counts the lifecycle callbacks a real sensor would
+// use (setup to init hardware, loop20ms/loop1s to poll + format). Pins that
+// SystemModule's overridden setup()/loop1s() chain to base — without that, an
+// added peripheral would never initialise or poll.
+class CountingPeripheral : public mm::MoonModule {
+public:
+    mm::ModuleRole role() const override { return mm::ModuleRole::Peripheral; }
+    uint32_t setupCalls = 0, loop20msCalls = 0, loop1sCalls = 0;
+    void setup() override { setupCalls++; }
+    void loop20ms() override { loop20msCalls++; }
+    void loop1s() override { loop1sCalls++; }
+};
+} // namespace
+
 // On the desktop platform (MAC DE:AD:BE:EF:CA:FE), the auto-generated device name is "MM-CAFE" (last two MAC bytes).
 TEST_CASE("SystemModule MAC-to-deviceName") {
     // Desktop platform returns MAC DE:AD:BE:EF:CA:FE
@@ -76,4 +91,36 @@ TEST_CASE("SystemModule bootReason control populated") {
         }
     }
     CHECK(found);
+}
+
+// SystemModule accepts user-added Peripheral children (sensors/actuators the
+// user solders on); the role string drives the type-picker filter + add policy.
+TEST_CASE("SystemModule accepts peripheral children") {
+    mm::SystemModule sys;
+    CHECK(std::strcmp(sys.acceptsChildRoles(), "peripheral") == 0);
+}
+
+// Regression: SystemModule overrides setup() and loop1s(); both must chain to
+// MoonModule's base so a Peripheral child's setup()/loop1s() actually fire.
+// Without the chain a sensor would never init or poll (the "children miss
+// callbacks" trap from history/decisions.md). loop20ms() isn't overridden, so
+// the base default already propagates it.
+TEST_CASE("SystemModule propagates lifecycle to a peripheral child") {
+    mm::SystemModule sys;
+    CountingPeripheral periph;
+    sys.addChild(&periph);
+
+    sys.setup();
+    CHECK(periph.setupCalls == 1);   // setup() chained to base
+
+    sys.loop1s();
+    CHECK(periph.loop1sCalls == 1);  // loop1s() chained to base
+
+    sys.loop20ms();
+    CHECK(periph.loop20msCalls == 1); // base default (not overridden) propagates
+}
+
+// roleName maps the new Peripheral enum to its lowercase API string.
+TEST_CASE("Peripheral role name") {
+    CHECK(std::strcmp(mm::roleName(mm::ModuleRole::Peripheral), "peripheral") == 0);
 }

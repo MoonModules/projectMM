@@ -103,12 +103,17 @@ size_t freeInternalHeap() {
     return heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 }
 
-static size_t testMaxBlock = 0;  // 0 = no cap (report the real value)
-void setTestMaxAllocBlock(size_t bytes) { testMaxBlock = bytes; }
+// Test-only cap on the reported largest-free block; 0 = no cap. atomic to match
+// the desktop seam's cross-thread contract. It only ever LOWERS the reported
+// value (min with the real block) — a cap can't claim more contiguous heap than
+// the device actually has, so a forced-paging test stays honest.
+static std::atomic<size_t> testMaxBlock{0};
+void setTestMaxAllocBlock(size_t bytes) { testMaxBlock.store(bytes, std::memory_order_relaxed); }
 
 size_t maxAllocBlock() {
-    if (testMaxBlock) return testMaxBlock;
-    return heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    size_t real = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    size_t cap = testMaxBlock.load(std::memory_order_relaxed);
+    return (cap != 0 && cap < real) ? cap : real;
 }
 
 size_t maxInternalAllocBlock() {
