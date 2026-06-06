@@ -17,18 +17,10 @@ The container itself owns no buffer. Each layer owns its own buffer; the Drivers
 - `addChild(layer)` — add a layer (heap-allocated list, grows on demand).
 - `setLayouts(Layouts*)` — wire the shared Layouts and propagate it to every layer so each can size its buffer. Idempotent — call again after adding a layer to wire the new one.
 - `layouts()` — accessor for the wired Layouts pointer.
-- `activeLayer()` — placeholder for the single-layer pipeline: returns the first enabled layer (or the first child if none are enabled). The Drivers container reads it for buffer + dimensions. Replaced by composition in the follow-up.
+- `activeLayer()` — the single-layer pipeline: returns the first enabled layer (or the first child if none are enabled). The Drivers container reads it for buffer + dimensions.
 - `loop()` — walks every enabled layer in order, timing each one. Per-layer timing surfaces in the card's stats line.
 
-## Follow-up: composition
-
-The composition step lives in [Drivers](Drivers.md), not here — Layers iterates and the Drivers container blends, mirroring the engine's separation between producers (Layers) and consumers (Drivers). When composition lands:
-
-- Drivers' `loop()` walks every layer in the Layers container, blends their buffers into the shared output buffer (alpha-over by default; modes per layer), then runs each driver.
-- Each layer's [`startX/Y/Z` and `endX/Y/Z` controls](Layer.md#start-end-controls) become active — a layer with `endX < layout width` paints into a sub-region, and the rest of the output stays at whatever the previous layer wrote (or black if none).
-- The single-layer fast path still applies when only one layer is enabled.
-
-Tracked in [docs/plan.md](../../plan.md) as "Multi-Layer composition (pending)".
+Today a single layer is active: `activeLayer()` returns the first enabled layer and the Drivers container reads its buffer. Multi-layer blending (the producer/consumer split where Layers iterates and Drivers composites) is not yet built.
 
 ## Prior art
 

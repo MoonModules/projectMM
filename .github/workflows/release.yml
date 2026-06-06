@@ -155,8 +155,7 @@ jobs:
           name: desktop-macos
           path: dist/
 
-  # build-windows: pending Windows platform-layer port. See docs/plan.md
-  # "Windows desktop port (blocker for 1.0 Windows binary)". The job was
+  # build-windows: pending the Windows platform-layer port. The job was
   # removed (rather than left red) so the release pipeline can produce a
   # tagged 1.0 from the matching `dist/projectMM-macos-arm64-vX.Y.Z.tar.gz`
   # + the four ESP32 firmwares. Re-add the build-windows job and the
@@ -358,8 +357,7 @@ jobs:
           fail_on_unmatched_files: true
           # The `files:` block below is a multi-line literal string — every line
           # is a glob pattern, the action does NOT strip `#` as comment syntax.
-          # Add `dist/projectMM-*.zip` back when build-windows is restored
-          # (see docs/plan.md "Windows desktop port").
+          # Add `dist/projectMM-*.zip` back when build-windows is restored.
           files: |
             dist/firmware-*.bin
             dist/manifest-*.json

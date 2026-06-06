@@ -8,16 +8,38 @@
 namespace mm {
 
 // Reads from logical buffer (src), writes to physical buffer (dst) via LUT.
-// Additive blending with clamping (for future multi-layer support).
+// Two paths chosen by MappingLUT::overwrites(): when true (every current
+// layout/modifier — each physical light written at most once), it overwrite-
+// copies src→dst (fast, no read-back); when false, it additively blends with
+// clamping (for multi-layer composition where sources overlap on a destination).
+// Either way dst is cleared first so physical cells with no source stay black.
 inline void blendMap(const Buffer& src, Buffer& dst, const MappingLUT& lut, uint8_t channelsPerLight) {
     if (!lut.hasLUT()) {
         std::memcpy(dst.data(), src.data(), src.bytes());
         return;
     }
 
+    // Clear first so physical cells with no source (sparse layouts — a sphere's
+    // lattice gaps) stay black.
     dst.clear();
     nrOfLightsType logCount = lut.logicalCount();
 
+    if (lut.overwrites()) {
+        // Each destination is written by at most one source (mirror, shuffle,
+        // sparse box→driver), so plain-copy — no read-back, no clamp. This is
+        // ~4× the additive path and is the case every current layout takes.
+        for (nrOfLightsType li = 0; li < logCount; li++) {
+            const uint8_t* srcLight = src.data() + static_cast<size_t>(li) * channelsPerLight;
+            lut.forEachDestination(li, [&](nrOfLightsType physIdx) {
+                uint8_t* dstLight = dst.data() + static_cast<size_t>(physIdx) * channelsPerLight;
+                for (uint8_t c = 0; c < channelsPerLight; c++) dstLight[c] = srcLight[c];
+            });
+        }
+        return;
+    }
+
+    // Additive blend with clamping — for a map that folds multiple sources onto
+    // one destination (e.g. future multi-layer compositing).
     for (nrOfLightsType li = 0; li < logCount; li++) {
         const uint8_t* srcLight = src.data() + static_cast<size_t>(li) * channelsPerLight;
         lut.forEachDestination(li, [&](nrOfLightsType physIdx) {

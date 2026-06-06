@@ -111,6 +111,9 @@ public:
             case ModuleRole::Driver:   suffix = "Driver";   break;
             case ModuleRole::Generic:  suffix = "Module";   break;
             case ModuleRole::Layer:    return typeName;     // no suffix to strip
+            // Peripherals name themselves freely (GyroSensor, Relay, …) — no
+            // forced role suffix, so show the type name as-is.
+            case ModuleRole::Peripheral: return typeName;
         }
         size_t typeLen = std::strlen(typeName);
         size_t suffixLen = std::strlen(suffix);

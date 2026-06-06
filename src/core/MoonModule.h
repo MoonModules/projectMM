@@ -7,18 +7,27 @@
 
 namespace mm {
 
-enum class ModuleRole : uint8_t { Generic, Effect, Modifier, Driver, Layout, Layer };
+// Peripheral: a module attached to SystemModule that bridges to the outside
+// world — hardware or network — and is user-add/deletable (the firmware is the
+// same whether or not the device has the peripheral wired). Covers both readers
+// and writers: gyro/IMU + mic/line-in (in), relay/GPIO + Home Assistant push
+// (out), and modules that do both. Read-vs-write is NOT a role distinction —
+// direction and core affinity are per-module decisions (a peripheral may read,
+// write, or both), so one role spans the category. Justified by that named
+// roster, not one member (core grows slower than the domain — see CLAUDE.md).
+enum class ModuleRole : uint8_t { Generic, Effect, Modifier, Driver, Layout, Layer, Peripheral };
 
 // Lowercase role name for JSON/API output. Single source of truth so the role
 // string can't drift between /api/state and /api/types.
 inline const char* roleName(ModuleRole role) {
     switch (role) {
-        case ModuleRole::Effect:   return "effect";
-        case ModuleRole::Modifier: return "modifier";
-        case ModuleRole::Driver:   return "driver";
-        case ModuleRole::Layout:   return "layout";
-        case ModuleRole::Layer:    return "layer";
-        default:                   return "generic";
+        case ModuleRole::Effect:     return "effect";
+        case ModuleRole::Modifier:   return "modifier";
+        case ModuleRole::Driver:     return "driver";
+        case ModuleRole::Layout:     return "layout";
+        case ModuleRole::Layer:      return "layer";
+        case ModuleRole::Peripheral: return "peripheral";
+        default:                     return "generic";
     }
 }
 

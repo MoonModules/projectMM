@@ -56,9 +56,9 @@ The numbers above are observations. The **contracts** projectMM commits to — w
 
 ![Installer](docs/assets/screenshots/installer.png)
 
-**Desktop — download and run.** Grab the macOS arm64 tarball from the [releases page](https://github.com/ewowi/projectMM/releases), unpack, run, open `http://localhost:8080/`. The binary is unsigned, so Gatekeeper prompts on first run — right-click → Open, or clear the quarantine flag with `xattr -dr com.apple.quarantine ./projectMM`. Windows desktop binaries are blocked on the Windows platform-layer port (see [docs/plan.md](docs/plan.md)); macOS arm64 is the only desktop binary that ships from 1.0 today.
+**Desktop — download and run.** Grab the macOS arm64 tarball from the [releases page](https://github.com/ewowi/projectMM/releases), unpack, run, open `http://localhost:8080/`. The binary is unsigned, so Gatekeeper prompts on first run — right-click → Open, or clear the quarantine flag with `xattr -dr com.apple.quarantine ./projectMM`. macOS arm64 is the only desktop binary that ships today; Windows needs its platform-layer port first.
 
-Once running, the UI lets you build a render pipeline visually (layouts → layers with effects + modifiers → drivers), preview the result in 3D, and save it. The source tree builds for Teensy, Raspberry Pi, and Linux too — see [building.md](docs/building.md). Release binaries for those targets are tracked in [docs/plan.md](docs/plan.md).
+Once running, the UI lets you build a render pipeline visually (layouts → layers with effects + modifiers → drivers), preview the result in 3D, and save it. The source tree also builds for Teensy, Raspberry Pi, and Linux from source — see [building.md](docs/building.md) — though only the macOS and ESP32 binaries ship as releases.
 
 ### From source
 

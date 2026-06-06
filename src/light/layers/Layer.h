@@ -261,20 +261,19 @@ public:
         nrOfLightsType maxDest = logicalCount * mod->maxMultiplier();
         if (maxDest > driverCount * 2) maxDest = driverCount * 2;
 
-        size_t lutBytes = MappingLUT::estimateBytes(logicalCount, maxDest);
-        if (!canAllocate(lutBytes)) {
+        // MappingLUT::build owns the allocation decision: it tries a single
+        // contiguous block, falls back to fixed-size pages when no single block
+        // fits but total heap allows it, and returns false only on genuine
+        // exhaustion (total free minus HEAP_RESERVE too small). So no
+        // single-block pre-check here — that pre-check is exactly what made a
+        // fragmented-but-not-exhausted heap (the 128×128 mirror case on
+        // no-PSRAM) degrade unnecessarily.
+        if (!lut_.build(logicalCount, maxDest)) {
             std::printf("  DEGRADE  LUT skipped (need %u, free %u)\n",
-                        static_cast<unsigned>(lutBytes),
+                        static_cast<unsigned>(MappingLUT::estimateBytes(logicalCount, maxDest)),
                         static_cast<unsigned>(platform::freeHeap()));
             lutSkipped_ = true;
             setStatus("modifier LUT skipped — not enough memory", Severity::Warning);
-            degradeIdentity();
-            return;
-        }
-
-        if (!lut_.build(logicalCount, maxDest)) {
-            lutSkipped_ = true;
-            setStatus("modifier LUT build failed — not enough memory", Severity::Warning);
             degradeIdentity();
             return;
         }

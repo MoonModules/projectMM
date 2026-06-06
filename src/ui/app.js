@@ -1505,12 +1505,13 @@ function cssEscape(s) {
 // 🗼 movement). The dimensional emoji (📏 1D · 🟦 2D · 🧊 3D) is derived from
 // the type's `dim` field. All three are merged in emojiTagsFor().
 const ROLE_EMOJI = {
-    effect:   "🔥",
-    driver:   "☸️",
-    modifier: "💎",
-    layout:   "🚥",
-    layer:    "🥞",
-    generic:  "⚙️",
+    effect:     "🔥",
+    driver:     "☸️",
+    modifier:   "💎",
+    layout:     "🚥",
+    layer:      "🥞",
+    peripheral: "🛰️",
+    generic:    "⚙️",
 };
 
 // Dim int → emoji. Only effects carry `dim` (1/2/3); other modules have dim == 0

@@ -119,3 +119,11 @@ TEST_CASE("BoardModule::setBoard rejects nullptr") {
     CHECK_FALSE(board.setBoard(nullptr));
     CHECK_FALSE(board.dirty());
 }
+
+// BoardModule is a code-wired System child and must NOT be user-deletable — now
+// that SystemModule accepts user add/remove of (peripheral) children, the board
+// identity opts out via userEditable() == false so the user can't delete it.
+TEST_CASE("BoardModule is not user-editable") {
+    mm::BoardModule board;
+    CHECK_FALSE(board.userEditable());
+}

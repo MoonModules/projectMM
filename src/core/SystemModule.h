@@ -17,6 +17,14 @@ public:
     // from the UI for no good reason, and the user can't easily re-enable.
     bool respectsEnabled() const override { return false; }
 
+    // Accepts user-added Peripheral children (sensors, actuators — bridges to
+    // hardware/network the user solders on or off). The same firmware runs with
+    // or without them, so the user adds/deletes them at runtime; the add/replace/
+    // delete + persistence machinery is the generic MoonModule path. BoardModule
+    // (also a System child) is code-wired and opts out of deletion via its own
+    // userEditable() == false.
+    const char* acceptsChildRoles() const override { return "peripheral"; }
+
     void setup() override {
         // Compute default deviceName from MAC: MM-XXXX. Skip if a persisted value was
         // already overlaid by Scheduler phase 2 (deviceName_ non-empty).
@@ -49,6 +57,11 @@ public:
             std::snprintf(flashStr_, sizeof(flashStr_), "%uMB",
                           static_cast<unsigned>(chipFlashVal_ / (1024 * 1024)));
         }
+
+        // Chain to base so children (BoardModule, user-added Peripherals) get
+        // their setup() — a peripheral initialises its hardware here. Overriding
+        // setup() shadows the base default that would otherwise propagate.
+        MoonModule::setup();
     }
 
     void onBuildControls() override {
@@ -149,6 +162,13 @@ public:
         // on PSRAM-equipped boards (S3/S2) and tells the user nothing.
         std::snprintf(maxBlockStr_, sizeof(maxBlockStr_), "%uKB",
                       static_cast<unsigned>(platform::maxInternalAllocBlock() / 1024));
+
+        // Chain to base so children get their loop1s() — a Peripheral formats
+        // its read-only display values here. Overriding loop1s() shadows the
+        // base default that would otherwise propagate. (setup/loop20ms/loop/
+        // teardown propagate too: setup is chained above, loop20ms/loop/teardown
+        // aren't overridden so the base default carries them.)
+        MoonModule::loop1s();
     }
 
     const char* deviceName() const { return deviceName_; }

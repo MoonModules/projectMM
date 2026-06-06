@@ -19,10 +19,10 @@ public:
     // the WebSocket frame) call layer_ for current physical width/height/depth. ArtNet doesn't
     // need it — it just streams bytes.
     //
-    // Multi-layer: this is the *active* layer for dimension queries, not a 1:1 wiring
-    // constraint. When the multi-layer pipeline arrives, Drivers composes/blends N
-    // layer buffers upstream and still hands each driver one Layer for dimensions —
-    // the driver outputs to a single physical fixture either way. See plan.md backlog.
+    // This is the *active* layer for dimension queries, not a 1:1 wiring
+    // constraint: each driver outputs to a single physical fixture, and the
+    // Drivers container hands it one Layer for dimensions regardless of how many
+    // layers feed the output buffer.
     void setLayer(Layer* layer) { layer_ = layer; }
 
     // Shared output correction (brightness LUT + channel order + white) owned by the

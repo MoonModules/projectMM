@@ -20,9 +20,8 @@
 // state.
 //
 // Lives as a code-wired child of SystemModule, mirroring how Improv lives
-// under NetworkModule. Today this is a single-field module; future commits
-// add per-board pin maps + default module-config overrides as additional
-// controls (see docs/plan.md § Runtime board presets).
+// under NetworkModule. A single-field module: the control set grows only when
+// a runtime consumer reads a new per-board field (pin maps, config overrides).
 
 #include "core/MoonModule.h"
 #include "core/FilesystemModule.h"
@@ -36,6 +35,11 @@ public:
     // Identity-class data: belongs visible even when the module is "disabled"
     // (matches SystemModule's same call — diagnostics shouldn't vanish).
     bool respectsEnabled() const override { return false; }
+
+    // Code-wired board identity — not user-deletable. SystemModule now accepts
+    // user-added/removed Peripheral children; without this opt-out the user
+    // could delete the board identity from the same child list.
+    bool userEditable() const override { return false; }
 
     void onBuildControls() override {
         controls_.addText("board", boardKey_, sizeof(boardKey_));

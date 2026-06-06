@@ -4,7 +4,7 @@ Owns the physical-hardware identity name — e.g. `Olimex ESP32-Gateway Rev G`, 
 
 BoardModule is a code-wired child of SystemModule, mirroring the way `ImprovProvisioningModule` lives under `NetworkModule`. `markWiredByCode()` keeps it alive on devices whose persisted `/.config/SystemModule.json` predates the child addition — without it, the first FilesystemModule load would trim the unknown child.
 
-Today this is a single-control module — a deliberate seed for the planned [Runtime board presets](../../plan.md) work that will grow per-board pin maps (Ethernet RMII clock GPIO, MDIO/MDC, LED-data pins), default module-config overrides, and the board key as the catalog index. The control set grows when the first runtime consumer reads the new fields, not before.
+This is a single-control module by design: the control set grows only when a runtime consumer reads a new field, not before. The catalog (`controls.*` in `boards.json`) already carries per-board values beyond the name — they fan out to whatever controls the device exposes (see Catalog below).
 
 ## Controls
 
@@ -24,11 +24,11 @@ MoonDeck deduces the board from the device's `firmware` control whenever a singl
 
 The web installer's custom orchestrator (`docs/install/install-orchestrator.js`) owns the SerialPort end-to-end: it flashes via esptool-js, provisions WiFi via the Improv standard `SEND_WIFI_CREDENTIALS` (0x01), then sends our vendor RPC `SET_BOARD` (0xFE) carrying the user's picked board name. The device-side handler at `src/platform/esp32/platform_esp32_improv.cpp::improvHandleSetBoard` validates the payload, signals the scheduler thread via a buffer + atomic flag, and the module's `loop1s()` calls `BoardModule::setBoard()`. Same dirty-flag + debounced-save chain MoonDeck triggers; the only difference is the transport.
 
-The orchestrator owns the SerialPort end-to-end (flash via esptool-js → Improv provisioning → SET_BOARD), so post-PROVISIONED board injection lands in the same session as the flash and the "Your devices" auto-add records the URL atomically. The vendor-command-dispatcher pattern is extensible: each new per-control injectable (device name override, MQTT broker URL, DMX universe) adds one command ID + one dispatcher case — see the design rationale in [docs/history/decisions.md](../../history/decisions.md).
+The orchestrator owns the SerialPort end-to-end (flash via esptool-js → Improv provisioning → SET_BOARD), so post-PROVISIONED board injection lands in the same session as the flash and the "Your devices" auto-add records the URL atomically. The vendor-command-dispatcher takes one command ID + one dispatcher case per injectable, so a new per-control injectable is an additive change to the dispatcher.
 
 The Improv RPC pushes **only** the board name (`Board.board`) — it does not consult the boards.json `controls.*` payload. The full catalog fan-out lives in the HTTP paths (MoonDeck `_push_board_to_device`, the orchestrator's post-Improv HTTP push, the device-side `?board=` consumer). The RPC stays single-purpose because everything else can wait until WiFi is up.
 
-**Pre-WiFi limitation.** SET_BOARD runs before WiFi association; every other catalog field rides HTTP which runs after. Per-board controls that need to land *before* association (country code, antenna selector, pre-association TX-power) can't use this pipeline as-is — see [docs/history/decisions.md](../../history/decisions.md) for the design rationale and the escape hatches (new vendor RPC vs sdkconfig bake).
+**Pre-WiFi ordering.** SET_BOARD runs before WiFi association; every other catalog field rides HTTP, which runs after. Every per-board control shipped today applies post-association (e.g. `Network.txPowerSetting`), so the ordering is fine: the device briefly runs at a default for the ~1 s between association and the HTTP fan-out completing. A control that must take effect *before* association (country code, antenna selector, pre-association TX-power) cannot ride this pipeline as-is — it would need its own pre-association transport rather than being folded into SET_BOARD's wire format.
 
 ### Web installer — HTTP fallback via Inject button (`?board=…`)
 
@@ -88,4 +88,4 @@ A board name that doesn't appear in the catalog renders in MoonDeck's picker as 
 
 ## Prior art
 
-This is the device-side seed of a feature that started in MoonLight as the "IO module" (a grab-bag for board presets + I²S peripherals + sensor inputs). projectMM splits the lifecycle: BoardModule owns boot-time hardware identity; a future `PeripheralsModule` or similar will own runtime-attached devices. Conflating the two under "IO" makes the lifecycle layer (boot-time set once vs runtime hot-pluggable) hard to reason about.
+This is the device-side seed of a feature that started in MoonLight as the "IO module" (a grab-bag for board presets + I²S peripherals + sensor inputs). projectMM splits the lifecycle by concern: BoardModule owns boot-time hardware *identity* (set once), while runtime-attached devices are individual [peripherals](../../architecture.md#peripherals) — each its own MoonModule under SystemModule, user-add/deletable. Conflating identity and hot-pluggable devices under one "IO" module makes the lifecycle layer (boot-time-set vs runtime-managed) hard to reason about, so they stay separate module kinds.

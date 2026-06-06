@@ -1,6 +1,6 @@
 # UI Specification — Deferred items & research
 
-Companion to [moonmodules/core/ui.md](../../moonmodules/core/ui.md). The main spec describes the v3 UI as shipped (the implemented baseline). This file holds everything that is **not** in the live UI yet: short-term deferred items, open design questions for 1.0, the full gap analysis against projectMM v1, loose ends, and prior-art notes.
+Companion to [moonmodules/core/ui.md](../../../moonmodules/core/ui.md). The main spec describes the v3 UI as shipped (the implemented baseline). This file holds everything that is **not** in the live UI yet: short-term deferred items, open design questions for 1.0, the full gap analysis against projectMM v1, loose ends, and prior-art notes.
 
 Promote sections from here into the main spec as they ship. When the entire file becomes empty, delete it.
 
@@ -9,7 +9,6 @@ Promote sections from here into the main spec as they ship. When the entire file
 - Side nav with drag-reorder of root modules (root order is fixed in `main.cpp` today; not painful)
 - Health panel (`<details>` + `GET /api/test`)
 - Log panel (`<details>` + WS `{t:"log",m:"…"}`)
-- Update-available badge + OTA panel (requires `/api/firmware`)
 - Core affinity badge (C0/C1) — only meaningful when core pinning lands
 - Module category() field — adds taxonomy beyond `role()` for the picker (decision: derive from role() for now)
 
@@ -33,7 +32,7 @@ Legend:
 
 ### Layout & navigation
 
-Side nav (one root visible at a time), hamburger + slide-in drawer, and the nav footer with copyright + social links all shipped in plan-12 — see [moonmodules/core/ui.md § Side navigation](../../moonmodules/core/ui.md#side-navigation). Remaining items:
+Side nav (one root visible at a time), hamburger + slide-in drawer, and the nav footer with copyright + social links all shipped in plan-12 — see [moonmodules/core/ui.md § Side navigation](../../../moonmodules/core/ui.md#side-navigation). Remaining items:
 
 | v1 feature | v3 today | Recommendation |
 |---|---|---|
@@ -52,7 +51,7 @@ Side nav (one root visible at a time), hamburger + slide-in drawer, and the nav 
 
 ### Type picker — research notes
 
-The emoji tag chip filter shipped — see [moonmodules/core/ui.md § Type picker](../../moonmodules/core/ui.md#type-picker). Each type carries a curated `tags` string (its `tags()` method, emitted in `/api/types`); the picker shows role + tag emoji as toggle chips with AND filtering.
+The emoji tag chip filter shipped — see [moonmodules/core/ui.md § Type picker](../../../moonmodules/core/ui.md#type-picker). Each type carries a curated `tags` string (its `tags()` method, emitted in `/api/types`); the picker shows role + tag emoji as toggle chips with AND filtering.
 
 ### WebSocket protocol
 
@@ -67,17 +66,6 @@ The emoji tag chip filter shipped — see [moonmodules/core/ui.md § Type picker
 |---|---|---|
 | System health panel (`<details>` collapsible at bottom, polls `GET /api/test` every 30s, shows pass/fail table) | none | **Defer-1.x** — needs backend `/api/test` endpoint that runs the doctest suite at runtime. Lower priority — `ctest` covers this for now. |
 | Log panel (`<details>`, ring buffer of 100 lines, error/warn coloring, auto-scroll with stick-to-bottom detection, backfill via `GET /api/log` on reconnect) | none | **Defer-1.x** — pairs with the log WS channel above. Both arrive together. |
-| Update-available badge in status bar (polls GitHub `/releases`, hour cache, version compare) | none | **Defer-1.x** — needs to be paired with an OTA story. Gate: only meaningful when v3 ships GitHub releases. |
-| OTA panel inside `FirmwareUpdateModule` card (file upload + GitHub releases tab, XHR with progress, device-side download via `POST /api/firmware/url`, handle WS-drop-as-success-during-reboot) | none | **Defer-1.x** — non-trivial backend work (HTTP upload handler, secondary OTA partition handling, signed update support). Whole feature is its own plan. |
-| Firmware download to device (`POST /api/firmware/url` with body `{url}`) — device downloads from GitHub, frees UI from being the bottleneck | none | **Defer-1.x** — same plan as OTA. |
-
-### Helpers and polish
-
-| v1 feature | v3 today | Recommendation |
-|---|---|---|
-| Byte formatting (`X B` / `X KB`) | `fmtBytes()` exists, used by the card stats line | **Adopt-1.0** — reuse `fmtBytes()` anywhere else memory is shown (e.g. status-bar free heap) for consistency. |
-| Numeric formatting with `Number.isInteger()` check (integer→`String(n)`, float→`n.toFixed(1)`) | inconsistent | **Adopt-1.0** — small utility. Already done by `displayControlValue` in v3 partially. |
-| Document title kept in sync with deviceName | none | **Adopt-1.0** — one line in the WS handler. Helps when juggling multiple devices in browser tabs. |
 
 ### Patterns to consciously NOT carry over
 
@@ -89,7 +77,7 @@ The emoji tag chip filter shipped — see [moonmodules/core/ui.md § Type picker
 
 | Cost class | Items |
 |---|---|
-| Tiny (< 30 lines each, no backend work) | category emoji badge, document.title sync, byte/number formatters |
+| Tiny (< 30 lines each, no backend work) | category emoji badge on the card header |
 | Small (30–100 lines, no backend) | — (all small items shipped in the baseline) |
 | Medium (needs minor backend change) | help-link mapping (needs docs site), category() field if we ever want it richer than role()-derived |
 | Large (separate plan) | health panel + `/api/test`, log panel + WS log channel, OTA + GitHub-update badge, full multi-layer UI, presets UI |
@@ -103,7 +91,7 @@ These are smaller mechanisms recorded so we don't have to rediscover them. Each 
 - `parent_id` per module — v1 ships a flat array and the UI rebuilds the tree via `buildTree()` walking `parent_id`. v3's `/api/state` already returns a nested tree, so **Drop** — the UI never needs to assemble parents from a flat list.
 - `core` per module (FreeRTOS core affinity 0/1) with **inheritance**: children take their parent's core via `propagateCore`. **Drop until core pinning is a real engine feature.**
 - Distinct `id` (stable, machine-friendly) vs `name` (human-friendly, editable) per module. v3 today uses `name` for both. **Defer-1.x**: split when the UI needs to disambiguate two instances of the same type or when ids are referenced from external configs.
-- `timing.self_ms_per_tick` (this module excluding children) and `timing.ms_per_tick` (this module including children). v3's `loopTimeUs` is the "self" form. **Adopt-1.0 in reduced form**: surface the existing self-time; add an "inclusive" time later only if profiling demands it.
+- `timing.ms_per_tick` (this module *including* children). The self-time (`loopTimeUs`) is already surfaced on each card. **Defer-1.x**: add an "inclusive" time only if profiling demands it.
 
 **Rendering quirks worth keeping (or rejecting):**
 - v1 uses `innerHTML` heavily and an `esc()` helper to neutralize HTML in user strings. **v3 should prefer `textContent`** for all dynamic strings (no escape needed, no XSS surface). Reserve `innerHTML` for static templates inside the JS source. Already partially the case in v3.
