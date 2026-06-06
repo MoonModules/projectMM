@@ -15,9 +15,27 @@ inline void blendMap(const Buffer& src, Buffer& dst, const MappingLUT& lut, uint
         return;
     }
 
+    // Clear first so physical cells with no source (sparse layouts — a sphere's
+    // lattice gaps) stay black.
     dst.clear();
     nrOfLightsType logCount = lut.logicalCount();
 
+    if (lut.overwrites()) {
+        // Each destination is written by at most one source (mirror, shuffle,
+        // sparse box→driver), so plain-copy — no read-back, no clamp. This is
+        // ~4× the additive path and is the case every current layout takes.
+        for (nrOfLightsType li = 0; li < logCount; li++) {
+            const uint8_t* srcLight = src.data() + static_cast<size_t>(li) * channelsPerLight;
+            lut.forEachDestination(li, [&](nrOfLightsType physIdx) {
+                uint8_t* dstLight = dst.data() + static_cast<size_t>(physIdx) * channelsPerLight;
+                for (uint8_t c = 0; c < channelsPerLight; c++) dstLight[c] = srcLight[c];
+            });
+        }
+        return;
+    }
+
+    // Additive blend with clamping — for a map that folds multiple sources onto
+    // one destination (e.g. future multi-layer compositing).
     for (nrOfLightsType li = 0; li < logCount; li++) {
         const uint8_t* srcLight = src.data() + static_cast<size_t>(li) * channelsPerLight;
         lut.forEachDestination(li, [&](nrOfLightsType physIdx) {

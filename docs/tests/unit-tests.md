@@ -27,7 +27,9 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 - Identity mapping (logical N → physical N) leaves every byte unchanged.
 - One logical light routed to multiple physical positions copies the colour to each (mirror-style mappings work).
-- Two logical lights writing into the same physical light add and clamp at 255 (no overflow).
+- A paged LUT (forced via the maxAllocBlock test cap) must produce a byte-identical dst to a single-alloc LUT with the same mapping. Paging is an allocation detail; blendMap output must not depend on it. This is the end-to-end pin for the no-PSRAM-fragmentation fix.
+- An additive (overwrites=false) LUT folding two sources onto one physical light adds and clamps at 255 (no overflow). overwrites=false is the opt-in for the rare overlap case (future multi-layer compositing); the default copy path would instead overwrite, so this pins the additive contract explicitly.
+- The default (overwrites=true) path plain-copies: two sources mapped to the same physical means the LAST writer wins, no addition. Pins the fast path.
 
 ## BoardModule
 
@@ -247,6 +249,8 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - A fresh LUT carries no mapping (hasLUT==false, logicalCount==0); BlendMap takes the fast identity copy path.
 - setIdentity(N) declares a 1:1 mapping for N lights without allocating a LUT; forEachDestination still iterates correctly.
 - Each logical light can map to a different count of physical lights; forEachDestination yields every mapped index in order.
+- When no single contiguous block fits (forced via the test cap) but total heap allows it, build() pages the destinations array. The mapping must read back identically to a single-alloc build — paging is an allocation detail, not a behaviour change. isPaged() confirms the fallback actually engaged.
+- build() returns false on genuine exhaustion — total free heap (minus the reserve) can't hold the destinations — so the caller degrades to 1:1. Forced here via a non-zero freeHeap is desktop-only-unavailable, so this case pins the paged path's success and the boundary; the tier-3 false path is covered by the Layer sparse-mapping degrade test on real heap limits.
 - free() releases memory and resets counts; build() can be called again to install a fresh mapping.
 
 ## MetaballsEffect

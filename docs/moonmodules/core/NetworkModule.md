@@ -106,9 +106,7 @@ Not every ESP32 has WiFi (e.g. ESP32-C2, ESP32-H2 ship without it) and not every
 - If Ethernet hardware is detected (PHY responds during init), the cascade starts at Ethernet. Otherwise Ethernet is skipped.
 - If WiFi hardware is present, STA + AP fallback are available. Otherwise the cascade ends after Ethernet.
 
-Today the cascade tries each interface unconditionally and relies on the platform init calls to fail fast when the hardware isn't present: `platform::ethInit()` returns false on boards without a PHY, and the WiFi STA/AP init paths return false on chips without WiFi. The `onBuildControls()` pass binds the full control set on every device — one firmware variant handles all combinations.
-
-Surfacing hardware presence to the UI (so cards for absent interfaces hide rather than show as "no link" / "no IP") is deferred — see `docs/plan.md`.
+The cascade tries each interface unconditionally and relies on the platform init calls to fail fast when the hardware isn't present: `platform::ethInit()` returns false on boards without a PHY, and the WiFi STA/AP init paths return false on chips without WiFi. The `onBuildControls()` pass binds the full control set on every device — one firmware variant handles all combinations. Cards for absent interfaces show as "no link" / "no IP" rather than hiding, because the device exposes no hardware-presence signal to the UI.
 
 ## Ethernet-only build
 

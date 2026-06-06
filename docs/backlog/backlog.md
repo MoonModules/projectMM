@@ -34,12 +34,28 @@ Either path: ~2–3 h translation + Windows-side testing. Once green, `build-win
 
 ### WiFi ArtNet performance (pending investigation)
 
-128×128 WiFi ArtNet measurements exist (see [performance.md](performance.md) "ArtNet over WiFi" and "Build-variant WiFi comparison"). Remaining matrix:
+128×128 WiFi ArtNet measurements exist (see [performance.md](../performance.md) "ArtNet over WiFi" and "Build-variant WiFi comparison"). Remaining matrix:
 
 - WiFi STA 64×64 (4K LEDs, 24 universes)
 - WiFi STA 32×32 (1K LEDs, 6 universes)
 
 This determines the practical LED limit for WiFi-only boards. Until the `sdkconfig.defaults` TX-buffer fix lands (identified in the build-variant table), **use `esp32-eth-wifi` for any ArtNet workload on classic ESP32** even if Ethernet isn't physically connected.
+
+### Async ArtNet send — decouple the wire from the render tick (PSRAM-only)
+
+The ArtNet send is synchronous: `ArtNetSendDriver::loop()` blasts ~97 universes (a 48 KB frame at 128×128) inline, and the per-universe `send()` blocks on lwIP TX backpressure — the netif/EMAC (or WiFi) drivers throttle to wire throughput. Measured on hardware: **~35 ms over Ethernet, ~90 ms over WiFi**, charged straight to the render tick, so ArtNet alone caps the Olimex at ~15 FPS and the S3 (WiFi) at ~7 FPS at 128×128. This is a transport throughput limit, **not** something a non-blocking socket can shed — verified that neither `O_NONBLOCK` nor `MSG_DONTWAIT` makes lwIP return early for UDP (the block is below the socket API; both flags drop zero packets and cost the same ~35 ms). The earlier "non-blocking recovered it to ~2 ms" reading was a transient external condition (the receiver/switch draining the burst freely in one window), unreproducible under steady load with the exact firmware.
+
+The real fix is a **dedicated send task**: `loop()` snapshots the corrected frame into a handoff buffer and signals the task; the send task drains it to the wire at its own pace while the render task continues. The tick stops paying the ~35–90 ms — render runs at its own rate (~30 FPS on the Olimex), ArtNet streams independently at whatever the link sustains.
+
+**Gate this on `platform::hasPsram`. It does not fit non-PSRAM boards at the grid sizes where it would help** — the math is hard:
+- The handoff buffer must hold one full frame: **48 KB at 128×128** (16384 × 3), plus a ~4 KB task stack.
+- The Olimex (no-PSRAM) at 128×128 runs at **~46 KB free heap, ~18 KB largest contiguous block** (measured). The 48 KB buffer exceeds *both* the total free heap and (by far) the largest block — it can't allocate at all, the same fragmentation cliff the paged MappingLUT just had to work around.
+- A double-buffer (so the task reads frame N while render writes N+1) doubles it to ~96 KB — even more out of reach.
+- At 64×64 the frame is only 12 KB and *might* fit, but at 64×64 the synchronous send is already fast enough that ArtNet isn't the bottleneck — so the task buys nothing where it's affordable on no-PSRAM.
+
+So the PSRAM gate isn't conservative; it's a hard requirement. PSRAM boards (S3/S2, Olimex-with-PSRAM variants) have megabytes for the handoff buffer via `heap_caps_malloc(..., MALLOC_CAP_SPIRAM)`; non-PSRAM boards keep the synchronous send and the documented "use Ethernet / smaller grid for high FPS at large grids" guidance ([ArtNetSendDriver.md](../moonmodules/light/drivers/ArtNetSendDriver.md)).
+
+When implemented: `if constexpr (platform::hasPsram)` (or a runtime `hasPsram()` check) selects the async path; the buffer lives in PSRAM; the send task pins to the core opposite the render task (see [Task core-pinning](#task-core-pinning-backlog)). Non-PSRAM keeps `loop()`'s inline send unchanged. One handoff buffer + a binary semaphore/notification is the minimal shape — don't build a ring of frames until a second consumer needs it.
 
 ### `esp32-eth` slow Ethernet bring-up vs `esp32-eth-wifi` (investigation)
 
@@ -57,20 +73,18 @@ What we don't know:
 
 Diagnostic to run when picking this up: flash both variants, capture `idf.py monitor` from boot to "got IP" on each, diff the timestamps of `Ethernet link up` and `Ethernet got IP` ESP_LOGI lines. If link-up is fast but DHCP is slow → lwIP init issue (look at `esp_netif_init`'s side effects from excluded components). If link-up itself is slow → PHY/clock path (try re-adding only `esp_coex` to see if it helps).
 
-### NoiseEffect cost on ESP32 (investigation)
+### NoiseEffect simplex cost on ESP32 (investigation)
 
-At 128×128 with mirror XY, NoiseEffect renders a 64×64 logical area but still costs **~47 ms/tick** on `esp32-eth-wifi` (Olimex Gateway, 160 MHz) — ~11.5 µs per pixel for 4,096 pixels. That's 55% of the total ~85 ms tick, capping the workload at ~12 FPS. By comparison RainbowEffect on the same pipeline hits ~22 FPS — the simplex math is the dominant cost.
+With mirror XY at 128×128, NoiseEffect renders the 64×64 logical quadrant in **~11 ms/tick** on the Olimex (measured) — the simplex math dominates, since the Xtensa LX6 has no FPU and float math is software-emulated. (RainbowEffect on the same pipeline is much cheaper.) This is correct, non-degraded behaviour; it's only worth revisiting if a deployment needs Noise faster than ~11 ms at this grid.
 
-To reach 18 FPS at 128×128 with mirror + Noise (matching the historic Rainbow headline), total tick must drop to ~56 ms. ArtNet alone is ~28 ms, so Noise needs to drop from 47 ms to ~28 ms — a ~40% cut on the effect itself.
+Worth investigating if so:
 
-Worth investigating:
-
-- **Q16 fixed-point simplex** instead of float (Xtensa LX6 has no FPU; float math is software-emulated).
+- **Q16 fixed-point simplex** instead of float (kills the software-float emulation cost).
 - **Lower-precision hash** — current simplex uses a 256-entry permutation lookup; a smaller / SIMD-friendly hash may be faster on Xtensa.
 - **Strided sampling + interpolation** — render at 32×32, bilinear up to 64×64. Visual quality cost; needs A/B comparison.
 - **Inline / unroll the inner per-pixel loop** to keep the simplex state in registers.
 
-None of these are obviously free. Reaching 18 FPS may require accepting a visual signature change. Defer until there's a real use case (today's "12 FPS at heaviest workload" is fine for the intended deployment scale).
+None of these are obviously free, and a fixed-point port may shift the visual signature. Defer until there's a real use case — at large grids the tick is dominated by the synchronous ArtNet send (~35 ms), not Noise, so the effect is rarely the bottleneck.
 
 ### MoonDeck doc-asset endpoint hardening (backlog)
 
@@ -93,35 +107,13 @@ On `esp32-eth-wifi`, default 128×128 grid, free heap at boot is ~28 KB — not 
 
 Fix options in increasing scope:
 - **Cap the default grid** — drop to 64×64 on `esp32-eth-wifi` (Layer ~32 KB + LUT ~16 KB = 48 KB, comfortably under). Simplest.
-- **PSRAM for Layer buffer + LUT** — ESP32-Gateway has 4 MB PSRAM unused on non-S3 builds. Moving the 49 KB pixel buffer + 64 KB LUT out of DRAM frees ~110 KB for radios. Cost: ~25% FPS hit (PSRAM bandwidth ~12 MB/s vs DRAM ~80 MB/s); needs measurement. See [decisions.md](history/decisions.md) "Adaptive memory allocation design" for the allocation rules.
+- **PSRAM for Layer buffer + LUT** — ESP32-Gateway has 4 MB PSRAM unused on non-S3 builds. Moving the 49 KB pixel buffer + 64 KB LUT out of DRAM frees ~110 KB for radios. Cost: ~25% FPS hit (PSRAM bandwidth ~12 MB/s vs DRAM ~80 MB/s); needs measurement. See [decisions.md](../history/decisions.md) "Adaptive memory allocation design" for the allocation rules.
 - **Lazy WiFi init** — skip `esp_wifi_init` when `ssid_` is empty and no AP-fallback is pending. Helps only when credentials exist but the network is unreachable — niche.
-
-### Mirror LUT silently degrades at 128×128 on no-PSRAM ESP32 (regression — open)
-
-The Layer mirror LUT at 128×128 needs ~72 KB contiguous (4097-entry offsets table + 32768-entry destinations, each `uint16_t`). On Olimex Gateway Rev G the largest contiguous block at runtime is **~52 KB on `esp32-eth-wifi`** and **~53 KB on `esp32-eth`** — see the `observed.<target>.max_alloc_block` field in `test/scenarios/light/scenario_GridLayout_grid_sizes.json` `size-128x128`. Removing the WiFi stack reclaims ~36 KB of *free* heap but only ~4 KB of *contiguous* heap, because the dominant fragmenters are our own allocations (49 KB Layer logical buffer + 49 KB Driver output buffer), not WiFi.
-
-Result: `Layer::rebuildLUT` hits the `canAllocate(72 KB)` failure path, sets status `"modifier LUT skipped — not enough memory"` (severity warning), and degrades to 1:1 mapping. **Mirror has no visible effect at 128×128** on either Olimex build. At 64×64 the LUT only needs ~18 KB, easily fits. At 128×64 the LUT needs ~36 KB, also fits.
-
-**This is a regression.** Commit `7763bf8` ("Add eth-only build, fix FPS swing, optimize ArtNet") documented `128×128 grid, mirror XY, noise effect, Ethernet` with `Noise effect | 11,200 µs | 16% | 4096 logical pixels` and total tick 69,000 µs (14 FPS, free heap 124 KB). That `4096 logical pixels` line proves the mirror LUT was applied — Noise rendered the quadrant, not the full grid. Today the same workload measures `47,000 µs` for NoiseEffect (rendering all 16,384 pixels, because the LUT degraded), and free heap is down to ~97 KB. Net regression: ~27 KB of free heap lost since `7763bf8`, mirror no longer applied, Noise pays 4× the per-pixel cost.
-
-Suspect additions between `7763bf8` and today:
-- `aaf8d98` Per-driver output correction (Correction stage in Drivers path; allocates the 49 KB output buffer that didn't exist before).
-- `4cdc09a` Plan-18: release-channel picker + OTA + Improv WiFi + post-flash fix-pack (FirmwareUpdateModule, ImprovProvisioningModule).
-- HTTP server endpoints accumulated over the same span (WebSocket buffers, route handlers, mDNS service registrations).
-
-The contiguous-block deficit is structural now: even with mDNS off + Preview disabled + Improv deleted at runtime, max block stays at 53 KB (verified live on Olimex 2026-06-02). So toggling features off won't restore it — the per-driver Correction stage in `Drivers.h` lines 92-104 is the dominant non-removable consumer.
-
-Fix options:
-- **Allocate LUT before Driver output buffer** in `Layer::rebuildLUT()` / `Drivers::onBuildState()` — claim the larger contiguous chunk while heap is still less fragmented at startup. Requires reshuffling allocation order (Drivers currently allocates `outputBuffer_` in its own `onBuildState`, independently of Layer). Low risk; should let mirror work at 128×128 on eth-only at least.
-- **Smaller LUT representation for symmetric mirrors** — a "1:1 + axis-mirror suffix" encoding could compress the 72 KB LUT into ~4 KB (just the axis flags + an offset per logical pixel). Significant work but kills the problem outright for any mirror config.
-- **PSRAM** — only helps on PSRAM-equipped boards (Olimex Gateway Rev G has none).
-
-Tracked because surfacing the regression now (with max_alloc_block telemetry in scenarios) makes the next step concrete: pick one of the three options and measure.
 
 ### Preview memory optimizations (backlog)
 
 - **Defer Preview allocation** — allocate the preview buffer on first WebSocket client connect; free on last disconnect. Saves ~5 KB when no browser is open.
-- **Cap `detail` at 2 by default** — `detail = 3` adds ~14 ms/tick (see [performance.md](performance.md) "Preview detail cost"). Straightforward guard in PreviewDriver.
+- **Cap `detail` at 2 by default** — `detail = 3` adds ~14 ms/tick (see [performance.md](../performance.md) "Preview detail cost"). Straightforward guard in PreviewDriver.
 
 ### Task core-pinning (backlog)
 
@@ -133,7 +125,7 @@ No FreeRTOS tasks are pinned today. At 16K LEDs the render task takes ~52 ms/tic
 
 ### Runtime board presets (multi-commit, partially landed)
 
-The firmware-vs-board separation is now in place across the codebase (see [architecture.md § Firmware vs board](architecture.md#firmware-vs-board)). `build_esp32.py --firmware <variant>` picks the compiled binary; MoonDeck deduces the physical board where the firmware uniquely identifies hardware (`esp32-eth*` ⇒ `olimex-esp32-gateway-rev-g`) and lets the user pick from a short hardcoded list otherwise. Firmware variants stay separate — `esp32-eth` saves ~670 KB flash + ~30 KB DRAM vs `esp32-eth-wifi` (measured); merging would erase that win.
+The firmware-vs-board separation is now in place across the codebase (see [architecture.md § Firmware vs board](../architecture.md#firmware-vs-board)). `build_esp32.py --firmware <variant>` picks the compiled binary; MoonDeck deduces the physical board where the firmware uniquely identifies hardware (`esp32-eth*` ⇒ `olimex-esp32-gateway-rev-g`) and lets the user pick from a short hardcoded list otherwise. Firmware variants stay separate — `esp32-eth` saves ~670 KB flash + ~30 KB DRAM vs `esp32-eth-wifi` (measured); merging would erase that win.
 
 What still needs separation: the eth variants hardcode Olimex Gateway RMII pins in `src/platform/esp32/platform_esp32.cpp::ethInit()`, so they only work on that one PCB. As we add boards with different pins (LOLIN D32 tested 2026-06-02, QuinLED variants planned), runtime pin configuration becomes the next step.
 
@@ -167,7 +159,7 @@ When picked up: add `offsetX/Y/Z` (lengthType) controls to `LayoutBase`; `Layout
 
 ### Improv as a child of NetworkModule (deferred — needs scheduler work first)
 
-Architecturally the right shape; attempted in plan-21, reverted. Blocker: `Scheduler::tick()` only walks top-level modules for `loop20ms`/`loop1s` — children silently miss those callbacks. See [decisions.md](history/decisions.md) "Trying to add a child module to NetworkModule".
+Architecturally the right shape; attempted in plan-21, reverted. Blocker: `Scheduler::tick()` only walks top-level modules for `loop20ms`/`loop1s` — children silently miss those callbacks. See [decisions.md](../history/decisions.md) "Trying to add a child module to NetworkModule".
 
 Minimum-scope fix before the move:
 1. `MoonModule::loop20ms`/`loop1s` propagate to children (or Scheduler walks them) — pick whichever costs less at runtime.

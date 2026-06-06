@@ -6,6 +6,8 @@ Output driver. Reads from the Drivers container's output buffer and sends ArtNet
 
 The UDP socket is `connect()`-bound to the destination in `setup()`, so each per-universe `sendTo()` skips the address parse + route lookup — a measurable saving when a frame spans dozens of universes (16,384 lights = 97 universes). See [performance.md](../../../performance.md) "ArtNet UDP send cost".
 
+**Synchronous send (throughput-bound at large grids).** The send is synchronous in the render loop — one UDP packet per universe. A full 128×128 frame is ~97 universes (~50 KB); pushing that through the ESP32 TX path takes real wall-clock time (measured ~35 ms over Ethernet, ~90 ms over WiFi) that is charged to the render tick, so ArtNet dominates the tick at large grids. This is a transport throughput limit, not a code path that a non-blocking socket can shed: lwIP blocks UDP TX in the netif/driver layer below the socket API, so neither `O_NONBLOCK` nor `MSG_DONTWAIT` makes a full-frame send return early (verified on hardware). For high frame rates at large grids, use Ethernet over WiFi, or a smaller grid. See [performance.md](../../../performance.md) for the measured per-transport send cost.
+
 ## Controls
 
 - `ip` (ipv4, default "192.168.1.70") — destination IP address. Stored as 4 octets device-side (`uint8_t[4]`), formatted to a dotted-quad string only at the wire boundary. See [coding-standards.md § Prefer integers](../../../coding-standards.md#prefer-integers-store-values-in-their-native-shape).

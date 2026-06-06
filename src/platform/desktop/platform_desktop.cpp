@@ -65,8 +65,15 @@ size_t freeInternalHeap() {
     return 0; // Not meaningful on desktop (0 = unlimited)
 }
 
+// Test-only cap on the reported largest-free block; 0 = unlimited (the real
+// desktop default). Lets a test force MappingLUT's paged fallback (which only
+// triggers when no single contiguous block fits) without an actual fragmented
+// heap. std::atomic to match setTestNowMs's cross-thread contract.
+static std::atomic<size_t> testMaxBlock{0};
+void setTestMaxAllocBlock(size_t bytes) { testMaxBlock.store(bytes, std::memory_order_relaxed); }
+
 size_t maxAllocBlock() {
-    return 0; // Not meaningful on desktop (0 = unlimited)
+    return testMaxBlock.load(std::memory_order_relaxed); // 0 = unlimited
 }
 
 size_t maxInternalAllocBlock() {

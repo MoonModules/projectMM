@@ -2,8 +2,6 @@
 
 This spec describes the projectMM web UI **as shipped** — minimal, MoonModule-driven, no frameworks.
 
-For deferred items, the open design questions for 1.0, and the gap analysis, see [moonmodules_draft/core/ui.md](../../moonmodules_draft/core/ui.md).
-
 ## TL;DR
 
 **The UI is three hand-maintained files** (`index.html`, `app.js`, `style.css`) that render any MoonModule tree generically — no per-module-type code. State updates flow via WebSocket; mutations go through a small REST API.

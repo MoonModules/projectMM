@@ -50,7 +50,7 @@ Individual measurements vary ~5–10% on the Olimex board with no configuration 
 | ArtNet (97 UDP packets) | ~27,000 µs | ~110,000 µs |
 | Total tick | ~50,000 µs / 20 FPS | ~130,000 µs / 7 FPS |
 
-WiFi `sendto()` is ~1,140 µs/packet vs Ethernet's ~280 µs — CSMA/CA backoff, rate adaptation, link-layer retries. Not a code regression; WiFi physics. For ArtNet at 16K lights, use Ethernet. Root-cause writeup in [decisions.md](history/decisions.md) under "next-iteration branch".
+WiFi `sendto()` is ~1,140 µs/packet vs Ethernet's ~280 µs — CSMA/CA backoff, rate adaptation, link-layer retries. Not a code regression; WiFi physics. For ArtNet at 16K lights, use Ethernet.
 
 ### Build-variant note: WiFi-only `esp32` is slow on Olimex
 
@@ -61,7 +61,7 @@ Same source tree, same MCU (ESP32 classic, 160 MHz):
 | Olimex Gateway, `esp32` (WiFi-only) | 220 ms (4 FPS) | 155 ms |
 | Olimex Gateway, `esp32-eth-wifi` | 85–95 ms (10–12 FPS) | 38 ms |
 
-The Olimex `esp32` build is 4× slower at ArtNet than `esp32-eth-wifi` on the same board — `sdkconfig.defaults.eth` likely enlarges a shared lwIP/WiFi buffer pool via `CONFIG_ETH_DMA_*`. Fix tracked in [plan.md](plan.md). **Use `esp32-eth-wifi` for any ArtNet workload on classic ESP32**, even without Ethernet connected. Generic ESP32 boards (no PCB-trace antenna, less stable 3V3) vary wildly in WiFi TX quality vs the Olimex.
+The Olimex `esp32` build is 4× slower at ArtNet than `esp32-eth-wifi` on the same board — `sdkconfig.defaults.eth` enlarges a shared lwIP/WiFi buffer pool via `CONFIG_ETH_DMA_*` that the WiFi-only build doesn't get. **Use `esp32-eth-wifi` for any ArtNet workload on classic ESP32**, even without Ethernet connected. Generic ESP32 boards (no PCB-trace antenna, less stable 3V3) vary wildly in WiFi TX quality vs the Olimex.
 
 ### Memory at 128×128 with mirror
 

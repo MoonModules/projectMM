@@ -27,6 +27,11 @@ size_t freeHeap();          // total free (internal + PSRAM if present)
 size_t freeInternalHeap();  // internal RAM only (for stack/HTTP/WiFi reserve check)
 size_t maxAllocBlock();     // largest contiguous block (any memory type — incl PSRAM)
 size_t maxInternalAllocBlock(); // largest contiguous block in INTERNAL RAM only
+
+// Test-only cap on the value maxAllocBlock() reports; 0 = no cap (real value).
+// Lets a test force MappingLUT's paged-destinations fallback without an actual
+// fragmented heap. Production never calls this; reset to 0 in teardown.
+void setTestMaxAllocBlock(size_t bytes);
                                 // (scarce; use this as the memory-pressure KPI).
                                 // PSRAM blocks dominate on S3/S2 boards and make
                                 // maxAllocBlock useless as a stress signal —

@@ -20,9 +20,8 @@
 // state.
 //
 // Lives as a code-wired child of SystemModule, mirroring how Improv lives
-// under NetworkModule. Today this is a single-field module; future commits
-// add per-board pin maps + default module-config overrides as additional
-// controls (see docs/plan.md § Runtime board presets).
+// under NetworkModule. A single-field module: the control set grows only when
+// a runtime consumer reads a new per-board field (pin maps, config overrides).
 
 #include "core/MoonModule.h"
 #include "core/FilesystemModule.h"

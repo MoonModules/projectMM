@@ -42,9 +42,9 @@ BUILD_DIR = ROOT / "build" / _HOST
 # Anchor: this floor matches what `contract.esp32-eth-wifi.tick_us` promises in
 # test/scenarios/light/scenario_GridLayout_grid_sizes.json `size-128x128` —
 # 100,000 µs = 10 FPS with the default NoiseEffect workload. The historic 18
-# FPS reference (RainbowEffect) is tracked as a P1 investigation in
-# docs/plan.md "NoiseEffect cost on ESP32"; reaching it on Noise requires
-# algorithmic work on the effect.
+# FPS reference (RainbowEffect) is higher because Rainbow is cheaper than Noise;
+# reaching 18 FPS on Noise needs algorithmic work on the effect (the Xtensa has
+# no FPU, so the simplex float math dominates).
 MIN_ESP32_FPS_LED_PRODUCT = 10 * 16384  # 163840
 
 sys.path.insert(0, str(ROOT / "scripts" / "build"))

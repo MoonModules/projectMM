@@ -577,7 +577,7 @@ Notes on the shape:
 Two real numbers worth noting:
 
 - **DMA transmission is asynchronous to `push()`.** Wire-level WS2812 transmission at 800 kHz takes ~30 µs per LED × 16K = ~500 ms in serial; on parallel hardware (16 pins) it's ~30 ms. Both of these are larger than the frame budget — which is why double-buffering + DMA chains exist. The driver's `push()` returns immediately after handing the buffer to DMA; the next frame's `push()` blocks (or yields) until DMA is free.
-- **`push()` budget shrinks fast at higher counts.** At 30K LEDs the effect compute alone is 20+ ms (linear in light count for most effects); the frame budget either grows (drop to 30 FPS) or moves to multi-core (effects on core 1, network on core 0). projectMM does not pin tasks today; see `docs/plan.md` "Task core-pinning (backlog)".
+- **`push()` budget shrinks fast at higher counts.** At 30K LEDs the effect compute alone is 20+ ms (linear in light count for most effects); the frame budget either grows (drop to 30 FPS) or moves to multi-core (effects on core 1, network on core 0). projectMM does not pin tasks today — the render runs on whichever core the scheduler task lands on.
 
 ## Hot-path do-and-don't checklist
 

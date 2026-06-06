@@ -103,7 +103,11 @@ size_t freeInternalHeap() {
     return heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 }
 
+static size_t testMaxBlock = 0;  // 0 = no cap (report the real value)
+void setTestMaxAllocBlock(size_t bytes) { testMaxBlock = bytes; }
+
 size_t maxAllocBlock() {
+    if (testMaxBlock) return testMaxBlock;
     return heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
 }
 
