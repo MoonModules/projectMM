@@ -290,6 +290,7 @@ TEST_CASE("FilesystemModule writes valid JSON with children") {
     // "0.type":"MirrorModifier""0.mirrorX":true with no separator.
     std::ifstream f(std::string(tmpRoot) + "/.config/Layer.json");
     std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    f.close();  // Windows holds an exclusive lock on open files — close before remove_all.
     CHECK(content.find("\"MirrorModifier\",") != std::string::npos);
     CHECK(content.find("\"NoiseEffect\",") != std::string::npos);
     // And the catastrophic "}{ or "X""Y syntactic shape must not appear.
@@ -351,6 +352,7 @@ TEST_CASE("FilesystemModule singleton survives probe construct+destruct") {
 
     std::ifstream f(std::string(tmpRoot) + "/.config/Layer.json");
     CHECK(f.is_open());
+    f.close();  // Windows holds an exclusive lock on open files — close before remove_all.
 
     scheduler.teardown();
     std::filesystem::remove_all(tmpRoot);

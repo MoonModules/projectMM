@@ -3,6 +3,8 @@
 #include "doctest.h"
 #include "core/MoonModule.h"
 
+#include <string>  // MSVC STL doesn't pull this in via doctest.h
+
 namespace {
 
 class StubModule : public mm::MoonModule {};

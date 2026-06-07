@@ -63,18 +63,42 @@ Or use MoonDeck's PC tab for the same operations with a status dot per card. The
 
 Each host writes into its own build dir: `build/macos/`, `build/linux/`, `build/windows/`. The per-host layout mirrors the ESP32 side's `build/esp32-<board>/` shape — one directory per target, no cross-target clobbering on a multi-host dev machine.
 
+### Prerequisites
+
+Every host needs [uv](https://docs.astral.sh/uv/), CMake 3.20+, and a C++20 compiler.
+
+- **macOS:** `xcode-select --install` for Clang, `brew install cmake uv`.
+- **Linux:** distro packages for `cmake`, GCC 12+ / Clang 15+, and `uv` from astral's installer.
+- **Windows:** Visual Studio 2022 Build Tools with the **MSVC v143** workload and **Windows 11 SDK**, plus CMake. Quickest install (run in an elevated terminal):
+
+  ```powershell
+  winget install Kitware.CMake
+  winget install Microsoft.VisualStudio.2022.BuildTools --override "--passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+  ```
+
+  Build and test from a **Developer PowerShell for VS 2022** (Start Menu → "x64 Native Tools…") so `cl.exe` and the SDK paths are on `PATH`. The default CMake generator on Windows is Visual Studio multi-config, so `projectMM.exe` lands at `build/windows/Release/projectMM.exe` and `mm_scenarios.exe` at `build/windows/test/Release/`. `build_desktop.py` and `run_scenario.py` look in both the `Release/` subdir and the build root, so Ninja (single-config) also works if preferred.
+
 ## ESP32
 
 The ESP32 target uses ESP-IDF directly, not the Arduino framework.
 
-**Tested IDF version:** **v6.0.0** (`v6.1-dev-399-gd1b91b79b` internally). All builds and hardware tests use this tag. Minimum: ESP-IDF v5.1 (C++20 via GCC 12+); the project targets v6.x APIs (`esp_eth_phy_new_generic`, component manager for mDNS) so v5.x may need adjustments.
+**Tested IDF version:** **v6.1-dev** (internal `v6.1-dev-399-gd1b91b79b5`). CI builds against this tag and local builds should match (clone command below). Minimum: ESP-IDF v5.1 (C++20 via GCC 12+); the project targets v6.x APIs (`esp_eth_phy_new_generic`, component manager for mDNS) so v5.x may need adjustments.
 
 ### Prerequisites
 
-You need [uv](https://docs.astral.sh/uv/) (Python launcher), CMake 3.20+, and a C++20 compiler. Clone ESP-IDF into `~/esp/esp-idf` (the path the build scripts expect):
+You need [uv](https://docs.astral.sh/uv/) (Python launcher), CMake 3.20+, and a C++20 compiler. Clone ESP-IDF (~2 GB) into the expected location for your OS — the build scripts search this path first via `Path.home() / "esp" / "esp-idf"`:
 
+**macOS / Linux:**
 ```sh
-git clone --depth 1 --branch v6.0.0 https://github.com/espressif/esp-idf.git ~/esp/esp-idf
+git clone --depth 1 --branch v6.1-dev https://github.com/espressif/esp-idf.git ~/esp/esp-idf
+```
+
+**Windows** (PowerShell — run once with admin to enable long paths if you haven't already):
+```powershell
+# IDF and its tooling have deeply nested paths; without longpaths the clone
+# trips MAX_PATH (260 chars) inside the v6.1-dev tree.
+git config --global core.longpaths true
+git clone --depth 1 --branch v6.1-dev https://github.com/espressif/esp-idf.git "$env:USERPROFILE\esp\esp-idf"
 ```
 
 Then run the one-time Python environment setup — either open MoonDeck (`uv run scripts/moondeck.py`), go to the ESP32 tab, and click **Setup ESP-IDF**, or run it directly:
@@ -85,6 +109,10 @@ uv run scripts/build/build_esp32.py --firmware esp32                  # WiFi-onl
 uv run scripts/build/flash_esp32.py --firmware esp32 --port /dev/tty.usbserial-XXXX
 uv run scripts/run/monitor_esp32.py --port /dev/tty.usbserial-XXXX
 ```
+
+`setup_esp_idf.py` runs the upstream installer for the host: `install.sh` on macOS/Linux, `install.bat` on Windows. Both create the same `~/.espressif/python_env/...` venv and download the same toolchains (~1.5 GB more) — only the wrapper differs. The Windows installer needs roughly 5 minutes on a fast link.
+
+On Windows, the `--port` argument is a `COM*` name (e.g. `COM3`) instead of `/dev/tty.usbserial-XXXX`. MoonDeck's port picker enumerates `COM*` automatically.
 
 The ESP32 tab in MoonDeck wraps the same steps as cards (Setup → Firmware → Build → Port → Flash → Run). The Network bar at the top is the same one shown on the Live tab — it remembers which serial port and WiFi credentials belong to the current LAN, so moving the laptop between networks doesn't require re-picking.
 

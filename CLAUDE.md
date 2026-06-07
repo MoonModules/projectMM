@@ -53,6 +53,10 @@ Then check the recommendation against [§ Principles](#principles) (minimalism, 
 
 **Plan before implementing.** Use `/plan` mode before every feature. Review plans for: unnecessary files, inheritance where structs suffice, modifications outside the relevant directory. Reject and regenerate bad plans.
 
+**Use `uv` for every Python invocation.** Never type `python` or `python3` directly — always go through `uv run` (e.g. `uv run scripts/build/build_desktop.py`, `uv run python -c "…"`). This applies to shell commands, CMake `add_custom_command` / `execute_process`, documentation examples, and anything that shells out. In CMake, resolve `find_program(UV_EXECUTABLE NAMES uv REQUIRED HINTS "$ENV{USERPROFILE}/.local/bin" "$ENV{HOME}/.local/bin")` once and use `${UV_EXECUTABLE} run python …` thereafter. Reason: uv manages the project venv and is the project standard ([scripts/MoonDeck.md](scripts/MoonDeck.md)); bare `python3` isn't on PATH on Windows (and macOS Python Launcher pops a Store prompt). If you catch yourself about to type `python`, stop and prefix with `uv run`.
+
+The **one exception** is `esp32/main/CMakeLists.txt`: ESP-IDF builds use IDF's bundled Python venv, not the project venv — adding uv to ESP-IDF docker would be a bigger CI lift than the portability win pays for. That file uses `find_package(Python3 REQUIRED COMPONENTS Interpreter)` and invokes `${Python3_EXECUTABLE}`, so CMake locates whichever Python IDF set up (`.venv\Scripts\python.exe` on Windows IDF, `.venv/bin/python3` on macOS/Linux IDF). The shared `src/ui/embed_ui.cmake` script takes a `PYTHON_CMD` parameter that callers pass: desktop passes `${UV_EXECUTABLE};run;python`, ESP32 passes `${Python3_EXECUTABLE}`.
+
 **Consider extending before creating.** When adding a feature, check if an existing module can be extended cleanly. If a new file is genuinely cleaner, that's fine — but justify it.
 
 **Do not remove comments** unless they are outdated or factually wrong. Comments document intent and context. Removing them silently loses knowledge.

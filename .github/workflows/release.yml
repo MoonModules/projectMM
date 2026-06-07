@@ -54,6 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
       - name: Verify tag matches library.json version
         if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v'))
         # Pass the tag via --tag arg, not via an env var named GITHUB_REF_NAME.
@@ -63,7 +64,7 @@ jobs:
         # warning on the direct ${{ }} expansion inside a shell string.
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
-        run: python scripts/build/verify_version.py --tag "$TAG"
+        run: uv run scripts/build/verify_version.py --tag "$TAG"
 
   build-esp32:
     needs: verify-version
@@ -148,26 +149,37 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+      # CMakeLists.txt calls find_program(UV_EXECUTABLE … REQUIRED) so the
+      # build-host Python (gzip / build_info.h) is reached through uv. The
+      # runners don't ship uv by default — install it before package_desktop.
+      - uses: astral-sh/setup-uv@v3
       - name: Build + package macOS arm64
-        run: python scripts/build/package_desktop.py
+        run: uv run scripts/build/package_desktop.py
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-macos
           path: dist/
 
-  # build-windows: pending the Windows platform-layer port. The job was
-  # removed (rather than left red) so the release pipeline can produce a
-  # tagged 1.0 from the matching `dist/projectMM-macos-arm64-vX.Y.Z.tar.gz`
-  # + the four ESP32 firmwares. Re-add the build-windows job and the
-  # corresponding `dist/projectMM-*.zip` glob in `release` once the port
-  # lands; the surrounding scaffolding stays identical.
+  build-windows:
+    needs: verify-version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Same uv prerequisite as build-macos — see the comment there.
+      - uses: astral-sh/setup-uv@v3
+      - name: Build + package Windows x64
+        run: uv run scripts/build/package_desktop.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: dist/
 
   release:
     # Publish a release on: version tag push, main branch push, or workflow_dispatch.
     # Plain branch push without matching paths is filtered by the top-level `paths:`
     # so the build jobs already won't run; this condition is the belt to their braces.
     if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
-    needs: [build-esp32, build-macos]
+    needs: [build-esp32, build-macos, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write     # softprops/action-gh-release needs this
@@ -272,6 +284,7 @@ jobs:
               --pattern 'firmware-*.bin' \
               --pattern 'manifest-*.json' \
               --pattern 'projectMM-*.tar.gz' \
+              --pattern 'projectMM-*.zip' \
               || echo "  (skip $T — not yet released or no matching assets)"
           done
 
@@ -282,6 +295,7 @@ jobs:
           cp dist/firmware-*.bin                   "pages/install/releases/$TAG/" || true
           cp pages-manifests/manifest-*.json       "pages/install/releases/$TAG/"
           cp dist/projectMM-*.tar.gz               "pages/install/releases/$TAG/" || true
+          cp dist/projectMM-*.zip                  "pages/install/releases/$TAG/" || true
 
           echo "Pages release tree:"
           find pages/install/releases -maxdepth 2 -type f | sort
@@ -357,11 +371,11 @@ jobs:
           fail_on_unmatched_files: true
           # The `files:` block below is a multi-line literal string — every line
           # is a glob pattern, the action does NOT strip `#` as comment syntax.
-          # Add `dist/projectMM-*.zip` back when build-windows is restored.
           files: |
             dist/firmware-*.bin
             dist/manifest-*.json
             dist/projectMM-*.tar.gz
+            dist/projectMM-*.zip
 
       - id: deploy-pages
         uses: actions/deploy-pages@v4

@@ -5,10 +5,21 @@
 # (HttpServerModule); the browser inflates natively, so the firmware carries the
 # UI ~3.5x smaller with no device-side or front-end decompressor. Standard
 # embedded-web-UI practice (WLED, ESPHome, ESP-IDF examples all pre-gzip assets).
-# Compression runs on the BUILD HOST via python3's gzip module — stdlib,
-# guaranteed on every ESP-IDF/desktop build host (chosen over a `gzip` binary
-# that Windows toolchains may lack). The PNG is already compressed, so it stays
-# raw.
+# Compression runs on the BUILD HOST via Python's gzip module — stdlib, so any
+# Python interpreter works (chosen over a `gzip` binary that Windows toolchains
+# may lack). The PNG is already compressed, so it stays raw.
+#
+# The caller passes the interpreter as a CMake list via `-DPYTHON_CMD=...`:
+#   desktop CMakeLists  → `${UV_EXECUTABLE};run;python` (uv-managed venv)
+#   ESP32 CMakeLists    → `python3` (always present in the IDF toolchain
+#                                    container — adding uv to ESP-IDF docker
+#                                    would be a bigger CI lift than the
+#                                    portability win pays for).
+if(NOT DEFINED PYTHON_CMD)
+    # Fallback: bare `python3`. Works on macOS/Linux. Windows MSVC builds set
+    # PYTHON_CMD explicitly because `python3` isn't on PATH there.
+    set(PYTHON_CMD python3)
+endif()
 
 # Gzip ${UI_DIR}/<name> to ${OUT_DIR}/<name>.gz and HEX-read it into OUT_VAR.
 function(gzip_file_hex NAME OUT_VAR)
@@ -17,10 +28,10 @@ function(gzip_file_hex NAME OUT_VAR)
     get_filename_component(out_dir "${OUT}" DIRECTORY)
     set(gz "${out_dir}/${NAME}.gz")
     execute_process(
-        COMMAND python3 -c "import sys,gzip; open(sys.argv[2],'wb').write(gzip.compress(open(sys.argv[1],'rb').read(),9))" "${src}" "${gz}"
+        COMMAND ${PYTHON_CMD} -c "import sys,gzip; open(sys.argv[2],'wb').write(gzip.compress(open(sys.argv[1],'rb').read(),9))" "${src}" "${gz}"
         RESULT_VARIABLE rc)
     if(NOT rc EQUAL 0)
-        message(FATAL_ERROR "gzip of ${src} failed (python3 rc=${rc})")
+        message(FATAL_ERROR "gzip of ${src} failed (PYTHON_CMD=${PYTHON_CMD} rc=${rc})")
     endif()
     file(READ "${gz}" hex HEX)
     file(REMOVE "${gz}")

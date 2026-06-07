@@ -32,8 +32,24 @@ sys.path.insert(0, str(ROOT / "scripts" / "scenario"))
 import _observed  # noqa: E402
 
 _HOST = {"darwin": "macos", "win32": "windows"}.get(sys.platform, "linux")
-_RUNNER_BASE = ROOT / "build" / _HOST / "test" / "mm_scenarios"
-RUNNER = _RUNNER_BASE.with_suffix(".exe") if sys.platform == "win32" else _RUNNER_BASE
+
+
+def _resolve_runner() -> Path:
+    """Find mm_scenarios. MSVC multi-config drops it in test/Release/; Ninja and
+    single-config generators drop it in test/. Check both so the script works
+    with either layout."""
+    base = ROOT / "build" / _HOST / "test" / "mm_scenarios"
+    suffix = ".exe" if sys.platform == "win32" else ""
+    candidates = [base.with_suffix(suffix)]
+    if sys.platform == "win32":
+        candidates.insert(0, base.parent / "Release" / f"mm_scenarios{suffix}")
+    for c in candidates:
+        if c.exists():
+            return c
+    return candidates[-1]  # fall through with the simplest path for the error message
+
+
+RUNNER = _resolve_runner()
 
 # Format emitted by scenario_runner.cpp's measure block:
 #   MEASURE <step-name>: tick=Nus FPS=N lights=N heap=N (step: ±N) block=N

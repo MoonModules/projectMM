@@ -9,12 +9,38 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # desktop build runs cleanly on Windows runners (no -W flags on MSVC) and on
 # macOS/Linux (no /W flags on Clang/GCC).
 if(MSVC)
-    add_compile_options(/W4 /WX)
+    # /W4 /WX matches the GCC/Clang `-Wall -Wextra -Werror` discipline. A few
+    # MSVC-only warnings have no GCC equivalent at -Wall -Wextra and are
+    # suppressed below rather than fought at every call site:
+    #   C4702 — "unreachable code" inside `if constexpr` early-return branches
+    #           (a well-known MSVC quirk: it analyses the discarded branch as
+    #           live and flags everything after `return;`). GCC understands the
+    #           constexpr discard and doesn't warn.
+    #   C4244 / C4267 — implicit narrowing (int→smaller, size_t→smaller). GCC
+    #           only warns under -Wconversion, which is not part of -Wall
+    #           -Wextra. The codebase uses explicit static_cast at the sites
+    #           where loss-of-data is the real concern; suppressing here brings
+    #           MSVC noise level back in line with GCC.
+    add_compile_options(/W4 /WX /wd4702 /wd4244 /wd4267)
+    # MSVC marks the standard C library (strcpy, sprintf, fopen, localtime, …)
+    # as deprecated and emits C4996; /WX makes that fatal. Silence the family —
+    # the code uses these standard functions deliberately and consistently with
+    # the POSIX side, and the "secure" `_s` variants are a Microsoft extension.
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS
+                            _WINSOCK_DEPRECATED_NO_WARNINGS)
     # Static MSVC runtime so the Windows binary doesn't need vcredist.
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 else()
     add_compile_options(-Wall -Wextra -Werror)
 endif()
+
+# `uv` is the project's Python launcher (see CLAUDE.md / scripts/MoonDeck.md).
+# The build invokes Python helpers for build_info.h generation and UI embedding;
+# resolving them through `uv run python …` keeps Windows (where `python3` isn't
+# on PATH) on the same path as macOS / Linux without a `find_package(Python3)`
+# detour and without per-host scaffolding.
+find_program(UV_EXECUTABLE NAMES uv REQUIRED
+             HINTS "$ENV{USERPROFILE}/.local/bin" "$ENV{HOME}/.local/bin")
 
 # Core library. Most modules ship header-only (single .h file with implementation
 # inline). Core service modules that bridge to the platform (HTTP server,
@@ -33,20 +59,24 @@ target_link_libraries(mm_core PUBLIC mm_platform)
 # Platform library (desktop)
 add_library(mm_platform src/platform/desktop/platform_desktop.cpp)
 target_include_directories(mm_platform PUBLIC src/ src/platform/desktop/)
+# Winsock for the desktop socket surface on Windows.
+target_link_libraries(mm_platform PUBLIC $<$<PLATFORM_ID:Windows>:ws2_32>)
 
 # Generate build_info.h from library.json (carries version, build date, board name).
 add_custom_command(
     OUTPUT ${CMAKE_SOURCE_DIR}/src/core/build_info.h
-    COMMAND ${CMAKE_COMMAND} -E env python3 ${CMAKE_SOURCE_DIR}/scripts/build/generate_build_info.py
+    COMMAND ${UV_EXECUTABLE} run python ${CMAKE_SOURCE_DIR}/scripts/build/generate_build_info.py
     DEPENDS ${CMAKE_SOURCE_DIR}/library.json ${CMAKE_SOURCE_DIR}/scripts/build/generate_build_info.py
     COMMENT "Generating build_info.h"
 )
 add_custom_target(build_info_gen DEPENDS ${CMAKE_SOURCE_DIR}/src/core/build_info.h)
 
-# Embed UI files as C arrays
+# Embed UI files as C arrays. PYTHON_CMD is a CMake list — semicolons inside
+# the value become argv splits; passing "${UV_EXECUTABLE};run;python" expands
+# to `<uv> run python` at execute_process time.
 add_custom_command(
     OUTPUT ${CMAKE_SOURCE_DIR}/src/ui/ui_embedded.h
-    COMMAND ${CMAKE_COMMAND} -DUI_DIR=${CMAKE_SOURCE_DIR}/src/ui -DOUT=${CMAKE_SOURCE_DIR}/src/ui/ui_embedded.h -P ${CMAKE_SOURCE_DIR}/src/ui/embed_ui.cmake
+    COMMAND ${CMAKE_COMMAND} -DUI_DIR=${CMAKE_SOURCE_DIR}/src/ui -DOUT=${CMAKE_SOURCE_DIR}/src/ui/ui_embedded.h "-DPYTHON_CMD=${UV_EXECUTABLE};run;python" -P ${CMAKE_SOURCE_DIR}/src/ui/embed_ui.cmake
     DEPENDS ${CMAKE_SOURCE_DIR}/src/ui/index.html ${CMAKE_SOURCE_DIR}/src/ui/app.js ${CMAKE_SOURCE_DIR}/src/ui/style.css ${CMAKE_SOURCE_DIR}/src/ui/install-picker.js ${CMAKE_SOURCE_DIR}/src/ui/preview3d.js ${CMAKE_SOURCE_DIR}/src/ui/moonlight-logo.png ${CMAKE_SOURCE_DIR}/src/ui/embed_ui.cmake
     COMMENT "Embedding UI files"
 )

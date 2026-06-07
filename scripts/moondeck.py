@@ -33,7 +33,7 @@ import generate_test_docs as test_doc_gen  # noqa: E402
 def _app_version():
     """Read the project version from library.json. '?' if unavailable."""
     try:
-        return json.loads((ROOT / "library.json").read_text()).get("version", "?")
+        return json.loads((ROOT / "library.json").read_text(encoding="utf-8")).get("version", "?")
     except Exception:
         return "?"
 
@@ -54,7 +54,7 @@ def _load_boards():
     Step 2 picker will share this file.
     """
     try:
-        return json.loads(BOARDS_FILE.read_text())
+        return json.loads(BOARDS_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return []
 
@@ -301,7 +301,7 @@ def _consume_last_flash() -> dict | None:
     if not _LAST_FLASH_FILE.exists():
         return None
     try:
-        data = json.loads(_LAST_FLASH_FILE.read_text())
+        data = json.loads(_LAST_FLASH_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     import time

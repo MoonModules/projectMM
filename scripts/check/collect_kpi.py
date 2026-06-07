@@ -50,7 +50,12 @@ MIN_ESP32_FPS_LED_PRODUCT = 10 * 16384  # 163840
 sys.path.insert(0, str(ROOT / "scripts" / "build"))
 
 def run(cmd, cwd=None, timeout=30):
-    r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, timeout=timeout)
+    # encoding="utf-8" + errors="replace" — subprocess defaults to the locale
+    # codec when text=True, which is cp1252 on Windows and crashes on bytes
+    # >= 0x80 from tools like idf.py size that emit utf-8 (deg/box-drawing).
+    r = subprocess.run(cmd, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace",
+                       cwd=cwd, timeout=timeout)
     return r.stdout + r.stderr, r.returncode
 
 # ---------------------------------------------------------------------------
@@ -189,6 +194,7 @@ def collect_esp32():
                        "-DSDKCONFIG=" + str(esp32_build / "sdkconfig"),
                        "size"],
                 capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
                 cwd=ESP32_DIR, env=env, timeout=60)
             out = r.stdout + r.stderr
 
@@ -242,7 +248,7 @@ def collect_esp32():
 def _extract_esp32_tick(log, kpi):
     if not log.exists():
         return False
-    for line in reversed(log.read_text().splitlines()):
+    for line in reversed(log.read_text(encoding="utf-8", errors="replace").splitlines()):
         if "tick:" not in line:
             continue
         # Format: "tick: 108us (FPS: 9259)  free: 215180  maxBlock: 63488"
@@ -264,7 +270,7 @@ def _live_capture(log, seconds=15):
     if not cfg.exists():
         return False
     try:
-        state = json.loads(cfg.read_text())
+        state = json.loads(cfg.read_text(encoding="utf-8"))
         # Port lives inside the active network record (post-networks refactor
         # in moondeck.py). Fall back to the legacy top-level `port` so an
         # un-migrated moondeck.json still works.
@@ -306,11 +312,13 @@ def collect_code():
 
     src_files = list(src_dir.rglob("*.h")) + list(src_dir.rglob("*.cpp"))
     kpi["src_files"] = len(src_files)
-    kpi["src_lines"] = sum(f.read_text().count("\n") for f in src_files)
+    # encoding="utf-8" — sources contain non-ASCII (→, µ, ×) in comments.
+    # errors="replace" so any garbled file in the build dir doesn't crash KPI.
+    kpi["src_lines"] = sum(f.read_text(encoding="utf-8", errors="replace").count("\n") for f in src_files)
 
     test_files = [f for f in test_dir.rglob("*.cpp") if f.name != "doctest.h"]
     kpi["test_files"] = len(test_files)
-    kpi["test_lines"] = sum(f.read_text().count("\n") for f in test_files)
+    kpi["test_lines"] = sum(f.read_text(encoding="utf-8", errors="replace").count("\n") for f in test_files)
 
     kpi["specs"] = len(list((ROOT / "docs" / "moonmodules").rglob("*.md")))
     kpi["scenarios"] = len(list((ROOT / "test" / "scenarios").rglob("*.json")))

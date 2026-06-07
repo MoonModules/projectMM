@@ -56,9 +56,14 @@ The numbers above are observations. The **contracts** projectMM commits to — w
 
 ![Installer](docs/assets/screenshots/installer.png)
 
-**Desktop — download and run.** Grab the macOS arm64 tarball from the [releases page](https://github.com/ewowi/projectMM/releases), unpack, run, open `http://localhost:8080/`. The binary is unsigned, so Gatekeeper prompts on first run — right-click → Open, or clear the quarantine flag with `xattr -dr com.apple.quarantine ./projectMM`. macOS arm64 is the only desktop binary that ships today; Windows needs its platform-layer port first.
+**Desktop — download and run.** Grab the build for your OS from the [releases page](https://github.com/ewowi/projectMM/releases):
 
-Once running, the UI lets you build a render pipeline visually (layouts → layers with effects + modifiers → drivers), preview the result in 3D, and save it. The source tree also builds for Teensy, Raspberry Pi, and Linux from source — see [building.md](docs/building.md) — though only the macOS and ESP32 binaries ship as releases.
+- **macOS arm64:** `projectMM-macos-arm64-vX.Y.Z.tar.gz` — unpack, run `./projectMM`. The binary is unsigned, so Gatekeeper prompts on first run — right-click → Open, or clear the quarantine flag with `xattr -dr com.apple.quarantine ./projectMM`.
+- **Windows x64:** `projectMM-windows-x64-vX.Y.Z.zip` — unzip, double-click `projectMM.exe`. SmartScreen may warn on first run because the binary is unsigned (More info → Run anyway).
+
+Then open `http://localhost:8080/`.
+
+Once running, the UI lets you build a render pipeline visually (layouts → layers with effects + modifiers → drivers), preview the result in 3D, and save it. The source tree also builds for Teensy, Raspberry Pi, and Linux from source — see [building.md](docs/building.md) — though only the macOS, Windows, and ESP32 binaries ship as releases.
 
 ### From source
 

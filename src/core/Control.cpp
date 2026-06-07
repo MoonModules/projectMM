@@ -194,7 +194,7 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
             // Password parses identically to Text — only serialization differs.
             // c.max is the buffer size; parseString writes up to maxLen-1 then
             // NUL-terminates, so passing c.max gives "fill the buffer".
-            uint8_t maxLen = c.max > 0 ? c.max : 16;
+            uint8_t maxLen = static_cast<uint8_t>(c.max > 0 ? c.max : 16);
             mm::json::parseString(json, key, static_cast<char*>(c.ptr), maxLen);
             return ApplyResult::Ok;
         }

@@ -102,7 +102,10 @@ def package_macos(binary: Path, version: str) -> Path:
     DIST_DIR.mkdir(exist_ok=True)
     out = DIST_DIR / f"projectMM-macos-arm64-v{version}.tar.gz"
     readme = DIST_DIR / "_README.txt"
-    readme.write_text(readme_text(version, "macOS arm64"))
+    # encoding="utf-8" — the README contains "→" and "—"; Windows' default
+    # write_text encoding is cp1252 and rejects them. Explicit utf-8 matches
+    # what tar/zip readers expect today.
+    readme.write_text(readme_text(version, "macOS arm64"), encoding="utf-8")
     try:
         with tarfile.open(out, "w:gz") as tar:
             tar.add(binary, arcname="projectMM")
@@ -117,7 +120,7 @@ def package_windows(binary: Path, version: str) -> Path:
     DIST_DIR.mkdir(exist_ok=True)
     out = DIST_DIR / f"projectMM-windows-x64-v{version}.zip"
     readme = DIST_DIR / "_README.txt"
-    readme.write_text(readme_text(version, "Windows x64"))
+    readme.write_text(readme_text(version, "Windows x64"), encoding="utf-8")
     try:
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.write(binary, arcname="projectMM.exe")

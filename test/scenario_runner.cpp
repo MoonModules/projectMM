@@ -877,7 +877,9 @@ int main(int argc, char* argv[]) {
         for (auto& entry : std::filesystem::recursive_directory_iterator("test/scenarios")) {
             if (entry.path().extension() == ".json") {
                 total++;
-                if (runScenario(entry.path().c_str()) != 0) failed++;
+                // path::c_str() is wchar_t* on Windows; round-trip through
+                // .string() to get a portable narrow-char view for runScenario.
+                if (runScenario(entry.path().string().c_str()) != 0) failed++;
                 std::printf("\n");
             }
         }
