@@ -729,6 +729,14 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
         sendResponse(conn, 400, "application/json", "{\"error\":\"top-level modules cannot be replaced\"}");
         return;
     }
+    // Non-editable submodules (Board, Preview, Improv) are apparatus — replacing
+    // one swaps it for a different type, which is as much a removal as a delete.
+    // Refuse, mirroring handleDeleteModule's guard, so the editability contract
+    // holds across both endpoints.
+    if (!mod->userEditable()) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"module not editable\"}");
+        return;
+    }
     char typeName[32] = {};
     mm::json::parseString(body, "type", typeName, sizeof(typeName));
     if (typeName[0] == 0) {

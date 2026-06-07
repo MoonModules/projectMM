@@ -17,7 +17,7 @@ The only real gap is the platform layer's networking: `src/platform/desktop/plat
 - `::close(fd)` → `closesocket(fd)`.
 - Non-blocking: `fcntl(fd, F_GETFL/F_SETFL, O_NONBLOCK)` → `ioctlsocket(fd, FIONBIO, &mode)`.
 - `inet_pton / inet_ntop` — present in `<ws2tcpip.h>` (Vista+), usable as-is.
-- `writev(fd, iovec[], n)` in `TcpConnection::writeChunks` (the ArtNet hot path) — no Winsock equivalent. Use `WSASend` with a `WSABUF[]` array (1:1 shape with `iovec`), or fall back to a single coalesced `send` of the concatenated chunks. Keep the non-blocking partial-write semantics the POSIX path already documents.
+- `sendmsg(fd_, &msg, MSG_DONTWAIT)` with an `iovec[]` in `TcpConnection::writeChunks` (the ArtNet hot path) — no Winsock equivalent. Map to `WSASend` with a `WSABUF[]` array (1:1 shape with the `iovec[]`), or fall back to a single coalesced `send` of the concatenated chunks. Preserve the non-blocking partial-write semantics the POSIX path documents (`MSG_DONTWAIT` → a non-blocking socket via `ioctlsocket(FIONBIO)` plus `WSASend`).
 - `nanosleep` → `std::this_thread::sleep_for` (already pulling `<thread>`/`<chrono>`), or keep `nanosleep` behind the POSIX branch.
 - One-time `WSAStartup(MAKEWORD(2,2), …)` at desktop start + `WSACleanup()` at exit — add to `main_desktop.cpp` under `_WIN32`.
 - `main_desktop.cpp`: `sigaction(SIGINT)` / `signal(SIGPIPE, SIG_IGN)` → on Windows use `signal(SIGINT, …)` (SIGPIPE doesn't exist; socket writes just return an error, which the code already checks).

@@ -264,6 +264,19 @@ struct ScenarioContext {
         return mm::ModuleFactory::create(type);
     }
 
+    // Erase every `modules` entry whose pointer lies in `root`'s subtree (root
+    // and all descendants), so deleting a module that has registered children
+    // (e.g. a Layer with an effect child) doesn't leave their ids pointing at
+    // freed memory. Call BEFORE deleteTree(root). Walks the live tree, so it
+    // must run while the subtree is still intact.
+    void purgeSubtree(mm::MoonModule* root) {
+        if (!root) return;
+        for (uint8_t i = 0; i < root->childCount(); i++) purgeSubtree(root->child(i));
+        for (auto it = modules.begin(); it != modules.end();) {
+            it = (it->second == root) ? modules.erase(it) : std::next(it);
+        }
+    }
+
     void wireModule(const char* type, const char* id, const JsonVal& step) {
         auto* mod = modules[id];
         if (!mod) return;
@@ -543,8 +556,8 @@ static int runScenario(const char* path) {
             auto* parent = target->parent();
             parent->removeChild(target);
             target->teardown();
+            ctx.purgeSubtree(target);  // erase target + any registered descendants before freeing
             mm::Scheduler::deleteTree(target);
-            ctx.modules.erase(targetId);
             if (schedulerStarted) ctx.scheduler.buildState();
             std::printf("  -     %s (%s)\n", name, targetId);
         } else if (std::strcmp(op, "clear_children") == 0) {
@@ -570,12 +583,9 @@ static int runScenario(const char* path) {
                 if (!childMod->userEditable()) continue;
                 container->removeChild(childMod);
                 childMod->teardown();
-                // Purge any ctx.modules entries pointing into this subtree so a
-                // later add can reuse the id. Erase by pointer match (the child
-                // and anything it owned); scenario-added ids map to pointers.
-                for (auto it = ctx.modules.begin(); it != ctx.modules.end();) {
-                    it = (it->second == childMod) ? ctx.modules.erase(it) : std::next(it);
-                }
+                // Purge the child AND any registered descendants (e.g. a Layer's
+                // effect child) before freeing, so no id is left dangling.
+                ctx.purgeSubtree(childMod);
                 mm::Scheduler::deleteTree(childMod);
                 cleared++;
             }

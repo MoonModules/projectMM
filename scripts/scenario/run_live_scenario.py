@@ -319,7 +319,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
 
     # Live runs `steps` only — `fixture` is the in-process equivalent of what
     # main.cpp already wired on the device.
-    for step in scenario.get("steps", []):
+    for step_index, step in enumerate(scenario.get("steps", [])):
         step_name = step.get("name", "?")
         op = step.get("op", "")
         step_result = {"name": step_name, "op": op}
@@ -596,10 +596,13 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
             # commit a renegotiated promise.
             if update_contract:
                 # Preserve any per-step tolerance overrides already in place.
+                # Key by step INDEX, not the step dict — a dict is unhashable, so
+                # `(step, target)` as a key raised TypeError (this whole path is
+                # only reached with --update-contract, which the gates don't pass).
                 existing = step.get("contract", {}).get(target, {})
-                if (step, target) not in pending_contract_originals:
+                if (step_index, target) not in pending_contract_originals:
                     # Deep enough copy: existing is a flat dict of scalars.
-                    pending_contract_originals[(step, target)] = (
+                    pending_contract_originals[(step_index, target)] = (
                         dict(existing) if existing else None
                     )
                 new_block = {
@@ -681,11 +684,11 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
     if not contract_safe_to_write and update_contract:
         # Revert any contract mutations we made to the in-memory tree so the
         # JSON write below (for observed) doesn't leak them to disk.
-        for step in scenario.get("steps", []):
+        for step_index, step in enumerate(scenario.get("steps", [])):
             contract = step.get("contract")
             if contract and target in contract:
-                if (step, target) in pending_contract_originals:
-                    orig = pending_contract_originals[(step, target)]
+                if (step_index, target) in pending_contract_originals:
+                    orig = pending_contract_originals[(step_index, target)]
                     if orig is None:
                         del contract[target]
                     else:

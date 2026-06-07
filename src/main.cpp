@@ -207,9 +207,10 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     artnet->markWiredByCode();
 
     auto* preview = static_cast<mm::PreviewDriver*>(mm::ModuleFactory::create("PreviewDriver"));
-    // PreviewDriver reads the active Layer (via Drivers' setLayer wiring) for the
-    // light positions and the sparse driver buffer it streams; it owns its own
-    // scratch buffers, so no externally-owned frame is needed.
+    // PreviewDriver reads the active Layer (resolved by the Drivers container's
+    // setLayers(layersContainer) wiring above) for the light positions and the
+    // sparse driver buffer it streams; it owns its own scratch buffers, so no
+    // externally-owned frame is needed.
     drivers->addChild(preview);
     // These two drivers are wired by code here (preview gets its broadcaster set
     // below, once httpServer exists; ArtNet its IP). Mark them wired-by-code so a
