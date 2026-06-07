@@ -6,9 +6,9 @@ This document holds what scenarios can't carry: structural sizes (`sizeof`), bui
 
 ---
 
-## Desktop (macOS, Apple Silicon)
+## Desktop (64-bit)
 
-Desktop ArtNet sends to a non-existent IP so packets complete instantly; `freeHeap` returns 0 (unlimited). Per-step tick budgets live in `contract.pc-macos` blocks across the scenarios.
+Desktop ArtNet sends to a non-existent IP so packets complete instantly; `freeHeap` returns 0 (unlimited). Per-step tick budgets live in per-host `contract.pc-<os>` blocks across the scenarios — `pc-macos` for macOS arm64, `pc-windows` for Windows x64, `pc-linux` for Linux. The `sizeof` and dynamic-memory numbers below apply to all 64-bit desktop targets; tick numbers differ by host CPU and live in the scenario contracts.
 
 ### sizeof (desktop, 64-bit)
 
@@ -24,7 +24,12 @@ Desktop ArtNet sends to a non-existent IP so packets complete instantly; `freeHe
 
 `Drivers` grew from 120 → 408 with the per-driver `Correction` stage (256-entry brightness LUT + channel-order table). Other classes grew ~16-32 bytes each as `MoonModule` itself grew (rolling-range observed slot + wired-by-code flag + per-child `tickChildren` accounting fields).
 
-Binary: **358 KB** (debug-arm64; release-strip yields a smaller number).
+Binary sizes:
+
+| Target | Size | Build |
+|--------|------|-------|
+| macOS arm64 | 358 KB | debug-arm64 (release-strip is smaller) |
+| Windows x64 | 432 KB | MSVC Release, static CRT |
 
 ### Memory at 128×128 with mirror
 

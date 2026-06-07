@@ -137,7 +137,7 @@ release is visible only to those who opt into the Pre-release channel.
 ```bash
 # Bump library.json to "1.0.0-rcN", commit, tag v1.0.0-rcN, push tag.
 # Workflow:
-#   - 4 ESP32 builds + macOS build run.
+#   - 4 ESP32 builds + macOS build + Windows build run.
 #   - release job stages cumulative content (last 5 stable + 5 prerelease)
 #     under pages/install/releases/<tag>/ on Pages.
 #   - Publishes a GitHub Release flagged "Pre-release".
@@ -152,7 +152,8 @@ don't ship the API.
 `release.yml` does this automatically on every `v*` tag (stable + RC):
 
 1. `build-esp32` matrix produces four firmware bundles + four
-   `flasher_args.json` files. `build-macos` produces the desktop tarball.
+   `flasher_args.json` files. `build-macos` produces the macOS tarball;
+   `build-windows` produces the Windows zip.
 2. The `release` job:
    - Generates manifests in two flavours: absolute URLs (for GitHub release
      assets, used by the OTA picker) and relative URLs (for the Pages copy,

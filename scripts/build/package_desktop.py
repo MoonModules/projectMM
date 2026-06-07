@@ -12,7 +12,8 @@ Linux is intentionally not supported here — projectMM 1.0 ships ESP32 firmware
 + macOS + Windows desktop only. Linux desktop is on the 2.0 roadmap.
 
 Both archives are unsigned; macOS users will see the Gatekeeper "downloaded
-from internet" prompt on first run. Documented in the release notes.
+from internet" prompt and Windows users will see a SmartScreen warning on
+first run. Documented in the README and the per-archive README.txt.
 """
 
 import json

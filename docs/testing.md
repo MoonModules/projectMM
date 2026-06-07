@@ -296,6 +296,9 @@ Inventory: **[docs/tests/unit-tests.md](tests/unit-tests.md)** (auto-generated, 
 Run them with:
 
 ```bash
+# Replace build/macos with build/linux or build/windows per host. The
+# MoonDeck path below and `uv run scripts/test/test_desktop.py` resolve the
+# host build dir automatically; the raw ctest / mm_tests calls don't.
 ctest --test-dir build/macos --output-on-failure   # all
 ./build/macos/test/mm_tests -tc="<case-name>"      # one test case
 uv run scripts/test/test_desktop.py --module Layer # filtered by module
