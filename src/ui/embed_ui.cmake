@@ -9,15 +9,17 @@
 # Python interpreter works (chosen over a `gzip` binary that Windows toolchains
 # may lack). The PNG is already compressed, so it stays raw.
 #
-# The caller passes the interpreter as a CMake list via `-DPYTHON_CMD=...`:
-#   desktop CMakeLists  → `${UV_EXECUTABLE};run;python` (uv-managed venv)
-#   ESP32 CMakeLists    → `python3` (always present in the IDF toolchain
-#                                    container — adding uv to ESP-IDF docker
-#                                    would be a bigger CI lift than the
-#                                    portability win pays for).
-if(NOT DEFINED PYTHON_CMD)
-    # Fallback: bare `python3`. Works on macOS/Linux. Windows MSVC builds set
-    # PYTHON_CMD explicitly because `python3` isn't on PATH there.
+# Interpreter resolution — callers pick ONE of:
+#   PYTHON_CMD       — a CMake list giving the exact argv prefix (ESP32 path
+#                      passes `${Python3_EXECUTABLE}`). Wins if both are set.
+#   UV_EXECUTABLE    — path to `uv`; built into `<uv> run python` here (desktop
+#                      path). The list is built in-script so the desktop
+#                      CMakeLists doesn't have to pass semicolons through
+#                      MSBuild / make's command-line splitter.
+# If neither is set, we fall back to bare `python3` (POSIX-friendly).
+if(DEFINED UV_EXECUTABLE AND NOT DEFINED PYTHON_CMD)
+    set(PYTHON_CMD ${UV_EXECUTABLE} run python)
+elseif(NOT DEFINED PYTHON_CMD)
     set(PYTHON_CMD python3)
 endif()
 

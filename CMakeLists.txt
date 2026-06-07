@@ -71,20 +71,25 @@ add_custom_command(
 )
 add_custom_target(build_info_gen DEPENDS ${CMAKE_SOURCE_DIR}/src/core/build_info.h)
 
-# Embed UI files as C arrays. PYTHON_CMD is a CMake list — semicolons inside
-# the value become argv splits; passing "${UV_EXECUTABLE};run;python" expands
-# to `<uv> run python` at execute_process time.
+# Embed UI files as C arrays. Pass UV_EXECUTABLE through as a single value
+# (no semicolons on the command line — those would either get split by `make`
+# on POSIX hosts or land as literals in the value on MSBuild) and let
+# embed_ui.cmake assemble the `<uv> run python` list internally.
 add_custom_command(
     OUTPUT ${CMAKE_SOURCE_DIR}/src/ui/ui_embedded.h
-    COMMAND ${CMAKE_COMMAND} -DUI_DIR=${CMAKE_SOURCE_DIR}/src/ui -DOUT=${CMAKE_SOURCE_DIR}/src/ui/ui_embedded.h "-DPYTHON_CMD=${UV_EXECUTABLE};run;python" -P ${CMAKE_SOURCE_DIR}/src/ui/embed_ui.cmake
+    COMMAND ${CMAKE_COMMAND} -DUI_DIR=${CMAKE_SOURCE_DIR}/src/ui -DOUT=${CMAKE_SOURCE_DIR}/src/ui/ui_embedded.h -DUV_EXECUTABLE=${UV_EXECUTABLE} -P ${CMAKE_SOURCE_DIR}/src/ui/embed_ui.cmake
     DEPENDS ${CMAKE_SOURCE_DIR}/src/ui/index.html ${CMAKE_SOURCE_DIR}/src/ui/app.js ${CMAKE_SOURCE_DIR}/src/ui/style.css ${CMAKE_SOURCE_DIR}/src/ui/install-picker.js ${CMAKE_SOURCE_DIR}/src/ui/preview3d.js ${CMAKE_SOURCE_DIR}/src/ui/moonlight-logo.png ${CMAKE_SOURCE_DIR}/src/ui/embed_ui.cmake
     COMMENT "Embedding UI files"
 )
 add_custom_target(ui_embed DEPENDS ${CMAKE_SOURCE_DIR}/src/ui/ui_embedded.h)
 
-# mm_core's HttpServerModule.cpp consumes ui_embedded.h — wire the dep so a
-# clean build orders them correctly.
-add_dependencies(mm_core ui_embed)
+# mm_core's HttpServerModule.cpp consumes ui_embedded.h and SystemModule.h
+# (a mm_core public header) consumes build_info.h. Anything that links mm_core
+# transitively includes those headers, so both generated files must exist
+# before any mm_core compile unit starts. CI's parallel clean build exposes
+# the race (test/ compiles SystemModule.h while build_info_gen is still
+# running); wiring the dep here makes the ordering explicit on every consumer.
+add_dependencies(mm_core ui_embed build_info_gen)
 
 # Application
 add_executable(projectMM src/main.cpp src/platform/desktop/main_desktop.cpp)

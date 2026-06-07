@@ -619,7 +619,16 @@ static int runScenario(const char* path) {
             fresh->onBuildControls();
             fresh->setup();
             fresh->onBuildState();
-            if (old) { old->teardown(); mm::Scheduler::deleteTree(old); }
+            if (old) {
+                // Mirror the remove_module / clear_children branches: purge any
+                // ctx.modules entries pointing at old or its descendants before
+                // freeing. Otherwise a later step addressing an old descendant
+                // by id reads a dangling pointer. purgeSubtree also removes the
+                // targetId mapping; we re-register it to fresh on the next line.
+                ctx.purgeSubtree(old);
+                old->teardown();
+                mm::Scheduler::deleteTree(old);
+            }
             ctx.modules[targetId] = fresh;
             if (schedulerStarted) ctx.scheduler.buildState();
             std::printf("  ~     %s (%s → %s)\n", name, targetId, newType);

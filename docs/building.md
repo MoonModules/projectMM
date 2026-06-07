@@ -89,11 +89,13 @@ The ESP32 target uses ESP-IDF directly, not the Arduino framework.
 You need [uv](https://docs.astral.sh/uv/) (Python launcher), CMake 3.20+, and a C++20 compiler. Clone ESP-IDF (~2 GB) into the expected location for your OS — the build scripts search this path first via `Path.home() / "esp" / "esp-idf"`:
 
 **macOS / Linux:**
+
 ```sh
 git clone --depth 1 --branch v6.1-dev https://github.com/espressif/esp-idf.git ~/esp/esp-idf
 ```
 
 **Windows** (PowerShell — run once with admin to enable long paths if you haven't already):
+
 ```powershell
 # IDF and its tooling have deeply nested paths; without longpaths the clone
 # trips MAX_PATH (260 chars) inside the v6.1-dev tree.
