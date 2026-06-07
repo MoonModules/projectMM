@@ -15,7 +15,7 @@ Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi,
 
 ## Performance
 
-What projectMM delivers, measured end-to-end through a full render pipeline — an effect, a modifier, and an output driver (the canonical sweep runs NoiseEffect → MirrorModifier XY → ArtNet, but any effect/modifier/driver combination runs the same path). **FPS shown is computed from the underlying tick measurement (FPS = 1,000,000 / tick_us)** — tick is the unit the contracts and assertions actually use; FPS is the headline number.
+What projectMM delivers, measured end-to-end through a full render pipeline — an effect, a modifier, and an output driver (the canonical sweep runs NoiseEffect → MultiplyModifier XY (mirror fold) → ArtNet, but any effect/modifier/driver combination runs the same path). **FPS shown is computed from the underlying tick measurement (FPS = 1,000,000 / tick_us)** — tick is the unit the contracts and assertions actually use; FPS is the headline number.
 
 Every measurement below comes from a real scenario run on the listed board — `test/scenarios/light/scenario_GridLayout_grid_sizes.json` is the canonical sweep. Per-step `contract.<target>` blocks carry the promises the device must hit; per-step `observed.<target>` blocks carry the latest reading.
 

@@ -3,6 +3,8 @@
 #include "core/MoonModule.h"
 #include "light/light_types.h" // lengthType, nrOfLightsType
 
+#include <cstdio> // std::snprintf for the status line
+
 namespace mm {
 
 // Callback for layout coordinate iteration — a layout walks its positions and
@@ -70,6 +72,36 @@ public:
             offset += layout->lightCount();
         }
     }
+
+    // Status line: total physical lights + the physical bounding box (the extent
+    // of all light coordinates). Both are derived facts the container owns — the
+    // count is the driver buffer size, the box is the dense render extent. Shown
+    // via the status slot (not controls) so it costs no spec-check entry and
+    // renders generically. Recomputed only on a rebuild (cold path). A degenerate
+    // setup (no lights / zero box) flags Warning so the UI shows it's empty.
+    void onBuildState() override {
+        const nrOfLightsType lights = totalLightCount();
+        // One forEachCoord pass for the bounding box: max coordinate + 1 per axis.
+        struct Extent { lengthType x, y, z; bool any; } e{0, 0, 0, false};
+        forEachCoord([](void* ctx, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
+            auto* ex = static_cast<Extent*>(ctx);
+            if (x > ex->x) ex->x = x;
+            if (y > ex->y) ex->y = y;
+            if (z > ex->z) ex->z = z;
+            ex->any = true;
+        }, &e);
+        const lengthType w = e.any ? e.x + 1 : 0;
+        const lengthType h = e.any ? e.y + 1 : 0;
+        const lengthType d = e.any ? e.z + 1 : 0;
+        std::snprintf(statusBuf_, sizeof(statusBuf_), "%u lights · %u×%u×%u",
+                      static_cast<unsigned>(lights),
+                      static_cast<unsigned>(w), static_cast<unsigned>(h), static_cast<unsigned>(d));
+        setStatus(statusBuf_, lights == 0 ? Severity::Warning : Severity::Status);
+        MoonModule::onBuildState();
+    }
+
+private:
+    char statusBuf_[40] = {};  // "65535 lights · 999×999×999" fits; owned (setStatus borrows)
 };
 
 } // namespace mm

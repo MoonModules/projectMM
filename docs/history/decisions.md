@@ -53,8 +53,8 @@ are concrete rules, not aspirations.
     loop. Add inter-packet delay and FPS limiting. Missing pacing
     looks like rendering bugs but is network flooding.
 14. **Use virtual interfaces, not dynamic_cast.** Modules interact
-    through virtual methods. Layer should not know about MirrorModifier
-    or RotateModifier by name.
+    through virtual methods. Layer should not know about MultiplyModifier
+    or CheckerboardModifier by name.
 15. **Rebuild propagation must be in the framework.** Don't check dirty
     flags per-module in main.cpp. Use an event/observer system or a
     centralized pipeline-changed signal.

@@ -29,7 +29,7 @@ Animation: time scrolls the noise coordinate space (smooth drift). The scroll sp
 
 [Unit tests: NoiseEffect](../../../tests/unit-tests.md#noiseeffect) — non-zero output, spatial variation, differs from rainbow.
 
-[Scenario: scenario_MirrorModifier_pipeline](../../../tests/scenario-tests.md#scenario_mirrormodifier_pipeline) — full pipeline with noise + mirror, performance bounds.
+[Scenario: scenario_MultiplyModifier_pipeline](../../../tests/scenario-tests.md#scenario_multiplymodifier_pipeline) — full pipeline with noise + multiply/mirror, performance bounds.
 
 ## Prior art
 

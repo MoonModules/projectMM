@@ -1,13 +1,13 @@
 {
-  "name": "scenario_MirrorModifier_memory_lut",
-  "module": "MirrorModifier",
+  "name": "scenario_MultiplyModifier_memory_lut",
+  "module": "MultiplyModifier",
   "mode": "construct",
   "also": [
     "Layer",
     "MappingLUT",
     "BlendMap"
   ],
-  "description": "Verify that adding a MirrorModifier allocates both the mapping LUT and the driver buffer (the heavy memory path). Companion to scenario_Layer_memory_1to1, which verifies the no-LUT path.",
+  "description": "Verify that adding a MultiplyModifier allocates both the mapping LUT and the driver buffer (the heavy memory path). Companion to scenario_Layer_memory_1to1, which verifies the no-LUT path.",
   "steps": [
     {
       "name": "add-layout-group",
@@ -49,10 +49,10 @@
     },
     {
       "name": "add-mirror",
-      "description": "Add MirrorModifier — triggers LUT and driver-buffer allocation.",
+      "description": "Add MultiplyModifier — triggers LUT and driver-buffer allocation.",
       "op": "add_module",
-      "id": "Mirror",
-      "type": "MirrorModifier",
+      "id": "Multiply",
+      "type": "MultiplyModifier",
       "parent_id": "Layer"
     },
     {

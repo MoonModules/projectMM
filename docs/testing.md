@@ -52,7 +52,7 @@ A test lives under the subfolder of its **primary** `@module`'s source domain (e
 
 ### Naming convention
 
-- **Unit tests:** `unit_<ExactModuleName>[_<topic>].cpp` — `<ExactModuleName>` is the **CamelCase** class name as it appears in `// @module` (and in the source: `Layer`, `MoonModule`, `MirrorModifier`, `ArtNetSendDriver`). The optional `<topic>` collapses when the file's the only test for its module (`unit_Color.cpp` is fine if `@module Color`); add it when one module has several test files (`unit_Layer_extrude.cpp`, `unit_Layer_zero_grid.cpp`, …) or when the topic genuinely clarifies what the file covers (`unit_FilesystemModule_persistence.cpp`).
+- **Unit tests:** `unit_<ExactModuleName>[_<topic>].cpp` — `<ExactModuleName>` is the **CamelCase** class name as it appears in `// @module` (and in the source: `Layer`, `MoonModule`, `MultiplyModifier`, `ArtNetSendDriver`). The optional `<topic>` collapses when the file's the only test for its module (`unit_Color.cpp` is fine if `@module Color`); add it when one module has several test files (`unit_Layer_extrude.cpp`, `unit_Layer_zero_grid.cpp`, …) or when the topic genuinely clarifies what the file covers (`unit_FilesystemModule_persistence.cpp`).
 - **Scenarios:** `scenario_<ExactModuleName>_<topic>.json` — same module-naming rule; the topic is always present because scenarios always cross multiple modules and the topic distinguishes the focus.
 - The **`"name"` field inside each scenario JSON** matches the filename stem exactly (e.g. `"name": "scenario_Layer_base_pipeline"`). The runner, the MoonDeck dropdown, the generated docs and `--name` on the CLI all use this single identifier.
 
@@ -109,12 +109,12 @@ A `mutate` scenario that needs platform-bound modules (Network mDNS, WiFi, OTA) 
 
 ### Reset block: idempotent scenarios
 
-`mutate` scenarios mutate shared controls (Grid size, Mirror toggles, Preview detail). Without restoring those controls to known values at scenario start, measurements become coupled to *which other scenarios ran first* — last scenario's leftover state poisons this one's baseline. The fix is a top-level **`reset`** array, an `add_module`/`set_control`-shape list that runs *before* the scenario's own `steps`:
+`mutate` scenarios mutate shared controls (Grid size, Multiply mirror toggles, Preview detail). Without restoring those controls to known values at scenario start, measurements become coupled to *which other scenarios ran first* — last scenario's leftover state poisons this one's baseline. The fix is a top-level **`reset`** array, an `add_module`/`set_control`-shape list that runs *before* the scenario's own `steps`:
 
 ```json
 "reset": [
   { "name": "reset-grid-width", "op": "set_control", "id": "Grid", "key": "width", "value": 128 },
-  { "name": "reset-mirrorX", "op": "set_control", "id": "Mirror", "key": "mirrorX", "value": true }
+  { "name": "reset-mirrorX", "op": "set_control", "id": "Multiply", "key": "mirrorX", "value": true }
 ],
 ```
 
@@ -214,22 +214,22 @@ Every `scenario_*.json` carries top-level metadata plus a `description` per step
   "name": "scenario_GridLayout_grid_sizes",
   "module": "GridLayout",
   "mode": "mutate",
-  "also": ["Layer", "MirrorModifier", "Drivers", "ArtNetSendDriver"],
+  "also": ["Layer", "MultiplyModifier", "Drivers", "ArtNetSendDriver"],
   "description": "Walk the grid through 16x16 → 32x32 → 64x64 → 128x128 and assert a per-size FPS floor.",
   "fixture": [
     { "name": "fix-layouts", "op": "add_module", "id": "Layouts", "type": "Layouts" },
     { "name": "fix-grid", "op": "add_module", "id": "Grid", "type": "GridLayout", "parent_id": "Layouts", "props": {"width": 16, "height": 16} },
     { "name": "fix-layer", "op": "add_module", "id": "Layer", "type": "Layer", "props": {"layouts": "Layouts", "channelsPerLight": 3} },
     { "name": "fix-noise", "op": "add_module", "id": "Noise", "type": "NoiseEffect", "parent_id": "Layer" },
-    { "name": "fix-mirror", "op": "add_module", "id": "Mirror", "type": "MirrorModifier", "parent_id": "Layer" },
+    { "name": "fix-mirror", "op": "add_module", "id": "Multiply", "type": "MultiplyModifier", "parent_id": "Layer" },
     { "name": "fix-drivers", "op": "add_module", "id": "Drivers", "type": "Drivers", "props": {"layer": "Layer"} },
     { "name": "fix-artnet", "op": "add_module", "id": "ArtNet", "type": "ArtNetSendDriver", "parent_id": "Drivers" }
   ],
   "reset": [
     { "name": "reset-grid-width", "op": "set_control", "id": "Grid", "key": "width", "value": 128 },
     { "name": "reset-grid-height", "op": "set_control", "id": "Grid", "key": "height", "value": 128 },
-    { "name": "reset-mirrorX", "op": "set_control", "id": "Mirror", "key": "mirrorX", "value": true },
-    { "name": "reset-mirrorY", "op": "set_control", "id": "Mirror", "key": "mirrorY", "value": true }
+    { "name": "reset-mirrorX", "op": "set_control", "id": "Multiply", "key": "mirrorX", "value": true },
+    { "name": "reset-mirrorY", "op": "set_control", "id": "Multiply", "key": "mirrorY", "value": true }
   ],
   "steps": [
     {

@@ -33,7 +33,14 @@ Disabling a layout child (the `enabled` toggle in the UI) removes its lights fro
 
 Side effect: ArtNet universe assignments shift with the indices. To keep driver-to-fixture mapping stable across enable changes, disable the driver instead of the layout.
 
+## Status
+
+The container's status line (the `MoonModule` status slot, rendered by the UI) shows the **physical** setup it describes: `"<N> lights · <W>×<H>×<D>"` — the total light count summed across all enabled layout children (this is the size of the driver output buffer) and the physical bounding box (the extent of all light coordinates, the size of the dense render buffer). For a dense grid the count equals the box volume; for a sparse layout (e.g. a sphere shell) the count is smaller than the box — the gap is the at-a-glance signal that the layout is sparse. An empty setup (no lights) reports `Warning` severity. Recomputed on every rebuild (`onBuildState`), not per tick.
+
+## Reordering
+
+Layout children are reordered by drag-and-drop in the UI (`POST /api/modules/<name>/move` with `{"to": <index>}`). **Insert semantics, not swap:** the dragged layout takes the drop target's slot and the others shift to fill — the standard reorderable-list behaviour (Finder, Trello, SortableJS). Dropping onto a row (rather than a between-rows gap) means the landing is the target's absolute index, so dragging down lands after the target and dragging up lands before it. Order matters: it sets the physical index range each layout occupies, which drives ArtNet universe assignment. Same `move` op and semantics apply to every container (effects/modifiers under a Layer, drivers under Drivers).
+
 ## What needs improvement
 
 - Layout control changes must propagate to every layer (LUT rebuild) and to the Drivers container (output buffer reallocation). Mechanism: [architecture.md § Rebuild propagation](../../architecture.md#rebuild-propagation).
-- Runtime add / remove / reorder of layouts.

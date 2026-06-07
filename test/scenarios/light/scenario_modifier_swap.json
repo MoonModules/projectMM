@@ -1,0 +1,291 @@
+{
+  "name": "scenario_modifier_swap",
+  "module": "Layer",
+  "mode": "mutate",
+  "also": [
+    "MultiplyModifier",
+    "CheckerboardModifier",
+    "NoiseEffect",
+    "Layouts",
+    "GridLayout",
+    "Drivers",
+    "ArtNetSendDriver",
+    "PreviewDriver"
+  ],
+  "description": "Swap the Layer's modifier between Multiply and Checkerboard and verify the pipeline stays live across each replace. Prepares its own canvas (clear + rebuild) so it runs from any device state: one Layout(Grid 32x32) + one Layer + one effect + one modifier, then replace_module cycles the modifier MOD slot Multiply -> Checkerboard -> Multiply, measuring after each so a broken swap (null buffer / wrong light count) shows up. Exercises the modifier-replace path the UI's drag-replace uses.",
+  "fixture": [
+    {
+      "name": "fix-layouts",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "fix-grid",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 32,
+        "height": 32
+      }
+    },
+    {
+      "name": "fix-layers",
+      "op": "add_module",
+      "id": "Layers",
+      "type": "Layers",
+      "props": {
+        "layouts": "Layouts"
+      }
+    },
+    {
+      "name": "fix-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "parent_id": "Layers",
+      "props": {
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "fix-fx",
+      "op": "add_module",
+      "id": "FX",
+      "type": "NoiseEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "fix-mod",
+      "op": "add_module",
+      "id": "MOD",
+      "type": "MultiplyModifier",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "fix-drivers",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "layers": "Layers"
+      }
+    },
+    {
+      "name": "fix-artnet",
+      "op": "add_module",
+      "id": "ArtNet",
+      "type": "ArtNetSendDriver",
+      "parent_id": "Drivers"
+    }
+  ],
+  "steps": [
+    {
+      "name": "shrink-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16,
+      "optional": true
+    },
+    {
+      "name": "shrink-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "optional": true
+    },
+    {
+      "name": "clear-layers",
+      "op": "clear_children",
+      "id": "Layers"
+    },
+    {
+      "name": "clear-layouts",
+      "op": "clear_children",
+      "id": "Layouts"
+    },
+    {
+      "name": "build-grid",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 32,
+        "height": 32
+      }
+    },
+    {
+      "name": "build-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "parent_id": "Layers",
+      "props": {
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "build-fx",
+      "op": "add_module",
+      "id": "FX",
+      "type": "NoiseEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "build-mod",
+      "op": "add_module",
+      "id": "MOD",
+      "type": "MultiplyModifier",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "multiply-1",
+      "op": "measure",
+      "measure": true,
+      "description": "Multiply modifier active — pipeline live, LUT folds the grid.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            6,
+            7
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            129,
+            440
+          ],
+          "free_heap": [
+            176224,
+            176436
+          ],
+          "max_alloc_block": [
+            77824,
+            110592
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "swap-to-checker",
+      "op": "replace_module",
+      "id": "MOD",
+      "type": "CheckerboardModifier"
+    },
+    {
+      "name": "checkerboard",
+      "op": "measure",
+      "measure": true,
+      "description": "Checkerboard modifier active — masks half the lights; pipeline stays live (driver buffer non-null).",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            17,
+            20
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-08"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            1010,
+            1138
+          ],
+          "free_heap": [
+            173744,
+            175536
+          ],
+          "max_alloc_block": [
+            77824,
+            110592
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "swap-to-multiply",
+      "op": "replace_module",
+      "id": "MOD",
+      "type": "MultiplyModifier"
+    },
+    {
+      "name": "multiply-2",
+      "op": "measure",
+      "measure": true,
+      "description": "Back to Multiply — replace round-trips cleanly, pipeline live again.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            6,
+            8
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-08"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            439,
+            546
+          ],
+          "free_heap": [
+            173092,
+            176436
+          ],
+          "max_alloc_block": [
+            77824,
+            110592
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    }
+  ]
+}

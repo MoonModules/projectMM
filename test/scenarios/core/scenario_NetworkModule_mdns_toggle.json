@@ -22,14 +22,14 @@
     {
       "name": "reset-mirrorX",
       "op": "set_control",
-      "id": "Mirror",
+      "id": "Multiply",
       "key": "mirrorX",
       "value": true
     },
     {
       "name": "reset-mirrorY",
       "op": "set_control",
-      "id": "Mirror",
+      "id": "Multiply",
       "key": "mirrorY",
       "value": true
     },

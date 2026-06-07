@@ -40,7 +40,8 @@ add_executable(mm_tests
     unit/light/unit_Layouts_mutation.cpp
     unit/light/unit_Layouts_toggle_cycle.cpp
     unit/light/unit_MetaballsEffect.cpp
-    unit/light/unit_MirrorModifier.cpp
+    unit/light/unit_MultiplyModifier.cpp
+    unit/light/unit_CheckerboardModifier.cpp
     unit/light/unit_NoiseEffect.cpp
     unit/light/unit_ParticlesEffect.cpp
     unit/light/unit_PlasmaEffect.cpp

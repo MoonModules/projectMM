@@ -3,10 +3,10 @@
   "module": "MoonModule",
   "mode": "mutate",
   "also": [
-    "MirrorModifier",
+    "MultiplyModifier",
     "NoiseEffect"
   ],
-  "description": "Measure the cost of control changes on a running pipeline. Toggles MirrorModifier's mirrorX/Y at different points and verifies each change is applied without freezing the render loop. Companion to the MoonModule control-change gate unit tests (unit_MoonModule_control_change_gate.cpp) — this is the live equivalent.",
+  "description": "Measure the cost of control changes on a running pipeline. Toggles MultiplyModifier's mirrorX/Y at different points and verifies each change is applied without freezing the render loop. Companion to the MoonModule control-change gate unit tests (unit_MoonModule_control_change_gate.cpp) — this is the live equivalent.",
   "fixture": [
     {
       "name": "fix-layouts",
@@ -45,8 +45,8 @@
     {
       "name": "fix-mirror",
       "op": "add_module",
-      "id": "Mirror",
-      "type": "MirrorModifier",
+      "id": "Multiply",
+      "type": "MultiplyModifier",
       "parent_id": "Layer"
     },
     {
@@ -84,14 +84,14 @@
     {
       "name": "reset-mirrorX",
       "op": "set_control",
-      "id": "Mirror",
+      "id": "Multiply",
       "key": "mirrorX",
       "value": true
     },
     {
       "name": "reset-mirrorY",
       "op": "set_control",
-      "id": "Mirror",
+      "id": "Multiply",
       "key": "mirrorY",
       "value": true
     },
@@ -135,7 +135,7 @@
         "pc-macos": {
           "tick_us": [
             97,
-            209
+            222
           ],
           "free_heap": [
             0,
@@ -147,7 +147,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-05"
+            "2026-06-07"
           ]
         },
         "esp32-eth-wifi": {
@@ -228,7 +228,7 @@
       "name": "disable-mirrorX",
       "description": "Disable mirrorX. Modifier control triggers a pipeline rebuild — measures the rebuilt path.",
       "op": "set_control",
-      "id": "Mirror",
+      "id": "Multiply",
       "key": "mirrorX",
       "value": false,
       "measure": true,
@@ -249,7 +249,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            181,
+            109,
             275
           ],
           "free_heap": [
@@ -262,7 +262,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-05"
+            "2026-06-08"
           ]
         },
         "esp32-eth-wifi": {
@@ -343,7 +343,7 @@
       "name": "disable-mirrorY",
       "description": "Disable mirrorY. Mirror is now fully off — should land on the no-LUT path.",
       "op": "set_control",
-      "id": "Mirror",
+      "id": "Multiply",
       "key": "mirrorY",
       "value": false,
       "measure": true,
@@ -364,7 +364,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            346,
+            111,
             522
           ],
           "free_heap": [
@@ -377,7 +377,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-05"
+            "2026-06-08"
           ]
         },
         "esp32-eth-wifi": {
@@ -458,7 +458,7 @@
       "name": "re-enable-mirrors",
       "description": "Re-enable mirrorX (rebuild back to LUT path).",
       "op": "set_control",
-      "id": "Mirror",
+      "id": "Multiply",
       "key": "mirrorX",
       "value": true
     },
@@ -466,7 +466,7 @@
       "name": "re-enable-mirrorY",
       "description": "Re-enable mirrorY and measure — the heavy LUT path must recover (FPS within 50% of baseline) without staying degraded.",
       "op": "set_control",
-      "id": "Mirror",
+      "id": "Multiply",
       "key": "mirrorY",
       "value": true,
       "measure": true,

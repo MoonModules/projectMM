@@ -293,7 +293,7 @@ A **Layer** (a MoonModule, child of Layers) owns:
 
 A layer can have **multiple effects**. Effects are not blended — they write to the buffer sequentially in their listed order, each overwriting or adding to the previous. That allows stacked patterns (a base-colour effect followed by a sparkle effect).
 
-A layer can have **multiple modifiers**. Static modifiers chain during LUT build; dynamic modifiers chain during rendering. Order matters: mirror-then-rotate differs from rotate-then-mirror.
+A layer applies its **first enabled modifier** during LUT build (`Layer::rebuildLUT`). Modifier *chaining* — applying several in sequence — is not yet implemented; when it lands, order will matter (a multiply-then-checkerboard mask differs from checkerboard-then-multiply, just as mirror-then-rotate differs from rotate-then-mirror), which is why modifiers are reorderable in the UI today even though only the first currently takes effect. Static modifiers would chain during LUT build; dynamic modifiers during rendering.
 
 Each layer references the shared Layouts. The layer builds its own LUT by iterating the Layouts container's coordinates and applying its static modifiers in order. Different layers in Layers can have different modifiers, producing different LUTs from the same Layouts.
 
@@ -345,7 +345,7 @@ A modifier can:
 - Transform the mapping LUT via `transformCoord()` — rebuilt on the cold path, zero render cost.
 - Transform light values via `transformLights()` on the hot path — per-light cost, enables dynamic animations like rotation.
 
-**Dimensionality** for modifiers defaults to `Dim::D3` (assumed to work in all three axes unless declared otherwise). Unlike for effects, this is purely advisory — the Layer doesn't extrude modifier output. It exists so the UI can render the 📏/🟦/🧊 chip on the card. **MirrorModifier** is D3 (it has independent mirrorX/Y/Z toggles).
+**Dimensionality** for modifiers defaults to `Dim::D3` (assumed to work in all three axes unless declared otherwise). Unlike for effects, this is purely advisory — the Layer doesn't extrude modifier output. It exists so the UI can render the 📏/🟦/🧊 chip on the card. **MultiplyModifier** is D3 (it has independent multiplyX/Y/Z + mirrorX/Y/Z toggles).
 
 ## Mapping and blending
 

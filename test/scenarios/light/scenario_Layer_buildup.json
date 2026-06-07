@@ -6,7 +6,7 @@
     "Layouts",
     "GridLayout",
     "RainbowEffect",
-    "MirrorModifier",
+    "MultiplyModifier",
     "Drivers",
     "ArtNetSendDriver"
   ],
@@ -179,10 +179,10 @@
     },
     {
       "name": "add-mirror",
-      "description": "MirrorModifier under Layer. Triggers a LUT build + Drivers output buffer allocation (the heavy memory path).",
+      "description": "MultiplyModifier under Layer. Triggers a LUT build + Drivers output buffer allocation (the heavy memory path).",
       "op": "add_module",
-      "id": "Mirror",
-      "type": "MirrorModifier",
+      "id": "Multiply",
+      "type": "MultiplyModifier",
       "parent_id": "Layer"
     },
     {

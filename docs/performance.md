@@ -141,7 +141,7 @@ The Olimex `esp32` build is 4× slower at ArtNet than `esp32-eth-wifi` on the sa
 | Drivers | 48 KB | output buffer (128×128×3) |
 | System + Network | 0 | char buffers in class, no heap |
 
-LUT is half desktop size (uint16_t vs uint32_t per entry). The 1:1 (no-modifier) path skips the LUT entirely; see `scenario_Layer_memory_1to1` vs `scenario_MirrorModifier_memory_lut`.
+LUT is half desktop size (uint16_t vs uint32_t per entry). The 1:1 (no-modifier) path skips the LUT entirely; see `scenario_Layer_memory_1to1` vs `scenario_MultiplyModifier_memory_lut`.
 
 ### Heap breakdown (128×128, mirror, RainbowEffect, Ethernet + mDNS)
 

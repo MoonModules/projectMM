@@ -79,7 +79,7 @@ public:
                     // a flash literal from registerType<T>("…"), valid for the program lifetime.
                     mod->setTypeName(types_[i].name);
                     // Display name: typeName with the role-noun suffix stripped
-                    // (NoiseEffect → Noise, MirrorModifier → Mirror, GridLayout → Grid,
+                    // (NoiseEffect → Noise, MultiplyModifier → Multiply, GridLayout → Grid,
                     // PreviewDriver → Preview). The role chip already conveys what kind of
                     // module it is; the card label shouldn't repeat it. typeName stays
                     // intact for persistence / lookup / replace.
@@ -96,7 +96,7 @@ public:
     // Returns a pointer into a small static buffer — caller copies it (setName does).
     // Role-based stripping:
     //   Effect   → strip "Effect"   (NoiseEffect → Noise)
-    //   Modifier → strip "Modifier" (MirrorModifier → Mirror)
+    //   Modifier → strip "Modifier" (MultiplyModifier → Multiply)
     //   Layout   → strip "Layout"   (GridLayout → Grid)
     //   Driver   → strip "Driver"   (PreviewDriver → Preview)
     //   Generic  → strip "Module"   (FilesystemModule → Filesystem)

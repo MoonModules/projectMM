@@ -8,7 +8,7 @@
 #include "core/SystemModule.h"
 #include "light/effects/NoiseEffect.h"
 #include "light/effects/RainbowEffect.h"
-#include "light/modifiers/MirrorModifier.h"
+#include "light/modifiers/MultiplyModifier.h"
 #include "light/layers/Layer.h"
 #include "platform/platform.h"
 
@@ -103,7 +103,7 @@ TEST_CASE("FilesystemModule structural reconciliation") {
     mm::ModuleFactory::registerType<mm::Layer>("Layer");
     mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect");
     mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
-    mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier");
+    mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier");
 
     // Write a Layer.json that asks for one child (RainbowEffect at position 0).
     {
@@ -117,15 +117,15 @@ TEST_CASE("FilesystemModule structural reconciliation") {
     fs->setTypeName("FilesystemModule");
     fs->setScheduler(&scheduler);
 
-    // Build a live tree: Layer with NoiseEffect at pos 0 and MirrorModifier at pos 1.
+    // Build a live tree: Layer with NoiseEffect at pos 0 and MultiplyModifier at pos 1.
     // The JSON wants RainbowEffect at pos 0 and nothing at pos 1 — so we expect a swap
     // and a trim.
     auto* layer = new mm::Layer();
     layer->setTypeName("Layer");
     auto* noise = new mm::NoiseEffect();
     noise->setTypeName("NoiseEffect");
-    auto* mirror = new mm::MirrorModifier();
-    mirror->setTypeName("MirrorModifier");
+    auto* mirror = new mm::MultiplyModifier();
+    mirror->setTypeName("MultiplyModifier");
     layer->addChild(noise);
     layer->addChild(mirror);
 
@@ -262,7 +262,7 @@ TEST_CASE("FilesystemModule writes valid JSON with children") {
 
     mm::ModuleFactory::registerType<mm::Layer>("Layer");
     mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect");
-    mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier");
+    mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier");
 
     mm::Scheduler scheduler;
     auto* fs = new mm::FilesystemModule();
@@ -270,8 +270,8 @@ TEST_CASE("FilesystemModule writes valid JSON with children") {
     fs->setScheduler(&scheduler);
     auto* layer = new mm::Layer();
     layer->setTypeName("Layer");
-    auto* mirror = new mm::MirrorModifier();
-    mirror->setTypeName("MirrorModifier");
+    auto* mirror = new mm::MultiplyModifier();
+    mirror->setTypeName("MultiplyModifier");
     auto* noise = new mm::NoiseEffect();
     noise->setTypeName("NoiseEffect");
     layer->addChild(mirror);
@@ -287,11 +287,11 @@ TEST_CASE("FilesystemModule writes valid JSON with children") {
 
     // Read back the raw file and verify both child "type" fields are followed by
     // a comma before the next field — the previously-broken serializer emitted
-    // "0.type":"MirrorModifier""0.mirrorX":true with no separator.
+    // "0.type":"MultiplyModifier""0.mirrorX":true with no separator.
     std::ifstream f(std::string(tmpRoot) + "/.config/Layer.json");
     std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     f.close();  // Windows holds an exclusive lock on open files — close before remove_all.
-    CHECK(content.find("\"MirrorModifier\",") != std::string::npos);
+    CHECK(content.find("\"MultiplyModifier\",") != std::string::npos);
     CHECK(content.find("\"NoiseEffect\",") != std::string::npos);
     // And the catastrophic "}{ or "X""Y syntactic shape must not appear.
     CHECK(content.find("\"\"") == std::string::npos);

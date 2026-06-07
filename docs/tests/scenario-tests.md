@@ -10,7 +10,7 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 
 `test/scenarios/light/scenario_GridLayout_grid_sizes.json` — Walk the grid through 16x16 → 32x32 → 64x64 → 128x128 and assert a per-size FPS floor.
 
-**Mode**: `mutate` · **Also touches**: Layer, MirrorModifier, NoiseEffect, Drivers, ArtNetSendDriver, PreviewDriver
+**Mode**: `mutate` · **Also touches**: Layer, MultiplyModifier, NoiseEffect, Drivers, ArtNetSendDriver, PreviewDriver
 
 #### `size-16x16` (set_control)  📏
 
@@ -31,12 +31,14 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 | `esp32-eth-wifi` | ≥ 1,429 / 1,821 | ≥ 146KB / 139KB | ≥ 49KB / 52KB |
 | `esp32s3-n16r8` | — / 1,672 | — / 8360KB | — / 160KB |
 | `pc-macos` | ≥ 200,000 / 200,000-1,000,000 | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 142,857-333,333 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `esp32s3-n16r8`: observed 2026-06-04
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `pc-windows`: observed 2026-06-07
 
 #### `size-32x32` (set_control)  📏
 
@@ -56,13 +58,15 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 | `esp32-eth` | ≥ 303 / 379-381 | ≥ 161KB / 172KB | ≥ 78KB / 92KB |
 | `esp32-eth-wifi` | ≥ 400 / 390 | ≥ 142KB / 132KB | ≥ 49KB / 50KB |
 | `esp32s3-n16r8` | — / 288 | — / 8349KB | — / 140KB |
-| `pc-macos` | ≥ 100,000 / 111,111-166,667 | unlimited / unlimited | — / unlimited |
+| `pc-macos` | ≥ 100,000 / 111,111-200,000 | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 71,429-90,909 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `esp32s3-n16r8`: observed 2026-06-04
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-06
+- `pc-windows`: observed 2026-06-07
 
 #### `size-64x64` (set_control)  📏
 
@@ -83,12 +87,14 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 | `esp32-eth-wifi` | ≥ 76.9 / 85.7 | ≥ 117KB / 108KB | ≥ 44KB / 48KB |
 | `esp32s3-n16r8` | — / 25.9 | — / 8310KB | — / 152KB |
 | `pc-macos` | ≥ 33,333 / 30,303-43,478 | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 17,857-22,727 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `esp32s3-n16r8`: observed 2026-06-04
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
+- `pc-windows`: observed 2026-06-07
 
 #### `size-128x128` (set_control)  📏
 
@@ -109,18 +115,20 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 | `esp32-eth-wifi` | ≥ 10.0 / 54.5 | ≥ 103KB / 129KB | ≥ 44KB / 52KB |
 | `esp32s3-n16r8` | — / 6.1 | — / 8163KB | — / 164KB |
 | `pc-macos` | ≥ 8,333 / 4,975-10,204 | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 3,676-4,505 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `esp32s3-n16r8`: observed 2026-06-04
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
+- `pc-windows`: observed 2026-06-07
 
 ### scenario_GridLayout_resize
 
 `test/scenarios/light/scenario_GridLayout_resize.json` — Resize the grid while the pipeline is running and verify it reallocates cleanly under memory pressure. Lowers to 128x64 (release memory), increases to 128x128 (heaviest config: mirror + LUT). Each measured step captures tick/FPS/heap so the runner reports the degrade behaviour.
 
-**Mode**: `mutate` · **Also touches**: MirrorModifier, Layer
+**Mode**: `mutate` · **Also touches**: MultiplyModifier, Layer
 
 #### `size-128x128` (set_control)  📏
 
@@ -134,11 +142,13 @@ Set grid height to 128 (alongside default width 128). Measures the heaviest conf
 | `esp32-eth` | — / 10.7-10.8 | — / 132KB | — / 48KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.4 | ≥ 103KB / 93KB | — / 48KB |
 | `pc-macos` | ≥ 8,333 / 3,534-10,526 | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 3,413-4,566 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
+- `pc-windows`: observed 2026-06-07
 
 #### `shrink-to-128x64` (set_control)  📏
 
@@ -155,11 +165,13 @@ Shrink to 128x64. Measured: FPS must stay within 20% of the baseline (proves the
 | `esp32-eth` | — / 26.4-26.5 | — / 114KB | — / 48KB |
 | `esp32-eth-wifi` | ≥ 22.2 / 31.8 | ≥ 83KB / 75KB | — / 24KB |
 | `pc-macos` | ≥ 16,667 / 5,208-21,739 | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 7,299-10,638 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
+- `pc-windows`: observed 2026-06-07
 
 #### `grow-to-128x128` (set_control)  📏
 
@@ -173,13 +185,1136 @@ Grow back to 128x128. Measured: confirms the heap can return to the heavy baseli
 | `esp32-eth` | — / 10.4 | — / 132KB | — / 48KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 93KB | — / 52KB |
 | `pc-macos` | ≥ 8,333 / 3,257-10,204 | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 3,436-4,608 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
+- `pc-windows`: observed 2026-06-07
 
 ## Layer
+
+### scenario_AllEffects_grid_sizes
+
+`test/scenarios/light/scenario_AllEffects_grid_sizes.json` — Sweep every effect (no modifier) across 16/32/64/128 square grids and measure tick/FPS, free internal heap, max internal block per (effect, size). The scenario prepares its own canvas: clear_children wipes whatever layouts/layers/drivers the device had, then it rebuilds exactly one Layout(Grid) + one Layer + one effect (no modifier) + ArtNet, so the measurement is each effect's raw cost over the full grid through the real output driver, on any starting device state. PreviewDriver is apparatus (non-deletable) so it survives the clear. Effects are swapped via replace_module at a fixed Layer child slot; grid resized via set_control (width then height, measuring after height so we never measure an N x 128 stripe).
+
+**Mode**: `mutate` · **Also touches**: Layouts, GridLayout, Drivers, ArtNetSendDriver, PreviewDriver, LinesEffect, RainbowEffect, NoiseEffect, PlasmaEffect, PlasmaPaletteEffect, MetaballsEffect, FireEffect, ParticlesEffect, GlowParticlesEffect, CheckerboardEffect, SpiralEffect, RipplesEffect, LavaLampEffect, GameOfLifeEffect
+
+#### `LinesEffect-16x16` (set_control)  📏
+
+LinesEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `shrink-grid-w` (set_control)
+- `shrink-grid-h` (set_control)
+- `clear-layers` (clear_children)
+- `clear-layouts` (clear_children)
+- `clear-drivers` (clear_children)
+- `build-grid` (add_module)
+- `build-layer` (add_module)
+- `build-fx` (add_module)
+- `build-artnet` (add_module)
+- `LinesEffect-pre-w` (set_control)
+- `LinesEffect-pre-h` (set_control)
+- `fx-LinesEffect` (replace_module)
+- `LinesEffect-16x16-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 12,658 | — / 221KB | — / 108KB |
+| `pc-macos` | — / — | — / unlimited | — / unlimited |
+| `pc-windows` | — / — | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `LinesEffect-32x32` (set_control)  📏
+
+LinesEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `LinesEffect-32x32-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 7,634 | — / 215KB | — / 108KB |
+| `pc-macos` | — / — | — / unlimited | — / unlimited |
+| `pc-windows` | — / — | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `LinesEffect-64x64` (set_control)  📏
+
+LinesEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `LinesEffect-64x64-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 2,304 | — / 195KB | — / 108KB |
+| `pc-macos` | — / 1,000,000-— | — / unlimited | — / unlimited |
+| `pc-windows` | — / 1,000,000 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `LinesEffect-128x128` (set_control)  📏
+
+LinesEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `LinesEffect-128x128-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 23.3 | — / 126KB | — / 62KB |
+| `pc-macos` | — / 1,000,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 37,037-250,000 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `RainbowEffect-16x16` (set_control)  📏
+
+RainbowEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `RainbowEffect-pre-w` (set_control)
+- `RainbowEffect-pre-h` (set_control)
+- `fx-RainbowEffect` (replace_module)
+- `RainbowEffect-16x16-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 3,831 | — / 173KB | — / 92KB |
+| `pc-macos` | — / — | — / unlimited | — / unlimited |
+| `pc-windows` | — / 250,000-500,000 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `RainbowEffect-32x32` (set_control)  📏
+
+RainbowEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `RainbowEffect-32x32-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 968 | — / 168KB | — / 88KB |
+| `pc-macos` | — / 500,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 90,909-166,667 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `RainbowEffect-64x64` (set_control)  📏
+
+RainbowEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `RainbowEffect-64x64-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 143 | — / 159KB | — / 76KB |
+| `pc-macos` | — / 111,111 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 34,483-40,000 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `RainbowEffect-128x128` (set_control)  📏
+
+RainbowEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `RainbowEffect-128x128-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 22.6 | — / 126KB | — / 62KB |
+| `pc-macos` | — / 25,641-28,571 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 6,098-8,929 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `NoiseEffect-16x16` (set_control)  📏
+
+NoiseEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `NoiseEffect-pre-w` (set_control)
+- `NoiseEffect-pre-h` (set_control)
+- `fx-NoiseEffect` (replace_module)
+- `NoiseEffect-16x16-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 1,117 | — / 172KB | — / 92KB |
+| `pc-macos` | — / 250,000-333,333 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 83,333-111,111 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `NoiseEffect-32x32` (set_control)  📏
+
+NoiseEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `NoiseEffect-32x32-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 324 | — / 168KB | — / 88KB |
+| `pc-macos` | — / 62,500-71,429 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 25,000-29,412 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `NoiseEffect-64x64` (set_control)  📏
+
+NoiseEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `NoiseEffect-64x64-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 71.8 | — / 159KB | — / 76KB |
+| `pc-macos` | — / 14,085-15,625 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 4,739-6,757 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `NoiseEffect-128x128` (set_control)  📏
+
+NoiseEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `NoiseEffect-128x128-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 17.1 | — / 126KB | — / 62KB |
+| `pc-macos` | — / 2,959-3,268 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 1,190-1,437 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `PlasmaEffect-16x16` (set_control)  📏
+
+PlasmaEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `PlasmaEffect-pre-w` (set_control)
+- `PlasmaEffect-pre-h` (set_control)
+- `fx-PlasmaEffect` (replace_module)
+- `PlasmaEffect-16x16-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 3,195 | — / 174KB | — / 92KB |
+| `pc-macos` | — / 1,000,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 500,000 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `PlasmaEffect-32x32` (set_control)  📏
+
+PlasmaEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `PlasmaEffect-32x32-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 830 | — / 171KB | — / 92KB |
+| `pc-macos` | — / 333,333 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 142,857-166,667 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `PlasmaEffect-64x64` (set_control)  📏
+
+PlasmaEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `PlasmaEffect-64x64-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 135 | — / 162KB | — / 84KB |
+| `pc-macos` | — / 76,923-90,909 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 35,714-43,478 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `PlasmaEffect-128x128` (set_control)  📏
+
+PlasmaEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `PlasmaEffect-128x128-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 18.3 | — / 126KB | — / 62KB |
+| `pc-macos` | — / 19,231-22,727 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 7,874-9,709 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `PlasmaPaletteEffect-16x16` (set_control)  📏
+
+PlasmaPaletteEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `PlasmaPaletteEffect-pre-w` (set_control)
+- `PlasmaPaletteEffect-pre-h` (set_control)
+- `fx-PlasmaPaletteEffect` (replace_module)
+- `PlasmaPaletteEffect-16x16-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 6,024 | — / 170KB | — / 92KB |
+| `pc-macos` | — / — | — / unlimited | — / unlimited |
+| `pc-windows` | — / 500,000-1,000,000 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `PlasmaPaletteEffect-32x32` (set_control)  📏
+
+PlasmaPaletteEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `PlasmaPaletteEffect-32x32-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 1,733 | — / 168KB | — / 88KB |
+| `pc-macos` | — / 1,000,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 250,000-333,333 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `PlasmaPaletteEffect-64x64` (set_control)  📏
+
+PlasmaPaletteEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `PlasmaPaletteEffect-64x64-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 268 | — / 161KB | — / 80KB |
+| `pc-macos` | — / 142,857-200,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 50,000-71,429 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `PlasmaPaletteEffect-128x128` (set_control)  📏
+
+PlasmaPaletteEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `PlasmaPaletteEffect-128x128-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 21.8 | — / 126KB | — / 62KB |
+| `pc-macos` | — / 43,478-50,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 12,346-18,868 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `MetaballsEffect-16x16` (set_control)  📏
+
+MetaballsEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `MetaballsEffect-pre-w` (set_control)
+- `MetaballsEffect-pre-h` (set_control)
+- `fx-MetaballsEffect` (replace_module)
+- `MetaballsEffect-16x16-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 2,016 | — / 174KB | — / 92KB |
+| `pc-macos` | — / 1,000,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 200,000-250,000 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `MetaballsEffect-32x32` (set_control)  📏
+
+MetaballsEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `MetaballsEffect-32x32-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 522 | — / 171KB | — / 92KB |
+| `pc-macos` | — / 250,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 50,000-62,500 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `MetaballsEffect-64x64` (set_control)  📏
+
+MetaballsEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `MetaballsEffect-64x64-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 103 | — / 162KB | — / 84KB |
+| `pc-macos` | — / 55,556-62,500 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 12,500-15,385 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `MetaballsEffect-128x128` (set_control)  📏
+
+MetaballsEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `MetaballsEffect-128x128-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 18.7 | — / 126KB | — / 62KB |
+| `pc-macos` | — / 13,158-15,873 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 2,786-3,636 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `FireEffect-16x16` (set_control)  📏
+
+FireEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `FireEffect-pre-w` (set_control)
+- `FireEffect-pre-h` (set_control)
+- `fx-FireEffect` (replace_module)
+- `FireEffect-16x16-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 2,762 | — / 173KB | — / 96KB |
+| `pc-macos` | — / 1,000,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 333,333-500,000 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `FireEffect-32x32` (set_control)  📏
+
+FireEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `FireEffect-32x32-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 784 | — / 170KB | — / 92KB |
+| `pc-macos` | — / 250,000-333,333 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 100,000-125,000 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `FireEffect-64x64` (set_control)  📏
+
+FireEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `FireEffect-64x64-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 160 | — / 158KB | — / 76KB |
+| `pc-macos` | — / 55,556-76,923 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 27,027-33,333 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `FireEffect-128x128` (set_control)  📏
+
+FireEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `FireEffect-128x128-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 21.5 | — / 110KB | — / 62KB |
+| `pc-macos` | — / 16,949-19,231 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 6,452-7,194 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `ParticlesEffect-16x16` (set_control)  📏
+
+ParticlesEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `ParticlesEffect-pre-w` (set_control)
+- `ParticlesEffect-pre-h` (set_control)
+- `fx-ParticlesEffect` (replace_module)
+- `ParticlesEffect-16x16-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 4,717 | — / 172KB | — / 80KB |
+| `pc-macos` | — / 1,000,000-— | — / unlimited | — / unlimited |
+| `pc-windows` | — / 500,000 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `ParticlesEffect-32x32` (set_control)  📏
+
+ParticlesEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `ParticlesEffect-32x32-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 1,848 | — / 168KB | — / 80KB |
+| `pc-macos` | — / 333,333-500,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 166,667-250,000 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `ParticlesEffect-64x64` (set_control)  📏
+
+ParticlesEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `ParticlesEffect-64x64-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 425 | — / 150KB | — / 68KB |
+| `pc-macos` | — / 111,111-142,857 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 52,632-71,429 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `ParticlesEffect-128x128` (set_control)  📏
+
+ParticlesEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `ParticlesEffect-128x128-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 30.8 | — / 78KB | — / 34KB |
+| `pc-macos` | — / 27,027-34,483 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 12,987-15,873 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `GlowParticlesEffect-16x16` (set_control)  📏
+
+GlowParticlesEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `GlowParticlesEffect-pre-w` (set_control)
+- `GlowParticlesEffect-pre-h` (set_control)
+- `fx-GlowParticlesEffect` (replace_module)
+- `GlowParticlesEffect-16x16-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 1,706 | — / 174KB | — / 84KB |
+| `pc-macos` | — / 500,000-1,000,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 142,857-166,667 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `GlowParticlesEffect-32x32` (set_control)  📏
+
+GlowParticlesEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `GlowParticlesEffect-32x32-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 586 | — / 171KB | — / 84KB |
+| `pc-macos` | — / 52,632-250,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 35,714-45,455 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `GlowParticlesEffect-64x64` (set_control)  📏
+
+GlowParticlesEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `GlowParticlesEffect-64x64-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 128 | — / 162KB | — / 80KB |
+| `pc-macos` | — / 37,037-55,556 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 8,850-10,638 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `GlowParticlesEffect-128x128` (set_control)  📏
+
+GlowParticlesEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `GlowParticlesEffect-128x128-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 14.3 | — / 126KB | — / 62KB |
+| `pc-macos` | — / 7,752-14,286 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 1,949-2,370 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `CheckerboardEffect-16x16` (set_control)  📏
+
+CheckerboardEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `CheckerboardEffect-pre-w` (set_control)
+- `CheckerboardEffect-pre-h` (set_control)
+- `fx-CheckerboardEffect` (replace_module)
+- `CheckerboardEffect-16x16-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 8,475 | — / 173KB | — / 96KB |
+| `pc-macos` | — / — | — / unlimited | — / unlimited |
+| `pc-windows` | — / 500,000 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `CheckerboardEffect-32x32` (set_control)  📏
+
+CheckerboardEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `CheckerboardEffect-32x32-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 2,618 | — / 168KB | — / 88KB |
+| `pc-macos` | — / 1,000,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 142,857-166,667 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `CheckerboardEffect-64x64` (set_control)  📏
+
+CheckerboardEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `CheckerboardEffect-64x64-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 397 | — / 159KB | — / 72KB |
+| `pc-macos` | — / 250,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 34,483-45,455 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `CheckerboardEffect-128x128` (set_control)  📏
+
+CheckerboardEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `CheckerboardEffect-128x128-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 21.2 | — / 123KB | — / 62KB |
+| `pc-macos` | — / 45,455-62,500 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 8,475-10,638 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `SpiralEffect-16x16` (set_control)  📏
+
+SpiralEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `SpiralEffect-pre-w` (set_control)
+- `SpiralEffect-pre-h` (set_control)
+- `fx-SpiralEffect` (replace_module)
+- `SpiralEffect-16x16-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 2,404 | — / 170KB | — / 88KB |
+| `pc-macos` | — / 1,000,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 250,000-500,000 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `SpiralEffect-32x32` (set_control)  📏
+
+SpiralEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `SpiralEffect-32x32-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 572 | — / 170KB | — / 88KB |
+| `pc-macos` | — / 250,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 100,000-125,000 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `SpiralEffect-64x64` (set_control)  📏
+
+SpiralEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `SpiralEffect-64x64-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 87.0 | — / 161KB | — / 76KB |
+| `pc-macos` | — / 22,222-62,500 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 23,810-27,027 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `SpiralEffect-128x128` (set_control)  📏
+
+SpiralEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `SpiralEffect-128x128-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 15.5 | — / 123KB | — / 62KB |
+| `pc-macos` | — / 9,901-13,889 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 5,102-6,579 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `RipplesEffect-16x16` (set_control)  📏
+
+RipplesEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `RipplesEffect-pre-w` (set_control)
+- `RipplesEffect-pre-h` (set_control)
+- `fx-RipplesEffect` (replace_module)
+- `RipplesEffect-16x16-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 1,119 | — / 170KB | — / 92KB |
+| `pc-macos` | — / 333,333 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 100,000-125,000 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `RipplesEffect-32x32` (set_control)  📏
+
+RipplesEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `RipplesEffect-32x32-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 284 | — / 168KB | — / 88KB |
+| `pc-macos` | — / 83,333-125,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 38,462-47,619 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `RipplesEffect-64x64` (set_control)  📏
+
+RipplesEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `RipplesEffect-64x64-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 45.0 | — / 161KB | — / 80KB |
+| `pc-macos` | — / 30,303-34,483 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 12,048-15,152 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `RipplesEffect-128x128` (set_control)  📏
+
+RipplesEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `RipplesEffect-128x128-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 12.2 | — / 125KB | — / 62KB |
+| `pc-macos` | — / 8,403-9,259 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 3,067-3,831 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `LavaLampEffect-16x16` (set_control)  📏
+
+LavaLampEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `LavaLampEffect-pre-w` (set_control)
+- `LavaLampEffect-pre-h` (set_control)
+- `fx-LavaLampEffect` (replace_module)
+- `LavaLampEffect-16x16-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 3,030 | — / 170KB | — / 92KB |
+| `pc-macos` | — / 1,000,000-— | — / unlimited | — / unlimited |
+| `pc-windows` | — / 250,000-500,000 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `LavaLampEffect-32x32` (set_control)  📏
+
+LavaLampEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `LavaLampEffect-32x32-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 756 | — / 170KB | — / 88KB |
+| `pc-macos` | — / 333,333-500,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 66,667-111,111 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `LavaLampEffect-64x64` (set_control)  📏
+
+LavaLampEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `LavaLampEffect-64x64-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 113 | — / 161KB | — / 72KB |
+| `pc-macos` | — / 100,000-125,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 23,810-29,412 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `LavaLampEffect-128x128` (set_control)  📏
+
+LavaLampEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `LavaLampEffect-128x128-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 18.2 | — / 125KB | — / 62KB |
+| `pc-macos` | — / 29,412-32,258 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 4,926-6,757 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `GameOfLifeEffect-16x16` (set_control)  📏
+
+GameOfLifeEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `GameOfLifeEffect-pre-w` (set_control)
+- `GameOfLifeEffect-pre-h` (set_control)
+- `fx-GameOfLifeEffect` (replace_module)
+- `GameOfLifeEffect-16x16-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 6,803 | — / 171KB | — / 88KB |
+| `pc-macos` | — / — | — / unlimited | — / unlimited |
+| `pc-windows` | — / 500,000-1,000,000 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `GameOfLifeEffect-32x32` (set_control)  📏
+
+GameOfLifeEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `GameOfLifeEffect-32x32-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 1,520 | — / 166KB | — / 84KB |
+| `pc-macos` | — / 1,000,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 166,667-200,000 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `GameOfLifeEffect-64x64` (set_control)  📏
+
+GameOfLifeEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `GameOfLifeEffect-64x64-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 227 | — / 151KB | — / 68KB |
+| `pc-macos` | — / 200,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 38,462-47,619 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
+
+#### `GameOfLifeEffect-128x128` (set_control)  📏
+
+GameOfLifeEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.
+
+**Setup** (preceding non-measured steps):
+- `GameOfLifeEffect-128x128-w` (set_control)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 13.9 | — / 91KB | — / 46KB |
+| `pc-macos` | — / 19,608-25,641 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 8,696-9,174 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07
+- `pc-windows`: observed 2026-06-07
 
 ### scenario_Layer_base_pipeline
 
@@ -207,14 +1342,16 @@ Add ArtNetSendDriver and run the bounded FPS measurement (expected to stay at >=
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `pc-macos` | ≥ 20,000 / 7,576-— | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 7,874-8,475 | — / unlimited | — / unlimited |
 
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
+- `pc-windows`: observed 2026-06-07
 
 ### scenario_Layer_buildup
 
 `test/scenarios/light/scenario_Layer_buildup.json` — Start empty, add modules step by step, measure tick + heap after each meaningful pipeline state. Surfaces 'how much does each module cost?' so a regression in any one module shows up as a per-step delta instead of a single end-to-end number. Heap bounds catch unintended allocations: each step's delta vs the previous step is asserted against max_delta_bytes (only meaningful on ESP32 where freeHeap() returns a real value).
 
-**Mode**: `construct` · **Also touches**: Layouts, GridLayout, RainbowEffect, MirrorModifier, Drivers, ArtNetSendDriver
+**Mode**: `construct` · **Also touches**: Layouts, GridLayout, RainbowEffect, MultiplyModifier, Drivers, ArtNetSendDriver
 
 #### `measure-minimum` (measure)  📏
 
@@ -231,8 +1368,10 @@ Baseline: 16x16 grid + Rainbow only. No Drivers yet (Layer renders into its own 
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `pc-macos` | ≥ 20,000 / 8,197-— | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 333,333-1,000,000 | — / unlimited | — / unlimited |
 
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
+- `pc-windows`: observed 2026-06-07
 
 #### `measure-full-16x16` (measure)  📏
 
@@ -250,15 +1389,17 @@ Full pipeline at 16x16. Heap delta vs previous measure-minimum step should stay 
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `pc-macos` | ≥ 20,000 / 5,464-— | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 200,000-500,000 | — / unlimited | — / unlimited |
 
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
+- `pc-windows`: observed 2026-06-07
 
 #### `measure-with-lut-16x16` (measure)  📏
 
 Mirror is on: Layer has a LUT, Drivers has an output buffer. min_fps_led_product asserts the throughput floor scales correctly to the logical grid size (post-mirror).
 
 **Setup** (preceding non-measured steps):
-- `add-mirror` (add_module) — MirrorModifier under Layer. Triggers a LUT build + Drivers output buffer allocation (the heavy memory path).
+- `add-mirror` (add_module) — MultiplyModifier under Layer. Triggers a LUT build + Drivers output buffer allocation (the heavy memory path).
 
 **Bounds**:
 - FPS × lights ≥ 100,000
@@ -268,8 +1409,10 @@ Mirror is on: Layer has a LUT, Drivers has an output buffer. min_fps_led_product
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `pc-macos` | ≥ 16,667 / 6,667-— | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 333,333-1,000,000 | — / unlimited | — / unlimited |
 
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
+- `pc-windows`: observed 2026-06-07
 
 #### `measure-full-128x128` (measure)  📏
 
@@ -288,8 +1431,10 @@ Production-size grid with the full pipeline. Final tick + cumulative heap delta 
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `pc-macos` | ≥ 16,667 / 5,882-23,256 | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 10,000-13,158 | — / unlimited | — / unlimited |
 
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
+- `pc-windows`: observed 2026-06-07
 
 ### scenario_Layer_memory_1to1
 
@@ -316,8 +1461,10 @@ Add ArtNetSendDriver and run the bounded FPS measurement on the no-LUT path.
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `pc-macos` | ≥ 20,000 / 12,500-— | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 500,000-1,000,000 | — / unlimited | — / unlimited |
 
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
+- `pc-windows`: observed 2026-06-07
 
 ## Layouts
 
@@ -339,8 +1486,10 @@ Baseline: a single 64x64 grid layout drives the pipeline.
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `pc-macos` | — / 29,412-125,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 32,258-37,037 | — / unlimited | — / unlimited |
 
 - `pc-macos`: observed 2026-06-05
+- `pc-windows`: observed 2026-06-07
 
 #### `measure-two-layouts` (measure)  📏
 
@@ -357,8 +1506,10 @@ Pipeline still renders with two layouts wired (buffer non-null, fps measurable).
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `pc-macos` | — / 33,333-111,111 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 16,393-23,810 | — / unlimited | — / unlimited |
 
 - `pc-macos`: observed 2026-06-05
+- `pc-windows`: observed 2026-06-07
 
 #### `measure-after-replace` (measure)  📏
 
@@ -374,9 +1525,11 @@ Pipeline still renders after replacing a grid with a sphere (different layout ty
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | — / 11,494-100,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 8,621-100,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 5,848-9,009 | — / unlimited | — / unlimited |
 
-- `pc-macos`: observed 2026-06-05
+- `pc-macos`: observed 2026-06-05 → 2026-06-07
+- `pc-windows`: observed 2026-06-07
 
 #### `measure-after-remove` (measure)  📏
 
@@ -393,76 +1546,18 @@ Pipeline renders with the single remaining grid, same as the baseline.
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `pc-macos` | — / 16,949-125,000 | — / unlimited | — / unlimited |
+| `pc-windows` | — / 33,333-38,462 | — / unlimited | — / unlimited |
 
 - `pc-macos`: observed 2026-06-05
-
-## MirrorModifier
-
-### scenario_MirrorModifier_memory_lut
-
-`test/scenarios/light/scenario_MirrorModifier_memory_lut.json` — Verify that adding a MirrorModifier allocates both the mapping LUT and the driver buffer (the heavy memory path). Companion to scenario_Layer_memory_1to1, which verifies the no-LUT path.
-
-**Mode**: `construct` · **Also touches**: Layer, MappingLUT, BlendMap
-
-#### `add-artnet` (add_module)  📏
-
-Add ArtNetSendDriver and run the bounded FPS measurement on the LUT path.
-
-**Setup** (preceding non-measured steps):
-- `add-layout-group` (add_module) — Create the top-level Layouts container.
-- `add-grid` (add_module) — Add a 16x16 GridLayout.
-- `add-layer` (add_module) — Add a Layer wired to Layouts (RGB).
-- `add-noise` (add_module) — Add NoiseEffect as the Layer's effect.
-- `add-mirror` (add_module) — Add MirrorModifier — triggers LUT and driver-buffer allocation.
-- `add-driver-group` (add_module) — Add a Drivers container wired to the Layer.
-
-**Bounds**:
-- FPS ≥ 80% of baseline
-
-**Performance** (contract / observed) — tick stored, FPS shown:
-
-| Board | FPS | heap | block |
-|---|---|---|---|
-| `pc-macos` | ≥ 8,333 / 3,322-1,000,000 | unlimited / unlimited | — / unlimited |
-
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
-
-### scenario_MirrorModifier_pipeline
-
-`test/scenarios/light/scenario_MirrorModifier_pipeline.json` — Pipeline with a mirror modifier: NoiseEffect renders one quadrant, MirrorModifier reflects across X and Y to produce a kaleidoscope. Used to verify the MirrorModifier wires into Layer cleanly and that the full pipeline still meets its FPS bound.
-
-**Mode**: `construct` · **Also touches**: Layer, NoiseEffect, ArtNetSendDriver
-
-#### `add-artnet` (add_module)  📏
-
-Add ArtNetSendDriver and run the bounded FPS measurement (mirror + LUT path must stay at >=80% of the rated FPS).
-
-**Setup** (preceding non-measured steps):
-- `add-layout-group` (add_module) — Create the top-level Layouts container.
-- `add-grid` (add_module) — Add a 128x128 GridLayout child to Layouts. Set explicitly (the module default is 16x16x1) so the tick is measurable above the host's microsecond clock.
-- `add-layer` (add_module) — Add a Layer wired to Layouts (RGB).
-- `add-noise` (add_module) — Add NoiseEffect as the Layer's effect.
-- `add-mirror` (add_module) — Add MirrorModifier so logical pixels reflect across X and Y in the physical grid.
-- `add-driver-group` (add_module) — Add a Drivers container wired to the Layer's output buffer.
-
-**Bounds**:
-- FPS ≥ 80% of baseline
-
-**Performance** (contract / observed) — tick stored, FPS shown:
-
-| Board | FPS | heap | block |
-|---|---|---|---|
-| `pc-macos` | ≥ 8,333 / 4,065-1,000,000 | unlimited / unlimited | — / unlimited |
-
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
+- `pc-windows`: observed 2026-06-07
 
 ## MoonModule
 
 ### scenario_MoonModule_control_change
 
-`test/scenarios/core/scenario_MoonModule_control_change.json` — Measure the cost of control changes on a running pipeline. Toggles MirrorModifier's mirrorX/Y at different points and verifies each change is applied without freezing the render loop. Companion to the MoonModule control-change gate unit tests (unit_MoonModule_control_change_gate.cpp) — this is the live equivalent.
+`test/scenarios/core/scenario_MoonModule_control_change.json` — Measure the cost of control changes on a running pipeline. Toggles MultiplyModifier's mirrorX/Y at different points and verifies each change is applied without freezing the render loop. Companion to the MoonModule control-change gate unit tests (unit_MoonModule_control_change_gate.cpp) — this is the live equivalent.
 
-**Mode**: `mutate` · **Also touches**: MirrorModifier, NoiseEffect
+**Mode**: `mutate` · **Also touches**: MultiplyModifier, NoiseEffect
 
 #### `baseline` (set_control)  📏
 
@@ -478,12 +1573,14 @@ Set NoiseEffect.scale=4 and measure baseline FPS (mirror on). Effect controls do
 | `esp32` | — / 3.9 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 10.5-10.6 | — / 133KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 94KB | — / 48KB |
-| `pc-macos` | ≥ 8,333 / 4,785-10,309 | unlimited / unlimited | — / unlimited |
+| `pc-macos` | ≥ 8,333 / 4,505-10,309 | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 4,000-4,405 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-07
+- `pc-windows`: observed 2026-06-07
 
 #### `disable-mirrorX` (set_control)  📏
 
@@ -496,12 +1593,14 @@ Disable mirrorX. Modifier control triggers a pipeline rebuild — measures the r
 | `esp32` | — / 4.8 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 10.4 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.0 | ≥ 103KB / 94KB | — / 48KB |
-| `pc-macos` | ≥ 5,000 / 3,636-5,525 | unlimited / unlimited | — / unlimited |
+| `pc-macos` | ≥ 5,000 / 3,636-8,475 | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 2,024-2,392 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-07
+- `pc-windows`: observed 2026-06-07
 
 #### `disable-mirrorY` (set_control)  📏
 
@@ -514,12 +1613,14 @@ Disable mirrorY. Mirror is now fully off — should land on the no-LUT path.
 | `esp32` | — / 4.4 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 8.9-9.0 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 11.1 | ≥ 103KB / 94KB | — / 48KB |
-| `pc-macos` | ≥ 2,500 / 1,916-2,890 | unlimited / unlimited | — / unlimited |
+| `pc-macos` | ≥ 2,500 / 1,916-8,547 | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 1,082-1,305 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-07
+- `pc-windows`: observed 2026-06-07
 
 #### `re-enable-mirrorY` (set_control)  📏
 
@@ -539,11 +1640,77 @@ Re-enable mirrorY and measure — the heavy LUT path must recover (FPS within 50
 | `esp32-eth` | — / 10.5-10.6 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.1 | ≥ 103KB / 94KB | — / 48KB |
 | `pc-macos` | ≥ 8,333 / 5,348-10,417 | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 4,065-4,854 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
+- `pc-windows`: observed 2026-06-07
+
+## MultiplyModifier
+
+### scenario_MultiplyModifier_memory_lut
+
+`test/scenarios/light/scenario_MultiplyModifier_memory_lut.json` — Verify that adding a MultiplyModifier allocates both the mapping LUT and the driver buffer (the heavy memory path). Companion to scenario_Layer_memory_1to1, which verifies the no-LUT path.
+
+**Mode**: `construct` · **Also touches**: Layer, MappingLUT, BlendMap
+
+#### `add-artnet` (add_module)  📏
+
+Add ArtNetSendDriver and run the bounded FPS measurement on the LUT path.
+
+**Setup** (preceding non-measured steps):
+- `add-layout-group` (add_module) — Create the top-level Layouts container.
+- `add-grid` (add_module) — Add a 16x16 GridLayout.
+- `add-layer` (add_module) — Add a Layer wired to Layouts (RGB).
+- `add-noise` (add_module) — Add NoiseEffect as the Layer's effect.
+- `add-mirror` (add_module) — Add MultiplyModifier — triggers LUT and driver-buffer allocation.
+- `add-driver-group` (add_module) — Add a Drivers container wired to the Layer.
+
+**Bounds**:
+- FPS ≥ 80% of baseline
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `pc-macos` | ≥ 8,333 / 3,322-1,000,000 | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 166,667-333,333 | — / unlimited | — / unlimited |
+
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
+- `pc-windows`: observed 2026-06-07
+
+### scenario_MultiplyModifier_pipeline
+
+`test/scenarios/light/scenario_MultiplyModifier_pipeline.json` — Pipeline with a mirror modifier: NoiseEffect renders one quadrant, MultiplyModifier reflects across X and Y to produce a kaleidoscope. Used to verify the MultiplyModifier wires into Layer cleanly and that the full pipeline still meets its FPS bound.
+
+**Mode**: `construct` · **Also touches**: Layer, NoiseEffect, ArtNetSendDriver
+
+#### `add-artnet` (add_module)  📏
+
+Add ArtNetSendDriver and run the bounded FPS measurement (mirror + LUT path must stay at >=80% of the rated FPS).
+
+**Setup** (preceding non-measured steps):
+- `add-layout-group` (add_module) — Create the top-level Layouts container.
+- `add-grid` (add_module) — Add a 128x128 GridLayout child to Layouts. Set explicitly (the module default is 16x16x1) so the tick is measurable above the host's microsecond clock.
+- `add-layer` (add_module) — Add a Layer wired to Layouts (RGB).
+- `add-noise` (add_module) — Add NoiseEffect as the Layer's effect.
+- `add-mirror` (add_module) — Add MultiplyModifier so logical pixels reflect across X and Y in the physical grid.
+- `add-driver-group` (add_module) — Add a Drivers container wired to the Layer's output buffer.
+
+**Bounds**:
+- FPS ≥ 80% of baseline
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `pc-macos` | ≥ 8,333 / 4,065-1,000,000 | unlimited / unlimited | — / unlimited |
+| `pc-windows` | — / 3,953-4,444 | — / unlimited | — / unlimited |
+
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
+- `pc-windows`: observed 2026-06-07
 
 ## NetworkModule
 

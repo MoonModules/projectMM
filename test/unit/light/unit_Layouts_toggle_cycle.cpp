@@ -7,7 +7,7 @@
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
 #include "light/effects/RainbowEffect.h"
-#include "light/modifiers/MirrorModifier.h"
+#include "light/modifiers/MultiplyModifier.h"
 #include "light/drivers/Drivers.h"
 
 namespace {
@@ -68,7 +68,7 @@ TEST_CASE("Toggle a single layout off then on: pipeline survives and renders aga
     // Include a modifier so the LUT is actually populated (hasLUT == true); the
     // crash only occurs in this path because the no-LUT path doesn't read the
     // output buffer.
-    mm::MirrorModifier mirror;
+    mm::MultiplyModifier mirror;
     layer.addChild(&mirror);
     layersC.addChild(&layer);
     layersC.setLayouts(&layouts);

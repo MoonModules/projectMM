@@ -3,7 +3,7 @@
   "module": "GridLayout",
   "mode": "mutate",
   "also": [
-    "MirrorModifier",
+    "MultiplyModifier",
     "Layer"
   ],
   "description": "Resize the grid while the pipeline is running and verify it reallocates cleanly under memory pressure. Lowers to 128x64 (release memory), increases to 128x128 (heaviest config: mirror + LUT). Each measured step captures tick/FPS/heap so the runner reports the degrade behaviour.",
@@ -45,8 +45,8 @@
     {
       "name": "fix-mirror",
       "op": "add_module",
-      "id": "Mirror",
-      "type": "MirrorModifier",
+      "id": "Multiply",
+      "type": "MultiplyModifier",
       "parent_id": "Layer"
     },
     {
@@ -84,14 +84,14 @@
     {
       "name": "reset-mirrorX",
       "op": "set_control",
-      "id": "Mirror",
+      "id": "Multiply",
       "key": "mirrorX",
       "value": true
     },
     {
       "name": "reset-mirrorY",
       "op": "set_control",
-      "id": "Mirror",
+      "id": "Multiply",
       "key": "mirrorY",
       "value": true
     }

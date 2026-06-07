@@ -53,6 +53,12 @@ Hot-path cost is zero for D3 effects (the default) and zero when the layer's unu
 
 See [EffectBase § Dimensions and auto-extrusion](EffectBase.md#dimensions-and-auto-extrusion) for the effect-side contract and [Unit tests: Layer](../../tests/unit-tests.md#layer) for the pinned tests (see `unit_Layer_extrude.cpp`).
 
+## Status
+
+The Layer's status line (the `MoonModule` status slot) shows the **logical** box the effects render into — `"<w>×<h>×<d>"`, the dimensions a modifier and the start/end region carving reshape. This differs from the physical bounding box shown on the [Layouts](Layouts.md#status) container: a Mirror-XY modifier on a 128×128 physical layout renders into a 64×64 logical box (the half that gets folded), so the Layer reads `64×64×1` while Layouts reads `128×128×1`. The gap between the two is the modifier's effect, made visible.
+
+The same slot carries memory-degradation warnings (`Severity::Warning`/`Error`) when a build can't fit: `"modifier LUT skipped — not enough memory"`, `"sparse LUT build failed — not enough memory"`, `"buffer reduced — not enough memory"`, `"buffer allocation failed — not enough memory"`. A warning wins over the neutral box line — when the Layer is degraded, that's what the user needs to see. Recomputed on every rebuild (`onBuildState`), not per tick.
+
 ## EffectBase overlap
 
 Consider whether Layer itself can provide the rendering context (buffer, dims, elapsed time) directly to effects, eliminating the need for a separate EffectBase class. The layer already knows everything the effect needs.

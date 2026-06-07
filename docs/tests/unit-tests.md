@@ -262,19 +262,6 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - One tick on a 16×16 grid leaves at least one non-zero byte in the layer buffer (proves the effect rendered).
 - Pixels at opposite corners of a 32×32 grid differ in colour (the effect is not flat-filling the buffer).
 
-## MirrorModifier
-
-`test/unit/light/unit_MirrorModifier.cpp`
-
-- MirrorModifier reports D3 dimensions (handles all three axes via mirrorX/Y/Z toggles).
-- A 128×128 physical grid with mirrorXY has 64×64 logical lights (effect only renders one quadrant).
-- An odd-axis physical grid (127×127) rounds up: 64×64 logical lights with one centre row/column shared.
-- mirrorZ on a 128×128×4 grid yields 64×64×2 logical lights (mirroring also halves the Z axis).
-- With mirrorXY enabled, the corner pixel (0,0) maps to all four corners of the physical grid.
-- The centre pixel on an odd-axis grid deduplicates: all four mirror reflections land on the same position so count=1.
-- With no mirror axis enabled, mapToPhysical returns one position (identity pass-through).
-- mirrorX-only yields two positions per logical pixel (original + horizontal reflection).
-
 ## ModuleFactory
 
 `test/unit/core/unit_ModuleFactory.cpp`
@@ -303,7 +290,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - addBool binds a bool field — toggling the field updates control.ptr's view.
 
 `test/unit/core/unit_MoonModule_control_change_gate.cpp`
-*Also touches: GridLayout, MirrorModifier, NoiseEffect, Drivers.*
+*Also touches: GridLayout, MultiplyModifier, NoiseEffect, Drivers.*
 
 - Layout and Modifier modules opt in to rebuild on a control change (their controls reshape the pipeline).
 - Effects and Drivers opt out — their controls are values read directly in the hot path, no rebuild needed (prevents slider stutter).
@@ -334,6 +321,20 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - An out-of-range index returns nullptr and the tree (plus the rejected replacement's parent pointer) stays untouched.
 - A nullptr replacement returns nullptr and leaves the tree intact.
 - After replace, the caller follows the lifecycle order: onBuildControls → setup → onBuildState on the fresh module, then teardown on the old.
+
+## MultiplyModifier
+
+`test/unit/light/unit_MultiplyModifier.cpp`
+
+- Reports D3 — handles all three axes. Pins the ModifierBase default too.
+- Defaults (multiply 2/2/1, mirror true/true/false) reproduce the canonical mirror-XY pipeline: a 128×128 physical grid → 64×64 logical (each axis folds).
+- multiplyZ tiles the Z axis too: 128×128×4 with multiply 2/2/2 → 64×64×2.
+- PURE-FOLD EQUIVALENCE: with the defaults (mult 2, mirror XY), the corner logical pixel (0,0) fans out to all four physical corners — byte-identical to the old MirrorModifier corner test. This is the canonical-pipeline guarantee.
+- PURE-FOLD EQUIVALENCE: an interior pixel folds to the same two columns the old mirrorX-only produced — original + horizontal reflection.
+- No multiplication on any axis (all multipliers 1) → identity pass-through.
+- Tiling WITHOUT mirror repeats (does not reflect) — multiply 2 on X, mirror off: logical x=0 lands at physical x=0 (tile 0) and x=64 (tile 1, identity offset), NOT x=127. This is the difference from a fold.
+- maxMultiplier is the product — bounds the LUT fan-out buffer (must stay ≤ 8).
+- Fan-out never exceeds maxOut even if asked for more than the buffer holds.
 
 ## NetworkModule
 
@@ -385,6 +386,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - A small grid sends every light at its grid position (stride 1, exact).
 - A large layout is index-downsampled (stride > 1) so the payload fits the send-buffer cap — but at REAL positions, not a padded box.
 - Default fps is the rate-limited preview stream rate.
+- Regression: deleting the active Layer must not leave a driver holding a dangling layer_ pointer. Previously Drivers::passBufferToDrivers early-returned when the active Layer was null, leaving PreviewDriver's layer_ pointing at the freed Layer; the next onBuildState read layer_->layouts() on freed memory and crashed the device (LoadProhibited → boot loop, since the broken tree persists). Now passBufferToDrivers clears the drivers' layer_/sourceBuffer_ to null, a safe idle state. This drives the real path: Drivers bound to a Layers CONTAINER (self-healing), the Layer removed, then buildState re-resolves activeLayer()=null.
 
 ## RainbowEffect
 

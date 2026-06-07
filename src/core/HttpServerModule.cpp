@@ -763,11 +763,18 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
         return;
     }
 
-    // Preserve the replaced module's name on the fresh one. Replace means "same
-    // slot, same identity, new type" — callers (and scenario replace_module
-    // steps) keep addressing it by that name. Without this the fresh module
-    // takes the factory display name, so a second replace can't find it.
-    fresh->setName(mod->name());
+    // Name on replace: keep a CUSTOM name (a scenario id like "MOD", or a
+    // user-renamed slot) so callers can keep addressing the slot by it. But if
+    // the old name was just the old type's factory display name ("Multiply" for
+    // a MultiplyModifier), let the fresh module keep its own factory name
+    // ("Checkerboard") — otherwise a Multiply→Checkerboard replace leaves a
+    // Checkerboard mislabelled "Multiply". `fresh` already arrives with its
+    // correct default name from ModuleFactory::create, so we only override for a
+    // custom name; then re-run uniqueness so two same-type siblings don't collide.
+    const char* oldDefault = ModuleFactory::displayNameFor(mod->typeName(), mod->role());
+    if (std::strcmp(mod->name(), oldDefault) != 0) {
+        fresh->setName(mod->name());  // custom name — preserve the slot identity
+    }
 
     // Swap in place; replaceChildAt returns the old module, which we own.
     MoonModule* old = parent->replaceChildAt(index, fresh);
@@ -783,6 +790,13 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
         old->teardown();
         Scheduler::deleteTree(old);
     }
+
+    // Disambiguate only now that the tree is in its final shape: `fresh` is in
+    // place and `old` is gone. Run before this and firstByName wouldn't find
+    // `fresh` (not yet linked) and would append a spurious " 2"; run after the
+    // old module is removed and a genuine same-named sibling is the only thing
+    // that triggers a suffix. No-op for a preserved custom name that's unique.
+    if (scheduler_) scheduler_->ensureUniqueName(fresh);
 
     // Re-run onBuildState across the tree so Layer LUT / Drivers buffer
     // wiring re-forms — a replaced effect/driver re-wires like a freshly added one.

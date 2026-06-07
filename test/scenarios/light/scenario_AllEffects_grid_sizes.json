@@ -649,7 +649,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            9,
+            8,
             9
           ],
           "free_heap": [
@@ -721,7 +721,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            36,
+            35,
             39
           ],
           "free_heap": [
@@ -958,7 +958,7 @@
         "pc-macos": {
           "tick_us": [
             64,
-            70
+            74
           ],
           "free_heap": [
             0,
@@ -1030,7 +1030,7 @@
         "pc-macos": {
           "tick_us": [
             306,
-            326
+            342
           ],
           "free_heap": [
             0,
@@ -1266,7 +1266,7 @@
         "pc-macos": {
           "tick_us": [
             11,
-            12
+            13
           ],
           "free_heap": [
             0,
@@ -1338,7 +1338,7 @@
         "pc-macos": {
           "tick_us": [
             44,
-            48
+            52
           ],
           "free_heap": [
             0,
@@ -1574,7 +1574,7 @@
         "pc-macos": {
           "tick_us": [
             5,
-            5
+            7
           ],
           "free_heap": [
             0,
@@ -1646,7 +1646,7 @@
         "pc-macos": {
           "tick_us": [
             20,
-            21
+            24
           ],
           "free_heap": [
             0,
@@ -1810,7 +1810,7 @@
         "pc-macos": {
           "tick_us": [
             4,
-            4
+            5
           ],
           "free_heap": [
             0,
@@ -1954,7 +1954,7 @@
         "pc-macos": {
           "tick_us": [
             63,
-            65
+            76
           ],
           "free_heap": [
             0,
@@ -2118,7 +2118,7 @@
         "pc-macos": {
           "tick_us": [
             3,
-            3
+            4
           ],
           "free_heap": [
             0,
@@ -2190,7 +2190,7 @@
         "pc-macos": {
           "tick_us": [
             13,
-            15
+            18
           ],
           "free_heap": [
             0,
@@ -2262,7 +2262,7 @@
         "pc-macos": {
           "tick_us": [
             52,
-            54
+            59
           ],
           "free_heap": [
             0,
@@ -2426,7 +2426,7 @@
         "pc-macos": {
           "tick_us": [
             2,
-            2
+            3
           ],
           "free_heap": [
             0,
@@ -2570,7 +2570,7 @@
         "pc-macos": {
           "tick_us": [
             29,
-            32
+            37
           ],
           "free_heap": [
             0,
@@ -2662,7 +2662,7 @@
         "pc-macos": {
           "tick_us": [
             1,
-            1
+            2
           ],
           "free_heap": [
             0,
@@ -2734,7 +2734,7 @@
         "pc-macos": {
           "tick_us": [
             4,
-            5
+            19
           ],
           "free_heap": [
             0,
@@ -2806,7 +2806,7 @@
         "pc-macos": {
           "tick_us": [
             18,
-            20
+            27
           ],
           "free_heap": [
             0,
@@ -2878,7 +2878,7 @@
         "pc-macos": {
           "tick_us": [
             70,
-            77
+            129
           ],
           "free_heap": [
             0,
@@ -3186,7 +3186,7 @@
         "pc-macos": {
           "tick_us": [
             16,
-            18
+            22
           ],
           "free_heap": [
             0,
@@ -3422,7 +3422,7 @@
         "pc-macos": {
           "tick_us": [
             16,
-            18
+            45
           ],
           "free_heap": [
             0,
@@ -3494,7 +3494,7 @@
         "pc-macos": {
           "tick_us": [
             72,
-            75
+            101
           ],
           "free_heap": [
             0,
@@ -3658,7 +3658,7 @@
         "pc-macos": {
           "tick_us": [
             8,
-            9
+            12
           ],
           "free_heap": [
             0,
@@ -3729,8 +3729,8 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            29,
-            30
+            28,
+            33
           ],
           "free_heap": [
             0,
@@ -3742,7 +3742,7 @@
           ],
           "at": [
             "2026-06-07",
-            "2026-06-07"
+            "2026-06-08"
           ]
         },
         "esp32-eth": {
@@ -3802,7 +3802,7 @@
         "pc-macos": {
           "tick_us": [
             108,
-            116
+            119
           ],
           "free_heap": [
             0,
@@ -4110,7 +4110,7 @@
         "pc-macos": {
           "tick_us": [
             31,
-            34
+            35
           ],
           "free_heap": [
             0,
@@ -4417,8 +4417,8 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            39,
-            46
+            38,
+            51
           ],
           "free_heap": [
             0,

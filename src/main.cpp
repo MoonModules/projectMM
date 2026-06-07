@@ -16,7 +16,8 @@
 #include "light/effects/RipplesEffect.h"
 #include "light/effects/LavaLampEffect.h"
 #include "light/effects/GameOfLifeEffect.h"
-#include "light/modifiers/MirrorModifier.h"
+#include "light/modifiers/MultiplyModifier.h"
+#include "light/modifiers/CheckerboardModifier.h"
 #include "light/drivers/ArtNetSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
 #include "core/HttpServerModule.h"
@@ -59,7 +60,8 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::RipplesEffect>("RipplesEffect", "light/effects/RipplesEffect.md");
     mm::ModuleFactory::registerType<mm::LavaLampEffect>("LavaLampEffect", "light/effects/LavaLampEffect.md");
     mm::ModuleFactory::registerType<mm::GameOfLifeEffect>("GameOfLifeEffect", "light/effects/GameOfLifeEffect.md");
-    mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier", "light/modifiers/MirrorModifier.md");
+    mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier", "light/modifiers/MultiplyModifier.md");
+    mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers/CheckerboardModifier.md");
     mm::ModuleFactory::registerType<mm::ArtNetSendDriver>("ArtNetSendDriver", "light/drivers/ArtNetSendDriver.md");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers/PreviewDriver.md");
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/HttpServerModule.md");
@@ -191,8 +193,10 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     auto* noise = mm::ModuleFactory::create("NoiseEffect");
     layer->addChild(noise);
 
-    auto* mirror = mm::ModuleFactory::create("MirrorModifier");
-    layer->addChild(mirror);
+    // MultiplyModifier with its default mult=2 / mirror=true on X,Y reproduces
+    // the old MirrorModifier-XY canonical pipeline (fold each axis in half).
+    auto* multiply = mm::ModuleFactory::create("MultiplyModifier");
+    layer->addChild(multiply);
 
     // Drivers: top-level container; one or more Driver children. Bound to the
     // Layers container — Drivers re-resolves the active Layer from it at every

@@ -1,13 +1,13 @@
 {
-  "name": "scenario_MirrorModifier_pipeline",
-  "module": "MirrorModifier",
+  "name": "scenario_MultiplyModifier_pipeline",
+  "module": "MultiplyModifier",
   "mode": "construct",
   "also": [
     "Layer",
     "NoiseEffect",
     "ArtNetSendDriver"
   ],
-  "description": "Pipeline with a mirror modifier: NoiseEffect renders one quadrant, MirrorModifier reflects across X and Y to produce a kaleidoscope. Used to verify the MirrorModifier wires into Layer cleanly and that the full pipeline still meets its FPS bound.",
+  "description": "Pipeline with a mirror modifier: NoiseEffect renders one quadrant, MultiplyModifier reflects across X and Y to produce a kaleidoscope. Used to verify the MultiplyModifier wires into Layer cleanly and that the full pipeline still meets its FPS bound.",
   "steps": [
     {
       "name": "add-layout-group",
@@ -49,10 +49,10 @@
     },
     {
       "name": "add-mirror",
-      "description": "Add MirrorModifier so logical pixels reflect across X and Y in the physical grid.",
+      "description": "Add MultiplyModifier so logical pixels reflect across X and Y in the physical grid.",
       "op": "add_module",
-      "id": "Mirror",
-      "type": "MirrorModifier",
+      "id": "Multiply",
+      "type": "MultiplyModifier",
       "parent_id": "Layer"
     },
     {

@@ -4,7 +4,7 @@
   "mode": "mutate",
   "also": [
     "Layer",
-    "MirrorModifier",
+    "MultiplyModifier",
     "NoiseEffect",
     "Drivers",
     "ArtNetSendDriver",
@@ -49,8 +49,8 @@
     {
       "name": "fix-mirror",
       "op": "add_module",
-      "id": "Mirror",
-      "type": "MirrorModifier",
+      "id": "Multiply",
+      "type": "MultiplyModifier",
       "parent_id": "Layer"
     },
     {
@@ -95,14 +95,14 @@
     {
       "name": "reset-mirrorX",
       "op": "set_control",
-      "id": "Mirror",
+      "id": "Multiply",
       "key": "mirrorX",
       "value": true
     },
     {
       "name": "reset-mirrorY",
       "op": "set_control",
-      "id": "Mirror",
+      "id": "Multiply",
       "key": "mirrorY",
       "value": true
     }
