@@ -86,7 +86,7 @@ ESP32 uses LittleFS via the `joltwallet/esp_littlefs` component on a dedicated p
 
 - Unit test (`test_filesystem_persistence.cpp`):
   - **Value round-trip**: set `deviceName` → save → fresh `Scheduler` + modules → load → assert. Uses `platform::fsSetRoot()` for test isolation. Wall time ~2.3s (the debounce window dominates).
-  - **Structural reconciliation**: hand-write a `Layer.json` with one child (RainbowEffect). Build a live tree with two children (NoiseEffect + MirrorModifier). After load, assert the tree reconciled — RainbowEffect at position 0, Mirror trimmed.
+  - **Structural reconciliation**: hand-write a `Layer.json` with one child (RainbowEffect). Build a live tree with two children (NoiseEffect + MultiplyModifier). After load, assert the tree reconciled — RainbowEffect at position 0, the modifier trimmed.
 
 ## First boot
 

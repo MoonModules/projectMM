@@ -201,8 +201,9 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // Drivers: top-level container; one or more Driver children. Bound to the
     // Layers container — Drivers re-resolves the active Layer from it at every
     // buildState, so a Layer cleared+rebuilt via the API self-heals without
-    // re-running this wiring. (The composition follow-up will blend across N
-    // Layer buffers read from the same container.)
+    // re-running this wiring. Binding the container (not a single Layer) is what
+    // lets a driver read across N Layer buffers from one place — the hook
+    // multi-layer blending uses.
     auto* drivers = static_cast<mm::Drivers*>(mm::ModuleFactory::create("Drivers"));
     drivers->setLayers(layersContainer);
 

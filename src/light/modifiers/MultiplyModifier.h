@@ -37,12 +37,19 @@ public:
     // over-estimating is safe (a few unused slots); under-estimating would
     // truncate. No fixed cap — limited only by memory. e.g. 8×8 = 64.
     nrOfLightsType maxMultiplier() const override {
-        const lengthType cx = multiplyX ? multiplyX : 1;
-        const lengthType cy = multiplyY ? multiplyY : 1;
-        const lengthType cz = multiplyZ ? multiplyZ : 1;
-        return static_cast<nrOfLightsType>(cx) *
-               static_cast<nrOfLightsType>(cy) *
-               static_cast<nrOfLightsType>(cz);
+        const uint8_t cx = multiplyX ? multiplyX : 1;
+        const uint8_t cy = multiplyY ? multiplyY : 1;
+        const uint8_t cz = multiplyZ ? multiplyZ : 1;
+        // Compute in uint64 and saturate to the return type's max. The controls
+        // cap each axis at 64, so the product can reach 64³ = 262144 — which
+        // overflows nrOfLightsType (uint16 on no-PSRAM). A wrapped value here
+        // would defeat the uint64 maxDest math in Layer::rebuildLUT (it'd be fed
+        // an already-wrapped, possibly-0 multiplier → empty LUT → black display).
+        // The Layer clamps maxDest to driverCount×2 anyway, so saturating the
+        // upper bound only over-allocates the scratch buffer slightly.
+        const uint64_t product = static_cast<uint64_t>(cx) * cy * cz;
+        constexpr uint64_t kTypeMax = static_cast<nrOfLightsType>(-1);
+        return static_cast<nrOfLightsType>(product < kTypeMax ? product : kTypeMax);
     }
 
     void onBuildControls() override {

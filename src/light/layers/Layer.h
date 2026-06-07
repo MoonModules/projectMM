@@ -308,11 +308,14 @@ public:
         nrOfLightsType* boxToDriver = sparse ? buildBoxToDriver(boxCount) : nullptr;
 
         // Per-light scratch buffer for the modifier's fan-out destinations. Sized
-        // to the modifier's actual maxMultiplier() (not a fixed cap) so any
-        // fan-out the modifier declares fits without truncation — the only limit
-        // is memory. Heap-allocated on the cold path (like boxToDriver); an OOM
-        // here degrades to the identity LUT, same cascade as the LUT build above.
-        const nrOfLightsType fanout = mod->maxMultiplier() > 0 ? mod->maxMultiplier() : 1;
+        // to the modifier's maxMultiplier(), but clamped to boxCount: a logical
+        // light can't map to more positions than the physical box has cells, so
+        // that's the true ceiling. The clamp avoids a pathological over-alloc
+        // when maxMultiplier() saturates high (e.g. a 64×64×16 multiply reports
+        // 65535 but a small grid has far fewer cells). Heap-allocated on the cold
+        // path (like boxToDriver); an OOM here degrades to the identity LUT.
+        nrOfLightsType fanout = mod->maxMultiplier() > 0 ? mod->maxMultiplier() : 1;
+        if (fanout > boxCount && boxCount > 0) fanout = boxCount;
         auto* physicals = static_cast<nrOfLightsType*>(
             platform::alloc(static_cast<size_t>(fanout) * sizeof(nrOfLightsType)));
         if (!physicals) {

@@ -143,6 +143,23 @@ TEST_CASE("MultiplyModifier maxMultiplier is the product of axes") {
     CHECK(m.maxMultiplier() == 4);   // the default-ish XY fold
 }
 
+// REGRESSION: maxMultiplier() must NOT wrap when all axes are maxed. The product
+// 64×64×16 = 65536 overflows nrOfLightsType (uint16 on no-PSRAM) and would wrap
+// to 0 — feeding the uint64 maxDest math in Layer::rebuildLUT an already-wrapped
+// (possibly 0) multiplier → empty LUT → black display. It must saturate to the
+// type max instead. (Single-axis tests above stay under the wrap; this one
+// crosses it.) On uint32 (PSRAM) the product fits and isn't saturated — assert
+// only the non-wrap, non-zero invariant that holds on both widths.
+TEST_CASE("MultiplyModifier maxMultiplier saturates, never wraps to 0") {
+    mm::MultiplyModifier m;
+    m.multiplyX = 64; m.multiplyY = 64; m.multiplyZ = 16;  // 65536 — wraps uint16
+    CHECK(m.maxMultiplier() > 0);                          // never the wrapped 0
+    // The product (65536) is ≥ the uint16 ceiling, so on a uint16 build it
+    // saturates to 65535; on uint32 it's the true 65536. Either way it's a large
+    // positive upper bound, never a small/zero value that would starve the LUT.
+    CHECK(m.maxMultiplier() >= 65535);
+}
+
 // REGRESSION: an 8×8 multiply must emit all 64 tile positions, not be truncated
 // to 8. The Layer's scratch buffer is sized to ModifierBase::kMaxFanout (64); a
 // smaller buffer (the original physicals[8]) silently dropped 56 of the 64 tiles,

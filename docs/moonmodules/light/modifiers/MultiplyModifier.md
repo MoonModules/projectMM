@@ -4,19 +4,19 @@ Static modifier. Tiles the logical image across the physical box `multiply` time
 
 ## Controls
 
-- `multiplyX` (Uint8, 1–8, default 2) — tiles along X (1 = no tiling)
-- `multiplyY` (Uint8, 1–8, default 2) — tiles along Y
-- `multiplyZ` (Uint8, 1–8, default 1) — tiles along Z
+- `multiplyX` (Uint8, 1–64, default 2) — tiles along X (1 = no tiling)
+- `multiplyY` (Uint8, 1–64, default 2) — tiles along Y
+- `multiplyZ` (Uint8, 1–64, default 1) — tiles along Z
 - `mirrorX` (Bool, default true) — reflect alternate (odd) tiles along X
 - `mirrorY` (Bool, default true) — reflect alternate tiles along Y
-- `mirrorZ` (Bool, default false) — reflect alternate tiles along Z
+- `mirrorZ` (Bool, default true) — reflect alternate tiles along Z
 
-The defaults (`multiply 2/2/1`, `mirror true/true/false`) reproduce the canonical mirror-XY pipeline: a 128×128 physical grid folds to a 64×64 logical buffer, each logical light fanning out to its four reflected quadrants.
+The defaults (`multiply 2/2/1`, `mirror all on`) reproduce the canonical mirror-XY pipeline: a 128×128 physical grid folds to a 64×64 logical buffer, each logical light fanning out to its four reflected quadrants. (`mirrorZ` on is a no-op on a 2D/depth-1 layout.)
 
 ## Effect on the pipeline
 
-- **Logical box shrinks by the multiplier**: `logW = physW / multiplyX` (etc.). 128×128 with multiply 2/2 → 64×64 logical (the effect renders a quarter of the lights).
-- **LUT produces 1:N mappings**: each logical light maps to `multiplyX·multiplyY·multiplyZ` physical positions (the tiles). The product is the LUT fan-out, bounded to **≤ 8** (the fixed `physicals[8]` stack buffer in `Layer::rebuildLUT`); each axis is capped at 8 and `mapToPhysical` never writes past `maxOut`.
+- **Logical box shrinks by the multiplier**: `logW = physW / multiplyX` (etc.). 128×128 with multiply 2/2 → 64×64 logical (the effect renders a quarter of the lights). The effective multiplier clamps to the axis extent — `multiplyZ` on a depth-1 layout clamps to 1 (no-op), never blanking the layer.
+- **LUT produces 1:N mappings**: each logical light maps to `multiplyX·multiplyY·multiplyZ` physical positions (the tiles). There is **no fixed fan-out cap** — `Layer::rebuildLUT` sizes a per-light scratch buffer to the modifier's `maxMultiplier()` (heap, cold path), so the full fan-out is emitted, limited only by memory (an alloc failure degrades to the identity LUT).
 - **Tile vs fold**: with mirror **off** on an axis, tiles repeat (translate); with mirror **on**, odd-numbered tiles reflect within their tile (`size − 1 − pos`), so multiply 2 + mirror = a fold.
 - **Integer division**: a physical extent not divisible by the multiplier leaves uncovered cells at the high edge (they map to nothing) — the same edge behaviour the old mirror had on odd widths, without a shared centre line.
 
@@ -26,7 +26,7 @@ A Layer applies its first enabled modifier during `rebuildLUT` (modifier chainin
 
 ## Tests
 
-[Unit tests: MultiplyModifier](../../../tests/unit-tests.md#multiplymodifier) — logical dimensions, tile fan-out, per-axis mirror reflection, the pure-fold equivalence to the old Mirror, the ≤8 fan-out clamp.
+[Unit tests: MultiplyModifier](../../../tests/unit-tests.md#multiplymodifier) — logical dimensions, tile fan-out, per-axis mirror reflection, the pure-fold equivalence to the old Mirror, the multiplyZ-on-2D no-op, and the extent clamp.
 
 [Scenario: scenario_MultiplyModifier_pipeline](../../../tests/scenario-tests.md#scenario_multiplymodifier_pipeline) — full pipeline with the multiply/mirror kaleidoscope, performance bounds.
 

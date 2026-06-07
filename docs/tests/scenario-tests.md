@@ -342,7 +342,7 @@ RainbowEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, m
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 143 | — / 159KB | — / 76KB |
-| `pc-macos` | — / 111,111 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 111,111-125,000 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 34,483-40,000 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07
@@ -421,7 +421,7 @@ NoiseEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 71.8 | — / 159KB | — / 76KB |
-| `pc-macos` | — / 14,085-15,625 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 13,514-15,625 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 4,739-6,757 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07
@@ -440,7 +440,7 @@ NoiseEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, 
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 17.1 | — / 126KB | — / 62KB |
-| `pc-macos` | — / 2,959-3,268 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 2,924-3,268 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 1,190-1,437 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07
@@ -500,11 +500,11 @@ PlasmaEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, ma
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 135 | — / 162KB | — / 84KB |
-| `pc-macos` | — / 76,923-90,909 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 66,667-90,909 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 35,714-43,478 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-08
 - `pc-windows`: observed 2026-06-07
 
 #### `PlasmaEffect-128x128` (set_control)  📏
@@ -598,7 +598,7 @@ PlasmaPaletteEffect at 128x128 (16384 lights) — measure tick/FPS, free interna
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 21.8 | — / 126KB | — / 62KB |
-| `pc-macos` | — / 43,478-50,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 41,667-50,000 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 12,346-18,868 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07
@@ -639,7 +639,7 @@ MetaballsEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap,
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 522 | — / 171KB | — / 92KB |
-| `pc-macos` | — / 250,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 200,000-250,000 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 50,000-62,500 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07
@@ -1132,11 +1132,11 @@ RipplesEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, m
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 45.0 | — / 161KB | — / 80KB |
-| `pc-macos` | — / 30,303-34,483 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 30,303-35,714 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 12,048-15,152 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-08
 - `pc-windows`: observed 2026-06-07
 
 #### `RipplesEffect-128x128` (set_control)  📏
@@ -1230,7 +1230,7 @@ LavaLampEffect at 128x128 (16384 lights) — measure tick/FPS, free internal hea
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 18.2 | — / 125KB | — / 62KB |
-| `pc-macos` | — / 29,412-32,258 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 28,571-32,258 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 4,926-6,757 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07
@@ -1309,7 +1309,7 @@ GameOfLifeEffect at 128x128 (16384 lights) — measure tick/FPS, free internal h
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 13.9 | — / 91KB | — / 46KB |
-| `pc-macos` | — / 19,608-25,641 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 19,608-26,316 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 8,696-9,174 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07
@@ -1466,6 +1466,70 @@ Add ArtNetSendDriver and run the bounded FPS measurement on the no-LUT path.
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
 - `pc-windows`: observed 2026-06-07
 
+### scenario_modifier_swap
+
+`test/scenarios/light/scenario_modifier_swap.json` — Swap the Layer's modifier between Multiply and Checkerboard and verify the pipeline stays live across each replace. Prepares its own canvas (clear + rebuild) so it runs from any device state: one Layout(Grid 32x32) + one Layer + one effect + one modifier, then replace_module cycles the modifier MOD slot Multiply -> Checkerboard -> Multiply, measuring after each so a broken swap (null buffer / wrong light count) shows up. Exercises the modifier-replace path the UI's drag-replace uses.
+
+**Mode**: `mutate` · **Also touches**: MultiplyModifier, CheckerboardModifier, NoiseEffect, Layouts, GridLayout, Drivers, ArtNetSendDriver, PreviewDriver
+
+#### `multiply-1` (measure)  📏
+
+Multiply modifier active — pipeline live, LUT folds the grid.
+
+**Setup** (preceding non-measured steps):
+- `shrink-w` (set_control)
+- `shrink-h` (set_control)
+- `clear-layers` (clear_children)
+- `clear-layouts` (clear_children)
+- `build-grid` (add_module)
+- `build-layer` (add_module)
+- `build-fx` (add_module)
+- `build-mod` (add_module)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 1,580-7,752 | — / 172KB-204KB | — / 76KB-108KB |
+| `pc-macos` | — / 142,857-166,667 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07 → 2026-06-08
+- `pc-macos`: observed 2026-06-07
+
+#### `checkerboard` (measure)  📏
+
+Checkerboard modifier active — masks half the lights; pipeline stays live (driver buffer non-null).
+
+**Setup** (preceding non-measured steps):
+- `swap-to-checker` (replace_module)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 778-990 | — / 170KB-203KB | — / 76KB-108KB |
+| `pc-macos` | — / 50,000-58,824 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07 → 2026-06-08
+- `pc-macos`: observed 2026-06-07 → 2026-06-08
+
+#### `multiply-2` (measure)  📏
+
+Back to Multiply — replace round-trips cleanly, pipeline live again.
+
+**Setup** (preceding non-measured steps):
+- `swap-to-multiply` (replace_module)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32-eth` | — / 1,587-2,278 | — / 169KB-204KB | — / 76KB-108KB |
+| `pc-macos` | — / 125,000-166,667 | — / unlimited | — / unlimited |
+
+- `esp32-eth`: observed 2026-06-07 → 2026-06-08
+- `pc-macos`: observed 2026-06-07 → 2026-06-08
+
 ## Layouts
 
 ### scenario_Layouts_mutation
@@ -1593,13 +1657,13 @@ Disable mirrorX. Modifier control triggers a pipeline rebuild — measures the r
 | `esp32` | — / 4.8 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 10.4 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.0 | ≥ 103KB / 94KB | — / 48KB |
-| `pc-macos` | ≥ 5,000 / 3,636-8,475 | unlimited / unlimited | — / unlimited |
+| `pc-macos` | ≥ 5,000 / 3,636-9,174 | unlimited / unlimited | — / unlimited |
 | `pc-windows` | — / 2,024-2,392 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-07
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-08
 - `pc-windows`: observed 2026-06-07
 
 #### `disable-mirrorY` (set_control)  📏
@@ -1613,13 +1677,13 @@ Disable mirrorY. Mirror is now fully off — should land on the no-LUT path.
 | `esp32` | — / 4.4 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 8.9-9.0 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 11.1 | ≥ 103KB / 94KB | — / 48KB |
-| `pc-macos` | ≥ 2,500 / 1,916-8,547 | unlimited / unlimited | — / unlimited |
+| `pc-macos` | ≥ 2,500 / 1,916-9,009 | unlimited / unlimited | — / unlimited |
 | `pc-windows` | — / 1,082-1,305 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-07
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-08
 - `pc-windows`: observed 2026-06-07
 
 #### `re-enable-mirrorY` (set_control)  📏

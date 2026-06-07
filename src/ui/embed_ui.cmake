@@ -16,11 +16,19 @@
 #                      path). The list is built in-script so the desktop
 #                      CMakeLists doesn't have to pass semicolons through
 #                      MSBuild / make's command-line splitter.
-# If neither is set, we fall back to bare `python3` (POSIX-friendly).
+# The two build entry points always pass one of these (root CMakeLists passes
+# UV_EXECUTABLE via find_program(... REQUIRED); the ESP32 path passes PYTHON_CMD).
+# A standalone `cmake -P` invocation that supplies neither is a configuration
+# error — fail loudly here rather than fall back to a bare `python3` that doesn't
+# exist on Windows (where it's `python`/`py`), which would surface as a cryptic
+# mid-build "python3 not found" inside the gzip custom command.
 if(DEFINED UV_EXECUTABLE AND NOT DEFINED PYTHON_CMD)
     set(PYTHON_CMD ${UV_EXECUTABLE} run python)
 elseif(NOT DEFINED PYTHON_CMD)
-    set(PYTHON_CMD python3)
+    message(FATAL_ERROR
+        "embed_ui.cmake: no Python interpreter. Pass -DUV_EXECUTABLE=<path-to-uv> "
+        "or -DPYTHON_CMD=<interpreter>. (The normal build supplies one; this only "
+        "fires on a standalone `cmake -P embed_ui.cmake` with neither set.)")
 endif()
 
 # Gzip ${UI_DIR}/<name> to ${OUT_DIR}/<name>.gz and HEX-read it into OUT_VAR.

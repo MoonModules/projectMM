@@ -551,8 +551,10 @@ static int runScenario(const char* path) {
             // modules can be removed; top-level modules are policy-fixed.
             const char* targetId = step["id"].c_str();
             auto* target = ctx.modules.count(targetId) ? ctx.modules[targetId] : nullptr;
-            if (!target || !target->parent()) {
-                std::printf("  -     %s — %s not found or top-level, skipped\n", name, targetId);
+            if (!target || !target->parent() || !target->userEditable()) {
+                // Mirror the live API (handleDeleteModule): top-level and
+                // non-editable submodules (Board, Preview, Improv) can't be removed.
+                std::printf("  -     %s — %s not found / top-level / not editable, skipped\n", name, targetId);
                 continue;
             }
             auto* parent = target->parent();
@@ -601,8 +603,10 @@ static int runScenario(const char* path) {
             const char* targetId = step["id"].c_str();
             const char* newType = step["type"].c_str();
             auto* target = ctx.modules.count(targetId) ? ctx.modules[targetId] : nullptr;
-            if (!target || !target->parent()) {
-                std::printf("  ~     %s — %s not found or top-level, skipped\n", name, targetId);
+            if (!target || !target->parent() || !target->userEditable()) {
+                // Mirror the live API (handleReplaceModule): top-level and
+                // non-editable submodules can't be replaced.
+                std::printf("  ~     %s — %s not found / top-level / not editable, skipped\n", name, targetId);
                 continue;
             }
             auto* parent = target->parent();

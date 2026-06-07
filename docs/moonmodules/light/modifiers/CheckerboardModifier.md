@@ -15,7 +15,7 @@ Static modifier. Masks the layer in a checkerboard pattern: lights in the "off" 
 
 ## Cross-domain wiring
 
-A Layer applies its first enabled modifier during `rebuildLUT`; modifier chaining (where Checkerboard-then-Multiply would differ from Multiply-then-Checkerboard) is not yet implemented — see [architecture.md § Modifiers](../../../architecture.md#modifiers). The mask integrates with no `ModifierBase` contract change because the contract already permits a logical light to map to zero physical positions.
+A Layer applies its first enabled modifier during `rebuildLUT`; modifier chaining (where Checkerboard-then-Multiply differs from Multiply-then-Checkerboard) is not implemented — only the first enabled modifier applies. See [architecture.md § Modifiers](../../../architecture.md#modifiers). The mask integrates with no `ModifierBase` contract change because the contract already permits a logical light to map to zero physical positions.
 
 ## Tests
 

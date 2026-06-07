@@ -11,7 +11,15 @@ import sys
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 from pathlib import Path
+
+
+def _mod_path(name: str) -> str:
+    """`/api/modules/<name>` with the name URL-encoded. Module names can contain
+    spaces (ensureUniqueName disambiguates duplicates as "Layer 2"), which urllib
+    rejects in a raw URL — encode so delete/replace/clear can address them."""
+    return "/api/modules/" + urllib.parse.quote(name, safe="")
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 SCENARIOS_DIR = ROOT / "test" / "scenarios"
@@ -373,7 +381,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                 # reads identically on the in-process runner (which uses
                 # `remove_module`) and here. The two runners must never diverge
                 # on op names, or a scenario silently no-ops on one tier.
-                resp = client.delete(f"/api/modules/{step['id']}")
+                resp = client.delete(_mod_path(step["id"]))
                 step_result["status"] = "ok" if resp.get("ok") else "error"
                 print(f"  -     {step.get('id', '?')}")
 
@@ -390,7 +398,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                 cleared = skipped = 0
                 for cn in child_names:
                     try:
-                        client.delete(f"/api/modules/{cn}")
+                        client.delete(_mod_path(cn))
                         cleared += 1
                     except urllib.error.HTTPError as de:
                         # Non-deletable submodules (Preview, Board, Improv) return
@@ -410,7 +418,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                 # Swap a child for a fresh module of another type at the same
                 # slot, keeping its name — mirrors the in-process op and the
                 # device's POST /api/modules/<name>/replace endpoint.
-                resp = client.post(f"/api/modules/{step['id']}/replace",
+                resp = client.post(_mod_path(step["id"]) + "/replace",
                                    {"type": step["type"]})
                 step_result["status"] = "ok" if resp.get("ok") else "error"
                 print(f"  ~     {step.get('id', '?')} → {step.get('type', '?')}")
@@ -667,7 +675,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
     # Cleanup: delete modules that were created by this scenario
     for module_id in reversed(created_modules):
         try:
-            client.delete(f"/api/modules/{module_id}")
+            client.delete(_mod_path(module_id))
             print(f"  -     {module_id} (cleanup)")
         except Exception:
             pass

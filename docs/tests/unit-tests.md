@@ -69,6 +69,16 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - RipplesEffect has localised features (thin rings); corner-pair check is too strict, so we scan for any two distinct pixels instead. Ripples paints at least one non-zero byte (effect actually renders).
 - At least two distinct pixels exist somewhere in the buffer (ripples are localised, so corner-pair would be too strict).
 
+## CheckerboardModifier
+
+`test/unit/light/unit_CheckerboardModifier.cpp`
+
+- Identity dimensions — a mask doesn't resize the logical box.
+- size=1: every cell is its own square; parity = (x+y+z)&1. Default (invert false) keeps even-parity cells, drops odd-parity.
+- invert flips which parity passes — the cell that was dropped now passes and vice versa.
+- size>1 groups cells into squares: with size=2, the 2×2 block at the origin is all one square (parity of 0/2=0), so all four pass; the next block over drops.
+- Never fans out — at most one destination.
+
 ## Color
 
 `test/unit/core/unit_Color.cpp`
@@ -198,6 +208,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Dense grid: every box cell is a light, so no LUT — the identity/memcpy fast path is preserved exactly (the grid short-circuit).
 - Sparse sphere: a LUT is built; its destinations are driver indices in [0, lightCount), and the render buffer stays the dense bounding box.
 - Sphere + Mirror: the modifier's box-coordinate destinations are translated into driver-index space; no destination escapes [0, lightCount).
+- REGRESSION: a high fan-out Multiply (8×8×4 = 256) on a 128×128 grid must build a NON-EMPTY LUT that covers every physical light. The maxDest estimate (logicalCount × maxMultiplier) is computed in 64-bit; before that fix it overflowed uint16 on no-PSRAM boards (256 × 256 = 65536 wraps to 0), sized the LUT to ~nothing, and blanked the display. Here we assert the LUT actually maps the full light set, in range — the symptom that black-screened the device.
 
 `test/unit/light/unit_Layer_zero_grid.cpp`
 *Also touches: RainbowEffect, NoiseEffect, PlasmaEffect, CheckerboardEffect, SpiralEffect, MetaballsEffect, PlasmaPaletteEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect, FireEffect, ParticlesEffect.*
@@ -333,7 +344,11 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - PURE-FOLD EQUIVALENCE: an interior pixel folds to the same two columns the old mirrorX-only produced — original + horizontal reflection.
 - No multiplication on any axis (all multipliers 1) → identity pass-through.
 - Tiling WITHOUT mirror repeats (does not reflect) — multiply 2 on X, mirror off: logical x=0 lands at physical x=0 (tile 0) and x=64 (tile 1, identity offset), NOT x=127. This is the difference from a fold.
-- maxMultiplier is the product — bounds the LUT fan-out buffer (must stay ≤ 8).
+- multiplyZ on a 2D (depth-1) layout is a no-op: the effective multiplier clamps to the axis extent (1), so logD stays 1 and the layer isn't blanked. Before the clamp, multiplyZ=4 made logD = 1/4 = 0 → empty layer.
+- A multiplier larger than the axis extent clamps to the extent (can't tile more times than there are pixels).
+- maxMultiplier is the product of the raw controls (the fan-out upper bound).
+- REGRESSION: maxMultiplier() must NOT wrap when all axes are maxed. The product 64×64×16 = 65536 overflows nrOfLightsType (uint16 on no-PSRAM) and would wrap to 0 — feeding the uint64 maxDest math in Layer::rebuildLUT an already-wrapped (possibly 0) multiplier → empty LUT → black display. It must saturate to the type max instead. (Single-axis tests above stay under the wrap; this one crosses it.) On uint32 (PSRAM) the product fits and isn't saturated — assert only the non-wrap, non-zero invariant that holds on both widths.
+- REGRESSION: an 8×8 multiply must emit all 64 tile positions, not be truncated to 8. The Layer's scratch buffer is sized to ModifierBase::kMaxFanout (64); a smaller buffer (the original physicals[8]) silently dropped 56 of the 64 tiles, so a 128×128 grid showed only 8 tiles instead of the full 8×8 = 64.
 - Fan-out never exceeds maxOut even if asked for more than the buffer holds.
 
 ## NetworkModule
@@ -402,7 +417,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 - A name with no collision is returned unchanged.
 - The second module with a duplicate name gets " 2" suffixed; the first keeps its original name.
-- Suffix counting increments past existing " 2" / " 3" suffixes ("Layer", "Layer 2", "Layer" → "Layer 3").
+- Suffix counting increments past existing "-2" / "-3" suffixes ("Layer", "Layer-2", "Layer" → "Layer-3").
 - deduplicateNamesInTree() walks the entire module tree in one pass and disambiguates every duplicate (used after persistence load).
 - firstByName(name) returns the first match in DFS order, or nullptr if no module carries that name.
 - If the disambiguating suffix would overflow the 16-byte name buffer, ensureUniqueName refuses to truncate and keeps the colliding name (sharp edge, documented).

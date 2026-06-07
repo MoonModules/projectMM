@@ -293,7 +293,7 @@ A **Layer** (a MoonModule, child of Layers) owns:
 
 A layer can have **multiple effects**. Effects are not blended — they write to the buffer sequentially in their listed order, each overwriting or adding to the previous. That allows stacked patterns (a base-colour effect followed by a sparkle effect).
 
-A layer applies its **first enabled modifier** during LUT build (`Layer::rebuildLUT`). Modifier *chaining* — applying several in sequence — is not yet implemented; when it lands, order will matter (a multiply-then-checkerboard mask differs from checkerboard-then-multiply, just as mirror-then-rotate differs from rotate-then-mirror), which is why modifiers are reorderable in the UI today even though only the first currently takes effect. Static modifiers would chain during LUT build; dynamic modifiers during rendering.
+A layer applies its **first enabled modifier** during LUT build (`Layer::rebuildLUT`). Modifier *chaining* — applying several in sequence — is not implemented: only the first enabled modifier takes effect. Order matters for a chain (a multiply-then-checkerboard mask differs from checkerboard-then-multiply, just as mirror-then-rotate differs from rotate-then-mirror), which is why modifiers are reorderable in the UI even though only the first is applied today. Chaining is on the [backlog](backlog/backlog.md) — static modifiers chain during LUT build, dynamic modifiers during rendering.
 
 Each layer references the shared Layouts. The layer builds its own LUT by iterating the Layouts container's coordinates and applying its static modifiers in order. Different layers in Layers can have different modifiers, producing different LUTs from the same Layouts.
 
