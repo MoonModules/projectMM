@@ -1,0 +1,3467 @@
+{
+  "name": "scenario_AllEffects_grid_sizes",
+  "module": "Layer",
+  "mode": "mutate",
+  "also": [
+    "Layouts",
+    "GridLayout",
+    "Drivers",
+    "ArtNetSendDriver",
+    "PreviewDriver",
+    "LinesEffect",
+    "RainbowEffect",
+    "NoiseEffect",
+    "PlasmaEffect",
+    "PlasmaPaletteEffect",
+    "MetaballsEffect",
+    "FireEffect",
+    "ParticlesEffect",
+    "GlowParticlesEffect",
+    "CheckerboardEffect",
+    "SpiralEffect",
+    "RipplesEffect",
+    "LavaLampEffect",
+    "GameOfLifeEffect"
+  ],
+  "description": "Sweep every effect (no modifier) across 16/32/64/128 square grids and measure tick/FPS, free internal heap, max internal block per (effect, size). The scenario prepares its own canvas: clear_children wipes whatever layouts/layers/drivers the device had, then it rebuilds exactly one Layout(Grid) + one Layer + one effect (no modifier) + ArtNet, so the measurement is each effect's raw cost over the full grid through the real output driver, on any starting device state. PreviewDriver is apparatus (non-deletable) so it survives the clear. Effects are swapped via replace_module at a fixed Layer child slot; grid resized via set_control (width then height, measuring after height so we never measure an N x 128 stripe).",
+  "fixture": [
+    {
+      "name": "fix-layouts",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "fix-grid",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 16,
+        "height": 16
+      }
+    },
+    {
+      "name": "fix-layers",
+      "op": "add_module",
+      "id": "Layers",
+      "type": "Layers",
+      "props": {
+        "layouts": "Layouts"
+      }
+    },
+    {
+      "name": "fix-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "parent_id": "Layers",
+      "props": {
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "fix-fx",
+      "op": "add_module",
+      "id": "FX",
+      "type": "NoiseEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "fix-drivers",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "layers": "Layers"
+      }
+    },
+    {
+      "name": "fix-artnet",
+      "op": "add_module",
+      "id": "ArtNet",
+      "type": "ArtNetSendDriver",
+      "parent_id": "Drivers"
+    },
+    {
+      "name": "fix-preview",
+      "op": "add_module",
+      "id": "Preview",
+      "type": "PreviewDriver",
+      "parent_id": "Drivers"
+    }
+  ],
+  "steps": [
+    {
+      "name": "shrink-grid-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16,
+      "optional": true
+    },
+    {
+      "name": "shrink-grid-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "optional": true
+    },
+    {
+      "name": "clear-layers",
+      "op": "clear_children",
+      "id": "Layers"
+    },
+    {
+      "name": "clear-layouts",
+      "op": "clear_children",
+      "id": "Layouts"
+    },
+    {
+      "name": "clear-drivers",
+      "op": "clear_children",
+      "id": "Drivers"
+    },
+    {
+      "name": "build-grid",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 16,
+        "height": 16
+      }
+    },
+    {
+      "name": "build-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "parent_id": "Layers",
+      "props": {
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "build-fx",
+      "op": "add_module",
+      "id": "FX",
+      "type": "LinesEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "build-artnet",
+      "op": "add_module",
+      "id": "ArtNet",
+      "type": "ArtNetSendDriver",
+      "parent_id": "Drivers"
+    },
+    {
+      "name": "LinesEffect-pre-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "LinesEffect-pre-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16
+    },
+    {
+      "name": "fx-LinesEffect",
+      "op": "replace_module",
+      "id": "FX",
+      "type": "LinesEffect"
+    },
+    {
+      "name": "LinesEffect-16x16-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "LinesEffect-16x16",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "measure": true,
+      "description": "LinesEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            0
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            79,
+            79
+          ],
+          "free_heap": [
+            225884,
+            225884
+          ],
+          "max_alloc_block": [
+            110592,
+            110592
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "LinesEffect-32x32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32
+    },
+    {
+      "name": "LinesEffect-32x32",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "measure": true,
+      "description": "LinesEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            0
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            131,
+            131
+          ],
+          "free_heap": [
+            219708,
+            219708
+          ],
+          "max_alloc_block": [
+            110592,
+            110592
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "LinesEffect-64x64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "LinesEffect-64x64",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "measure": true,
+      "description": "LinesEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            1
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            434,
+            434
+          ],
+          "free_heap": [
+            199716,
+            199716
+          ],
+          "max_alloc_block": [
+            110592,
+            110592
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "LinesEffect-128x128-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "LinesEffect-128x128",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true,
+      "description": "LinesEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            1,
+            1
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            42911,
+            42911
+          ],
+          "free_heap": [
+            129116,
+            129116
+          ],
+          "max_alloc_block": [
+            63488,
+            63488
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "RainbowEffect-pre-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "RainbowEffect-pre-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16
+    },
+    {
+      "name": "fx-RainbowEffect",
+      "op": "replace_module",
+      "id": "FX",
+      "type": "RainbowEffect"
+    },
+    {
+      "name": "RainbowEffect-16x16-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "RainbowEffect-16x16",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "measure": true,
+      "description": "RainbowEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            0
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            261,
+            261
+          ],
+          "free_heap": [
+            177396,
+            177396
+          ],
+          "max_alloc_block": [
+            94208,
+            94208
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "RainbowEffect-32x32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32
+    },
+    {
+      "name": "RainbowEffect-32x32",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "measure": true,
+      "description": "RainbowEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            2,
+            2
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            1033,
+            1033
+          ],
+          "free_heap": [
+            171968,
+            171968
+          ],
+          "max_alloc_block": [
+            90112,
+            90112
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "RainbowEffect-64x64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "RainbowEffect-64x64",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "measure": true,
+      "description": "RainbowEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            9,
+            9
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            6980,
+            6980
+          ],
+          "free_heap": [
+            162748,
+            162748
+          ],
+          "max_alloc_block": [
+            77824,
+            77824
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "RainbowEffect-128x128-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "RainbowEffect-128x128",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true,
+      "description": "RainbowEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            36,
+            38
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            44281,
+            44281
+          ],
+          "free_heap": [
+            129380,
+            129380
+          ],
+          "max_alloc_block": [
+            63488,
+            63488
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "NoiseEffect-pre-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "NoiseEffect-pre-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16
+    },
+    {
+      "name": "fx-NoiseEffect",
+      "op": "replace_module",
+      "id": "FX",
+      "type": "NoiseEffect"
+    },
+    {
+      "name": "NoiseEffect-16x16-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "NoiseEffect-16x16",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "measure": true,
+      "description": "NoiseEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            3,
+            4
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            895,
+            895
+          ],
+          "free_heap": [
+            176020,
+            176020
+          ],
+          "max_alloc_block": [
+            94208,
+            94208
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "NoiseEffect-32x32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32
+    },
+    {
+      "name": "NoiseEffect-32x32",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "measure": true,
+      "description": "NoiseEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            14,
+            15
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            3082,
+            3082
+          ],
+          "free_heap": [
+            172144,
+            172144
+          ],
+          "max_alloc_block": [
+            90112,
+            90112
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "NoiseEffect-64x64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "NoiseEffect-64x64",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "measure": true,
+      "description": "NoiseEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            64,
+            70
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            13923,
+            13923
+          ],
+          "free_heap": [
+            162936,
+            162936
+          ],
+          "max_alloc_block": [
+            77824,
+            77824
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "NoiseEffect-128x128-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "NoiseEffect-128x128",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true,
+      "description": "NoiseEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            306,
+            326
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            58413,
+            58413
+          ],
+          "free_heap": [
+            129372,
+            129372
+          ],
+          "max_alloc_block": [
+            63488,
+            63488
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "PlasmaEffect-pre-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "PlasmaEffect-pre-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16
+    },
+    {
+      "name": "fx-PlasmaEffect",
+      "op": "replace_module",
+      "id": "FX",
+      "type": "PlasmaEffect"
+    },
+    {
+      "name": "PlasmaEffect-16x16-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "PlasmaEffect-16x16",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "measure": true,
+      "description": "PlasmaEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            1,
+            1
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            313,
+            313
+          ],
+          "free_heap": [
+            177756,
+            177756
+          ],
+          "max_alloc_block": [
+            94208,
+            94208
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "PlasmaEffect-32x32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32
+    },
+    {
+      "name": "PlasmaEffect-32x32",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "measure": true,
+      "description": "PlasmaEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            3,
+            3
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            1205,
+            1205
+          ],
+          "free_heap": [
+            175452,
+            175452
+          ],
+          "max_alloc_block": [
+            94208,
+            94208
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "PlasmaEffect-64x64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "PlasmaEffect-64x64",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "measure": true,
+      "description": "PlasmaEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            11,
+            12
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            7394,
+            7394
+          ],
+          "free_heap": [
+            166236,
+            166236
+          ],
+          "max_alloc_block": [
+            86016,
+            86016
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "PlasmaEffect-128x128-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "PlasmaEffect-128x128",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true,
+      "description": "PlasmaEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            44,
+            48
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            54579,
+            54579
+          ],
+          "free_heap": [
+            129372,
+            129372
+          ],
+          "max_alloc_block": [
+            63488,
+            63488
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "PlasmaPaletteEffect-pre-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "PlasmaPaletteEffect-pre-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16
+    },
+    {
+      "name": "fx-PlasmaPaletteEffect",
+      "op": "replace_module",
+      "id": "FX",
+      "type": "PlasmaPaletteEffect"
+    },
+    {
+      "name": "PlasmaPaletteEffect-16x16-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "PlasmaPaletteEffect-16x16",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "measure": true,
+      "description": "PlasmaPaletteEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            0
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            166,
+            166
+          ],
+          "free_heap": [
+            174456,
+            174456
+          ],
+          "max_alloc_block": [
+            94208,
+            94208
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "PlasmaPaletteEffect-32x32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32
+    },
+    {
+      "name": "PlasmaPaletteEffect-32x32",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "measure": true,
+      "description": "PlasmaPaletteEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            1,
+            1
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            577,
+            577
+          ],
+          "free_heap": [
+            172152,
+            172152
+          ],
+          "max_alloc_block": [
+            90112,
+            90112
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "PlasmaPaletteEffect-64x64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "PlasmaPaletteEffect-64x64",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "measure": true,
+      "description": "PlasmaPaletteEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            5,
+            5
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            3736,
+            3736
+          ],
+          "free_heap": [
+            164508,
+            164508
+          ],
+          "max_alloc_block": [
+            81920,
+            81920
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "PlasmaPaletteEffect-128x128-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "PlasmaPaletteEffect-128x128",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true,
+      "description": "PlasmaPaletteEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            20,
+            21
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            45974,
+            45974
+          ],
+          "free_heap": [
+            129372,
+            129372
+          ],
+          "max_alloc_block": [
+            63488,
+            63488
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "MetaballsEffect-pre-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "MetaballsEffect-pre-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16
+    },
+    {
+      "name": "fx-MetaballsEffect",
+      "op": "replace_module",
+      "id": "FX",
+      "type": "MetaballsEffect"
+    },
+    {
+      "name": "MetaballsEffect-16x16-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "MetaballsEffect-16x16",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "measure": true,
+      "description": "MetaballsEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            1,
+            1
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            496,
+            496
+          ],
+          "free_heap": [
+            177756,
+            177756
+          ],
+          "max_alloc_block": [
+            94208,
+            94208
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "MetaballsEffect-32x32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32
+    },
+    {
+      "name": "MetaballsEffect-32x32",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "measure": true,
+      "description": "MetaballsEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            4,
+            4
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            1916,
+            1916
+          ],
+          "free_heap": [
+            175452,
+            175452
+          ],
+          "max_alloc_block": [
+            94208,
+            94208
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "MetaballsEffect-64x64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "MetaballsEffect-64x64",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "measure": true,
+      "description": "MetaballsEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            16,
+            18
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            9712,
+            9712
+          ],
+          "free_heap": [
+            166236,
+            166236
+          ],
+          "max_alloc_block": [
+            86016,
+            86016
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "MetaballsEffect-128x128-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "MetaballsEffect-128x128",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true,
+      "description": "MetaballsEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            63,
+            65
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            53599,
+            53599
+          ],
+          "free_heap": [
+            129372,
+            129372
+          ],
+          "max_alloc_block": [
+            63488,
+            63488
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "FireEffect-pre-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "FireEffect-pre-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16
+    },
+    {
+      "name": "fx-FireEffect",
+      "op": "replace_module",
+      "id": "FX",
+      "type": "FireEffect"
+    },
+    {
+      "name": "FireEffect-16x16-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "FireEffect-16x16",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "measure": true,
+      "description": "FireEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            1,
+            1
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            362,
+            362
+          ],
+          "free_heap": [
+            177496,
+            177496
+          ],
+          "max_alloc_block": [
+            98304,
+            98304
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "FireEffect-32x32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32
+    },
+    {
+      "name": "FireEffect-32x32",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "measure": true,
+      "description": "FireEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            3,
+            3
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            1275,
+            1275
+          ],
+          "free_heap": [
+            174432,
+            174432
+          ],
+          "max_alloc_block": [
+            94208,
+            94208
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "FireEffect-64x64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "FireEffect-64x64",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "measure": true,
+      "description": "FireEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            13,
+            15
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            6258,
+            6258
+          ],
+          "free_heap": [
+            161364,
+            161364
+          ],
+          "max_alloc_block": [
+            77824,
+            77824
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "FireEffect-128x128-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "FireEffect-128x128",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true,
+      "description": "FireEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            52,
+            54
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            46487,
+            46487
+          ],
+          "free_heap": [
+            112992,
+            112992
+          ],
+          "max_alloc_block": [
+            63488,
+            63488
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "ParticlesEffect-pre-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "ParticlesEffect-pre-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16
+    },
+    {
+      "name": "fx-ParticlesEffect",
+      "op": "replace_module",
+      "id": "FX",
+      "type": "ParticlesEffect"
+    },
+    {
+      "name": "ParticlesEffect-16x16-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "ParticlesEffect-16x16",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "measure": true,
+      "description": "ParticlesEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            1
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            212,
+            212
+          ],
+          "free_heap": [
+            176472,
+            176472
+          ],
+          "max_alloc_block": [
+            81920,
+            81920
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "ParticlesEffect-32x32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32
+    },
+    {
+      "name": "ParticlesEffect-32x32",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "measure": true,
+      "description": "ParticlesEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            2,
+            2
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            541,
+            541
+          ],
+          "free_heap": [
+            171864,
+            171864
+          ],
+          "max_alloc_block": [
+            81920,
+            81920
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "ParticlesEffect-64x64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "ParticlesEffect-64x64",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "measure": true,
+      "description": "ParticlesEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            7,
+            9
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            2353,
+            2353
+          ],
+          "free_heap": [
+            153432,
+            153432
+          ],
+          "max_alloc_block": [
+            69632,
+            69632
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "ParticlesEffect-128x128-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "ParticlesEffect-128x128",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true,
+      "description": "ParticlesEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            29,
+            32
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            32515,
+            32515
+          ],
+          "free_heap": [
+            79704,
+            79704
+          ],
+          "max_alloc_block": [
+            34816,
+            34816
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "GlowParticlesEffect-pre-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "GlowParticlesEffect-pre-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16
+    },
+    {
+      "name": "fx-GlowParticlesEffect",
+      "op": "replace_module",
+      "id": "FX",
+      "type": "GlowParticlesEffect"
+    },
+    {
+      "name": "GlowParticlesEffect-16x16-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "GlowParticlesEffect-16x16",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "measure": true,
+      "description": "GlowParticlesEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            1,
+            1
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            586,
+            586
+          ],
+          "free_heap": [
+            177700,
+            177700
+          ],
+          "max_alloc_block": [
+            86016,
+            86016
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "GlowParticlesEffect-32x32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32
+    },
+    {
+      "name": "GlowParticlesEffect-32x32",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "measure": true,
+      "description": "GlowParticlesEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            4,
+            5
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            1706,
+            1706
+          ],
+          "free_heap": [
+            175396,
+            175396
+          ],
+          "max_alloc_block": [
+            86016,
+            86016
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "GlowParticlesEffect-64x64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "GlowParticlesEffect-64x64",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "measure": true,
+      "description": "GlowParticlesEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            18,
+            20
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            7792,
+            7792
+          ],
+          "free_heap": [
+            166168,
+            166168
+          ],
+          "max_alloc_block": [
+            81920,
+            81920
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "GlowParticlesEffect-128x128-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "GlowParticlesEffect-128x128",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true,
+      "description": "GlowParticlesEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            70,
+            77
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            70035,
+            70035
+          ],
+          "free_heap": [
+            129304,
+            129304
+          ],
+          "max_alloc_block": [
+            63488,
+            63488
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "CheckerboardEffect-pre-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "CheckerboardEffect-pre-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16
+    },
+    {
+      "name": "fx-CheckerboardEffect",
+      "op": "replace_module",
+      "id": "FX",
+      "type": "CheckerboardEffect"
+    },
+    {
+      "name": "CheckerboardEffect-16x16-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "CheckerboardEffect-16x16",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "measure": true,
+      "description": "CheckerboardEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            0
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            118,
+            118
+          ],
+          "free_heap": [
+            177584,
+            177584
+          ],
+          "max_alloc_block": [
+            98304,
+            98304
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "CheckerboardEffect-32x32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32
+    },
+    {
+      "name": "CheckerboardEffect-32x32",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "measure": true,
+      "description": "CheckerboardEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            1,
+            1
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            382,
+            382
+          ],
+          "free_heap": [
+            172140,
+            172140
+          ],
+          "max_alloc_block": [
+            90112,
+            90112
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "CheckerboardEffect-64x64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "CheckerboardEffect-64x64",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "measure": true,
+      "description": "CheckerboardEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            4,
+            4
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            2517,
+            2517
+          ],
+          "free_heap": [
+            162940,
+            162940
+          ],
+          "max_alloc_block": [
+            73728,
+            73728
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "CheckerboardEffect-128x128-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "CheckerboardEffect-128x128",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true,
+      "description": "CheckerboardEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            16,
+            18
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            47168,
+            47168
+          ],
+          "free_heap": [
+            126072,
+            126072
+          ],
+          "max_alloc_block": [
+            63488,
+            63488
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "SpiralEffect-pre-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "SpiralEffect-pre-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16
+    },
+    {
+      "name": "fx-SpiralEffect",
+      "op": "replace_module",
+      "id": "FX",
+      "type": "SpiralEffect"
+    },
+    {
+      "name": "SpiralEffect-16x16-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "SpiralEffect-16x16",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "measure": true,
+      "description": "SpiralEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            1,
+            1
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            416,
+            416
+          ],
+          "free_heap": [
+            174456,
+            174456
+          ],
+          "max_alloc_block": [
+            90112,
+            90112
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "SpiralEffect-32x32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32
+    },
+    {
+      "name": "SpiralEffect-32x32",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "measure": true,
+      "description": "SpiralEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            4,
+            4
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            1749,
+            1749
+          ],
+          "free_heap": [
+            173700,
+            173700
+          ],
+          "max_alloc_block": [
+            90112,
+            90112
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "SpiralEffect-64x64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "SpiralEffect-64x64",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "measure": true,
+      "description": "SpiralEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            16,
+            18
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            11492,
+            11492
+          ],
+          "free_heap": [
+            164496,
+            164496
+          ],
+          "max_alloc_block": [
+            77824,
+            77824
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "SpiralEffect-128x128-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "SpiralEffect-128x128",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true,
+      "description": "SpiralEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            72,
+            75
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            64536,
+            64536
+          ],
+          "free_heap": [
+            126084,
+            126084
+          ],
+          "max_alloc_block": [
+            63488,
+            63488
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "RipplesEffect-pre-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "RipplesEffect-pre-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16
+    },
+    {
+      "name": "fx-RipplesEffect",
+      "op": "replace_module",
+      "id": "FX",
+      "type": "RipplesEffect"
+    },
+    {
+      "name": "RipplesEffect-16x16-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "RipplesEffect-16x16",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "measure": true,
+      "description": "RipplesEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            3,
+            3
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            894,
+            894
+          ],
+          "free_heap": [
+            174404,
+            174404
+          ],
+          "max_alloc_block": [
+            94208,
+            94208
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "RipplesEffect-32x32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32
+    },
+    {
+      "name": "RipplesEffect-32x32",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "measure": true,
+      "description": "RipplesEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            8,
+            9
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            3520,
+            3520
+          ],
+          "free_heap": [
+            172116,
+            172116
+          ],
+          "max_alloc_block": [
+            90112,
+            90112
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "RipplesEffect-64x64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "RipplesEffect-64x64",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "measure": true,
+      "description": "RipplesEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            29,
+            30
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            22203,
+            22203
+          ],
+          "free_heap": [
+            164368,
+            164368
+          ],
+          "max_alloc_block": [
+            81920,
+            81920
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "RipplesEffect-128x128-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "RipplesEffect-128x128",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true,
+      "description": "RipplesEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            108,
+            116
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            81784,
+            81784
+          ],
+          "free_heap": [
+            127500,
+            127500
+          ],
+          "max_alloc_block": [
+            63488,
+            63488
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "LavaLampEffect-pre-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "LavaLampEffect-pre-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16
+    },
+    {
+      "name": "fx-LavaLampEffect",
+      "op": "replace_module",
+      "id": "FX",
+      "type": "LavaLampEffect"
+    },
+    {
+      "name": "LavaLampEffect-16x16-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "LavaLampEffect-16x16",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "measure": true,
+      "description": "LavaLampEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            1
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            330,
+            330
+          ],
+          "free_heap": [
+            174356,
+            174356
+          ],
+          "max_alloc_block": [
+            94208,
+            94208
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "LavaLampEffect-32x32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32
+    },
+    {
+      "name": "LavaLampEffect-32x32",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "measure": true,
+      "description": "LavaLampEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            2,
+            2
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            1322,
+            1322
+          ],
+          "free_heap": [
+            173620,
+            173620
+          ],
+          "max_alloc_block": [
+            90112,
+            90112
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "LavaLampEffect-64x64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "LavaLampEffect-64x64",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "measure": true,
+      "description": "LavaLampEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            8,
+            9
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            8846,
+            8846
+          ],
+          "free_heap": [
+            164400,
+            164400
+          ],
+          "max_alloc_block": [
+            73728,
+            73728
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "LavaLampEffect-128x128-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "LavaLampEffect-128x128",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true,
+      "description": "LavaLampEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            31,
+            33
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            55036,
+            55036
+          ],
+          "free_heap": [
+            127544,
+            127544
+          ],
+          "max_alloc_block": [
+            63488,
+            63488
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "GameOfLifeEffect-pre-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "GameOfLifeEffect-pre-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16
+    },
+    {
+      "name": "fx-GameOfLifeEffect",
+      "op": "replace_module",
+      "id": "FX",
+      "type": "GameOfLifeEffect"
+    },
+    {
+      "name": "GameOfLifeEffect-16x16-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16
+    },
+    {
+      "name": "GameOfLifeEffect-16x16",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 16,
+      "measure": true,
+      "description": "GameOfLifeEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            0
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            147,
+            147
+          ],
+          "free_heap": [
+            175368,
+            175368
+          ],
+          "max_alloc_block": [
+            90112,
+            90112
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "GameOfLifeEffect-32x32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32
+    },
+    {
+      "name": "GameOfLifeEffect-32x32",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "measure": true,
+      "description": "GameOfLifeEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            1,
+            1
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            658,
+            658
+          ],
+          "free_heap": [
+            169968,
+            169968
+          ],
+          "max_alloc_block": [
+            86016,
+            86016
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "GameOfLifeEffect-64x64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "GameOfLifeEffect-64x64",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64,
+      "measure": true,
+      "description": "GameOfLifeEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            5,
+            5
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            4415,
+            4415
+          ],
+          "free_heap": [
+            154608,
+            154608
+          ],
+          "max_alloc_block": [
+            69632,
+            69632
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    },
+    {
+      "name": "GameOfLifeEffect-128x128-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 128
+    },
+    {
+      "name": "GameOfLifeEffect-128x128",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 128,
+      "measure": true,
+      "description": "GameOfLifeEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            39,
+            46
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        },
+        "esp32-eth": {
+          "tick_us": [
+            72173,
+            72173
+          ],
+          "free_heap": [
+            93164,
+            93164
+          ],
+          "max_alloc_block": [
+            47104,
+            47104
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -13,6 +13,7 @@ This document describes the system as it is. Coding conventions live in [coding-
   - [Parallelism](#parallelism)
   - [Data exchange between modules](#data-exchange-between-modules)
   - [Event triggering between modules](#event-triggering-between-modules)
+  - [Robustness](#robustness)
   - [Hot path discipline](#hot-path-discipline)
   - [Platform abstraction](#platform-abstraction)
   - [Firmware vs board](#firmware-vs-board)
@@ -151,6 +152,19 @@ A control changes, or the module tree is mutated (a child added, deleted, replac
 This is the recognised layout/prepare-pass pattern: JUCE's `prepareToPlay` and UIKit's `layoutSubviews` work the same way — a framework-driven sweep over every object of the primary type, gated by per-object metadata (WPF's `AffectsMeasure`, here `controlChangeTriggersBuildState`). Not pub/sub: the publisher (HttpServerModule, or the mutation site) explicitly tells the coordinator to run the pass; the coordinator explicitly walks every module. The light domain consumes this mechanism for its mapping rebuild (see [§ Mapping and blending](#mapping-and-blending)) but the mechanism itself is core and applies to any module with derived state.
 
 If a module needs to actively notify a specific other module of an event (rather than publish data for polling, or change its own controls), the pattern is a direct method call from the producer to a known consumer — `ImprovProvisioningModule::loop1s` calls `networkModule_->setWifiCredentials(...)` when credentials arrive over UART. No event bus; the producer holds a pointer to the consumer set at wiring time (`main.cpp`). Pub/sub becomes the right pattern only when there are multiple unknown subscribers per event — projectMM has none today.
+
+## Robustness
+
+A running device must tolerate **any sequence of UI actions or API calls** — add, delete, replace, move, or reconfigure any module in any order, at any grid size — and keep running. Degraded or idle is an acceptable outcome; a crash, a hang, or a boot loop is not. This is a defining strongpoint: the device is something an end user can poke at freely without bricking it.
+
+The contract is bounded to **what the software accepts as input**. Power loss, a malformed OTA image, a brown-out, or electrical faults are out of scope — the firmware can't intercept those. Everything that arrives through the HTTP API, the WebSocket, or the UI is in scope.
+
+Why this needs stating as its own guarantee: the mutation-driven rebuild above ([§ Event triggering](#event-triggering-between-modules)) means a single API call can free and rebuild a large slice of the module tree mid-render. The hazard is **stale references** — a module holding a pointer to something that was just torn down. The two patterns that keep it safe:
+
+- **Resolve links at `onBuildState`, don't cache them across mutations.** A module that depends on another (a `Drivers` reading the active `Layer`, a `Layer` reading its `Layouts`) re-resolves that link from the tree at every rebuild rather than pinning a pointer once at wiring time. When the dependency is gone, the link resolves to null — not to freed memory.
+- **Tolerate null at the point of use.** Every consumer of a resolved link null-checks it and falls back to an idle state (no buffer, zero lights, nothing sent) rather than dereferencing. A driver with no Layer sends nothing; a Layer with no Layouts reports zero lights. Idle, not crashed.
+
+The enforcement is the test framework, not discipline alone (see the [Hard Rule](../CLAUDE.md#hard-rules)). When a sequence is found that crashes or wedges the device, the fix is **incomplete until a test reproduces that sequence** — so the same break can't return. Worked example: deleting the last Layer once left `Drivers` holding a dangling pointer to the freed Layer; `PreviewDriver` then read it and panicked (`LoadProhibited`), and because the tree persists, the device boot-looped. The fix made `Drivers` clear its drivers' Layer pointers to null when no Layer is active, and a regression test (`unit_PreviewDriver`, "tolerates the active Layer being deleted") drives a Layer delete + rebuild and asserts the driver ends up null, not dangling. The scenario layer adds the same coverage end-to-end: `clear_children` lets a scenario clear a container and rebuild its own pipeline from any starting tree, so the delete/rebuild path is exercised on real hardware, not just in unit tests.
 
 ## Hot path discipline
 

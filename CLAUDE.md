@@ -15,6 +15,7 @@ See `docs/architecture.md` for system design. This file contains only rules and 
 - **No duplication, in code or docs.** Same logic in two places belongs in one shared function; same fact in two docs belongs in one place the other links to. A comment or doc paragraph that restates what the code already says is duplication too — delete it. (Reuse a recognisable shape rather than inventing one — see *Common patterns first* above.)
 - **Data over objects in the hot path.** Where speed and memory matter most, design around plain contiguous data, not an object graph: a flat buffer of elements that one stage writes and the next stage reads, following the producer/consumer data flow in [docs/architecture.md](docs/architecture.md). This is a deliberate performance choice — a contiguous buffer is cache-friendly and lets a stage do integer math straight on the array, whereas per-element objects with virtual accessors are cache-hostile and allocation-heavy, exactly what the hot-path rules forbid. The one deliberate class hierarchy is the module tree (one `MoonModule` base, shallow subclasses, a single virtual-dispatch boundary), because uniform polymorphism is what lets the UI render any module generically with zero per-module UI code. Don't add inheritance elsewhere, and don't wrap hot-path buffer data in objects.
 - **Concrete first, abstract later.** Build one working feature end-to-end before extracting patterns into shared abstractions. Don't build the framework before the domain logic works.
+- **Robust to any input.** A running device tolerates any sequence of UI actions or API calls — add, delete, replace, or reconfigure any module in any order, at any grid size, and it keeps running. Degraded or idle is acceptable; crashed is not. This robustness is a defining strongpoint of projectMM, and it's guarded by the test framework, not by hope: a discovered crash drives a new test that pins the fix (see the Hard Rule). Out of scope: power loss, malformed OTA, brown-out, and other physical/electrical faults the firmware can't intercept — this principle is about what the software accepts as input.
 - **Domain-neutral core.** Separate core infrastructure from the light domain as much as practical. When mixing is necessary, use domain-neutral naming so the code stays open to future separation.
 - **Present tense only.** Code, comments, and documentation describe the system as it is now. No changelogs, no roadmaps. History lives in git commits. Exceptions: `docs/backlog/` (forward-looking) and `docs/history/` (backward-looking).
 
@@ -31,6 +32,8 @@ The design rationale for each rule below lives in [docs/architecture.md](docs/ar
 **Hot path discipline.** In the render loop and anything it calls: no heap allocations (`new`, `malloc`, `push_back`, `std::string`), no blocking (`delay`, `sleep`, `mutex.lock()` — use `try_lock`), integer math preferred over `float` per-light. Memory: single contiguous blocks outside the hot path, PSRAM via `heap_caps_malloc(..., MALLOC_CAP_SPIRAM)` for large buffers. Network input: synchronous by default. Full rules + rationale: [architecture.md § Hot path discipline](docs/architecture.md#hot-path-discipline).
 
 **Effects must run at every grid size and tick rate.** No crash on 0×0×0; animation math doesn't truncate to zero on fast devices. Full rule + rationale: [architecture.md § Effects](docs/architecture.md#effects).
+
+**Robust to any input.** No UI action or API-call sequence crashes or wedges a running device — including deleting, replacing, or clearing modules in any order. A crash or hang is a bug, not the user's fault; the fix is incomplete until a test reproduces the sequence. Full rule + rationale: [architecture.md § Robustness](docs/architecture.md#robustness).
 
 ## Process Rules
 
@@ -112,7 +115,7 @@ A commit that touches *only* `.github/`, `docs/`, `scripts/` (non-test), `README
 
 **When "commit now" is received** — compile the commit message in this format and execute the commit:
 
-8. Commit message format:
+8. Commit message format (the structure below uses hard newlines *between* its parts — title, summary, KPI line, bullets are each their own line. But do **not** hard-wrap *within* a part: the summary paragraph and each bullet are a single unbroken line that the viewer soft-wraps — same reasoning as the no-hard-wraps-in-markdown rule in [coding-standards.md](docs/coding-standards.md), keeps diffs clean and renders correctly on GitHub. Only the title obeys a length cap; everything else runs as long as it needs to on one line):
    - **Title line** — short imperative summary of the change (≤ 72 chars), e.g. `Add MirrorModifier and fix PreviewDriver sampling`
    - **Short summary** — a TL;DR for the commit: 1–3 sentences max, end-user readable, plain language. State *what* changed and *why* at the level a release-notes reader cares about — do NOT recap the change sections that follow (the bullets do that), and do NOT enumerate files. If your draft is longer than three sentences or restates section headers, cut it. A reader who only sees the title + this paragraph should know what shipped and why.
    - **KPI one-liner** — the `tick:Xus(FPS:Y)` line from step 7. Omit if the KPI gate didn't run (no `src/` changes).
@@ -185,8 +188,10 @@ docs/
     backlog.md             ← the prioritised to-build list
     moonmodules_draft/     ← draft specs for unimplemented modules (promoted out as they ship)
   history/                 ← backward-looking: accumulated wisdom
+    README.md              ← index: what's here + cross-repo trends + digest prompt
     decisions.md           ← actions, lessons, proven patterns
     *-inventory.md         ← prior-project surveys (v1, v2, moonlight)
+    <repo>.md              ← friend-repo monthly activity digests (FastLED, WLED, …)
   moonmodules/             ← one page per MoonModule (specs before code)
 ```
 

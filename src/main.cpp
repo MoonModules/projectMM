@@ -194,11 +194,13 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     auto* mirror = mm::ModuleFactory::create("MirrorModifier");
     layer->addChild(mirror);
 
-    // Drivers: top-level container; one or more Driver children. Today wired to
-    // the single active Layer (placeholder); the composition follow-up will read
-    // from the Layers container directly and blend across N Layer buffers.
+    // Drivers: top-level container; one or more Driver children. Bound to the
+    // Layers container — Drivers re-resolves the active Layer from it at every
+    // buildState, so a Layer cleared+rebuilt via the API self-heals without
+    // re-running this wiring. (The composition follow-up will blend across N
+    // Layer buffers read from the same container.)
     auto* drivers = static_cast<mm::Drivers*>(mm::ModuleFactory::create("Drivers"));
-    drivers->setLayer(layersContainer->activeLayer());
+    drivers->setLayers(layersContainer);
 
     auto* artnet = mm::ModuleFactory::create("ArtNetSendDriver");
     drivers->addChild(artnet);  // name = "ArtNetSend" (factory default) — disambiguates from a future ArtNetReceive

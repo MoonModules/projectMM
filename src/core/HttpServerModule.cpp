@@ -688,6 +688,15 @@ void HttpServerModule::handleDeleteModule(platform::TcpConnection& conn, const c
         return;
     }
 
+    // Non-editable submodules (Board, Preview, Improv) are apparatus, not
+    // swappable pipeline content — refuse here so the API enforces it, not just
+    // the UI's hidden delete button. They can still be disabled via their enable
+    // toggle; they just can't be removed from the tree.
+    if (!mod->userEditable()) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"module not deletable\"}");
+        return;
+    }
+
     // Remove from parent
     parent->removeChild(mod);
 
@@ -745,6 +754,12 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
         sendResponse(conn, 400, "application/json", "{\"error\":\"unknown type\"}");
         return;
     }
+
+    // Preserve the replaced module's name on the fresh one. Replace means "same
+    // slot, same identity, new type" — callers (and scenario replace_module
+    // steps) keep addressing it by that name. Without this the fresh module
+    // takes the factory display name, so a second replace can't find it.
+    fresh->setName(mod->name());
 
     // Swap in place; replaceChildAt returns the old module, which we own.
     MoonModule* old = parent->replaceChildAt(index, fresh);

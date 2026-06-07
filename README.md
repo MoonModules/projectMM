@@ -10,7 +10,7 @@ Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi,
 - **Effects, modifiers, layouts, drivers** (output currently ArtNet, plus the built-in 3D preview) — all pluggable, all configurable live, all persisted across reboots.
 - **One firmware, many devices.** ESP32, Teensy, Raspberry Pi, Windows / macOS / Linux desktop — the same source builds for each.
 - **Native 3D** from the start. 2D and 1D are the cases where one or two dimensions are size 1; effects don't pick a mode.
-- **Built-in browser UI.** The interface renders any module from its declared controls — adding a new effect needs zero UI code.
+- **Built-in browser UI.** The interface renders any module from its declared controls — adding a new module needs zero UI code.
 - **DMX and addressable LEDs in the same setup.** RGB strips, RGBW pixels, multi-channel par lights, moving heads — all addressed through the same pipeline.
 
 ## Performance
@@ -113,7 +113,7 @@ This is the current iteration of years of LED / light system development. Each p
 | **StarLight** | Standalone LED firmware | [ewowi/StarLight](https://github.com/ewowi/StarLight) |
 | **MoonLight** | Ground-up build: 60+ effects, memory-optimised mapping, 11 driver types | [MoonModules/MoonLight](https://github.com/MoonModules/MoonLight) |
 
-Their lessons and proven patterns are distilled in [`docs/history/`](docs/history/) — the codebase this project cherry-picks from, never porting wholesale.
+Their lessons and proven patterns are distilled in [`docs/history/`](docs/history/README.md) — the codebase this project cherry-picks from, never porting wholesale.
 
 ## Contributing
 

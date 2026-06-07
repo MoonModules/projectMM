@@ -8,13 +8,42 @@ Completed items are removed. This file is deleted when empty.
 
 ### Windows desktop port (blocker for 1.0 Windows binary)
 
-`src/platform/desktop/platform_desktop.cpp` won't compile under MSVC — it uses POSIX socket headers (`sys/socket.h`, `sendmsg`, `fcntl`, …) with no MSVC equivalent. The `build-windows` CI job and the `dist/projectMM-*.zip` upload are disabled in `release.yml` until this lands.
+The only real gap is the platform layer's networking: `src/platform/desktop/platform_desktop.cpp` uses POSIX Berkeley sockets that don't exist under MSVC. Almost everything else is already Windows-ready — CMake has the `if(MSVC)` branch (`/W4 /WX`, static runtime), `scripts/build/package_desktop.py` already has a `build_windows()` path that emits `dist/projectMM-windows-x64-vX.Y.Z.zip`, and `release.yml` carries a commented-out `build-windows` job placeholder. So this is "port one file + flip the switches that are already wired."
 
-Two approaches:
-1. **Conditional includes in `platform_desktop.cpp`** — `#ifdef _WIN32` blocks around every socket call. Smallest diff; local damage inside `src/platform/`.
-2. **Split into `platform_desktop_posix.cpp` + `platform_desktop_windows.cpp`** — CMake picks per host. Mirrors the ESP32/desktop split already in place.
+**The non-portable surface** (all in `platform_desktop.cpp` unless noted):
 
-Either path: ~2–3 h translation + Windows-side testing. Once green, `build-windows` flips and the v1.0.0 Windows zip ships automatically.
+- Headers `sys/socket.h`, `netinet/in.h`, `arpa/inet.h`, `sys/uio.h`, `unistd.h`, `fcntl.h` → Winsock2: `<winsock2.h>`, `<ws2tcpip.h>`.
+- `::socket / ::bind / ::connect / ::listen / ::accept / ::send / ::getsockname` — same names under Winsock but the fd is a `SOCKET` (unsigned), errors are `INVALID_SOCKET` / `SOCKET_ERROR`, and per-call errno is `WSAGetLastError()`.
+- `::close(fd)` → `closesocket(fd)`.
+- Non-blocking: `fcntl(fd, F_GETFL/F_SETFL, O_NONBLOCK)` → `ioctlsocket(fd, FIONBIO, &mode)`.
+- `inet_pton / inet_ntop` — present in `<ws2tcpip.h>` (Vista+), usable as-is.
+- `writev(fd, iovec[], n)` in `TcpConnection::writeChunks` (the ArtNet hot path) — no Winsock equivalent. Use `WSASend` with a `WSABUF[]` array (1:1 shape with `iovec`), or fall back to a single coalesced `send` of the concatenated chunks. Keep the non-blocking partial-write semantics the POSIX path already documents.
+- `nanosleep` → `std::this_thread::sleep_for` (already pulling `<thread>`/`<chrono>`), or keep `nanosleep` behind the POSIX branch.
+- One-time `WSAStartup(MAKEWORD(2,2), …)` at desktop start + `WSACleanup()` at exit — add to `main_desktop.cpp` under `_WIN32`.
+- `main_desktop.cpp`: `sigaction(SIGINT)` / `signal(SIGPIPE, SIG_IGN)` → on Windows use `signal(SIGINT, …)` (SIGPIPE doesn't exist; socket writes just return an error, which the code already checks).
+- `std::filesystem` usage is already portable — no change. Watch `fsRoot_` default `"build"` works the same; path separators handled by `std::filesystem`.
+
+**Recommended approach: `#ifdef _WIN32` inside `platform_desktop.cpp`** (approach 1), not a file split. The divergent surface is ~15 call sites in one file; a thin set of `#ifdef` blocks (or a few `inline` shims at the top: `closesocket`→`close` alias, an `iovec`/`WSABUF` adapter) keeps it local and readable. A separate `platform_desktop_windows.cpp` would duplicate the ~90% of the file that's already portable (filesystem, time, the socket *logic*) — that's the duplication the principles warn against. Split only if the `#ifdef` density crosses the 30-second-readability line.
+
+**Step-by-step (do this on the Windows machine):**
+
+1. **Dev environment.** Install Visual Studio 2022 Build Tools (MSVC v143 + Windows SDK), CMake 3.20+, Python 3, and [uv](https://docs.astral.sh/uv/). Clone the repo. ESP-IDF is *not* needed for desktop-only dev.
+2. **Confirm the baseline fails as expected.** `uv run scripts/build/build_desktop.py` (it already routes to `build/windows/`) — it should fail only in `platform_desktop.cpp` on the POSIX headers. That confirms nothing else is in the way.
+3. **Port the surface above.** Add `#ifdef _WIN32` branches per call site; link `ws2_32` in CMake (`target_link_libraries(mm_platform PUBLIC $<$<PLATFORM_ID:Windows>:ws2_32>)`).
+4. **Build + run locally.** `build_desktop.py`, then run `build/windows/Release/projectMM.exe`, open `http://localhost:8080/`, verify the UI loads, an effect renders in the 3D preview, and ArtNet output works (point it at a listener or a second device).
+5. **Tests.** `ctest` (unit) and `uv run scripts/scenario/run_scenario.py` (scenarios) must pass on Windows — they exercise `platform_desktop.cpp` (the scenario runner and `unit_*` link it). This is the real port verification.
+6. **MoonDeck.** `uv run scripts/moondeck.py`, open `http://localhost:8420`, and confirm the dev console works on Windows: the PC tab builds / runs / tests (it shells out to the same scripts), and the Live tab discovers devices. MoonDeck is already substantially Windows-aware — `scripts/moondeck.py` has `_IS_WIN` branches for process control (`taskkill`/`tasklist` vs `pkill`/`pgrep`, `CREATE_NEW_PROCESS_GROUP`) and a `COM*` serial-port scan — so the work here is verifying those paths on a real Windows box, not writing them. The ESP32 flash tab additionally needs ESP-IDF installed (same prerequisite as macOS, not a Windows-specific gap).
+7. **Package.** `uv run scripts/build/package_desktop.py` → confirm it produces `dist/projectMM-windows-x64-vX.Y.Z.zip` with a runnable `projectMM.exe` + README.txt.
+8. **Re-enable CI.** Uncomment the `build-windows` job in `.github/workflows/release.yml` (the scaffolding note at the job site says the surrounding structure stays identical), add `windows` to the `release` job's `needs:`, and restore the `dist/projectMM-*.zip` glob (line ~360). After the next tag, the v1.0 Windows zip ships automatically.
+9. **README.** Update the "Getting started → Desktop" note in `README.md` (today it says macOS arm64 is the only desktop binary; add the Windows zip + run instructions).
+
+**Already cross-platform — no work, just verify:**
+
+- **Web installer + `preview_installer.py`** — flashing happens in-browser via Web Serial (esptool-js) in Chrome/Edge, and Windows is a first-class Web Serial target. `preview_installer.py` only serves files + generates a manifest; it doesn't shell out to native esptool. So the *end-user flashing* story on Windows needs zero porting — it's a plus for Windows, not a gap. Just confirm the picker loads and a flash completes from a Windows Chrome/Edge.
+- **Serial helper scripts** (`improv_probe.py`, `improv_smoke_test.py`, `monitor_esp32.py`) — already take a `--port` string; on Windows pass `COM3` instead of `/dev/tty.usbserial-X` (improv_probe's `--help` already shows both). No code change.
+- **`std::filesystem`, time, threading** in `platform_desktop.cpp` — portable as-is.
+
+Estimate: ~2–4 h (the port itself is small; most of the time is local Windows build/test iteration). Once `ctest` + scenarios are green on Windows and the CI job flips, Windows is a first-class dev + run target.
 
 ### Release 2.0 — distribution catches up to the source tree
 
@@ -240,7 +269,7 @@ Audio-reactive lighting (and motion-reactive) is core to what WLED-MM / MoonLigh
 4. The first audio-reactive effect(s) consuming it.
 5. IMU and line-in slot into the same source-module + platform-API shape afterwards.
 
-Cherry-pick the proven audio pipeline from MoonLight / WLED-MM (FFT band layout, AGC, beat detection) — reference, don't port wholesale, per [history](../history/) practice. Specs before code: a `MicrophoneModule.md` (and the source-category contract) get written and reviewed before implementation.
+Cherry-pick the proven audio pipeline from MoonLight / WLED-MM (FFT band layout, AGC, beat detection) — reference, don't port wholesale, per [history](../history/README.md) practice. Specs before code: a `MicrophoneModule.md` (and the source-category contract) get written and reviewed before implementation.
 
 ---
 

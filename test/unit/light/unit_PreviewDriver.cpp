@@ -1,9 +1,11 @@
 // @module PreviewDriver
 
 #include "doctest.h"
+#include "core/Scheduler.h"
 #include "light/drivers/PreviewDriver.h"
 #include "light/drivers/Drivers.h"
 #include "light/layers/Layer.h"
+#include "light/layers/Layers.h"
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/SphereLayout.h"
@@ -126,4 +128,49 @@ TEST_CASE("PreviewDriver downsamples a large layout via index stride") {
 TEST_CASE("PreviewDriver fps default") {
     mm::PreviewDriver driver;
     CHECK(driver.fps == 24);
+}
+
+// Regression: deleting the active Layer must not leave a driver holding a
+// dangling layer_ pointer. Previously Drivers::passBufferToDrivers early-returned
+// when the active Layer was null, leaving PreviewDriver's layer_ pointing at the
+// freed Layer; the next onBuildState read layer_->layouts() on freed memory and
+// crashed the device (LoadProhibited → boot loop, since the broken tree persists).
+// Now passBufferToDrivers clears the drivers' layer_/sourceBuffer_ to null, a safe
+// idle state. This drives the real path: Drivers bound to a Layers CONTAINER
+// (self-healing), the Layer removed, then buildState re-resolves activeLayer()=null.
+TEST_CASE("PreviewDriver tolerates the active Layer being deleted") {
+    mm::GridLayout g; g.width = 16; g.height = 16; g.depth = 1;
+    mm::Layouts group; group.addChild(&g);
+    mm::Layers layers;
+    auto* layer = new mm::Layer();
+    layer->setChannelsPerLight(3);
+    layers.addChild(layer);
+    layers.setLayouts(&group);
+    layers.onBuildControls();
+
+    mm::Drivers drivers;
+    auto* preview = new mm::PreviewDriver();
+    CaptureBroadcaster cap;
+    preview->setBroadcaster(&cap);
+    drivers.addChild(preview);
+    drivers.setLayers(&layers);          // container-bound: layer_ re-resolved at buildState
+    drivers.onBuildControls();
+
+    layers.onBuildState();
+    drivers.onBuildState();
+    REQUIRE(preview->layer() == layer);  // wired to the active Layer
+
+    // Remove the only Layer, then rebuild — activeLayer() now returns null.
+    layers.removeChild(layer);
+    layer->teardown();
+    mm::Scheduler::deleteTree(layer);    // free it — a stale pointer would now dangle
+
+    layers.onBuildState();
+    drivers.onBuildState();              // must NOT deref the freed Layer
+    CHECK(preview->layer() == nullptr);  // cleared, not dangling
+
+    // And producing a frame on the empty pipeline is a safe no-op (no crash).
+    preview->buildAndSendCoordTable();
+    preview->sendFrame();
+    CHECK(cap.frameMsgs == 0);           // nothing to send with no layer
 }
