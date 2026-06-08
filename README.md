@@ -15,13 +15,13 @@ Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi,
 
 ## Performance
 
-What projectMM delivers, measured end-to-end through a full render pipeline — an effect, a modifier, and an output driver (the canonical sweep runs NoiseEffect → MultiplyModifier XY (mirror fold) → ArtNet, but any effect/modifier/driver combination runs the same path). **FPS shown is computed from the underlying tick measurement (FPS = 1,000,000 / tick_us)** — tick is the unit the contracts and assertions actually use; FPS is the headline number.
+Measured end-to-end through a full render pipeline (effect → modifier → ArtNet output) on real hardware. FPS is derived from the per-frame tick time.
 
-Every measurement below comes from a real scenario run on the listed board — `test/scenarios/light/scenario_GridLayout_grid_sizes.json` is the canonical sweep. Per-step `contract.<target>` blocks carry the promises the device must hit; per-step `observed.<target>` blocks carry the latest reading.
+The **Desktop** column is host-CPU-bound, not OS-bound — the numbers track the machine, not macOS vs Windows vs Linux. Captured on Apple Silicon (M-series); the macOS and Windows binaries run the same code on comparable hardware. (Per-OS desktop benchmarks are a 2.0 item.)
 
 ### Frames per second
 
-| Grid | Lights | Apple Silicon (M-series) | Olimex `esp32-eth-wifi` | Olimex `esp32-eth` | LOLIN S3 N16R8 `esp32s3-n16r8` |
+| Grid | Lights | Desktop | Olimex `esp32-eth-wifi` | Olimex `esp32-eth` | LOLIN S3 N16R8 `esp32s3-n16r8` |
 |---|---:|---:|---:|---:|---:|
 | 16×16 | 256 | — *(below host clock resolution)* | 1,543 | 1,628 | 1,672 |
 | 32×32 | 1,024 | 166,667 | 447 | 432 | 287 |
@@ -34,7 +34,7 @@ The LOLIN S3 N16R8 is WiFi-only and runs with `Network.txPowerSetting` capped to
 
 Each cell is **free internal RAM / largest contiguous internal-RAM block**. Internal RAM is the scarce, comparable resource across all boards — so for PSRAM boards (the S3) this is internal-only, NOT the PSRAM-merged total (we assume the 8 MB PSRAM pool is large enough that it isn't the constraint). The block size is the memory-pressure signal that matters: free RAM can be ample while fragmentation leaves no single block big enough for the next allocation.
 
-| Grid | Apple Silicon (M-series) | Olimex `esp32-eth-wifi` | Olimex `esp32-eth` | LOLIN S3 N16R8 `esp32s3-n16r8` |
+| Grid | Desktop | Olimex `esp32-eth-wifi` | Olimex `esp32-eth` | LOLIN S3 N16R8 `esp32s3-n16r8` |
 |---|---:|---:|---:|---:|
 | 16×16 | unlimited | 139 KB / 52 KB | 178 KB / 100 KB | 238 KB / 160 KB |
 | 32×32 | unlimited | 132 KB / 50 KB | 172 KB / 92 KB | 240 KB / 152 KB |

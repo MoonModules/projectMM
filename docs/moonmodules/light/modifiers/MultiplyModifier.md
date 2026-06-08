@@ -22,7 +22,7 @@ The defaults (`multiply 2/2/1`, `mirror all on`) reproduce the canonical mirror-
 
 ## Cross-domain wiring
 
-A Layer applies its first enabled modifier during `rebuildLUT` (modifier chaining — where order would matter, e.g. multiply-then-checkerboard ≠ checkerboard-then-multiply — is not yet implemented; see [architecture.md § Modifiers](../../../architecture.md#modifiers)). `mapToPhysical` emits physical box indices; the Layer translates them to driver indices and drops any that fall outside the real light set.
+A Layer applies its first enabled modifier during `rebuildLUT` — modifier chaining (where order matters, e.g. multiply-then-checkerboard ≠ checkerboard-then-multiply) is not implemented; see [architecture.md § Modifiers](../../../architecture.md#modifiers). `mapToPhysical` emits physical box indices; the Layer translates them to driver indices and drops any that fall outside the real light set.
 
 ## Tests
 

@@ -85,7 +85,12 @@ Use project typedefs (`lengthType`, `nrOfLightsType`) consistently so types matc
 
 ## Compiler warnings
 
-All targets build with `-Wall -Wextra -Werror`. No warning is "harmless" — fix it or silence it explicitly with a `-Wno-…` justified in code.
+All targets build warnings-as-errors: `-Wall -Wextra -Werror` on Clang/GCC (macOS, Linux, ESP32), `/W4 /WX` on MSVC (Windows) — gated by compiler in `CMakeLists.txt`. No warning is "harmless" — fix it or silence it explicitly with a `-Wno-…` (Clang/GCC) or `#pragma warning` justified in code.
+
+**A clean local build is not proof the Windows build passes.** MSVC's `/W4` flags things Clang/GCC's `-Wall -Wextra` don't — most commonly **signed/unsigned mismatch in comparisons** (C4389), e.g. `(x & 1) == 1u` where the left side is signed: harmless logically, fatal under `/WX`. This has slipped past the macOS gate and broken Windows CI more than once. So:
+
+- In a comparison, keep both sides the same signedness — don't mix a signed expression with an unsigned literal (`== 1`, not `== 1u`, when the other side is signed). Watch `& `, `%`, and subtraction results, which carry the signedness of their operands.
+- A change that only built+passed on macOS/Linux is **not** verified for Windows. The Windows CI job (`release.yml`) is the real gate for MSVC-only warnings; let it run before considering a `src/`-touching change done, or build with MSVC locally if you have it.
 
 ## Static checks
 
