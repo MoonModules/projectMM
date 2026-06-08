@@ -7,11 +7,19 @@ Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi,
 ## What you get
 
 - **Plug in, open a browser, see lights.** A live 3D preview of every effect, every modifier, every layout, controllable from the same browser tab.
+- **16,384 LEDs on a classic ESP32.** A full 128×128 grid runs on plain ESP32 hardware (not just the S3) — memory-adaptive, degrading gracefully rather than failing on tight boards.
 - **Effects, modifiers, layouts, drivers** (output currently ArtNet, plus the built-in 3D preview) — all pluggable, all configurable live, all persisted across reboots.
 - **One firmware, many devices.** ESP32, Teensy, Raspberry Pi, Windows / macOS / Linux desktop — the same source builds for each.
 - **Native 3D** from the start. 2D and 1D are the cases where one or two dimensions are size 1; effects don't pick a mode.
 - **Built-in browser UI.** The interface renders any module from its declared controls — adding a new module needs zero UI code.
 - **DMX and addressable LEDs in the same setup.** RGB strips, RGBW pixels, multi-channel par lights, moving heads — all addressed through the same pipeline.
+- **Flash from the browser in seconds.** The web installer picks your board, flashes the matching firmware, and hands WiFi credentials to the device over USB (Improv) — choices remembered between sessions.
+
+## Under the hood
+
+- **ESP-IDF directly, no Arduino.** The ESP32 build is pure ESP-IDF (v6.x) — native RMT/SPI LED drivers, `esp_http_server`, FreeRTOS — built with `idf.py`, not PlatformIO or the Arduino framework. See [building.md § Why not Arduino](docs/building.md#why-not-arduino).
+- **No third-party libraries.** No FastLED, no ESPAsyncWebServer, no ArduinoJson — the colour math, the HTTP/WebSocket server, and the control storage are all in-tree. A library, when genuinely needed, lives behind the platform boundary in `src/platform/`, never in core. The full rationale + replacements: [building.md § Third-party libraries](docs/building.md#third-party-libraries).
+- **One module model.** Every effect, modifier, layout, and driver is a `MoonModule` — one base class, a uniform lifecycle, declared controls. That uniformity is why the UI renders any module with zero per-module code, and why a new capability is a new file, not a new framework. See [architecture.md § MoonModules](docs/architecture.md#moonmodules).
 
 ## Performance
 
