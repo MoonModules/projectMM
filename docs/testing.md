@@ -287,7 +287,7 @@ uv run scripts/docs/generate_test_docs.py            # writes both docs
 uv run scripts/docs/generate_test_docs.py --check    # exits non-zero on drift (CI-friendly)
 ```
 
-The check mode is the planned commit gate: if a contributor adds a `TEST_CASE` without re-running the generator, `--check` flags it before the commit goes out.
+`--check` exits non-zero when the docs are stale — a contributor who adds a `TEST_CASE` without re-running the generator gets flagged. Run it in CI or before a commit to keep the generated docs in sync.
 
 ## Unit tests
 

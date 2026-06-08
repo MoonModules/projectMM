@@ -68,8 +68,6 @@ for port in /dev/tty.usbserial-*; do
 done
 ```
 
-A future `--from-list <devicelist.json>` mode that reads a per-device manifest is on the 2.0 roadmap, deferred until projectMM has a devicelist schema.
-
 ## Prior art
 
 - **projectMM-v1's `deploy/wifi.py` + `deploy/flashfs.py --wifi`** — wrote credentials to a local `data/state/sta1.json`, baked them into a LittleFS partition image, esptool-flashed the partition to each `test: true` device in `deploy/devicelist.json`. Same rack-provisioning use case; Improv replaces the partition-baking-and-reflashing path with live serial provisioning (devices stay running, no flash mode required).
