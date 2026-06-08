@@ -48,7 +48,10 @@ public:
         const lengthType s = size ? size : 1;
         // Parity of the square this light sits in. Even parity = "on" square by
         // default; `invert` swaps which parity passes.
-        const bool on = (((lx / s) + (ly / s) + (lz / s)) & 1) == (invert ? 1u : 0u);
+        // Parity is non-negative; compare as signed int so MSVC (/W4) doesn't
+        // flag a signed/unsigned mismatch against an unsigned literal.
+        const int parity = ((lx / s) + (ly / s) + (lz / s)) & 1;
+        const bool on = parity == (invert ? 1 : 0);
         if (!on) return;  // dropped — no physical destination (the mask)
         outPhysicals[0] = static_cast<nrOfLightsType>(lz) * static_cast<nrOfLightsType>(physW) * static_cast<nrOfLightsType>(physH) +
                           static_cast<nrOfLightsType>(ly) * static_cast<nrOfLightsType>(physW) +
