@@ -16,7 +16,8 @@
 #include "light/effects/RipplesEffect.h"
 #include "light/effects/LavaLampEffect.h"
 #include "light/effects/GameOfLifeEffect.h"
-#include "light/modifiers/MirrorModifier.h"
+#include "light/modifiers/MultiplyModifier.h"
+#include "light/modifiers/CheckerboardModifier.h"
 #include "light/drivers/ArtNetSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
 #include "core/HttpServerModule.h"
@@ -59,7 +60,8 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::RipplesEffect>("RipplesEffect", "light/effects/RipplesEffect.md");
     mm::ModuleFactory::registerType<mm::LavaLampEffect>("LavaLampEffect", "light/effects/LavaLampEffect.md");
     mm::ModuleFactory::registerType<mm::GameOfLifeEffect>("GameOfLifeEffect", "light/effects/GameOfLifeEffect.md");
-    mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier", "light/modifiers/MirrorModifier.md");
+    mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier", "light/modifiers/MultiplyModifier.md");
+    mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers/CheckerboardModifier.md");
     mm::ModuleFactory::registerType<mm::ArtNetSendDriver>("ArtNetSendDriver", "light/drivers/ArtNetSendDriver.md");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers/PreviewDriver.md");
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/HttpServerModule.md");
@@ -191,23 +193,29 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     auto* noise = mm::ModuleFactory::create("NoiseEffect");
     layer->addChild(noise);
 
-    auto* mirror = mm::ModuleFactory::create("MirrorModifier");
-    layer->addChild(mirror);
+    // MultiplyModifier with its default mult=2 / mirror=true on X,Y reproduces
+    // the old MirrorModifier-XY canonical pipeline (fold each axis in half).
+    auto* multiply = mm::ModuleFactory::create("MultiplyModifier");
+    layer->addChild(multiply);
 
-    // Drivers: top-level container; one or more Driver children. Today wired to
-    // the single active Layer (placeholder); the composition follow-up will read
-    // from the Layers container directly and blend across N Layer buffers.
+    // Drivers: top-level container; one or more Driver children. Bound to the
+    // Layers container — Drivers re-resolves the active Layer from it at every
+    // buildState, so a Layer cleared+rebuilt via the API self-heals without
+    // re-running this wiring. Binding the container (not a single Layer) is what
+    // lets a driver read across N Layer buffers from one place — the hook
+    // multi-layer blending uses.
     auto* drivers = static_cast<mm::Drivers*>(mm::ModuleFactory::create("Drivers"));
-    drivers->setLayer(layersContainer->activeLayer());
+    drivers->setLayers(layersContainer);
 
     auto* artnet = mm::ModuleFactory::create("ArtNetSendDriver");
     drivers->addChild(artnet);  // name = "ArtNetSend" (factory default) — disambiguates from a future ArtNetReceive
     artnet->markWiredByCode();
 
     auto* preview = static_cast<mm::PreviewDriver*>(mm::ModuleFactory::create("PreviewDriver"));
-    // PreviewDriver reads the active Layer (via Drivers' setLayer wiring) for the
-    // light positions and the sparse driver buffer it streams; it owns its own
-    // scratch buffers, so no externally-owned frame is needed.
+    // PreviewDriver reads the active Layer (resolved by the Drivers container's
+    // setLayers(layersContainer) wiring above) for the light positions and the
+    // sparse driver buffer it streams; it owns its own scratch buffers, so no
+    // externally-owned frame is needed.
     drivers->addChild(preview);
     // These two drivers are wired by code here (preview gets its broadcaster set
     // below, once httpServer exists; ArtNet its IP). Mark them wired-by-code so a

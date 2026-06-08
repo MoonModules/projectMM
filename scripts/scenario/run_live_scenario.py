@@ -11,7 +11,15 @@ import sys
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 from pathlib import Path
+
+
+def _mod_path(name: str) -> str:
+    """`/api/modules/<name>` with the name URL-encoded. Module names can contain
+    spaces (ensureUniqueName disambiguates duplicates as "Layer 2"), which urllib
+    rejects in a raw URL — encode so delete/replace/clear can address them."""
+    return "/api/modules/" + urllib.parse.quote(name, safe="")
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 SCENARIOS_DIR = ROOT / "test" / "scenarios"
@@ -25,25 +33,46 @@ import _observed  # noqa: E402
 
 
 class Client:
+    # Mutating ops (add/delete/replace/control) trigger a full buildState on the
+    # device — at 128x128 that frees/reallocates a large buffer + LUT and can
+    # take several seconds on a busy ESP32. 5s was too tight (deletes timed out
+    # mid-teardown, leaving a half-mutated tree). 15s clears the worst case while
+    # still catching a genuinely hung device.
+    TIMEOUT_S = 15
+
     def __init__(self, host: str):
         self.base = f"http://{host}"
 
+    def _send(self, req):
+        # A mutating call triggers buildState; while the device is mid-rebuild it
+        # can drop the TCP connection (ConnectionResetError / "remote end closed")
+        # or briefly refuse one. The device recovers in well under a second, so a
+        # single transient drop shouldn't cascade-fail the run — retry once after
+        # a short settle. A genuine HTTPError (4xx/5xx from the handler) is a real
+        # result and is NOT retried; it propagates to the caller.
+        for attempt in range(2):
+            try:
+                with urllib.request.urlopen(req, timeout=self.TIMEOUT_S) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.HTTPError:
+                raise  # a real handler response — let the caller decide
+            except (urllib.error.URLError, ConnectionError, OSError):
+                if attempt == 0:
+                    time.sleep(1.0)
+                    continue
+                raise
+
     def get(self, path: str):
-        req = urllib.request.Request(f"{self.base}{path}")
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            return json.loads(resp.read())
+        return self._send(urllib.request.Request(f"{self.base}{path}"))
 
     def post(self, path: str, data: dict):
         body = json.dumps(data).encode()
-        req = urllib.request.Request(f"{self.base}{path}", data=body,
-                                     headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            return json.loads(resp.read())
+        return self._send(urllib.request.Request(
+            f"{self.base}{path}", data=body,
+            headers={"Content-Type": "application/json"}))
 
     def delete(self, path: str):
-        req = urllib.request.Request(f"{self.base}{path}", method="DELETE")
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            return json.loads(resp.read())
+        return self._send(urllib.request.Request(f"{self.base}{path}", method="DELETE"))
 
 
 def _today_iso() -> str:
@@ -164,6 +193,21 @@ def _collect_module_names(state: dict) -> set:
     return names
 
 
+def _child_names_of(state: dict, container_name: str) -> list:
+    """Direct-child names of the named container in the live tree (depth-1 only).
+    Used by clear_children to enumerate what to delete; the device tears down each
+    child's whole subtree, so only the immediate children need naming."""
+    def find(modules):
+        for m in modules:
+            if m.get("name") == container_name:
+                return [c.get("name") for c in m.get("children", []) if c.get("name")]
+            hit = find(m.get("children", []))
+            if hit is not None:
+                return hit
+        return None
+    return find(state.get("modules", [])) or []
+
+
 def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                  update_contract: bool = False,
                  update_reason: str | None = None) -> dict:
@@ -206,27 +250,39 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
         results["passed"] = False
         return results
 
-    # Pre-flight: every id touched by the steps must already exist on the device.
-    # A scenario in mutate mode is meant to tweak the live pipeline; a missing id
-    # means the scenario was written against a different wiring than the device
-    # has, and the old silent-skip path produced meaningless passes.
+    # Pre-flight: every id touched by a step must be reachable — either already
+    # on the device, OR added by an earlier add_module in this scenario. A
+    # canvas-preparing scenario clears the containers and builds its own tree, so
+    # its set_control/replace ids won't exist on the device yet; they're created
+    # mid-run. A still-unreachable id is a real typo / wrong-wiring bug.
     target = "unknown"
     try:
         live_state = client.get("/api/state")
         target = _detect_target(live_state)
-        live_names = _collect_module_names(live_state)
-        # Include reset block ids in the pre-flight — a reset step that
-        # references a missing module would silently no-op and the baseline
-        # would measure unintended state.
-        referenced = {step["id"] for step in scenario.get("steps", [])
-                      if step.get("op") in ("set_control", "delete_module") and step.get("id")}
-        referenced |= {r["id"] for r in scenario.get("reset", [])
-                       if r.get("op") == "set_control" and r.get("id")}
-        missing = sorted(referenced - live_names)
+        # Walk the steps in order, growing the reachable set as add_module steps
+        # create ids. The containers (Layouts/Layers/Drivers) are always present.
+        reachable = _collect_module_names(live_state)
+        missing = []
+        for step in scenario.get("steps", []):
+            sid = step.get("id")
+            opn = step.get("op")
+            if opn == "add_module" and sid:
+                reachable.add(sid)
+            elif opn in ("set_control", "delete_module", "remove_module", "replace_module", "clear_children") and sid:
+                # `optional` steps are best-effort (e.g. shrink the grid before a
+                # clear, if a grid exists) — the executor skips them on a missing
+                # target, so they don't count as a wiring bug in the pre-flight.
+                if sid not in reachable and not step.get("optional"):
+                    missing.append(sid)
+        # Reset-block ids must exist before steps run (no add can precede them).
+        for r in scenario.get("reset", []):
+            if r.get("op") == "set_control" and r.get("id") and r["id"] not in reachable:
+                missing.append(r["id"])
+        missing = sorted(set(missing))
         if missing:
-            print(f"\n  FAIL — mutate scenario references ids not on the live device: "
-                  f"{', '.join(missing)}. Re-flash, or write the scenario against the "
-                  f"actual wiring.")
+            print(f"\n  FAIL — scenario references ids that are neither on the live "
+                  f"device nor added by an earlier step: {', '.join(missing)}. "
+                  f"Fix the wiring or add the module first.")
             results["passed"] = False
             return results
     except Exception as e:
@@ -271,7 +327,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
 
     # Live runs `steps` only — `fixture` is the in-process equivalent of what
     # main.cpp already wired on the device.
-    for step in scenario.get("steps", []):
+    for step_index, step in enumerate(scenario.get("steps", [])):
         step_name = step.get("name", "?")
         op = step.get("op", "")
         step_result = {"name": step_name, "op": op}
@@ -291,9 +347,27 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
             elif op == "set_control":
                 data = {"module": step["id"], "control": step["key"],
                         "value": step["value"]}
-                resp = client.post("/api/control", data)
-                step_result["status"] = "ok" if resp.get("ok") else "error"
-                print(f"  SET   {step.get('id', '?')}.{step.get('key', '?')} = {step.get('value', '?')}")
+                try:
+                    resp = client.post("/api/control", data)
+                    step_result["status"] = "ok" if resp.get("ok") else "error"
+                    print(f"  SET   {step.get('id', '?')}.{step.get('key', '?')} = {step.get('value', '?')}")
+                except urllib.error.HTTPError as ce:
+                    if step.get("optional") and ce.code == 404:
+                        # An `optional` set_control on a missing module (e.g. shrink
+                        # a grid a prior run's cleanup removed) is a no-op, not a fail.
+                        step_result["status"] = "ok"
+                        print(f"  SET   {step.get('id','?')}.{step.get('key','?')} — skipped (optional, not present)")
+                    elif ce.code == 404:
+                        # Transient: a set_control issued right after a structural
+                        # change (replace/add) can race the device's buildState and
+                        # briefly see "module not found" while the tree rebuilds.
+                        # Settle and retry once before treating it as a real failure.
+                        time.sleep(1.0)
+                        resp = client.post("/api/control", data)
+                        step_result["status"] = "ok" if resp.get("ok") else "error"
+                        print(f"  SET   {step.get('id','?')}.{step.get('key','?')} = {step.get('value','?')} (retried)")
+                    else:
+                        raise
                 # If this step doesn't measure (so `collect_metrics` won't wait
                 # for us), still give the device a moment — a set_control that
                 # triggers buildState briefly mutates the module tree, and the
@@ -302,10 +376,53 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                 if not (step.get("measure") or op == "measure"):
                     time.sleep(0.5)
 
-            elif op == "delete_module":
-                resp = client.delete(f"/api/modules/{step['id']}")
+            elif op in ("delete_module", "remove_module"):
+                # Both names mean the same thing — accept either so a scenario
+                # reads identically on the in-process runner (which uses
+                # `remove_module`) and here. The two runners must never diverge
+                # on op names, or a scenario silently no-ops on one tier.
+                resp = client.delete(_mod_path(step["id"]))
                 step_result["status"] = "ok" if resp.get("ok") else "error"
                 print(f"  -     {step.get('id', '?')}")
+
+            elif op == "clear_children":
+                # Delete every child of a container, leaving the container.
+                # The "prepare my own canvas" primitive — a scenario assumes
+                # nothing about the device's starting tree. Enumerate children
+                # from /api/state, DELETE each by name. The device tears down the
+                # whole subtree per delete (handleDeleteModule), so clearing a
+                # Layer's effect also drops any modifier under it.
+                container_id = step["id"]
+                state = client.get("/api/state")
+                child_names = _child_names_of(state, container_id)
+                cleared = skipped = 0
+                for cn in child_names:
+                    try:
+                        client.delete(_mod_path(cn))
+                        cleared += 1
+                    except urllib.error.HTTPError as de:
+                        # Non-deletable submodules (Preview, Board, Improv) return
+                        # 400 "module not deletable" — that's expected, skip them.
+                        # Mirrors the in-process op, which skips !userEditable().
+                        # Re-raise anything that isn't a clean deletability refusal.
+                        if de.code == 400:
+                            skipped += 1
+                        else:
+                            raise
+                step_result["status"] = "ok"
+                tail = f", {skipped} kept" if skipped else ""
+                print(f"  clr   {container_id} ({cleared} cleared{tail})")
+                time.sleep(0.5)  # let buildState settle before the next add
+
+            elif op == "replace_module":
+                # Swap a child for a fresh module of another type at the same
+                # slot, keeping its name — mirrors the in-process op and the
+                # device's POST /api/modules/<name>/replace endpoint.
+                resp = client.post(_mod_path(step["id"]) + "/replace",
+                                   {"type": step["type"]})
+                step_result["status"] = "ok" if resp.get("ok") else "error"
+                print(f"  ~     {step.get('id', '?')} → {step.get('type', '?')}")
+                time.sleep(0.5)
 
             elif op == "measure":
                 # Pure measurement step (introduced for the build-up scenario shape).
@@ -487,10 +604,13 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
             # commit a renegotiated promise.
             if update_contract:
                 # Preserve any per-step tolerance overrides already in place.
+                # Key by step INDEX, not the step dict — a dict is unhashable, so
+                # `(step, target)` as a key raised TypeError (this whole path is
+                # only reached with --update-contract, which the gates don't pass).
                 existing = step.get("contract", {}).get(target, {})
-                if (step, target) not in pending_contract_originals:
+                if (step_index, target) not in pending_contract_originals:
                     # Deep enough copy: existing is a flat dict of scalars.
-                    pending_contract_originals[(step, target)] = (
+                    pending_contract_originals[(step_index, target)] = (
                         dict(existing) if existing else None
                     )
                 new_block = {
@@ -555,7 +675,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
     # Cleanup: delete modules that were created by this scenario
     for module_id in reversed(created_modules):
         try:
-            client.delete(f"/api/modules/{module_id}")
+            client.delete(_mod_path(module_id))
             print(f"  -     {module_id} (cleanup)")
         except Exception:
             pass
@@ -572,11 +692,11 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
     if not contract_safe_to_write and update_contract:
         # Revert any contract mutations we made to the in-memory tree so the
         # JSON write below (for observed) doesn't leak them to disk.
-        for step in scenario.get("steps", []):
+        for step_index, step in enumerate(scenario.get("steps", [])):
             contract = step.get("contract")
             if contract and target in contract:
-                if (step, target) in pending_contract_originals:
-                    orig = pending_contract_originals[(step, target)]
+                if (step_index, target) in pending_contract_originals:
+                    orig = pending_contract_originals[(step_index, target)]
                     if orig is None:
                         del contract[target]
                     else:

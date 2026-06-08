@@ -6,16 +6,80 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <string>
 #include <thread>
+#include <cerrno>
+
+#ifdef _WIN32
+// Winsock + Win32 socket APIs. SOCKET is an unsigned handle (INVALID_SOCKET = ~0),
+// but `fd_` stays `int` in the cross-platform header — the narrowing is well-defined
+// for handle values in the practical range and is the standard Win32 pattern.
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <io.h>     // _fileno, _commit (POSIX fileno/fsync equivalents)
+#else
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <cerrno>
+#endif
 
 namespace mm::platform {
+
+namespace {
+// Tiny portability shims so each call site reads as plain code, not `#ifdef` noise.
+// POSIX uses int FDs + errno + read/write/close; Winsock uses SOCKET handles +
+// WSAGetLastError + recv/send/closesocket. Map to a small common surface.
+#ifdef _WIN32
+// SOCKET is unsigned (UINT_PTR). `sock(fd)` casts to it at API boundaries so
+// /W4 doesn't warn about signed→unsigned at every call site.
+inline SOCKET sock(int fd) { return static_cast<SOCKET>(fd); }
+inline int close_sock(int fd) { return ::closesocket(sock(fd)); }
+// WSAEWOULDBLOCK: non-blocking call had no buffer/data. WSAETIMEDOUT: blocking
+// recv hit SO_RCVTIMEO without data. Both translate to POSIX EAGAIN semantics
+// (the read/write path returns -1 / WouldBlock and the caller retries).
+inline bool sockWouldBlock() {
+    int err = ::WSAGetLastError();
+    return err == WSAEWOULDBLOCK || err == WSAETIMEDOUT;
+}
+inline int open_sock(int domain, int type, int protocol) {
+    SOCKET s = ::socket(domain, type, protocol);
+    return (s == INVALID_SOCKET) ? -1 : static_cast<int>(s);
+}
+inline int make_nonblocking(int fd) {
+    u_long mode = 1;
+    return ::ioctlsocket(sock(fd), FIONBIO, &mode);
+}
+#else
+inline int sock(int fd) { return fd; }
+inline int close_sock(int fd) { return ::close(fd); }
+inline bool sockWouldBlock() { return errno == EAGAIN || errno == EWOULDBLOCK; }
+inline int open_sock(int domain, int type, int protocol) {
+    return ::socket(domain, type, protocol);
+}
+inline int make_nonblocking(int fd) {
+    int flags = ::fcntl(fd, F_GETFL, 0);
+    return ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
+#endif
+#ifdef _WIN32
+// Winsock 2.2 must be initialized once per process before any socket call.
+// A static RAII guard runs at library load (covers both the app and the test
+// binaries, which have their own main() but link mm_platform). WSAStartup is
+// reference-counted so this is safe alongside any future caller-side init.
+struct WinsockInit {
+    WinsockInit() {
+        WSADATA d;
+        ::WSAStartup(MAKEWORD(2, 2), &d);
+    }
+    ~WinsockInit() { ::WSACleanup(); }
+};
+static WinsockInit g_winsockInit;
+#endif
+
+}  // namespace
 
 static auto startTime = std::chrono::steady_clock::now();
 // Test-only override for millis(); 0 means "use the real clock". std::atomic so
@@ -104,20 +168,20 @@ const char* hostIp() {
     // host's LAN IP. Cached after the first call. "" if offline.
     static char ip[INET_ADDRSTRLEN] = {};
     if (ip[0]) return ip;
-    int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+    int fd = open_sock(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) return "";
     sockaddr_in probe{};
     probe.sin_family = AF_INET;
     probe.sin_port = htons(80);
     inet_pton(AF_INET, "8.8.8.8", &probe.sin_addr);
-    if (::connect(fd, reinterpret_cast<sockaddr*>(&probe), sizeof(probe)) == 0) {
+    if (::connect(sock(fd), reinterpret_cast<sockaddr*>(&probe), sizeof(probe)) == 0) {
         sockaddr_in local{};
         socklen_t len = sizeof(local);
-        if (::getsockname(fd, reinterpret_cast<sockaddr*>(&local), &len) == 0) {
+        if (::getsockname(sock(fd), reinterpret_cast<sockaddr*>(&local), &len) == 0) {
             inet_ntop(AF_INET, &local.sin_addr, ip, sizeof(ip));
         }
     }
-    ::close(fd);
+    close_sock(fd);
     return ip;
 }
 
@@ -195,7 +259,10 @@ bool fsRemove(const char* path) {
 
 int fsRead(const char* path, char* buf, size_t maxLen) {
     if (!buf || maxLen == 0) return -1;
-    FILE* f = std::fopen(toFsPath(path).c_str(), "rb");
+    // path::c_str() returns wchar_t* on Windows; std::fopen needs char*. Go via
+    // .string() so the call compiles on both. Costs one std::string allocation
+    // per read — acceptable for /.config/*.json reads (rare, small).
+    FILE* f = std::fopen(toFsPath(path).string().c_str(), "rb");
     if (!f) return -1;
     size_t n = std::fread(buf, 1, maxLen - 1, f);
     std::fclose(f);
@@ -208,7 +275,7 @@ bool fsWriteAtomic(const char* path, const char* data, size_t len) {
     auto tmp = target;
     tmp += ".tmp";
 
-    FILE* f = std::fopen(tmp.c_str(), "wb");
+    FILE* f = std::fopen(tmp.string().c_str(), "wb");
     if (!f) return false;
     size_t written = std::fwrite(data, 1, len, f);
     if (written != len) {
@@ -218,8 +285,13 @@ bool fsWriteAtomic(const char* path, const char* data, size_t len) {
         return false;
     }
     std::fflush(f);
+#ifdef _WIN32
+    int fd = ::_fileno(f);
+    if (fd >= 0) ::_commit(fd);  // Windows equivalent of fsync
+#else
     int fd = ::fileno(f);
     if (fd >= 0) ::fsync(fd);
+#endif
     std::fclose(f);
 
     std::error_code ec;
@@ -238,7 +310,10 @@ void fsList(const char* dir, FsListCb cb, void* user) {
     if (!std::filesystem::exists(p, ec)) return;
     for (auto& entry : std::filesystem::directory_iterator(p, ec)) {
         if (ec) break;
-        cb(entry.path().filename().c_str(), entry.is_directory(ec), user);
+        // path::filename().c_str() returns wchar_t* on Windows; the callback
+        // wants char*. Round-trip through .string() to get a portable view.
+        std::string name = entry.path().filename().string();
+        cb(name.c_str(), entry.is_directory(ec), user);
     }
 }
 
@@ -339,7 +414,7 @@ UdpSocket::~UdpSocket() {
 
 bool UdpSocket::open() {
     if (fd_ >= 0) return true;
-    fd_ = ::socket(AF_INET, SOCK_DGRAM, 0);
+    fd_ = open_sock(AF_INET, SOCK_DGRAM, 0);
     return fd_ >= 0;
 }
 
@@ -349,17 +424,17 @@ bool UdpSocket::connect(const char* ip, uint16_t port) {
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     if (inet_pton(AF_INET, ip, &addr.sin_addr) != 1) return false;
-    return ::connect(fd_, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == 0;
+    return ::connect(sock(fd_), reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == 0;
 }
 
 bool UdpSocket::sendTo(const uint8_t* data, size_t len) {
     if (fd_ < 0) return false;
-    return ::send(fd_, data, len, 0) >= 0;
+    return ::send(sock(fd_), reinterpret_cast<const char*>(data), static_cast<int>(len), 0) >= 0;
 }
 
 void UdpSocket::close() {
     if (fd_ >= 0) {
-        ::close(fd_);
+        close_sock(fd_);
         fd_ = -1;
     }
 }
@@ -372,10 +447,14 @@ TcpConnection::~TcpConnection() {
 
 int TcpConnection::read(uint8_t* buf, size_t maxLen) {
     if (fd_ < 0) return -1;
-    auto n = ::read(fd_, buf, maxLen);
+    // recv() works the same on POSIX and Winsock — the socket is blocking with
+    // SO_RCVTIMEO set in TcpServer::accept (Windows takes DWORD ms, POSIX takes
+    // struct timeval). After the timeout, recv returns -1 with EAGAIN/EWOULDBLOCK
+    // (POSIX) or WSAEWOULDBLOCK (Windows); we translate both to -1 for the caller.
+    auto n = ::recv(sock(fd_), reinterpret_cast<char*>(buf), static_cast<int>(maxLen), 0);
     if (n > 0) return static_cast<int>(n);
     if (n == 0) return 0; // peer closed
-    if (errno == EAGAIN || errno == EWOULDBLOCK) return -1; // nothing available
+    if (sockWouldBlock()) return -1; // read timed out, nothing available
     return 0; // error → treat as closed
 }
 
@@ -383,14 +462,16 @@ bool TcpConnection::write(const uint8_t* data, size_t len) {
     if (fd_ < 0) return false;
     size_t sent = 0;
     while (sent < len) {
-        auto n = ::write(fd_, data + sent, len - sent);
+        auto n = ::send(sock(fd_), reinterpret_cast<const char*>(data + sent),
+                        static_cast<int>(len - sent), 0);
         if (n > 0) {
             sent += static_cast<size_t>(n);
-        } else if (n < 0 && errno == EINTR) {
+        } else if (sockWouldBlock()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+#ifndef _WIN32
+        } else if (errno == EINTR) {
             continue; // interrupted by signal, retry
-        } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            struct timespec ts = {0, 1000000}; // 1ms
-            nanosleep(&ts, nullptr);
+#endif
         } else {
             return false;
         }
@@ -401,6 +482,33 @@ bool TcpConnection::write(const uint8_t* data, size_t len) {
 WriteResult TcpConnection::writeChunks(const WriteChunk* chunks, int count) {
     if (fd_ < 0) return WriteResult::Error;
     if (count < 1 || count > MAX_WRITE_CHUNKS) return WriteResult::Error;
+#ifdef _WIN32
+    // WSASend takes a WSABUF[] — same scatter-gather shape as iovec[]. Windows
+    // has no MSG_DONTWAIT flag, so flip the socket to non-blocking just for the
+    // duration of this call (and back). The socket is blocking by default for
+    // recv()'s SO_RCVTIMEO behaviour (see TcpServer::accept).
+    WSABUF bufs[MAX_WRITE_CHUNKS];
+    size_t total = 0;
+    for (int i = 0; i < count; i++) {
+        bufs[i].buf = reinterpret_cast<char*>(const_cast<uint8_t*>(chunks[i].data));
+        bufs[i].len = static_cast<ULONG>(chunks[i].len);
+        total += chunks[i].len;
+    }
+    u_long nonblocking = 1;
+    ::ioctlsocket(sock(fd_), FIONBIO, &nonblocking);
+    DWORD sentBytes = 0;
+    int rc = ::WSASend(sock(fd_), bufs, static_cast<DWORD>(count),
+                       &sentBytes, 0, nullptr, nullptr);
+    int err = (rc == SOCKET_ERROR) ? ::WSAGetLastError() : 0;
+    u_long blocking = 0;
+    ::ioctlsocket(sock(fd_), FIONBIO, &blocking);
+    if (rc == SOCKET_ERROR) {
+        return (err == WSAEWOULDBLOCK) ? WriteResult::WouldBlock : WriteResult::Error;
+    }
+    if (sentBytes == 0) return WriteResult::WouldBlock;
+    if (static_cast<size_t>(sentBytes) == total) return WriteResult::Complete;
+    return WriteResult::Partial;
+#else
     struct iovec iov[MAX_WRITE_CHUNKS];
     size_t total = 0;
     for (int i = 0; i < count; i++) {
@@ -416,17 +524,17 @@ WriteResult TcpConnection::writeChunks(const WriteChunk* chunks, int count) {
     msg.msg_iovlen = static_cast<decltype(msg.msg_iovlen)>(count);
     ssize_t n = ::sendmsg(fd_, &msg, MSG_DONTWAIT);
     if (n < 0) {
-        return (errno == EAGAIN || errno == EWOULDBLOCK)
-                   ? WriteResult::WouldBlock : WriteResult::Error;
+        return sockWouldBlock() ? WriteResult::WouldBlock : WriteResult::Error;
     }
     if (n == 0) return WriteResult::WouldBlock;
     if (static_cast<size_t>(n) == total) return WriteResult::Complete;
     return WriteResult::Partial;
+#endif
 }
 
 void TcpConnection::close() {
     if (fd_ >= 0) {
-        ::close(fd_);
+        close_sock(fd_);
         fd_ = -1;
     }
 }
@@ -439,51 +547,61 @@ TcpServer::~TcpServer() {
 
 bool TcpServer::open(uint16_t port) {
     if (fd_ >= 0) return true;
-    fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
+    fd_ = open_sock(AF_INET, SOCK_STREAM, 0);
     if (fd_ < 0) return false;
 
     int opt = 1;
-    setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    setsockopt(sock(fd_), SOL_SOCKET, SO_REUSEADDR,
+               reinterpret_cast<const char*>(&opt), sizeof(opt));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(port);
 
-    if (::bind(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-        ::close(fd_);
+    if (::bind(sock(fd_), reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+        close_sock(fd_);
         fd_ = -1;
         return false;
     }
 
-    if (::listen(fd_, 8) < 0) {
-        ::close(fd_);
+    if (::listen(sock(fd_), 8) < 0) {
+        close_sock(fd_);
         fd_ = -1;
         return false;
     }
 
-    // Set non-blocking
-    int flags = fcntl(fd_, F_GETFL, 0);
-    fcntl(fd_, F_SETFL, flags | O_NONBLOCK);
+    make_nonblocking(fd_);
 
     return true;
 }
 
 TcpConnection TcpServer::accept() {
     if (fd_ < 0) return TcpConnection();
+#ifdef _WIN32
+    SOCKET client = ::accept(sock(fd_), nullptr, nullptr);
+    if (client == INVALID_SOCKET) return TcpConnection();
+    int clientFd = static_cast<int>(client);
+    // Match POSIX: socket stays blocking, SO_RCVTIMEO gives recv a 2-second
+    // timeout. Windows SO_RCVTIMEO takes a DWORD millisecond count (not a
+    // timeval). writeChunks toggles non-blocking around its WSASend call to
+    // emulate POSIX's MSG_DONTWAIT.
+    DWORD timeoutMs = 2000;
+    ::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO,
+                 reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
+#else
     int clientFd = ::accept(fd_, nullptr, nullptr);
     if (clientFd < 0) return TcpConnection();
-
     // Set read timeout (2 seconds) instead of non-blocking
     struct timeval tv = {2, 0};
     setsockopt(clientFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
+#endif
     return TcpConnection(clientFd);
 }
 
 void TcpServer::close() {
     if (fd_ >= 0) {
-        ::close(fd_);
+        close_sock(fd_);
         fd_ = -1;
     }
 }

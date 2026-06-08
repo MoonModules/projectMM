@@ -3,6 +3,7 @@
 #include "core/MoonModule.h"
 #include "light/layers/Buffer.h"
 #include "light/layers/Layer.h"
+#include "light/layers/Layers.h"
 #include "light/layers/BlendMap.h"
 #include "light/drivers/Correction.h"
 #include "platform/platform.h"
@@ -24,6 +25,9 @@ public:
     // Drivers container hands it one Layer for dimensions regardless of how many
     // layers feed the output buffer.
     void setLayer(Layer* layer) { layer_ = layer; }
+    // The active Layer this driver reads dimensions from — null when no Layer is
+    // wired (e.g. the last Layer was deleted). Drivers must tolerate null here.
+    Layer* layer() const { return layer_; }
 
     // Shared output correction (brightness LUT + channel order + white) owned by the
     // Drivers container. Default no-op so Preview (which shows the raw logical buffer)
@@ -49,7 +53,19 @@ public:
     uint8_t brightness = 255;
     uint8_t lightPreset = 0;  // index into kLightPresetOptions; 0 = RGB
 
+    // Two ways to wire the source Layer:
+    //  - setLayers(Layers*): bind the container; layer_ is re-resolved from
+    //    activeLayer() at every buildState. This makes the link self-healing —
+    //    a Layer cleared and rebuilt via the API (clear_children + add_module)
+    //    is picked up on the next buildState without re-running main.cpp wiring.
+    //  - setLayer(Layer*): pin a specific Layer directly (test rigs that build a
+    //    Layer outside a Layers container). Skips re-resolution.
+    void setLayers(Layers* layers) {
+        layers_ = layers;
+        if (layers_) layer_ = layers_->activeLayer();
+    }
     void setLayer(Layer* layer) {
+        layers_ = nullptr;  // explicit pin overrides container resolution
         layer_ = layer;
     }
 
@@ -83,6 +99,10 @@ public:
     }
 
     void onBuildState() override {
+        // Re-resolve the active Layer from the bound container so a Layer that
+        // was cleared and rebuilt via the API is picked up here (self-healing).
+        // setLayer() pins a Layer directly and leaves layers_ null — skip then.
+        if (layers_) layer_ = layers_->activeLayer();
         // Output buffer needed if any layer has a LUT (currently single layer).
         // Multi-layer: check all layers, allocate if at least one has a LUT.
         // If allocation fails (no contiguous heap large enough — a real risk on
@@ -119,17 +139,24 @@ public:
     }
 
 private:
+    Layers* layers_ = nullptr;  // bound container; layer_ re-resolved from it at buildState
     Layer* layer_ = nullptr;
     Buffer outputBuffer_;
     Correction correction_;
 
     void passBufferToDrivers() {
-        if (!layer_) return;
-        Buffer* buf = layer_->lut().hasLUT() ? &outputBuffer_ : &layer_->buffer();
+        // No active Layer (e.g. the last Layer was just deleted): clear every
+        // driver's Layer + source-buffer pointers rather than leaving them at
+        // their previous values. An early return here left drivers holding a
+        // dangling layer_ pointing at the freed Layer — PreviewDriver then read
+        // layer_->layouts() on freed memory and crashed (LoadProhibited). A
+        // driver with a null layer/buffer is a well-defined idle state.
+        Buffer* buf = layer_ ? (layer_->lut().hasLUT() ? &outputBuffer_ : &layer_->buffer())
+                             : nullptr;
         for (uint8_t i = 0; i < childCount(); i++) {
             auto* drv = static_cast<DriverBase*>(child(i));
             drv->setSourceBuffer(buf);
-            drv->setLayer(layer_);  // so PreviewDriver can read current physical dimensions
+            drv->setLayer(layer_);  // null when no active Layer; drivers must tolerate it
             drv->setCorrection(&correction_);  // physical drivers apply it; Preview ignores
         }
     }

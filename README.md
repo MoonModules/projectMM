@@ -10,12 +10,12 @@ Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi,
 - **Effects, modifiers, layouts, drivers** (output currently ArtNet, plus the built-in 3D preview) — all pluggable, all configurable live, all persisted across reboots.
 - **One firmware, many devices.** ESP32, Teensy, Raspberry Pi, Windows / macOS / Linux desktop — the same source builds for each.
 - **Native 3D** from the start. 2D and 1D are the cases where one or two dimensions are size 1; effects don't pick a mode.
-- **Built-in browser UI.** The interface renders any module from its declared controls — adding a new effect needs zero UI code.
+- **Built-in browser UI.** The interface renders any module from its declared controls — adding a new module needs zero UI code.
 - **DMX and addressable LEDs in the same setup.** RGB strips, RGBW pixels, multi-channel par lights, moving heads — all addressed through the same pipeline.
 
 ## Performance
 
-What projectMM delivers, measured end-to-end through a full render pipeline — an effect, a modifier, and an output driver (the canonical sweep runs NoiseEffect → MirrorModifier XY → ArtNet, but any effect/modifier/driver combination runs the same path). **FPS shown is computed from the underlying tick measurement (FPS = 1,000,000 / tick_us)** — tick is the unit the contracts and assertions actually use; FPS is the headline number.
+What projectMM delivers, measured end-to-end through a full render pipeline — an effect, a modifier, and an output driver (the canonical sweep runs NoiseEffect → MultiplyModifier XY (mirror fold) → ArtNet, but any effect/modifier/driver combination runs the same path). **FPS shown is computed from the underlying tick measurement (FPS = 1,000,000 / tick_us)** — tick is the unit the contracts and assertions actually use; FPS is the headline number.
 
 Every measurement below comes from a real scenario run on the listed board — `test/scenarios/light/scenario_GridLayout_grid_sizes.json` is the canonical sweep. Per-step `contract.<target>` blocks carry the promises the device must hit; per-step `observed.<target>` blocks carry the latest reading.
 
@@ -56,9 +56,14 @@ The numbers above are observations. The **contracts** projectMM commits to — w
 
 ![Installer](docs/assets/screenshots/installer.png)
 
-**Desktop — download and run.** Grab the macOS arm64 tarball from the [releases page](https://github.com/ewowi/projectMM/releases), unpack, run, open `http://localhost:8080/`. The binary is unsigned, so Gatekeeper prompts on first run — right-click → Open, or clear the quarantine flag with `xattr -dr com.apple.quarantine ./projectMM`. macOS arm64 is the only desktop binary that ships today; Windows needs its platform-layer port first.
+**Desktop — download and run.** Grab the build for your OS from the [releases page](https://github.com/ewowi/projectMM/releases):
 
-Once running, the UI lets you build a render pipeline visually (layouts → layers with effects + modifiers → drivers), preview the result in 3D, and save it. The source tree also builds for Teensy, Raspberry Pi, and Linux from source — see [building.md](docs/building.md) — though only the macOS and ESP32 binaries ship as releases.
+- **macOS arm64:** `projectMM-macos-arm64-vX.Y.Z.tar.gz` — unpack, run `./projectMM`. The binary is unsigned, so Gatekeeper prompts on first run — right-click → Open, or clear the quarantine flag with `xattr -dr com.apple.quarantine ./projectMM`.
+- **Windows x64:** `projectMM-windows-x64-vX.Y.Z.zip` — unzip, double-click `projectMM.exe`. SmartScreen may warn on first run because the binary is unsigned (More info → Run anyway).
+
+Then open `http://localhost:8080/`.
+
+Once running, the UI lets you build a render pipeline visually (layouts → layers with effects + modifiers → drivers), preview the result in 3D, and save it. The source tree also builds for Teensy, Raspberry Pi, and Linux from source — see [building.md](docs/building.md) — though only the macOS, Windows, and ESP32 binaries ship as releases.
 
 ### From source
 
@@ -113,7 +118,7 @@ This is the current iteration of years of LED / light system development. Each p
 | **StarLight** | Standalone LED firmware | [ewowi/StarLight](https://github.com/ewowi/StarLight) |
 | **MoonLight** | Ground-up build: 60+ effects, memory-optimised mapping, 11 driver types | [MoonModules/MoonLight](https://github.com/MoonModules/MoonLight) |
 
-Their lessons and proven patterns are distilled in [`docs/history/`](docs/history/) — the codebase this project cherry-picks from, never porting wholesale.
+Their lessons and proven patterns are distilled in [`docs/history/`](docs/history/README.md) — the codebase this project cherry-picks from, never porting wholesale.
 
 ## Contributing
 

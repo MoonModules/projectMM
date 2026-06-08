@@ -688,6 +688,15 @@ void HttpServerModule::handleDeleteModule(platform::TcpConnection& conn, const c
         return;
     }
 
+    // Non-editable submodules (Board, Preview, Improv) are apparatus, not
+    // swappable pipeline content — refuse here so the API enforces it, not just
+    // the UI's hidden delete button. They can still be disabled via their enable
+    // toggle; they just can't be removed from the tree.
+    if (!mod->userEditable()) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"module not deletable\"}");
+        return;
+    }
+
     // Remove from parent
     parent->removeChild(mod);
 
@@ -720,6 +729,14 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
         sendResponse(conn, 400, "application/json", "{\"error\":\"top-level modules cannot be replaced\"}");
         return;
     }
+    // Non-editable submodules (Board, Preview, Improv) are apparatus — replacing
+    // one swaps it for a different type, which is as much a removal as a delete.
+    // Refuse, mirroring handleDeleteModule's guard, so the editability contract
+    // holds across both endpoints.
+    if (!mod->userEditable()) {
+        sendResponse(conn, 400, "application/json", "{\"error\":\"module not editable\"}");
+        return;
+    }
     char typeName[32] = {};
     mm::json::parseString(body, "type", typeName, sizeof(typeName));
     if (typeName[0] == 0) {
@@ -746,6 +763,19 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
         return;
     }
 
+    // Name on replace: keep a CUSTOM name (a scenario id like "MOD", or a
+    // user-renamed slot) so callers can keep addressing the slot by it. But if
+    // the old name was just the old type's factory display name ("Multiply" for
+    // a MultiplyModifier), let the fresh module keep its own factory name
+    // ("Checkerboard") — otherwise a Multiply→Checkerboard replace leaves a
+    // Checkerboard mislabelled "Multiply". `fresh` already arrives with its
+    // correct default name from ModuleFactory::create, so we only override for a
+    // custom name; then re-run uniqueness so two same-type siblings don't collide.
+    const char* oldDefault = ModuleFactory::displayNameFor(mod->typeName(), mod->role());
+    if (std::strcmp(mod->name(), oldDefault) != 0) {
+        fresh->setName(mod->name());  // custom name — preserve the slot identity
+    }
+
     // Swap in place; replaceChildAt returns the old module, which we own.
     MoonModule* old = parent->replaceChildAt(index, fresh);
 
@@ -760,6 +790,13 @@ void HttpServerModule::handleReplaceModule(platform::TcpConnection& conn, const 
         old->teardown();
         Scheduler::deleteTree(old);
     }
+
+    // Disambiguate only now that the tree is in its final shape: `fresh` is in
+    // place and `old` is gone. Run before this and firstByName wouldn't find
+    // `fresh` (not yet linked) and would append a spurious " 2"; run after the
+    // old module is removed and a genuine same-named sibling is the only thing
+    // that triggers a suffix. No-op for a preserved custom name that's unique.
+    if (scheduler_) scheduler_->ensureUniqueName(fresh);
 
     // Re-run onBuildState across the tree so Layer LUT / Drivers buffer
     // wiring re-forms — a replaced effect/driver re-wires like a freshly added one.

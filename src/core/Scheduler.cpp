@@ -166,15 +166,20 @@ void Scheduler::ensureUniqueName(MoonModule* mod) {
     // computing a longer name than setName can store. The snprintf check
     // below refuses to truncate, which means the practical cap depends on
     // the base length: 99 for ≤ 5-char bases, 9 for 12–13-char bases like
-    // "GlowParticles" or "PlasmaPalette" (where "GlowParticles 10" = 16
+    // "GlowParticles" or "PlasmaPalette" (where "GlowParticles-10" = 16
     // chars + NUL doesn't fit). When the cap is hit we keep the duplicate
     // name rather than truncate; first-match DFS lookups become ambiguous
     // for that name but the engine doesn't crash. This is unlikely in
     // practice (10+ same-typed siblings on one tree) — bump name_/candidate
     // together if it ever bites.
+    //
+    // Separator is '-', not a space: the name becomes a URL path segment in the
+    // module API (DELETE / replace / move `/api/modules/<name>`); a space there
+    // needs URL-encoding and breaks the device's raw-path name lookup, so a
+    // device-created "Grid 2" couldn't be deleted. '-' is URL-safe and readable.
     char candidate[16];
     for (int suffix = 2; suffix < 100; suffix++) {
-        int n = std::snprintf(candidate, sizeof(candidate), "%s %d", base, suffix);
+        int n = std::snprintf(candidate, sizeof(candidate), "%s-%d", base, suffix);
         if (n < 0 || n >= static_cast<int>(sizeof(candidate))) return;  // doesn't fit name_
         if (firstByName(candidate) == nullptr) {
             mod->setName(candidate);

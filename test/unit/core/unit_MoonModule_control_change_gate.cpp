@@ -1,5 +1,5 @@
 // @module MoonModule
-// @also GridLayout, MirrorModifier, NoiseEffect, Drivers
+// @also GridLayout, MultiplyModifier, NoiseEffect, Drivers
 
 // Pins the selective control-change rebuild gate. `handleSetControl` rebuilds
 // the pipeline only when `controlChangeTriggersBuildState()` returns true.
@@ -11,13 +11,13 @@
 #include "doctest.h"
 #include "light/drivers/Drivers.h"
 #include "light/layouts/GridLayout.h"
-#include "light/modifiers/MirrorModifier.h"
+#include "light/modifiers/MultiplyModifier.h"
 #include "light/effects/NoiseEffect.h"
 
 // Layout and Modifier modules opt in to rebuild on a control change (their controls reshape the pipeline).
 TEST_CASE("controlChangeTriggersBuildState: Layout and Modifier opt in") {
     mm::GridLayout layout;
-    mm::MirrorModifier modifier;
+    mm::MultiplyModifier modifier;
     CHECK(layout.controlChangeTriggersBuildState("width"));
     CHECK(modifier.controlChangeTriggersBuildState("mirrorX"));
 }

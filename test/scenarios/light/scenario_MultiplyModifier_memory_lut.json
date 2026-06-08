@@ -1,13 +1,13 @@
 {
-  "name": "scenario_MirrorModifier_pipeline",
-  "module": "MirrorModifier",
+  "name": "scenario_MultiplyModifier_memory_lut",
+  "module": "MultiplyModifier",
   "mode": "construct",
   "also": [
     "Layer",
-    "NoiseEffect",
-    "ArtNetSendDriver"
+    "MappingLUT",
+    "BlendMap"
   ],
-  "description": "Pipeline with a mirror modifier: NoiseEffect renders one quadrant, MirrorModifier reflects across X and Y to produce a kaleidoscope. Used to verify the MirrorModifier wires into Layer cleanly and that the full pipeline still meets its FPS bound.",
+  "description": "Verify that adding a MultiplyModifier allocates both the mapping LUT and the driver buffer (the heavy memory path). Companion to scenario_Layer_memory_1to1, which verifies the no-LUT path.",
   "steps": [
     {
       "name": "add-layout-group",
@@ -18,14 +18,14 @@
     },
     {
       "name": "add-grid",
-      "description": "Add a 128x128 GridLayout child to Layouts. Set explicitly (the module default is 16x16x1) so the tick is measurable above the host's microsecond clock.",
+      "description": "Add a 16x16 GridLayout.",
       "op": "add_module",
       "id": "Grid",
       "type": "GridLayout",
       "parent_id": "Layouts",
       "props": {
-        "width": 128,
-        "height": 128
+        "width": 16,
+        "height": 16
       }
     },
     {
@@ -49,15 +49,15 @@
     },
     {
       "name": "add-mirror",
-      "description": "Add MirrorModifier so logical pixels reflect across X and Y in the physical grid.",
+      "description": "Add MultiplyModifier — triggers LUT and driver-buffer allocation.",
       "op": "add_module",
-      "id": "Mirror",
-      "type": "MirrorModifier",
+      "id": "Multiply",
+      "type": "MultiplyModifier",
       "parent_id": "Layer"
     },
     {
       "name": "add-driver-group",
-      "description": "Add a Drivers container wired to the Layer's output buffer.",
+      "description": "Add a Drivers container wired to the Layer.",
       "op": "add_module",
       "id": "Drivers",
       "type": "Drivers",
@@ -67,7 +67,7 @@
     },
     {
       "name": "add-artnet",
-      "description": "Add ArtNetSendDriver and run the bounded FPS measurement (mirror + LUT path must stay at >=80% of the rated FPS).",
+      "description": "Add ArtNetSendDriver and run the bounded FPS measurement on the LUT path.",
       "op": "add_module",
       "id": "ArtNet",
       "type": "ArtNetSendDriver",
@@ -90,7 +90,7 @@
         "pc-macos": {
           "tick_us": [
             1,
-            246
+            301
           ],
           "free_heap": [
             0,
@@ -103,6 +103,24 @@
           "at": [
             "2026-06-02",
             "2026-06-05"
+          ]
+        },
+        "pc-windows": {
+          "tick_us": [
+            3,
+            6
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
           ]
         }
       }

@@ -5,7 +5,7 @@
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/SphereLayout.h"
-#include "light/modifiers/MirrorModifier.h"
+#include "light/modifiers/MultiplyModifier.h"
 
 // The driver/output buffer must hold ONLY the real lights, never the dense
 // bounding box. A sphere defines a 9x9x9 (=729) render grid but only 210 shell
@@ -88,7 +88,7 @@ TEST_CASE("Layer: sphere + mirror maps into driver-index space") {
     mm::Layer layer;
     layer.setLayouts(&group);
     layer.setChannelsPerLight(3);
-    mm::MirrorModifier mirror;
+    mm::MultiplyModifier mirror;
     mirror.mirrorX = true;
     layer.addChild(&mirror);
     layer.onBuildControls();
@@ -103,4 +103,46 @@ TEST_CASE("Layer: sphere + mirror maps into driver-index space") {
             CHECK(d < N);   // mirror destinations are driver indices, never box indices
         });
     }
+}
+
+// REGRESSION: a high fan-out Multiply (8×8×4 = 256) on a 128×128 grid must build
+// a NON-EMPTY LUT that covers every physical light. The maxDest estimate
+// (logicalCount × maxMultiplier) is computed in 64-bit; before that fix it
+// overflowed uint16 on no-PSRAM boards (256 × 256 = 65536 wraps to 0), sized the
+// LUT to ~nothing, and blanked the display. Here we assert the LUT actually maps
+// the full light set, in range — the symptom that black-screened the device.
+TEST_CASE("Layer: high fan-out Multiply builds a full, in-range LUT (no overflow)") {
+    mm::GridLayout g;
+    g.width = 128; g.height = 128; g.depth = 1;     // 16384 physical lights
+    mm::Layouts group;
+    group.addChild(&g);
+    mm::Layer layer;
+    layer.setLayouts(&group);
+    layer.setChannelsPerLight(3);
+    mm::MultiplyModifier mult;
+    mult.multiplyX = 8; mult.multiplyY = 8; mult.multiplyZ = 4;  // raw product 256
+    layer.addChild(&mult);
+    layer.onBuildControls();
+    layer.onBuildState();
+
+    const mm::nrOfLightsType N = layer.physicalLightCount();   // 16384
+    CHECK(N == 16384);
+    CHECK(layer.lut().hasLUT());
+
+    // multiplyZ clamps to depth-1 → effective 8×8×1; logical box 16×16 = 256.
+    CHECK(layer.lut().logicalCount() == 16 * 16);
+
+    // Count destinations: the LUT must NOT be empty (the black-screen bug) and
+    // every destination must be a valid driver index. 256 logical × 64 tiles =
+    // 16384 destinations = full coverage.
+    std::size_t total = 0;
+    bool inRange = true;
+    for (mm::nrOfLightsType li = 0; li < layer.lut().logicalCount(); li++) {
+        layer.lut().forEachDestination(li, [&](mm::nrOfLightsType d) {
+            total++;
+            if (d >= N) inRange = false;
+        });
+    }
+    CHECK(total == 16384);   // full physical coverage, not a collapsed/empty LUT
+    CHECK(inRange);
 }

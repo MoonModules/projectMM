@@ -11,9 +11,22 @@
 #include "light/layers/Layer.h"
 #include "light/layouts/Layouts.h"
 #include "light/layers/Layers.h"
+#include "light/effects/LinesEffect.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/NoiseEffect.h"
-#include "light/modifiers/MirrorModifier.h"
+#include "light/effects/PlasmaEffect.h"
+#include "light/effects/PlasmaPaletteEffect.h"
+#include "light/effects/MetaballsEffect.h"
+#include "light/effects/FireEffect.h"
+#include "light/effects/ParticlesEffect.h"
+#include "light/effects/GlowParticlesEffect.h"
+#include "light/effects/CheckerboardEffect.h"
+#include "light/effects/SpiralEffect.h"
+#include "light/effects/RipplesEffect.h"
+#include "light/effects/LavaLampEffect.h"
+#include "light/effects/GameOfLifeEffect.h"
+#include "light/modifiers/MultiplyModifier.h"
+#include "light/modifiers/CheckerboardModifier.h"
 #include "light/drivers/Drivers.h"
 #include "light/drivers/ArtNetSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
@@ -156,9 +169,22 @@ static void registerScenarioTypes() {
     mm::ModuleFactory::registerType<mm::SphereLayout>("SphereLayout");
     mm::ModuleFactory::registerType<mm::Layers>("Layers");
     mm::ModuleFactory::registerType<mm::Layer>("Layer");
+    mm::ModuleFactory::registerType<mm::LinesEffect>("LinesEffect");
     mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
     mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect");
-    mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier");
+    mm::ModuleFactory::registerType<mm::PlasmaEffect>("PlasmaEffect");
+    mm::ModuleFactory::registerType<mm::PlasmaPaletteEffect>("PlasmaPaletteEffect");
+    mm::ModuleFactory::registerType<mm::MetaballsEffect>("MetaballsEffect");
+    mm::ModuleFactory::registerType<mm::FireEffect>("FireEffect");
+    mm::ModuleFactory::registerType<mm::ParticlesEffect>("ParticlesEffect");
+    mm::ModuleFactory::registerType<mm::GlowParticlesEffect>("GlowParticlesEffect");
+    mm::ModuleFactory::registerType<mm::CheckerboardEffect>("CheckerboardEffect");
+    mm::ModuleFactory::registerType<mm::SpiralEffect>("SpiralEffect");
+    mm::ModuleFactory::registerType<mm::RipplesEffect>("RipplesEffect");
+    mm::ModuleFactory::registerType<mm::LavaLampEffect>("LavaLampEffect");
+    mm::ModuleFactory::registerType<mm::GameOfLifeEffect>("GameOfLifeEffect");
+    mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier");
+    mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier");
     mm::ModuleFactory::registerType<mm::Drivers>("Drivers");
     mm::ModuleFactory::registerType<mm::ArtNetSendDriver>("ArtNetSendDriver");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver");
@@ -240,6 +266,19 @@ struct ScenarioContext {
         return mm::ModuleFactory::create(type);
     }
 
+    // Erase every `modules` entry whose pointer lies in `root`'s subtree (root
+    // and all descendants), so deleting a module that has registered children
+    // (e.g. a Layer with an effect child) doesn't leave their ids pointing at
+    // freed memory. Call BEFORE deleteTree(root). Walks the live tree, so it
+    // must run while the subtree is still intact.
+    void purgeSubtree(mm::MoonModule* root) {
+        if (!root) return;
+        for (uint8_t i = 0; i < root->childCount(); i++) purgeSubtree(root->child(i));
+        for (auto it = modules.begin(); it != modules.end();) {
+            it = (it->second == root) ? modules.erase(it) : std::next(it);
+        }
+    }
+
     void wireModule(const char* type, const char* id, const JsonVal& step) {
         auto* mod = modules[id];
         if (!mod) return;
@@ -256,7 +295,16 @@ struct ScenarioContext {
         // Wire props (only when the step has any).
         if (step.has("props")) {
             auto& props = step["props"];
-            if (std::strcmp(type, "Layer") == 0) {
+            if (std::strcmp(type, "Layers") == 0) {
+                // Wire the container's Layouts (mirrors main.cpp's
+                // layersContainer->setLayouts). Layers re-propagates this to its
+                // child Layers at every buildState, so a Layer added later picks
+                // it up — the self-healing path the device relies on.
+                if (props.has("layouts")) {
+                    auto* layoutsModule = static_cast<mm::Layouts*>(modules[props["layouts"].str]);
+                    if (layoutsModule) static_cast<mm::Layers*>(mod)->setLayouts(layoutsModule);
+                }
+            } else if (std::strcmp(type, "Layer") == 0) {
                 auto* layer = static_cast<mm::Layer*>(mod);
                 if (props.has("layouts")) {
                     auto* layoutsModule = static_cast<mm::Layouts*>(modules[props["layouts"].str]);
@@ -266,7 +314,14 @@ struct ScenarioContext {
                     layer->setChannelsPerLight(static_cast<uint8_t>(props["channelsPerLight"].num));
                 }
             } else if (std::strcmp(type, "Drivers") == 0) {
-                if (props.has("layer")) {
+                // Prefer binding the Layers container (self-healing: the active
+                // Layer is re-resolved at every buildState, so a Layer cleared
+                // and rebuilt mid-scenario is picked up — mirrors main.cpp).
+                // Fall back to pinning a specific Layer for older fixtures.
+                if (props.has("layers")) {
+                    auto* layersModule = static_cast<mm::Layers*>(modules[props["layers"].str]);
+                    if (layersModule) static_cast<mm::Drivers*>(mod)->setLayers(layersModule);
+                } else if (props.has("layer")) {
                     auto* layerModule = static_cast<mm::Layer*>(modules[props["layer"].str]);
                     if (layerModule) static_cast<mm::Drivers*>(mod)->setLayer(layerModule);
                 }
@@ -485,24 +540,61 @@ static int runScenario(const char* path) {
             } else {
                 std::printf("  SET   %s (%s.%s)\n", name, targetId, key);
             }
-        } else if (std::strcmp(op, "remove_module") == 0) {
+        } else if (std::strcmp(op, "remove_module") == 0 || std::strcmp(op, "delete_module") == 0) {
+            // `remove_module` and `delete_module` are aliases — accept both so a
+            // scenario reads identically here and on the live runner (which uses
+            // `delete_module`). The two runners must never diverge on op names,
+            // or a scenario silently no-ops on one tier.
             // Remove a child module from its parent — mirrors
             // HttpServerModule::handleDeleteModule (remove from parent,
             // teardown + recursive delete, rebuild pipeline state). Only child
             // modules can be removed; top-level modules are policy-fixed.
             const char* targetId = step["id"].c_str();
             auto* target = ctx.modules.count(targetId) ? ctx.modules[targetId] : nullptr;
-            if (!target || !target->parent()) {
-                std::printf("  -     %s — %s not found or top-level, skipped\n", name, targetId);
+            if (!target || !target->parent() || !target->userEditable()) {
+                // Mirror the live API (handleDeleteModule): top-level and
+                // non-editable submodules (Board, Preview, Improv) can't be removed.
+                std::printf("  -     %s — %s not found / top-level / not editable, skipped\n", name, targetId);
                 continue;
             }
             auto* parent = target->parent();
             parent->removeChild(target);
             target->teardown();
+            ctx.purgeSubtree(target);  // erase target + any registered descendants before freeing
             mm::Scheduler::deleteTree(target);
-            ctx.modules.erase(targetId);
             if (schedulerStarted) ctx.scheduler.buildState();
             std::printf("  -     %s (%s)\n", name, targetId);
+        } else if (std::strcmp(op, "clear_children") == 0) {
+            // Delete every child of a container, leaving the container itself.
+            // The "prepare my own canvas" primitive: a scenario assumes nothing
+            // about the device's starting tree, clears a container, then adds
+            // what it needs. Children are deleted including ones the scenario
+            // never added (a live device's pre-existing effects/modifiers).
+            // Mirrors remove_module's teardown, looped over all children. Walk
+            // back-to-front since removeChild compacts the array in place.
+            const char* targetId = step["id"].c_str();
+            auto* container = ctx.modules.count(targetId) ? ctx.modules[targetId] : nullptr;
+            if (!container) {
+                std::printf("  clr     %s — container %s not found, skipped\n", name, targetId);
+                continue;
+            }
+            int cleared = 0;
+            for (uint8_t i = container->childCount(); i > 0; i--) {
+                mm::MoonModule* childMod = container->child(i - 1);
+                // Mirror handleDeleteModule: non-editable submodules (Board,
+                // Preview, Improv) are apparatus, not deletable — skip them so
+                // the in-process clear matches what the live device does.
+                if (!childMod->userEditable()) continue;
+                container->removeChild(childMod);
+                childMod->teardown();
+                // Purge the child AND any registered descendants (e.g. a Layer's
+                // effect child) before freeing, so no id is left dangling.
+                ctx.purgeSubtree(childMod);
+                mm::Scheduler::deleteTree(childMod);
+                cleared++;
+            }
+            if (schedulerStarted) ctx.scheduler.buildState();
+            std::printf("  clr     %s (%s: %d cleared)\n", name, targetId, cleared);
         } else if (std::strcmp(op, "replace_module") == 0) {
             // Replace a child with a fresh module of another type at the same
             // slot — mirrors HttpServerModule::handleReplaceModule. The new
@@ -511,8 +603,10 @@ static int runScenario(const char* path) {
             const char* targetId = step["id"].c_str();
             const char* newType = step["type"].c_str();
             auto* target = ctx.modules.count(targetId) ? ctx.modules[targetId] : nullptr;
-            if (!target || !target->parent()) {
-                std::printf("  ~     %s — %s not found or top-level, skipped\n", name, targetId);
+            if (!target || !target->parent() || !target->userEditable()) {
+                // Mirror the live API (handleReplaceModule): top-level and
+                // non-editable submodules can't be replaced.
+                std::printf("  ~     %s — %s not found / top-level / not editable, skipped\n", name, targetId);
                 continue;
             }
             auto* parent = target->parent();
@@ -531,7 +625,16 @@ static int runScenario(const char* path) {
             fresh->onBuildControls();
             fresh->setup();
             fresh->onBuildState();
-            if (old) { old->teardown(); mm::Scheduler::deleteTree(old); }
+            if (old) {
+                // Mirror the remove_module / clear_children branches: purge any
+                // ctx.modules entries pointing at old or its descendants before
+                // freeing. Otherwise a later step addressing an old descendant
+                // by id reads a dangling pointer. purgeSubtree also removes the
+                // targetId mapping; we re-register it to fresh on the next line.
+                ctx.purgeSubtree(old);
+                old->teardown();
+                mm::Scheduler::deleteTree(old);
+            }
             ctx.modules[targetId] = fresh;
             if (schedulerStarted) ctx.scheduler.buildState();
             std::printf("  ~     %s (%s → %s)\n", name, targetId, newType);
@@ -789,7 +892,9 @@ int main(int argc, char* argv[]) {
         for (auto& entry : std::filesystem::recursive_directory_iterator("test/scenarios")) {
             if (entry.path().extension() == ".json") {
                 total++;
-                if (runScenario(entry.path().c_str()) != 0) failed++;
+                // path::c_str() is wchar_t* on Windows; round-trip through
+                // .string() to get a portable narrow-char view for runScenario.
+                if (runScenario(entry.path().string().c_str()) != 0) failed++;
                 std::printf("\n");
             }
         }

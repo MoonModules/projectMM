@@ -31,7 +31,11 @@ def host_build_dir() -> str:
 
 def main():
     bdir = host_build_dir()
+    is_windows = platform.system() == "Windows"
     print(f"Building desktop target into {bdir}/ ...")
+    # CMAKE_BUILD_TYPE is honoured by single-config generators (Ninja, Make).
+    # Visual Studio is multi-config and ignores it — we pass --config Release at
+    # build time below. Setting CMAKE_BUILD_TYPE on multi-config is harmless.
     r = subprocess.run(
         ["cmake", "-B", bdir, "-DCMAKE_BUILD_TYPE=Release"],
         cwd=ROOT,
@@ -39,10 +43,10 @@ def main():
     if r.returncode != 0:
         sys.exit(r.returncode)
 
-    r = subprocess.run(
-        ["cmake", "--build", bdir],
-        cwd=ROOT,
-    )
+    build_cmd = ["cmake", "--build", bdir]
+    if is_windows:
+        build_cmd += ["--config", "Release"]
+    r = subprocess.run(build_cmd, cwd=ROOT)
     sys.exit(r.returncode)
 
 

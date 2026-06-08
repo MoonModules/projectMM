@@ -56,27 +56,27 @@ TEST_CASE("Scheduler::ensureUniqueName suffixes the second occurrence") {
 
     s.ensureUniqueName(second);
     CHECK(std::strcmp(first->name(), "Layer") == 0);
-    CHECK(std::strcmp(second->name(), "Layer 2") == 0);
+    CHECK(std::strcmp(second->name(), "Layer-2") == 0);  // '-' separator (URL-safe)
 
     s.deleteTree(parent);
 }
 
-// Suffix counting increments past existing " 2" / " 3" suffixes ("Layer", "Layer 2", "Layer" → "Layer 3").
-TEST_CASE("Scheduler::ensureUniqueName keeps suffixing past 'Foo 2'") {
+// Suffix counting increments past existing "-2" / "-3" suffixes ("Layer", "Layer-2", "Layer" → "Layer-3").
+TEST_CASE("Scheduler::ensureUniqueName keeps suffixing past 'Foo-2'") {
     mm::Scheduler s;
     auto* parent = new Stub();
     parent->setName("Layers");
     s.addModule(parent);
 
     auto* a = new Stub(); a->setName("Layer");   parent->addChild(a);
-    auto* b = new Stub(); b->setName("Layer 2"); parent->addChild(b);
+    auto* b = new Stub(); b->setName("Layer-2"); parent->addChild(b);
     auto* c = new Stub(); c->setName("Layer");   parent->addChild(c);
 
     s.ensureUniqueName(c);
-    // First "Layer" intact, hand-named "Layer 2" intact, new collision lands at "Layer 3".
+    // First "Layer" intact, existing "Layer-2" intact, new collision lands at "Layer-3".
     CHECK(std::strcmp(a->name(), "Layer") == 0);
-    CHECK(std::strcmp(b->name(), "Layer 2") == 0);
-    CHECK(std::strcmp(c->name(), "Layer 3") == 0);
+    CHECK(std::strcmp(b->name(), "Layer-2") == 0);
+    CHECK(std::strcmp(c->name(), "Layer-3") == 0);
 
     s.deleteTree(parent);
 }
@@ -109,11 +109,11 @@ TEST_CASE("Scheduler::deduplicateNamesInTree walks the whole tree") {
 
     s.deduplicateNamesInTree();
 
-    // First occurrences keep their names; second ones get " 2" suffix.
+    // First occurrences keep their names; second ones get a "-2" suffix.
     CHECK(std::strcmp(layerA->name(), "Layer") == 0);
-    CHECK(std::strcmp(layerB->name(), "Layer 2") == 0);
+    CHECK(std::strcmp(layerB->name(), "Layer-2") == 0);
     CHECK(std::strcmp(effectA1->name(), "Noise") == 0);
-    CHECK(std::strcmp(effectB1->name(), "Noise 2") == 0);
+    CHECK(std::strcmp(effectB1->name(), "Noise-2") == 0);
 
     s.deleteTree(layers);
 }
@@ -136,7 +136,7 @@ TEST_CASE("Scheduler::firstByName returns the first match in tree-walk order") {
 // If the disambiguating suffix would overflow the 16-byte name buffer, ensureUniqueName refuses to truncate and keeps the colliding name (sharp edge, documented).
 TEST_CASE("Scheduler::ensureUniqueName leaves the colliding name alone when the suffixed result wouldn't fit") {
     // MoonModule::name_ is 16 bytes (15 chars + NUL). A 13-char base name like
-    // "GlowParticles" reaches the buffer ceiling at suffix "10" — "GlowParticles 10"
+    // "GlowParticles" reaches the buffer ceiling at suffix "10" — "GlowParticles-10"
     // is 16 chars, doesn't fit. ensureUniqueName must refuse to truncate
     // (keep the duplicate, return) rather than silently produce a different
     // result than the caller asked for. This test pins that refusal.
@@ -145,8 +145,8 @@ TEST_CASE("Scheduler::ensureUniqueName leaves the colliding name alone when the 
     parent->setName("Layers");
     s.addModule(parent);
 
-    // Create one base "GlowParticles" plus eight "GlowParticles 2".."GlowParticles 9".
-    // The next ensureUniqueName needs "GlowParticles 10" which doesn't fit.
+    // Create one base "GlowParticles" plus eight "GlowParticles-2".."GlowParticles-9".
+    // The next ensureUniqueName needs "GlowParticles-10" which doesn't fit.
     auto* first = new Stub();
     first->setName("GlowParticles");
     parent->addChild(first);
@@ -154,7 +154,7 @@ TEST_CASE("Scheduler::ensureUniqueName leaves the colliding name alone when the 
     for (int n = 2; n <= 9; n++) {
         auto* m = new Stub();
         char nm[16];
-        std::snprintf(nm, sizeof(nm), "GlowParticles %d", n);
+        std::snprintf(nm, sizeof(nm), "GlowParticles-%d", n);
         m->setName(nm);
         parent->addChild(m);
     }

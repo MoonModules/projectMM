@@ -6,9 +6,9 @@ This document holds what scenarios can't carry: structural sizes (`sizeof`), bui
 
 ---
 
-## Desktop (macOS, Apple Silicon)
+## Desktop (64-bit)
 
-Desktop ArtNet sends to a non-existent IP so packets complete instantly; `freeHeap` returns 0 (unlimited). Per-step tick budgets live in `contract.pc-macos` blocks across the scenarios.
+Desktop ArtNet sends to a non-existent IP so packets complete instantly; `freeHeap` returns 0 (unlimited). Per-step tick budgets live in per-host `contract.pc-<os>` blocks across the scenarios — `pc-macos` for macOS arm64, `pc-windows` for Windows x64, `pc-linux` for Linux. The `sizeof` and dynamic-memory numbers below apply to all 64-bit desktop targets; tick numbers differ by host CPU and live in the scenario contracts.
 
 ### sizeof (desktop, 64-bit)
 
@@ -24,7 +24,12 @@ Desktop ArtNet sends to a non-existent IP so packets complete instantly; `freeHe
 
 `Drivers` grew from 120 → 408 with the per-driver `Correction` stage (256-entry brightness LUT + channel-order table). Other classes grew ~16-32 bytes each as `MoonModule` itself grew (rolling-range observed slot + wired-by-code flag + per-child `tickChildren` accounting fields).
 
-Binary: **358 KB** (debug-arm64; release-strip yields a smaller number).
+Binary sizes:
+
+| Target | Size | Build |
+|--------|------|-------|
+| macOS arm64 | 358 KB | debug-arm64 (release-strip is smaller) |
+| Windows x64 | 432 KB | MSVC Release, static CRT |
 
 ### Memory at 128×128 with mirror
 
@@ -42,6 +47,71 @@ Per-step tick/heap live in `contract.esp32-eth-wifi` and `contract.esp32-eth` ac
 ### Run-to-run variance
 
 Individual measurements vary ~5–10% on the Olimex board with no configuration change — inherent ESP32/Ethernet timing jitter (lwIP `tcpip_thread` scheduling, EMAC DMA, Ethernet ACK pacing). Scenarios use 10% default ESP32 tolerance to absorb this; when a step trips, re-run before treating it as a real regression. The `collect_kpi.py --commit` gate parses a single `tick:` line from `esp32/monitor.log` and can flag an unlucky sample — same rule applies.
+
+### All-effects sweep (every effect, no modifier, Ethernet + ArtNet)
+
+`scenario_AllEffects_grid_sizes` runs each effect alone over a Layer (no modifier) at four square grids, through the real ArtNet + Preview drivers — the per-effect cost of the same pipeline the README's single-effect headline row measures. Numbers are `observed.esp32-eth` from a live run; apply the ~5–10% variance above.
+
+**FPS** (= 1,000,000 / tick µs):
+
+| Effect | 16² | 32² | 64² | 128² |
+|--------|----:|----:|----:|-----:|
+| Lines | 12658 | 7633 | 2304 | 23 |
+| Rainbow | 3831 | 968 | 143 | 22 |
+| Noise | 1117 | 324 | 71 | 17 |
+| Plasma | 3194 | 829 | 135 | 18 |
+| PlasmaPalette | 6024 | 1733 | 267 | 21 |
+| Metaballs | 2016 | 521 | 102 | 18 |
+| Fire | 2762 | 784 | 159 | 21 |
+| Particles | 4716 | 1848 | 424 | 30 |
+| GlowParticles | 1706 | 586 | 128 | 14 |
+| Checkerboard | 8474 | 2617 | 397 | 21 |
+| Spiral | 2403 | 571 | 87 | 15 |
+| Ripples | 1118 | 284 | 45 | 12 |
+| LavaLamp | 3030 | 756 | 113 | 18 |
+| GameOfLife | 6802 | 1519 | 226 | 13 |
+
+At 128² nearly every effect converges to ~12–23 FPS: the board is **ArtNet-output-bound** there (the ~38 ms synchronous send dominates the tick), so effect-compute differences wash out — the same physics the README narrates for the S3 over WiFi. Effect cost is visible at 64² and below, where Ripples / Noise / Spiral are the heaviest and Lines / Checkerboard the lightest.
+
+**Free internal heap** (KB) — the scarce resource on a no-PSRAM board; drops as the grid grows because the Layer buffer + LUT and the driver output buffer live in internal RAM:
+
+| Effect | 16² | 32² | 64² | 128² |
+|--------|----:|----:|----:|-----:|
+| Lines | 220 | 214 | 195 | 126 |
+| Rainbow | 173 | 167 | 158 | 126 |
+| Noise | 171 | 168 | 159 | 126 |
+| Plasma | 173 | 171 | 162 | 126 |
+| PlasmaPalette | 170 | 168 | 160 | 126 |
+| Metaballs | 173 | 171 | 162 | 126 |
+| Fire | 173 | 170 | 157 | 110 |
+| Particles | 172 | 167 | 149 | 77 |
+| GlowParticles | 173 | 171 | 162 | 126 |
+| Checkerboard | 173 | 168 | 159 | 123 |
+| Spiral | 170 | 169 | 160 | 123 |
+| Ripples | 170 | 168 | 160 | 124 |
+| LavaLamp | 170 | 169 | 160 | 124 |
+| GameOfLife | 171 | 165 | 150 | 90 |
+
+**Largest free internal block** (KB) — the memory-pressure signal that matters: free heap can be ample while fragmentation leaves no single block big enough for the next allocation:
+
+| Effect | 16² | 32² | 64² | 128² |
+|--------|----:|----:|----:|-----:|
+| Lines | 108 | 108 | 108 | 62 |
+| Rainbow | 92 | 88 | 76 | 62 |
+| Noise | 92 | 88 | 76 | 62 |
+| Plasma | 92 | 92 | 84 | 62 |
+| PlasmaPalette | 92 | 88 | 80 | 62 |
+| Metaballs | 92 | 92 | 84 | 62 |
+| Fire | 96 | 92 | 76 | 62 |
+| Particles | 80 | 80 | 68 | 34 |
+| GlowParticles | 84 | 84 | 80 | 62 |
+| Checkerboard | 96 | 88 | 72 | 62 |
+| Spiral | 88 | 88 | 76 | 62 |
+| Ripples | 92 | 88 | 80 | 62 |
+| LavaLamp | 92 | 88 | 72 | 62 |
+| GameOfLife | 88 | 84 | 68 | 46 |
+
+Most effects hold the same ~126 KB free / 62 KB block at 128² — their per-cell state is negligible next to the buffers. The exceptions carry real per-cell state: **Particles** (77 KB / 34 KB) and **GameOfLife** (90 KB / 46 KB) allocate a parallel grid-sized array, and **Fire** (110 KB) a heat map. Those three are the ones to watch for fragmentation headroom on a no-PSRAM board at large grids.
 
 ### ArtNet over WiFi vs Ethernet
 
@@ -71,7 +141,7 @@ The Olimex `esp32` build is 4× slower at ArtNet than `esp32-eth-wifi` on the sa
 | Drivers | 48 KB | output buffer (128×128×3) |
 | System + Network | 0 | char buffers in class, no heap |
 
-LUT is half desktop size (uint16_t vs uint32_t per entry). The 1:1 (no-modifier) path skips the LUT entirely; see `scenario_Layer_memory_1to1` vs `scenario_MirrorModifier_memory_lut`.
+LUT is half desktop size (uint16_t vs uint32_t per entry). The 1:1 (no-modifier) path skips the LUT entirely; see `scenario_Layer_memory_1to1` vs `scenario_MultiplyModifier_memory_lut`.
 
 ### Heap breakdown (128×128, mirror, RainbowEffect, Ethernet + mDNS)
 

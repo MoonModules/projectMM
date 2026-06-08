@@ -3,7 +3,7 @@
   "module": "GridLayout",
   "mode": "mutate",
   "also": [
-    "MirrorModifier",
+    "MultiplyModifier",
     "Layer"
   ],
   "description": "Resize the grid while the pipeline is running and verify it reallocates cleanly under memory pressure. Lowers to 128x64 (release memory), increases to 128x128 (heaviest config: mirror + LUT). Each measured step captures tick/FPS/heap so the runner reports the degrade behaviour.",
@@ -45,8 +45,8 @@
     {
       "name": "fix-mirror",
       "op": "add_module",
-      "id": "Mirror",
-      "type": "MirrorModifier",
+      "id": "Multiply",
+      "type": "MultiplyModifier",
       "parent_id": "Layer"
     },
     {
@@ -84,14 +84,14 @@
     {
       "name": "reset-mirrorX",
       "op": "set_control",
-      "id": "Mirror",
+      "id": "Multiply",
       "key": "mirrorX",
       "value": true
     },
     {
       "name": "reset-mirrorY",
       "op": "set_control",
-      "id": "Mirror",
+      "id": "Multiply",
       "key": "mirrorY",
       "value": true
     }
@@ -190,6 +190,24 @@
           "at": [
             "2026-06-02",
             "2026-06-02"
+          ]
+        },
+        "pc-windows": {
+          "tick_us": [
+            219,
+            293
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
           ]
         }
       }
@@ -293,6 +311,24 @@
             "2026-06-02",
             "2026-06-02"
           ]
+        },
+        "pc-windows": {
+          "tick_us": [
+            94,
+            137
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
         }
       }
     },
@@ -389,6 +425,24 @@
           "at": [
             "2026-06-02",
             "2026-06-02"
+          ]
+        },
+        "pc-windows": {
+          "tick_us": [
+            217,
+            291
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
           ]
         }
       }

@@ -13,6 +13,7 @@ This document describes the system as it is. Coding conventions live in [coding-
   - [Parallelism](#parallelism)
   - [Data exchange between modules](#data-exchange-between-modules)
   - [Event triggering between modules](#event-triggering-between-modules)
+  - [Robustness](#robustness)
   - [Hot path discipline](#hot-path-discipline)
   - [Platform abstraction](#platform-abstraction)
   - [Firmware vs board](#firmware-vs-board)
@@ -152,6 +153,19 @@ This is the recognised layout/prepare-pass pattern: JUCE's `prepareToPlay` and U
 
 If a module needs to actively notify a specific other module of an event (rather than publish data for polling, or change its own controls), the pattern is a direct method call from the producer to a known consumer — `ImprovProvisioningModule::loop1s` calls `networkModule_->setWifiCredentials(...)` when credentials arrive over UART. No event bus; the producer holds a pointer to the consumer set at wiring time (`main.cpp`). Pub/sub becomes the right pattern only when there are multiple unknown subscribers per event — projectMM has none today.
 
+## Robustness
+
+A running device must tolerate **any sequence of UI actions or API calls** — add, delete, replace, move, or reconfigure any module in any order, at any grid size — and keep running. Degraded or idle is an acceptable outcome; a crash, a hang, or a boot loop is not. This is a defining strongpoint: the device is something an end user can poke at freely without bricking it.
+
+The contract is bounded to **what the software accepts as input**. Power loss, a malformed OTA image, a brown-out, or electrical faults are out of scope — the firmware can't intercept those. Everything that arrives through the HTTP API, the WebSocket, or the UI is in scope.
+
+Why this needs stating as its own guarantee: the mutation-driven rebuild above ([§ Event triggering](#event-triggering-between-modules)) means a single API call can free and rebuild a large slice of the module tree mid-render. The hazard is **stale references** — a module holding a pointer to something that was just torn down. The two patterns that keep it safe:
+
+- **Resolve links at `onBuildState`, don't cache them across mutations.** A module that depends on another (a `Drivers` reading the active `Layer`, a `Layer` reading its `Layouts`) re-resolves that link from the tree at every rebuild rather than pinning a pointer once at wiring time. When the dependency is gone, the link resolves to null — not to freed memory.
+- **Tolerate null at the point of use.** Every consumer of a resolved link null-checks it and falls back to an idle state (no buffer, zero lights, nothing sent) rather than dereferencing. A driver with no Layer sends nothing; a Layer with no Layouts reports zero lights. Idle, not crashed.
+
+The enforcement is the test framework, not discipline alone (see the [Hard Rule](../CLAUDE.md#hard-rules)). When a sequence is found that crashes or wedges the device, the fix is **incomplete until a test reproduces that sequence** — so the same break can't return. Worked example: deleting the last Layer once left `Drivers` holding a dangling pointer to the freed Layer; `PreviewDriver` then read it and panicked (`LoadProhibited`), and because the tree persists, the device boot-looped. The fix made `Drivers` clear its drivers' Layer pointers to null when no Layer is active, and a regression test (`unit_PreviewDriver`, "tolerates the active Layer being deleted") drives a Layer delete + rebuild and asserts the driver ends up null, not dangling. The scenario layer adds the same coverage end-to-end: `clear_children` lets a scenario clear a container and rebuild its own pipeline from any starting tree, so the delete/rebuild path is exercised on real hardware, not just in unit tests.
+
 ## Hot path discipline
 
 The render loop (`Scheduler::tick` and everything it calls — every effect, modifier, driver, layout) is the hot path. It runs roughly 50–10000 times per second depending on light count. Code there obeys three rules:
@@ -279,7 +293,7 @@ A **Layer** (a MoonModule, child of Layers) owns:
 
 A layer can have **multiple effects**. Effects are not blended — they write to the buffer sequentially in their listed order, each overwriting or adding to the previous. That allows stacked patterns (a base-colour effect followed by a sparkle effect).
 
-A layer can have **multiple modifiers**. Static modifiers chain during LUT build; dynamic modifiers chain during rendering. Order matters: mirror-then-rotate differs from rotate-then-mirror.
+A layer applies its **first enabled modifier** during LUT build (`Layer::rebuildLUT`). Modifier *chaining* — applying several in sequence — is not implemented: only the first enabled modifier takes effect. Order matters for a chain (a multiply-then-checkerboard mask differs from checkerboard-then-multiply, just as mirror-then-rotate differs from rotate-then-mirror), which is why modifiers are reorderable in the UI even though only the first is applied today. Chaining is on the [backlog](backlog/backlog.md) — static modifiers chain during LUT build, dynamic modifiers during rendering.
 
 Each layer references the shared Layouts. The layer builds its own LUT by iterating the Layouts container's coordinates and applying its static modifiers in order. Different layers in Layers can have different modifiers, producing different LUTs from the same Layouts.
 
@@ -331,7 +345,7 @@ A modifier can:
 - Transform the mapping LUT via `transformCoord()` — rebuilt on the cold path, zero render cost.
 - Transform light values via `transformLights()` on the hot path — per-light cost, enables dynamic animations like rotation.
 
-**Dimensionality** for modifiers defaults to `Dim::D3` (assumed to work in all three axes unless declared otherwise). Unlike for effects, this is purely advisory — the Layer doesn't extrude modifier output. It exists so the UI can render the 📏/🟦/🧊 chip on the card. **MirrorModifier** is D3 (it has independent mirrorX/Y/Z toggles).
+**Dimensionality** for modifiers defaults to `Dim::D3` (assumed to work in all three axes unless declared otherwise). Unlike for effects, this is purely advisory — the Layer doesn't extrude modifier output. It exists so the UI can render the 📏/🟦/🧊 chip on the card. **MultiplyModifier** is D3 (it has independent multiplyX/Y/Z + mirrorX/Y/Z toggles).
 
 ## Mapping and blending
 

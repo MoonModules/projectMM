@@ -675,7 +675,7 @@ function createCard(mod, depth) {
 
     // -- Children block + footer --
     // The .card-children wrapper lives inside this card so the parent's border
-    // encloses its children; renderModuleTree recurses into it. The "+ add child"
+    // encloses its children; renderModuleTree recurses into it. The "+ add module"
     // footer only appears on parents that accept user-created children — a parent
     // hosting only code-wired children (e.g. Network → Improv) renders the
     // children block but no add button.
@@ -687,12 +687,12 @@ function createCard(mod, depth) {
         card.appendChild(childrenEl);
 
         if (acceptsNewChildren(mod)) {
-            // -- Footer: + add child --
+            // -- Footer: + add module --
             const footer = document.createElement("div");
             footer.className = "card-footer";
             const addBtn = document.createElement("button");
             addBtn.className = "add-btn";
-            addBtn.textContent = "+ add child";
+            addBtn.textContent = "+ add module";
             addBtn.addEventListener("click", () => {
                 // Hide the button while the picker is open (the picker takes its
                 // place); restore it once the picker is removed (cancel/create/Esc).
@@ -838,7 +838,7 @@ function findParent(childName) {
     return walk(null, state.modules);
 }
 
-// Whether this module renders any nested children at all (a "+ add child"
+// Whether this module renders any nested children at all (a "+ add module"
 // button included if it also accepts new ones via the UI). True whenever the
 // module has at least one child today OR is one of the light-pipeline
 // containers that users can add to. This lets code-wired children (e.g.
@@ -858,7 +858,7 @@ function rolesAcceptedBy(parentMod) {
     return csv ? csv.split(",") : [];
 }
 
-// Whether the "+ add child" affordance applies — derived from acceptsChildRoles
+// Whether the "+ add module" affordance applies — derived from acceptsChildRoles
 // being non-empty, so there's a single source of truth (no separate list).
 function acceptsNewChildren(mod) {
     return rolesAcceptedBy(mod).length > 0;
@@ -1777,9 +1777,22 @@ function attachDragHandlers(card, mod) {
     });
     card.addEventListener("drop", (e) => {
         e.preventDefault();
+        // Innermost card wins — without stopPropagation the drop bubbles to every
+        // ancestor card that also has a drop handler, firing a SECOND move onto
+        // the grandparent's child list (e.g. dropping onto Mirror also dropped
+        // onto the Layer card → move into Layers, index 0 → undoing the first
+        // move). Same reason dragstart stops propagation above.
+        e.stopPropagation();
         card.classList.remove("drag-over");
         const srcName = e.dataTransfer.getData("text/plain");
         if (!srcName || srcName === mod.name) return;
+        // Insert semantics (not swap): the dropped item takes the target row's
+        // slot and the others shift to fill — the standard reorderable-list
+        // behaviour (Finder, Trello, VS Code, SortableJS). Because we drop ONTO a
+        // row (not into a between-rows gap), the landing is the target's absolute
+        // index: dragging down lands after the target, dragging up lands before
+        // it. That's consistent ("take the target's slot"), just not always-before.
+        //
         // Compute target absolute index within parent's children. Identify the
         // drop-target by name, not by object identity — state is replaced on
         // every WS push, so `mod` captured at render time is stale within ~1s.

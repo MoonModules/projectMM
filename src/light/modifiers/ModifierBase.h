@@ -23,15 +23,20 @@ public:
     // purely an advisory chip, never read in the render path.
     virtual Dim dimensions() const { return Dim::D3; }
 
-    // Max physical destinations per logical light (for LUT allocation estimate)
-    virtual uint8_t maxMultiplier() const { return 8; }
+    // Max physical destinations a single logical light fans out to. The Layer
+    // sizes its per-light scratch buffer to exactly this (heap, cold path), so
+    // there is no fixed ceiling — a modifier may declare any fan-out and the
+    // only limit is memory (an alloc failure degrades to the identity LUT).
+    // Returned as nrOfLightsType (not uint8_t) so large fan-outs (e.g. an 8×8×8
+    // multiply = 512) are expressible without overflow.
+    virtual nrOfLightsType maxMultiplier() const { return 8; }
 
     // Compute logical dimensions given physical dimensions
     virtual void logicalDimensions(lengthType physW, lengthType physH, lengthType physD,
                                    lengthType& logW, lengthType& logH, lengthType& logD) const = 0;
 
-    // Map a logical coordinate to physical positions
-    // outPhysicals: caller-provided array (stack, max 8 for XYZ mirror)
+    // Map a logical coordinate to physical positions.
+    // outPhysicals: caller-provided array sized kMaxFanout; write at most maxOut.
     // outCount: set to number of physical positions written
     virtual void mapToPhysical(lengthType lx, lengthType ly, lengthType lz,
                                lengthType physW, lengthType physH, lengthType physD,

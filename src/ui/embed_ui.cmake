@@ -5,10 +5,31 @@
 # (HttpServerModule); the browser inflates natively, so the firmware carries the
 # UI ~3.5x smaller with no device-side or front-end decompressor. Standard
 # embedded-web-UI practice (WLED, ESPHome, ESP-IDF examples all pre-gzip assets).
-# Compression runs on the BUILD HOST via python3's gzip module — stdlib,
-# guaranteed on every ESP-IDF/desktop build host (chosen over a `gzip` binary
-# that Windows toolchains may lack). The PNG is already compressed, so it stays
-# raw.
+# Compression runs on the BUILD HOST via Python's gzip module — stdlib, so any
+# Python interpreter works (chosen over a `gzip` binary that Windows toolchains
+# may lack). The PNG is already compressed, so it stays raw.
+#
+# Interpreter resolution — callers pick ONE of:
+#   PYTHON_CMD       — a CMake list giving the exact argv prefix (ESP32 path
+#                      passes `${Python3_EXECUTABLE}`). Wins if both are set.
+#   UV_EXECUTABLE    — path to `uv`; built into `<uv> run python` here (desktop
+#                      path). The list is built in-script so the desktop
+#                      CMakeLists doesn't have to pass semicolons through
+#                      MSBuild / make's command-line splitter.
+# The two build entry points always pass one of these (root CMakeLists passes
+# UV_EXECUTABLE via find_program(... REQUIRED); the ESP32 path passes PYTHON_CMD).
+# A standalone `cmake -P` invocation that supplies neither is a configuration
+# error — fail loudly here rather than fall back to a bare `python3` that doesn't
+# exist on Windows (where it's `python`/`py`), which would surface as a cryptic
+# mid-build "python3 not found" inside the gzip custom command.
+if(DEFINED UV_EXECUTABLE AND NOT DEFINED PYTHON_CMD)
+    set(PYTHON_CMD ${UV_EXECUTABLE} run python)
+elseif(NOT DEFINED PYTHON_CMD)
+    message(FATAL_ERROR
+        "embed_ui.cmake: no Python interpreter. Pass -DUV_EXECUTABLE=<path-to-uv> "
+        "or -DPYTHON_CMD=<interpreter>. (The normal build supplies one; this only "
+        "fires on a standalone `cmake -P embed_ui.cmake` with neither set.)")
+endif()
 
 # Gzip ${UI_DIR}/<name> to ${OUT_DIR}/<name>.gz and HEX-read it into OUT_VAR.
 function(gzip_file_hex NAME OUT_VAR)
@@ -17,10 +38,10 @@ function(gzip_file_hex NAME OUT_VAR)
     get_filename_component(out_dir "${OUT}" DIRECTORY)
     set(gz "${out_dir}/${NAME}.gz")
     execute_process(
-        COMMAND python3 -c "import sys,gzip; open(sys.argv[2],'wb').write(gzip.compress(open(sys.argv[1],'rb').read(),9))" "${src}" "${gz}"
+        COMMAND ${PYTHON_CMD} -c "import sys,gzip; open(sys.argv[2],'wb').write(gzip.compress(open(sys.argv[1],'rb').read(),9))" "${src}" "${gz}"
         RESULT_VARIABLE rc)
     if(NOT rc EQUAL 0)
-        message(FATAL_ERROR "gzip of ${src} failed (python3 rc=${rc})")
+        message(FATAL_ERROR "gzip of ${src} failed (PYTHON_CMD=${PYTHON_CMD} rc=${rc})")
     endif()
     file(READ "${gz}" hex HEX)
     file(REMOVE "${gz}")

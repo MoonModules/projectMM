@@ -33,7 +33,7 @@ import generate_test_docs as test_doc_gen  # noqa: E402
 def _app_version():
     """Read the project version from library.json. '?' if unavailable."""
     try:
-        return json.loads((ROOT / "library.json").read_text()).get("version", "?")
+        return json.loads((ROOT / "library.json").read_text(encoding="utf-8")).get("version", "?")
     except Exception:
         return "?"
 
@@ -54,7 +54,7 @@ def _load_boards():
     Step 2 picker will share this file.
     """
     try:
-        return json.loads(BOARDS_FILE.read_text())
+        return json.loads(BOARDS_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return []
 
@@ -301,7 +301,7 @@ def _consume_last_flash() -> dict | None:
     if not _LAST_FLASH_FILE.exists():
         return None
     try:
-        data = json.loads(_LAST_FLASH_FILE.read_text())
+        data = json.loads(_LAST_FLASH_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     import time
@@ -641,24 +641,36 @@ def is_process_running(name: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def list_serial_ports() -> list[str]:
-    """List available serial ports."""
-    ports = []
-    # macOS
+    """List available serial ports.
+
+    POSIX hosts: glob the conventional /dev/tty* device files (no deps).
+    Windows: read HKLM\\HARDWARE\\DEVICEMAP\\SERIALCOMM via winreg (stdlib).
+    SERIALCOMM is the authoritative table the OS itself maintains for
+    present COM ports — what pyserial reads under the hood — so a registry
+    walk is both correct and dependency-free. The previous brute-force
+    COM0..COM255 open-and-close loop required pyserial, which MoonDeck did
+    not declare, so on Windows the list silently came back empty.
+    """
+    ports: list[str] = []
     import glob
     ports.extend(glob.glob("/dev/tty.usb*"))
     ports.extend(glob.glob("/dev/ttyUSB*"))
     ports.extend(glob.glob("/dev/ttyACM*"))
-    # Windows COM ports
     if sys.platform == "win32":
-        for i in range(256):
-            port = f"COM{i}"
-            try:
-                import serial
-                s = serial.Serial(port)
-                s.close()
-                ports.append(port)
-            except Exception:
-                pass
+        import winreg
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                r"HARDWARE\DEVICEMAP\SERIALCOMM") as key:
+                i = 0
+                while True:
+                    try:
+                        _, port, _ = winreg.EnumValue(key, i)
+                        ports.append(port)
+                        i += 1
+                    except OSError:
+                        break
+        except FileNotFoundError:
+            pass  # no SERIALCOMM key — no ports present
     return sorted(ports)
 
 

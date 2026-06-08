@@ -28,7 +28,9 @@ def find_moonmodules():
         if str(rel).startswith("platform/") or str(rel).startswith("ui/"):
             continue
 
-        content = h_file.read_text()
+        # Explicit utf-8: source files contain non-ASCII (→, µ, ×). Windows'
+        # default read_text encoding is cp1252 and rejects those bytes.
+        content = h_file.read_text(encoding="utf-8")
         # Check if file defines a class inheriting from MoonModule or its subclasses
         if re.search(r'class\s+\w+\s*:\s*public\s+\w*(MoonModule|EffectBase|DriverBase|ModifierBase|LayoutBase)', content):
             # Skip abstract base classes (pure virtual methods + no controls)
@@ -52,8 +54,8 @@ def find_spec(module_path):
 def check_spec_freshness(source_path, spec_path):
     """Check if spec mentions key elements from the source."""
     issues = []
-    source = source_path.read_text()
-    spec = spec_path.read_text()
+    source = source_path.read_text(encoding="utf-8")
+    spec = spec_path.read_text(encoding="utf-8")
 
     # Extract control names from source
     controls = re.findall(r'controls_\.add\w+\("(\w+)"', source)

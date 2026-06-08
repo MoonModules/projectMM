@@ -67,8 +67,8 @@ public:
     void onBuildControls() override {
         // Platform-derived totals queried here (idempotent, no I/O) so the conditionals that
         // gate the Progress controls see real values rather than waiting on setup().
-        totalInternalVal_ = platform::totalInternalHeap();
-        totalHeapVal_ = platform::totalHeap();
+        totalInternalVal_ = static_cast<uint32_t>(platform::totalInternalHeap());
+        totalHeapVal_ = static_cast<uint32_t>(platform::totalHeap());
         firmwareSizeVal_ = static_cast<uint32_t>(platform::firmwareSize());
         totalFlashVal_ = static_cast<uint32_t>(platform::firmwarePartition());
         chipFlashVal_ = static_cast<uint32_t>(platform::flashChipSize());

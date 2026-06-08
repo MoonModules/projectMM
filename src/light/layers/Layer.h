@@ -111,6 +111,19 @@ public:
 
         rebuildLUT();
 
+        // Neutral status: the LOGICAL box the effects render into (width_×height_×
+        // depth_) — this is what start/end region carving and modifiers reshape,
+        // so it can differ from the physical box (shown on Layouts). Only set it
+        // when rebuildLUT left the status clear; a degrade path (LUT skipped /
+        // buffer reduced) sets its own Warning, which must win over this line.
+        if (status() == nullptr) {
+            std::snprintf(statusBuf_, sizeof(statusBuf_), "%u×%u×%u",
+                          static_cast<unsigned>(width_),
+                          static_cast<unsigned>(height_),
+                          static_cast<unsigned>(depth_));
+            setStatus(statusBuf_);
+        }
+
         // Children allocate after LUT is built (effects need buffer dimensions)
         MoonModule::onBuildState();
     }
@@ -258,8 +271,15 @@ public:
         // maxDest in DRIVER-index terms. The modifier's multiplier bounds how
         // many destinations a logical cell fans out to; clamp to 2× the real
         // light count (was box count — driverCount is the true ceiling now).
-        nrOfLightsType maxDest = logicalCount * mod->maxMultiplier();
-        if (maxDest > driverCount * 2) maxDest = driverCount * 2;
+        // Compute in 64-bit: on a no-PSRAM board nrOfLightsType is uint16, and
+        // logicalCount × maxMultiplier (e.g. 256 × 256) overflows it — which
+        // wrapped maxDest to a tiny value, built a near-empty LUT, and blanked
+        // the display (the multiplyZ-on-2D black-screen bug). Clamp the ceiling
+        // before narrowing back to nrOfLightsType.
+        uint64_t maxDestWide = static_cast<uint64_t>(logicalCount) * mod->maxMultiplier();
+        const uint64_t ceiling = static_cast<uint64_t>(driverCount) * 2;
+        if (maxDestWide > ceiling) maxDestWide = ceiling;
+        nrOfLightsType maxDest = static_cast<nrOfLightsType>(maxDestWide);
 
         // MappingLUT::build owns the allocation decision: it tries a single
         // contiguous block, falls back to fixed-size pages when no single block
@@ -287,8 +307,25 @@ public:
         // Layouts::forEachCoord. nullptr → dense grid → no translation needed.
         nrOfLightsType* boxToDriver = sparse ? buildBoxToDriver(boxCount) : nullptr;
 
-        // Fill LUT by iterating all logical coordinates
-        nrOfLightsType physicals[8];
+        // Per-light scratch buffer for the modifier's fan-out destinations. Sized
+        // to the modifier's maxMultiplier(), but clamped to boxCount: a logical
+        // light can't map to more positions than the physical box has cells, so
+        // that's the true ceiling. The clamp avoids a pathological over-alloc
+        // when maxMultiplier() saturates high (e.g. a 64×64×16 multiply reports
+        // 65535 but a small grid has far fewer cells). Heap-allocated on the cold
+        // path (like boxToDriver); an OOM here degrades to the identity LUT.
+        nrOfLightsType fanout = mod->maxMultiplier() > 0 ? mod->maxMultiplier() : 1;
+        if (fanout > boxCount && boxCount > 0) fanout = boxCount;
+        auto* physicals = static_cast<nrOfLightsType*>(
+            platform::alloc(static_cast<size_t>(fanout) * sizeof(nrOfLightsType)));
+        if (!physicals) {
+            if (boxToDriver) platform::free(boxToDriver);
+            lut_.free();
+            lutSkipped_ = true;
+            setStatus("modifier scratch alloc failed — not enough memory", Severity::Warning);
+            degradeIdentity();
+            return;
+        }
         nrOfLightsType count;
         nrOfLightsType logIdx = 0;
 
@@ -297,7 +334,7 @@ public:
                 for (lengthType x = 0; x < width_; x++) {
                     count = 0;
                     mod->mapToPhysical(x, y, z, physicalWidth_, physicalHeight_, physicalDepth_,
-                                       physicals, count, 8);
+                                       physicals, count, fanout);
                     if (boxToDriver) {
                         // Translate box indices → driver indices, dropping cells
                         // that map to no real light (kNoDriver).
@@ -313,6 +350,7 @@ public:
                 }
             }
         }
+        platform::free(physicals);
         if (boxToDriver) platform::free(boxToDriver);
 
         lut_.finalize();
@@ -375,6 +413,7 @@ private:
     lengthType height_ = 0;
     lengthType depth_ = 0;
     uint32_t elapsed_ = 0;
+    char statusBuf_[20] = {};  // "999×999×999" fits; owned (setStatus borrows the pointer)
 
     // Check if heap can afford an allocation (returns true if unlimited or enough budget)
     static bool canAllocate(size_t bytesNeeded) {

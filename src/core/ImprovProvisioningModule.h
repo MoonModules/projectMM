@@ -37,6 +37,10 @@ public:
     // Diagnostics keep ticking; matches FirmwareUpdateModule / SystemModule.
     bool respectsEnabled() const override { return false; }
 
+    // Apparatus, not swappable content — provisioning is a fixed device service.
+    // Not deletable (matches Board / Preview); can still be disabled.
+    bool userEditable() const override { return false; }
+
     void setup() override {
         if constexpr (platform::hasImprov) {
             // Strings borrowed; platform task copies them into its own storage

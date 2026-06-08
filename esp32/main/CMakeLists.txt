@@ -65,11 +65,19 @@ if(MM_NO_ETH)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_NO_ETH)
 endif()
 
-# Embed UI files — regenerate on every build
+# Embed UI files — regenerate on every build. ESP-IDF's bundled Python venv
+# is named `python.exe` on Windows and `python3` on macOS/Linux; bare `python3`
+# fails on the Windows IDF venv. find_package(Python3) lets CMake locate the
+# interpreter via the same logic IDF uses (PATH, IDF env), so the same code
+# works on every host. The desktop CMakeLists routes through `uv run python`
+# for the same reason — only for the IDF build path do we let CMake pick the
+# interpreter, because adding uv to ESP-IDF docker would be a bigger CI lift
+# than the portability win pays for.
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(UI_DIR ${COMPONENT_DIR}/../../src/ui)
 add_custom_command(
     OUTPUT ${UI_DIR}/ui_embedded.h
-    COMMAND ${CMAKE_COMMAND} -DUI_DIR=${UI_DIR} -DOUT=${UI_DIR}/ui_embedded.h -P ${UI_DIR}/embed_ui.cmake
+    COMMAND ${CMAKE_COMMAND} -DUI_DIR=${UI_DIR} -DOUT=${UI_DIR}/ui_embedded.h -DPYTHON_CMD=${Python3_EXECUTABLE} -P ${UI_DIR}/embed_ui.cmake
     DEPENDS ${UI_DIR}/index.html ${UI_DIR}/app.js ${UI_DIR}/style.css ${UI_DIR}/install-picker.js ${UI_DIR}/preview3d.js ${UI_DIR}/moonlight-logo.png ${UI_DIR}/embed_ui.cmake
     COMMENT "Embedding UI files"
 )
@@ -79,7 +87,7 @@ add_custom_target(ui_embed DEPENDS ${UI_DIR}/ui_embedded.h)
 set(BUILD_INFO_DIR ${COMPONENT_DIR}/../../src/core)
 add_custom_command(
     OUTPUT ${BUILD_INFO_DIR}/build_info.h
-    COMMAND python3 ${COMPONENT_DIR}/../../scripts/build/generate_build_info.py
+    COMMAND ${Python3_EXECUTABLE} ${COMPONENT_DIR}/../../scripts/build/generate_build_info.py
     DEPENDS ${COMPONENT_DIR}/../../library.json ${COMPONENT_DIR}/../../scripts/build/generate_build_info.py
     COMMENT "Generating build_info.h"
 )

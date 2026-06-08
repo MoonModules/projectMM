@@ -4,7 +4,7 @@
   "mode": "mutate",
   "also": [
     "Layer",
-    "MirrorModifier",
+    "MultiplyModifier",
     "NoiseEffect",
     "Drivers",
     "ArtNetSendDriver",
@@ -49,8 +49,8 @@
     {
       "name": "fix-mirror",
       "op": "add_module",
-      "id": "Mirror",
-      "type": "MirrorModifier",
+      "id": "Multiply",
+      "type": "MultiplyModifier",
       "parent_id": "Layer"
     },
     {
@@ -95,14 +95,14 @@
     {
       "name": "reset-mirrorX",
       "op": "set_control",
-      "id": "Mirror",
+      "id": "Multiply",
       "key": "mirrorX",
       "value": true
     },
     {
       "name": "reset-mirrorY",
       "op": "set_control",
-      "id": "Mirror",
+      "id": "Multiply",
       "key": "mirrorY",
       "value": true
     }
@@ -241,6 +241,24 @@
             "2026-06-04",
             "2026-06-04"
           ]
+        },
+        "pc-windows": {
+          "tick_us": [
+            3,
+            7
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
         }
       }
     },
@@ -376,6 +394,24 @@
           "at": [
             "2026-06-04",
             "2026-06-04"
+          ]
+        },
+        "pc-windows": {
+          "tick_us": [
+            11,
+            14
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
           ]
         }
       }
@@ -513,6 +549,24 @@
             "2026-06-04",
             "2026-06-04"
           ]
+        },
+        "pc-windows": {
+          "tick_us": [
+            44,
+            56
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
+          ]
         }
       }
     },
@@ -648,6 +702,24 @@
           "at": [
             "2026-06-04",
             "2026-06-04"
+          ]
+        },
+        "pc-windows": {
+          "tick_us": [
+            222,
+            272
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-07",
+            "2026-06-07"
           ]
         }
       }

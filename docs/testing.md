@@ -52,7 +52,7 @@ A test lives under the subfolder of its **primary** `@module`'s source domain (e
 
 ### Naming convention
 
-- **Unit tests:** `unit_<ExactModuleName>[_<topic>].cpp` — `<ExactModuleName>` is the **CamelCase** class name as it appears in `// @module` (and in the source: `Layer`, `MoonModule`, `MirrorModifier`, `ArtNetSendDriver`). The optional `<topic>` collapses when the file's the only test for its module (`unit_Color.cpp` is fine if `@module Color`); add it when one module has several test files (`unit_Layer_extrude.cpp`, `unit_Layer_zero_grid.cpp`, …) or when the topic genuinely clarifies what the file covers (`unit_FilesystemModule_persistence.cpp`).
+- **Unit tests:** `unit_<ExactModuleName>[_<topic>].cpp` — `<ExactModuleName>` is the **CamelCase** class name as it appears in `// @module` (and in the source: `Layer`, `MoonModule`, `MultiplyModifier`, `ArtNetSendDriver`). The optional `<topic>` collapses when the file's the only test for its module (`unit_Color.cpp` is fine if `@module Color`); add it when one module has several test files (`unit_Layer_extrude.cpp`, `unit_Layer_zero_grid.cpp`, …) or when the topic genuinely clarifies what the file covers (`unit_FilesystemModule_persistence.cpp`).
 - **Scenarios:** `scenario_<ExactModuleName>_<topic>.json` — same module-naming rule; the topic is always present because scenarios always cross multiple modules and the topic distinguishes the focus.
 - The **`"name"` field inside each scenario JSON** matches the filename stem exactly (e.g. `"name": "scenario_Layer_base_pipeline"`). The runner, the MoonDeck dropdown, the generated docs and `--name` on the CLI all use this single identifier.
 
@@ -109,12 +109,12 @@ A `mutate` scenario that needs platform-bound modules (Network mDNS, WiFi, OTA) 
 
 ### Reset block: idempotent scenarios
 
-`mutate` scenarios mutate shared controls (Grid size, Mirror toggles, Preview detail). Without restoring those controls to known values at scenario start, measurements become coupled to *which other scenarios ran first* — last scenario's leftover state poisons this one's baseline. The fix is a top-level **`reset`** array, an `add_module`/`set_control`-shape list that runs *before* the scenario's own `steps`:
+`mutate` scenarios mutate shared controls (Grid size, Multiply mirror toggles, Preview detail). Without restoring those controls to known values at scenario start, measurements become coupled to *which other scenarios ran first* — last scenario's leftover state poisons this one's baseline. The fix is a top-level **`reset`** array, an `add_module`/`set_control`-shape list that runs *before* the scenario's own `steps`:
 
 ```json
 "reset": [
   { "name": "reset-grid-width", "op": "set_control", "id": "Grid", "key": "width", "value": 128 },
-  { "name": "reset-mirrorX", "op": "set_control", "id": "Mirror", "key": "mirrorX", "value": true }
+  { "name": "reset-mirrorX", "op": "set_control", "id": "Multiply", "key": "mirrorX", "value": true }
 ],
 ```
 
@@ -214,22 +214,22 @@ Every `scenario_*.json` carries top-level metadata plus a `description` per step
   "name": "scenario_GridLayout_grid_sizes",
   "module": "GridLayout",
   "mode": "mutate",
-  "also": ["Layer", "MirrorModifier", "Drivers", "ArtNetSendDriver"],
+  "also": ["Layer", "MultiplyModifier", "Drivers", "ArtNetSendDriver"],
   "description": "Walk the grid through 16x16 → 32x32 → 64x64 → 128x128 and assert a per-size FPS floor.",
   "fixture": [
     { "name": "fix-layouts", "op": "add_module", "id": "Layouts", "type": "Layouts" },
     { "name": "fix-grid", "op": "add_module", "id": "Grid", "type": "GridLayout", "parent_id": "Layouts", "props": {"width": 16, "height": 16} },
     { "name": "fix-layer", "op": "add_module", "id": "Layer", "type": "Layer", "props": {"layouts": "Layouts", "channelsPerLight": 3} },
     { "name": "fix-noise", "op": "add_module", "id": "Noise", "type": "NoiseEffect", "parent_id": "Layer" },
-    { "name": "fix-mirror", "op": "add_module", "id": "Mirror", "type": "MirrorModifier", "parent_id": "Layer" },
+    { "name": "fix-mirror", "op": "add_module", "id": "Multiply", "type": "MultiplyModifier", "parent_id": "Layer" },
     { "name": "fix-drivers", "op": "add_module", "id": "Drivers", "type": "Drivers", "props": {"layer": "Layer"} },
     { "name": "fix-artnet", "op": "add_module", "id": "ArtNet", "type": "ArtNetSendDriver", "parent_id": "Drivers" }
   ],
   "reset": [
     { "name": "reset-grid-width", "op": "set_control", "id": "Grid", "key": "width", "value": 128 },
     { "name": "reset-grid-height", "op": "set_control", "id": "Grid", "key": "height", "value": 128 },
-    { "name": "reset-mirrorX", "op": "set_control", "id": "Mirror", "key": "mirrorX", "value": true },
-    { "name": "reset-mirrorY", "op": "set_control", "id": "Mirror", "key": "mirrorY", "value": true }
+    { "name": "reset-mirrorX", "op": "set_control", "id": "Multiply", "key": "mirrorX", "value": true },
+    { "name": "reset-mirrorY", "op": "set_control", "id": "Multiply", "key": "mirrorY", "value": true }
   ],
   "steps": [
     {
@@ -296,6 +296,9 @@ Inventory: **[docs/tests/unit-tests.md](tests/unit-tests.md)** (auto-generated, 
 Run them with:
 
 ```bash
+# Replace build/macos with build/linux or build/windows per host. The
+# MoonDeck path below and `uv run scripts/test/test_desktop.py` resolve the
+# host build dir automatically; the raw ctest / mm_tests calls don't.
 ctest --test-dir build/macos --output-on-failure   # all
 ./build/macos/test/mm_tests -tc="<case-name>"      # one test case
 uv run scripts/test/test_desktop.py --module Layer # filtered by module
@@ -324,7 +327,10 @@ Or via MoonDeck (PC tab → Scenarios card). The module dropdown is shared with 
 **Step ops** the in-process runner understands today:
 
 - `add_module` — instantiate a module by `type`, register it under `id`. Top-level when no `parent_id`. Mid-scenario adds (after the first `measure` step) run setup() + buildState() immediately, mirroring the live `/api/modules` POST shape.
-- `set_control` — write a control on an already-added module (`id` + `key` + `value`). Mirrors `handleSetControl`: applies the typed write, calls `onUpdate()`, and triggers `Scheduler::buildState()` if `controlChangeTriggersBuildState` returns true. Today supports Uint8 / Uint16 / Int16 / Bool / Text / Password / Select.
+- `remove_module` / `delete_module` — delete a child module from its parent (teardown + recursive free + buildState). The two names are aliases (the in-process and live runners must never diverge on op names, or a scenario silently no-ops on one tier). Refuses non-editable submodules (`userEditable()==false`) and top-level modules.
+- `replace_module` — swap a child for a fresh module of another `type` at the same slot. A default-named module relabels to the new type; a custom/scenario id is preserved so later steps can still address it. Mirrors `/api/modules/<name>/replace`.
+- `clear_children` — delete every deletable child of a container (`id`), leaving the container. The "prepare my own canvas" primitive: a scenario assumes nothing about the device's starting tree, clears a container, then adds what it needs. Non-editable children (Board, Preview, Improv) are skipped.
+- `set_control` — write a control on an already-added module (`id` + `key` + `value`). Mirrors `handleSetControl`: applies the typed write, calls `onUpdate()`, and triggers `Scheduler::buildState()` if `controlChangeTriggersBuildState` returns true. Today supports Uint8 / Uint16 / Int16 / Bool / Text / Password / Select. A step may carry `"optional": true` — a best-effort write (e.g. shrink a grid that may not exist) that's skipped, not failed, when the target is absent.
 - `measure` — pure measurement step. Runs warmup + measure frames, prints per-step tick / FPS / lights / heap-delta, applies any `bounds` assertions for this step.
 
 A step can also set `"measure": true` on a non-measure op (e.g. mark the last `add_module` as the one to measure after); the runner treats either shape identically.

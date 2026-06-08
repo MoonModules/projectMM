@@ -7,6 +7,16 @@
 #include <cstdio>
 #include <cstring>
 
+// Printf-format checking: GCC/Clang have __attribute__((format)); MSVC parses
+// it as an "unknown override specifier" under /WX and the whole class fails to
+// parse downstream. Define a portable macro that expands to the attribute on
+// the GNU family and to nothing on MSVC.
+#if defined(__GNUC__) || defined(__clang__)
+  #define MM_PRINTF_FORMAT(fmt_arg, va_arg) __attribute__((format(printf, fmt_arg, va_arg)))
+#else
+  #define MM_PRINTF_FORMAT(fmt_arg, va_arg)
+#endif
+
 namespace mm {
 
 // Writes JSON with no fixed-buffer size ceiling. Three modes:
@@ -70,7 +80,7 @@ public:
     // module header) fits the FRAG_MAX stack buffer; a fragment that would
     // exceed it — e.g. an unusually long text-control value — is re-formatted
     // into a heap buffer so the output is never silently truncated.
-    void appendf(const char* fmt, ...) __attribute__((format(printf, 2, 3))) {
+    void appendf(const char* fmt, ...) MM_PRINTF_FORMAT(2, 3) {
         char frag[FRAG_MAX];
         va_list ap;
         va_start(ap, fmt);

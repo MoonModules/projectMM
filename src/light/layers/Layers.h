@@ -35,6 +35,14 @@ public:
 
     Layouts* layouts() const { return layouts_; }
 
+    // Re-wire children before they build their state, so a Layer added via the
+    // API (clear_children + add_module) gets the shared Layouts without anyone
+    // re-running main.cpp's setLayouts. Then chain to base to build the children.
+    void onBuildState() override {
+        setLayouts(layouts_);
+        MoonModule::onBuildState();
+    }
+
     // Role-filtered loop propagation: only tick children that are Layers.
     // The factory / UI shouldn't allow non-Layer children of a Layers
     // container, but if one slips in (test fixture, hand-crafted config),

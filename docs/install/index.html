@@ -78,6 +78,10 @@
     }
     .button-row { margin-top: 16px; }
     .note { color: var(--muted); font-size: 13px; margin-top: 10px; }
+    /* `.windows-only` elements are `hidden` by default in the HTML; the tiny
+       userAgent check at the top of <body> below removes `hidden` only on
+       Windows. Inverse to a CSS-only approach because CSS can't detect the
+       host OS — `[hidden]` already wins specificity-wise. */
     .erase-row { margin-top: 12px; font-size: 13px; }
     .erase-row label { cursor: pointer; }
     .erase-row input { vertical-align: middle; margin-right: 6px; }
@@ -324,6 +328,21 @@
   </style>
 </head>
 <body>
+  <!-- Reveal the Windows-CH340 BOOT-button hints (the `.windows-only`
+       paragraphs in the install modal) only on Windows hosts. Defers to
+       DOMContentLoaded so the elements (declared further down) exist by
+       the time the toggle runs. navigator.userAgent's "Windows" substring
+       is the same signal MDN documents for OS detection on the open web —
+       no third-party UA parser pulled in for one boolean. The install
+       modal is hidden by default, so the toggle happens off-screen and
+       there's no flash-of-visible-content concern. -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      if (/Windows/i.test(navigator.userAgent)) {
+        document.querySelectorAll('.windows-only').forEach(el => el.hidden = false);
+      }
+    });
+  </script>
   <main>
     <h1>projectMM Installer <span class="version-chip" id="version-chip" hidden></span></h1>
     <p class="tag">Plug in your ESP32. Pick a release + board. Flash. Get the device on your network. Open it in a browser.</p>
@@ -470,6 +489,22 @@
       <div class="install-section" id="section-connecting">
         <div class="install-status">Connecting to device over Web Serial…</div>
         <div class="install-status" id="connecting-detail"></div>
+        <!-- Documented Windows DTR/RTS timing issue (espressif/esptool#136,
+             #790): on Windows the auto-reset-into-bootloader sequence
+             dispatches setDTR and setRTS as separate IOCTLs, so the
+             ESP32's EN+IO0 toggle doesn't always land. Chrome's Web Serial
+             API can't tightly batch the two writes the way pyserial /
+             native esptool can. Worse on Windows 11 than Windows 10. The
+             official workaround is the manual BOOT/RST sequence the
+             Espressif docs recommend for any board where auto-reset
+             doesn't fire. Hidden on macOS/Linux. -->
+        <p class="note windows-only" hidden>
+          <strong>Windows users:</strong> if you see "Failed to connect with
+          the device," it's a known Windows timing issue with browser-based
+          flashing. Hold the <code>BOOT</code> (or <code>BUT1</code>) button
+          on the board, tap <code>RST</code> (reset) once, then release
+          <code>BOOT</code> — then click Install again.
+        </p>
       </div>
 
       <!-- Shown when the user's picked port doesn't open (probe failed):
@@ -564,6 +599,17 @@
       <div class="install-section" id="section-error">
         <div class="install-status">Something went wrong.</div>
         <div class="install-error" id="error-message"></div>
+        <!-- Same Windows DTR/RTS-timing hint as in section-connecting,
+             repeated here because the connecting phase is often too quick
+             to read before the error lands. See the comment in
+             section-connecting for the upstream-issue references. -->
+        <p class="note windows-only" hidden>
+          <strong>Windows users:</strong> if the stage was
+          <code>connect-flash</code>, it's a known Windows timing issue
+          with browser-based flashing. Hold the <code>BOOT</code> (or
+          <code>BUT1</code>) button on the board, tap <code>RST</code>
+          once, release <code>BOOT</code>, then click Install again.
+        </p>
         <div class="install-actions">
           <button type="button" class="secondary" id="error-close">Close</button>
         </div>

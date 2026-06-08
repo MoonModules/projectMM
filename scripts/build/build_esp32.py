@@ -96,6 +96,15 @@ def find_idf() -> Path | None:
     return None
 
 
+# Python venv layout differs between platforms — POSIX puts the interpreter in
+# `<venv>/bin/python`; Windows in `<venv>/Scripts/python.exe`. Same for the
+# toolchain `bin` dirs ESP-IDF unpacks under ~/.espressif/tools (POSIX) vs
+# %USERPROFILE%\.espressif\tools\…\Scripts (Windows for some tools, `bin` for
+# the GCC toolchains). The constants below capture the per-platform split.
+_VENV_BIN = "Scripts" if sys.platform == "win32" else "bin"
+_PYTHON_EXE = "python.exe" if sys.platform == "win32" else "python"
+
+
 def find_idf_python() -> Path | None:
     """Find the ESP-IDF Python venv. Prefers most recently modified."""
     venv_dir = Path.home() / ".espressif" / "python_env"
@@ -103,7 +112,7 @@ def find_idf_python() -> Path | None:
         return None
     candidates = []
     for d in venv_dir.iterdir():
-        python = d / "bin" / "python"
+        python = d / _VENV_BIN / _PYTHON_EXE
         if python.exists():
             candidates.append((d.stat().st_mtime, d))
     if candidates:
@@ -116,7 +125,7 @@ def idf_version(idf_path: Path) -> str:
     """Extract a clean semver from the IDF version string."""
     version_file = idf_path / "version.txt"
     if version_file.exists():
-        raw = version_file.read_text().strip()
+        raw = version_file.read_text(encoding="utf-8").strip()
         # Extract major.minor.patch from strings like "v6.1-dev-399-gd1b91b79b5"
         m = re.match(r"v?(\d+\.\d+)(?:\.(\d+))?", raw)
         if m:
@@ -129,6 +138,13 @@ def idf_env(idf_path: Path) -> dict:
     env = dict(os.environ)
     env["IDF_PATH"] = str(idf_path)
     env["ESP_IDF_VERSION"] = idf_version(idf_path)
+    # ESP-IDF's Python tooling refuses to run on a non-UTF-8 locale. Windows
+    # defaults to cp1252 (locale "English_Netherlands.1252" etc.), so idf.py
+    # bails with "Support for Unicode is required". PYTHONUTF8=1 (PEP 540)
+    # forces Python into UTF-8 mode regardless of the system locale, and
+    # PYTHONIOENCODING covers the stdin/stdout/stderr streams.
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
 
     venv_path = find_idf_python()
     if venv_path:
@@ -138,31 +154,47 @@ def idf_env(idf_path: Path) -> dict:
     extra_paths = []
 
     if venv_path:
-        extra_paths.append(str(venv_path / "bin"))
+        extra_paths.append(str(venv_path / _VENV_BIN))
 
     extra_paths.append(str(idf_path / "tools"))
 
-    # Add toolchain paths from ~/.espressif/tools
+    # Add toolchain paths from ~/.espressif/tools. Tool layout varies — POSIX
+    # tools have `bin/` subdirs (xtensa-esp-elf, cmake), Windows tools often
+    # don't (ninja, ccache, idf-exe ship the .exe at the version-dir root, or
+    # inside a single product-named subdir). Add both: the version dir itself
+    # (catches flat layouts) plus any nested `bin/` subdir (catches POSIX
+    # layouts). Together this covers every tool IDF installs on either host.
     tools_dir = Path.home() / ".espressif" / "tools"
     if tools_dir.exists():
         for tool in tools_dir.iterdir():
             if tool.is_dir():
                 for version_dir in sorted(tool.iterdir(), reverse=True):
+                    extra_paths.append(str(version_dir))
                     bin_dirs = list(version_dir.rglob("bin"))
                     if bin_dirs:
                         extra_paths.append(str(bin_dirs[0]))
-                        break
+                    break
 
     env["PATH"] = os.pathsep.join(extra_paths + [env.get("PATH", "")])
     return env
 
 
 def idf_cmd(idf_path: Path) -> list[str]:
-    """Return the command to invoke idf.py via the venv Python."""
+    """Return the command to invoke idf.py via the venv Python.
+
+    On Windows the entry point is `_idf_win_shim.py` instead of idf.py
+    directly — the shim calls `locale.setlocale(LC_ALL, "en_US.UTF-8")`
+    BEFORE idf.py runs, which is the only way to make IDF's locale check
+    (`locale.getlocale()`) pass on Windows installs whose system locale
+    is non-UTF-8 (e.g. Dutch / German / French). See the shim's docstring.
+    """
     venv_path = find_idf_python()
-    if venv_path:
-        return [str(venv_path / "bin" / "python"), str(idf_path / "tools" / "idf.py")]
-    return [str(idf_path / "tools" / "idf.py")]
+    python_exe = (str(venv_path / _VENV_BIN / _PYTHON_EXE)
+                  if venv_path else "python")
+    if sys.platform == "win32":
+        shim = Path(__file__).resolve().parent / "_idf_win_shim.py"
+        return [python_exe, str(shim)]
+    return [python_exe, str(idf_path / "tools" / "idf.py")]
 
 
 def firmware_cmake_args(firmware: str, release: str = "") -> list[str]:

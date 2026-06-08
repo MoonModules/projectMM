@@ -53,8 +53,8 @@ are concrete rules, not aspirations.
     loop. Add inter-packet delay and FPS limiting. Missing pacing
     looks like rendering bugs but is network flooding.
 14. **Use virtual interfaces, not dynamic_cast.** Modules interact
-    through virtual methods. Layer should not know about MirrorModifier
-    or RotateModifier by name.
+    through virtual methods. Layer should not know about MultiplyModifier
+    or CheckerboardModifier by name.
 15. **Rebuild propagation must be in the framework.** Don't check dirty
     flags per-module in main.cpp. Use an event/observer system or a
     centralized pipeline-changed signal.
@@ -679,3 +679,9 @@ The apparent blocker was "core uses `lengthType`." On inspection the uses were i
 **Two adjacent traps the same effect hit:**
 - **First-frame `dt`.** `lastElapsed_` starts at 0, so the first `now - lastElapsed_` is the whole device uptime — a huge `dt` that pins the step accumulator above the beat threshold *permanently* (max rate forever, `bpm` ignored). Bootstrap `lastElapsed_` on the first call and take `dt = 0` that frame.
 - **Width of the change delta.** The stagnation check narrowed `alive - lastAlive_` to `uint16_t`; at the 512×512 max grid on a PSRAM board (`nrOfLightsType == uint32_t`, 262144 cells) that truncates and triggers false re-seeds. Counters derived from cell counts must be `nrOfLightsType`, not a fixed width.
+
+## uint16 intermediate overflow blanks the display — and a status check doesn't prove the render works (MultiplyModifier)
+
+A high fan-out modifier (`MultiplyModifier` at 8×8×4) black-screened the no-PSRAM Olimex while the desktop showed it working. Root cause: `Layer::rebuildLUT` computed `maxDest = logicalCount * mod->maxMultiplier()` in `nrOfLightsType`. On no-PSRAM that's `uint16_t`, and `256 * 256 = 65536` **wraps to 0** — the LUT was sized to ~nothing, so almost every light mapped nowhere and the frame went black. On desktop (`nrOfLightsType == uint32_t`) the product fits, so the bug was invisible there. **Fix:** compute the product in `uint64_t`, clamp to the ceiling, then narrow back. This is the same family as the GameOfLife delta-width trap above, but for an *intermediate product*, not a stored counter — **any `nrOfLightsType * nrOfLightsType` (or `× a multiplier`) can overflow uint16 even when both operands are individually small; do the arithmetic in a wider type before narrowing.**
+
+The harder lesson is about *verification*: the agent's hardware test asserted the Layer **status string** ("16×16×1") and called it a pass — but the status reflects `logicalDimensions`, which was correct; the *render* (driven by the corrupted LUT) was black. The product owner caught it by eye. **A status/dimension assertion is not proof the pipeline renders.** A correctness test for a mapping/effect must assert the **buffer or LUT is non-empty with the expected coverage** (the regression added here counts LUT destinations == physical light count), not just that the declared dimensions look right. And: a bug that depends on `nrOfLightsType` width is **invisible on the uint32 desktop build** — width-sensitive paths need either a uint16-typed unit test or hardware confirmation, not desktop-only.
