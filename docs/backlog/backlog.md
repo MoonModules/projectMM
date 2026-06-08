@@ -256,7 +256,7 @@ Audio-reactive lighting (and motion-reactive) is core to what WLED-MM / MoonLigh
 4. The first audio-reactive effect(s) consuming it.
 5. IMU and line-in slot into the same source-module + platform-API shape afterwards.
 
-Cherry-pick the proven audio pipeline from MoonLight / WLED-MM (FFT band layout, AGC, beat detection) — reference, don't port wholesale, per [history](../history/README.md) practice. Specs before code: a `MicrophoneModule.md` (and the source-category contract) get written and reviewed before implementation.
+Study the proven audio pipeline in MoonLight / WLED-MM (FFT band layout, AGC, beat detection) to inform our own — reference the approach, don't port their code, per [history](../history/README.md) practice. Specs before code: a `MicrophoneModule.md` (and the source-category contract) get written and reviewed before implementation.
 
 ---
 

@@ -13,7 +13,7 @@ Smooth animated noise. Samples a 2D field on flat (`depth == 1`) layouts and a t
 
 ## Design notes
 
-The effect picks the 2D (`depth == 1`) or 3D path per `loop()`. The noise value drives **hue, not brightness** — driving brightness would leave most lights near-black; full brightness keeps the field visible. Time is applied as a coordinate offset into the field (smooth drift, not a per-frame hash reseed), scaled by panel width so a 16-wide and 128-wide panel look equally fast at the same `bpm`; in 3D the z axis scrolls at 1/5 the x-rate so the field flows rather than slides flat. `scale` defaults low (4) so the pattern reads on small grids; higher suits larger panels.
+The effect picks the 2D (`depth == 1`) or 3D path per `loop()`. The noise value drives **hue, not brightness** — driving brightness would leave most lights near-black; full brightness keeps the field visible. Time is applied as a coordinate offset into the field (smooth drift, not a per-frame hash reseed), scaled by panel width so a 16-wide and 128-wide panel look equally fast at the same `bpm`; in 3D the z-axis scrolls at 1/5 the x-rate so the field flows rather than slides flat. `scale` defaults low (4) so the pattern reads on small grids; higher suits larger panels.
 
 ## Tests
 

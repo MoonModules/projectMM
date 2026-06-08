@@ -126,7 +126,7 @@ This is the current iteration of years of LED / light system development. Each p
 | **StarLight** | Standalone LED firmware | [ewowi/StarLight](https://github.com/ewowi/StarLight) |
 | **MoonLight** | Ground-up build: 60+ effects, memory-optimised mapping, 11 driver types | [MoonModules/MoonLight](https://github.com/MoonModules/MoonLight) |
 
-Their lessons and proven patterns are distilled in [`docs/history/`](docs/history/README.md) — the codebase this project cherry-picks from, never porting wholesale.
+Their lessons and proven patterns are distilled in [`docs/history/`](docs/history/README.md) — the prior art this project studies to sharpen its own designs. We learn from their approaches; we don't copy their code.
 
 ## Contributing
 

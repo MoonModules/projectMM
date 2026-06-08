@@ -81,7 +81,10 @@ def check_source_links():
     for md in sorted(SPECS.rglob("*.md")):
         spec_rel = md.relative_to(ROOT)
         text = md.read_text(encoding="utf-8")
-        m = re.search(r'^## Source\s*$(.*)', text, re.MULTILINE | re.DOTALL)
+        # Capture only the Source section body — stop at the next top-level
+        # header or end-of-file, so links in a later section aren't mistaken
+        # for source links if a page ever has one after Source.
+        m = re.search(r'^## Source\s*$(.*?)(?=^##\s|\Z)', text, re.MULTILINE | re.DOTALL)
         if not m:
             issues.append((spec_rel, "no '## Source' section"))
             continue
@@ -94,7 +97,14 @@ def check_source_links():
             continue
         for href in rel_links:
             target = href.split("#", 1)[0]  # drop any anchor
-            if not (md.parent / target).resolve().exists():
+            # A source link must resolve to a file inside the repo. Relative
+            # `../` hops are expected (specs are nested under docs/); what's
+            # rejected is an absolute path or one whose resolved target lands
+            # outside the repo root.
+            candidate = (md.parent / target).resolve()
+            if target.startswith("/") or not candidate.is_relative_to(ROOT):
+                issues.append((spec_rel, f"source link escapes repo or is absolute: {href}"))
+            elif not candidate.exists():
                 issues.append((spec_rel, f"source link does not resolve: {href}"))
     return issues
 
