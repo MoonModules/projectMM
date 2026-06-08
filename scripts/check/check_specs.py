@@ -65,6 +65,39 @@ def check_spec_freshness(source_path, spec_path):
 
     return issues
 
+def check_source_links():
+    """Verify every spec page carries a '## Source' section whose links resolve.
+
+    The Source section links each spec back to the .h/.cpp (or UI/asset files)
+    it documents. This pass catches two drifts the source->spec checks above
+    can't: a source file renamed/moved out from under a spec's link, and a new
+    spec page added without a Source section at all. Walks spec->source (the
+    inverse direction), so it covers every .md including the few that document
+    multiple files (ui.md, LightConfig.md) with no single matching module.
+
+    Returns a list of (spec_rel, issue) tuples — empty when all is well.
+    """
+    issues = []
+    for md in sorted(SPECS.rglob("*.md")):
+        spec_rel = md.relative_to(ROOT)
+        text = md.read_text(encoding="utf-8")
+        m = re.search(r'^## Source\s*$(.*)', text, re.MULTILINE | re.DOTALL)
+        if not m:
+            issues.append((spec_rel, "no '## Source' section"))
+            continue
+        # Markdown links in the Source section: [label](relative/path).
+        # Only check relative paths (the repo convention); skip any http(s) URL.
+        links = re.findall(r'\]\(([^)]+)\)', m.group(1))
+        rel_links = [href for href in links if not href.startswith(("http://", "https://"))]
+        if not rel_links:
+            issues.append((spec_rel, "'## Source' section has no relative source link"))
+            continue
+        for href in rel_links:
+            target = href.split("#", 1)[0]  # drop any anchor
+            if not (md.parent / target).resolve().exists():
+                issues.append((spec_rel, f"source link does not resolve: {href}"))
+    return issues
+
 def main():
     modules = find_moonmodules()
     missing = []
@@ -83,8 +116,11 @@ def main():
             else:
                 ok.append(rel)
 
+    source_link_issues = check_source_links()
+
     # Report
-    print(f"Spec check: {len(modules)} modules, {len(ok)} ok, {len(missing)} missing, {len(outdated)} outdated")
+    print(f"Spec check: {len(modules)} modules, {len(ok)} ok, {len(missing)} missing, "
+          f"{len(outdated)} outdated, {len(source_link_issues)} source-link issues")
 
     if missing:
         print("\nMissing specs:")
@@ -98,7 +134,12 @@ def main():
             for issue in issues:
                 print(f"    {issue}")
 
-    if missing or outdated:
+    if source_link_issues:
+        print("\nSource-link issues:")
+        for spec, issue in source_link_issues:
+            print(f"  {spec} — {issue}")
+
+    if missing or outdated or source_link_issues:
         print()
         sys.exit(1)
     else:

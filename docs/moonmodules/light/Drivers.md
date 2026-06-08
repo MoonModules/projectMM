@@ -12,9 +12,7 @@ The shared output buffer is necessary because blend+map writes to arbitrary phys
 
 Exception: when memory is tight AND mapping is 1:1 unshuffled (single layer, grid layout, no serpentine), Drivers can skip its own buffer and let drivers read directly from the layer's buffer at the cost of parallelism. See [architecture.md § Parallelism](../../architecture.md#parallelism).
 
-## Buffer type
-
-Same `Buffer` as a Layer uses — `uint8_t*` sized by `channelsPerLight × nrOfLights` (from the Layouts container). Allocated via `platform::alloc`.
+It uses the same `Buffer` type a Layer does, sized by the Layouts container.
 
 ## Output correction
 
@@ -25,18 +23,7 @@ The Drivers container owns the shared output-correction state and exposes two co
 | `brightness` | uint8 (0–255) | Global brightness. Scales every channel through a 256-entry LUT (`(v × brightness) / 255`). Changing it rebuilds only the LUT on the cheap `onUpdate` tier — no pipeline realloc, so the slider is fluent. Gamma / white-balance fold into this LUT later as a per-channel R/G/B split. |
 | `lightPreset` | select | The physical wire format: channel order and whether the light is RGBW. Options: `RGB`, `RBG`, `GRB`, `GBR`, `BRG`, `BGR`, `RGBW`, `GRBW`. RGBW presets make each driver emit 4 channels per light with white derived as `min(R,G,B)` from the (brightness-scaled) RGB. |
 
-The correction lives on `Correction` (`src/light/drivers/Correction.h`): a brightness LUT, a channel-order table, output channel count, and a derive-white flag. `Drivers::onUpdate` rebuilds it on a `brightness`/`lightPreset` change; `passBufferToDrivers` hands each child a `const Correction*` via `DriverBase::setCorrection`.
-
-## API
-
-- `addChild(driver)` — no hard-coded max, dynamic list.
-- `setLayer(layer)` — the active layer to blend from. Today (single-layer pipeline) wired directly; the composition follow-up will read from the Layers container and blend across every layer.
-- `onBuildState()` — allocates the shared output buffer if any active layer has a LUT.
-- `loop()` — blendMap the active layer's buffer into the output buffer, then call each driver's `loop()`.
-
-## Layer-to-driver assignment
-
-Currently every driver sees the same output (the active layer's buffer, blended via LUT). Assigning specific layers to specific drivers is a possible future extension once composition lands.
+The state lives on `Correction` (`src/light/drivers/Correction.h`): a brightness LUT, channel-order table, output channel count, derive-white flag. `Drivers::onUpdate` rebuilds it on a `brightness`/`lightPreset` change and hands each child a `const Correction*`. Every driver currently sees the same blended output of the active layer; per-driver layer assignment is a [backlog](../../backlog/backlog.md) item that lands with multi-layer composition.
 
 ## Prior art
 
@@ -51,3 +38,7 @@ Container for driver modules. Receives pixel data from EffectsLayer.
 ### projectMM v2 — DataRegistry ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/DataRegistry.h))
 
 Type-erased buffer directory. Producers declare, consumers resolve by id. Decouples effects from drivers.
+
+## Source
+
+[Drivers.h](../../../src/light/drivers/Drivers.h)

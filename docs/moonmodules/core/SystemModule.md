@@ -31,32 +31,9 @@ System-level diagnostics and device identity. Always loaded, always visible in t
 
 On desktop these show "desktop" / "N/A" for hardware-specific fields.
 
-## Progress bar controls
-
-Sized controls (heap, flash, psram, filesystem) show as progress bars in the UI: current value relative to total capacity. This gives an immediate visual sense of how full each resource is. The UI auto-renders these based on a `progress` control type (min=0, max=total, value=used or free).
-
 ## Device name
 
-Default: `MM-XXXX` where XXXX = last 4 hex characters of the device's MAC address (e.g. `MM-3A7F`). Used for:
-- **mDNS**: NetworkModule registers `name.local`
-- **AP SSID**: NetworkModule uses name as the AP network name
-- **Device identification**: MoonDeck shows name in the device list
-
-The device name is the device's identity across the system. Used consistently as `deviceName` in code, UI, and docs. Internally used as the hostname for mDNS registration (`deviceName.local`).
-
-## Lifecycle
-
-- `setup()` — read MAC address, compute default name, read chip info
-- `loop1s()` — update dynamic controls (heap, fps, uptime)
-- No hot-path work — all updates in loop1s
-
-## Platform
-
-Needs:
-- `platform::getMacAddress(uint8_t[6])` — for default name generation
-- `esp_chip_info()` — chip model/revision (ESP32 only)
-- `esp_idf_version_get()` — IDF version string (ESP32 only)
-- `esp_partition` APIs — flash/firmware size (ESP32 only)
+`deviceName` is the device's identity across the system: NetworkModule uses it as the mDNS hostname (`deviceName.local`) and the AP SSID, and MoonDeck shows it in the device list. The default `MM-XXXX` derives from the last 4 hex of the MAC.
 
 ## Tests
 
@@ -74,3 +51,7 @@ Needs:
 
 - System diagnostics via REST API
 - Device name used for mDNS
+
+## Source
+
+[SystemModule.h](../../../src/core/SystemModule.h)

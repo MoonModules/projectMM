@@ -8,7 +8,6 @@ Classic demoscene fire simulation on the XY plane. Maintains a `width x height` 
 
 ## Controls
 
-- `enabled` (bool, default true) — inherited from `EffectBase`
 - `cooling` (uint8_t, default 55, range 10-200) — heat loss per frame (higher = shorter flames)
 - `sparking` (uint8_t, default 120, range 50-255) — probability of new sparks at the bottom row
 - `hue_shift` (uint8_t, default 0, range 0-255) — rotate the fire palette around the colour wheel (0 = classic fire, 96 = green ghost-fire, 160 = blue plasma-fire)
@@ -42,3 +41,7 @@ Allocates `width * height` bytes for the heat buffer in `onBuildState()` when `e
 ## Prior art
 
 Standard demoscene fire (Lode's tutorials, FastLED's `Fire2012`). Adapted to the integer-only, no-Arduino style of this codebase.
+
+## Source
+
+[FireEffect.h](../../../../src/light/effects/FireEffect.h)

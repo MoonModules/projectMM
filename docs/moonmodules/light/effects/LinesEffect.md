@@ -16,3 +16,7 @@ Port of MoonLight's Lines effect.
 ## Notes
 
 On a 1D layout only the red plane is active (width > 1 check). On a 2D layout blue is suppressed (depth = 1). On a 3D layout all three sweep simultaneously.
+
+## Source
+
+[LinesEffect.h](../../../../src/light/effects/LinesEffect.h)

@@ -152,38 +152,7 @@ Child reorder *within* a parent (a child within a container) is supported via HT
 
 ### REST API (for mutations and initial state)
 
-```text
-GET    /api/state             full module tree state — initial load + post-mutation refresh
-                              each module entry includes name, type, role, enabled,
-                              loopTimeUs, classSize, dynamicBytes, controls[]
-                              plus userEditable:false ONLY when the module opts out of
-                              UI delete/replace (omitted = editable, the common case)
-                              streamed to the socket (no Content-Length, Connection: close)
-                              so a tree of any size serializes without a fixed-buffer limit
-GET    /api/types             {types:[{name, displayName, role, docPath, tags, dim, acceptsChildRoles, defaults}]} — for the type picker
-                              name is the stable factory key (e.g. "SomeTypeRole"); use this for create/replace API calls
-                              displayName is the role-suffix-stripped label (e.g. "SomeType") — what the cards and picker rows show
-                              docPath is the spec page relative to docs/moonmodules/ ("" if none)
-                              tags is a curated emoji string for the picker's chip filter ("" if none)
-                              dim is the dimensionality (1/2/3) when the type declares one; 0 otherwise
-                              acceptsChildRoles is a comma-separated list of child roles this type
-                              accepts ("" = none) — drives the "+ add child" affordance + picker filter
-                              defaults map is captured from a fresh probe instance per type
-GET    /api/system            fps, tickTimeUs, freeHeap, freeInternal, maxBlock, uptime
-POST   /api/control           {module, control, value} — set a control value
-POST   /api/modules           {type, parent_id?} — create
-POST   /api/modules/<n>/move  {to: N} — reorder to absolute index N within parent
-                              strict-suffix match: /movex returns 404
-                              triggers Scheduler::buildState() so LUT-affecting reorders rebuild
-POST   /api/modules/<n>/replace {type} — swap module <n> for another type at the same
-                              position. Strict-suffix match. The replacement starts with
-                              factory defaults; siblings and order are preserved.
-                              Rejects top-level modules and unknown types.
-DELETE /api/modules/<name>
-POST   /api/reboot            calls platform::reboot() — esp_restart() on ESP32, std::exit(0) on desktop
-```
-
-The `/api/control` shape is `{module: "name", control: "key", value: …}`.
+The full endpoint list, request/response shapes, and field-level notes (including the `/api/types` fields the type picker reads and the `userEditable` flag the card actions read) live in **[HttpServerModule § REST API](HttpServerModule.md#rest-api)** — the server owns that contract. The UI consumes it as documented there; `/api/control` is `{module, control, value}`. `/api/state` streams with no fixed-size buffer, so a tree of any size serializes without truncation — the property the no-rebuild contract below relies on.
 
 ### Static assets
 
@@ -248,19 +217,6 @@ mm_timing_mode      "fps" | "ms"                                (default: "fps")
 
 No other client state persists. Reorder, control values, etc. all live on the device.
 
-## Feature summary
+## Source
 
-Everything in this spec is in the live codebase. The 12 features below each link to the section that describes the contract.
-
-1. **Status bar** with hamburger, MoonLight logo, brand, device name, system stats (uptime · free heap), WS dot, reboot button (with crashed-state styling), and theme toggle — see [Status bar](#status-bar).
-2. **Side navigation** — a left column listing root modules; one root visible at a time, selection persisted; footer with social links + copyright; hamburger collapses it (wide) or slides it in over an overlay (<820px) — see [Side navigation](#side-navigation).
-3. **Single-column module card layout** with hierarchy (children inline-indented, depth-based card backgrounds) — see [Module card](#module-card).
-4. **All 11 control types** (slider for uint8/uint16, bool, text, password with hold-to-peek, select, display, display-int, time, progress, ipv4, button) with the `dragTs` + 20ms-feedback + 150/500ms-debounce pattern — see [Control types](#control-types).
-5. **Type picker** (role-filtered, emoji tag chip filter, search box, keyboard navigation) on parents that accept children — see [Type picker](#type-picker).
-6. **Reset-to-default ↺** buttons per control with a known default. Defaults are captured from a fresh probe instance per type (factory's probe — no per-control boilerplate) and emitted in `/api/types`.
-7. **Light/dark theme toggle** via `[data-theme]` on `<body>` + CSS variables; preference persists in `localStorage['mm_theme']`.
-8. **WS keepalive ping (25s)** + `visibilitychange` pause + `pageshow` bfcache resume — see [Communication § WebSocket](#websocket-primary-for-state-updates).
-9. **Domain preview channel** — a sticky canvas above the cards that scroll-shrinks 0→50% over 300px, fed by a binary frame on the WebSocket and rendered by a domain plugin — see [Domain preview channel](#domain-preview-channel).
-10. **Per-card stats line** — `🕒` timing (clickable to cycle fps↔ms, global mode in `localStorage['mm_timing_mode']`) plus `🧠` memory: `classSize`, and `+ dynamicBytes` only when the module allocated heap.
-11. **Card action buttons** on reorderable children: ✎ replace-with-another-type, × delete (press-twice). Reorder is HTML5 drag-and-drop on desktop and mobile. Reorder calls `POST /api/modules/<n>/move`, replace calls `POST /api/modules/<n>/replace`.
-12. **MoonLight logo + favicon** — the header logo and browser-tab favicon are the same `/moonlight-logo.png` asset, embedded on ESP32.
+The three hand-maintained files: [index.html](../../../src/ui/index.html) · [app.js](../../../src/ui/app.js) · [style.css](../../../src/ui/style.css). Embedded into the firmware at build time via `src/ui/embed_ui.cmake`.

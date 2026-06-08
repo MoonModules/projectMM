@@ -101,7 +101,7 @@ Open `http://localhost:8420`: PC tab to build / run / test, ESP32 tab to flash, 
 
 ## How we work
 
-projectMM is built with AI agents under tight human direction — the **product owner** decides what to build, reviews every line and every spec, and controls what gets committed. Agents write code in defined roles; they don't make decisions.
+projectMM is built by AI agents under tight human direction. Everything in this repository — firmware and desktop code, the web installer, the MoonDeck dev console, all documentation, the unit and scenario tests, even the UI screenshots and effect GIFs — is authored by agents; the **product owner** writes none of it directly. What the product owner *does* author is the **process** ([CLAUDE.md](CLAUDE.md)), the **architecture** ([architecture.md](docs/architecture.md)), and the **module specifications** ([docs/moonmodules/](docs/moonmodules/)) — then decides what to build next, reviews every line and every spec, runs the hardware tests, and controls every commit, merge, and release. Agents write in defined roles; they don't make decisions. The agent writes; the product owner thinks.
 
 Meet the team: 🤖 Architect designs, 👽 Developer implements, 👾 Reviewer checks before merge, 🛸 Tester verifies, 💀 Runner does quick build and check passes. Full team descriptions in [CLAUDE.md](CLAUDE.md).
 

@@ -2,25 +2,11 @@
 
 ![GridLayout controls](../../../assets/screenshots/GridLayout.png)
 
-Arranges lights in a 3D grid (row-major: x varies fastest, then y, then z). Full-density mapping — every position maps to a light.
-
-## Controls
-
-- `width`, `height` (default `defaultGridSize` = 16, range 1–512)
-- `depth` (default 1, range 1–512)
-
-## Coordinate Iterator
-
-Yields `(physicalIndex, x, y, z)` for each light in row-major order (X then Y then Z).
+Arranges lights in a 3D grid, row-major (x fastest, then y, then z). Full-density — every position maps to a light. Controls: `width`, `height`, `depth`.
 
 ## Mapping
 
-Grid with default settings (no serpentine, X-then-Y order) is **1:1 unshuffled** — `oneToOneMapping` flag set, mapping table skipped entirely. Layer buffer and driver buffer are separate when memory allows (for parallelism), shared when memory is tight.
-
-## Edge cases
-
-- Width or height = 0: prevented by min=1 on controls.
-- Very large grids may exceed available memory for buffer allocation.
+Default settings (no serpentine, X-then-Y) are **1:1 unshuffled** — the `oneToOneMapping` flag is set and the mapping table skipped entirely. The Layer buffer and driver buffer are separate when memory allows (for parallelism), shared when memory is tight. `defaultGridSize` (16) is owned here and also read by the composition roots to size the boot grid.
 
 ## Tests
 
@@ -39,3 +25,7 @@ Width/height/depth/serpentine controls. Mapping rebuilt in onUpdate(), parent no
 ### projectMM v2 — GridLayoutModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/GridLayoutModule.h))
 
 Same controls. Uses LayoutModule base class.
+
+## Source
+
+[GridLayout.h](../../../../src/light/layouts/GridLayout.h)

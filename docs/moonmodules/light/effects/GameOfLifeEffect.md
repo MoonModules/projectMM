@@ -61,3 +61,7 @@ line in place of `hsvToRgb`. Nothing else is coupled to either.
   ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/effects/GameOfLifeEffect.h)) —
   used PSRAM grids and exposed `setCell` / `getCell` / `liveCount` test helpers
   for deterministic rule testing without rendering; mirrored here.
+
+## Source
+
+[GameOfLifeEffect.h](../../../../src/light/effects/GameOfLifeEffect.h)

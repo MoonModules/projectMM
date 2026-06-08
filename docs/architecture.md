@@ -366,7 +366,7 @@ Because mapping and blending happen in a single pass over each layer, there is n
 
 **Drivers** (a MoonModule) is the top-level container for one or more drivers. It is the consumer side of the pipeline. The Drivers container owns a shared output buffer and performs blend+map from every layer's buffer into it each frame. Individual drivers then read from this buffer to push to hardware / network.
 
-The shared output buffer is necessary when blend+map writes to arbitrary physical positions via the LUT — the output is not filled sequentially, so a driver cannot read chunk-by-chunk until the full buffer is populated. It is *not* needed for the single-layer, no-blend case (identity or serpentine-shuffle mapping): there a driver can fuse map + output correction + protocol encode into one pass straight into its own output (DMA buffer / packet), skipping the shared buffer. Full detail in [the LED-driver design doc](moonmodules/light/leddriver-analysis-top-down.md).
+The shared output buffer is necessary when blend+map writes to arbitrary physical positions via the LUT — the output is not filled sequentially, so a driver cannot read chunk-by-chunk until the full buffer is populated. It is *not* needed for the single-layer, no-blend case (identity or serpentine-shuffle mapping): there a driver can fuse map + output correction + protocol encode into one pass straight into its own output (DMA buffer / packet), skipping the shared buffer. Full detail in [the LED-driver design doc](backlog/leddriver-analysis-top-down.md).
 
 Each driver (a MoonModule) speaks one protocol:
 

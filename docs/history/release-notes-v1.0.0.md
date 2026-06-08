@@ -41,8 +41,9 @@ What makes projectMM different from other LED firmware:
 - **ESP-IDF directly, no Arduino** — pure ESP-IDF v6.x (native RMT/SPI drivers, `esp_http_server`, FreeRTOS), built with `idf.py`, not PlatformIO/Arduino. [Why](https://github.com/ewowi/projectMM/blob/v1.0.0/docs/building.md#why-not-arduino).
 - **No third-party libraries** — no FastLED, ESPAsyncWebServer, or ArduinoJson; the colour math, the HTTP/WebSocket server (implemented ourselves), and the control storage are all in-tree. [Rationale + replacements](https://github.com/ewowi/projectMM/blob/v1.0.0/docs/building.md#third-party-libraries).
 - **One module model** — every effect, modifier, layout, and driver is a [`MoonModule`](https://github.com/ewowi/projectMM/blob/v1.0.0/docs/architecture.md#moonmodules): one base class, uniform lifecycle, declared controls. That uniformity is why the UI renders any module with zero per-module code.
-- **A serious test suite** — unit tests + full-pipeline scenario tests with per-board performance contracts, run on every commit. [testing.md](https://github.com/ewowi/projectMM/blob/v1.0.0/docs/testing.md).
+- **Two test layers** — fast **unit tests** for individual modules plus **scenario tests** that drive the full pipeline (layout → effect → modifier → driver) against per-board performance contracts, both run on every commit. [testing.md](https://github.com/ewowi/projectMM/blob/v1.0.0/docs/testing.md).
 - **MoonDeck dev console** — build, flash, monitor, and test every target from one browser console (`uv run scripts/moondeck.py`), wrapping the same scripts CI and the CLI use.
+- **Built entirely by agents** — every line of code, the installer, MoonDeck, all docs, the unit + scenario tests, and the screenshots/GIFs were authored by AI agents. The product owner defined the process ([CLAUDE.md](https://github.com/ewowi/projectMM/blob/v1.0.0/CLAUDE.md)), the [architecture](https://github.com/ewowi/projectMM/blob/v1.0.0/docs/architecture.md), and the [module specs](https://github.com/ewowi/projectMM/tree/v1.0.0/docs/moonmodules) — then reviewed everything, tested on hardware, and controlled every commit and release.
 
 ## Faster, friendlier flashing
 

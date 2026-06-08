@@ -82,3 +82,7 @@ Container for effects. Owns Channel (pixel buffer). Effects wired via `setInput(
 ### projectMM v2 — PixelEffectBase ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/effects/PixelEffectBase.h))
 
 Shared spine eliminates ~70 lines boilerplate per effect. Layout resolution by category, not type string. DataBuffer + DataRegistry for producer/consumer decoupling.
+
+## Source
+
+[Layer.h](../../../src/light/layers/Layer.h)

@@ -49,3 +49,7 @@ Memory-optimal union. 2 bytes (no-PSRAM) or 4 bytes (PSRAM). Map type stored IN 
 ### projectMM v1 — GridLayout.requestMappings ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/layouts/GridLayout.h))
 
 Simple flat array: `mappings[logical_index] = physical_strip_index`. Only 1:1. Rebuilt on control change.
+
+## Source
+
+[MappingLUT.h](../../../src/light/layers/MappingLUT.h)

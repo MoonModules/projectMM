@@ -40,3 +40,7 @@ Plain 3-byte RGB struct. No FastLED dependency. Limited to RGB only.
 ### projectMM v2 — RGB ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/RGB.h))
 
 Same 3-byte struct. Still limited to RGB.
+
+## Source
+
+Channel model: [light_types.h](../../../src/light/light_types.h). Colour math: [color.h](../../../src/core/color.h).

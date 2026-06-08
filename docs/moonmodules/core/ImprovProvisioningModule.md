@@ -1,12 +1,8 @@
 # ImprovProvisioningModule
 
-Browser-driven WiFi provisioning over USB-serial, using the [Improv-WiFi](https://www.improv-wifi.com/) protocol. Bridges credentials from a Chrome / Edge / Opera tab — or from `scripts/build/improv_provision.py` — into `NetworkModule::setWifiCredentials`, which writes through to the same buffers the AP-fallback UI flow uses.
+Browser-driven WiFi provisioning over USB-serial, using the [Improv-WiFi](https://www.improv-wifi.com/) protocol. Bridges credentials from a Chrome / Edge / Opera tab — or from `scripts/build/improv_provision.py` for rack/CI use — into `NetworkModule::setWifiCredentials`, which writes the same buffers the AP-fallback UI flow uses. The protocol parser + UART task live in the platform layer; this module is the status surface that polls a ready-flag and bridges credentials to NetworkModule on the scheduler thread.
 
-ImprovProvisioningModule is a **child of NetworkModule** in the module tree (wired in `src/main.cpp`). Its `loop1s()` polls a ready-flag the platform task sets when credentials arrive, then calls back into NetworkModule — the parent-child relationship matches the data flow. NetworkModule's lifecycle methods chain to the base default so Improv participates normally in setup / control binding / teardown.
-
-The wiring calls `markWiredByCode()` on the Improv instance so the persistence-apply step preserves the child across reboots even on devices whose `Network.json` predates the addition (see [Persistence — code-wired children](../../architecture.md#persistence) in the architecture doc).
-
-The protocol parser + UART listener task live in the platform layer (`mm::platform::improvProvisioningInit` at [src/platform/platform.h](../../../src/platform/platform.h)); this module is the status surface plus the bridge that hands credentials off to NetworkModule on the scheduler thread.
+A code-wired child of NetworkModule. The wiring calls `markWiredByCode()` so the persistence-apply step preserves the child across reboots even on devices whose `Network.json` predates the addition (see [Persistence — code-wired children](../../architecture.md#persistence)).
 
 The browser flow runs immediately after a Web Serial flash (ESP Web Tools recognises Improv-capable firmware and offers a "Connect to Wi-Fi?" dialog automatically). The CLI flow uses [`scripts/build/improv_provision.py`](../../../scripts/build/improv_provision.py) over the same USB cable for headless or rack provisioning.
 
@@ -72,3 +68,7 @@ done
 
 - **projectMM-v1's `deploy/wifi.py` + `deploy/flashfs.py --wifi`** — wrote credentials to a local `data/state/sta1.json`, baked them into a LittleFS partition image, esptool-flashed the partition to each `test: true` device in `deploy/devicelist.json`. Same rack-provisioning use case; Improv replaces the partition-baking-and-reflashing path with live serial provisioning (devices stay running, no flash mode required).
 - **Improv-WiFi** is the standard ESPHome / Home Assistant uses for cross-firmware WiFi provisioning. Library: `improv/improv` on the [ESP Component Registry](https://components.espressif.com/components/improv/improv) (source: <https://github.com/improv-wifi/sdk-cpp>); specification: <https://www.improv-wifi.com/serial/>.
+
+## Source
+
+[ImprovProvisioningModule.h](../../../src/core/ImprovProvisioningModule.h)
