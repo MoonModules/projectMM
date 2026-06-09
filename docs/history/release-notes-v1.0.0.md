@@ -2,8 +2,6 @@
 
 The first stable release. Drive large LED installations and DMX lighting from a single source tree — ESP32 for deployment, desktop for development and as a high-speed network node — controlled live from a browser with a 3D preview.
 
-> Images below use absolute `raw.githubusercontent.com/.../v1.0.0/...` URLs so they render in the GitHub release body (which can't resolve repo-relative paths). They resolve once the `v1.0.0` tag is pushed.
-
 ![Web UI](https://raw.githubusercontent.com/MoonModules/projectMM/v1.0.0/docs/assets/screenshots/ui_overview.png)
 
 ## What you get
@@ -81,3 +79,7 @@ Tracked in [docs/backlog/backlog.md](https://github.com/MoonModules/projectMM/bl
 ## Built on
 
 Years of LED/light system development — WLED, WLED-MoonModules, StarLight, MoonLight. Their proven patterns are distilled in [docs/history/](https://github.com/MoonModules/projectMM/tree/v1.0.0/docs/history). Community: [Discord](https://discord.gg/TC8NSUSCdV).
+
+## Get involved
+
+If you like projectMM, give it a ⭐️, fork it, or open an issue or pull request. It helps the project grow, improve, and get noticed.

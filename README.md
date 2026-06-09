@@ -4,22 +4,39 @@ Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi,
 
 ![Web UI](docs/assets/screenshots/ui_overview.png)
 
-## What you get
+👉 **Try it now:** flash an ESP32 straight from your browser → <https://moonmodules.org/projectMM/install/>
 
-- **Plug in, open a browser, see lights.** A live 3D preview of every effect, every modifier, every layout, controllable from the same browser tab.
-- **Up to 16,384 LEDs on a classic ESP32.** A full 128×128 grid runs on plain ESP32 hardware (other devices even more) — memory-adaptive, degrading gracefully rather than failing on tight boards.
-- **Effects, modifiers, layouts, drivers** (output currently ArtNet, plus the built-in 3D preview) — all pluggable, all configurable live, all persisted across reboots.
-- **One firmware, many devices.** ESP32, Teensy, Raspberry Pi, Windows / macOS / Linux desktop — the same source builds for each.
-- **Native 3D** from the start. 2D and 1D are the cases where one or two dimensions are size 1; effects don't pick a mode.
-- **Built-in browser UI.** The interface renders any module from its declared controls — adding a new module needs zero UI code.
-- **Art-Net / DMX and addressable LEDs in the same setup.** RGB strips, RGBW pixels, multi-channel par lights, moving heads — all addressed through the same pipeline.
-- **Flash from the browser in seconds.** The web installer picks your board, flashes the matching firmware, and hands WiFi credentials to the device over USB (Improv) — choices remembered between sessions.
+📦 **Release + downloads:** [latest release](https://github.com/MoonModules/projectMM/releases/latest)
+
+🛠️ **Building / hacking on it?** [MoonDeck](scripts/MoonDeck.md), our browser-based dev console (build · flash · test · live device discovery), comes in the repo.
+
+Open Chrome or Edge, plug in your board, and you'll see lights in under a minute.
+
+If you like projectMM, give it a ⭐️, fork it, or open an issue or pull request — it helps the project grow, improve, and get noticed.
+
+## What makes projectMM different
+
+🔵 **16,384 LEDs on a *classic* ESP32** — not just the S3 or P4. Memory-adaptive from a 16×16 panel up to 128×128, degrading gracefully on tight boards instead of crashing.
+
+🧊 **Native 3D from the ground up** — 2D and 1D are just the cases where a dimension is size 1. Effects never pick a mode.
+
+🎛️ **Pluggable pipeline** — Layouts → Layers (effects + modifiers) → Drivers. Build it visually in the browser, configure it live, and it survives reboots.
+
+💡 **DMX *and* addressable LEDs in one setup** — RGB strips, RGBW pixels, par lights, moving heads, all through the same pipeline.
+
+🖥️ **One source tree, many targets** — the same code runs on ESP32, Teensy, Raspberry Pi, and macOS / Windows / Linux.
+
+🎨 **Plug in, open a browser, see lights** — a live 3D preview of every effect, modifier, and layout, controllable from the same tab. The interface renders any module from its declared controls, so adding a module needs zero UI code.
+
+⚡ **Flash from your browser in seconds** — the web installer picks your board, flashes the matching firmware, and hands WiFi credentials to the device over USB via Improv. No serial monitor, no recompile.
 
 ## Under the hood
 
-- **ESP-IDF directly, no Arduino.** The ESP32 build is pure ESP-IDF (v6.x) — native LED drivers, `esp_http_server`, FreeRTOS — built with `idf.py`, not PlatformIO or the Arduino framework. See [building.md § Why not Arduino](docs/building.md#why-not-arduino).
-- **No third-party libraries.** No FastLED, no ESPAsyncWebServer, no ArduinoJson — the colour math, the HTTP/WebSocket server, and the control storage are all in-tree. A library, when genuinely needed, lives behind the platform boundary in `src/platform/`, never in core. The full rationale + replacements: [building.md § Third-party libraries](docs/building.md#third-party-libraries).
-- **One module model.** Every effect, modifier, layout, and driver is a `MoonModule` — one base class, a uniform lifecycle, declared controls. That uniformity is why the UI renders any module with zero per-module code, and why a new capability is a new file, not a new framework. See [architecture.md § MoonModules](docs/architecture.md#moonmodules).
+🛠️ **ESP-IDF directly, no Arduino** — the ESP32 build is pure ESP-IDF (v6.x): native LED drivers, `esp_http_server`, FreeRTOS, built with `idf.py`, not PlatformIO or the Arduino framework. See [building.md § Why not Arduino](docs/building.md#why-not-arduino).
+
+📦 **No third-party libraries** — no FastLED, no ESPAsyncWebServer, no ArduinoJson. The colour math, the HTTP/WebSocket server, and the control storage are all in-tree. A library, when genuinely needed, lives behind the platform boundary in `src/platform/`, never in core. The full rationale + replacements: [building.md § Third-party libraries](docs/building.md#third-party-libraries).
+
+🧱 **One module model** — every effect, modifier, layout, and driver is a `MoonModule`: one base class, a uniform lifecycle, declared controls. That uniformity is why the UI renders any module with zero per-module code, and why a new capability is a new file, not a new framework. See [architecture.md § MoonModules](docs/architecture.md#moonmodules).
 
 ## Performance
 
@@ -125,7 +142,7 @@ This is the current iteration of years of LED / light system development. Each p
 | **StarLight** | Standalone LED firmware | [ewowi/StarLight](https://github.com/ewowi/StarLight) |
 | **MoonLight** | Ground-up build: 60+ effects, memory-optimised mapping, 11 driver types | [MoonModules/MoonLight](https://github.com/MoonModules/MoonLight) |
 
-Their lessons and proven patterns are distilled in [`docs/history/`](docs/history/README.md) — the prior art this project studies to sharpen its own designs. We learn from their approaches; we don't copy their code.
+We built, maintained, and contributed to these projects — so projectMM is grounded in years of our own hands-on experience, not arms-length study. Their lessons and proven patterns are distilled in [`docs/history/`](docs/history/README.md), alongside monthly digests of friend projects (like FastLED and upstream WLED) we follow closely but don't own. From all of it we carry the ideas forward into our own implementation: we apply what we learned and write our own code, never copying theirs — and when a specific project or person inspires something here, we credit them by name (in the history digests and each module's "Prior art" notes).
 
 ## Contributing
 
