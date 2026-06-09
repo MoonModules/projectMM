@@ -183,11 +183,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write     # softprops/action-gh-release needs this
-      pages: write        # actions/deploy-pages needs this
-      id-token: write     # actions/deploy-pages needs this (OIDC for Pages)
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy-pages.outputs.page_url }}
+    # No `environment: github-pages` here: that environment's protection rule
+    # only allows `main`, so binding asset-publishing to it made every vX.Y.Z
+    # tag run fail BEFORE any step ran — including the asset upload — leaving
+    # tagged releases with zero binaries. Pages deploy lives in its own job
+    # below (gated to main, the only ref the environment trusts).
     steps:
       - uses: actions/checkout@v4
 
@@ -218,23 +218,18 @@ jobs:
             echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Generate ESP Web Tools manifests (release-asset + Pages-relative)
+      - name: Generate ESP Web Tools manifests (release-asset URLs)
         env:
           TAG: ${{ steps.tag.outputs.tag }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           V=$(jq -r .version library.json)
-          # Two sets of manifests:
-          #   dist/manifest-*.json      → absolute GitHub release-asset URLs.
-          #                               Uploaded as release assets; read by
-          #                               the on-device OTA picker (device
-          #                               fetches the .bin directly — no CORS).
-          #   pages-manifests/*.json    → relative paths (.bin alongside the
-          #                               manifest). Used by the web installer,
-          #                               which is same-origin-bound by CORS.
+          # Absolute GitHub release-asset URLs. Uploaded as release assets;
+          # read by the on-device OTA picker (device fetches the .bin directly
+          # — no CORS). The Pages-relative manifests are generated in the
+          # deploy-pages job, where the web installer (CORS-bound) consumes them.
           BASE="https://github.com/${REPO}/releases/download/$TAG"
-          mkdir -p pages-manifests
           for F in esp32 esp32-eth esp32-eth-wifi esp32s3-n16r8; do
             python scripts/build/generate_manifest.py \
               --firmware "$F" \
@@ -242,80 +237,7 @@ jobs:
               --release-url "$BASE" \
               --flasher-args "dist/flasher-$F.json" \
               --out "dist/manifest-$F.json"
-            python scripts/build/generate_manifest.py \
-              --firmware "$F" \
-              --version "$V" \
-              --release-url . \
-              --flasher-args "dist/flasher-$F.json" \
-              --out "pages-manifests/manifest-$F.json"
           done
-
-      # Pages deploy: every tag (stable + RC + latest). The web installer page
-      # reads api.github.com to populate its release dropdown; the cumulative-
-      # content step below keeps the last 5 stable + 5 prerelease releases on
-      # Pages so those binaries are flashable (Web Serial is CORS-bound and
-      # GitHub release assets don't return CORS headers — see plan-18 Context).
-      # End users see Stable selected by default; latest/RC is opt-in via the
-      # channel dropdown.
-      - name: Stage cumulative release content
-        env:
-          TAG: ${{ steps.tag.outputs.tag }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          # Last 5 stable + last 5 prerelease tags.
-          STABLE=$(gh release list --limit 50 --exclude-drafts \
-                   --json tagName,isPrerelease \
-                   | jq -r '.[] | select(.isPrerelease|not) | .tagName' | head -5)
-          PRE=$(gh release list --limit 50 --exclude-drafts \
-                --json tagName,isPrerelease \
-                | jq -r '.[] | select(.isPrerelease) | .tagName' | head -5)
-          KEEP=$(printf '%s\n%s\n' "$STABLE" "$PRE" | sort -u)
-          echo "Releases to keep on Pages:"
-          echo "$KEEP" | sed 's/^/  /'
-
-          for T in $KEEP; do
-            mkdir -p "pages/install/releases/$T"
-            # Tolerate the current tag failing here — its release isn't
-            # published yet (softprops/action-gh-release runs later in this
-            # job); we stage its binaries from local dist/ a few lines below.
-            gh release download "$T" \
-              --dir "pages/install/releases/$T" \
-              --pattern 'firmware-*.bin' \
-              --pattern 'manifest-*.json' \
-              --pattern 'projectMM-*.tar.gz' \
-              --pattern 'projectMM-*.zip' \
-              || echo "  (skip $T — not yet released or no matching assets)"
-          done
-
-          # Stage the current release from local dist/ + pages-manifests/.
-          # The current tag's release-publish step runs after this, so a
-          # `gh release download` for $TAG would return nothing.
-          mkdir -p "pages/install/releases/$TAG"
-          cp dist/firmware-*.bin                   "pages/install/releases/$TAG/" || true
-          cp pages-manifests/manifest-*.json       "pages/install/releases/$TAG/"
-          cp dist/projectMM-*.tar.gz               "pages/install/releases/$TAG/" || true
-          cp dist/projectMM-*.zip                  "pages/install/releases/$TAG/" || true
-
-          echo "Pages release tree:"
-          find pages/install/releases -maxdepth 2 -type f | sort
-
-      - name: Stage GitHub Pages site
-        run: |
-          set -euo pipefail
-          # Install page + the shared install-picker module sit at the root.
-          # Each release's binaries + manifests live under releases/<tag>/.
-          mkdir -p pages/install
-          cp -r docs/install/. pages/install/
-          cp src/ui/install-picker.js pages/install/
-          # library.json — install page reads the project version from it.
-          # Same shape preview_installer.py stages locally.
-          cp library.json pages/install/
-          ls -la pages/install/
-
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: pages
 
       - name: Re-create the `latest` release fresh
         # The `latest` tag is a moving prerelease: every main-branch build
@@ -376,6 +298,99 @@ jobs:
             dist/manifest-*.json
             dist/projectMM-*.tar.gz
             dist/projectMM-*.zip
+
+  # Deploy the web installer to GitHub Pages. Separate from `release` because
+  # the `github-pages` environment's protection rule only allows `main` — so
+  # this job is gated to main and carries the environment, while `release`
+  # (which must run on tags too) stays free of it. The cumulative-content step
+  # restages the last 5 stable + 5 prerelease releases on every run, so a tag
+  # release's binaries reach the installer at the next main deploy.
+  deploy-pages:
+    if: github.ref == 'refs/heads/main'
+    needs: [release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write        # actions/deploy-pages needs this
+      id-token: write     # actions/deploy-pages needs this (OIDC for Pages)
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy-pages.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts into dist/
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find artifacts -type f -exec mv {} dist/ \;
+          ls -la dist/
+
+      - name: Generate Pages-relative ESP Web Tools manifests
+        run: |
+          set -euo pipefail
+          V=$(jq -r .version library.json)
+          # Pages manifests use relative paths (.bin alongside the manifest),
+          # because the web installer is same-origin-bound by CORS. The
+          # absolute release-asset manifests live in the `release` job.
+          mkdir -p pages-manifests
+          for F in esp32 esp32-eth esp32-eth-wifi esp32s3-n16r8; do
+            python scripts/build/generate_manifest.py \
+              --firmware "$F" \
+              --version "$V" \
+              --release-url . \
+              --flasher-args "dist/flasher-$F.json" \
+              --out "pages-manifests/manifest-$F.json"
+          done
+
+      - name: Stage cumulative release content
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Keep the last 5 stable + 5 prerelease releases on Pages so their
+          # binaries stay flashable (Web Serial is CORS-bound and GitHub
+          # release assets don't return CORS headers).
+          STABLE=$(gh release list --limit 50 --exclude-drafts \
+                   --json tagName,isPrerelease \
+                   | jq -r '.[] | select(.isPrerelease|not) | .tagName' | head -5)
+          PRE=$(gh release list --limit 50 --exclude-drafts \
+                --json tagName,isPrerelease \
+                | jq -r '.[] | select(.isPrerelease) | .tagName' | head -5)
+          KEEP=$(printf '%s\n%s\n' "$STABLE" "$PRE" | sort -u)
+          echo "Releases to keep on Pages:"
+          echo "$KEEP" | sed 's/^/  /'
+
+          for T in $KEEP; do
+            mkdir -p "pages/install/releases/$T"
+            gh release download "$T" \
+              --dir "pages/install/releases/$T" \
+              --pattern 'firmware-*.bin' \
+              --pattern 'manifest-*.json' \
+              --pattern 'projectMM-*.tar.gz' \
+              --pattern 'projectMM-*.zip' \
+              || echo "  (skip $T — no matching assets)"
+          done
+
+      - name: Stage GitHub Pages site
+        run: |
+          set -euo pipefail
+          # Install page + the shared install-picker module sit at the root.
+          # Each release's binaries + manifests live under releases/<tag>/.
+          mkdir -p pages/install
+          cp -r docs/install/. pages/install/
+          cp src/ui/install-picker.js pages/install/
+          # library.json — install page reads the project version from it.
+          cp library.json pages/install/
+          ls -la pages/install/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages
 
       - id: deploy-pages
         uses: actions/deploy-pages@v4
