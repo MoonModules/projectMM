@@ -32,6 +32,7 @@ The first concrete LED-driver increment, derived from [leddriver-analysis-top-do
 11. **`test/device/device_RmtLoopback.cpp`** (new dir + file, hardware-gated) — TX a known buffer, RX-capture on the jumpered pin (GPIO4→GPIO5), decode, assert equal. Establishes the `test/device/` convention for hardware-only tests.
 
 ## Open items deferred to later increments
+
 - **sigrok/fx2lafw cross-check + MoonDeck "LED driver test" Python script** — the independent-clock proof and the run-from-MoonDeck flow ([analysis §5.3](leddriver-analysis-top-down.md)).
 - **Parallel strands via LCD_CAM (S3) / I2S (classic) / PARLIO (P4)** — increment 2+; reuse this increment's `DriverBase` contract, encoder helpers, and test rig. The fused per-light apply+encode loop becomes a templated base helper when the *second* fused driver lands (don't extract speculatively).
 - **Dedicated core-1 driver task + per-module core-affinity control** ([analysis §7.2](leddriver-analysis-top-down.md)).
