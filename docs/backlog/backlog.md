@@ -162,7 +162,7 @@ Board preset catalog + upload (later, when the runtime config has real consumers
 - **LED output pins** — per-strip data GPIOs (1–16 outputs/board); the first real consumer (a Driver pin control) unblocks multi-output boards (QuinLED Dig-Quad/Octa, SE16, LightCrafter).
 - **Ethernet PHY config** — LAN8720/RMII (MDC/MDIO/CLK/power-pin/PHY-addr/clock-mode) vs W5500/SPI (MISO/MOSI/SCK/CS/IRQ); the consumer is the runtime `Network.eth_*` controls listed above, replacing the hardcoded Olimex pins.
 - **Power budget** — `maxPower` (Watts) per board, for a future current-limit / brightness-cap control.
-- **Audio / I2S** — SD/WS/SCK/MCLK pins, the input side of audio-reactive effects ([Pi-5 audio-reactive note](#raspberry-pi-5-audio--motion-reactive-host) is the desktop counterpart).
+- **Audio / I2S** — SD/WS/SCK/MCLK pins, the input side of audio-reactive effects ([Pi-5 sensor note](#sensor-input-on-raspberry-pi-5--microphone-imu-line-in-post-10-multi-commit) is the desktop counterpart).
 - **Buttons & inputs** — push/toggle/lights-on, PIR, digital-input; needs an input-event concept the firmware doesn't have yet.
 - **Relays & power control** — relay / lights-on / high-low pins.
 - **Infrared** — IR receive pin (remote control).

@@ -54,6 +54,15 @@ FIRMWARES: dict[str, dict] = {
         "eth_only": False,
         "description": "ESP32 classic — WiFi only",
     },
+    "esp32-16mb": {
+        "chip": "esp32",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.16mb"],
+        "eth_only": False,
+        "description": "ESP32 classic with 16 MB flash — WiFi only. Same silicon "
+                       "as `esp32`; the 4 MB binary runs on these boards too, this "
+                       "variant just uses the extra flash for bigger OTA slots + "
+                       "filesystem (Serg boards, QuinLED Dig-Octa).",
+    },
     "esp32-eth": {
         "chip": "esp32",
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth"],

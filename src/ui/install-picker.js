@@ -556,15 +556,25 @@ function render(state) {
         // states is never returned — applyDetectedChip always yields a message).
         state.runDetect = async (onStatus) => {
             if (onStatus) onStatus("Detecting…");
+            // Clear any prior detection up front so a failed re-detect can't leave
+            // the board list narrowed to a stale chip family (e.g. detect S3, then
+            // a later detect fails on a wrong port — without this the list would
+            // still hide the classic boards and claim an S3 was found).
+            state.detectedChip = null;
             let status;
             try {
                 state.detectedChip = await state.onDetect();   // "ESP32" | "ESP32-S3" | ...
                 status = applyDetectedChip(state, boardEl);
-                safeLocalSet(PREF_BOARD_KEY, state.selectedBoard || "");
-                refreshFirmwareDropdown();
             } catch (e) {
+                // Restore the full, unfiltered board list — detection didn't land,
+                // so don't keep any narrowing from a previous attempt.
+                fillBoardOptions(boardEl, state.boards, "(any board)");
+                state.selectedBoard = "";
+                boardEl.value = "";
                 status = `Detect failed: ${e && e.message ? e.message : e}`;
             }
+            safeLocalSet(PREF_BOARD_KEY, state.selectedBoard || "");
+            refreshFirmwareDropdown();
             if (onStatus) onStatus(status);
             return status;
         };

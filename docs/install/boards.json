@@ -65,8 +65,8 @@
   {
     "name": "QuinLED Dig-Octa 32-8L",
     "chip": "ESP32",
-    "firmwares": ["esp32"],
-    "default_firmware": "esp32",
+    "firmwares": ["esp32-16mb"],
+    "default_firmware": "esp32-16mb",
     "controls": {
       "Board": { "board": "QuinLED Dig-Octa 32-8L" }
     }
@@ -74,8 +74,8 @@
   {
     "name": "Serg UniShield V5",
     "chip": "ESP32",
-    "firmwares": ["esp32"],
-    "default_firmware": "esp32",
+    "firmwares": ["esp32-16mb"],
+    "default_firmware": "esp32-16mb",
     "controls": {
       "Board": { "board": "Serg UniShield V5" }
     }
@@ -83,8 +83,8 @@
   {
     "name": "Serg MiniShield",
     "chip": "ESP32",
-    "firmwares": ["esp32"],
-    "default_firmware": "esp32",
+    "firmwares": ["esp32-16mb"],
+    "default_firmware": "esp32-16mb",
     "controls": {
       "Board": { "board": "Serg MiniShield" }
     }

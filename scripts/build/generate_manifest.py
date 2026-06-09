@@ -50,6 +50,7 @@ PART_NAME_MAP = {
 # Full list: https://github.com/espressif/esptool-js/blob/main/src/esploader.ts
 CHIP_FAMILIES = {
     "esp32":           "ESP32",
+    "esp32-16mb":      "ESP32",
     "esp32-eth":       "ESP32",
     "esp32-eth-wifi":  "ESP32",
     "esp32s3-n16r8":   "ESP32-S3",
