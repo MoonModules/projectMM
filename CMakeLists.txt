@@ -21,7 +21,11 @@ if(MSVC)
     #           -Wextra. The codebase uses explicit static_cast at the sites
     #           where loss-of-data is the real concern; suppressing here brings
     #           MSVC noise level back in line with GCC.
-    add_compile_options(/W4 /WX /wd4702 /wd4244 /wd4267)
+    #   C5285 — vendored doctest.h (v2.4.11) forward-declares `std::tuple` as a
+    #           libstdc++/libc++ portability workaround; the VS 2026 MSVC STL
+    #           newly flags that as "specializing a standard template". It's in
+    #           third-party header code we don't own and GCC/Clang never warn.
+    add_compile_options(/W4 /WX /wd4702 /wd4244 /wd4267 /wd5285)
     # MSVC marks the standard C library (strcpy, sprintf, fopen, localtime, …)
     # as deprecated and emits C4996; /WX makes that fatal. Silence the family —
     # the code uses these standard functions deliberately and consistently with
