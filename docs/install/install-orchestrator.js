@@ -193,7 +193,7 @@ function normalizeDeviceUrl(input) {
 
 // Mixed-content guard: the installer page can only fetch() a plain http://
 // device URL when the page itself is on http:// (i.e. localhost preview).
-// On https://ewowi.github.io the browser blocks the fetch silently — caller
+// On https://moonmodules.org the browser blocks the fetch silently — caller
 // must fall through to the query-param handoff via the Visit button. file:
 // pages count as http for this purpose.
 function canFetchHttp(deviceUrl) {

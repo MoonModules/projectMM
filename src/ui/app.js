@@ -197,12 +197,12 @@ async function sendControl(moduleName, controlName, value) {
 // but the device UI is on a different origin (the device's HTTP server),
 // so we fetch the canonical Pages copy. CORS: GitHub Pages static assets
 // ship `Access-Control-Allow-Origin: *`, so a cross-origin fetch from
-// http://<device>/ to https://ewowi.github.io succeeds without proxying.
+// http://<device>/ to https://moonmodules.org succeeds without proxying.
 // Hardcoded rather than configurable: the catalog is project-global, not
 // per-installation. During local development, flip this to
 // `http://localhost:8000/boards.json` and re-flash; preview_installer.py
 // sends the same `Access-Control-Allow-Origin: *` header production does.
-const BOARDS_JSON_URL = "https://ewowi.github.io/projectMM/install/boards.json";
+const BOARDS_JSON_URL = "https://moonmodules.org/projectMM/install/boards.json";
 
 // Consume an installer-emitted `?board=<name>` query param: look the name
 // up in boards.json on Pages, then push every field under `controls.<mod>.<ctrl>`

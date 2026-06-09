@@ -1014,6 +1014,20 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"error": "unknown script"}, 404)
             return
 
+        # Refuse to launch with a required selector unset: the underlying
+        # script declares the arg `required=True`, so running it bare just
+        # leaks argparse's "the following arguments are required" usage error
+        # into the log. Surface a clear message naming what to pick instead.
+        REQUIRED = [("needs_port", "port", "a serial port"),
+                    ("needs_firmware", "firmware", "a firmware variant"),
+                    ("needs_scenario", "scenario", "a scenario"),
+                    ("needs_module", "module", "a module")]
+        missing = [label for flag, key, label in REQUIRED
+                   if script_def.get(flag) and not params.get(key)]
+        if missing:
+            self._send_json({"error": f"Select {' and '.join(missing)} first."}, 400)
+            return
+
         kill_script(script_id)  # Kill previous if still running
 
         script_path = SCRIPTS_DIR / script_def["script"]

@@ -8,7 +8,7 @@
 //   - Forget → drop the entry from localStorage.
 //
 // Diagnose intentionally lives on the device UI itself (same-origin), not
-// here — Chrome's mixed-content blocker stops https://ewowi.github.io from
+// here — Chrome's mixed-content blocker stops https://moonmodules.org from
 // fetch()-ing http://192.168.1.X. The device-side Diagnose button (in
 // app.js) does the same job from the right side of the security boundary.
 //

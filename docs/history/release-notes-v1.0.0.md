@@ -44,11 +44,11 @@ Two things worth calling out for this first release:
 
 ## Faster, friendlier flashing
 
-The [web installer](https://ewowi.github.io/projectMM/install/) flashes from the browser in seconds (down from minutes): it picks your board, flashes the matching firmware, remembers your choices between sessions, and hands WiFi credentials to the device over USB via [Improv](https://github.com/MoonModules/projectMM/blob/v1.0.0/docs/moonmodules/core/ImprovProvisioningModule.md) — no serial monitor, no recompile.
+The [web installer](https://moonmodules.org/projectMM/install/) flashes from the browser in seconds (down from minutes): it picks your board, flashes the matching firmware, remembers your choices between sessions, and hands WiFi credentials to the device over USB via [Improv](https://github.com/MoonModules/projectMM/blob/v1.0.0/docs/moonmodules/core/ImprovProvisioningModule.md) — no serial monitor, no recompile.
 
 ## Downloads
 
-**ESP32 — flash from your browser.** Open the [web installer](https://ewowi.github.io/projectMM/install/) in Chrome or Edge; it walks you through board, firmware, flashing, and WiFi setup. Four firmware variants:
+**ESP32 — flash from your browser.** Open the [web installer](https://moonmodules.org/projectMM/install/) in Chrome or Edge; it walks you through board, firmware, flashing, and WiFi setup. Four firmware variants:
 
 - `esp32-eth-wifi` — ESP32 classic, Ethernet + WiFi (recommended for ArtNet).
 - `esp32-eth` — ESP32 classic, Ethernet only.

@@ -238,7 +238,7 @@ def main() -> int:
     # Mirror GitHub Pages' default static-asset CORS behaviour
     # (`Access-Control-Allow-Origin: *`). The device-UI's
     # `consumePendingBoardParam` fetches boards.json cross-origin
-    # (http://<device>/ → https://ewowi.github.io/…). In dev we point that
+    # (http://<device>/ → https://moonmodules.org/…). In dev we point that
     # constant at this preview server so we can iterate on the schema; the
     # device's browser will refuse the fetch unless we serve the same CORS
     # header production does. Doesn't affect the production firmware — only

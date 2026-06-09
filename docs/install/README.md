@@ -2,7 +2,7 @@
 
 This directory holds the source for the **custom installer page** (driven by
 `install-orchestrator.js`, not ESP Web Tools) at
-<https://ewowi.github.io/projectMM/install/>.
+<https://moonmodules.org/projectMM/install/>.
 
 End users land here, pick a channel + board, click Install. The browser flashes
 the device over USB (Web Serial → ESP32), then runs Improv-Serial provisioning,

@@ -59,7 +59,7 @@ The numbers above are observations. The **contracts** projectMM commits to — w
 
 ### From a release
 
-**ESP32 — flash from your browser.** Open the [web installer](https://ewowi.github.io/projectMM/install/) in Chrome or Edge — it walks you through release, board and firmware selection, flashing, and network setup. The installer lists stable releases and a `latest` build (published automatically on every merge to main) carrying the newest unreleased changes.
+**ESP32 — flash from your browser.** Open the [web installer](https://moonmodules.org/projectMM/install/) in Chrome or Edge — it walks you through release, board and firmware selection, flashing, and network setup. The installer lists stable releases and a `latest` build (published automatically on every merge to main) carrying the newest unreleased changes.
 
 ![Installer](docs/assets/screenshots/installer.png)
 
