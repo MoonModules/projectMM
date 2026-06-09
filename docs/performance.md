@@ -226,7 +226,7 @@ These numbers shift with IDF version + sdkconfig — treat as rough proportions.
 | FreeRTOS + IDF core | ~150 KB | Kernel, esp_event, esp_timer, heap, logging, partition ops. Always present. |
 | projectMM code | ~120 KB | `src/core/` + `src/light/` + `src/platform/esp32/` + `src/main.cpp`. ~10% of the binary. |
 | HTTP server + WS | ~60 KB | `esp_http_server` + `HttpServerModule` routing. |
-| Embedded UI assets | ~50 KB | `index.html`, `app.js`, `style.css`, `install-picker.js`, logo PNG — packed as `constexpr uint8_t[]`. |
+| Embedded UI assets | ~50 KB | `index.html`, `app.js`, `style.css`, `preview3d.js`, `install-picker.js`, logo PNG — packed as `constexpr uint8_t[]`. |
 | `esp_https_ota` + HTTP client | ~40 KB | OTA-from-URL machinery. |
 | LittleFS | ~30 KB | `joltwallet/esp_littlefs` component. |
 | Ethernet stack | ~30 KB | `esp_eth` + LAN8720 PHY. `esp32` variant drops this. |

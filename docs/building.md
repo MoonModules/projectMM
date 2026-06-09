@@ -176,7 +176,7 @@ CMake runs these automatically before compilation when their source files change
 | Step | Source | Generated | Trigger |
 |------|--------|-----------|---------|
 | `build_info_gen` | `library.json` | `src/core/build_info.h` | `library.json` changes |
-| `ui_embed` | `src/ui/index.html`, `app.js`, `style.css` | `src/ui/ui_embedded.h` | any UI file changes |
+| `ui_embed` | `src/ui/index.html`, `app.js`, `style.css`, `preview3d.js`, `install-picker.js`, logo | `src/ui/ui_embedded.h` | any UI file changes |
 
 Both are defined in the root `CMakeLists.txt` (desktop) and `esp32/main/CMakeLists.txt` (ESP32). Generated files are gitignored — rebuilt on every clean build.
 

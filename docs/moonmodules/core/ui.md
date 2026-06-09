@@ -4,7 +4,7 @@ This spec describes the projectMM web UI **as shipped** — minimal, MoonModule-
 
 ## TL;DR
 
-**The UI is three hand-maintained files** (`index.html`, `app.js`, `style.css`) that render any MoonModule tree generically — no per-module-type code. State updates flow via WebSocket; mutations go through a small REST API.
+**The UI is a handful of hand-maintained files** (`index.html`, `app.js`, `style.css`, plus the `preview3d.js` and `install-picker.js` modules `app.js` imports) that render any MoonModule tree generically — no per-module-type code. State updates flow via WebSocket; mutations go through a small REST API.
 
 **Backend contract** — what the UI depends on:
 - HttpServerModule serves `/api/state`, `/api/types`, `/api/control`, `POST /api/modules`, `DELETE /api/modules/<n>`, `POST /api/modules/<n>/move`, `POST /api/modules/<n>/replace`, `POST /api/reboot`.
@@ -14,7 +14,7 @@ This spec describes the projectMM web UI **as shipped** — minimal, MoonModule-
 
 ## Principles
 
-- **Three hand-maintained files**: `index.html`, `app.js`, `style.css`, plus the `moonlight-logo.png` asset. No frameworks, no build tools, no npm. All four are embedded at compile time on ESP32 via `ui_embedded.h` (the logo as a binary byte array).
+- **Hand-maintained files, no toolchain**: `index.html`, `app.js`, `style.css`, plus two ES modules `app.js` imports — `preview3d.js` (WebGL 3D preview) and `install-picker.js` (shared with the web installer) — and the `moonlight-logo.png` asset. No frameworks, no build tools, no npm. All are gzipped and embedded at compile time on ESP32 via `ui_embedded.h` (the logo as a binary byte array).
 - **MoonModule-driven.** The UI has zero hard-coded knowledge of specific module types or domain categories. It queries `/api/types` and `/api/state` (or its WebSocket equivalent) and renders generically — module name, role chip, controls, children — without naming any concrete type in the codebase.
 - **Adding a new MoonModule with new controls requires zero UI changes** — provided the engine uses control types the UI already knows how to render.
 - **WebSocket for updates, REST for mutations.** Real-time state push without polling; user actions are explicit POST/DELETE calls.
@@ -219,4 +219,4 @@ No other client state persists. Reorder, control values, etc. all live on the de
 
 ## Source
 
-The three hand-maintained files: [index.html](../../../src/ui/index.html) · [app.js](../../../src/ui/app.js) · [style.css](../../../src/ui/style.css). Embedded into the firmware at build time via `src/ui/embed_ui.cmake`.
+The hand-maintained files: [index.html](../../../src/ui/index.html) · [app.js](../../../src/ui/app.js) · [style.css](../../../src/ui/style.css) · [preview3d.js](../../../src/ui/preview3d.js) · [install-picker.js](../../../src/ui/install-picker.js). Embedded into the firmware at build time via [embed_ui.cmake](../../../src/ui/embed_ui.cmake).
