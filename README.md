@@ -63,7 +63,7 @@ The numbers above are observations. The **contracts** projectMM commits to — w
 
 ![Installer](docs/assets/screenshots/installer.png)
 
-**Desktop — download and run.** Grab the build for your OS from the [releases page](https://github.com/ewowi/projectMM/releases):
+**Desktop — download and run.** Grab the build for your OS from the [releases page](https://github.com/MoonModules/projectMM/releases):
 
 - **macOS arm64:** `projectMM-macos-arm64-vX.Y.Z.tar.gz` — unpack, run `./projectMM`. The binary is unsigned, so Gatekeeper prompts on first run — right-click → Open, or clear the quarantine flag with `xattr -dr com.apple.quarantine ./projectMM`.
 - **Windows x64:** `projectMM-windows-x64-vX.Y.Z.zip` — unzip, double-click `projectMM.exe`. SmartScreen may warn on first run because the binary is unsigned (More info → Run anyway).
@@ -131,8 +131,8 @@ Their lessons and proven patterns are distilled in [`docs/history/`](docs/histor
 
 projectMM is a community project — built in the open, shaped by the people who use it. We'd love to hear from you:
 
-- **Ideas and requests** — an effect, a layout, a driver, a fixture you want supported? [Open an issue](https://github.com/ewowi/projectMM/issues) and tell us.
-- **Help build it** — pick something from the [issues](https://github.com/ewowi/projectMM/issues), or propose a MoonModule. See [How we work](#how-we-work) for the process.
+- **Ideas and requests** — an effect, a layout, a driver, a fixture you want supported? [Open an issue](https://github.com/MoonModules/projectMM/issues) and tell us.
+- **Help build it** — pick something from the [issues](https://github.com/MoonModules/projectMM/issues), or propose a MoonModule. See [How we work](#how-we-work) for the process.
 - **Test on hardware** — run it on your panels, boards, and fixtures, and report what works and what doesn't.
 - **Talk to us** — questions, show-and-tell, and design discussion on [Discord](https://discord.gg/TC8NSUSCdV).
 

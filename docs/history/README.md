@@ -35,7 +35,7 @@ One-time surveys of earlier projects, used to decide what to harvest into projec
 
 ### Runbooks
 
-- [repo-transfer.md](repo-transfer.md) — staged plan for moving the repo `ewowi/projectMM` → `MoonModules/projectMM` and cutting the installer URLs to `moonmodules.org`. A handoff for a fresh Claude session post-transfer.
+- [repo-transfer.md](repo-transfer.md) — staged plan for moving the repo `MoonModules/projectMM` → `MoonModules/projectMM` and cutting the installer URLs to `moonmodules.org`. A handoff for a fresh Claude session post-transfer.
 
 ## Cross-repo trends
 

@@ -41,7 +41,7 @@
 // 1. Constants + module state
 // ---------------------------------------------------------------------------
 
-const API_URL = "https://api.github.com/repos/ewowi/projectMM/releases?per_page=10";
+const API_URL = "https://api.github.com/repos/MoonModules/projectMM/releases?per_page=10";
 const CACHE_KEY = "projectMM.releases.v1";
 const CACHE_TTL_MS = 5 * 60 * 1000;  // 5 min — short enough to surface new RCs, long enough to avoid rate-limit thrash
 

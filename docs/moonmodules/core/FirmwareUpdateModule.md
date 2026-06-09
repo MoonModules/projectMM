@@ -18,7 +18,7 @@ A thin status surface for OTA flashing. The flash itself is driven by `POST /api
 Request body:
 
 ```json
-{ "url": "https://github.com/ewowi/projectMM/releases/download/v1.0.0/firmware-esp32-eth-wifi-v1.0.0.bin" }
+{ "url": "https://github.com/MoonModules/projectMM/releases/download/v1.0.0/firmware-esp32-eth-wifi-v1.0.0.bin" }
 ```
 
 Response:

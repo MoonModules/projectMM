@@ -95,7 +95,7 @@ def readme_text(version: str, platform_label: str) -> str:
         f"unsigned. Right-click → Open, or 'xattr -dr com.apple.quarantine\n"
         f"./projectMM' to clear the quarantine flag.\n"
         f"\n"
-        f"Source: https://github.com/ewowi/projectMM\n"
+        f"Source: https://github.com/MoonModules/projectMM\n"
     )
 
 
