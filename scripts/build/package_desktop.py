@@ -66,9 +66,11 @@ def configure_and_build_macos() -> Path:
 def configure_and_build_windows() -> Path:
     """Configure + build for Windows x64. Returns the built binary path."""
     bdir = str(BUILD_DIR_WIN.relative_to(ROOT))
+    # No -G: let CMake auto-detect the installed Visual Studio. Pinning a
+    # specific generator (e.g. "Visual Studio 17 2022") breaks whenever the
+    # windows-latest runner image migrates its bundled VS version.
     run([
         "cmake", "-B", bdir,
-        "-G", "Visual Studio 17 2022", "-A", "x64",
         "-DCMAKE_BUILD_TYPE=Release",
     ])
     run(["cmake", "--build", bdir, "--config", "Release"])
