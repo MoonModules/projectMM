@@ -372,9 +372,20 @@
            plugged-in devices" as the platform allows. If the user clicks
            Install without picking, the orchestrator falls back to its own
            requestPort() prompt — current behaviour preserved. -->
+      <!-- Picking a port auto-detects the connected chip (ESP Web Tools /
+           ESPHome model: connect and detect are one action) and narrows the
+           board dropdown below to that chip family — no separate Detect button.
+           #detect-status shows the result ("Detected ESP32-S3 — selected …")
+           right under the port row; re-detect = "Pick another port…". This is
+           web-installer only; the shared picker module (embedded in firmware,
+           no local serial) carries the narrowing logic but never the port UI. -->
       <div class="control-row" id="port-row">
         <span class="control-label">USB Port</span>
         <select id="port-select" class="rp-select"></select>
+      </div>
+      <div class="control-row" id="detect-status-row">
+        <span class="control-label"></span>
+        <span id="detect-status" class="rp-status"></span>
       </div>
 
       <!-- Erase opt-in. Lives here in the source DOM (outside the picker
@@ -1162,12 +1173,26 @@
     rebuildPortSelect();
 
     async function openPortPicker() {
+      let granted = false;
       try {
         pickedPort = await navigator.serial.requestPort({});
+        granted = true;
+        // A pending detect() handle is bound to the OLD port — drop it so the
+        // next Detect/Install opens the newly-picked port cleanly.
+        await installer.clearDetected();
       } catch (_) {
         // User cancelled the picker — keep whatever was picked before.
       }
       rebuildPortSelect();
+      // Auto-detect right after a fresh grant — the ESP Web Tools / ESPHome
+      // model where picking the device detects it immediately, so the board
+      // list narrows without a second click. Only on a genuine new grant (not
+      // a dropdown re-select), and non-fatal: runDetect routes any failure to
+      // the status line. Re-detect = pick another port (same path).
+      if (granted) {
+        const status = document.getElementById("detect-status");
+        installPicker.runDetect((text) => { status.textContent = text; });
+      }
     }
 
     portSelect.addEventListener("change", () => {
@@ -1323,6 +1348,13 @@
       container: document.getElementById("picker-mount"),
       ownFirmwareKey: null,  // web installer flashes any firmware variant
       installRowExtras: document.getElementById("erase-row"),
+      onDetect: async () => {
+        // The monitor (if open) holds the port — release it before esptool
+        // claims it, same as the install path. detect() keeps the port open
+        // afterwards so the following Install reuses it.
+        if (_monitor.port) await closeMonitor();
+        return await installer.detect({ port: pickedPort, onLog: appendLog });
+      },
       onInstall: async (firmware, manifestUrl /*, binaryUrl */) => {
         // If the monitor is open it holds the port — release it before
         // esptool tries to claim it. The reverse lock (monitor button

@@ -60,6 +60,14 @@ function makeState() {
         container: null,
         ownFirmwareKey: null,
         onInstall: null,
+        onDetect: null,        // web installer only: opens serial, returns the
+                               // detected chip-family string ("ESP32" / "ESP32-S3").
+                               // null on on-device OTA (no local serial), which is
+                               // also what gates the Detect button off there.
+        detectedChip: null,    // chip family from the last successful Detect, or null
+        runDetect: null,       // render() fills this with the detect routine when
+                               // the Detect button is present; runDetect() public
+                               // method calls it (host's auto-fire on port grant)
         enableBoardPicker: true, // true on web installer, false on on-device OTA
         // Optional caller-owned DOM element rendered just above the Install
         // button row. The web installer uses this to slot its "Erase chip
@@ -241,6 +249,56 @@ function relativeTime(iso) {
 // 6. DOM construction + event wiring
 // ---------------------------------------------------------------------------
 
+// Rebuild a board <select>: a leading pass-through option (label varies by
+// context) followed by one option per board. Shared by render() (full catalog)
+// and applyDetectedChip() (chip-narrowed list) so the option-building shape
+// lives in one place. Pure DOM — no serial, no network: safe in the firmware
+// build (this file embeds into the device via embed_ui.cmake).
+function fillBoardOptions(boardEl, boards, passthroughLabel) {
+    boardEl.replaceChildren();
+    const any = document.createElement("option");
+    any.value = "";
+    any.textContent = passthroughLabel;
+    boardEl.appendChild(any);
+    for (const b of boards) {
+        const opt = document.createElement("option");
+        opt.value = b.name;
+        opt.textContent = b.name;
+        boardEl.appendChild(opt);
+    }
+}
+
+// After a successful Detect, narrow the board <select> to ONLY the boards whose
+// `chip` matches the detected family — the other family is removed from the list
+// entirely (plug in an S3, the classic-ESP32 boards disappear, and vice versa).
+// The pass-through is relabelled "Other / generic <chip>" so a user with a board
+// not in the catalog can still flash the right firmware for their silicon. The
+// returned status string is shown next to the Detect button.
+// Detection gives chip FAMILY only — it can't tell esp32 / esp32-eth /
+// esp32-eth-wifi apart (same silicon, different wiring), so when several boards
+// share the family we narrow + let the user pick rather than guessing.
+function applyDetectedChip(state, boardEl) {
+    const matches = state.boards.filter(b => b.chip === state.detectedChip);
+    if (matches.length === 0) {
+        // A chip we ship no board for: don't strand the user — leave the full
+        // list and report it. (selectedBoard unchanged.)
+        return `Detected ${state.detectedChip} — no matching board, pick manually`;
+    }
+    fillBoardOptions(boardEl, matches, `Other / generic ${state.detectedChip}`);
+    if (matches.length === 1) {
+        state.selectedBoard = matches[0].name;   // exactly one board → auto-pick
+    } else if (!matches.find(b => b.name === state.selectedBoard)) {
+        // Several boards in this family; the prior pick (if any) belongs to the
+        // other family — clear it back to the generic pass-through so we don't
+        // carry a now-hidden selection.
+        state.selectedBoard = "";
+    }
+    boardEl.value = state.selectedBoard || "";
+    return matches.length === 1
+        ? `Detected ${state.detectedChip} — selected ${matches[0].name}`
+        : `Detected ${state.detectedChip} — pick your board (${matches.length} match)`;
+}
+
 // Builds the picker UI into `state.container`. Idempotent — calling more than
 // once just rebuilds.
 //
@@ -307,21 +365,10 @@ function render(state) {
     const statusEl = state.container.querySelector("#rp-status");
 
     if (boardEl) {
-        // "(any board)" is the no-filter pass-through: firmware dropdown shows
-        // every compatible firmware in the release, just as if the board picker
-        // didn't exist. Named option (not blank) so the user knows it's a
-        // deliberate choice, not an empty placeholder.
-        boardEl.replaceChildren();
-        const anyOpt = document.createElement("option");
-        anyOpt.value = "";
-        anyOpt.textContent = "(any board)";
-        boardEl.appendChild(anyOpt);
-        for (const b of state.boards) {
-            const opt = document.createElement("option");
-            opt.value = b.name;
-            opt.textContent = b.name;
-            boardEl.appendChild(opt);
-        }
+        // Full catalog, no chip filter yet. The "(any board)" pass-through
+        // means the firmware dropdown shows every compatible firmware, just
+        // as if the board picker didn't exist.
+        fillBoardOptions(boardEl, state.boards, "(any board)");
         // Restore the user's last picked board if it's still in the catalog
         // (the catalog may have changed since their last visit; falling
         // through to "(any board)" if their pick is gone is the safe shape).
@@ -386,16 +433,32 @@ function render(state) {
             }
         }
         if (compatible.length === 0) {
-            // Distinguish two no-match reasons: device reports its firmware
-            // but this release has nothing matching it, vs device's firmware
-            // is "unknown" (build didn't propagate MM_FIRMWARE_NAME) and the
-            // compatibility filter rejects everything. The latter is a build
-            // bug — surface it so a developer can spot it.
-            const reason = state.ownFirmwareKey === "unknown"
-                ? "device firmware is 'unknown' — rebuild with MM_FIRMWARE_NAME set"
-                : state.selectedBoard
-                    ? `no compatible firmwares for ${state.selectedBoard} in this release`
-                    : "no compatible firmwares in this release";
+            // Distinguish the no-match reasons:
+            //   - device firmware "unknown" (build didn't propagate
+            //     MM_FIRMWARE_NAME) → a build bug; surface it for the dev.
+            //   - a board whose firmware exists in ANOTHER release we can see
+            //     but not the selected one → a newer firmware variant (e.g. a
+            //     board added after the last stable). Point the user at the
+            //     release that has it instead of dead-ending. This is exactly
+            //     the case for boards added between releases: their binary only
+            //     lands in `latest` / the next tag, not the older stable.
+            //   - otherwise → genuinely no build for this board/firmware.
+            let reason;
+            if (state.ownFirmwareKey === "unknown") {
+                reason = "device firmware is 'unknown' — rebuild with MM_FIRMWARE_NAME set";
+            } else if (state.selectedBoard) {
+                const board = state.boards.find(b => b.name === state.selectedBoard);
+                const wanted = board ? board.firmwares : [];
+                // Newest other release whose assets include a firmware this board needs.
+                const elsewhere = sorted.find((rel, idx) =>
+                    idx !== state.releaseIdx
+                    && (rel.firmwares || []).some(f => wanted.includes(f.firmware)));
+                reason = elsewhere
+                    ? `${state.selectedBoard} needs a newer release — select ${elsewhere.tag_name}${elsewhere.prerelease ? " (beta)" : ""} above`
+                    : `no compatible firmware for ${state.selectedBoard} in this release`;
+            } else {
+                reason = "no compatible firmwares in this release";
+            }
             firmwareEl.innerHTML = `<option value="">— ${reason} —</option>`;
             installBtn.disabled = true;
             return;
@@ -481,11 +544,59 @@ function render(state) {
         });
     }
 
+    if (boardEl && state.onDetect) {
+        // The detect routine: opens the serial port (via onDetect — the seam to
+        // the serial/esptool code in install-orchestrator.js), reads the chip
+        // family, narrows the board list to that family. The Detect BUTTON lives
+        // in the host page (under the port picker), not here — the page calls
+        // installPicker.runDetect() and shows the returned status string. This
+        // keeps the button out of the firmware-embedded picker, and the
+        // narrowing logic in the picker (which owns the board <select>).
+        // Returns a status string for the caller to display ("" on success-less
+        // states is never returned — applyDetectedChip always yields a message).
+        state.runDetect = async (onStatus) => {
+            if (onStatus) onStatus("Detecting…");
+            // Clear any prior detection up front so a failed re-detect can't leave
+            // the board list narrowed to a stale chip family (e.g. detect S3, then
+            // a later detect fails on a wrong port — without this the list would
+            // still hide the classic boards and claim an S3 was found).
+            state.detectedChip = null;
+            let status;
+            try {
+                state.detectedChip = await state.onDetect();   // "ESP32" | "ESP32-S3" | ...
+                status = applyDetectedChip(state, boardEl);
+            } catch (e) {
+                // Restore the full, unfiltered board list — detection didn't land,
+                // so don't keep any narrowing from a previous attempt.
+                fillBoardOptions(boardEl, state.boards, "(any board)");
+                state.selectedBoard = "";
+                boardEl.value = "";
+                status = `Detect failed: ${e && e.message ? e.message : e}`;
+            }
+            safeLocalSet(PREF_BOARD_KEY, state.selectedBoard || "");
+            refreshFirmwareDropdown();
+            if (onStatus) onStatus(status);
+            return status;
+        };
+    }
+
     installBtn.addEventListener("click", async () => {
         const r = sorted[state.releaseIdx];
         if (!r || !state.firmware) return;
         const entry = (r.firmwares || []).find(f => f.firmware === state.firmware);
         if (!entry) return;
+        // Mismatch guard: if Detect ran and the user then overrode the board to
+        // one of a different chip family, confirm before flashing the wrong
+        // binary (which would fail at the bootloader with a cryptic error).
+        // Gated on detectedChip, which is only ever set on the web installer —
+        // never reached on the on-device OTA build.
+        if (state.detectedChip && state.selectedBoard) {
+            const board = state.boards.find(b => b.name === state.selectedBoard);
+            if (board && board.chip && board.chip !== state.detectedChip
+                && !confirm(`You picked ${state.selectedBoard} (${board.chip}) but the connected device is ${state.detectedChip}. Flash anyway?`)) {
+                return;
+            }
+        }
         // Install click is the strongest "yes, this is my choice" signal —
         // remember it explicitly in addition to the on-change writes above, in
         // case the user reaches this point without having interacted with the
@@ -519,6 +630,12 @@ export const installPicker = {
      * @param {(firmware: string, manifestUrl: string, binaryUrl: string) => Promise<void>} opts.onInstall
      *   - Called when the user clicks Install. The picker doesn't decide how
      *     to install — the caller decides.
+     * @param {() => Promise<string>} [opts.onDetect] - web installer only:
+     *   opens the serial port and returns the connected chip-family string
+     *   ("ESP32" / "ESP32-S3"). When provided, the picker renders a "Detect
+     *   my board" button that narrows the board list to the detected family.
+     *   Omit on the on-device OTA picker (no local serial) — the button then
+     *   never renders. All serial/esptool work lives behind this callback.
      * @param {boolean} [opts.enableBoardPicker=true] - true on the web
      *   installer (renders a board <select> above firmware, narrows firmware
      *   list to the board's compatible variants); false on the on-device OTA
@@ -529,12 +646,13 @@ export const installPicker = {
      *   it. The picker re-attaches the SAME node on every render(), so
      *   listeners the caller wired on the element keep firing.
      */
-    async init({ container, ownFirmwareKey, onInstall, enableBoardPicker = true,
-                 installRowExtras = null }) {
+    async init({ container, ownFirmwareKey, onInstall, onDetect = null,
+                 enableBoardPicker = true, installRowExtras = null }) {
         const state = makeState();
         state.container = container;
         state.ownFirmwareKey = ownFirmwareKey || null;
         state.onInstall = onInstall;
+        state.onDetect = onDetect;
         state.enableBoardPicker = enableBoardPicker;
         state.installRowExtras = installRowExtras;
 
@@ -586,5 +704,30 @@ export const installPicker = {
      */
     getSelectedBoard() {
         return _lastState ? (_lastState.selectedBoard || "") : "";
+    },
+
+    /**
+     * Chip family from the last successful Detect ("ESP32" / "ESP32-S3"), or ""
+     * if Detect hasn't run / failed / isn't wired. Always "" on the on-device
+     * OTA picker (no onDetect). Currently informational; the mismatch guard at
+     * install time reads state.detectedChip directly.
+     */
+    getDetectedChip() {
+        return _lastState ? (_lastState.detectedChip || "") : "";
+    },
+
+    /**
+     * Detect the connected chip and narrow the board list to its family. Called
+     * by the host's "Detect my board" button (under the port picker) and auto-
+     * fired after a fresh port grant (the ESP Web Tools / ESPHome model: detect
+     * immediately on connect). `onStatus(text)` is invoked with "Detecting…"
+     * then the final status ("Detected ESP32-S3 — …" / "Detect failed: …") so
+     * the page can show progress; the final string is also returned. No-op
+     * returning "" if the picker isn't mounted or detect isn't wired (on-device
+     * OTA). Never throws — failures come back as a status string.
+     */
+    async runDetect(onStatus) {
+        if (_lastState && _lastState.runDetect) return await _lastState.runDetect(onStatus);
+        return "";
     },
 };

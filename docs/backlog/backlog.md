@@ -16,7 +16,12 @@ Completed items are removed. This file is deleted when empty.
 - **Raspberry Pi** — ARM64, cross-built or native.
 - **macOS code-signing** — drops the Gatekeeper "downloaded from internet" prompt.
 - **Windows code-signing** — drops the SmartScreen warning on first run of `projectMM.exe`. Same shape as macOS signing; needs an EV / OV code-signing certificate (Microsoft Trusted Signing is the cheapest current option). Until then, the README notes the SmartScreen prompt.
-- **Runtime PHY / pin config for Ethernet** — replaces build-time Olimex-pin baking in `sdkconfig.defaults.eth` with a runtime picker via `platform::ethPresent()` / `platform::wifiPresent()`. Once landed, `esp32-eth*` variants stop being Olimex-specific; NetworkModule's `onBuildControls()` flips the `hidden` flag on absent-interface controls.
+- **Runtime PHY / pin config for Ethernet** — replaces build-time Olimex-pin baking in `sdkconfig.defaults.eth` with a runtime picker via `platform::ethPresent()` / `platform::wifiPresent()`. Once landed, `esp32-eth*` variants stop being Olimex-specific; NetworkModule's `onBuildControls()` flips the `hidden` flag on absent-interface controls. **This unblocks the firmware-variant collapse below — it is the prerequisite.**
+
+  **Target end-state once runtime PHY config lands — collapse the three classic variants to two.** Today there are three (`esp32` = WiFi-only, `esp32-eth` = Eth-only-Olimex, `esp32-eth-wifi` = both-Olimex), because the `.eth` fragment *bakes in Olimex's RMII pins* (clock GPIO17, reset GPIO5, LAN8720, addr 0 — see `sdkconfig.defaults.eth` + `ethInit()` in `platform_esp32.cpp`). So Ethernet can't be in the default build: a LOLIN/QuinLED/Generic board flashing it would drive Olimex's pins as RMII lines and stall at boot waiting for a PHY that isn't there. Once `ethInit()` selects pins/PHY at runtime (and no-ops when no PHY is present), the variants become:
+  - **`esp32`** — the default: WiFi **and** Ethernet, Eth brought up only when a PHY is detected/configured. Replaces both `esp32` and `esp32-eth-wifi`.
+  - **`esp32-eth-only`** (today's `esp32-eth`) — Eth only, WiFi compiled out via `EXCLUDE_COMPONENTS`. Kept for two real reasons: it saves flash, and it guarantees no WiFi stack is present to interfere (relevant to the [WiFi ArtNet performance](#wifi-artnet-performance-pending-investigation) and the eth-flapping investigation). Only the Eth-only case earns a separate firmware — so this is variant *reduction*, not explosion.
+  - **PSRAM boards still get the default `esp32`/`esp32s3-*` build, Ethernet-capable, no extra firmware.** The **ESP32-S3 has no built-in EMAC**, but that does *not* mean a separate firmware: an external **SPI PHY (W5500) wired to GPIO pins** gives the S3 Ethernet, and which PHY/pins (RMII vs SPI, the W5500 MISO/MOSI/SCK/CS/IRQ above) is **runtime config**, exactly the runtime-PHY mechanism this item adds — the same way MoonLight handles it (`ethernetType: BoardDefault / LAN8720-RMII / W5500-SPI` per board). So the default firmware ships **both** the RMII and the SPI-PHY driver; whether Ethernet comes up, and over which PHY, is selected at runtime from the board/pin config. Classic ESP32 uses its internal RMII MAC; S3 uses an SPI PHY; neither needs its own firmware variant. (Product-owner proposal, recorded on PR #16.)
 - **Installer UX polish** — clear "Pre-release (beta)" warning on RC/latest picks, yank-by-asset-tag instead of yank-by-release-deletion.
 
 ---
@@ -156,6 +161,23 @@ Board preset catalog + upload (later, when the runtime config has real consumers
 - MoonDeck "Set board" picker reads the catalog to populate the dropdown.
 - Pin reassignment requires reboot (ESP-IDF can't hot-reconfigure EMAC pins after `esp_eth_driver_install`); document the constraint.
 - A first attempt at this catalog landed and was rolled back during the firmware-vs-board separation work — the catalog only earns its keep once the device reads it, otherwise it's a docs-shaped file in the wrong place.
+
+**Prior art — MoonLight's per-board pin database** ([ModuleIO.h](https://github.com/MoonModules/MoonLight/blob/main/src/MoonBase/Modules/ModuleIO.h)). MoonLight (our own project) already models exactly this for ~25 boards across ESP32-D0 / S3 / P4: a `pins[]` array of `{GPIO, usage, index}` plus board-level `maxPower`, `ethernetType`, `ethPhyAddr`, `ethClkMode`. Don't copy the file or paste its tables here — read it when building the catalog and write our own. Its `usage` enum enumerates the hardware functionalities a projectMM board preset *could* drive once the device-side consumers exist (each needs its own module/control before the corresponding `boards.json` / catalog field earns its keep — none exist today beyond `Board.board` + `Network.txPowerSetting`):
+
+- **LED output pins** — per-strip data GPIOs (1–16 outputs/board); the first real consumer (a Driver pin control) unblocks multi-output boards (QuinLED Dig-Quad/Octa, SE16, LightCrafter).
+- **Ethernet PHY config** — LAN8720/RMII (MDC/MDIO/CLK/power-pin/PHY-addr/clock-mode) vs W5500/SPI (MISO/MOSI/SCK/CS/IRQ); the consumer is the runtime `Network.eth_*` controls listed above, replacing the hardcoded Olimex pins.
+- **Power budget** — `maxPower` (Watts) per board, for a future current-limit / brightness-cap control.
+- **Audio / I2S** — SD/WS/SCK/MCLK pins, the input side of audio-reactive effects ([Pi-5 sensor note](#sensor-input-on-raspberry-pi-5--microphone-imu-line-in-post-10-multi-commit) is the desktop counterpart).
+- **Buttons & inputs** — push/toggle/lights-on, PIR, digital-input; needs an input-event concept the firmware doesn't have yet.
+- **Relays & power control** — relay / lights-on / high-low pins.
+- **Infrared** — IR receive pin (remote control).
+- **RS485 / DMX** — TX/RX/DE pins (DMX output beyond the current ArtNet path).
+- **Sensing** — voltage / current / battery / temperature ADC pins.
+- **Onboard LED / key, exposed / reserved pins** — board-housekeeping and conflict-avoidance metadata.
+
+Sequencing rule (unchanged): each functionality lands a device-side control first, then its preset field; the catalog grows one earned consumer at a time, never as a speculative pin dump.
+
+**Module variant + PSRAM within the classic-ESP32 family.** `getChipDescription()` and MoonLight's `ModuleIO.h` both report only the *core* family ("ESP32"), not the *module* (WROOM / WROVER / PICO) — so neither distinguishes whether a classic-ESP32 board has PSRAM. This matters for projectMM (whose large-LED story leans on PSRAM) in a way it doesn't for MoonLight: e.g. the **QuinLED Dig-Next-2 is built on an ESP32-PICO with 2 MB PSRAM**, but projectMM's `esp32` build has no `CONFIG_SPIRAM` (see the `#ifdef CONFIG_SPIRAM` gate in `platform_esp32.cpp::psramAlloc`), so it flashes and runs as a no-PSRAM device and hits the non-PSRAM fragmentation ceiling at large grids that the 2 MB would otherwise relieve. A PSRAM-enabled classic-ESP32 firmware variant (e.g. `esp32-psram`) would unlock it; `boards.json` could then carry a `psram` hint per board to steer the picker — but only once that variant exists (no consumer today). `boards.json` currently maps every classic board to the WiFi-only `esp32` variant, which is correct-but-unoptimised for PSRAM-bearing PICO boards.
 
 ### Multi-layer composition (backlog)
 

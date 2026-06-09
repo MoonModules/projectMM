@@ -18,3 +18,4 @@ One-off research documents that informed a future direction, kept for the reason
 
 - [leddriver-analysis-top-down.md](leddriver-analysis-top-down.md) — reasons from the end goal (driving WS2812-class LEDs from a GPIO pin) toward a generic driver architecture, per-platform implementation, and a testing strategy.
 - [leddriver-analysis-bottom-up.md](leddriver-analysis-bottom-up.md) — the companion landscape survey: catalogues the existing LED-driver libraries across ESP32, Teensy, Raspberry Pi, and PC, and recommends a path.
+- [leddriver-increment-1-plan.md](leddriver-increment-1-plan.md) — the concrete first-increment plan distilled from the two analyses: RMT/WS2812B on classic ESP32, the unified one-base driver hierarchy (ArtNet + LED + Preview as peer interpreters of the light preset), the platform seam, and the loopback + host-encoder test strategy. Locked product-owner decisions at the top.

@@ -54,6 +54,15 @@ FIRMWARES: dict[str, dict] = {
         "eth_only": False,
         "description": "ESP32 classic — WiFi only",
     },
+    "esp32-16mb": {
+        "chip": "esp32",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.16mb"],
+        "eth_only": False,
+        "description": "ESP32 classic with 16 MB flash — WiFi only. Same silicon "
+                       "as `esp32`; the 4 MB binary runs on these boards too, this "
+                       "variant just uses the extra flash for bigger OTA slots + "
+                       "filesystem (Serg boards, QuinLED Dig-Octa).",
+    },
     "esp32-eth": {
         "chip": "esp32",
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth"],
@@ -71,6 +80,14 @@ FIRMWARES: dict[str, dict] = {
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32s3-n16r8"],
         "eth_only": False,
         "description": "ESP32-S3 DevKitC-1 (N16R8: 16 MB flash, 8 MB octal PSRAM) — WiFi only",
+    },
+    "esp32s3-n8r8": {
+        "chip": "esp32s3",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32s3-n8r8"],
+        "eth_only": False,
+        "description": "ESP32-S3 (N8R8: 8 MB flash, 8 MB octal PSRAM) — WiFi only. "
+                       "Half the flash of N16R8; the N16R8 binary overruns an 8 MB "
+                       "board, so N8R8 boards (LightCrafter etc.) need this variant.",
     },
 }
 

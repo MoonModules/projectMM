@@ -72,7 +72,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        firmware: [esp32, esp32-eth, esp32-eth-wifi, esp32s3-n16r8]
+        firmware: [esp32, esp32-16mb, esp32-eth, esp32-eth-wifi, esp32s3-n16r8, esp32s3-n8r8]
     steps:
       - uses: actions/checkout@v4
 
@@ -230,7 +230,10 @@ jobs:
           # — no CORS). The Pages-relative manifests are generated in the
           # deploy-pages job, where the web installer (CORS-bound) consumes them.
           BASE="https://github.com/${REPO}/releases/download/$TAG"
-          for F in esp32 esp32-eth esp32-eth-wifi esp32s3-n16r8; do
+          # Keep in sync with the build-esp32 matrix above (the source of truth
+          # for which firmware variants exist). A variant missing here builds but
+          # gets no manifest, so the installer can't flash it.
+          for F in esp32 esp32-16mb esp32-eth esp32-eth-wifi esp32s3-n16r8 esp32s3-n8r8; do
             python scripts/build/generate_manifest.py \
               --firmware "$F" \
               --version "$V" \
@@ -338,7 +341,10 @@ jobs:
           # because the web installer is same-origin-bound by CORS. The
           # absolute release-asset manifests live in the `release` job.
           mkdir -p pages-manifests
-          for F in esp32 esp32-eth esp32-eth-wifi esp32s3-n16r8; do
+          # Keep in sync with the build-esp32 matrix above (the source of truth
+          # for which firmware variants exist). A variant missing here builds but
+          # gets no manifest, so the installer can't flash it.
+          for F in esp32 esp32-16mb esp32-eth esp32-eth-wifi esp32s3-n16r8 esp32s3-n8r8; do
             python scripts/build/generate_manifest.py \
               --firmware "$F" \
               --version "$V" \
