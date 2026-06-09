@@ -1,24 +1,11 @@
 # BlendMap
 
-Free function that reads from one or more Layer buffers and writes blended+mapped output into a destination buffer. Called by the Drivers container each frame.
+`blendMap` is a free function that reads a Layer's buffer and writes mapped output into a destination buffer, called by the Drivers container each frame. The destination is cleared first, so physical cells with no source (a sparse layout's lattice gaps) stay black.
 
-## Operation
+The LUT picks one of two paths: when each physical light is written at most once (every current layout/modifier — mirror, shuffle, sparse box→driver), it overwrite-copies source→destination (no read-back, no clamp, ~4× faster); when sources can overlap a destination (multi-layer composition), it additively blends with clamping. Physical indices are bounds-checked so an out-of-range LUT entry can't overrun the buffer.
 
-1. Clears destination buffer (memset to 0)
-2. For each Layer in the Layers container:
-   - For each logical light in the Layer's LUT:
-     - Read source colour from the Layer's buffer
-     - Look up physical destination(s) via LUT
-     - Additively blend into destination (clamp to 255)
+Configurable per-layer blend modes (beyond additive) land with multi-layer composition — a [backlog](../../backlog/backlog.md) item.
 
-## What worked
+## Source
 
-- Correctly handles 1:0 (skip), 1:1 (shuffled and unshuffled), 1:N (mirror) mappings.
-- Additive blending with clamping works for multiple layers.
-- Bounds checking on physical indices prevents buffer overflows.
-
-## What needs improvement
-
-- Only additive blending. Need configurable blend modes per layer.
-- Clears entire destination buffer every frame. For 16K+ lights this is ~50KB memset. Could track dirty regions instead.
-- The function is `inline` in a header. For large installations this might cause code bloat if included in multiple translation units.
+[BlendMap.h](../../../src/light/layers/BlendMap.h)

@@ -17,14 +17,19 @@ GET    /api/state                 → full module tree JSON: each entry carries
                                     name, type, role, enabled, loopTimeUs,
                                     classSize, dynamicBytes, controls[],
                                     status + severity (only when set by the
-                                    module; severity ∈ status/warning/error)
+                                    module; severity ∈ status/warning/error),
+                                    plus userEditable:false ONLY when the module
+                                    opts out of UI delete/replace (omitted = editable)
 GET    /api/system                → fps, tickTimeUs, freeHeap, freeInternal,
                                     maxBlock, uptime
-GET    /api/types                 → {types:[{name, displayName, role,
-                                              docPath, tags, dim, defaults}]}
+GET    /api/types                 → {types:[{name, displayName, role, docPath,
+                                              tags, dim, acceptsChildRoles, defaults}]}
                                     name is the stable factory key
                                     ("RainbowEffect"); displayName is the
-                                    role-suffix-stripped UI label ("Rainbow")
+                                    role-suffix-stripped UI label ("Rainbow");
+                                    acceptsChildRoles is the comma-separated child
+                                    roles this type accepts (""=none); defaults is
+                                    captured from a fresh probe instance per type
 
 POST   /api/control               → {module, control, value}
 POST   /api/modules               → {type, id?, parent_id?} — create
@@ -66,3 +71,7 @@ HTTP via cpp-httplib (PC) / ESPAsyncWebServer (ESP32). WebSocket on separate por
 ### projectMM v2 — HttpServerModule + WebSocketModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/network/HttpServerModule.h))
 
 Separate MoonModules for HTTP and WebSocket. projectMM combines them into one module.
+
+## Source
+
+[HttpServerModule.cpp](../../../src/core/HttpServerModule.cpp) · [HttpServerModule.h](../../../src/core/HttpServerModule.h)

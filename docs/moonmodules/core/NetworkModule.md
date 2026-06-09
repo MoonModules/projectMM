@@ -152,3 +152,7 @@ The `ssid_` / `password_` member buffers still exist (unconditional struct layou
 - `mdns.h` — mDNS service
 - `esp_netif.h` — network interface management
 - `esp_event.h` — connection/disconnection events
+
+## Source
+
+[NetworkModule.h](../../../src/core/NetworkModule.h)

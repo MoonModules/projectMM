@@ -4,31 +4,11 @@ Contiguous light data buffer. Used by both layers (effects write into it) and dr
 
 ## Storage
 
-Raw `uint8_t*` buffer, sized by `channelsPerLight * nrOfLights`. This supports RGB (3 channels), RGBW (4 channels), and multi-channel DMX fixtures (up to 32 channels per light) via configurable channel count and offsets.
-
-Memory allocated via `platform::alloc` (PSRAM when available). Allocated outside the hot path, reused every frame.
-
-`std::span<uint8_t>` provides a safe, zero-cost view into the raw buffer. Using `uint8_t*` rather than `RGB*` keeps the buffer flexible for any channel configuration. For the common RGB case, convenience accessors can cast to RGB on the fly.
+A raw `uint8_t*` (not `RGB*`) keeps the buffer flexible for any channel layout — RGB, RGBW, or multi-channel DMX fixtures — addressed by channel count + offset. Allocated via `platform::alloc` (PSRAM when available) outside the hot path and reused every frame; a `std::span<uint8_t>` view is the zero-cost safe accessor.
 
 ## Locking
 
-Semaphores are expensive (~150 bytes on ESP32). Prefer:
-- Atomic pointer swap for double-buffering (producer/consumer)
-- Lock-free single-slot SPSC pattern
-- Share a single semaphore across multiple layers rather than one per layer
-
-## API
-
-- `allocate(nrOfLights, channelsPerLight)` — allocate via `platform::alloc`
-- `free()` — safe to call multiple times
-- `clear()` — memset to 0
-- `data()` — raw `uint8_t*` pointer
-- `span()` — `std::span<uint8_t>` view
-- `count()` — number of lights
-- `channelsPerLight()` — channels per light
-- `bytes()` — total byte count
-
-Move-constructible, not copyable.
+Semaphores are expensive (~150 bytes on ESP32), so prefer lock-free patterns: an atomic pointer swap for double-buffering, a single-slot SPSC handoff, or one shared semaphore across layers rather than one per layer.
 
 ## Tests
 
@@ -47,3 +27,7 @@ Raw `uint8_t*` buffer, sized by `channelsPerLight * nrOfLights`. Supports RGB, R
 ### projectMM v2 — DataBuffer ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/core/DataBuffer.h))
 
 Lock-free single-slot SPSC buffer with atomic revision counter. Teardown-safe via invalidate() sentinel. Multiple consumers each track independent read positions.
+
+## Source
+
+[Buffer.h](../../../src/light/layers/Buffer.h)

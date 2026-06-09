@@ -54,3 +54,7 @@ Streamed via WebSocket binary frames. Control: `logEveryN` (slider 1-1000) for t
 ### projectMM v2 — PreviewModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/PreviewModule.h))
 
 Same pattern, uses v2 DataBuffer for frame data.
+
+## Source
+
+[PreviewDriver.h](../../../../src/light/drivers/PreviewDriver.h)

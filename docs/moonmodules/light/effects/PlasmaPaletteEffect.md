@@ -8,15 +8,14 @@ Same four-sine plasma field as `PlasmaEffect`, but colours come from a 256-entry
 
 ## Controls
 
-- `enabled` (bool) — from `EffectBase`
 - `bpm` (uint8_t, default 30, range 1-255)
 - `scale_x` (uint8_t, default 16, range 1-64)
 - `scale_y` (uint8_t, default 16, range 1-64)
 
-## Rendering
-
-Plasma index `((s1+s2+s3+s4)>>2)` maps through `palette_[256]` (768 bytes flash). `dynamicBytes()` = 0.
-
 ## Tests
 
 [Unit tests: CheckerboardEffect](../../../tests/unit-tests.md#checkerboardeffect) (PlasmaPaletteEffect is one of the stateless effects covered) — non-zero output, spatial variation.
+
+## Source
+
+[PlasmaPaletteEffect.h](../../../../src/light/effects/PlasmaPaletteEffect.h)

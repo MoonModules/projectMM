@@ -14,29 +14,9 @@ Animation must be **resolution-independent**: multiply the time offset by the pa
 
 Animation is driven by **elapsed millis**, not frame count. This ensures consistent speed regardless of FPS. The speed slider controls the animation dynamics, never the framerate — FPS should always be maximal for smooth motion.
 
-## Rendering context
-
-Whatever provides it, effects need:
-- `buffer()` — the `uint8_t*` buffer to write into
-- `width()`, `height()`, `depth()` — logical dimensions
-- `channelsPerLight()` — channels per light (3=RGB, 4=RGBW, etc.)
-- `elapsed()` — milliseconds for animation (synchronized clock)
-- `nrOfLights()` — total lights in this layer's buffer
-
 ## Dimensions and auto-extrusion
 
-Each effect declares which axes it iterates through `virtual Dim dimensions() const` (default `Dim::D3`):
-
-- `Dim::D3` — effect iterates x, y, z itself. The framework does no extrusion.
-- `Dim::D2` — effect promises to write only the `z = 0` slice. `Layer::extrude` copies that slice across every other z on a 3D layer.
-- `Dim::D1` — effect promises to write only the `y = 0, z = 0` row. `Layer::extrude` fills y then z.
-
-Two contracts to honour in `loop()`:
-
-1. **Use `width()`, `height()`, `depth()` at frame time.** Never hardcode a maximum (no `for z < SOMETHING`). A D3 effect may run on a D1 or D2 layer; its loop must iterate whatever the layer provides. Writing past `width × height × depth × channels` is a buffer overrun.
-2. **A D2/D1 effect is an opt-in promise.** Declaring D2 tells the framework it can `memcpy` your z = 0 slice across z; declaring D1 lets it fill y and z. Stateful effects (own dynamic buffers) should size those to the same slice the loop writes — `w × h × cpl` for D2, `w × cpl` for D1 — not the full 3D buffer.
-
-The `dim` int (1/2/3) is emitted in `/api/types`; the UI derives the 📏/🟦/🧊 chip from it. See [architecture.md § Effects](../../architecture.md#effects) for the live declarations per shipped effect, and [Unit tests: Layer](../../tests/unit-tests.md#layer) (see `unit_Layer_extrude.cpp`) for the pinned contract tests.
+`dimensions()` (D3 default; the `.h` documents the per-axis contract) is a claim about which axes the effect *iterates*, not what the layer has — so `loop()` must read `width()`/`height()`/`depth()` at frame time and never hardcode a bound. The `dim` int (1/2/3) is emitted in `/api/types`; the UI derives the 📏/🟦/🧊 chip from it, so it isn't repeated in each module's `tags()`. See [architecture.md § Effects](../../architecture.md#effects) for the live declaration per shipped effect, and `unit_Layer_extrude.cpp` for the pinned contract tests.
 
 ## Prior art
 
@@ -53,3 +33,7 @@ Base for effects. Produces into a Channel.
 ### projectMM v2 — PixelEffectBase ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/effects/PixelEffectBase.h))
 
 Shared spine: concrete effect implements only `build_effect_controls()` + `render_(px, w, h, d)`. Eliminates ~70 lines boilerplate.
+
+## Source
+
+[EffectBase.h](../../../src/light/effects/EffectBase.h)

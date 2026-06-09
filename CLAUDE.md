@@ -80,7 +80,7 @@ Each commit produces visible output. The product owner picks what to build next.
 ### Per-feature workflow
 
 1. **Pick what to build.** One layout, one effect, one driver, one modifier, one system module — whatever adds the next useful capability.
-2. **Review only the relevant module drafts.** Cherry-pick from `docs/backlog/moonmodules_draft/`. Promote only what's needed to `docs/moonmodules/`.
+2. **Review only the relevant module drafts.** Select from `docs/backlog/moonmodules_draft/`. Promote only what's needed to `docs/moonmodules/`.
 3. **`/plan` it.** Plan references only the promoted specs + architecture docs. Plans are not promoted to the repo — the implemented code, docs, and commit message together describe what landed.
 4. **Implement in a branch** (`next-iteration` or feature branch). Test on hardware. Run the commit gates (see Lifecycle Events below). Commit.
 5. **Push.** Product owner pushes. CodeRabbit reviews the PR. Process findings.
@@ -189,6 +189,7 @@ docs/
   testing.md               ← test inventory and strategy
   performance.md           ← per-module timing, memory, sizeof for each platform
   backlog/                 ← forward-looking: what to build next (not present-tense)
+    README.md              ← index: what's here (list + draft specs + design studies)
     backlog.md             ← the prioritised to-build list
     moonmodules_draft/     ← draft specs for unimplemented modules (promoted out as they ship)
   history/                 ← backward-looking: accumulated wisdom
@@ -210,9 +211,9 @@ Documentation describes the system as it is. Git commits are the history. Module
 
 Do **not** repeat facts the `.h` already states: the controls list (the .h has `controls_.addX(...)`), the method signatures (they're declared), the implementation strategy ("uses a TcpServer abstraction" — visible in the includes), or architectural rules that belong in `architecture.md` (domain boundary, hot-path discipline, etc.). When in doubt: if a fact is visible in the file's `.h`, the `.md` can drop it. The spec-check script and a comment header in the `.h` together carry the contract; the `.md` carries what the file can't.
 
-The `history/` folder is the distilled experience of years of building LED/light systems — from WLED, WLED-MM, StarLight, MoonLight, through projectMM. It contains proven patterns, memory tricks, control mechanisms, and hard-won lessons. We cherry-pick from it — we never implement it wholesale.
+The `history/` folder is the distilled experience of years of building LED/light systems — from WLED, WLED-MM, StarLight, MoonLight, through projectMM. It contains proven patterns, memory tricks, control mechanisms, and hard-won lessons. **We study these projects to sharpen our own designs — we read their approaches and learn from their decisions; we do not copy their code.** Everything that lands in projectMM is our own implementation, written against our own architecture. A good idea doesn't care who has it: we let these projects shape how we think, and we always respect their licenses by writing our own code rather than lifting theirs. When a specific project or person inspires something here, we credit them by name — the `history/` digests and the per-module "Prior art" sections are where that attribution lives.
 
-The `backlog/` folder is its forward-looking counterpart: `backlog.md` is the prioritised to-build list, and `moonmodules_draft/` holds specs for modules not yet implemented (cherry-picked and promoted to `moonmodules/` as each ships, then deleted from the draft). Both `history/` and `backlog/` are exempt from the present-tense rule and agents don't read them automatically — only when planning new work.
+The `backlog/` folder is its forward-looking counterpart: `backlog.md` is the prioritised to-build list, and `moonmodules_draft/` holds specs for modules not yet implemented (selected and promoted to `moonmodules/` as each ships, then deleted from the draft). Both `history/` and `backlog/` are exempt from the present-tense rule and agents don't read them automatically — only when planning new work.
 
 ## Code Style
 

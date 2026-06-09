@@ -2,18 +2,14 @@
 
 ![FirmwareUpdateModule controls](../../assets/screenshots/FirmwareUpdateModule.png)
 
-OTA flash progress + the `/api/firmware/url` endpoint, surfaced as two read-only controls in the UI.
-
-The module itself is a thin status surface. The actual flash is driven by the HTTP route `POST /api/firmware/url` in `HttpServerModule`, which hands the URL to `mm::platform::http_fetch_to_ota`. That function spawns a FreeRTOS task that downloads the binary (via `esp_https_ota`) and writes it to the next OTA partition. Three file-scope globals — `g_otaStatus` (char buffer), `g_otaBytesRead` (uint32_t) and `g_otaBytesTotal` (uint32_t) — carry progress between the task and this module's `loop1s()` poll. The UI renders the byte pair as "X KB / Y KB".
+A thin status surface for OTA flashing. The flash itself is driven by `POST /api/firmware/url` in HttpServerModule, which hands the URL to `platform::http_fetch_to_ota` (a task that downloads via `esp_https_ota` and writes the next OTA partition). The task and this module communicate through shared file-scope globals; the module polls them in `loop1s()` and the existing WebSocket state push surfaces the change at 1 Hz.
 
 ## Controls
 
 | Name | Type | Description |
 |---|---|---|
-| `update_status` | read-only string (64 chars) | One of: `idle`, `starting`, `downloading`, `flashing`, `rebooting`, `error: <reason>`. |
-| `update_pct` | progress (bytes/total) | Live byte counters — `value` = bytes downloaded so far, `total` = full image size (0 until `esp_https_ota_get_image_size` reports it just after TLS handshake). The UI renders both fields as "X KB / Y KB". The control name is historical (`update_pct` predates the percent → bytes migration); the wire shape and UI rendering are bytes throughout. |
-
-Both controls update via the WebSocket state push at 1 Hz — the module's `loop1s()` polls the globals and copies into the bound buffers, the existing WS broadcast picks up the change with no extra wiring. The `total` snapshot is captured at control-bind time, so when the OTA task reports the real image size mid-task, `loop1s()` calls `rebuildControls()` once to refresh the descriptor.
+| `update_status` | read-only string | One of: `idle`, `starting`, `downloading`, `flashing`, `rebooting`, `error: <reason>`. |
+| `update_pct` | progress (bytes/total) | Live byte counters rendered as "X KB / Y KB"; `total` is 0 until `esp_https_ota_get_image_size` reports it just after the TLS handshake. The name is historical (it predates the percent→bytes migration); the wire shape is bytes. |
 
 ## Wire contract
 
@@ -64,3 +60,7 @@ After an error, `update_status` stays on the error message until the next `/api/
 
 - **projectMM-v1** had this module + the route + the platform helper, structured the same way: `src/modules/system/FirmwareUpdateModule.h` (display surface), `src/core/OtaState.h` (shared globals), `src/core/AppRoutes.cpp:174-210` (the route), `src/pal/Pal.h` (`pal::http_fetch_to_ota`).
 - **`esp_https_ota`** is the standard ESP-IDF OTA-from-HTTP component, used by every OTA flow on ESP32 since IDF v4.x. The install-picker UI is the new layer on top.
+
+## Source
+
+[FirmwareUpdateModule.h](../../../src/core/FirmwareUpdateModule.h)

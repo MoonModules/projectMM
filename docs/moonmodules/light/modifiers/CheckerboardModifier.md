@@ -28,3 +28,7 @@ A Layer applies its first enabled modifier during `rebuildLUT`; modifier chainin
 ### MoonLight — M_MoonLight.h Checkerboard ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h))
 
 MoonLight's Checkerboard drops lights by setting `position.x = UINT16_MAX` (a sentinel the layout pass skips), with `size`, `invert`, and a `group` flag. We express the drop as `outCount = 0` (our equivalent, no sentinel needed) and start with `size` + `invert`; `group` is deferred.
+
+## Source
+
+[CheckerboardModifier.h](../../../../src/light/modifiers/CheckerboardModifier.h)

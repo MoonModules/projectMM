@@ -46,13 +46,9 @@ The Scheduler exposes `setLoadAllHook(LoadAllFn fn)` as a function pointer so it
 
 HttpServerModule calls `target->markDirty()` and `FilesystemModule::noteDirty()` on every successful mutation: control changes, **and tree-shape changes** (add / delete / move a module — the parent is marked dirty so its file is rewritten with the new child set). `noteDirty()` stamps `lastDirtyMs_` and sets `dirtyPending_`. In `loop1s()`, FilesystemModule waits `DEBOUNCE_MS` (2000ms) after the last dirty mark, then walks the module tree; any subtree with a dirty descendant is serialized to a flat JSON blob and written atomically (write to `.tmp` then rename).
 
-A subtree's dirty flag is cleared only after its write actually succeeds; a failed write leaves the flag set so `loop1s()` retries on the next pass. Losing power before the debounce expires loses the in-flight change — that's the cost of debouncing in exchange for fewer flash writes. For deliberate teardowns, `FilesystemModule::flushPending()` forces all dirty subtrees through synchronously, bypassing the debounce. HttpServerModule's `POST /api/reboot` handler calls it so an add-then-immediate-reboot doesn't lose the change.
+A subtree's dirty flag is cleared only after its write succeeds; a failed write leaves it set so `loop1s()` retries. Losing power before the debounce expires loses the in-flight change — the cost of debouncing for fewer flash writes. `FilesystemModule::flushPending()` forces all dirty subtrees through synchronously; `POST /api/reboot` calls it so an add-then-reboot doesn't lose the change.
 
-FilesystemModule exposes one read-only control, **`lastSaved`** — `"never"` before the first successful save this session, otherwise how long ago the last write happened (`"5s ago"` / `"3m ago"` / `"2h ago"`), refreshed each `loop1s()`. Being a `ReadOnly` control it is itself never persisted.
-
-The serializer emits each child as `"N.type":"TypeName"` followed by that child's controls; the reader (`applyNode`) reconciles the live tree to match — factory-creating, replacing, or trimming children by position so the persisted tree shape is restored on boot.
-
-The singleton pointer used by the static `noteDirty()` / `flushPending()` is bound in `setScheduler()`, **not** the constructor — the factory creates short-lived probe instances (for `/api/types` defaults capture) whose destructor would otherwise clear the singleton.
+The `lastSaved` read-only control shows how long ago the last write happened (`"never"`, `"5s ago"`, `"3m ago"`), refreshed each `loop1s()`.
 
 ## Conditional visibility (`hidden` flag)
 
@@ -65,22 +61,9 @@ controls_.setHidden(controls_.count() - 1, addressing_ != 1);
 
 This means the persistence layer can find and overlay `ip` regardless of the live conditional state, while the UI honors the hidden flag (`if (ctrl.hidden) continue` in `renderCards`). When a Select changes at runtime, HttpServerModule calls `rebuildControls()` to re-evaluate the flags.
 
-## Platform requirements
+## Platform layer
 
-- `platform::fsMount()` — mount the filesystem (idempotent)
-- `platform::fsMkdir(path)` — create `/.config/` on first boot
-- `platform::fsRead(path, buf, bufLen)` — read file into buffer, returns size or ≤0
-- `platform::fsWriteAtomic(path, buf, len)` — write to `<path>.tmp` then rename
-- `platform::filesystemUsed/filesystemTotal()` — for SystemModule's progress bar
-- `platform::fsSetRoot(path)` — desktop-only: redirect root for test isolation
-
-ESP32 uses LittleFS via the `joltwallet/esp_littlefs` component on a dedicated partition. Desktop uses `std::filesystem` rooted at `build/` (overridable via `fsSetRoot`) — config lives under the gitignored build dir so it doesn't clutter the repo root.
-
-## Sizing
-
-- `MAX_FILE_BYTES = 2048` — max serialized subtree size; write returns false on overflow
-- `MAX_PATH = 64`, `MAX_KEY = 48` — stack buffers for path/key construction
-- All save/load buffers are stack-allocated; no heap allocation in the hot path
+Filesystem access goes through `platform::fs*` (mount, mkdir, read, atomic write-then-rename, used/total). ESP32 uses LittleFS (`joltwallet/esp_littlefs`) on a dedicated partition; desktop uses `std::filesystem` rooted at `build/` (overridable via `fsSetRoot` for test isolation) so config doesn't clutter the repo root. Save/load shares one 2 KB buffer (`MAX_FILE_BYTES`); a subtree that serializes larger than that fails the write.
 
 ## Tests
 
@@ -97,3 +80,7 @@ No files exist → load is a no-op. Modules run with their default member-initia
 - Presets (`/.config/presets/`)
 - Migration between schema versions (e.g. renaming a control). Today, an unknown JSON key is silently ignored and a missing key keeps the default.
 - Runtime add/remove via UI (the underlying mechanism is in place — `replaceChildAt`, factory creation, lifecycle propagation — but no UI endpoint yet calls into it).
+
+## Source
+
+[FilesystemModule.cpp](../../../src/core/FilesystemModule.cpp) · [FilesystemModule.h](../../../src/core/FilesystemModule.h)

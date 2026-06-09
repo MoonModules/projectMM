@@ -10,23 +10,7 @@ Field order optimized for minimal padding: group 8-byte fields, then 4-byte, the
 
 ## Lifecycle
 
-- `setup()` — called once after construction
-- `loop()` — hot path for effects/drivers. Called every iteration. The Scheduler handles pacing and yielding to other tasks.
-- `loop20ms()` — called every ~20ms (for UI updates, control reads, network polling)
-- `loop1s()` — called every ~1 second (diagnostics, reconnects, housekeeping)
-- `teardown()` — called before destruction, must clean up all allocated resources
-- `onBuildState()` — single hook for dynamic allocation after setup. Sets `moduleAllocBytes_`. Called at setup and on reallocation triggers.
-- `onBuildControls()` — all addControl() calls here, not in setup(). Supports dynamic rebuild via `clearControls()`.
-
-The Scheduler handles pacing — `loop()` modules don't need to manage timing themselves. `loop20ms` for UI/network. `loop1s` for cold-path housekeeping.
-
-## Controls
-
-See [Control.md](Control.md) for full control specification.
-
-Controls bind to class variables by reference. Hot-path code reads the variable directly — zero overhead. Slider controls default to `uint8_t` (0-255) range where possible, aligning with DMX standard.
-
-`onBuildControls()` prepares the control set. Supports dynamic controls: when a control value changes (e.g. a mode selector), `onBuildControls()` can be re-called to show/hide mode-specific controls.
+`setup()` / `teardown()` bracket the module's life; `loop()` / `loop20ms()` / `loop1s()` are the three tick rates (the [Scheduler](Scheduler.md) owns pacing). Two build hooks separate from `setup()`: `onBuildControls()` holds all `addX()` calls and can be re-run to rebuild the set (e.g. when a Select changes mode), and `onBuildState()` is the single dynamic-allocation hook (sets the module's heap-byte report), called at setup and on any reallocation trigger. Controls bind by reference, so see [Control.md](Control.md) for the rest.
 
 ## Footprint reporting
 
@@ -114,3 +98,7 @@ Conditional controls (e.g. fields only visible under a Select mode) are always b
 - Field order optimized 8B→4B→2B→1B, saving 24 bytes.
 - `classSize` set via `register_type<T>()`.
 - `AutoWireSpec` — an arbitrary dependency-graph (DAG) wiring mechanism. projectMM deliberately uses parent/child only; the DAG was more than the domain needs.
+
+## Source
+
+[MoonModule.h](../../../src/core/MoonModule.h)

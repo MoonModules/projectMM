@@ -1,13 +1,18 @@
 # Architecture
 
-This document describes the system as it is. Coding conventions live in [coding-standards.md](coding-standards.md); how to build and run lives in [building.md](building.md); what is tested lives in [testing.md](testing.md).
+This document is the agreed-up-front **architecture contract** — what projectMM is designed to be. Most of it describes the system as it is today; a few load-bearing design decisions are settled but not yet implemented. Those are marked **🚧 — designed, not implemented yet (high priority for release 2)**. The 🚧 marker means the design is committed (this is how it *will* work, and code should be written toward it), not that it's optional or undecided. Anything without the marker is live today.
+
+Coding conventions live in [coding-standards.md](coding-standards.md); how to build and run lives in [building.md](building.md); what is tested lives in [testing.md](testing.md).
 
 ## Contents
 
-- [The problem](#the-problem)
-- [Core and light domain](#core-and-light-domain)
+- [Architecture](#architecture)
+  - [Contents](#contents)
+  - [The problem](#the-problem)
+  - [Core and light domain](#core-and-light-domain)
 - [Core](#core)
   - [MoonModules](#moonmodules)
+    - [Lifecycle propagation to children](#lifecycle-propagation-to-children)
   - [Controls](#controls)
   - [Persistence](#persistence)
   - [Parallelism](#parallelism)
@@ -18,19 +23,28 @@ This document describes the system as it is. Coding conventions live in [coding-
   - [Platform abstraction](#platform-abstraction)
   - [Firmware vs board](#firmware-vs-board)
   - [Peripherals](#peripherals)
+  - [Multi-device runtime](#multi-device-runtime)
 - [Light domain](#light-domain)
   - [The pipeline](#the-pipeline)
   - [3D from the start](#3d-from-the-start)
   - [Layouts and Layout](#layouts-and-layout)
   - [Layers and Layer](#layers-and-layer)
   - [Effects](#effects)
+    - [Dimensionality](#dimensionality)
+    - [Robustness rules](#robustness-rules)
   - [Modifiers](#modifiers)
   - [Mapping and blending](#mapping-and-blending)
   - [Drivers](#drivers)
   - [Memory strategy](#memory-strategy)
+    - [Buffer types](#buffer-types)
+    - [Adaptive allocation](#adaptive-allocation)
+    - [Degradation cascade](#degradation-cascade)
+    - [Invariants](#invariants)
+    - [Per-module reporting](#per-module-reporting)
+    - [Scaling to available memory](#scaling-to-available-memory)
   - [Multi-device sync](#multi-device-sync)
 - [Web UI](#web-ui)
-- [What we leave undesigned](#what-we-leave-undesigned)
+  - [What we leave undesigned](#what-we-leave-undesigned)
 
 ## The problem
 
@@ -58,7 +72,7 @@ The core's job is the runtime: modules, their lifecycle, their parameters, how t
 
 ## MoonModules
 
-The core building block is a **MoonModule**. Everything is a MoonModule — not just effects, modifiers, layouts, and drivers, but also system services (HTTP server, WebSocket server, file server, WiFi, mDNS, OTA updates) and [peripherals](#peripherals) (sensors and actuators bridging to hardware/network). The core itself is minimal: MoonModule base, buffer management, a scheduler.
+The core building block is a **[MoonModule](moonmodules/core/MoonModule.md)**. Everything is a MoonModule — not just effects, modifiers, layouts, and drivers, but also system services (HTTP server, WebSocket server, file server, WiFi, mDNS, OTA updates) and [peripherals](#peripherals) (sensors and actuators bridging to hardware/network). The core itself is minimal: MoonModule base, buffer management, a [Scheduler](moonmodules/core/Scheduler.md).
 
 This means:
 
@@ -86,23 +100,25 @@ This means a container module gets correct lifecycle handling for its children w
 ModuleFactory::registerType<NoiseEffect>("NoiseEffect");
 ```
 
-ModuleFactory is core infrastructure (`src/core/ModuleFactory.h`), not itself a MoonModule.
+ModuleFactory is core infrastructure ([`src/core/ModuleFactory.h`](../src/core/ModuleFactory.h)), not itself a MoonModule.
 
 **Dynamic over fixed-size.** Children, module lists, control sets — anything structural — grow on demand from the heap during `setup()`. Fixed-size arrays impose arbitrary limits, waste memory on instances that don't use the full capacity, and cost memory on instances that need none (e.g. leaf modules with zero children). The hot path only iterates these arrays — same pointer arithmetic as a fixed array, no performance difference.
 
-Each MoonModule is documented in `docs/moonmodules/` as it is built.
+**Self-reporting.** Every MoonModule reports its own footprint and cost: `classSize()` (the `sizeof` of the class instance, captured at registration), `dynamicBytes()` (heap allocated during `onBuildState`), and `loopTimeUs()` (average time its `loop` took, accumulated per tick). These surface in `/api/system`, console output, and scenario tests — the same numbers for an effect, a driver, or a system service, because they're a base-class feature, not a light-domain one.
+
+Each MoonModule is documented in [`docs/moonmodules/`](moonmodules/) as it is built.
 
 ## Controls
 
-Every MoonModule exposes **controls** — runtime-configurable parameters visible in the web UI. A grid layout exposes width, height, depth. An ArtNet driver exposes destination IP and universe. A fire effect exposes speed, cooling, sparking.
+Every MoonModule exposes **[controls](moonmodules/core/Control.md)** — runtime-configurable parameters visible in the web UI. A grid layout exposes width, height, depth. An ArtNet driver exposes destination IP and universe. A fire effect exposes speed, cooling, sparking.
 
-Controls bind to MoonModule member variables. The variable's default is the control's default. The hot path reads the variable directly — no function call. When a control value changes, the system notifies the owning MoonModule for cold-path reactions (e.g. a layout size change triggers a LUT rebuild).
+Controls bind to MoonModule member variables. The variable's default is the control's default. The hot path reads the variable directly — no function call. When a control value changes, the system notifies the owning MoonModule for cold-path reactions — recompute a derived table, re-size a buffer, re-bind a socket (the three-tier mechanism is [§ Event triggering between modules](#event-triggering-between-modules)).
 
 Controls are dynamic: when a value changes, the control set can be rebuilt. A select control that picks a mode can show/hide other controls based on the choice.
 
 Prefer `uint8_t` (0–255) for slider controls. Minimises per-control memory, aligns with DMX channel values, keeps the UI range manageable.
 
-Controls are the bridge between the UI and the engine. The web UI renders them automatically from what MoonModules declare. The exact control types (slider, toggle, colour picker, text input, dropdown) are defined in the [UI spec](moonmodules/core/ui.md). The principle: modules declare what they need, the UI renders it.
+Controls are the bridge between the [web UI](moonmodules/core/ui.md) and the running module tree: the UI renders a control from what the MoonModule declares, and a value the user changes there writes straight back into the module's member variable. The exact control types (slider, toggle, colour picker, text input, dropdown) are defined in the [UI spec](moonmodules/core/ui.md). The principle: modules declare what they need, the UI renders it.
 
 ## Persistence
 
@@ -112,15 +128,19 @@ Control values and each module's `enabled` flag are persisted to flash so settin
 - **Lifecycle** — `Scheduler::setup()` runs four phases: (1) `onBuildControls` binds every module's full control set, (2) the FilesystemModule load hook overlays persisted values onto the bound variables, (2b) `rebuildControls` re-evaluates conditional `hidden` flags against the loaded state, (3) each module's own `setup()` runs with persisted values already in member variables, (4) `onBuildState` sizes buffers. Modules themselves know nothing about persistence — they just bind their variables.
 - **Save trigger** — HttpServerModule marks the target module dirty on every successful control mutation. FilesystemModule debounces 2 s in `loop1s()`, walks the tree, writes any subtree containing a dirty descendant via atomic write-and-rename.
 - **Conditional controls** — every conditional control is always bound; the module sets a `hidden` flag (`controls_.setHidden(i, …)`) to tell the UI not to render it. The load path can therefore find persisted values regardless of the live conditional state.
-- **Code-wired children survive a stale file** — modules attached by `main.cpp`'s boot wiring (today: `ImprovProvisioningModule` as a child of `NetworkModule`) call `markWiredByCode()` after `addChild()`. The persistence apply step preserves them even when the saved file pre-dates the addition. Without this, every release that added or moved a code-wired child would trim it on the first boot of an existing device, and the user would lose the child until the next save rewrote the file. Children added through the HTTP API or recreated from JSON stay unmarked — those follow the file's tree shape exactly so UI deletes still take effect.
+- **Code-wired children survive a stale file** — some children aren't created by the user; `main.cpp`'s boot wiring attaches them (`ImprovProvisioningModule` under `NetworkModule`; `BoardModule`, `ArtNetSendDriver`, `PreviewDriver` under their parents). Each such child calls `markWiredByCode()` after `addChild()` — a one-bit flag meaning *"I belong here because the code put me here, not because a saved file or a user asked for me."* The problem it solves: persistence reconciles the live tree to match the saved JSON, so a child that exists in code but is absent from an older saved file (written before that child was added) would be trimmed on load. The flag tells the apply step to keep it. Children added through the HTTP API or recreated from JSON stay unmarked — those follow the file's tree shape exactly, so UI deletes still take effect.
 
-The Scheduler stays independent of FilesystemModule's type via a function-pointer hook (`setLoadAllHook`) — no circular include, persistence is opt-in. With no FilesystemModule registered, the load phase is a no-op and the system runs with member-initialised defaults.
+How persistence reaches the Scheduler without the Scheduler depending on it: the Scheduler exposes a **function-pointer hook** (`setLoadAllHook`) that the load phase calls if set. FilesystemModule registers its load routine through that hook at startup; the Scheduler never includes or names FilesystemModule (no circular dependency, and persistence is fully optional). With no FilesystemModule registered the hook is null, the load phase is a no-op, and the system runs with member-initialised defaults.
 
 ## Parallelism
 
 On multi-core systems (ESP32 has 2 cores, desktop / RPi have many), the system exploits parallelism by assigning MoonModules to specific cores. Each MoonModule can declare a core affinity. The scheduler respects this when pinning tasks. On single-core or desktop systems, affinity is ignored and everything runs on available threads.
 
-The model is **producers vs consumers**: producers generate data, consumers process and output it. They run on separate cores with double buffering at the boundary — no locks on the hot path. The light domain instantiates the model concretely: effects are producers, drivers are consumers. Which buffers play the double-buffer role is covered in [§ Memory strategy](#memory-strategy).
+The model is **producers vs consumers**: producers generate data, consumers process and output it. The light domain instantiates it concretely — effects are producers, drivers are consumers.
+
+Today the pipeline runs **single-threaded**: `Scheduler::tick()` runs the producers (effects), then the blend+map, then the consumers (drivers) in sequence on one core. With one thread there's no concurrent access and therefore no lock — the consumer always reads a fully-written frame because the producer already finished this tick.
+
+**🚧 Two-core double-buffer handover.** The committed design runs producer and consumer on **separate cores** so the consumer transmits frame N while the producer fills frame N+1 — the throughput win the single-thread loop leaves on the table. The hand-off is an **atomic double-buffer swap**, not a held lock: the producer fills buffer A; when done it atomically hands A to the consumer and starts filling B; the consumer copies/encodes A out (to its DMA buffer or socket) and, when finished, signals the producer that A is free to fill again. Neither side ever reads or writes the buffer the other currently owns, so the synchronisation is a single atomic flag/pointer swap rather than a lock around the whole frame. This matters because the consumer's copy-out (LED DMA encode, ArtNet packetise) is slow relative to a buffer fill — without the swap the producer would lap the consumer and the consumer would read a half-written frame (a visible glitch). Which buffers play the double-buffer role is covered in [§ Memory strategy](#memory-strategy).
 
 ## Data exchange between modules
 
@@ -133,7 +153,7 @@ When one module produces data another module reads on the hot path, the pattern 
 - The producer exposes the struct via a `const`-returning getter (or a `setX(const Foo*)` setter on the consumer).
 - The **consumer holds a `const Foo*`** received once at wiring time in `main.cpp`, and reads it on the hot path each frame.
 
-No registry, no subscription, no event bus. The consumer reads the latest value when it needs it; if the producer wrote nothing this tick, the consumer sees the previous value (acceptable for the kinds of data this exchanges — frame buffers, periodic captures). Producer and consumer can run on different cores: publisher-write / readers-read with a one-frame staleness tolerance that doesn't need a lock.
+No registry, no subscription, no event bus. The consumer reads the latest value when it needs it; if the producer wrote nothing this tick, the consumer sees the previous value (acceptable for the kinds of data this exchanges — small state structs, periodic captures). This pull pattern is lock-free **for a small POD struct overwritten in place**: a reader on another core might catch a half-updated struct, but the result is one slightly-inconsistent read of a few fields that self-corrects next tick — visually harmless for the gyro/sensor data this carries, and cheaper than a lock. That tolerance does **not** extend to a large frame buffer the consumer copies out wholesale (an LED DMA buffer, an ArtNet packet) — there a half-written read is a visible glitch, so that hand-off uses the 🚧 two-core double-buffer swap from [§ Parallelism](#parallelism), not this lock-free pull.
 
 **Push through a domain-neutral sink.** When the producer should hand bytes to a generic core service rather than expose a struct, the core defines a narrow interface and the producer pushes to it. The producer owns the data and its wire format; the core sink (the interface's implementer) knows only "take these bytes and do my generic job" — it has zero knowledge of what the bytes mean or which domain produced them. `BinaryBroadcaster` (`HttpServerModule` implements it: "broadcast these bytes to all WebSocket clients") is the example — the producer side lives in the light domain (see [§ The pipeline](#the-pipeline)).
 
@@ -143,9 +163,9 @@ Both shapes extend without ceremony to any future producer/consumer pair (a sens
 
 A control changes, or the module tree is mutated (a child added, deleted, replaced, moved) — and other modules may need to react. The framework provides a three-tier split so each change costs only as much as it has to, from cheapest to most expensive:
 
-1. **`onUpdate(controlName)`** — runs on *every* control change, but only on the module whose own control changed. A cheap, per-control reaction: recompute a small LUT, re-bind a socket. Default no-op. This is where a brightness change rebuilds the (256-entry) correction LUT — no reallocation, so dragging the slider stays fluent.
-2. **`controlChangeTriggersBuildState(controlName)`** — a gate, default `false`. Only `true` for controls that change physical dimensions or mapping shape (a Layout's grid width/height/depth; a Modifier's toggles change the LUT shape). When `true`, the framework runs the pipeline-wide rebuild; when `false` (effect speed, driver fps, brightness), it doesn't.
-3. **`onBuildState()`** — the module (re)builds its derived state (buffers, LUTs) for the current control values. Reached via `Scheduler::buildState()` — the coordinator-driven sweep that walks every module's `onBuildState`.
+1. **`onUpdate(controlName)`** — runs on *every* control change, but only on the module whose own control changed. A cheap, in-place, per-control reaction that touches nothing else: recompute a small derived table, re-bind a socket. Default no-op.
+2. **`controlChangeTriggersBuildState(controlName)`** — a gate, default `false`. A module returns `true` only for controls that change the size or shape of its derived state (and thus may ripple to other modules); for controls that just tweak a value in place it stays `false`. When `true`, the framework runs the tree-wide rebuild; when `false`, it doesn't.
+3. **`onBuildState()`** — the module (re)builds its derived state (buffers, tables) for the current control values. Reached via `Scheduler::buildState()` — the coordinator-driven sweep that walks every module's `onBuildState`.
 
 `Scheduler::buildState()` fires from two triggers: a tier-2 gate returning true after a control change, **and** any tree mutation (HTTP add/delete/replace/move handlers all call it unconditionally — a structural change is rare and unambiguously needs a rebuild). Both triggers funnel through the same sweep; each module's `onBuildState` is idempotent (e.g. an effect only reallocs when its grid count actually changed), so over-rebuilding is wasted work, not a correctness hazard.
 
@@ -168,7 +188,7 @@ The enforcement is the test framework, not discipline alone (see the [Hard Rule]
 
 ## Hot path discipline
 
-The render loop (`Scheduler::tick` and everything it calls — every effect, modifier, driver, layout) is the hot path. It runs roughly 50–10000 times per second depending on light count. Code there obeys three rules:
+The render loop (`Scheduler::tick` and everything it calls — every effect, modifier, driver, layout) is the hot path. It runs roughly 50–10000 times per second depending on light count and CPU performance. Code there obeys three rules:
 
 - **No heap allocations.** `new`, `malloc`, `push_back`, `std::string` constructors, `make_unique`, `make_shared` — none of them on the hot path. Heap fragmentation on a long-running ESP32 kills throughput in minutes. Allocate everything during `setup()` / `onBuildState()`; the loop only reads and writes pre-sized buffers.
 - **No blocking.** No `delay`, no `sleep`, no `mutex.lock()`. If a mutex is unavoidable, use `try_lock` and skip the work this tick. Blocking the render task means a visible glitch on the LEDs.
@@ -190,7 +210,7 @@ Only abstract what you actually need. Currently:
 
 Abstractions are added when a concrete implementation needs them, not pre-designed.
 
-**Platform boundary (hard rule).** All `#ifdef`, `#if defined`, platform-specific `#include`s, and hardware API calls live exclusively in `src/platform/`. Everything outside `src/platform/` compiles on every target without modification. Compile-time platform branching uses `if constexpr` on `platform_config.h` flags — never a preprocessor `#ifdef`. The boundary is enforced by `scripts/check/check_platform_boundary.py`, a commit gate (see [CLAUDE.md § Lifecycle Events](../CLAUDE.md#lifecycle-events)).
+**Platform boundary (hard rule).** All `#ifdef`, `#if defined`, platform-specific `#include`s, and hardware API calls live exclusively in `src/platform/`. Everything outside `src/platform/` compiles on every target without modification. Compile-time platform branching uses `if constexpr` on `platform_config.h` flags — never a preprocessor `#ifdef`. The boundary is enforced by [`scripts/check/check_platform_boundary.py`](../scripts/check/check_platform_boundary.py), a commit gate (see [CLAUDE.md § Lifecycle Events](../CLAUDE.md#lifecycle-events)).
 
 ## Firmware vs board
 
@@ -198,27 +218,28 @@ Abstractions are added when a concrete implementation needs them, not pre-design
 
 **Board** is the physical hardware — chip + PCB + on-board peripherals (PHY, USB-serial, PSRAM, antenna). Examples: `Olimex ESP32-Gateway Rev G`, `LOLIN D32`, `Generic ESP32 DevKit`. The device cannot identify its own board (no readable PCB ID on classic ESP32), so MoonDeck deduces it from the firmware where unambiguous (`esp32-eth*` ⇒ Olimex) and otherwise lets the user pick. The board name is stored on the device by [BoardModule](moonmodules/core/BoardModule.md) — a code-wired child of SystemModule that holds a single `board` Text control with the `readonly` UI flag (renders display-only on the device's own UI; HTTP `/api/control` writes still apply). MoonDeck mirrors the picked / deduced value to the device via `POST /api/control` after each discover and after every dropdown change. The catalog of valid board names lives at [docs/install/boards.json](install/boards.json), shared between MoonDeck and the web installer — MoonDeck reads it for its dropdown and HTTP `/api/control` push; the web installer reads it for its picker, pushes the picked board via Improv RPC `SET_BOARD` on first flash, and provides an HTTP fallback (Inject button on *Your devices*) when Improv isn't available on the firmware variant.
 
-A board can run multiple firmwares (Olimex runs all four); a firmware can run on multiple boards (`esp32` runs on any ESP32 dev board). The codebase reserves "board" exclusively for physical hardware and "firmware" exclusively for the compiled binary.
+A board can run multiple firmwares (the Olimex Gateway runs both `esp32-eth` and `esp32-eth-wifi`); a firmware can run on multiple boards (`esp32` runs on any classic ESP32 dev board). The `esp32s3-n16r8` firmware is S3-only and does not run on the Olimex Gateway or other classic-ESP32 boards. The codebase reserves "board" exclusively for physical hardware and "firmware" exclusively for the compiled binary.
 
 ## Peripherals
 
-A **peripheral** is a MoonModule (role `ModuleRole::Peripheral`) that bridges to the outside world — hardware or network — *independently of the light pipeline*. Examples: a gyro/IMU read over I²C, a microphone or line-in read over I²S, a relay or GPIO toggled out, a status push to Home Assistant. Peripherals are **domain-neutral and live in core** — they know nothing about lights; the platform transport they use (I²C, UART, GPIO) is itself a domain-neutral platform primitive.
+A **peripheral** is a MoonModule (role `ModuleRole::Peripheral`) that bridges to the outside world — hardware or network — *independently of the light pipeline*. Examples: a gyro/IMU over I²C, a microphone over I²S, a relay or GPIO toggled out, a status push to Home Assistant. Peripherals are **domain-neutral and live in core**; the platform transport they use (I²C, UART, GPIO) is itself a domain-neutral platform primitive.
 
-The defining property is the **data relationship, not the connector**: a peripheral does not consume or produce the light pipeline's output buffer. This is the clean line between a peripheral and a driver — *does the module consume the light output buffer?* If yes it is a **driver** (ArtNet, DMX, SPI-LED all consume the buffer and differ only in transport); if no it is a **peripheral**. A DMX sender uses a peripheral-style transport (UART/RS-485) but is a driver, because it sends the rendered buffer.
+> *"Peripheral" here means an external add-on the user wires up — not the ESP32's own on-chip peripherals (LCD_CAM, SPI, PARLIO, RMT). Those on-chip blocks are how **drivers** clock data out to LEDs, reached through the [platform layer](#platform-abstraction); the term is standard for both, but they're different things.*
 
-Peripherals are **user-add/deletable children of SystemModule**. The firmware is identical whether or not the device has the peripheral wired, so the user manages it at runtime — solder a gyro on, add the module; remove it later. This reuses the generic child add/replace/delete + persistence machinery; SystemModule simply declares `acceptsChildRoles("peripheral")`, and `SystemModule::userEditable()` defaults to allowing deletion (BoardModule, also a System child, opts out with `userEditable() == false` because the board identity is code-wired, not user-discretionary). Automatic detection — probing a bus and adding the matching peripheral module — is out of scope here; the manual path is the foundation.
+The defining line is the **data relationship, not the connector**: *does the module consume the light output buffer?* If yes it's a **driver** (ArtNet, DMX, SPI-LED all consume the buffer, differing only in transport — a DMX sender uses a peripheral-style UART/RS-485 transport but is a driver because it sends the rendered buffer). If no, it's a **peripheral**.
 
-**Reader vs writer is a per-module decision, not a role.** A peripheral may read (gyro), write (relay), or both (read a mic, drive a relay on a beat). Core affinity (which core a module's polling runs on, for load balancing) is likewise a per-module choice. Encoding direction in the role would force a false binary and split modules that do both, so one `Peripheral` role spans the category and direction lives in the module's behaviour.
+Peripherals are **user-add/deletable children of SystemModule** — the firmware is identical whether or not the hardware is wired, so the user adds the module when they solder a gyro on and removes it later, reusing the generic child add/replace/delete + persistence machinery (SystemModule declares `acceptsChildRoles("peripheral")`). Direction is per-module, not a role: a peripheral may read (gyro), write (relay), or both, so one `Peripheral` role spans the category. Each is a `.h`+`.cpp` core module under `src/core/` (core file convention), reaches hardware only through a domain-neutral platform primitive (`platform::i2c*` etc.), polls in `loop20ms`/`loop1s` (never the render hot path), and gets a spec in `docs/moonmodules/core/` (enforced by `check_specs.py`). Automatic bus-probe detection is out of scope; the manual path is the foundation.
 
-**File shape and location.** A peripheral is core (domain-neutral), so it follows the *core* file convention — `.h` + `.cpp` under `src/core/` — not the light-domain header-only convention. Its hardware access goes through a domain-neutral platform primitive (`platform::i2c*`, and the same pattern for any other transport a peripheral needs), never a direct device call (the [platform boundary](#platform-abstraction) applies). It polls in `loop20ms` / `loop1s` (the render hot path is for the light pipeline only) and formats its readings into controls. Each peripheral gets a spec in `docs/moonmodules/core/` like any other core module (enforced by `check_specs.py`).
+**An effect reads a peripheral's data** via the shared-struct pull pattern from [§ Data exchange](#data-exchange-between-modules) — no new mechanism: the peripheral owns a small POD struct (`ImuState { float pitch, roll, … }`) overwritten in place each poll, exposes it via `const ImuState* state() const`, and the effect holds that `const` pointer set once at wiring time in `main.cpp`. A peripheral that only *displays* its readings skips the getter — it's a producer with no consumer yet. The current peripherals are display-only; an audio- or motion-reactive effect would add the getter + wiring (tracked in the [backlog](backlog/backlog.md)).
 
-**Reading a peripheral's data from an effect** uses the shared-struct pull pattern from [§ Data exchange between modules](#data-exchange-between-modules) — the same shape effects/drivers already use, no new mechanism:
+## Multi-device runtime
 
-- The peripheral owns a small POD struct (e.g. `ImuState { float pitch, roll, gyroX, … }`) declared in a plain-data header, overwritten in place each poll — no per-frame allocation.
-- It exposes the struct via a `const`-returning getter: `const ImuState* state() const`.
-- The consuming effect holds a `const ImuState*`, set once at wiring time in `main.cpp` (`effect->setImu(gyro->state())`), and reads it on the hot path each frame. Producer and consumer can sit on different cores — publisher-writes / reader-reads with one-poll staleness, no lock.
+Two domain-neutral services let several controllers act as one installation. They're core because nothing about them is light-specific — any domain spanning multiple devices uses the same two.
 
-A peripheral that only *displays* its readings (controls, no effect consumer) simply skips the getter + wiring — it's the producer with no consumer yet. Today's peripherals are display-only; the struct-getter + effect-wiring is what an audio-reactive or motion-reactive effect adds on top (tracked in the backlog).
+- **Discovery** — devices find each other via mDNS. `NetworkModule` advertises each device today; this is live.
+- **🚧 Clock sync** — one leader broadcasts its elapsed time (millis); followers compute their offset, targeting sub-millisecond accuracy. A shared monotonic clock is the foundation any cross-device coordination builds on. The committed design; not yet wired.
+
+What the synced clock is *for* is a domain question — the light domain's use of it (synced animation across a wall) is in [§ Multi-device sync](#multi-device-sync).
 
 # Light domain
 
@@ -282,7 +303,9 @@ Multiple layouts can live in one Layouts container. Each layout describes one li
 
 ## Layers and Layer
 
-**Layers** (a MoonModule) is the top-level container for one or more layers. Each layer renders independently into its own buffer; the Drivers container composes those buffers downstream. With one layer wired (today's boot pipeline) Layers is a thin pass-through; multi-layer composition (alpha-blend / additive) is in [§ What we leave undesigned](#what-we-leave-undesigned).
+**Layers** (a MoonModule) is the top-level container for one or more layers. Each layer renders independently into its own buffer; the Drivers container composes those buffers downstream.
+
+**🚧 Multi-layer composition.** The container exists to compose more than one Layer's buffer into the shared output — alpha-blend and additive, in layer order. With a single layer wired (today's boot pipeline) Layers is a thin pass-through, but the design is the multi-layer case: each Layer renders into its own buffer, and the Drivers container's blend+map step composites them in order into the physical buffer (which is why that buffer is described as a *blend* buffer in [§ Memory strategy](#memory-strategy)). The single-layer path is the degenerate case of this, not a separate design.
 
 A **Layer** (a MoonModule, child of Layers) owns:
 
@@ -301,7 +324,7 @@ Each layer references the shared Layouts. The layer builds its own LUT by iterat
 
 Effects produce light colours. They write into the Layer's buffer, which represents a logical grid. The Layer determines the buffer's dimensions (width, height, depth) from the Layouts, its own start/end percentages within the physical layout, and its modifiers. Effects receive these logical dimensions and elapsed time (millis) as their rendering context. They compute light positions from the buffer index (e.g. `x = i % width`, `y = i / width`).
 
-Effects use elapsed time for animation, not frame count. Animation speed becomes frame-rate independent — an effect looks the same at 30 fps and 60 fps. For multi-device sync, the leader synchronises elapsed time across followers; same approach as syncing a frame counter, but frame-rate independent.
+Effects use elapsed time for animation, not frame count. Animation speed becomes frame-rate independent — an effect looks the same at 30 fps and 60 fps. This is also what makes the 🚧 cross-device clock sync work: a shared elapsed-time base means synced visuals across controllers (see [§ Multi-device sync](#multi-device-sync)).
 
 Effects know nothing about hardware, protocols, physical LED layout, or mapping. They only see the logical grid the layer provides.
 
@@ -366,7 +389,7 @@ Because mapping and blending happen in a single pass over each layer, there is n
 
 **Drivers** (a MoonModule) is the top-level container for one or more drivers. It is the consumer side of the pipeline. The Drivers container owns a shared output buffer and performs blend+map from every layer's buffer into it each frame. Individual drivers then read from this buffer to push to hardware / network.
 
-The shared output buffer is necessary when blend+map writes to arbitrary physical positions via the LUT — the output is not filled sequentially, so a driver cannot read chunk-by-chunk until the full buffer is populated. It is *not* needed for the single-layer, no-blend case (identity or serpentine-shuffle mapping): there a driver can fuse map + output correction + protocol encode into one pass straight into its own output (DMA buffer / packet), skipping the shared buffer. Full detail in [the LED-driver design doc](moonmodules/light/leddriver-analysis-top-down.md).
+The shared output buffer is necessary when blend+map writes to arbitrary physical positions via the LUT — the output is not filled sequentially, so a driver cannot read chunk-by-chunk until the full buffer is populated. It is *not* needed for the single-layer, no-blend case (identity or serpentine-shuffle mapping): there a driver can fuse map + output correction + protocol encode into one pass straight into its own output (DMA buffer / packet), skipping the shared buffer. Full detail in [the LED-driver design doc](backlog/leddriver-analysis-top-down.md).
 
 Each driver (a MoonModule) speaks one protocol:
 
@@ -388,10 +411,10 @@ All buffers are allocated as single contiguous blocks outside the hot path — a
 ### Buffer types
 
 - **Layer buffers** — one per active layer, holds the logical light data for one effect chain. Allocated in PSRAM when available. On memory-constrained devices, consumers may read from the layer buffer directly (no mapping, no blending, no physical buffer needed).
-- **Physical buffer** — when present, holds the blended+mapped output. It is a *blend* buffer, needed only for compositing (>1 layer, or any alpha/additive blend); it is not what provides producer/consumer parallelism. Parallelism comes from the consumer's own working copy — the encoded DMA buffer for a clockless LED driver, or the kernel socket buffer for ArtNet — which decouples the producer (filling the next Layer frame) from the consumer (transmitting the previous one).
+- **Physical buffer** — when present, holds the blended+mapped output. It is a *blend* buffer, needed only for compositing (>1 layer, or any alpha/additive blend); it is not what provides producer/consumer parallelism. Under the 🚧 [two-core handover](#parallelism), parallelism comes from the consumer's own working copy — the encoded DMA buffer for a clockless LED driver, or the kernel socket buffer for ArtNet — which decouples the producer (filling the next Layer frame) from the consumer (transmitting the previous one).
 - **Mapping LUT** — flat lookup table for logical→physical. Read-only during rendering. PSRAM is fine — sequential reads are cache-friendly.
 
-All buffers are raw `uint8_t*` arrays sized `channelsPerLight * nrOfLights`. Supports RGB (3 channels), RGBW (4 channels), and multi-channel DMX fixtures (up to 32 channels per light) without separate code paths. Channel layout is configured via offsets (see MoonLight's [LightsHeader](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/LightsHeader.h) pattern).
+All buffers are raw `uint8_t*` arrays sized `channelsPerLight * nrOfLights`. There is no pre-allocated per-channel array and no fixed channel layout — `channelsPerLight` is a runtime value (a `uint8_t`, so 1–255), so RGB (3), RGBW (4), and multi-channel DMX fixtures all use the same code path; the buffer simply gets wider. Channel layout is configured via offsets (see MoonLight's [LightsHeader](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/LightsHeader.h) pattern).
 
 Network input (ArtNet receive, WebSocket) is processed synchronously at a defined point in the frame loop. Zero extra buffers, no race conditions. The trade-off is up to one frame of latency (~16 ms at 60 fps), imperceptible for LEDs.
 
@@ -422,7 +445,7 @@ Non-negotiable:
 
 ### Per-module reporting
 
-Every MoonModule reports `classSize()` (sizeof the class instance) and `dynamicBytes()` (heap allocated during `onBuildState`). Visible in `/api/system`, console output, and scenario tests. Memory scenarios verify that 1:1 pipelines use zero intermediate buffers and that the cascade triggers at the right thresholds.
+Every MoonModule self-reports `classSize()` / `dynamicBytes()` / `loopTimeUs()` (a core base-class feature — see [§ MoonModules](#moonmodules)). For the light pipeline specifically, memory scenarios use those numbers to verify that 1:1 pipelines allocate zero intermediate buffers and that the degradation cascade triggers at the right thresholds.
 
 ### Scaling to available memory
 
@@ -437,17 +460,16 @@ The architecture does not assume PSRAM is present. Buffer counts and sizes are d
 
 ## Multi-device sync
 
-For installations spanning multiple controllers:
+How lighting uses the core [multi-device runtime](#multi-device-runtime) (discovery + clock sync) to drive an installation spanning multiple controllers:
 
-1. **Discovery** — devices find each other via mDNS.
-2. **Time sync** — one leader broadcasts its elapsed time (millis). Followers compute their offset. Target: sub-millisecond accuracy. Since effects use elapsed time for animation, synced time means synced visuals — regardless of each device's frame rate.
-3. **Light distribution** — when one device sends light data to another, use ArtNet / E1.31 / DDP. These are the standards, no need to invent a protocol.
+- **🚧 Synced visuals from the shared clock.** Effects animate off elapsed time ([§ Effects](#effects)), so feeding them the leader's synced clock instead of each device's local one makes a wall of controllers animate in lockstep — regardless of each one's frame rate. This is the light-domain payoff of the core clock sync.
+- **🚧 Light distribution** — one device sending rendered light data to another uses the existing ArtNet / E1.31 / DDP standards (the ArtNet *driver* already sends to fixtures today; device-to-device distribution as a sync topology is the part not yet wired). No bespoke protocol.
 
 # Web UI
 
 ![UI overview](assets/screenshots/ui_overview.png)
 
-The UI is three hand-maintained files: `index.html`, `app.js`, `style.css`. No frameworks, no build tools, no npm. Served directly by the embedded HTTP server.
+The UI is a handful of hand-maintained files — `index.html`, `app.js`, `style.css`, plus two focused ES modules `app.js` imports (`preview3d.js` for the WebGL 3D preview, `install-picker.js` shared with the web installer). No frameworks, no build tools, no npm. Served directly by the embedded HTTP server.
 
 The UI is **MoonModule-driven**. It contains no hard-coded knowledge of specific effects, layouts, or drivers. It queries the system for the current MoonModule tree (layers, effects, modifiers, layouts, drivers — each with their controls) and renders generically:
 
@@ -457,12 +479,11 @@ The UI is **MoonModule-driven**. It contains no hard-coded knowledge of specific
 
 Adding a new MoonModule with controls needs **zero changes** to the UI files. This extends to the tree-mutation affordances: which modules accept children (and of what role) comes from each type's `acceptsChildRoles()`, and whether a module can be deleted/replaced comes from its `userEditable()` — both declared on the C++ side and reported in `/api/types` + `/api/state`. The UI hardcodes no list of "which types are containers" or "which roles are editable"; a new container type or a fixed child is a one-line C++ override.
 
-The light domain plugs into the UI at three points: a fixed top-level tree (Layouts / Layers / Drivers pinned in `main.cpp`, root reorder disabled while child reorder works via drag-and-drop), a binary WebSocket preview channel ([PreviewDriver](moonmodules/light/drivers/PreviewDriver.md) — type byte `0x02`, 13-byte header `dw/dh/dd/ow/oh/od`, RGB triples), and per-role emoji for the chip filter (the `ROLE_EMOJI` map in `app.js` is the single source of truth — `effect`, `driver`, …, `peripheral`). Full UI spec: [docs/moonmodules/core/ui.md](moonmodules/core/ui.md).
+The light domain plugs into the UI at three points: a fixed top-level tree (Layouts / Layers / Drivers pinned in `main.cpp`, root reorder disabled while child reorder works via drag-and-drop), a binary WebSocket preview channel ([PreviewDriver](moonmodules/light/drivers/PreviewDriver.md) — a `0x03` coordinate table sent once per LUT rebuild plus per-frame `0x02` RGB point lists, so sparse layouts preview at their real positions), and per-role emoji for the chip filter (the `ROLE_EMOJI` map in `app.js` is the single source of truth — `effect`, `driver`, …, `peripheral`). Full UI spec: [docs/moonmodules/core/ui.md](moonmodules/core/ui.md).
 
 ## What we leave undesigned
 
-Filled in by module docs before each module is built:
+Genuinely open questions — *not* the same as a 🚧 marker. A 🚧 item is a committed design that simply isn't coded yet (multi-layer composition, two-core handover, time sync); the items here are ones where the *design itself* isn't settled, deferred until a concrete need forces the decision:
 
-- **Multi-layer composition** — composing more than one Layer's buffer into the shared output (alpha blend, additive). Today's pipeline ships one Layer and passes through.
-- **Sparse / non-grid 3D preview** — preview today derives `(x, y, z)` from a dense grid index; sparse layouts (rings, spheres, point clouds) render as a clump in the bounding box. The architecture's intended fix is a one-time coordinate message — see [PreviewDriver](moonmodules/light/drivers/PreviewDriver.md).
-- **WiFi runtime disable** — today the eth-only build profile compiles WiFi out; runtime gating based on detected hardware presence is a future addition.
+- **WiFi runtime disable** — today the eth-only build profile compiles WiFi out. Whether runtime gating should key off detected hardware presence, an explicit control, or a board-catalog field isn't decided; the eth-only build covers the need until one is.
+- **Mixing light types in one Layouts** — each layout child describes one light type (all LED strips, or all par lights). Whether a single Layouts container should hold mixed types (LED strips + par lights together), and how the channel layout would reconcile across them, isn't designed; one Layouts per light type is the current model.

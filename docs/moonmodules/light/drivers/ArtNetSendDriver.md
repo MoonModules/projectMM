@@ -49,3 +49,7 @@ Controls: universe_start (slider 0-255), ip (text). Platform UDP abstraction.
 ### projectMM v2 — ArtnetOutModule ([source](https://github.com/ewowi/projectMM-v2/blob/main/src/modules/lights/ArtnetOutModule.h))
 
 Uses PalUdp abstraction. ADR 0005 teardown safety via DataBuffer invalidation.
+
+## Source
+
+[ArtNetSendDriver.h](../../../../src/light/drivers/ArtNetSendDriver.h)

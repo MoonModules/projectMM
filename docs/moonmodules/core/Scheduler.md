@@ -37,3 +37,7 @@ Child modules run in their declared order within the parent. Top-level modules a
 
 - Multi-core: runs N `core_loop()` threads (default 2 on ESP32). Each module declares `coreAffinity()`. Uses `pal::task_create_pinned` with 8KB stacks.
 - Module ticking: setup, loop, loop20ms, loop1s, loop10s, teardown — dispatched per core.
+
+## Source
+
+[Scheduler.cpp](../../../src/core/Scheduler.cpp) · [Scheduler.h](../../../src/core/Scheduler.h)

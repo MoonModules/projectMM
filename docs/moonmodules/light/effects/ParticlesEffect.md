@@ -8,7 +8,6 @@ A swarm of particles drifting on the XY plane with persistent trails. Each parti
 
 ## Controls
 
-- `enabled` (bool, default true) — inherited from `EffectBase`
 - `count` (uint8_t, default 32, range 1-64) — number of active particles
 - `speed` (uint8_t, default 80, range 1-255) — velocity multiplier
 - `fade` (uint8_t, default 240, range 200-255) — trail persistence (255 = no fade, 200 = quick fade)
@@ -42,3 +41,7 @@ Particle list (`64 * 8` bytes) is part of `sizeof(ParticlesEffect)`, not `dynami
 ## Prior art
 
 Classic "snow"/"stars"/"fireflies" effect from many LED firmwares. The fade-and-draw approach (a.k.a. *afterimage*) matches FastLED's `fadeToBlackBy` idiom.
+
+## Source
+
+[ParticlesEffect.h](../../../../src/light/effects/ParticlesEffect.h)
