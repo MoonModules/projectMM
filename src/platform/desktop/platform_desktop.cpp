@@ -606,4 +606,23 @@ void TcpServer::close() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// RMT WS2812 — no-op stubs. Desktop has no RMT peripheral; the driver guards
+// every call with `if constexpr (platform::isEsp32)` (false here), so these
+// exist only to satisfy the linker and are never reached at runtime.
+// ---------------------------------------------------------------------------
+bool rmtWs2812Init(RmtWs2812Handle& /*h*/, uint8_t /*gpio*/, uint32_t /*resolutionHz*/,
+                   bool /*invert*/) {
+    return false;
+}
+uint32_t rmtWs2812Resolution(const RmtWs2812Handle& /*h*/) { return 0; }
+void rmtWs2812Show(RmtWs2812Handle& /*h*/, const uint32_t* /*symbols*/,
+                   size_t /*symbolCount*/, uint32_t /*resetUs*/) {}
+void rmtWs2812Deinit(RmtWs2812Handle& /*h*/) {}
+size_t rmtWs2812RxCapture(uint8_t /*gpio*/, uint32_t /*resolutionHz*/,
+                          uint32_t* /*outSymbols*/, size_t /*maxSymbols*/,
+                          uint32_t /*timeoutMs*/) {
+    return 0;
+}
+
 } // namespace mm::platform

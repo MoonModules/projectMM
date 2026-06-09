@@ -261,4 +261,38 @@ private:
 // Does not return.
 [[noreturn]] void reboot();
 
+// ---------------------------------------------------------------------------
+// RMT WS2812 LED output (classic ESP32). The driver (src/light/drivers/
+// RmtLedDriver.h) does the symbol encode in domain code; the platform owns only
+// the peripheral. All no-ops on non-ESP32 targets, so the driver compiles
+// everywhere behind `if constexpr (platform::isEsp32)` and is simply inert off
+// the chip that has RMT.
+// ---------------------------------------------------------------------------
+
+// Opaque handle to one configured RMT TX channel. `impl` is set by the platform
+// (a heap struct holding the channel + encoder); the driver never inspects it.
+struct RmtWs2812Handle { void* impl = nullptr; };
+
+// Allocate + configure one RMT TX channel on `gpio`. `resolutionHz` is the tick
+// clock the caller expresses symbol durations in; `invert` flips output polarity
+// for inverting level-shifters. Returns false on failure (and on non-ESP32).
+bool rmtWs2812Init(RmtWs2812Handle& h, uint8_t gpio, uint32_t resolutionHz, bool invert);
+
+// The tick resolution the platform actually granted (may differ from requested).
+// The driver converts its ns timings to ticks with this. 0 if not initialised.
+uint32_t rmtWs2812Resolution(const RmtWs2812Handle& h);
+
+// Transmit `symbolCount` pre-encoded WS2812 RMT symbols, block until done, then
+// hold the line idle `resetUs` microseconds for the inter-frame latch. Synchronous.
+void rmtWs2812Show(RmtWs2812Handle& h, const uint32_t* symbols, size_t symbolCount,
+                   uint32_t resetUs);
+
+void rmtWs2812Deinit(RmtWs2812Handle& h);
+
+// RX loopback capture, on-device test only (no-op stub off ESP32). Capture up to
+// `maxSymbols` pulse-duration symbols on `gpio` (jumpered from the TX pin) within
+// `timeoutMs`. Returns the number captured. Used only by the loopback HAL test.
+size_t rmtWs2812RxCapture(uint8_t gpio, uint32_t resolutionHz,
+                          uint32_t* outSymbols, size_t maxSymbols, uint32_t timeoutMs);
+
 } // namespace mm::platform

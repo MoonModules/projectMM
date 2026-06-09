@@ -6,6 +6,11 @@ namespace mm::platform {
 
 constexpr bool hasPsram = true;
 
+// Not an ESP32 chip family — chip-specific drivers (RMT LED, LCD_CAM) `if
+// constexpr` these false and compile to inert stubs on desktop.
+constexpr bool isEsp32 = false;
+constexpr bool isEsp32S3 = false;
+
 // Desktop is not a target of the Ethernet-only firmware profile; it ships
 // WiFi stubs and exercises the hasWiFi==true code path for compile coverage.
 constexpr bool hasWiFi = true;

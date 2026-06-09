@@ -50,7 +50,11 @@ class Drivers : public MoonModule {
 public:
     const char* acceptsChildRoles() const override { return "driver"; }
 
-    uint8_t brightness = 255;
+    // Default low (≈8%). A fresh device with LEDs wired but no power budget set
+    // (e.g. a strip on USB 5V) draws far less at 20 than at full white, so the
+    // first boot can't brown out the board before the user sets a safe level.
+    // The user raises it via the brightness control once their supply is known.
+    uint8_t brightness = 20;
     uint8_t lightPreset = 0;  // index into kLightPresetOptions; 0 = RGB
 
     // Two ways to wire the source Layer:

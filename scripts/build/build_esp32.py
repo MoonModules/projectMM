@@ -214,12 +214,17 @@ def idf_cmd(idf_path: Path) -> list[str]:
     return [python_exe, str(idf_path / "tools" / "idf.py")]
 
 
-def firmware_cmake_args(firmware: str, release: str = "") -> list[str]:
+def firmware_cmake_args(firmware: str, release: str = "",
+                        loopback_test: bool = False) -> list[str]:
     """Extra -D cache args for the requested firmware.
 
     `release` is the release-channel tag (e.g. "latest", "v1.0.0") to burn
     into the binary as MM_RELEASE. Empty for local builds — SystemModule
     then shows the bare semver with no channel suffix.
+
+    `loopback_test` builds a test-only firmware that runs the RMT WS2812
+    loopback (test/device/device_RmtLoopback.cpp) instead of the app. Never
+    shipped — for hardware verification with a GPIO 4 -> GPIO 5 jumper.
     """
     spec = FIRMWARES[firmware]
     fragments = ";".join(spec["fragments"])
@@ -245,6 +250,8 @@ def firmware_cmake_args(firmware: str, release: str = "") -> list[str]:
     has_eth_fragment = any(f.endswith(".eth") for f in spec["fragments"])
     if not has_eth_fragment:
         args.append("-DMM_NO_ETH=1")
+    if loopback_test:
+        args.append("-DMM_LED_LOOPBACK_TEST=1")
     return args
 
 
@@ -295,6 +302,10 @@ def main():
                         help="Release-channel tag to burn into the binary as "
                              "MM_RELEASE (e.g. 'latest', 'v1.0.0'). Set by the "
                              "release workflow; omit for local builds.")
+    parser.add_argument("--loopback-test", action="store_true",
+                        help="Build a test-only firmware that runs the RMT WS2812 "
+                             "loopback (jumper GPIO 4 -> GPIO 5) and prints PASS/FAIL "
+                             "instead of the app. Hardware verification only.")
     args = parser.parse_args()
 
     firmware = resolve_firmware(args)
@@ -339,7 +350,7 @@ def main():
     # builds the per-build-dir sdkconfig already has the chip pinned, so
     # set-target is skipped — switching to another firmware uses a different
     # build_dir entirely, so its sdkconfig is untouched.
-    extra = firmware_cmake_args(firmware, args.release)
+    extra = firmware_cmake_args(firmware, args.release, args.loopback_test)
     if not build_dir.exists():
         print(f"Setting target to {chip} (firmware: {firmware}, build dir: "
               f"{build_dir.relative_to(ROOT)})...")

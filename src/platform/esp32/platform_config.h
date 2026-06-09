@@ -12,6 +12,21 @@ constexpr bool hasPsram = true;
 constexpr bool hasPsram = false;
 #endif
 
+// Which ESP32 silicon family this build targets. Drivers that pick a peripheral
+// per chip (the RMT LED driver runs on classic ESP32; LCD_CAM on the S3 later)
+// `if constexpr` on these instead of #ifdef'ing in domain code. Desktop sets both
+// false. Keyed off the IDF target macro the toolchain defines.
+#ifdef CONFIG_IDF_TARGET_ESP32S3
+constexpr bool isEsp32 = false;
+constexpr bool isEsp32S3 = true;
+#elif defined(CONFIG_IDF_TARGET_ESP32)
+constexpr bool isEsp32 = true;
+constexpr bool isEsp32S3 = false;
+#else
+constexpr bool isEsp32 = false;
+constexpr bool isEsp32S3 = false;
+#endif
+
 // WiFi is compiled out in the Ethernet-only build profile. ESP-IDF v6.x has no
 // CONFIG_ESP_WIFI_ENABLED switch, so the eth-only build instead drops the WiFi
 // components via EXCLUDE_COMPONENTS and defines MM_NO_WIFI (see esp32/main/CMakeLists.txt).

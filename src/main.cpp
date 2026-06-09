@@ -20,6 +20,7 @@
 #include "light/modifiers/CheckerboardModifier.h"
 #include "light/drivers/ArtNetSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
+#include "light/drivers/RmtLedDriver.h"
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
 #include "core/BoardModule.h"
@@ -64,6 +65,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers/CheckerboardModifier.md");
     mm::ModuleFactory::registerType<mm::ArtNetSendDriver>("ArtNetSendDriver", "light/drivers/ArtNetSendDriver.md");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers/PreviewDriver.md");
+    mm::ModuleFactory::registerType<mm::RmtLedDriver>("RmtLedDriver", "light/drivers/RmtLedDriver.md");
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/HttpServerModule.md");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/SystemModule.md");
     mm::ModuleFactory::registerType<mm::BoardModule>("BoardModule", "core/BoardModule.md");
@@ -210,6 +212,15 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     auto* artnet = mm::ModuleFactory::create("ArtNetSendDriver");
     drivers->addChild(artnet);  // name = "ArtNetSend" (factory default) — disambiguates from a future ArtNetReceive
     artnet->markWiredByCode();
+
+    // RMT WS2812 LED output — classic ESP32 only this increment (the RMT seam is
+    // a no-op on S3/desktop; LCD_CAM is the S3 path, later). Wired by code like
+    // ArtNet so a persistence load can't drop it.
+    if constexpr (mm::platform::isEsp32) {
+        auto* led = mm::ModuleFactory::create("RmtLedDriver");
+        drivers->addChild(led);
+        led->markWiredByCode();
+    }
 
     auto* preview = static_cast<mm::PreviewDriver*>(mm::ModuleFactory::create("PreviewDriver"));
     // PreviewDriver reads the active Layer (resolved by the Drivers container's
