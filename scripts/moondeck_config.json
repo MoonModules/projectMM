@@ -1,5 +1,5 @@
 {
-  "firmwares": ["esp32", "esp32-eth", "esp32-eth-wifi", "esp32s3-n16r8"],
+  "firmwares": ["esp32", "esp32-eth", "esp32-eth-wifi", "esp32s3-n16r8", "esp32s3-n8r8"],
   "scripts": [
     {
       "id": "build_desktop",

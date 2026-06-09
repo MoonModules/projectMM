@@ -1,6 +1,7 @@
 [
   {
     "name": "Olimex ESP32-Gateway Rev G",
+    "chip": "ESP32",
     "firmwares": ["esp32-eth", "esp32-eth-wifi"],
     "default_firmware": "esp32-eth-wifi",
     "controls": {
@@ -9,6 +10,7 @@
   },
   {
     "name": "LOLIN D32",
+    "chip": "ESP32",
     "firmwares": ["esp32"],
     "default_firmware": "esp32",
     "controls": {
@@ -17,6 +19,7 @@
   },
   {
     "name": "Generic ESP32 DevKit",
+    "chip": "ESP32",
     "firmwares": ["esp32"],
     "default_firmware": "esp32",
     "controls": {
@@ -24,7 +27,107 @@
     }
   },
   {
+    "name": "QuinLED Dig-2-Go",
+    "chip": "ESP32",
+    "firmwares": ["esp32"],
+    "default_firmware": "esp32",
+    "controls": {
+      "Board": { "board": "QuinLED Dig-2-Go" }
+    }
+  },
+  {
+    "name": "QuinLED Dig-Next-2",
+    "chip": "ESP32",
+    "firmwares": ["esp32"],
+    "default_firmware": "esp32",
+    "controls": {
+      "Board": { "board": "QuinLED Dig-Next-2" }
+    }
+  },
+  {
+    "name": "QuinLED Dig-Uno V3",
+    "chip": "ESP32",
+    "firmwares": ["esp32"],
+    "default_firmware": "esp32",
+    "controls": {
+      "Board": { "board": "QuinLED Dig-Uno V3" }
+    }
+  },
+  {
+    "name": "QuinLED Dig-Quad V3",
+    "chip": "ESP32",
+    "firmwares": ["esp32"],
+    "default_firmware": "esp32",
+    "controls": {
+      "Board": { "board": "QuinLED Dig-Quad V3" }
+    }
+  },
+  {
+    "name": "QuinLED Dig-Octa 32-8L",
+    "chip": "ESP32",
+    "firmwares": ["esp32"],
+    "default_firmware": "esp32",
+    "controls": {
+      "Board": { "board": "QuinLED Dig-Octa 32-8L" }
+    }
+  },
+  {
+    "name": "Serg UniShield V5",
+    "chip": "ESP32",
+    "firmwares": ["esp32"],
+    "default_firmware": "esp32",
+    "controls": {
+      "Board": { "board": "Serg UniShield V5" }
+    }
+  },
+  {
+    "name": "Serg MiniShield",
+    "chip": "ESP32",
+    "firmwares": ["esp32"],
+    "default_firmware": "esp32",
+    "controls": {
+      "Board": { "board": "Serg MiniShield" }
+    }
+  },
+  {
+    "name": "MHC V4.3",
+    "chip": "ESP32",
+    "firmwares": ["esp32"],
+    "default_firmware": "esp32",
+    "controls": {
+      "Board": { "board": "MHC V4.3" }
+    }
+  },
+  {
+    "name": "MHC V5.7 PRO",
+    "chip": "ESP32",
+    "firmwares": ["esp32"],
+    "default_firmware": "esp32",
+    "controls": {
+      "Board": { "board": "MHC V5.7 PRO" }
+    }
+  },
+  {
+    "name": "Yves V4.8",
+    "chip": "ESP32",
+    "firmwares": ["esp32"],
+    "default_firmware": "esp32",
+    "controls": {
+      "Board": { "board": "Yves V4.8" }
+    }
+  },
+  {
+    "name": "Cube 2020-10",
+    "chip": "ESP32",
+    "firmwares": ["esp32"],
+    "default_firmware": "esp32",
+    "controls": {
+      "Board": { "board": "Cube 2020-10" }
+    }
+  },
+  {
     "name": "ESP32-S3 N16R8 DevKit",
+    "chip": "ESP32-S3",
     "firmwares": ["esp32s3-n16r8"],
     "default_firmware": "esp32s3-n16r8",
     "controls": {
@@ -33,11 +136,30 @@
   },
   {
     "name": "LOLIN S3 N16R8",
+    "chip": "ESP32-S3",
     "firmwares": ["esp32s3-n16r8"],
     "default_firmware": "esp32s3-n16r8",
     "controls": {
       "Board": { "board": "LOLIN S3 N16R8" },
       "Network": { "txPowerSetting": 8 }
+    }
+  },
+  {
+    "name": "LightCrafter 16",
+    "chip": "ESP32-S3",
+    "firmwares": ["esp32s3-n8r8"],
+    "default_firmware": "esp32s3-n8r8",
+    "controls": {
+      "Board": { "board": "LightCrafter 16" }
+    }
+  },
+  {
+    "name": "SE 16 V1",
+    "chip": "ESP32-S3",
+    "firmwares": ["esp32s3-n8r8"],
+    "default_firmware": "esp32s3-n8r8",
+    "controls": {
+      "Board": { "board": "SE 16 V1" }
     }
   }
 ]

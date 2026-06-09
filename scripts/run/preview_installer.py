@@ -246,6 +246,12 @@ def main() -> int:
     class CorsHandler(http.server.SimpleHTTPRequestHandler):
         def end_headers(self):
             self.send_header("Access-Control-Allow-Origin", "*")
+            # no-store so edits to boards.json / index.html / install-picker.js
+            # show on a normal reload. Python's http.server sends only
+            # Last-Modified (no Cache-Control), so browsers heuristically cache
+            # and a stale boards.json survives a restage until a hard reload.
+            # Dev-preview only; production Pages sets its own cache headers.
+            self.send_header("Cache-Control", "no-store")
             super().end_headers()
 
     handler = CorsHandler

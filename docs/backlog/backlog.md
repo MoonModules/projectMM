@@ -157,6 +157,23 @@ Board preset catalog + upload (later, when the runtime config has real consumers
 - Pin reassignment requires reboot (ESP-IDF can't hot-reconfigure EMAC pins after `esp_eth_driver_install`); document the constraint.
 - A first attempt at this catalog landed and was rolled back during the firmware-vs-board separation work — the catalog only earns its keep once the device reads it, otherwise it's a docs-shaped file in the wrong place.
 
+**Prior art — MoonLight's per-board pin database** ([ModuleIO.h](https://github.com/MoonModules/MoonLight/blob/main/src/MoonBase/Modules/ModuleIO.h)). MoonLight (our own project) already models exactly this for ~25 boards across ESP32-D0 / S3 / P4: a `pins[]` array of `{GPIO, usage, index}` plus board-level `maxPower`, `ethernetType`, `ethPhyAddr`, `ethClkMode`. Don't copy the file or paste its tables here — read it when building the catalog and write our own. Its `usage` enum enumerates the hardware functionalities a projectMM board preset *could* drive once the device-side consumers exist (each needs its own module/control before the corresponding `boards.json` / catalog field earns its keep — none exist today beyond `Board.board` + `Network.txPowerSetting`):
+
+- **LED output pins** — per-strip data GPIOs (1–16 outputs/board); the first real consumer (a Driver pin control) unblocks multi-output boards (QuinLED Dig-Quad/Octa, SE16, LightCrafter).
+- **Ethernet PHY config** — LAN8720/RMII (MDC/MDIO/CLK/power-pin/PHY-addr/clock-mode) vs W5500/SPI (MISO/MOSI/SCK/CS/IRQ); the consumer is the runtime `Network.eth_*` controls listed above, replacing the hardcoded Olimex pins.
+- **Power budget** — `maxPower` (Watts) per board, for a future current-limit / brightness-cap control.
+- **Audio / I2S** — SD/WS/SCK/MCLK pins, the input side of audio-reactive effects ([Pi-5 audio-reactive note](#raspberry-pi-5-audio--motion-reactive-host) is the desktop counterpart).
+- **Buttons & inputs** — push/toggle/lights-on, PIR, digital-input; needs an input-event concept the firmware doesn't have yet.
+- **Relays & power control** — relay / lights-on / high-low pins.
+- **Infrared** — IR receive pin (remote control).
+- **RS485 / DMX** — TX/RX/DE pins (DMX output beyond the current ArtNet path).
+- **Sensing** — voltage / current / battery / temperature ADC pins.
+- **Onboard LED / key, exposed / reserved pins** — board-housekeeping and conflict-avoidance metadata.
+
+Sequencing rule (unchanged): each functionality lands a device-side control first, then its preset field; the catalog grows one earned consumer at a time, never as a speculative pin dump.
+
+**Module variant + PSRAM within the classic-ESP32 family.** `getChipDescription()` and MoonLight's `ModuleIO.h` both report only the *core* family ("ESP32"), not the *module* (WROOM / WROVER / PICO) — so neither distinguishes whether a classic-ESP32 board has PSRAM. This matters for projectMM (whose large-LED story leans on PSRAM) in a way it doesn't for MoonLight: e.g. the **QuinLED Dig-Next-2 is built on an ESP32-PICO with 2 MB PSRAM**, but projectMM's `esp32` build has no `CONFIG_SPIRAM` (see the `#ifdef CONFIG_SPIRAM` gate in `platform_esp32.cpp::psramAlloc`), so it flashes and runs as a no-PSRAM device and hits the non-PSRAM fragmentation ceiling at large grids that the 2 MB would otherwise relieve. A PSRAM-enabled classic-ESP32 firmware variant (e.g. `esp32-psram`) would unlock it; `boards.json` could then carry a `psram` hint per board to steer the picker — but only once that variant exists (no consumer today). `boards.json` currently maps every classic board to the WiFi-only `esp32` variant, which is correct-but-unoptimised for PSRAM-bearing PICO boards.
+
 ### Multi-layer composition (backlog)
 
 `Layers` holds N layers; `Drivers` reads from a single active layer today. Composition is the missing piece — additional layers render their buffers but only the first enabled layer reaches output.

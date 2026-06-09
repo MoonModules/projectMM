@@ -53,6 +53,7 @@ CHIP_FAMILIES = {
     "esp32-eth":       "ESP32",
     "esp32-eth-wifi":  "ESP32",
     "esp32s3-n16r8":   "ESP32-S3",
+    "esp32s3-n8r8":    "ESP32-S3",
 }
 
 

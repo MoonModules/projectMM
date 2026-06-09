@@ -72,6 +72,14 @@ FIRMWARES: dict[str, dict] = {
         "eth_only": False,
         "description": "ESP32-S3 DevKitC-1 (N16R8: 16 MB flash, 8 MB octal PSRAM) — WiFi only",
     },
+    "esp32s3-n8r8": {
+        "chip": "esp32s3",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32s3-n8r8"],
+        "eth_only": False,
+        "description": "ESP32-S3 (N8R8: 8 MB flash, 8 MB octal PSRAM) — WiFi only. "
+                       "Half the flash of N16R8; the N16R8 binary overruns an 8 MB "
+                       "board, so N8R8 boards (LightCrafter etc.) need this variant.",
+    },
 }
 
 # Deprecated --profile values → firmware, kept one release for callers that

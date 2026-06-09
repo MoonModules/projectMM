@@ -277,6 +277,23 @@ async function connectAndDescribeChip(esploader) {
 // Public API
 // ---------------------------------------------------------------------------
 
+// Set by detect(); consumed by start(). navigator.serial allows ONE open handle
+// per port, and connectAndDescribeChip leaves the port open at 460800 with the
+// stub loaded — so detect() keeps that connection and start() reuses it instead
+// of re-opening (which would double-open and fail). Cleared once start() takes
+// it, on any detect() failure, or via clearDetected() when the user re-picks a
+// port. { port, transport, esploader, chipName } | null.
+let _detected = null;
+
+// Tear down whatever detect() left open and release the port back to the OS.
+async function releaseDetected() {
+    if (!_detected) return;
+    const { transport, port } = _detected;
+    _detected = null;
+    try { await transport.disconnect(); } catch (_) { /* already gone */ }
+    try { await port.close(); } catch (_) { /* already closed */ }
+}
+
 export const installer = {
     /**
      * Drive the full install flow: request port, flash via esptool-js,
@@ -435,6 +452,18 @@ export const installer = {
             // means the picker pops without an authorization dialog;
             // the user picks a different port (wrong-port case) or the
             // same port now replugged (stale case).
+            //
+            // Reuse a detect() connection when present: the port is already
+            // open at 460800 with the stub loaded and the chip described, so we
+            // skip the probe-open + Transport + connect entirely and jump
+            // straight to fetch/flash. Consumed here — start() now owns teardown
+            // (the finally block disconnects transport + closes port as usual).
+            if (_detected) {
+                ({ port, transport, esploader } = _detected);
+                const chipName = _detected.chipName;
+                _detected = null;
+                trackProgress("connect-flash", { chipName });
+            } else {
             let probeFailed = false;
             if (prePickedPort) {
                 try {
@@ -492,6 +521,7 @@ export const installer = {
             });
             const chipName = await connectAndDescribeChip(esploader);
             trackProgress("connect-flash", { chipName });
+            } // end of detect()-reuse else branch
 
             // Fetch the manifest + all part binaries before erasing flash.
             // Failing here (CDN issue, bad manifest) leaves the device
@@ -848,6 +878,65 @@ export const installer = {
                 if (port) await port.close();
             } catch (_) { /* ignore */ }
         }
+    },
+
+    /**
+     * Detect the connected chip family WITHOUT flashing. Opens the serial port,
+     * reads the chip via the same connectAndDescribeChip path start() uses, and
+     * KEEPS the connection open — stored in _detected so a following start()
+     * reuses it (no double-open of the single Web Serial handle, no second OS
+     * picker, no repeated bootloader-entry dance). Returns the chip-family
+     * string ("ESP32" / "ESP32-S3" / ...). Web installer only — the on-device
+     * OTA UI has no local serial and never wires this.
+     *
+     * @param {object} opts
+     * @param {SerialPort} [opts.port] - host's pre-picked port; if omitted,
+     *   detect() prompts requestPort() itself.
+     * @param {(line: string) => void} [opts.onLog]
+     * @returns {Promise<string>} the chip-family description
+     */
+    async detect({ port: prePickedPort, onLog } = {}) {
+        if (!navigator.serial) {
+            throw new Error("Web Serial API not available — use Chrome, Edge, or Opera");
+        }
+        // Drop any prior detect that start() never consumed, so we don't leak
+        // an open handle when the user clicks Detect twice.
+        await releaseDetected();
+
+        const port = prePickedPort || await navigator.serial.requestPort({});
+        // Trimmed espTerminal (same shape as start()'s) so chip-info lines reach
+        // the log panel; the single-char filter drops esptool's "." / "_" noise.
+        const espTerminal = onLog ? {
+            clean: () => {},
+            writeLine: (s) => onLog(s),
+            write: (s) => { if (s && s.length > 1) onLog(s); },
+        } : undefined;
+        const transport = new Transport(port, false);
+        const esploader = new ESPLoader({
+            transport,
+            baudrate: 460800,
+            romBaudrate: 115200,
+            terminal: espTerminal,
+        });
+        try {
+            const chipName = await connectAndDescribeChip(esploader);
+            _detected = { port, transport, esploader, chipName };
+            return chipName;
+        } catch (e) {
+            // Failed before we could stash it — release the port so the next
+            // attempt (or a manual flow) can re-open cleanly.
+            try { await transport.disconnect(); } catch (_) { /* ignore */ }
+            try { await port.close(); } catch (_) { /* ignore */ }
+            throw e;
+        }
+    },
+
+    /**
+     * Release a pending detect() connection (e.g. the user re-picked the port,
+     * so the detected handle is now stale). Safe to call when nothing is pending.
+     */
+    async clearDetected() {
+        await releaseDetected();
     },
 
     /**

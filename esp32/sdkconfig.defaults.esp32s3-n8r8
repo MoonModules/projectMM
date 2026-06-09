@@ -1,0 +1,14 @@
+# ESP32-S3-N8R8 (8 MB flash, 8 MB PSRAM)
+# Append to sdkconfig.defaults (later fragment wins, overriding the base 4 MB +
+# esp32dev.csv partition the classic default sets).
+
+# Custom partition table — 8MB layout (app0/app1 = 3 MB each, spiffs = ~1.9 MB)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/esp32s3_n8r8.csv"
+
+# Flash size override (default is 2MB on ESP32-S3)
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+
+# PSRAM — same 8 MB octal as N16R8
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
