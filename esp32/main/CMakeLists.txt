@@ -11,7 +11,6 @@ idf_component_register(
         "../../src/platform/esp32/platform_esp32_ota.cpp"
         "../../src/platform/esp32/platform_esp32_improv.cpp"
         "../../src/platform/esp32/platform_esp32_rmt.cpp"
-        "../../test/device/device_RmtLoopback.cpp"
     INCLUDE_DIRS
         "../../src"
         "../../src/platform/esp32"
@@ -71,12 +70,6 @@ if(MM_ETH_ONLY)
 endif()
 if(MM_NO_ETH)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_NO_ETH)
-endif()
-# MM_LED_LOOPBACK_TEST — build_esp32.py --loopback-test sets this. The firmware
-# then runs ONLY the RMT WS2812 loopback test (test/device/device_RmtLoopback.cpp,
-# wired in app_main) and prints PASS/FAIL — a hardware-gated build, not shipped.
-if(MM_LED_LOOPBACK_TEST)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_LED_LOOPBACK_TEST)
 endif()
 
 # Embed UI files — regenerate on every build. ESP-IDF's bundled Python venv

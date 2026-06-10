@@ -291,8 +291,22 @@ void rmtWs2812Deinit(RmtWs2812Handle& h);
 
 // RX loopback capture, on-device test only (no-op stub off ESP32). Capture up to
 // `maxSymbols` pulse-duration symbols on `gpio` (jumpered from the TX pin) within
-// `timeoutMs`. Returns the number captured. Used only by the loopback HAL test.
+// `timeoutMs`. Returns the number captured. Used only by the loopback self-test.
 size_t rmtWs2812RxCapture(uint8_t gpio, uint32_t resolutionHz,
                           uint32_t* outSymbols, size_t maxSymbols, uint32_t timeoutMs);
+
+// Self-contained RMT loopback self-test, runnable from the running firmware (the
+// RmtLedDriver's loopbackTest control). Drives a known WS2812 pattern out `txGpio`
+// and captures it back on `rxGpio` (the user jumpers them), proving the GPIO emits
+// correct bytes on real silicon. All hardware (RMT TX/RX, the GPIO continuity
+// pre-check) lives here so src/light/ stays platform-free. No-op returning a
+// "not supported" result off ESP32.
+struct RmtLoopbackResult {
+    bool jumperDetected = false;  // plain-GPIO continuity pre-check (tx high→rx high, low→low)
+    bool pass = false;            // captured bytes == sent bytes
+    uint8_t sent[3] = {};         // the test pattern transmitted
+    uint8_t got[3] = {};          // what was decoded back (valid only if pass-attempted)
+};
+RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio);
 
 } // namespace mm::platform

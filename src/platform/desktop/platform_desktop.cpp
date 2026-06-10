@@ -624,5 +624,8 @@ size_t rmtWs2812RxCapture(uint8_t /*gpio*/, uint32_t /*resolutionHz*/,
                           uint32_t /*timeoutMs*/) {
     return 0;
 }
+RmtLoopbackResult rmtWs2812Loopback(uint8_t /*txGpio*/, uint8_t /*rxGpio*/) {
+    return {};   // not supported off ESP32
+}
 
 } // namespace mm::platform

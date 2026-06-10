@@ -491,11 +491,13 @@ void HttpServerModule::handleSetControl(platform::TcpConnection& conn, const cha
                 sendResponse(conn, 400, "application/json", "{\"error\":\"control is read-only\"}");
                 return;
         }
-        // Rebuild controls only for Select (dynamic onBuildControls re-evaluates the
-        // visible set, e.g. NetworkModule's static-IP fields).
-        if (c.type == ControlType::Select) {
-            target->rebuildControls();
-        }
+        // Rebuild the control list after every change so onBuildControls() can
+        // re-evaluate which controls are visible for the new value — any control
+        // can reshape the list (a Select picking static-IP fields, a checkbox
+        // revealing its options). rebuildControls() is clear()+onBuildControls(),
+        // which the contract requires to be cheap and idempotent, so running it
+        // per-change costs nothing for the common case where the list is unchanged.
+        target->rebuildControls();
         // Three-tier control-change reaction (see MoonModule::onUpdate):
         //   1. onUpdate — always, cheap. Lets the module recompute a small LUT etc.
         //   2. rebuild — only when the control changes physical dims / mapping shape

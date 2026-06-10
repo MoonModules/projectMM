@@ -48,6 +48,7 @@ add_executable(mm_tests
     unit/light/unit_PreviewDriver.cpp
     unit/light/unit_RainbowEffect.cpp
     unit/light/unit_RmtLedEncoder.cpp
+    unit/light/unit_RmtLedDriver_lifecycle.cpp
 )
 
 target_include_directories(mm_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

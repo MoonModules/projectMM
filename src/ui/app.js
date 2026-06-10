@@ -1371,8 +1371,74 @@ function allModules() {
     return out;
 }
 
+// Reconcile a card's control rows when its set of VISIBLE controls changed (a
+// `hidden` flag flipped at runtime, e.g. NetworkModule's static-IP fields or
+// RmtLedDriver's loopbackRxPin). The value-patch path in updateModuleControls
+// can't add or remove rows, so this handles that half. Returns true if it
+// changed the DOM. No-op (returns false) on the common frame where nothing moved.
+//
+// Position-stable by design: it inserts each newly-visible row at its correct
+// index among the existing control rows and removes rows that became hidden —
+// it does NOT tear down and re-append every row (that would land them after the
+// card's child-module block / install-picker mount, never converge, and re-fire
+// every WS tick — a render loop that wedges the UI).
+function syncVisibleControls(mod) {
+    const card = document.querySelector(`.card[data-module="${cssEscape(mod.name)}"]`);
+    if (!card) return false;
+    const host = card.querySelector(".card-controls-collapse") || card;
+
+    const wantNames = mod.controls.filter(c => !c.hidden).map(c => c.name);
+    const haveRows = [...host.querySelectorAll(":scope > .control-row[data-key]")];
+    const haveNames = haveRows.map(r => r.dataset.key);
+    if (wantNames.length === haveNames.length && wantNames.every((n, i) => n === haveNames[i])) {
+        return false;  // unchanged — the common case
+    }
+
+    // Remove rows whose control is no longer visible.
+    const wantSet = new Set(wantNames);
+    for (const row of haveRows) {
+        if (!wantSet.has(row.dataset.key)) row.remove();
+    }
+    // Insert each visible control's row at its correct position. The anchor is the
+    // first existing control row that should come AFTER this one; null → append
+    // before the children block (insertBefore(node, null) appends to host's end,
+    // but control rows precede .card-children which lives on the card, not here).
+    const visibleControls = mod.controls.filter(c => !c.hidden);
+    for (let i = 0; i < visibleControls.length; i++) {
+        const name = visibleControls[i].name;
+        if (host.querySelector(`:scope > .control-row[data-key="${cssEscape(name)}"]`)) continue;
+        const row = createControl(mod.name, mod.type, visibleControls[i]);
+        if (!row) continue;
+        // Anchor: the rendered row of the next visible control that already exists.
+        let anchor = null;
+        for (let j = i + 1; j < visibleControls.length && !anchor; j++) {
+            anchor = host.querySelector(`:scope > .control-row[data-key="${cssEscape(visibleControls[j].name)}"]`);
+        }
+        // No later control row exists yet → keep this row above the card's
+        // children block / install-picker mount / footer (which live in the host
+        // when host===card), so controls never render below the children.
+        if (!anchor) {
+            anchor = host.querySelector(":scope > .card-children")
+                  || host.querySelector(":scope > .install-picker-host")
+                  || host.querySelector(":scope > .card-footer");
+        }
+        host.insertBefore(row, anchor);
+    }
+    return true;
+}
+
 function updateModuleControls(mod) {
     if (!mod.controls) return;
+
+    // Conditional controls: a module can flip a control's `hidden` flag at runtime
+    // (e.g. RmtLedDriver reveals loopbackRxPin while the test is on, NetworkModule
+    // reveals static-IP fields). The value-patch loop below only updates controls
+    // already in the DOM — it can't add or remove one. So first detect whether the
+    // set of VISIBLE controls drifted from what's rendered, and if so re-render
+    // this card's control rows. Cheap: only fires on the rare frame where a hidden
+    // flag actually changed.
+    if (syncVisibleControls(mod)) return;  // re-rendered — values are fresh, skip patch
+
     for (const ctrl of mod.controls) {
         const mid = cssEscape(mod.name);
         const k = cssEscape(ctrl.name);

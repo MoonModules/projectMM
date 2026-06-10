@@ -51,20 +51,20 @@ TEST_CASE("encoder: one byte, MSB-first, 0 and 1 bits get the right pulse widths
     }
 }
 
-TEST_CASE("encoder: N lights produce N*channels*8 symbols, in order") {
-    // Two RGB lights → 2*3*8 = 48 symbols. Check the first bit of light 0 and the
-    // first bit of light 1 land at the expected indices.
-    const uint8_t wire[6] = {0xFF, 0x00, 0x00,   // light 0: first byte all-ones
-                             0x00, 0x00, 0xFF};  // light 1: last byte all-ones
-    uint32_t out[48] = {};
-    mm::encodeWs2812Symbols(wire, 3, T0H, T1H, PERIOD, out);  // note: per-light call
+TEST_CASE("encoder: one light's channels emit channels*8 symbols in byte order") {
+    // encodeWs2812Symbols encodes ONE light of `channels` bytes — the driver calls
+    // it once per light, so multi-light *ordering* is the driver's concern, not the
+    // encoder's. Here channels=3 → 3*8 = 24 symbols, byte 0 then byte 1 then byte 2.
+    const uint8_t wire[3] = {0xFF, 0x00, 0x80};  // byte0 all-ones, byte1 zero, byte2 MSB set
+    uint32_t out[24] = {};
+    mm::encodeWs2812Symbols(wire, 3, T0H, T1H, PERIOD, out);
 
-    // This test drives the per-LIGHT encode (channels=3). Light 0 byte0 MSB = 1.
-    checkBit(out[0], T1H);
-    // Light 0 byte0 LSB (bit index 7) = 1 too (0xFF).
-    checkBit(out[7], T1H);
-    // Byte1 (0x00) bit 8 = 0.
-    checkBit(out[8], T0H);
+    checkBit(out[0], T1H);   // byte0 MSB = 1
+    checkBit(out[7], T1H);   // byte0 LSB = 1 (0xFF)
+    checkBit(out[8], T0H);   // byte1 MSB = 0 (0x00)
+    checkBit(out[15], T0H);  // byte1 LSB = 0
+    checkBit(out[16], T1H);  // byte2 MSB = 1 (0x80)
+    checkBit(out[17], T0H);  // byte2 bit 1 = 0
 }
 
 TEST_CASE("encoder: GRB ordering comes from Correction, encoder is order-agnostic") {

@@ -19,16 +19,22 @@ Bits are sent **MSB-first** within each byte; channel order (GRB, GRBW, …) is 
 
 ## Controls
 
-- `gpio` (uint8_t, default 18, range 0–48) — the data pin. Changing it re-initialises the RMT channel live (no reboot needed). The default avoids GPIO 4/5, which the on-device loopback test uses.
+- `gpio` (uint8_t, default 18, range 0–48) — the data / TX pin. Changing it re-initialises the RMT channel live (no reboot needed). The loopback self-test also transmits on this pin, so it validates the actual output.
+- `loopbackRxPin` (uint8_t, default 5, range 0–48) — the RX pin for the loopback self-test. Jumper it to `gpio` to run the test.
+- `loopbackTest` (bool) — tick to run a one-shot RMT TX→RX loopback self-test (see Self-test below). Auto-resets after running; the result lands in the module's status field.
 
 ## Cross-domain wiring
 
 The driver is added as a child of the `Drivers` container in `main.cpp` (under `if constexpr (platform::isEsp32)`), exactly like [ArtNetSendDriver](ArtNetSendDriver.md): it receives `setSourceBuffer` / `setCorrection` / `setLayer` from `Drivers::passBufferToDrivers`, and applies the same `const Correction*` ArtNet uses. The **symbol encode** (`encodeWs2812Symbols` in `RmtSymbol.h`) is domain code in `src/light/` so it is host-testable; the **peripheral** (`platform::rmtWs2812*` in `src/platform/esp32/platform_esp32_rmt.cpp`) is the only ESP-IDF-touching part.
 
+## Loopback self-test (on device)
+
+The RMT peripheral is a transceiver, so the driver can verify its own output on real silicon — no separate test firmware. Jumper `gpio` (TX) to `loopbackRxPin`, then tick the `loopbackTest` control: the driver transmits a known WS2812 pattern out the data pin, captures it back on the RX pin, decodes, and compares. The outcome goes to the module's **status field** (`setStatus`): `loopback PASS`, `loopback FAIL: sent … got …`, or `loopback: jumper not detected` (a plain-GPIO continuity pre-check runs first, so a wiring fault is reported as such, not mistaken for a code bug). The test reconfigures the data pin and briefly drives the test pattern, so any strip on `gpio` flickers once during the run; normal output resumes after. All hardware lives in `platform::rmtWs2812Loopback`.
+
 ## Tests
 
-- **Encoder (CI, host):** `test/unit/light/unit_RmtLedEncoder.cpp` asserts the bit→symbol contract (MSB-first, exact T0H/T1H tick widths, GRB ordering via Correction, RGBW → 32 symbols/light) with no hardware — the same test was written red before the encoder and pins it now.
-- **HAL loopback (on device):** the RMT peripheral is a transceiver — `test/device/device_RmtLoopback.cpp` jumpers the TX pin to an RX pin, captures the emitted pulses, decodes them back to bytes, and asserts they equal what was sent. Independent proof that a GPIO emits correct WS2812 data on real silicon.
+- **Encoder (CI, host):** `test/unit/light/unit_RmtLedEncoder.cpp` asserts the bit→symbol contract (MSB-first, exact T0H/T1H tick widths, GRB ordering via Correction, RGBW → 32 symbols/light) with no hardware — written red before the encoder, pins it now.
+- **Lifecycle (CI, host):** `test/unit/light/unit_RmtLedDriver_lifecycle.cpp` pins the symbol-buffer ownership — sized in `onBuildState`, survives a rebuild (reinit must not free it), freed on teardown — the class of bug that once reached hardware, now caught on every push.
 
 ## Prior art
 

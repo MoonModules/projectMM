@@ -160,8 +160,12 @@ public:
             // boards.json catalog injects 8 dBm for LOLIN boards.
             controls_.addInt16("txPowerSetting", txPowerSetting_, 0, 21);
         }
-        controls_.addSelect("addressing", addressing_, addressingOptions_, 2);
         controls_.addBool("mDNS", mdnsEnabled_);
+
+        // addressing goes immediately before the static-IP fields it conditions, so
+        // the dropdown and the fields it reveals stay adjacent (mDNS, unrelated,
+        // sits above rather than wedged between them).
+        controls_.addSelect("addressing", addressing_, addressingOptions_, 2);
 
         // Static-IP fields are always bound (so persistence can load them at any time),
         // but visibility flips based on addressing mode. Toggling the Select triggers a

@@ -12,6 +12,7 @@
 #include "doctest.h"
 #include "platform_config.h"       // pulls in platform::hasWiFi before NetworkModule.h
 #include "core/NetworkModule.h"
+#include "conditional_controls.h"  // shared conditional-control invariant helpers
 
 #include <cstring>
 
@@ -182,5 +183,25 @@ TEST_CASE("NetworkModule rssi/txPower controls hidden in non-WiFi states") {
         CHECK(matchCount == 2);
     } else {
         CHECK(matchCount == 0);
+    }
+}
+
+// Conditional controls: the static-IP fields (ip/gateway/subnet/dns) are visible
+// only when addressing == Static (1), hidden under DHCP (0) — but ALWAYS bound so
+// persistence can load a saved static config regardless of the live mode. This is
+// the documented add-then-setHidden pattern (architecture.md § Conditional
+// controls); the test pins it both ways so a regression (e.g. dropping setHidden,
+// or conditionally NOT adding the field) fails here, not on hardware.
+TEST_CASE("NetworkModule static-IP fields track the addressing mode") {
+    mm::NetworkModule net;
+    net.setup();   // builds controls once (desktop cascade lands on AP/Idle)
+
+    // addressing is the Select that conditions the static fields. setCondition(true)
+    // → Static (value 1) → fields visible; setCondition(false) → DHCP (0) → hidden.
+    auto setStatic = [&](bool on) {
+        mm::test::setControlValue<uint8_t>(net, "addressing", on ? uint8_t{1} : uint8_t{0});
+    };
+    for (const char* field : {"ip", "gateway", "subnet", "dns"}) {
+        mm::test::checkConditionalControl(net, field, setStatic, /*visibleWhenTrue=*/true);
     }
 }
