@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <cstdio>   // snprintf for the loopback status string
+#include <cstring>  // std::strcmp in onUpdate / controlChangeTriggersBuildState
 
 namespace mm {
 
@@ -242,10 +243,21 @@ private:
 
     // --- RMT channel (hardware; ESP32-only) ---
 
+    static constexpr const char* kInitFailMsg = "RMT init failed — check the gpio pin";
+
     void reinit() {
         if constexpr (!platform::isEsp32) return;
         deinit();
         inited_ = platform::rmtWs2812Init(rmt_, gpio, kResolutionHz, cfg_.invert);
+        // Surface an init failure instead of silently no-op'ing in loop() — the
+        // status field tells the user why output is dark (usually a bad gpio),
+        // rather than leaving them to wonder why nothing lights.
+        if (!inited_) {
+            clearFailBuf();   // release any stale loopback FAIL string first
+            setStatus(kInitFailMsg, Severity::Error);
+        } else if (status() == kInitFailMsg) {
+            clearStatus();    // a prior init failure recovered (e.g. gpio fixed)
+        }
     }
 
     // Releases only the RMT channel — NOT the symbol buffer (that's freeSymbols(),

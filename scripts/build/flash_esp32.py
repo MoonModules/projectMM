@@ -40,6 +40,12 @@ def main():
                              "firmware must exist at build/esp32-<firmware>/ — "
                              "i.e. you must have run Build with the same "
                              "--firmware first.")
+    parser.add_argument("--baud", type=int, default=460800,
+                        help="esptool flash baud rate (default: 460800 — reliable on "
+                             "every board). The web installer uses 921600 (~2x faster); "
+                             "pass --baud 921600 to match it, but some USB bridges "
+                             "(CP210x/CH340) drop to 'chip stopped responding' mid-flash "
+                             "at that rate, so it's opt-in, not the default.")
     args = parser.parse_args()
 
     if not ESP32_DIR.exists():
@@ -77,7 +83,10 @@ def main():
         "-DSDKCONFIG=" + str(build_dir / "sdkconfig"),
     ]
 
-    r = subprocess.run(cmd + b_arg + ["flash", "-p", args.port],
+    # -b sets the esptool flash baud (idf.py's own default is also 460800).
+    # --baud 921600 matches the web installer for ~2x speed, but isn't the
+    # default because some USB bridges can't sustain it (see --baud help).
+    r = subprocess.run(cmd + b_arg + ["flash", "-p", args.port, "-b", str(args.baud)],
                        cwd=ESP32_DIR, env=env)
     if r.returncode == 0:
         _record_flash_event(args.port, args.firmware)

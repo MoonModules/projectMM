@@ -19,7 +19,7 @@
     "GlowParticlesEffect",
     "CheckerboardEffect",
     "SpiralEffect",
-    "RipplesEffect",
+    "RingsEffect",
     "LavaLampEffect",
     "GameOfLifeEffect"
   ],
@@ -3548,40 +3548,40 @@
       }
     },
     {
-      "name": "RipplesEffect-pre-w",
+      "name": "RingsEffect-pre-w",
       "op": "set_control",
       "id": "Grid",
       "key": "width",
       "value": 16
     },
     {
-      "name": "RipplesEffect-pre-h",
+      "name": "RingsEffect-pre-h",
       "op": "set_control",
       "id": "Grid",
       "key": "height",
       "value": 16
     },
     {
-      "name": "fx-RipplesEffect",
+      "name": "fx-RingsEffect",
       "op": "replace_module",
       "id": "FX",
-      "type": "RipplesEffect"
+      "type": "RingsEffect"
     },
     {
-      "name": "RipplesEffect-16x16-w",
+      "name": "RingsEffect-16x16-w",
       "op": "set_control",
       "id": "Grid",
       "key": "width",
       "value": 16
     },
     {
-      "name": "RipplesEffect-16x16",
+      "name": "RingsEffect-16x16",
       "op": "set_control",
       "id": "Grid",
       "key": "height",
       "value": 16,
       "measure": true,
-      "description": "RipplesEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "description": "RingsEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max internal block.",
       "observed": {
         "pc-macos": {
           "tick_us": [
@@ -3640,20 +3640,20 @@
       }
     },
     {
-      "name": "RipplesEffect-32x32-w",
+      "name": "RingsEffect-32x32-w",
       "op": "set_control",
       "id": "Grid",
       "key": "width",
       "value": 32
     },
     {
-      "name": "RipplesEffect-32x32",
+      "name": "RingsEffect-32x32",
       "op": "set_control",
       "id": "Grid",
       "key": "height",
       "value": 32,
       "measure": true,
-      "description": "RipplesEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "description": "RingsEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max internal block.",
       "observed": {
         "pc-macos": {
           "tick_us": [
@@ -3712,20 +3712,20 @@
       }
     },
     {
-      "name": "RipplesEffect-64x64-w",
+      "name": "RingsEffect-64x64-w",
       "op": "set_control",
       "id": "Grid",
       "key": "width",
       "value": 64
     },
     {
-      "name": "RipplesEffect-64x64",
+      "name": "RingsEffect-64x64",
       "op": "set_control",
       "id": "Grid",
       "key": "height",
       "value": 64,
       "measure": true,
-      "description": "RipplesEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "description": "RingsEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max internal block.",
       "observed": {
         "pc-macos": {
           "tick_us": [
@@ -3784,20 +3784,20 @@
       }
     },
     {
-      "name": "RipplesEffect-128x128-w",
+      "name": "RingsEffect-128x128-w",
       "op": "set_control",
       "id": "Grid",
       "key": "width",
       "value": 128
     },
     {
-      "name": "RipplesEffect-128x128",
+      "name": "RingsEffect-128x128",
       "op": "set_control",
       "id": "Grid",
       "key": "height",
       "value": 128,
       "measure": true,
-      "description": "RipplesEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.",
+      "description": "RingsEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, max internal block.",
       "observed": {
         "pc-macos": {
           "tick_us": [

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>projectMM</title>
+  <link rel="icon" type="image/png" href="./install/favicon.png">
+  <!-- Landing page for the Pages ROOT (moonmodules.org/projectMM/). The deploy
+       stages this as pages/index.html; the web installer lives at ./install/.
+       Deliberately a single static file — no site generator (no mkdocs). -->
+  <style>
+    :root {
+      --bg:     #1a1a2e;
+      --card:   #16213e;
+      --fg:     #e0e0e0;
+      --muted:  #a0a0b0;
+      --accent: #a78bfa;
+      --border: #2a3a6a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 48px 16px;
+    }
+    main { width: 100%; max-width: 560px; }
+    h1 { font-size: 2.4rem; margin: 0 0 8px; }
+    .tagline { color: var(--muted); font-size: 1.15rem; margin: 0 0 32px; }
+    .btn {
+      display: inline-block;
+      background: var(--accent);
+      color: #1a1a2e;
+      font-weight: 600;
+      font-size: 1.1rem;
+      text-decoration: none;
+      padding: 14px 32px;
+      border-radius: 10px;
+      transition: filter .15s;
+    }
+    .btn:hover { filter: brightness(1.1); }
+    .links { margin-top: 28px; }
+    .links a { color: var(--accent); text-decoration: none; margin: 0 10px; }
+    .links a:hover { text-decoration: underline; }
+    .note { color: var(--muted); font-size: .9rem; margin-top: 40px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>projectMM</h1>
+    <p class="tagline">High-performance LED &amp; DMX lighting control for ESP32 and beyond.</p>
+
+    <a class="btn" href="./install/">⚡ Flash an ESP32 from your browser</a>
+
+    <div class="links">
+      <a href="https://github.com/MoonModules/projectMM">GitHub</a>
+      <a href="https://github.com/MoonModules/projectMM#readme">Docs</a>
+      <a href="https://github.com/MoonModules/projectMM/releases">Releases</a>
+    </div>
+
+    <p class="note">Web installer works in Chrome &amp; Edge (Web Serial). No download required.</p>
+  </main>
+</body>
+</html>

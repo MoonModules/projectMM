@@ -60,14 +60,16 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 ## CheckerboardEffect
 
 `test/unit/light/unit_CheckerboardEffect.cpp`
-*Also touches: SpiralEffect, PlasmaPaletteEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect.*
+*Also touches: SpiralEffect, PlasmaPaletteEffect, RingsEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect.*
 
 - Checkerboard paints at least one non-zero byte on a 16×16 grid (effect actually renders).
 - With cell_size=4, adjacent cells render different colours (the checker pattern is real, not uniform).
 - LavaLampEffect has localised blob features that can land on identical corner palette indices at some t values (corner-pair check is too strict). Scan the whole buffer for any two distinct pixels instead — same approach as RipplesEffect below. LavaLamp paints at least one non-zero byte (effect actually renders).
 - Across 10 frames at bpm=60, at least one frame shows two distinct colours somewhere in the buffer (blobs move and the field varies).
-- RipplesEffect has localised features (thin rings); corner-pair check is too strict, so we scan for any two distinct pixels instead. Ripples paints at least one non-zero byte (effect actually renders).
-- At least two distinct pixels exist somewhere in the buffer (ripples are localised, so corner-pair would be too strict).
+- RingsEffect has localised features (thin rings); corner-pair check is too strict, so we scan for any two distinct pixels instead. Rings paints at least one non-zero byte (effect actually renders).
+- At least two distinct pixels exist somewhere in the buffer (rings are localised, so corner-pair would be too strict).
+- RipplesEffect (MoonLight sine-wave water surface) lights one pixel per column at a sine-driven height. On a flat 2D layer it still paints a visible wavefront — assert it renders something and varies across the surface.
+- _RipplesEffect spatial variation_
 
 ## CheckerboardModifier
 
@@ -211,7 +213,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - REGRESSION: a high fan-out Multiply (8×8×4 = 256) on a 128×128 grid must build a NON-EMPTY LUT that covers every physical light. The maxDest estimate (logicalCount × maxMultiplier) is computed in 64-bit; before that fix it overflowed uint16 on no-PSRAM boards (256 × 256 = 65536 wraps to 0), sized the LUT to ~nothing, and blanked the display. Here we assert the LUT actually maps the full light set, in range — the symptom that black-screened the device.
 
 `test/unit/light/unit_Layer_zero_grid.cpp`
-*Also touches: RainbowEffect, NoiseEffect, PlasmaEffect, CheckerboardEffect, SpiralEffect, MetaballsEffect, PlasmaPaletteEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect, FireEffect, ParticlesEffect.*
+*Also touches: RainbowEffect, NoiseEffect, PlasmaEffect, CheckerboardEffect, SpiralEffect, MetaballsEffect, PlasmaPaletteEffect, RingsEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect, FireEffect, ParticlesEffect.*
 
 - Rainbow on 0,0,0 grid: no crash.
 - Noise on 0,0,0 grid: no crash.
@@ -220,6 +222,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Spiral on 0,0,0 grid: no crash.
 - Metaballs on 0,0,0 grid: no crash.
 - PlasmaPalette on 0,0,0 grid: no crash.
+- Rings on 0,0,0 grid: no crash.
 - Ripples on 0,0,0 grid: no crash.
 - GlowParticles on 0,0,0 grid: no crash.
 - LavaLamp on 0,0,0 grid: no crash.
@@ -363,6 +366,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - parseDottedQuad (in Control.h) is the validator on every IPv4 write, over both the HTTP API and persistence. Pin the contract.
 - The static-IP fields (ip / gateway / subnet / dns) are bound as IPv4 controls — 4 bytes of storage each, not 16-char dotted-quad strings. They start hidden because addressing defaults to DHCP.
 - In WiFi-capable builds (anything other than --firmware esp32-eth), the rssi and txPower controls are present and start hidden — Idle/Ethernet don't expose live WiFi metrics. The Ethernet-only build compiles them out entirely so the iteration finds nothing, which is still a valid pass shape.
+- Conditional controls: the static-IP fields (ip/gateway/subnet/dns) are visible only when addressing == Static (1), hidden under DHCP (0) — but ALWAYS bound so persistence can load a saved static config regardless of the live mode. This is the documented add-then-setHidden pattern (architecture.md § Conditional controls); the test pins it both ways so a regression (e.g. dropping setHidden, or conditionally NOT adding the field) fails here, not on hardware.
 
 ## NoiseEffect
 
@@ -410,6 +414,26 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - A single frame on a 4×4 grid leaves the buffer non-zero (rainbow always paints somewhere).
 - Pixel (0,0) is at full saturation and value (one channel exactly 255) — confirms hsvToRgb wiring.
 - Distant pixels carry different hues (the rainbow gradient is spatial, not uniform).
+
+## RmtLedDriver
+
+`test/unit/light/unit_RmtLedDriver_lifecycle.cpp`
+*Also touches: Drivers, Correction.*
+
+- _RmtLedDriver sizes the symbol buffer in onBuildState_
+- _RmtLedDriver keeps the symbol buffer across a rebuild (reinit must not free it)_
+- _RmtLedDriver grows the symbol buffer when the grid grows_
+- _RmtLedDriver releases the symbol buffer on teardown_
+- MoonModule contract: teardown reverses setup, so setup→teardown→setup→teardown cycles leave no residue — no leaked heap (ASAN in the test runner catches that), no stuck state. After each teardown the driver must look untouched: no symbol buffer, no status. Run several cycles to surface any accumulation.
+- Conditional control: loopbackRxPin is visible only while loopbackTest is on, hidden otherwise — but always bound (so a saved rxPin loads regardless). Same add-then-setHidden pattern as NetworkModule (architecture.md § Conditional controls). This pins the exact behavior that, with the old UI, showed the pin at the wrong times; a regression in the C++ flag now fails here.
+
+`test/unit/light/unit_RmtLedEncoder.cpp`
+*Also touches: Correction.*
+
+- _encoder: one byte, MSB-first, 0 and 1 bits get the right pulse widths_
+- _encoder: one light's channels emit channels*8 symbols in byte order_
+- _encoder: GRB ordering comes from Correction, encoder is order-agnostic_
+- _encoder: RGBW preset yields 32 symbols per light_
 
 ## Scheduler
 

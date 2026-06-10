@@ -19,8 +19,8 @@ Bits are sent **MSB-first** within each byte; channel order (GRB, GRBW, …) is 
 
 ## Controls
 
-- `gpio` (uint8_t, default 18, range 0–48) — the data / TX pin. Changing it re-initialises the RMT channel live (no reboot needed). The loopback self-test also transmits on this pin, so it validates the actual output.
-- `loopbackRxPin` (uint8_t, default 5, range 0–48) — the RX pin for the loopback self-test. Jumper it to `gpio` to run the test.
+- `gpio` (uint16_t, default 18) — the data / TX pin. uint16 so the UI renders a number field, not a slider; the peripheral validates the pin at init. Changing it re-initialises the RMT channel live (no reboot needed). The loopback self-test also transmits on this pin, so it validates the actual output.
+- `loopbackRxPin` (uint16_t, default 5) — the RX pin for the loopback self-test. Jumper it to `gpio` to run the test. Shown only while `loopbackTest` is on.
 - `loopbackTest` (bool) — tick to run a one-shot RMT TX→RX loopback self-test (see Self-test below). Auto-resets after running; the result lands in the module's status field.
 
 ## Cross-domain wiring

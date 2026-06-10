@@ -13,6 +13,7 @@
 #include "light/effects/GlowParticlesEffect.h"
 #include "light/effects/CheckerboardEffect.h"
 #include "light/effects/SpiralEffect.h"
+#include "light/effects/RingsEffect.h"
 #include "light/effects/RipplesEffect.h"
 #include "light/effects/LavaLampEffect.h"
 #include "light/effects/GameOfLifeEffect.h"
@@ -58,6 +59,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::GlowParticlesEffect>("GlowParticlesEffect", "light/effects/GlowParticlesEffect.md");
     mm::ModuleFactory::registerType<mm::CheckerboardEffect>("CheckerboardEffect", "light/effects/CheckerboardEffect.md");
     mm::ModuleFactory::registerType<mm::SpiralEffect>("SpiralEffect", "light/effects/SpiralEffect.md");
+    mm::ModuleFactory::registerType<mm::RingsEffect>("RingsEffect", "light/effects/RingsEffect.md");
     mm::ModuleFactory::registerType<mm::RipplesEffect>("RipplesEffect", "light/effects/RipplesEffect.md");
     mm::ModuleFactory::registerType<mm::LavaLampEffect>("LavaLampEffect", "light/effects/LavaLampEffect.md");
     mm::ModuleFactory::registerType<mm::GameOfLifeEffect>("GameOfLifeEffect", "light/effects/GameOfLifeEffect.md");

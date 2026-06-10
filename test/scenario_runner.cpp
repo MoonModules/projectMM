@@ -22,6 +22,7 @@
 #include "light/effects/GlowParticlesEffect.h"
 #include "light/effects/CheckerboardEffect.h"
 #include "light/effects/SpiralEffect.h"
+#include "light/effects/RingsEffect.h"
 #include "light/effects/RipplesEffect.h"
 #include "light/effects/LavaLampEffect.h"
 #include "light/effects/GameOfLifeEffect.h"
@@ -180,6 +181,7 @@ static void registerScenarioTypes() {
     mm::ModuleFactory::registerType<mm::GlowParticlesEffect>("GlowParticlesEffect");
     mm::ModuleFactory::registerType<mm::CheckerboardEffect>("CheckerboardEffect");
     mm::ModuleFactory::registerType<mm::SpiralEffect>("SpiralEffect");
+    mm::ModuleFactory::registerType<mm::RingsEffect>("RingsEffect");
     mm::ModuleFactory::registerType<mm::RipplesEffect>("RipplesEffect");
     mm::ModuleFactory::registerType<mm::LavaLampEffect>("LavaLampEffect");
     mm::ModuleFactory::registerType<mm::GameOfLifeEffect>("GameOfLifeEffect");
