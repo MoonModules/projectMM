@@ -356,6 +356,8 @@ Scenarios that add modules (e.g. `scenario_Layer_base_pipeline`, `scenario_Layer
 
 Memory tracking works on ESP32: `freeHeap` and `freeInternalHeap` report real values. Desktop returns 0 (unlimited). The control-change scenario verifies no memory leaks by checking that heap returns to baseline after a mirror toggle.
 
+One live-tier test lives outside the scenario JSON schema because it spans **multiple devices**: `uv run scripts/scenario/run_artnet_live.py` runs an ArtNet matrix over every online board in moondeck.json — each board is once the sender, all others listen, and reception is asserted by reading each device's `/ws` preview stream (see [MoonDeck.md § run_artnet_live](../scripts/MoonDeck.md#run_artnet_live)). A device matrix needs loops and per-round state the declarative scenario JSON can't express, so it follows the `improv_smoke_test.py` script shape instead.
+
 ## Hardware Verification
 
 All live scenarios pass on both desktop and ESP32 with `min_pct: 80` relative bounds. Per-module timing, memory allocation, and sizeof measurements for each platform are in [performance.md](performance.md).

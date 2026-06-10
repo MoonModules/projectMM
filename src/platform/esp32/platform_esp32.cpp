@@ -36,6 +36,7 @@
 #include "esp_wifi.h"
 #endif
 #include "esp_log.h"
+#include "esp_rom_sys.h"     // esp_rom_delay_us (delayUs)
 #include "mdns.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
@@ -89,6 +90,12 @@ void yield() {
 
 void delayMs(uint32_t ms) {
     vTaskDelay(pdMS_TO_TICKS(ms));
+}
+
+void delayUs(uint32_t us) {
+    // Busy-wait — fine for the few-hundred-µs protocol gaps this exists for
+    // (e.g. the WS2812 inter-frame latch), off any latency-critical context.
+    esp_rom_delay_us(us);
 }
 
 void reboot() {
@@ -638,6 +645,28 @@ bool UdpSocket::connect(const char* ip, uint16_t port) {
 bool UdpSocket::sendTo(const uint8_t* data, size_t len) {
     if (fd_ < 0) return false;
     return ::send(fd_, data, len, 0) >= 0;
+}
+
+bool UdpSocket::bind(uint16_t port) {
+    if (fd_ < 0) return false;
+    int reuse = 1;
+    setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (::bind(fd_, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) return false;
+    // Non-blocking so the render loop's drain never stalls waiting for a packet.
+    int flags = fcntl(fd_, F_GETFL, 0);
+    fcntl(fd_, F_SETFL, flags | O_NONBLOCK);
+    return true;
+}
+
+int UdpSocket::recvFrom(uint8_t* buf, size_t maxLen) {
+    if (fd_ < 0) return -1;
+    auto n = ::recv(fd_, buf, maxLen, 0);
+    // 0-byte datagrams and EWOULDBLOCK both mean "nothing usable pending".
+    return n > 0 ? static_cast<int>(n) : -1;
 }
 
 void UdpSocket::close() {

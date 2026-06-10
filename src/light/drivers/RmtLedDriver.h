@@ -7,48 +7,132 @@
 
 #include <cstdint>
 #include <cstdio>   // snprintf for the loopback status string
+#include <cstdlib>  // std::strtol in the pin/count list parsers
 #include <cstring>  // std::strcmp in onUpdate / controlChangeTriggersBuildState
 
 namespace mm {
 
-// WS2812B output over the ESP32 RMT peripheral. One strand, 8-bit, GRB.
+// WS2812B output over the ESP32 RMT peripheral. One or more strands — one GPIO
+// and one RMT TX channel per strand — fed consecutive slices of the source
+// buffer, 8-bit, GRB.
 //
 // This is the readable EXAMPLE future LED drivers copy. It reads as a sibling of
 // ArtNetSendDriver: same DriverBase hooks, same per-light `correction_->apply()`
 // guard pattern, same once-allocated owned buffer sized off the hot path. The
 // only thing that differs is the emit — ArtNet packs corrected bytes into UDP
 // universes; this fuses the correction and the WS2812 symbol-encode into one
-// pass over the lights, then hands the symbols to the platform.
+// pass over the lights, then hands per-pin slices of the symbols to the
+// platform. All channels are started before any is waited on, so a multi-pin
+// frame costs the longest strand, not the sum.
 //
 // Domain code only: the symbol encode lives in RmtSymbol.h; the platform owns
-// just the peripheral (platform::rmtWs2812*). On non-ESP32 targets every
+// just the peripheral (platform::rmtWs2812*). On targets without RMT every
 // platform call is an inert stub and the driver does nothing — guarded by
-// `if constexpr (platform::isEsp32)` so it compiles everywhere.
+// `if constexpr (platform::rmtTxChannels == 0)` so it compiles everywhere.
+// The pin/count parsing and buffer slicing run on every platform, which is what
+// lets the host unit tests (unit_RmtLedDriver_pins.cpp) pin them.
 class RmtLedDriver : public DriverBase {
 public:
-    // Pins are uint16 so the UI renders them as a number field, not a slider —
-    // you type a GPIO number, you don't drag to it. (The peripheral validates the
-    // pin at init; an out-of-range value just fails to bind.)
-    uint16_t gpio = 18;  // data / TX pin (live-editable). 18 is a standard WS2812
-                         // data pin. The loopback self-test transmits on THIS pin,
-                         // so it validates the actual output.
+    // Hard cap on the pin arrays: the largest RMT TX group of any supported
+    // chip (8 on classic ESP32; the S3 has 4 — enforced per target via
+    // maxPinsForTarget()). A fixed array bounded by a hardware constant, not a
+    // dynamic list: the bound can't grow at runtime.
+    static constexpr uint8_t kMaxPins = 8;
+
+    // Comma-separated GPIO list, one RMT TX channel per pin ("18,17,16"). Text
+    // control so one field holds N pins — per-output (pin, count) rows are the
+    // WLED LED-settings pattern. The peripheral validates each pin at init; a
+    // parse error or failing pin lands in the status field and the driver idles.
+    // 24 bytes fit kMaxPins 2-digit GPIOs plus separators. The loopback
+    // self-test transmits on the FIRST pin, so it validates the actual output.
+    char pins[24] = "18";
+
+    // Comma-separated lights-per-pin ("100,100,50"), matched to `pins` by
+    // position — each pin takes the next consecutive slice of the source
+    // buffer. May be empty or shorter than `pins`: the unassigned remainder
+    // splits evenly over the remaining pins (last pin takes the rounding
+    // remainder), so the empty default just splits the whole buffer evenly.
+    char ledsPerPin[48] = "";
 
     // Loopback self-test (replaces the old standalone test firmware): tick the
-    // checkbox to run a one-shot RMT TX→RX round-trip — jumper `gpio` to
-    // `loopbackRxPin`, the test transmits a known WS2812 pattern and captures it
-    // back, proving the GPIO emits correct bytes on real silicon. The outcome
-    // goes to the MoonModule status slot (setStatus) with the right severity; the
-    // checkbox auto-resets.
+    // checkbox to run a one-shot RMT TX→RX round-trip — jumper the FIRST pin in
+    // `pins` to `loopbackRxPin`, the test transmits a known WS2812 pattern and
+    // captures it back, proving the GPIO emits correct bytes on real silicon.
+    // The outcome goes to the MoonModule status slot (setStatus) with the right
+    // severity; the checkbox auto-resets.
     bool     loopbackTest = false;  // checkbox: set true to run once
-    uint16_t loopbackRxPin = 5;     // jumper this to `gpio` for the test
+    uint16_t loopbackRxPin = 5;     // jumper this to the first pin for the test
 
     // 40 MHz RMT tick clock = 25 ns/tick: t0h 350ns→14, t1h 700ns→28, period
     // 1250ns→50 ticks. The encoder converts ns→ticks via the granted resolution,
     // so this is the requested clock, not a hard-coded tick count.
     static constexpr uint32_t kResolutionHz = 40'000'000;
 
+    // --- pin/count list parsing (public statics, host-testable — the
+    // ArtNetSendDriver::buildPacket precedent). Both return nullptr on success
+    // or a static error literal the caller feeds straight into setStatus(). ---
+
+    // Parse "18,17,16" into out[0..maxPins). Spaces around tokens are fine
+    // (strtol skips them). Rejects empty input, bad tokens, trailing commas,
+    // duplicates, and more than maxPins entries (the chip's TX-channel cap).
+    static const char* parsePinList(const char* s, uint16_t* out, uint8_t maxPins,
+                                    uint8_t& nOut) {
+        nOut = 0;
+        if (!s || !*s) return "invalid pin list";
+        const char* p = s;
+        while (true) {
+            char* end = nullptr;
+            const long v = std::strtol(p, &end, 10);
+            if (end == p || v < 0 || v > 0xFFFF) return "invalid pin list";
+            while (*end == ' ') end++;
+            if (nOut >= maxPins) return "too many pins for this chip";
+            for (uint8_t i = 0; i < nOut; i++)
+                if (out[i] == static_cast<uint16_t>(v)) return "duplicate pin";
+            out[nOut++] = static_cast<uint16_t>(v);
+            if (*end == '\0') return nullptr;
+            if (*end != ',') return "invalid pin list";
+            p = end + 1;
+        }
+    }
+
+    // Fill counts[0..nPins) from "100,100,50" (may be empty or shorter than the
+    // pin list; extra entries beyond nPins are ignored — a stale longer list
+    // after pins shrank is not an error). Explicit counts are clamped so the
+    // running sum never exceeds totalLights; the unassigned remainder splits
+    // evenly over the unlisted pins, last pin takes the rounding remainder.
+    static const char* assignCounts(const char* s, uint8_t nPins,
+                                    nrOfLightsType totalLights, nrOfLightsType* counts) {
+        for (uint8_t i = 0; i < nPins; i++) counts[i] = 0;
+        nrOfLightsType remaining = totalLights;
+        uint8_t nExplicit = 0;
+        const char* p = s;
+        while (p && *p && nExplicit < nPins) {
+            char* end = nullptr;
+            const long v = std::strtol(p, &end, 10);
+            if (end == p || v < 0) return "invalid ledsPerPin list";
+            while (*end == ' ') end++;
+            const nrOfLightsType c =
+                (v > static_cast<long>(remaining)) ? remaining
+                                                   : static_cast<nrOfLightsType>(v);
+            counts[nExplicit++] = c;
+            remaining = static_cast<nrOfLightsType>(remaining - c);
+            if (*end == '\0') break;
+            if (*end != ',') return "invalid ledsPerPin list";
+            p = end + 1;
+        }
+        const uint8_t nRemaining = static_cast<uint8_t>(nPins - nExplicit);
+        if (nRemaining > 0) {
+            const nrOfLightsType per = static_cast<nrOfLightsType>(remaining / nRemaining);
+            for (uint8_t i = nExplicit; i < nPins; i++) counts[i] = per;
+            counts[nPins - 1] = static_cast<nrOfLightsType>(
+                counts[nPins - 1] + (remaining - per * nRemaining));
+        }
+        return nullptr;
+    }
+
     void onBuildControls() override {
-        controls_.addUint16("gpio", gpio);
+        controls_.addText("pins", pins, sizeof(pins));
+        controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
         controls_.addBool("loopbackTest", loopbackTest);
         // loopbackRxPin is always bound (so persistence can load it any time) but
         // only shown while the test mode is on — same always-add-then-setHidden
@@ -58,21 +142,22 @@ public:
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
     }
 
-    // Changing the data pin re-inits the RMT channel (live, not reboot-to-apply),
-    // so the pipeline-wide onBuildState sweep runs and reinit() picks up the pin.
+    // Changing the pin list or the per-pin counts re-parses and re-inits the RMT
+    // channels (live, not reboot-to-apply), so the pipeline-wide onBuildState
+    // sweep runs and parseConfig()/reinit() pick up the new lists.
     bool controlChangeTriggersBuildState(const char* name) const override {
-        return std::strcmp(name, "gpio") == 0;
+        return std::strcmp(name, "pins") == 0 || std::strcmp(name, "ledsPerPin") == 0;
     }
 
     // React to a control change (runs off the render loop, in the HTTP/API
     // handler context — a blocking self-test here is fine). loopbackTest is a
     // persistent on/off mode. While it's ON, the test (re-)runs on every relevant
-    // change — turning it on, OR editing gpio / loopbackRxPin — so the pins can be
+    // change — turning it on, OR editing pins / loopbackRxPin — so the pins can be
     // set in any order and the result always reflects the current pins. Turning it
     // OFF clears the result.
     void onUpdate(const char* name) override {
         const bool isTestControl = std::strcmp(name, "loopbackTest") == 0;
-        const bool isPinControl  = std::strcmp(name, "gpio") == 0
+        const bool isPinControl  = std::strcmp(name, "pins") == 0
                                 || std::strcmp(name, "loopbackRxPin") == 0;
         if (isTestControl && !loopbackTest) {
             clearFailBuf();
@@ -86,37 +171,55 @@ public:
     // host-testable and a hardware-only guard can never strand it:
     //   - SYMBOL BUFFER (plain heap): resizeSymbols() / freeSymbols(), run on
     //     every platform.
-    //   - RMT CHANNEL (hardware): reinit() / deinit(), ESP32-only (if constexpr).
+    //   - RMT CHANNELS (hardware): reinit() / deinitAll(), RMT-targets-only
+    //     (if constexpr).
     // The original bug put the buffer free inside the hardware deinit(), which
     // reinit() (a rebuild) calls — so a rebuild freed the buffer loop() needs.
     // Keeping the two apart makes that mistake impossible here and lets the host
     // unit test (unit_RmtLedDriver_lifecycle.cpp) pin it.
-    void setup() override { reinit(); }
-    void teardown() override { deinit(); freeSymbols(); clearFailBuf(); }
+    void setup() override { parseConfig(); reinit(); }
+    void teardown() override {
+        deinitAll();
+        freeSymbols();
+        clearFailBuf();
+        clearConfigErr();
+    }
 
-    // Topology (light count / channels) or the gpio control changed — resize the
-    // symbol buffer and (re)init the channel off the hot path. loop() never allocates.
+    // Topology (light count / channels) or the pins/ledsPerPin controls changed —
+    // re-parse the lists, resize the symbol buffer, and (re)init the channels off
+    // the hot path. loop() never allocates.
     void onBuildState() override {
+        parseConfig();
         resizeSymbols();
         reinit();
         MoonModule::onBuildState();
     }
 
-    // Preset toggle (RGB↔RGBW) changes outChannels without a structural rebuild.
-    void onCorrectionChanged() override { resizeSymbols(); }
+    // Preset toggle (RGB↔RGBW) changes outChannels without a structural rebuild —
+    // the per-pin symbol offsets scale with outChannels, so re-derive them too.
+    void onCorrectionChanged() override { parseConfig(); resizeSymbols(); }
 
-    void setSourceBuffer(Buffer* buf) override { sourceBuffer_ = buf; resizeSymbols(); }
-    void setCorrection(const Correction* c) override { correction_ = c; resizeSymbols(); }
+    void setSourceBuffer(Buffer* buf) override {
+        sourceBuffer_ = buf;
+        parseConfig();      // counts derive from the buffer's light count
+        resizeSymbols();
+    }
+    void setCorrection(const Correction* c) override {
+        correction_ = c;
+        parseConfig();      // offsets derive from outChannels
+        resizeSymbols();
+    }
 
     void loop() override {
-        if constexpr (!platform::isEsp32) return;   // inert off the chip with RMT
+        if constexpr (platform::rmtTxChannels == 0) return;  // inert off RMT chips
         if (!inited_ || !sourceBuffer_ || !sourceBuffer_->data() || !correction_) return;
 
         const nrOfLightsType n = sourceBuffer_->count();
         const uint8_t outCh = correction_->outChannels;
         // Same defensive guard ArtNet uses: skip rather than overrun if the
         // symbol buffer is stale (e.g. correction swapped without a resize).
-        if (n == 0 || outCh == 0 || !symbols_ || symbolCap_ < symbolsFor(n, outCh)) return;
+        if (n == 0 || outCh == 0 || pinCount_ == 0
+            || !symbols_ || symbolCap_ < symbolsFor(n, outCh)) return;
 
         // Fused single pass: correct one light into wire bytes, encode those
         // bytes straight into the symbol buffer. No second sweep over encoded
@@ -133,16 +236,31 @@ public:
             encodeWs2812Symbols(wire, outCh, t0h, t1h, period, symbols_ + s);
             s += static_cast<size_t>(outCh) * 8;
         }
-        platform::rmtWs2812Show(rmt_, symbols_, s, cfg_.reset_us);
+        // Start every pin's slice before waiting on any — the channels clock out
+        // concurrently, so the tick is charged the longest strand, not the sum.
+        // The shared reset gap (the WS2812 latch) runs once, after the last wait.
+        for (uint8_t i = 0; i < pinCount_; i++) {
+            if (pinCounts_[i] == 0) continue;
+            platform::rmtWs2812Transmit(rmt_[i], symbols_ + pinOffsets_[i],
+                                        static_cast<size_t>(pinCounts_[i]) * outCh * 8);
+        }
+        for (uint8_t i = 0; i < pinCount_; i++) {
+            if (pinCounts_[i] == 0) continue;
+            platform::rmtWs2812Wait(rmt_[i], 1000 /* ms */);
+        }
+        if (cfg_.reset_us) platform::delayUs(cfg_.reset_us);
     }
 
-    // Test-only accessors for the symbol-buffer lifecycle. Mirror ArtNet's
-    // correctedBuffer() accessor. Let unit tests pin the invariants a hardware
-    // bug already taught us: the buffer is sized in onBuildState (never in
-    // loop), it SURVIVES a gpio-change reinit (reinit must not free it), and it
-    // is released on teardown (no leak). Not part of any runtime API.
+    // Test-only accessors. symbolBuffer/symbolCapacity mirror ArtNet's
+    // correctedBuffer() and let unit tests pin the buffer-lifecycle invariants a
+    // hardware bug already taught us; pinCount/pinLightCount/pinSymbolOffsetWords
+    // pin the multi-pin slice arithmetic (unit_RmtLedDriver_pins.cpp). Not part
+    // of any runtime API.
     const uint32_t* symbolBuffer() const { return symbols_; }
     size_t symbolCapacity() const { return symbolCap_; }
+    uint8_t pinCount() const { return pinCount_; }
+    nrOfLightsType pinLightCount(uint8_t i) const { return i < pinCount_ ? pinCounts_[i] : 0; }
+    size_t pinSymbolOffsetWords(uint8_t i) const { return i < pinCount_ ? pinOffsets_[i] : 0; }
 
 private:
     // Source frame + shared correction — each physical driver owns these (the
@@ -152,16 +270,35 @@ private:
     const Correction* correction_ = nullptr;
 
     LedDriverConfig cfg_;
-    platform::RmtWs2812Handle rmt_;
-    bool inited_ = false;
+    platform::RmtWs2812Handle rmt_[kMaxPins];
+    uint16_t       pinList_[kMaxPins] = {};    // parsed pins, list order
+    nrOfLightsType pinCounts_[kMaxPins] = {};  // lights per pin (slice lengths)
+    size_t         pinOffsets_[kMaxPins] = {}; // slice start in symbols_, words
+    uint8_t pinCount_ = 0;                     // 0 = idle (parse error / no pins)
+    bool inited_ = false;                      // all-or-nothing across the pins
     uint32_t* symbols_ = nullptr;   // owned; one word per WS2812 data bit
     size_t symbolCap_ = 0;          // words allocated
 
-    // On-demand FAIL status string — only allocated when a loopback FAILs (the
-    // one outcome needing the captured hex). nullptr otherwise; freed on teardown
-    // and on any non-FAIL result. PASS / jumper / unsupported use flash literals.
+    // The parse-error literal currently shown in the status slot (nullptr when
+    // the config is valid) — tracked so a successful re-parse clears only our
+    // own error, never a loopback result.
+    const char* configErr_ = nullptr;
+
+    // On-demand FAIL status string — only allocated when a loopback or channel
+    // init FAILs (the outcomes needing a formatted message). nullptr otherwise;
+    // freed on teardown and on any non-FAIL result. PASS / jumper / unsupported
+    // use flash literals.
     static constexpr size_t kFailBufLen = 48;
     char* failBuf_ = nullptr;
+
+    // The chip's TX-channel cap caps the pin list; on targets without RMT
+    // (desktop, where the constant is 0) fall back to kMaxPins so the parsing
+    // and slicing stay fully host-testable.
+    static constexpr uint8_t maxPinsForTarget() {
+        return (platform::rmtTxChannels > 0 && platform::rmtTxChannels < kMaxPins)
+                   ? platform::rmtTxChannels
+                   : kMaxPins;
+    }
 
     static size_t symbolsFor(nrOfLightsType lights, uint8_t channels) {
         return static_cast<size_t>(lights) * channels * 8;
@@ -170,9 +307,47 @@ private:
     // Convert a ns duration to RMT ticks using the resolution the platform
     // granted. Falls back to the requested clock when not inited (host/desktop).
     uint16_t nsToTicks(uint32_t ns) const {
-        uint32_t hz = inited_ ? platform::rmtWs2812Resolution(rmt_) : kResolutionHz;
+        uint32_t hz = inited_ ? platform::rmtWs2812Resolution(rmt_[0]) : kResolutionHz;
         if (hz == 0) hz = kResolutionHz;
         return static_cast<uint16_t>((static_cast<uint64_t>(ns) * hz) / 1'000'000'000ull);
+    }
+
+    // --- pin/count config (plain parsing; runs on every platform) ---
+
+    // Re-derive pinList_/pinCounts_/pinOffsets_ from the two text controls and
+    // the current buffer/correction. On error: pinCount_ = 0 (loop() idles) and
+    // the static error literal goes to the status slot; a later successful parse
+    // clears it. Off the hot path.
+    bool parseConfig() {
+        pinCount_ = 0;
+        uint8_t n = 0;
+        const char* err = parsePinList(pins, pinList_, maxPinsForTarget(), n);
+        if (!err) {
+            const nrOfLightsType total = sourceBuffer_ ? sourceBuffer_->count() : 0;
+            err = assignCounts(ledsPerPin, n, total, pinCounts_);
+        }
+        if (err) {
+            configErr_ = err;
+            setStatus(err, Severity::Error);
+            return false;
+        }
+        pinCount_ = n;
+        const uint8_t outCh = correction_ ? correction_->outChannels : 0;
+        size_t off = 0;
+        for (uint8_t i = 0; i < pinCount_; i++) {
+            pinOffsets_[i] = off;
+            off += static_cast<size_t>(pinCounts_[i]) * outCh * 8;
+        }
+        clearConfigErr();
+        return true;
+    }
+
+    // Drop our parse-error status (and only ours — a loopback result stays).
+    void clearConfigErr() {
+        if (configErr_) {
+            if (status() == configErr_) clearStatus();
+            configErr_ = nullptr;
+        }
     }
 
     // --- symbol buffer (plain heap; runs on every platform) ---
@@ -197,21 +372,30 @@ private:
 
     // --- loopback self-test (control-driven) ---
 
-    // Run the one-shot RMT TX→RX loopback and report via the MoonModule status
-    // slot. The slot stores a const char* (no copy), so PASS / jumper-missing /
-    // not-supported are flash literals — zero RAM. Only the FAIL case needs the
-    // captured hex, so it borrows a buffer allocated ON DEMAND and freed by
-    // clearFailBuf() (teardown + every non-FAIL outcome) — no permanent member.
+    // Run the one-shot RMT TX→RX loopback on the FIRST pin and report via the
+    // MoonModule status slot. The slot stores a const char* (no copy), so PASS /
+    // jumper-missing / not-supported are flash literals — zero RAM. Only the
+    // FAIL case needs the captured hex, so it borrows a buffer allocated ON
+    // DEMAND and freed by clearFailBuf() (teardown + every non-FAIL outcome) —
+    // no permanent member.
     void runLoopbackSelfTest() {
-        if constexpr (!platform::isEsp32) {
+        if constexpr (platform::rmtTxChannels == 0) {
             clearFailBuf();
             setStatus("loopback: not supported on this platform", Severity::Warning);
             return;
         }
-        // The test reconfigures the data pin (gpio) as TX, so release our normal
-        // RMT channel first; reinit() restores it after.
-        deinit();
-        const auto r = platform::rmtWs2812Loopback(gpio, loopbackRxPin);
+        if (pinCount_ == 0) {
+            clearFailBuf();
+            setStatus("loopback: no valid pins", Severity::Warning);
+            return;
+        }
+        // The test reconfigures the first data pin as TX, so release ALL our TX
+        // channels first — this also guarantees the test's RX channel can always
+        // allocate RMT memory, even with every TX channel otherwise claimed;
+        // reinit() restores them after.
+        deinitAll();
+        const auto r = platform::rmtWs2812Loopback(static_cast<uint8_t>(pinList_[0]),
+                                                   static_cast<uint8_t>(loopbackRxPin));
         reinit();
         if (!r.jumperDetected) {
             clearFailBuf();
@@ -241,31 +425,50 @@ private:
         }
     }
 
-    // --- RMT channel (hardware; ESP32-only) ---
+    // --- RMT channels (hardware; RMT targets only) ---
 
-    static constexpr const char* kInitFailMsg = "RMT init failed — check the gpio pin";
+    static constexpr const char* kInitFailMsg = "RMT init failed — check the pins";
 
+    // All-or-nothing: a failing pin deinits everything and reports which pin,
+    // so loop()'s guard stays a single bool and the user sees one clear error
+    // instead of some strands dark, some lit.
     void reinit() {
-        if constexpr (!platform::isEsp32) return;
-        deinit();
-        inited_ = platform::rmtWs2812Init(rmt_, gpio, kResolutionHz, cfg_.invert);
-        // Surface an init failure instead of silently no-op'ing in loop() — the
-        // status field tells the user why output is dark (usually a bad gpio),
-        // rather than leaving them to wonder why nothing lights.
-        if (!inited_) {
-            clearFailBuf();   // release any stale loopback FAIL string first
-            setStatus(kInitFailMsg, Severity::Error);
-        } else if (status() == kInitFailMsg) {
-            clearStatus();    // a prior init failure recovered (e.g. gpio fixed)
+        if constexpr (platform::rmtTxChannels == 0) return;
+        deinitAll();
+        if (pinCount_ == 0) return;   // parse error — already in the status slot
+        for (uint8_t i = 0; i < pinCount_; i++) {
+            if (platform::rmtWs2812Init(rmt_[i], static_cast<uint8_t>(pinList_[i]),
+                                        kResolutionHz, cfg_.invert)) continue;
+            // Surface which pin failed instead of silently no-op'ing in loop() —
+            // the status tells the user why output is dark (usually a bad pin),
+            // rather than leaving them to wonder why nothing lights.
+            deinitAll();
+            clearFailBuf();
+            failBuf_ = static_cast<char*>(platform::alloc(kFailBufLen));
+            if (failBuf_) {
+                std::snprintf(failBuf_, kFailBufLen, "RMT init failed on pin %u",
+                              static_cast<unsigned>(pinList_[i]));
+                setStatus(failBuf_, Severity::Error);
+            } else {
+                setStatus(kInitFailMsg, Severity::Error);
+            }
+            return;
         }
+        inited_ = true;
+        // A prior init failure recovered (e.g. a pin fixed) — drop the stale error.
+        if (failBuf_ && status() == failBuf_) clearFailBuf();
+        if (status() == kInitFailMsg) clearStatus();
     }
 
-    // Releases only the RMT channel — NOT the symbol buffer (that's freeSymbols(),
-    // owned by teardown). reinit() calls this on every rebuild, so freeing the
-    // buffer here would strand loop() — the original bug.
-    void deinit() {
-        if constexpr (!platform::isEsp32) return;
-        if (inited_) { platform::rmtWs2812Deinit(rmt_); inited_ = false; }
+    // Releases only the RMT channels — NOT the symbol buffer (that's
+    // freeSymbols(), owned by teardown). reinit() calls this on every rebuild,
+    // so freeing the buffer here would strand loop() — the original bug.
+    void deinitAll() {
+        if constexpr (platform::rmtTxChannels == 0) return;
+        for (uint8_t i = 0; i < kMaxPins; i++) {
+            if (rmt_[i].impl) platform::rmtWs2812Deinit(rmt_[i]);
+        }
+        inited_ = false;
     }
 };
 

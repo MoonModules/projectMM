@@ -17,6 +17,7 @@
 #include "driver/rmt_rx.h"
 #include "driver/rmt_encoder.h"
 #include "driver/gpio.h"   // continuity pre-check in the loopback self-test
+#include "soc/soc_caps.h"  // SOC_RMT_MEM_WORDS_PER_CHANNEL (64 classic, 48 S3)
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -50,9 +51,11 @@ bool rmtWs2812Init(RmtWs2812Handle& h, uint8_t gpio, uint32_t resolutionHz, bool
     txCfg.clk_src = RMT_CLK_SRC_DEFAULT;
     txCfg.resolution_hz = resolutionHz;
     // Two memory blocks of symbols ping-pong so the DMA-less channel can refill
-    // while sending — the classic anti-glitch shape. 64 symbols/block is the
-    // classic-ESP32 size; the copy encoder streams from our buffer regardless.
-    txCfg.mem_block_symbols = 64;
+    // while sending — the classic anti-glitch shape. The per-channel block size
+    // is a chip fact (64 words classic, 48 on the S3 — a hardcoded 64 makes
+    // rmt_new_tx_channel reject S3); the copy encoder streams from our buffer
+    // regardless.
+    txCfg.mem_block_symbols = SOC_RMT_MEM_WORDS_PER_CHANNEL;
     txCfg.trans_queue_depth = 4;
     txCfg.flags.invert_out = invert ? 1 : 0;
 
@@ -85,29 +88,32 @@ uint32_t rmtWs2812Resolution(const RmtWs2812Handle& h) {
     return st ? st->resolutionHz : 0;
 }
 
-void rmtWs2812Show(RmtWs2812Handle& h, const uint32_t* symbols, size_t symbolCount,
-                   uint32_t resetUs) {
+bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint32_t* symbols, size_t symbolCount) {
     auto* st = static_cast<RmtTxState*>(h.impl);
-    if (!st || !symbols || symbolCount == 0) return;
+    if (!st || !symbols || symbolCount == 0) return false;
 
     rmt_transmit_config_t txCfg = {};
     txCfg.loop_count = 0;   // single shot, no hardware loop
 
     // Our symbols are already rmt_symbol_word_t-shaped; the copy encoder takes a
-    // byte size. Transmit, then block until the strand has fully clocked out — with
-    // a finite timeout so a wedged DMA can't hang the render tick forever. Even the
+    // byte size. This only *starts* the transfer — channels started back-to-back
+    // clock out concurrently, which is what makes a multi-pin frame cost the
+    // longest strand instead of the sum. The caller pairs this with
+    // rmtWs2812Wait and owns the inter-frame latch after the last wait.
+    return rmt_transmit(st->channel, st->encoder, symbols,
+                        symbolCount * sizeof(uint32_t), &txCfg) == ESP_OK;
+}
+
+void rmtWs2812Wait(RmtWs2812Handle& h, uint32_t timeoutMs) {
+    auto* st = static_cast<RmtTxState*>(h.impl);
+    if (!st) return;
+    // Finite timeout so a wedged DMA can't hang the render tick forever. Even the
     // longest realistic frame (thousands of pixels) clocks out well under 1 s; a
     // timeout here means the peripheral is stuck, and the driver re-encodes the
     // whole frame next tick anyway, so a dropped frame self-heals. Fuller error
     // handling (return failure, cancel in-flight) is deferred — see the backlog
     // note in leddriver-increment-1-plan.md.
-    rmt_transmit(st->channel, st->encoder, symbols, symbolCount * sizeof(uint32_t), &txCfg);
-    rmt_tx_wait_all_done(st->channel, 1000 /* ms */);
-
-    // Inter-frame reset: hold the line idle-LOW. invert_out (if set at init) is
-    // applied by the peripheral, so a plain busy-wait with the channel idle is
-    // the latch. ets_delay_us is fine for a few hundred us off any task context.
-    if (resetUs) ets_delay_us(resetUs);
+    rmt_tx_wait_all_done(st->channel, timeoutMs);
 }
 
 void rmtWs2812Deinit(RmtWs2812Handle& h) {
@@ -153,11 +159,13 @@ size_t rmtWs2812RxCapture(uint8_t gpio, uint32_t resolutionHz,
     rxCfg.gpio_num = static_cast<gpio_num_t>(gpio);
     rxCfg.clk_src = RMT_CLK_SRC_DEFAULT;
     rxCfg.resolution_hz = resolutionHz;
-    // The RX channel's internal memory block must be even and >= 64 symbols
-    // (IDF requirement). Round maxSymbols up to that floor; the actual capture
-    // buffer (outSymbols / maxSymbols) is separate and can be smaller.
+    // The RX channel's internal memory block must be even and >= one hardware
+    // block (IDF requirement; 64 words classic, 48 on the S3 — a hardcoded 64
+    // would silently claim part of a second S3 channel's memory). Round
+    // maxSymbols up to that floor; the actual capture buffer (outSymbols /
+    // maxSymbols) is separate and can be smaller.
     size_t memBlock = static_cast<size_t>(maxSymbols);
-    if (memBlock < 64) memBlock = 64;
+    if (memBlock < SOC_RMT_MEM_WORDS_PER_CHANNEL) memBlock = SOC_RMT_MEM_WORDS_PER_CHANNEL;
     if (memBlock & 1) memBlock++;
     rxCfg.mem_block_symbols = memBlock;
 
@@ -264,7 +272,9 @@ RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio) {
     if (xTaskCreate(rxTask, "rmtlb", 4096, &cap, 5, nullptr) == pdPASS) {
         vTaskDelay(pdMS_TO_TICKS(50));
         for (int i = 0; i < 50 && !cap.done; i++) {
-            rmtWs2812Show(tx, txSymbols, kBits, /*resetUs=*/300);
+            rmtWs2812Transmit(tx, txSymbols, kBits);
+            rmtWs2812Wait(tx, 1000);
+            ets_delay_us(300);   // inter-frame latch
             vTaskDelay(pdMS_TO_TICKS(10));
         }
         for (int i = 0; i < 200 && !cap.done; i++) vTaskDelay(pdMS_TO_TICKS(10));

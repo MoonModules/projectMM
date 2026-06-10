@@ -28,6 +28,16 @@ Completed items are removed. This file is deleted when empty.
 
 ## ESP32 performance and memory
 
+### Intermittent ~0.5 s LED pauses with the RMT driver (pending investigation)
+
+Observed on the bench (2026-06): LED output running on the RMT driver occasionally freezes for about half a second. Postponed by the product owner until more observations exist. Ranked suspects from the initial analysis, each with a cheap experiment:
+
+1. **WiFi modem power-save never disabled** — nothing in `src/` calls `esp_wifi_set_ps(WIFI_PS_NONE)`, so the IDF default `WIFI_PS_MIN_MODEM` is active; the radio's DTIM sleep causes exactly this class of intermittent multi-hundred-ms stall. WLED and the v1/v2 lineage disable sleep. Experiment: one line in the ESP32 platform code after association.
+2. **ArtNetSendDriver sending synchronously every tick to an absent destination** (default `192.168.1.70`) — lwIP keeps re-ARPing a dead address while the send sits in the render tick. Data point (2026-06-10): the bench esp32-16mb had ArtNetSend *disabled* in its persisted config, consistent with the pauses being annoying enough to switch the sender off. Experiment: point the ArtNet IP at a live host (or disable the driver) and see if the pauses stop.
+3. **`rmt_tx_wait_all_done` 1 s timeout** — a wedged transmission blocks the tick up to a full second (multi-pin: up to N×1 s). Least likely (~1 s, not ~0.5 s) but it's the only hard block in the driver itself.
+
+If pauses correlate with UI control changes, also consider the 2 s-debounced SPIFFS save stalling flash-resident code. The per-tick KPI log around a pause discriminates between these immediately.
+
 ### WiFi ArtNet performance (pending investigation)
 
 128×128 WiFi ArtNet measurements exist (see [performance.md](../performance.md) "ArtNet over WiFi" and "Build-variant WiFi comparison"). Remaining matrix:

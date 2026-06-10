@@ -7,6 +7,8 @@
 #include "light/layers/Buffer.h"
 #include "unit/core/conditional_controls.h"  // shared conditional-control helpers
 
+#include <cstring>  // std::strcpy (writing the pins text control directly)
+
 // These tests pin the symbol-buffer LIFECYCLE — the exact class of bug that
 // reached hardware: a review fix made deinit() free symbols_, and because
 // reinit() calls deinit(), every rebuild freed the buffer loop() needs, so the
@@ -46,7 +48,7 @@ TEST_CASE("RmtLedDriver sizes the symbol buffer in onBuildState") {
 TEST_CASE("RmtLedDriver keeps the symbol buffer across a rebuild (reinit must not free it)") {
     // The regression: onBuildState() does resizeSymbols() THEN reinit(), and a
     // bad reinit()->deinit() freed symbols_ right after it was allocated, so the
-    // buffer was null by the time loop() ran. A second onBuildState (what a gpio
+    // buffer was null by the time loop() ran. A second onBuildState (what a pins
     // change / topology rebuild triggers) must leave the buffer present.
     mm::RmtLedDriver d;
     mm::Buffer src;
@@ -57,6 +59,22 @@ TEST_CASE("RmtLedDriver keeps the symbol buffer across a rebuild (reinit must no
     d.onBuildState();   // simulate a rebuild (the path that runs reinit())
     CHECK(d.symbolBuffer() != nullptr);   // would be null with the deinit()-frees bug
     CHECK(d.symbolCapacity() >= static_cast<size_t>(64) * 3 * 8);
+}
+
+TEST_CASE("RmtLedDriver keeps the symbol buffer across a pins change") {
+    // Same regression class as above, multi-pin flavour: editing the pins list
+    // triggers a rebuild that re-parses and re-inits N channels — none of which
+    // may free the symbol buffer loop() encodes into.
+    mm::RmtLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    wire(d, src, corr, 64);
+    REQUIRE(d.symbolBuffer() != nullptr);
+
+    std::strcpy(d.pins, "18,17");
+    d.onBuildState();
+    CHECK(d.symbolBuffer() != nullptr);
+    CHECK(d.pinCount() == 2);
 }
 
 TEST_CASE("RmtLedDriver grows the symbol buffer when the grid grows") {

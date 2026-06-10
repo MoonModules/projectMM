@@ -4,6 +4,21 @@ Auto-generated from `test/unit/{core,light}/unit_*.cpp` by `scripts/docs/generat
 
 Unit tests are the fastest tier in the [test strategy](../testing.md): they run the production code in-process with doctest, no platform, no network. Each section below covers one module.
 
+## ArtNetReceiveEffect
+
+`test/unit/light/unit_ArtNetReceiveEffect.cpp`
+*Also touches: ArtNetSendDriver.*
+
+- A packet built by the sender's builder parses back to the same universe and payload — the two sides can't drift.
+- Bad magic, non-OpDmx opcodes, truncated headers, and lying length fields are all rejected — the receiver drops them.
+- Universe universe_start lands at byte 0; the next universe lands at byte 510 — the same split the sender uses.
+- The layer clears its buffer every tick; staging holds the last frame, so the lights don't strobe black between packets.
+- Universes below universe_start are ignored; universes relative to a non-zero start land at offset 0.
+- A payload overrunning the buffer end is clamped; a universe entirely beyond the buffer is ignored.
+- A 0×0×0 grid accepts packets as a clean no-op — degraded, not crashed.
+- Staging is sized in onBuildState (off the hot path), loop() never reallocates it, teardown frees it.
+- A real packet sent over localhost UDP lands in the layer buffer — the end-to-end proof of the platform receive path.
+
 ## ArtNetSendDriver
 
 `test/unit/light/unit_ArtNetSendDriver_no_alloc_in_loop.cpp`
@@ -64,7 +79,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 - Checkerboard paints at least one non-zero byte on a 16×16 grid (effect actually renders).
 - With cell_size=4, adjacent cells render different colours (the checker pattern is real, not uniform).
-- LavaLampEffect has localised blob features that can land on identical corner palette indices at some t values (corner-pair check is too strict). Scan the whole buffer for any two distinct pixels instead — same approach as RipplesEffect below. LavaLamp paints at least one non-zero byte (effect actually renders).
+- LavaLampEffect has localised blob features that can land on identical corner palette indices at some t values (corner-pair check is too strict). Scan the whole buffer for any two distinct pixels instead — same approach as RingsEffect below. LavaLamp paints at least one non-zero byte (effect actually renders).
 - Across 10 frames at bpm=60, at least one frame shows two distinct colours somewhere in the buffer (blobs move and the field varies).
 - RingsEffect has localised features (thin rings); corner-pair check is too strict, so we scan for any two distinct pixels instead. Rings paints at least one non-zero byte (effect actually renders).
 - At least two distinct pixels exist somewhere in the buffer (rings are localised, so corner-pair would be too strict).
@@ -422,10 +437,31 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 - _RmtLedDriver sizes the symbol buffer in onBuildState_
 - _RmtLedDriver keeps the symbol buffer across a rebuild (reinit must not free it)_
+- _RmtLedDriver keeps the symbol buffer across a pins change_
 - _RmtLedDriver grows the symbol buffer when the grid grows_
 - _RmtLedDriver releases the symbol buffer on teardown_
 - MoonModule contract: teardown reverses setup, so setup→teardown→setup→teardown cycles leave no residue — no leaked heap (ASAN in the test runner catches that), no stuck state. After each teardown the driver must look untouched: no symbol buffer, no status. Run several cycles to surface any accumulation.
 - Conditional control: loopbackRxPin is visible only while loopbackTest is on, hidden otherwise — but always bound (so a saved rxPin loads regardless). Same add-then-setHidden pattern as NetworkModule (architecture.md § Conditional controls). This pins the exact behavior that, with the old UI, showed the pin at the wrong times; a regression in the C++ flag now fails here.
+
+`test/unit/light/unit_RmtLedDriver_pins.cpp`
+*Also touches: Drivers, Correction.*
+
+- "18,17,16" parses to three pins in list order — the order defines the buffer slices.
+- A single pin (the default "18") and spaces around tokens are both fine.
+- _parsePinList rejects bad input with a static error message_
+- maxPins is the chip's RMT TX-channel cap: 5 pins fail an S3-sized 4, fit a classic 8.
+- The same GPIO twice would double-drive one strand — rejected at parse time.
+- Explicit "100,100,50" maps one count to each pin by position.
+- A short list assigns what it names; unlisted pins share the remaining lights evenly.
+- _assignCounts with an empty list splits evenly, last pin takes the rounding remainder_
+- _assignCounts clamps so the sum never exceeds the buffer_
+- _assignCounts handles a zero-light buffer (0×0×0 grid) as all-zero_
+- _assignCounts rejects a bad token_
+- _assignCounts ignores extra counts beyond the pin list_
+- _RmtLedDriver slices the buffer across pins (even split)_
+- _RmtLedDriver slices the buffer per ledsPerPin_
+- _RmtLedDriver idles with a status error on a bad pin list_
+- _RmtLedDriver re-slices when the source buffer changes_
 
 `test/unit/light/unit_RmtLedEncoder.cpp`
 *Also touches: Correction.*

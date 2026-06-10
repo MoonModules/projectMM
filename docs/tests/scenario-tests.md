@@ -519,11 +519,11 @@ PlasmaEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap,
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 18.3-24.3 | — / 126KB | — / 62KB-108KB |
-| `pc-macos` | — / 19,231-22,727 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 17,241-22,727 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 7,874-9,709 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-10
 - `pc-windows`: observed 2026-06-07
 
 #### `PlasmaPaletteEffect-16x16` (set_control)  📏
@@ -598,11 +598,11 @@ PlasmaPaletteEffect at 128x128 (16384 lights) — measure tick/FPS, free interna
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 21.8-32.1 | — / 126KB | — / 62KB-108KB |
-| `pc-macos` | — / 41,667-50,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 37,037-50,000 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 12,346-18,868 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-10
 - `pc-windows`: observed 2026-06-07
 
 #### `MetaballsEffect-16x16` (set_control)  📏
@@ -914,11 +914,11 @@ GlowParticlesEffect at 128x128 (16384 lights) — measure tick/FPS, free interna
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 14.3-15.0 | — / 126KB | — / 62KB-108KB |
-| `pc-macos` | — / 7,752-14,286 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 7,752-14,493 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 1,949-2,370 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-10
 - `pc-windows`: observed 2026-06-07
 
 #### `CheckerboardEffect-16x16` (set_control)  📏
@@ -1094,11 +1094,11 @@ RingsEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max 
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 1,119-1,129 | — / 170KB-173KB | — / 92KB-108KB |
-| `pc-macos` | — / 333,333 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 333,333-1,000,000 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 100,000-125,000 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-10
 - `pc-windows`: observed 2026-06-07
 
 #### `RingsEffect-32x32` (set_control)  📏
@@ -1113,11 +1113,11 @@ RingsEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 284-413 | — / 168KB-171KB | — / 88KB-108KB |
-| `pc-macos` | — / 83,333-125,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 83,333-250,000 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 38,462-47,619 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-10
 - `pc-windows`: observed 2026-06-07
 
 #### `RingsEffect-64x64` (set_control)  📏
@@ -1132,11 +1132,11 @@ RingsEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 45.0-96.6 | — / 161KB-162KB | — / 80KB-108KB |
-| `pc-macos` | — / 30,303-35,714 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 30,303-58,824 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 12,048-15,152 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07 → 2026-06-08
+- `pc-macos`: observed 2026-06-07 → 2026-06-10
 - `pc-windows`: observed 2026-06-07
 
 #### `RingsEffect-128x128` (set_control)  📏
@@ -1151,11 +1151,11 @@ RingsEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, 
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 12.2-13.0 | — / 125KB-126KB | — / 62KB-108KB |
-| `pc-macos` | — / 8,403-9,259 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 8,403-13,889 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 3,067-3,831 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-10
 - `pc-windows`: observed 2026-06-07
 
 #### `LavaLampEffect-16x16` (set_control)  📏
@@ -1594,11 +1594,11 @@ Pipeline still renders after replacing a grid with a sphere (different layout ty
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 38,462 | — / 223KB | — / 108KB |
-| `pc-macos` | — / 8,621-100,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 7,246-100,000 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 5,848-9,009 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-08
-- `pc-macos`: observed 2026-06-05 → 2026-06-07
+- `pc-macos`: observed 2026-06-05 → 2026-06-10
 - `pc-windows`: observed 2026-06-07
 
 #### `measure-after-remove` (measure)  📏
@@ -1685,13 +1685,13 @@ Disable mirrorY. Mirror is now fully off — should land on the no-LUT path.
 | `esp32` | — / 4.4 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 8.9-9.0 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 11.1 | ≥ 103KB / 94KB | — / 48KB |
-| `pc-macos` | ≥ 2,500 / 1,916-9,009 | unlimited / unlimited | — / unlimited |
+| `pc-macos` | ≥ 2,500 / 1,916-9,091 | unlimited / unlimited | — / unlimited |
 | `pc-windows` | — / 1,082-1,305 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-08
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-10
 - `pc-windows`: observed 2026-06-07
 
 #### `re-enable-mirrorY` (set_control)  📏

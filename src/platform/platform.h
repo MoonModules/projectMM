@@ -23,6 +23,9 @@ void free(void* ptr);
 
 void yield();
 void delayMs(uint32_t ms);  // blocking sleep; only use outside the hot path
+void delayUs(uint32_t us);  // blocking busy-wait for sub-ms protocol gaps (e.g.
+                            // the WS2812 inter-frame latch); fine for a few
+                            // hundred µs, not a general-purpose sleep
 size_t freeHeap();          // total free (internal + PSRAM if present)
 size_t freeInternalHeap();  // internal RAM only (for stack/HTTP/WiFi reserve check)
 size_t maxAllocBlock();     // largest contiguous block (any memory type — incl PSRAM)
@@ -193,6 +196,15 @@ public:
     // parse + route lookup. Returns false on a bad IP.
     bool connect(const char* ip, uint16_t port);
     bool sendTo(const uint8_t* data, size_t len);  // uses the connect()ed destination
+    // Receiver side (ArtNet in): listen on `port` on any interface
+    // (SO_REUSEADDR) and flip the socket non-blocking — note that flips the
+    // whole socket, sendTo() included. Returns false when the port is taken.
+    bool bind(uint16_t port);
+    // Non-blocking receive of one datagram: >0 = bytes copied into buf, -1 =
+    // nothing pending. Mirrors TcpConnection::read's contract minus the
+    // peer-closed 0 case (UDP has no connection to close). A datagram longer
+    // than maxLen is truncated.
+    int recvFrom(uint8_t* buf, size_t maxLen);
     void close();
 
 private:
@@ -262,11 +274,12 @@ private:
 [[noreturn]] void reboot();
 
 // ---------------------------------------------------------------------------
-// RMT WS2812 LED output (classic ESP32). The driver (src/light/drivers/
-// RmtLedDriver.h) does the symbol encode in domain code; the platform owns only
-// the peripheral. All no-ops on non-ESP32 targets, so the driver compiles
-// everywhere behind `if constexpr (platform::isEsp32)` and is simply inert off
-// the chip that has RMT.
+// RMT WS2812 LED output (classic ESP32 + S3). The driver (src/light/drivers/
+// RmtLedDriver.h) does the symbol encode in domain code and may run several
+// channels at once (one per pin); the platform owns only the peripheral. All
+// no-ops on targets without RMT, so the driver compiles everywhere behind
+// `if constexpr (platform::rmtTxChannels > 0)` (see platform_config.h) and is
+// simply inert off the chips that have RMT.
 // ---------------------------------------------------------------------------
 
 // Opaque handle to one configured RMT TX channel. `impl` is set by the platform
@@ -282,10 +295,19 @@ bool rmtWs2812Init(RmtWs2812Handle& h, uint8_t gpio, uint32_t resolutionHz, bool
 // The driver converts its ns timings to ticks with this. 0 if not initialised.
 uint32_t rmtWs2812Resolution(const RmtWs2812Handle& h);
 
-// Transmit `symbolCount` pre-encoded WS2812 RMT symbols, block until done, then
-// hold the line idle `resetUs` microseconds for the inter-frame latch. Synchronous.
-void rmtWs2812Show(RmtWs2812Handle& h, const uint32_t* symbols, size_t symbolCount,
-                   uint32_t resetUs);
+// Start transmitting `symbolCount` pre-encoded WS2812 RMT symbols and return
+// immediately — channels started back-to-back clock out concurrently. Pair with
+// rmtWs2812Wait; the caller owns the inter-frame latch (delayUs) after the last
+// wait. The symbol buffer must stay valid until the wait returns. Returns false
+// when the channel isn't initialised (and on targets without RMT).
+bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint32_t* symbols, size_t symbolCount);
+
+// Block until the channel's in-flight transmission finishes, bounded by
+// `timeoutMs` so a wedged peripheral can't hang the render tick forever — a
+// timed-out frame is simply dropped and re-encoded next tick (self-heals). With
+// N channels waited sequentially the worst case is N×timeoutMs; acceptable for
+// the same self-healing reason.
+void rmtWs2812Wait(RmtWs2812Handle& h, uint32_t timeoutMs);
 
 void rmtWs2812Deinit(RmtWs2812Handle& h);
 

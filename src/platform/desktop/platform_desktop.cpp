@@ -121,6 +121,10 @@ void delayMs(uint32_t ms) {
     std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 }
 
+void delayUs(uint32_t us) {
+    std::this_thread::sleep_for(std::chrono::microseconds(us));
+}
+
 size_t freeHeap() {
     return 0; // Not meaningful on desktop (0 = unlimited)
 }
@@ -432,6 +436,27 @@ bool UdpSocket::sendTo(const uint8_t* data, size_t len) {
     return ::send(sock(fd_), reinterpret_cast<const char*>(data), static_cast<int>(len), 0) >= 0;
 }
 
+bool UdpSocket::bind(uint16_t port) {
+    if (fd_ < 0) return false;
+    int reuse = 1;
+    ::setsockopt(sock(fd_), SOL_SOCKET, SO_REUSEADDR,
+                 reinterpret_cast<const char*>(&reuse), sizeof(reuse));
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (::bind(sock(fd_), reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) return false;
+    // Non-blocking so the render loop's drain never stalls waiting for a packet.
+    return make_nonblocking(fd_) == 0;
+}
+
+int UdpSocket::recvFrom(uint8_t* buf, size_t maxLen) {
+    if (fd_ < 0) return -1;
+    auto n = ::recv(sock(fd_), reinterpret_cast<char*>(buf), static_cast<int>(maxLen), 0);
+    // 0-byte datagrams and would-block both mean "nothing usable pending".
+    return n > 0 ? static_cast<int>(n) : -1;
+}
+
 void UdpSocket::close() {
     if (fd_ >= 0) {
         close_sock(fd_);
@@ -608,16 +633,19 @@ void TcpServer::close() {
 
 // ---------------------------------------------------------------------------
 // RMT WS2812 — no-op stubs. Desktop has no RMT peripheral; the driver guards
-// every call with `if constexpr (platform::isEsp32)` (false here), so these
-// exist only to satisfy the linker and are never reached at runtime.
+// every call with `if constexpr (platform::rmtTxChannels == 0)` (0 here), so
+// these exist only to satisfy the linker and are never reached at runtime.
 // ---------------------------------------------------------------------------
 bool rmtWs2812Init(RmtWs2812Handle& /*h*/, uint8_t /*gpio*/, uint32_t /*resolutionHz*/,
                    bool /*invert*/) {
     return false;
 }
 uint32_t rmtWs2812Resolution(const RmtWs2812Handle& /*h*/) { return 0; }
-void rmtWs2812Show(RmtWs2812Handle& /*h*/, const uint32_t* /*symbols*/,
-                   size_t /*symbolCount*/, uint32_t /*resetUs*/) {}
+bool rmtWs2812Transmit(RmtWs2812Handle& /*h*/, const uint32_t* /*symbols*/,
+                       size_t /*symbolCount*/) {
+    return false;
+}
+void rmtWs2812Wait(RmtWs2812Handle& /*h*/, uint32_t /*timeoutMs*/) {}
 void rmtWs2812Deinit(RmtWs2812Handle& /*h*/) {}
 size_t rmtWs2812RxCapture(uint8_t /*gpio*/, uint32_t /*resolutionHz*/,
                           uint32_t* /*outSymbols*/, size_t /*maxSymbols*/,

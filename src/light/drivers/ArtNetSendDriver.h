@@ -1,5 +1,6 @@
 #pragma once
 
+#include "light/ArtNetPacket.h"   // shared OpDmx wire format (build + parse)
 #include "light/drivers/Drivers.h"
 #include "platform/platform.h"
 
@@ -133,44 +134,9 @@ public:
         sequence_++;
     }
 
-    // Public for testability: builds an ArtNet OpDmx packet into outBuf.
-    // Returns total packet size. outBuf must be at least ARTNET_HEADER_SIZE + dataLen.
-    static size_t buildPacket(uint8_t* outBuf, uint16_t universe, uint8_t sequence,
-                              const uint8_t* data, uint16_t dataLen) {
-        // "Art-Net\0" header
-        std::memcpy(outBuf, "Art-Net", 8); // includes null terminator
-
-        // OpCode: OpDmx = 0x5000 (little-endian)
-        outBuf[8] = 0x00;
-        outBuf[9] = 0x50;
-
-        // Protocol version: 14 (big-endian)
-        outBuf[10] = 0x00;
-        outBuf[11] = 0x0e;
-
-        // Sequence
-        outBuf[12] = sequence;
-
-        // Physical port
-        outBuf[13] = 0;
-
-        // Universe (little-endian)
-        outBuf[14] = static_cast<uint8_t>(universe & 0xFF);
-        outBuf[15] = static_cast<uint8_t>(universe >> 8);
-
-        // Length (big-endian)
-        outBuf[16] = static_cast<uint8_t>(dataLen >> 8);
-        outBuf[17] = static_cast<uint8_t>(dataLen & 0xFF);
-
-        // DMX data
-        std::memcpy(outBuf + ARTNET_HEADER_SIZE, data, dataLen);
-
-        return ARTNET_HEADER_SIZE + dataLen;
-    }
-
-    static constexpr uint16_t ARTNET_PORT = 6454;
-    static constexpr size_t MAX_CHANNELS_PER_UNIVERSE = 510; // 170 RGB lights
-    static constexpr size_t ARTNET_HEADER_SIZE = 18;
+    // The packet build, the constants, and the inverse parse live in
+    // light/ArtNetPacket.h, shared with ArtNetReceiveEffect — the wire format
+    // exists in exactly one place.
 
     // Test-only accessor for the correction-applied buffer. Lets the unit
     // tests pin the no-allocation-in-loop contract (size set in onBuildState
@@ -202,7 +168,7 @@ private:
 
     void sendUniverse(uint16_t universe, const uint8_t* data, uint16_t dataLen) {
         uint8_t packet[ARTNET_HEADER_SIZE + MAX_CHANNELS_PER_UNIVERSE];
-        size_t packetLen = buildPacket(packet, universe, sequence_, data, dataLen);
+        size_t packetLen = buildArtDmxPacket(packet, universe, sequence_, data, dataLen);
         socket_.sendTo(packet, packetLen);
     }
 

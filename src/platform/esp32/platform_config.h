@@ -4,6 +4,8 @@
 
 #include "sdkconfig.h"
 
+#include <cstdint>
+
 namespace mm::platform {
 
 #ifdef CONFIG_SPIRAM
@@ -25,6 +27,16 @@ constexpr bool isEsp32S3 = false;
 #else
 constexpr bool isEsp32 = false;
 constexpr bool isEsp32S3 = false;
+#endif
+
+// RMT TX channels this chip offers (8 on classic ESP32, 4 on the S3, straight
+// from the IDF SOC capability config). Doubles as the RMT capability flag: the
+// RMT LED driver and its main.cpp registration guard on `rmtTxChannels > 0`
+// instead of a chip-family flag, so a new RMT-bearing target works untouched.
+#ifdef CONFIG_SOC_RMT_SUPPORTED
+constexpr uint8_t rmtTxChannels = CONFIG_SOC_RMT_TX_CANDIDATES_PER_GROUP;
+#else
+constexpr uint8_t rmtTxChannels = 0;
 #endif
 
 // WiFi is compiled out in the Ethernet-only build profile. ESP-IDF v6.x has no

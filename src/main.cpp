@@ -17,6 +17,7 @@
 #include "light/effects/RipplesEffect.h"
 #include "light/effects/LavaLampEffect.h"
 #include "light/effects/GameOfLifeEffect.h"
+#include "light/effects/ArtNetReceiveEffect.h"
 #include "light/modifiers/MultiplyModifier.h"
 #include "light/modifiers/CheckerboardModifier.h"
 #include "light/drivers/ArtNetSendDriver.h"
@@ -63,6 +64,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::RipplesEffect>("RipplesEffect", "light/effects/RipplesEffect.md");
     mm::ModuleFactory::registerType<mm::LavaLampEffect>("LavaLampEffect", "light/effects/LavaLampEffect.md");
     mm::ModuleFactory::registerType<mm::GameOfLifeEffect>("GameOfLifeEffect", "light/effects/GameOfLifeEffect.md");
+    mm::ModuleFactory::registerType<mm::ArtNetReceiveEffect>("ArtNetReceiveEffect", "light/effects/ArtNetReceiveEffect.md");
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier", "light/modifiers/MultiplyModifier.md");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers/CheckerboardModifier.md");
     mm::ModuleFactory::registerType<mm::ArtNetSendDriver>("ArtNetSendDriver", "light/drivers/ArtNetSendDriver.md");
@@ -215,10 +217,10 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     drivers->addChild(artnet);  // name = "ArtNetSend" (factory default) — disambiguates from a future ArtNetReceive
     artnet->markWiredByCode();
 
-    // RMT WS2812 LED output — classic ESP32 only this increment (the RMT seam is
-    // a no-op on S3/desktop; LCD_CAM is the S3 path, later). Wired by code like
-    // ArtNet so a persistence load can't drop it.
-    if constexpr (mm::platform::isEsp32) {
+    // RMT WS2812 LED output — any chip with RMT TX channels (classic ESP32: 8,
+    // S3: 4; the seam is a no-op on desktop, and LCD_CAM is the S3's *parallel*
+    // path, later). Wired by code like ArtNet so a persistence load can't drop it.
+    if constexpr (mm::platform::rmtTxChannels > 0) {
         auto* led = mm::ModuleFactory::create("RmtLedDriver");
         drivers->addChild(led);
         led->markWiredByCode();

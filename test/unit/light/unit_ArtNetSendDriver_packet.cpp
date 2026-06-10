@@ -8,11 +8,11 @@
 // The built packet contains the exact header layout the Art-Net spec mandates: ID, OpCode, version, sequence, physical, universe, length, data.
 TEST_CASE("ArtNet packet header format") {
     uint8_t data[3] = {255, 0, 128};
-    uint8_t packet[mm::ArtNetSendDriver::ARTNET_HEADER_SIZE + 3];
+    uint8_t packet[mm::ARTNET_HEADER_SIZE + 3];
 
-    size_t len = mm::ArtNetSendDriver::buildPacket(packet, 0, 42, data, 3);
+    size_t len = mm::buildArtDmxPacket(packet, 0, 42, data, 3);
 
-    CHECK(len == mm::ArtNetSendDriver::ARTNET_HEADER_SIZE + 3);
+    CHECK(len == mm::ARTNET_HEADER_SIZE + 3);
 
     // "Art-Net\0" at offset 0
     CHECK(std::memcmp(packet, "Art-Net", 8) == 0);
@@ -48,9 +48,9 @@ TEST_CASE("ArtNet packet header format") {
 // Universe 259 (0x0103) is encoded little-endian (low byte first), matching the Art-Net wire format.
 TEST_CASE("ArtNet packet with non-zero universe") {
     uint8_t data[6] = {1, 2, 3, 4, 5, 6};
-    uint8_t packet[mm::ArtNetSendDriver::ARTNET_HEADER_SIZE + 6];
+    uint8_t packet[mm::ARTNET_HEADER_SIZE + 6];
 
-    mm::ArtNetSendDriver::buildPacket(packet, 259, 0, data, 6);
+    mm::buildArtDmxPacket(packet, 259, 0, data, 6);
 
     // Universe 259 = 0x0103, little-endian
     CHECK(packet[14] == 0x03);
@@ -60,7 +60,7 @@ TEST_CASE("ArtNet packet with non-zero universe") {
 // 256 RGB lights (768 bytes) split across exactly 2 universes (510 + 258), matching the 510-channel-per-universe cap.
 TEST_CASE("ArtNet universe splitting for 256 RGB lights") {
     // 256 RGB lights = 768 bytes = 2 universes (510 + 258)
-    constexpr size_t maxPerUniverse = mm::ArtNetSendDriver::MAX_CHANNELS_PER_UNIVERSE;
+    constexpr size_t maxPerUniverse = mm::MAX_CHANNELS_PER_UNIVERSE;
     constexpr size_t totalBytes = 256 * 3;
 
     size_t universeCount = 0;
@@ -80,9 +80,9 @@ TEST_CASE("ArtNet universe splitting for 256 RGB lights") {
 TEST_CASE("ArtNet packet length field is big-endian") {
     uint8_t data[510];
     std::memset(data, 0, sizeof(data));
-    uint8_t packet[mm::ArtNetSendDriver::ARTNET_HEADER_SIZE + 510];
+    uint8_t packet[mm::ARTNET_HEADER_SIZE + 510];
 
-    mm::ArtNetSendDriver::buildPacket(packet, 0, 0, data, 510);
+    mm::buildArtDmxPacket(packet, 0, 0, data, 510);
 
     // 510 = 0x01FE, big-endian
     CHECK(packet[16] == 0x01);

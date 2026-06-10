@@ -172,6 +172,18 @@ Executes scenario steps (add_module, set_control, delete_module) via REST API. C
 
 For a full description of each scenario, see the [scenario inventory](/api/docs/tests/scenario-tests.md) — auto-generated from the JSON files.
 
+### run_artnet_live
+
+End-to-end ArtNet matrix test across every online board in moondeck.json's active network — the live proof for [ArtNetReceiveEffect](../docs/moonmodules/light/effects/ArtNetReceiveEffect.md). Each round one device is the sender and every other device listens: the PC seeds the sender with a solid colour over real ArtNet UDP, asserts the sender's `/ws` preview stream shows it, then points the sender's own ArtNetSendDriver at each listener and asserts the listener's preview shows the sender's corrected colour (brightness + channel order replicated host-side). With one device online only the PC→device leg runs.
+
+```bash
+uv run scripts/scenario/run_artnet_live.py                      # full matrix over all online devices
+uv run scripts/scenario/run_artnet_live.py --device MM-70BC     # only rounds with this sender
+uv run scripts/scenario/run_artnet_live.py --tolerance 1        # loosen the per-channel byte match
+```
+
+Everything it mutates (grid size → 16×16 for the run, ArtNetSend `ip`, the temporarily added ArtNetReceive effect) is restored afterwards, also on failure. Exit codes: `0` = all legs passed, `1` = a leg failed, `2` = environment problem (no online devices / no moondeck.json). Desktop listeners may need the OS firewall to allow UDP 6454.
+
 ## ESP32 Tab
 
 
