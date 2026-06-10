@@ -53,7 +53,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - RingsEffect has localised features (thin rings); corner-pair check is too strict, so we scan for any two distinct pixels instead. Rings paints at least one non-zero byte (effect actually renders).
 - At least two distinct pixels exist somewhere in the buffer (rings are localised, so corner-pair would be too strict).
 - RipplesEffect (MoonLight sine-wave water surface) lights one pixel per column at a sine-driven height. On a flat 2D layer it still paints a visible wavefront — assert it renders something and varies across the surface.
-- _RipplesEffect spatial variation_
+- Ripples lights one pixel per column at a sine-driven height, so the surface holds at least two distinct colours (wavefront vs background) — scan the whole buffer, corner-pair would be too strict.
 
 ## CheckerboardModifier
 
@@ -241,6 +241,30 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 *Also touches: Layer, Drivers.*
 
 - Disabling the only layout child and re-enabling it must not crash Drivers, and rendering resumes cleanly.
+
+## LcdLedDriver
+
+`test/unit/light/unit_LcdLedDriver.cpp`
+*Also touches: Drivers, Correction.*
+
+- Explicit counts slice the buffer consecutively; the frame is sized by the LONGEST lane. The bus always has all 8 lanes — unused strands take the 0-light remainder and idle LOW.
+- Empty ledsPerPin splits evenly — same PinList semantics the RMT driver uses.
+- An RGB→RGBW preset toggle grows the frame (32 vs 24 slot bytes per light).
+- A bad pin list idles the driver with the parse literal in the status; fixing it recovers.
+- IDF's i80 bus rejects partial pin sets, so the driver does too — fewer than 8 pins is a config error, not a narrower bus.
+- A 0×0×0 grid is a clean idle: zero counts, zero frame (no pad for an empty frame), no crash.
+- setup/teardown cycles leave no residue (status clean, ASAN-checked heap).
+- loopbackRxPin is bound always, visible only while loopbackTest is on.
+
+`test/unit/light/unit_LcdLedEncoder.cpp`
+*Also touches: Correction.*
+
+- One lane, one byte 0xA5: slot0 always the mask, slot1 follows the bits MSB-first, slot2 always zero.
+- Two lanes 0xFF/0x00 in one row: the data slot carries lane 0's bit only — the transpose itself.
+- A lane excluded from the mask contributes to NEITHER slot 0 nor slot 1, even with garbage wire bytes — short strands idle LOW (no white flashes).
+- Mask 0 (a row past every lane's strand) is a fully idle row.
+- Channel order comes from Correction (logical red → GRB wire {0,255,0}); the encoder is order-agnostic.
+- RGBW rows emit 4 channels × 8 bits × 3 slots = 96 bytes.
 
 ## MappingLUT
 

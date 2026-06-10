@@ -180,6 +180,7 @@ TEST_CASE("RipplesEffect writes non-zero RGB") {
     CHECK(ctx.hasNonZero());
 }
 
+// Ripples lights one pixel per column at a sine-driven height, so the surface holds at least two distinct colours (wavefront vs background) — scan the whole buffer, corner-pair would be too strict.
 TEST_CASE("RipplesEffect spatial variation") {
     Ctx ctx(32, 32);
     mm::RipplesEffect effect;

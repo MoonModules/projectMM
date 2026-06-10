@@ -672,4 +672,27 @@ RmtLoopbackResult rmtWs2812Loopback(uint8_t /*txGpio*/, uint8_t /*rxGpio*/) {
     return {};   // not supported off ESP32
 }
 
+// ---------------------------------------------------------------------------
+// LCD_CAM WS2812 — no-op stubs. Desktop has no i80 peripheral; the LCD LED
+// driver guards every call with `if constexpr (platform::lcdLanes == 0)`
+// (0 here), so these exist only to satisfy the linker.
+// ---------------------------------------------------------------------------
+bool lcdWs2812Init(LcdWs2812Handle& /*h*/, const uint16_t* /*dataPins*/,
+                   uint8_t /*laneCount*/, uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
+                   size_t /*bufferBytes*/) {
+    return false;
+}
+uint8_t* lcdWs2812Buffer(const LcdWs2812Handle& /*h*/) { return nullptr; }
+size_t lcdWs2812BufferCapacity(const LcdWs2812Handle& /*h*/) { return 0; }
+bool lcdWs2812Transmit(LcdWs2812Handle& /*h*/, size_t /*bytes*/) { return false; }
+void lcdWs2812Wait(LcdWs2812Handle& /*h*/, uint32_t /*timeoutMs*/) {}
+void lcdWs2812Deinit(LcdWs2812Handle& /*h*/) {}
+RmtLoopbackResult lcdWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
+                                    uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
+                                    uint16_t /*rxGpio*/, const uint8_t* /*frame*/,
+                                    size_t /*frameBytes*/, size_t /*dataBytes*/,
+                                    uint8_t /*rowBits*/) {
+    return {};   // not supported off the S3
+}
+
 } // namespace mm::platform

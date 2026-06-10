@@ -24,7 +24,7 @@ namespace {
 // inspects the driver.
 void wire(mm::RmtLedDriver& d, mm::Buffer& src, mm::Correction& corr,
           mm::nrOfLightsType lights = 64) {
-    src.allocate(lights, 3);
+    REQUIRE(src.allocate(lights, 3));   // a masked alloc failure would fail cases downstream
     corr.rebuild(255, mm::LightPreset::GRB);   // 3 out-channels
     d.onBuildControls();
     d.setSourceBuffer(&src);

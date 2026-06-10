@@ -94,7 +94,7 @@ def wait_for_solid(host: str, rgb, tolerance: int = 0, min_match_pct: float = 10
         while time.monotonic() < deadline:
             try:
                 opcode, payload = ws.read_frame(deadline)
-            except (TimeoutError, socket.timeout):
+            except TimeoutError:    # socket.timeout is an alias since Python 3.10
                 break
             if opcode != 0x2 or not payload or payload[0] != 0x02:
                 continue  # text/state frame or 0x03 coordinate table

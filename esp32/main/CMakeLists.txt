@@ -11,6 +11,7 @@ idf_component_register(
         "../../src/platform/esp32/platform_esp32_ota.cpp"
         "../../src/platform/esp32/platform_esp32_improv.cpp"
         "../../src/platform/esp32/platform_esp32_rmt.cpp"
+        "../../src/platform/esp32/platform_esp32_lcd.cpp"
     INCLUDE_DIRS
         "../../src"
         "../../src/platform/esp32"

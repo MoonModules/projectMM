@@ -175,13 +175,22 @@ struct ImprovDeviceInfo {
 // boardReady's release-store. Pass nullptr/0/nullptr to opt out (desktop
 // stub, future targets without BoardModule). Mirrors the ssid/password
 // triple: validate + buffer-write + flag-signal, scheduler thread reads.
+// SET_TX_POWER RPC (command 0xFD) — when set, the Improv task validates the
+// 1-byte dBm payload (0..21), writes it to txPowerOut, and publishes via
+// txPowerReady's release-store. This is the pre-association escape hatch for
+// boards whose LDO browns out at full TX power (LOLIN S3/S2): their
+// boards.json cap normally arrives over HTTP *after* the device is online,
+// which such a board can never reach — proven on the bench 2026-06-10. Same
+// validate + buffer-write + flag-signal shape as SET_BOARD.
 bool improvProvisioningInit(const ImprovDeviceInfo& info,
                             char* ssidOut, size_t ssidOutLen,
                             char* passwordOut, size_t passwordOutLen,
                             std::atomic<bool>* ready,
                             char* statusBuf, size_t statusBufLen,
                             char* boardOut = nullptr, size_t boardOutLen = 0,
-                            std::atomic<bool>* boardReady = nullptr);
+                            std::atomic<bool>* boardReady = nullptr,
+                            uint8_t* txPowerOut = nullptr,
+                            std::atomic<bool>* txPowerReady = nullptr);
 
 class UdpSocket {
 public:
@@ -335,5 +344,62 @@ struct RmtLoopbackResult {
     uint8_t got[3] = {};          // what was decoded back (valid only if pass-attempted)
 };
 RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio);
+
+// ---------------------------------------------------------------------------
+// LCD_CAM parallel WS2812 output (ESP32-S3). The driver
+// (src/light/drivers/LcdLedDriver.h) pre-encodes the WHOLE frame into one
+// DMA buffer (3-slot encode in LcdSlots.h, domain code); the platform owns
+// only the i80 bus/peripheral AND the DMA buffer itself — the buffer must be
+// DMA-capable internal RAM (platform::alloc prefers PSRAM, which the
+// peripheral can't stream from at full rate), so the platform allocates it at
+// init and exposes the pointer for the driver's zero-copy encode. All inert
+// on targets without the i80 LCD peripheral, guarded by
+// `if constexpr (platform::lcdLanes == 0)` in the driver.
+// ---------------------------------------------------------------------------
+
+// Opaque handle to one configured i80 bus + IO device + DMA frame buffer.
+struct LcdWs2812Handle { void* impl = nullptr; };
+
+// Create the 8-lane bus on `dataPins[0..laneCount)` plus the two peripheral-
+// mandated lines WS2812 strands ignore: `wrGpio` (the pixel clock) and
+// `dcGpio` (data/command). Allocates a zeroed DMA-capable frame buffer of
+// `bufferBytes`. Returns false on any failure (bad pins, DMA memory pressure).
+bool lcdWs2812Init(LcdWs2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
+                   uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes);
+
+// The DMA frame buffer the driver encodes into (zero-copy), and its capacity
+// — the driver's grow-only check. nullptr / 0 when not initialised.
+uint8_t* lcdWs2812Buffer(const LcdWs2812Handle& h);
+size_t lcdWs2812BufferCapacity(const LcdWs2812Handle& h);
+
+// Start the autonomous DMA transfer of the buffer's first `bytes` and return;
+// pair with lcdWs2812Wait. Once started no CPU work remains — there is no
+// refill deadline for WiFi to miss (the design difference vs the ISR-refilled
+// rings in the hpwit/FastLED lineage).
+bool lcdWs2812Transmit(LcdWs2812Handle& h, size_t bytes);
+
+// Block until the in-flight transfer finishes, bounded by `timeoutMs`; a
+// timed-out frame is dropped and re-encoded next tick (self-heals, same
+// stance as rmtWs2812Wait).
+void lcdWs2812Wait(LcdWs2812Handle& h, uint32_t timeoutMs);
+
+void lcdWs2812Deinit(LcdWs2812Handle& h);
+
+// LCD loopback self-test: build a private FULL-WIDTH bus on the driver's
+// real pins (the i80 peripheral configures all 8 data lines — a partial bus
+// is rejected by the hardware layer) and transmit the caller's REAL encoded
+// frame (`frame`/`frameBytes`, lane 0 = dataPins[0]) back to back, exactly
+// like the render loop, while an RMT RX channel captures the whole frame off
+// `rxGpio` and verifies every bit (RMT receive is transmitter-agnostic — the
+// increment-1 rig reused). `dataBytes` is the slot-carrying prefix of the
+// frame (before the latch pad); `rowBits` the bits per light row, so the
+// expected pattern repeats per row. Testing the genuine frame matters: a
+// short synthetic burst misses exactly the real-transfer failures (DMA
+// descriptor boundaries, sustained-rate stalls). Same result shape as the
+// RMT test; got[] holds the first mismatching row. No-op off the S3.
+RmtLoopbackResult lcdWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
+                                    uint16_t wrGpio, uint16_t dcGpio, uint16_t rxGpio,
+                                    const uint8_t* frame, size_t frameBytes,
+                                    size_t dataBytes, uint8_t rowBits);
 
 } // namespace mm::platform

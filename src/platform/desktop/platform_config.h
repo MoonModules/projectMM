@@ -16,6 +16,9 @@ constexpr bool isEsp32S3 = false;
 // No RMT peripheral — the RMT LED driver guards on this and is inert on desktop.
 constexpr uint8_t rmtTxChannels = 0;
 
+// No LCD_CAM peripheral — the LCD LED driver guards on this and is inert too.
+constexpr uint8_t lcdLanes = 0;
+
 // Desktop is not a target of the Ethernet-only firmware profile; it ships
 // WiFi stubs and exercises the hasWiFi==true code path for compile coverage.
 constexpr bool hasWiFi = true;

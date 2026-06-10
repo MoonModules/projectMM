@@ -32,6 +32,20 @@ public:
     // STA mode active but the state machine still thinking it's in AP.
     // wifiApStop() drops wifiInitDone_=false so the next ensureWifiInit
     // registers handlers cleanly.
+
+    // Improv SET_TX_POWER path: persist + apply the TX-power cap (whole dBm,
+    // 0 = lift). Must run BEFORE setWifiCredentials when both arrive from one
+    // provisioning flow — brown-out-prone boards (LOLIN S3) fail WiFi auth at
+    // full power, so the cap has to be in place for the association attempt.
+    void setTxPowerSetting(uint8_t dBm) {
+        if (dBm > 21) return;
+        txPowerSetting_ = dBm;
+        markDirty();
+        FilesystemModule::noteDirty();   // same persist arming as setWifiCredentials
+        syncTxPower();                   // applies now if the radio is up; the
+                                         // STA-start path re-applies otherwise
+    }
+
     void setWifiCredentials(const char* ssid, const char* password) {
         if (!ssid) return;
         std::strncpy(ssid_, ssid, sizeof(ssid_) - 1);

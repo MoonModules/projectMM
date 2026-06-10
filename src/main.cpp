@@ -22,6 +22,7 @@
 #include "light/modifiers/CheckerboardModifier.h"
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
+#include "light/drivers/LcdLedDriver.h"
 #include "light/drivers/RmtLedDriver.h"
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
@@ -70,6 +71,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver", "light/drivers/NetworkSendDriver.md");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers/PreviewDriver.md");
     mm::ModuleFactory::registerType<mm::RmtLedDriver>("RmtLedDriver", "light/drivers/RmtLedDriver.md");
+    mm::ModuleFactory::registerType<mm::LcdLedDriver>("LcdLedDriver", "light/drivers/LcdLedDriver.md");
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/HttpServerModule.md");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/SystemModule.md");
     mm::ModuleFactory::registerType<mm::BoardModule>("BoardModule", "core/BoardModule.md");
@@ -218,12 +220,21 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     netSend->markWiredByCode();
 
     // RMT WS2812 LED output — any chip with RMT TX channels (classic ESP32: 8,
-    // S3: 4; the seam is a no-op on desktop, and LCD_CAM is the S3's *parallel*
-    // path, later). Wired by code like ArtNet so a persistence load can't drop it.
+    // S3: 4; the seam is a no-op on desktop). Wired by code like NetworkSend so
+    // a persistence load can't drop it.
     if constexpr (mm::platform::rmtTxChannels > 0) {
         auto* led = mm::ModuleFactory::create("RmtLedDriver");
         drivers->addChild(led);
         led->markWiredByCode();
+    }
+
+    // LCD_CAM parallel WS2812 output — chips with the i80 LCD peripheral (the
+    // S3 among current targets): 8 strands clock out simultaneously over one
+    // DMA transfer, the S3's scale path beyond its 4 RMT channels.
+    if constexpr (mm::platform::lcdLanes > 0) {
+        auto* lcd = mm::ModuleFactory::create("LcdLedDriver");
+        drivers->addChild(lcd);
+        lcd->markWiredByCode();
     }
 
     auto* preview = static_cast<mm::PreviewDriver*>(mm::ModuleFactory::create("PreviewDriver"));

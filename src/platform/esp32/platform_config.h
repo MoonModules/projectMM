@@ -39,6 +39,16 @@ constexpr uint8_t rmtTxChannels = CONFIG_SOC_RMT_TX_CANDIDATES_PER_GROUP;
 constexpr uint8_t rmtTxChannels = 0;
 #endif
 
+// Parallel WS2812 lanes over the LCD_CAM i80 bus (ESP32-S3 among current
+// targets). The peripheral does 16; this increment deliberately caps at 8 —
+// half the DMA footprint, and widening is a constant change, not a redesign.
+// SOC-derived like rmtTxChannels so a future i80-bearing chip works untouched.
+#ifdef CONFIG_SOC_LCD_I80_SUPPORTED
+constexpr uint8_t lcdLanes = 8;
+#else
+constexpr uint8_t lcdLanes = 0;
+#endif
+
 // WiFi is compiled out in the Ethernet-only build profile. ESP-IDF v6.x has no
 // CONFIG_ESP_WIFI_ENABLED switch, so the eth-only build instead drops the WiFi
 // components via EXCLUDE_COMPONENTS and defines MM_NO_WIFI (see esp32/main/CMakeLists.txt).

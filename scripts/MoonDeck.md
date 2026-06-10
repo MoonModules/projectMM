@@ -298,6 +298,15 @@ Push WiFi credentials to a running projectMM device over USB-serial. Uses the [I
 
 **One-click flow**: pick the device's port in MoonDeck, hit **Improv WiFi**. The script reads SSID + password from the **active network's WiFi block in `scripts/moondeck.json`** (the one shown in the network bar at the top of the sidebar). If that block is empty, it falls back to detecting the host machine's currently-joined WiFi (macOS Keychain / Linux NetworkManager / Windows `netsh`). The device replies with its new URL when STA comes up — typically 5-10 s end to end.
 
+**Board dropdown (pre-association injection)**: pick your physical board next to the Firmware dropdown and the flow forwards `--board` — the script then resolves the board's `boards.json` settings and pushes the TX-power cap over the `SET_TX_POWER` vendor RPC **before** the credentials, plus `SET_BOARD` after success. This matters for brown-out-prone boards (LOLIN S3/S2, cap 8 dBm): at full TX power they fail their very first WiFi association, so the cap can't wait for the post-online HTTP injection. Leave the dropdown on "(any board)" for boards without special settings.
+
+```bash
+# Equivalent CLI for a LOLIN S3 (cap resolved from boards.json):
+uv run scripts/build/improv_provision.py --port /dev/cu.usbmodem-XXX --board "LOLIN S3 N16R8"
+# Or set the cap explicitly without a catalog entry:
+uv run scripts/build/improv_provision.py --port /dev/cu.usbmodem-XXX --tx-power 8
+```
+
 ```bash
 # Use host's currently-joined WiFi (one click in MoonDeck → equivalent CLI):
 uv run scripts/build/improv_provision.py --port /dev/tty.usbserial-XXXX

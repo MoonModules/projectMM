@@ -49,6 +49,8 @@ add_executable(mm_tests
     unit/light/unit_RainbowEffect.cpp
     unit/light/unit_NetworkReceiveEffect.cpp
     unit/light/unit_NetworkReceiveEffect_protocols.cpp
+    unit/light/unit_LcdLedDriver.cpp
+    unit/light/unit_LcdLedEncoder.cpp
     unit/light/unit_RmtLedEncoder.cpp
     unit/light/unit_RmtLedDriver_lifecycle.cpp
     unit/light/unit_RmtLedDriver_pins.cpp

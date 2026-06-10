@@ -192,7 +192,8 @@
       "label": "Improv WiFi",
       "help": "improv_provision",
       "script": "build/improv_provision.py",
-      "needs_port": true
+      "needs_port": true,
+      "pass_board": true
     },
     {
       "id": "improv_probe",

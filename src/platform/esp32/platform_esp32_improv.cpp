@@ -74,6 +74,11 @@ struct ImprovTaskState {
     char* boardOut = nullptr;
     size_t boardOutLen = 0;
     std::atomic<bool>* boardReady = nullptr;
+
+    // Vendor SET_TX_POWER RPC (command 0xFD): pre-association TX-power cap in
+    // whole dBm for brown-out-prone boards. Same producer/consumer dance.
+    uint8_t* txPowerOut = nullptr;
+    std::atomic<bool>* txPowerReady = nullptr;
 };
 static ImprovTaskState g_improv;  // single global — only one Improv task per device
 
@@ -318,6 +323,43 @@ static void improvHandleSetBoard(const uint8_t* payload, uint8_t len) {
     improvSend(ImprovFrameType::RpcResponse, rpc);
 }
 
+// SET_TX_POWER vendor RPC (command 0xFD) — the pre-association escape hatch
+// for boards whose LDO browns out at full TX power (LOLIN S3/S2). Their
+// boards.json cap (Network.txPowerSetting) normally arrives over HTTP after
+// the device is online — which a browning-out board can never reach: it fails
+// WiFi auth at 20 dBm before any HTTP exists (proven on the bench,
+// 2026-06-10). This RPC carries the cap over the same serial channel as the
+// credentials, so it persists BEFORE the first association attempt.
+//
+// Frame payload layout (after the standard Improv frame header):
+//   [0xFD]              command
+//   [data_len]          number of bytes that follow (= 1)
+//   [dBm]               0..21 whole dBm; 0 = no cap (lift)
+//
+// On valid: write into g_improv.txPowerOut, set txPowerReady. The module's
+// loop1s() forwards to NetworkModule::setTxPowerSetting (persist + apply).
+static constexpr uint8_t IMPROV_CMD_SET_TX_POWER = 0xFD;
+static constexpr uint8_t IMPROV_ERROR_INVALID_TX_POWER = 0x81;
+
+static void improvHandleSetTxPower(const uint8_t* payload, uint8_t len) {
+    if (!g_improv.txPowerOut || !g_improv.txPowerReady) {
+        improvSendError(improv::ERROR_UNKNOWN_RPC);
+        return;
+    }
+    // payload[0] = command (dispatched on), payload[1] = data_len, payload[2] = dBm.
+    if (len != 3 || payload[1] != 1 || payload[2] > 21) {
+        improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_TX_POWER));
+        return;
+    }
+    *g_improv.txPowerOut = payload[2];
+    // release-store pairs with the module's acquire-load in loop1s().
+    g_improv.txPowerReady->store(true, std::memory_order_release);
+    auto rpc = improv::build_rpc_response(
+        static_cast<improv::Command>(IMPROV_CMD_SET_TX_POWER),
+        std::vector<std::string>{}, false);
+    improvSend(ImprovFrameType::RpcResponse, rpc);
+}
+
 // Dispatch a completed frame from the parser. Only RPC frames carry commands
 // we care about; the spec lets the other types through silently.
 static void improvDispatchFrame(const ImprovFrameParser& parser) {
@@ -329,6 +371,10 @@ static void improvDispatchFrame(const ImprovFrameParser& parser) {
     uint8_t rawLen = parser.lastPayloadLen();
     if (rawLen >= 1 && raw[0] == IMPROV_CMD_SET_BOARD) {
         improvHandleSetBoard(raw, rawLen);
+        return;
+    }
+    if (rawLen >= 1 && raw[0] == IMPROV_CMD_SET_TX_POWER) {
+        improvHandleSetTxPower(raw, rawLen);
         return;
     }
     improv::ImprovCommand cmd = improv::parse_improv_data(
@@ -524,7 +570,9 @@ bool improvProvisioningInit(const ImprovDeviceInfo& info,
                             std::atomic<bool>* ready,
                             char* statusBuf, size_t statusBufLen,
                             char* boardOut, size_t boardOutLen,
-                            std::atomic<bool>* boardReady) {
+                            std::atomic<bool>* boardReady,
+                            uint8_t* txPowerOut,
+                            std::atomic<bool>* txPowerReady) {
     if (!info.name || !info.chipFamily || !info.firmwareVersion ||
         !ssidOut || ssidOutLen == 0 ||
         !passwordOut || passwordOutLen == 0 ||
@@ -545,6 +593,9 @@ bool improvProvisioningInit(const ImprovDeviceInfo& info,
     g_improv.boardOut = boardOut;
     g_improv.boardOutLen = boardOutLen;
     g_improv.boardReady = boardReady;
+    // SET_TX_POWER opt-in, same shape.
+    g_improv.txPowerOut = txPowerOut;
+    g_improv.txPowerReady = txPowerReady;
 
     // 6 KB stack: parser is small, scan response uses std::vector + std::string
     // (some short-string-optimised, some heap). Priority 4 — below OTA (5),
@@ -576,7 +627,9 @@ bool improvProvisioningInit(const ImprovDeviceInfo& /*info*/,
                             std::atomic<bool>* /*ready*/,
                             char* statusBuf, size_t statusBufLen,
                             char* /*boardOut*/, size_t /*boardOutLen*/,
-                            std::atomic<bool>* /*boardReady*/) {
+                            std::atomic<bool>* /*boardReady*/,
+                            uint8_t* /*txPowerOut*/,
+                            std::atomic<bool>* /*txPowerReady*/) {
     if (statusBuf && statusBufLen > 0) {
         std::snprintf(statusBuf, statusBufLen, "not supported (no WiFi)");
     }

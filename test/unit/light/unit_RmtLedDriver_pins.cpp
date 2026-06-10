@@ -9,7 +9,7 @@
 #include <cstring>
 
 // These tests pin the MULTI-PIN surface: the `pins` / `ledsPerPin` text-control
-// parsing (public statics, the NetworkSendDriver::buildPacket testability
+// parsing (shared free functions in PinList.h, used by RmtLedDriver and LcdLedDriver
 // precedent) and the slice arithmetic down to per-pin symbol offsets. All pure
 // host logic — the RMT peripheral is never touched; on desktop the channel init
 // is inert but parsing and slicing must behave identically, which is exactly
@@ -19,7 +19,7 @@ namespace {
 
 void wire(mm::RmtLedDriver& d, mm::Buffer& src, mm::Correction& corr,
           mm::nrOfLightsType lights) {
-    src.allocate(lights, 3);
+    REQUIRE(src.allocate(lights, 3));   // a masked alloc failure would fail cases downstream
     corr.rebuild(255, mm::LightPreset::GRB);   // 3 out-channels
     d.onBuildControls();
     d.setSourceBuffer(&src);
@@ -35,7 +35,7 @@ void wire(mm::RmtLedDriver& d, mm::Buffer& src, mm::Correction& corr,
 TEST_CASE("parsePinList accepts a comma-separated list, in order") {
     uint16_t pins[8] = {};
     uint8_t n = 0;
-    CHECK(mm::RmtLedDriver::parsePinList("18,17,16", pins, 8, n) == nullptr);
+    CHECK(mm::parsePinList("18,17,16", pins, 8, n) == nullptr);
     REQUIRE(n == 3);
     CHECK(pins[0] == 18);
     CHECK(pins[1] == 17);
@@ -46,11 +46,11 @@ TEST_CASE("parsePinList accepts a comma-separated list, in order") {
 TEST_CASE("parsePinList accepts a single pin and spaces around tokens") {
     uint16_t pins[8] = {};
     uint8_t n = 0;
-    CHECK(mm::RmtLedDriver::parsePinList("18", pins, 8, n) == nullptr);
+    CHECK(mm::parsePinList("18", pins, 8, n) == nullptr);
     REQUIRE(n == 1);
     CHECK(pins[0] == 18);
 
-    CHECK(mm::RmtLedDriver::parsePinList(" 18, 17 ", pins, 8, n) == nullptr);
+    CHECK(mm::parsePinList(" 18, 17 ", pins, 8, n) == nullptr);
     REQUIRE(n == 2);
     CHECK(pins[1] == 17);
 }
@@ -60,9 +60,9 @@ TEST_CASE("parsePinList rejects bad input with a static error message") {
     uint8_t n = 0;
     // Bad token, trailing comma (empty token), and the empty string are all
     // invalid — the driver idles with the message in its status field.
-    CHECK(mm::RmtLedDriver::parsePinList("18,x", pins, 8, n) != nullptr);
-    CHECK(mm::RmtLedDriver::parsePinList("18,", pins, 8, n) != nullptr);
-    CHECK(mm::RmtLedDriver::parsePinList("", pins, 8, n) != nullptr);
+    CHECK(mm::parsePinList("18,x", pins, 8, n) != nullptr);
+    CHECK(mm::parsePinList("18,", pins, 8, n) != nullptr);
+    CHECK(mm::parsePinList("", pins, 8, n) != nullptr);
 }
 
 // maxPins is the chip's RMT TX-channel cap: 5 pins fail an S3-sized 4, fit a classic 8.
@@ -70,9 +70,9 @@ TEST_CASE("parsePinList enforces maxPins (the chip's TX-channel cap)") {
     uint16_t pins[8] = {};
     uint8_t n = 0;
     // 5 pins through an S3-sized cap of 4 → rejected.
-    CHECK(mm::RmtLedDriver::parsePinList("1,2,3,4,5", pins, 4, n) != nullptr);
+    CHECK(mm::parsePinList("1,2,3,4,5", pins, 4, n) != nullptr);
     // The same list fits the classic-ESP32 cap of 8.
-    CHECK(mm::RmtLedDriver::parsePinList("1,2,3,4,5", pins, 8, n) == nullptr);
+    CHECK(mm::parsePinList("1,2,3,4,5", pins, 8, n) == nullptr);
     CHECK(n == 5);
 }
 
@@ -80,7 +80,7 @@ TEST_CASE("parsePinList enforces maxPins (the chip's TX-channel cap)") {
 TEST_CASE("parsePinList rejects duplicate pins") {
     uint16_t pins[8] = {};
     uint8_t n = 0;
-    CHECK(mm::RmtLedDriver::parsePinList("18,17,18", pins, 8, n) != nullptr);
+    CHECK(mm::parsePinList("18,17,18", pins, 8, n) != nullptr);
 }
 
 // --- assignCounts -----------------------------------------------------------
@@ -88,7 +88,7 @@ TEST_CASE("parsePinList rejects duplicate pins") {
 // Explicit "100,100,50" maps one count to each pin by position.
 TEST_CASE("assignCounts takes explicit per-pin counts") {
     mm::nrOfLightsType counts[8] = {};
-    CHECK(mm::RmtLedDriver::assignCounts("100,100,50", 3, 250, counts) == nullptr);
+    CHECK(mm::assignCounts("100,100,50", 3, 250, counts) == nullptr);
     CHECK(counts[0] == 100);
     CHECK(counts[1] == 100);
     CHECK(counts[2] == 50);
@@ -99,7 +99,7 @@ TEST_CASE("assignCounts splits the remainder evenly over unlisted pins") {
     // 3 pins, only the first has an explicit count: the remaining 150 lights
     // split evenly over the remaining 2 pins.
     mm::nrOfLightsType counts[8] = {};
-    CHECK(mm::RmtLedDriver::assignCounts("100", 3, 250, counts) == nullptr);
+    CHECK(mm::assignCounts("100", 3, 250, counts) == nullptr);
     CHECK(counts[0] == 100);
     CHECK(counts[1] == 75);
     CHECK(counts[2] == 75);
@@ -107,7 +107,7 @@ TEST_CASE("assignCounts splits the remainder evenly over unlisted pins") {
 
 TEST_CASE("assignCounts with an empty list splits evenly, last pin takes the rounding remainder") {
     mm::nrOfLightsType counts[8] = {};
-    CHECK(mm::RmtLedDriver::assignCounts("", 3, 100, counts) == nullptr);
+    CHECK(mm::assignCounts("", 3, 100, counts) == nullptr);
     CHECK(counts[0] == 33);
     CHECK(counts[1] == 33);
     CHECK(counts[2] == 34);
@@ -116,17 +116,17 @@ TEST_CASE("assignCounts with an empty list splits evenly, last pin takes the rou
 TEST_CASE("assignCounts clamps so the sum never exceeds the buffer") {
     mm::nrOfLightsType counts[8] = {};
     // Explicit counts overrun the 250-light buffer: second pin clamps to what's left.
-    CHECK(mm::RmtLedDriver::assignCounts("200,200", 2, 250, counts) == nullptr);
+    CHECK(mm::assignCounts("200,200", 2, 250, counts) == nullptr);
     CHECK(counts[0] == 200);
     CHECK(counts[1] == 50);
     // A single count larger than the whole buffer clamps to the buffer.
-    CHECK(mm::RmtLedDriver::assignCounts("300", 1, 250, counts) == nullptr);
+    CHECK(mm::assignCounts("300", 1, 250, counts) == nullptr);
     CHECK(counts[0] == 250);
 }
 
 TEST_CASE("assignCounts handles a zero-light buffer (0×0×0 grid) as all-zero") {
     mm::nrOfLightsType counts[8] = {0xFF, 0xFF, 0xFF};
-    CHECK(mm::RmtLedDriver::assignCounts("", 3, 0, counts) == nullptr);
+    CHECK(mm::assignCounts("", 3, 0, counts) == nullptr);
     CHECK(counts[0] == 0);
     CHECK(counts[1] == 0);
     CHECK(counts[2] == 0);
@@ -134,14 +134,14 @@ TEST_CASE("assignCounts handles a zero-light buffer (0×0×0 grid) as all-zero")
 
 TEST_CASE("assignCounts rejects a bad token") {
     mm::nrOfLightsType counts[8] = {};
-    CHECK(mm::RmtLedDriver::assignCounts("100,x", 2, 250, counts) != nullptr);
+    CHECK(mm::assignCounts("100,x", 2, 250, counts) != nullptr);
 }
 
 TEST_CASE("assignCounts ignores extra counts beyond the pin list") {
     // Robust to any input: a stale longer ledsPerPin after pins shrank is not an
     // error — the extra entries just don't apply.
     mm::nrOfLightsType counts[8] = {};
-    CHECK(mm::RmtLedDriver::assignCounts("10,20,30", 2, 100, counts) == nullptr);
+    CHECK(mm::assignCounts("10,20,30", 2, 100, counts) == nullptr);
     CHECK(counts[0] == 10);
     CHECK(counts[1] == 20);
 }

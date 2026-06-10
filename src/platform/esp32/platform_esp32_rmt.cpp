@@ -168,6 +168,13 @@ size_t rmtWs2812RxCapture(uint8_t gpio, uint32_t resolutionHz,
     if (memBlock < SOC_RMT_MEM_WORDS_PER_CHANNEL) memBlock = SOC_RMT_MEM_WORDS_PER_CHANNEL;
     if (memBlock & 1) memBlock++;
     rxCfg.mem_block_symbols = memBlock;
+#if SOC_RMT_SUPPORT_DMA
+    // A capture larger than one hardware block (whole-frame captures, e.g. the
+    // LCD loopback's full-frame check) needs the DMA backend — without it the
+    // channel would claim its neighbours' memory blocks and still cap out.
+    // Caller's buffer must then be DMA-capable internal RAM.
+    rxCfg.flags.with_dma = maxSymbols > SOC_RMT_MEM_WORDS_PER_CHANNEL;
+#endif
 
     rmt_channel_handle_t rxChan = nullptr;
     if (rmt_new_rx_channel(&rxCfg, &rxChan) != ESP_OK) return 0;
@@ -216,8 +223,13 @@ namespace {
 constexpr uint32_t kLoopbackResHz = 40'000'000;  // 25 ns/tick, same as the driver
 constexpr uint16_t kT0H = 14, kT1H = 28, kPeriod = 50;  // 350/700/1250 ns in ticks
 
+} // namespace
+
+namespace detail {
+
 // Plain-GPIO continuity check: drive tx, read rx. Separates "wire wrong" from
-// "RMT wrong" so a failed jumper is reported clearly.
+// "RMT/LCD wrong" so a failed jumper is reported clearly. Shared with the LCD
+// loopback in platform_esp32_lcd.cpp (declared there), hence not anonymous.
 bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio) {
     gpio_set_direction(static_cast<gpio_num_t>(txGpio), GPIO_MODE_OUTPUT);
     gpio_set_direction(static_cast<gpio_num_t>(rxGpio), GPIO_MODE_INPUT);
@@ -233,13 +245,13 @@ bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio) {
     return hi == 1 && lo == 0;
 }
 
-} // namespace
+} // namespace detail
 
 RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio) {
     RmtLoopbackResult r;
     r.sent[0] = 0xA5; r.sent[1] = 0x00; r.sent[2] = 0xFF;  // recognisable pattern
 
-    r.jumperDetected = loopbackJumperOk(txGpio, rxGpio);
+    r.jumperDetected = detail::loopbackJumperOk(txGpio, rxGpio);
     if (!r.jumperDetected) return r;   // no point running RMT through a dead wire
 
     // Build 24 symbols (3 bytes × 8 bits, MSB-first) for the pattern.

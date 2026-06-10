@@ -167,6 +167,15 @@ def idf_env(idf_path: Path) -> dict:
     if venv_path:
         env["IDF_PYTHON_ENV_PATH"] = str(venv_path)
 
+    # IDF's post-build gen_gdbinit.py reads ESP_ROM_ELF_DIR (export.sh sets it;
+    # this hand-built env must too). The step only re-runs when its inputs
+    # change, so the missing variable failed builds intermittently.
+    rom_elfs = Path.home() / ".espressif" / "tools" / "esp-rom-elfs"
+    if rom_elfs.exists():
+        versions = sorted((d for d in rom_elfs.iterdir() if d.is_dir()), reverse=True)
+        if versions:
+            env["ESP_ROM_ELF_DIR"] = str(versions[0]) + os.sep
+
     # Build PATH: venv bin + IDF tools + toolchains + existing PATH
     extra_paths = []
 

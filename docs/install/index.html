@@ -1363,6 +1363,7 @@
         if (_monitor.port) await closeMonitor();
         const localUrl = toLocalUrl(manifestUrl);
         const board = installPicker.getSelectedBoard();
+        const txPower = installPicker.getSelectedBoardTxPower();
         openModal(board ? `Installing projectMM on ${board}` : `Installing ${firmware}`);
         showSection("connecting");
         document.getElementById("connecting-detail").textContent = "";
@@ -1372,6 +1373,7 @@
           port: pickedPort,
           manifestUrl: localUrl,
           board,
+          txPower,
           eraseBefore,
           onProgress: handleProgress,
           uiWaitForCreds,

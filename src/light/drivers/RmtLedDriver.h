@@ -2,12 +2,12 @@
 
 #include "light/drivers/Drivers.h"        // DriverBase, Correction
 #include "light/drivers/LedDriverConfig.h"
+#include "light/drivers/PinList.h"         // parsePinList / assignCounts (shared with LcdLedDriver)
 #include "light/drivers/RmtSymbol.h"       // encodeWs2812Symbols (host-testable)
 #include "platform/platform.h"
 
 #include <cstdint>
 #include <cstdio>   // snprintf for the loopback status string
-#include <cstdlib>  // std::strtol in the pin/count list parsers
 #include <cstring>  // std::strcmp in onUpdate / controlChangeTriggersBuildState
 
 namespace mm {
@@ -68,67 +68,9 @@ public:
     // so this is the requested clock, not a hard-coded tick count.
     static constexpr uint32_t kResolutionHz = 40'000'000;
 
-    // --- pin/count list parsing (public statics, host-testable — the
-    // NetworkSendDriver::buildPacket precedent). Both return nullptr on success
-    // or a static error literal the caller feeds straight into setStatus(). ---
-
-    // Parse "18,17,16" into out[0..maxPins). Spaces around tokens are fine
-    // (strtol skips them). Rejects empty input, bad tokens, trailing commas,
-    // duplicates, and more than maxPins entries (the chip's TX-channel cap).
-    static const char* parsePinList(const char* s, uint16_t* out, uint8_t maxPins,
-                                    uint8_t& nOut) {
-        nOut = 0;
-        if (!s || !*s) return "invalid pin list";
-        const char* p = s;
-        while (true) {
-            char* end = nullptr;
-            const long v = std::strtol(p, &end, 10);
-            if (end == p || v < 0 || v > 0xFFFF) return "invalid pin list";
-            while (*end == ' ') end++;
-            if (nOut >= maxPins) return "too many pins for this chip";
-            for (uint8_t i = 0; i < nOut; i++)
-                if (out[i] == static_cast<uint16_t>(v)) return "duplicate pin";
-            out[nOut++] = static_cast<uint16_t>(v);
-            if (*end == '\0') return nullptr;
-            if (*end != ',') return "invalid pin list";
-            p = end + 1;
-        }
-    }
-
-    // Fill counts[0..nPins) from "100,100,50" (may be empty or shorter than the
-    // pin list; extra entries beyond nPins are ignored — a stale longer list
-    // after pins shrank is not an error). Explicit counts are clamped so the
-    // running sum never exceeds totalLights; the unassigned remainder splits
-    // evenly over the unlisted pins, last pin takes the rounding remainder.
-    static const char* assignCounts(const char* s, uint8_t nPins,
-                                    nrOfLightsType totalLights, nrOfLightsType* counts) {
-        for (uint8_t i = 0; i < nPins; i++) counts[i] = 0;
-        nrOfLightsType remaining = totalLights;
-        uint8_t nExplicit = 0;
-        const char* p = s;
-        while (p && *p && nExplicit < nPins) {
-            char* end = nullptr;
-            const long v = std::strtol(p, &end, 10);
-            if (end == p || v < 0) return "invalid ledsPerPin list";
-            while (*end == ' ') end++;
-            const nrOfLightsType c =
-                (v > static_cast<long>(remaining)) ? remaining
-                                                   : static_cast<nrOfLightsType>(v);
-            counts[nExplicit++] = c;
-            remaining = static_cast<nrOfLightsType>(remaining - c);
-            if (*end == '\0') break;
-            if (*end != ',') return "invalid ledsPerPin list";
-            p = end + 1;
-        }
-        const uint8_t nRemaining = static_cast<uint8_t>(nPins - nExplicit);
-        if (nRemaining > 0) {
-            const nrOfLightsType per = static_cast<nrOfLightsType>(remaining / nRemaining);
-            for (uint8_t i = nExplicit; i < nPins; i++) counts[i] = per;
-            counts[nPins - 1] = static_cast<nrOfLightsType>(
-                counts[nPins - 1] + (remaining - per * nRemaining));
-        }
-        return nullptr;
-    }
+    // The pin/count list parsing (parsePinList / assignCounts) lives in
+    // PinList.h, shared with LcdLedDriver — both drivers slice the source
+    // buffer from the same two text controls.
 
     void onBuildControls() override {
         controls_.addText("pins", pins, sizeof(pins));

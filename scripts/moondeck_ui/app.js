@@ -77,6 +77,7 @@ async function init() {
     }
 
     renderFirmwareSelect();
+    renderBoardSelect();
     renderScripts();
     renderNetworkBar();
     try { renderDevices(); } catch (e) { console.error("renderDevices:", e); }
@@ -506,6 +507,7 @@ async function runScriptOnce(script, btn, extraParams) {
     if (script.needs_port) params.port = (getActiveNetwork()?.port) || "";
     if (script.needs_scenario) params.scenario = state.scenario;
     if (script.needs_module) params.module = state.module;
+    if (script.pass_board) params.board = state.provisionBoard || "";
     for (const flag of (script.flags || [])) {
         const stateKey = `flag_${script.id}_${flag.id}`;
         params[`flag_${flag.id}`] = stateKey in state ? state[stateKey] : flag.default;
@@ -583,6 +585,32 @@ async function runScriptOnce(script, btn, extraParams) {
 // ESP32 controls
 // ---------------------------------------------------------------------------
 
+// Board picker for provisioning scripts (pass_board): boards.json entries
+// whose `firmwares` include the selected firmware. "(any board)" = no
+// injection. Distinct state key from the LEGACY `state.board` (which meant
+// firmware — see the migration in init) and from per-device boards.
+function renderBoardSelect() {
+    const select = document.getElementById("board-select");
+    if (!select) return;
+    select.innerHTML = "";
+    const candidates = boards.filter(b => (b.firmwares || []).includes(state.firmware));
+    const options = [["", "(any board)"], ...candidates.map(b => [b.name, b.name])];
+    if (state.provisionBoard && !options.some(([v]) => v === state.provisionBoard)) {
+        state.provisionBoard = "";   // firmware changed; stale pick no longer applies
+    }
+    for (const [val, lbl] of options) {
+        const opt = document.createElement("option");
+        opt.value = val;
+        opt.textContent = lbl;
+        if (val === (state.provisionBoard || "")) opt.selected = true;
+        select.appendChild(opt);
+    }
+    select.addEventListener("change", async () => {
+        state.provisionBoard = select.value;
+        await saveState();
+    });
+}
+
 function renderFirmwareSelect() {
     const select = document.getElementById("firmware-select");
     select.innerHTML = "";
@@ -600,6 +628,7 @@ function renderFirmwareSelect() {
     select.addEventListener("change", async () => {
         state.firmware = select.value;
         await saveState();
+        renderBoardSelect();   // board candidates follow the firmware
     });
 }
 
