@@ -103,7 +103,7 @@ MODULES = [
     ("MultiplyModifier",    "Layer",    {}, True),
     ("CheckerboardModifier","Layer",    {}, True),
     # Drivers
-    ("ArtNetSendDriver",    "Drivers",  {}, False),
+    ("NetworkSendDriver",    "Drivers",  {}, False),
     ("PreviewDriver",       "Drivers",  {}, False),
 ]
 

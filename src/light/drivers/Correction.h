@@ -21,7 +21,7 @@ inline constexpr uint8_t kLightPresetCount =
 // it on a brightness / light-preset change (cheap, cold path), and hands a const
 // pointer to each driver child. apply() is the hot-path per-light transform.
 //
-// Today only ArtNetSendDriver consumes it; future LED drivers (WS2812 via RMT,
+// Today only NetworkSendDriver consumes it; future LED drivers (WS2812 via RMT,
 // APA102 via SPI) apply the same correction before their protocol encode.
 //
 // Brightness uses a single 256-entry LUT applied to every channel. Gamma /

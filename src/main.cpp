@@ -17,10 +17,10 @@
 #include "light/effects/RipplesEffect.h"
 #include "light/effects/LavaLampEffect.h"
 #include "light/effects/GameOfLifeEffect.h"
-#include "light/effects/ArtNetReceiveEffect.h"
+#include "light/effects/NetworkReceiveEffect.h"
 #include "light/modifiers/MultiplyModifier.h"
 #include "light/modifiers/CheckerboardModifier.h"
-#include "light/drivers/ArtNetSendDriver.h"
+#include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
 #include "light/drivers/RmtLedDriver.h"
 #include "core/HttpServerModule.h"
@@ -64,10 +64,10 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::RipplesEffect>("RipplesEffect", "light/effects/RipplesEffect.md");
     mm::ModuleFactory::registerType<mm::LavaLampEffect>("LavaLampEffect", "light/effects/LavaLampEffect.md");
     mm::ModuleFactory::registerType<mm::GameOfLifeEffect>("GameOfLifeEffect", "light/effects/GameOfLifeEffect.md");
-    mm::ModuleFactory::registerType<mm::ArtNetReceiveEffect>("ArtNetReceiveEffect", "light/effects/ArtNetReceiveEffect.md");
+    mm::ModuleFactory::registerType<mm::NetworkReceiveEffect>("NetworkReceiveEffect", "light/effects/NetworkReceiveEffect.md");
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier", "light/modifiers/MultiplyModifier.md");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers/CheckerboardModifier.md");
-    mm::ModuleFactory::registerType<mm::ArtNetSendDriver>("ArtNetSendDriver", "light/drivers/ArtNetSendDriver.md");
+    mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver", "light/drivers/NetworkSendDriver.md");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers/PreviewDriver.md");
     mm::ModuleFactory::registerType<mm::RmtLedDriver>("RmtLedDriver", "light/drivers/RmtLedDriver.md");
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/HttpServerModule.md");
@@ -102,11 +102,11 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
 
     // Names come from ModuleFactory::create via displayNameFor — strips the
     // role suffix (Effect/Modifier/Layout/Driver, plus Module for generics) so
-    // e.g. NoiseEffect → "Noise", FilesystemModule → "Filesystem". For drivers,
-    // the Send/Receive part is kept so siblings like ArtNetSendDriver and a
-    // future ArtNetReceiveDriver stay distinguishable as "ArtNetSend" and
-    // "ArtNetReceive". setName() overrides are only needed for genuine renames,
-    // not for default display.
+    // e.g. NoiseEffect → "Noise", FilesystemModule → "Filesystem". For network
+    // modules the Send/Receive part is kept so NetworkSendDriver ("NetworkSend")
+    // and NetworkReceiveEffect ("NetworkReceive") stay distinguishable.
+    // setName() overrides are only needed for genuine renames, not for default
+    // display.
 
     // Note: ModuleFactory::create can in principle return nullptr (factory entry
     // missing, OOM at probe construction). We deliberately do not null-check
@@ -213,9 +213,9 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     auto* drivers = static_cast<mm::Drivers*>(mm::ModuleFactory::create("Drivers"));
     drivers->setLayers(layersContainer);
 
-    auto* artnet = mm::ModuleFactory::create("ArtNetSendDriver");
-    drivers->addChild(artnet);  // name = "ArtNetSend" (factory default) — disambiguates from a future ArtNetReceive
-    artnet->markWiredByCode();
+    auto* netSend = mm::ModuleFactory::create("NetworkSendDriver");
+    drivers->addChild(netSend);  // name = "NetworkSend" (factory default)
+    netSend->markWiredByCode();
 
     // RMT WS2812 LED output — any chip with RMT TX channels (classic ESP32: 8,
     // S3: 4; the seam is a no-op on desktop, and LCD_CAM is the S3's *parallel*
@@ -274,7 +274,11 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     std::printf("sizeof: MoonModule=%zu Layer=%zu Drivers=%zu Grid=%zu HttpServer=%zu\n",
                 sizeof(mm::MoonModule), sizeof(mm::Layer), sizeof(mm::Drivers),
                 sizeof(mm::GridLayout), sizeof(mm::HttpServerModule));
-    std::printf("ArtNet → %s\n", static_cast<mm::ArtNetSendDriver*>(artnet)->ip);
+    // The ip control is 4 raw octets, not a string — format before printing
+    // (the old %s on the byte array printed garbage).
+    char netSendIp[16];
+    mm::formatDottedQuad(netSendIp, static_cast<mm::NetworkSendDriver*>(netSend)->ip);
+    std::printf("NetworkSend → %s\n", netSendIp);
     // The server binds all interfaces (INADDR_ANY) — reachable from other
     // devices on the LAN, not only localhost.
     std::printf("HTTP server → http://localhost:%u\n", httpServer->port);

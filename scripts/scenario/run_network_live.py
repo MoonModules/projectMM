@@ -1,26 +1,29 @@
 #!/usr/bin/env python3
-"""Live ArtNet matrix test across every online board in moondeck.json.
+"""Live lights-over-UDP matrix test across every online board in moondeck.json.
 
-Proves the ArtNet receive path end-to-end on real firmware. Devices come from
-scripts/moondeck.json (the MoonDeck device list, active network, online only).
-Each round one device is the SENDER and every other device LISTENS:
+Proves the multi-protocol network path (ArtNet, E1.31/sACN, DDP) end-to-end on
+real firmware. Devices come from scripts/moondeck.json (the MoonDeck device
+list, active network, online only). Each round one device is the SENDER and
+every other device LISTENS:
 
-  1. The PC seeds the sender: builds OpDmx packets with a round-distinct solid
-     colour and sends them to the sender's UDP 6454; an ArtNetReceiveEffect
-     (added to each device's Layer for the duration of the run) writes them
-     into the layer buffer. The sender's /ws preview stream must show the
-     colour — proves PC → device receive.
-  2. The sender's own ArtNetSendDriver is pointed at each listener in turn;
-     the listener's preview must show the sender's CORRECTED colour (the send
-     driver applies brightness + channel order) — proves device → device over
-     real firmware send + receive.
+  1. The PC seeds the sender three times — once per protocol, each with its own
+     colour — to the sender's protocol ports (6454/5568/4048); the
+     NetworkReceiveEffect (added to each device's Layer for the run) listens on
+     all three at once. The sender's /ws preview stream must show each colour —
+     proves PC → device receive per protocol.
+  2. The sender's own NetworkSendDriver is pointed at each listener in turn,
+     with its protocol control cycled round-robin so all three send paths get
+     exercised across a matrix run; the listener's preview must show the
+     sender's CORRECTED colour (the send driver applies brightness + channel
+     order) — proves device → device over real firmware send + receive.
 
 With one online device only step 1 runs (the matrix needs ≥2 boards). All
-mutated state (grid size, ArtNetSend ip, the added effects) is restored in a
-finally block. Exit codes follow improv_smoke_test.py: 0 = all legs passed,
-1 = a leg failed, 2 = environment problem (no devices, moondeck.json missing).
+mutated state (grid size, NetworkSend ip/protocol/enabled, the added effects)
+is restored in a finally block. Exit codes follow improv_smoke_test.py: 0 =
+all legs passed, 1 = a leg failed, 2 = environment problem (no devices,
+moondeck.json missing).
 
-Run:  uv run scripts/scenario/run_artnet_live.py [--device NAME] [--host IP]
+Run:  uv run scripts/scenario/run_network_live.py [--device NAME] [--host IP]
 """
 
 import argparse
@@ -38,7 +41,10 @@ import _preview_ws  # noqa: E402
 
 MOONDECK_STATE = ROOT / "scripts" / "moondeck.json"
 ARTNET_PORT = 6454
+E131_PORT = 5568
+DDP_PORT = 4048
 CHANNELS_PER_UNIVERSE = 510
+PROTOCOLS = ["ArtNet", "E1.31", "DDP"]   # mirrors NetworkSendDriver.kProtocolOptions
 
 # Round colours: channel values far apart so they stay distinct after the
 # sender's brightness scale (default 20/255 → e.g. (255,128,0) → (20,10,0)),
@@ -74,19 +80,65 @@ def build_artdmx(universe: int, sequence: int, data: bytes) -> bytes:
     return bytes(pkt)
 
 
-def send_solid(host: str, rgb, universes: int = 2, repeats: int = 10,
-               pace_ms: int = 50):
-    """Send `repeats` full frames of `universes`×510-channel solid colour to the
-    device. Repeats absorb WiFi power-save first-packet loss; the receiver's
-    hold-last-frame staging means one arrival suffices."""
+# Mirrors src/light/E131Packet.h::buildE131Packet — keep the two in sync.
+def build_e131(universe: int, sequence: int, data: bytes) -> bytes:
+    total = 126 + len(data)
+    pkt = bytearray(126)
+    pkt[0:2] = (0x0010).to_bytes(2, "big")            # preamble size
+    pkt[4:16] = b"ASC-E1.17\0\0\0"
+    pkt[16:18] = (0x7000 | (total - 16)).to_bytes(2, "big")
+    pkt[21] = 0x04                                    # root vector
+    pkt[22:38] = b"run_network_live"                  # CID (any stable 16 bytes)
+    pkt[38:40] = (0x7000 | (total - 38)).to_bytes(2, "big")
+    pkt[43] = 0x02                                    # framing vector
+    pkt[44:53] = b"projectMM"                         # source name (NUL-padded)
+    pkt[108] = 100                                    # priority
+    pkt[111] = sequence & 0xFF
+    pkt[113:115] = universe.to_bytes(2, "big")
+    pkt[115:117] = (0x7000 | (total - 115)).to_bytes(2, "big")
+    pkt[117] = 0x02                                   # DMP vector
+    pkt[118] = 0xA1
+    pkt[122] = 0x01                                   # address increment
+    pkt[123:125] = (1 + len(data)).to_bytes(2, "big")  # property count
+    return bytes(pkt) + data
+
+
+# Mirrors src/light/DdpPacket.h::buildDdpPacket — keep the two in sync.
+def build_ddp(offset: int, push: bool, data: bytes) -> bytes:
+    pkt = bytearray(10)
+    pkt[0] = 0x40 | (0x01 if push else 0x00)
+    pkt[2] = 0x01                                     # RGB
+    pkt[3] = 0x01                                     # default display
+    pkt[4:8] = offset.to_bytes(4, "big")
+    pkt[8:10] = len(data).to_bytes(2, "big")
+    return bytes(pkt) + data
+
+
+def send_solid(host: str, rgb, protocol: str = "ArtNet", universes: int = 2,
+               repeats: int = 10, pace_ms: int = 50):
+    """Send `repeats` full frames of solid colour to the device via the given
+    protocol (the receiver autodetects on all three ports). Repeats absorb WiFi
+    power-save first-packet loss; the receiver's hold-last-frame staging means
+    one arrival suffices."""
     ip = host.partition(":")[0]
     payload = bytes(rgb) * (CHANNELS_PER_UNIVERSE // 3)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         seq = 0
         for _ in range(repeats):
-            for u in range(universes):
-                sock.sendto(build_artdmx(u, seq, payload), (ip, ARTNET_PORT))
+            if protocol == "DDP":
+                # One byte-addressed chunk per universe-sized slice keeps the
+                # frame shape identical across protocols.
+                for u in range(universes):
+                    last = u == universes - 1
+                    sock.sendto(build_ddp(u * CHANNELS_PER_UNIVERSE, last, payload),
+                                (ip, DDP_PORT))
+            elif protocol == "E1.31":
+                for u in range(universes):
+                    sock.sendto(build_e131(u, seq, payload), (ip, E131_PORT))
+            else:
+                for u in range(universes):
+                    sock.sendto(build_artdmx(u, seq, payload), (ip, ARTNET_PORT))
             seq = (seq + 1) & 0xFF
             time.sleep(pace_ms / 1000.0)
     finally:
@@ -148,11 +200,12 @@ class Board:
         state = self.client.get("/api/state")
         grid = find_module(state, "Grid") or {}
         drivers = find_module(state, "Drivers") or {}
-        artnet = find_module(state, "ArtNetSend") or {}
+        artnet = find_module(state, "NetworkSend") or {}
         self.orig_w = _control_value(grid, "width")
         self.orig_h = _control_value(grid, "height")
         self.orig_ip = _control_value(artnet, "ip")
-        # The user may have ArtNetSend disabled (e.g. while testing LED output);
+        self.orig_protocol = _control_value(artnet, "protocol")
+        # The user may have NetworkSend disabled (e.g. while testing LED output);
         # relay legs need it on, so remember the original state to restore.
         self.artnet_enabled = bool(artnet.get("enabled", False))
         self.brightness = _control_value(drivers, "brightness") or 0
@@ -161,6 +214,7 @@ class Board:
         self.added_receiver = False
         self.ip_changed = False
         self.enable_changed = False
+        self.protocol_changed = False
 
     def set_control(self, module: str, control: str, value):
         self.client.post("/api/control",
@@ -171,26 +225,31 @@ class Board:
         # (16×16 → 256 lights → 2 universes, preview stride 1).
         self.set_control("Grid", "width", 16)
         self.set_control("Grid", "height", 16)
-        self.client.post("/api/modules", {"type": "ArtNetReceiveEffect",
-                                          "id": "ArtNetReceive", "parent_id": "Layer"})
+        self.client.post("/api/modules", {"type": "NetworkReceiveEffect",
+                                          "id": "NetworkReceive", "parent_id": "Layer"})
         self.added_receiver = True
 
     def restore(self):
         if self.added_receiver:
             try:
-                self.client.delete("/api/modules/ArtNetReceive")
+                self.client.delete("/api/modules/NetworkReceive")
             except Exception as e:
-                print(f"  WARN  {self.name}: could not remove ArtNetReceive: {e}")
+                print(f"  WARN  {self.name}: could not remove NetworkReceive: {e}")
         if self.ip_changed and self.orig_ip is not None:
             try:
-                self.set_control("ArtNetSend", "ip", self.orig_ip)
+                self.set_control("NetworkSend", "ip", self.orig_ip)
             except Exception as e:
-                print(f"  WARN  {self.name}: could not restore ArtNetSend.ip: {e}")
+                print(f"  WARN  {self.name}: could not restore NetworkSend.ip: {e}")
         if self.enable_changed:
             try:
-                self.set_control("ArtNetSend", "enabled", self.artnet_enabled)
+                self.set_control("NetworkSend", "enabled", self.artnet_enabled)
             except Exception as e:
-                print(f"  WARN  {self.name}: could not restore ArtNetSend.enabled: {e}")
+                print(f"  WARN  {self.name}: could not restore NetworkSend.enabled: {e}")
+        if self.protocol_changed and self.orig_protocol is not None:
+            try:
+                self.set_control("NetworkSend", "protocol", self.orig_protocol)
+            except Exception as e:
+                print(f"  WARN  {self.name}: could not restore NetworkSend.protocol: {e}")
         for key, val in (("width", self.orig_w), ("height", self.orig_h)):
             if val is not None:
                 try:
@@ -229,6 +288,9 @@ def main() -> int:
 
     boards = [Board(d) for d in devices]
     passed, failed, skipped = 0, 0, 0
+    relay_count = 0   # global counter so relay protocols cycle across ALL legs
+                      # (a per-round formula repeats the same protocol when the
+                      # board count and protocol count share a factor)
     try:
         for b in boards:
             b.setup()
@@ -243,23 +305,36 @@ def main() -> int:
             print(f"== round {k + 1}/{len(boards)}: sender {sender.name}, "
                   f"colour {colour}", flush=True)
 
-            # Leg 1 — PC seeds the sender; its preview shows the RAW colour
-            # (preview streams the uncorrected buffer).
-            send_solid(sender.host, colour, repeats=args.packets, pace_ms=args.pace_ms)
-            ok, pct, pts, detail = _preview_ws.wait_for_solid(
-                sender.host, colour, args.tolerance, 100.0, args.timeout)
-            if ok:
-                print(f"PASS  pc → {sender.name} (preview solid, {pts} points)", flush=True)
-                passed += 1
-            else:
-                print(f"FAIL  pc → {sender.name} (best {pct:.0f}% of {pts} points"
-                      f"{', ' + detail if detail else ''})"
-                      " — desktop listeners: check the OS firewall allows UDP 6454", flush=True)
-                failed += 1
+            # Leg 1 — the seed sweep: the PC seeds the sender once per protocol,
+            # each with a rotated colour (a stale frame from the previous
+            # protocol can't false-pass); the receiver autodetects all three.
+            # The sender's preview shows the RAW colour (uncorrected buffer).
+            seeded_colour = None
+            for pi, proto in enumerate(PROTOCOLS):
+                proto_colour = colour[pi:] + colour[:pi]
+                send_solid(sender.host, proto_colour, protocol=proto,
+                           repeats=args.packets, pace_ms=args.pace_ms)
+                ok, pct, pts, detail = _preview_ws.wait_for_solid(
+                    sender.host, proto_colour, args.tolerance, 100.0, args.timeout)
+                if ok:
+                    print(f"PASS  pc → {sender.name} [{proto}] (preview solid, {pts} points)",
+                          flush=True)
+                    passed += 1
+                    seeded_colour = proto_colour
+                else:
+                    print(f"FAIL  pc → {sender.name} [{proto}] (best {pct:.0f}% of {pts} points"
+                          f"{', ' + detail if detail else ''})"
+                          " — desktop listeners: check the OS firewall allows UDP 6454/5568/4048",
+                          flush=True)
+                    failed += 1
+            if seeded_colour is None:
                 continue  # without a seeded sender the relay legs can't mean anything
+            colour = seeded_colour  # the sender's buffer now holds the last seeded colour
 
             # Legs 2..N — sender relays to each listener via its own
-            # ArtNetSendDriver; listeners see the sender's CORRECTED colour.
+            # NetworkSendDriver, cycling the protocol control round-robin so a
+            # full matrix run exercises all three firmware send paths;
+            # listeners see the sender's CORRECTED colour.
             for listener in boards:
                 if listener is sender:
                     continue
@@ -267,26 +342,33 @@ def main() -> int:
                     print(f"SKIP  {sender.name} → {listener.name} ({self_skip})", flush=True)
                     skipped += 1
                     continue
+                relay_proto = relay_count % len(PROTOCOLS)
+                relay_count += 1
                 expected = corrected(colour, sender.brightness, sender.preset)
                 if not sender.artnet_enabled and not sender.enable_changed:
-                    sender.set_control("ArtNetSend", "enabled", True)
+                    sender.set_control("NetworkSend", "enabled", True)
                     sender.enable_changed = True
-                sender.set_control("ArtNetSend", "ip", listener.host.partition(":")[0])
+                sender.set_control("NetworkSend", "protocol", relay_proto)
+                sender.protocol_changed = True
+                sender.set_control("NetworkSend", "ip", listener.host.partition(":")[0])
                 sender.ip_changed = True
                 ok, pct, pts, detail = _preview_ws.wait_for_solid(
                     listener.host, expected, args.tolerance, 100.0, args.timeout)
                 if ok:
-                    print(f"PASS  {sender.name} → {listener.name} "
+                    print(f"PASS  {sender.name} → {listener.name} [{PROTOCOLS[relay_proto]}] "
                           f"(expected {expected} after sender correction, {pts} points)", flush=True)
                     passed += 1
                 else:
-                    print(f"FAIL  {sender.name} → {listener.name} (expected {expected}, "
-                          f"best {pct:.0f}% of {pts} points"
+                    print(f"FAIL  {sender.name} → {listener.name} [{PROTOCOLS[relay_proto]}] "
+                          f"(expected {expected}, best {pct:.0f}% of {pts} points"
                           f"{', ' + detail if detail else ''})", flush=True)
                     failed += 1
             if sender.ip_changed and sender.orig_ip is not None:
-                sender.set_control("ArtNetSend", "ip", sender.orig_ip)
+                sender.set_control("NetworkSend", "ip", sender.orig_ip)
                 sender.ip_changed = False
+            if sender.protocol_changed and sender.orig_protocol is not None:
+                sender.set_control("NetworkSend", "protocol", sender.orig_protocol)
+                sender.protocol_changed = False
     finally:
         for b in boards:
             b.restore()

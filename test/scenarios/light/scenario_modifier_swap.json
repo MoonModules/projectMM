@@ -9,7 +9,7 @@
     "Layouts",
     "GridLayout",
     "Drivers",
-    "ArtNetSendDriver",
+    "NetworkSendDriver",
     "PreviewDriver"
   ],
   "description": "Swap the Layer's modifier between Multiply and Checkerboard and verify the pipeline stays live across each replace. Prepares its own canvas (clear + rebuild) so it runs from any device state: one Layout(Grid 32x32) + one Layer + one effect + one modifier, then replace_module cycles the modifier MOD slot Multiply -> Checkerboard -> Multiply, measuring after each so a broken swap (null buffer / wrong light count) shows up. Exercises the modifier-replace path the UI's drag-replace uses.",
@@ -77,7 +77,7 @@
       "name": "fix-artnet",
       "op": "add_module",
       "id": "ArtNet",
-      "type": "ArtNetSendDriver",
+      "type": "NetworkSendDriver",
       "parent_id": "Drivers"
     }
   ],

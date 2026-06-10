@@ -30,7 +30,7 @@ The source buffer is split into **consecutive slices**, one per pin, in list ord
 
 ## Cross-domain wiring
 
-The driver is added as a child of the `Drivers` container in `main.cpp` (under `if constexpr (platform::rmtTxChannels > 0)`), exactly like [ArtNetSendDriver](ArtNetSendDriver.md): it receives `setSourceBuffer` / `setCorrection` / `setLayer` from `Drivers::passBufferToDrivers`, and applies the same `const Correction*` ArtNet uses. The **symbol encode** (`encodeWs2812Symbols` in `RmtSymbol.h`) is domain code in `src/light/` so it is host-testable; the **peripheral** (`platform::rmtWs2812*` in `src/platform/esp32/platform_esp32_rmt.cpp`) is the only ESP-IDF-touching part. Per-chip channel and memory limits come from the IDF SOC capability macros, so the same code serves classic and S3.
+The driver is added as a child of the `Drivers` container in `main.cpp` (under `if constexpr (platform::rmtTxChannels > 0)`), exactly like [NetworkSendDriver](NetworkSendDriver.md): it receives `setSourceBuffer` / `setCorrection` / `setLayer` from `Drivers::passBufferToDrivers`, and applies the same `const Correction*` ArtNet uses. The **symbol encode** (`encodeWs2812Symbols` in `RmtSymbol.h`) is domain code in `src/light/` so it is host-testable; the **peripheral** (`platform::rmtWs2812*` in `src/platform/esp32/platform_esp32_rmt.cpp`) is the only ESP-IDF-touching part. Per-chip channel and memory limits come from the IDF SOC capability macros, so the same code serves classic and S3.
 
 ## Loopback self-test (on device)
 

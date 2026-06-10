@@ -122,12 +122,12 @@
       "needs_scenario": true
     },
     {
-      "id": "artnet_live_test",
+      "id": "network_live_test",
       "tab": "live",
       "group": "scenario",
-      "label": "ArtNet Live Test",
-      "help": "run_artnet_live",
-      "script": "scenario/run_artnet_live.py"
+      "label": "Network Live Test",
+      "help": "run_network_live",
+      "script": "scenario/run_network_live.py"
     },
     {
       "id": "setup_esp_idf",

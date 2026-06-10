@@ -203,8 +203,13 @@ public:
     // Non-blocking receive of one datagram: >0 = bytes copied into buf, -1 =
     // nothing pending. Mirrors TcpConnection::read's contract minus the
     // peer-closed 0 case (UDP has no connection to close). A datagram longer
-    // than maxLen is truncated.
-    int recvFrom(uint8_t* buf, size_t maxLen);
+    // than maxLen is truncated. Pass `srcIp` to also get the sender's IPv4
+    // octets (ArtNet discovery replies go back to the poller's address).
+    int recvFrom(uint8_t* buf, size_t maxLen, uint8_t srcIp[4] = nullptr);
+    // One-shot send to an explicit address — for replying on a bound,
+    // unconnected receive socket (e.g. ArtPollReply to the poller). connect()ed
+    // send sockets keep using sendTo().
+    bool sendToAddr(const uint8_t ip[4], uint16_t port, const uint8_t* data, size_t len);
     void close();
 
 private:

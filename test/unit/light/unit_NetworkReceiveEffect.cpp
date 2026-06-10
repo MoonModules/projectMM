@@ -1,9 +1,9 @@
-// @module ArtNetReceiveEffect
-// @also ArtNetSendDriver
+// @module NetworkReceiveEffect
+// @also NetworkSendDriver
 
 #include "doctest.h"
 #include "light/ArtNetPacket.h"
-#include "light/effects/ArtNetReceiveEffect.h"
+#include "light/effects/NetworkReceiveEffect.h"
 #include "light/layouts/GridLayout.h"
 #include "platform/platform.h"
 
@@ -25,7 +25,7 @@ struct Rig {
     mm::Layouts layouts;
     mm::GridLayout grid;
     mm::Layer layer;
-    mm::ArtNetReceiveEffect fx;
+    mm::NetworkReceiveEffect fx;
 
     explicit Rig(mm::lengthType w = 16, mm::lengthType h = 16) {
         grid.width = w;
@@ -90,7 +90,7 @@ TEST_CASE("ArtNet OpDmx parse rejects malformed packets") {
 // --- universe placement (applyDmx, no sockets) --------------------------------
 
 // Universe universe_start lands at byte 0; the next universe lands at byte 510 — the same split the sender uses.
-TEST_CASE("ArtNetReceiveEffect places universes at consecutive 510-byte offsets") {
+TEST_CASE("NetworkReceiveEffect places universes at consecutive 510-byte offsets") {
     Rig r;
     uint8_t u0[510], u1[258];
     std::memset(u0, 0xAA, sizeof(u0));
@@ -108,7 +108,7 @@ TEST_CASE("ArtNetReceiveEffect places universes at consecutive 510-byte offsets"
 }
 
 // The layer clears its buffer every tick; staging holds the last frame, so the lights don't strobe black between packets.
-TEST_CASE("ArtNetReceiveEffect holds the last frame across ticks without new packets") {
+TEST_CASE("NetworkReceiveEffect holds the last frame across ticks without new packets") {
     Rig r;
     uint8_t u0[3] = {10, 20, 30};
     r.fx.applyDmx(0, u0, sizeof(u0));
@@ -122,7 +122,7 @@ TEST_CASE("ArtNetReceiveEffect holds the last frame across ticks without new pac
 }
 
 // Universes below universe_start are ignored; universes relative to a non-zero start land at offset 0.
-TEST_CASE("ArtNetReceiveEffect respects universe_start") {
+TEST_CASE("NetworkReceiveEffect respects universe_start") {
     Rig r;
     r.fx.universeStart = 5;
     uint8_t below[3] = {1, 1, 1};
@@ -139,7 +139,7 @@ TEST_CASE("ArtNetReceiveEffect respects universe_start") {
 }
 
 // A payload overrunning the buffer end is clamped; a universe entirely beyond the buffer is ignored.
-TEST_CASE("ArtNetReceiveEffect clamps payloads to the buffer") {
+TEST_CASE("NetworkReceiveEffect clamps payloads to the buffer") {
     Rig r;   // 768 bytes
     uint8_t u1[510];
     std::memset(u1, 0xCC, sizeof(u1));
@@ -154,7 +154,7 @@ TEST_CASE("ArtNetReceiveEffect clamps payloads to the buffer") {
 }
 
 // A 0×0×0 grid accepts packets as a clean no-op — degraded, not crashed.
-TEST_CASE("ArtNetReceiveEffect tolerates a zero-light grid") {
+TEST_CASE("NetworkReceiveEffect tolerates a zero-light grid") {
     Rig r(0, 0);
     uint8_t u0[3] = {1, 2, 3};
     r.fx.applyDmx(0, u0, sizeof(u0));
@@ -165,7 +165,7 @@ TEST_CASE("ArtNetReceiveEffect tolerates a zero-light grid") {
 // --- staging lifecycle ---------------------------------------------------------
 
 // Staging is sized in onBuildState (off the hot path), loop() never reallocates it, teardown frees it.
-TEST_CASE("ArtNetReceiveEffect staging buffer lifecycle") {
+TEST_CASE("NetworkReceiveEffect staging buffer lifecycle") {
     Rig r;
     REQUIRE(r.fx.stagingData() != nullptr);
     CHECK(r.fx.stagingBytes() == r.layer.buffer().bytes());
@@ -182,16 +182,17 @@ TEST_CASE("ArtNetReceiveEffect staging buffer lifecycle") {
 // --- localhost round-trip (real UDP through the platform bind/recvFrom path) ---
 
 // A real packet sent over localhost UDP lands in the layer buffer — the end-to-end proof of the platform receive path.
-TEST_CASE("ArtNetReceiveEffect receives over localhost UDP") {
+TEST_CASE("NetworkReceiveEffect receives over localhost UDP") {
     Rig r;
-    // Not 6454: a live ArtNet tool on the dev machine must not collide with CI.
-    r.fx.port = 16454;
+    // The effect binds the three well-known protocol ports (constants by
+    // design). A running projectMM desktop app would hold them — don't run the
+    // app and ctest at once; CI runners have the ports free.
     r.fx.setup();
-    REQUIRE(r.fx.status() == nullptr);   // bind succeeded
+    REQUIRE(r.fx.status() == nullptr);   // binds succeeded
 
     mm::platform::UdpSocket tx;
     REQUIRE(tx.open());
-    REQUIRE(tx.connect("127.0.0.1", 16454));
+    REQUIRE(tx.connect("127.0.0.1", mm::ARTNET_PORT));
     uint8_t payload[3] = {42, 43, 44};
     uint8_t pkt[mm::ARTNET_HEADER_SIZE + 3];
     const size_t len = mm::buildArtDmxPacket(pkt, 0, 0, payload, 3);

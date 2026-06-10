@@ -6,7 +6,7 @@
     "Layouts",
     "GridLayout",
     "Drivers",
-    "ArtNetSendDriver",
+    "NetworkSendDriver",
     "PreviewDriver",
     "LinesEffect",
     "RainbowEffect",
@@ -81,7 +81,7 @@
       "name": "fix-artnet",
       "op": "add_module",
       "id": "ArtNet",
-      "type": "ArtNetSendDriver",
+      "type": "NetworkSendDriver",
       "parent_id": "Drivers"
     },
     {
@@ -156,7 +156,7 @@
       "name": "build-artnet",
       "op": "add_module",
       "id": "ArtNet",
-      "type": "ArtNetSendDriver",
+      "type": "NetworkSendDriver",
       "parent_id": "Drivers"
     },
     {
@@ -506,7 +506,7 @@
         "pc-macos": {
           "tick_us": [
             0,
-            0
+            1
           ],
           "free_heap": [
             0,
@@ -518,7 +518,7 @@
           ],
           "at": [
             "2026-06-07",
-            "2026-06-07"
+            "2026-06-10"
           ]
         },
         "esp32-eth": {
@@ -886,7 +886,7 @@
         "pc-macos": {
           "tick_us": [
             14,
-            16
+            17
           ],
           "free_heap": [
             0,
@@ -898,7 +898,7 @@
           ],
           "at": [
             "2026-06-07",
-            "2026-06-07"
+            "2026-06-10"
           ]
         },
         "esp32-eth": {
@@ -1502,7 +1502,7 @@
         "pc-macos": {
           "tick_us": [
             1,
-            1
+            2
           ],
           "free_heap": [
             0,
@@ -1514,7 +1514,7 @@
           ],
           "at": [
             "2026-06-07",
-            "2026-06-07"
+            "2026-06-10"
           ]
         },
         "esp32-eth": {

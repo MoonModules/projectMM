@@ -29,7 +29,7 @@
 #include "light/modifiers/MultiplyModifier.h"
 #include "light/modifiers/CheckerboardModifier.h"
 #include "light/drivers/Drivers.h"
-#include "light/drivers/ArtNetSendDriver.h"
+#include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
 #include "platform/platform.h"
 
@@ -188,7 +188,7 @@ static void registerScenarioTypes() {
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier");
     mm::ModuleFactory::registerType<mm::Drivers>("Drivers");
-    mm::ModuleFactory::registerType<mm::ArtNetSendDriver>("ArtNetSendDriver");
+    mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver");
     done = true;
 }

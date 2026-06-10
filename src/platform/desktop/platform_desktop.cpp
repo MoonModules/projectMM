@@ -450,11 +450,27 @@ bool UdpSocket::bind(uint16_t port) {
     return make_nonblocking(fd_) == 0;
 }
 
-int UdpSocket::recvFrom(uint8_t* buf, size_t maxLen) {
+int UdpSocket::recvFrom(uint8_t* buf, size_t maxLen, uint8_t srcIp[4]) {
     if (fd_ < 0) return -1;
-    auto n = ::recv(sock(fd_), reinterpret_cast<char*>(buf), static_cast<int>(maxLen), 0);
+    sockaddr_in src{};
+    socklen_t srcLen = sizeof(src);
+    auto n = ::recvfrom(sock(fd_), reinterpret_cast<char*>(buf), static_cast<int>(maxLen), 0,
+                        reinterpret_cast<sockaddr*>(&src), &srcLen);
     // 0-byte datagrams and would-block both mean "nothing usable pending".
-    return n > 0 ? static_cast<int>(n) : -1;
+    if (n <= 0) return -1;
+    if (srcIp) std::memcpy(srcIp, &src.sin_addr.s_addr, 4);   // network order = octets
+    return static_cast<int>(n);
+}
+
+bool UdpSocket::sendToAddr(const uint8_t ip[4], uint16_t port,
+                           const uint8_t* data, size_t len) {
+    if (fd_ < 0) return false;
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    std::memcpy(&addr.sin_addr.s_addr, ip, 4);
+    return ::sendto(sock(fd_), reinterpret_cast<const char*>(data), static_cast<int>(len), 0,
+                    reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) >= 0;
 }
 
 void UdpSocket::close() {

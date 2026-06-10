@@ -4,37 +4,6 @@ Auto-generated from `test/unit/{core,light}/unit_*.cpp` by `scripts/docs/generat
 
 Unit tests are the fastest tier in the [test strategy](../testing.md): they run the production code in-process with doctest, no platform, no network. Each section below covers one module.
 
-## ArtNetReceiveEffect
-
-`test/unit/light/unit_ArtNetReceiveEffect.cpp`
-*Also touches: ArtNetSendDriver.*
-
-- A packet built by the sender's builder parses back to the same universe and payload — the two sides can't drift.
-- Bad magic, non-OpDmx opcodes, truncated headers, and lying length fields are all rejected — the receiver drops them.
-- Universe universe_start lands at byte 0; the next universe lands at byte 510 — the same split the sender uses.
-- The layer clears its buffer every tick; staging holds the last frame, so the lights don't strobe black between packets.
-- Universes below universe_start are ignored; universes relative to a non-zero start land at offset 0.
-- A payload overrunning the buffer end is clamped; a universe entirely beyond the buffer is ignored.
-- A 0×0×0 grid accepts packets as a clean no-op — degraded, not crashed.
-- Staging is sized in onBuildState (off the hot path), loop() never reallocates it, teardown frees it.
-- A real packet sent over localhost UDP lands in the layer buffer — the end-to-end proof of the platform receive path.
-
-## ArtNetSendDriver
-
-`test/unit/light/unit_ArtNetSendDriver_no_alloc_in_loop.cpp`
-*Also touches: Drivers, Correction.*
-
-- onBuildState sizes the correction-applied buffer to source-count × out-channels. The size matches what loop() needs on its first send. Calling loop() after onBuildState must not reallocate — pin the data pointer + shape.
-- A preset toggle from RGB to RGBW grows outChannels from 3 to 4. The grow runs in onCorrectionChanged, off the hot path.
-- A brightness-only change keeps outChannels at 3 — onCorrectionChanged is still called, but the resize short-circuits (existing buffer already fits).
-
-`test/unit/light/unit_ArtNetSendDriver_packet.cpp`
-
-- The built packet contains the exact header layout the Art-Net spec mandates: ID, OpCode, version, sequence, physical, universe, length, data.
-- Universe 259 (0x0103) is encoded little-endian (low byte first), matching the Art-Net wire format.
-- 256 RGB lights (768 bytes) split across exactly 2 universes (510 + 258), matching the 510-channel-per-universe cap.
-- The data-length field is encoded big-endian (high byte first), unlike the universe field — matching the Art-Net spec.
-
 ## BlendMap
 
 `test/unit/light/unit_BlendMap.cpp`
@@ -382,6 +351,53 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - The static-IP fields (ip / gateway / subnet / dns) are bound as IPv4 controls — 4 bytes of storage each, not 16-char dotted-quad strings. They start hidden because addressing defaults to DHCP.
 - In WiFi-capable builds (anything other than --firmware esp32-eth), the rssi and txPower controls are present and start hidden — Idle/Ethernet don't expose live WiFi metrics. The Ethernet-only build compiles them out entirely so the iteration finds nothing, which is still a valid pass shape.
 - Conditional controls: the static-IP fields (ip/gateway/subnet/dns) are visible only when addressing == Static (1), hidden under DHCP (0) — but ALWAYS bound so persistence can load a saved static config regardless of the live mode. This is the documented add-then-setHidden pattern (architecture.md § Conditional controls); the test pins it both ways so a regression (e.g. dropping setHidden, or conditionally NOT adding the field) fails here, not on hardware.
+
+## NetworkReceiveEffect
+
+`test/unit/light/unit_NetworkReceiveEffect.cpp`
+*Also touches: NetworkSendDriver.*
+
+- A packet built by the sender's builder parses back to the same universe and payload — the two sides can't drift.
+- Bad magic, non-OpDmx opcodes, truncated headers, and lying length fields are all rejected — the receiver drops them.
+- Universe universe_start lands at byte 0; the next universe lands at byte 510 — the same split the sender uses.
+- The layer clears its buffer every tick; staging holds the last frame, so the lights don't strobe black between packets.
+- Universes below universe_start are ignored; universes relative to a non-zero start land at offset 0.
+- A payload overrunning the buffer end is clamped; a universe entirely beyond the buffer is ignored.
+- A 0×0×0 grid accepts packets as a clean no-op — degraded, not crashed.
+- Staging is sized in onBuildState (off the hot path), loop() never reallocates it, teardown frees it.
+- A real packet sent over localhost UDP lands in the layer buffer — the end-to-end proof of the platform receive path.
+
+`test/unit/light/unit_NetworkReceiveEffect_protocols.cpp`
+*Also touches: NetworkSendDriver.*
+
+- A packet built by the sender's builder parses back to the same universe and payload — the two sides can't drift.
+- Truncated headers, a bad ACN identifier, wrong layer vectors, a non-zero start code, and a lying property count are all rejected.
+- A packet built by the sender's builder parses back to the same byte offset and payload.
+- Truncated headers, wrong version bits, and a lying length field are rejected.
+- Each universe-protocol parser refuses the other protocols' datagrams — port mix-ups degrade to silence, not garbage.
+- An ArtPoll datagram is recognised (the discovery hook Resolume/Madrix use); OpDmx and non-ArtNet packets are not polls.
+- The ArtPollReply carries the fields controllers read: opcode, IP, port, names, universe switches, MAC.
+- DDP's byte addressing lands payloads at the exact offset; out-of-range and overflowing offsets are clamped or dropped.
+- channels_per_universe = 512 maps universes at 512-byte strides and clamps a 512-channel payload to its slot.
+- Three senders — one per protocol — hit the same effect on its three ports; each payload lands. The autodetect proof.
+
+## NetworkSendDriver
+
+`test/unit/light/unit_NetworkSendDriver_no_alloc_in_loop.cpp`
+*Also touches: Drivers, Correction.*
+
+- onBuildState sizes the correction-applied buffer to source-count × out-channels. The size matches what loop() needs on its first send. Calling loop() after onBuildState must not reallocate — pin the data pointer + shape.
+- A preset toggle from RGB to RGBW grows outChannels from 3 to 4. The grow runs in onCorrectionChanged, off the hot path.
+- A brightness-only change keeps outChannels at 3 — onCorrectionChanged is still called, but the resize short-circuits (existing buffer already fits).
+
+`test/unit/light/unit_NetworkSendDriver_packet.cpp`
+
+- The built packet contains the exact header layout the Art-Net spec mandates: ID, OpCode, version, sequence, physical, universe, length, data.
+- Universe 259 (0x0103) is encoded little-endian (low byte first), matching the Art-Net wire format.
+- 256 RGB lights (768 bytes) split across exactly 2 universes (510 + 258), matching the 510-channel-per-universe cap.
+- The data-length field is encoded big-endian (high byte first), unlike the universe field — matching the Art-Net spec.
+- The built E1.31 packet carries the exact ACN layout strict sACN receivers (and tools like xLights) validate: identifier, the three flags+length fields, CID, source name, priority, universe, property count, start code.
+- The built DDP packet carries version+push bits, RGB data type, default destination, and big-endian offset/length.
 
 ## NoiseEffect
 

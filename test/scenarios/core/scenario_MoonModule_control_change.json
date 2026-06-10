@@ -62,7 +62,7 @@
       "name": "fix-artnet",
       "op": "add_module",
       "id": "ArtNet",
-      "type": "ArtNetSendDriver",
+      "type": "NetworkSendDriver",
       "parent_id": "Drivers"
     }
   ],

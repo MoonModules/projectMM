@@ -17,7 +17,7 @@ namespace mm {
 // buffer, 8-bit, GRB.
 //
 // This is the readable EXAMPLE future LED drivers copy. It reads as a sibling of
-// ArtNetSendDriver: same DriverBase hooks, same per-light `correction_->apply()`
+// NetworkSendDriver: same DriverBase hooks, same per-light `correction_->apply()`
 // guard pattern, same once-allocated owned buffer sized off the hot path. The
 // only thing that differs is the emit — ArtNet packs corrected bytes into UDP
 // universes; this fuses the correction and the WS2812 symbol-encode into one
@@ -69,7 +69,7 @@ public:
     static constexpr uint32_t kResolutionHz = 40'000'000;
 
     // --- pin/count list parsing (public statics, host-testable — the
-    // ArtNetSendDriver::buildPacket precedent). Both return nullptr on success
+    // NetworkSendDriver::buildPacket precedent). Both return nullptr on success
     // or a static error literal the caller feeds straight into setStatus(). ---
 
     // Parse "18,17,16" into out[0..maxPins). Spaces around tokens are fine
@@ -265,7 +265,7 @@ public:
 private:
     // Source frame + shared correction — each physical driver owns these (the
     // contract shares Correction::apply(), not the member storage); same shape
-    // as ArtNetSendDriver.
+    // as NetworkSendDriver.
     Buffer* sourceBuffer_ = nullptr;
     const Correction* correction_ = nullptr;
 

@@ -9,7 +9,7 @@
 #include <cstring>
 
 // These tests pin the MULTI-PIN surface: the `pins` / `ledsPerPin` text-control
-// parsing (public statics, the ArtNetSendDriver::buildPacket testability
+// parsing (public statics, the NetworkSendDriver::buildPacket testability
 // precedent) and the slice arithmetic down to per-pin symbol offsets. All pure
 // host logic — the RMT peripheral is never touched; on desktop the channel init
 // is inert but parsing and slicing must behave identically, which is exactly

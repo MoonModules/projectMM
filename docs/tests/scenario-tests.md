@@ -10,7 +10,7 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 
 `test/scenarios/light/scenario_GridLayout_grid_sizes.json` — Walk the grid through 16x16 → 32x32 → 64x64 → 128x128 and assert a per-size FPS floor.
 
-**Mode**: `mutate` · **Also touches**: Layer, MultiplyModifier, NoiseEffect, Drivers, ArtNetSendDriver, PreviewDriver
+**Mode**: `mutate` · **Also touches**: Layer, MultiplyModifier, NoiseEffect, Drivers, NetworkSendDriver, PreviewDriver
 
 #### `size-16x16` (set_control)  📏
 
@@ -199,7 +199,7 @@ Grow back to 128x128. Measured: confirms the heap can return to the heavy baseli
 
 `test/scenarios/light/scenario_AllEffects_grid_sizes.json` — Sweep every effect (no modifier) across 16/32/64/128 square grids and measure tick/FPS, free internal heap, max internal block per (effect, size). The scenario prepares its own canvas: clear_children wipes whatever layouts/layers/drivers the device had, then it rebuilds exactly one Layout(Grid) + one Layer + one effect (no modifier) + ArtNet, so the measurement is each effect's raw cost over the full grid through the real output driver, on any starting device state. PreviewDriver is apparatus (non-deletable) so it survives the clear. Effects are swapped via replace_module at a fixed Layer child slot; grid resized via set_control (width then height, measuring after height so we never measure an N x 128 stripe).
 
-**Mode**: `mutate` · **Also touches**: Layouts, GridLayout, Drivers, ArtNetSendDriver, PreviewDriver, LinesEffect, RainbowEffect, NoiseEffect, PlasmaEffect, PlasmaPaletteEffect, MetaballsEffect, FireEffect, ParticlesEffect, GlowParticlesEffect, CheckerboardEffect, SpiralEffect, RingsEffect, LavaLampEffect, GameOfLifeEffect
+**Mode**: `mutate` · **Also touches**: Layouts, GridLayout, Drivers, NetworkSendDriver, PreviewDriver, LinesEffect, RainbowEffect, NoiseEffect, PlasmaEffect, PlasmaPaletteEffect, MetaballsEffect, FireEffect, ParticlesEffect, GlowParticlesEffect, CheckerboardEffect, SpiralEffect, RingsEffect, LavaLampEffect, GameOfLifeEffect
 
 #### `LinesEffect-16x16` (set_control)  📏
 
@@ -1318,13 +1318,13 @@ GameOfLifeEffect at 128x128 (16384 lights) — measure tick/FPS, free internal h
 
 ### scenario_Layer_base_pipeline
 
-`test/scenarios/light/scenario_Layer_base_pipeline.json` — Core pipeline: build Layouts→Grid→Layer→RainbowEffect→Drivers→ArtNetSendDriver from scratch and verify each module wires correctly. Drives the bounded FPS check at the end so a render-path regression is caught.
+`test/scenarios/light/scenario_Layer_base_pipeline.json` — Core pipeline: build Layouts→Grid→Layer→RainbowEffect→Drivers→NetworkSendDriver from scratch and verify each module wires correctly. Drives the bounded FPS check at the end so a render-path regression is caught.
 
-**Mode**: `construct` · **Also touches**: GridLayout, RainbowEffect, Drivers, ArtNetSendDriver
+**Mode**: `construct` · **Also touches**: GridLayout, RainbowEffect, Drivers, NetworkSendDriver
 
 #### `add-artnet` (add_module)  📏
 
-Add ArtNetSendDriver and run the bounded FPS measurement (expected to stay at >=80% of the rated FPS for the 128x128 grid this scenario builds; min_pct needs a live baseline, so it gates only on hardware and is skipped with a WARN in the desktop runner).
+Add NetworkSendDriver and run the bounded FPS measurement (expected to stay at >=80% of the rated FPS for the 128x128 grid this scenario builds; min_pct needs a live baseline, so it gates only on hardware and is skipped with a WARN in the desktop runner).
 
 **Setup** (preceding non-measured steps):
 - `add-layout-group` (add_module) — Create the top-level Layouts container.
@@ -1351,7 +1351,7 @@ Add ArtNetSendDriver and run the bounded FPS measurement (expected to stay at >=
 
 `test/scenarios/light/scenario_Layer_buildup.json` — Start empty, add modules step by step, measure tick + heap after each meaningful pipeline state. Surfaces 'how much does each module cost?' so a regression in any one module shows up as a per-step delta instead of a single end-to-end number. Heap bounds catch unintended allocations: each step's delta vs the previous step is asserted against max_delta_bytes (only meaningful on ESP32 where freeHeap() returns a real value).
 
-**Mode**: `construct` · **Also touches**: Layouts, GridLayout, RainbowEffect, MultiplyModifier, Drivers, ArtNetSendDriver
+**Mode**: `construct` · **Also touches**: Layouts, GridLayout, RainbowEffect, MultiplyModifier, Drivers, NetworkSendDriver
 
 #### `measure-minimum` (measure)  📏
 
@@ -1379,7 +1379,7 @@ Full pipeline at 16x16. Heap delta vs previous measure-minimum step should stay 
 
 **Setup** (preceding non-measured steps):
 - `add-drivers` (add_module) — Drivers container wired to the Layer.
-- `add-artnet` (add_module) — ArtNetSendDriver under Drivers. Full pipeline now end-to-end.
+- `add-artnet` (add_module) — NetworkSendDriver under Drivers. Full pipeline now end-to-end.
 
 **Bounds**:
 - heap growth ≤ 8192B vs previous measure step
@@ -1444,7 +1444,7 @@ Production-size grid with the full pipeline. Final tick + cumulative heap delta 
 
 #### `add-artnet` (add_module)  📏
 
-Add ArtNetSendDriver and run the bounded FPS measurement on the no-LUT path.
+Add NetworkSendDriver and run the bounded FPS measurement on the no-LUT path.
 
 **Setup** (preceding non-measured steps):
 - `add-layout-group` (add_module) — Create the top-level Layouts container.
@@ -1470,7 +1470,7 @@ Add ArtNetSendDriver and run the bounded FPS measurement on the no-LUT path.
 
 `test/scenarios/light/scenario_modifier_swap.json` — Swap the Layer's modifier between Multiply and Checkerboard and verify the pipeline stays live across each replace. Prepares its own canvas (clear + rebuild) so it runs from any device state: one Layout(Grid 32x32) + one Layer + one effect + one modifier, then replace_module cycles the modifier MOD slot Multiply -> Checkerboard -> Multiply, measuring after each so a broken swap (null buffer / wrong light count) shows up. Exercises the modifier-replace path the UI's drag-replace uses.
 
-**Mode**: `mutate` · **Also touches**: MultiplyModifier, CheckerboardModifier, NoiseEffect, Layouts, GridLayout, Drivers, ArtNetSendDriver, PreviewDriver
+**Mode**: `mutate` · **Also touches**: MultiplyModifier, CheckerboardModifier, NoiseEffect, Layouts, GridLayout, Drivers, NetworkSendDriver, PreviewDriver
 
 #### `multiply-1` (measure)  📏
 
@@ -1536,7 +1536,7 @@ Back to Multiply — replace round-trips cleanly, pipeline live again.
 
 `test/scenarios/light/scenario_Layouts_mutation.json` — Tree mutation on the Layouts container while the pipeline runs: add a second layout (multiple layouts under one Layouts), replace a layout with a different type, and remove a layout. The check is that each mutation leaves the pipeline RENDERING — Layer + Drivers re-wire via buildState and the buffer stays non-null and non-zero. Mirrors the HTTP add/replace/delete handlers; exercises the runner's add_module / replace_module / remove_module ops. NOTE: the Layer renders a dense bounding-box buffer sized by the layouts' coordinate EXTENT, not the summed light count — layouts that overlap in coordinate space share voxels (two 64x64 grids both occupy x,y in 0..63). There are no per-layout coordinate offsets, so multiple layouts share the same coordinate box; these steps assert liveness, not buffer-size arithmetic. Grids are 64x64 so the tick stays above the host's microsecond clock at every step.
 
-**Mode**: `mutate` · **Also touches**: GridLayout, SphereLayout, Layer, RainbowEffect, Drivers, ArtNetSendDriver
+**Mode**: `mutate` · **Also touches**: GridLayout, SphereLayout, Layer, RainbowEffect, Drivers, NetworkSendDriver
 
 #### `measure-one-layout` (measure)  📏
 
@@ -1730,7 +1730,7 @@ Re-enable mirrorY and measure — the heavy LUT path must recover (FPS within 50
 
 #### `add-artnet` (add_module)  📏
 
-Add ArtNetSendDriver and run the bounded FPS measurement on the LUT path.
+Add NetworkSendDriver and run the bounded FPS measurement on the LUT path.
 
 **Setup** (preceding non-measured steps):
 - `add-layout-group` (add_module) — Create the top-level Layouts container.
@@ -1757,11 +1757,11 @@ Add ArtNetSendDriver and run the bounded FPS measurement on the LUT path.
 
 `test/scenarios/light/scenario_MultiplyModifier_pipeline.json` — Pipeline with a mirror modifier: NoiseEffect renders one quadrant, MultiplyModifier reflects across X and Y to produce a kaleidoscope. Used to verify the MultiplyModifier wires into Layer cleanly and that the full pipeline still meets its FPS bound.
 
-**Mode**: `construct` · **Also touches**: Layer, NoiseEffect, ArtNetSendDriver
+**Mode**: `construct` · **Also touches**: Layer, NoiseEffect, NetworkSendDriver
 
 #### `add-artnet` (add_module)  📏
 
-Add ArtNetSendDriver and run the bounded FPS measurement (mirror + LUT path must stay at >=80% of the rated FPS).
+Add NetworkSendDriver and run the bounded FPS measurement (mirror + LUT path must stay at >=80% of the rated FPS).
 
 **Setup** (preceding non-measured steps):
 - `add-layout-group` (add_module) — Create the top-level Layouts container.
