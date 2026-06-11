@@ -285,7 +285,20 @@ bool ethInit() {
     phy_config.phy_addr = ethPins.phyAddr;
     phy_config.reset_gpio_num = ethPins.rstGpio;
 
+    // Helper to unwind whatever was created so far on any failure — ethInit
+    // runs once at boot, but a clean teardown means a broken PHY/cable degrades
+    // (returns false → the WiFi/AP cascade takes over) instead of leaking the
+    // netif + MAC/PHY drivers.
+    auto fail = [&](const char* what, esp_eth_mac_t* m, esp_eth_phy_t* p) -> bool {
+        ESP_LOGE(NET_TAG, "Ethernet %s", what);
+        if (p) p->del(p);
+        if (m) m->del(m);
+        if (ethNetif_) { esp_netif_destroy(ethNetif_); ethNetif_ = nullptr; }
+        return false;
+    };
+
     esp_eth_mac_t* mac = esp_eth_mac_new_esp32(&emac_config, &mac_config);
+    if (!mac) return fail("MAC create failed", nullptr, nullptr);
     // IP101 (P4-NANO) is a managed-component PHY ctor (espressif/ip101 in
     // idf_component.yml; removed from esp_eth core in IDF v6); the generic ctor
     // (Olimex LAN8720) stays in core. The IP101 symbol is only declared on the
@@ -300,14 +313,16 @@ bool ethInit() {
 #else
     phy = esp_eth_phy_new_generic(&phy_config);
 #endif
+    if (!phy) return fail("PHY create failed", mac, nullptr);
 
     esp_eth_config_t eth_config = ETH_DEFAULT_CONFIG(mac, phy);
     esp_eth_handle_t eth_handle = nullptr;
     esp_err_t err = esp_eth_driver_install(&eth_config, &eth_handle);
     if (err != ESP_OK) {
-        ESP_LOGE(NET_TAG, "Ethernet driver install failed: %s", esp_err_to_name(err));
-        return false;
+        return fail(esp_err_to_name(err), mac, phy);
     }
+    // From here the driver owns mac+phy (driver_uninstall frees them); the
+    // remaining failure paths uninstall the driver instead of del-ing mac/phy.
     ESP_ERROR_CHECK(esp_netif_attach(ethNetif_, esp_eth_new_netif_glue(eth_handle)));
 
     ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID,
@@ -318,6 +333,10 @@ bool ethInit() {
     err = esp_eth_start(eth_handle);
     if (err != ESP_OK) {
         ESP_LOGE(NET_TAG, "Ethernet start failed: %s", esp_err_to_name(err));
+        esp_event_handler_unregister(ETH_EVENT, ESP_EVENT_ANY_ID, &ethEventHandler);
+        esp_event_handler_unregister(IP_EVENT, IP_EVENT_ETH_GOT_IP, &ethEventHandler);
+        esp_eth_driver_uninstall(eth_handle);  // frees mac + phy
+        if (ethNetif_) { esp_netif_destroy(ethNetif_); ethNetif_ = nullptr; }
         return false;
     }
 

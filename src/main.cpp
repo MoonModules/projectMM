@@ -23,6 +23,7 @@
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
 #include "light/drivers/LcdLedDriver.h"
+#include "light/drivers/ParlioLedDriver.h"
 #include "light/drivers/RmtLedDriver.h"
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
@@ -72,6 +73,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers/PreviewDriver.md");
     mm::ModuleFactory::registerType<mm::RmtLedDriver>("RmtLedDriver", "light/drivers/RmtLedDriver.md");
     mm::ModuleFactory::registerType<mm::LcdLedDriver>("LcdLedDriver", "light/drivers/LcdLedDriver.md");
+    mm::ModuleFactory::registerType<mm::ParlioLedDriver>("ParlioLedDriver", "light/drivers/ParlioLedDriver.md");
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/HttpServerModule.md");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/SystemModule.md");
     mm::ModuleFactory::registerType<mm::BoardModule>("BoardModule", "core/BoardModule.md");
@@ -235,6 +237,15 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
         auto* lcd = mm::ModuleFactory::create("LcdLedDriver");
         drivers->addChild(lcd);
         lcd->markWiredByCode();
+    }
+
+    // Parlio parallel WS2812 output — chips with the Parlio peripheral (the
+    // ESP32-P4 among current targets): the P4's scale path, sibling of the LCD
+    // driver, 8 strands over one DMA transfer.
+    if constexpr (mm::platform::parlioLanes > 0) {
+        auto* parlio = mm::ModuleFactory::create("ParlioLedDriver");
+        drivers->addChild(parlio);
+        parlio->markWiredByCode();
     }
 
     auto* preview = static_cast<mm::PreviewDriver*>(mm::ModuleFactory::create("PreviewDriver"));

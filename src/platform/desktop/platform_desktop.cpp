@@ -699,4 +699,22 @@ RmtLoopbackResult lcdWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*lane
     return {};   // not supported off the S3
 }
 
+// Parlio WS2812 — no-op stubs. Desktop has no Parlio peripheral; the driver
+// idles (parlioLanes == 0). Sizing/slicing is host-pinned by the driver tests.
+bool parlioWs2812Init(ParlioWs2812Handle& /*h*/, const uint16_t* /*dataPins*/,
+                      uint8_t /*laneCount*/, uint32_t /*pclkHz*/, size_t /*bufferBytes*/) {
+    return false;
+}
+uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& /*h*/) { return nullptr; }
+size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle& /*h*/) { return 0; }
+bool parlioWs2812Transmit(ParlioWs2812Handle& /*h*/, size_t /*bytes*/) { return false; }
+void parlioWs2812Wait(ParlioWs2812Handle& /*h*/, uint32_t /*timeoutMs*/) {}
+void parlioWs2812Deinit(ParlioWs2812Handle& /*h*/) {}
+RmtLoopbackResult parlioWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
+                                       uint16_t /*rxGpio*/, const uint8_t* /*frame*/,
+                                       size_t /*frameBytes*/, size_t /*dataBytes*/,
+                                       uint8_t /*rowBits*/) {
+    return {};   // not supported off the P4
+}
+
 } // namespace mm::platform

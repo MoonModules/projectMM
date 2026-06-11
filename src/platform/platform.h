@@ -288,7 +288,7 @@ private:
 [[noreturn]] void reboot();
 
 // ---------------------------------------------------------------------------
-// RMT WS2812 LED output (classic ESP32 + S3). The driver (src/light/drivers/
+// RMT WS2812 LED output (classic ESP32 + S3 + P4). The driver (src/light/drivers/
 // RmtLedDriver.h) does the symbol encode in domain code and may run several
 // channels at once (one per pin); the platform owns only the peripheral. All
 // no-ops on targets without RMT, so the driver compiles everywhere behind
@@ -413,5 +413,49 @@ RmtLoopbackResult lcdWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
                                     uint16_t wrGpio, uint16_t dcGpio, uint16_t rxGpio,
                                     const uint8_t* frame, size_t frameBytes,
                                     size_t dataBytes, uint8_t rowBits);
+
+// ---------------------------------------------------------------------------
+// Parlio (Parallel IO) WS2812 output — the ESP32-P4's parallel LED path, a
+// sibling of the LCD_CAM i80 functions above. Same autonomous-whole-frame DMA
+// shape, but Parlio is simpler: it takes the data GPIOs directly (no
+// sacrificial WR/DC lines — Parlio generates the pixel clock itself from
+// `pclkHz`) and allows ANY lane count (1..8 here), so there is no all-8-pins
+// rule. The same encoder feeds it (LcdSlots.h — one bus word per slot, bit L =
+// data line L). All inert on targets without Parlio, guarded by
+// `if constexpr (platform::parlioLanes == 0)` in the driver.
+// ---------------------------------------------------------------------------
+
+// Opaque handle to one configured Parlio TX unit + DMA frame buffer.
+struct ParlioWs2812Handle { void* impl = nullptr; };
+
+// Create a Parlio TX unit on `dataPins[0..laneCount)` clocked at `pclkHz` (the
+// WS2812 slot rate), with a zeroed DMA-capable frame buffer of `bufferBytes`.
+// No WR/DC pins — Parlio drives the clock internally. Returns false on failure.
+bool parlioWs2812Init(ParlioWs2812Handle& h, const uint16_t* dataPins,
+                      uint8_t laneCount, uint32_t pclkHz, size_t bufferBytes);
+
+// The DMA frame buffer the driver encodes into (zero-copy) + its capacity.
+uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& h);
+size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle& h);
+
+// Start the autonomous DMA transfer of the buffer's first `bytes`; pair with
+// parlioWs2812Wait. No refill deadline once started (single-shot, not the
+// loop-transmission mode Parlio also offers).
+bool parlioWs2812Transmit(ParlioWs2812Handle& h, size_t bytes);
+
+// Block until the in-flight transfer finishes, bounded by `timeoutMs`; a
+// timed-out frame is dropped and re-encoded next tick (self-heals).
+void parlioWs2812Wait(ParlioWs2812Handle& h, uint32_t timeoutMs);
+
+void parlioWs2812Deinit(ParlioWs2812Handle& h);
+
+// Parlio loopback self-test — same contract + result shape as the LCD/RMT
+// loopbacks. ROUND 4 implements the body (Parlio RX or RMT-RX capture of
+// lane 0); round 2 ships a stub that returns a default (not-run) result so the
+// driver's control surface exists. `dataBytes`/`rowBits` as in lcdWs2812Loopback.
+RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
+                                       uint16_t rxGpio, const uint8_t* frame,
+                                       size_t frameBytes, size_t dataBytes,
+                                       uint8_t rowBits);
 
 } // namespace mm::platform

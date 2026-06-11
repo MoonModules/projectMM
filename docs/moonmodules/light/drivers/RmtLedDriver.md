@@ -1,6 +1,6 @@
 # RMT LED Driver
 
-Output driver for WS2812B-class addressable LEDs over the ESP32 **RMT** peripheral — one or more strands, one GPIO and one RMT TX channel per strand. Reads the Drivers container's buffer, applies the shared [Correction](Correction.md) (brightness / channel order / RGBW white) per light, and emits the WS2812 1-wire signal. Runs on any chip whose RMT peripheral has TX channels: classic ESP32 (8 channels) and ESP32-S3 (4 channels). On desktop the RMT platform seam is a no-op and the driver is inert.
+Output driver for WS2812B-class addressable LEDs over the ESP32 **RMT** peripheral — one or more strands, one GPIO and one RMT TX channel per strand. Reads the Drivers container's buffer, applies the shared [Correction](Correction.md) (brightness / channel order / RGBW white) per light, and emits the WS2812 1-wire signal. Runs on any chip whose RMT peripheral has TX channels: classic ESP32 (8 channels), ESP32-S3 (4 channels), and ESP32-P4 (4 channels, DMA-backed). On desktop the RMT platform seam is a no-op and the driver is inert.
 
 ## Wire contract — WS2812B
 
@@ -23,7 +23,7 @@ The source buffer is split into **consecutive slices**, one per pin, in list ord
 
 ## Controls
 
-- `pins` (text, default `"18"`) — comma-separated data / TX GPIO list, e.g. `18,17,16`. One RMT TX channel per pin: up to 8 on classic ESP32, 4 on the S3 (exceeding the chip's limit, a bad token, or a duplicate pin puts an error in the status field and the driver idles). Changing it re-initialises the channels live (no reboot needed). The loopback self-test transmits on the **first** pin in the list.
+- `pins` (text, default `"18"`) — comma-separated data / TX GPIO list, e.g. `18,17,16`. One RMT TX channel per pin: up to 8 on classic ESP32, 4 on the S3 and P4 (exceeding the chip's limit, a bad token, or a duplicate pin puts an error in the status field and the driver idles). Changing it re-initialises the channels live (no reboot needed). The loopback self-test transmits on the **first** pin in the list.
 - `ledsPerPin` (text, default empty) — comma-separated lights-per-pin, e.g. `100,100,50`, matched to `pins` by position. May be empty or shorter than `pins`; see Buffer slicing above.
 - `loopbackRxPin` (uint16_t, default 5) — the RX pin for the loopback self-test. Jumper it to the **first** pin in `pins` to run the test. Shown only while `loopbackTest` is on.
 - `loopbackTest` (bool) — tick to run a one-shot RMT TX→RX loopback self-test (see Self-test below). Auto-resets after running; the result lands in the module's status field.
@@ -31,7 +31,9 @@ The source buffer is split into **consecutive slices**, one per pin, in list ord
 
 ## Cross-domain wiring
 
-The driver is added as a child of the `Drivers` container in `main.cpp` (under `if constexpr (platform::rmtTxChannels > 0)`), exactly like [NetworkSendDriver](NetworkSendDriver.md): it receives `setSourceBuffer` / `setCorrection` / `setLayer` from `Drivers::passBufferToDrivers`, and applies the same `const Correction*` ArtNet uses. The **symbol encode** (`encodeWs2812Symbols` in `RmtSymbol.h`) is domain code in `src/light/` so it is host-testable; the **peripheral** (`platform::rmtWs2812*` in `src/platform/esp32/platform_esp32_rmt.cpp`) is the only ESP-IDF-touching part. Per-chip channel and memory limits come from the IDF SOC capability macros, so the same code serves classic and S3.
+The driver is added as a child of the `Drivers` container in `main.cpp` (under `if constexpr (platform::rmtTxChannels > 0)`), exactly like [NetworkSendDriver](NetworkSendDriver.md): it receives `setSourceBuffer` / `setCorrection` / `setLayer` from `Drivers::passBufferToDrivers`, and applies the same `const Correction*` ArtNet uses. The **symbol encode** (`encodeWs2812Symbols` in `RmtSymbol.h`) is domain code in `src/light/` so it is host-testable; the **peripheral** (`platform::rmtWs2812*` in `src/platform/esp32/platform_esp32_rmt.cpp`) is the only ESP-IDF-touching part. Per-chip channel and memory limits come from the IDF SOC capability macros, so the same code serves classic, S3 and P4.
+
+The peripheral half uses the **modern RMT driver** (ESP-IDF 5.x+ "RMT v2": `driver/rmt_tx.h` / `rmt_rx.h` / `rmt_encoder.h` — `rmt_new_tx_channel()`, a copy encoder, `rmt_transmit()`), **not** the legacy channel-numbered API (`driver/rmt.h`, `rmt_config_t`, `RMT_CHANNEL_n`, `rmt_write_items()`). This isn't a preference — the legacy driver was **removed entirely in ESP-IDF v6** (the build IDF), so the modern API is the only one that exists. One payoff is portability: the same v2 code serves every RMT-bearing target with no per-chip branching, including the **P4**, whose RMT additionally has a DMA backend (`SOC_RMT_SUPPORT_DMA`, used by the whole-frame loopback capture — the classic ESP32 has no RMT DMA).
 
 ## Loopback self-test (on device)
 
@@ -63,7 +65,7 @@ When 1–3 all come back clean, the fix is electrical, in rough order of effecti
 
 ## Prior art
 
-The WS2812 protocol fundamentals and the RMT-first / loopback-test strategy come from the project's [LED driver analysis](../../../backlog/leddriver-analysis-top-down.md), which studies FastLED's `clockless_rmt_esp32`, hpwit's I2S drivers, and WLED — read for the lessons, not copied. RMT-v1-style manual ping-pong is what makes RMT more WiFi-resilient than the DMA-less v2 default ([FastLED #2082](https://github.com/FastLED/FastLED/issues/2082)). Per-output (pin, count) rows are the WLED LED-settings pattern.
+The WS2812 protocol fundamentals and the RMT-first / loopback-test strategy come from the project's [LED driver analysis](../../../backlog/leddriver-analysis-top-down.md), which studies FastLED's `clockless_rmt_esp32`, hpwit's I2S drivers, and WLED — read for the lessons, not copied. FastLED's manual ping-pong refill (their "RMT5" worker, distinct from the IDF *driver* version above) is what makes their path more WiFi-resilient than a naive DMA-less refill ([FastLED #2082](https://github.com/FastLED/FastLED/issues/2082)); we sidestep that whole class of refill deadlines differently — by pre-encoding the entire frame and letting the modern driver stream it, so there is no per-frame refill to miss. Per-output (pin, count) rows are the WLED LED-settings pattern.
 
 ## Source
 

@@ -4,11 +4,14 @@
 
 namespace mm {
 
-// WS2812 encode for the ESP32-S3 LCD_CAM parallel bus — the contract between
-// LcdLedDriver (domain) and the platform's i80 peripheral, named for the wire
-// unit it builds (one LCD pixel-clock SLOT = one byte on the 8-bit bus), the
-// RmtSymbol.h sibling. Pure data transform, no platform include — the host CI
-// encoder test (unit_LcdLedEncoder.cpp) pins it with no ESP32.
+// WS2812 encode for parallel WS2812 buses — the contract between a parallel
+// driver (domain) and a parallel peripheral, named for the wire unit it builds
+// (one pixel-clock SLOT = one byte on the 8-bit bus), the RmtSymbol.h sibling.
+// Used by BOTH the LCD_CAM i80 driver (ESP32-S3, LcdLedDriver) and the Parlio
+// driver (ESP32-P4, ParlioLedDriver) — a Parlio bus byte and an i80 bus byte
+// are identical (one word per slot, bit L = data line L), so one encoder
+// serves both. Pure data transform, no platform include — the host CI encoder
+// test (unit_LcdLedEncoder.cpp) pins it with no ESP32.
 //
 // Technique (hpwit / Adafruit "ESP32uesday" / FastLED S3 lineage — studied,
 // not copied): every WS2812 data bit becomes THREE bus slots clocked at

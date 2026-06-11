@@ -197,7 +197,7 @@ Grow back to 128x128. Measured: confirms the heap can return to the heavy baseli
 
 ### scenario_AllEffects_grid_sizes
 
-`test/scenarios/light/scenario_AllEffects_grid_sizes.json` — Sweep every effect (no modifier) across 16/32/64/128 square grids and measure tick/FPS, free internal heap, max internal block per (effect, size). The scenario prepares its own canvas: clear_children wipes whatever layouts/layers/drivers the device had, then it rebuilds exactly one Layout(Grid) + one Layer + one effect (no modifier) + ArtNet, so the measurement is each effect's raw cost over the full grid through the real output driver, on any starting device state. PreviewDriver is apparatus (non-deletable) so it survives the clear. Effects are swapped via replace_module at a fixed Layer child slot; grid resized via set_control (width then height, measuring after height so we never measure an N x 128 stripe).
+`test/scenarios/light/scenario_AllEffects_grid_sizes.json` — Sweep every effect (no modifier) across 16/32/64/128 square grids and measure tick/FPS, free internal heap, max internal block per (effect, size). The scenario prepares its own canvas: clear_children wipes whatever layouts/layers/drivers the device had, then it rebuilds exactly one Layout(Grid) + one Layer + one effect (no modifier) + NetworkSendDriver, so the measurement is each effect's raw cost over the full grid through the real output driver, on any starting device state. PreviewDriver is apparatus (non-deletable) so it survives the clear. Effects are swapped via replace_module at a fixed Layer child slot; grid resized via set_control (width then height, measuring after height so we never measure an N x 128 stripe).
 
 **Mode**: `mutate` · **Also touches**: Layouts, GridLayout, Drivers, NetworkSendDriver, PreviewDriver, LinesEffect, RainbowEffect, NoiseEffect, PlasmaEffect, PlasmaPaletteEffect, MetaballsEffect, FireEffect, ParticlesEffect, GlowParticlesEffect, CheckerboardEffect, SpiralEffect, RingsEffect, LavaLampEffect, GameOfLifeEffect
 
@@ -342,11 +342,11 @@ RainbowEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, m
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 143-176 | — / 159KB-162KB | — / 76KB-108KB |
-| `pc-macos` | — / 111,111-125,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 100,000-125,000 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 34,483-40,000 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-11
 - `pc-windows`: observed 2026-06-07
 
 #### `RainbowEffect-128x128` (set_control)  📏
@@ -421,11 +421,11 @@ NoiseEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 45.3-71.8 | — / 159KB-162KB | — / 76KB-108KB |
-| `pc-macos` | — / 13,333-15,625 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 12,500-15,625 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 4,739-6,757 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07 → 2026-06-10
+- `pc-macos`: observed 2026-06-07 → 2026-06-11
 - `pc-windows`: observed 2026-06-07
 
 #### `NoiseEffect-128x128` (set_control)  📏
@@ -440,11 +440,11 @@ NoiseEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, 
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 12.3-17.1 | — / 126KB | — / 62KB-108KB |
-| `pc-macos` | — / 2,924-3,268 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 2,825-3,268 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 1,190-1,437 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-11
 - `pc-windows`: observed 2026-06-07
 
 #### `PlasmaEffect-16x16` (set_control)  📏
@@ -756,11 +756,11 @@ FireEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, m
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 18.1-21.5 | — / 110KB | — / 62KB |
-| `pc-macos` | — / 16,949-19,231 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 16,393-19,231 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 6,452-7,194 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-11
 - `pc-windows`: observed 2026-06-07
 
 #### `ParticlesEffect-16x16` (set_control)  📏
@@ -1034,11 +1034,11 @@ SpiralEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, ma
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 572-691 | — / 170KB-171KB | — / 88KB-108KB |
-| `pc-macos` | — / 200,000-250,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 166,667-250,000 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 100,000-125,000 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07 → 2026-06-08
+- `pc-macos`: observed 2026-06-07 → 2026-06-11
 - `pc-windows`: observed 2026-06-07
 
 #### `SpiralEffect-64x64` (set_control)  📏
@@ -1094,11 +1094,11 @@ RingsEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, max 
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 1,119-1,129 | — / 170KB-173KB | — / 92KB-108KB |
-| `pc-macos` | — / 333,333-1,000,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 250,000-1,000,000 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 100,000-125,000 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07 → 2026-06-10
+- `pc-macos`: observed 2026-06-07 → 2026-06-11
 - `pc-windows`: observed 2026-06-07
 
 #### `RingsEffect-32x32` (set_control)  📏
@@ -1230,11 +1230,11 @@ LavaLampEffect at 128x128 (16384 lights) — measure tick/FPS, free internal hea
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 18.2-19.0 | — / 125KB-126KB | — / 62KB-108KB |
-| `pc-macos` | — / 27,778-32,258 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 27,778-33,333 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 4,926-6,757 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07 → 2026-06-10
+- `pc-macos`: observed 2026-06-07 → 2026-06-11
 - `pc-windows`: observed 2026-06-07
 
 #### `GameOfLifeEffect-16x16` (set_control)  📏
@@ -1290,11 +1290,11 @@ GameOfLifeEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 227-235 | — / 151KB-154KB | — / 68KB-108KB |
-| `pc-macos` | — / 166,667-200,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 142,857-200,000 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 38,462-47,619 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07 → 2026-06-08
+- `pc-macos`: observed 2026-06-07 → 2026-06-11
 - `pc-windows`: observed 2026-06-07
 
 #### `GameOfLifeEffect-128x128` (set_control)  📏
@@ -1491,10 +1491,10 @@ Multiply modifier active — pipeline live, LUT folds the grid.
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 1,580-7,752 | — / 172KB-225KB | — / 76KB-108KB |
-| `pc-macos` | — / 142,857-166,667 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 111,111-166,667 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-11
 
 #### `checkerboard` (measure)  📏
 
@@ -1508,10 +1508,10 @@ Checkerboard modifier active — masks half the lights; pipeline stays live (dri
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 769-990 | — / 170KB-225KB | — / 76KB-108KB |
-| `pc-macos` | — / 50,000-58,824 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 31,250-58,824 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07 → 2026-06-08
+- `pc-macos`: observed 2026-06-07 → 2026-06-11
 
 #### `multiply-2` (measure)  📏
 
@@ -1525,10 +1525,10 @@ Back to Multiply — replace round-trips cleanly, pipeline live again.
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 1,587-2,278 | — / 169KB-225KB | — / 76KB-108KB |
-| `pc-macos` | — / 125,000-166,667 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 66,667-166,667 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07 → 2026-06-08
+- `pc-macos`: observed 2026-06-07 → 2026-06-11
 
 ## Layouts
 
@@ -1572,11 +1572,11 @@ Pipeline still renders with two layouts wired (buffer non-null, fps measurable).
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 37,037 | — / 223KB | — / 108KB |
-| `pc-macos` | — / 33,333-111,111 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 21,739-111,111 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 16,393-23,810 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-08
-- `pc-macos`: observed 2026-06-05
+- `pc-macos`: observed 2026-06-05 → 2026-06-11
 - `pc-windows`: observed 2026-06-07
 
 #### `measure-after-replace` (measure)  📏
@@ -1594,11 +1594,11 @@ Pipeline still renders after replacing a grid with a sphere (different layout ty
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 38,462 | — / 223KB | — / 108KB |
-| `pc-macos` | — / 7,246-100,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 5,747-100,000 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 5,848-9,009 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-08
-- `pc-macos`: observed 2026-06-05 → 2026-06-10
+- `pc-macos`: observed 2026-06-05 → 2026-06-11
 - `pc-windows`: observed 2026-06-07
 
 #### `measure-after-remove` (measure)  📏

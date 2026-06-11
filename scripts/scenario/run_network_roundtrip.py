@@ -164,7 +164,9 @@ def run_one(host: str, repeats: int, timeout_s: float) -> bool:
                 continue
             any_ok = True
             latencies.sort()
-            median = latencies[len(latencies) // 2]
+            n = len(latencies)
+            median = (latencies[n // 2] if n % 2
+                      else (latencies[n // 2 - 1] + latencies[n // 2]) / 2.0)
             print(f"    {proto}: min {latencies[0]:.1f} / median {median:.1f} / "
                   f"max {latencies[-1]:.1f} ms over {len(latencies)}/{repeats}", flush=True)
             summary.append((proto, (latencies[0], median, latencies[-1], len(latencies))))

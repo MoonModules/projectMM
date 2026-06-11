@@ -434,6 +434,22 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - With depth > 1, adjacent and distant z-slices each render differently (3D noise, not a stack of identical 2D slices).
 - Same z-slice variation requirement holds for Plasma — each depth plane renders differently.
 
+## ParlioLedDriver
+
+`test/unit/light/unit_ParlioLedDriver.cpp`
+*Also touches: Drivers, Correction.*
+
+- Three lanes (Parlio accepts any 1..8 count) slice the buffer consecutively; the frame is sized by the LONGEST lane.
+- Empty ledsPerPin splits evenly over the default 8 lanes — shared PinList semantics. (The default ledsPerPin="64" puts everything on lane 0; clearing it gives the even split.)
+- The Parlio-vs-LCD difference: 1..8 pins are ALL valid (no exactly-8 rule).
+- More than 8 pins is rejected (the chip's lane cap), like the other drivers.
+- An RGB→RGBW preset toggle grows the frame (32 vs 24 slot bytes per light).
+- A bad pin list idles the driver with the parse literal in the status; fixing it recovers.
+- A 0×0×0 grid is a clean idle: zero counts, zero frame, no crash.
+- loop() is crash-safe across single-pin / multi-pin / pre-init configs (the transmit path is gated out on the host; this pins the reachable contract).
+- setup/teardown cycles leave no residue (status clean, ASAN-checked heap).
+- loopbackRxPin is bound always, visible only while loopbackTest is on.
+
 ## ParticlesEffect
 
 `test/unit/light/unit_ParticlesEffect.cpp`
@@ -502,6 +518,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - _RmtLedDriver slices the buffer per ledsPerPin_
 - _RmtLedDriver idles with a status error on a bad pin list_
 - _RmtLedDriver re-slices when the source buffer changes_
+- loop() is a safe no-op across single-pin, multi-pin and zero-grid configs.
 
 `test/unit/light/unit_RmtLedEncoder.cpp`
 *Also touches: Correction.*

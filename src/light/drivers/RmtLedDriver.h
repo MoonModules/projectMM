@@ -197,14 +197,18 @@ public:
         // Start every pin's slice before waiting on any — the channels clock out
         // concurrently, so the tick is charged the longest strand, not the sum.
         // The shared reset gap (the WS2812 latch) runs once, after the last wait.
+        // Wait ONLY on channels whose transmit started: a failed transmit gives
+        // no done-callback, so waiting on it would block the full 1000 ms timeout
+        // and a single bad pin would stall the tick (the same guard the LCD /
+        // Parlio loops use, here per channel).
+        bool started[kMaxPins] = {};
         for (uint8_t i = 0; i < pinCount_; i++) {
             if (pinCounts_[i] == 0) continue;
-            platform::rmtWs2812Transmit(rmt_[i], symbols_ + pinOffsets_[i],
+            started[i] = platform::rmtWs2812Transmit(rmt_[i], symbols_ + pinOffsets_[i],
                                         static_cast<size_t>(pinCounts_[i]) * outCh * 8);
         }
         for (uint8_t i = 0; i < pinCount_; i++) {
-            if (pinCounts_[i] == 0) continue;
-            platform::rmtWs2812Wait(rmt_[i], 1000 /* ms */);
+            if (started[i]) platform::rmtWs2812Wait(rmt_[i], 1000 /* ms */);
         }
         if (cfg_.reset_us) platform::delayUs(cfg_.reset_us);
     }
@@ -381,11 +385,16 @@ private:
         } else {
             if (!failBuf_) failBuf_ = static_cast<char*>(platform::alloc(kFailBufLen));
             if (failBuf_ && loopbackFrame) {
+                // bits per light = outChannels × 8 (24 for RGB, 32 for RGBW) —
+                // the same channel count the frame was built with, not a
+                // hardcoded /24, so the light index is right for RGBW too.
+                const unsigned bitsPerLight =
+                    (correction_ ? correction_->outChannels : 3u) * 8u;
                 std::snprintf(failBuf_, kFailBufLen,
                               "loopback FAIL: bad bit %u/%u (light %u)",
                               static_cast<unsigned>(r.firstBadBit),
                               static_cast<unsigned>(r.bitsChecked),
-                              static_cast<unsigned>(r.firstBadBit / 24));
+                              static_cast<unsigned>(r.firstBadBit / bitsPerLight));
                 setStatus(failBuf_, Severity::Error);
             } else if (failBuf_) {
                 std::snprintf(failBuf_, kFailBufLen, "loopback FAIL: sent %02X%02X%02X got %02X%02X%02X",

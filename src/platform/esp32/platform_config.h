@@ -40,10 +40,11 @@ constexpr bool isEsp32S3 = false;
 constexpr bool isEsp32P4 = false;
 #endif
 
-// RMT TX channels this chip offers (8 on classic ESP32, 4 on the S3, straight
-// from the IDF SOC capability config). Doubles as the RMT capability flag: the
-// RMT LED driver and its main.cpp registration guard on `rmtTxChannels > 0`
-// instead of a chip-family flag, so a new RMT-bearing target works untouched.
+// RMT TX channels this chip offers (8 on classic ESP32, 4 on the S3 and P4,
+// straight from the IDF SOC capability config). Doubles as the RMT capability
+// flag: the RMT LED driver and its main.cpp registration guard on
+// `rmtTxChannels > 0` instead of a chip-family flag, so a new RMT-bearing
+// target works untouched.
 #ifdef CONFIG_SOC_RMT_SUPPORTED
 constexpr uint8_t rmtTxChannels = CONFIG_SOC_RMT_TX_CANDIDATES_PER_GROUP;
 #else
@@ -66,6 +67,18 @@ constexpr uint8_t rmtTxChannels = 0;
 constexpr uint8_t lcdLanes = 8;
 #else
 constexpr uint8_t lcdLanes = 0;
+#endif
+
+// Parallel WS2812 lanes over the Parlio (Parallel IO) TX peripheral — the
+// ESP32-P4's scale path. The unit does 16 data lines; capped at 8 here to
+// mirror lcdLanes (half the DMA footprint; widening is a constant change).
+// SOC-derived like the others, so a future Parlio-bearing chip works untouched.
+// Unlike i80, Parlio takes the data GPIOs directly (no sacrificial WR/DC) and
+// allows any lane count, so ParlioLedDriver has no exactly-8-pins rule.
+#ifdef CONFIG_SOC_PARLIO_SUPPORTED
+constexpr uint8_t parlioLanes = 8;
+#else
+constexpr uint8_t parlioLanes = 0;
 #endif
 
 // WiFi is compiled out in the Ethernet-only build profile. ESP-IDF v6.x has no
