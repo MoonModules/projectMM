@@ -4110,7 +4110,7 @@
         "pc-macos": {
           "tick_us": [
             30,
-            36
+            45
           ],
           "free_heap": [
             0,
@@ -4274,7 +4274,7 @@
         "pc-macos": {
           "tick_us": [
             1,
-            2
+            3
           ],
           "free_heap": [
             0,
@@ -4418,7 +4418,7 @@
         "pc-macos": {
           "tick_us": [
             35,
-            52
+            201
           ],
           "free_heap": [
             0,

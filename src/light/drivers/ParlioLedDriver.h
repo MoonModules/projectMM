@@ -273,8 +273,12 @@ private:
         return true;
     }
 
-    // --- loopback self-test (control-driven). ROUND 4 implements the body;
-    // for now the platform stub returns a not-run result, reported as such. ---
+    // --- loopback self-test (control-driven). Builds the REAL frame with the
+    // test pattern on lane 0, deinits the live unit, and hands the platform a
+    // private Parlio TX unit + RMT-RX capture that transmits the genuine frame
+    // back to back and verifies every bit. Same shape as the LCD/RMT rigs, minus
+    // the i80 full-bus workaround (Parlio runs on 1 lane, so lane 0 alone is a
+    // valid private unit). ---
 
     void runLoopbackSelfTest() {
         if constexpr (platform::parlioLanes == 0) {
@@ -282,8 +286,68 @@ private:
             setStatus("loopback: not supported on this platform", Severity::Warning);
             return;
         }
-        clearFailBuf();
-        setStatus("loopback: not implemented yet (round 4)", Severity::Warning);
+        if (laneCount_ == 0) {
+            clearFailBuf();
+            setStatus("loopback: no valid pins", Severity::Warning);
+            return;
+        }
+        const uint8_t outCh = correction_ ? correction_->outChannels : 0;
+        if (frameBytes_ == 0 || maxLaneLights_ == 0 || outCh == 0) {
+            clearFailBuf();
+            setStatus("loopback: no lights to encode", Severity::Warning);
+            return;
+        }
+        // Build the REAL frame, test pattern in every row on lane 0 only — the
+        // platform transmits the genuine transfer (size, DMA, latch pad) back to
+        // back and verifies every captured bit. Heap alloc is fine: control-
+        // driven, off the hot path.
+        auto* frame = static_cast<uint8_t*>(platform::alloc(frameBytes_));
+        if (!frame) {
+            clearFailBuf();
+            setStatus("loopback: out of memory", Severity::Error);
+            return;
+        }
+        std::memset(frame, 0, frameBytes_);
+        uint8_t wire[kMaxLanes * 4] = {};
+        wire[0] = 0xA5; wire[1] = 0x00; wire[2] = 0xFF;   // wire[3] stays 0 (RGBW)
+        uint8_t* out = frame;
+        for (nrOfLightsType row = 0; row < maxLaneLights_; row++) {
+            encodeWs2812LcdSlots(wire, 0x01, outCh, out);
+            out += static_cast<size_t>(outCh) * 8 * 3;
+        }
+        const size_t dataBytes = static_cast<size_t>(maxLaneLights_) * outCh * 24;
+        deinit();   // free the live unit; the test rebuilds its own on the data pins
+        const auto r = platform::parlioWs2812Loopback(laneList_, laneCount_,
+                                                      loopbackRxPin, frame,
+                                                      frameBytes_, dataBytes,
+                                                      static_cast<uint8_t>(outCh * 8));
+        platform::free(frame);
+        // Loopback verdict first, then reinit: if rebuilding the real unit fails
+        // afterwards, kInitFailMsg overwrites the verdict — an unusable driver
+        // matters more than a passed self-test.
+        if (!r.jumperDetected) {
+            clearFailBuf();
+            setStatus("loopback: jumper not detected", Severity::Warning);
+        } else if (r.pass) {
+            clearFailBuf();
+            setStatus("loopback PASS", Severity::Status);
+        } else {
+            if (!failBuf_) failBuf_ = static_cast<char*>(platform::alloc(kFailBufLen));
+            if (failBuf_) {
+                // Name the first corrupted light: rowBits = outCh*8, so
+                // light = firstBadBit / rowBits.
+                const unsigned rowBits = static_cast<unsigned>(outCh) * 8u;
+                const unsigned badLight = rowBits ? r.firstBadBit / rowBits : 0u;
+                std::snprintf(failBuf_, kFailBufLen,
+                              "loopback FAIL: bad bit %u/%u (light %u)",
+                              static_cast<unsigned>(r.firstBadBit),
+                              static_cast<unsigned>(r.bitsChecked), badLight);
+                setStatus(failBuf_, Severity::Error);
+            } else {
+                setStatus("loopback FAIL", Severity::Error);
+            }
+        }
+        reinit();
     }
 
     void clearFailBuf() {

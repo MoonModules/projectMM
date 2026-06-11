@@ -284,6 +284,10 @@ Step 3's custom RPC infrastructure is the seed. Plausible follow-on injectables:
 
 ## Sensors and audio-reactive input
 
+### INMP441 microphone on ESP32 — volume + FFT 16-band (planned, next after the Parlio loopback)
+
+The first audio-reactive capability, on the **ESP32** (not the Pi). Full plan: **[inmp441-mic-plan.md](inmp441-mic-plan.md)** — an INMP441 I²S MEMS mic on the S3 (WS4/SD5/SCK6), a `MicModule` SystemModule Peripheral producing an `AudioFrame` (volume RMS + 16-band FFT + dominant peak), consumed by `AudioVolumeEffect` + `AudioSpectrumEffect`. Signal math is pure/host-tested (`AudioLevel.h`/`AudioBands.h`); only the I²S read + FFT kernel (esp-dsp float) sit behind the platform boundary, with a naive-DFT desktop stub so band tests run in CI. WLED-MM lessons baked in (DC strip, squelch/gain, warm-up discard — studied, not copied). AGC + pin auto-scan deferred. The Pi-5 sensor note below is the (later, different-platform) counterpart.
+
 ### Sensor input on Raspberry Pi 5 — microphone, IMU, line-in (post-1.0, multi-commit)
 
 Audio-reactive lighting (and motion-reactive) is core to what WLED-MM / MoonLight are known for. The Pi 5 is the right host for it: it has the CPU and RAM for real FFT-based audio analysis that the Xtensa ESP32 struggles with, and a full Linux audio + I²C stack. None of this exists today — the codebase has no sensor, audio, or IMU concept, and the Pi currently runs the **desktop** platform backend (there is no `src/platform/rpi/`), which has no hardware access. So this is a domain expansion built on a real platform-backend prerequisite, not a small add.
