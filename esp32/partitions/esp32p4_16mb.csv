@@ -1,0 +1,10 @@
+# Partition table for the Waveshare ESP32-P4-NANO (16 MB flash, 32 MB PSRAM).
+# Same 16 MB layout as the S3-N16R8 board: app0 / app1 are 4 MB each (full
+# projectMM binary with headroom), spiffs gets the remaining ~8 MB for LittleFS.
+#
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x5000,
+otadata,  data, ota,     0xe000,   0x2000,
+app0,     app,  ota_0,   0x10000,  0x400000,
+app1,     app,  ota_1,   0x410000, 0x400000,
+spiffs,   data, spiffs,  0x810000, 0x7F0000,

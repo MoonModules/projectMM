@@ -302,6 +302,9 @@ RmtLoopbackResult lcdWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
                 static_cast<uint8_t>((r.got[(b - rowStart) / 8] << 1) | bit);
         }
         r.pass = mismatch == SIZE_MAX;
+        r.bitsChecked = static_cast<uint32_t>(kBits);
+        r.firstBadBit = (mismatch == SIZE_MAX) ? static_cast<uint32_t>(kBits)
+                                               : static_cast<uint32_t>(mismatch);
         ESP_LOGI(LCD_TAG, "loopback: high ticks — 0-bits %u..%u, 1-bits %u..%u (25ns/tick)",
                  (unsigned)minH[0], (unsigned)maxH[0], (unsigned)minH[1], (unsigned)maxH[1]);
         if (!r.pass) {

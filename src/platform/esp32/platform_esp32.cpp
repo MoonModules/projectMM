@@ -32,6 +32,9 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_eth.h"
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+#include "esp_eth_phy_ip101.h"   // P4-NANO PHY — managed component espressif/ip101
+#endif
 #ifndef MM_NO_WIFI
 #include "esp_wifi.h"
 #endif
@@ -151,6 +154,7 @@ const char* chipModel() {
         case CHIP_ESP32S2: return "ESP32-S2";
         case CHIP_ESP32S3: return "ESP32-S3";
         case CHIP_ESP32C3: return "ESP32-C3";
+        case CHIP_ESP32P4: return "ESP32-P4";
         default:           return "ESP32-?";
     }
 }
@@ -265,19 +269,37 @@ bool ethInit() {
     esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
     ethNetif_ = esp_netif_new(&netif_cfg);
 
-    // MAC config — Olimex ESP32-Gateway Rev G: RMII clock output on GPIO17
+    // RMII / PHY pins come from the per-target ethPins config (platform_config.h)
+    // — the Olimex map by default, the P4-NANO's IP101 map on the P4. ethPins is
+    // a compile-time constant, so the unused branch (and its PHY ctor) is dropped.
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
     eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
-    emac_config.clock_config.rmii.clock_mode = EMAC_CLK_OUT;
-    emac_config.clock_config.rmii.clock_gpio = static_cast<int>(GPIO_NUM_17);
+    emac_config.clock_config.rmii.clock_mode =
+        ethPins.rmiiClockExtIn ? EMAC_CLK_EXT_IN : EMAC_CLK_OUT;
+    emac_config.clock_config.rmii.clock_gpio =
+        static_cast<gpio_num_t>(ethPins.rmiiClockGpio);
+    if (ethPins.mdcGpio >= 0)  emac_config.smi_gpio.mdc_num  = ethPins.mdcGpio;
+    if (ethPins.mdioGpio >= 0) emac_config.smi_gpio.mdio_num = ethPins.mdioGpio;
 
-    // PHY config — Olimex ESP32-Gateway: LAN8720, addr 0, reset GPIO 5
     eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
-    phy_config.phy_addr = 0;
-    phy_config.reset_gpio_num = 5;
+    phy_config.phy_addr = ethPins.phyAddr;
+    phy_config.reset_gpio_num = ethPins.rstGpio;
 
     esp_eth_mac_t* mac = esp_eth_mac_new_esp32(&emac_config, &mac_config);
-    esp_eth_phy_t* phy = esp_eth_phy_new_generic(&phy_config);
+    // IP101 (P4-NANO) is a managed-component PHY ctor (espressif/ip101 in
+    // idf_component.yml; removed from esp_eth core in IDF v6); the generic ctor
+    // (Olimex LAN8720) stays in core. The IP101 symbol is only declared on the
+    // P4 build (its header include is #ifdef'd), so the *call* must be guarded
+    // at the preprocessor level too — `if constexpr` discards a dead branch but
+    // still requires it to compile, and an undeclared symbol won't. ethPins is
+    // constexpr, so on P4 the runtime branch still folds away.
+    esp_eth_phy_t* phy;
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+    if (ethPins.isIp101) phy = esp_eth_phy_new_ip101(&phy_config);
+    else                 phy = esp_eth_phy_new_generic(&phy_config);
+#else
+    phy = esp_eth_phy_new_generic(&phy_config);
+#endif
 
     esp_eth_config_t eth_config = ETH_DEFAULT_CONFIG(mac, phy);
     esp_eth_handle_t eth_handle = nullptr;

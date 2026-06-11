@@ -371,19 +371,13 @@ private:
             clearFailBuf();
             setStatus("loopback: jumper not detected", Severity::Warning);
         } else if (r.pass) {
+            // PASS is a static literal (no failBuf_ alloc): setStatus holds the
+            // pointer, not a copy, so the string must outlive the call, and
+            // failBuf_ is by invariant a FAIL-only buffer (see clearFailBuf).
+            // The whole-frame bit count is in the serial log; the status slot
+            // doesn't need it badly enough to break either rule.
             clearFailBuf();
-            if (loopbackFrame) {
-                if (!failBuf_) failBuf_ = static_cast<char*>(platform::alloc(kFailBufLen));
-                if (failBuf_) {
-                    std::snprintf(failBuf_, kFailBufLen, "loopback PASS (%u bits)",
-                                  static_cast<unsigned>(r.bitsChecked));
-                    setStatus(failBuf_, Severity::Status);
-                } else {
-                    setStatus("loopback PASS", Severity::Status);
-                }
-            } else {
-                setStatus("loopback PASS", Severity::Status);
-            }
+            setStatus("loopback PASS", Severity::Status);
         } else {
             if (!failBuf_) failBuf_ = static_cast<char*>(platform::alloc(kFailBufLen));
             if (failBuf_ && loopbackFrame) {

@@ -5,3 +5,9 @@ dependencies:
     version: "^1.16.0"
   improv/improv:
     version: "^1.2.5"
+  # IP101 Ethernet PHY for the ESP32-P4-NANO. IDF v6 moved the per-PHY drivers
+  # out of esp_eth core into managed components; only referenced on the P4 build
+  # (ethInit's IP101 ctor is behind if constexpr). The generic PHY (Olimex
+  # LAN8720) stays in core, so non-P4 builds don't pull this.
+  espressif/ip101:
+    version: "^1.0.0"

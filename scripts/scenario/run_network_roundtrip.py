@@ -113,19 +113,21 @@ def measure_roundtrip(host: str, repeats: int, timeout_s: float, protocol: str):
     return latencies
 
 
-def _grid_value(client: Client, axis: str, fallback: int) -> int:
-    """Read the device's current Grid.<axis> so we can restore it afterwards."""
+def _grid_value(client: Client, axis: str):
+    """Read the device's current Grid.<axis>, or None if it can't be read — so
+    the caller restores only what it actually captured (restoring a guessed
+    default could change a grid we never measured)."""
     try:
         for m in client.get("/api/state").get("modules", []):
             for stack in ([m], m.get("children", []) or []):
                 for mod in stack:
                     if mod.get("name") == "Grid":
                         for c in mod.get("controls", []):
-                            if c.get("name") == axis:
-                                return int(c.get("value", fallback))
+                            if c.get("name") == axis and c.get("value") is not None:
+                                return int(c["value"])
     except Exception:
         pass
-    return fallback
+    return None
 
 
 def run_one(host: str, repeats: int, timeout_s: float) -> bool:
@@ -133,8 +135,12 @@ def run_one(host: str, repeats: int, timeout_s: float) -> bool:
     afterwards. Returns True if any protocol returned a measurement."""
     client = Client(host)
     added = False
-    orig_w = _grid_value(client, "width", 16)
-    orig_h = _grid_value(client, "height", 16)
+    # Capture the grid BEFORE any mutation, so the finally block can restore it
+    # whether or not the receiver add succeeds (the grid POSTs run first, so the
+    # grid can be left changed even if the add fails). None = couldn't read it →
+    # don't restore that axis (better than forcing a guessed value).
+    orig_w = _grid_value(client, "width")
+    orig_h = _grid_value(client, "height")
     try:
         # 16×16 → 256 lights → 2 universes, the shape the matrix test uses.
         client.post("/api/control", {"module": "Grid", "control": "width", "value": 16})
@@ -172,18 +178,22 @@ def run_one(host: str, repeats: int, timeout_s: float) -> bool:
             print("  FAIL  no protocol returned a frame — receive or preview path down")
         return any_ok
     finally:
+        # Remove the temporary receiver only if it was added; restore the grid
+        # regardless (the grid POSTs run before the add, so it can be changed
+        # even when the add failed). Skip an axis we couldn't read (None).
         if added:
-            for body in ({"path": "/api/modules/NetworkReceive"},
-                         {"w": orig_w}, {"h": orig_h}):
-                try:
-                    if "path" in body:
-                        client.delete(body["path"])
-                    elif "w" in body:
-                        client.post("/api/control", {"module": "Grid", "control": "width", "value": body["w"]})
-                    else:
-                        client.post("/api/control", {"module": "Grid", "control": "height", "value": body["h"]})
-                except Exception:
-                    pass
+            try:
+                client.delete("/api/modules/NetworkReceive")
+            except Exception:
+                pass
+        for axis, val in (("width", orig_w), ("height", orig_h)):
+            if val is None:
+                continue
+            try:
+                client.post("/api/control",
+                            {"module": "Grid", "control": axis, "value": val})
+            except Exception:
+                print(f"  WARN  could not restore Grid {axis} to {val}", flush=True)
 
 
 def main() -> int:

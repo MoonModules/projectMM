@@ -605,10 +605,13 @@ function renderBoardSelect() {
         if (val === (state.provisionBoard || "")) opt.selected = true;
         select.appendChild(opt);
     }
-    select.addEventListener("change", async () => {
+    // onchange (assigned, not addEventListener) so a re-render replaces the
+    // handler instead of stacking another — addEventListener here would fire
+    // saveState() once per past render.
+    select.onchange = async () => {
         state.provisionBoard = select.value;
         await saveState();
-    });
+    };
 }
 
 function renderFirmwareSelect() {

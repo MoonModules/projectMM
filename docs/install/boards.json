@@ -161,5 +161,14 @@
     "controls": {
       "Board": { "board": "SE 16 V1" }
     }
+  },
+  {
+    "name": "Waveshare ESP32-P4-NANO",
+    "chip": "ESP32-P4",
+    "firmwares": ["esp32p4-eth"],
+    "default_firmware": "esp32p4-eth",
+    "controls": {
+      "Board": { "board": "Waveshare ESP32-P4-NANO" }
+    }
   }
 ]

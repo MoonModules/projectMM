@@ -89,6 +89,14 @@ FIRMWARES: dict[str, dict] = {
                        "Half the flash of N16R8; the N16R8 binary overruns an 8 MB "
                        "board, so N8R8 boards (LightCrafter etc.) need this variant.",
     },
+    "esp32p4-eth": {
+        "chip": "esp32p4",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32p4-eth"],
+        "eth_only": True,
+        "description": "Waveshare ESP32-P4-NANO — Ethernet only (IP101 PHY). WiFi "
+                       "needs the on-board ESP32-C6 co-processor (esp-hosted), not "
+                       "yet wired; round 3 adds it.",
+    },
 }
 
 # Deprecated --profile values → firmware, kept one release for callers that
@@ -247,11 +255,15 @@ def firmware_cmake_args(firmware: str, release: str = "") -> list[str]:
         # out the WiFi paths (MM_ETH_ONLY → esp32/main/CMakeLists.txt).
         args.append("-DEXCLUDE_COMPONENTS=" + ";".join(ETH_ONLY_EXCLUDE))
         args.append("-DMM_ETH_ONLY=1")
-    # Firmwares that don't include the .eth sdkconfig fragment have no EMAC
-    # config — the on-chip Ethernet headers (`eth_esp32_emac_config_t`, …)
-    # disappear, and platform_esp32.cpp's ethInit() won't compile. Set
-    # MM_NO_ETH so the source provides stub implementations instead.
-    has_eth_fragment = any(f.endswith(".eth") for f in spec["fragments"])
+    # Firmwares that don't enable the EMAC have no on-chip Ethernet headers
+    # (`eth_esp32_emac_config_t`, …), so platform_esp32.cpp's ethInit() won't
+    # compile — set MM_NO_ETH and the source provides stubs instead. A variant
+    # "has Ethernet" when any fragment carries an EMAC-enabling sdkconfig: the
+    # classic Olimex fragment is `sdkconfig.defaults.eth` (".eth"); board-specific
+    # ones append "-eth" (e.g. ".esp32p4-eth"). Match either so a new eth board
+    # doesn't silently stub Ethernet out.
+    has_eth_fragment = any(f.endswith(".eth") or f.endswith("-eth")
+                           for f in spec["fragments"])
     if not has_eth_fragment:
         args.append("-DMM_NO_ETH=1")
     return args

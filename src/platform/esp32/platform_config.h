@@ -16,17 +16,28 @@ constexpr bool hasPsram = false;
 
 // Which ESP32 silicon family this build targets. Drivers that pick a peripheral
 // per chip (the RMT LED driver runs on classic ESP32; LCD_CAM on the S3 later)
-// `if constexpr` on these instead of #ifdef'ing in domain code. Desktop sets both
-// false. Keyed off the IDF target macro the toolchain defines.
+// `if constexpr` on these instead of #ifdef'ing in domain code. Desktop sets all
+// false. Keyed off the IDF target macro the toolchain defines. Note most
+// capability gating (rmtTxChannels, lcdLanes) keys off SOC flags rather than
+// these family flags, so a new target works untouched — isEsp32P4 exists only
+// for the genuinely chip-specific seams (the P4's Ethernet pin map, and later
+// its C6-co-processor WiFi).
 #ifdef CONFIG_IDF_TARGET_ESP32S3
 constexpr bool isEsp32 = false;
 constexpr bool isEsp32S3 = true;
+constexpr bool isEsp32P4 = false;
+#elif defined(CONFIG_IDF_TARGET_ESP32P4)
+constexpr bool isEsp32 = false;
+constexpr bool isEsp32S3 = false;
+constexpr bool isEsp32P4 = true;
 #elif defined(CONFIG_IDF_TARGET_ESP32)
 constexpr bool isEsp32 = true;
 constexpr bool isEsp32S3 = false;
+constexpr bool isEsp32P4 = false;
 #else
 constexpr bool isEsp32 = false;
 constexpr bool isEsp32S3 = false;
+constexpr bool isEsp32P4 = false;
 #endif
 
 // RMT TX channels this chip offers (8 on classic ESP32, 4 on the S3, straight
@@ -75,6 +86,34 @@ constexpr bool hasEthernet = false;
 #else
 constexpr bool hasEthernet = true;
 #endif
+
+// Per-board Ethernet RMII / PHY pin map. The pins are NOT runtime-configurable
+// today (full runtime PHY/pin selection is a 2.0 backlog item); they are a
+// compile-time-per-target constant so the platform boundary stays clean — no
+// scattered #ifdefs in ethInit(), which reads this struct instead of literals.
+// Plain ints (not IDF enums) keep this header free of esp_eth includes; ethInit
+// translates rmiiClockExtIn → EMAC_CLK_EXT_IN/OUT and isIp101 → the PHY ctor.
+struct EthPinConfig {
+    int phyAddr;
+    int mdcGpio;        // SMI clock; -1 = leave at IDF default
+    int mdioGpio;       // SMI data;  -1 = leave at IDF default
+    int rstGpio;        // PHY reset
+    int rmiiClockGpio;  // RMII 50 MHz reference clock pin
+    bool rmiiClockExtIn;  // true = clock IN (board feeds it), false = chip drives it OUT
+    bool isIp101;       // true = IP101 PHY ctor, false = generic
+};
+
+// ESP32-P4-NANO (Waveshare): IP101 PHY, addr 1, MDC/MDIO 31/52, reset 51,
+// external 50 MHz RMII clock fed IN on GPIO50. Source: Waveshare wiki +
+// schematic + the ESPHome device page (two independent sources agree).
+// Else: Olimex ESP32-Gateway Rev G — LAN8720 (generic PHY), addr 0, reset 5,
+// chip drives the RMII clock OUT on GPIO17, MDC/MDIO left at IDF defaults (the
+// pins this board has always used; now a named config instead of literals).
+constexpr EthPinConfig ethPins =
+    isEsp32P4 ? EthPinConfig{ /*phyAddr*/ 1, /*mdc*/ 31, /*mdio*/ 52, /*rst*/ 51,
+                              /*rmiiClk*/ 50, /*extIn*/ true,  /*ip101*/ true }
+              : EthPinConfig{ /*phyAddr*/ 0, /*mdc*/ -1, /*mdio*/ -1, /*rst*/ 5,
+                              /*rmiiClk*/ 17, /*extIn*/ false, /*ip101*/ false };
 
 // OTA (esp_https_ota) is available on every ESP32 build — the OTA partition
 // layout in partitions/*.csv reserves app0/app1 unconditionally, and esp_https_ota

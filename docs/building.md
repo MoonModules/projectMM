@@ -122,7 +122,7 @@ The ESP32 tab in MoonDeck wraps the same steps as cards (Setup → Firmware → 
 
 ### Firmware variants
 
-`build_esp32.py --firmware` selects one of four shipping variants. The key combines chip name + feature flags + (for SKU-sensitive chips) module. ("Firmware" here is the compiled binary; the physical board is a separate concept — see [architecture.md § Firmware vs board](architecture.md#firmware-vs-board).)
+`build_esp32.py --firmware` selects one of the shipping variants. The key combines chip name + feature flags + (for SKU-sensitive chips) module. ("Firmware" here is the compiled binary; the physical board is a separate concept — see [architecture.md § Firmware vs board](architecture.md#firmware-vs-board).) `build_esp32.py --help` lists the full set; the main ones:
 
 | `--firmware` | IDF target | `SDKCONFIG_DEFAULTS` | What's in the image |
 |---|---|---|---|
@@ -130,6 +130,7 @@ The ESP32 tab in MoonDeck wraps the same steps as cards (Setup → Firmware → 
 | `esp32-eth` | `esp32` | `sdkconfig.defaults;sdkconfig.defaults.eth` | Ethernet only. WiFi components dropped via `-DEXCLUDE_COMPONENTS=esp_wifi;wpa_supplicant;esp_coex` and `-DMM_ETH_ONLY=1`. Smaller image, more free RAM. Olimex ESP32-Gateway pins baked in (LAN8720 @ MDIO 0, PHY RST GPIO 5). |
 | `esp32-eth-wifi` | `esp32` | `sdkconfig.defaults;sdkconfig.defaults.eth` | Ethernet + WiFi. Same Olimex pin map. Full Ethernet → WiFi STA → WiFi AP cascade. |
 | `esp32s3-n16r8` | `esp32s3` | `sdkconfig.defaults;sdkconfig.defaults.esp32s3-n16r8` | ESP32-S3 DevKitC-1 with the N16R8 module (16 MB flash, 8 MB octal PSRAM). WiFi only. |
+| `esp32p4-eth` | `esp32p4` | `sdkconfig.defaults;sdkconfig.defaults.esp32p4-eth` | Waveshare ESP32-P4-NANO, Ethernet only (IP101 PHY — pins in the `ethPins` config, not sdkconfig). The P4 has no native WiFi; that arrives via the on-board ESP32-C6 co-processor in a later round. Pulls the `espressif/ip101` managed PHY component. |
 
 ESP-IDF v6.x has no `CONFIG_ESP_WIFI_ENABLED` switch (the symbol is forced on for WiFi-capable SoCs), so dropping WiFi at compile time happens via `EXCLUDE_COMPONENTS` plus `MM_NO_WIFI` (set when `MM_ETH_ONLY=1`, applied in `esp32/main/CMakeLists.txt`). The `esp32-eth` variant takes this path; `esp32-eth-wifi` keeps everything compiled in and uses the runtime cascade in `NetworkModule`.
 

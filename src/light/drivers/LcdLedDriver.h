@@ -349,8 +349,15 @@ private:
         } else {
             if (!failBuf_) failBuf_ = static_cast<char*>(platform::alloc(kFailBufLen));
             if (failBuf_) {
-                std::snprintf(failBuf_, kFailBufLen, "loopback FAIL: sent %02X%02X%02X got %02X%02X%02X",
-                              r.sent[0], r.sent[1], r.sent[2], r.got[0], r.got[1], r.got[2]);
+                // Name the first corrupted light (the spec promises this): the
+                // loopback reports the first mismatching bit; rowBits = outCh*8,
+                // so light = firstBadBit / rowBits.
+                const unsigned rowBits = static_cast<unsigned>(outCh) * 8u;
+                const unsigned badLight = rowBits ? r.firstBadBit / rowBits : 0u;
+                std::snprintf(failBuf_, kFailBufLen,
+                              "loopback FAIL: bad bit %u/%u (light %u)",
+                              static_cast<unsigned>(r.firstBadBit),
+                              static_cast<unsigned>(r.bitsChecked), badLight);
                 setStatus(failBuf_, Severity::Error);
             } else {
                 setStatus("loopback FAIL", Severity::Error);
