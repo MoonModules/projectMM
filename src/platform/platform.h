@@ -339,11 +339,23 @@ size_t rmtWs2812RxCapture(uint8_t gpio, uint32_t resolutionHz,
 // "not supported" result off ESP32.
 struct RmtLoopbackResult {
     bool jumperDetected = false;  // plain-GPIO continuity pre-check (tx high→rx high, low→low)
-    bool pass = false;            // captured bytes == sent bytes
-    uint8_t sent[3] = {};         // the test pattern transmitted
-    uint8_t got[3] = {};          // what was decoded back (valid only if pass-attempted)
+    bool pass = false;            // captured bytes == sent bytes (or whole frame bit-exact)
+    uint8_t sent[3] = {};         // the per-light test pattern transmitted
+    uint8_t got[3] = {};          // the light holding the first mismatch (light 0 when clean)
+    uint32_t bitsChecked = 0;     // total WS2812 bits verified (frame mode); 24 for the short test
+    uint32_t firstBadBit = 0;     // index of the first wrong bit, or bitsChecked when all pass
 };
 RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio);
+
+// Whole-FRAME RMT loopback: instead of a 24-bit synthetic burst, transmit a
+// real `lights`-light WS2812 frame (the per-light pattern 0xA5/0x00/0xFF
+// repeated, `channels` per light) back to back like the render loop, capture
+// the WHOLE frame on rxGpio and bit-verify every WS2812 bit. This is what
+// catches frame-rate / sustained-transfer corruption and RF interference on
+// the data line that a 24-bit burst can't — a single flipped bit anywhere in
+// the frame fails the test and reports its position. No-op off ESP32.
+RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t txGpio, uint8_t rxGpio,
+                                         uint16_t lights, uint8_t channels);
 
 // ---------------------------------------------------------------------------
 // LCD_CAM parallel WS2812 output (ESP32-S3). The driver

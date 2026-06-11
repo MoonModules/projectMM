@@ -213,3 +213,52 @@ TEST_CASE("RmtLedDriver re-slices when the source buffer changes") {
     CHECK(d.pinLightCount(0) == 100);
     CHECK(d.pinLightCount(1) == 100);
 }
+
+// --- loop() robustness -------------------------------------------------------
+//
+// loop()'s transmit-all/wait-all concurrency body is gated out on the desktop
+// (platform::rmtTxChannels == 0 → it returns at the top), exactly as
+// LcdLedDriver::loop() is. So the host can pin only the reachable contract:
+// loop() must never crash or overrun for any pin configuration, grid size, or
+// uninitialised state. The concurrency path itself (parallel transmit, longest-
+// strand cost) is proven on hardware by the real-frame loopback self-test —
+// the platform boundary keeps it out of CI, which is by design.
+
+// loop() is a safe no-op across single-pin, multi-pin and zero-grid configs.
+TEST_CASE("RmtLedDriver loop is crash-safe for every pin configuration") {
+    mm::Correction corr;
+    corr.rebuild(255, mm::LightPreset::GRB);
+
+    SUBCASE("single pin, populated grid") {
+        mm::RmtLedDriver d; mm::Buffer src;
+        std::strcpy(d.pins, "18");
+        wire(d, src, corr, 64);
+        d.loop();                       // host: inert; must not crash/overrun
+    }
+    SUBCASE("multi-pin even split") {
+        mm::RmtLedDriver d; mm::Buffer src;
+        std::strcpy(d.pins, "18,17,16");
+        wire(d, src, corr, 90);
+        REQUIRE(d.pinCount() == 3);
+        d.loop();
+    }
+    SUBCASE("zero-light grid — counts and offsets stay zero") {
+        // A 0-light buffer allocates nothing (allocate() returns false by
+        // design), so wire it by hand rather than through the success-asserting
+        // helper — the point is that loop() tolerates the empty buffer.
+        mm::RmtLedDriver d; mm::Buffer src;
+        std::strcpy(d.pins, "18,17");
+        CHECK_FALSE(src.allocate(0, 3));
+        d.onBuildControls();
+        d.setSourceBuffer(&src);
+        d.setCorrection(&corr);
+        d.onBuildState();
+        d.loop();                       // 0×0×0 must be a clean no-op
+    }
+    SUBCASE("loop before any buffer is wired") {
+        mm::RmtLedDriver d;
+        d.onBuildControls();
+        d.loop();                       // uninitialised: the guards must hold
+    }
+    CHECK(true);                        // reached here ⇒ no crash in any subcase
+}

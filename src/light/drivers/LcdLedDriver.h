@@ -82,8 +82,14 @@ public:
         const bool isPinControl  = std::strcmp(name, "pins") == 0
                                 || std::strcmp(name, "loopbackRxPin") == 0;
         if (isTestControl && !loopbackTest) {
+            // Toggling the test off clears the loopback's own verdict (FAIL
+            // buffer or the PASS/jumper string), then re-derives the driver's
+            // real status — a config/init error must survive, which a blind
+            // clearStatus() would hide.
             clearFailBuf();
             clearStatus();
+            parseConfig();
+            reinit();
         } else if (loopbackTest && (isTestControl || isPinControl)) {
             runLoopbackSelfTest();
         }
@@ -135,8 +141,11 @@ public:
         }
         // The latch pad after the rows is zeroed at reinit and never written
         // here, so the transfer ends holding every lane LOW for >=300 µs.
-        platform::lcdWs2812Transmit(lcd_, frameBytes_);
-        platform::lcdWs2812Wait(lcd_, 1000 /* ms */);
+        // Only wait when the transfer actually started: a failed tx_color gives
+        // no done-callback, so an unconditional wait would block the full 1000 ms
+        // timeout every tick. Drop the frame and retry next tick (self-heals).
+        if (platform::lcdWs2812Transmit(lcd_, frameBytes_))
+            platform::lcdWs2812Wait(lcd_, 1000 /* ms */);
     }
 
     // Test-only accessors — pin the lane slicing and frame-size arithmetic on

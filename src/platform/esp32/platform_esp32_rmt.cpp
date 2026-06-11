@@ -167,14 +167,23 @@ size_t rmtWs2812RxCapture(uint8_t gpio, uint32_t resolutionHz,
     size_t memBlock = static_cast<size_t>(maxSymbols);
     if (memBlock < SOC_RMT_MEM_WORDS_PER_CHANNEL) memBlock = SOC_RMT_MEM_WORDS_PER_CHANNEL;
     if (memBlock & 1) memBlock++;
-    rxCfg.mem_block_symbols = memBlock;
 #if SOC_RMT_SUPPORT_DMA
     // A capture larger than one hardware block (whole-frame captures, e.g. the
-    // LCD loopback's full-frame check) needs the DMA backend — without it the
-    // channel would claim its neighbours' memory blocks and still cap out.
-    // Caller's buffer must then be DMA-capable internal RAM.
+    // LCD loopback's full-frame check) uses the DMA backend, which can stream
+    // an arbitrarily large mem_block. Caller's buffer must then be DMA-capable
+    // internal RAM.
     rxCfg.flags.with_dma = maxSymbols > SOC_RMT_MEM_WORDS_PER_CHANNEL;
+#else
+    // No RMT DMA (classic ESP32): mem_block_symbols larger than one hardware
+    // channel silently claims neighbouring channels' memory and fails to
+    // allocate ("no free rx channels"). Cap to a single channel — the caller
+    // gets at most one channel's worth of symbols per capture. A whole-frame
+    // check on such a chip must therefore use a frame that fits one channel
+    // (the frame loopback sizes itself to maxLaneLights accordingly).
+    if (memBlock > SOC_RMT_MEM_WORDS_PER_CHANNEL)
+        memBlock = SOC_RMT_MEM_WORDS_PER_CHANNEL;
 #endif
+    rxCfg.mem_block_symbols = memBlock;
 
     rmt_channel_handle_t rxChan = nullptr;
     if (rmt_new_rx_channel(&rxCfg, &rxChan) != ESP_OK) return 0;
@@ -302,6 +311,119 @@ RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio) {
         }
         r.pass = (r.got[0] == r.sent[0] && r.got[1] == r.sent[1] && r.got[2] == r.sent[2]);
     }
+    r.bitsChecked = static_cast<uint32_t>(kBits);
+    r.firstBadBit = r.pass ? static_cast<uint32_t>(kBits) : 0;
+    return r;
+}
+
+// Whole-frame variant: transmit a real `lights`-light frame back to back and
+// bit-verify the WHOLE capture. The per-light pattern is 0xA5/0x00/0xFF (the
+// sent[] bytes), zero-padded for any 4th (white) channel, repeated for every
+// light. Unlike the 24-bit burst above, this drives the sustained DMA path and
+// a long wire under whatever RF the device is doing — so it catches the
+// frame-rate corruption and interference the short test is blind to.
+RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t txGpio, uint8_t rxGpio,
+                                         uint16_t lights, uint8_t channels) {
+    RmtLoopbackResult r;
+    r.sent[0] = 0xA5; r.sent[1] = 0x00; r.sent[2] = 0xFF;
+    if (lights == 0 || channels < 3 || channels > 4) return r;
+
+    r.jumperDetected = detail::loopbackJumperOk(txGpio, rxGpio);
+    if (!r.jumperDetected) return r;
+
+    const uint32_t sym0 = static_cast<uint32_t>(kT0H) | (1u << 15)
+                        | (static_cast<uint32_t>(kPeriod - kT0H) << 16);
+    const uint32_t sym1 = static_cast<uint32_t>(kT1H) | (1u << 15)
+                        | (static_cast<uint32_t>(kPeriod - kT1H) << 16);
+    const uint8_t bitsPerLight = static_cast<uint8_t>(channels * 8);
+#if !SOC_RMT_SUPPORT_DMA
+    // No RMT DMA (classic ESP32): the RX capture can hold at most one hardware
+    // channel's symbols, so cap the verified frame to what fits whole lights in
+    // that block. The frame is still transmitted back to back (the sustained-
+    // output stress that exposes RF interference); we just verify a prefix that
+    // the no-DMA receiver can actually capture.
+    const uint16_t maxLights =
+        static_cast<uint16_t>(SOC_RMT_MEM_WORDS_PER_CHANNEL / bitsPerLight);
+    if (lights > maxLights) lights = maxLights ? maxLights : 1;
+#endif
+    const size_t kBits = static_cast<size_t>(lights) * bitsPerLight;
+
+    // One real frame's worth of symbols, DMA-capable internal RAM (the same
+    // place the driver's own symbol buffer lives). Off the hot path — this is
+    // a control-driven self-test.
+    auto* txSymbols = static_cast<uint32_t*>(heap_caps_malloc(
+        kBits * sizeof(uint32_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+    const size_t capMax = kBits + 16;
+    auto* rxSymbols = static_cast<uint32_t*>(heap_caps_aligned_alloc(
+        64, capMax * sizeof(uint32_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+    if (!txSymbols || !rxSymbols) {
+        heap_caps_free(txSymbols);
+        heap_caps_free(rxSymbols);
+        return r;
+    }
+    size_t s = 0;
+    for (uint16_t light = 0; light < lights; light++)
+        for (uint8_t ch = 0; ch < channels; ch++) {
+            const uint8_t byte = ch < 3 ? r.sent[ch] : 0x00;
+            for (int bit = 7; bit >= 0; bit--)
+                txSymbols[s++] = (byte & (1u << bit)) ? sym1 : sym0;
+        }
+
+    RmtWs2812Handle tx;
+    if (!rmtWs2812Init(tx, txGpio, kLoopbackResHz, /*invert=*/false)) {
+        heap_caps_free(txSymbols);
+        heap_caps_free(rxSymbols);
+        return r;
+    }
+
+    struct Cap {
+        uint8_t rxGpio; uint32_t* buf; size_t max;
+        volatile size_t got = 0; volatile bool done = false;
+    } cap{rxGpio, rxSymbols, capMax};
+    auto rxTask = [](void* arg) {
+        auto* c = static_cast<Cap*>(arg);
+        c->got = rmtWs2812RxCapture(c->rxGpio, kLoopbackResHz, c->buf, c->max, 1000);
+        c->done = true;
+        vTaskDelete(nullptr);
+    };
+    if (xTaskCreate(rxTask, "rmtlbf", 4096, &cap, 5, nullptr) == pdPASS) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        // Back-to-back frames, the render loop's cadence. The capture latches
+        // one whole frame; we keep resending so it can't miss the window.
+        for (int i = 0; i < 100 && !cap.done; i++) {
+            rmtWs2812Transmit(tx, txSymbols, kBits);
+            rmtWs2812Wait(tx, 1000);
+            ets_delay_us(300);   // inter-frame WS2812 latch
+        }
+        for (int i = 0; i < 200 && !cap.done; i++) vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    rmtWs2812Deinit(tx);
+
+    if (cap.done && cap.got >= kBits) {
+        size_t mismatch = SIZE_MAX;
+        for (size_t b = 0; b < kBits; b++) {
+            const uint16_t high = static_cast<uint16_t>(rxSymbols[b] & 0x7FFF);
+            const uint8_t bit = (high >= ((kT0H + kT1H) / 2)) ? 1 : 0;
+            const uint8_t pos = static_cast<uint8_t>(b % bitsPerLight);
+            const uint8_t expByte = (pos / 8u) < 3 ? r.sent[pos / 8u] : 0x00;
+            const uint8_t exp = (expByte >> (7 - (pos & 7))) & 1u;
+            if (bit != exp && mismatch == SIZE_MAX) mismatch = b;
+        }
+        r.pass = (mismatch == SIZE_MAX);
+        r.bitsChecked = static_cast<uint32_t>(kBits);
+        r.firstBadBit = (mismatch == SIZE_MAX) ? static_cast<uint32_t>(kBits)
+                                               : static_cast<uint32_t>(mismatch);
+        // got[] = the light holding the first mismatch (light 0 when clean).
+        const size_t badLight = (mismatch == SIZE_MAX) ? 0 : mismatch / bitsPerLight;
+        const size_t lightStart = badLight * bitsPerLight;
+        for (size_t b = 0; b < 24 && lightStart + b < cap.got; b++) {
+            const uint8_t bit = ((rxSymbols[lightStart + b] & 0x7FFF)
+                                 >= ((kT0H + kT1H) / 2)) ? 1 : 0;
+            r.got[b / 8] = static_cast<uint8_t>((r.got[b / 8] << 1) | bit);
+        }
+    }
+    heap_caps_free(txSymbols);
+    heap_caps_free(rxSymbols);
     return r;
 }
 

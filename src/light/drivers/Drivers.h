@@ -55,7 +55,12 @@ public:
     // first boot can't brown out the board before the user sets a safe level.
     // The user raises it via the brightness control once their supply is known.
     uint8_t brightness = 20;
-    uint8_t lightPreset = 0;  // index into kLightPresetOptions; 0 = RGB
+    // GRB (index 2): the wire order of WS2812/SK6812 strips — the common case,
+    // so a freshly-flashed board with a strip attached shows correct colours
+    // out of the box. Only the physical output drivers apply this reorder;
+    // PreviewDriver reads the RGB source buffer directly, so the simulator is
+    // unaffected. RGB-ordered outputs (some ArtNet/network sinks) flip it back.
+    uint8_t lightPreset = 2;  // index into kLightPresetOptions; 2 = GRB
 
     // Two ways to wire the source Layer:
     //  - setLayers(Layers*): bind the container; layer_ is re-resolved from

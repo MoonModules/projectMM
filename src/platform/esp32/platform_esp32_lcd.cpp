@@ -20,7 +20,12 @@
 #include "sdkconfig.h"
 #include "soc/soc_caps.h"
 
-#if SOC_LCD_I80_SUPPORTED
+// SOC_LCDCAM_I80_LCD_SUPPORTED, not SOC_LCD_I80_SUPPORTED: the classic ESP32
+// sets the latter for its I2S-LCD peripheral, which is NOT the LCD_CAM i80 bus
+// esp_lcd drives here — compiling this body for the classic chip wired the
+// driver onto it and hung its boot. Mirror the lcdLanes gate in
+// platform_config.h. (esp_lcd headers below only exist where LCD_CAM does.)
+#if SOC_LCDCAM_I80_LCD_SUPPORTED
 
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_io_i80.h"

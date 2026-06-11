@@ -671,6 +671,10 @@ size_t rmtWs2812RxCapture(uint8_t /*gpio*/, uint32_t /*resolutionHz*/,
 RmtLoopbackResult rmtWs2812Loopback(uint8_t /*txGpio*/, uint8_t /*rxGpio*/) {
     return {};   // not supported off ESP32
 }
+RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t /*txGpio*/, uint8_t /*rxGpio*/,
+                                         uint16_t /*lights*/, uint8_t /*channels*/) {
+    return {};   // not supported off ESP32
+}
 
 // ---------------------------------------------------------------------------
 // LCD_CAM WS2812 — no-op stubs. Desktop has no i80 peripheral; the LCD LED

@@ -63,6 +63,14 @@ public:
     bool     loopbackTest = false;  // checkbox: set true to run once
     uint16_t loopbackRxPin = 5;     // jumper this to the first pin for the test
 
+    // Whole-frame stress variant: instead of a 24-bit burst, transmit a real
+    // frame the size of the first pin's slice, back to back, and bit-verify the
+    // WHOLE capture. This is the one that catches frame-rate corruption and RF
+    // interference on the data line (the flicker class of bug) — a 24-bit burst
+    // passes through a wire that mangles a sustained frame. Shown only in test
+    // mode; the status names the first corrupted light on failure.
+    bool     loopbackFrame = false;
+
     // 40 MHz RMT tick clock = 25 ns/tick: t0h 350ns→14, t1h 700ns→28, period
     // 1250ns→50 ticks. The encoder converts ns→ticks via the granted resolution,
     // so this is the requested clock, not a hard-coded tick count.
@@ -82,6 +90,8 @@ public:
         // every control change (HttpServerModule) re-runs this and flips the flag.
         controls_.addUint16("loopbackRxPin", loopbackRxPin);
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
+        controls_.addBool("loopbackFrame", loopbackFrame);
+        controls_.setHidden(controls_.count() - 1, !loopbackTest);
     }
 
     // Changing the pin list or the per-pin counts re-parses and re-inits the RMT
@@ -100,10 +110,16 @@ public:
     void onUpdate(const char* name) override {
         const bool isTestControl = std::strcmp(name, "loopbackTest") == 0;
         const bool isPinControl  = std::strcmp(name, "pins") == 0
-                                || std::strcmp(name, "loopbackRxPin") == 0;
+                                || std::strcmp(name, "loopbackRxPin") == 0
+                                || std::strcmp(name, "loopbackFrame") == 0;
         if (isTestControl && !loopbackTest) {
+            // Toggling the test off clears the loopback verdict, then re-derives
+            // the real driver status — a config/init error must survive (a blind
+            // clearStatus() would hide it).
             clearFailBuf();
             clearStatus();
+            parseConfig();
+            reinit();
         } else if (loopbackTest && (isTestControl || isPinControl)) {
             runLoopbackSelfTest();
         }
@@ -336,18 +352,48 @@ private:
         // allocate RMT memory, even with every TX channel otherwise claimed;
         // reinit() restores them after.
         deinitAll();
-        const auto r = platform::rmtWs2812Loopback(static_cast<uint8_t>(pinList_[0]),
-                                                   static_cast<uint8_t>(loopbackRxPin));
+        const uint8_t txPin = static_cast<uint8_t>(pinList_[0]);
+        const uint8_t rxPin = static_cast<uint8_t>(loopbackRxPin);
+        platform::RmtLoopbackResult r;
+        if (loopbackFrame) {
+            // Whole-frame stress test on the first pin's slice (or 64 lights if
+            // no buffer is wired yet) — the size that actually exposes
+            // frame-rate / RF corruption.
+            const uint16_t lights = pinCounts_[0] > 0
+                ? static_cast<uint16_t>(pinCounts_[0]) : 64;
+            const uint8_t ch = correction_ ? correction_->outChannels : 3;
+            r = platform::rmtWs2812LoopbackFrame(txPin, rxPin, lights, ch);
+        } else {
+            r = platform::rmtWs2812Loopback(txPin, rxPin);
+        }
         reinit();
         if (!r.jumperDetected) {
             clearFailBuf();
             setStatus("loopback: jumper not detected", Severity::Warning);
         } else if (r.pass) {
             clearFailBuf();
-            setStatus("loopback PASS", Severity::Status);
+            if (loopbackFrame) {
+                if (!failBuf_) failBuf_ = static_cast<char*>(platform::alloc(kFailBufLen));
+                if (failBuf_) {
+                    std::snprintf(failBuf_, kFailBufLen, "loopback PASS (%u bits)",
+                                  static_cast<unsigned>(r.bitsChecked));
+                    setStatus(failBuf_, Severity::Status);
+                } else {
+                    setStatus("loopback PASS", Severity::Status);
+                }
+            } else {
+                setStatus("loopback PASS", Severity::Status);
+            }
         } else {
             if (!failBuf_) failBuf_ = static_cast<char*>(platform::alloc(kFailBufLen));
-            if (failBuf_) {
+            if (failBuf_ && loopbackFrame) {
+                std::snprintf(failBuf_, kFailBufLen,
+                              "loopback FAIL: bad bit %u/%u (light %u)",
+                              static_cast<unsigned>(r.firstBadBit),
+                              static_cast<unsigned>(r.bitsChecked),
+                              static_cast<unsigned>(r.firstBadBit / 24));
+                setStatus(failBuf_, Severity::Error);
+            } else if (failBuf_) {
                 std::snprintf(failBuf_, kFailBufLen, "loopback FAIL: sent %02X%02X%02X got %02X%02X%02X",
                               r.sent[0], r.sent[1], r.sent[2], r.got[0], r.got[1], r.got[2]);
                 setStatus(failBuf_, Severity::Error);

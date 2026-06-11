@@ -489,6 +489,19 @@ private:
     void syncTxPower() {
         if constexpr (!platform::hasWiFi) return;
         if (txPowerSetting_ == appliedTxPowerSetting_) return;
+        // "No override" (0) with nothing ever applied is a genuine no-op: the
+        // radio is already at its default ceiling, so there is nothing to push.
+        // Skipping it is not just an optimisation — calling
+        // esp_wifi_set_max_tx_power inside the radio-start call stack (this runs
+        // right after wifiStaInit/startAP) hangs the classic ESP32 on IDF
+        // v6.1-dev with an interrupt-watchdog reset, boot-looping the device. A
+        // default board must never touch TX power; a real cap (1..21) still does,
+        // and lifting a prior cap back to 0 still pushes the ceiling because
+        // appliedTxPowerSetting_ is then > 0.
+        if (txPowerSetting_ == 0 && appliedTxPowerSetting_ <= 0) {
+            appliedTxPowerSetting_ = 0;   // mark synced so we don't re-check every tick
+            return;
+        }
         const bool radioUp = (state_ == State::ConnectedSta
                               || state_ == State::WaitingSta
                               || state_ == State::AP);

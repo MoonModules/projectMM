@@ -1,5 +1,11 @@
 # MoonDeck Script Reference
 
+MoonDeck is projectMM's browser-based developer console: one page that builds, flashes, runs, tests, monitors, and checks the project across every target, and discovers and drives devices on the network. Every action it offers is a thin wrapper around a script under `scripts/`, so the CLI (`uv run scripts/<group>/<name>.py`) and MoonDeck run exactly the same code — agents typically use the CLI, humans use MoonDeck. For what MoonDeck *is* and where it sits in the workflow see [docs/building.md § MoonDeck](../docs/building.md#moondeck--the-dev-console); this page is the per-script reference.
+
+Launch it with `uv run scripts/moondeck.py` and open <http://localhost:8420>. The console has three tabs — **PC** (desktop build / run / test), **ESP32** (chip + port, build / flash / monitor), and **Live** (discovery and live runs against networked devices) — above a network bar and per-device board pickers. Script definitions live in `scripts/moondeck_config.json` (committed); runtime state (selected network, devices, ports) persists in `scripts/moondeck.json` (gitignored).
+
+Below: the UI behaviours common to every card, described once, then one section per script grouped by the tab it appears on. Each section gives the equivalent CLI invocation, so the page doubles as the command reference for running anything without the browser.
+
 ## UI Features
 
 - **Status dots** on each card: grey (not run), orange (running), green (exit 0), red (exit non-zero).
@@ -183,6 +189,17 @@ uv run scripts/scenario/run_network_live.py --tolerance 1        # loosen the pe
 ```
 
 Everything it mutates (grid size → 16×16 for the run, NetworkSend `ip`/`protocol`/`enabled`, the temporarily added NetworkReceive effect) is restored afterwards, also on failure. Exit codes: `0` = all legs passed, `1` = a leg failed, `2` = environment problem (no online devices / no moondeck.json). Desktop listeners may need the OS firewall to allow UDP 6454/5568/4048.
+
+### run_network_roundtrip
+
+Minimal **PC→device→PC latency probe** across **all three protocols**: per device, the PC sends one solid-colour frame over ArtNet, then E1.31, then DDP, each time timing how long until that colour appears in the device's `/ws` preview stream (PC → NetworkReceiveEffect → PreviewDriver → PC). The receiver autodetects each protocol on its own port, so there's no device reconfig between them. Reports min / median / max over N repeats per protocol and a per-device median-per-protocol comparison line — the spread is the signal for the latency / hiccup symptom, the protocol comparison shows which transport is fastest on a given board, and running across boards makes the per-chip difference visible (a classic ESP32 measures slower than an S3). Runs against **every device checked in the Live tab** (the same `selected` set the matrix test uses); unreachable checked devices are warned and skipped. The measured time includes the PreviewDriver's own fps quantisation (≈42 ms at the 24 fps default), so it's "state visible within" latency, not wire latency; raise the device's Preview fps to tighten it. Deliberately minimal — per-frame sequence matching, the device→device chain, and jitter/drop histograms are left as later extensions.
+
+```bash
+uv run scripts/scenario/run_network_roundtrip.py                  # every checked device, 10 probes each
+uv run scripts/scenario/run_network_roundtrip.py --host 192.168.1.156 --repeats 20   # one explicit device
+```
+
+Captures and restores each device's grid and removes the temporary NetworkReceive on exit (also on failure). Exit codes match the matrix test: `0` = at least one device measured, `1` = none returned a frame, `2` = environment problem (no checked/reachable devices).
 
 ## ESP32 Tab
 

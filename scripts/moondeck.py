@@ -1045,14 +1045,14 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             cmd.extend(["--name", params["scenario"]])
         if script_def.get("needs_module") and params.get("module"):
             cmd.extend(["--module", params["module"]])
-        # pass_board: derive the board from the selected firmware when the
-        # mapping is unambiguous (one boards.json entry claims it) and forward
-        # it — improv_provision.py then injects the board's TX-power cap
-        # BEFORE provisioning (the LOLIN brown-out fix). Ambiguous firmwares
-        # (several boards share esp32s3-n16r8) stay board-less here; the user
-        # runs the CLI with --board, or the web installer's explicit picker.
+        # pass_board: forward the board picked in the UI's provisioning
+        # dropdown (state.provisionBoard) so improv_provision.py injects that
+        # board's TX-power cap BEFORE provisioning (the LOLIN brown-out fix).
+        # No firmware-deduce fallback: the only pass_board script
+        # (improv_provision) doesn't declare needs_firmware, so params never
+        # carries a firmware to deduce from — the dropdown is the sole source.
         if script_def.get("pass_board"):
-            board = params.get("board") or _deduce_board(params.get("firmware", ""))
+            board = params.get("board")
             if board:
                 cmd.extend(["--board", board])
         if params.get("host"):

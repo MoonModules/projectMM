@@ -38,13 +38,12 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from run_live_scenario import Client, _control_value  # shared HTTP wrapper  # noqa: E402
 import _preview_ws  # noqa: E402
-
-MOONDECK_STATE = ROOT / "scripts" / "moondeck.json"
-ARTNET_PORT = 6454
-E131_PORT = 5568
-DDP_PORT = 4048
-CHANNELS_PER_UNIVERSE = 510
-PROTOCOLS = ["ArtNet", "E1.31", "DDP"]   # mirrors NetworkSendDriver.kProtocolOptions
+# Shared lights-over-UDP surface (ports, packet builders, device set) — see
+# _net_probe.py; the matrix-only colour-correction/Board logic stays below.
+from _net_probe import (  # noqa: E402
+    ARTNET_PORT, E131_PORT, DDP_PORT, CHANNELS_PER_UNIVERSE, PROTOCOLS,
+    MOONDECK_STATE, build_artdmx, build_e131, build_ddp, load_selected_devices,
+)
 
 # Round colours: channel values far apart so they stay distinct after the
 # sender's brightness scale (default 20/255 → e.g. (255,128,0) → (20,10,0)),
@@ -67,51 +66,8 @@ def corrected(rgb, brightness, preset):
     return tuple(scaled[order[i]] for i in range(3))
 
 
-# Mirrors src/light/ArtNetPacket.h::buildArtDmxPacket — cross-language
-# duplication is unavoidable here; keep the two in sync.
-def build_artdmx(universe: int, sequence: int, data: bytes) -> bytes:
-    pkt = bytearray(b"Art-Net\0")
-    pkt += bytes([0x00, 0x50])                        # OpDmx, little-endian
-    pkt += bytes([0x00, 0x0E])                        # protocol 14, big-endian
-    pkt += bytes([sequence & 0xFF, 0])                # sequence, physical
-    pkt += bytes([universe & 0xFF, (universe >> 8) & 0xFF])   # universe LE
-    pkt += bytes([(len(data) >> 8) & 0xFF, len(data) & 0xFF])  # length BE
-    pkt += data
-    return bytes(pkt)
-
-
-# Mirrors src/light/E131Packet.h::buildE131Packet — keep the two in sync.
-def build_e131(universe: int, sequence: int, data: bytes) -> bytes:
-    total = 126 + len(data)
-    pkt = bytearray(126)
-    pkt[0:2] = (0x0010).to_bytes(2, "big")            # preamble size
-    pkt[4:16] = b"ASC-E1.17\0\0\0"
-    pkt[16:18] = (0x7000 | (total - 16)).to_bytes(2, "big")
-    pkt[21] = 0x04                                    # root vector
-    pkt[22:38] = b"run_network_live"                  # CID (any stable 16 bytes)
-    pkt[38:40] = (0x7000 | (total - 38)).to_bytes(2, "big")
-    pkt[43] = 0x02                                    # framing vector
-    pkt[44:53] = b"projectMM"                         # source name (NUL-padded)
-    pkt[108] = 100                                    # priority
-    pkt[111] = sequence & 0xFF
-    pkt[113:115] = universe.to_bytes(2, "big")
-    pkt[115:117] = (0x7000 | (total - 115)).to_bytes(2, "big")
-    pkt[117] = 0x02                                   # DMP vector
-    pkt[118] = 0xA1
-    pkt[122] = 0x01                                   # address increment
-    pkt[123:125] = (1 + len(data)).to_bytes(2, "big")  # property count
-    return bytes(pkt) + data
-
-
-# Mirrors src/light/DdpPacket.h::buildDdpPacket — keep the two in sync.
-def build_ddp(offset: int, push: bool, data: bytes) -> bytes:
-    pkt = bytearray(10)
-    pkt[0] = 0x40 | (0x01 if push else 0x00)
-    pkt[2] = 0x01                                     # RGB
-    pkt[3] = 0x01                                     # default display
-    pkt[4:8] = offset.to_bytes(4, "big")
-    pkt[8:10] = len(data).to_bytes(2, "big")
-    return bytes(pkt) + data
+# build_artdmx / build_e131 / build_ddp now live in _net_probe.py (imported
+# above) — shared with the latency probe.
 
 
 def send_solid(host: str, rgb, protocol: str = "ArtNet", universes: int = 2,
@@ -145,31 +101,8 @@ def send_solid(host: str, rgb, protocol: str = "ArtNet", universes: int = 2,
         sock.close()
 
 
-# --- device list -------------------------------------------------------------
-
-def load_online_devices():
-    """Devices of moondeck.json's active network, re-probed (a stale `online`
-    flag must not hang the run on a 15 s mutating-call timeout)."""
-    if not MOONDECK_STATE.exists():
-        print(f"FAIL  {MOONDECK_STATE} not found — run MoonDeck once to discover devices")
-        sys.exit(2)
-    state = json.loads(MOONDECK_STATE.read_text())
-    nets = state.get("networks", [])
-    net = next((n for n in nets if n.get("name") == state.get("active_network")),
-               nets[0] if nets else None)
-    if not net:
-        print("FAIL  moondeck.json has no networks")
-        sys.exit(2)
-    devices = []
-    for dev in net.get("devices", []):
-        if not dev.get("online"):
-            continue
-        try:  # quick reachability probe, far shorter than Client's mutate timeout
-            with urllib.request.urlopen(f"http://{dev['ip']}/api/state", timeout=3):
-                devices.append(dev)
-        except OSError:
-            print(f"  WARN  {dev.get('deviceName', dev['ip'])} marked online but unreachable — skipped")
-    return devices
+# load_selected_devices now lives in _net_probe.py (imported above) — shared
+# with the latency probe.
 
 
 def find_module(state: dict, name: str):
@@ -276,14 +209,15 @@ def main() -> int:
                     help="seconds after a mutating call before asserting")
     args = ap.parse_args()
 
-    devices = load_online_devices()
+    devices = load_selected_devices()
     if not devices:
-        print("FAIL  no online devices in moondeck.json's active network")
+        print("FAIL  no selected+reachable devices in moondeck.json's active "
+              "network — check device boxes in the Live tab")
         return 2
-    print(f"devices: {len(devices)} online — "
+    print(f"devices: {len(devices)} selected — "
           + ", ".join(f"{d.get('deviceName', '?')} ({d['ip']})" for d in devices), flush=True)
     if len(devices) == 1:
-        print("note: only one device online — running the PC→device leg; "
+        print("note: only one device selected — running the PC→device leg; "
               "the device↔device matrix needs ≥2 boards", flush=True)
 
     boards = [Board(d) for d in devices]

@@ -130,6 +130,14 @@
       "script": "scenario/run_network_live.py"
     },
     {
+      "id": "network_roundtrip",
+      "tab": "live",
+      "group": "scenario",
+      "label": "Network Round-trip",
+      "help": "run_network_roundtrip",
+      "script": "scenario/run_network_roundtrip.py"
+    },
+    {
       "id": "setup_esp_idf",
       "tab": "esp32",
       "group": "setup",

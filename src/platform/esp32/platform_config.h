@@ -42,8 +42,16 @@ constexpr uint8_t rmtTxChannels = 0;
 // Parallel WS2812 lanes over the LCD_CAM i80 bus (ESP32-S3 among current
 // targets). The peripheral does 16; this increment deliberately caps at 8 —
 // half the DMA footprint, and widening is a constant change, not a redesign.
-// SOC-derived like rmtTxChannels so a future i80-bearing chip works untouched.
-#ifdef CONFIG_SOC_LCD_I80_SUPPORTED
+// SOC-derived like rmtTxChannels so a future LCD_CAM-bearing chip works
+// untouched.
+//
+// Gate on SOC_LCDCAM_I80_LCD_SUPPORTED (the LCD_CAM peripheral's i80 mode),
+// NOT SOC_LCD_I80_SUPPORTED: the classic ESP32 sets the latter for its
+// unrelated I2S-LCD peripheral, so gating on it wired this driver onto the
+// classic chip and hung its boot trying to init an esp_lcd i80 bus the chip
+// doesn't have. SOC_LCDCAM_I80_LCD_SUPPORTED is defined only on chips with the
+// real LCD_CAM (S3/P4), which is what esp_lcd's i80 driver actually needs.
+#ifdef CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED
 constexpr uint8_t lcdLanes = 8;
 #else
 constexpr uint8_t lcdLanes = 0;

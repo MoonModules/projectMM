@@ -21,7 +21,7 @@ The Drivers container owns the shared output-correction state and exposes two co
 | Control | Type | Description |
 |---|---|---|
 | `brightness` | uint8 (0–255) | Global brightness. Scales every channel through a 256-entry LUT (`(v × brightness) / 255`). Changing it rebuilds only the LUT on the cheap `onUpdate` tier — no pipeline realloc, so the slider is fluent. Gamma / white-balance fold into this LUT later as a per-channel R/G/B split. |
-| `lightPreset` | select | The physical wire format: channel order and whether the light is RGBW. Options: `RGB`, `RBG`, `GRB`, `GBR`, `BRG`, `BGR`, `RGBW`, `GRBW`. RGBW presets make each driver emit 4 channels per light with white derived as `min(R,G,B)` from the (brightness-scaled) RGB. |
+| `lightPreset` | select | The physical wire format: channel order and whether the light is RGBW. Options: `RGB`, `RBG`, `GRB`, `GBR`, `BRG`, `BGR`, `RGBW`, `GRBW`. Defaults to `GRB` — the WS2812/SK6812 wire order, so a strip shows correct colours out of the box (PreviewDriver reads the RGB source buffer directly and is unaffected). RGBW presets make each driver emit 4 channels per light with white derived as `min(R,G,B)` from the (brightness-scaled) RGB. |
 
 The state lives on `Correction` (`src/light/drivers/Correction.h`): a brightness LUT, channel-order table, output channel count, derive-white flag. `Drivers::onUpdate` rebuilds it on a `brightness`/`lightPreset` change and hands each child a `const Correction*`. Every driver currently sees the same blended output of the active layer; per-driver layer assignment is a [backlog](../../backlog/backlog.md) item that lands with multi-layer composition.
 

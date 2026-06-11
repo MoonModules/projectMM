@@ -27,6 +27,7 @@ The source buffer is split into **consecutive slices**, one per pin, in list ord
 - `ledsPerPin` (text, default empty) — comma-separated lights-per-pin, e.g. `100,100,50`, matched to `pins` by position. May be empty or shorter than `pins`; see Buffer slicing above.
 - `loopbackRxPin` (uint16_t, default 5) — the RX pin for the loopback self-test. Jumper it to the **first** pin in `pins` to run the test. Shown only while `loopbackTest` is on.
 - `loopbackTest` (bool) — tick to run a one-shot RMT TX→RX loopback self-test (see Self-test below). Auto-resets after running; the result lands in the module's status field.
+- `loopbackFrame` (bool) — whole-frame variant of the self-test, shown only while `loopbackTest` is on. Instead of a 24-bit burst it transmits a real frame (the first pin's slice, or 64 lights) back to back and bit-verifies the entire capture. This is what catches frame-rate corruption and RF interference on the data line — a 24-bit burst can pass through a wire that mangles a sustained frame. On failure the status names the first corrupted bit and light.
 
 ## Cross-domain wiring
 
@@ -35,6 +36,24 @@ The driver is added as a child of the `Drivers` container in `main.cpp` (under `
 ## Loopback self-test (on device)
 
 The RMT peripheral is a transceiver, so the driver can verify its own output on real silicon — no separate test firmware. Jumper the **first** pin in `pins` (TX) to `loopbackRxPin`, then tick the `loopbackTest` control: the driver transmits a known WS2812 pattern out the data pin, captures it back on the RX pin, decodes, and compares. To test another output, temporarily move it to the front of the list. The outcome goes to the module's **status field** (`setStatus`): `loopback PASS`, `loopback FAIL: sent … got …`, or `loopback: jumper not detected` (a plain-GPIO continuity pre-check runs first, so a wiring fault is reported as such, not mistaken for a code bug). The test releases **all** TX channels first (so the RX capture can always allocate RMT memory, even with every channel in use) and briefly drives the test pattern, so any strips flicker once during the run; normal output resumes after. All hardware lives in `platform::rmtWs2812Loopback`.
+
+The default test sends a 24-bit pattern — enough to prove the GPIO emits correct bytes, but blind to faults that only appear over a sustained transfer (frame-rate DMA corruption, RF interference on a long data line — the *intermittent flicker* class of bug). Tick `loopbackFrame` to switch to the whole-frame variant: it transmits a real frame the size of the first pin's slice, back to back like the render loop, captures the **entire** frame, and bit-verifies every WS2812 bit. A single flipped bit anywhere fails the test and the status reports its position (`loopback FAIL: bad bit N/M (light K)`); a clean run reports the bit count (`loopback PASS (M bits)`). Run it while WiFi is active to reproduce interference that only manifests under radio load. Hardware lives in `platform::rmtWs2812LoopbackFrame`. (On the classic ESP32, which has no RMT DMA, the whole-frame capture is capped to one RMT channel's worth of symbols — ~2 RGB lights — and the frame is still clocked back to back; the S3/P4 capture the full frame via DMA.)
+
+## Troubleshooting: flicker on LEDs that should be off
+
+Random wrong colours on LEDs that the effect leaves black — most often a few stray pixels flickering — is, on a 3.3 V ESP32 driving WS2812 **directly**, almost always a **data-line signal-integrity** problem, not a firmware bug. WS2812 wants a logic-high near 0.7 × VDD (≈ 3.5 V on a 5 V strip), but the ESP32 only drives 3.3 V, so individual bits sit at the margin and noise tips them. Confirm the firmware is innocent before reaching for the soldering iron — these checks were the actual diagnosis path on the bench (recorded in [decisions.md](../../../history/decisions.md)):
+
+1. **Is the data clean?** The preview/source buffer is the logical RGB the effect produced — if it shows no stray colour, the effect is innocent (the corruption is downstream of the buffer).
+2. **Is the firmware/peripheral clean?** Run the `loopbackFrame` self-test through a short jumper on the data pin. A `PASS` means the RMT encode + transmit emit bit-perfect WS2812 — the GPIO is fine.
+3. **Is it WiFi RF?** Lower `Network.txPowerSetting` from 20 dBm down toward 2 and watch. If the flicker shrinks with TX power, it's radio coupling into the data wire (mitigate with the cap below). If it's **unchanged across the whole sweep, it is not the radio** — it's the physical data path.
+
+When 1–3 all come back clean, the fix is electrical, in rough order of effectiveness:
+
+- **Add a 3.3 → 5 V level shifter** on the data line (e.g. 74HCT125 / 74AHCT125) — the single most effective fix; it restores the logic-high margin the LEDs expect.
+- **Add a ~330 Ω series resistor** at the GPIO, close to the board, to damp reflections.
+- **Shorten / shield the data wire**, and keep it away from the power leads and the antenna.
+- **Share a solid, thick common ground** between the strip's supply and the board.
+- If RF coupling was implicated by step 3, set a per-board `Network.txPowerSetting` cap (the same `boards.json` mechanism the LOLIN S3 uses).
 
 ## Tests
 
