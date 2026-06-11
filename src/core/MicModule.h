@@ -1,0 +1,199 @@
+#pragma once
+
+// MicModule — reads a digital I2S MEMS microphone (e.g. INMP441) and publishes
+// one analysed AudioFrame per render tick: an overall sound level plus a 16-band
+// frequency spectrum and the dominant peak. It is the PRODUCER in the audio
+// producer/consumer pair; audio-reactive effects (AudioVolumeEffect,
+// AudioSpectrumEffect) are the consumers, wired the AudioFrame* in main.cpp.
+//
+// A SystemModule Peripheral child (the role already exists). Chip-agnostic:
+// gated on platform::hasI2sMic, inert with a status note on targets without I2S
+// and on desktop. The signal math is host-tested domain code (AudioLevel.h,
+// AudioBands.h); this module owns the lifecycle, the controls, and the two
+// platform seams (the I2S read and the FFT kernel).
+//
+// Hot path: fixed member scratch buffers (sample block + window + magnitudes),
+// one float FFT per loop, no per-loop heap. The mic read is non-blocking enough
+// for the tick; a bad init leaves the module idle (zeroed frame), never crashing.
+
+#include "core/MoonModule.h"
+#include "light/AudioFrame.h"
+#include "light/AudioLevel.h"
+#include "light/AudioBands.h"
+#include "platform/platform.h"
+
+#include <cstdint>
+#include <cstdio>   // snprintf for the read-out strings
+#include <cstring>
+
+namespace mm {
+
+class MicModule : public MoonModule {
+public:
+    // Block size = FFT size: a power of two. 512 samples at 22050 Hz is ~23 ms of
+    // audio per frame — fine resolution (~43 Hz/bin) at a modest per-tick cost.
+    static constexpr size_t kBlock = 512;
+    static constexpr size_t kMag = kBlock / 2;   // real-FFT magnitude bins
+
+    ModuleRole role() const override { return ModuleRole::Peripheral; }
+
+    // Diagnostics stay visible even when "disabled" (same stance as BoardModule):
+    // the level/peak read-outs are useful regardless of the enabled toggle.
+    bool respectsEnabled() const override { return false; }
+
+    // --- controls: three I2S pins, sample rate, the two conditioning knobs, and
+    // two read-only read-outs. The pins default to the bench wiring (INMP441 on
+    // WS=4 / SD=5 / SCK=6) but are fully user-editable. ---
+    uint16_t wsPin = 4;          // word-select / LRCLK
+    uint16_t sdPin = 5;          // serial data in
+    uint16_t sckPin = 6;         // bit clock
+    // Sample rate is a discrete choice (the standard audio rates), so it's a
+    // dropdown over a fixed set, not a free number. sampleRateSel indexes
+    // kSampleRates; sampleRate() resolves it to Hz. Default index 2 = 22050.
+    uint8_t  sampleRateSel = 2;
+    // Two knobs condition the spectrum + level:
+    uint8_t  floor = 100;        // noise floor (dB display floor) — bands/level
+                                 // below this read as silence. Raise to keep an
+                                 // ambient room dark, lower for a quiet room.
+    uint8_t  gain = 222;         // sensitivity — HIGHER = more (a narrower dB window
+                                 // so a given sound fills more of the bar).
+
+    static constexpr uint16_t kSampleRates[] = {8000, 16000, 22050, 44100};
+    static constexpr uint8_t kSampleRateCount = 4;
+    uint32_t sampleRate() const { return kSampleRates[sampleRateSel < kSampleRateCount
+                                                       ? sampleRateSel : 2]; }
+
+    void onBuildControls() override {
+        controls_.addUint16("wsPin", wsPin);
+        controls_.addUint16("sdPin", sdPin);
+        controls_.addUint16("sckPin", sckPin);
+        static constexpr const char* kRateOptions[] = {"8000", "16000", "22050", "44100"};
+        controls_.addSelect("sampleRate", sampleRateSel, kRateOptions, kSampleRateCount);
+        controls_.addUint8("floor", floor, 0, 255);
+        controls_.addUint8("gain", gain, 1, 255);
+        // Read-only live read-outs (formatted in loop1s).
+        controls_.addText("level", levelStr_, sizeof(levelStr_));
+        controls_.setReadOnly(controls_.count() - 1, true);
+        controls_.addText("peakHz", peakStr_, sizeof(peakStr_));
+        controls_.setReadOnly(controls_.count() - 1, true);
+        MoonModule::onBuildControls();
+    }
+
+    // A pin or rate change rebuilds the I2S channel.
+    bool controlChangeTriggersBuildState(const char* name) const override {
+        return std::strcmp(name, "wsPin") == 0 || std::strcmp(name, "sdPin") == 0
+            || std::strcmp(name, "sckPin") == 0 || std::strcmp(name, "sampleRate") == 0;
+    }
+
+    void onBuildState() override { reinit(); MoonModule::onBuildState(); }
+    void setup() override { active_ = this; reinit(); }
+    void teardown() override {
+        deinit();
+        if (active_ == this) active_ = nullptr;   // effects fall back to silence
+    }
+
+    // The latest analysed frame — what effects read. Always valid (zeroed until
+    // the first successful read), so a consumer never dereferences null and a
+    // mic-less build just sees silence.
+    const AudioFrame* audioFrame() const { return &frame_; }
+
+    // Process-wide accessor for the consumers (audio effects). There is one mic,
+    // and an effect can be added/removed via the UI at any time, so it can't rely
+    // on a boot-time setter — it asks here. Returns the live mic's frame while one
+    // exists, else a static all-silent frame, so an effect added before/without a
+    // mic still reads valid silence instead of null. The active instance registers
+    // itself in setup() and clears the pointer in teardown(), so add/remove in any
+    // order leaves a coherent answer (the robustness rule).
+    static const AudioFrame* latestFrame() {
+        static const AudioFrame kSilence{};
+        return active_ ? &active_->frame_ : &kSilence;
+    }
+
+    void loop() override {
+        if constexpr (!platform::hasI2sMic) return;   // inert off I2S targets
+        if (!inited_) return;                          // bad init → idle (zero frame)
+
+        // Drain whatever the DMA holds this tick (non-blocking) into the free tail
+        // of the block accumulator. A full kBlock takes ~23 ms to arrive (longer
+        // than one render tick), so each tick contributes a partial; we analyse
+        // once the accumulator is full, then reset it.
+        const size_t n = platform::audioMicRead(mic_, samples_ + filled_, kBlock - filled_);
+        if (n == 0) return;                            // nothing ready this tick
+        filled_ += n;
+        if (filled_ < kBlock) return;                  // wait for a whole block
+        filled_ = 0;                                   // consumed below; refill next
+
+        // Level: overall loudness (RMS), independent of the FFT — it fluctuates
+        // with how loud the room is. Uses a gentler floor than the bands (half),
+        // so the VU keeps moving with volume instead of being gated hard like the
+        // per-band display.
+        computeLevel(samples_, kBlock, static_cast<uint8_t>(floor / 2), gain, frame_);
+
+        // Spectrum: window -> FFT -> 16 log bands, same floor/gain mapping.
+        uint16_t peakHz = 0, peakMag = 0;
+        applyWindow(samples_, kBlock, windowed_);
+        platform::audioFft(windowed_, kBlock, mag_);
+        magnitudesToBands(mag_, kMag, sampleRate(), floor, gain,
+                          frame_.bands, peakHz, peakMag);
+
+        // Peak frequency: the exact-Hz FFT bin, held when there's no real signal so
+        // it doesn't wander in silence.
+        if (peakMag > 8) { frame_.peakHz = peakHz; frame_.peakMag = peakMag; }
+    }
+
+    void loop1s() override {
+        std::snprintf(levelStr_, sizeof(levelStr_), "%u", static_cast<unsigned>(frame_.level));
+        std::snprintf(peakStr_, sizeof(peakStr_), "%u Hz", static_cast<unsigned>(frame_.peakHz));
+        MoonModule::loop1s();
+    }
+
+private:
+    // The mic that latestFrame() hands to effects. One in practice; the last one
+    // to setup() wins, teardown() clears it. inline so the header stays standalone.
+    static inline MicModule* active_ = nullptr;
+
+    platform::AudioMicHandle mic_;
+    bool inited_ = false;
+    size_t filled_ = 0;         // samples accumulated toward the next full block
+
+    // Fixed hot-path scratch — sized once, never reallocated. ~6 KB total
+    // (2 KB samples + 2 KB windowed + 1 KB magnitudes), DRAM-resident.
+    int32_t samples_[kBlock] = {};
+    float windowed_[kBlock] = {};
+    float mag_[kMag] = {};
+
+    AudioFrame frame_;
+
+    char levelStr_[12] = {};
+    char peakStr_[12] = {};
+
+    static constexpr const char* kInitFailMsg = "mic init failed — check pins / rate";
+
+    void reinit() {
+        if constexpr (!platform::hasI2sMic) {
+            setStatus("mic: no I2S on this platform", Severity::Warning);
+            return;
+        }
+        deinit();
+        inited_ = platform::audioMicInit(mic_, wsPin, sdPin, sckPin, sampleRate());
+        if (!inited_) {
+            setStatus(kInitFailMsg, Severity::Error);
+            return;
+        }
+        // The INMP441 emits ~250 ms of power-on settling garbage after the clock
+        // starts. The read is non-blocking (hot-path rule), so we can't drain a
+        // fixed sample count here at init — the DMA has barely filled. Instead the
+        // settling samples flow through the first few loop() reads and the level /
+        // bands self-correct within that quarter-second; no separate discard is
+        // needed, and the frame stays valid (zeroed) until then.
+        if (status() == kInitFailMsg) clearStatus();
+    }
+
+    void deinit() {
+        if constexpr (!platform::hasI2sMic) return;
+        if (inited_) platform::audioMicDeinit(mic_);
+        inited_ = false;
+    }
+};
+
+} // namespace mm

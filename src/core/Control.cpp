@@ -108,11 +108,12 @@ void writeControlValue(JsonSink& sink, const ControlDescriptor& c) {
 void writeControlMetadata(JsonSink& sink, const ControlDescriptor& c) {
     switch (c.type) {
         case ControlType::Uint8:
-            sink.appendf(",\"min\":%d,\"max\":%d",
-                         static_cast<int>(c.min), static_cast<int>(c.max));
-            return;
+        case ControlType::Uint16:
         case ControlType::Int16:
-            sink.appendf(",\"min\":%d,\"max\":%d", c.min, c.max);
+            // All three numeric sliders carry a real [min,max] the UI renders
+            // as a range; %d on the int32 fields covers the full uint16 span.
+            sink.appendf(",\"min\":%d,\"max\":%d", static_cast<int>(c.min),
+                         static_cast<int>(c.max));
             return;
         case ControlType::ReadOnlyInt: {
             // aux holds a borrowed const char* unit suffix (set via
@@ -134,7 +135,6 @@ void writeControlMetadata(JsonSink& sink, const ControlDescriptor& c) {
             sink.appendf(",\"total\":%lu", static_cast<unsigned long>(c.aux));
             return;
         // Everything else: no extras.
-        case ControlType::Uint16:
         case ControlType::Bool:
         case ControlType::Text:
         case ControlType::Password:
@@ -167,14 +167,13 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
         }
         case ControlType::Uint16: {
             int v = mm::json::parseInt(json, key);
-            // Strict: out-of-natural-range (uint16 wraps below 0 / above
-            // UINT16_MAX) fails. Clamp: snap into the type range. There's
-            // no c.min/c.max bound here (uint8 descriptor fields can't
-            // bound a uint16 range), only the natural-type bound.
-            if (policy == ApplyPolicy::Strict && (v < 0 || v > UINT16_MAX)) {
+            // Strict: out-of-[min,max] fails. Clamp: snap into [min,max]. The
+            // descriptor's int32 min/max now carry a real uint16 range (default
+            // 0..UINT16_MAX = no constraint), so this matches Uint8/Int16.
+            if (policy == ApplyPolicy::Strict && (v < c.min || v > c.max)) {
                 return ApplyResult::OutOfRange;
             }
-            return clampInto(static_cast<uint16_t*>(c.ptr), v, 0, UINT16_MAX);
+            return clampInto(static_cast<uint16_t*>(c.ptr), v, c.min, c.max);
         }
         case ControlType::Int16: {
             int v = mm::json::parseInt(json, key);

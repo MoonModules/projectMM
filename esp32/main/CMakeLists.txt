@@ -13,6 +13,7 @@ idf_component_register(
         "../../src/platform/esp32/platform_esp32_rmt.cpp"
         "../../src/platform/esp32/platform_esp32_lcd.cpp"
         "../../src/platform/esp32/platform_esp32_parlio.cpp"
+        "../../src/platform/esp32/platform_esp32_i2s.cpp"
     INCLUDE_DIRS
         "../../src"
         "../../src/platform/esp32"

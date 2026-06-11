@@ -18,6 +18,8 @@
 #include "light/effects/LavaLampEffect.h"
 #include "light/effects/GameOfLifeEffect.h"
 #include "light/effects/NetworkReceiveEffect.h"
+#include "light/effects/AudioVolumeEffect.h"
+#include "light/effects/AudioSpectrumEffect.h"
 #include "light/modifiers/MultiplyModifier.h"
 #include "light/modifiers/CheckerboardModifier.h"
 #include "light/drivers/NetworkSendDriver.h"
@@ -28,6 +30,7 @@
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
 #include "core/BoardModule.h"
+#include "core/MicModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/ImprovProvisioningModule.h"
 #include "core/FilesystemModule.h"
@@ -67,6 +70,8 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::LavaLampEffect>("LavaLampEffect", "light/effects/LavaLampEffect.md");
     mm::ModuleFactory::registerType<mm::GameOfLifeEffect>("GameOfLifeEffect", "light/effects/GameOfLifeEffect.md");
     mm::ModuleFactory::registerType<mm::NetworkReceiveEffect>("NetworkReceiveEffect", "light/effects/NetworkReceiveEffect.md");
+    mm::ModuleFactory::registerType<mm::AudioVolumeEffect>("AudioVolumeEffect", "light/effects/AudioVolumeEffect.md");
+    mm::ModuleFactory::registerType<mm::AudioSpectrumEffect>("AudioSpectrumEffect", "light/effects/AudioSpectrumEffect.md");
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier", "light/modifiers/MultiplyModifier.md");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers/CheckerboardModifier.md");
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver", "light/drivers/NetworkSendDriver.md");
@@ -77,6 +82,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/HttpServerModule.md");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/SystemModule.md");
     mm::ModuleFactory::registerType<mm::BoardModule>("BoardModule", "core/BoardModule.md");
+    mm::ModuleFactory::registerType<mm::MicModule>("MicModule", "core/MicModule.md");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/FirmwareUpdateModule.md");
     mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/ImprovProvisioningModule.md");
     mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule", "core/NetworkModule.md");
@@ -138,6 +144,21 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     auto* boardModule = static_cast<mm::BoardModule*>(mm::ModuleFactory::create("BoardModule"));
     systemModule->addChild(boardModule);
     boardModule->markWiredByCode();
+
+    // MicModule — I2S microphone input, a Peripheral child of System. Produces the
+    // AudioFrame the audio effects consume; they reach it via MicModule::latestFrame()
+    // (not a boot setter), so a UI-added audio effect finds the live mic too. Gated
+    // on platform::hasI2sMic: created only where there's an I2S peripheral (every
+    // current ESP32; not desktop), so on a mic-less build the effects read a static
+    // silent frame and degrade to dark. markWiredByCode keeps it through a
+    // persistence load, like BoardModule.
+    if constexpr (mm::platform::hasI2sMic) {
+        auto* micModule = static_cast<mm::MicModule*>(mm::ModuleFactory::create("MicModule"));
+        if (micModule) {            // never deref a failed create — a missing
+            systemModule->addChild(micModule);   // registration must not boot-loop
+            micModule->markWiredByCode();
+        }
+    }
 
     // FirmwareUpdate — surfaces OTA status as two read-only controls.
     // The actual flash is driven by POST /api/firmware/url; this module just

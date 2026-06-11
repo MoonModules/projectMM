@@ -81,6 +81,18 @@ constexpr uint8_t parlioLanes = 8;
 constexpr uint8_t parlioLanes = 0;
 #endif
 
+// I2S audio input (an INMP441-class digital MEMS microphone). SOC-derived like
+// the LED-peripheral flags: every current ESP32 has I2S, so this is true on all
+// of them, but the gate keeps MicModule + the I2S platform seam inert on any
+// future I2S-less target and on desktop. The audio math (RMS, FFT bands) is
+// host-tested domain code; only the I2S read and the FFT kernel sit behind the
+// boundary, both guarded by `if constexpr (platform::hasI2sMic)`.
+#ifdef CONFIG_SOC_I2S_SUPPORTED
+constexpr bool hasI2sMic = true;
+#else
+constexpr bool hasI2sMic = false;
+#endif
+
 // WiFi is compiled out in the Ethernet-only build profile. ESP-IDF v6.x has no
 // CONFIG_ESP_WIFI_ENABLED switch, so the eth-only build instead drops the WiFi
 // components via EXCLUDE_COMPONENTS and defines MM_NO_WIFI (see esp32/main/CMakeLists.txt).

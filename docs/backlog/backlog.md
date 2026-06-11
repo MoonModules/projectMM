@@ -284,9 +284,13 @@ Step 3's custom RPC infrastructure is the seed. Plausible follow-on injectables:
 
 ## Sensors and audio-reactive input
 
-### INMP441 microphone on ESP32 — volume + FFT 16-band (planned, next after the Parlio loopback)
+### Audio-reactive input on ESP32 — DONE (level + FFT 16-band), with follow-ups deferred
 
-The first audio-reactive capability, on the **ESP32** (not the Pi). Full plan: **[inmp441-mic-plan.md](inmp441-mic-plan.md)** — an INMP441 I²S MEMS mic on the S3 (WS4/SD5/SCK6), a `MicModule` SystemModule Peripheral producing an `AudioFrame` (volume RMS + 16-band FFT + dominant peak), consumed by `AudioVolumeEffect` + `AudioSpectrumEffect`. Signal math is pure/host-tested (`AudioLevel.h`/`AudioBands.h`); only the I²S read + FFT kernel (esp-dsp float) sit behind the platform boundary, with a naive-DFT desktop stub so band tests run in CI. WLED-MM lessons baked in (DC strip, squelch/gain, warm-up discard — studied, not copied). AGC + pin auto-scan deferred. The Pi-5 sensor note below is the (later, different-platform) counterpart.
+The first audio-reactive capability **shipped**: [MicModule](../moonmodules/core/MicModule.md) reads an INMP441 I²S mic and publishes an `AudioFrame` (sound level + 16-band spectrum + dominant peak) consumed by [AudioVolumeEffect](../moonmodules/light/effects/AudioVolumeEffect.md) and [AudioSpectrumEffect](../moonmodules/light/effects/AudioSpectrumEffect.md). It is a **plain, manual** spectrum: a log/dB display scale with two knobs, `floor` (noise floor) and `gain` (sensitivity). Deferred follow-ups, each its own increment on that base:
+
+- **Adaptive conditioning** — auto noise-floor / auto-gain / smoothing so the display self-calibrates to a room ("sound off → dark, sound on → vivid") instead of being tuned by hand. A self-calibrating version was prototyped and removed; the manual `floor`/`gain` is the shipped baseline. Reinvent from scratch when wanted, and **tune it in a quiet room** — a noisy environment (a strong, varying low-frequency ambient) is the adversarial case that made the prototype hard to settle.
+- **Pin auto-scan** — detect the mic's `sdPin` with `wsPin`/`sckPin` fixed (a noise-prompt + confirm convenience); ships today with explicit pin controls.
+- **Beat / onset detection** beyond the raw peak; more audio effects (2D / palette-driven frequency-reactive).
 
 ### Sensor input on Raspberry Pi 5 — microphone, IMU, line-in (post-1.0, multi-commit)
 

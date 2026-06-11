@@ -11,3 +11,9 @@ dependencies:
   # LAN8720) stays in core, so non-P4 builds don't pull this.
   espressif/ip101:
     version: "^1.0.0"
+  # esp-dsp — Espressif's signal-processing library; we use its float radix-2 FFT
+  # (dsps_fft2r_fc32) for the microphone spectrum. Float (not fixed-point) because
+  # every mic-capable target here has an FPU, where float is faster. Referenced
+  # only from platform_esp32_i2s.cpp's audioFft.
+  espressif/esp-dsp:
+    version: "^1.5.0"

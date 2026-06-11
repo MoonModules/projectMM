@@ -974,17 +974,53 @@ function createControl(moduleName, moduleType, ctrl) {
             break;
         }
         case "uint16": {
-            const input = document.createElement("input");
-            input.type = "number";
-            input.value = ctrl.value ?? 0;
-            input.dataset.mid = moduleName;
-            input.dataset.key = ctrl.name;
-            input.addEventListener("input", () => {
-                dragTs[key] = Date.now();
-                debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, parseInt(input.value)));
-            });
-            row.appendChild(input);
-            appendResetButton(row, moduleName, ctrl, def, () => { input.value = def; });
+            // Bounded (server sent an explicit max below the type ceiling) →
+            // slider, like uint8/int16. Unbounded (max == 65535, the default for
+            // port/universe-style values with no natural range) → plain number.
+            const uMin = Number(ctrl.min ?? 0);
+            const uMax = Number(ctrl.max ?? 65535);
+            if (uMax < 65535) {
+                const input = document.createElement("input");
+                input.type = "range";
+                input.min = uMin;
+                input.max = uMax;
+                input.value = Math.max(uMin, Math.min(uMax, Number(ctrl.value ?? 0)));
+                input.dataset.mid = moduleName;
+                input.dataset.key = ctrl.name;
+                const numInput = document.createElement("input");
+                numInput.type = "number";
+                numInput.className = "control-value-input";
+                numInput.min = uMin;
+                numInput.max = uMax;
+                numInput.value = input.value;
+                input.addEventListener("input", () => {
+                    dragTs[key] = Date.now();
+                    numInput.value = input.value;
+                    debounceSend(key, 150, () => sendControl(moduleName, ctrl.name, parseInt(input.value)));
+                });
+                numInput.addEventListener("input", () => {
+                    const v = Math.max(uMin, Math.min(uMax, parseInt(numInput.value) || 0));
+                    input.value = v;
+                    debounceSend(key, 150, () => sendControl(moduleName, ctrl.name, v));
+                });
+                row.appendChild(input);
+                row.appendChild(numInput);
+                appendResetButton(row, moduleName, ctrl, def, () => {
+                    input.value = def; numInput.value = def;
+                });
+            } else {
+                const input = document.createElement("input");
+                input.type = "number";
+                input.value = ctrl.value ?? 0;
+                input.dataset.mid = moduleName;
+                input.dataset.key = ctrl.name;
+                input.addEventListener("input", () => {
+                    dragTs[key] = Date.now();
+                    debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, parseInt(input.value)));
+                });
+                row.appendChild(input);
+                appendResetButton(row, moduleName, ctrl, def, () => { input.value = def; });
+            }
             break;
         }
         case "int16": {

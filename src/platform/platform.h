@@ -450,12 +450,44 @@ void parlioWs2812Wait(ParlioWs2812Handle& h, uint32_t timeoutMs);
 void parlioWs2812Deinit(ParlioWs2812Handle& h);
 
 // Parlio loopback self-test — same contract + result shape as the LCD/RMT
-// loopbacks. ROUND 4 implements the body (Parlio RX or RMT-RX capture of
-// lane 0); round 2 ships a stub that returns a default (not-run) result so the
-// driver's control surface exists. `dataBytes`/`rowBits` as in lcdWs2812Loopback.
+// loopbacks: a private Parlio TX unit transmits the caller's real frame back to
+// back while rmtWs2812RxCapture reads it off `rxGpio` (lane 0 carries the
+// pattern) and every bit is verified. `dataBytes`/`rowBits` as in lcdWs2812Loopback.
 RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
                                        uint16_t rxGpio, const uint8_t* frame,
                                        size_t frameBytes, size_t dataBytes,
                                        uint8_t rowBits);
+
+// ---------------------------------------------------------------------------
+// I2S audio input (digital MEMS microphone, e.g. INMP441). Two seams only:
+// the I2S read (audioMic*) and the FFT kernel (audioFft). Everything else —
+// DC strip, RMS, windowing, the magnitude->16-band log mapping, noise-floor/gain —
+// is host-tested domain code (src/light/AudioLevel.h, AudioBands.h), so the level
+// and band math runs in CI without hardware. On desktop audioMicRead returns 0
+// (no capture) but audioFft is a real (naive) DFT, so the whole
+// read->window->FFT->bands path is still exercised host-side.
+// All inert on targets without I2S, guarded by `if constexpr (platform::hasI2sMic)`.
+// ---------------------------------------------------------------------------
+
+// Opaque handle to one configured I2S RX channel (standard/Philips mode).
+struct AudioMicHandle { void* impl = nullptr; };
+
+// Bring up an I2S RX channel reading the mic on the given pins at `sampleRate`
+// (24-bit data in a 32-bit slot, mono). Returns false on failure (bad pins,
+// no I2S, out of memory) — the module then idles with a status error.
+bool audioMicInit(AudioMicHandle& h, uint16_t wsPin, uint16_t sdPin,
+                  uint16_t sckPin, uint32_t sampleRate);
+
+// Read up to `maxSamples` 32-bit samples into `out`; returns the count read
+// (0 if none ready / not initialised). Non-blocking enough for the render tick.
+size_t audioMicRead(AudioMicHandle& h, int32_t* out, size_t maxSamples);
+
+void audioMicDeinit(AudioMicHandle& h);
+
+// Real-input FFT kernel: `windowed` holds `n` (a power of two) windowed samples;
+// fills `outMag` with the n/2 magnitude bins. esp-dsp's float `dsps_fft2r_fc32`
+// on ESP32 (the FPU makes float faster than fixed-point); a naive O(n^2) DFT on
+// desktop — correct, only fast enough for the host tests' small n.
+void audioFft(const float* windowed, size_t n, float* outMag);
 
 } // namespace mm::platform

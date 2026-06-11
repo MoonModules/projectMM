@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>     // cosf/sinf/sqrtf for the naive desktop DFT (audioFft)
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -715,6 +716,35 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*l
                                        size_t /*frameBytes*/, size_t /*dataBytes*/,
                                        uint8_t /*rowBits*/) {
     return {};   // not supported off the P4
+}
+
+// I2S microphone — no capture on desktop (hasI2sMic == false, MicModule inert),
+// so init fails and read returns nothing.
+bool audioMicInit(AudioMicHandle& /*h*/, uint16_t /*wsPin*/, uint16_t /*sdPin*/,
+                  uint16_t /*sckPin*/, uint32_t /*sampleRate*/) {
+    return false;
+}
+size_t audioMicRead(AudioMicHandle& /*h*/, int32_t* /*out*/, size_t /*maxSamples*/) {
+    return 0;
+}
+void audioMicDeinit(AudioMicHandle& /*h*/) {}
+
+// FFT kernel — a real but naive O(n^2) DFT. NOT the production kernel (the ESP32
+// uses esp-dsp's fast radix-2), but a correct reference so the host tests run the
+// genuine magnitude->band path on synthesized signals. n must be a power of two;
+// fills outMag[0..n/2) with the bin magnitudes.
+void audioFft(const float* windowed, size_t n, float* outMag) {
+    if (!windowed || !outMag || n == 0) return;
+    const float twoPiOverN = -2.0f * 3.14159265358979323846f / static_cast<float>(n);
+    for (size_t k = 0; k < n / 2; k++) {
+        float re = 0.0f, im = 0.0f;
+        for (size_t t = 0; t < n; t++) {
+            const float a = twoPiOverN * static_cast<float>(k) * static_cast<float>(t);
+            re += windowed[t] * std::cos(a);
+            im += windowed[t] * std::sin(a);
+        }
+        outMag[k] = std::sqrt(re * re + im * im);
+    }
 }
 
 } // namespace mm::platform

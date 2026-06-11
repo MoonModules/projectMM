@@ -22,6 +22,11 @@ constexpr uint8_t lcdLanes = 0;
 // No Parlio peripheral — the Parlio LED driver guards on this and is inert too.
 constexpr uint8_t parlioLanes = 0;
 
+// No I2S microphone — MicModule guards on this and is inert on desktop. The
+// audioFft seam still has a (naive-DFT) desktop implementation so the audio
+// band math runs end-to-end in host tests; only live capture is absent.
+constexpr bool hasI2sMic = false;
+
 // Desktop is not a target of the Ethernet-only firmware profile; it ships
 // WiFi stubs and exercises the hasWiFi==true code path for compile coverage.
 constexpr bool hasWiFi = true;
