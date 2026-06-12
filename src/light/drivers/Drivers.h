@@ -42,8 +42,57 @@ public:
     // onBuildState — this hook is just for the preset-driven channel-count change
     // that doesn't trigger a structural rebuild.
     virtual void onCorrectionChanged() {}
+
+    // Clear both shared status strings on teardown (frees the owned failBuf_). A
+    // driver that overrides teardown() for its own peripheral cleanup chains to
+    // this afterwards: `deinit(); DriverBase::teardown();`.
+    void teardown() override { clearFailBuf(); clearConfigErr(); }
+
 protected:
     Layer* layer_ = nullptr;
+
+    // --- Shared status-string lifecycle for the physical LED drivers (RMT / LCD /
+    // Parlio). They report two kinds of transient status that must clear cleanly
+    // without stomping an unrelated status set by something else:
+    //   configErr_ — a borrowed string literal (a parse-error message);
+    //   failBuf_   — an owned, on-demand char buffer (a formatted loopback/init
+    //                failure with numbers in it).
+    // Both follow the same "clear only MY status" rule: only call clearStatus() if
+    // the status currently shown is the one this driver set. This was triplicated
+    // verbatim across the three drivers; it lives here once (the No-duplication
+    // rule). Preview-style drivers never touch these, so the cost is a couple of
+    // null pointers they ignore.
+    const char* configErr_ = nullptr;
+    char* failBuf_ = nullptr;
+    static constexpr size_t kFailBufLen = 48;
+
+    // Record a parse/config error: set the status and remember it so clearConfigErr
+    // can later retract exactly this one.
+    void setConfigErr(const char* err) {
+        configErr_ = err;
+        setStatus(err, Severity::Error);
+    }
+    void clearConfigErr() {
+        if (configErr_) {
+            if (status() == configErr_) clearStatus();
+            configErr_ = nullptr;
+        }
+    }
+
+    // Lazily allocate the owned fail-message buffer (caller snprintf's into it then
+    // setStatus(failBuf_)). Returns null if the allocation fails, in which case the
+    // caller falls back to a literal status.
+    char* failBufEnsure() {
+        if (!failBuf_) failBuf_ = static_cast<char*>(platform::alloc(kFailBufLen));
+        return failBuf_;
+    }
+    void clearFailBuf() {
+        if (failBuf_) {
+            if (status() == failBuf_) clearStatus();
+            platform::free(failBuf_);
+            failBuf_ = nullptr;
+        }
+    }
 };
 
 class Drivers : public MoonModule {

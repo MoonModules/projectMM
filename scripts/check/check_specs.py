@@ -38,6 +38,15 @@ def find_moonmodules():
             has_controls = re.search(r'controls_\.add', content)
             if has_pure_virtual and not has_controls:
                 continue
+            # Skip CRTP template bases (e.g. ParallelLedDriver<Derived>): a
+            # `template<...> class X : public DriverBase` is shared infrastructure,
+            # not a registered module — its controls belong to the concrete derived
+            # classes, which carry the docs. The concrete subclass is `class Foo :
+            # public X<Foo>` (no leading `template<`), so it is still picked up.
+            if re.search(r'template\s*<[^>]*>\s*class\s+\w+\s*:\s*public\s+\w*'
+                         r'(MoonModule|EffectBase|DriverBase|ModifierBase|LayoutBase)',
+                         content):
+                continue
             modules.append(h_file)
     return modules
 

@@ -41,9 +41,14 @@ public:
 
     ModuleRole role() const override { return ModuleRole::Peripheral; }
 
-    // Diagnostics stay visible even when "disabled" (same stance as BoardModule):
-    // the level/peak read-outs are useful regardless of the enabled toggle.
-    bool respectsEnabled() const override { return false; }
+    // Unlike a zero-cost diagnostic peripheral (BoardModule), this module pays a
+    // real per-tick cost (the FFT) that IS the capability, not an optional extra,
+    // so it must not run when the user turns it off. We therefore respect `enabled`
+    // (the default): the Scheduler skips loop() entirely while disabled, so the FFT,
+    // the level, and the read-outs all stop and the cost goes to zero. Enabled runs
+    // the full pipeline; removing the module stops it the same way. The read-outs
+    // hold their last value while disabled (no consumer reads a disabled module).
+    // (respectsEnabled() defaults to true, so we don't override it.)
 
     // --- controls: three I2S pins, sample rate, the two conditioning knobs, and
     // two read-only read-outs. The pins default to the bench wiring (INMP441 on

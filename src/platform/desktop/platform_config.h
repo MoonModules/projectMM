@@ -8,10 +8,10 @@ namespace mm::platform {
 
 constexpr bool hasPsram = true;
 
-// Not an ESP32 chip family — chip-specific drivers (RMT LED, LCD_CAM) `if
-// constexpr` these false and compile to inert stubs on desktop.
-constexpr bool isEsp32 = false;
-constexpr bool isEsp32S3 = false;
+// Not an ESP32-P4, so the P4-specific seams (Ethernet pin map, co-processor WiFi)
+// compile out on desktop. Mirrors the esp32 config, which keeps only isEsp32P4
+// (the general isEsp32/isEsp32S3 family flags had no users and were removed).
+constexpr bool isEsp32P4 = false;
 
 // No RMT peripheral — the RMT LED driver guards on this and is inert on desktop.
 constexpr uint8_t rmtTxChannels = 0;

@@ -14,29 +14,16 @@ constexpr bool hasPsram = true;
 constexpr bool hasPsram = false;
 #endif
 
-// Which ESP32 silicon family this build targets. Drivers that pick a peripheral
-// per chip (the RMT LED driver runs on classic ESP32; LCD_CAM on the S3 later)
-// `if constexpr` on these instead of #ifdef'ing in domain code. Desktop sets all
-// false. Keyed off the IDF target macro the toolchain defines. Note most
-// capability gating (rmtTxChannels, lcdLanes) keys off SOC flags rather than
-// these family flags, so a new target works untouched — isEsp32P4 exists only
-// for the genuinely chip-specific seams (the P4's Ethernet pin map, and later
-// its C6-co-processor WiFi).
-#ifdef CONFIG_IDF_TARGET_ESP32S3
-constexpr bool isEsp32 = false;
-constexpr bool isEsp32S3 = true;
-constexpr bool isEsp32P4 = false;
-#elif defined(CONFIG_IDF_TARGET_ESP32P4)
-constexpr bool isEsp32 = false;
-constexpr bool isEsp32S3 = false;
+// Which ESP32 silicon family this build targets. Capability gating
+// (rmtTxChannels, lcdLanes, parlioLanes, hasI2sMic) keys off SOC flags, not the
+// family, so a new chip works untouched and no general isEsp32/isEsp32S3 flag is
+// needed (the ones that existed had no users and were removed). isEsp32P4 remains
+// because the P4 has two genuinely chip-specific seams that aren't SOC-derived:
+// its Ethernet pin map (ethPins) and its co-processor WiFi (hasWifiCoprocessor).
+// Keyed off the IDF target macro; false on desktop.
+#ifdef CONFIG_IDF_TARGET_ESP32P4
 constexpr bool isEsp32P4 = true;
-#elif defined(CONFIG_IDF_TARGET_ESP32)
-constexpr bool isEsp32 = true;
-constexpr bool isEsp32S3 = false;
-constexpr bool isEsp32P4 = false;
 #else
-constexpr bool isEsp32 = false;
-constexpr bool isEsp32S3 = false;
 constexpr bool isEsp32P4 = false;
 #endif
 

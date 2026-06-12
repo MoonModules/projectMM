@@ -12,8 +12,11 @@
 // ISR-refilled rings in the hpwit/FastLED LCD drivers this design studied.
 //
 // The file compiles on every ESP32 chip: everything is under
-// SOC_LCD_I80_SUPPORTED with inert stubs otherwise (classic ESP32 builds it
-// too; the driver never calls in thanks to platform::lcdLanes == 0).
+// SOC_LCDCAM_I80_LCD_SUPPORTED with inert stubs otherwise (classic ESP32 builds
+// it too; the driver never calls in thanks to platform::lcdLanes == 0). Gate on
+// SOC_LCDCAM_I80_LCD_SUPPORTED, NOT SOC_LCD_I80_SUPPORTED: the classic ESP32 sets
+// the latter for its unrelated I2S-LCD peripheral, which wired this driver onto a
+// chip with no LCD_CAM and hung its boot (see platform_config.h + decisions.md).
 
 #include "platform/platform.h"
 
@@ -326,7 +329,7 @@ RmtLoopbackResult lcdWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
 
 } // namespace mm::platform
 
-#else  // !SOC_LCD_I80_SUPPORTED — inert stubs so classic ESP32 links
+#else  // !SOC_LCDCAM_I80_LCD_SUPPORTED — inert stubs so classic ESP32 links
 
 namespace mm::platform {
 
@@ -346,4 +349,4 @@ RmtLoopbackResult lcdWs2812Loopback(const uint16_t*, uint8_t, uint16_t, uint16_t
 
 } // namespace mm::platform
 
-#endif  // SOC_LCD_I80_SUPPORTED
+#endif  // SOC_LCDCAM_I80_LCD_SUPPORTED

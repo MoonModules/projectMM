@@ -140,8 +140,7 @@ public:
     void teardown() override {
         deinitAll();
         freeSymbols();
-        clearFailBuf();
-        clearConfigErr();
+        DriverBase::teardown();   // clears failBuf_ + configErr_
     }
 
     // Topology (light count / channels) or the pins/ledsPerPin controls changed —
@@ -243,16 +242,11 @@ private:
     size_t symbolCap_ = 0;          // words allocated
 
     // The parse-error literal currently shown in the status slot (nullptr when
-    // the config is valid) — tracked so a successful re-parse clears only our
-    // own error, never a loopback result.
-    const char* configErr_ = nullptr;
-
-    // On-demand FAIL status string — only allocated when a loopback or channel
-    // init FAILs (the outcomes needing a formatted message). nullptr otherwise;
-    // freed on teardown and on any non-FAIL result. PASS / jumper / unsupported
-    // use flash literals.
-    static constexpr size_t kFailBufLen = 48;
-    char* failBuf_ = nullptr;
+    // configErr_, failBuf_, kFailBufLen and the clearConfigErr/clearFailBuf/
+    // failBufEnsure/setConfigErr helpers live on DriverBase (shared verbatim with
+    // the LCD and Parlio drivers). The on-demand FAIL string (failBuf_) is only
+    // formatted when a loopback or channel init FAILs; PASS/jumper/unsupported use
+    // flash literals.
 
     // The chip's TX-channel cap caps the pin list; on targets without RMT
     // (desktop, where the constant is 0) fall back to kMaxPins so the parsing
@@ -290,8 +284,7 @@ private:
             err = assignCounts(ledsPerPin, n, total, pinCounts_);
         }
         if (err) {
-            configErr_ = err;
-            setStatus(err, Severity::Error);
+            setConfigErr(err);
             return false;
         }
         pinCount_ = n;
@@ -303,14 +296,6 @@ private:
         }
         clearConfigErr();
         return true;
-    }
-
-    // Drop our parse-error status (and only ours — a loopback result stays).
-    void clearConfigErr() {
-        if (configErr_) {
-            if (status() == configErr_) clearStatus();
-            configErr_ = nullptr;
-        }
     }
 
     // --- symbol buffer (plain heap; runs on every platform) ---
@@ -384,7 +369,7 @@ private:
             clearFailBuf();
             setStatus("loopback PASS", Severity::Status);
         } else {
-            if (!failBuf_) failBuf_ = static_cast<char*>(platform::alloc(kFailBufLen));
+            failBufEnsure();
             if (failBuf_ && loopbackFrame) {
                 // bits per light = outChannels × 8 (24 for RGB, 32 for RGBW) —
                 // the same channel count the frame was built with, not a
@@ -407,16 +392,6 @@ private:
         }
     }
 
-    // Release the on-demand FAIL string and drop any status pointing into it, so
-    // no allocation outlives a non-FAIL result or the module.
-    void clearFailBuf() {
-        if (failBuf_) {
-            if (status() == failBuf_) clearStatus();
-            platform::free(failBuf_);
-            failBuf_ = nullptr;
-        }
-    }
-
     // --- RMT channels (hardware; RMT targets only) ---
 
     static constexpr const char* kInitFailMsg = "RMT init failed — check the pins";
@@ -436,8 +411,7 @@ private:
             // rather than leaving them to wonder why nothing lights.
             deinitAll();
             clearFailBuf();
-            failBuf_ = static_cast<char*>(platform::alloc(kFailBufLen));
-            if (failBuf_) {
+            if (failBufEnsure()) {
                 std::snprintf(failBuf_, kFailBufLen, "RMT init failed on pin %u",
                               static_cast<unsigned>(pinList_[i]));
                 setStatus(failBuf_, Severity::Error);
