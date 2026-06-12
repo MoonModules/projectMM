@@ -53,9 +53,9 @@ PART_NAME_MAP = {
     "ota_data_initial.bin": "{prefix}-ota-data.bin",
 }
 
-# IDF target → chip family string ESP Web Tools accepts (stable, two entries).
+# IDF target → chip family string ESP Web Tools accepts.
 # Full list: https://github.com/espressif/esptool-js/blob/main/src/esploader.ts
-_TARGET_TO_FAMILY = {"esp32": "ESP32", "esp32s3": "ESP32-S3"}
+_TARGET_TO_FAMILY = {"esp32": "ESP32", "esp32s3": "ESP32-S3", "esp32p4": "ESP32-P4"}
 
 # firmware → ESP Web Tools chip family, derived from build_esp32's FIRMWARES so
 # adding a variant there flows here automatically.
