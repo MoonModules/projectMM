@@ -536,6 +536,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - _RmtLedDriver releases the symbol buffer on teardown_
 - MoonModule contract: teardown reverses setup, so setup→teardown→setup→teardown cycles leave no residue — no leaked heap (ASAN in the test runner catches that), no stuck state. After each teardown the driver must look untouched: no symbol buffer, no status. Run several cycles to surface any accumulation.
 - Conditional control: loopbackRxPin is visible only while loopbackTest is on, hidden otherwise — but always bound (so a saved rxPin loads regardless). Same add-then-setHidden pattern as NetworkModule (architecture.md § Conditional controls). This pins the exact behavior that, with the old UI, showed the pin at the wrong times; a regression in the C++ flag now fails here.
+- Editing `pins` while the loopback test is ON must refresh the parsed config before the self-test runs — onUpdate fires before the buildState sweep re-parses, so without the in-branch parseConfig() the test would transmit on the OLD pin and show a verdict for it. Mirrors the fix in ParallelLedDriver; this pins the RMT sibling that the dedup left behind. Host-observable via pinCount(): the refresh re-parses to the new pin set even though the platform loopback itself is inert.
 
 `test/unit/light/unit_RmtLedDriver_pins.cpp`
 *Also touches: Drivers, Correction.*

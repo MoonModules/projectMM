@@ -146,3 +146,31 @@ TEST_CASE("RmtLedDriver loopbackRxPin tracks the loopbackTest toggle") {
     };
     mm::test::checkConditionalControl(d, "loopbackRxPin", setTest, /*visibleWhenTrue=*/true);
 }
+
+// Editing `pins` while the loopback test is ON must refresh the parsed config
+// before the self-test runs — onUpdate fires before the buildState sweep re-parses,
+// so without the in-branch parseConfig() the test would transmit on the OLD pin and
+// show a verdict for it. Mirrors the fix in ParallelLedDriver; this pins the RMT
+// sibling that the dedup left behind. Host-observable via pinCount(): the refresh
+// re-parses to the new pin set even though the platform loopback itself is inert.
+TEST_CASE("RmtLedDriver loopback re-parses pins before testing (no stale-pin verdict)") {
+    mm::RmtLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    src.allocate(64, 3);
+    corr.rebuild(255, mm::LightPreset::GRB);
+    std::strcpy(d.pins, "18");
+    d.onBuildControls();
+    d.setSourceBuffer(&src);
+    d.setCorrection(&corr);
+    d.onBuildState();
+    REQUIRE(d.pinCount() == 1);
+
+    // Turn the test on, then edit pins to a 3-pin set and fire the pin update the
+    // way the control framework does (write the buffer, then onUpdate). The config
+    // must already reflect 3 pins by the time the self-test reads pinList_.
+    mm::test::setControlValue<bool>(d, "loopbackTest", true);
+    std::strcpy(d.pins, "18,17,16");
+    d.onUpdate("pins");
+    CHECK(d.pinCount() == 3);   // refreshed before the test, not the stale 1
+}

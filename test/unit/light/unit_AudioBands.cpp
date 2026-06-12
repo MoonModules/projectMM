@@ -2,7 +2,7 @@
 // @also AudioSpectrumEffect
 
 #include "doctest.h"
-#include "light/AudioBands.h"
+#include "core/AudioBands.h"
 #include "platform/platform.h"   // platform::audioFft (desktop naive DFT)
 
 #include <cmath>

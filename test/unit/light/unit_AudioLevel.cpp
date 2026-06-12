@@ -2,7 +2,7 @@
 // @also AudioVolumeEffect
 
 #include "doctest.h"
-#include "light/AudioLevel.h"
+#include "core/AudioLevel.h"
 #include "core/AudioModule.h"
 #include "core/ModuleFactory.h"
 #include "light/effects/AudioVolumeEffect.h"

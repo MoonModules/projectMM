@@ -6,7 +6,7 @@ Streams the light buffer over UDP in one of three industry protocols, selected b
 
 ## Controls
 
-- `protocol` (select: ArtNet / E1.31 / DDP, default ArtNet) — the wire protocol; the destination port follows it automatically (6454 / 5568 / 4048). Changing it re-targets the socket live.
+- `protocol` (select: ArtNet / E1.31 / DDP, default ArtNet) — the wire protocol; the destination port follows it automatically (6454 / 5568 / 4048). Changing it re-targets the socket **live, no reboot** ([§ Live reconfiguration](../../../architecture.md#live-reconfiguration-every-change-applies-without-a-reboot)) — switch output protocol on a running device mid-show.
 - `ip` (IPv4, default 192.168.1.70) — unicast destination. Changing it re-binds live; E1.31 multicast is deliberately not implemented (see Interop below).
 - `universe_start` (uint16_t, default 0) — first universe for ArtNet and E1.31; DDP is byte-addressed and ignores it.
 - `fps` (uint8_t, default 50, range 1-120) — frame rate limit. Without it the loop would re-send on every render tick; receivers expect a steady frame cadence.

@@ -246,8 +246,16 @@ RmtLoopbackResult lcdWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
     // The i80-specific transmit: ship one frame and wait for its done-callback.
     // Everything else (capture, cadence, bit-verify) is the shared helper.
     auto transmitOnce = [st, frameBytes]() {
-        esp_lcd_panel_io_tx_color(st->io, -1, st->buf, frameBytes);
-        xSemaphoreTake(st->done, pdMS_TO_TICKS(1000));
+        // Loopback self-test path (not the render hot path): surface a failed
+        // enqueue or a done-callback timeout instead of letting it show up only as
+        // a later capture mismatch (same handling as the Parlio sibling).
+        const esp_err_t err = esp_lcd_panel_io_tx_color(st->io, -1, st->buf, frameBytes);
+        if (err != ESP_OK) {
+            ESP_LOGE(LCD_TAG, "loopback: tx enqueue failed (%s)", esp_err_to_name(err));
+            return;
+        }
+        if (xSemaphoreTake(st->done, pdMS_TO_TICKS(1000)) != pdTRUE)
+            ESP_LOGE(LCD_TAG, "loopback: tx done-callback timed out");
     };
     detail::captureAndVerifyFrame(rxGpio, frameBytes, dataBytes, rowBits, kPclkHz,
                                   LCD_TAG, transmitOnce, r);

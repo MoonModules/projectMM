@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/AudioFrame.h"
+#include "core/AudioFrame.h"
 
 #include <cmath>     // log10 for the shared dB mapping
 #include <cstddef>

@@ -25,9 +25,9 @@
 // for the tick; a bad init leaves the module idle (zeroed frame), never crashing.
 
 #include "core/MoonModule.h"
-#include "light/AudioFrame.h"
-#include "light/AudioLevel.h"
-#include "light/AudioBands.h"
+#include "core/AudioFrame.h"
+#include "core/AudioLevel.h"
+#include "core/AudioBands.h"
 #include "platform/platform.h"
 
 #include <cstdint>
@@ -215,7 +215,10 @@ private:
         // settling samples flow through the first few loop() reads and the level /
         // bands self-correct within that quarter-second; no separate discard is
         // needed, and the frame stays valid (zeroed) until then.
-        if (status() == kInitFailMsg) clearStatus();
+        // Clear any prior status now the mic is live — not just kInitFailMsg, but
+        // also the "set wsPin / sdPin / sckPin" note from the unset-pin path, which
+        // would otherwise persist and mislead after the user fills the pins in.
+        clearStatus();
     }
 
     void deinit() {

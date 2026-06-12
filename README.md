@@ -20,9 +20,19 @@ If you like projectMM, give it a ⭐️, fork it, or open an issue or pull reque
 
 🧊 **Native 3D from the ground up**: 2D and 1D are just the cases where a dimension is size 1. Effects never pick a mode.
 
-🎛️ **Pluggable pipeline**: Layouts → Layers (effects + modifiers) → Drivers. Build it visually in the browser, configure it live, and it survives reboots.
+🎛️ **Pluggable pipeline**: Layouts → Layers (effects + modifiers) → Drivers. Build it visually in the browser, and every change applies live (settings also persist to flash across power cycles).
+
+🔄 **No reboot to apply a configuration change**: edit a pin map, a strand length, an output protocol, or the mic on a running device and it takes effect on the very next frame — no init-at-boot step, no restart. Where most LED-controller firmware needs a reboot for a pin or protocol change, projectMM applies it live. (Flashing new *firmware* over OTA still needs the usual power cycle — that's a binary swap, not a config change.)
 
 💡 **DMX *and* addressable LEDs in one setup**: RGB strips, RGBW pixels, par lights, moving heads, all through the same pipeline.
+
+🔌 **Parallel WS2812 output**: drive many strands at once over three ESP32 peripherals — RMT (every chip), the S3's LCD_CAM i80 bus (8 lanes), and the P4's Parlio engine (up to 20 simultaneous strands on the P4) — each with an on-device loopback self-test that bit-verifies the wire signal.
+
+🌐 **Industry protocols, both directions**: send *and* receive [Art-Net](https://art-net.org.uk/), [E1.31/sACN](https://tsp.esta.org/tsp/documents/docs/ANSI_E1-31-2018.pdf), and [DDP](http://www.3waylabs.com/ddp/) over the network — interoperable with Falcon, Advatek, xLights, Resolume, LedFx and other industry gear.
+
+🎵 **Audio-reactive**: an I²S microphone drives a 16-band FFT spectrum + sound level, consumed by audio-reactive effects — all built fresh from the mic datasheet and textbook DSP.
+
+🛡️ **Robust to any input**: add, delete, replace, or reconfigure any module in any order, at any grid size, and the device keeps running — degraded or idle, never crashed. Every crash that's ever found becomes a regression test, so it stays fixed.
 
 🖥️ **One source tree, many targets**: the same code runs on ESP32, Teensy, Raspberry Pi, and macOS / Windows / Linux.
 
@@ -35,6 +45,8 @@ If you like projectMM, give it a ⭐️, fork it, or open an issue or pull reque
 🛠️ **ESP-IDF directly, no Arduino**: the ESP32 build is pure ESP-IDF (v6.x): native LED drivers, `esp_http_server`, FreeRTOS, built with `idf.py`, not PlatformIO or the Arduino framework. See [building.md § Why not Arduino](docs/building.md#why-not-arduino).
 
 📦 **No third-party libraries**: no FastLED, no ESPAsyncWebServer, no ArduinoJson. The colour math, the HTTP/WebSocket server, and the control storage are all in-tree. A library, when genuinely needed, lives behind the platform boundary in `src/platform/`, never in core. The full rationale + replacements: [building.md § Third-party libraries](docs/building.md#third-party-libraries).
+
+🔬 **Industry standards, our own code**: we study the prior art hard — friend repos, peripheral datasheets, the Art-Net / E1.31 / WS2812 standards — carry its *ideas* forward, and credit it by name; but we write our own code rather than copying theirs or tracing their structure. Each feature is spec'd from the primary source, its behaviour pinned with unit + scenario tests, then written fresh against our own architecture, so the result is independent by construction, not a renamed fork. Textbook algorithm, textbook name, our implementation. The method: [CLAUDE.md § Principles](CLAUDE.md#principles).
 
 🧱 **One module model**: every effect, modifier, layout, and driver is a `MoonModule`: one base class, a uniform lifecycle, declared controls. That uniformity is why the UI renders any module with zero per-module code, and why a new capability is a new file, not a new framework. See [architecture.md § MoonModules](docs/architecture.md#moonmodules).
 
@@ -142,7 +154,7 @@ This is the current iteration of years of LED / light system development. Each p
 | **StarLight** | Standalone LED firmware | [ewowi/StarLight](https://github.com/ewowi/StarLight) |
 | **MoonLight** | Ground-up build: 60+ effects, memory-optimised mapping, 11 driver types | [MoonModules/MoonLight](https://github.com/MoonModules/MoonLight) |
 
-We built, maintained, and contributed to these projects, so projectMM is grounded in years of our own hands-on experience, not arms-length study. Their lessons and proven patterns are distilled in [`docs/history/`](docs/history/README.md), alongside monthly digests of friend projects (like FastLED and upstream WLED) we follow closely but don't own. From all of it we carry the ideas forward into our own implementation: we apply what we learned and write our own code, never copying theirs; and when a specific project or person inspires something here, we credit them by name (in the history digests and each module's "Prior art" notes).
+We built, maintained, and contributed to these projects, so projectMM is grounded in years of our own hands-on experience, not arms-length study. Their lessons and proven patterns are distilled in [`docs/history/`](docs/history/README.md), alongside monthly digests of friend projects (like FastLED and upstream WLED) we follow closely but don't own. From all of it we carry the ideas forward into our own implementation: we apply what we learned and write our own code rather than copying theirs; and when a specific project or person inspires something here, we credit them by name (in the history digests and each module's "Prior art" notes).
 
 ## Contributing
 

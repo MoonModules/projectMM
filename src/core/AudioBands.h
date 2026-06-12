@@ -1,7 +1,7 @@
 #pragma once
 
-#include "light/AudioFrame.h"
-#include "light/AudioLevel.h"   // magToByte — the shared log/dB mapping
+#include "core/AudioFrame.h"
+#include "core/AudioLevel.h"   // magToByte — the shared log/dB mapping
 
 #include <cmath>     // cosf/powf — band math is inherently float (so is the
                      // audioFft seam it feeds); the recognisable DSP choice.

@@ -34,7 +34,8 @@ void wire(mm::LcdLedDriver& d, mm::Buffer& src, mm::Correction& corr,
     d.onBuildState();
 }
 
-// frameBytes = maxLaneLights × outCh × 24 + 784 latch pad, rounded up to 64.
+// frameBytes = maxLaneLights × outCh × 24 + 800 latch pad + 64 clock-tolerance
+// slack, rounded up to 64 (mirrors ParallelLedDriver::frameBytesFor).
 size_t expectFrame(mm::nrOfLightsType maxLights, uint8_t outCh) {
     if (maxLights == 0) return 0;
     const size_t raw = static_cast<size_t>(maxLights) * outCh * 24 + 800 + 64;

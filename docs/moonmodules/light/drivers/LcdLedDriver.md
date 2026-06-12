@@ -14,7 +14,7 @@ Identical semantics to the [RMT driver](RmtLedDriver.md#buffer-slicing-across-pi
 
 ## Controls
 
-- `pins` (text, default empty) — comma-separated data GPIOs, one lane each, **exactly 8** (the i80 peripheral configures every data line of the bus width and rejects partial sets, so all 8 GPIOs are claimed even when fewer strands are wired). Empty by default (the strand is user-soldered, so no pin is assumed — the driver idles until set); a known-good LOLIN S3 set is `1,2,4,5,6,7,8,9`, which clears the octal-PSRAM pins (26–37), USB (19/20) and strapping pins. Changing it re-creates the bus live.
+- `pins` (text, default empty) — comma-separated data GPIOs, one lane each, **exactly 8** (the i80 peripheral configures every data line of the bus width and rejects partial sets, so all 8 GPIOs are claimed even when fewer strands are wired). Empty by default (the strand is user-soldered, so no pin is assumed — the driver idles until set); a known-good LOLIN S3 set is `1,2,4,5,6,7,8,9`, which clears the octal-PSRAM pins (26–37), USB (19/20) and strapping pins. Changing it re-creates the i80 bus **live, no reboot** ([§ Live reconfiguration](../../../architecture.md#live-reconfiguration-every-change-applies-without-a-reboot)).
 - `ledsPerPin` (text, default empty) — lights per lane, matched by position; empty = even split. To drive fewer than 8 strands, give the unused lanes `0` (or list only the used lanes' counts summing to the grid size — the remainder lanes get 0 and idle LOW).
 - `clockPin` (uint16_t, default 10) — the i80 bus WR line. The peripheral *requires* it on a real GPIO (the IDF i80 bus rejects `wr_gpio_num < 0`); WS2812 strands ignore the waveform. Peripheral-fixed (not user-strand wiring), so it keeps a sensible overridable default — point it at any otherwise-free GPIO if 10 is taken.
 - `dcPin` (uint16_t, default 11) — the i80 data/command line, same story: required by the peripheral (`dc_gpio_num < 0` is rejected), unused by the LEDs, overridable default.
@@ -31,7 +31,7 @@ Added as a child of the `Drivers` container in `main.cpp` under `if constexpr (p
 
 ## Tests
 
-Full case list in the generated [unit tests § LcdLedDriver](../../tests/unit-tests.md#lcdleddriver) (regenerated from the test files, never drifts). What's covered:
+Full case list in the generated [unit tests § LcdLedDriver](../../../tests/unit-tests.md#lcdleddriver) (regenerated from the test files, never drifts). What's covered:
 
 - **Encoder (CI, host):** byte-exact 3-slot triplets — transpose across lanes, MSB-first, the unequal-lane idle-LOW rule, GRB via Correction, RGBW rows.
 - **Driver (CI, host):** lane slicing (including unequal leds-per-lane), frame-byte math (RGBW growth, alignment rounding), bad-pin status + recovery, the exactly-8-pins rule, the empty-default idle (no GPIO claimed until pins are set), zero-grid robustness, teardown.

@@ -127,6 +127,12 @@ public:
             parseConfig();
             reinit();
         } else if (loopbackTest && (isTestControl || isPinControl)) {
+            // A `pins` edit changes pinList_/pinCount_, but onUpdate runs BEFORE the
+            // onBuildState() sweep re-parses (and loopbackRxPin/loopbackFrame don't
+            // trigger that sweep at all), so refresh here before testing — otherwise
+            // the self-test would transmit on the STALE pinList_[0] and show a verdict
+            // for the previous pin. Mirrors ParallelLedDriver::onUpdate.
+            if (std::strcmp(name, "pins") == 0) { parseConfig(); reinit(); }
             runLoopbackSelfTest();
         }
     }

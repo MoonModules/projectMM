@@ -32,8 +32,8 @@ The DSP choices are the textbook defaults on purpose: a **Hann** window, **RMS**
 
 ## Controls
 
-- `wsPin` / `sdPin` / `sckPin`: the three I²S GPIOs (see table above). Changing any re-creates the I²S channel.
-- `sampleRate`: a dropdown over the standard rates (8000 / 16000 / 22050 / 44100 Hz), default **22050** (~11 kHz Nyquist covers the range that matters for light). Changing it re-creates the channel.
+- `wsPin` / `sdPin` / `sckPin`: the three I²S GPIOs (see table above). Changing any re-creates the I²S channel **live** — no reboot ([§ Live reconfiguration](../../architecture.md#live-reconfiguration-every-change-applies-without-a-reboot)); notable for an audio peripheral, where most firmware (WLED's audioreactive usermod included) bakes the mic pins in and needs a restart to change them.
+- `sampleRate`: a dropdown over the standard rates (8000 / 16000 / 22050 / 44100 Hz), default **22050** (~11 kHz Nyquist covers the range that matters for light). Changing it re-creates the channel live.
 - `floor`, the noise floor: bands and level below this read as silence, so an ambient room stays dark. Raise it for a noisy room, lower it for a quiet one. Default 100.
 - `gain`, sensitivity: higher = more (a narrower dB window, so a given sound fills more of the bar). Default 222.
 - `level`: read-only live sound level (updates each second).
@@ -41,7 +41,7 @@ The DSP choices are the textbook defaults on purpose: a **Hann** window, **RMS**
 
 ## Cross-domain wiring
 
-AudioModule produces an `AudioFrame` (`src/light/AudioFrame.h`); the consuming effects reach the live frame through the static **`AudioModule::latestFrame()`**, not a boot-time setter, so an effect added through the UI at any time still finds the one mic, and with no mic it gets a static silent frame. The active module registers itself in `setup()` and clears that pointer in `teardown()`, so adding or removing the mic (or an effect) in any order always leaves a coherent answer.
+AudioModule produces an `AudioFrame` (`src/core/AudioFrame.h`); the consuming effects reach the live frame through the static **`AudioModule::latestFrame()`**, not a boot-time setter, so an effect added through the UI at any time still finds the one mic, and with no mic it gets a static silent frame. The active module registers itself in `setup()` and clears that pointer in `teardown()`, so adding or removing the mic (or an effect) in any order always leaves a coherent answer.
 
 The first ~250 ms after the I²S clock starts are power-on settling garbage; the read is non-blocking (the hot-path rule), so those samples flow through the first few `loop()` reads and the level/bands self-correct within that quarter-second; the frame stays valid (zeroed) until then.
 
@@ -110,4 +110,4 @@ Full case lists are in the generated inventories — [unit tests § AudioModule]
 
 ## Source
 
-[AudioModule.h](../../../src/core/AudioModule.h) · [AudioFrame.h](../../../src/light/AudioFrame.h) · [AudioLevel.h](../../../src/light/AudioLevel.h) · [AudioBands.h](../../../src/light/AudioBands.h) · [platform_esp32_i2s.cpp](../../../src/platform/esp32/platform_esp32_i2s.cpp)
+[AudioModule.h](../../../src/core/AudioModule.h) · [AudioFrame.h](../../../src/core/AudioFrame.h) · [AudioLevel.h](../../../src/core/AudioLevel.h) · [AudioBands.h](../../../src/core/AudioBands.h) · [platform_esp32_i2s.cpp](../../../src/platform/esp32/platform_esp32_i2s.cpp)

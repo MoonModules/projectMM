@@ -471,7 +471,7 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCou
 // I2S audio input (digital MEMS microphone, e.g. INMP441). Two seams only:
 // the I2S read (audioMic*) and the FFT kernel (audioFft). Everything else —
 // DC strip, RMS, windowing, the magnitude->16-band log mapping, noise-floor/gain —
-// is host-tested domain code (src/light/AudioLevel.h, AudioBands.h), so the level
+// is host-tested domain code (src/core/AudioLevel.h, AudioBands.h), so the level
 // and band math runs in CI without hardware. On desktop audioMicRead returns 0
 // (no capture) but audioFft is a real (naive) DFT, so the whole
 // read->window->FFT->bands path is still exercised host-side.

@@ -234,8 +234,17 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCou
     parlio_transmit_config_t xcfg = {};
     xcfg.idle_value = 0;   // lines rest LOW between frames (the latch)
     auto transmitOnce = [st, frameBytes, &xcfg]() {
-        parlio_tx_unit_transmit(st->unit, st->buf, frameBytes * 8, &xcfg);
-        xSemaphoreTake(st->done, pdMS_TO_TICKS(1000));
+        // Loopback self-test path (not the render hot path): a failed enqueue or a
+        // done-callback timeout would otherwise be silent and just surface later as
+        // a capture mismatch — log it so the real cause is visible in the verdict.
+        const esp_err_t err = parlio_tx_unit_transmit(st->unit, st->buf,
+                                                      frameBytes * 8, &xcfg);
+        if (err != ESP_OK) {
+            ESP_LOGE(PAR_TAG, "loopback: tx enqueue failed (%s)", esp_err_to_name(err));
+            return;   // nothing to wait for
+        }
+        if (xSemaphoreTake(st->done, pdMS_TO_TICKS(1000)) != pdTRUE)
+            ESP_LOGE(PAR_TAG, "loopback: tx done-callback timed out");
     };
     detail::captureAndVerifyFrame(rxGpio, frameBytes, dataBytes, rowBits, kPclkHz,
                                   PAR_TAG, transmitOnce, r);
