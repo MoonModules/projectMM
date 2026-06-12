@@ -22,14 +22,19 @@
 #include "light/effects/GlowParticlesEffect.h"
 #include "light/effects/CheckerboardEffect.h"
 #include "light/effects/SpiralEffect.h"
+#include "light/effects/RingsEffect.h"
 #include "light/effects/RipplesEffect.h"
 #include "light/effects/LavaLampEffect.h"
 #include "light/effects/GameOfLifeEffect.h"
 #include "light/modifiers/MultiplyModifier.h"
 #include "light/modifiers/CheckerboardModifier.h"
 #include "light/drivers/Drivers.h"
-#include "light/drivers/ArtNetSendDriver.h"
+#include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
+#include "core/SystemModule.h"
+#include "core/AudioModule.h"
+#include "light/effects/AudioVolumeEffect.h"
+#include "light/effects/AudioSpectrumEffect.h"
 #include "platform/platform.h"
 
 #include <cstdint>
@@ -180,14 +185,19 @@ static void registerScenarioTypes() {
     mm::ModuleFactory::registerType<mm::GlowParticlesEffect>("GlowParticlesEffect");
     mm::ModuleFactory::registerType<mm::CheckerboardEffect>("CheckerboardEffect");
     mm::ModuleFactory::registerType<mm::SpiralEffect>("SpiralEffect");
+    mm::ModuleFactory::registerType<mm::RingsEffect>("RingsEffect");
     mm::ModuleFactory::registerType<mm::RipplesEffect>("RipplesEffect");
     mm::ModuleFactory::registerType<mm::LavaLampEffect>("LavaLampEffect");
     mm::ModuleFactory::registerType<mm::GameOfLifeEffect>("GameOfLifeEffect");
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier");
     mm::ModuleFactory::registerType<mm::Drivers>("Drivers");
-    mm::ModuleFactory::registerType<mm::ArtNetSendDriver>("ArtNetSendDriver");
+    mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver");
+    mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule");
+    mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule");
+    mm::ModuleFactory::registerType<mm::AudioVolumeEffect>("AudioVolumeEffect");
+    mm::ModuleFactory::registerType<mm::AudioSpectrumEffect>("AudioSpectrumEffect");
     done = true;
 }
 

@@ -33,6 +33,16 @@ IDF_SEARCH_PATHS = [
 # NOTE: esp_phy is NOT excluded — it provides RF/clock init the ESP32 EMAC
 # (Ethernet RMII) depends on. Excluding it leaves Ethernet stuck "started"
 # with no link. Only the genuinely WiFi-side components are dropped.
+#
+# NOTE on the P4 co-processor components (esp_hosted / esp_wifi_remote / eppp_link):
+# the `rules: target == esp32p4` gate in main/idf_component.yml pulls them for ANY
+# esp32p4 build, including the WiFi-less esp32p4-eth, because manifest rules can't
+# see our eth-only flag. EXCLUDE_COMPONENTS does NOT drop them (the component
+# manager resolves the managed dependency before the exclude applies). It's a
+# *build-time* cost only: the linker dead-strips the unused code, so they add ~0
+# bytes of flash to esp32p4-eth (our coprocessorWifi() is the empty stub there, so
+# no esp_hosted symbol is referenced — confirmed: their .text size is 0x0 in the
+# .map). Left as-is rather than fought; see docs/backlog/backlog.md.
 ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
 
 # Firmware catalogue. Each entry describes one shipping firmware variant.
@@ -88,6 +98,22 @@ FIRMWARES: dict[str, dict] = {
         "description": "ESP32-S3 (N8R8: 8 MB flash, 8 MB octal PSRAM) — WiFi only. "
                        "Half the flash of N16R8; the N16R8 binary overruns an 8 MB "
                        "board, so N8R8 boards (LightCrafter etc.) need this variant.",
+    },
+    "esp32p4-eth": {
+        "chip": "esp32p4",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32p4-eth"],
+        "eth_only": True,
+        "description": "Waveshare ESP32-P4-NANO — Ethernet only (IP101 PHY). The "
+                       "WiFi-less fallback; esp32p4-eth-wifi adds the C6 radio.",
+    },
+    "esp32p4-eth-wifi": {
+        "chip": "esp32p4",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32p4-eth",
+                      "sdkconfig.defaults.esp32p4-eth-wifi"],
+        "eth_only": False,
+        "description": "Waveshare ESP32-P4-NANO — Ethernet + WiFi. WiFi runs on the "
+                       "on-board ESP32-C6 over SDIO (esp_wifi_remote + esp_hosted, "
+                       "pulled P4-only). First build is longer (managed components).",
     },
 }
 
@@ -167,6 +193,15 @@ def idf_env(idf_path: Path) -> dict:
     if venv_path:
         env["IDF_PYTHON_ENV_PATH"] = str(venv_path)
 
+    # IDF's post-build gen_gdbinit.py reads ESP_ROM_ELF_DIR (export.sh sets it;
+    # this hand-built env must too). The step only re-runs when its inputs
+    # change, so the missing variable failed builds intermittently.
+    rom_elfs = Path.home() / ".espressif" / "tools" / "esp-rom-elfs"
+    if rom_elfs.exists():
+        versions = sorted((d for d in rom_elfs.iterdir() if d.is_dir()), reverse=True)
+        if versions:
+            env["ESP_ROM_ELF_DIR"] = str(versions[0]) + os.sep
+
     # Build PATH: venv bin + IDF tools + toolchains + existing PATH
     extra_paths = []
 
@@ -238,11 +273,15 @@ def firmware_cmake_args(firmware: str, release: str = "") -> list[str]:
         # out the WiFi paths (MM_ETH_ONLY → esp32/main/CMakeLists.txt).
         args.append("-DEXCLUDE_COMPONENTS=" + ";".join(ETH_ONLY_EXCLUDE))
         args.append("-DMM_ETH_ONLY=1")
-    # Firmwares that don't include the .eth sdkconfig fragment have no EMAC
-    # config — the on-chip Ethernet headers (`eth_esp32_emac_config_t`, …)
-    # disappear, and platform_esp32.cpp's ethInit() won't compile. Set
-    # MM_NO_ETH so the source provides stub implementations instead.
-    has_eth_fragment = any(f.endswith(".eth") for f in spec["fragments"])
+    # Firmwares that don't enable the EMAC have no on-chip Ethernet headers
+    # (`eth_esp32_emac_config_t`, …), so platform_esp32.cpp's ethInit() won't
+    # compile — set MM_NO_ETH and the source provides stubs instead. A variant
+    # "has Ethernet" when any fragment carries an EMAC-enabling sdkconfig: the
+    # classic Olimex fragment is `sdkconfig.defaults.eth` (".eth"); board-specific
+    # ones append "-eth" (e.g. ".esp32p4-eth"). Match either so a new eth board
+    # doesn't silently stub Ethernet out.
+    has_eth_fragment = any(f.endswith(".eth") or f.endswith("-eth")
+                           for f in spec["fragments"])
     if not has_eth_fragment:
         args.append("-DMM_NO_ETH=1")
     return args
@@ -339,6 +378,17 @@ def main():
     # builds the per-build-dir sdkconfig already has the chip pinned, so
     # set-target is skipped — switching to another firmware uses a different
     # build_dir entirely, so its sdkconfig is untouched.
+    #
+    # KNOWN ISSUE (esp32p4-eth-wifi): esp_wifi_remote's slave target
+    # (SLAVE_IDF_TARGET_ESP32C6) is selected by a Kconfig `default ... if
+    # IDF_TARGET_ESP32P4` that fires during `set-target` but is dropped by the
+    # reconfigure a plain `build` triggers, falling back to ESP32-H2 (no WiFi) and
+    # failing on missing CONFIG_WIFI_RMT_* symbols. A clean manual sequence works:
+    #   rm -rf build/esp32-esp32p4-eth-wifi && idf.py -B <dir> -DSDKCONFIG=<dir>/sdkconfig \
+    #     -DSDKCONFIG_DEFAULTS="..." set-target esp32p4 && (same) build
+    # but this wrapper does not yet reproduce it reliably — tracked in
+    # docs/backlog/backlog.md (ESP32-P4 round 3). Until fixed, build this variant
+    # with the manual sequence above.
     extra = firmware_cmake_args(firmware, args.release)
     if not build_dir.exists():
         print(f"Setting target to {chip} (firmware: {firmware}, build dir: "

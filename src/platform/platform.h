@@ -23,6 +23,9 @@ void free(void* ptr);
 
 void yield();
 void delayMs(uint32_t ms);  // blocking sleep; only use outside the hot path
+void delayUs(uint32_t us);  // blocking busy-wait for sub-ms protocol gaps (e.g.
+                            // the WS2812 inter-frame latch); fine for a few
+                            // hundred µs, not a general-purpose sleep
 size_t freeHeap();          // total free (internal + PSRAM if present)
 size_t freeInternalHeap();  // internal RAM only (for stack/HTTP/WiFi reserve check)
 size_t maxAllocBlock();     // largest contiguous block (any memory type — incl PSRAM)
@@ -47,6 +50,15 @@ constexpr size_t HEAP_RESERVE = 32768;
 void getMacAddress(uint8_t mac[6]);
 const char* chipModel();
 const char* sdkVersion();
+
+// WiFi co-processor status, for boards whose radio lives on a separate chip (the
+// ESP32-P4 + on-board ESP32-C6 over esp_hosted). Returns a short status string:
+// the detected co-processor firmware version when the link is up (e.g.
+// "C6 fw 2.12.9"), "not detected" when the slave never completed its handshake or
+// reports 0.0.0 (the tell for absent / incompatible C6 slave firmware), or "" on
+// targets with a native radio (no co-processor). Lets SystemModule prove the C6
+// firmware state instead of guessing. Empty string => render nothing.
+const char* coprocessorWifi();
 
 // This host's LAN IPv4 address as a dotted string, or "" if unavailable.
 // Desktop: the outbound interface address. ESP32: empty — the device IP is
@@ -172,13 +184,22 @@ struct ImprovDeviceInfo {
 // boardReady's release-store. Pass nullptr/0/nullptr to opt out (desktop
 // stub, future targets without BoardModule). Mirrors the ssid/password
 // triple: validate + buffer-write + flag-signal, scheduler thread reads.
+// SET_TX_POWER RPC (command 0xFD) — when set, the Improv task validates the
+// 1-byte dBm payload (0..21), writes it to txPowerOut, and publishes via
+// txPowerReady's release-store. This is the pre-association escape hatch for
+// boards whose LDO browns out at full TX power (LOLIN S3/S2): their
+// boards.json cap normally arrives over HTTP *after* the device is online,
+// which such a board can never reach — proven on the bench 2026-06-10. Same
+// validate + buffer-write + flag-signal shape as SET_BOARD.
 bool improvProvisioningInit(const ImprovDeviceInfo& info,
                             char* ssidOut, size_t ssidOutLen,
                             char* passwordOut, size_t passwordOutLen,
                             std::atomic<bool>* ready,
                             char* statusBuf, size_t statusBufLen,
                             char* boardOut = nullptr, size_t boardOutLen = 0,
-                            std::atomic<bool>* boardReady = nullptr);
+                            std::atomic<bool>* boardReady = nullptr,
+                            uint8_t* txPowerOut = nullptr,
+                            std::atomic<bool>* txPowerReady = nullptr);
 
 class UdpSocket {
 public:
@@ -193,6 +214,20 @@ public:
     // parse + route lookup. Returns false on a bad IP.
     bool connect(const char* ip, uint16_t port);
     bool sendTo(const uint8_t* data, size_t len);  // uses the connect()ed destination
+    // Receiver side (ArtNet in): listen on `port` on any interface
+    // (SO_REUSEADDR) and flip the socket non-blocking — note that flips the
+    // whole socket, sendTo() included. Returns false when the port is taken.
+    bool bind(uint16_t port);
+    // Non-blocking receive of one datagram: >0 = bytes copied into buf, -1 =
+    // nothing pending. Mirrors TcpConnection::read's contract minus the
+    // peer-closed 0 case (UDP has no connection to close). A datagram longer
+    // than maxLen is truncated. Pass `srcIp` to also get the sender's IPv4
+    // octets (ArtNet discovery replies go back to the poller's address).
+    int recvFrom(uint8_t* buf, size_t maxLen, uint8_t srcIp[4] = nullptr);
+    // One-shot send to an explicit address — for replying on a bound,
+    // unconnected receive socket (e.g. ArtPollReply to the poller). connect()ed
+    // send sockets keep using sendTo().
+    bool sendToAddr(const uint8_t ip[4], uint16_t port, const uint8_t* data, size_t len);
     void close();
 
 private:
@@ -260,5 +295,208 @@ private:
 // Restart the device. On ESP32: hardware reset (esp_restart). On desktop: process exit.
 // Does not return.
 [[noreturn]] void reboot();
+
+// ---------------------------------------------------------------------------
+// RMT WS2812 LED output (classic ESP32 + S3 + P4). The driver (src/light/drivers/
+// RmtLedDriver.h) does the symbol encode in domain code and may run several
+// channels at once (one per pin); the platform owns only the peripheral. All
+// no-ops on targets without RMT, so the driver compiles everywhere behind
+// `if constexpr (platform::rmtTxChannels > 0)` (see platform_config.h) and is
+// simply inert off the chips that have RMT.
+// ---------------------------------------------------------------------------
+
+// Opaque handle to one configured RMT TX channel. `impl` is set by the platform
+// (a heap struct holding the channel + encoder); the driver never inspects it.
+struct RmtWs2812Handle { void* impl = nullptr; };
+
+// Allocate + configure one RMT TX channel on `gpio`. `resolutionHz` is the tick
+// clock the caller expresses symbol durations in; `invert` flips output polarity
+// for inverting level-shifters. Returns false on failure (and on non-ESP32).
+bool rmtWs2812Init(RmtWs2812Handle& h, uint8_t gpio, uint32_t resolutionHz, bool invert);
+
+// The tick resolution the platform actually granted (may differ from requested).
+// The driver converts its ns timings to ticks with this. 0 if not initialised.
+uint32_t rmtWs2812Resolution(const RmtWs2812Handle& h);
+
+// Start transmitting `symbolCount` pre-encoded WS2812 RMT symbols and return
+// immediately — channels started back-to-back clock out concurrently. Pair with
+// rmtWs2812Wait; the caller owns the inter-frame latch (delayUs) after the last
+// wait. The symbol buffer must stay valid until the wait returns. Returns false
+// when the channel isn't initialised (and on targets without RMT).
+bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint32_t* symbols, size_t symbolCount);
+
+// Block until the channel's in-flight transmission finishes, bounded by
+// `timeoutMs` so a wedged peripheral can't hang the render tick forever — a
+// timed-out frame is simply dropped and re-encoded next tick (self-heals). With
+// N channels waited sequentially the worst case is N×timeoutMs; acceptable for
+// the same self-healing reason.
+void rmtWs2812Wait(RmtWs2812Handle& h, uint32_t timeoutMs);
+
+void rmtWs2812Deinit(RmtWs2812Handle& h);
+
+// RX loopback capture, on-device test only (no-op stub off ESP32). Capture up to
+// `maxSymbols` pulse-duration symbols on `gpio` (jumpered from the TX pin) within
+// `timeoutMs`. Returns the number captured. Used only by the loopback self-test.
+size_t rmtWs2812RxCapture(uint8_t gpio, uint32_t resolutionHz,
+                          uint32_t* outSymbols, size_t maxSymbols, uint32_t timeoutMs);
+
+// Self-contained RMT loopback self-test, runnable from the running firmware (the
+// RmtLedDriver's loopbackTest control). Drives a known WS2812 pattern out `txGpio`
+// and captures it back on `rxGpio` (the user jumpers them), proving the GPIO emits
+// correct bytes on real silicon. All hardware (RMT TX/RX, the GPIO continuity
+// pre-check) lives here so src/light/ stays platform-free. No-op returning a
+// "not supported" result off ESP32.
+struct RmtLoopbackResult {
+    bool jumperDetected = false;  // plain-GPIO continuity pre-check (tx high→rx high, low→low)
+    bool pass = false;            // captured bytes == sent bytes (or whole frame bit-exact)
+    uint8_t sent[3] = {};         // the per-light test pattern transmitted
+    uint8_t got[3] = {};          // the light holding the first mismatch (light 0 when clean)
+    uint32_t bitsChecked = 0;     // total WS2812 bits verified (frame mode); 24 for the short test
+    uint32_t firstBadBit = 0;     // index of the first wrong bit, or bitsChecked when all pass
+};
+RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio);
+
+// Whole-FRAME RMT loopback: instead of a 24-bit synthetic burst, transmit a
+// real `lights`-light WS2812 frame (the per-light pattern 0xA5/0x00/0xFF
+// repeated, `channels` per light) back to back like the render loop, capture
+// the WHOLE frame on rxGpio and bit-verify every WS2812 bit. This is what
+// catches frame-rate / sustained-transfer corruption and RF interference on
+// the data line that a 24-bit burst can't — a single flipped bit anywhere in
+// the frame fails the test and reports its position. No-op off ESP32.
+RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t txGpio, uint8_t rxGpio,
+                                         uint16_t lights, uint8_t channels);
+
+// ---------------------------------------------------------------------------
+// LCD_CAM parallel WS2812 output (ESP32-S3). The driver
+// (src/light/drivers/LcdLedDriver.h) pre-encodes the WHOLE frame into one
+// DMA buffer (3-slot encode in LcdSlots.h, domain code); the platform owns
+// only the i80 bus/peripheral AND the DMA buffer itself — the buffer must be
+// DMA-capable internal RAM (platform::alloc prefers PSRAM, which the
+// peripheral can't stream from at full rate), so the platform allocates it at
+// init and exposes the pointer for the driver's zero-copy encode. All inert
+// on targets without the i80 LCD peripheral, guarded by
+// `if constexpr (platform::lcdLanes == 0)` in the driver.
+// ---------------------------------------------------------------------------
+
+// Opaque handle to one configured i80 bus + IO device + DMA frame buffer.
+struct LcdWs2812Handle { void* impl = nullptr; };
+
+// Create the 8-lane bus on `dataPins[0..laneCount)` plus the two peripheral-
+// mandated lines WS2812 strands ignore: `wrGpio` (the pixel clock) and
+// `dcGpio` (data/command). Allocates a zeroed DMA-capable frame buffer of
+// `bufferBytes`. Returns false on any failure (bad pins, DMA memory pressure).
+bool lcdWs2812Init(LcdWs2812Handle& h, const uint16_t* dataPins, uint8_t laneCount,
+                   uint16_t wrGpio, uint16_t dcGpio, size_t bufferBytes);
+
+// The DMA frame buffer the driver encodes into (zero-copy), and its capacity
+// — the driver's grow-only check. nullptr / 0 when not initialised.
+uint8_t* lcdWs2812Buffer(const LcdWs2812Handle& h);
+size_t lcdWs2812BufferCapacity(const LcdWs2812Handle& h);
+
+// Start the autonomous DMA transfer of the buffer's first `bytes` and return;
+// pair with lcdWs2812Wait. Once started no CPU work remains — there is no
+// refill deadline for WiFi to miss (the design difference vs the ISR-refilled
+// rings in the hpwit/FastLED lineage).
+bool lcdWs2812Transmit(LcdWs2812Handle& h, size_t bytes);
+
+// Block until the in-flight transfer finishes, bounded by `timeoutMs`; a
+// timed-out frame is dropped and re-encoded next tick (self-heals, same
+// stance as rmtWs2812Wait).
+void lcdWs2812Wait(LcdWs2812Handle& h, uint32_t timeoutMs);
+
+void lcdWs2812Deinit(LcdWs2812Handle& h);
+
+// LCD loopback self-test: build a private FULL-WIDTH bus on the driver's
+// real pins (the i80 peripheral configures all 8 data lines — a partial bus
+// is rejected by the hardware layer) and transmit the caller's REAL encoded
+// frame (`frame`/`frameBytes`, lane 0 = dataPins[0]) back to back, exactly
+// like the render loop, while an RMT RX channel captures the whole frame off
+// `rxGpio` and verifies every bit (RMT receive is transmitter-agnostic — the
+// increment-1 rig reused). `dataBytes` is the slot-carrying prefix of the
+// frame (before the latch pad); `rowBits` the bits per light row, so the
+// expected pattern repeats per row. Testing the genuine frame matters: a
+// short synthetic burst misses exactly the real-transfer failures (DMA
+// descriptor boundaries, sustained-rate stalls). Same result shape as the
+// RMT test; got[] holds the first mismatching row. No-op off the S3.
+RmtLoopbackResult lcdWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
+                                    uint16_t wrGpio, uint16_t dcGpio, uint16_t rxGpio,
+                                    const uint8_t* frame, size_t frameBytes,
+                                    size_t dataBytes, uint8_t rowBits);
+
+// ---------------------------------------------------------------------------
+// Parlio (Parallel IO) WS2812 output — the ESP32-P4's parallel LED path, a
+// sibling of the LCD_CAM i80 functions above. Same autonomous-whole-frame DMA
+// shape, but Parlio is simpler: it takes the data GPIOs directly (no
+// sacrificial WR/DC lines — Parlio generates the pixel clock itself from
+// `pclkHz`) and allows ANY lane count (1..8 here), so there is no all-8-pins
+// rule. The same encoder feeds it (LcdSlots.h — one bus word per slot, bit L =
+// data line L). All inert on targets without Parlio, guarded by
+// `if constexpr (platform::parlioLanes == 0)` in the driver.
+// ---------------------------------------------------------------------------
+
+// Opaque handle to one configured Parlio TX unit + DMA frame buffer.
+struct ParlioWs2812Handle { void* impl = nullptr; };
+
+// Create a Parlio TX unit on `dataPins[0..laneCount)` clocked at `pclkHz` (the
+// WS2812 slot rate), with a zeroed DMA-capable frame buffer of `bufferBytes`.
+// No WR/DC pins — Parlio drives the clock internally. Returns false on failure.
+bool parlioWs2812Init(ParlioWs2812Handle& h, const uint16_t* dataPins,
+                      uint8_t laneCount, uint32_t pclkHz, size_t bufferBytes);
+
+// The DMA frame buffer the driver encodes into (zero-copy) + its capacity.
+uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& h);
+size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle& h);
+
+// Start the autonomous DMA transfer of the buffer's first `bytes`; pair with
+// parlioWs2812Wait. No refill deadline once started (single-shot, not the
+// loop-transmission mode Parlio also offers).
+bool parlioWs2812Transmit(ParlioWs2812Handle& h, size_t bytes);
+
+// Block until the in-flight transfer finishes, bounded by `timeoutMs`; a
+// timed-out frame is dropped and re-encoded next tick (self-heals).
+void parlioWs2812Wait(ParlioWs2812Handle& h, uint32_t timeoutMs);
+
+void parlioWs2812Deinit(ParlioWs2812Handle& h);
+
+// Parlio loopback self-test — same contract + result shape as the LCD/RMT
+// loopbacks: a private Parlio TX unit transmits the caller's real frame back to
+// back while rmtWs2812RxCapture reads it off `rxGpio` (lane 0 carries the
+// pattern) and every bit is verified. `dataBytes`/`rowBits` as in lcdWs2812Loopback.
+RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
+                                       uint16_t rxGpio, const uint8_t* frame,
+                                       size_t frameBytes, size_t dataBytes,
+                                       uint8_t rowBits);
+
+// ---------------------------------------------------------------------------
+// I2S audio input (digital MEMS microphone, e.g. INMP441). Two seams only:
+// the I2S read (audioMic*) and the FFT kernel (audioFft). Everything else —
+// DC strip, RMS, windowing, the magnitude->16-band log mapping, noise-floor/gain —
+// is host-tested domain code (src/core/AudioLevel.h, AudioBands.h), so the level
+// and band math runs in CI without hardware. On desktop audioMicRead returns 0
+// (no capture) but audioFft is a real (naive) DFT, so the whole
+// read->window->FFT->bands path is still exercised host-side.
+// All inert on targets without I2S, guarded by `if constexpr (platform::hasI2sMic)`.
+// ---------------------------------------------------------------------------
+
+// Opaque handle to one configured I2S RX channel (standard/Philips mode).
+struct AudioMicHandle { void* impl = nullptr; };
+
+// Bring up an I2S RX channel reading the mic on the given pins at `sampleRate`
+// (24-bit data in a 32-bit slot, mono). Returns false on failure (bad pins,
+// no I2S, out of memory) — the module then idles with a status error.
+bool audioMicInit(AudioMicHandle& h, uint16_t wsPin, uint16_t sdPin,
+                  uint16_t sckPin, uint32_t sampleRate);
+
+// Read up to `maxSamples` 32-bit samples into `out`; returns the count read
+// (0 if none ready / not initialised). Non-blocking enough for the render tick.
+size_t audioMicRead(AudioMicHandle& h, int32_t* out, size_t maxSamples);
+
+void audioMicDeinit(AudioMicHandle& h);
+
+// Real-input FFT kernel: `windowed` holds `n` (a power of two) windowed samples;
+// fills `outMag` with the n/2 magnitude bins. esp-dsp's float `dsps_fft2r_fc32`
+// on ESP32 (the FPU makes float faster than fixed-point); a naive O(n^2) DFT on
+// desktop — correct, only fast enough for the host tests' small n.
+void audioFft(const float* windowed, size_t n, float* outMag);
 
 } // namespace mm::platform

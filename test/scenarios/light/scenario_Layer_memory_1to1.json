@@ -58,10 +58,10 @@
     },
     {
       "name": "add-artnet",
-      "description": "Add ArtNetSendDriver and run the bounded FPS measurement on the no-LUT path.",
+      "description": "Add NetworkSendDriver and run the bounded FPS measurement on the no-LUT path.",
       "op": "add_module",
       "id": "ArtNet",
-      "type": "ArtNetSendDriver",
+      "type": "NetworkSendDriver",
       "parent_id": "Drivers",
       "measure": true,
       "bounds": {

@@ -10,10 +10,20 @@ idf_component_register(
         "../../src/platform/esp32/platform_esp32_fs.cpp"
         "../../src/platform/esp32/platform_esp32_ota.cpp"
         "../../src/platform/esp32/platform_esp32_improv.cpp"
+        "../../src/platform/esp32/platform_esp32_rmt.cpp"
+        "../../src/platform/esp32/platform_esp32_lcd.cpp"
+        "../../src/platform/esp32/platform_esp32_parlio.cpp"
+        "../../src/platform/esp32/platform_esp32_i2s.cpp"
     INCLUDE_DIRS
         "../../src"
         "../../src/platform/esp32"
 )
+# Note: no explicit REQUIRES — the component relies on IDF's default common
+# requirements, which already transitively expose driver/, esp_timer, nvs_flash,
+# esp_https_ota, esp_driver_rmt, etc. Adding an explicit REQUIRES switches the
+# component to strict mode and would hide every implicitly-available component,
+# breaking the existing files. esp_driver_rmt's include dir is already on the
+# compile line via the common set, so platform_esp32_rmt.cpp finds driver/rmt_*.h.
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra -Werror)
 

@@ -4,21 +4,41 @@ Auto-generated from `test/unit/{core,light}/unit_*.cpp` by `scripts/docs/generat
 
 Unit tests are the fastest tier in the [test strategy](../testing.md): they run the production code in-process with doctest, no platform, no network. Each section below covers one module.
 
-## ArtNetSendDriver
+## AudioModule
 
-`test/unit/light/unit_ArtNetSendDriver_no_alloc_in_loop.cpp`
-*Also touches: Drivers, Correction.*
+`test/unit/light/unit_AudioBands.cpp`
+*Also touches: AudioSpectrumEffect.*
 
-- onBuildState sizes the correction-applied buffer to source-count × out-channels. The size matches what loop() needs on its first send. Calling loop() after onBuildState must not reallocate — pin the data pointer + shape.
-- A preset toggle from RGB to RGBW grows outChannels from 3 to 4. The grow runs in onCorrectionChanged, off the hot path.
-- A brightness-only change keeps outChannels at 3 — onCorrectionChanged is still called, but the resize short-circuits (existing buffer already fits).
+- _AudioBands: silence yields all-zero bands and no peak_
+- _AudioBands: a low tone lands in a low band, a high tone in a high band_
+- _AudioBands: the reported peak frequency tracks the played tone_
+- _AudioBands: a single tone concentrates energy, not smears it everywhere_
+- _AudioBands: noiseFloor gates a low idle spectrum to zero, gain scales it back_
+- _AudioBands: zero / degenerate input never crashes_
 
-`test/unit/light/unit_ArtNetSendDriver_packet.cpp`
+`test/unit/light/unit_AudioLevel.cpp`
+*Also touches: AudioVolumeEffect.*
 
-- The built packet contains the exact header layout the Art-Net spec mandates: ID, OpCode, version, sequence, physical, universe, length, data.
-- Universe 259 (0x0103) is encoded little-endian (low byte first), matching the Art-Net wire format.
-- 256 RGB lights (768 bytes) split across exactly 2 universes (510 + 258), matching the 510-channel-per-universe cap.
-- The data-length field is encoded big-endian (high byte first), unlike the universe field — matching the Art-Net spec.
+- _DcBlocker: a constant DC offset is filtered out_
+- _DcBlocker: an audio tone passes through (DC removed, AC kept)_
+- _DcBlocker: reset clears state, null-safe_
+- _AudioLevel: silence reads zero_
+- _AudioLevel: pure DC reads zero (DC offset stripped)_
+- _AudioLevel: a loud sine reads a higher level than a quiet one_
+- _AudioLevel: DC bias does not change the level of a sine_
+- _AudioLevel: a high noiseFloor (dB floor) gates a modest signal to zero_
+- _AudioLevel: higher gain (narrower dB window) reads a higher level_
+- _AudioLevel: empty / null input is silence, never a crash_
+- _AudioLevel: isqrt64 matches floor(sqrt) on a spread of values_
+- Regression: the boot wiring in main.cpp does create("AudioModule")->markWiredByCode() and create() returns nullptr for an UNREGISTERED type — so a missing registerType<AudioModule> made the deref crash and the device boot-looped (found on the S3 bench). These pin that AudioModule and the two audio effects are all registered + createable through the factory, and that latestFrame() is never null even with no mic (so a consumer added before the mic can't deref null).
+- _AudioModule::latestFrame is never null (silent frame with no active mic)_
+
+`test/unit/light/unit_AudioModule.cpp`
+
+- _AudioModule: a fresh, unconfigured module is idle (pins default unset)_
+- _AudioModule: setup/teardown is repeatable with no residual state_
+- _AudioModule: teardown clears the active mic (latestFrame falls back to silence)_
+- _AudioModule: last setup() wins, any add/remove order stays coherent_
 
 ## BlendMap
 
@@ -60,14 +80,16 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 ## CheckerboardEffect
 
 `test/unit/light/unit_CheckerboardEffect.cpp`
-*Also touches: SpiralEffect, PlasmaPaletteEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect.*
+*Also touches: SpiralEffect, PlasmaPaletteEffect, RingsEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect.*
 
 - Checkerboard paints at least one non-zero byte on a 16×16 grid (effect actually renders).
 - With cell_size=4, adjacent cells render different colours (the checker pattern is real, not uniform).
-- LavaLampEffect has localised blob features that can land on identical corner palette indices at some t values (corner-pair check is too strict). Scan the whole buffer for any two distinct pixels instead — same approach as RipplesEffect below. LavaLamp paints at least one non-zero byte (effect actually renders).
+- LavaLampEffect has localised blob features that can land on identical corner palette indices at some t values (corner-pair check is too strict). Scan the whole buffer for any two distinct pixels instead — same approach as RingsEffect below. LavaLamp paints at least one non-zero byte (effect actually renders).
 - Across 10 frames at bpm=60, at least one frame shows two distinct colours somewhere in the buffer (blobs move and the field varies).
-- RipplesEffect has localised features (thin rings); corner-pair check is too strict, so we scan for any two distinct pixels instead. Ripples paints at least one non-zero byte (effect actually renders).
-- At least two distinct pixels exist somewhere in the buffer (ripples are localised, so corner-pair would be too strict).
+- RingsEffect has localised features (thin rings); corner-pair check is too strict, so we scan for any two distinct pixels instead. Rings paints at least one non-zero byte (effect actually renders).
+- At least two distinct pixels exist somewhere in the buffer (rings are localised, so corner-pair would be too strict).
+- RipplesEffect (MoonLight sine-wave water surface) lights one pixel per column at a sine-driven height. On a flat 2D layer it still paints a visible wavefront — assert it renders something and varies across the surface.
+- Ripples lights one pixel per column at a sine-driven height, so the surface holds at least two distinct colours (wavefront vs background) — scan the whole buffer, corner-pair would be too strict.
 
 ## CheckerboardModifier
 
@@ -211,7 +233,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - REGRESSION: a high fan-out Multiply (8×8×4 = 256) on a 128×128 grid must build a NON-EMPTY LUT that covers every physical light. The maxDest estimate (logicalCount × maxMultiplier) is computed in 64-bit; before that fix it overflowed uint16 on no-PSRAM boards (256 × 256 = 65536 wraps to 0), sized the LUT to ~nothing, and blanked the display. Here we assert the LUT actually maps the full light set, in range — the symptom that black-screened the device.
 
 `test/unit/light/unit_Layer_zero_grid.cpp`
-*Also touches: RainbowEffect, NoiseEffect, PlasmaEffect, CheckerboardEffect, SpiralEffect, MetaballsEffect, PlasmaPaletteEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect, FireEffect, ParticlesEffect.*
+*Also touches: RainbowEffect, NoiseEffect, PlasmaEffect, CheckerboardEffect, SpiralEffect, MetaballsEffect, PlasmaPaletteEffect, RingsEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect, FireEffect, ParticlesEffect.*
 
 - Rainbow on 0,0,0 grid: no crash.
 - Noise on 0,0,0 grid: no crash.
@@ -220,6 +242,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Spiral on 0,0,0 grid: no crash.
 - Metaballs on 0,0,0 grid: no crash.
 - PlasmaPalette on 0,0,0 grid: no crash.
+- Rings on 0,0,0 grid: no crash.
 - Ripples on 0,0,0 grid: no crash.
 - GlowParticles on 0,0,0 grid: no crash.
 - LavaLamp on 0,0,0 grid: no crash.
@@ -254,6 +277,31 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 *Also touches: Layer, Drivers.*
 
 - Disabling the only layout child and re-enabling it must not crash Drivers, and rendering resumes cleanly.
+
+## LcdLedDriver
+
+`test/unit/light/unit_LcdLedDriver.cpp`
+*Also touches: Drivers, Correction.*
+
+- Explicit counts slice the buffer consecutively; the frame is sized by the LONGEST lane. The bus always has all 8 lanes — unused strands take the 0-light remainder and idle LOW.
+- Empty ledsPerPin splits evenly — same PinList semantics the RMT driver uses.
+- An RGB→RGBW preset toggle grows the frame (32 vs 24 slot bytes per light).
+- A bad pin list idles the driver with the parse literal in the status; fixing it recovers.
+- Pins now default UNSET (the "default only when it cannot do harm" rule — the strand is user-soldered). A fresh, unconfigured driver idles, never grabbing the 8 data GPIOs on its own. (wire() back-fills empty pins for the slicing cases, so this one wires the buffer directly to keep pins empty.)
+- IDF's i80 bus rejects partial pin sets, so the driver does too — fewer than 8 pins is a config error, not a narrower bus.
+- A 0×0×0 grid is a clean idle: zero counts, zero frame (no pad for an empty frame), no crash.
+- setup/teardown cycles leave no residue (status clean, ASAN-checked heap).
+- loopbackRxPin is bound always, visible only while loopbackTest is on.
+
+`test/unit/light/unit_LcdLedEncoder.cpp`
+*Also touches: Correction.*
+
+- One lane, one byte 0xA5: slot0 always the mask, slot1 follows the bits MSB-first, slot2 always zero.
+- Two lanes 0xFF/0x00 in one row: the data slot carries lane 0's bit only — the transpose itself.
+- A lane excluded from the mask contributes to NEITHER slot 0 nor slot 1, even with garbage wire bytes — short strands idle LOW (no white flashes).
+- Mask 0 (a row past every lane's strand) is a fully idle row.
+- Channel order comes from Correction (logical red → GRB wire {0,255,0}); the encoder is order-agnostic.
+- RGBW rows emit 4 channels × 8 bits × 3 slots = 96 bytes.
 
 ## MappingLUT
 
@@ -363,6 +411,54 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - parseDottedQuad (in Control.h) is the validator on every IPv4 write, over both the HTTP API and persistence. Pin the contract.
 - The static-IP fields (ip / gateway / subnet / dns) are bound as IPv4 controls — 4 bytes of storage each, not 16-char dotted-quad strings. They start hidden because addressing defaults to DHCP.
 - In WiFi-capable builds (anything other than --firmware esp32-eth), the rssi and txPower controls are present and start hidden — Idle/Ethernet don't expose live WiFi metrics. The Ethernet-only build compiles them out entirely so the iteration finds nothing, which is still a valid pass shape.
+- Conditional controls: the static-IP fields (ip/gateway/subnet/dns) are visible only when addressing == Static (1), hidden under DHCP (0) — but ALWAYS bound so persistence can load a saved static config regardless of the live mode. This is the documented add-then-setHidden pattern (architecture.md § Conditional controls); the test pins it both ways so a regression (e.g. dropping setHidden, or conditionally NOT adding the field) fails here, not on hardware.
+
+## NetworkReceiveEffect
+
+`test/unit/light/unit_NetworkReceiveEffect.cpp`
+*Also touches: NetworkSendDriver.*
+
+- A packet built by the sender's builder parses back to the same universe and payload — the two sides can't drift.
+- Bad magic, non-OpDmx opcodes, truncated headers, and lying length fields are all rejected — the receiver drops them.
+- Universe universe_start lands at byte 0; the next universe lands at byte 510 — the same split the sender uses.
+- The layer clears its buffer every tick; staging holds the last frame, so the lights don't strobe black between packets.
+- Universes below universe_start are ignored; universes relative to a non-zero start land at offset 0.
+- A payload overrunning the buffer end is clamped; a universe entirely beyond the buffer is ignored.
+- A 0×0×0 grid accepts packets as a clean no-op — degraded, not crashed.
+- Staging is sized in onBuildState (off the hot path), loop() never reallocates it, teardown frees it.
+- A real packet sent over localhost UDP lands in the layer buffer — the end-to-end proof of the platform receive path.
+
+`test/unit/light/unit_NetworkReceiveEffect_protocols.cpp`
+*Also touches: NetworkSendDriver.*
+
+- A packet built by the sender's builder parses back to the same universe and payload — the two sides can't drift.
+- Truncated headers, a bad ACN identifier, wrong layer vectors, a non-zero start code, and a lying property count are all rejected.
+- A packet built by the sender's builder parses back to the same byte offset and payload.
+- Truncated headers, wrong version bits, and a lying length field are rejected.
+- Each universe-protocol parser refuses the other protocols' datagrams — port mix-ups degrade to silence, not garbage.
+- An ArtPoll datagram is recognised (the discovery hook Resolume/Madrix use); OpDmx and non-ArtNet packets are not polls.
+- The ArtPollReply carries the fields controllers read: opcode, IP, port, names, universe switches, MAC.
+- DDP's byte addressing lands payloads at the exact offset; out-of-range and overflowing offsets are clamped or dropped.
+- channels_per_universe = 512 maps universes at 512-byte strides and clamps a 512-channel payload to its slot.
+- Three senders — one per protocol — hit the same effect on its three ports; each payload lands. The autodetect proof.
+
+## NetworkSendDriver
+
+`test/unit/light/unit_NetworkSendDriver_no_alloc_in_loop.cpp`
+*Also touches: Drivers, Correction.*
+
+- onBuildState sizes the correction-applied buffer to source-count × out-channels. The size matches what loop() needs on its first send. Calling loop() after onBuildState must not reallocate — pin the data pointer + shape.
+- A preset toggle from RGB to RGBW grows outChannels from 3 to 4. The grow runs in onCorrectionChanged, off the hot path.
+- A brightness-only change keeps outChannels at 3 — onCorrectionChanged is still called, but the resize short-circuits (existing buffer already fits).
+
+`test/unit/light/unit_NetworkSendDriver_packet.cpp`
+
+- The built packet contains the exact header layout the Art-Net spec mandates: ID, OpCode, version, sequence, physical, universe, length, data.
+- Universe 259 (0x0103) is encoded little-endian (low byte first), matching the Art-Net wire format.
+- 256 RGB lights (768 bytes) split across exactly 2 universes (510 + 258), matching the 510-channel-per-universe cap.
+- The data-length field is encoded big-endian (high byte first), unlike the universe field — matching the Art-Net spec.
+- The built E1.31 packet carries the exact ACN layout strict sACN receivers (and tools like xLights) validate: identifier, the three flags+length fields, CID, source name, priority, universe, property count, start code.
+- The built DDP packet carries version+push bits, RGB data type, default destination, and big-endian offset/length.
 
 ## NoiseEffect
 
@@ -374,6 +470,23 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Noise and Rainbow produce visibly different frames on the same grid (sanity check that they're distinct algorithms).
 - With depth > 1, adjacent and distant z-slices each render differently (3D noise, not a stack of identical 2D slices).
 - Same z-slice variation requirement holds for Plasma — each depth plane renders differently.
+
+## ParlioLedDriver
+
+`test/unit/light/unit_ParlioLedDriver.cpp`
+*Also touches: Drivers, Correction.*
+
+- Three lanes (Parlio accepts any 1..8 count) slice the buffer consecutively; the frame is sized by the LONGEST lane.
+- Empty ledsPerPin (the default) splits evenly over the 8 lanes — shared PinList semantics, same as the RMT/LCD drivers.
+- The Parlio-vs-LCD difference: 1..8 pins are ALL valid (no exactly-8 rule).
+- More than 8 pins is rejected (the chip's lane cap), like the other drivers.
+- An RGB→RGBW preset toggle grows the frame (32 vs 24 slot bytes per light).
+- A bad pin list idles the driver with the parse literal in the status; fixing it recovers.
+- Pins now default UNSET (the "default only when it cannot do harm" rule — the strand is user-soldered). A fresh, unconfigured driver idles, never grabbing a GPIO. (wire() back-fills empty pins for the slicing cases, so this one wires the buffer directly to keep pins empty.)
+- A 0×0×0 grid is a clean idle: zero counts, zero frame, no crash.
+- loop() is crash-safe across single-pin / multi-pin / pre-init configs (the transmit path is gated out on the host; this pins the reachable contract).
+- setup/teardown cycles leave no residue (status clean, ASAN-checked heap).
+- loopbackRxPin is bound always, visible only while loopbackTest is on.
 
 ## ParticlesEffect
 
@@ -410,6 +523,50 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - A single frame on a 4×4 grid leaves the buffer non-zero (rainbow always paints somewhere).
 - Pixel (0,0) is at full saturation and value (one channel exactly 255) — confirms hsvToRgb wiring.
 - Distant pixels carry different hues (the rainbow gradient is spatial, not uniform).
+
+## RmtLedDriver
+
+`test/unit/light/unit_RmtLedDriver_lifecycle.cpp`
+*Also touches: Drivers, Correction.*
+
+- _RmtLedDriver sizes the symbol buffer in onBuildState_
+- _RmtLedDriver keeps the symbol buffer across a rebuild (reinit must not free it)_
+- _RmtLedDriver keeps the symbol buffer across a pins change_
+- _RmtLedDriver grows the symbol buffer when the grid grows_
+- _RmtLedDriver releases the symbol buffer on teardown_
+- MoonModule contract: teardown reverses setup, so setup→teardown→setup→teardown cycles leave no residue — no leaked heap (ASAN in the test runner catches that), no stuck state. After each teardown the driver must look untouched: no symbol buffer, no status. Run several cycles to surface any accumulation.
+- Conditional control: loopbackRxPin is visible only while loopbackTest is on, hidden otherwise — but always bound (so a saved rxPin loads regardless). Same add-then-setHidden pattern as NetworkModule (architecture.md § Conditional controls). This pins the exact behavior that, with the old UI, showed the pin at the wrong times; a regression in the C++ flag now fails here.
+- Editing `pins` while the loopback test is ON must refresh the parsed config before the self-test runs — onUpdate fires before the buildState sweep re-parses, so without the in-branch parseConfig() the test would transmit on the OLD pin and show a verdict for it. Mirrors the fix in ParallelLedDriver; this pins the RMT sibling that the dedup left behind. Host-observable via pinCount(): the refresh re-parses to the new pin set even though the platform loopback itself is inert.
+
+`test/unit/light/unit_RmtLedDriver_pins.cpp`
+*Also touches: Drivers, Correction.*
+
+- "18,17,16" parses to three pins in list order — the order defines the buffer slices.
+- A single pin (the default "18") and spaces around tokens are both fine.
+- _parsePinList rejects bad input with a static error message_
+- maxPins is the chip's RMT TX-channel cap: 5 pins fail an S3-sized 4, fit a classic 8.
+- The same GPIO twice would double-drive one strand — rejected at parse time.
+- Explicit "100,100,50" maps one count to each pin by position.
+- A short list assigns what it names; unlisted pins share the remaining lights evenly.
+- _assignCounts with an empty list splits evenly, last pin takes the rounding remainder_
+- _assignCounts clamps so the sum never exceeds the buffer_
+- _assignCounts handles a zero-light buffer (0×0×0 grid) as all-zero_
+- _assignCounts rejects a bad token_
+- _assignCounts ignores extra counts beyond the pin list_
+- _RmtLedDriver slices the buffer across pins (even split)_
+- _RmtLedDriver slices the buffer per ledsPerPin_
+- _RmtLedDriver idles with a status error on a bad pin list_
+- _RmtLedDriver with the empty default pins idles cleanly (no pin assumed)_
+- _RmtLedDriver re-slices when the source buffer changes_
+- loop() is a safe no-op across single-pin, multi-pin and zero-grid configs.
+
+`test/unit/light/unit_RmtLedEncoder.cpp`
+*Also touches: Correction.*
+
+- _encoder: one byte, MSB-first, 0 and 1 bits get the right pulse widths_
+- _encoder: one light's channels emit channels*8 symbols in byte order_
+- _encoder: GRB ordering comes from Correction, encoder is order-agnostic_
+- _encoder: RGBW preset yields 32 symbols per light_
 
 ## Scheduler
 

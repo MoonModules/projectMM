@@ -1,10 +1,11 @@
 // @module CheckerboardEffect
-// @also SpiralEffect, PlasmaPaletteEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect
+// @also SpiralEffect, PlasmaPaletteEffect, RingsEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect
 
 #include "doctest.h"
 #include "light/effects/CheckerboardEffect.h"
 #include "light/effects/SpiralEffect.h"
 #include "light/effects/PlasmaPaletteEffect.h"
+#include "light/effects/RingsEffect.h"
 #include "light/effects/RipplesEffect.h"
 #include "light/effects/GlowParticlesEffect.h"
 #include "light/effects/LavaLampEffect.h"
@@ -108,7 +109,7 @@ STATELESS_EFFECT_TEST(GlowParticlesEffect)
 // LavaLampEffect has localised blob features that can land on identical corner
 // palette indices at some t values (corner-pair check is too strict). Scan the
 // whole buffer for any two distinct pixels instead — same approach as
-// RipplesEffect below.
+// RingsEffect below.
 // LavaLamp paints at least one non-zero byte (effect actually renders).
 TEST_CASE("LavaLampEffect writes non-zero RGB") {
     Ctx ctx(16, 16);
@@ -145,9 +146,31 @@ TEST_CASE("LavaLampEffect spatial variation") {
     CHECK(varied);
 }
 
-// RipplesEffect has localised features (thin rings); corner-pair check is
+// RingsEffect has localised features (thin rings); corner-pair check is
 // too strict, so we scan for any two distinct pixels instead.
-// Ripples paints at least one non-zero byte (effect actually renders).
+// Rings paints at least one non-zero byte (effect actually renders).
+TEST_CASE("RingsEffect writes non-zero RGB") {
+    Ctx ctx(16, 16);
+    mm::RingsEffect effect;
+    ctx.layer.addChild(&effect);
+    ctx.layer.onBuildState();
+    ctx.layer.loop();
+    CHECK(ctx.hasNonZero());
+}
+
+// At least two distinct pixels exist somewhere in the buffer (rings are localised, so corner-pair would be too strict).
+TEST_CASE("RingsEffect spatial variation") {
+    Ctx ctx(32, 32);
+    mm::RingsEffect effect;
+    ctx.layer.addChild(&effect);
+    ctx.layer.onBuildState();
+    ctx.layer.loop();
+    CHECK(ctx.hasTwoDistinctColors());
+}
+
+// RipplesEffect (MoonLight sine-wave water surface) lights one pixel per column
+// at a sine-driven height. On a flat 2D layer it still paints a visible wavefront
+// — assert it renders something and varies across the surface.
 TEST_CASE("RipplesEffect writes non-zero RGB") {
     Ctx ctx(16, 16);
     mm::RipplesEffect effect;
@@ -157,7 +180,7 @@ TEST_CASE("RipplesEffect writes non-zero RGB") {
     CHECK(ctx.hasNonZero());
 }
 
-// At least two distinct pixels exist somewhere in the buffer (ripples are localised, so corner-pair would be too strict).
+// Ripples lights one pixel per column at a sine-driven height, so the surface holds at least two distinct colours (wavefront vs background) — scan the whole buffer, corner-pair would be too strict.
 TEST_CASE("RipplesEffect spatial variation") {
     Ctx ctx(32, 32);
     mm::RipplesEffect effect;

@@ -974,17 +974,58 @@ function createControl(moduleName, moduleType, ctrl) {
             break;
         }
         case "uint16": {
-            const input = document.createElement("input");
-            input.type = "number";
-            input.value = ctrl.value ?? 0;
-            input.dataset.mid = moduleName;
-            input.dataset.key = ctrl.name;
-            input.addEventListener("input", () => {
-                dragTs[key] = Date.now();
-                debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, parseInt(input.value)));
-            });
-            row.appendChild(input);
-            appendResetButton(row, moduleName, ctrl, def, () => { input.value = def; });
+            // Bounded (server sent an explicit max below the type ceiling) →
+            // slider, like uint8/int16. Unbounded (max == 65535, the default for
+            // port/universe-style values with no natural range) → plain number.
+            const uMin = Number(ctrl.min ?? 0);
+            const uMax = Number(ctrl.max ?? 65535);
+            if (uMax < 65535) {
+                const input = document.createElement("input");
+                input.type = "range";
+                input.min = uMin;
+                input.max = uMax;
+                input.value = Math.max(uMin, Math.min(uMax, Number(ctrl.value ?? 0)));
+                input.dataset.mid = moduleName;
+                input.dataset.key = ctrl.name;
+                const numInput = document.createElement("input");
+                numInput.type = "number";
+                numInput.className = "control-value-input";
+                numInput.min = uMin;
+                numInput.max = uMax;
+                numInput.value = input.value;
+                input.addEventListener("input", () => {
+                    dragTs[key] = Date.now();
+                    numInput.value = input.value;
+                    debounceSend(key, 150, () => sendControl(moduleName, ctrl.name, parseInt(input.value)));
+                });
+                numInput.addEventListener("input", () => {
+                    const v = Math.max(uMin, Math.min(uMax, parseInt(numInput.value) || 0));
+                    input.value = v;
+                    debounceSend(key, 150, () => sendControl(moduleName, ctrl.name, v));
+                });
+                row.appendChild(input);
+                row.appendChild(numInput);
+                appendResetButton(row, moduleName, ctrl, def, () => {
+                    input.value = def; numInput.value = def;
+                });
+            } else {
+                const input = document.createElement("input");
+                input.type = "number";
+                input.value = ctrl.value ?? 0;
+                input.dataset.mid = moduleName;
+                input.dataset.key = ctrl.name;
+                input.addEventListener("input", () => {
+                    dragTs[key] = Date.now();
+                    // Sanitise: empty/garbage → 0, clamp into the uint16 range so a
+                    // NaN or out-of-range value never reaches the device.
+                    let v = parseInt(input.value, 10);
+                    if (Number.isNaN(v)) v = 0;
+                    v = Math.max(0, Math.min(65535, v));
+                    debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, v));
+                });
+                row.appendChild(input);
+                appendResetButton(row, moduleName, ctrl, def, () => { input.value = def; });
+            }
             break;
         }
         case "int16": {
@@ -1371,8 +1412,74 @@ function allModules() {
     return out;
 }
 
+// Reconcile a card's control rows when its set of VISIBLE controls changed (a
+// `hidden` flag flipped at runtime, e.g. NetworkModule's static-IP fields or
+// RmtLedDriver's loopbackRxPin). The value-patch path in updateModuleControls
+// can't add or remove rows, so this handles that half. Returns true if it
+// changed the DOM. No-op (returns false) on the common frame where nothing moved.
+//
+// Position-stable by design: it inserts each newly-visible row at its correct
+// index among the existing control rows and removes rows that became hidden —
+// it does NOT tear down and re-append every row (that would land them after the
+// card's child-module block / install-picker mount, never converge, and re-fire
+// every WS tick — a render loop that wedges the UI).
+function syncVisibleControls(mod) {
+    const card = document.querySelector(`.card[data-module="${cssEscape(mod.name)}"]`);
+    if (!card) return false;
+    const host = card.querySelector(".card-controls-collapse") || card;
+
+    const wantNames = mod.controls.filter(c => !c.hidden).map(c => c.name);
+    const haveRows = [...host.querySelectorAll(":scope > .control-row[data-key]")];
+    const haveNames = haveRows.map(r => r.dataset.key);
+    if (wantNames.length === haveNames.length && wantNames.every((n, i) => n === haveNames[i])) {
+        return false;  // unchanged — the common case
+    }
+
+    // Remove rows whose control is no longer visible.
+    const wantSet = new Set(wantNames);
+    for (const row of haveRows) {
+        if (!wantSet.has(row.dataset.key)) row.remove();
+    }
+    // Insert each visible control's row at its correct position. The anchor is the
+    // first existing control row that should come AFTER this one; null → append
+    // before the children block (insertBefore(node, null) appends to host's end,
+    // but control rows precede .card-children which lives on the card, not here).
+    const visibleControls = mod.controls.filter(c => !c.hidden);
+    for (let i = 0; i < visibleControls.length; i++) {
+        const name = visibleControls[i].name;
+        if (host.querySelector(`:scope > .control-row[data-key="${cssEscape(name)}"]`)) continue;
+        const row = createControl(mod.name, mod.type, visibleControls[i]);
+        if (!row) continue;
+        // Anchor: the rendered row of the next visible control that already exists.
+        let anchor = null;
+        for (let j = i + 1; j < visibleControls.length && !anchor; j++) {
+            anchor = host.querySelector(`:scope > .control-row[data-key="${cssEscape(visibleControls[j].name)}"]`);
+        }
+        // No later control row exists yet → keep this row above the card's
+        // children block / install-picker mount / footer (which live in the host
+        // when host===card), so controls never render below the children.
+        if (!anchor) {
+            anchor = host.querySelector(":scope > .card-children")
+                  || host.querySelector(":scope > .install-picker-host")
+                  || host.querySelector(":scope > .card-footer");
+        }
+        host.insertBefore(row, anchor);
+    }
+    return true;
+}
+
 function updateModuleControls(mod) {
     if (!mod.controls) return;
+
+    // Conditional controls: a module can flip a control's `hidden` flag at runtime
+    // (e.g. RmtLedDriver reveals loopbackRxPin while the test is on, NetworkModule
+    // reveals static-IP fields). The value-patch loop below only updates controls
+    // already in the DOM — it can't add or remove one. So first detect whether the
+    // set of VISIBLE controls drifted from what's rendered, and if so re-render
+    // this card's control rows. Cheap: only fires on the rare frame where a hidden
+    // flag actually changed.
+    if (syncVisibleControls(mod)) return;  // re-rendered — values are fresh, skip patch
+
     for (const ctrl of mod.controls) {
         const mid = cssEscape(mod.name);
         const k = cssEscape(ctrl.name);

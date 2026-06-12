@@ -1,5 +1,9 @@
 # Checkerboard Modifier
 
+![CheckerboardModifier controls](../../../assets/screenshots/CheckerboardModifier.png)
+
+![CheckerboardModifier preview](../../../assets/screenshots/CheckerboardModifier.gif)
+
 Static modifier. Masks the layer in a checkerboard pattern: lights in the "off" squares are dropped (they receive nothing), lights in the "on" squares pass through unchanged. Unlike Multiply, this doesn't remap or resize — it's a spatial on/off mask applied to whatever the effect drew.
 
 ## Controls

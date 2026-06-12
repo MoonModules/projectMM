@@ -52,7 +52,7 @@ A test lives under the subfolder of its **primary** `@module`'s source domain (e
 
 ### Naming convention
 
-- **Unit tests:** `unit_<ExactModuleName>[_<topic>].cpp` — `<ExactModuleName>` is the **CamelCase** class name as it appears in `// @module` (and in the source: `Layer`, `MoonModule`, `MultiplyModifier`, `ArtNetSendDriver`). The optional `<topic>` collapses when the file's the only test for its module (`unit_Color.cpp` is fine if `@module Color`); add it when one module has several test files (`unit_Layer_extrude.cpp`, `unit_Layer_zero_grid.cpp`, …) or when the topic genuinely clarifies what the file covers (`unit_FilesystemModule_persistence.cpp`).
+- **Unit tests:** `unit_<ExactModuleName>[_<topic>].cpp` — `<ExactModuleName>` is the **CamelCase** class name as it appears in `// @module` (and in the source: `Layer`, `MoonModule`, `MultiplyModifier`, `NetworkSendDriver`). The optional `<topic>` collapses when the file's the only test for its module (`unit_Color.cpp` is fine if `@module Color`); add it when one module has several test files (`unit_Layer_extrude.cpp`, `unit_Layer_zero_grid.cpp`, …) or when the topic genuinely clarifies what the file covers (`unit_FilesystemModule_persistence.cpp`).
 - **Scenarios:** `scenario_<ExactModuleName>_<topic>.json` — same module-naming rule; the topic is always present because scenarios always cross multiple modules and the topic distinguishes the focus.
 - The **`"name"` field inside each scenario JSON** matches the filename stem exactly (e.g. `"name": "scenario_Layer_base_pipeline"`). The runner, the MoonDeck dropdown, the generated docs and `--name` on the CLI all use this single identifier.
 
@@ -214,7 +214,7 @@ Every `scenario_*.json` carries top-level metadata plus a `description` per step
   "name": "scenario_GridLayout_grid_sizes",
   "module": "GridLayout",
   "mode": "mutate",
-  "also": ["Layer", "MultiplyModifier", "Drivers", "ArtNetSendDriver"],
+  "also": ["Layer", "MultiplyModifier", "Drivers", "NetworkSendDriver"],
   "description": "Walk the grid through 16x16 → 32x32 → 64x64 → 128x128 and assert a per-size FPS floor.",
   "fixture": [
     { "name": "fix-layouts", "op": "add_module", "id": "Layouts", "type": "Layouts" },
@@ -223,7 +223,7 @@ Every `scenario_*.json` carries top-level metadata plus a `description` per step
     { "name": "fix-noise", "op": "add_module", "id": "Noise", "type": "NoiseEffect", "parent_id": "Layer" },
     { "name": "fix-mirror", "op": "add_module", "id": "Multiply", "type": "MultiplyModifier", "parent_id": "Layer" },
     { "name": "fix-drivers", "op": "add_module", "id": "Drivers", "type": "Drivers", "props": {"layer": "Layer"} },
-    { "name": "fix-artnet", "op": "add_module", "id": "ArtNet", "type": "ArtNetSendDriver", "parent_id": "Drivers" }
+    { "name": "fix-artnet", "op": "add_module", "id": "ArtNet", "type": "NetworkSendDriver", "parent_id": "Drivers" }
   ],
   "reset": [
     { "name": "reset-grid-width", "op": "set_control", "id": "Grid", "key": "width", "value": 128 },
@@ -355,6 +355,8 @@ All scenarios use relative FPS bounds (`min_pct`) so they pass on any device —
 Scenarios that add modules (e.g. `scenario_Layer_base_pipeline`, `scenario_Layer_memory_1to1`) create temporary modules on the running device and clean them up at the end (`- Rainbow (cleanup)`). Modules that already exist show `=` instead of `+`.
 
 Memory tracking works on ESP32: `freeHeap` and `freeInternalHeap` report real values. Desktop returns 0 (unlimited). The control-change scenario verifies no memory leaks by checking that heap returns to baseline after a mirror toggle.
+
+One live-tier test lives outside the scenario JSON schema because it spans **multiple devices**: `uv run scripts/scenario/run_network_live.py` runs a lights-over-UDP matrix (ArtNet, E1.31 and DDP) over every online board in moondeck.json — each board is once the sender, all others listen, and reception is asserted by reading each device's `/ws` preview stream (see [MoonDeck.md § run_network_live](../scripts/MoonDeck.md#run_network_live)). A device matrix needs loops and per-round state the declarative scenario JSON can't express, so it follows the `improv_smoke_test.py` script shape instead.
 
 ## Hardware Verification
 

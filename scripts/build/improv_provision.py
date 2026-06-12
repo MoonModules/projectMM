@@ -219,6 +219,19 @@ def main() -> int:
                          "on Windows; empty for open networks)")
     ap.add_argument("--timeout", type=float, default=45.0,
                     help="Max seconds to wait for a final response (default: 45)")
+    ap.add_argument("--board", default=None, metavar="NAME",
+                    help="Board name from docs/install/boards.json (e.g. "
+                         "'LOLIN S3 N16R8'). Resolves the board's TX-power cap "
+                         "(controls.Network.txPowerSetting) automatically and "
+                         "pushes the board name via SET_BOARD after "
+                         "provisioning — the same injection the web installer "
+                         "does. An explicit --tx-power overrides the lookup.")
+    ap.add_argument("--tx-power", type=int, default=None, metavar="DBM",
+                    help="Send the SET_TX_POWER vendor RPC (0..21 whole dBm) "
+                         "BEFORE the credentials. Required for boards whose LDO "
+                         "browns out at full TX power (LOLIN S3/S2 → 8, see "
+                         "docs/install/boards.json) — without it the very first "
+                         "association fails and the cap can never arrive over HTTP.")
     args = ap.parse_args()
 
     if args.self_test:
@@ -261,11 +274,51 @@ def main() -> int:
         print(f"ERROR: password too long ({len(args.password)} > 63 bytes)", file=sys.stderr)
         return 2
 
+    if args.board:
+        # boards.json is the single source of truth for per-board injection —
+        # same file the web installer and MoonDeck read.
+        import json
+        from pathlib import Path
+        boards_file = Path(__file__).resolve().parents[2] / "docs" / "install" / "boards.json"
+        try:
+            catalog = json.loads(boards_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"ERROR: cannot read {boards_file}: {e}", file=sys.stderr)
+            return 2
+        entry = next((b for b in catalog if b.get("name") == args.board), None)
+        if entry is None:
+            names = ", ".join(b.get("name", "?") for b in catalog)
+            print(f"ERROR: board {args.board!r} not in boards.json ({names})",
+                  file=sys.stderr)
+            return 2
+        cap = entry.get("controls", {}).get("Network", {}).get("txPowerSetting")
+        if args.tx_power is None and isinstance(cap, int):
+            args.tx_power = cap
+            print(f"==> board {args.board!r}: TX-power cap {cap} dBm from boards.json")
+
     try:
         ser = serial.Serial(args.port, baudrate=115200, timeout=0.1)
     except serial.SerialException as e:
         print(f"ERROR: could not open {args.port}: {e}", file=sys.stderr)
         return 2
+
+    if args.tx_power is not None:
+        if not 0 <= args.tx_power <= 21:
+            print(f"ERROR: --tx-power {args.tx_power} out of range 0..21", file=sys.stderr)
+            return 2
+        # SET_TX_POWER vendor RPC (0xFD): [cmd][data_len=1][dBm]. Mirrors
+        # SET_BOARD's framing; the firmware persists + applies it before the
+        # association the credentials below will trigger. The 2.5 s pause lets
+        # the module's 1 Hz consumer pick the cap up first.
+        print(f"==> sending SET_TX_POWER {args.tx_power} dBm to {args.port}")
+        ser.write(build_frame(TYPE_RPC, bytes([0xFD, 1, args.tx_power])))
+        ser.flush()
+        deadline = time.monotonic() + 5.0
+        ack = parse_frame(ser, deadline)
+        if not (ack and ack[0] == TYPE_RPC_RESPONSE):
+            print("==> warning: no SET_TX_POWER ack (old firmware?) — continuing",
+                  file=sys.stderr)
+        time.sleep(2.5)
 
     print(f"==> sending WIFI_SETTINGS to {args.port} (SSID: {args.ssid!r})")
     payload = build_wifi_settings_payload(args.ssid, args.password)
@@ -307,6 +360,16 @@ def main() -> int:
                 idx += slen
             url = urls[0] if urls else "(no URL reported)"
             print(f"==> provisioned: {url}")
+            if args.board:
+                # SET_BOARD vendor RPC (0xFE): [cmd][1+len][len][name] —
+                # the same post-provision push the web installer does, so
+                # the device persists its physical-board identity.
+                name = args.board.encode("utf-8")
+                ser.write(build_frame(TYPE_RPC,
+                                      bytes([0xFE, 1 + len(name), len(name)]) + name))
+                ser.flush()
+                time.sleep(0.5)   # let the device's serial task consume it
+                print(f"==> pushed SET_BOARD {args.board!r}")
             ser.close()
             return 0
 

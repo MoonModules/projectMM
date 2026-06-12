@@ -82,7 +82,7 @@ Every host needs [uv](https://docs.astral.sh/uv/), CMake 3.20+, and a C++20 comp
 
 The ESP32 target uses ESP-IDF directly, not the Arduino framework.
 
-**Tested IDF version:** **v6.1-dev** (internal `v6.1-dev-399-gd1b91b79b5`). CI builds against this tag and local builds should match (clone command below). Minimum: ESP-IDF v5.1 (C++20 via GCC 12+); the project targets v6.x APIs (`esp_eth_phy_new_generic`, component manager for mDNS) so v5.x may need adjustments.
+**Tested IDF version:** **v6.1-dev** (internal `v6.1-dev-399-gd1b91b79b5`). CI builds against this snapshot and local builds should match (clone command below). The why, the alternatives, and how to check for a newer one are in [ESP-IDF version](#esp-idf-version) below.
 
 ### Prerequisites
 
@@ -120,9 +120,63 @@ The ESP32 tab in MoonDeck wraps the same steps as cards (Setup → Firmware → 
 
 ![MoonDeck ESP32 tab](assets/screenshots/moondeck_esp32.png)
 
+### ESP-IDF version
+
+**Pinned to `v6.1-dev-399-gd1b91b79b5`** (a specific commit on the pre-release v6.1 branch). `setup_esp_idf.py` holds the exact commit in `PINNED_IDF_VERSION` and warns loudly when the installed tree differs, so a stray `git pull` or a fresh shallow clone landing on a newer dev commit is visible rather than silent. Minimum is ESP-IDF v5.1 (C++20 needs GCC 12+); the project uses v6.x APIs (`esp_eth_phy_new_generic`, the component manager for mDNS, the modern RMT/parlio/LCD drivers) so v5.x would need adjustments.
+
+**Why a dev snapshot and not a stable tag.** As of June 2026 the v6.x line is: **v6.0 is the current stable** (GA 2026-02-27); **v6.1 is still pre-release** (beta1 2026-06-11, RC1 2026-07-23, GA 2026-07-31). We pin a v6.1-dev commit because it carries driver fixes we want on the newer SoCs (P4 parlio, RMT v2 on every chip), and because v6.0 vs v6.1-dev is a small delta. The trade-off is honest: a dev branch gets **no support guarantee** and moves under you, which is exactly why the pin is a fixed commit, not a floating branch. The clean inflection point is **v6.1 GA (2026-07-31)**: re-pin to the `v6.1` tag then, which starts the 30-month support clock (see below). That move is a deliberate re-test pass, not a routine pull. Tracked in [backlog § ESP-IDF version pinning](backlog/backlog.md#esp-idf-version-pinning-pending).
+
+**v6.0 is the floor — don't depend on anything newer than it.** Because **v6.0 stable is our fallback** if the v6.1 line proves troublesome, the firmware and build tooling must stay buildable on v6.0. The rule is generic: **use no IDF API, component, Kconfig symbol, or tool that isn't present in v6.0.** A feature that exists only on the v6.1-dev branch (or arrives in a later minor) is off-limits until v6.0 is no longer the fallback. When adopting anything new from the IDF, confirm it shipped in v6.0 first (check the v6.0 docs / release notes, not `latest`); if it's v6.1-only, it waits.
+
+**Explicit exceptions are allowed.** The floor is a default, not an absolute. A feature may step below it (depend on something not in v6.0) when the product owner decides so *explicitly* and the reason is documented at the point it's introduced — in the module spec, a code comment at the dependency, and the commit body. The bar is a conscious, recorded decision, not a silent drift: a floor you can consciously waive with a stated reason stays honest, whereas a rule quietly violated does not. Each such exception also narrows the v6.0 fallback (that target now needs the newer dependency too), so it states what the fallback loses. The known exception today is **P4 WiFi over the C6 co-processor**, which needs `esp_wifi_remote` / esp-hosted (a managed component outside mainline v6.0); it is an accepted, documented exception, scoped to the P4 target, tracked in the [backlog](backlog/backlog.md#esp32-p4-support--rounds-3-4-in-progress).
+
+**v6.0 vs v6.1, and where the real change was.** The earthquake was **v5.x → v6.0**, not v6.0 → v6.1:
+
+- **v6.0** (vs v5.x): the legacy peripheral drivers were **removed entirely** (ADC, DAC, I2S, Timer, PCNT, MCPWM, **RMT**, temp sensor), which is why the LED drivers use the modern RMT v2 / parlio / `esp_lcd` APIs (rationale at [RmtLedDriver.md](moonmodules/light/drivers/RmtLedDriver.md)); **picolibc** replaced newlib as the default C library; **warnings-as-errors** became the default (matches our own `-Werror`); the `CONFIG_ESP_WIFI_ENABLED` switch was dropped (forced on for WiFi SoCs, hence the `EXCLUDE_COMPONENTS` path documented under [Firmware variants](#firmware-variants)); plus the new install manager (EIM), a built-in MCP server, CMake Build System v2 (preview), `wifi_provisioning` → `network_provisioning`, PSA Crypto, and new chips (C5/C61 full, H21/H4 preview).
+- **v6.1** (vs v6.0): an ordinary minor — bugfixes, more chip maturity, incremental features on the v6.0 baseline. No second mass-removal. Because it is still beta, its feature set isn't frozen until RC1.
+
+**Support / EOL policy.** Each *stable* ESP-IDF release is supported for **30 months** from its GA date, split into a Service period (frequent bugfix releases, occasional regulatory features) and a Maintenance period (security and high-severity fixes only). Pre-release and dev snapshots get none of this. So pinning to a GA tag (v6.0 today, or v6.1 after 2026-07-31) is what buys the support window; riding `v6.1-dev` does not.
+
+**How to check for a newer version.**
+
+- **Latest stable + all tags:** the [releases page](https://github.com/espressif/esp-idf/releases), or from a clone: `git -C ~/esp/esp-idf fetch --tags && git -C ~/esp/esp-idf tag -l 'v6.*'`.
+- **What our tree currently is:** `cat ~/esp/esp-idf/version.txt`, or `git -C ~/esp/esp-idf describe --tags`. `setup_esp_idf.py` prints this and flags drift from the pin.
+- **The release schedule + EOL dates:** the upstream [`ROADMAP.md`](https://github.com/espressif/esp-idf/blob/master/ROADMAP.md) (beta/RC/GA dates per minor, and when each older minor reaches end-of-life).
+
+Moving to a different release is never automatic: bump `PINNED_IDF_VERSION` in `setup_esp_idf.py`, re-clone or check out the new tag, then run the full ESP32 build + hardware re-test pass before committing the bump.
+
+#### Adopting the v6.x ecosystem changes
+
+v6.0 introduced ecosystem-level changes beyond the API surface. The stance, under [§ Principles → Industry standards](../CLAUDE.md#principles), is to **embrace these as the ESP32 standard** — if the IDF makes something the recognised way to build, install, provision, or ship, that's the path we want, not a bespoke one we maintain alone. We adopt them **step by step** (each its own commit + hardware re-test) rather than all at once, and only after they clear the **v6.0-floor rule** above, but the default is *yes, adopt*, with the burden on *why not* — not the reverse.
+
+Two guardrails bound the "embrace everything" stance:
+
+- **Platform-generic stays intact.** These are ESP32-specific gains; none may regress Teensy or the desktop (macOS / Windows / Linux) paths, which don't use ESP-IDF at all. An IDF feature is adopted *inside* the ESP32 platform layer / build tooling, never by leaking an IDF assumption into shared `src/` or the desktop build. If embracing a v6.x feature would touch a cross-platform seam, that seam stays abstracted (the existing platform-boundary rule).
+- **The v6.0 floor.** Adopt only what's in v6.0 (see the rule above), so the v6.0 fallback keeps working.
+
+Each row below states where we are and the trigger to move.
+
+| Change | Where we are now | How / when to adopt |
+|---|---|---|
+| **EIM** (ESP-IDF Installation Manager) — the new default, cross-platform installer; Espressif says `install.sh` / `idf_tools.py` are "no longer needed" | `setup_esp_idf.py` drives the legacy `install.sh` / `install.bat`. Works, but is now the *old* documented path. | **Adopt any time** — EIM shipped *in v6.0*, so it clears the v6.0-floor rule, and it has a headless CI mode. This is the highest-priority alignment and doesn't need to wait for the re-pin. Add EIM as the **preferred** path in `setup_esp_idf.py` (CLI: `eim install`), keep `install.sh` as a documented fallback for one release. Keep the exact-commit pin: EIM's multi-version management *helps* reproducibility, it doesn't replace the pin. |
+| **PSA Crypto** — legacy mbedTLS crypto APIs deprecated in favour of the PSA API | No direct exposure: we never call mbedTLS ourselves; OTA uses `esp_https_ota` + `esp_crt_bundle_attach` ([platform_esp32_ota.cpp](../src/platform/esp32/platform_esp32_ota.cpp)), which wrap crypto internally. | Nothing to migrate while we stay on high-level components. **Watch** only: if a future feature needs hashing/signing directly (e.g. signed-OTA verification, a device identity), write it against the **PSA API** from the start, not legacy mbedTLS. Trigger: first direct crypto use. |
+| **`network_provisioning`** — Espressif's Unified Provisioning subsystem, renamed from `wifi_provisioning` in v6.0. Transports: **BLE (GATT)** + **Wi-Fi SoftAP**. Clients: official iOS/Android apps for both, plus `esp_prov` (a Python CLI on Linux/macOS/Windows). Transport-agnostic but ships no web/serial client. | We provision over [Improv](../src/core/ImprovProvisioningModule.h) — serial (USB) + BLE, driven from the **browser** (ESP Web Tools) or a serial CLI. That covers the *web-installer / no-app* onboarding well. What we **don't** have is the IDF-native **phone-app + SoftAP** flow (open the ESP app, pick the device's AP, hand it credentials) that most shipping ESP32 products offer. So this is a real coverage gap, not a duplicate: the two standards meet only on BLE and own different front-ends. | **Adopt to close the gap — this is a planned capability, not a maybe.** `network_provisioning` is in v6.0 (clears the floor) and is *the* IDF-native standard, so embracing it is exactly the stance above. Add it as a **sibling provisioning module** beside ImprovProvisioning (both live as Peripheral/System modules; the device can offer whichever transports its chip supports), reusing the same WiFi-credential plumbing. Not a replacement for Improv — they cover different front-ends (browser vs phone-app), and a product can want either. The phone-app + SoftAP path is the part that makes ESP32 deployment feel product-grade. Trigger: scheduled as one of the v6.0-adoption iterations (see below). |
+| **CMake Build System v2** — the named successor to the current build system; technical preview in v6.0/6.1, has its own migration guide | Standard `idf.py` build (v1). Our component is a thin `idf_component_register()` wrapper, so the migration surface is small. | **Watch until it's GA** (not while it's preview — adopting a preview build system would be the opposite of "common patterns first"). Trigger: v2 ships as the default. Then dry-run a build under v2, fix any `idf_component_register()` / Kconfig-dependency fallout, switch. Low risk given how little custom CMake we have. |
+| **Built-in MCP server** (`idf.py mcp-server`) — lets an AI assistant drive build/flash/monitor/debug directly | Not used. Agents and humans both go through the `scripts/<group>/*.py` layer (the uniform interface in [scripts/MoonDeck.md](../scripts/MoonDeck.md)), which wraps pin-drift checks, per-firmware build dirs, and KPI collection. | **Evaluate, don't default to it.** The risk is a *second control path* that bypasses our script policy, and it's ESP32-only (no desktop), so it can't be the uniform path. If adopted, wrap it *behind* a script (`scripts/run/idf_mcp.py`) so the policy layer still applies, rather than pointing the agent at raw `idf.py`. Trigger: a concrete debug workflow the scripts can't cover. |
+
+The general rule: **anything already in v6.0 we adopt proactively** (it clears the floor, so there's no reason to wait — EIM and `network_provisioning` are both here), while **preview / not-yet-in-v6.0 features wait** until they're stable *and* in our floor. Each adoption is its own commit with its own hardware re-test, and none may regress the Teensy / desktop paths.
+
+**Adoption iterations (the step-by-step plan).** We close the v6.0 gaps one at a time, picked up as normal feature commits:
+
+1. **EIM installer** — rework `setup_esp_idf.py` to prefer `eim install`, keep `install.sh` as a one-release fallback. Smallest and lowest-risk (build-path only, no firmware change, no hardware re-test), and EIM's multi-version management is what cleanly supports the v6.0-floor / v6.1-fallback juggling — so it sequences first as an enabler for the rest.
+2. **`network_provisioning`** — the headline capability: a sibling provisioning module beside ImprovProvisioning adding the phone-app + SoftAP onboarding flow. Its own plan (spec before code), a `Peripheral`/System module reusing the WiFi-credential plumbing, BLE-stack cost weighed per chip.
+3. Further v6.0 items (PSA-native crypto, CMake v2, MCP) are pulled in as their triggers fire (first direct crypto use; v2 GA; a debug need), per the rows above.
+
+Tracked in [backlog § ESP-IDF version pinning](backlog/backlog.md#esp-idf-version-pinning-pending).
+
 ### Firmware variants
 
-`build_esp32.py --firmware` selects one of four shipping variants. The key combines chip name + feature flags + (for SKU-sensitive chips) module. ("Firmware" here is the compiled binary; the physical board is a separate concept — see [architecture.md § Firmware vs board](architecture.md#firmware-vs-board).)
+`build_esp32.py --firmware` selects one of the shipping variants. The key combines chip name + feature flags + (for SKU-sensitive chips) module. ("Firmware" here is the compiled binary; the physical board is a separate concept — see [architecture.md § Firmware vs board](architecture.md#firmware-vs-board).) `build_esp32.py --help` lists the full set; the main ones:
 
 | `--firmware` | IDF target | `SDKCONFIG_DEFAULTS` | What's in the image |
 |---|---|---|---|
@@ -130,10 +184,12 @@ The ESP32 tab in MoonDeck wraps the same steps as cards (Setup → Firmware → 
 | `esp32-eth` | `esp32` | `sdkconfig.defaults;sdkconfig.defaults.eth` | Ethernet only. WiFi components dropped via `-DEXCLUDE_COMPONENTS=esp_wifi;wpa_supplicant;esp_coex` and `-DMM_ETH_ONLY=1`. Smaller image, more free RAM. Olimex ESP32-Gateway pins baked in (LAN8720 @ MDIO 0, PHY RST GPIO 5). |
 | `esp32-eth-wifi` | `esp32` | `sdkconfig.defaults;sdkconfig.defaults.eth` | Ethernet + WiFi. Same Olimex pin map. Full Ethernet → WiFi STA → WiFi AP cascade. |
 | `esp32s3-n16r8` | `esp32s3` | `sdkconfig.defaults;sdkconfig.defaults.esp32s3-n16r8` | ESP32-S3 DevKitC-1 with the N16R8 module (16 MB flash, 8 MB octal PSRAM). WiFi only. |
+| `esp32p4-eth` | `esp32p4` | `sdkconfig.defaults;sdkconfig.defaults.esp32p4-eth` | [Waveshare ESP32-P4-NANO](https://www.waveshare.com/wiki/ESP32-P4-Nano), Ethernet only (IP101 PHY — pins in the `ethPins` config, not sdkconfig). The WiFi-less fallback. Pulls the `espressif/ip101` managed PHY component. |
+| `esp32p4-eth-wifi` | `esp32p4` | `…;sdkconfig.defaults.esp32p4-eth;sdkconfig.defaults.esp32p4-eth-wifi` | Same NANO board, Ethernet + WiFi. The P4 has no native radio; WiFi runs on the on-board **[ESP32-C6](https://www.espressif.com/en/products/socs/esp32-c6)** over SDIO via the [`esp_wifi_remote`](https://components.espressif.com/components/espressif/esp_wifi_remote) + [`esp_hosted`](https://github.com/espressif/esp-hosted-mcu) managed components (pulled P4-only). These are a deliberate [v6.0-floor exception](#esp-idf-version). The `esp_wifi_*` API is unchanged; the platform layer only adds an `esp_hosted` bring-up before `esp_wifi_init`. First build is longer (managed-component fetch). |
 
 ESP-IDF v6.x has no `CONFIG_ESP_WIFI_ENABLED` switch (the symbol is forced on for WiFi-capable SoCs), so dropping WiFi at compile time happens via `EXCLUDE_COMPONENTS` plus `MM_NO_WIFI` (set when `MM_ETH_ONLY=1`, applied in `esp32/main/CMakeLists.txt`). The `esp32-eth` variant takes this path; `esp32-eth-wifi` keeps everything compiled in and uses the runtime cascade in `NetworkModule`.
 
-Each firmware has its own build dir at `build/esp32-<firmware>/`, so all four variants can coexist on disk. `build_esp32.py` points `idf.py -B` at the per-firmware dir; switching firmwares is just a different `--firmware` argument, no clean rebuild penalty. Same-firmware rebuilds stay incremental, as before. Disk usage scales with the number of firmwares built (≈100 MB each), and a future rename would orphan the old dir — clean with `scripts/build/clean_esp32.py --firmware <name>` or `--all`.
+Each firmware has its own build dir at `build/esp32-<firmware>/`, so all variants can coexist on disk. `build_esp32.py` points `idf.py -B` at the per-firmware dir; switching firmwares is just a different `--firmware` argument, no clean rebuild penalty. Same-firmware rebuilds stay incremental, as before. Disk usage scales with the number of firmwares built (≈100 MB each), and a future rename would orphan the old dir — clean with `scripts/build/clean_esp32.py --firmware <name>` or `--all`.
 
 Each ESP32-S3 SKU has its own firmware key because the sdkconfig fragment encodes flash size, partition table, and PSRAM mode — flashing an `n16r8` binary onto a different module (e.g. N8R2) either misaligns the partition table (boot loop) or fails PSRAM init. New SKUs become new keys (e.g. `esp32s3-n8r8`); there is no generic `esp32s3` shortcut.
 

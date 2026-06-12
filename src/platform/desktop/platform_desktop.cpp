@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>     // cosf/sinf/sqrtf for the naive desktop DFT (audioFft)
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -121,6 +122,10 @@ void delayMs(uint32_t ms) {
     std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 }
 
+void delayUs(uint32_t us) {
+    std::this_thread::sleep_for(std::chrono::microseconds(us));
+}
+
 size_t freeHeap() {
     return 0; // Not meaningful on desktop (0 = unlimited)
 }
@@ -193,6 +198,10 @@ const char* sdkVersion() {
 #else
     return "unknown";
 #endif
+}
+
+const char* coprocessorWifi() {
+    return "";   // desktop has no WiFi co-processor
 }
 
 const char* resetReason() {
@@ -432,6 +441,43 @@ bool UdpSocket::sendTo(const uint8_t* data, size_t len) {
     return ::send(sock(fd_), reinterpret_cast<const char*>(data), static_cast<int>(len), 0) >= 0;
 }
 
+bool UdpSocket::bind(uint16_t port) {
+    if (fd_ < 0) return false;
+    int reuse = 1;
+    ::setsockopt(sock(fd_), SOL_SOCKET, SO_REUSEADDR,
+                 reinterpret_cast<const char*>(&reuse), sizeof(reuse));
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (::bind(sock(fd_), reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) return false;
+    // Non-blocking so the render loop's drain never stalls waiting for a packet.
+    return make_nonblocking(fd_) == 0;
+}
+
+int UdpSocket::recvFrom(uint8_t* buf, size_t maxLen, uint8_t srcIp[4]) {
+    if (fd_ < 0) return -1;
+    sockaddr_in src{};
+    socklen_t srcLen = sizeof(src);
+    auto n = ::recvfrom(sock(fd_), reinterpret_cast<char*>(buf), static_cast<int>(maxLen), 0,
+                        reinterpret_cast<sockaddr*>(&src), &srcLen);
+    // 0-byte datagrams and would-block both mean "nothing usable pending".
+    if (n <= 0) return -1;
+    if (srcIp) std::memcpy(srcIp, &src.sin_addr.s_addr, 4);   // network order = octets
+    return static_cast<int>(n);
+}
+
+bool UdpSocket::sendToAddr(const uint8_t ip[4], uint16_t port,
+                           const uint8_t* data, size_t len) {
+    if (fd_ < 0) return false;
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    std::memcpy(&addr.sin_addr.s_addr, ip, 4);
+    return ::sendto(sock(fd_), reinterpret_cast<const char*>(data), static_cast<int>(len), 0,
+                    reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) >= 0;
+}
+
 void UdpSocket::close() {
     if (fd_ >= 0) {
         close_sock(fd_);
@@ -603,6 +649,105 @@ void TcpServer::close() {
     if (fd_ >= 0) {
         close_sock(fd_);
         fd_ = -1;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RMT WS2812 — no-op stubs. Desktop has no RMT peripheral; the driver guards
+// every call with `if constexpr (platform::rmtTxChannels == 0)` (0 here), so
+// these exist only to satisfy the linker and are never reached at runtime.
+// ---------------------------------------------------------------------------
+bool rmtWs2812Init(RmtWs2812Handle& /*h*/, uint8_t /*gpio*/, uint32_t /*resolutionHz*/,
+                   bool /*invert*/) {
+    return false;
+}
+uint32_t rmtWs2812Resolution(const RmtWs2812Handle& /*h*/) { return 0; }
+bool rmtWs2812Transmit(RmtWs2812Handle& /*h*/, const uint32_t* /*symbols*/,
+                       size_t /*symbolCount*/) {
+    return false;
+}
+void rmtWs2812Wait(RmtWs2812Handle& /*h*/, uint32_t /*timeoutMs*/) {}
+void rmtWs2812Deinit(RmtWs2812Handle& /*h*/) {}
+size_t rmtWs2812RxCapture(uint8_t /*gpio*/, uint32_t /*resolutionHz*/,
+                          uint32_t* /*outSymbols*/, size_t /*maxSymbols*/,
+                          uint32_t /*timeoutMs*/) {
+    return 0;
+}
+RmtLoopbackResult rmtWs2812Loopback(uint8_t /*txGpio*/, uint8_t /*rxGpio*/) {
+    return {};   // not supported off ESP32
+}
+RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t /*txGpio*/, uint8_t /*rxGpio*/,
+                                         uint16_t /*lights*/, uint8_t /*channels*/) {
+    return {};   // not supported off ESP32
+}
+
+// ---------------------------------------------------------------------------
+// LCD_CAM WS2812 — no-op stubs. Desktop has no i80 peripheral; the LCD LED
+// driver guards every call with `if constexpr (platform::lcdLanes == 0)`
+// (0 here), so these exist only to satisfy the linker.
+// ---------------------------------------------------------------------------
+bool lcdWs2812Init(LcdWs2812Handle& /*h*/, const uint16_t* /*dataPins*/,
+                   uint8_t /*laneCount*/, uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
+                   size_t /*bufferBytes*/) {
+    return false;
+}
+uint8_t* lcdWs2812Buffer(const LcdWs2812Handle& /*h*/) { return nullptr; }
+size_t lcdWs2812BufferCapacity(const LcdWs2812Handle& /*h*/) { return 0; }
+bool lcdWs2812Transmit(LcdWs2812Handle& /*h*/, size_t /*bytes*/) { return false; }
+void lcdWs2812Wait(LcdWs2812Handle& /*h*/, uint32_t /*timeoutMs*/) {}
+void lcdWs2812Deinit(LcdWs2812Handle& /*h*/) {}
+RmtLoopbackResult lcdWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
+                                    uint16_t /*wrGpio*/, uint16_t /*dcGpio*/,
+                                    uint16_t /*rxGpio*/, const uint8_t* /*frame*/,
+                                    size_t /*frameBytes*/, size_t /*dataBytes*/,
+                                    uint8_t /*rowBits*/) {
+    return {};   // not supported off the S3
+}
+
+// Parlio WS2812 — no-op stubs. Desktop has no Parlio peripheral; the driver
+// idles (parlioLanes == 0). Sizing/slicing is host-pinned by the driver tests.
+bool parlioWs2812Init(ParlioWs2812Handle& /*h*/, const uint16_t* /*dataPins*/,
+                      uint8_t /*laneCount*/, uint32_t /*pclkHz*/, size_t /*bufferBytes*/) {
+    return false;
+}
+uint8_t* parlioWs2812Buffer(const ParlioWs2812Handle& /*h*/) { return nullptr; }
+size_t parlioWs2812BufferCapacity(const ParlioWs2812Handle& /*h*/) { return 0; }
+bool parlioWs2812Transmit(ParlioWs2812Handle& /*h*/, size_t /*bytes*/) { return false; }
+void parlioWs2812Wait(ParlioWs2812Handle& /*h*/, uint32_t /*timeoutMs*/) {}
+void parlioWs2812Deinit(ParlioWs2812Handle& /*h*/) {}
+RmtLoopbackResult parlioWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
+                                       uint16_t /*rxGpio*/, const uint8_t* /*frame*/,
+                                       size_t /*frameBytes*/, size_t /*dataBytes*/,
+                                       uint8_t /*rowBits*/) {
+    return {};   // not supported off the P4
+}
+
+// I2S microphone — no capture on desktop (hasI2sMic == false, AudioModule inert),
+// so init fails and read returns nothing.
+bool audioMicInit(AudioMicHandle& /*h*/, uint16_t /*wsPin*/, uint16_t /*sdPin*/,
+                  uint16_t /*sckPin*/, uint32_t /*sampleRate*/) {
+    return false;
+}
+size_t audioMicRead(AudioMicHandle& /*h*/, int32_t* /*out*/, size_t /*maxSamples*/) {
+    return 0;
+}
+void audioMicDeinit(AudioMicHandle& /*h*/) {}
+
+// FFT kernel — a real but naive O(n^2) DFT. NOT the production kernel (the ESP32
+// uses esp-dsp's fast radix-2), but a correct reference so the host tests run the
+// genuine magnitude->band path on synthesized signals. n must be a power of two;
+// fills outMag[0..n/2) with the bin magnitudes.
+void audioFft(const float* windowed, size_t n, float* outMag) {
+    if (!windowed || !outMag || n == 0) return;
+    const float twoPiOverN = -2.0f * 3.14159265358979323846f / static_cast<float>(n);
+    for (size_t k = 0; k < n / 2; k++) {
+        float re = 0.0f, im = 0.0f;
+        for (size_t t = 0; t < n; t++) {
+            const float a = twoPiOverN * static_cast<float>(k) * static_cast<float>(t);
+            re += windowed[t] * std::cos(a);
+            im += windowed[t] * std::sin(a);
+        }
+        outMag[k] = std::sqrt(re * re + im * im);
     }
 }
 

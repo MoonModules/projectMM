@@ -1,0 +1,269 @@
+{
+  "name": "scenario_Audio_mutation",
+  "module": "AudioModule",
+  "mode": "mutate",
+  "also": [
+    "SystemModule",
+    "Layouts",
+    "GridLayout",
+    "Layer",
+    "RainbowEffect",
+    "AudioVolumeEffect",
+    "AudioSpectrumEffect",
+    "Drivers",
+    "PreviewDriver"
+  ],
+  "description": "Add / configure / remove the AudioModule peripheral and an audio-reactive effect while the render pipeline runs, proving the robustness rule for the audio producer/consumer pair. AudioModule is a Peripheral (it sits beside the pipeline, publishing an AudioFrame), and the audio effects read it through the static AudioModule::latestFrame() accessor, NOT a boot-time pointer — so add/remove can happen in any order at runtime. The checks assert the pipeline keeps RENDERING (buffer non-null, fps measurable) through each mutation: adding the mic, setting its pins (the user-configures-then-runs flow), adding a consumer effect, and crucially REMOVING the mic while a consumer is still live (the consumer must fall back to a silent frame, never deref a dangling pointer — the bug the boot-loop fix and the unit lifecycle tests pin, here proven end-to-end through the Scheduler). On the host the mic is inert (hasI2sMic false), so this exercises the wiring/lifecycle, not real capture; capture is proven on hardware. Grid is 64x64 so the tick stays above the host microsecond clock at every step.",
+  "fixture": [
+    {
+      "name": "fix-system",
+      "description": "SystemModule: the top-level container peripherals (mic, board) hang under, mirroring main.cpp where the user adds AudioModule beside BoardModule.",
+      "op": "add_module",
+      "id": "System",
+      "type": "SystemModule"
+    },
+    {
+      "name": "fix-layouts",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "fix-grid",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 64,
+        "height": 64
+      }
+    },
+    {
+      "name": "fix-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "props": {
+        "layouts": "Layouts",
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "fix-rainbow",
+      "op": "add_module",
+      "id": "Rainbow",
+      "type": "RainbowEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "fix-drivers",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "layer": "Layer"
+      }
+    },
+    {
+      "name": "fix-preview",
+      "op": "add_module",
+      "id": "Preview",
+      "type": "PreviewDriver",
+      "parent_id": "Drivers"
+    }
+  ],
+  "steps": [
+    {
+      "name": "measure-pipeline-only",
+      "description": "Baseline: the render pipeline runs with no audio module present.",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min": 1
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            9,
+            10
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-12",
+            "2026-06-12"
+          ]
+        }
+      }
+    },
+    {
+      "name": "add-audio-module",
+      "description": "Add the AudioModule peripheral under SystemModule (where the user adds it, beside the board). Pins default unset, so it stays idle; the pipeline must keep rendering.",
+      "op": "add_module",
+      "id": "Audio",
+      "type": "AudioModule",
+      "parent_id": "System"
+    },
+    {
+      "name": "measure-audio-added",
+      "description": "Pipeline still renders with the (idle, unconfigured) mic added.",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min": 1
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            9,
+            9
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-12",
+            "2026-06-12"
+          ]
+        }
+      }
+    },
+    {
+      "name": "configure-audio-pins",
+      "description": "Set a mic pin — the user-configures-then-runs flow. On host the mic is inert, but the buildState rebuild must not disturb the running pipeline.",
+      "op": "set_control",
+      "id": "Audio",
+      "key": "sdPin",
+      "value": 5
+    },
+    {
+      "name": "add-audio-consumer",
+      "description": "Add an AudioVolumeEffect consumer under the Layer. It reads the mic via the static accessor; with the mic present it gets the live (silent, on host) frame.",
+      "op": "add_module",
+      "id": "Vol",
+      "type": "AudioVolumeEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "measure-consumer-live",
+      "description": "Pipeline renders with the producer + consumer both wired.",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min": 1
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            9,
+            10
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-12",
+            "2026-06-12"
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove-audio-module",
+      "description": "Remove the mic while the consumer is STILL live. The consumer must fall back to AudioModule::latestFrame()'s static silence — no dangling pointer, no crash. This is the robustness rule's hardest case for this pair.",
+      "op": "remove_module",
+      "id": "Audio"
+    },
+    {
+      "name": "measure-after-mic-removed",
+      "description": "Mic gone, consumer remains: pipeline keeps rendering on silent audio (buffer non-null, fps measurable). No crash from the orphaned consumer.",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min": 1
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            9,
+            9
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-12",
+            "2026-06-12"
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove-audio-consumer",
+      "description": "Remove the orphaned consumer too — clean teardown, pipeline still live.",
+      "op": "remove_module",
+      "id": "Vol"
+    },
+    {
+      "name": "measure-back-to-baseline",
+      "description": "Both audio modules gone: back to the pipeline-only baseline, still rendering.",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min": 1
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            9,
+            10
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-12",
+            "2026-06-12"
+          ]
+        }
+      }
+    }
+  ]
+}

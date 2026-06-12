@@ -5,7 +5,7 @@
   "also": [
     "Layer",
     "NoiseEffect",
-    "ArtNetSendDriver"
+    "NetworkSendDriver"
   ],
   "description": "Pipeline with a mirror modifier: NoiseEffect renders one quadrant, MultiplyModifier reflects across X and Y to produce a kaleidoscope. Used to verify the MultiplyModifier wires into Layer cleanly and that the full pipeline still meets its FPS bound.",
   "steps": [
@@ -67,10 +67,10 @@
     },
     {
       "name": "add-artnet",
-      "description": "Add ArtNetSendDriver and run the bounded FPS measurement (mirror + LUT path must stay at >=80% of the rated FPS).",
+      "description": "Add NetworkSendDriver and run the bounded FPS measurement (mirror + LUT path must stay at >=80% of the rated FPS).",
       "op": "add_module",
       "id": "ArtNet",
-      "type": "ArtNetSendDriver",
+      "type": "NetworkSendDriver",
       "parent_id": "Drivers",
       "measure": true,
       "bounds": {

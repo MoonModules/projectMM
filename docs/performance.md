@@ -67,11 +67,11 @@ Individual measurements vary ~5–10% on the Olimex board with no configuration 
 | GlowParticles | 1706 | 586 | 128 | 14 |
 | Checkerboard | 8474 | 2617 | 397 | 21 |
 | Spiral | 2403 | 571 | 87 | 15 |
-| Ripples | 1118 | 284 | 45 | 12 |
+| Rings | 1118 | 284 | 45 | 12 |
 | LavaLamp | 3030 | 756 | 113 | 18 |
 | GameOfLife | 6802 | 1519 | 226 | 13 |
 
-At 128² nearly every effect converges to ~12–23 FPS: the board is **ArtNet-output-bound** there (the ~38 ms synchronous send dominates the tick), so effect-compute differences wash out — the same physics the README narrates for the S3 over WiFi. Effect cost is visible at 64² and below, where Ripples / Noise / Spiral are the heaviest and Lines / Checkerboard the lightest.
+At 128² nearly every effect converges to ~12–23 FPS: the board is **ArtNet-output-bound** there (the ~38 ms synchronous send dominates the tick), so effect-compute differences wash out — the same physics the README narrates for the S3 over WiFi. Effect cost is visible at 64² and below, where Rings / Noise / Spiral are the heaviest and Lines / Checkerboard the lightest.
 
 **Free internal heap** (KB) — the scarce resource on a no-PSRAM board; drops as the grid grows because the Layer buffer + LUT and the driver output buffer live in internal RAM:
 
@@ -88,7 +88,7 @@ At 128² nearly every effect converges to ~12–23 FPS: the board is **ArtNet-ou
 | GlowParticles | 173 | 171 | 162 | 126 |
 | Checkerboard | 173 | 168 | 159 | 123 |
 | Spiral | 170 | 169 | 160 | 123 |
-| Ripples | 170 | 168 | 160 | 124 |
+| Rings | 170 | 168 | 160 | 124 |
 | LavaLamp | 170 | 169 | 160 | 124 |
 | GameOfLife | 171 | 165 | 150 | 90 |
 
@@ -107,7 +107,7 @@ At 128² nearly every effect converges to ~12–23 FPS: the board is **ArtNet-ou
 | GlowParticles | 84 | 84 | 80 | 62 |
 | Checkerboard | 96 | 88 | 72 | 62 |
 | Spiral | 88 | 88 | 76 | 62 |
-| Ripples | 92 | 88 | 80 | 62 |
+| Rings | 92 | 88 | 80 | 62 |
 | LavaLamp | 92 | 88 | 72 | 62 |
 | GameOfLife | 88 | 84 | 68 | 46 |
 

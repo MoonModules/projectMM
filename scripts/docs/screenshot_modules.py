@@ -22,15 +22,44 @@ Saves to:
   docs/assets/screenshots/installer.png      — web installer page
 
 Usage:
-    uv run scripts/docs/screenshot_modules.py [--host localhost:8080] [--force]
+    # one effect, raw (no modifier), good preview size, with its GIF, overwriting:
+    uv run scripts/docs/screenshot_modules.py --filter Ripples --no-modifier --grid 32 --gif --force
+    # everything, same look:
+    uv run scripts/docs/screenshot_modules.py --no-modifier --grid 32 --gif --force
 
-Prerequisites:
-    uv run playwright install chromium   # one-time
-    ffmpeg must be on PATH (brew install ffmpeg)
-    For installer: uv run scripts/run/preview_installer.py  (serves on port 8000)
+Preview quality:
+    --no-modifier  removes the default MultiplyModifier so effects render RAW, not
+                   mirror-folded. Recommended for effect previews.
+    --grid N       resizes the grid before capture. 32 is the sweet spot: bigger
+                   than the 16 boot default (more detail) but still dense in the
+                   preview. NOTE: 128 looks WORSE, not better — the preview index-
+                   downsamples to a fixed send budget, so a huge grid spreads sparse
+                   effects (Ripples, Game of Life) to scattered dots. Use ~32.
+
+Prerequisites (one-time, machine-local — NOT in the repo or the venv):
+    1. ffmpeg on PATH                       brew install ffmpeg
+    2. Playwright's chromium browser:
+         uv run --with playwright playwright install chromium
+       NOTE: plain `uv run playwright …` FAILS — playwright isn't a project
+       dependency, it's an inline (PEP 723) dep of THIS script, so the browser
+       install needs `--with playwright`. On macOS the browser lands in
+       ~/Library/Caches/ms-playwright/ (not ~/.cache/). It survives venv rebuilds
+       and repo transfers — if it's "missing" it was simply never installed here.
+
+Running server: the script captures against whatever is on --host (default
+:8080). Start ONE fresh server:  cmake --build build -j && ./build/projectMM
+(or via MoonDeck's PC tab). GOTCHA: a leftover binary on :8080 captures the WRONG
+images silently — e.g. a `build/macos/projectMM` from a MoonDeck run still bound
+to the port serves the OLD code, so a renamed/changed effect screenshots as its
+previous version no matter how often you rebuild. The script now prints a STALE
+SERVER warning when the running types don't match src/main.cpp; if you see it,
+`pkill -f projectMM` and start exactly one server. GIFs need --gif (PNG-only
+otherwise). Always eyeball the output PNG — the card title + controls should
+match the effect you captured.
 """
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
@@ -65,13 +94,16 @@ MODULES = [
     ("ParticlesEffect",     "Layer",    {}, True),
     ("GlowParticlesEffect", "Layer",    {}, True),
     ("CheckerboardEffect",  "Layer",    {}, True),
+    ("RingsEffect",         "Layer",    {}, True),
     ("RipplesEffect",       "Layer",    {}, True),
     ("LavaLampEffect",      "Layer",    {}, True),
     ("SpiralEffect",        "Layer",    {}, True),
+    ("GameOfLifeEffect",    "Layer",    {}, True),
     # Modifiers — added as children of Layer
-    ("MirrorModifier",      "Layer",    {}, True),
+    ("MultiplyModifier",    "Layer",    {}, True),
+    ("CheckerboardModifier","Layer",    {}, True),
     # Drivers
-    ("ArtNetSendDriver",    "Drivers",  {}, False),
+    ("NetworkSendDriver",    "Drivers",  {}, False),
     ("PreviewDriver",       "Drivers",  {}, False),
 ]
 
@@ -235,6 +267,53 @@ def delete_module(host: str, id_: str) -> bool:
     return r.ok
 
 
+def set_control(host: str, module: str, control: str, value) -> bool:
+    """Set a control value via the same /api/control path the UI uses."""
+    r = _post(f"http://{host}/api/control",
+              json={"module": module, "control": control, "value": value}, timeout=5)
+    return r.ok
+
+
+def prepare_pipeline(host: str, drop_modifiers: bool, grid: int | None) -> None:
+    """Make the capture pipeline match the requested look BEFORE adding effects.
+
+    The default boot pipeline is Grid(16x16) + Layer(Noise + MultiplyModifier).
+    Two knobs improve effect previews:
+      - drop_modifiers: delete any Modifier children of the Layer so each effect
+        renders RAW, not folded/mirrored by the default MultiplyModifier.
+      - grid: resize the GridLayout (e.g. 128) for crisper, higher-res previews.
+    Both are best-effort and logged; a failure here doesn't abort the run.
+    """
+    try:
+        sr = _get(f"http://{host}/api/state", timeout=5)
+        if not sr.ok:
+            return
+        mods = sr.json().get("modules", [])
+    except Exception:
+        return
+
+    def walk(ms, role_wanted, type_contains):
+        out = []
+        for m in ms:
+            if m.get("role") == role_wanted or type_contains in m.get("type", ""):
+                out.append(m)
+            out.extend(walk(m.get("children", []), role_wanted, type_contains))
+        return out
+
+    if drop_modifiers:
+        for m in walk(mods, "modifier", "Modifier"):
+            if delete_module(host, m.get("name", "")):
+                print(f"  pipeline: removed modifier {m.get('name')!r} (raw effect preview)")
+
+    if grid:
+        for g in walk(mods, "", "GridLayout"):
+            name = g.get("name", "")
+            ok_w = set_control(host, name, "width", grid)
+            ok_h = set_control(host, name, "height", grid)
+            if ok_w and ok_h:
+                print(f"  pipeline: grid {name!r} -> {grid}x{grid}")
+
+
 def get_types(host: str) -> set[str]:
     r = _get(f"http://{host}/api/types", timeout=5)
     if not r.ok:
@@ -242,6 +321,47 @@ def get_types(host: str) -> set[str]:
     data = r.json()
     types = data.get("types", data) if isinstance(data, dict) else data
     return {t["name"] if isinstance(t, dict) else t for t in types}
+
+
+def source_registered_types() -> set[str]:
+    """The module type names main.cpp registers, parsed from registerType<...>("Name", ...).
+
+    Used to detect a STALE server binary: if the running server is missing a type
+    the source registers, it's an old build (or a different binary) — the cause of
+    a hard-to-spot bug where screenshots capture the previous version of an effect.
+    Returns an empty set if main.cpp can't be read (then the check is skipped).
+    """
+    main_cpp = ROOT / "src" / "main.cpp"
+    try:
+        text = main_cpp.read_text()
+    except OSError:
+        return set()
+    # registerType<mm::FooEffect>("FooEffect", "...") — capture the quoted name.
+    return set(re.findall(r'registerType<[^>]+>\(\s*"([^"]+)"', text))
+
+
+def check_server_freshness(host: str) -> None:
+    """Warn loudly if the running server looks like a stale binary.
+
+    Compares the server's registered types against what src/main.cpp registers.
+    The classic failure (seen 2026-06): a leftover `build/macos/projectMM` from a
+    MoonDeck run was still bound to :8080, so captures showed the PRE-rename effect
+    no matter how many times the dev binary was rebuilt. A missing type is the
+    tell — surface it with the fix instead of silently capturing wrong images.
+    """
+    src = source_registered_types()
+    if not src:
+        return  # couldn't parse main.cpp — skip rather than false-alarm
+    server = get_types(host)
+    missing = sorted(src - server)
+    if missing:
+        print(f"  ⚠️  STALE SERVER: {host} is missing {len(missing)} type(s) the "
+              f"source registers: {', '.join(missing[:6])}"
+              + (" …" if len(missing) > 6 else ""))
+        print(f"      The running binary is older than the current source. Most likely a")
+        print(f"      second projectMM (e.g. build/macos/projectMM from MoonDeck) is still")
+        print(f"      on :8080. Fix:  pkill -f projectMM  then rebuild + run ONE server:")
+        print(f"        cmake --build build -j && ./build/projectMM")
 
 
 # ---------------------------------------------------------------------------
@@ -489,6 +609,12 @@ def main() -> int:
                         help="Also capture animated GIF previews for effects/modifiers")
     parser.add_argument("--filter", default="",
                         help="Only capture modules whose type name contains this substring (case-insensitive)")
+    parser.add_argument("--no-modifier", action="store_true",
+                        help="Remove the default MultiplyModifier from the Layer so effects "
+                             "render RAW (not folded/mirrored) in their previews.")
+    parser.add_argument("--grid", type=int, default=0, metavar="N",
+                        help="Resize the GridLayout to NxN before capturing (e.g. 128) for "
+                             "higher-resolution previews. Default: leave the boot grid (16).")
     parser.add_argument("--extras-only", action="store_true",
                         help="Skip projectMM module captures; only run the extra shots "
                              "(MoonDeck tabs, installer). Useful for recapturing the "
@@ -515,6 +641,24 @@ def main() -> int:
         server_types = get_types(args.host)
         if server_types:
             print(f"Server reports {len(server_types)} module types.")
+        # Catch a stale / wrong server binary before capturing anything against it.
+        check_server_freshness(args.host)
+
+        # Catch the MODULES list drifting from registered types — a registered
+        # effect/modifier with no list entry is silently never captured (how
+        # GameOfLife/MultiplyModifier/CheckerboardModifier went imageless).
+        listed = {t for t, *_ in MODULES}
+        uncaptured = sorted(
+            t for t in source_registered_types()
+            if ("Effect" in t or "Modifier" in t) and t not in listed)
+        if uncaptured:
+            print(f"  ⚠️  {len(uncaptured)} registered effect/modifier(s) are NOT in this "
+                  f"script's MODULES list, so they get no screenshot: {', '.join(uncaptured)}")
+            print(f"      Add them to MODULES (near the top of this file) to capture them.")
+
+        # Optional pipeline tweaks for nicer effect previews (raw, higher-res).
+        if args.no_modifier or args.grid:
+            prepare_pipeline(args.host, args.no_modifier, args.grid or None)
 
         # Known name prefixes for orphan sweep (first 16 chars of each type name).
         known_prefixes = {t[:16] for t, _, _, _ in MODULES}
@@ -750,6 +894,14 @@ def main() -> int:
     print(f"Captured : {len(captured)} PNGs, {len(gif_captured)} GIFs")
     print(f"Skipped  : {len(skipped)}")
     print(f"Failed   : {len(failed)}")
+    # GIFs are PNG-only by default — remind when an effect/modifier capture ran
+    # without --gif, since "0 GIFs" on an effect run usually means the flag was
+    # forgotten, not that nothing animates.
+    if not args.gif and not args.extras_only and any(
+            (not filt or filt in t.lower()) and want_gif
+            for t, _, _, want_gif in MODULES):
+        print("\nNote: GIFs were NOT captured — re-run with --gif to also record "
+              "animated previews for effects/modifiers.")
     if failed:
         print("\nFailed:")
         for name, reason in failed:

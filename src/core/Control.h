@@ -71,8 +71,12 @@ struct ControlDescriptor {
     const char* name = nullptr;
     uintptr_t aux = 0;      // Progress: total capacity. Select: pointer to options array.
     ControlType type = ControlType::Uint8;
-    int16_t min = 0;   // Uint8/Int16: UI clamp range. Text/Password/ReadOnly: max = bufSize, min unused.
-    int16_t max = 255; // Uint16/Select: natural range, UI ignores these fields.
+    // int32_t (not int16_t) so the same fields bound every numeric type: Int16's
+    // negatives (down to -32768) AND Uint16's full 0..65535 range, which a 16-bit
+    // field couldn't hold. Uint8/Uint16/Int16 all carry a real UI slider range
+    // here; Text/Password/ReadOnly reuse max as the buffer size (min unused).
+    int32_t min = 0;
+    int32_t max = 255;
     bool hidden = false;    // UI visibility flag. Set via ControlList::setHidden() after addX().
                             // Persistence ignores this — hidden controls are still saved/loaded
                             // so toggling visibility doesn't lose state.
@@ -100,12 +104,14 @@ public:
         controls_[count_++] = {&var, name, 0, ControlType::Uint8, min, max};
     }
 
-    // c.min/c.max are uint8_t so they can't bound a uint16 range. Persistence
-    // and the live setter rely on the natural type range (0..UINT16_MAX) here,
-    // not on c.min/c.max.
-    void addUint16(const char* name, uint16_t& var) {
+    // min/max default to the full type range (no UI constraint) when omitted;
+    // pass explicit bounds (e.g. addUint16("sampleRate", r, 8000, 48000)) to get
+    // a bounded slider in the UI and server-side clamping on write — the same
+    // contract as addUint8/addInt16, now that the descriptor's min/max are int32.
+    void addUint16(const char* name, uint16_t& var,
+                   uint16_t min = 0, uint16_t max = UINT16_MAX) {
         grow();
-        controls_[count_++] = {&var, name, 0, ControlType::Uint16, 0, 0};
+        controls_[count_++] = {&var, name, 0, ControlType::Uint16, min, max};
     }
 
     // lengthType (int16_t) — signed wire format so negative values round-trip

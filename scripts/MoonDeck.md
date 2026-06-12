@@ -1,5 +1,11 @@
 # MoonDeck Script Reference
 
+MoonDeck is projectMM's browser-based developer console: one page that builds, flashes, runs, tests, monitors, and checks the project across every target, and discovers and drives devices on the network. Every action it offers is a thin wrapper around a script under `scripts/`, so the CLI (`uv run scripts/<group>/<name>.py`) and MoonDeck run exactly the same code — agents typically use the CLI, humans use MoonDeck. For what MoonDeck *is* and where it sits in the workflow see [docs/building.md § MoonDeck](../docs/building.md#moondeck--the-dev-console); this page is the per-script reference.
+
+Launch it with `uv run scripts/moondeck.py` and open <http://localhost:8420>. The console has three tabs — **PC** (desktop build / run / test), **ESP32** (chip + port, build / flash / monitor), and **Live** (discovery and live runs against networked devices) — above a network bar and per-device board pickers. Script definitions live in `scripts/moondeck_config.json` (committed); runtime state (selected network, devices, ports) persists in `scripts/moondeck.json` (gitignored).
+
+Below: the UI behaviours common to every card, described once, then one section per script grouped by the tab it appears on. Each section gives the equivalent CLI invocation, so the page doubles as the command reference for running anything without the browser.
+
 ## UI Features
 
 - **Status dots** on each card: grey (not run), orange (running), green (exit 0), red (exit non-zero).
@@ -172,6 +178,29 @@ Executes scenario steps (add_module, set_control, delete_module) via REST API. C
 
 For a full description of each scenario, see the [scenario inventory](/api/docs/tests/scenario-tests.md) — auto-generated from the JSON files.
 
+### run_network_live
+
+End-to-end lights-over-UDP matrix test across every online board in moondeck.json's active network — the live proof for [NetworkReceiveEffect](../docs/moonmodules/light/effects/NetworkReceiveEffect.md) and [NetworkSendDriver](../docs/moonmodules/light/drivers/NetworkSendDriver.md). Each round one device is the sender and every other device listens: the PC seeds the sender **three times — once per protocol (ArtNet, E1.31, DDP), each with its own colour** — asserting the sender's `/ws` preview stream shows each one, then points the sender's own NetworkSendDriver at each listener with the protocol control cycled round-robin and asserts the listener's preview shows the sender's corrected colour (brightness + channel order replicated host-side). With one device online only the PC→device sweep runs.
+
+```bash
+uv run scripts/scenario/run_network_live.py                      # full matrix over all online devices
+uv run scripts/scenario/run_network_live.py --device MM-70BC     # only rounds with this sender
+uv run scripts/scenario/run_network_live.py --tolerance 1        # loosen the per-channel byte match
+```
+
+Everything it mutates (grid size → 16×16 for the run, NetworkSend `ip`/`protocol`/`enabled`, the temporarily added NetworkReceive effect) is restored afterwards, also on failure. Exit codes: `0` = all legs passed, `1` = a leg failed, `2` = environment problem (no online devices / no moondeck.json). Desktop listeners may need the OS firewall to allow UDP 6454/5568/4048.
+
+### run_network_roundtrip
+
+Minimal **PC→device→PC latency probe** across **all three protocols**: per device, the PC sends one solid-colour frame over ArtNet, then E1.31, then DDP, each time timing how long until that colour appears in the device's `/ws` preview stream (PC → NetworkReceiveEffect → PreviewDriver → PC). The receiver autodetects each protocol on its own port, so there's no device reconfig between them. Reports min / median / max over N repeats per protocol and a per-device median-per-protocol comparison line — the spread is the signal for the latency / hiccup symptom, the protocol comparison shows which transport is fastest on a given board, and running across boards makes the per-chip difference visible (a classic ESP32 measures slower than an S3). Runs against **every device checked in the Live tab** (the same `selected` set the matrix test uses); unreachable checked devices are warned and skipped. The measured time includes the PreviewDriver's own fps quantisation (≈42 ms at the 24 fps default), so it's "state visible within" latency, not wire latency; raise the device's Preview fps to tighten it. Deliberately minimal — per-frame sequence matching, the device→device chain, and jitter/drop histograms are left as later extensions.
+
+```bash
+uv run scripts/scenario/run_network_roundtrip.py                  # every checked device, 10 probes each
+uv run scripts/scenario/run_network_roundtrip.py --host 192.168.1.156 --repeats 20   # one explicit device
+```
+
+Captures and restores each device's grid and removes the temporary NetworkReceive on exit (also on failure). Exit codes match the matrix test: `0` = at least one device measured, `1` = none returned a frame, `2` = environment problem (no checked/reachable devices).
+
 ## ESP32 Tab
 
 
@@ -286,6 +315,15 @@ Push WiFi credentials to a running projectMM device over USB-serial. Uses the [I
 
 **One-click flow**: pick the device's port in MoonDeck, hit **Improv WiFi**. The script reads SSID + password from the **active network's WiFi block in `scripts/moondeck.json`** (the one shown in the network bar at the top of the sidebar). If that block is empty, it falls back to detecting the host machine's currently-joined WiFi (macOS Keychain / Linux NetworkManager / Windows `netsh`). The device replies with its new URL when STA comes up — typically 5-10 s end to end.
 
+**Board dropdown (pre-association injection)**: pick your physical board next to the Firmware dropdown and the flow forwards `--board` — the script then resolves the board's `boards.json` settings and pushes the TX-power cap over the `SET_TX_POWER` vendor RPC **before** the credentials, plus `SET_BOARD` after success. This matters for brown-out-prone boards (LOLIN S3/S2, cap 8 dBm): at full TX power they fail their very first WiFi association, so the cap can't wait for the post-online HTTP injection. Leave the dropdown on "(any board)" for boards without special settings.
+
+```bash
+# Equivalent CLI for a LOLIN S3 (cap resolved from boards.json):
+uv run scripts/build/improv_provision.py --port /dev/cu.usbmodem-XXX --board "LOLIN S3 N16R8"
+# Or set the cap explicitly without a catalog entry:
+uv run scripts/build/improv_provision.py --port /dev/cu.usbmodem-XXX --tx-power 8
+```
+
 ```bash
 # Use host's currently-joined WiFi (one click in MoonDeck → equivalent CLI):
 uv run scripts/build/improv_provision.py --port /dev/tty.usbserial-XXXX
@@ -308,7 +346,7 @@ for port in /dev/tty.usbserial-*; do
 done
 ```
 
-The host-WiFi reader lives at [scripts/build/host_wifi.py](build/host_wifi.py) and runs standalone for diagnosis (`python3 scripts/build/host_wifi.py` prints the resolved SSID + password). It first checks `scripts/moondeck.json`'s active network's `wifi` block; if empty, falls back to OS auto-detect. The first macOS auto-detect run pops a Keychain access dialog — the OS doing its job; we don't try to bypass it. The retired `scripts/build/wifi_credentials.json` source is gone — credentials now live per-network in moondeck.json, so moving the laptop between networks is just a dropdown switch.
+The host-WiFi reader lives at [scripts/build/host_wifi.py](build/host_wifi.py) and runs standalone for diagnosis (`uv run scripts/build/host_wifi.py` prints the resolved SSID + password). It first checks `scripts/moondeck.json`'s active network's `wifi` block; if empty, falls back to OS auto-detect. The first macOS auto-detect run pops a Keychain access dialog — the OS doing its job; we don't try to bypass it. The retired `scripts/build/wifi_credentials.json` source is gone — credentials now live per-network in moondeck.json, so moving the laptop between networks is just a dropdown switch.
 
 Replaces v1's `deploy/wifi.py` + `deploy/flashfs.py --wifi` partition-baking flow — the device stays running, no flash mode required. Full module + protocol details: [docs/moonmodules/core/ImprovProvisioningModule.md](../docs/moonmodules/core/ImprovProvisioningModule.md).
 

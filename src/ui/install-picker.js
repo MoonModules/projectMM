@@ -707,6 +707,22 @@ export const installPicker = {
     },
 
     /**
+     * The picked board's boards.json TX-power cap
+     * (controls.Network.txPowerSetting), or null when the board has none /
+     * no board is picked. The orchestrator pushes it over Improv BEFORE
+     * provisioning — brown-out-prone boards (LOLIN S3/S2) fail their first
+     * association at full power, so the cap can't wait for the post-online
+     * HTTP fan-out.
+     */
+    getSelectedBoardTxPower() {
+        if (!_lastState || !_lastState.selectedBoard || !_lastState.boards) return null;
+        const entry = _lastState.boards.find(b => b.name === _lastState.selectedBoard);
+        const v = entry && entry.controls && entry.controls.Network
+            && entry.controls.Network.txPowerSetting;
+        return (typeof v === "number") ? v : null;
+    },
+
+    /**
      * Chip family from the last successful Detect ("ESP32" / "ESP32-S3"), or ""
      * if Detect hasn't run / failed / isn't wired. Always "" on the on-device
      * OTA picker (no onDetect). Currently informational; the mismatch guard at

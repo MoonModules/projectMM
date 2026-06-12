@@ -32,10 +32,22 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_eth.h"
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+#include "esp_eth_phy_ip101.h"   // P4-NANO PHY — managed component espressif/ip101
+#endif
 #ifndef MM_NO_WIFI
 #include "esp_wifi.h"
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+// On the P4 (WiFi build only — this is inside #ifndef MM_NO_WIFI), esp_wifi_* is
+// forwarded to the on-board ESP32-C6 by esp_wifi_remote / esp_hosted. esp_hosted
+// self-initialises at boot via a constructor, so no bring-up call is needed (see
+// ensureWifiInit); this header is only for the read-only coprocessorWifi() query
+// that reports the C6's slave-firmware version. Matches the guard on that function.
+#include "esp_hosted.h"
+#endif
 #endif
 #include "esp_log.h"
+#include "esp_rom_sys.h"     // esp_rom_delay_us (delayUs)
 #include "mdns.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
@@ -91,6 +103,12 @@ void delayMs(uint32_t ms) {
     vTaskDelay(pdMS_TO_TICKS(ms));
 }
 
+void delayUs(uint32_t us) {
+    // Busy-wait — fine for the few-hundred-µs protocol gaps this exists for
+    // (e.g. the WS2812 inter-frame latch), off any latency-critical context.
+    esp_rom_delay_us(us);
+}
+
 void reboot() {
     esp_restart();
 }
@@ -144,6 +162,7 @@ const char* chipModel() {
         case CHIP_ESP32S2: return "ESP32-S2";
         case CHIP_ESP32S3: return "ESP32-S3";
         case CHIP_ESP32C3: return "ESP32-C3";
+        case CHIP_ESP32P4: return "ESP32-P4";
         default:           return "ESP32-?";
     }
 }
@@ -156,6 +175,30 @@ const char* hostIp() {
 
 const char* sdkVersion() {
     return esp_get_idf_version();
+}
+
+const char* coprocessorWifi() {
+#if defined(CONFIG_IDF_TARGET_ESP32P4) && !defined(MM_NO_WIFI)
+    // The P4's WiFi runs on the on-board ESP32-C6 via esp_hosted. Ask the host API
+    // what slave firmware version the C6 actually reported over the link. A version
+    // of 0.0.0 (or an error) means the slave never completed its handshake — the
+    // signature of absent / incompatible C6 slave firmware, which is exactly the
+    // case we want to surface rather than infer.
+    static char buf[24] = "querying…";
+    esp_hosted_coprocessor_fwver_t ver = {};
+    if (esp_hosted_get_coprocessor_fwversion(&ver) == ESP_OK
+        && (ver.major1 || ver.minor1 || ver.patch1)) {
+        std::snprintf(buf, sizeof(buf), "C6 fw %u.%u.%u",
+                      static_cast<unsigned>(ver.major1),
+                      static_cast<unsigned>(ver.minor1),
+                      static_cast<unsigned>(ver.patch1));
+    } else {
+        std::snprintf(buf, sizeof(buf), "not detected");
+    }
+    return buf;
+#else
+    return "";   // native-radio targets have no WiFi co-processor
+#endif
 }
 
 const char* resetReason() {
@@ -258,27 +301,60 @@ bool ethInit() {
     esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
     ethNetif_ = esp_netif_new(&netif_cfg);
 
-    // MAC config — Olimex ESP32-Gateway Rev G: RMII clock output on GPIO17
+    // RMII / PHY pins come from the per-target ethPins config (platform_config.h)
+    // — the Olimex map by default, the P4-NANO's IP101 map on the P4. ethPins is
+    // a compile-time constant, so the unused branch (and its PHY ctor) is dropped.
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
     eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
-    emac_config.clock_config.rmii.clock_mode = EMAC_CLK_OUT;
-    emac_config.clock_config.rmii.clock_gpio = static_cast<int>(GPIO_NUM_17);
+    emac_config.clock_config.rmii.clock_mode =
+        ethPins.rmiiClockExtIn ? EMAC_CLK_EXT_IN : EMAC_CLK_OUT;
+    emac_config.clock_config.rmii.clock_gpio =
+        static_cast<gpio_num_t>(ethPins.rmiiClockGpio);
+    if (ethPins.mdcGpio >= 0)  emac_config.smi_gpio.mdc_num  = ethPins.mdcGpio;
+    if (ethPins.mdioGpio >= 0) emac_config.smi_gpio.mdio_num = ethPins.mdioGpio;
 
-    // PHY config — Olimex ESP32-Gateway: LAN8720, addr 0, reset GPIO 5
     eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
-    phy_config.phy_addr = 0;
-    phy_config.reset_gpio_num = 5;
+    phy_config.phy_addr = ethPins.phyAddr;
+    phy_config.reset_gpio_num = ethPins.rstGpio;
+
+    // Helper to unwind whatever was created so far on any failure — ethInit
+    // runs once at boot, but a clean teardown means a broken PHY/cable degrades
+    // (returns false → the WiFi/AP cascade takes over) instead of leaking the
+    // netif + MAC/PHY drivers.
+    auto fail = [&](const char* what, esp_eth_mac_t* m, esp_eth_phy_t* p) -> bool {
+        ESP_LOGE(NET_TAG, "Ethernet %s", what);
+        if (p) p->del(p);
+        if (m) m->del(m);
+        if (ethNetif_) { esp_netif_destroy(ethNetif_); ethNetif_ = nullptr; }
+        return false;
+    };
 
     esp_eth_mac_t* mac = esp_eth_mac_new_esp32(&emac_config, &mac_config);
-    esp_eth_phy_t* phy = esp_eth_phy_new_generic(&phy_config);
+    if (!mac) return fail("MAC create failed", nullptr, nullptr);
+    // IP101 (P4-NANO) is a managed-component PHY ctor (espressif/ip101 in
+    // idf_component.yml; removed from esp_eth core in IDF v6); the generic ctor
+    // (Olimex LAN8720) stays in core. The IP101 symbol is only declared on the
+    // P4 build (its header include is #ifdef'd), so the *call* must be guarded
+    // at the preprocessor level too — `if constexpr` discards a dead branch but
+    // still requires it to compile, and an undeclared symbol won't. ethPins is
+    // constexpr, so on P4 the runtime branch still folds away.
+    esp_eth_phy_t* phy;
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+    if (ethPins.isIp101) phy = esp_eth_phy_new_ip101(&phy_config);
+    else                 phy = esp_eth_phy_new_generic(&phy_config);
+#else
+    phy = esp_eth_phy_new_generic(&phy_config);
+#endif
+    if (!phy) return fail("PHY create failed", mac, nullptr);
 
     esp_eth_config_t eth_config = ETH_DEFAULT_CONFIG(mac, phy);
     esp_eth_handle_t eth_handle = nullptr;
     esp_err_t err = esp_eth_driver_install(&eth_config, &eth_handle);
     if (err != ESP_OK) {
-        ESP_LOGE(NET_TAG, "Ethernet driver install failed: %s", esp_err_to_name(err));
-        return false;
+        return fail(esp_err_to_name(err), mac, phy);
     }
+    // From here the driver owns mac+phy (driver_uninstall frees them); the
+    // remaining failure paths uninstall the driver instead of del-ing mac/phy.
     ESP_ERROR_CHECK(esp_netif_attach(ethNetif_, esp_eth_new_netif_glue(eth_handle)));
 
     ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID,
@@ -289,6 +365,10 @@ bool ethInit() {
     err = esp_eth_start(eth_handle);
     if (err != ESP_OK) {
         ESP_LOGE(NET_TAG, "Ethernet start failed: %s", esp_err_to_name(err));
+        esp_event_handler_unregister(ETH_EVENT, ESP_EVENT_ANY_ID, &ethEventHandler);
+        esp_event_handler_unregister(IP_EVENT, IP_EVENT_ETH_GOT_IP, &ethEventHandler);
+        esp_eth_driver_uninstall(eth_handle);  // frees mac + phy
+        if (ethNetif_) { esp_netif_destroy(ethNetif_); ethNetif_ = nullptr; }
         return false;
     }
 
@@ -355,6 +435,19 @@ static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
 // init failure is a recoverable runtime error, not a panic.
 static bool ensureWifiInit() {
     if (wifiInitDone_) return true;
+
+    // P4 note: the P4 has no native radio — WiFi runs on the on-board ESP32-C6 via
+    // esp_wifi_remote / esp_hosted (the esp32p4-eth-wifi build). No bring-up code is
+    // needed here: esp_hosted self-initialises at boot via a constructor
+    // (ESP_SYSTEM_INIT_FN → esp_hosted_init, the `host_init: ESP Hosted` boot line),
+    // which sets up the SDIO transport, RPC, and the wifi-remote channels and
+    // connects to the C6. After that the esp_wifi_* calls below are forwarded to the
+    // C6 unchanged. Do NOT call esp_hosted_init()/esp_hosted_connect_to_slave() here:
+    // init is already done (idempotent no-op), and connect_to_slave() is actually a
+    // transport *reconfigure* that resets the slave (GPIO 54) and re-inits SDIO —
+    // which on a live link fails (`sdmmc_card_init failed`) and tears down the
+    // working boot-time connection. Proven on the P4-NANO bench (2026-06-12).
+
     ensureNetifInit();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -422,6 +515,17 @@ bool wifiStaInit(const char* ssid, const char* password) {
         ESP_LOGE(NET_TAG, "WiFi STA start failed: %s", esp_err_to_name(err));
         wifiStaStop();
         return false;
+    }
+
+    // Disable WiFi modem power-save. IDF defaults to WIFI_PS_MIN_MODEM, which
+    // DTIM-sleeps the radio between beacons — that sleep causes intermittent
+    // multi-hundred-ms stalls in TCP socket handling (the HTTP server wedges
+    // while UDP/DDP keeps flowing) and the LED-pause class of glitch. The whole
+    // lineage (WLED, v1/v2) turns it off for the same reason; a wall-powered LED
+    // controller has no battery to save. Non-fatal if it fails (older IDF / odd
+    // chip) — log and carry on.
+    if ((err = esp_wifi_set_ps(WIFI_PS_NONE)) != ESP_OK) {
+        ESP_LOGW(NET_TAG, "WiFi power-save disable failed: %s", esp_err_to_name(err));
     }
 
     err = esp_wifi_connect();
@@ -638,6 +742,44 @@ bool UdpSocket::connect(const char* ip, uint16_t port) {
 bool UdpSocket::sendTo(const uint8_t* data, size_t len) {
     if (fd_ < 0) return false;
     return ::send(fd_, data, len, 0) >= 0;
+}
+
+bool UdpSocket::bind(uint16_t port) {
+    if (fd_ < 0) return false;
+    int reuse = 1;
+    setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (::bind(fd_, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) return false;
+    // Non-blocking so the render loop's drain never stalls waiting for a packet.
+    int flags = fcntl(fd_, F_GETFL, 0);
+    fcntl(fd_, F_SETFL, flags | O_NONBLOCK);
+    return true;
+}
+
+int UdpSocket::recvFrom(uint8_t* buf, size_t maxLen, uint8_t srcIp[4]) {
+    if (fd_ < 0) return -1;
+    sockaddr_in src{};
+    socklen_t srcLen = sizeof(src);
+    auto n = ::recvfrom(fd_, buf, maxLen, 0,
+                        reinterpret_cast<sockaddr*>(&src), &srcLen);
+    // 0-byte datagrams and EWOULDBLOCK both mean "nothing usable pending".
+    if (n <= 0) return -1;
+    if (srcIp) std::memcpy(srcIp, &src.sin_addr.s_addr, 4);   // network order = octets
+    return static_cast<int>(n);
+}
+
+bool UdpSocket::sendToAddr(const uint8_t ip[4], uint16_t port,
+                           const uint8_t* data, size_t len) {
+    if (fd_ < 0) return false;
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    std::memcpy(&addr.sin_addr.s_addr, ip, 4);
+    return ::sendto(fd_, data, len, 0,
+                    reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) >= 0;
 }
 
 void UdpSocket::close() {

@@ -7,7 +7,7 @@
     "MultiplyModifier",
     "NoiseEffect",
     "Drivers",
-    "ArtNetSendDriver",
+    "NetworkSendDriver",
     "PreviewDriver"
   ],
   "description": "Walk the grid through 16x16 → 32x32 → 64x64 → 128x128 and assert a per-size FPS floor.",
@@ -66,7 +66,7 @@
       "name": "fix-artnet",
       "op": "add_module",
       "id": "ArtNet",
-      "type": "ArtNetSendDriver",
+      "type": "NetworkSendDriver",
       "parent_id": "Drivers"
     },
     {
@@ -309,7 +309,7 @@
         "pc-macos": {
           "tick_us": [
             5,
-            9
+            13
           ],
           "free_heap": [
             0,
@@ -321,7 +321,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-06"
+            "2026-06-11"
           ]
         },
         "esp32-eth-wifi": {
@@ -463,7 +463,7 @@
         "pc-macos": {
           "tick_us": [
             23,
-            33
+            223
           ],
           "free_heap": [
             0,
@@ -475,7 +475,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-05"
+            "2026-06-11"
           ]
         },
         "esp32-eth-wifi": {
@@ -617,7 +617,7 @@
         "pc-macos": {
           "tick_us": [
             98,
-            201
+            204
           ],
           "free_heap": [
             0,
@@ -629,7 +629,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-05"
+            "2026-06-11"
           ]
         },
         "esp32-eth-wifi": {

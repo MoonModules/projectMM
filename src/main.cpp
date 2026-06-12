@@ -13,16 +13,24 @@
 #include "light/effects/GlowParticlesEffect.h"
 #include "light/effects/CheckerboardEffect.h"
 #include "light/effects/SpiralEffect.h"
+#include "light/effects/RingsEffect.h"
 #include "light/effects/RipplesEffect.h"
 #include "light/effects/LavaLampEffect.h"
 #include "light/effects/GameOfLifeEffect.h"
+#include "light/effects/NetworkReceiveEffect.h"
+#include "light/effects/AudioVolumeEffect.h"
+#include "light/effects/AudioSpectrumEffect.h"
 #include "light/modifiers/MultiplyModifier.h"
 #include "light/modifiers/CheckerboardModifier.h"
-#include "light/drivers/ArtNetSendDriver.h"
+#include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
+#include "light/drivers/LcdLedDriver.h"
+#include "light/drivers/ParlioLedDriver.h"
+#include "light/drivers/RmtLedDriver.h"
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
 #include "core/BoardModule.h"
+#include "core/AudioModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/ImprovProvisioningModule.h"
 #include "core/FilesystemModule.h"
@@ -57,16 +65,24 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::GlowParticlesEffect>("GlowParticlesEffect", "light/effects/GlowParticlesEffect.md");
     mm::ModuleFactory::registerType<mm::CheckerboardEffect>("CheckerboardEffect", "light/effects/CheckerboardEffect.md");
     mm::ModuleFactory::registerType<mm::SpiralEffect>("SpiralEffect", "light/effects/SpiralEffect.md");
+    mm::ModuleFactory::registerType<mm::RingsEffect>("RingsEffect", "light/effects/RingsEffect.md");
     mm::ModuleFactory::registerType<mm::RipplesEffect>("RipplesEffect", "light/effects/RipplesEffect.md");
     mm::ModuleFactory::registerType<mm::LavaLampEffect>("LavaLampEffect", "light/effects/LavaLampEffect.md");
     mm::ModuleFactory::registerType<mm::GameOfLifeEffect>("GameOfLifeEffect", "light/effects/GameOfLifeEffect.md");
+    mm::ModuleFactory::registerType<mm::NetworkReceiveEffect>("NetworkReceiveEffect", "light/effects/NetworkReceiveEffect.md");
+    mm::ModuleFactory::registerType<mm::AudioVolumeEffect>("AudioVolumeEffect", "light/effects/AudioVolumeEffect.md");
+    mm::ModuleFactory::registerType<mm::AudioSpectrumEffect>("AudioSpectrumEffect", "light/effects/AudioSpectrumEffect.md");
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier", "light/modifiers/MultiplyModifier.md");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers/CheckerboardModifier.md");
-    mm::ModuleFactory::registerType<mm::ArtNetSendDriver>("ArtNetSendDriver", "light/drivers/ArtNetSendDriver.md");
+    mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver", "light/drivers/NetworkSendDriver.md");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers/PreviewDriver.md");
+    mm::ModuleFactory::registerType<mm::RmtLedDriver>("RmtLedDriver", "light/drivers/RmtLedDriver.md");
+    mm::ModuleFactory::registerType<mm::LcdLedDriver>("LcdLedDriver", "light/drivers/LcdLedDriver.md");
+    mm::ModuleFactory::registerType<mm::ParlioLedDriver>("ParlioLedDriver", "light/drivers/ParlioLedDriver.md");
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/HttpServerModule.md");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/SystemModule.md");
     mm::ModuleFactory::registerType<mm::BoardModule>("BoardModule", "core/BoardModule.md");
+    mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule", "core/AudioModule.md");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/FirmwareUpdateModule.md");
     mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/ImprovProvisioningModule.md");
     mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule", "core/NetworkModule.md");
@@ -96,11 +112,11 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
 
     // Names come from ModuleFactory::create via displayNameFor — strips the
     // role suffix (Effect/Modifier/Layout/Driver, plus Module for generics) so
-    // e.g. NoiseEffect → "Noise", FilesystemModule → "Filesystem". For drivers,
-    // the Send/Receive part is kept so siblings like ArtNetSendDriver and a
-    // future ArtNetReceiveDriver stay distinguishable as "ArtNetSend" and
-    // "ArtNetReceive". setName() overrides are only needed for genuine renames,
-    // not for default display.
+    // e.g. NoiseEffect → "Noise", FilesystemModule → "Filesystem". For network
+    // modules the Send/Receive part is kept so NetworkSendDriver ("NetworkSend")
+    // and NetworkReceiveEffect ("NetworkReceive") stay distinguishable.
+    // setName() overrides are only needed for genuine renames, not for default
+    // display.
 
     // Note: ModuleFactory::create can in principle return nullptr (factory entry
     // missing, OOM at probe construction). We deliberately do not null-check
@@ -128,6 +144,15 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     auto* boardModule = static_cast<mm::BoardModule*>(mm::ModuleFactory::create("BoardModule"));
     systemModule->addChild(boardModule);
     boardModule->markWiredByCode();
+
+    // AudioModule is NOT auto-wired. It is a mic peripheral, useful only on a board
+    // that actually has an I2S microphone, so the user adds it through the UI when
+    // they have one (the same model as the effects: registered in the factory,
+    // user-added, not boot-wired). Auto-wiring it on every flash forced an I2S init
+    // on boards with no mic, which on the classic ESP32 hung setup() and boot-looped
+    // the device. When added, its pins default to empty so it stays idle until the
+    // user enters the real GPIOs. The audio effects reach it via the static
+    // AudioModule::latestFrame(), which returns a silent frame when no mic exists.
 
     // FirmwareUpdate — surfaces OTA status as two read-only controls.
     // The actual flash is driven by POST /api/firmware/url; this module just
@@ -207,9 +232,36 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     auto* drivers = static_cast<mm::Drivers*>(mm::ModuleFactory::create("Drivers"));
     drivers->setLayers(layersContainer);
 
-    auto* artnet = mm::ModuleFactory::create("ArtNetSendDriver");
-    drivers->addChild(artnet);  // name = "ArtNetSend" (factory default) — disambiguates from a future ArtNetReceive
-    artnet->markWiredByCode();
+    auto* netSend = mm::ModuleFactory::create("NetworkSendDriver");
+    drivers->addChild(netSend);  // name = "NetworkSend" (factory default)
+    netSend->markWiredByCode();
+
+    // RMT WS2812 LED output — any chip with RMT TX channels (classic ESP32: 8,
+    // S3: 4; the seam is a no-op on desktop). Wired by code like NetworkSend so
+    // a persistence load can't drop it.
+    if constexpr (mm::platform::rmtTxChannels > 0) {
+        auto* led = mm::ModuleFactory::create("RmtLedDriver");
+        drivers->addChild(led);
+        led->markWiredByCode();
+    }
+
+    // LCD_CAM parallel WS2812 output — chips with the i80 LCD peripheral (the
+    // S3 among current targets): 8 strands clock out simultaneously over one
+    // DMA transfer, the S3's scale path beyond its 4 RMT channels.
+    if constexpr (mm::platform::lcdLanes > 0) {
+        auto* lcd = mm::ModuleFactory::create("LcdLedDriver");
+        drivers->addChild(lcd);
+        lcd->markWiredByCode();
+    }
+
+    // Parlio parallel WS2812 output — chips with the Parlio peripheral (the
+    // ESP32-P4 among current targets): the P4's scale path, sibling of the LCD
+    // driver, 8 strands over one DMA transfer.
+    if constexpr (mm::platform::parlioLanes > 0) {
+        auto* parlio = mm::ModuleFactory::create("ParlioLedDriver");
+        drivers->addChild(parlio);
+        parlio->markWiredByCode();
+    }
 
     auto* preview = static_cast<mm::PreviewDriver*>(mm::ModuleFactory::create("PreviewDriver"));
     // PreviewDriver reads the active Layer (resolved by the Drivers container's
@@ -259,7 +311,11 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     std::printf("sizeof: MoonModule=%zu Layer=%zu Drivers=%zu Grid=%zu HttpServer=%zu\n",
                 sizeof(mm::MoonModule), sizeof(mm::Layer), sizeof(mm::Drivers),
                 sizeof(mm::GridLayout), sizeof(mm::HttpServerModule));
-    std::printf("ArtNet → %s\n", static_cast<mm::ArtNetSendDriver*>(artnet)->ip);
+    // The ip control is 4 raw octets, not a string — format before printing
+    // (the old %s on the byte array printed garbage).
+    char netSendIp[16];
+    mm::formatDottedQuad(netSendIp, static_cast<mm::NetworkSendDriver*>(netSend)->ip);
+    std::printf("NetworkSend → %s\n", netSendIp);
     // The server binds all interfaces (INADDR_ANY) — reachable from other
     // devices on the LAN, not only localhost.
     std::printf("HTTP server → http://localhost:%u\n", httpServer->port);

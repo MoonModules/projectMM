@@ -32,6 +32,20 @@ public:
     // STA mode active but the state machine still thinking it's in AP.
     // wifiApStop() drops wifiInitDone_=false so the next ensureWifiInit
     // registers handlers cleanly.
+
+    // Improv SET_TX_POWER path: persist + apply the TX-power cap (whole dBm,
+    // 0 = lift). Must run BEFORE setWifiCredentials when both arrive from one
+    // provisioning flow — brown-out-prone boards (LOLIN S3) fail WiFi auth at
+    // full power, so the cap has to be in place for the association attempt.
+    void setTxPowerSetting(uint8_t dBm) {
+        if (dBm > 21) return;
+        txPowerSetting_ = dBm;
+        markDirty();
+        FilesystemModule::noteDirty();   // same persist arming as setWifiCredentials
+        syncTxPower();                   // applies now if the radio is up; the
+                                         // STA-start path re-applies otherwise
+    }
+
     void setWifiCredentials(const char* ssid, const char* password) {
         if (!ssid) return;
         std::strncpy(ssid_, ssid, sizeof(ssid_) - 1);
@@ -160,8 +174,12 @@ public:
             // boards.json catalog injects 8 dBm for LOLIN boards.
             controls_.addInt16("txPowerSetting", txPowerSetting_, 0, 21);
         }
-        controls_.addSelect("addressing", addressing_, addressingOptions_, 2);
         controls_.addBool("mDNS", mdnsEnabled_);
+
+        // addressing goes immediately before the static-IP fields it conditions, so
+        // the dropdown and the fields it reveals stay adjacent (mDNS, unrelated,
+        // sits above rather than wedged between them).
+        controls_.addSelect("addressing", addressing_, addressingOptions_, 2);
 
         // Static-IP fields are always bound (so persistence can load them at any time),
         // but visibility flips based on addressing mode. Toggling the Select triggers a
@@ -471,6 +489,19 @@ private:
     void syncTxPower() {
         if constexpr (!platform::hasWiFi) return;
         if (txPowerSetting_ == appliedTxPowerSetting_) return;
+        // "No override" (0) with nothing ever applied is a genuine no-op: the
+        // radio is already at its default ceiling, so there is nothing to push.
+        // Skipping it is not just an optimisation — calling
+        // esp_wifi_set_max_tx_power inside the radio-start call stack (this runs
+        // right after wifiStaInit/startAP) hangs the classic ESP32 on IDF
+        // v6.1-dev with an interrupt-watchdog reset, boot-looping the device. A
+        // default board must never touch TX power; a real cap (1..21) still does,
+        // and lifting a prior cap back to 0 still pushes the ceiling because
+        // appliedTxPowerSetting_ is then > 0.
+        if (txPowerSetting_ == 0 && appliedTxPowerSetting_ <= 0) {
+            appliedTxPowerSetting_ = 0;   // mark synced so we don't re-check every tick
+            return;
+        }
         const bool radioUp = (state_ == State::ConnectedSta
                               || state_ == State::WaitingSta
                               || state_ == State::AP);

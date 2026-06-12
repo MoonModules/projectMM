@@ -58,7 +58,8 @@ public:
                 &pendingCredentials_,
                 statusStr_, sizeof(statusStr_),
                 pendingBoard_, sizeof(pendingBoard_),
-                &pendingBoardReady_);
+                &pendingBoardReady_,
+                &pendingTxPower_, &pendingTxPowerReady_);
         } else {
             std::strncpy(statusStr_, "not supported on this platform", sizeof(statusStr_) - 1);
         }
@@ -69,6 +70,15 @@ public:
     }
 
     void loop1s() override {
+        // Vendor SET_TX_POWER RPC — handled BEFORE the credentials on purpose:
+        // when an installer sends the cap and the credentials back-to-back,
+        // both flags can land within one tick, and the cap must be persisted
+        // before the STA attempt starts or a brown-out-prone board (LOLIN S3)
+        // fails auth at full power — the exact hole this RPC closes.
+        if (pendingTxPowerReady_.load(std::memory_order_acquire) && networkModule_) {
+            networkModule_->setTxPowerSetting(pendingTxPower_);
+            pendingTxPowerReady_.store(false, std::memory_order_release);
+        }
         // The platform task writes credentials into pendingSsid_/pendingPassword_
         // then publishes via a release-store on pendingCredentials_. We do an
         // acquire-load here so the buffer writes are visible before we read
@@ -112,6 +122,11 @@ private:
     // pendingCredentials_, sized to BoardModule's storage (32 bytes).
     char pendingBoard_[32] = {};
     std::atomic<bool> pendingBoardReady_{false};
+
+    // Vendor SET_TX_POWER RPC — the pre-association TX-power cap (whole dBm)
+    // for brown-out-prone boards; same producer/consumer shape as the above.
+    uint8_t pendingTxPower_ = 0;
+    std::atomic<bool> pendingTxPowerReady_{false};
 };
 
 } // namespace mm

@@ -6,9 +6,9 @@
     "GridLayout",
     "RainbowEffect",
     "Drivers",
-    "ArtNetSendDriver"
+    "NetworkSendDriver"
   ],
-  "description": "Core pipeline: build Layouts→Grid→Layer→RainbowEffect→Drivers→ArtNetSendDriver from scratch and verify each module wires correctly. Drives the bounded FPS check at the end so a render-path regression is caught.",
+  "description": "Core pipeline: build Layouts→Grid→Layer→RainbowEffect→Drivers→NetworkSendDriver from scratch and verify each module wires correctly. Drives the bounded FPS check at the end so a render-path regression is caught.",
   "steps": [
     {
       "name": "add-layout-group",
@@ -60,10 +60,10 @@
     },
     {
       "name": "add-artnet",
-      "description": "Add ArtNetSendDriver and run the bounded FPS measurement (expected to stay at >=80% of the rated FPS for the 128x128 grid this scenario builds; min_pct needs a live baseline, so it gates only on hardware and is skipped with a WARN in the desktop runner).",
+      "description": "Add NetworkSendDriver and run the bounded FPS measurement (expected to stay at >=80% of the rated FPS for the 128x128 grid this scenario builds; min_pct needs a live baseline, so it gates only on hardware and is skipped with a WARN in the desktop runner).",
       "op": "add_module",
       "id": "ArtNet",
-      "type": "ArtNetSendDriver",
+      "type": "NetworkSendDriver",
       "parent_id": "Drivers",
       "measure": true,
       "bounds": {

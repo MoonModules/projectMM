@@ -5,3 +5,33 @@ dependencies:
     version: "^1.16.0"
   improv/improv:
     version: "^1.2.5"
+  # IP101 Ethernet PHY for the ESP32-P4-NANO. IDF v6 moved the per-PHY drivers
+  # out of esp_eth core into managed components; only referenced on the P4 build
+  # (ethInit's IP101 ctor is behind if constexpr). The generic PHY (Olimex
+  # LAN8720) stays in core, so non-P4 builds don't pull this.
+  espressif/ip101:
+    version: "^1.0.0"
+  # esp-dsp — Espressif's signal-processing library; we use its float radix-2 FFT
+  # (dsps_fft2r_fc32) for the microphone spectrum. Float (not fixed-point) because
+  # every mic-capable target here has an FPU, where float is faster. Referenced
+  # only from platform_esp32_i2s.cpp's audioFft.
+  espressif/esp-dsp:
+    version: "^1.5.0"
+  # esp_wifi_remote + esp_hosted — WiFi for the ESP32-P4 via the on-board ESP32-C6
+  # co-processor over SDIO. The P4 has no native radio; these present the C6's
+  # radio through the standard esp_wifi_* API (API-compatible, so the WiFi seam in
+  # platform_esp32.cpp is unchanged; esp_hosted self-inits at boot, no bring-up
+  # code needed). DELIBERATE v6.0-floor exception (docs/building.md § ESP-IDF
+  # version): these are managed components outside mainline v6.0, accepted
+  # explicitly and scoped to the P4. The `rules` gate pulls them ONLY on the
+  # esp32p4 build, so classic/S3 and the eth-only P4 build don't fetch or compile
+  # them. Versions pinned to patch-level (the versions validated on the P4-NANO
+  # bench) so the P4 build doesn't silently drift to a new minor.
+  espressif/esp_wifi_remote:
+    version: "~1.6.1"
+    rules:
+      - if: "target == esp32p4"
+  espressif/esp_hosted:
+    version: "~2.12.9"
+    rules:
+      - if: "target == esp32p4"

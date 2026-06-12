@@ -14,18 +14,18 @@ The browser flow runs immediately after a Web Serial flash (ESP Web Tools recogn
 
 ## ESP32-S3 USB-port footnote
 
-The ESP32-S3-DevKitC-1 has **two USB ports**. Improv only works on the silkscreen-labelled UART port (UART0 routed through the on-board USB-to-UART bridge). The native USB-Serial-JTAG port is a different hardware block and is not supported by the Improv listener.
-
-If your S3 board only exposes the native USB-CDC port (some breakout boards), fall back to the AP-mode flow: device boots a SoftAP at `4.3.2.1`, join from a phone, enter credentials.
+The listener serves **both** serial transports: UART0 (external USB-to-UART bridges) and the S3's native USB-Serial-JTAG port — boards that only expose native USB (LOLIN S3 N16R8 among them) provision over that port directly (proven on the bench 2026-06-10). If neither serial path is available, the AP-mode flow remains: the device boots a SoftAP at `4.3.2.1`, join from a phone, enter credentials.
 
 ## Wire contract
 
-Both transports speak the same Improv-WiFi serial protocol — frames of `IMPROV` + version byte + type + length + payload + checksum. Full protocol details: <https://www.improv-wifi.com/serial/>. The on-device implementation supports four RPC commands:
+Both transports speak the same Improv-WiFi serial protocol — frames of `IMPROV` + version byte + type + length + payload + checksum. Full protocol details: <https://www.improv-wifi.com/serial/>. The on-device implementation supports four standard RPC commands plus two vendor extensions:
 
 - `GET_CURRENT_STATE` — returns "authorized" or "provisioned" depending on whether WiFi STA is connected.
 - `GET_DEVICE_INFO` — returns `[firmware, version, chipFamily, deviceName]` (where `firmware` = `"projectMM"`, `version` from `kVersion` in `build_info.h`, `chipFamily` from `platform::chipModel()`, `deviceName` from `SystemModule`).
 - `GET_WIFI_NETWORKS` — runs a synchronous WiFi scan, returns up to 10 SSIDs with RSSI + auth flag. **Rejected while STA is connected** (see below).
 - `WIFI_SETTINGS` — writes SSID + password to NetworkModule via `setWifiCredentials`, polls `wifiStaConnected()` for up to 30 s, replies with success (carrying `http://<ip>/`) or `ERROR_UNABLE_TO_CONNECT`.
+- `SET_BOARD` (vendor, `0xFE`) — payload `[str_len][board name]`; persists the physical-board name into BoardModule. Sent by the web installer after provisioning.
+- `SET_TX_POWER` (vendor, `0xFD`) — payload `[1][dBm]` (0–21; 0 lifts the cap); persists + applies `Network.txPowerSetting` **before** any association attempt. This is the provisioning escape hatch for boards whose LDO browns out at full TX power (LOLIN S3/S2): their `boards.json` cap normally arrives over HTTP *after* the device is online — which a browning-out board can never reach, since it fails WiFi auth at 20 dBm first. `improv_provision.py --tx-power 8` (and the MoonDeck flow) sends this ahead of the credentials; error `0x81` on an out-of-range value.
 
 `WIFI_SETTINGS` and `GET_WIFI_NETWORKS` are both **rejected with `ERROR_UNABLE_TO_CONNECT` while `platform::wifiStaConnected() == true`**. The scan gate protects large installs: `esp_wifi_scan_start` puts the radio into scan mode for 2-5 s, during which inbound ArtNet packets are dropped. On a 16K-LED rig that's a visible glitch. To re-provision a running device, wipe `ssid` via the UI and reboot, then run Improv before STA reconnects. `GET_CURRENT_STATE` and `GET_DEVICE_INFO` stay available regardless — they're read-only and don't touch the radio.
 

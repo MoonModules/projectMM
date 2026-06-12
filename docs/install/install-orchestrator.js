@@ -37,6 +37,15 @@ import { ImprovSerial } from "https://unpkg.com/improv-wifi-serial-sdk@2.5.0/dis
 // src/platform/esp32/platform_esp32_improv.cpp.
 const IMPROV_CMD_SET_BOARD = 0xFE;
 
+// SET_TX_POWER vendor RPC command ID — the pre-association TX-power cap for
+// boards whose LDO browns out at full power (LOLIN S3/S2). Their boards.json
+// cap (controls.Network.txPowerSetting) used to arrive only via the HTTP
+// fan-out AFTER the device was online, which a browning-out board can never
+// reach: it fails WiFi auth at 20 dBm first (proven on the bench 2026-06-10).
+// Sent BEFORE provisioning so the very first association runs capped.
+// Matches the device-side handler at src/platform/esp32/platform_esp32_improv.cpp.
+const IMPROV_CMD_SET_TX_POWER = 0xFD;
+
 // Improv frame type for RPC commands (matches src/core/ImprovFrame.h).
 const IMPROV_FRAME_TYPE_RPC = 0x03;
 
@@ -158,6 +167,22 @@ function encodeSetBoardPayload(board) {
 async function sendSetBoardFrame(port, board) {
     const payload = encodeSetBoardPayload(board);
     const frame = buildImprovFrame(IMPROV_FRAME_TYPE_RPC, payload);
+    const writer = port.writable.getWriter();
+    try {
+        await writer.write(frame);
+    } finally {
+        writer.releaseLock();
+    }
+}
+
+// Sends the SET_TX_POWER frame ([0xFD][1][dBm]) on a port we own — called
+// BEFORE ImprovSerial takes the port's locks, so no close/reopen dance is
+// needed. Fire-and-forget like SET_BOARD: the device acks with RpcResponse
+// we don't read; the HTTP fan-out later re-applies the same boards.json
+// value as the late fallback.
+async function sendSetTxPowerFrame(port, dBm) {
+    const frame = buildImprovFrame(IMPROV_FRAME_TYPE_RPC,
+                                   new Uint8Array([IMPROV_CMD_SET_TX_POWER, 1, dBm & 0xFF]));
     const writer = port.writable.getWriter();
     try {
         await writer.write(frame);
@@ -304,6 +329,11 @@ export const installer = {
      * @param {string} opts.manifestUrl - URL to an ESP Web Tools manifest
      * @param {string} [opts.board] - board name from boards.json to push
      *   via SET_BOARD after provisioning. Omit / empty for "(any board)".
+     * @param {number|null} [opts.txPower] - boards.json
+     *   controls.Network.txPowerSetting for the picked board (whole dBm).
+     *   When set, the SET_TX_POWER vendor RPC is pushed BEFORE provisioning
+     *   so brown-out-prone boards associate at the capped power. Omit /
+     *   null when the board has no cap.
      * @param {boolean} [opts.eraseBefore=false] - when true, eraseFlash()
      *   before writeFlash. Wipes the entire chip including LittleFS (saved
      *   WiFi credentials, board name). Adds ~12 s. Default false because
@@ -311,8 +341,8 @@ export const installer = {
      *   persistent state to survive a firmware bump.
      * @param {(stage: string, detail?: object) => void} opts.onProgress
      *   Stages: request-port, connect-flash, fetch-firmware, erase,
-     *   flash, reboot, connect-improv, wifi-creds-form, provisioning,
-     *   set-board, done. flash also carries { pct }. connect-flash carries
+     *   flash, reboot, connect-improv, set-tx-power, wifi-creds-form,
+     *   provisioning, set-board, done. flash also carries { pct }. connect-flash carries
      *   { chipName } once detection succeeds.
      * @param {() => Promise<{ssid: string, password: string}>} opts.uiWaitForCreds
      *   Host page resolves this when the user fills in the WiFi form.
@@ -369,7 +399,7 @@ export const installer = {
      *   omitted/null OR when opening this handle fails (stale grant after
      *   the device was unplugged and replugged).
      */
-    async start({ manifestUrl, board, eraseBefore = false, port: prePickedPort,
+    async start({ manifestUrl, board, txPower = null, eraseBefore = false, port: prePickedPort,
                    onProgress, uiWaitForCreds, uiWaitForIp, uiShowNeedsIpRetrying,
                    uiWaitForPortRetry,
                    onSuccess, onError, onLog }) {
@@ -627,6 +657,16 @@ export const installer = {
                 port = await navigator.serial.requestPort({});
                 await port.open({ baudRate: 115200 });
             }
+            // Pre-association TX-power cap (LOLIN brown-out fix): push it
+            // while we still own the port, before ImprovSerial locks it.
+            // The device applies + persists it within a second — long
+            // before the user finishes the WiFi form below.
+            if (txPower != null) {
+                trackProgress("set-tx-power");
+                if (onLog) onLog(`[orchestrator] SET_TX_POWER ${txPower} dBm (boards.json cap)`);
+                await sendSetTxPowerFrame(port, txPower);
+                await new Promise(r => setTimeout(r, 200));
+            }
             improvClient = new ImprovSerial(port, improvLogger);
             // ImprovSerial's initialize() throws "Improv Wi-Fi Serial not
             // detected" in two distinct cases that look identical to the SDK
@@ -744,6 +784,12 @@ export const installer = {
                 // unlocked state.
                 if (uiShowNeedsIpRetrying) uiShowNeedsIpRetrying(true);
                 await new Promise(r => setTimeout(r, 250));
+                // Re-push the TX-power cap on every retry: a slow-booting
+                // board may have missed the first frame entirely.
+                if (txPower != null) {
+                    try { await sendSetTxPowerFrame(port, txPower); } catch (_) { /* best-effort */ }
+                    await new Promise(r => setTimeout(r, 200));
+                }
                 try {
                     improvClient = new ImprovSerial(port, improvLogger);
                     await improvClient.initialize();

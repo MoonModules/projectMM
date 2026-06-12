@@ -21,8 +21,11 @@ add_executable(mm_tests
     unit/core/unit_SystemModule.cpp
 
     # light/
-    unit/light/unit_ArtNetSendDriver_no_alloc_in_loop.cpp
-    unit/light/unit_ArtNetSendDriver_packet.cpp
+    unit/light/unit_AudioModule.cpp
+    unit/light/unit_AudioLevel.cpp
+    unit/light/unit_AudioBands.cpp
+    unit/light/unit_NetworkSendDriver_no_alloc_in_loop.cpp
+    unit/light/unit_NetworkSendDriver_packet.cpp
     unit/light/unit_BlendMap.cpp
     unit/light/unit_CheckerboardEffect.cpp
     unit/light/unit_Correction.cpp
@@ -47,6 +50,14 @@ add_executable(mm_tests
     unit/light/unit_PlasmaEffect.cpp
     unit/light/unit_PreviewDriver.cpp
     unit/light/unit_RainbowEffect.cpp
+    unit/light/unit_NetworkReceiveEffect.cpp
+    unit/light/unit_NetworkReceiveEffect_protocols.cpp
+    unit/light/unit_LcdLedDriver.cpp
+    unit/light/unit_LcdLedEncoder.cpp
+    unit/light/unit_ParlioLedDriver.cpp
+    unit/light/unit_RmtLedEncoder.cpp
+    unit/light/unit_RmtLedDriver_lifecycle.cpp
+    unit/light/unit_RmtLedDriver_pins.cpp
 )
 
 target_include_directories(mm_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -8,7 +8,7 @@
     "RainbowEffect",
     "MultiplyModifier",
     "Drivers",
-    "ArtNetSendDriver"
+    "NetworkSendDriver"
   ],
   "description": "Start empty, add modules step by step, measure tick + heap after each meaningful pipeline state. Surfaces 'how much does each module cost?' so a regression in any one module shows up as a per-step delta instead of a single end-to-end number. Heap bounds catch unintended allocations: each step's delta vs the previous step is asserted against max_delta_bytes (only meaningful on ESP32 where freeHeap() returns a real value).",
   "steps": [
@@ -114,10 +114,10 @@
     },
     {
       "name": "add-artnet",
-      "description": "ArtNetSendDriver under Drivers. Full pipeline now end-to-end.",
+      "description": "NetworkSendDriver under Drivers. Full pipeline now end-to-end.",
       "op": "add_module",
       "id": "ArtNet",
-      "type": "ArtNetSendDriver",
+      "type": "NetworkSendDriver",
       "parent_id": "Drivers"
     },
     {

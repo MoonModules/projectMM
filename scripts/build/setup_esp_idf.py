@@ -15,6 +15,26 @@ from build_esp32 import find_idf, IDF_SEARCH_PATHS
 # execution policy unlocked, which we'd rather not assume.
 INSTALL_SCRIPT_NAME = "install.bat" if sys.platform == "win32" else "install.sh"
 
+# The ESP-IDF commit every target (classic ESP32, S3, P4) has been validated
+# against. This script can't move an existing checkout for you (it doesn't own
+# the clone), but it warns loudly when the installed IDF differs — a silent
+# `git pull` or a fresh shallow clone landing on a newer dev-branch commit is
+# exactly what turns a green build red with no code change (see
+# docs/backlog/backlog.md "ESP-IDF version pinning"). To pin: in ~/esp/esp-idf,
+# `git fetch && git checkout <commit>`. Migrating off this dev snapshot to a
+# stable tag (v6.1 lands 2026-07-31) is a deliberate re-test pass, not a pull.
+PINNED_IDF_COMMIT = "d1b91b79b5ff12d9d4b21fe1cf5406ab6044b8ff"
+PINNED_IDF_VERSION = "v6.1-dev-399-gd1b91b79b5"
+
+
+def _installed_idf_commit(idf_path: Path) -> str:
+    try:
+        r = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(idf_path),
+                           capture_output=True, text=True)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except OSError:
+        return ""
+
 
 def main():
     idf_path = find_idf()
@@ -30,6 +50,17 @@ def main():
     version_file = idf_path / "version.txt"
     if version_file.exists():
         print(f"Version: {version_file.read_text(encoding='utf-8').strip()}")
+
+    # Drift warning: the build was validated against a specific IDF commit, and
+    # the dev branch this snapshot lives on moves. A mismatch isn't fatal (you
+    # may be deliberately migrating), but it must be visible.
+    installed = _installed_idf_commit(idf_path)
+    if installed and installed != PINNED_IDF_COMMIT:
+        print(f"\n⚠  IDF commit drift: installed {installed[:12]} != "
+              f"pinned {PINNED_IDF_COMMIT[:12]} ({PINNED_IDF_VERSION}).")
+        print("   Builds were validated against the pinned commit. If a build "
+              "fails unexpectedly, this is the first suspect.")
+        print(f"   To pin: (cd {idf_path} && git checkout {PINNED_IDF_COMMIT})\n")
 
     # The shallow `git clone --depth 1` users typically run skips submodules,
     # but install.{sh,bat} needs the vendored tooling under `tools/idf_tools.py`

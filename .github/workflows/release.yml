@@ -392,7 +392,10 @@ jobs:
           cp src/ui/install-picker.js pages/install/
           # library.json — install page reads the project version from it.
           cp library.json pages/install/
-          ls -la pages/install/
+          # Root landing page (moonmodules.org/projectMM/) → Flash button + repo
+          # links. Without it the bare root 404s; only /install/ would exist.
+          cp docs/landing/index.html pages/index.html
+          ls -la pages/ pages/install/
 
       - uses: actions/upload-pages-artifact@v3
         with:

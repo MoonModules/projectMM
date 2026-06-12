@@ -3,115 +3,87 @@
 #include "light/layers/Layer.h"
 #include "core/color.h"
 
+#include <cmath>
+#include <cstring>
+
 namespace mm {
 
-// Expanding concentric rings from random centre points.
-// Each ripple grows continuously and respawns at a fresh random
-// position once it leaves the visible area. Multiple ripples overlap.
+// 3D dancing sine-wave ripples — a reimplementation of MoonLight's Ripples
+// against our architecture (studied, not copied; see docs/history).
+//
+// For each (x, z) column on the floor plane, the distance from the centre sets a
+// wave phase; one pixel per column is lit at the height
+//   y = floor(h/2 * (1 + sin(dist / interval + time)))
+// so the lit surface ripples like water filling the 3D volume. The hue cycles
+// over time and position (a palette substitute). Genuinely 3D: it writes a
+// height across the y-axis, so it needs real depth — on a 2D grid (depth 1) it
+// degenerates to a single y-row, which is honest for a flat layout.
+//
+// Float trig in the loop matches the existing wave effects (Plasma, LavaLamp);
+// the hot-path integer-math preference is for per-light colour work, not the
+// handful of transcendental ops a wave front needs.
 class RipplesEffect : public EffectBase {
 public:
-    const char* tags() const override { return "💫🦅"; }  // MoonLight origin · David Jupijn / Rising Step
-    // Iterates y and x only; Layer::extrude fills z on 3D layers.
-    Dim dimensions() const override { return Dim::D2; }
+    const char* tags() const override { return "💫🟦🦅"; }  // MoonLight origin · water-ripple
+    Dim dimensions() const override { return Dim::D3; }
 
-    static constexpr uint8_t MAX_RIPPLES = 8;
-
-    uint8_t count = 4;
-    uint8_t speed = 60;
-    uint8_t thickness = 3;
-    uint8_t hue_shift = 0;
+    uint8_t speed = 50;     // 0 = stopped, 99 = fast
+    uint8_t interval = 128; // wavefront spacing: low = tight rings, high = wide
 
     void onBuildControls() override {
-        controls_.addUint8("count", count, 1, 255);
-        controls_.addUint8("speed", speed, 1, 255);
-        controls_.addUint8("thickness", thickness, 1, 255);
-        controls_.addUint8("hue_shift", hue_shift, 0, 255);
+        controls_.addUint8("speed", speed, 0, 99);
+        controls_.addUint8("interval", interval, 1, 254);
     }
 
     void loop() override {
         uint8_t* buf = buffer();
-        lengthType w = width();
-        lengthType h = height();
-        uint8_t cpl = channelsPerLight();
-        if (w <= 0 || h <= 0) return;
+        const lengthType w = width();
+        const lengthType h = height();
+        const lengthType d = depth();
+        const uint8_t cpl = channelsPerLight();
+        if (w <= 0 || h <= 0 || d <= 0) return;
 
-        // Visible radius limit (octagonal distance to far corner)
-        uint8_t maxR = dist8(static_cast<int16_t>(w), static_cast<int16_t>(h));
+        // Clear: every column lights at most one y, so the rest must be black.
+        std::memset(buf, 0, static_cast<size_t>(nrOfLights()) * cpl);
 
-        if (!initialized_) {
-            for (uint8_t i = 0; i < MAX_RIPPLES; i++) {
-                spawn(i, w, h);
-                // Stagger initial radii so ripples are spread across all sizes
-                radius_[i] = static_cast<uint8_t>((i * maxR) / MAX_RIPPLES);
-            }
-            initialized_ = true;
-        }
+        // Wavefront spacing, scaled to the layout height so the look is grid-size
+        // independent. Guard against a degenerate (near-zero) spacing.
+        const float rippleInterval = 1.3f * ((255.0f - static_cast<float>(interval)) / 128.0f)
+                                     * std::sqrt(static_cast<float>(h));
+        if (rippleInterval < 0.01f) return;
 
-        uint32_t now = elapsed();
-        uint32_t dt = now - lastElapsed_;
-        lastElapsed_ = now;
-        // growth in radius units per frame (scaled by speed control + dt)
-        uint16_t growth = static_cast<uint16_t>((static_cast<uint32_t>(speed) * dt) >> 7);
-        if (growth == 0) growth = 1;
+        // Animate. speed 99 → fast, 0 → frozen. elapsed() is ms since effect start.
+        const float timeInterval = static_cast<float>(elapsed())
+                                  / (100.0f - static_cast<float>(speed)) / 6.4f;
 
-        for (uint8_t i = 0; i < count && i < MAX_RIPPLES; i++) {
-            uint16_t next = static_cast<uint16_t>(radius_[i]) + growth;
-            if (next > maxR) {
-                spawn(i, w, h);
-            } else {
-                radius_[i] = static_cast<uint8_t>(next);
-            }
-        }
+        const float cx = static_cast<float>(w - 1) / 2.0f;
+        const float cz = static_cast<float>(d - 1) / 2.0f;
+        const nrOfLightsType wh = static_cast<nrOfLightsType>(w) * h;
 
-        for (lengthType y = 0; y < h; y++) {
-            uint8_t* row = buf + static_cast<size_t>(y) * static_cast<size_t>(w) * cpl;
+        for (lengthType z = 0; z < d; z++) {
             for (lengthType x = 0; x < w; x++) {
-                uint16_t r_acc = 0, g_acc = 0, b_acc = 0;
-                for (uint8_t i = 0; i < count && i < MAX_RIPPLES; i++) {
-                    int16_t dx = static_cast<int16_t>(x - cx_[i]);
-                    int16_t dy = static_cast<int16_t>(y - cy_[i]);
-                    uint8_t d = dist8(dx, dy);
-                    int16_t diff = static_cast<int16_t>(d) - static_cast<int16_t>(radius_[i]);
-                    if (diff < 0) diff = static_cast<int16_t>(-diff);
-                    if (diff < thickness) {
-                        // Brightness peaks at ring centre, falls off with distance from ring.
-                        uint8_t falloff = static_cast<uint8_t>(((thickness - diff) * 255) / thickness);
-                        // Older ripples (large radius) fade out.
-                        uint8_t age_fade = static_cast<uint8_t>(255 - ((radius_[i] * 255u) / maxR));
-                        uint8_t intensity = scale8(falloff, age_fade);
-                        RGB c = hsvToRgb(static_cast<uint8_t>(hue_[i] + hue_shift), 240, intensity);
-                        r_acc = static_cast<uint16_t>(r_acc + c.r);
-                        g_acc = static_cast<uint16_t>(g_acc + c.g);
-                        b_acc = static_cast<uint16_t>(b_acc + c.b);
-                    }
-                }
-                if (cpl >= 1) row[0] = r_acc > 255 ? 255 : static_cast<uint8_t>(r_acc);
-                if (cpl >= 2) row[1] = g_acc > 255 ? 255 : static_cast<uint8_t>(g_acc);
-                if (cpl >= 3) row[2] = b_acc > 255 ? 255 : static_cast<uint8_t>(b_acc);
-                row += cpl;
+                const float dx = static_cast<float>(x) - cx;
+                const float dz = static_cast<float>(z) - cz;
+                // Distance from the floor-plane centre, scaled to height.
+                const float dist = std::sqrt(dx * dx + dz * dz) / 9.899495f * static_cast<float>(h);
+                const float phase = dist / rippleInterval + timeInterval;
+                const lengthType y = static_cast<lengthType>(
+                    std::floor(static_cast<float>(h) / 2.0f * (1.0f + std::sin(phase))));
+                if (y < 0 || y >= h) continue;
+
+                const uint8_t hue = static_cast<uint8_t>(
+                    elapsed() / 50u + static_cast<uint32_t>(x) * 3u + static_cast<uint32_t>(z) * 7u);
+                const RGB c = hsvToRgb(hue, 255, 255);
+
+                // Buffer layout is (z * h * w + y * w + x) — see NoiseEffect.
+                const nrOfLightsType idx = static_cast<nrOfLightsType>(z) * wh
+                                         + static_cast<nrOfLightsType>(y) * w + x;
+                uint8_t* px = buf + static_cast<size_t>(idx) * cpl;
+                if (cpl >= 1) px[0] = c.r;
+                if (cpl >= 2) px[1] = c.g;
+                if (cpl >= 3) px[2] = c.b;
             }
         }
-    }
-
-private:
-    lengthType cx_[MAX_RIPPLES] = {};
-    lengthType cy_[MAX_RIPPLES] = {};
-    uint8_t radius_[MAX_RIPPLES] = {};
-    uint8_t hue_[MAX_RIPPLES] = {};
-    bool initialized_ = false;
-    uint32_t lastElapsed_ = 0;
-    uint32_t rngState_ = 0xC0DECAFEu;
-
-    uint8_t rand8() {
-        rngState_ = rngState_ * 1103515245u + 12345u;
-        return static_cast<uint8_t>((rngState_ >> 16) & 0xFF);
-    }
-
-    void spawn(uint8_t i, lengthType w, lengthType h) {
-        cx_[i] = static_cast<lengthType>((static_cast<uint16_t>(rand8()) * w) >> 8);
-        cy_[i] = static_cast<lengthType>((static_cast<uint16_t>(rand8()) * h) >> 8);
-        radius_[i] = 0;
-        hue_[i] = rand8();
     }
 };
 

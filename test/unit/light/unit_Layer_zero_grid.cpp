@@ -1,5 +1,5 @@
 // @module Layer
-// @also RainbowEffect, NoiseEffect, PlasmaEffect, CheckerboardEffect, SpiralEffect, MetaballsEffect, PlasmaPaletteEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect, FireEffect, ParticlesEffect
+// @also RainbowEffect, NoiseEffect, PlasmaEffect, CheckerboardEffect, SpiralEffect, MetaballsEffect, PlasmaPaletteEffect, RingsEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect, FireEffect, ParticlesEffect
 
 #include "doctest.h"
 #include "light/layers/Layer.h"
@@ -12,6 +12,7 @@
 #include "light/effects/SpiralEffect.h"
 #include "light/effects/MetaballsEffect.h"
 #include "light/effects/PlasmaPaletteEffect.h"
+#include "light/effects/RingsEffect.h"
 #include "light/effects/RipplesEffect.h"
 #include "light/effects/GlowParticlesEffect.h"
 #include "light/effects/LavaLampEffect.h"
@@ -62,6 +63,8 @@ TEST_CASE("SpiralEffect on 0,0,0 grid")      { run_with_empty_layout<mm::SpiralE
 TEST_CASE("MetaballsEffect on 0,0,0 grid")   { run_with_empty_layout<mm::MetaballsEffect>(); }
 // PlasmaPalette on 0,0,0 grid: no crash.
 TEST_CASE("PlasmaPaletteEffect on 0,0,0 grid"){run_with_empty_layout<mm::PlasmaPaletteEffect>(); }
+// Rings on 0,0,0 grid: no crash.
+TEST_CASE("RingsEffect on 0,0,0 grid")       { run_with_empty_layout<mm::RingsEffect>(); }
 // Ripples on 0,0,0 grid: no crash.
 TEST_CASE("RipplesEffect on 0,0,0 grid")     { run_with_empty_layout<mm::RipplesEffect>(); }
 // GlowParticles on 0,0,0 grid: no crash.
