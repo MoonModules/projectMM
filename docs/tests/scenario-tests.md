@@ -4,6 +4,102 @@ Auto-generated from `test/scenarios/{core,light}/scenario_*.json` by `scripts/do
 
 Scenario tests are the integration tier in the [test strategy](../testing.md): each one is a JSON script that drives the full pipeline (PC or live ESP32) and captures tick / heap per step against per-target contracts. Run them with `scripts/scenario/run_scenario.py` (PC) or `scripts/scenario/run_live_scenario.py` (live device). See [testing.md § Performance contracts](../testing.md#performance-contracts-contracttarget) for the contract semantics.
 
+## AudioModule
+
+### scenario_Audio_mutation
+
+`test/scenarios/light/scenario_Audio_mutation.json` — Add / configure / remove the AudioModule peripheral and an audio-reactive effect while the render pipeline runs, proving the robustness rule for the audio producer/consumer pair. AudioModule is a Peripheral (it sits beside the pipeline, publishing an AudioFrame), and the audio effects read it through the static AudioModule::latestFrame() accessor, NOT a boot-time pointer — so add/remove can happen in any order at runtime. The checks assert the pipeline keeps RENDERING (buffer non-null, fps measurable) through each mutation: adding the mic, setting its pins (the user-configures-then-runs flow), adding a consumer effect, and crucially REMOVING the mic while a consumer is still live (the consumer must fall back to a silent frame, never deref a dangling pointer — the bug the boot-loop fix and the unit lifecycle tests pin, here proven end-to-end through the Scheduler). On the host the mic is inert (hasI2sMic false), so this exercises the wiring/lifecycle, not real capture; capture is proven on hardware. Grid is 64x64 so the tick stays above the host microsecond clock at every step.
+
+**Mode**: `mutate` · **Also touches**: SystemModule, Layouts, GridLayout, Layer, RainbowEffect, AudioVolumeEffect, AudioSpectrumEffect, Drivers, PreviewDriver
+
+#### `measure-pipeline-only` (measure)  📏
+
+Baseline: the render pipeline runs with no audio module present.
+
+**Bounds**:
+- FPS ≥ 1 (absolute)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `pc-macos` | — / 100,000-111,111 | — / unlimited | — / unlimited |
+
+- `pc-macos`: observed 2026-06-12
+
+#### `measure-audio-added` (measure)  📏
+
+Pipeline still renders with the (idle, unconfigured) mic added.
+
+**Setup** (preceding non-measured steps):
+- `add-audio-module` (add_module) — Add the AudioModule peripheral under SystemModule (where the user adds it, beside the board). Pins default unset, so it stays idle; the pipeline must keep rendering.
+
+**Bounds**:
+- FPS ≥ 1 (absolute)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `pc-macos` | — / 111,111 | — / unlimited | — / unlimited |
+
+- `pc-macos`: observed 2026-06-12
+
+#### `measure-consumer-live` (measure)  📏
+
+Pipeline renders with the producer + consumer both wired.
+
+**Setup** (preceding non-measured steps):
+- `configure-audio-pins` (set_control) — Set a mic pin — the user-configures-then-runs flow. On host the mic is inert, but the buildState rebuild must not disturb the running pipeline.
+- `add-audio-consumer` (add_module) — Add an AudioVolumeEffect consumer under the Layer. It reads the mic via the static accessor; with the mic present it gets the live (silent, on host) frame.
+
+**Bounds**:
+- FPS ≥ 1 (absolute)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `pc-macos` | — / 100,000-111,111 | — / unlimited | — / unlimited |
+
+- `pc-macos`: observed 2026-06-12
+
+#### `measure-after-mic-removed` (measure)  📏
+
+Mic gone, consumer remains: pipeline keeps rendering on silent audio (buffer non-null, fps measurable). No crash from the orphaned consumer.
+
+**Setup** (preceding non-measured steps):
+- `remove-audio-module` (remove_module) — Remove the mic while the consumer is STILL live. The consumer must fall back to AudioModule::latestFrame()'s static silence — no dangling pointer, no crash. This is the robustness rule's hardest case for this pair.
+
+**Bounds**:
+- FPS ≥ 1 (absolute)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `pc-macos` | — / 111,111 | — / unlimited | — / unlimited |
+
+- `pc-macos`: observed 2026-06-12
+
+#### `measure-back-to-baseline` (measure)  📏
+
+Both audio modules gone: back to the pipeline-only baseline, still rendering.
+
+**Setup** (preceding non-measured steps):
+- `remove-audio-consumer` (remove_module) — Remove the orphaned consumer too — clean teardown, pipeline still live.
+
+**Bounds**:
+- FPS ≥ 1 (absolute)
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `pc-macos` | — / 100,000-111,111 | — / unlimited | — / unlimited |
+
+- `pc-macos`: observed 2026-06-12
+
 ## GridLayout
 
 ### scenario_GridLayout_grid_sizes
@@ -58,14 +154,14 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 | `esp32-eth` | ≥ 303 / 379-381 | ≥ 161KB / 172KB | ≥ 78KB / 92KB |
 | `esp32-eth-wifi` | ≥ 400 / 390 | ≥ 142KB / 132KB | ≥ 49KB / 50KB |
 | `esp32s3-n16r8` | — / 288 | — / 8349KB | — / 140KB |
-| `pc-macos` | ≥ 100,000 / 111,111-200,000 | unlimited / unlimited | — / unlimited |
+| `pc-macos` | ≥ 100,000 / 76,923-200,000 | unlimited / unlimited | — / unlimited |
 | `pc-windows` | — / 71,429-90,909 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `esp32s3-n16r8`: observed 2026-06-04
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-06
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-11
 - `pc-windows`: observed 2026-06-07
 
 #### `size-64x64` (set_control)  📏
@@ -86,14 +182,14 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 | `esp32-eth` | ≥ 55.6 / 74.5-74.7 | ≥ 137KB / 147KB | ≥ 54KB / 62KB |
 | `esp32-eth-wifi` | ≥ 76.9 / 85.7 | ≥ 117KB / 108KB | ≥ 44KB / 48KB |
 | `esp32s3-n16r8` | — / 25.9 | — / 8310KB | — / 152KB |
-| `pc-macos` | ≥ 33,333 / 30,303-43,478 | unlimited / unlimited | — / unlimited |
+| `pc-macos` | ≥ 33,333 / 4,484-43,478 | unlimited / unlimited | — / unlimited |
 | `pc-windows` | — / 17,857-22,727 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `esp32s3-n16r8`: observed 2026-06-04
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-11
 - `pc-windows`: observed 2026-06-07
 
 #### `size-128x128` (set_control)  📏
@@ -114,14 +210,14 @@ Scenario tests are the integration tier in the [test strategy](../testing.md): e
 | `esp32-eth` | ≥ 9.1 / 10.5-10.6 | ≥ 122KB / 132KB | ≥ 47KB / 48KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 54.5 | ≥ 103KB / 129KB | ≥ 44KB / 52KB |
 | `esp32s3-n16r8` | — / 6.1 | — / 8163KB | — / 164KB |
-| `pc-macos` | ≥ 8,333 / 4,975-10,204 | unlimited / unlimited | — / unlimited |
+| `pc-macos` | ≥ 8,333 / 4,902-10,204 | unlimited / unlimited | — / unlimited |
 | `pc-windows` | — / 3,676-4,505 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: contract set 2026-06-02 "anti-regression floor; LUT-fit telemetry baseline" · observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
 - `esp32s3-n16r8`: observed 2026-06-04
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-11
 - `pc-windows`: observed 2026-06-07
 
 ### scenario_GridLayout_resize
@@ -342,11 +438,11 @@ RainbowEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, m
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 143-176 | — / 159KB-162KB | — / 76KB-108KB |
-| `pc-macos` | — / 100,000-125,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 71,429-125,000 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 34,483-40,000 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07 → 2026-06-11
+- `pc-macos`: observed 2026-06-07 → 2026-06-12
 - `pc-windows`: observed 2026-06-07
 
 #### `RainbowEffect-128x128` (set_control)  📏
@@ -361,11 +457,11 @@ RainbowEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 20.2-22.6 | — / 126KB | — / 62KB-108KB |
-| `pc-macos` | — / 25,000-28,571 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 24,390-28,571 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 6,098-8,929 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07 → 2026-06-10
+- `pc-macos`: observed 2026-06-07 → 2026-06-12
 - `pc-windows`: observed 2026-06-07
 
 #### `NoiseEffect-16x16` (set_control)  📏
@@ -440,11 +536,11 @@ NoiseEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, 
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 12.3-17.1 | — / 126KB | — / 62KB-108KB |
-| `pc-macos` | — / 2,825-3,268 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 1,357-3,268 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 1,190-1,437 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07 → 2026-06-11
+- `pc-macos`: observed 2026-06-07 → 2026-06-12
 - `pc-windows`: observed 2026-06-07
 
 #### `PlasmaEffect-16x16` (set_control)  📏
@@ -481,11 +577,11 @@ PlasmaEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, ma
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 830-863 | — / 171KB | — / 92KB-108KB |
-| `pc-macos` | — / 333,333 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 200,000-333,333 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 142,857-166,667 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-12
 - `pc-windows`: observed 2026-06-07
 
 #### `PlasmaEffect-64x64` (set_control)  📏
@@ -500,11 +596,11 @@ PlasmaEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, ma
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 135-181 | — / 162KB | — / 84KB-108KB |
-| `pc-macos` | — / 66,667-90,909 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 62,500-90,909 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 35,714-43,478 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07 → 2026-06-08
+- `pc-macos`: observed 2026-06-07 → 2026-06-12
 - `pc-windows`: observed 2026-06-07
 
 #### `PlasmaEffect-128x128` (set_control)  📏
@@ -598,11 +694,11 @@ PlasmaPaletteEffect at 128x128 (16384 lights) — measure tick/FPS, free interna
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 21.8-32.1 | — / 126KB | — / 62KB-108KB |
-| `pc-macos` | — / 37,037-50,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 32,258-50,000 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 12,346-18,868 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07 → 2026-06-10
+- `pc-macos`: observed 2026-06-07 → 2026-06-12
 - `pc-windows`: observed 2026-06-07
 
 #### `MetaballsEffect-16x16` (set_control)  📏
@@ -620,11 +716,11 @@ MetaballsEffect at 16x16 (256 lights) — measure tick/FPS, free internal heap, 
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 2,016-2,062 | — / 173KB-174KB | — / 92KB-108KB |
-| `pc-macos` | — / 1,000,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 500,000-1,000,000 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 200,000-250,000 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-12
 - `pc-windows`: observed 2026-06-07
 
 #### `MetaballsEffect-32x32` (set_control)  📏
@@ -658,11 +754,11 @@ MetaballsEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap,
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 89.3-103 | — / 162KB | — / 84KB-108KB |
-| `pc-macos` | — / 55,556-62,500 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 38,462-62,500 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 12,500-15,385 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-12
 - `pc-windows`: observed 2026-06-07
 
 #### `MetaballsEffect-128x128` (set_control)  📏
@@ -677,11 +773,11 @@ MetaballsEffect at 128x128 (16384 lights) — measure tick/FPS, free internal he
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 16.3-18.7 | — / 126KB | — / 62KB-108KB |
-| `pc-macos` | — / 13,158-15,873 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 5,263-15,873 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 2,786-3,636 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-12
 - `pc-windows`: observed 2026-06-07
 
 #### `FireEffect-16x16` (set_control)  📏
@@ -718,11 +814,11 @@ FireEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap, max 
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 678-784 | — / 170KB | — / 92KB-108KB |
-| `pc-macos` | — / 250,000-333,333 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 142,857-333,333 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 100,000-125,000 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-12
 - `pc-windows`: observed 2026-06-07
 
 #### `FireEffect-64x64` (set_control)  📏
@@ -737,11 +833,11 @@ FireEffect at 64x64 (4096 lights) — measure tick/FPS, free internal heap, max 
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 122-160 | — / 158KB | — / 76KB-108KB |
-| `pc-macos` | — / 55,556-76,923 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 27,778-76,923 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 27,027-33,333 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-12
 - `pc-windows`: observed 2026-06-07
 
 #### `FireEffect-128x128` (set_control)  📏
@@ -756,11 +852,11 @@ FireEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, m
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 18.1-21.5 | — / 110KB | — / 62KB |
-| `pc-macos` | — / 16,393-19,231 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 6,803-19,231 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 6,452-7,194 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07 → 2026-06-11
+- `pc-macos`: observed 2026-06-07 → 2026-06-12
 - `pc-windows`: observed 2026-06-07
 
 #### `ParticlesEffect-16x16` (set_control)  📏
@@ -1151,11 +1247,11 @@ RingsEffect at 128x128 (16384 lights) — measure tick/FPS, free internal heap, 
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 12.2-13.0 | — / 125KB-126KB | — / 62KB-108KB |
-| `pc-macos` | — / 8,403-13,889 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 7,937-13,889 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 3,067-3,831 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07 → 2026-06-10
+- `pc-macos`: observed 2026-06-07 → 2026-06-12
 - `pc-windows`: observed 2026-06-07
 
 #### `LavaLampEffect-16x16` (set_control)  📏
@@ -1230,7 +1326,7 @@ LavaLampEffect at 128x128 (16384 lights) — measure tick/FPS, free internal hea
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 18.2-19.0 | — / 125KB-126KB | — / 62KB-108KB |
-| `pc-macos` | — / 27,778-33,333 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 22,222-33,333 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 4,926-6,757 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
@@ -1271,11 +1367,11 @@ GameOfLifeEffect at 32x32 (1024 lights) — measure tick/FPS, free internal heap
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 1,520-1,653 | — / 166KB-169KB | — / 84KB-108KB |
-| `pc-macos` | — / 1,000,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 333,333-1,000,000 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 166,667-200,000 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07
+- `pc-macos`: observed 2026-06-07 → 2026-06-11
 - `pc-windows`: observed 2026-06-07
 
 #### `GameOfLifeEffect-64x64` (set_control)  📏
@@ -1309,11 +1405,11 @@ GameOfLifeEffect at 128x128 (16384 lights) — measure tick/FPS, free internal h
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 11.5-13.9 | — / 91KB-94KB | — / 46KB-62KB |
-| `pc-macos` | — / 19,608-28,571 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 4,975-28,571 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 8,696-9,174 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
-- `pc-macos`: observed 2026-06-07 → 2026-06-08
+- `pc-macos`: observed 2026-06-07 → 2026-06-11
 - `pc-windows`: observed 2026-06-07
 
 ### scenario_Layer_base_pipeline
@@ -1491,7 +1587,7 @@ Multiply modifier active — pipeline live, LUT folds the grid.
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 1,580-7,752 | — / 172KB-225KB | — / 76KB-108KB |
-| `pc-macos` | — / 111,111-166,667 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 76,923-166,667 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
 - `pc-macos`: observed 2026-06-07 → 2026-06-11
@@ -1508,7 +1604,7 @@ Checkerboard modifier active — masks half the lights; pipeline stays live (dri
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 769-990 | — / 170KB-225KB | — / 76KB-108KB |
-| `pc-macos` | — / 31,250-58,824 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 17,544-58,824 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
 - `pc-macos`: observed 2026-06-07 → 2026-06-11

@@ -145,20 +145,14 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     systemModule->addChild(boardModule);
     boardModule->markWiredByCode();
 
-    // AudioModule — I2S microphone input, a Peripheral child of System. Produces the
-    // AudioFrame the audio effects consume; they reach it via AudioModule::latestFrame()
-    // (not a boot setter), so a UI-added audio effect finds the live mic too. Gated
-    // on platform::hasI2sMic: created only where there's an I2S peripheral (every
-    // current ESP32; not desktop), so on a mic-less build the effects read a static
-    // silent frame and degrade to dark. markWiredByCode keeps it through a
-    // persistence load, like BoardModule.
-    if constexpr (mm::platform::hasI2sMic) {
-        auto* audioModule = static_cast<mm::AudioModule*>(mm::ModuleFactory::create("AudioModule"));
-        if (audioModule) {            // never deref a failed create — a missing
-            systemModule->addChild(audioModule);   // registration must not boot-loop
-            audioModule->markWiredByCode();
-        }
-    }
+    // AudioModule is NOT auto-wired. It is a mic peripheral, useful only on a board
+    // that actually has an I2S microphone, so the user adds it through the UI when
+    // they have one (the same model as the effects: registered in the factory,
+    // user-added, not boot-wired). Auto-wiring it on every flash forced an I2S init
+    // on boards with no mic, which on the classic ESP32 hung setup() and boot-looped
+    // the device. When added, its pins default to empty so it stays idle until the
+    // user enters the real GPIOs. The audio effects reach it via the static
+    // AudioModule::latestFrame(), which returns a silent frame when no mic exists.
 
     // FirmwareUpdate — surfaces OTA status as two read-only controls.
     // The actual flash is driven by POST /api/firmware/url; this module just

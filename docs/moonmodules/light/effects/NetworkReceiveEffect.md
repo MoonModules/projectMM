@@ -1,6 +1,6 @@
 # Network Receive Effect
 
-Receives lights-over-UDP data — **ArtNet, E1.31/sACN, and DDP, all at once** — and writes it into the layer buffer, behaving like any other effect: composable with modifiers, part of layer blending, selectable through the same UI. The receive side for industry senders (Resolume Arena, Madrix, xLights, LedFx, …) and the end-to-end pair with [NetworkSendDriver](../drivers/NetworkSendDriver.md).
+Receives lights-over-UDP data — **[Art-Net](https://art-net.org.uk/downloads/art-net.pdf), [E1.31 / sACN](https://tsp.esta.org/tsp/documents/docs/ANSI_E1-31-2018.pdf), and [DDP](http://www.3waylabs.com/ddp/), all at once** — and writes it into the layer buffer, behaving like any other effect: composable with modifiers, part of layer blending, selectable through the same UI. The receive side for industry senders (Resolume Arena, Madrix, xLights, LedFx, …) and the end-to-end pair with [NetworkSendDriver](../drivers/NetworkSendDriver.md).
 
 There is deliberately **no protocol control**: the effect binds the three well-known ports (6454 ArtNet, 5568 E1.31, 4048 DDP) simultaneously and validates each packet against its port's wire format — WLED's multi-port pattern. Whatever a sender speaks just works; the status field shows what is being received (`receiving DDP`, …).
 

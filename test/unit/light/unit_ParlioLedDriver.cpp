@@ -23,6 +23,12 @@ namespace {
 
 void wire(mm::ParlioLedDriver& d, mm::Buffer& src, mm::Correction& corr,
           mm::nrOfLightsType lights) {
+    // Pins default to UNSET now (the "default only when it cannot do harm" rule —
+    // the user solders the strand to its own GPIOs), so a fresh driver idles until
+    // configured. These slicing/frame tests exercise the lane logic, not the
+    // default value, so the helper supplies the bench 8-pin set unless a case set
+    // its own pins first.
+    if (d.pins[0] == '\0') std::strcpy(d.pins, "20,21,22,23,24,25,26,27");
     // allocate succeeds exactly when lights > 0 (zero-grid wires an empty buffer
     // on purpose); a masked alloc failure would fail cases downstream.
     REQUIRE(src.allocate(lights, 3) == (lights > 0));
@@ -63,15 +69,13 @@ TEST_CASE("ParlioLedDriver slices lanes and sizes the frame by the longest") {
     CHECK(d.frameBytes() == expectFrame(50, 3));
 }
 
-// Empty ledsPerPin splits evenly over the default 8 lanes — shared PinList
-// semantics. (The default ledsPerPin="64" puts everything on lane 0; clearing
-// it gives the even split.)
+// Empty ledsPerPin (the default) splits evenly over the 8 lanes — shared PinList
+// semantics, same as the RMT/LCD drivers.
 TEST_CASE("ParlioLedDriver even split over 8 lanes") {
     mm::ParlioLedDriver d;
     mm::Buffer src;
     mm::Correction corr;
-    std::strcpy(d.ledsPerPin, "");   // override the single-strand default
-    wire(d, src, corr, 256);         // default pins: 8 lanes
+    wire(d, src, corr, 256);         // ledsPerPin empty (default) = even split
 
     REQUIRE(d.laneCount() == 8);
     CHECK(d.laneLightCount(0) == 32);
@@ -140,6 +144,28 @@ TEST_CASE("ParlioLedDriver bad pins → status error → recovery") {
     CHECK(d.status() == nullptr);
 }
 
+// Pins now default UNSET (the "default only when it cannot do harm" rule — the
+// strand is user-soldered). A fresh, unconfigured driver idles, never grabbing a
+// GPIO. (wire() back-fills empty pins for the slicing cases, so this one wires
+// the buffer directly to keep pins empty.)
+TEST_CASE("ParlioLedDriver with the empty default pins idles cleanly") {
+    mm::ParlioLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    REQUIRE(d.pins[0] == '\0');           // the empty default, not a bench guess
+    REQUIRE(src.allocate(64, 3));
+    corr.rebuild(255, mm::LightPreset::GRB);
+    d.onBuildControls();
+    d.setSourceBuffer(&src);
+    d.setCorrection(&corr);
+    d.onBuildState();
+
+    CHECK(d.laneCount() == 0);            // no lanes claimed
+    CHECK(d.frameBytes() == 0);
+    CHECK(d.status() != nullptr);         // "set pins" surfaced, not silent
+    d.loop();                             // must be a no-op, not a crash
+}
+
 // A 0×0×0 grid is a clean idle: zero counts, zero frame, no crash.
 TEST_CASE("ParlioLedDriver tolerates a zero-light buffer") {
     mm::ParlioLedDriver d;
@@ -188,13 +214,14 @@ TEST_CASE("ParlioLedDriver setup/teardown is repeatable") {
     mm::Correction corr;
     src.allocate(64, 3);
     corr.rebuild(255, mm::LightPreset::GRB);
+    std::strcpy(d.pins, "20,21,22,23,24,25,26,27");   // pins now default UNSET
     d.onBuildControls();
     for (int cycle = 0; cycle < 4; cycle++) {
         d.setup();
         d.setSourceBuffer(&src);
         d.setCorrection(&corr);
         d.onBuildState();
-        REQUIRE(d.laneCount() == 8);   // the default 8 pins
+        REQUIRE(d.laneCount() == 8);   // the 8 pins set above
         d.teardown();
         CHECK(d.status() == nullptr);
     }

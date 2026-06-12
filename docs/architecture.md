@@ -393,7 +393,7 @@ The shared output buffer is necessary when blend+map writes to arbitrary physica
 
 Each driver (a MoonModule) speaks one protocol:
 
-- **LED drivers**: WS2812 via RMT (multi-pin), plus two parallel-output paths on the newer chips, WS2812 over the S3's LCD_CAM i80 bus and over the P4's Parlio peripheral (up to 8 lanes each, DMA-driven). Platform-specific; all behind the platform boundary.
+- **LED drivers**: WS2812 via RMT (multi-pin), plus two parallel-output paths on the newer chips. The S3's LCD_CAM i80 bus ([LcdLedDriver](moonmodules/light/drivers/LcdLedDriver.md)) drives exactly 8 data GPIOs — the i80 bus claims every data line of its width, so a partial set is rejected. The P4's Parlio peripheral ([ParlioLedDriver](moonmodules/light/drivers/ParlioLedDriver.md)) drives 1–8 lanes — it takes the data GPIOs directly, so any count up to 8 is valid. Both are DMA-driven. Platform-specific; all behind the platform boundary.
 - **DMX / ArtNet**: sends DMX over UDP. Supports addressable LEDs and conventional DMX fixtures (pars, moving heads, dimmers).
 - **Preview**: streams light data to the web UI via WebSocket.
 - **Desktop output**: SDL2 or terminal for visual preview. Desktop also serves as a high-speed processing node, driving lights via ArtNet/DDP over the network.

@@ -4,6 +4,42 @@ Auto-generated from `test/unit/{core,light}/unit_*.cpp` by `scripts/docs/generat
 
 Unit tests are the fastest tier in the [test strategy](../testing.md): they run the production code in-process with doctest, no platform, no network. Each section below covers one module.
 
+## AudioModule
+
+`test/unit/light/unit_AudioBands.cpp`
+*Also touches: AudioSpectrumEffect.*
+
+- _AudioBands: silence yields all-zero bands and no peak_
+- _AudioBands: a low tone lands in a low band, a high tone in a high band_
+- _AudioBands: the reported peak frequency tracks the played tone_
+- _AudioBands: a single tone concentrates energy, not smears it everywhere_
+- _AudioBands: noiseFloor gates a low idle spectrum to zero, gain scales it back_
+- _AudioBands: zero / degenerate input never crashes_
+
+`test/unit/light/unit_AudioLevel.cpp`
+*Also touches: AudioVolumeEffect.*
+
+- _DcBlocker: a constant DC offset is filtered out_
+- _DcBlocker: an audio tone passes through (DC removed, AC kept)_
+- _DcBlocker: reset clears state, null-safe_
+- _AudioLevel: silence reads zero_
+- _AudioLevel: pure DC reads zero (DC offset stripped)_
+- _AudioLevel: a loud sine reads a higher level than a quiet one_
+- _AudioLevel: DC bias does not change the level of a sine_
+- _AudioLevel: a high noiseFloor (dB floor) gates a modest signal to zero_
+- _AudioLevel: higher gain (narrower dB window) reads a higher level_
+- _AudioLevel: empty / null input is silence, never a crash_
+- _AudioLevel: isqrt64 matches floor(sqrt) on a spread of values_
+- Regression: the boot wiring in main.cpp does create("AudioModule")->markWiredByCode() and create() returns nullptr for an UNREGISTERED type — so a missing registerType<AudioModule> made the deref crash and the device boot-looped (found on the S3 bench). These pin that AudioModule and the two audio effects are all registered + createable through the factory, and that latestFrame() is never null even with no mic (so a consumer added before the mic can't deref null).
+- _AudioModule::latestFrame is never null (silent frame with no active mic)_
+
+`test/unit/light/unit_AudioModule.cpp`
+
+- _AudioModule: a fresh, unconfigured module is idle (pins default unset)_
+- _AudioModule: setup/teardown is repeatable with no residual state_
+- _AudioModule: teardown clears the active mic (latestFrame falls back to silence)_
+- _AudioModule: last setup() wins, any add/remove order stays coherent_
+
 ## BlendMap
 
 `test/unit/light/unit_BlendMap.cpp`
@@ -251,6 +287,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Empty ledsPerPin splits evenly — same PinList semantics the RMT driver uses.
 - An RGB→RGBW preset toggle grows the frame (32 vs 24 slot bytes per light).
 - A bad pin list idles the driver with the parse literal in the status; fixing it recovers.
+- Pins now default UNSET (the "default only when it cannot do harm" rule — the strand is user-soldered). A fresh, unconfigured driver idles, never grabbing the 8 data GPIOs on its own. (wire() back-fills empty pins for the slicing cases, so this one wires the buffer directly to keep pins empty.)
 - IDF's i80 bus rejects partial pin sets, so the driver does too — fewer than 8 pins is a config error, not a narrower bus.
 - A 0×0×0 grid is a clean idle: zero counts, zero frame (no pad for an empty frame), no crash.
 - setup/teardown cycles leave no residue (status clean, ASAN-checked heap).
@@ -440,11 +477,12 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 *Also touches: Drivers, Correction.*
 
 - Three lanes (Parlio accepts any 1..8 count) slice the buffer consecutively; the frame is sized by the LONGEST lane.
-- Empty ledsPerPin splits evenly over the default 8 lanes — shared PinList semantics. (The default ledsPerPin="64" puts everything on lane 0; clearing it gives the even split.)
+- Empty ledsPerPin (the default) splits evenly over the 8 lanes — shared PinList semantics, same as the RMT/LCD drivers.
 - The Parlio-vs-LCD difference: 1..8 pins are ALL valid (no exactly-8 rule).
 - More than 8 pins is rejected (the chip's lane cap), like the other drivers.
 - An RGB→RGBW preset toggle grows the frame (32 vs 24 slot bytes per light).
 - A bad pin list idles the driver with the parse literal in the status; fixing it recovers.
+- Pins now default UNSET (the "default only when it cannot do harm" rule — the strand is user-soldered). A fresh, unconfigured driver idles, never grabbing a GPIO. (wire() back-fills empty pins for the slicing cases, so this one wires the buffer directly to keep pins empty.)
 - A 0×0×0 grid is a clean idle: zero counts, zero frame, no crash.
 - loop() is crash-safe across single-pin / multi-pin / pre-init configs (the transmit path is gated out on the host; this pins the reachable contract).
 - setup/teardown cycles leave no residue (status clean, ASAN-checked heap).
@@ -517,6 +555,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - _RmtLedDriver slices the buffer across pins (even split)_
 - _RmtLedDriver slices the buffer per ledsPerPin_
 - _RmtLedDriver idles with a status error on a bad pin list_
+- _RmtLedDriver with the empty default pins idles cleanly (no pin assumed)_
 - _RmtLedDriver re-slices when the source buffer changes_
 - loop() is a safe no-op across single-pin, multi-pin and zero-grid configs.
 

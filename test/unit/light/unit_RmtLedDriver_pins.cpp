@@ -197,6 +197,26 @@ TEST_CASE("RmtLedDriver idles with a status error on a bad pin list") {
     CHECK(d.status() == nullptr);
 }
 
+TEST_CASE("RmtLedDriver with the empty default pins idles cleanly (no pin assumed)") {
+    // Pins now default UNSET (the "default only when it cannot do harm" rule — the
+    // strand is user-soldered). A fresh, unconfigured driver must idle, not grab a
+    // GPIO: zero pins, a status note, and a crash-safe no-op loop().
+    mm::RmtLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    REQUIRE(d.pins[0] == '\0');           // the empty default, not a bench guess
+    wire(d, src, corr, 64);               // wire() leaves pins as-is (empty)
+
+    CHECK(d.pinCount() == 0);             // nothing claimed
+    CHECK(d.status() != nullptr);         // "set pins" surfaced, not silent
+    d.loop();                             // must be a no-op, not a crash
+    // Setting pins later brings it live (the user-configures-then-runs flow).
+    std::strcpy(d.pins, "18");
+    d.onBuildState();
+    CHECK(d.pinCount() == 1);
+    CHECK(d.status() == nullptr);
+}
+
 TEST_CASE("RmtLedDriver re-slices when the source buffer changes") {
     // setSourceBuffer must recompute counts (the Drivers container re-passes the
     // buffer on every buildState) — a grid resize updates the even split.

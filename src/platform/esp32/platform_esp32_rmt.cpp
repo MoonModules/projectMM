@@ -23,8 +23,13 @@
 #include "freertos/task.h"
 #include "rom/ets_sys.h"   // ets_delay_us for the reset gap
 
+#include "esp_heap_caps.h"   // capture buffer alloc for the shared frame loopback
+#include "esp_timer.h"       // timed first transmit
+#include "esp_log.h"
+
 #include <cstdlib>
 #include <cstring>
+#include <functional>  // the transmit callback the shared frame loopback takes
 #include <new>      // std::nothrow
 
 namespace mm::platform {
@@ -259,6 +264,102 @@ bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio) {
     gpio_reset_pin(static_cast<gpio_num_t>(txGpio));
     gpio_reset_pin(static_cast<gpio_num_t>(rxGpio));
     return hi == 1 && lo == 0;
+}
+
+// Shared frame-capture + bit-verify for the two parallel LED loopbacks (LCD_CAM
+// i80 and Parlio). They differ only in the transmit call (esp_lcd_panel_io_tx_color
+// vs parlio_tx_unit_transmit) and the private-bus state type; everything else —
+// the capture buffer, the RX task, the timed-first/back-to-back transmit cadence,
+// and the whole per-bit verification — was byte-for-byte identical, so it lives
+// here once. The caller has already done the jumper pre-check and built its
+// private TX bus on the data pins; it passes `transmitOnce` (transmit the frame
+// AND wait for its done-callback) and the params needed to size the capture and
+// log the granted clock. `r` is filled in place (jumperDetected already set).
+void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
+                           uint8_t rowBits, uint32_t pclkHz, const char* tag,
+                           const std::function<void()>& transmitOnce,
+                           RmtLoopbackResult& r) {
+    // Capture at 40 MHz: a slot is 15 ticks, so "0" ≈ 15 and "1" ≈ 30 high ticks
+    // — threshold midway at 25. One symbol per WS2812 bit; the frame's zeroed
+    // latch pad is the >100 µs idle that ends the capture.
+    constexpr uint32_t kCapResHz = 40'000'000;
+    const size_t kBits = dataBytes / 3;
+    const size_t capMax = kBits + 16;
+    auto* rxSymbols = static_cast<uint32_t*>(heap_caps_aligned_alloc(
+        64, capMax * sizeof(uint32_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+    if (!rxSymbols) {
+        ESP_LOGE(tag, "loopback: capture buffer alloc failed (%u B)",
+                 (unsigned)(capMax * sizeof(uint32_t)));
+        return;
+    }
+
+    struct Cap {
+        uint8_t rxGpio; uint32_t* buf; size_t max;
+        volatile size_t got = 0; volatile bool done = false;
+    } cap{static_cast<uint8_t>(rxGpio), rxSymbols, capMax};
+    auto rxTask = [](void* arg) {
+        auto* c = static_cast<Cap*>(arg);
+        c->got = rmtWs2812RxCapture(c->rxGpio, kCapResHz, c->buf, c->max, 1000);
+        c->done = true;
+        vTaskDelete(nullptr);
+    };
+    if (xTaskCreate(rxTask, "lblb", 4096, &cap, 5, nullptr) == pdPASS) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        // First transmit timed — the wall time of a known byte count confirms the
+        // granted pixel clock matches the configured slot rate (the bus driver
+        // doesn't expose the granted clock directly).
+        {
+            const int64_t t0 = esp_timer_get_time();
+            transmitOnce();
+            const int64_t dt = esp_timer_get_time() - t0;
+            ESP_LOGI(tag, "loopback: %u bytes in %lld us (expect ~%u us at %u Hz)",
+                     (unsigned)frameBytes, (long long)dt,
+                     (unsigned)(frameBytes * 1000000ull / pclkHz), (unsigned)pclkHz);
+        }
+        // Back-to-back frames, exactly the render loop's transmit/wait cadence.
+        for (int i = 0; i < 100 && !cap.done; i++) transmitOnce();
+        for (int i = 0; i < 200 && !cap.done; i++) vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    ESP_LOGI(tag, "loopback: rx captured %u symbols (need %u), idle rx level=%d",
+             (unsigned)cap.got, (unsigned)kBits,
+             gpio_get_level(static_cast<gpio_num_t>(rxGpio)));
+
+    if (cap.done && cap.got >= kBits) {
+        // Verify EVERY bit of the frame against the per-row pattern (r.sent[],
+        // zero-padded for RGBW rows), not just the first light.
+        size_t mismatch = SIZE_MAX;
+        uint16_t minH[2] = {0x7FFF, 0x7FFF}, maxH[2] = {0, 0};
+        for (size_t b = 0; b < kBits; b++) {
+            const uint16_t high = static_cast<uint16_t>(rxSymbols[b] & 0x7FFF);
+            const uint8_t bit = (high >= 25) ? 1 : 0;
+            if (high < minH[bit]) minH[bit] = high;
+            if (high > maxH[bit]) maxH[bit] = high;
+            const uint8_t rowPos = static_cast<uint8_t>(b % rowBits);
+            const uint8_t expByte = (rowPos / 8u) < 3 ? r.sent[rowPos / 8u] : 0x00;
+            const uint8_t exp = (expByte >> (7 - (rowPos & 7))) & 1u;
+            if (bit != exp && mismatch == SIZE_MAX) mismatch = b;
+        }
+        // r.got[] reports the row holding the first mismatch (row 0 when clean).
+        const size_t rowStart = (mismatch == SIZE_MAX)
+                                    ? 0 : mismatch - (mismatch % rowBits);
+        for (size_t b = rowStart; b < rowStart + 24 && b < cap.got; b++) {
+            const uint8_t bit = ((rxSymbols[b] & 0x7FFF) >= 25) ? 1 : 0;
+            r.got[(b - rowStart) / 8] =
+                static_cast<uint8_t>((r.got[(b - rowStart) / 8] << 1) | bit);
+        }
+        r.pass = mismatch == SIZE_MAX;
+        r.bitsChecked = static_cast<uint32_t>(kBits);
+        r.firstBadBit = (mismatch == SIZE_MAX) ? static_cast<uint32_t>(kBits)
+                                               : static_cast<uint32_t>(mismatch);
+        ESP_LOGI(tag, "loopback: high ticks — 0-bits %u..%u, 1-bits %u..%u (25ns/tick)",
+                 (unsigned)minH[0], (unsigned)maxH[0], (unsigned)minH[1], (unsigned)maxH[1]);
+        if (!r.pass) {
+            ESP_LOGE(tag, "loopback: first bad bit %u (light %u, bit-in-row %u)",
+                     (unsigned)mismatch, (unsigned)(mismatch / rowBits),
+                     (unsigned)(mismatch % rowBits));
+        }
+    }
+    heap_caps_free(rxSymbols);
 }
 
 } // namespace detail

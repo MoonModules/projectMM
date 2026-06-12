@@ -29,16 +29,22 @@ namespace mm {
 // architecture studied, never copied (see LcdLedDriver.md).
 class LcdLedDriver : public ParallelLedDriver<LcdLedDriver> {
 public:
-    LcdLedDriver() {
-        // Defaults: data pins stay clear of the LOLIN S3's octal-PSRAM pins
-        // (26-37), native USB (19/20) and strapping pins. ledsPerPin empty = even
-        // split. The loopback self-test transmits on the FIRST pin.
-        std::strcpy(pins, "1,2,4,5,6,7,8,9");
-        loopbackRxPin = 12;
-    }
+    // Data pins + loopback pin default to UNSET: they are user-soldered (the strand
+    // runs to whatever GPIOs the user wired), so a hard-coded default would be a
+    // guess that could drive a pin the user committed elsewhere — empty until set,
+    // the driver idles meanwhile (the "default only when it cannot do harm" rule;
+    // see decisions.md). The LOLIN S3 bench wiring was pins "1,2,4,5,6,7,8,9",
+    // loopbackRxPin 12 (kept clear of the octal-PSRAM pins 26-37, USB 19/20, and
+    // strapping pins) — set those again to reproduce the bench. (Base declares
+    // pins="" and loopbackRxPin=0, so the empty default needs no code here.)
 
-    // The i80 peripheral requires its WR (pixel clock) and DC lines on real GPIOs
-    // even though WS2812 strands ignore both — two sacrificial pins.
+    // WR (pixel clock) and DC are different: the IDF i80 bus *requires* both on real
+    // GPIOs (esp_lcd_panel_io_i80.c: `wr_gpio_num >= 0 && dc_gpio_num >= 0`), yet the
+    // WS2812 strands ignore both — they are peripheral-fixed, not user-strand wiring,
+    // so a sensible overridable default cannot do harm (same class as the chip-fixed
+    // Ethernet pins). The data pins above gate startup, so the bus stays idle until
+    // the user sets them regardless. (Dropping WR/DC entirely needs a direct-LCD_CAM
+    // driver that bypasses esp_lcd, hpwit-style — backlogged, not this increment.)
     uint16_t clockPin = 10;
     uint16_t dcPin = 11;
 

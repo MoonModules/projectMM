@@ -1,8 +1,12 @@
 #pragma once
 
-// AudioModule — acquires an audio source and publishes one analysed AudioFrame
-// per render tick: an overall sound level plus a 16-band frequency spectrum and
-// the dominant peak. Named for what it does (audio acquisition + analysis), not
+// AudioModule — acquires an audio source and publishes an AudioFrame (an overall
+// sound level plus a 16-band frequency spectrum and the dominant peak). The frame
+// is always available every render tick, but its analysed values are recomputed
+// only when a full sample block has accumulated: a 512-sample block at 22 kHz
+// takes ~23 ms to arrive (longer than one tick), so a tick that doesn't complete
+// a block re-publishes the previous AudioFrame unchanged rather than re-analysing.
+// Named for what it does (audio acquisition + analysis), not
 // for one source: today the source is a digital I2S MEMS mic (e.g. INMP441, the
 // only one wired); the analysis pipeline is source-independent and is meant to
 // serve line-in / USB sources behind the platform read seam as they are added.
@@ -51,11 +55,13 @@ public:
     // (respectsEnabled() defaults to true, so we don't override it.)
 
     // --- controls: three I2S pins, sample rate, the two conditioning knobs, and
-    // two read-only read-outs. The pins default to the bench wiring (INMP441 on
-    // WS=4 / SD=5 / SCK=6) but are fully user-editable. ---
-    uint16_t wsPin = 4;          // word-select / LRCLK
-    uint16_t sdPin = 5;          // serial data in
-    uint16_t sckPin = 6;         // bit clock
+    // two read-only read-outs. The pins default to UNSET (0): the module is user-
+    // added when a board has a mic, and stays idle (no I2S init) until the user
+    // enters the real GPIOs, so adding it can't grab arbitrary pins or wedge a
+    // board with no mic. The bench INMP441 wiring is WS=4 / SD=5 / SCK=6. ---
+    uint16_t wsPin = 0;          // word-select / LRCLK
+    uint16_t sdPin = 0;          // serial data in
+    uint16_t sckPin = 0;         // bit clock
     // Sample rate is a discrete choice (the standard audio rates), so it's a
     // dropdown over a fixed set, not a free number. sampleRateSel indexes
     // kSampleRates; sampleRate() resolves it to Hz. Default index 2 = 22050.
@@ -190,6 +196,13 @@ private:
             return;
         }
         deinit();
+        // Pins unset (the default until the user wires a mic): stay idle, don't
+        // attempt an I2S init. A 0 GPIO is not a valid mic pin, and initialising
+        // I2S on unset/arbitrary pins is what hung a mic-less board's boot.
+        if (wsPin == 0 || sdPin == 0 || sckPin == 0) {
+            setStatus("mic: set wsPin / sdPin / sckPin", Severity::Status);
+            return;
+        }
         inited_ = platform::audioMicInit(mic_, wsPin, sdPin, sckPin, sampleRate());
         if (!inited_) {
             setStatus(kInitFailMsg, Severity::Error);
@@ -209,6 +222,12 @@ private:
         if constexpr (!platform::hasI2sMic) return;
         if (inited_) platform::audioMicDeinit(mic_);
         inited_ = false;
+        filled_ = 0;
+        // Publish silence: latestFrame() hands frame_ to consumers whenever this is
+        // the active mic, independent of inited_. Without this, a mic that worked
+        // and then lost its bus (a failed reinit after a pin edit, or teardown)
+        // would leave the last real frame frozen on the LEDs instead of going dark.
+        frame_ = AudioFrame{};
     }
 };
 

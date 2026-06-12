@@ -49,9 +49,14 @@ struct DcBlocker {
             yPrev = y;
             // Clamp before narrowing: casting a float outside the int32 range to
             // int32_t is undefined behaviour. A settling transient (or a degenerate
-            // r) can briefly push y past the bounds, so saturate first.
+            // r) can briefly push y past the bounds, so saturate first. The positive
+            // bound is 2147483520.0f (2^31 - 128), NOT INT32_MAX: INT32_MAX
+            // (2147483647) has no exact float and rounds UP to 2^31, which is itself
+            // out of int32 range — clamping to it would still cast out of range.
+            // 2147483520 is the largest float strictly below 2^31, so the cast is
+            // always defined. -2^31 (INT32_MIN) is exactly representable, so it's fine.
             const float clamped = y < -2147483648.0f ? -2147483648.0f
-                                : y >  2147483647.0f ?  2147483647.0f : y;
+                                : y >  2147483520.0f ?  2147483520.0f : y;
             samples[i] = static_cast<int32_t>(clamped);
         }
     }

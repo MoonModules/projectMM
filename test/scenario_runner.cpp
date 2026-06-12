@@ -31,6 +31,10 @@
 #include "light/drivers/Drivers.h"
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
+#include "core/SystemModule.h"
+#include "core/AudioModule.h"
+#include "light/effects/AudioVolumeEffect.h"
+#include "light/effects/AudioSpectrumEffect.h"
 #include "platform/platform.h"
 
 #include <cstdint>
@@ -190,6 +194,10 @@ static void registerScenarioTypes() {
     mm::ModuleFactory::registerType<mm::Drivers>("Drivers");
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver");
+    mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule");
+    mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule");
+    mm::ModuleFactory::registerType<mm::AudioVolumeEffect>("AudioVolumeEffect");
+    mm::ModuleFactory::registerType<mm::AudioSpectrumEffect>("AudioSpectrumEffect");
     done = true;
 }
 

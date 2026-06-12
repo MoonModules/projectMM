@@ -21,6 +21,7 @@ add_executable(mm_tests
     unit/core/unit_SystemModule.cpp
 
     # light/
+    unit/light/unit_AudioModule.cpp
     unit/light/unit_AudioLevel.cpp
     unit/light/unit_AudioBands.cpp
     unit/light/unit_NetworkSendDriver_no_alloc_in_loop.cpp

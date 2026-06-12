@@ -1,6 +1,6 @@
 # RMT LED Driver
 
-Output driver for WS2812B-class addressable LEDs over the ESP32 **RMT** peripheral — one or more strands, one GPIO and one RMT TX channel per strand. Reads the Drivers container's buffer, applies the shared [Correction](Correction.md) (brightness / channel order / RGBW white) per light, and emits the WS2812 1-wire signal. Runs on any chip whose RMT peripheral has TX channels: classic ESP32 (8 channels), ESP32-S3 (4 channels), and ESP32-P4 (4 channels, DMA-backed). On desktop the RMT platform seam is a no-op and the driver is inert.
+Output driver for WS2812B-class addressable LEDs over the ESP32 **[RMT (Remote Control Transceiver)](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/rmt.html)** peripheral — one or more strands, one GPIO and one RMT TX channel per strand. Reads the Drivers container's buffer, applies the shared [Correction](Correction.md) (brightness / channel order / RGBW white) per light, and emits the WS2812 1-wire signal. Runs on any chip whose RMT peripheral has TX channels: classic ESP32 (8 channels), ESP32-S3 (4 channels), and ESP32-P4 (4 channels, DMA-backed). On desktop the RMT platform seam is a no-op and the driver is inert.
 
 ## Wire contract — [WS2812B](https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf)
 
@@ -23,9 +23,9 @@ The source buffer is split into **consecutive slices**, one per pin, in list ord
 
 ## Controls
 
-- `pins` (text, default `"18"`) — comma-separated data / TX GPIO list, e.g. `18,17,16`. One RMT TX channel per pin: up to 8 on classic ESP32, 4 on the S3 and P4 (exceeding the chip's limit, a bad token, or a duplicate pin puts an error in the status field and the driver idles). Changing it re-initialises the channels live (no reboot needed). The loopback self-test transmits on the **first** pin in the list.
+- `pins` (text, default empty) — comma-separated data / TX GPIO list, e.g. `18,17,16`. Empty by default (the strand is user-soldered, so no pin is assumed — the driver idles until set; the bench used `18`). One RMT TX channel per pin: up to 8 on classic ESP32, 4 on the S3 and P4 (exceeding the chip's limit, a bad token, or a duplicate pin puts an error in the status field and the driver idles). Changing it re-initialises the channels live (no reboot needed). The loopback self-test transmits on the **first** pin in the list.
 - `ledsPerPin` (text, default empty) — comma-separated lights-per-pin, e.g. `100,100,50`, matched to `pins` by position. May be empty or shorter than `pins`; see Buffer slicing above.
-- `loopbackRxPin` (uint16_t, default 5) — the RX pin for the loopback self-test. Jumper it to the **first** pin in `pins` to run the test. Shown only while `loopbackTest` is on.
+- `loopbackRxPin` (uint16_t, default unset) — the RX pin for the loopback self-test; set it when you wire the jumper (the bench used 5). Jumper it to the **first** pin in `pins` to run the test. Shown only while `loopbackTest` is on.
 - `loopbackTest` (bool) — a persistent on/off mode for the RMT TX→RX loopback self-test (see Self-test below). While it is on, the test re-runs whenever a relevant control changes (`pins`, `loopbackRxPin`, `loopbackFrame`), so the pins can be set in any order and the result always reflects the current wiring; the verdict lands in the module's status field. Turning it off clears the verdict.
 - `loopbackFrame` (bool) — whole-frame variant of the self-test, shown only while `loopbackTest` is on. Instead of a 24-bit burst it transmits a real frame (the first pin's slice, or 64 lights) back to back and bit-verifies the entire capture. This is what catches frame-rate corruption and RF interference on the data line — a 24-bit burst can pass through a wire that mangles a sustained frame. On failure the status names the first corrupted bit and light.
 
@@ -59,9 +59,11 @@ When 1–3 all come back clean, the fix is electrical, in rough order of effecti
 
 ## Tests
 
-- **Encoder (CI, host):** `test/unit/light/unit_RmtLedEncoder.cpp` asserts the bit→symbol contract (MSB-first, exact T0H/T1H tick widths, GRB ordering via Correction, RGBW → 32 symbols/light) with no hardware — written red before the encoder, pins it now.
-- **Lifecycle (CI, host):** `test/unit/light/unit_RmtLedDriver_lifecycle.cpp` pins the symbol-buffer ownership — sized in `onBuildState`, survives a rebuild (reinit must not free it), freed on teardown — the class of bug that once reached hardware, now caught on every push.
-- **Pins (CI, host):** `test/unit/light/unit_RmtLedDriver_pins.cpp` pins the `pins`/`ledsPerPin` parsing (bad tokens, duplicates, chip limit via the maxPins parameter) and the slice arithmetic (explicit counts, even-split remainder, clamping) down to the per-pin symbol offsets.
+Full case list in the generated [unit tests § RmtLedDriver](../../tests/unit-tests.md#rmtleddriver) (regenerated from the test files, never drifts). What's covered:
+
+- **Encoder (CI, host):** the bit→symbol contract — MSB-first, exact T0H/T1H tick widths, GRB ordering via Correction, RGBW → 32 symbols/light — with no hardware; written red before the encoder, pins it now.
+- **Lifecycle (CI, host):** the symbol-buffer ownership — sized in `onBuildState`, survives a rebuild (reinit must not free it), freed on teardown — the class of bug that once reached hardware, now caught on every push.
+- **Pins (CI, host):** the `pins`/`ledsPerPin` parsing (bad tokens, duplicates, chip limit) and slice arithmetic (explicit counts, even-split remainder, clamping) down to the per-pin symbol offsets, plus the empty-default idle (an unconfigured driver claims no GPIO).
 
 ## Prior art
 

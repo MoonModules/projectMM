@@ -2,7 +2,7 @@
 
 ![NetworkSendDriver controls](../../../assets/screenshots/NetworkSendDriver.png)
 
-Streams the light buffer over UDP in one of three industry protocols, selected by a control: **ArtNet**, **E1.31/sACN**, or **DDP**. Reads the Drivers container's buffer, applies the shared [Correction](Correction.md) (brightness / channel order / RGBW white) per light, chunks the corrected bytes per the selected protocol, and sends the whole frame as one burst at the configured rate. The single-node-multiple-protocols shape follows MoonLight's D_NetworkOut (architecture studied, not copied). Compatible with industry receivers — pixel controllers (Falcon, Advatek), xLights, LedFx, and ArtNet-controllable software.
+Streams the light buffer over UDP in one of three industry protocols, selected by a control: **[Art-Net](https://art-net.org.uk/downloads/art-net.pdf)**, **[E1.31 / sACN](https://tsp.esta.org/tsp/documents/docs/ANSI_E1-31-2018.pdf)** (the ANSI E1.31 streaming-ACN standard), or **[DDP](http://www.3waylabs.com/ddp/)** (Distributed Display Protocol). Reads the Drivers container's buffer, applies the shared [Correction](Correction.md) (brightness / channel order / RGBW white) per light, chunks the corrected bytes per the selected protocol, and sends the whole frame as one burst at the configured rate. The single-node-multiple-protocols shape follows MoonLight's D_NetworkOut (architecture studied, not copied). Compatible with industry receivers — pixel controllers (Falcon, Advatek), xLights, LedFx, and ArtNet-controllable software.
 
 ## Controls
 

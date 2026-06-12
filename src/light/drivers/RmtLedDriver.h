@@ -45,7 +45,11 @@ public:
     // parse error or failing pin lands in the status field and the driver idles.
     // 24 bytes fit kMaxPins 2-digit GPIOs plus separators. The loopback
     // self-test transmits on the FIRST pin, so it validates the actual output.
-    char pins[24] = "18";
+    // Defaults to UNSET: the strand is user-soldered to whatever GPIO the user
+    // wired, so a hard-coded pin would be a guess that could drive a pin committed
+    // elsewhere — empty until set, idle meanwhile (the "default only when it cannot
+    // do harm" rule; see decisions.md). Bench wiring was pin "18".
+    char pins[24] = "";
 
     // Comma-separated lights-per-pin ("100,100,50"), matched to `pins` by
     // position — each pin takes the next consecutive slice of the source
@@ -62,7 +66,8 @@ public:
     // severity. loopbackTest is a persistent on/off mode (see onUpdate): while on,
     // the test re-runs on every relevant change; turning it off clears the verdict.
     bool     loopbackTest = false;  // checkbox: on = run + keep re-running on change
-    uint16_t loopbackRxPin = 5;     // jumper this to the first pin for the test
+    uint16_t loopbackRxPin = 0;     // jumper this to the first pin for the test
+                                    // (unset by default; bench used pin 5)
 
     // Whole-frame stress variant: instead of a 24-bit burst, transmit a real
     // frame the size of the first pin's slice, back to back, and bit-verify the

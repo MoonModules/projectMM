@@ -26,15 +26,14 @@
 #if SOC_PARLIO_SUPPORTED
 
 #include "driver/parlio_tx.h"
-#include "driver/gpio.h"        // gpio_get_level for the post-capture idle log
+#include "driver/gpio.h"        // gpio_num_t / GPIO_NUM_NC for the unit's pin map
 #include "esp_log.h"
 #include "esp_heap_caps.h"
-#include "esp_timer.h"          // esp_timer_get_time for the timed first transmit
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "freertos/task.h"      // xTaskCreate / vTaskDelay for the RX task
 
 #include <cstring>
+#include <functional>  // the transmit callback passed to the shared frame loopback
 #include <new>      // std::nothrow
 
 namespace mm::platform {
@@ -117,8 +116,12 @@ ParlioState* createState(const uint16_t* dataPins, uint8_t laneCount,
     if (parlio_tx_unit_enable(st->unit) != ESP_OK) { destroyState(st); return nullptr; }
 
     // DMA-capable INTERNAL RAM: Parlio streams from internal SRAM at full rate
-    // (the same constraint as the LCD driver — platform::alloc prefers PSRAM
-    // and is wrong here). Zeroed so the trailing latch pad holds lines LOW.
+    // (the same constraint as the LCD driver — platform::alloc prefers PSRAM and
+    // is wrong here). Zeroed so the trailing latch pad holds lines LOW. Internal
+    // for now even though the Parlio GDMA *can* burst from PSRAM (access_ext_mem):
+    // moving big frames there to free scarce DRAM is a tracked follow-up (backlog
+    // § LCD/Parlio DMA frame buffer → PSRAM), needing the wider ext-mem alignment
+    // (not this fixed 64) + on-hardware proof, so not done here.
     st->buf = static_cast<uint8_t*>(heap_caps_aligned_alloc(
         64, bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
     if (!st->buf) { destroyState(st); return nullptr; }
@@ -191,10 +194,16 @@ void parlioWs2812Deinit(ParlioWs2812Handle& h) {
 // the wire signal is the same WS2812 the encoder produced for either bus.
 // ---------------------------------------------------------------------------
 
-// loopbackJumperOk lives in platform_esp32_rmt.cpp (defined there, declared in
-// platform_esp32_lcd.cpp) — the same plain-GPIO continuity check all three
-// loopback rigs share; declared here too so this TU can call it.
-namespace detail { bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio); }
+// loopbackJumperOk + captureAndVerifyFrame live in platform_esp32_rmt.cpp (the
+// shared continuity check and the shared capture+bit-verify all three loopback
+// rigs reuse); declared here so this TU can call them.
+namespace detail {
+bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio);
+void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
+                           uint8_t rowBits, uint32_t pclkHz, const char* tag,
+                           const std::function<void()>& transmitOnce,
+                           RmtLoopbackResult& r);
+}
 
 RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
                                        uint16_t rxGpio, const uint8_t* frame,
@@ -219,96 +228,18 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCou
     }
     std::memcpy(st->buf, frame, frameBytes);
 
-    // Capture at 40 MHz: a slot is 15 ticks, so "0" ≈ 15 and "1" ≈ 30 high
-    // ticks — threshold midway at 25. One symbol per WS2812 bit; the frame's
-    // zeroed latch pad is the >100 µs idle that ends the capture. (Same 2.67 MHz
-    // slot rate as the LCD bus, so the identical thresholds apply.)
-    constexpr uint32_t kCapResHz = 40'000'000;
-    const size_t kBits = dataBytes / 3;
-    const size_t capMax = kBits + 16;
-    auto* rxSymbols = static_cast<uint32_t*>(heap_caps_aligned_alloc(
-        64, capMax * sizeof(uint32_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
-    if (!rxSymbols) {
-        ESP_LOGE(PAR_TAG, "loopback: capture buffer alloc failed (%u B)",
-                 (unsigned)(capMax * sizeof(uint32_t)));
-        destroyState(st);
-        return r;
-    }
-
-    struct Cap {
-        uint8_t rxGpio; uint32_t* buf; size_t max;
-        volatile size_t got = 0; volatile bool done = false;
-    } cap{static_cast<uint8_t>(rxGpio), rxSymbols, capMax};
-    auto rxTask = [](void* arg) {
-        auto* c = static_cast<Cap*>(arg);
-        c->got = rmtWs2812RxCapture(c->rxGpio, kCapResHz, c->buf, c->max, 1000);
-        c->done = true;
-        vTaskDelete(nullptr);
+    // The Parlio-specific transmit: ship one frame (length in BITS, not bytes)
+    // and wait for its done-callback. Everything else (capture, cadence, bit-
+    // verify) is the shared helper.
+    parlio_transmit_config_t xcfg = {};
+    xcfg.idle_value = 0;   // lines rest LOW between frames (the latch)
+    auto transmitOnce = [st, frameBytes, &xcfg]() {
+        parlio_tx_unit_transmit(st->unit, st->buf, frameBytes * 8, &xcfg);
+        xSemaphoreTake(st->done, pdMS_TO_TICKS(1000));
     };
-    if (xTaskCreate(rxTask, "parlb", 4096, &cap, 5, nullptr) == pdPASS) {
-        vTaskDelay(pdMS_TO_TICKS(50));
-        parlio_transmit_config_t xcfg = {};
-        xcfg.idle_value = 0;   // lines rest LOW between frames (the latch)
-        // First transmit timed — the wall time of a known byte count confirms
-        // the granted pixel clock matches the configured 2.67 MHz slot rate.
-        {
-            const int64_t t0 = esp_timer_get_time();
-            esp_err_t err = parlio_tx_unit_transmit(st->unit, st->buf, frameBytes * 8, &xcfg);
-            const bool ok = xSemaphoreTake(st->done, pdMS_TO_TICKS(1000)) == pdTRUE;
-            const int64_t dt = esp_timer_get_time() - t0;
-            ESP_LOGI(PAR_TAG, "loopback: transmit err=%d done=%d %u bytes in %lld us "
-                              "(expect ~%u us at %u Hz)",
-                     (int)err, (int)ok, (unsigned)frameBytes, (long long)dt,
-                     (unsigned)(frameBytes * 1000000ull / kPclkHz), (unsigned)kPclkHz);
-        }
-        // Back-to-back frames, exactly the render loop's transmit/wait cadence.
-        for (int i = 0; i < 100 && !cap.done; i++) {
-            parlio_tx_unit_transmit(st->unit, st->buf, frameBytes * 8, &xcfg);
-            xSemaphoreTake(st->done, pdMS_TO_TICKS(1000));
-        }
-        for (int i = 0; i < 200 && !cap.done; i++) vTaskDelay(pdMS_TO_TICKS(10));
-    }
-    ESP_LOGI(PAR_TAG, "loopback: rx captured %u symbols (need %u), idle rx level=%d",
-             (unsigned)cap.got, (unsigned)kBits,
-             gpio_get_level(static_cast<gpio_num_t>(rxGpio)));
+    detail::captureAndVerifyFrame(rxGpio, frameBytes, dataBytes, rowBits, kPclkHz,
+                                  PAR_TAG, transmitOnce, r);
     destroyState(st);
-
-    if (cap.done && cap.got >= kBits) {
-        // Verify EVERY bit of the frame against the per-row pattern (sent[],
-        // zero-padded for RGBW rows), not just the first light.
-        size_t mismatch = SIZE_MAX;
-        uint16_t minH[2] = {0x7FFF, 0x7FFF}, maxH[2] = {0, 0};
-        for (size_t b = 0; b < kBits; b++) {
-            const uint16_t high = static_cast<uint16_t>(rxSymbols[b] & 0x7FFF);
-            const uint8_t bit = (high >= 25) ? 1 : 0;
-            if (high < minH[bit]) minH[bit] = high;
-            if (high > maxH[bit]) maxH[bit] = high;
-            const uint8_t rowPos = static_cast<uint8_t>(b % rowBits);
-            const uint8_t expByte = (rowPos / 8u) < 3 ? r.sent[rowPos / 8u] : 0x00;
-            const uint8_t exp = (expByte >> (7 - (rowPos & 7))) & 1u;
-            if (bit != exp && mismatch == SIZE_MAX) mismatch = b;
-        }
-        // got[] reports the row holding the first mismatch (row 0 when clean).
-        const size_t rowStart = (mismatch == SIZE_MAX)
-                                    ? 0 : mismatch - (mismatch % rowBits);
-        for (size_t b = rowStart; b < rowStart + 24 && b < cap.got; b++) {
-            const uint8_t bit = ((rxSymbols[b] & 0x7FFF) >= 25) ? 1 : 0;
-            r.got[(b - rowStart) / 8] =
-                static_cast<uint8_t>((r.got[(b - rowStart) / 8] << 1) | bit);
-        }
-        r.pass = mismatch == SIZE_MAX;
-        r.bitsChecked = static_cast<uint32_t>(kBits);
-        r.firstBadBit = (mismatch == SIZE_MAX) ? static_cast<uint32_t>(kBits)
-                                               : static_cast<uint32_t>(mismatch);
-        ESP_LOGI(PAR_TAG, "loopback: high ticks — 0-bits %u..%u, 1-bits %u..%u (25ns/tick)",
-                 (unsigned)minH[0], (unsigned)maxH[0], (unsigned)minH[1], (unsigned)maxH[1]);
-        if (!r.pass) {
-            ESP_LOGE(PAR_TAG, "loopback: first bad bit %u (light %u, bit-in-row %u)",
-                     (unsigned)mismatch, (unsigned)(mismatch / rowBits),
-                     (unsigned)(mismatch % rowBits));
-        }
-    }
-    heap_caps_free(rxSymbols);
     return r;
 }
 

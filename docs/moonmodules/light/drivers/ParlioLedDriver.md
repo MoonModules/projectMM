@@ -19,7 +19,7 @@ So **up to 20 parallel WS2812 strands** at once on the P4 today. The Waveshare P
 
 It is the [LCD driver](LcdLedDriver.md) shape with two simplifications, because Parlio is a simpler peripheral than the LCD_CAM i80 bus:
 
-- **No clock/dc pins.** The i80 bus needs two sacrificial GPIOs (WR + DC) on real pins even though WS2812 ignores them; Parlio generates the pixel clock itself, so there are none.
+- **No clock/dc pins.** The i80 bus needs two GPIOs (WR + DC) on real pins even though WS2812 ignores them (the IDF i80 layer rejects `wr/dc < 0`); Parlio generates the pixel clock itself (`clk_out_gpio_num = GPIO_NUM_NC`) and has no command/data phase, so there are none. (The LCD driver keeps an overridable default for its two; dropping them there would need a direct-LCD_CAM driver — backlogged.)
 - **No exactly-8-pins rule.** The i80 layer rejects a partial bus (every data line must be a real GPIO), so the LCD driver demands exactly 8 pins. Parlio takes the data GPIOs directly and runs on **1–8 lanes** — whatever `pins` names.
 
 ## Wire contract — 3 slots per bit
@@ -34,10 +34,10 @@ Identical semantics to the [RMT driver](RmtLedDriver.md#buffer-slicing-across-pi
 
 ## Controls
 
-- `pins` (text, default `"20"`) — comma-separated data GPIOs, one lane each, **1 to 8** (no all-pins rule). Default is a **single lane** — a typical 8×8 panel is one serpentine 64-LED strand. Choosing pins on the P4-NANO, **avoid**: STRAPPING pins **34–38** (boot-mode control — driving these can break boot, never use them for output), Ethernet RMII (28–31, 49–52), the ESP32-C6 SDIO (14–19, 54), and I2C (7–8). The clear GPIOs are **20–27, 32–33, 39–48**; the default 20 is strapping-safe. Add more pins for parallel strips. Changing it re-creates the TX unit live. The loopback self-test transmits on the **first** pin.
-- `ledsPerPin` (text, default `"64"`) — lights per lane, matched by position; empty = even split, remainder to the last lane. 64 = a one-strand 8×8 panel.
+- `pins` (text, default empty) — comma-separated data GPIOs, one lane each, **1 to 8** (no all-pins rule). Empty by default (the strand is user-soldered, so no pin is assumed — the driver idles until set). Choosing pins on the P4-NANO, **avoid**: STRAPPING pins **34–38** (boot-mode control — driving these can break boot, never use them for output), Ethernet RMII (28–31, 49–52), the ESP32-C6 SDIO (14–19, 54), and I2C (7–8). The clear GPIOs are **20–27, 32–33, 39–48**; a known-good bench set is `20,21,22,23,24,25,26,27`. Add pins for parallel strips. Changing it re-creates the TX unit live. The loopback self-test transmits on the **first** pin.
+- `ledsPerPin` (text, default empty) — lights per lane, matched by position; empty = even split over the wired lanes (all lights on the first lane when one pin is set), remainder to the last lane. Same semantics as the RMT/LCD drivers.
 - `loopbackTest` (bool) — one-shot **whole-frame** signal self-test: TX on the first pin in `pins`, RX on `loopbackRxPin`. It builds the real frame (test pattern in every row on lane 0), transmits it back to back like the render loop through a private Parlio TX unit, captures the entire frame on the RX pin (RMT-RX with the P4's DMA backend — the [same `rmtWs2812RxCapture`](RmtLedDriver.md#loopback-self-test-on-device) the RMT/LCD rigs use, transmitter-agnostic), and bit-verifies every WS2812 bit. The verdict lands in the status field: `loopback PASS`, `loopback FAIL: bad bit N/M (light K)`, or `loopback: jumper not detected` (a plain-GPIO continuity pre-check runs first). The strip on lane 0 flickers once during the run; normal output resumes after.
-- `loopbackRxPin` (uint16_t, default 33) — the RX pin for the self-test (jumper GPIO 32 → 33). Both strapping-safe. Shown only while `loopbackTest` is on.
+- `loopbackRxPin` (uint16_t, default unset) — the RX pin for the self-test; set it when you wire the jumper (the bench used 33, jumper GPIO 32 → 33, both strapping-safe). Shown only while `loopbackTest` is on.
 
 ## Memory
 
@@ -49,8 +49,10 @@ Added as a child of the `Drivers` container in `main.cpp` under `if constexpr (p
 
 ## Tests
 
-- **Encoder (CI, host):** shared with the LCD driver — `test/unit/light/unit_LcdLedEncoder.cpp` covers the 3-slot byte layout; not re-tested here.
-- **Driver (CI, host):** `test/unit/light/unit_ParlioLedDriver.cpp` — lane slicing, frame-byte math (RGBW growth, alignment rounding, latch pad), the **1–8 lanes accepted** rule (the Parlio-vs-i80 difference), over-8 rejection, bad-pin status + recovery, zero-grid + loop() crash-safety, teardown.
+Full case list in the generated [unit tests § ParlioLedDriver](../../tests/unit-tests.md#parlioleddriver) (regenerated from the test files, never drifts). What's covered:
+
+- **Encoder (CI, host):** shared with the LCD driver — the 3-slot byte layout is covered under [LcdLedDriver](LcdLedDriver.md#tests); not re-tested here.
+- **Driver (CI, host):** lane slicing (including unequal leds-per-lane), frame-byte math (RGBW growth, alignment rounding, latch pad), the **1–8 lanes accepted** rule (the Parlio-vs-i80 difference), over-8 rejection, bad-pin status + recovery, the empty-default idle (no GPIO claimed until pins are set), zero-grid + loop() crash-safety, teardown.
 - **Hardware:** tick-scaling across grid sizes proves frames clock out; the whole-frame loopback self-test (jumper GPIO 32 → 33) bit-verifies the wire signal on the P4. Driving a real strip is a later increment.
 
 ## Prior art

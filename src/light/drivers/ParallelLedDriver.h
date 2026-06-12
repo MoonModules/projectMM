@@ -82,6 +82,11 @@ public:
             parseConfig();
             reinit();
         } else if (loopbackTest && (isTestControl || isPinControl)) {
+            // A pin edit changes laneList_/laneCount_/frameBytes_, but onUpdate runs
+            // BEFORE the onBuildState() sweep (and loopbackRxPin doesn't trigger that
+            // sweep at all), so refresh the lane config here before testing it —
+            // otherwise the self-test would build its private bus from stale pins.
+            if (isPinControl) { parseConfig(); reinit(); }
             runLoopbackSelfTest();
         }
     }
@@ -165,6 +170,10 @@ protected:
     uint16_t busPins_[kMaxLanes] = {};   // data pins the live bus/unit was built
                                          // with — a pin change must rebuild even
                                          // when the buffer still fits
+    uint8_t  busLaneCount_ = 0;          // lane count the live bus was built with —
+                                         // a lane-count change (e.g. Parlio 8→4)
+                                         // can keep the same frameBytes_ yet needs
+                                         // a rebuild, so the fast path checks it too
 
     static constexpr uint8_t maxLanesForTarget() {
         return (Derived::lanesAvailable() > 0 && Derived::lanesAvailable() < kMaxLanes)
@@ -227,11 +236,14 @@ protected:
     void reinit() {
         if constexpr (Derived::lanesAvailable() == 0) return;
         if (laneCount_ == 0 || frameBytes_ == 0) { deinit(); return; }
-        if (inited_ && derived()->busCapacity() >= frameBytes_ && busPinsCurrent()) {
-            // Existing bus + buffer still fit AND sit on the wanted pins — just
-            // clear stale bytes so the (possibly relocated) latch pad is zero. The
-            // pin check matters: a pin edit keeps the frame size, and without it
-            // the bus would keep clocking out on the OLD GPIOs.
+        if (inited_ && derived()->busCapacity() >= frameBytes_ && busPinsCurrent()
+            && busLaneCount_ == laneCount_) {
+            // Existing bus + buffer still fit AND sit on the wanted pins AND drive
+            // the same lane count — just clear stale bytes so the (possibly
+            // relocated) latch pad is zero. The pin check matters: a pin edit keeps
+            // the frame size, and without it the bus would keep clocking out on the
+            // OLD GPIOs. The lane-count check matters for Parlio: 8→4 lanes can keep
+            // frameBytes_ and the surviving pins, but the bus was built for 8.
             std::memset(dmaBuf_, 0, derived()->busCapacity());
             return;
         }
@@ -240,6 +252,7 @@ protected:
         dmaBuf_ = inited_ ? derived()->busBuffer() : nullptr;
         if (inited_) {
             for (uint8_t i = 0; i < kMaxLanes; i++) busPins_[i] = laneList_[i];
+            busLaneCount_ = laneCount_;
             derived()->recordBusPins();   // i80 also stores WR/DC; Parlio no-op
         }
         if (!inited_) {
@@ -255,6 +268,7 @@ protected:
         if (inited_) derived()->busDeinit();
         inited_ = false;
         dmaBuf_ = nullptr;
+        busLaneCount_ = 0;
     }
 
     bool busPinsCurrent() const {

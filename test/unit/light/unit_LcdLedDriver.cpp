@@ -18,6 +18,12 @@ namespace {
 
 void wire(mm::LcdLedDriver& d, mm::Buffer& src, mm::Correction& corr,
           mm::nrOfLightsType lights) {
+    // Pins default to UNSET now (the "default only when it cannot do harm" rule —
+    // a user solders the strand to its own GPIOs), so a fresh driver idles until
+    // configured. These slicing/frame tests exercise the lane logic, not the
+    // default value, so the helper supplies the bench 8-pin set unless a case set
+    // its own pins first (the bad-pin / partial-bus cases do).
+    if (d.pins[0] == '\0') std::strcpy(d.pins, "1,2,4,5,6,7,8,9");
     // allocate succeeds exactly when lights > 0 (the zero-grid case wires an
     // empty buffer on purpose); a masked alloc failure would fail cases downstream.
     REQUIRE(src.allocate(lights, 3) == (lights > 0));
@@ -106,6 +112,28 @@ TEST_CASE("LcdLedDriver bad pins → status error → recovery") {
     CHECK(d.status() == nullptr);
 }
 
+// Pins now default UNSET (the "default only when it cannot do harm" rule — the
+// strand is user-soldered). A fresh, unconfigured driver idles, never grabbing
+// the 8 data GPIOs on its own. (wire() back-fills empty pins for the slicing
+// cases, so this one wires the buffer directly to keep pins empty.)
+TEST_CASE("LcdLedDriver with the empty default pins idles cleanly") {
+    mm::LcdLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    REQUIRE(d.pins[0] == '\0');           // the empty default, not a bench guess
+    REQUIRE(src.allocate(64, 3));
+    corr.rebuild(255, mm::LightPreset::GRB);
+    d.onBuildControls();
+    d.setSourceBuffer(&src);
+    d.setCorrection(&corr);
+    d.onBuildState();
+
+    CHECK(d.laneCount() == 0);            // no lanes claimed
+    CHECK(d.frameBytes() == 0);
+    CHECK(d.status() != nullptr);         // "set pins" surfaced, not silent
+    d.loop();                             // must be a no-op, not a crash
+}
+
 // IDF's i80 bus rejects partial pin sets, so the driver does too — fewer than
 // 8 pins is a config error, not a narrower bus.
 TEST_CASE("LcdLedDriver requires exactly 8 pins") {
@@ -142,6 +170,7 @@ TEST_CASE("LcdLedDriver setup/teardown is repeatable") {
     mm::Correction corr;
     src.allocate(64, 3);
     corr.rebuild(255, mm::LightPreset::GRB);
+    std::strcpy(d.pins, "1,2,4,5,6,7,8,9");   // pins now default UNSET
     d.onBuildControls();
     for (int cycle = 0; cycle < 4; cycle++) {
         d.setup();
