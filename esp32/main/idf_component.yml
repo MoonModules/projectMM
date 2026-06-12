@@ -19,17 +19,19 @@ dependencies:
     version: "^1.5.0"
   # esp_wifi_remote + esp_hosted — WiFi for the ESP32-P4 via the on-board ESP32-C6
   # co-processor over SDIO. The P4 has no native radio; these present the C6's
-  # radio through the standard esp_wifi_* API (API-compatible — see ensureWifiInit
-  # in platform_esp32.cpp, which only adds an esp_hosted bring-up prelude on P4).
-  # DELIBERATE v6.0-floor exception (docs/building.md § ESP-IDF version): these are
-  # managed components outside mainline v6.0, accepted explicitly and scoped to the
-  # P4. The `rules` gate pulls them ONLY on the esp32p4 build, so classic/S3 and
-  # the eth-only P4 build don't fetch or compile them.
+  # radio through the standard esp_wifi_* API (API-compatible, so the WiFi seam in
+  # platform_esp32.cpp is unchanged; esp_hosted self-inits at boot, no bring-up
+  # code needed). DELIBERATE v6.0-floor exception (docs/building.md § ESP-IDF
+  # version): these are managed components outside mainline v6.0, accepted
+  # explicitly and scoped to the P4. The `rules` gate pulls them ONLY on the
+  # esp32p4 build, so classic/S3 and the eth-only P4 build don't fetch or compile
+  # them. Versions pinned to patch-level (the versions validated on the P4-NANO
+  # bench) so the P4 build doesn't silently drift to a new minor.
   espressif/esp_wifi_remote:
-    version: "*"
+    version: "~1.6.1"
     rules:
       - if: "target == esp32p4"
   espressif/esp_hosted:
-    version: "*"
+    version: "~2.12.9"
     rules:
       - if: "target == esp32p4"

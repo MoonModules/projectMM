@@ -2,7 +2,7 @@
 
 Output driver for WS2812B-class addressable LEDs over the ESP32 **RMT** peripheral — one or more strands, one GPIO and one RMT TX channel per strand. Reads the Drivers container's buffer, applies the shared [Correction](Correction.md) (brightness / channel order / RGBW white) per light, and emits the WS2812 1-wire signal. Runs on any chip whose RMT peripheral has TX channels: classic ESP32 (8 channels), ESP32-S3 (4 channels), and ESP32-P4 (4 channels, DMA-backed). On desktop the RMT platform seam is a no-op and the driver is inert.
 
-## Wire contract — WS2812B
+## Wire contract — [WS2812B](https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf)
 
 1-wire NRZ at 800 kHz, no clock line. Each data bit is a 1.25 µs cell that starts HIGH then drops LOW; the HIGH duration encodes the bit:
 
@@ -33,7 +33,7 @@ The source buffer is split into **consecutive slices**, one per pin, in list ord
 
 The driver is added as a child of the `Drivers` container in `main.cpp` (under `if constexpr (platform::rmtTxChannels > 0)`), exactly like [NetworkSendDriver](NetworkSendDriver.md): it receives `setSourceBuffer` / `setCorrection` / `setLayer` from `Drivers::passBufferToDrivers`, and applies the same `const Correction*` ArtNet uses. The **symbol encode** (`encodeWs2812Symbols` in `RmtSymbol.h`) is domain code in `src/light/` so it is host-testable; the **peripheral** (`platform::rmtWs2812*` in `src/platform/esp32/platform_esp32_rmt.cpp`) is the only ESP-IDF-touching part. Per-chip channel and memory limits come from the IDF SOC capability macros, so the same code serves classic, S3 and P4.
 
-The peripheral half uses the **modern RMT driver** (ESP-IDF 5.x+ "RMT v2": `driver/rmt_tx.h` / `rmt_rx.h` / `rmt_encoder.h` — `rmt_new_tx_channel()`, a copy encoder, `rmt_transmit()`), **not** the legacy channel-numbered API (`driver/rmt.h`, `rmt_config_t`, `RMT_CHANNEL_n`, `rmt_write_items()`). This isn't a preference — the legacy driver was **removed entirely in ESP-IDF v6** (the build IDF), so the modern API is the only one that exists. One payoff is portability: the same v2 code serves every RMT-bearing target with no per-chip branching, including the **P4**, whose RMT additionally has a DMA backend (`SOC_RMT_SUPPORT_DMA`, used by the whole-frame loopback capture — the classic ESP32 has no RMT DMA).
+The peripheral half uses the [**modern RMT driver**](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/rmt.html) (ESP-IDF 5.x+ "RMT v2": `driver/rmt_tx.h` / `rmt_rx.h` / `rmt_encoder.h` — `rmt_new_tx_channel()`, a copy encoder, `rmt_transmit()`), **not** the legacy channel-numbered API (`driver/rmt.h`, `rmt_config_t`, `RMT_CHANNEL_n`, `rmt_write_items()`). This isn't a preference — the legacy driver was **removed entirely in [ESP-IDF v6](https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32/migration-guides/release-6.x/6.0/peripherals.html)** (the build IDF), so the modern API is the only one that exists. One payoff is portability: the same v2 code serves every RMT-bearing target with no per-chip branching, including the [**P4**](https://www.espressif.com/en/products/socs/esp32-p4), whose RMT additionally has a DMA backend (`SOC_RMT_SUPPORT_DMA`, used by the whole-frame loopback capture — the classic ESP32 has no RMT DMA).
 
 ## Loopback self-test (on device)
 

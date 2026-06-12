@@ -1,14 +1,14 @@
 #pragma once
 
 #include "light/layers/Layer.h"
-#include "core/MicModule.h"   // MicModule::latestFrame()
+#include "core/AudioModule.h"   // AudioModule::latestFrame()
 
 namespace mm {
 
 // Audio-reactive VU effect: the whole grid pulses with the microphone's sound
 // level. The simplest audio consumer — one scalar (AudioFrame::level) drives a
 // single brightness, a colour shifting from calm to hot as it rises. Reads the
-// live frame from MicModule::latestFrame(); with no mic (or silence) the frame is
+// live frame from AudioModule::latestFrame(); with no mic (or silence) the frame is
 // zero and the grid stays dark, so the effect is safe on any target.
 class AudioVolumeEffect : public EffectBase {
 public:
@@ -29,7 +29,7 @@ public:
         const size_t total = static_cast<size_t>(w) * h * d * cpl;
 
         // level is ~0..255; scale to the brightness ceiling.
-        const uint16_t level = MicModule::latestFrame()->level;
+        const uint16_t level = AudioModule::latestFrame()->level;
         const uint16_t v = static_cast<uint16_t>(
             (level > 255 ? 255 : level) * brightness / 255);
 
@@ -40,12 +40,16 @@ public:
         const uint8_t g = static_cast<uint8_t>(v > 128 ? (255 - v) * 2 : 255 * v / 128);
         const uint8_t b = 0;
 
-        // Write logical RGB only — channel order and any RGBW white are the
-        // driver's Correction (W = min(r,g,b)), like every other effect.
+        // Write logical RGB only: channel order and any RGBW white are the
+        // driver's Correction (W = min(r,g,b)), like every other effect. Effect
+        // buffers are RGB (cpl == 3) today; the loop stays correct for any cpl by
+        // writing R/G/B where they fit and zeroing any extra channels, so no stale
+        // bytes survive from a prior, differently-shaped frame.
         for (size_t off = 0; off < total; off += cpl) {
             if (cpl >= 1) buf[off + 0] = r;
             if (cpl >= 2) buf[off + 1] = g;
             if (cpl >= 3) buf[off + 2] = b;
+            for (uint8_t ch = 3; ch < cpl; ch++) buf[off + ch] = 0;
         }
     }
 };

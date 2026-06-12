@@ -4,7 +4,7 @@ The classic equalizer display: the microphone's **16 frequency bands** (bass →
 
 On a grid at least 3 rows tall, the **bottom row is an overall level/volume meter** (a horizontal VU bar lit left-to-right in proportion to `level`) and the spectrum bars sit in the rows above it. A shorter grid uses the full height for the spectrum.
 
-Reads the live frame from [MicModule](../../core/MicModule.md)`::latestFrame()`; no microphone or silence → all bands zero → dark.
+Reads the live frame from [AudioModule](../../core/AudioModule.md)`::latestFrame()`; no microphone or silence → all bands zero → dark.
 
 ## Controls
 

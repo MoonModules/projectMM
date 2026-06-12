@@ -1,10 +1,14 @@
 #pragma once
 
-// MicModule — reads a digital I2S MEMS microphone (e.g. INMP441) and publishes
-// one analysed AudioFrame per render tick: an overall sound level plus a 16-band
-// frequency spectrum and the dominant peak. It is the PRODUCER in the audio
-// producer/consumer pair; audio-reactive effects (AudioVolumeEffect,
-// AudioSpectrumEffect) are the consumers, wired the AudioFrame* in main.cpp.
+// AudioModule — acquires an audio source and publishes one analysed AudioFrame
+// per render tick: an overall sound level plus a 16-band frequency spectrum and
+// the dominant peak. Named for what it does (audio acquisition + analysis), not
+// for one source: today the source is a digital I2S MEMS mic (e.g. INMP441, the
+// only one wired); the analysis pipeline is source-independent and is meant to
+// serve line-in / USB sources behind the platform read seam as they are added.
+// It is the PRODUCER in the audio producer/consumer pair; audio-reactive effects
+// (AudioVolumeEffect, AudioSpectrumEffect) are the consumers, wired the
+// AudioFrame* in main.cpp.
 //
 // A SystemModule Peripheral child (the role already exists). Chip-agnostic:
 // gated on platform::hasI2sMic, inert with a status note on targets without I2S
@@ -28,7 +32,7 @@
 
 namespace mm {
 
-class MicModule : public MoonModule {
+class AudioModule : public MoonModule {
 public:
     // Block size = FFT size: a power of two. 512 samples at 22050 Hz is ~23 ms of
     // audio per frame — fine resolution (~43 Hz/bin) at a modest per-tick cost.
@@ -155,7 +159,7 @@ public:
 private:
     // The mic that latestFrame() hands to effects. One in practice; the last one
     // to setup() wins, teardown() clears it. inline so the header stays standalone.
-    static inline MicModule* active_ = nullptr;
+    static inline AudioModule* active_ = nullptr;
 
     platform::AudioMicHandle mic_;
     bool inited_ = false;

@@ -1,12 +1,14 @@
-# MicModule
+# AudioModule
 
-Reads a digital I²S MEMS microphone and publishes one analysed **AudioFrame** per render tick: an overall sound **level**, a 16-band frequency **spectrum**, and the **dominant peak**. It is the producer half of the audio-reactive pipeline; [AudioVolumeEffect](../light/effects/AudioVolumeEffect.md) and [AudioSpectrumEffect](../light/effects/AudioSpectrumEffect.md) are the consumers.
+Acquires an audio source and publishes one analysed **AudioFrame** per render tick: an overall sound **level**, a 16-band frequency **spectrum**, and the **dominant peak**. It is the producer half of the audio-reactive pipeline; [AudioVolumeEffect](../light/effects/AudioVolumeEffect.md) and [AudioSpectrumEffect](../light/effects/AudioSpectrumEffect.md) are the consumers.
+
+It is named for what it does, audio acquisition plus analysis, not for one source: today the source is a digital I²S MEMS microphone (the only one wired), and the same analysis pipeline is built to serve other sources (line-in, USB audio) behind the platform read seam as they are added. Most of the module is the analysis (DC-blocker, RMS level, windowed FFT, band mapping), which is source-independent.
 
 A SystemModule **Peripheral** child, code-wired in `main.cpp`. Chip-agnostic: it is created only where the platform has an I²S peripheral (`platform::hasI2sMic`, true on every current ESP32, false on desktop). On a mic-less build it isn't created and the audio effects read a permanently-silent frame, so they simply stay dark.
 
 ## Hardware: INMP441-class digital mic
 
-Built and tested against an **INMP441** (a self-clocked I²S MEMS microphone): standard/Philips framing, 24-bit data left-justified in a 32-bit slot, mono. Three wires plus power:
+Built and tested against an **[INMP441](https://invensense.tdk.com/wp-content/uploads/2015/02/INMP441.pdf)** (a self-clocked I²S MEMS microphone): standard/Philips framing, 24-bit data left-justified in a 32-bit slot, mono. Three wires plus power:
 
 | Control | Default | Pin |
 |---|---|---|
@@ -22,11 +24,11 @@ Each `loop()`: read a block of samples → DC-blocker high-pass → compute the 
 
 - **DC-blocker high-pass** (`AudioLevel.h::DcBlocker`, host-tested): a one-pole/one-zero IIR high-pass (`y[n] = x[n] − x[n−1] + R·y[n−1]`, `R = 0.99`, ≈ 40 Hz corner at 22 kHz) applied to the whole block before any analysis. It removes the MEMS mic's large constant DC bias *and* sub-bass rumble below ~40 Hz (handling/wind/structural) that would otherwise leak into the lowest band. Its state carries across blocks (it's a continuous filter, not per-block), and it resets when the channel re-inits. This is distinct from, and runs before, the level path's own block-mean subtraction below.
 - **Level** (`AudioLevel.h`, host-tested): subtract the block's DC mean (belt-and-braces after the high-pass), take the RMS, and map it through the log/dB window (`floor` / `gain`). It is the overall loudness, independent of the FFT: the VU value. (It uses a gentler floor than the bands so the meter keeps moving with volume rather than gating hard.)
-- **Spectrum** (`AudioBands.h`, host-tested): apply a Hann window (the standard general-purpose FFT window, tapers the block edges so a tone doesn't smear across bins), run the FFT (`platform::audioFft`), then group the magnitude bins into 16 log-spaced bands (a plain geometric / equal-ratio bin split) and pick the loudest bin as the dominant peak (argmax). The peak is held when no real signal is present so it doesn't wander in silence.
+- **Spectrum** (`AudioBands.h`, host-tested): apply a [Hann window](https://en.wikipedia.org/wiki/Hann_function) (the standard general-purpose FFT window, tapers the block edges so a tone doesn't smear across bins), run the FFT (`platform::audioFft`), then group the magnitude bins into 16 log-spaced bands (a plain geometric / equal-ratio bin split) and pick the loudest bin as the dominant peak (argmax). The peak is held when no real signal is present so it doesn't wander in silence.
 
-Only the I²S read and the FFT kernel are platform code (`platform_esp32_i2s.cpp`: IDF's `i2s_std` driver + esp-dsp's float `dsps_fft2r_fc32`); everything else is plain domain math that runs in CI on the desktop's reference DFT.
+Only the I²S read and the FFT kernel are platform code (`platform_esp32_i2s.cpp`: IDF's [`i2s_std`](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/i2s.html) driver + [esp-dsp](https://github.com/espressif/esp-dsp)'s float `dsps_fft2r_fc32`); everything else is plain domain math that runs in CI on the desktop's reference DFT.
 
-The DSP choices are the textbook defaults on purpose: a **Hann** window, **RMS** for level, a **geometric** band split, **argmax** for the peak. There is deliberately **no per-frequency correction table**; the INMP441 is flat ±3 dB across the range that matters (datasheet), so there is no mic-response error to compensate, and a hand-tuned correction curve would add complexity for nothing. The level is overall RMS loudness computed independently of the FFT, not derived from the bands; deriving it from the bands would stop it tracking volume.
+The DSP choices are the textbook defaults on purpose: a **Hann** window, **RMS** for level, a **geometric** band split, **argmax** for the peak. There is deliberately **no per-frequency correction table**; the INMP441 is flat ±3 dB across the range that matters ([datasheet](https://invensense.tdk.com/wp-content/uploads/2015/02/INMP441.pdf)), so there is no mic-response error to compensate, and a hand-tuned correction curve would add complexity for nothing. The level is overall RMS loudness computed independently of the FFT, not derived from the bands; deriving it from the bands would stop it tracking volume.
 
 ## Controls
 
@@ -39,7 +41,7 @@ The DSP choices are the textbook defaults on purpose: a **Hann** window, **RMS**
 
 ## Cross-domain wiring
 
-MicModule produces an `AudioFrame` (`src/light/AudioFrame.h`); the consuming effects reach the live frame through the static **`MicModule::latestFrame()`**, not a boot-time setter, so an effect added through the UI at any time still finds the one mic, and with no mic it gets a static silent frame. The active module registers itself in `setup()` and clears that pointer in `teardown()`, so adding or removing the mic (or an effect) in any order always leaves a coherent answer.
+AudioModule produces an `AudioFrame` (`src/light/AudioFrame.h`); the consuming effects reach the live frame through the static **`AudioModule::latestFrame()`**, not a boot-time setter, so an effect added through the UI at any time still finds the one mic, and with no mic it gets a static silent frame. The active module registers itself in `setup()` and clears that pointer in `teardown()`, so adding or removing the mic (or an effect) in any order always leaves a coherent answer.
 
 The first ~250 ms after the I²S clock starts are power-on settling garbage; the read is non-blocking (the hot-path rule), so those samples flow through the first few `loop()` reads and the level/bands self-correct within that quarter-second; the frame stays valid (zeroed) until then.
 
@@ -97,4 +99,4 @@ Each step is its own commit, host-tested red-first, and leaves the system workin
 
 ## Source
 
-[MicModule.h](../../../src/core/MicModule.h) · [AudioFrame.h](../../../src/light/AudioFrame.h) · [AudioLevel.h](../../../src/light/AudioLevel.h) · [AudioBands.h](../../../src/light/AudioBands.h) · [platform_esp32_i2s.cpp](../../../src/platform/esp32/platform_esp32_i2s.cpp)
+[AudioModule.h](../../../src/core/AudioModule.h) · [AudioFrame.h](../../../src/light/AudioFrame.h) · [AudioLevel.h](../../../src/light/AudioLevel.h) · [AudioBands.h](../../../src/light/AudioBands.h) · [platform_esp32_i2s.cpp](../../../src/platform/esp32/platform_esp32_i2s.cpp)

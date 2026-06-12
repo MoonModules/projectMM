@@ -30,7 +30,7 @@
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
 #include "core/BoardModule.h"
-#include "core/MicModule.h"
+#include "core/AudioModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/ImprovProvisioningModule.h"
 #include "core/FilesystemModule.h"
@@ -82,7 +82,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/HttpServerModule.md");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/SystemModule.md");
     mm::ModuleFactory::registerType<mm::BoardModule>("BoardModule", "core/BoardModule.md");
-    mm::ModuleFactory::registerType<mm::MicModule>("MicModule", "core/MicModule.md");
+    mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule", "core/AudioModule.md");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/FirmwareUpdateModule.md");
     mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/ImprovProvisioningModule.md");
     mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule", "core/NetworkModule.md");
@@ -145,18 +145,18 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     systemModule->addChild(boardModule);
     boardModule->markWiredByCode();
 
-    // MicModule — I2S microphone input, a Peripheral child of System. Produces the
-    // AudioFrame the audio effects consume; they reach it via MicModule::latestFrame()
+    // AudioModule — I2S microphone input, a Peripheral child of System. Produces the
+    // AudioFrame the audio effects consume; they reach it via AudioModule::latestFrame()
     // (not a boot setter), so a UI-added audio effect finds the live mic too. Gated
     // on platform::hasI2sMic: created only where there's an I2S peripheral (every
     // current ESP32; not desktop), so on a mic-less build the effects read a static
     // silent frame and degrade to dark. markWiredByCode keeps it through a
     // persistence load, like BoardModule.
     if constexpr (mm::platform::hasI2sMic) {
-        auto* micModule = static_cast<mm::MicModule*>(mm::ModuleFactory::create("MicModule"));
-        if (micModule) {            // never deref a failed create — a missing
-            systemModule->addChild(micModule);   // registration must not boot-loop
-            micModule->markWiredByCode();
+        auto* audioModule = static_cast<mm::AudioModule*>(mm::ModuleFactory::create("AudioModule"));
+        if (audioModule) {            // never deref a failed create — a missing
+            systemModule->addChild(audioModule);   // registration must not boot-loop
+            audioModule->markWiredByCode();
         }
     }
 

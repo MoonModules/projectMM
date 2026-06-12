@@ -2,7 +2,7 @@
 
 #include "light/layers/Layer.h"
 #include "core/color.h"        // hsvToRgb, RGB
-#include "core/MicModule.h"    // MicModule::latestFrame()
+#include "core/AudioModule.h"    // AudioModule::latestFrame()
 
 #include <cstring>             // std::memset
 
@@ -17,7 +17,7 @@ namespace mm {
 // (a horizontal VU bar) and the bars sit above it; shorter grids use the full
 // height for the spectrum.
 //
-// Reads the live frame from MicModule::latestFrame(); no mic / silence → all
+// Reads the live frame from AudioModule::latestFrame(); no mic / silence → all
 // bands zero → dark, so it is safe on any target and any grid size (including
 // 0×0). On a 1D strip (height 1) the bars collapse to per-column brightness.
 class AudioSpectrumEffect : public EffectBase {
@@ -43,7 +43,7 @@ public:
 
         std::memset(buf, 0, static_cast<size_t>(w) * h * d * cpl);
 
-        const AudioFrame* f = MicModule::latestFrame();
+        const AudioFrame* f = AudioModule::latestFrame();
 
         auto setRGB = [&](lengthType x, lengthType y, lengthType z,
                           uint8_t r, uint8_t g, uint8_t b) {
@@ -105,15 +105,18 @@ public:
                     r = c.r; g = c.g; b = c.b;
                 } else {
                     // Height gradient: green at the base → red at the top. The
-                    // gradient runs over h-1 rows so the top row reaches full red.
-                    // On a 1D strip there's no height to gradient over, so the one
+                    // gradient runs over the spectrum's own rows (specH), not the
+                    // full grid height: when the bottom row is reserved as the level
+                    // meter, specH == h-1, so dividing by (h-1) would stop the top
+                    // spectrum row one step short of full red. On a 1D strip
+                    // (specH <= 1) there's no height to gradient over, so the one
                     // row is a green→red ramp driven by magnitude (dark at mag 0).
-                    const uint8_t frac = (h > 1)
-                        ? static_cast<uint8_t>(static_cast<uint32_t>(row) * 255u / (h - 1))
+                    const uint8_t frac = (specH > 1)
+                        ? static_cast<uint8_t>(static_cast<uint32_t>(row) * 255u / (specH - 1))
                         : mag;
-                    r = (h > 1) ? frac : static_cast<uint8_t>(static_cast<uint32_t>(frac) * mag / 255u);
-                    g = (h > 1) ? static_cast<uint8_t>(255 - frac)
-                                : static_cast<uint8_t>(static_cast<uint32_t>(255 - frac) * mag / 255u);
+                    r = (specH > 1) ? frac : static_cast<uint8_t>(static_cast<uint32_t>(frac) * mag / 255u);
+                    g = (specH > 1) ? static_cast<uint8_t>(255 - frac)
+                                    : static_cast<uint8_t>(static_cast<uint32_t>(255 - frac) * mag / 255u);
                     b = 0;
                 }
                 for (lengthType z = 0; z < d; z++)

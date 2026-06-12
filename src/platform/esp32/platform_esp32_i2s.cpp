@@ -1,5 +1,5 @@
 // I2S microphone input + FFT kernel — the peripheral half of the audio feature
-// (MicModule, src/core/MicModule.h). The module does all the domain work: the
+// (AudioModule, src/core/AudioModule.h). The module does all the domain work: the
 // level math (AudioLevel.h), windowing and the magnitude->band mapping
 // (AudioBands.h). This file owns only the two seams: reading samples off an I2S
 // RX channel, and the FFT itself (esp-dsp's float radix-2).
@@ -109,7 +109,7 @@ size_t audioMicRead(AudioMicHandle& h, int32_t* out, size_t maxSamples) {
     // the DMA to fill (the hot-path no-blocking rule). It drains whatever the DMA
     // already holds and returns immediately. A full 512-sample block takes ~23 ms
     // at 22 kHz — longer than one render tick — so a single read returns only a
-    // partial block; MicModule accumulates partials across ticks and runs the FFT
+    // partial block; AudioModule accumulates partials across ticks and runs the FFT
     // when it has a whole block. On timeout the call still copies whatever was
     // ready into `out` and reports it in `bytesRead`, so we use that count
     // regardless of the return code (a timeout with bytesRead>0 is a partial read,

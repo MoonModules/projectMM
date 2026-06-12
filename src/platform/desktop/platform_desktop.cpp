@@ -722,7 +722,7 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*l
     return {};   // not supported off the P4
 }
 
-// I2S microphone — no capture on desktop (hasI2sMic == false, MicModule inert),
+// I2S microphone — no capture on desktop (hasI2sMic == false, AudioModule inert),
 // so init fails and read returns nothing.
 bool audioMicInit(AudioMicHandle& /*h*/, uint16_t /*wsPin*/, uint16_t /*sdPin*/,
                   uint16_t /*sckPin*/, uint32_t /*sampleRate*/) {

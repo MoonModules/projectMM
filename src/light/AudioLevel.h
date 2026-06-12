@@ -47,7 +47,12 @@ struct DcBlocker {
             const float y = x - xPrev + r * yPrev;
             xPrev = x;
             yPrev = y;
-            samples[i] = static_cast<int32_t>(y);
+            // Clamp before narrowing: casting a float outside the int32 range to
+            // int32_t is undefined behaviour. A settling transient (or a degenerate
+            // r) can briefly push y past the bounds, so saturate first.
+            const float clamped = y < -2147483648.0f ? -2147483648.0f
+                                : y >  2147483647.0f ?  2147483647.0f : y;
+            samples[i] = static_cast<int32_t>(clamped);
         }
     }
 };

@@ -1,6 +1,6 @@
 # LCD LED Driver
 
-Parallel WS2812B output on the **ESP32-S3** over the LCD_CAM peripheral: up to **8 strands clock out simultaneously**, one GPIO per strand, all fed by a single autonomous DMA transfer. The S3's scale path — where the [RMT driver](RmtLedDriver.md) tops out at 4 channels on the S3, this drives 8 lanes for the wall time of one. Reads the Drivers container's buffer, applies the shared [Correction](Correction.md) per light, and bit-transposes corrected bytes across the lanes.
+Parallel [WS2812B](https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf) output on the **ESP32-S3** over the [LCD_CAM](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/lcd/index.html) peripheral: up to **8 strands clock out simultaneously**, one GPIO per strand, all fed by a single autonomous DMA transfer. The S3's scale path — where the [RMT driver](RmtLedDriver.md) tops out at 4 channels on the S3, this drives 8 lanes for the wall time of one. Reads the Drivers container's buffer, applies the shared [Correction](Correction.md) per light, and bit-transposes corrected bytes across the lanes.
 
 ## Wire contract — 3 slots per bit
 
@@ -27,7 +27,7 @@ One internal-RAM DMA frame buffer owned by the platform (PSRAM is deliberately n
 
 ## Cross-domain wiring
 
-Added as a child of the `Drivers` container in `main.cpp` under `if constexpr (platform::lcdLanes > 0)` (SOC-derived: the S3 among current targets), wired by code like its siblings. The **slot encode** (`LcdSlots.h`) is domain code, host-testable; the **peripheral** (`platform_esp32_lcd.cpp`, ESP-IDF's `esp_lcd` i80 bus + GDMA) is the only IDF-touching part.
+Added as a child of the `Drivers` container in `main.cpp` under `if constexpr (platform::lcdLanes > 0)` (SOC-derived: the S3 among current targets), wired by code like its siblings. The **slot encode** (`LcdSlots.h`) is domain code, host-testable; the **peripheral** (`platform_esp32_lcd.cpp`, ESP-IDF's [`esp_lcd` i80 bus](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/lcd/index.html) + GDMA) is the only IDF-touching part.
 
 ## Tests
 

@@ -1,4 +1,4 @@
-// @module MicModule
+// @module AudioModule
 // @also AudioSpectrumEffect
 
 #include "doctest.h"
@@ -9,7 +9,7 @@
 #include <numbers>
 #include <vector>
 
-// The success spec for the frequency path, written RED before MicModule's FFT
+// The success spec for the frequency path, written RED before AudioModule's FFT
 // call exists. The whole pipeline runs host-side: synthesize a sine ->
 // applyWindow -> platform::audioFft (the desktop reference DFT) ->
 // magnitudesToBands, then assert the energy lands in the right band and the

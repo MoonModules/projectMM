@@ -83,7 +83,7 @@ constexpr uint8_t parlioLanes = 0;
 
 // I2S audio input (an INMP441-class digital MEMS microphone). SOC-derived like
 // the LED-peripheral flags: every current ESP32 has I2S, so this is true on all
-// of them, but the gate keeps MicModule + the I2S platform seam inert on any
+// of them, but the gate keeps AudioModule + the I2S platform seam inert on any
 // future I2S-less target and on desktop. The audio math (RMS, FFT bands) is
 // host-tested domain code; only the I2S read and the FFT kernel sit behind the
 // boundary, both guarded by `if constexpr (platform::hasI2sMic)`.
