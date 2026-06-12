@@ -376,16 +376,42 @@ jobs:
           echo "Releases to keep on Pages:"
           echo "$KEEP" | sed 's/^/  /'
 
+          # NOTE: deliberately NOT downloading manifest-*.json from the release.
+          # The release's manifests carry ABSOLUTE github.com asset URLs (built
+          # with --release-url=https://github.com/.../releases/download/... in the
+          # `release` job), which the web installer CANNOT fetch — GitHub release
+          # downloads don't return CORS headers, so a browser fetch() fails with
+          # "Failed to fetch" at the fetch-firmware stage. The installer needs the
+          # RELATIVE-path manifests generated into pages-manifests/ above (paths
+          # like ./firmware-*.bin, resolved same-origin against the Pages dir).
+          # Pulling manifest-*.json here would overwrite those with the broken
+          # absolute ones — which is exactly the regression this avoids.
           for T in $KEEP; do
             mkdir -p "pages/install/releases/$T"
             gh release download "$T" \
               --dir "pages/install/releases/$T" \
               --pattern 'firmware-*.bin' \
-              --pattern 'manifest-*.json' \
               --pattern 'projectMM-*.tar.gz' \
               --pattern 'projectMM-*.zip' \
               || echo "  (skip $T — no matching assets)"
           done
+
+          # Drop the relative-path manifests (pages-manifests/, current build) over
+          # the CURRENT tag's dir, so the installer fetches firmware same-origin.
+          # Older kept tags keep the relative manifests they deployed in their own
+          # past runs (Pages is cumulative); only the tag being built now is here.
+          # deploy-pages has no `id: tag` step, so resolve the tag the same way the
+          # build/release jobs do: workflow_dispatch tag wins; main push → latest;
+          # a vX.Y.Z tag push → that tag.
+          if [ -n "${{ inputs.tag }}" ]; then CUR_TAG="${{ inputs.tag }}"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then CUR_TAG="latest"
+          else CUR_TAG="${{ github.ref_name }}"; fi
+          if [ -d "pages/install/releases/$CUR_TAG" ]; then
+            cp pages-manifests/manifest-*.json "pages/install/releases/$CUR_TAG/"
+            echo "Installed relative manifests into releases/$CUR_TAG"
+          else
+            echo "WARNING: releases/$CUR_TAG not found — installer manifests not staged"
+          fi
 
       - name: Stage GitHub Pages site
         run: |
