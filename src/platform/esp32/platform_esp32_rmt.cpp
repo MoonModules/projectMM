@@ -110,9 +110,16 @@ void rmtWs2812Wait(RmtWs2812Handle& h, uint32_t timeoutMs) {
     // Finite timeout so a wedged DMA can't hang the render tick forever. Even the
     // longest realistic frame (thousands of pixels) clocks out well under 1 s; a
     // timeout here means the peripheral is stuck, and the driver re-encodes the
-    // whole frame next tick anyway, so a dropped frame self-heals. Fuller error
-    // handling (return failure, cancel in-flight) is deferred — see the backlog
-    // note in leddriver-increment-1-plan.md.
+    // whole frame next tick anyway, so a dropped frame self-heals.
+    //
+    // We deliberately do NOT cancel a timed-out transfer with rmt_disable(): on
+    // classic ESP32, rmt_disable() while a transmission is still active triggers an
+    // interrupt-WDT panic (espressif/esp-idf#17692, classic-only — S3/C6/P4 are
+    // unaffected). A panic is a worse failure than a dropped frame, so we leave the
+    // stuck transfer alone. It self-heals safely: the next tick re-encodes symbols_
+    // and calls rmt_transmit again; if the channel is still busy, rmt_transmit
+    // returns an error, rmtWs2812Transmit returns false, and RmtLedDriver::loop()
+    // skips waiting on that channel (its started[] guard) — no crash, no corruption.
     rmt_tx_wait_all_done(st->channel, timeoutMs);
 }
 

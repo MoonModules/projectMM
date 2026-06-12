@@ -12,52 +12,52 @@ Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi,
 
 Open Chrome or Edge, plug in your board, and you'll see lights in under a minute.
 
-If you like projectMM, give it a ⭐️, fork it, or open an issue or pull request — it helps the project grow, improve, and get noticed.
+If you like projectMM, give it a ⭐️, fork it, or open an issue or pull request; it helps the project grow, improve, and get noticed.
 
 ## What makes projectMM different
 
-🔵 **16,384 LEDs on a *classic* ESP32** — not just the S3 or P4. Memory-adaptive from a 16×16 panel up to 128×128, degrading gracefully on tight boards instead of crashing.
+🔵 **16,384 LEDs on a *classic* ESP32**, not just the S3 or P4. Memory-adaptive from a 16×16 panel up to 128×128, degrading gracefully on tight boards instead of crashing.
 
-🧊 **Native 3D from the ground up** — 2D and 1D are just the cases where a dimension is size 1. Effects never pick a mode.
+🧊 **Native 3D from the ground up**: 2D and 1D are just the cases where a dimension is size 1. Effects never pick a mode.
 
-🎛️ **Pluggable pipeline** — Layouts → Layers (effects + modifiers) → Drivers. Build it visually in the browser, configure it live, and it survives reboots.
+🎛️ **Pluggable pipeline**: Layouts → Layers (effects + modifiers) → Drivers. Build it visually in the browser, configure it live, and it survives reboots.
 
-💡 **DMX *and* addressable LEDs in one setup** — RGB strips, RGBW pixels, par lights, moving heads, all through the same pipeline.
+💡 **DMX *and* addressable LEDs in one setup**: RGB strips, RGBW pixels, par lights, moving heads, all through the same pipeline.
 
-🖥️ **One source tree, many targets** — the same code runs on ESP32, Teensy, Raspberry Pi, and macOS / Windows / Linux.
+🖥️ **One source tree, many targets**: the same code runs on ESP32, Teensy, Raspberry Pi, and macOS / Windows / Linux.
 
-🎨 **Plug in, open a browser, see lights** — a live 3D preview of every effect, modifier, and layout, controllable from the same tab. The interface renders any module from its declared controls, so adding a module needs zero UI code.
+🎨 **Plug in, open a browser, see lights**: a live 3D preview of every effect, modifier, and layout, controllable from the same tab. The interface renders any module from its declared controls, so adding a module needs zero UI code.
 
-⚡ **Flash from your browser in seconds** — the web installer picks your board, flashes the matching firmware, and hands WiFi credentials to the device over USB via Improv. No serial monitor, no recompile.
+⚡ **Flash from your browser in seconds**: the web installer picks your board, flashes the matching firmware, and hands WiFi credentials to the device over USB via Improv. No serial monitor, no recompile.
 
 ## Under the hood
 
-🛠️ **ESP-IDF directly, no Arduino** — the ESP32 build is pure ESP-IDF (v6.x): native LED drivers, `esp_http_server`, FreeRTOS, built with `idf.py`, not PlatformIO or the Arduino framework. See [building.md § Why not Arduino](docs/building.md#why-not-arduino).
+🛠️ **ESP-IDF directly, no Arduino**: the ESP32 build is pure ESP-IDF (v6.x): native LED drivers, `esp_http_server`, FreeRTOS, built with `idf.py`, not PlatformIO or the Arduino framework. See [building.md § Why not Arduino](docs/building.md#why-not-arduino).
 
-📦 **No third-party libraries** — no FastLED, no ESPAsyncWebServer, no ArduinoJson. The colour math, the HTTP/WebSocket server, and the control storage are all in-tree. A library, when genuinely needed, lives behind the platform boundary in `src/platform/`, never in core. The full rationale + replacements: [building.md § Third-party libraries](docs/building.md#third-party-libraries).
+📦 **No third-party libraries**: no FastLED, no ESPAsyncWebServer, no ArduinoJson. The colour math, the HTTP/WebSocket server, and the control storage are all in-tree. A library, when genuinely needed, lives behind the platform boundary in `src/platform/`, never in core. The full rationale + replacements: [building.md § Third-party libraries](docs/building.md#third-party-libraries).
 
-🧱 **One module model** — every effect, modifier, layout, and driver is a `MoonModule`: one base class, a uniform lifecycle, declared controls. That uniformity is why the UI renders any module with zero per-module code, and why a new capability is a new file, not a new framework. See [architecture.md § MoonModules](docs/architecture.md#moonmodules).
+🧱 **One module model**: every effect, modifier, layout, and driver is a `MoonModule`: one base class, a uniform lifecycle, declared controls. That uniformity is why the UI renders any module with zero per-module code, and why a new capability is a new file, not a new framework. See [architecture.md § MoonModules](docs/architecture.md#moonmodules).
 
 ## Performance
 
 Measured end-to-end through a full render pipeline (effect → modifier → ArtNet output) on real hardware. FPS is derived from the per-frame tick time.
 
-The **Desktop** column is host-CPU-bound, not OS-bound — the numbers track the machine, not macOS vs Windows vs Linux. Captured on Apple Silicon (M-series); the macOS and Windows binaries run the same code on comparable hardware.
+The **Desktop** column is host-CPU-bound, not OS-bound: the numbers track the machine, not macOS vs Windows vs Linux. Captured on Apple Silicon (M-series); the macOS and Windows binaries run the same code on comparable hardware.
 
 ### Frames per second
 
 | Grid | Lights | Desktop | Olimex `esp32-eth-wifi` | Olimex `esp32-eth` | LOLIN S3 N16R8 `esp32s3-n16r8` |
 |---|---:|---:|---:|---:|---:|
-| 16×16 | 256 | — *(below host clock resolution)* | 1,543 | 1,628 | 1,672 |
+| 16×16 | 256 | *(below host clock resolution)* | 1,543 | 1,628 | 1,672 |
 | 32×32 | 1,024 | 166,667 | 447 | 432 | 287 |
 | 64×64 | 4,096 | 40,000 | 81 | 71 | 25 |
 | 128×128 | 16,384 | 9,708 | 11 | 10 | 6 |
 
-The LOLIN S3 N16R8 is WiFi-only and runs with `Network.txPowerSetting` capped to 8 dBm (the brown-out fix — see below). At 128×128 it's bound by ArtNet over WiFi at reduced TX power (~93 ms of the ~164 ms tick), which is why it trails the Ethernet boards despite a faster core. The board's niche is PSRAM headroom (8 MB) for large pixel buffers, not raw ArtNet FPS — use an Ethernet board when frame rate matters.
+The LOLIN S3 N16R8 is WiFi-only and runs with `Network.txPowerSetting` capped to 8 dBm (the brown-out fix, see below). At 128×128 it's bound by ArtNet over WiFi at reduced TX power (~93 ms of the ~164 ms tick), which is why it trails the Ethernet boards despite a faster core. The board's niche is PSRAM headroom (8 MB) for large pixel buffers, not raw ArtNet FPS; use an Ethernet board when frame rate matters.
 
 ### Free heap
 
-Each cell is **free internal RAM / largest contiguous internal-RAM block**. Internal RAM is the scarce, comparable resource across all boards — so for PSRAM boards (the S3) this is internal-only, NOT the PSRAM-merged total (we assume the 8 MB PSRAM pool is large enough that it isn't the constraint). The block size is the memory-pressure signal that matters: free RAM can be ample while fragmentation leaves no single block big enough for the next allocation.
+Each cell is **free internal RAM / largest contiguous internal-RAM block**. Internal RAM is the scarce, comparable resource across all boards, so for PSRAM boards (the S3) this is internal-only, NOT the PSRAM-merged total (we assume the 8 MB PSRAM pool is large enough that it isn't the constraint). The block size is the memory-pressure signal that matters: free RAM can be ample while fragmentation leaves no single block big enough for the next allocation.
 
 | Grid | Desktop | Olimex `esp32-eth-wifi` | Olimex `esp32-eth` | LOLIN S3 N16R8 `esp32s3-n16r8` |
 |---|---:|---:|---:|---:|
@@ -66,34 +66,34 @@ Each cell is **free internal RAM / largest contiguous internal-RAM block**. Inte
 | 64×64 | unlimited | 108 KB / 48 KB | 147 KB / 62 KB | 236 KB / 152 KB |
 | 128×128 | unlimited | 129 KB / 52 KB | 132 KB / 48 KB | 240 KB / 164 KB |
 
-The S3's internal-free stays flat across grid sizes because its Layer buffer + LUT live in PSRAM — growing the grid consumes PSRAM, not internal RAM. The Olimex boards hold those buffers in internal RAM, so their free heap drops as the grid grows.
+The S3's internal-free stays flat across grid sizes because its Layer buffer + LUT live in PSRAM: growing the grid consumes PSRAM, not internal RAM. The Olimex boards hold those buffers in internal RAM, so their free heap drops as the grid grows.
 
 Build variants differ structurally: `esp32-eth-wifi` includes the WiFi stack (~270 KB flash, ~28 KB heap). `esp32-eth` drops WiFi for more free heap, at the cost of slightly slower tick on large grids (lwIP buffer-pool sizing is tuned for the eth-wifi sdkconfig). The right variant depends on whether the deployment needs WiFi, Ethernet, or large buffers.
 
-The numbers above are observations. The **contracts** projectMM commits to — what the device must hit on every CI run — live in [`test/scenarios/*.json`](test/scenarios/) as per-step `contract.<target>` blocks; see [docs/testing.md § Performance contracts](docs/testing.md#performance-contracts-contracttarget) for how they're set and renegotiated. The [docs/performance.md](docs/performance.md) page covers the *why* (WiFi vs Ethernet physics, sizeof tables, build-variant deltas).
+The numbers above are observations. The **contracts** projectMM commits to, what the device must hit on every CI run, live in [`test/scenarios/*.json`](test/scenarios/) as per-step `contract.<target>` blocks; see [docs/testing.md § Performance contracts](docs/testing.md#performance-contracts-contracttarget) for how they're set and renegotiated. The [docs/performance.md](docs/performance.md) page covers the *why* (WiFi vs Ethernet physics, sizeof tables, build-variant deltas).
 
 ## Getting started
 
 ### From a release
 
-**ESP32 — flash from your browser.** Open the [web installer](https://moonmodules.org/projectMM/install/) in Chrome or Edge — it walks you through release, board and firmware selection, flashing, and network setup. The installer lists stable releases and a `latest` build (published automatically on every merge to main) carrying the newest unreleased changes.
+**ESP32: flash from your browser.** Open the [web installer](https://moonmodules.org/projectMM/install/) in Chrome or Edge; it walks you through release, board and firmware selection, flashing, and network setup. The installer lists stable releases and a `latest` build (published automatically on every merge to main) carrying the newest unreleased changes.
 
 ![Installer](docs/assets/screenshots/installer.png)
 
-**Desktop — download and run.** Grab the build for your OS from the [releases page](https://github.com/MoonModules/projectMM/releases):
+**Desktop: download and run.** Grab the build for your OS from the [releases page](https://github.com/MoonModules/projectMM/releases):
 
-- **macOS arm64:** `projectMM-macos-arm64-vX.Y.Z.tar.gz` — unpack, run `./projectMM`. The binary is unsigned, so Gatekeeper prompts on first run — right-click → Open, or clear the quarantine flag with `xattr -dr com.apple.quarantine ./projectMM`.
-- **Windows x64:** `projectMM-windows-x64-vX.Y.Z.zip` — unzip, double-click `projectMM.exe`. SmartScreen may warn on first run because the binary is unsigned (More info → Run anyway).
+- **macOS arm64:** `projectMM-macos-arm64-vX.Y.Z.tar.gz`: unpack, run `./projectMM`. The binary is unsigned, so Gatekeeper prompts on first run; right-click → Open, or clear the quarantine flag with `xattr -dr com.apple.quarantine ./projectMM`.
+- **Windows x64:** `projectMM-windows-x64-vX.Y.Z.zip`: unzip, double-click `projectMM.exe`. SmartScreen may warn on first run because the binary is unsigned (More info → Run anyway).
 
 Then open `http://localhost:8080/`.
 
-Once running, the UI lets you build a render pipeline visually (layouts → layers with effects + modifiers → drivers), preview the result in 3D, send it to Art-Net, and save it. The source tree also builds for Teensy, Raspberry Pi, and Linux from source — see [building.md](docs/building.md) — though currently only the macOS, Windows, and ESP32 binaries ship as releases.
+Once running, the UI lets you build a render pipeline visually (layouts → layers with effects + modifiers → drivers), preview the result in 3D, send it to Art-Net, and save it. The source tree also builds for Teensy, Raspberry Pi, and Linux from source (see [building.md](docs/building.md)), though currently only the macOS, Windows, and ESP32 binaries ship as releases.
 
 ### From source
 
-You need [uv](https://docs.astral.sh/uv/) (Python launcher), CMake 3.20+, and a C++20 compiler. For ESP32, ESP-IDF v6.x is also required — see [building.md](docs/building.md) for the full setup instructions.
+You need [uv](https://docs.astral.sh/uv/) (Python launcher), CMake 3.20+, and a C++20 compiler. For ESP32, ESP-IDF v6.x is also required; see [building.md](docs/building.md) for the full setup instructions.
 
-Once prerequisites are in place, launch MoonDeck — the browser-based dev console:
+Once prerequisites are in place, launch MoonDeck, the browser-based dev console:
 
 ```sh
 uv run scripts/moondeck.py
@@ -107,27 +107,27 @@ Open `http://localhost:8420`: PC tab to build / run / test, ESP32 tab to flash, 
 
 | Document | What's in it |
 |----------|--------------|
-| [architecture.md](docs/architecture.md) | How the system is put together — core runtime + light domain, pipeline, memory, parallelism |
-| [coding-standards.md](docs/coding-standards.md) | How code in this repo is written — conventions, file shape, static checks |
+| [architecture.md](docs/architecture.md) | How the system is put together: core runtime + light domain, pipeline, memory, parallelism |
+| [coding-standards.md](docs/coding-standards.md) | How code in this repo is written: conventions, file shape, static checks |
 | [building.md](docs/building.md) | How to build and flash for every supported target |
 | [testing.md](docs/testing.md) | What tests exist and what they cover |
-| [performance.md](docs/performance.md) | Per-module timing, memory, sizeof — per platform |
-| [moonmodules/](docs/moonmodules/) | One spec page per module — [core](docs/moonmodules/core/) services and [light](docs/moonmodules/light/) effects, layouts, modifiers, drivers |
+| [performance.md](docs/performance.md) | Per-module timing, memory, sizeof, per platform |
+| [moonmodules/](docs/moonmodules/) | One spec page per module: [core](docs/moonmodules/core/) services and [light](docs/moonmodules/light/) effects, layouts, modifiers, drivers |
 | [CLAUDE.md](CLAUDE.md) | Rules, constraints, and development process |
 
 ## How we work
 
-projectMM is built by AI agents under tight human direction. Everything in this repository — firmware and desktop code, the web installer, the MoonDeck dev console, all documentation, the unit and scenario tests, even the UI screenshots and effect GIFs — is authored by agents; the **product owner** writes none of it directly. What the product owner *does* author is the **process** ([CLAUDE.md](CLAUDE.md)), the **architecture** ([architecture.md](docs/architecture.md)), and the **module specifications** ([docs/moonmodules/](docs/moonmodules/)) — then decides what to build next, reviews every line and every spec, runs the hardware tests, and controls every commit, merge, and release. Agents write in defined roles; they don't make decisions. The agent writes; the product owner thinks.
+projectMM is built by AI agents under tight human direction. Everything in this repository, firmware and desktop code, the web installer, the MoonDeck dev console, all documentation, the unit and scenario tests, even the UI screenshots and effect GIFs, is authored by agents; the **product owner** writes none of it directly. What the product owner *does* author is the **process** ([CLAUDE.md](CLAUDE.md)), the **architecture** ([architecture.md](docs/architecture.md)), and the **module specifications** ([docs/moonmodules/](docs/moonmodules/)); then decides what to build next, reviews every line and every spec, runs the hardware tests, and controls every commit, merge, and release. Agents write in defined roles; they don't make decisions. The agent writes; the product owner thinks.
 
 Meet the team: 🤖 Architect designs, 👽 Developer implements, 👾 Reviewer checks before merge, 🛸 Tester verifies, 💀 Runner does quick build and check passes. Full team descriptions in [CLAUDE.md](CLAUDE.md).
 
 A few principles run through everything:
 
-- **Common patterns first** — recognisable practice across code, docs, tests, UI. Bespoke choices need a stated reason.
-- **Specs before code** — a module is documented in [`docs/moonmodules/`](docs/moonmodules/) — purpose, controls, behaviour, edge cases, prior art — well enough to implement from before it's written.
-- **Working software at every commit** — each commit builds, passes the test + scenario gates, and produces something you can see run; never a broken intermediate state.
-- **Minimalism** — flat, predictable code; removing code beats adding it; every addition pays for itself.
-- **The system as it is** — code and docs describe the present; git history is the changelog.
+- **Common patterns first**: recognisable practice across code, docs, tests, UI. Bespoke choices need a stated reason.
+- **Specs before code**: a module is documented in [`docs/moonmodules/`](docs/moonmodules/), purpose, controls, behaviour, edge cases, prior art, well enough to implement from before it's written.
+- **Working software at every commit**: each commit builds, passes the test + scenario gates, and produces something you can see run; never a broken intermediate state.
+- **Minimalism**: flat, predictable code; removing code beats adding it; every addition pays for itself.
+- **The system as it is**: code and docs describe the present; git history is the changelog.
 
 The full rules and process are in [CLAUDE.md](CLAUDE.md).
 
@@ -142,16 +142,16 @@ This is the current iteration of years of LED / light system development. Each p
 | **StarLight** | Standalone LED firmware | [ewowi/StarLight](https://github.com/ewowi/StarLight) |
 | **MoonLight** | Ground-up build: 60+ effects, memory-optimised mapping, 11 driver types | [MoonModules/MoonLight](https://github.com/MoonModules/MoonLight) |
 
-We built, maintained, and contributed to these projects — so projectMM is grounded in years of our own hands-on experience, not arms-length study. Their lessons and proven patterns are distilled in [`docs/history/`](docs/history/README.md), alongside monthly digests of friend projects (like FastLED and upstream WLED) we follow closely but don't own. From all of it we carry the ideas forward into our own implementation: we apply what we learned and write our own code, never copying theirs — and when a specific project or person inspires something here, we credit them by name (in the history digests and each module's "Prior art" notes).
+We built, maintained, and contributed to these projects, so projectMM is grounded in years of our own hands-on experience, not arms-length study. Their lessons and proven patterns are distilled in [`docs/history/`](docs/history/README.md), alongside monthly digests of friend projects (like FastLED and upstream WLED) we follow closely but don't own. From all of it we carry the ideas forward into our own implementation: we apply what we learned and write our own code, never copying theirs; and when a specific project or person inspires something here, we credit them by name (in the history digests and each module's "Prior art" notes).
 
 ## Contributing
 
-projectMM is a community project — built in the open, shaped by the people who use it. We'd love to hear from you:
+projectMM is a community project, built in the open, shaped by the people who use it. We'd love to hear from you:
 
-- **Ideas and requests** — an effect, a layout, a driver, a fixture you want supported? [Open an issue](https://github.com/MoonModules/projectMM/issues) and tell us.
-- **Help build it** — pick something from the [issues](https://github.com/MoonModules/projectMM/issues), or propose a MoonModule. See [How we work](#how-we-work) for the process.
-- **Test on hardware** — run it on your panels, boards, and fixtures, and report what works and what doesn't.
-- **Talk to us** — questions, show-and-tell, and design discussion on [Discord](https://discord.gg/TC8NSUSCdV).
+- **Ideas and requests**: an effect, a layout, a driver, a fixture you want supported? [Open an issue](https://github.com/MoonModules/projectMM/issues) and tell us.
+- **Help build it**: pick something from the [issues](https://github.com/MoonModules/projectMM/issues), or propose a MoonModule. See [How we work](#how-we-work) for the process.
+- **Test on hardware**: run it on your panels, boards, and fixtures, and report what works and what doesn't.
+- **Talk to us**: questions, show-and-tell, and design discussion on [Discord](https://discord.gg/TC8NSUSCdV).
 
 Find the MoonModules community on [Discord](https://discord.gg/TC8NSUSCdV), [Reddit](https://reddit.com/r/moonmodules), [YouTube](https://www.youtube.com/@MoonModulesLighting), and [GitHub](https://github.com/MoonModules).
 

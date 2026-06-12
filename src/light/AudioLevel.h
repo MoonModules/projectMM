@@ -27,6 +27,31 @@ inline uint8_t magToByte(float m, uint16_t noiseFloor, uint16_t gain) {
     return static_cast<uint8_t>(t * 255.0f);
 }
 
+// DC-blocker: the standard one-pole/one-zero high-pass that removes the constant
+// (DC) offset and sub-bass rumble from the sample stream before any analysis —
+// y[n] = x[n] - x[n-1] + R·y[n-1]. R near 1 sets the cutoff: R = 0.99 ≈ 40 Hz at
+// 22 kHz. State (the two delay registers) persists across blocks, so the filter
+// is continuous frame to frame. Hot-path-trivial: one subtract + one multiply-add
+// per sample, two floats of state, no allocation. Host-tested.
+struct DcBlocker {
+    float xPrev = 0.0f;   // x[n-1]
+    float yPrev = 0.0f;   // y[n-1]
+
+    void reset() { xPrev = 0.0f; yPrev = 0.0f; }
+
+    // Filter `n` samples in place. R is the pole (0..1); higher = lower cutoff.
+    void process(int32_t* samples, size_t n, float r = 0.99f) {
+        if (!samples) return;
+        for (size_t i = 0; i < n; i++) {
+            const float x = static_cast<float>(samples[i]);
+            const float y = x - xPrev + r * yPrev;
+            xPrev = x;
+            yPrev = y;
+            samples[i] = static_cast<int32_t>(y);
+        }
+    }
+};
+
 // Sound-level (loudness) analysis for one block of I2S microphone samples — pure
 // domain math, no platform header, so it is host-tested without an ESP32 (the
 // platform owns only the I2S read that produces these samples; see platform.h

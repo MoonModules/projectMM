@@ -71,11 +71,11 @@ public:
         controls_.addSelect("sampleRate", sampleRateSel, kRateOptions, kSampleRateCount);
         controls_.addUint8("floor", floor, 0, 255);
         controls_.addUint8("gain", gain, 1, 255);
-        // Read-only live read-outs (formatted in loop1s).
-        controls_.addText("level", levelStr_, sizeof(levelStr_));
-        controls_.setReadOnly(controls_.count() - 1, true);
-        controls_.addText("peakHz", peakStr_, sizeof(peakStr_));
-        controls_.setReadOnly(controls_.count() - 1, true);
+        // Read-only live read-outs (formatted in loop1s). Derived every second,
+        // nothing to persist, so ReadOnly (the display-only type) not a flipped
+        // Text — same idiom as SystemModule's uptime/fps.
+        controls_.addReadOnly("level", levelStr_, sizeof(levelStr_));
+        controls_.addReadOnly("peakHz", peakStr_, sizeof(peakStr_));
         MoonModule::onBuildControls();
     }
 
@@ -123,6 +123,11 @@ public:
         if (filled_ < kBlock) return;                  // wait for a whole block
         filled_ = 0;                                   // consumed below; refill next
 
+        // DC-blocker high-pass (~40 Hz): removes the constant offset + sub-bass
+        // rumble before any analysis, so they can't leak into the low bands. The
+        // filter is continuous across blocks (state in dc_).
+        dc_.process(samples_, kBlock);
+
         // Level: overall loudness (RMS), independent of the FFT — it fluctuates
         // with how loud the room is. Uses a gentler floor than the bands (half),
         // so the VU keeps moving with volume instead of being gated hard like the
@@ -155,6 +160,7 @@ private:
     platform::AudioMicHandle mic_;
     bool inited_ = false;
     size_t filled_ = 0;         // samples accumulated toward the next full block
+    DcBlocker dc_;              // ~40 Hz high-pass, continuous across blocks
 
     // Fixed hot-path scratch — sized once, never reallocated. ~6 KB total
     // (2 KB samples + 2 KB windowed + 1 KB magnitudes), DRAM-resident.
@@ -180,6 +186,7 @@ private:
             setStatus(kInitFailMsg, Severity::Error);
             return;
         }
+        dc_.reset();   // start the high-pass clean for the new stream
         // The INMP441 emits ~250 ms of power-on settling garbage after the clock
         // starts. The read is non-blocking (hot-path rule), so we can't drain a
         // fixed sample count here at init — the DMA has barely filled. Instead the

@@ -52,6 +52,9 @@ public:
         std::snprintf(buildStr_, sizeof(buildStr_), "%s", kBuildDate);
         std::snprintf(firmwareStr_, sizeof(firmwareStr_), "%s", kFirmwareName);
         std::snprintf(bootReasonStr_, sizeof(bootReasonStr_), "%s", platform::resetReason());
+        if constexpr (platform::hasWifiCoprocessor) {
+            std::snprintf(coprocStr_, sizeof(coprocStr_), "%s", platform::coprocessorWifi());
+        }
 
         if (chipFlashVal_ > 0) {
             std::snprintf(flashStr_, sizeof(flashStr_), "%uMB",
@@ -121,6 +124,15 @@ public:
         controls_.addReadOnly("chip", chipInfo_, sizeof(chipInfo_));
         controls_.addReadOnly("sdk", sdkInfo_, sizeof(sdkInfo_));
         controls_.addReadOnly("bootReason", bootReasonStr_, sizeof(bootReasonStr_));
+        // WiFi co-processor (P4 + on-board C6) firmware read-out. Gated at compile
+        // time on hasWifiCoprocessor, so the whole control — and the snprintf/query
+        // cost — vanishes on native-radio builds (classic/S3/desktop) and the
+        // eth-only P4. Its value proves the C6 slave-firmware state ("C6 fw 2.12.9"
+        // vs "not detected"). loop1s() refreshes it.
+        if constexpr (platform::hasWifiCoprocessor) {
+            std::snprintf(coprocStr_, sizeof(coprocStr_), "%s", platform::coprocessorWifi());
+            controls_.addReadOnly("wifiCoproc", coprocStr_, sizeof(coprocStr_));
+        }
 
         // Chain into children (BoardModule today). Per the override-and-chain
         // convention in architecture.md § Lifecycle propagation to children:
@@ -163,6 +175,13 @@ public:
         std::snprintf(maxBlockStr_, sizeof(maxBlockStr_), "%uKB",
                       static_cast<unsigned>(platform::maxInternalAllocBlock() / 1024));
 
+        // Refresh the WiFi co-processor status, so the displayed C6 firmware state
+        // stays current if the link comes up after boot or the C6 is reflashed
+        // without a host reboot. Compiled out where there's no co-processor.
+        if constexpr (platform::hasWifiCoprocessor) {
+            std::snprintf(coprocStr_, sizeof(coprocStr_), "%s", platform::coprocessorWifi());
+        }
+
         // Chain to base so children get their loop1s() — a Peripheral formats
         // its read-only display values here. Overriding loop1s() shadows the
         // base default that would otherwise propagate. (setup/loop20ms/loop/
@@ -196,6 +215,7 @@ private:
     // 24 fits the longest current key ("desktop-macos-arm64" = 19) with headroom.
     char firmwareStr_[24] = {};
     char bootReasonStr_[16] = {};
+    char coprocStr_[24] = {};   // WiFi co-processor status, e.g. "C6 fw 2.12.9" / "not detected"
     uint32_t totalInternalVal_ = 0;
     uint32_t totalHeapVal_ = 0;
     char flashStr_[12] = {};

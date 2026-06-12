@@ -200,6 +200,10 @@ const char* sdkVersion() {
 #endif
 }
 
+const char* coprocessorWifi() {
+    return "";   // desktop has no WiFi co-processor
+}
+
 const char* resetReason() {
     // Desktop has no reset-reason concept; report a benign value the UI treats as "not crashed".
     return "OK";

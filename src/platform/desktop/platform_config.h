@@ -31,6 +31,10 @@ constexpr bool hasI2sMic = false;
 // WiFi stubs and exercises the hasWiFi==true code path for compile coverage.
 constexpr bool hasWiFi = true;
 
+// Desktop has no separate WiFi co-processor (the ESP32-P4 + C6 case); the
+// coprocessorWifi() read-out and its SystemModule control compile out here.
+constexpr bool hasWifiCoprocessor = false;
+
 // OTA writes to an ESP-IDF OTA partition; desktop has none. FirmwareUpdateModule
 // + the /api/firmware/url route `if constexpr (hasOta)` to a 501 stub instead.
 constexpr bool hasOta = false;

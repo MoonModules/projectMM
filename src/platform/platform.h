@@ -51,6 +51,15 @@ void getMacAddress(uint8_t mac[6]);
 const char* chipModel();
 const char* sdkVersion();
 
+// WiFi co-processor status, for boards whose radio lives on a separate chip (the
+// ESP32-P4 + on-board ESP32-C6 over esp_hosted). Returns a short status string:
+// the detected co-processor firmware version when the link is up (e.g.
+// "C6 fw 2.12.9"), "not detected" when the slave never completed its handshake or
+// reports 0.0.0 (the tell for absent / incompatible C6 slave firmware), or "" on
+// targets with a native radio (no co-processor). Lets SystemModule prove the C6
+// firmware state instead of guessing. Empty string => render nothing.
+const char* coprocessorWifi();
+
 // This host's LAN IPv4 address as a dotted string, or "" if unavailable.
 // Desktop: the outbound interface address. ESP32: empty — the device IP is
 // owned by NetworkModule (WiFi/Ethernet), not the platform layer.

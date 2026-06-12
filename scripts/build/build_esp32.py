@@ -33,6 +33,16 @@ IDF_SEARCH_PATHS = [
 # NOTE: esp_phy is NOT excluded — it provides RF/clock init the ESP32 EMAC
 # (Ethernet RMII) depends on. Excluding it leaves Ethernet stuck "started"
 # with no link. Only the genuinely WiFi-side components are dropped.
+#
+# NOTE on the P4 co-processor components (esp_hosted / esp_wifi_remote / eppp_link):
+# the `rules: target == esp32p4` gate in main/idf_component.yml pulls them for ANY
+# esp32p4 build, including the WiFi-less esp32p4-eth, because manifest rules can't
+# see our eth-only flag. EXCLUDE_COMPONENTS does NOT drop them (the component
+# manager resolves the managed dependency before the exclude applies). It's a
+# *build-time* cost only: the linker dead-strips the unused code, so they add ~0
+# bytes of flash to esp32p4-eth (our coprocessorWifi() is the empty stub there, so
+# no esp_hosted symbol is referenced — confirmed: their .text size is 0x0 in the
+# .map). Left as-is rather than fought; see docs/backlog/backlog.md.
 ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
 
 # Firmware catalogue. Each entry describes one shipping firmware variant.
@@ -93,9 +103,17 @@ FIRMWARES: dict[str, dict] = {
         "chip": "esp32p4",
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32p4-eth"],
         "eth_only": True,
-        "description": "Waveshare ESP32-P4-NANO — Ethernet only (IP101 PHY). WiFi "
-                       "needs the on-board ESP32-C6 co-processor (esp-hosted), not "
-                       "yet wired; round 3 adds it.",
+        "description": "Waveshare ESP32-P4-NANO — Ethernet only (IP101 PHY). The "
+                       "WiFi-less fallback; esp32p4-eth-wifi adds the C6 radio.",
+    },
+    "esp32p4-eth-wifi": {
+        "chip": "esp32p4",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32p4-eth",
+                      "sdkconfig.defaults.esp32p4-eth-wifi"],
+        "eth_only": False,
+        "description": "Waveshare ESP32-P4-NANO — Ethernet + WiFi. WiFi runs on the "
+                       "on-board ESP32-C6 over SDIO (esp_wifi_remote + esp_hosted, "
+                       "pulled P4-only). First build is longer (managed components).",
     },
 }
 
@@ -360,6 +378,17 @@ def main():
     # builds the per-build-dir sdkconfig already has the chip pinned, so
     # set-target is skipped — switching to another firmware uses a different
     # build_dir entirely, so its sdkconfig is untouched.
+    #
+    # KNOWN ISSUE (esp32p4-eth-wifi): esp_wifi_remote's slave target
+    # (SLAVE_IDF_TARGET_ESP32C6) is selected by a Kconfig `default ... if
+    # IDF_TARGET_ESP32P4` that fires during `set-target` but is dropped by the
+    # reconfigure a plain `build` triggers, falling back to ESP32-H2 (no WiFi) and
+    # failing on missing CONFIG_WIFI_RMT_* symbols. A clean manual sequence works:
+    #   rm -rf build/esp32-esp32p4-eth-wifi && idf.py -B <dir> -DSDKCONFIG=<dir>/sdkconfig \
+    #     -DSDKCONFIG_DEFAULTS="..." set-target esp32p4 && (same) build
+    # but this wrapper does not yet reproduce it reliably — tracked in
+    # docs/backlog/backlog.md (ESP32-P4 round 3). Until fixed, build this variant
+    # with the manual sequence above.
     extra = firmware_cmake_args(firmware, args.release)
     if not build_dir.exists():
         print(f"Setting target to {chip} (firmware: {firmware}, build dir: "

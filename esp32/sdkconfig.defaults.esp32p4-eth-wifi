@@ -1,0 +1,51 @@
+# Waveshare ESP32-P4-NANO: Ethernet + WiFi build.
+#   Board: https://www.waveshare.com/wiki/ESP32-P4-Nano-StartPage
+#
+# Layered onto sdkconfig.defaults + sdkconfig.defaults.esp32p4-eth by
+# scripts/build/build_esp32.py. The eth fragment brings the EMAC / RMII / flash /
+# PSRAM / partition layout; this fragment adds WiFi over the on-board ESP32-C6
+# co-processor.
+#
+# The P4 has no native radio. WiFi comes from the C6 reached over SDIO, presented
+# to the P4 as the standard esp_wifi_* API by the esp_wifi_remote + esp_hosted
+# managed components (pulled P4-only via the `rules` gate in main/idf_component.yml).
+# This is a DELIBERATE v6.0-floor exception (see docs/building.md § ESP-IDF version).
+# The bring-up prelude (esp_hosted_init + connect-to-slave, before esp_wifi_init)
+# lives in ensureWifiInit() in src/platform/esp32/platform_esp32.cpp, gated on
+# platform::usesRemoteWifi.
+#
+# Values below mirror Espressif's own P4 reference fragment:
+#   managed_components/espressif__esp_hosted/examples/host_network_split__power_save/
+#   sdkconfig.defaults.esp32p4 (+ the example's shared sdkconfig.defaults).
+
+# --- Co-processor = ESP32-C6. Two SEPARATE Kconfig choices must both point at the
+# C6, in this order, or the build fails:
+#   1. SLAVE_IDF_TARGET_ESP32C6 (esp_wifi_remote's slave select). It auto-defaults
+#      to C6 on a P4, but esp_hosted's own CP-target choice does NOT track it, so
+#      we set it explicitly to be unambiguous.
+#   2. ESP_HOSTED_CP_TARGET_ESP32C6 (esp_hosted's co-processor choice). This option
+#      `depends on SLAVE_IDF_TARGET_ESP32C6` — so without (1), only the dependency-
+#      free ESP32-H2 option is selectable and the choice silently falls to H2 (a
+#      WiFi-less part). That cascade is what dropped FUNC_BOARD to _NONE and left
+#      the WIFI_RMT_* symbols undefined (the build failure chased down here).
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+
+# --- Co-processor board preset. With the C6 target selected above, the "P4
+# Function EV Board" preset becomes available and configures the SDIO transport +
+# pins (CLK 18 / CMD 19 / D0-D3 14-17 / slave-reset 54), which match the NANO.
+# BENCH-VERIFY: if connect-to-slave fails, the NANO may differ from the EV board
+# preset; fall back to explicit SDIO pin config then.
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
+
+# --- Remote WiFi RX/TX buffer config. esp_wifi_remote's WIFI_INIT_CONFIG_DEFAULT()
+# reads these CONFIG_WIFI_RMT_* symbols (the remote counterparts of the native
+# CONFIG_ESP_WIFI_* buffers); without them the macro fails to compile. Values from
+# the reference fragment.
+CONFIG_WIFI_RMT_STATIC_RX_BUFFER_NUM=10
+CONFIG_WIFI_RMT_DYNAMIC_RX_BUFFER_NUM=32
+CONFIG_WIFI_RMT_DYNAMIC_TX_BUFFER_NUM=32
+CONFIG_WIFI_RMT_AMPDU_TX_ENABLED=y
+CONFIG_WIFI_RMT_TX_BA_WIN=32
+CONFIG_WIFI_RMT_AMPDU_RX_ENABLED=y
+CONFIG_WIFI_RMT_RX_BA_WIN=16

@@ -102,6 +102,16 @@ constexpr bool hasWiFi = false;
 constexpr bool hasWiFi = true;
 #endif
 
+// The P4 has no native radio; when it has WiFi at all (the esp32p4-eth-wifi build),
+// that WiFi runs on the on-board ESP32-C6 over SDIO via esp_wifi_remote / esp_hosted.
+// The esp_wifi_* API is identical to native and esp_hosted self-initialises at boot,
+// so the WiFi *path* needs no branch. This flag exists only so the co-processor
+// firmware read-out (SystemModule's `wifiCoproc` control + platform::coprocessorWifi)
+// compiles in ONLY on a build that actually has a co-processor — on every other
+// target the buffer, the calls, and the control vanish (if constexpr), keeping the
+// flash/RAM cost off boards that can't use it.
+constexpr bool hasWifiCoprocessor = isEsp32P4 && hasWiFi;
+
 // Ethernet is only available on firmware variants whose sdkconfig fragment
 // enables the ESP32 EMAC (sdkconfig.defaults.eth — Olimex pin map). Other
 // firmwares (plain ESP32 WiFi-only, ESP32-S3 with no EMAC) define MM_NO_ETH

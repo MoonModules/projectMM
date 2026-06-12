@@ -13,6 +13,7 @@ Decided once; not re-derived per file.
 - **No `using namespace` in headers.** In a `.cpp`, `using namespace mm;` is allowed at file scope. In a header it pollutes every translation unit that includes it.
 - **Semantic variable names.** Name variables for what they represent, not just their type. `availableHeap` not `available`, `internalHeap` not `internal`, `lutBytes` not `bytes`. A reader should understand the variable without looking at its assignment.
 - **No hard line wraps in markdown.** Let the editor soft-wrap. Hard wraps make diffs noisier than they need to be.
+- **No em-dashes (` — `) in prose.** Use a comma, semicolon, colon, parentheses, or a full stop instead, whichever the clause actually calls for. Applies to docs, comments, and commit messages. (Code is exempt: a literal `—` in a UI string or test fixture stays.) Existing em-dashes get replaced as files are touched, not in a single sweep.
 
 ## Prefer integers, store values in their native shape
 

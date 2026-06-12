@@ -38,6 +38,49 @@ std::vector<int32_t> sine(size_t n, double cycles, double amp24, double dc24 = 0
 
 } // namespace
 
+TEST_CASE("DcBlocker: a constant DC offset is filtered out") {
+    mm::DcBlocker dc;
+    std::vector<int32_t> s(1024, 100000);   // a big constant offset, no AC
+    dc.process(s.data(), s.size());
+    // After the filter settles, the output rides near zero (the DC is gone).
+    int32_t lo = s[1023], hi = s[1023];
+    for (size_t i = 900; i < s.size(); i++) {   // look past the transient
+        if (s[i] < lo) lo = s[i];
+        if (s[i] > hi) hi = s[i];
+    }
+    CHECK(std::abs(lo) < 2000);
+    CHECK(std::abs(hi) < 2000);
+}
+
+TEST_CASE("DcBlocker: an audio tone passes through (DC removed, AC kept)") {
+    mm::DcBlocker dc;
+    // A mid-frequency sine on a big DC pedestal — the DC must go, the swing stay.
+    const int32_t amp = 1 << 18;
+    auto biased = sine(1024, 40, amp, 1 << 21);   // amp on a much larger DC pedestal
+    dc.process(biased.data(), biased.size());
+    int32_t lo = biased[512], hi = biased[512];
+    for (size_t i = 512; i < biased.size(); i++) {     // past the transient
+        if (biased[i] < lo) lo = biased[i];
+        if (biased[i] > hi) hi = biased[i];
+    }
+    const int32_t swing = hi - lo;
+    // Centred near zero (DC removed): the midpoint is tiny vs the swing.
+    CHECK(std::abs(lo + hi) < swing / 4);
+    // The tone survived: the swing is on the order of the AC amplitude (<<8 slot).
+    CHECK(swing > amp);
+}
+
+TEST_CASE("DcBlocker: reset clears state, null-safe") {
+    mm::DcBlocker dc;
+    std::vector<int32_t> s(64, 50000);
+    dc.process(s.data(), s.size());
+    dc.reset();
+    CHECK(dc.xPrev == 0.0f);
+    CHECK(dc.yPrev == 0.0f);
+    dc.process(nullptr, 64);   // no crash
+    CHECK(true);
+}
+
 TEST_CASE("AudioLevel: silence reads zero") {
     std::vector<int32_t> s(512, 0);
     mm::AudioFrame f;

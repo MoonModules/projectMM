@@ -177,6 +177,15 @@ static void improvSendWifiNetworks() {
     // Synchronous-ish scan. Replies one network per RPC frame per the Improv
     // spec, then a final empty payload to mark end-of-list. Limit to 10
     // entries to keep the response set bounded.
+    //
+    // P4 remote-WiFi note: esp_wifi_scan_start needs the WiFi driver started. On
+    // native ESP32/S3 the driver is up by the time a user provisions. On the P4 the
+    // radio lives on the C6 and only comes up after the esp_hosted prelude in
+    // ensureWifiInit() (triggered by wifiApInit / wifiStaInit). If a scan is ever
+    // requested on a P4 that has not yet initialised WiFi, this returns an error
+    // cleanly (no crash) rather than scanning a cold link — acceptable for now;
+    // bench-verify whether a P4 provisioned from cold needs the link brought up
+    // here first, and if so route through the public wifiAp/wifiSta path.
     wifi_scan_config_t scan_cfg = {};
     if (esp_wifi_scan_start(&scan_cfg, true /*block*/) != ESP_OK) {
         improvSendError(improv::ERROR_UNKNOWN);

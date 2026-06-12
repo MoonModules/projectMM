@@ -37,6 +37,14 @@
 #endif
 #ifndef MM_NO_WIFI
 #include "esp_wifi.h"
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
+// On the P4 (WiFi build only — this is inside #ifndef MM_NO_WIFI), esp_wifi_* is
+// forwarded to the on-board ESP32-C6 by esp_wifi_remote / esp_hosted. esp_hosted
+// self-initialises at boot via a constructor, so no bring-up call is needed (see
+// ensureWifiInit); this header is only for the read-only coprocessorWifi() query
+// that reports the C6's slave-firmware version. Matches the guard on that function.
+#include "esp_hosted.h"
+#endif
 #endif
 #include "esp_log.h"
 #include "esp_rom_sys.h"     // esp_rom_delay_us (delayUs)
@@ -167,6 +175,30 @@ const char* hostIp() {
 
 const char* sdkVersion() {
     return esp_get_idf_version();
+}
+
+const char* coprocessorWifi() {
+#if defined(CONFIG_IDF_TARGET_ESP32P4) && !defined(MM_NO_WIFI)
+    // The P4's WiFi runs on the on-board ESP32-C6 via esp_hosted. Ask the host API
+    // what slave firmware version the C6 actually reported over the link. A version
+    // of 0.0.0 (or an error) means the slave never completed its handshake — the
+    // signature of absent / incompatible C6 slave firmware, which is exactly the
+    // case we want to surface rather than infer.
+    static char buf[24] = "querying…";
+    esp_hosted_coprocessor_fwver_t ver = {};
+    if (esp_hosted_get_coprocessor_fwversion(&ver) == ESP_OK
+        && (ver.major1 || ver.minor1 || ver.patch1)) {
+        std::snprintf(buf, sizeof(buf), "C6 fw %u.%u.%u",
+                      static_cast<unsigned>(ver.major1),
+                      static_cast<unsigned>(ver.minor1),
+                      static_cast<unsigned>(ver.patch1));
+    } else {
+        std::snprintf(buf, sizeof(buf), "not detected");
+    }
+    return buf;
+#else
+    return "";   // native-radio targets have no WiFi co-processor
+#endif
 }
 
 const char* resetReason() {
@@ -403,6 +435,19 @@ static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
 // init failure is a recoverable runtime error, not a panic.
 static bool ensureWifiInit() {
     if (wifiInitDone_) return true;
+
+    // P4 note: the P4 has no native radio — WiFi runs on the on-board ESP32-C6 via
+    // esp_wifi_remote / esp_hosted (the esp32p4-eth-wifi build). No bring-up code is
+    // needed here: esp_hosted self-initialises at boot via a constructor
+    // (ESP_SYSTEM_INIT_FN → esp_hosted_init, the `host_init: ESP Hosted` boot line),
+    // which sets up the SDIO transport, RPC, and the wifi-remote channels and
+    // connects to the C6. After that the esp_wifi_* calls below are forwarded to the
+    // C6 unchanged. Do NOT call esp_hosted_init()/esp_hosted_connect_to_slave() here:
+    // init is already done (idempotent no-op), and connect_to_slave() is actually a
+    // transport *reconfigure* that resets the slave (GPIO 54) and re-inits SDIO —
+    // which on a live link fails (`sdmmc_card_init failed`) and tears down the
+    // working boot-time connection. Proven on the P4-NANO bench (2026-06-12).
+
     ensureNetifInit();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
