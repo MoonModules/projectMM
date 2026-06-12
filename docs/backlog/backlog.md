@@ -10,7 +10,7 @@ Completed items are removed. This file is deleted when empty.
 
 1.0 ships ESP32 firmware (4 variants) + macOS arm64 + Windows x64. Still to add:
 
-- **ESP32-P4** firmware variant — new chip target, new sdkconfig fragment, fits the existing `FIRMWARES` table in `build_esp32.py`.
+- **ESP32-P4** firmware variant — **`esp32p4-eth` (Ethernet-only) shipped**: in `build_esp32.py`'s `FIRMWARES`, the `boards.json` catalog (Waveshare P4-NANO), and CI builds + publishes it to the web installer + releases. **Still to ship: `esp32p4-eth-wifi`** (the C6-WiFi variant) — it doesn't build reproducibly in CI yet (the `CONFIG_WIFI_RMT_*` Kconfig defaults don't survive a plain build without a fresh `set-target`), so it's held out of the release matrix until that's fixed; see [§ ESP32-P4 round 3](#esp32-p4-support--rounds-3-4-in-progress).
 - **Linux desktop binary** — third desktop job in `release.yml`, static-linked libstdc++.
 - **Teensy 4.1** — toolchain-file build, `.hex` for Teensy Loader.
 - **Raspberry Pi** — ARM64, cross-built or native.

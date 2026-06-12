@@ -72,7 +72,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        firmware: [esp32, esp32-16mb, esp32-eth, esp32-eth-wifi, esp32s3-n16r8, esp32s3-n8r8]
+        firmware: [esp32, esp32-16mb, esp32-eth, esp32-eth-wifi, esp32s3-n16r8, esp32s3-n8r8, esp32p4-eth]
     steps:
       - uses: actions/checkout@v4
 
@@ -112,8 +112,13 @@ jobs:
           # `v6.1-dev` is a rolling Docker tag on espressif/idf that tracks the
           # v6.1 dev line — close enough to the pinned SHA for CI today.
           esp_idf_version: v6.1-dev
-          # Any firmware whose key starts with `esp32s3` targets the S3.
-          target: ${{ startsWith(matrix.firmware, 'esp32s3') && 'esp32s3' || 'esp32' }}
+          # The IDF target follows the firmware-key prefix: esp32s3* → esp32s3,
+          # esp32p4* → esp32p4 (the only target that pulls the ip101 PHY +
+          # esp_hosted, both manifest-gated on target == esp32p4), everything
+          # else → esp32. (esp32p4-eth-wifi is intentionally NOT in the matrix
+          # yet — its C6-slave Kconfig defaults don't survive a plain CI build;
+          # tracked in backlog § ESP32-P4 round 3.)
+          target: ${{ startsWith(matrix.firmware, 'esp32s3') && 'esp32s3' || startsWith(matrix.firmware, 'esp32p4') && 'esp32p4' || 'esp32' }}
           path: 'esp32'
           # We run our own builder (not the action's default `idf.py build`)
           # so the sdkconfig fragments and EXCLUDE_COMPONENTS go through the
@@ -233,7 +238,7 @@ jobs:
           # Keep in sync with the build-esp32 matrix above (the source of truth
           # for which firmware variants exist). A variant missing here builds but
           # gets no manifest, so the installer can't flash it.
-          for F in esp32 esp32-16mb esp32-eth esp32-eth-wifi esp32s3-n16r8 esp32s3-n8r8; do
+          for F in esp32 esp32-16mb esp32-eth esp32-eth-wifi esp32s3-n16r8 esp32s3-n8r8 esp32p4-eth; do
             python scripts/build/generate_manifest.py \
               --firmware "$F" \
               --version "$V" \
@@ -344,7 +349,7 @@ jobs:
           # Keep in sync with the build-esp32 matrix above (the source of truth
           # for which firmware variants exist). A variant missing here builds but
           # gets no manifest, so the installer can't flash it.
-          for F in esp32 esp32-16mb esp32-eth esp32-eth-wifi esp32s3-n16r8 esp32s3-n8r8; do
+          for F in esp32 esp32-16mb esp32-eth esp32-eth-wifi esp32s3-n16r8 esp32s3-n8r8 esp32p4-eth; do
             python scripts/build/generate_manifest.py \
               --firmware "$F" \
               --version "$V" \
