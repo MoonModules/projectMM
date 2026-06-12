@@ -6,6 +6,7 @@
 #include "platform/platform.h"   // platform::audioFft (desktop naive DFT)
 
 #include <cmath>
+#include <numbers>
 #include <vector>
 
 // The success spec for the frequency path, written RED before MicModule's FFT
@@ -22,11 +23,13 @@ constexpr uint32_t kRate = 22050;     // default sample rate
 
 // Build kN samples of a sine at `freqHz`, 24-bit amplitude, in the int32 slot.
 std::vector<int32_t> tone(double freqHz, double amp24 = (1 << 21)) {
+    constexpr double kPi = std::numbers::pi_v<double>;
     std::vector<int32_t> v(kN);
     const double cycles = freqHz * kN / kRate;
     for (size_t i = 0; i < kN; i++) {
-        const double s = amp24 * std::sin(2.0 * M_PI * cycles * static_cast<double>(i) / kN);
-        v[i] = static_cast<int32_t>(s) << 8;
+        const double s = amp24 * std::sin(2.0 * kPi * cycles * static_cast<double>(i) / kN);
+        const int64_t sample = static_cast<int64_t>(s) << 8;   // avoid signed <<8 UB
+        v[i] = static_cast<int32_t>(sample);
     }
     return v;
 }

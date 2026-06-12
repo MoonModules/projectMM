@@ -1016,7 +1016,12 @@ function createControl(moduleName, moduleType, ctrl) {
                 input.dataset.key = ctrl.name;
                 input.addEventListener("input", () => {
                     dragTs[key] = Date.now();
-                    debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, parseInt(input.value)));
+                    // Sanitise: empty/garbage → 0, clamp into the uint16 range so a
+                    // NaN or out-of-range value never reaches the device.
+                    let v = parseInt(input.value, 10);
+                    if (Number.isNaN(v)) v = 0;
+                    v = Math.max(0, Math.min(65535, v));
+                    debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, v));
                 });
                 row.appendChild(input);
                 appendResetButton(row, moduleName, ctrl, def, () => { input.value = def; });

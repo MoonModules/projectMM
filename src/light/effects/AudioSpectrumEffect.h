@@ -104,12 +104,16 @@ public:
                     const RGB c = hsvToRgb(bandHue, 255, v);
                     r = c.r; g = c.g; b = c.b;
                 } else {
-                    // Height gradient: green at the base → red at the top.
+                    // Height gradient: green at the base → red at the top. The
+                    // gradient runs over h-1 rows so the top row reaches full red.
+                    // On a 1D strip there's no height to gradient over, so the one
+                    // row is a green→red ramp driven by magnitude (dark at mag 0).
                     const uint8_t frac = (h > 1)
-                        ? static_cast<uint8_t>(static_cast<uint32_t>(row) * 255u / h)
+                        ? static_cast<uint8_t>(static_cast<uint32_t>(row) * 255u / (h - 1))
                         : mag;
-                    r = frac;
-                    g = static_cast<uint8_t>(255 - frac);
+                    r = (h > 1) ? frac : static_cast<uint8_t>(static_cast<uint32_t>(frac) * mag / 255u);
+                    g = (h > 1) ? static_cast<uint8_t>(255 - frac)
+                                : static_cast<uint8_t>(static_cast<uint32_t>(255 - frac) * mag / 255u);
                     b = 0;
                 }
                 for (lengthType z = 0; z < d; z++)

@@ -29,6 +29,7 @@ Run:  uv run scripts/scenario/run_network_roundtrip.py [--host IP] [--repeats N]
 """
 
 import argparse
+import statistics
 import sys
 import time
 from pathlib import Path
@@ -163,10 +164,8 @@ def run_one(host: str, repeats: int, timeout_s: float) -> bool:
                 summary.append((proto, None))
                 continue
             any_ok = True
-            latencies.sort()
-            n = len(latencies)
-            median = (latencies[n // 2] if n % 2
-                      else (latencies[n // 2 - 1] + latencies[n // 2]) / 2.0)
+            latencies.sort()   # for the min/max below
+            median = statistics.median(latencies)
             print(f"    {proto}: min {latencies[0]:.1f} / median {median:.1f} / "
                   f"max {latencies[-1]:.1f} ms over {len(latencies)}/{repeats}", flush=True)
             summary.append((proto, (latencies[0], median, latencies[-1], len(latencies))))

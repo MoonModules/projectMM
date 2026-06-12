@@ -10,7 +10,7 @@ Reads the live frame from [MicModule](../../core/MicModule.md)`::latestFrame()`;
 
 ## Notes
 
-The colour is a level-driven green→red ramp; modifiers and layouts give the flat VU surface its shape. On an RGBW grid the white channel is left off.
+The colour is a level-driven green→red ramp; modifiers and layouts give the flat VU surface its shape. Like every effect it writes only logical RGB — the driver's [Correction](../drivers/Correction.md) applies channel order and, for an RGBW preset, derives the white channel (`W = min(R, G, B)`) after brightness scaling.
 
 ## Source
 

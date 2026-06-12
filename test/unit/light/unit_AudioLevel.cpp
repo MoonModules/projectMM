@@ -10,6 +10,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <numbers>
 #include <vector>
 
 // The success spec for the level path, written RED before MicModule's reader
@@ -24,10 +25,13 @@ namespace {
 // left-justified into the int32 slot (<<8) the INMP441 produces, plus an
 // optional DC bias to prove the bias is stripped.
 std::vector<int32_t> sine(size_t n, double cycles, double amp24, double dc24 = 0.0) {
+    constexpr double kPi = std::numbers::pi_v<double>;
     std::vector<int32_t> v(n);
     for (size_t i = 0; i < n; i++) {
-        const double s = amp24 * std::sin(2.0 * M_PI * cycles * static_cast<double>(i) / n) + dc24;
-        v[i] = static_cast<int32_t>(s) << 8;   // 24-bit value into the high bits
+        const double s = amp24 * std::sin(2.0 * kPi * cycles * static_cast<double>(i) / n) + dc24;
+        // <<8 on a wider signed type — left-shifting a negative int32 is UB.
+        const int64_t sample = static_cast<int64_t>(s) << 8;   // 24-bit into the high bits
+        v[i] = static_cast<int32_t>(sample);
     }
     return v;
 }

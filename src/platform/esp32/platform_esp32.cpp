@@ -472,6 +472,17 @@ bool wifiStaInit(const char* ssid, const char* password) {
         return false;
     }
 
+    // Disable WiFi modem power-save. IDF defaults to WIFI_PS_MIN_MODEM, which
+    // DTIM-sleeps the radio between beacons — that sleep causes intermittent
+    // multi-hundred-ms stalls in TCP socket handling (the HTTP server wedges
+    // while UDP/DDP keeps flowing) and the LED-pause class of glitch. The whole
+    // lineage (WLED, v1/v2) turns it off for the same reason; a wall-powered LED
+    // controller has no battery to save. Non-fatal if it fails (older IDF / odd
+    // chip) — log and carry on.
+    if ((err = esp_wifi_set_ps(WIFI_PS_NONE)) != ESP_OK) {
+        ESP_LOGW(NET_TAG, "WiFi power-save disable failed: %s", esp_err_to_name(err));
+    }
+
     err = esp_wifi_connect();
     if (err != ESP_OK) {
         ESP_LOGE(NET_TAG, "WiFi STA connect failed: %s", esp_err_to_name(err));

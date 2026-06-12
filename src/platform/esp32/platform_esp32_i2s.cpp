@@ -72,10 +72,9 @@ bool audioMicInit(AudioMicHandle& h, uint16_t wsPin, uint16_t sdPin,
 
     // Standard (Philips) mode, 32-bit slot / 24-bit data, mono. The INMP441 puts
     // its data in ONE slot, chosen by its L/R pin (GND=left, VDD/floating=right),
-    // and leaves the other empty. The bench mic reads empty on the left slot, so
-    // we select the RIGHT slot — the populated one for an L/R-to-VDD (or floating)
-    // wiring. If a mic is wired L/R-to-GND instead, this reads silence and the
-    // slot mask is the one line to flip.
+    // and leaves the other empty. The bench mic is wired L/R-to-GND, so we read the
+    // LEFT slot — the populated one for that wiring. If a mic reads silence with
+    // sound present it's filling the other slot; flip this to I2S_STD_SLOT_RIGHT.
     i2s_std_slot_config_t slotCfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
         I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO);
     slotCfg.slot_mask = I2S_STD_SLOT_LEFT;

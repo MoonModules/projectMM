@@ -40,11 +40,12 @@ public:
         const uint8_t g = static_cast<uint8_t>(v > 128 ? (255 - v) * 2 : 255 * v / 128);
         const uint8_t b = 0;
 
+        // Write logical RGB only — channel order and any RGBW white are the
+        // driver's Correction (W = min(r,g,b)), like every other effect.
         for (size_t off = 0; off < total; off += cpl) {
             if (cpl >= 1) buf[off + 0] = r;
             if (cpl >= 2) buf[off + 1] = g;
             if (cpl >= 3) buf[off + 2] = b;
-            if (cpl >= 4) buf[off + 3] = 0;   // RGBW: leave white off
         }
     }
 };

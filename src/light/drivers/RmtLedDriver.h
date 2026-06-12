@@ -59,8 +59,9 @@ public:
     // `pins` to `loopbackRxPin`, the test transmits a known WS2812 pattern and
     // captures it back, proving the GPIO emits correct bytes on real silicon.
     // The outcome goes to the MoonModule status slot (setStatus) with the right
-    // severity; the checkbox auto-resets.
-    bool     loopbackTest = false;  // checkbox: set true to run once
+    // severity. loopbackTest is a persistent on/off mode (see onUpdate): while on,
+    // the test re-runs on every relevant change; turning it off clears the verdict.
+    bool     loopbackTest = false;  // checkbox: on = run + keep re-running on change
     uint16_t loopbackRxPin = 5;     // jumper this to the first pin for the test
 
     // Whole-frame stress variant: instead of a 24-bit burst, transmit a real
