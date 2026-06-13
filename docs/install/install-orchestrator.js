@@ -248,8 +248,27 @@ async function tryHttpInjectBoard(deviceUrl, board) {
     } catch (_) {
         return false;
     }
-    if (!entry || !entry.controls) return false;
-    for (const [moduleName, controls] of Object.entries(entry.controls)) {
+    if (!entry) return false;
+    // Add modules first (a fresh flash has no user-added modules like AudioModule,
+    // so a control write to one would 404). Each entry is the POST /api/modules
+    // payload {type, id, parent_id}; the endpoint is idempotent (an existing id
+    // returns 200), so re-running the inject is safe. `modules` is optional —
+    // a bare-board entry omits it and only sets controls.
+    for (const m of entry.modules ?? []) {
+        if (!m || typeof m !== "object" || !m.type) continue;
+        try {
+            const res = await fetch(new URL("api/modules", deviceUrl), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ type: m.type, id: m.id, parent_id: m.parent_id }),
+                signal: AbortSignal.timeout(5000),
+            });
+            if (!res.ok) return false;
+        } catch (_) {
+            return false;
+        }
+    }
+    for (const [moduleName, controls] of Object.entries(entry.controls ?? {})) {
         if (!controls || typeof controls !== "object") continue;
         for (const [controlName, value] of Object.entries(controls)) {
             try {

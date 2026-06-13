@@ -11,10 +11,10 @@
 # RMII interface + flash / PSRAM / partition layout. (IP101 addr 1, MDC 31,
 # MDIO 52, reset 51, external RMII clock IN on GPIO 50 — see the struct.)
 
-# Custom partition table — 16 MB layout (app0/app1 = 4 MB each, spiffs = 8 MB),
-# same shape as the S3-N16R8 board.
+# Custom partition table — shared 16 MB layout (app0/app1 = 4 MB each, spiffs
+# ~7.9 MB). Chip-independent flash map; same file for classic-16mb and S3-N16R8.
 CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/esp32p4_16mb.csv"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/ota_16mb.csv"
 
 # Flash size override (P4-NANO ships 16 MB).
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y

@@ -135,6 +135,42 @@
     }
   },
   {
+    "name": "projectMM testbench S3",
+    "chip": "ESP32-S3",
+    "firmwares": ["esp32s3-n16r8"],
+    "default_firmware": "esp32s3-n16r8",
+    "modules": [
+      { "type": "AudioModule", "id": "Audio", "parent_id": "System" }
+    ],
+    "controls": {
+      "Board": { "board": "projectMM testbench S3" },
+      "Audio": { "wsPin": 4, "sdPin": 5, "sckPin": 6 },
+      "RmtLed": { "pins": "12", "loopbackRxPin": 13 },
+      "LcdLed": { "pins": "18" }
+    }
+  },
+  {
+    "name": "projectMM testbench ESP32-16MB",
+    "chip": "ESP32",
+    "firmwares": ["esp32-16mb"],
+    "default_firmware": "esp32-16mb",
+    "controls": {
+      "Board": { "board": "projectMM testbench ESP32-16MB" },
+      "RmtLed": { "pins": "4", "loopbackRxPin": 5 }
+    }
+  },
+  {
+    "name": "projectMM testbench P4",
+    "chip": "ESP32-P4",
+    "firmwares": ["esp32p4-eth"],
+    "default_firmware": "esp32p4-eth",
+    "controls": {
+      "Board": { "board": "projectMM testbench P4" },
+      "RmtLed": { "pins": "32", "loopbackRxPin": 33 },
+      "ParlioLed": { "pins": "20,21,22,23,24,25,26,27", "ledsPerPin": "64", "loopbackRxPin": 32 }
+    }
+  },
+  {
     "name": "LOLIN S3 N16R8",
     "chip": "ESP32-S3",
     "firmwares": ["esp32s3-n16r8"],

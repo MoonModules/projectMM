@@ -1,0 +1,250 @@
+{
+  "name": "scenario_Driver_mutation",
+  "module": "NetworkSendDriver",
+  "mode": "mutate",
+  "also": [
+    "GridLayout",
+    "Layer",
+    "RainbowEffect",
+    "Drivers",
+    "PreviewDriver"
+  ],
+  "description": "Add / remove output drivers under the Drivers container while the render pipeline runs, proving the robustness rule for driver deletion (the LED-driver delete path the product owner asked to cover; on the host RmtLed/LcdLed/Parlio are inert via platform constants, so the portable NetworkSendDriver + PreviewDriver exercise the SAME generic add/remove lifecycle through the Scheduler that the hardware drivers use). Drivers are consumers of the Layer's output buffer, added/removed at runtime in any order. The checks assert the pipeline keeps RENDERING (buffer non-null, fps measurable) through each mutation: adding a second driver, removing it, and crucially removing a driver while the pipeline is still live (a driver teardown must release its resources without stranding the buffer or the other drivers — the same end-to-end Scheduler path the Audio producer/consumer scenario proves for peripherals, here for the output stage). Grid is 64x64 so the tick stays above the host microsecond clock at every step.",
+  "fixture": [
+    {
+      "name": "fix-layouts",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "fix-grid",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 64,
+        "height": 64
+      }
+    },
+    {
+      "name": "fix-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "props": {
+        "layouts": "Layouts",
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "fix-rainbow",
+      "op": "add_module",
+      "id": "Rainbow",
+      "type": "RainbowEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "fix-drivers",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "layer": "Layer"
+      }
+    },
+    {
+      "name": "fix-preview",
+      "op": "add_module",
+      "id": "Preview",
+      "type": "PreviewDriver",
+      "parent_id": "Drivers"
+    }
+  ],
+  "steps": [
+    {
+      "name": "measure-one-driver",
+      "description": "Baseline: the pipeline renders with one driver (Preview) wired.",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min": 1
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            9,
+            9
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-13",
+            "2026-06-13"
+          ]
+        }
+      }
+    },
+    {
+      "name": "add-second-driver",
+      "description": "Add a NetworkSendDriver beside the Preview driver — two consumers of the same Layer output buffer. The add must not disturb the running pipeline.",
+      "op": "add_module",
+      "id": "ArtNet",
+      "type": "NetworkSendDriver",
+      "parent_id": "Drivers"
+    },
+    {
+      "name": "measure-two-drivers",
+      "description": "Pipeline renders with both drivers wired.",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min": 1
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            9,
+            9
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-13",
+            "2026-06-13"
+          ]
+        }
+      }
+    },
+    {
+      "name": "add-third-driver",
+      "description": "Add a second NetworkSendDriver — three drivers now share the Layer output buffer (Preview + two ArtNet). Stacking editable drivers before tearing them down in sequence.",
+      "op": "add_module",
+      "id": "ArtNet2",
+      "type": "NetworkSendDriver",
+      "parent_id": "Drivers"
+    },
+    {
+      "name": "measure-three-drivers",
+      "description": "Pipeline renders with three drivers wired.",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min": 1
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            9,
+            9
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-13",
+            "2026-06-13"
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove-first-added-driver",
+      "description": "Remove the FIRST-added NetworkSendDriver while the others (Preview + ArtNet2) are still live — delete a middle consumer, not the last. Its teardown must release its resources without stranding the buffer or the surviving drivers.",
+      "op": "remove_module",
+      "id": "ArtNet"
+    },
+    {
+      "name": "measure-after-first-remove",
+      "description": "One ArtNet gone, Preview + ArtNet2 remain: pipeline keeps rendering (buffer non-null, fps measurable). No crash from the mid-list teardown.",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min": 1
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            9,
+            9
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-13",
+            "2026-06-13"
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove-second-added-driver",
+      "description": "Remove the remaining editable driver (ArtNet2) too — back to just the boot-wired Preview. Repeated driver teardown leaves no residue; the pipeline still renders. (PreviewDriver is userEditable=false, so it stays — drivers always have at least the wired output consumer; this mirrors the live API, which forbids deleting code-wired modules.)",
+      "op": "remove_module",
+      "id": "ArtNet2"
+    },
+    {
+      "name": "measure-back-to-one-driver",
+      "description": "Both added drivers gone, back to the single Preview baseline, still rendering — the add/remove cycle leaves the pipeline coherent.",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min": 1
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            9,
+            9
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-13",
+            "2026-06-13"
+          ]
+        }
+      }
+    }
+  ]
+}

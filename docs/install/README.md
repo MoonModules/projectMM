@@ -27,13 +27,112 @@ end-to-end, no ESP Web Tools dependency on the install path.
   user provisioned from this page so they can re-visit / erase / forget
   them. Renders a dedicated *Inject* button next to Visit for every entry
   with a `board` field; the button opens `<device>/?board=<name>` and the
-  device UI fetches the matching `boards.json` entry from Pages to fan out
-  each `controls.*` field via `/api/control`. Idempotent — safe to re-click
-  after a popup-blocker rejection or a follow-up catalog edit.
+  device UI fetches the matching `boards.json` entry from Pages to add its
+  `modules` via `/api/modules`, then fan out each `controls.*` field via
+  `/api/control` (add-then-configure; see the schema below). Idempotent — safe
+  to re-click after a popup-blocker rejection or a follow-up catalog edit.
 - [`boards.json`](boards.json) — the board catalog (name → firmware
-  variants) the picker fetches and the BoardModule injector writes from.
+  variants + the modules/controls to inject) the picker fetches and the
+  installer / device-UI / MoonDeck injectors write from. Schema below.
 - [`favicon.png`](favicon.png) — moon-man, same as the device UI.
 - [`README.md`](README.md) — this file.
+
+## Catalog schema (`boards.json`)
+
+A flat JSON array of catalog entries. Each entry is the single source of truth
+for one piece of hardware and what to set up on it at install time. Three
+clients consume it identically — the web installer (`install-orchestrator.js`),
+the device UI's `?board=` inject (`src/ui/app.js`), and MoonDeck
+(`scripts/moondeck.py`) — so **adding a field that's just more
+modules/controls needs no client change**.
+
+```json
+{
+  "name": "projectMM testbench S3",
+  "chip": "ESP32-S3",
+  "firmwares": ["esp32s3-n16r8"],
+  "default_firmware": "esp32s3-n16r8",
+  "modules": [
+    { "type": "AudioModule", "id": "Audio", "parent_id": "System" }
+  ],
+  "controls": {
+    "Board": { "board": "projectMM testbench S3" },
+    "Audio": { "wsPin": 4, "sdPin": 5, "sckPin": 6 },
+    "RmtLed": { "pins": "12", "loopbackRxPin": 13 }
+  }
+}
+```
+
+The `RmtLed` block presets the LED-driver loopback self-test pins (`pins[0]` is
+the TX the test transmits on, `loopbackRxPin` the jumpered RX) so a bench
+operator just flips the `loopbackTest` switch — no need to retype pins. The
+driver is boot-wired, so this is a plain control set (no `modules` entry).
+`loopbackTest` is left off; presetting the pins doesn't auto-run the (blocking)
+test. The sibling `projectMM testbench ESP32-16MB` / `…P4` entries carry only the
+`RmtLed` loopback (no mic — only the S3 bench has one wired), each injecting only
+what is actually on that board.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `name` | yes | identifier **and** display label (no key/label split) |
+| `chip` | yes | the MCU family, for the picker's chip filter |
+| `firmwares` / `default_firmware` | yes | the firmware variants flashable on this hardware |
+| `modules` | no | modules to **create** before configuring (`POST /api/modules` payloads) |
+| `controls` | no | controls to **set** after the modules exist (`POST /api/control`) |
+
+**Add-then-configure.** Clients process `modules` **before** `controls`. A
+fresh flash has no user-added modules (an `AudioModule`, an extra effect), so a
+control write to one would 404 — the module must be created first.
+`POST /api/modules` is idempotent (an existing `id` returns 200), so re-running
+an inject is safe. Each `modules` entry needs an explicit **`id`** if its
+controls are then set, because factory display names collide and get
+disambiguated; address the controls by that same `id`.
+
+**Injection is opportunistic and partial.** Both `modules` and `controls` are
+optional — the catalog injects **only what is known and hardware-fixed**
+(vendor-soldered mic pins, board-fixed Ethernet pins). A bare board whose LED
+or mic pins the *user* wires omits them; the user adds the module and sets the
+pins manually later. Absent array ⇒ inject nothing. (This is the
+MCU/Board/Device provenance rule from
+[`docs/backlog/installer-3layer-plan.md`](../backlog/installer-3layer-plan.md):
+default a pin only at the level that fixes it.) The `projectMM testbench S3`
+entry above injects an `AudioModule` with the real, verified INMP441 mic pins
+(WS=4/SD=5/SCK=6, matching the bench wiring in
+[`AudioModule.h`](../../src/core/AudioModule.h)) plus the `RmtLed` loopback pins —
+a known-hardware Device on the maintainer's desk, so the inject is testable
+end-to-end. The `ESP32-16MB` and `P4` testbench siblings inject only the `RmtLed`
+loopback (no mic wired on those), each carrying only what is physically present.
+
+**Specific boards/devices: spec 'n test first.** A real product entry only grows
+a `modules`/pin block once that hardware has its own spec (with the product-page
+link + grabbed images for installer selection and pin layout) and a test pinning
+it — the project's *Specs before code* applied to catalog hardware. So vendor
+entries (the QuinLED Dig-2-Go, the Serg shields, …) stay **bare** (`Board.board`
+only) until spec'n'tested; e.g. whether the Dig-2-Go's *onboard* mic is even
+supported is an open spec'n'test question, so its entry injects nothing.
+
+**One entry type, no Board/Device split.** A "Device" (a finished rig like the
+`projectMM testbench S3` — board + a wired mic) is just an entry with *more* of
+`modules`/`controls` filled in than a bare "Board". Same schema; there is no
+separate `devices.json`.
+
+**`extends` (reserved, not yet resolved).** The carrier/shield pattern is
+literal extension (a Serg shield = a D1-Mini32 board *plus* the shield's pins),
+so a future optional **`extends: "<parent entry name>"`** lets an entry inherit
+another's `modules`/`controls` (multi-level MCU→carrier→device; child overrides
+parent at the same `{module, control}`; `modules` concatenate, deduped by `id`).
+The resolver is a client-side pre-pass to be built at the first real shared-base
+collision — today every entry is self-contained, so it isn't implemented yet.
+Don't author duplicated pin blocks expecting `extends` to dedupe them until it
+ships.
+
+**Shared op vocabulary.** A catalog entry is a test
+[scenario](../../test/scenarios/) minus the `measure` asserts — the same two
+operations: `add_module {type, id, parent_id}` (== `POST /api/modules`) and
+set-control (== `POST /api/control`, body `{module, control, value}` — the
+canonical field names; scenario's internal `set_control` uses `{id, key, value}`
+for the same fields). `scripts/scenario/run_live_scenario.py` already runs these
+ops over HTTP against a live device, the same channel the installer uses.
 
 ## What's *not* in this directory
 
