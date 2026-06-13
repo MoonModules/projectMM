@@ -203,26 +203,38 @@ def _push_board_to_device(ip: str, board: str) -> bool:
     # doesn't hammer the disk. If the user edits boards.json, restart
     # MoonDeck (same as every other catalog change).
     entry = next((b for b in BOARDS if b.get("name") == board), None)
+    modules = (entry or {}).get("modules") or []
     controls = (entry or {}).get("controls") or {}
     if not controls:
         # Custom / unknown board: just push the bare name. Mirrors the
         # legacy behaviour, so existing custom-board users don't regress.
         controls = {"Board": {"board": board}}
 
-    def _post(module_name: str, control_name: str, value) -> bool:
-        body = json.dumps({
-            "module": module_name,
-            "control": control_name,
-            "value": value,
-        }).encode()
+    def _post(path: str, body_obj: dict) -> bool:
+        body = json.dumps(body_obj).encode()
         try:
             req = urllib.request.Request(
-                f"http://{ip}/api/control",
+                f"http://{ip}{path}",
                 data=body, method="POST",
                 headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=0.6) as resp:
                 return resp.status == 200
         except (urllib.error.URLError, OSError):
+            return False
+
+    # Add modules before setting controls: a fresh flash has no user-added
+    # modules (e.g. AudioModule), so a control write to one would 404. Each
+    # entry is the POST /api/modules payload {type, id, parent_id}; the
+    # endpoint is idempotent (an existing id returns 200), so a repeated push
+    # re-adds nothing. `modules` is optional — bare-board entries omit it.
+    for m in modules:
+        if not isinstance(m, dict) or not m.get("type"):
+            continue
+        if not _post("/api/modules", {
+            "type": m.get("type"),
+            "id": m.get("id"),
+            "parent_id": m.get("parent_id"),
+        }):
             return False
 
     # Iterate the same shape the web installer + device UI use:
@@ -232,7 +244,11 @@ def _push_board_to_device(ip: str, board: str) -> bool:
         if not isinstance(ctrls, dict):
             continue
         for control_name, value in ctrls.items():
-            if not _post(module_name, control_name, value):
+            if not _post("/api/control", {
+                "module": module_name,
+                "control": control_name,
+                "value": value,
+            }):
                 return False
     return True
 

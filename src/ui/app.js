@@ -192,6 +192,26 @@ async function sendControl(moduleName, controlName, value) {
     }
 }
 
+async function sendAddModule(m) {
+    // Best-effort add for the board-inject path, same no-retry contract as
+    // sendControl. Mirrors POST /api/modules {type, id, parent_id}; the
+    // endpoint is idempotent (an existing id returns 200), so re-running an
+    // inject re-adds nothing. Distinct from the interactive addModule() helper,
+    // which refetches state per call (wrong inside a batch loop).
+    try {
+        const res = await fetch("/api/modules", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({type: m.type, id: m.id, parent_id: m.parent_id})
+        });
+        if (!res.ok) {
+            console.warn(`[board-inject] add module ${m.type} failed (status=${res.status})`);
+        }
+    } catch (e) {
+        console.warn(`[board-inject] add module ${m.type} failed (error=${e && e.message ? e.message : e})`);
+    }
+}
+
 // Public Pages URL of the board catalog. The installer page also serves
 // this at `./boards.json` (same-origin from the installer's perspective),
 // but the device UI is on a different origin (the device's HTTP server),
@@ -241,15 +261,23 @@ async function consumePendingBoardParam() {
         console.warn("[board-inject] failed to fetch boards.json:", e);
         return;
     }
-    if (!entry || !entry.controls) {
-        console.warn(`[board-inject] no controls for board "${pendingBoard}"`);
+    if (!entry) {
+        console.warn(`[board-inject] no catalog entry for board "${pendingBoard}"`);
         return;
+    }
+    // Add modules before setting controls: a fresh flash has no user-added
+    // modules (e.g. AudioModule), so a control write to one would 404. The
+    // modules step is optional — bare-board entries omit it.
+    // entry.modules shape: [ { type, id, parent_id }, ... ]
+    for (const m of entry.modules ?? []) {
+        if (!m || typeof m !== "object" || !m.type) continue;
+        await sendAddModule(m);
     }
     // entry.controls shape: { "<ModuleName>": { "<controlName>": <value>, ... }, ... }
     // e.g. { "Board": { "board": "Olimex ESP32-Gateway Rev G" } }
     // Iterate sequentially so each FilesystemModule debounced-save sees the
     // full set; parallel fires could race the dirty flag on the same module.
-    for (const [moduleName, controls] of Object.entries(entry.controls)) {
+    for (const [moduleName, controls] of Object.entries(entry.controls ?? {})) {
         if (!controls || typeof controls !== "object") continue;
         for (const [controlName, value] of Object.entries(controls)) {
             await sendControl(moduleName, controlName, value);
