@@ -203,12 +203,13 @@ def _push_board_to_device(ip: str, board: str) -> bool:
     # doesn't hammer the disk. If the user edits boards.json, restart
     # MoonDeck (same as every other catalog change).
     entry = next((b for b in BOARDS if b.get("name") == board), None)
-    modules = (entry or {}).get("modules") or []
-    controls = (entry or {}).get("controls") or {}
-    if not controls:
-        # Custom / unknown board: just push the bare name. Mirrors the
-        # legacy behaviour, so existing custom-board users don't regress.
-        controls = {"Board": {"board": board}}
+    if entry is not None:
+        modules = entry.get("modules") or []
+    else:
+        # Custom / unknown board: just push the bare name as a Board module.
+        # Mirrors the legacy behaviour so existing custom-board users don't regress.
+        modules = [{"type": "Board", "id": "Board", "parent_id": "System",
+                    "controls": {"board": board}}]
 
     def _post(path: str, body_obj: dict) -> bool:
         body = json.dumps(body_obj).encode()
@@ -222,30 +223,28 @@ def _push_board_to_device(ip: str, board: str) -> bool:
         except (urllib.error.URLError, OSError):
             return False
 
-    # Add modules before setting controls: a fresh flash has no user-added
-    # modules (e.g. AudioModule), so a control write to one would 404. Each
-    # entry is the POST /api/modules payload {type, id, parent_id}; the
-    # endpoint is idempotent (an existing id returns 200), so a repeated push
-    # re-adds nothing. `modules` is optional — bare-board entries omit it.
+    # Each entry is a list of module-with-controls units:
+    #   {type, id, parent_id?, controls?}
+    # Per module: add it first (when it has a parent_id — a fresh flash has no
+    # user-added modules like AudioModule, so a control write would 404), then set
+    # its controls. A module without parent_id is boot-wired/top-level (Board under
+    # System, Network) that already exists — skip the add, just set controls. The
+    # add is idempotent (an existing id returns 200). Sequential is plenty for the
+    # 1-3 controls typical entries carry.
     for m in modules:
-        if not isinstance(m, dict) or not m.get("type"):
+        if not isinstance(m, dict):
             continue
-        if not _post("/api/modules", {
-            "type": m.get("type"),
-            "id": m.get("id"),
-            "parent_id": m.get("parent_id"),
-        }):
-            return False
-
-    # Iterate the same shape the web installer + device UI use:
-    # entry.controls.<Module>.<control> = <value>. Sequential is plenty
-    # for the 1-3 leaves typical entries carry today.
-    for module_name, ctrls in controls.items():
-        if not isinstance(ctrls, dict):
-            continue
+        if m.get("parent_id") and m.get("type"):
+            if not _post("/api/modules", {
+                "type": m.get("type"),
+                "id": m.get("id"),
+                "parent_id": m.get("parent_id"),
+            }):
+                return False
+        ctrls = m.get("controls") or {}
         for control_name, value in ctrls.items():
             if not _post("/api/control", {
-                "module": module_name,
+                "module": m.get("id"),
                 "control": control_name,
                 "value": value,
             }):

@@ -27,9 +27,9 @@ end-to-end, no ESP Web Tools dependency on the install path.
   user provisioned from this page so they can re-visit / erase / forget
   them. Renders a dedicated *Inject* button next to Visit for every entry
   with a `board` field; the button opens `<device>/?board=<name>` and the
-  device UI fetches the matching `boards.json` entry from Pages to add its
-  `modules` via `/api/modules`, then fan out each `controls.*` field via
-  `/api/control` (add-then-configure; see the schema below). Idempotent — safe
+  device UI fetches the matching `boards.json` entry from Pages and, for each of
+  its `modules`, adds the module (`/api/modules`) then sets its nested controls
+  (`/api/control`) — add-then-configure; see the schema below. Idempotent — safe
   to re-click after a popup-blocker rejection or a follow-up catalog edit.
 - [`boards.json`](boards.json) — the board catalog (name → firmware
   variants + the modules/controls to inject) the picker fetches and the
@@ -43,8 +43,8 @@ A flat JSON array of catalog entries. Each entry is the single source of truth
 for one piece of hardware and what to set up on it at install time. Three
 clients consume it identically — the web installer (`install-orchestrator.js`),
 the device UI's `?board=` inject (`src/ui/app.js`), and MoonDeck
-(`scripts/moondeck.py`) — so **adding a field that's just more
-modules/controls needs no client change**.
+(`scripts/moondeck.py`) — so **adding another module-with-controls unit needs no
+client change**.
 
 ```json
 {
@@ -53,63 +53,103 @@ modules/controls needs no client change**.
   "firmwares": ["esp32s3-n16r8"],
   "default_firmware": "esp32s3-n16r8",
   "modules": [
-    { "type": "AudioModule", "id": "Audio", "parent_id": "System" }
-  ],
-  "controls": {
-    "Board": { "board": "projectMM testbench S3" },
-    "Audio": { "wsPin": 4, "sdPin": 5, "sckPin": 6 },
-    "RmtLed": { "pins": "12", "loopbackRxPin": 13 }
-  }
+    { "type": "Board", "id": "Board", "parent_id": "System",
+      "controls": { "board": "projectMM testbench S3" } },
+    { "type": "AudioModule", "id": "Audio", "parent_id": "System",
+      "controls": { "wsPin": 4, "sdPin": 5, "sckPin": 6 } },
+    { "type": "RmtLedDriver", "id": "RmtLed", "parent_id": "Drivers",
+      "controls": { "pins": "18", "loopbackTxPin": 13, "loopbackRxPin": 12 } }
+  ]
 }
 ```
 
-The `RmtLed` block presets the LED-driver loopback self-test pins (`pins[0]` is
-the TX the test transmits on, `loopbackRxPin` the jumpered RX) so a bench
-operator just flips the `loopbackTest` switch — no need to retype pins. The
-driver is boot-wired, so this is a plain control set (no `modules` entry).
-`loopbackTest` is left off; presetting the pins doesn't auto-run the (blocking)
-test. The sibling `projectMM testbench ESP32-16MB` / `…P4` entries carry only the
-`RmtLed` loopback (no mic — only the S3 bench has one wired), each injecting only
-what is actually on that board.
+Each entry is a **list of module-with-controls units** — "create this module (if
+not already present), then set its controls" as one unit. This is the same shape
+the scenario test format expresses with `add_module` + `set_control`, so a catalog
+entry reads like a scenario's setup phase. Even `Board` is a module entry (it's a
+boot-wired child of `System`, so the add is an idempotent no-op and only its
+`board` control applies).
+
+**LED drivers are catalog-added, not boot-wired.** The only driver the firmware
+creates at boot is `Preview` (it needs the HTTP-server broadcaster the catalog
+can't supply); every other driver — `RmtLedDriver`, `LcdLedDriver`,
+`ParlioLedDriver`, `NetworkSendDriver` — is added per board through its `modules`
+block (to the `Drivers` container), so a device only carries the outputs its board
+actually has instead of every driver the chip is capable of. The default LED
+driver per chip: **classic ESP32 → `RmtLedDriver`**, **S3 → `RmtLedDriver`** (LCD
+needs the full 8-lane bus — see the [LcdLedDriver spec](../moonmodules/light/drivers/LcdLedDriver.md);
+1..8-pin LCD is a future extension), **P4 → `ParlioLedDriver`** (runs 1–8 lanes).
+
+The `RmtLed` `controls` block presets the loopback self-test pins so a bench
+operator just flips the `loopbackTest` switch — no re-typing. **`loopbackTxPin` and
+`loopbackRxPin` are the test jumper (tx→rx), separate from the operational `pins`**:
+on the S3 the strip runs on `pins`=18 while the loopback transmits on 13 and
+captures on 12. (Without `loopbackTxPin` the test would fall back to transmitting on
+`pins[0]` — fine when the jumper is on the LED pin, but the testbench's jumper is on
+a dedicated pin, which is exactly why the override is stored.) `loopbackTest` is left
+off (presetting pins doesn't auto-run the blocking test). The sibling
+`projectMM testbench ESP32-16MB` adds `RmtLedDriver` (`pins`=18, loopback tx=4/rx=5);
+the `…P4` adds `ParlioLedDriver` (`pins`=20–27, `ledsPerPin`=64, loopback tx=33/rx=32).
+Only the S3 bench has a mic wired, so only it carries `AudioModule`. Each entry
+declares only what is actually on that board.
 
 | Field | Required | Meaning |
 |---|---|---|
 | `name` | yes | identifier **and** display label (no key/label split) |
 | `chip` | yes | the MCU family, for the picker's chip filter |
 | `firmwares` / `default_firmware` | yes | the firmware variants flashable on this hardware |
-| `modules` | no | modules to **create** before configuring (`POST /api/modules` payloads) |
-| `controls` | no | controls to **set** after the modules exist (`POST /api/control`) |
+| `modules` | yes | the list of module-with-controls units that set the board up |
 
-**Add-then-configure.** Clients process `modules` **before** `controls`. A
-fresh flash has no user-added modules (an `AudioModule`, an extra effect), so a
-control write to one would 404 — the module must be created first.
-`POST /api/modules` is idempotent (an existing `id` returns 200), so re-running
-an inject is safe. Each `modules` entry needs an explicit **`id`** if its
-controls are then set, because factory display names collide and get
-disambiguated; address the controls by that same `id`.
+Each `modules[]` unit is `{ type, id, parent_id?, controls? }`:
 
-**Injection is opportunistic and partial.** Both `modules` and `controls` are
-optional — the catalog injects **only what is known and hardware-fixed**
-(vendor-soldered mic pins, board-fixed Ethernet pins). A bare board whose LED
-or mic pins the *user* wires omits them; the user adds the module and sets the
-pins manually later. Absent array ⇒ inject nothing. (This is the
+| Module field | Meaning |
+|---|---|
+| `type` | factory type to create (e.g. `RmtLedDriver`, `AudioModule`, `Board`) |
+| `id` | the module's name — used both as the `POST /api/modules` id **and** as the `module` in every `POST /api/control`, so the two stay in sync |
+| `parent_id` | the container to add it under (`Drivers`, `System`). **Omitted** for a module that already exists at boot (e.g. `Network`) — the client then skips the add and only sets controls |
+| `controls` | the controls to set on that module after it exists |
+
+`type` and `parent_id` are spelled out even though `id` could imply them
+(`RmtLed`→`RmtLedDriver` under `Drivers`). Kept explicit on purpose: the two
+consumers of this shape — the offline in-process scenario runner (C++) and the
+online installer clients (JS/Python over HTTP) — can't share an `id`→`type`
+inference table without triplicating it across three languages, which is worse
+duplication than the field repetition. So a unit stays fully self-describing, the
+same way a scenario `add_module` op is. The bloat is the honest cost of that.
+
+**Add-then-configure, per module.** For each unit the client adds the module
+(when it has a `parent_id` — a fresh flash has no user-added modules like
+`AudioModule`, so a control write would 404), then sets its `controls`.
+`POST /api/modules` is idempotent (an existing `id` returns 200), so re-running an
+inject is safe. The `id` is what the controls address, so it is set explicitly
+(factory display names disambiguate on collision).
+
+**Injection is opportunistic and partial.** A module's `controls` (and the units
+list itself) carry **only what is known and hardware-fixed** (vendor-soldered mic
+pins, board-fixed Ethernet pins). A bare board whose LED or mic pins the *user*
+wires omits them; the user adds the module and sets the pins manually later.
+Inject nothing you don't know. (This is the
 MCU/Board/Device provenance rule from
 [`docs/backlog/installer-3layer-plan.md`](../backlog/installer-3layer-plan.md):
 default a pin only at the level that fixes it.) The `projectMM testbench S3`
-entry above injects an `AudioModule` with the real, verified INMP441 mic pins
+entry above adds an `AudioModule` with the real, verified INMP441 mic pins
 (WS=4/SD=5/SCK=6, matching the bench wiring in
-[`AudioModule.h`](../../src/core/AudioModule.h)) plus the `RmtLed` loopback pins —
-a known-hardware Device on the maintainer's desk, so the inject is testable
-end-to-end. The `ESP32-16MB` and `P4` testbench siblings inject only the `RmtLed`
-loopback (no mic wired on those), each carrying only what is physically present.
+[`AudioModule.h`](../../src/core/AudioModule.h)) plus an `RmtLedDriver`
+(LEDs on `pins`=18, loopback jumper tx=13→rx=12) — a known-hardware Device on the
+maintainer's desk, so the inject is testable end-to-end. The `ESP32-16MB` sibling
+adds `RmtLedDriver` (LEDs=18, loopback tx=4/rx=5); the `P4` sibling adds
+`ParlioLedDriver` (LEDs=20–27, loopback tx=33/rx=32). Only the S3 has a mic
+wired. Each carries only what is physically present (LCD is not preset on the S3
+testbench — its 8-lane bus would clash with the mic pins 4/5/6).
 
 **Specific boards/devices: spec 'n test first.** A real product entry only grows
-a `modules`/pin block once that hardware has its own spec (with the product-page
+a peripheral/pin unit once that hardware has its own spec (with the product-page
 link + grabbed images for installer selection and pin layout) and a test pinning
 it — the project's *Specs before code* applied to catalog hardware. So vendor
-entries (the QuinLED Dig-2-Go, the Serg shields, …) stay **bare** (`Board.board`
-only) until spec'n'tested; e.g. whether the Dig-2-Go's *onboard* mic is even
-supported is an open spec'n'test question, so its entry injects nothing.
+entries (the QuinLED Dig-2-Go, the Serg shields, …) carry only their **`Board`
+unit plus the default LED driver** until spec'n'tested for more; e.g. whether the
+Dig-2-Go's *onboard* mic is even supported is an open spec'n'test question, so its
+entry adds no `AudioModule`.
 
 **One entry type, no Board/Device split.** A "Device" (a finished rig like the
 `projectMM testbench S3` — board + a wired mic) is just an entry with *more* of
@@ -126,13 +166,15 @@ collision — today every entry is self-contained, so it isn't implemented yet.
 Don't author duplicated pin blocks expecting `extends` to dedupe them until it
 ships.
 
-**Shared op vocabulary.** A catalog entry is a test
-[scenario](../../test/scenarios/) minus the `measure` asserts — the same two
-operations: `add_module {type, id, parent_id}` (== `POST /api/modules`) and
-set-control (== `POST /api/control`, body `{module, control, value}` — the
-canonical field names; scenario's internal `set_control` uses `{id, key, value}`
-for the same fields). `scripts/scenario/run_live_scenario.py` already runs these
-ops over HTTP against a live device, the same channel the installer uses.
+**Shared op vocabulary.** A catalog entry's `modules` list is a test
+[scenario](../../test/scenarios/) setup phase minus the `measure` asserts — the
+same two operations per module: `add_module {type, id, parent_id}` (==
+`POST /api/modules`) and set-control (== `POST /api/control`). Both express
+"create a module, then configure it." (A scenario keeps a separate `props` block
+for in-process C++ construction wiring — `setLayouts`/`setChannelsPerLight`/grid
+dims that aren't control writes — which the catalog never needs, so the catalog
+unit carries only `controls`.) `scripts/scenario/run_live_scenario.py` already
+runs these ops over HTTP against a live device, the same channel the installer uses.
 
 ## What's *not* in this directory
 

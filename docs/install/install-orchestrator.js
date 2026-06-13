@@ -249,26 +249,30 @@ async function tryHttpInjectBoard(deviceUrl, board) {
         return false;
     }
     if (!entry) return false;
-    // Add modules first (a fresh flash has no user-added modules like AudioModule,
-    // so a control write to one would 404). Each entry is the POST /api/modules
-    // payload {type, id, parent_id}; the endpoint is idempotent (an existing id
-    // returns 200), so re-running the inject is safe. `modules` is optional —
-    // a bare-board entry omits it and only sets controls.
+    // Each entry is a list of module-with-controls units:
+    //   { type, id, parent_id?, controls? }
+    // Per module: add it first (when it has a parent_id — a fresh flash has no
+    // user-added modules like AudioModule, so a control write would 404), then set
+    // its controls. A module without parent_id is boot-wired/top-level (Board under
+    // System, Network) that already exists — skip the add, just set controls. The
+    // add is idempotent (an existing id returns 200). This is the install flow, so
+    // any failure aborts the inject (all-or-nothing).
     for (const m of entry.modules ?? []) {
-        if (!m || typeof m !== "object" || !m.type) continue;
-        try {
-            const res = await fetch(new URL("api/modules", deviceUrl), {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ type: m.type, id: m.id, parent_id: m.parent_id }),
-                signal: AbortSignal.timeout(5000),
-            });
-            if (!res.ok) return false;
-        } catch (_) {
-            return false;
+        if (!m || typeof m !== "object") continue;
+        if (m.parent_id && m.type) {
+            try {
+                const res = await fetch(new URL("api/modules", deviceUrl), {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ type: m.type, id: m.id, parent_id: m.parent_id }),
+                    signal: AbortSignal.timeout(5000),
+                });
+                if (!res.ok) return false;
+            } catch (_) {
+                return false;
+            }
         }
-    }
-    for (const [moduleName, controls] of Object.entries(entry.controls ?? {})) {
+        const controls = m.controls;
         if (!controls || typeof controls !== "object") continue;
         for (const [controlName, value] of Object.entries(controls)) {
             try {
@@ -276,7 +280,7 @@ async function tryHttpInjectBoard(deviceUrl, board) {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        module: moduleName,
+                        module: m.id,
                         control: controlName,
                         value,
                     }),

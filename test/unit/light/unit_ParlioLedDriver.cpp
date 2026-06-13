@@ -240,3 +240,20 @@ TEST_CASE("ParlioLedDriver loopbackRxPin tracks the loopbackTest toggle") {
     }
     CHECK(found);
 }
+
+// loopbackTxPin (optional lane-0 TX override) is bound always, hidden until the
+// test is on — same conditional-control contract as loopbackRxPin. The override's
+// lane-0 substitution is hardware-only (parlioLanes==0 on desktop); the visibility
+// contract is host-testable here.
+TEST_CASE("ParlioLedDriver loopbackTxPin tracks the loopbackTest toggle") {
+    mm::ParlioLedDriver d;
+    d.onBuildControls();
+    bool found = false;
+    for (uint8_t i = 0; i < d.controls().count(); i++) {
+        if (std::strcmp(d.controls()[i].name, "loopbackTxPin") == 0) {
+            found = true;
+            CHECK(d.controls()[i].hidden == true);   // test mode off by default
+        }
+    }
+    CHECK(found);
+}

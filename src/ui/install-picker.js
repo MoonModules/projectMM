@@ -717,8 +717,10 @@ export const installPicker = {
     getSelectedBoardTxPower() {
         if (!_lastState || !_lastState.selectedBoard || !_lastState.boards) return null;
         const entry = _lastState.boards.find(b => b.name === _lastState.selectedBoard);
-        const v = entry && entry.controls && entry.controls.Network
-            && entry.controls.Network.txPowerSetting;
+        // New catalog shape: each board's modules list carries its own controls;
+        // the WiFi TX-power cap lives on the Network module's controls block.
+        const net = entry && (entry.modules || []).find(m => m && m.id === "Network");
+        const v = net && net.controls && net.controls.txPowerSetting;
         return (typeof v === "number") ? v : null;
     },
 

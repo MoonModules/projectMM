@@ -232,47 +232,27 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     auto* drivers = static_cast<mm::Drivers*>(mm::ModuleFactory::create("Drivers"));
     drivers->setLayers(layersContainer);
 
-    auto* netSend = mm::ModuleFactory::create("NetworkSendDriver");
-    drivers->addChild(netSend);  // name = "NetworkSend" (factory default)
-    netSend->markWiredByCode();
+    // Output drivers (NetworkSend + the LED drivers: RMT / LCD_CAM / Parlio) are
+    // NOT boot-wired. They are added explicitly per board through the catalog
+    // (POST /api/modules to the Drivers container), the same model AudioModule
+    // uses, so a device only carries the drivers its board actually has instead of
+    // every driver the chip is capable of. The Drivers container wires any child
+    // generically in passBufferToDrivers() (setSourceBuffer/setLayer/setCorrection)
+    // at setup()/onBuildState(), so a runtime-added driver is wired identically to
+    // one added at boot, and a non-wiredByCode child persists across reboot via
+    // FilesystemModule. A bare flash with no catalog inject therefore has no LED /
+    // network output until a board is selected — the deliberate explicit-add model.
 
-    // RMT WS2812 LED output — any chip with RMT TX channels (classic ESP32: 8,
-    // S3: 4; the seam is a no-op on desktop). Wired by code like NetworkSend so
-    // a persistence load can't drop it.
-    if constexpr (mm::platform::rmtTxChannels > 0) {
-        auto* led = mm::ModuleFactory::create("RmtLedDriver");
-        drivers->addChild(led);
-        led->markWiredByCode();
-    }
-
-    // LCD_CAM parallel WS2812 output — chips with the i80 LCD peripheral (the
-    // S3 among current targets): 8 strands clock out simultaneously over one
-    // DMA transfer, the S3's scale path beyond its 4 RMT channels.
-    if constexpr (mm::platform::lcdLanes > 0) {
-        auto* lcd = mm::ModuleFactory::create("LcdLedDriver");
-        drivers->addChild(lcd);
-        lcd->markWiredByCode();
-    }
-
-    // Parlio parallel WS2812 output — chips with the Parlio peripheral (the
-    // ESP32-P4 among current targets): the P4's scale path, sibling of the LCD
-    // driver, 8 strands over one DMA transfer.
-    if constexpr (mm::platform::parlioLanes > 0) {
-        auto* parlio = mm::ModuleFactory::create("ParlioLedDriver");
-        drivers->addChild(parlio);
-        parlio->markWiredByCode();
-    }
-
+    // PreviewDriver is the one driver that stays boot-wired: it needs the HTTP
+    // server's WS broadcaster (set below, once httpServer exists), a reference only
+    // main.cpp has and the catalog can't supply. It reads the active Layer (resolved
+    // by the Drivers container's setLayers above) for the light positions and the
+    // sparse buffer it streams; it owns its own scratch buffers.
     auto* preview = static_cast<mm::PreviewDriver*>(mm::ModuleFactory::create("PreviewDriver"));
-    // PreviewDriver reads the active Layer (resolved by the Drivers container's
-    // setLayers(layersContainer) wiring above) for the light positions and the
-    // sparse driver buffer it streams; it owns its own scratch buffers, so no
-    // externally-owned frame is needed.
     drivers->addChild(preview);
-    // These two drivers are wired by code here (preview gets its broadcaster set
-    // below, once httpServer exists; ArtNet its IP). Mark them wired-by-code so a
-    // persistence load can't replace the wired instances with fresh factory ones
-    // that lost that wiring — same protection BoardModule / ImprovProvisioning use.
+    // Marked wired-by-code so a persistence load can't replace the wired instance
+    // with a fresh factory one that lost its broadcaster — same protection
+    // BoardModule / ImprovProvisioning use.
     preview->markWiredByCode();
 
     auto* httpServer = static_cast<mm::HttpServerModule*>(mm::ModuleFactory::create("HttpServerModule"));
@@ -311,11 +291,8 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     std::printf("sizeof: MoonModule=%zu Layer=%zu Drivers=%zu Grid=%zu HttpServer=%zu\n",
                 sizeof(mm::MoonModule), sizeof(mm::Layer), sizeof(mm::Drivers),
                 sizeof(mm::GridLayout), sizeof(mm::HttpServerModule));
-    // The ip control is 4 raw octets, not a string — format before printing
-    // (the old %s on the byte array printed garbage).
-    char netSendIp[16];
-    mm::formatDottedQuad(netSendIp, static_cast<mm::NetworkSendDriver*>(netSend)->ip);
-    std::printf("NetworkSend → %s\n", netSendIp);
+    // NetworkSend is no longer boot-wired (added per board via the catalog), so
+    // there is no boot-time instance whose IP we could log here.
     // The server binds all interfaces (INADDR_ANY) — reachable from other
     // devices on the LAN, not only localhost.
     std::printf("HTTP server → http://localhost:%u\n", httpServer->port);

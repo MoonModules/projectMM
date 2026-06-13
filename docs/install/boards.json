@@ -2,209 +2,541 @@
   {
     "name": "Olimex ESP32-Gateway Rev G",
     "chip": "ESP32",
-    "firmwares": ["esp32-eth", "esp32-eth-wifi"],
+    "firmwares": [
+      "esp32-eth",
+      "esp32-eth-wifi"
+    ],
     "default_firmware": "esp32-eth-wifi",
-    "controls": {
-      "Board": { "board": "Olimex ESP32-Gateway Rev G" }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "Olimex ESP32-Gateway Rev G"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers"
+      }
+    ]
   },
   {
     "name": "LOLIN D32",
     "chip": "ESP32",
-    "firmwares": ["esp32"],
+    "firmwares": [
+      "esp32"
+    ],
     "default_firmware": "esp32",
-    "controls": {
-      "Board": { "board": "LOLIN D32" }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "LOLIN D32"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers"
+      }
+    ]
   },
   {
     "name": "Generic ESP32 DevKit",
     "chip": "ESP32",
-    "firmwares": ["esp32"],
+    "firmwares": [
+      "esp32"
+    ],
     "default_firmware": "esp32",
-    "controls": {
-      "Board": { "board": "Generic ESP32 DevKit" }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "Generic ESP32 DevKit"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers"
+      }
+    ]
   },
   {
     "name": "QuinLED Dig-2-Go",
     "chip": "ESP32",
-    "firmwares": ["esp32"],
+    "firmwares": [
+      "esp32"
+    ],
     "default_firmware": "esp32",
-    "controls": {
-      "Board": { "board": "QuinLED Dig-2-Go" }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "QuinLED Dig-2-Go"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers"
+      }
+    ]
   },
   {
     "name": "QuinLED Dig-Next-2",
     "chip": "ESP32",
-    "firmwares": ["esp32"],
+    "firmwares": [
+      "esp32"
+    ],
     "default_firmware": "esp32",
-    "controls": {
-      "Board": { "board": "QuinLED Dig-Next-2" }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "QuinLED Dig-Next-2"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers"
+      }
+    ]
   },
   {
     "name": "QuinLED Dig-Uno V3",
     "chip": "ESP32",
-    "firmwares": ["esp32"],
+    "firmwares": [
+      "esp32"
+    ],
     "default_firmware": "esp32",
-    "controls": {
-      "Board": { "board": "QuinLED Dig-Uno V3" }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "QuinLED Dig-Uno V3"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers"
+      }
+    ]
   },
   {
     "name": "QuinLED Dig-Quad V3",
     "chip": "ESP32",
-    "firmwares": ["esp32"],
+    "firmwares": [
+      "esp32"
+    ],
     "default_firmware": "esp32",
-    "controls": {
-      "Board": { "board": "QuinLED Dig-Quad V3" }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "QuinLED Dig-Quad V3"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers"
+      }
+    ]
   },
   {
     "name": "QuinLED Dig-Octa 32-8L",
     "chip": "ESP32",
-    "firmwares": ["esp32-16mb"],
+    "firmwares": [
+      "esp32-16mb"
+    ],
     "default_firmware": "esp32-16mb",
-    "controls": {
-      "Board": { "board": "QuinLED Dig-Octa 32-8L" }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "QuinLED Dig-Octa 32-8L"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers"
+      }
+    ]
   },
   {
     "name": "Serg UniShield V5",
     "chip": "ESP32",
-    "firmwares": ["esp32-16mb"],
+    "firmwares": [
+      "esp32-16mb"
+    ],
     "default_firmware": "esp32-16mb",
-    "controls": {
-      "Board": { "board": "Serg UniShield V5" }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "Serg UniShield V5"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers"
+      }
+    ]
   },
   {
     "name": "Serg MiniShield",
     "chip": "ESP32",
-    "firmwares": ["esp32-16mb"],
+    "firmwares": [
+      "esp32-16mb"
+    ],
     "default_firmware": "esp32-16mb",
-    "controls": {
-      "Board": { "board": "Serg MiniShield" }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "Serg MiniShield"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers"
+      }
+    ]
   },
   {
     "name": "MHC V4.3",
     "chip": "ESP32",
-    "firmwares": ["esp32"],
+    "firmwares": [
+      "esp32"
+    ],
     "default_firmware": "esp32",
-    "controls": {
-      "Board": { "board": "MHC V4.3" }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "MHC V4.3"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers"
+      }
+    ]
   },
   {
     "name": "MHC V5.7 PRO",
     "chip": "ESP32",
-    "firmwares": ["esp32"],
+    "firmwares": [
+      "esp32"
+    ],
     "default_firmware": "esp32",
-    "controls": {
-      "Board": { "board": "MHC V5.7 PRO" }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "MHC V5.7 PRO"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers"
+      }
+    ]
   },
   {
     "name": "Yves V4.8",
     "chip": "ESP32",
-    "firmwares": ["esp32"],
+    "firmwares": [
+      "esp32"
+    ],
     "default_firmware": "esp32",
-    "controls": {
-      "Board": { "board": "Yves V4.8" }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "Yves V4.8"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers"
+      }
+    ]
   },
   {
     "name": "Cube 2020-10",
     "chip": "ESP32",
-    "firmwares": ["esp32"],
+    "firmwares": [
+      "esp32"
+    ],
     "default_firmware": "esp32",
-    "controls": {
-      "Board": { "board": "Cube 2020-10" }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "Cube 2020-10"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers"
+      }
+    ]
   },
   {
     "name": "ESP32-S3 N16R8 DevKit",
     "chip": "ESP32-S3",
-    "firmwares": ["esp32s3-n16r8"],
+    "firmwares": [
+      "esp32s3-n16r8"
+    ],
     "default_firmware": "esp32s3-n16r8",
-    "controls": {
-      "Board": { "board": "ESP32-S3 N16R8 DevKit" }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "ESP32-S3 N16R8 DevKit"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers"
+      }
+    ]
   },
   {
     "name": "projectMM testbench S3",
     "chip": "ESP32-S3",
-    "firmwares": ["esp32s3-n16r8"],
+    "firmwares": [
+      "esp32s3-n16r8"
+    ],
     "default_firmware": "esp32s3-n16r8",
     "modules": [
-      { "type": "AudioModule", "id": "Audio", "parent_id": "System" }
-    ],
-    "controls": {
-      "Board": { "board": "projectMM testbench S3" },
-      "Audio": { "wsPin": 4, "sdPin": 5, "sckPin": 6 },
-      "RmtLed": { "pins": "12", "loopbackRxPin": 13 },
-      "LcdLed": { "pins": "18" }
-    }
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "projectMM testbench S3"
+        }
+      },
+      {
+        "type": "AudioModule",
+        "id": "Audio",
+        "parent_id": "System",
+        "controls": {
+          "wsPin": 4,
+          "sdPin": 5,
+          "sckPin": 6
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "18",
+          "loopbackTxPin": 13,
+          "loopbackRxPin": 12
+        }
+      }
+    ]
   },
   {
     "name": "projectMM testbench ESP32-16MB",
     "chip": "ESP32",
-    "firmwares": ["esp32-16mb"],
+    "firmwares": [
+      "esp32-16mb"
+    ],
     "default_firmware": "esp32-16mb",
-    "controls": {
-      "Board": { "board": "projectMM testbench ESP32-16MB" },
-      "RmtLed": { "pins": "4", "loopbackRxPin": 5 }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "projectMM testbench ESP32-16MB"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "18",
+          "loopbackTxPin": 4,
+          "loopbackRxPin": 5
+        }
+      }
+    ]
   },
   {
     "name": "projectMM testbench P4",
     "chip": "ESP32-P4",
-    "firmwares": ["esp32p4-eth"],
+    "firmwares": [
+      "esp32p4-eth"
+    ],
     "default_firmware": "esp32p4-eth",
-    "controls": {
-      "Board": { "board": "projectMM testbench P4" },
-      "RmtLed": { "pins": "32", "loopbackRxPin": 33 },
-      "ParlioLed": { "pins": "20,21,22,23,24,25,26,27", "ledsPerPin": "64", "loopbackRxPin": 32 }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "projectMM testbench P4"
+        }
+      },
+      {
+        "type": "ParlioLedDriver",
+        "id": "ParlioLed",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "20,21,22,23,24,25,26,27",
+          "ledsPerPin": "64",
+          "loopbackTxPin": 33,
+          "loopbackRxPin": 32
+        }
+      }
+    ]
   },
   {
     "name": "LOLIN S3 N16R8",
     "chip": "ESP32-S3",
-    "firmwares": ["esp32s3-n16r8"],
+    "firmwares": [
+      "esp32s3-n16r8"
+    ],
     "default_firmware": "esp32s3-n16r8",
-    "controls": {
-      "Board": { "board": "LOLIN S3 N16R8" },
-      "Network": { "txPowerSetting": 8 }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "LOLIN S3 N16R8"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers"
+      },
+      {
+        "type": "NetworkModule",
+        "id": "Network",
+        "controls": {
+          "txPowerSetting": 8
+        }
+      }
+    ]
   },
   {
     "name": "LightCrafter 16",
     "chip": "ESP32-S3",
-    "firmwares": ["esp32s3-n8r8"],
+    "firmwares": [
+      "esp32s3-n8r8"
+    ],
     "default_firmware": "esp32s3-n8r8",
-    "controls": {
-      "Board": { "board": "LightCrafter 16" }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "LightCrafter 16"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers"
+      }
+    ]
   },
   {
     "name": "SE 16 V1",
     "chip": "ESP32-S3",
-    "firmwares": ["esp32s3-n8r8"],
+    "firmwares": [
+      "esp32s3-n8r8"
+    ],
     "default_firmware": "esp32s3-n8r8",
-    "controls": {
-      "Board": { "board": "SE 16 V1" }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "SE 16 V1"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers"
+      }
+    ]
   },
   {
     "name": "Waveshare ESP32-P4-NANO",
     "chip": "ESP32-P4",
-    "firmwares": ["esp32p4-eth"],
+    "firmwares": [
+      "esp32p4-eth"
+    ],
     "default_firmware": "esp32p4-eth",
-    "controls": {
-      "Board": { "board": "Waveshare ESP32-P4-NANO" }
-    }
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "Waveshare ESP32-P4-NANO"
+        }
+      },
+      {
+        "type": "ParlioLedDriver",
+        "id": "ParlioLed",
+        "parent_id": "Drivers"
+      }
+    ]
   }
 ]

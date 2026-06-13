@@ -197,3 +197,18 @@ TEST_CASE("LcdLedDriver loopbackRxPin tracks the loopbackTest toggle") {
     }
     CHECK(found);
 }
+
+// loopbackTxPin (optional lane-0 TX override) is bound always, hidden until the
+// test is on — same conditional-control contract as loopbackRxPin.
+TEST_CASE("LcdLedDriver loopbackTxPin tracks the loopbackTest toggle") {
+    mm::LcdLedDriver d;
+    d.onBuildControls();
+    bool found = false;
+    for (uint8_t i = 0; i < d.controls().count(); i++) {
+        if (std::strcmp(d.controls()[i].name, "loopbackTxPin") == 0) {
+            found = true;
+            CHECK(d.controls()[i].hidden == true);   // test mode off by default
+        }
+    }
+    CHECK(found);
+}

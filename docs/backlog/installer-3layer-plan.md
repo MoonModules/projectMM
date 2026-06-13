@@ -297,15 +297,22 @@ What landed (no firmware change — both endpoints already existed and are gener
   (`entry.modules ?? []` — a no-op for every existing entry, so non-breaking; edited
   in place per the install-alt rule above).
 - **Worked examples — three `projectMM testbench` entries** (real boards on the
-  maintainer's desk): the **S3** adds `AudioModule` + its real verified mic pins
-  (WS=4/SD=5/SCK=6) **and** presets the `RmtLed` loopback pins (`pins`=12, rx=13);
-  the **ESP32-16MB** and **P4** siblings preset only the `RmtLed` loopback (4/5 and
-  32/33 — no mic wired on those). Each injects only what's physically present, so
-  the injects are testable end-to-end on hardware. The LED loopback presets the
-  *existing* `pins`/`loopbackRxPin` controls (a considered `loopbackTxPin` control
-  was dropped — it only fit the RMT single-pin loopback, not the Parlio/Lcd
-  real-frame lane-array loopback; `pins[0]` is already the tx, uniform across all
-  three drivers). Vendor entries (Dig-2-Go etc.) stay **bare** until spec'n'tested.
+  maintainer's desk). Drivers are now **catalog-added** (not boot-wired — only
+  `Preview` is), so each entry's `modules` block adds its one LED driver, and each
+  injects only what's physically present:
+  - **S3**: adds `AudioModule` (mic pins WS=4/SD=5/SCK=6) + `RmtLedDriver`
+    (loopback `pins`=12, rx=12). LcdLed is *not* used — its 8-lane bus would clash
+    with the mic pins; S3 defaults to RMT.
+  - **ESP32-16MB**: adds `RmtLedDriver` (`pins`=4, rx=5) — no mic wired.
+  - **P4**: adds `ParlioLedDriver` (`pins`=20,21,22,23,24,25,26,27, `ledsPerPin`=64,
+    rx=32) — no mic wired, Parlio is the P4 default (1–8 lanes).
+
+  The injects are testable end-to-end on hardware (verified). The LED loopback
+  presets the *existing* `pins`/`loopbackRxPin` controls (a considered
+  `loopbackTxPin` control was dropped — it only fit the RMT single-pin loopback, not
+  the Parlio/Lcd real-frame lane-array loopback; `pins[0]` is already the tx, uniform
+  across all three drivers). Vendor entries (Dig-2-Go etc.) carry only their default
+  LED driver until spec'n'tested for more.
 - **Scenario test**: `scenario_Audio_mutation.json` extended to the full three-pin
   install sequence (add module → wsPin → sdPin → sckPin), proving the self-correcting
   partial-fill keeps the pipeline rendering.

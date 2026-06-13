@@ -145,8 +145,8 @@ async function init() {
         // `?board=<name>` when the orchestrator couldn't push the board
         // itself (HTTPS Pages → HTTP device blocked by mixed-content, OR
         // an Improv-less firmware variant). We consume it once, fetch the
-        // boards.json entry from Pages, fan out every `controls.*` field
-        // via the standard `/api/control` write, then strip the param via
+        // boards.json entry from Pages, add its modules + set their controls
+        // via the standard `/api/modules` + `/api/control` writes, then strip the param via
         // history.replaceState. Fire-and-forget — the WS state push driven
         // by sendControl re-renders the affected fields.
         consumePendingBoardParam();
@@ -197,7 +197,9 @@ async function sendAddModule(m) {
     // sendControl. Mirrors POST /api/modules {type, id, parent_id}; the
     // endpoint is idempotent (an existing id returns 200), so re-running an
     // inject re-adds nothing. Distinct from the interactive addModule() helper,
-    // which refetches state per call (wrong inside a batch loop).
+    // which refetches state per call (wrong inside a batch loop). Returns true
+    // on success so the caller can skip a failed module's controls (writing
+    // them would just 404 against a module that was never created).
     try {
         const res = await fetch("/api/modules", {
             method: "POST",
@@ -206,9 +208,12 @@ async function sendAddModule(m) {
         });
         if (!res.ok) {
             console.warn(`[board-inject] add module ${m.type} failed (status=${res.status})`);
+            return false;
         }
+        return true;
     } catch (e) {
         console.warn(`[board-inject] add module ${m.type} failed (error=${e && e.message ? e.message : e})`);
+        return false;
     }
 }
 
@@ -225,8 +230,9 @@ async function sendAddModule(m) {
 const BOARDS_JSON_URL = "https://moonmodules.org/projectMM/install/boards.json";
 
 // Consume an installer-emitted `?board=<name>` query param: look the name
-// up in boards.json on Pages, then push every field under `controls.<mod>.<ctrl>`
-// via the standard `/api/control` channel so each module's validation runs.
+// up in boards.json on Pages, then for each module in the entry add it
+// (`/api/modules`) and set its nested controls (`/api/control`) so each
+// module's validation runs.
 // Strip the query param BEFORE the network round-trip so a mid-fetch
 // refresh doesn't double-push. No retry — failures (network, rejection)
 // leave the device unchanged; user re-runs the Inject button or sets the
@@ -265,22 +271,29 @@ async function consumePendingBoardParam() {
         console.warn(`[board-inject] no catalog entry for board "${pendingBoard}"`);
         return;
     }
-    // Add modules before setting controls: a fresh flash has no user-added
-    // modules (e.g. AudioModule), so a control write to one would 404. The
-    // modules step is optional — bare-board entries omit it.
-    // entry.modules shape: [ { type, id, parent_id }, ... ]
+    // Each entry is a list of module-with-controls units:
+    //   entry.modules = [ { type, id, parent_id?, controls? }, ... ]
+    // Per module: add it first (when it has a parent_id — a fresh flash has no
+    // user-added modules like AudioModule, so a control write would 404), then
+    // set its controls. A module WITHOUT parent_id is a boot-wired/top-level one
+    // (Board under System, Network) that already exists — skip the add, just set
+    // controls. The add is idempotent (an existing id returns 200). If an add
+    // fails, skip that module's controls (writing them would 404) but keep going —
+    // a single failed module shouldn't abort the whole inject (best-effort
+    // contract; sendControl never aborts either). Sequential so each
+    // FilesystemModule debounced-save sees the full set.
     for (const m of entry.modules ?? []) {
-        if (!m || typeof m !== "object" || !m.type) continue;
-        await sendAddModule(m);
-    }
-    // entry.controls shape: { "<ModuleName>": { "<controlName>": <value>, ... }, ... }
-    // e.g. { "Board": { "board": "Olimex ESP32-Gateway Rev G" } }
-    // Iterate sequentially so each FilesystemModule debounced-save sees the
-    // full set; parallel fires could race the dirty flag on the same module.
-    for (const [moduleName, controls] of Object.entries(entry.controls ?? {})) {
-        if (!controls || typeof controls !== "object") continue;
-        for (const [controlName, value] of Object.entries(controls)) {
-            await sendControl(moduleName, controlName, value);
+        if (!m || typeof m !== "object") continue;
+        if (m.parent_id && m.type) {
+            if (!(await sendAddModule(m))) {
+                console.warn(`[board-inject] skipping controls for ${m.id || m.type} — its add failed`);
+                continue;
+            }
+        }
+        if (m.controls && typeof m.controls === "object") {
+            for (const [controlName, value] of Object.entries(m.controls)) {
+                await sendControl(m.id, controlName, value);
+            }
         }
     }
 }
