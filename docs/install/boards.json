@@ -722,10 +722,10 @@
     "url": "https://www.waveshare.com/esp32-p4-nano.htm",
     "supported": [
       "LEDs",
-      "WiFi",
       "Ethernet"
     ],
     "planned": [
+      "WiFi",
       "Microphone",
       "Audio codec",
       "Camera"
@@ -757,11 +757,11 @@
     "url": "https://shop.myhome-control.de/en/ABC-WLED-ESP32-P4-shield/HW10027",
     "supported": [
       "LEDs",
-      "WiFi",
       "Ethernet",
       "Audio"
     ],
     "planned": [
+      "WiFi",
       "RS-485 / DMX",
       "Inputs",
       "16-ch parallel LEDs (8+ not yet)"

@@ -134,6 +134,19 @@ FIRMWARES: dict[str, dict] = {
     },
 }
 
+# IDF target → chip-family label. ONE source for the family vocabulary, shared by:
+#   * the ESP Web Tools manifest (`chipFamily`, generate_manifest.py),
+#   * firmwares.json's per-variant `family` (generate_firmwares.py),
+#   * the installer's detect-vs-board comparison (boards.json `chip` uses these
+#     same strings; install-orchestrator.js normalises detected silicon to them).
+# projectMM aims to support every ESP32-family chip, so new SoCs are added HERE
+# once (S2 / C3 / C6 / C5 / H2 / P4 variants) and every consumer follows.
+TARGET_TO_FAMILY = {
+    "esp32":   "ESP32",
+    "esp32s3": "ESP32-S3",
+    "esp32p4": "ESP32-P4",
+}
+
 # Deprecated --profile values → firmware, kept one release for callers that
 # still pass --profile. Remove once external tooling has migrated.
 PROFILE_ALIASES = {

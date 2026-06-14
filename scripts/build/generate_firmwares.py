@@ -35,10 +35,14 @@ from build_esp32 import FIRMWARES  # noqa: E402
 def build_doc() -> dict:
     """Project FIRMWARES into the firmwares.json document.
 
-    `fragments` is build-internal (sdkconfig merge order) and intentionally
-    omitted — consumers care about name/chip/eth_only/ships/description.
-    check_firmwares.py imports this so the generator and checker can't disagree
-    on the projection.
+    `chip` is the IDF build target ("esp32s3"). The chip-FAMILY label ("ESP32-S3")
+    is deliberately NOT stored here: it's derivable from `chip` via build_esp32's
+    TARGET_TO_FAMILY, and no firmwares.json consumer needs it — the ESP Web Tools
+    manifest gets `chipFamily` from that map at generation time, and the installer's
+    runtime family check uses boards.json + esptool detection, not this file. Adding
+    it would be redundant data ahead of a consumer. `fragments` is build-internal
+    and likewise omitted. check_firmwares.py imports this so the generator and
+    checker can't disagree.
     """
     return {
         "firmwares": [

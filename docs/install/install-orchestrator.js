@@ -310,6 +310,27 @@ async function tryHttpInjectBoard(deviceUrl, board) {
 // second go on the RTS/DTR pulse). The rest of the body is reproduced
 // verbatim from esptool-js's ESPLoader.main — when the SDK pin bumps,
 // re-verify the sequence still matches upstream.
+// esptool's getChipDescription() reports the specific silicon (e.g.
+// "ESP32-D0WD-V3", "ESP32-S3 (QFN56) (revision v0.2)", "ESP32-C6 (revision v0.0)"),
+// but the picker compares against boards.json's coarse `chip` FAMILY — the same
+// vocabulary build_esp32's TARGET_TO_FAMILY emits into firmwares.json ("ESP32",
+// "ESP32-S3", "ESP32-P4", and any future S2/C3/C6/… as projectMM grows to support
+// every ESP32-family chip). Without normalising, a classic ESP32 matches NO board
+// (filter) and the flash guard false-warns on a correct flash.
+//
+// Normalise by KEEPING the family token and dropping the package/revision tail —
+// not by collapsing distinct chips. A bare "ESP32-<X>…" keeps "ESP32-<X>"; classic
+// silicon (ESP32-D0WD*, ESP32-PICO-*, ESP32-U4WDH — no second family token) maps to
+// plain "ESP32". This is forward-proof: a new ESP32-C5 needs no code change here.
+function chipFamily(chipName) {
+    const s = String(chipName || "").trim();
+    // ESP32-<LETTER+DIGITS> at the start is a sub-family (S3/P4/S2/C3/C6/C5/H2/…).
+    const sub = s.match(/^ESP32-([A-Z]\d+)\b/);
+    if (sub) return "ESP32-" + sub[1];
+    if (/^ESP32\b/.test(s)) return "ESP32";   // classic — no sub-family token
+    return s;                                  // unknown — pass through so it's visible
+}
+
 async function connectAndDescribeChip(esploader) {
     await esploader.connect("default_reset", 2);
     const chipName = await esploader.chip.getChipDescription(esploader);
@@ -995,8 +1016,11 @@ export const installer = {
         });
         try {
             const chipName = await connectAndDescribeChip(esploader);
+            // Keep the raw silicon name in _detected for the flash-progress log
+            // (more informative there); hand the picker the FAMILY, which is what
+            // it compares against boards.json's `chip`.
             _detected = { port, transport, esploader, chipName };
-            return chipName;
+            return chipFamily(chipName);
         } catch (e) {
             // Failed before we could stash it — release the port so the next
             // attempt (or a manual flow) can re-open cleanly.

@@ -40,7 +40,7 @@ from pathlib import Path
 # script never holds a second hand-maintained variant list — same cross-script
 # import collect_kpi.py already uses.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_esp32 import FIRMWARES  # noqa: E402
+from build_esp32 import FIRMWARES, TARGET_TO_FAMILY  # noqa: E402
 
 # ESP-IDF writes a number of `<name>.bin` references in flasher_args.json,
 # each keyed by hex offset. We map IDF's output names to the firmware-bundle
@@ -61,13 +61,11 @@ PART_NAME_MAP = {
     "ota_data_initial.bin": "shared-ota-data.bin",
 }
 
-# IDF target → chip family string ESP Web Tools accepts.
-# Full list: https://github.com/espressif/esptool-js/blob/main/src/esploader.ts
-_TARGET_TO_FAMILY = {"esp32": "ESP32", "esp32s3": "ESP32-S3", "esp32p4": "ESP32-P4"}
-
-# firmware → ESP Web Tools chip family, derived from build_esp32's FIRMWARES so
-# adding a variant there flows here automatically.
-CHIP_FAMILIES = {f: _TARGET_TO_FAMILY[spec["chip"]] for f, spec in FIRMWARES.items()}
+# firmware → ESP Web Tools chip family. TARGET_TO_FAMILY lives in build_esp32 (the
+# one family-vocabulary source, shared with firmwares.json); derived per firmware
+# so adding a variant to FIRMWARES flows here automatically. ESP Web Tools accepts
+# these family strings — https://github.com/espressif/esptool-js/blob/main/src/esploader.ts
+CHIP_FAMILIES = {f: TARGET_TO_FAMILY[spec["chip"]] for f, spec in FIRMWARES.items()}
 
 
 def parts_from_flasher_args(flasher_args: dict, prefix: str, size: str) -> list[dict]:

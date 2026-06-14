@@ -53,7 +53,13 @@ jobs:
     # (latest) and workflow_dispatch with a non-version tag.
     runs-on: ubuntu-latest
     steps:
+      # persist-credentials: false on every checkout that doesn't push — keeps the
+      # GITHUB_TOKEN out of .git/config where later steps (incl. third-party Docker
+      # actions) could read it. The `release` job is the one exception: its
+      # "Re-create latest" step does `git push -f`, so it keeps the credential.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v3
       - name: Verify tag matches library.json version
         if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v'))
@@ -78,6 +84,8 @@ jobs:
       list: ${{ steps.gen.outputs.list }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: gen
         run: |
           set -euo pipefail
@@ -92,6 +100,8 @@ jobs:
         firmware: ${{ fromJSON(needs.firmwares.outputs.list) }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Cache ESP-IDF tooling
         uses: actions/cache@v4
@@ -179,6 +189,8 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       # CMakeLists.txt calls find_program(UV_EXECUTABLE … REQUIRED) so the
       # build-host Python (gzip / build_info.h) is reached through uv. The
       # runners don't ship uv by default — install it before package_desktop.
@@ -195,6 +207,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       # Same uv prerequisite as build-macos — see the comment there.
       - uses: astral-sh/setup-uv@v3
       - name: Build + package Windows x64
@@ -219,6 +233,9 @@ jobs:
     # tagged releases with zero binaries. Pages deploy lives in its own job
     # below (gated to main, the only ref the environment trusts).
     steps:
+      # NB: this checkout KEEPS persisted credentials (unlike the other jobs) —
+      # the "Re-create latest" step below force-pushes the `latest` tag with git,
+      # which needs the token in .git/config.
       - uses: actions/checkout@v4
 
       - uses: actions/download-artifact@v4
@@ -352,6 +369,8 @@ jobs:
       url: ${{ steps.deploy-pages.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/download-artifact@v4
         with:

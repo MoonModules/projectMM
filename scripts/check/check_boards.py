@@ -87,7 +87,9 @@ def main():
 
         # --- firmwares / default ---
         fws = e.get("firmwares")
-        if isinstance(fws, list) and e.get("default_firmware") not in fws:
+        if not isinstance(fws, list):
+            errors.append(f"{where}: firmwares must be a list, got {type(fws).__name__}")
+        elif e.get("default_firmware") not in fws:
             errors.append(f"{where}: default_firmware '{e.get('default_firmware')}' "
                           f"not in firmwares {fws}")
 
@@ -121,6 +123,9 @@ def main():
         # --- modules ---
         mods = e.get("modules")
         if not isinstance(mods, list):
+            # `modules` is required (presence checked above); a wrong *type* is a
+            # schema violation, not something to skip silently.
+            errors.append(f"{where}: modules must be a list, got {type(mods).__name__}")
             continue
         board_control_seen = False
         for m in mods:
