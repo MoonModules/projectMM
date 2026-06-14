@@ -35,7 +35,7 @@ DOCS = ROOT / "docs"
 # in lockstep with the modules that actually exist. planned = peripherals with no
 # module yet (the backlog seed) — open-ended by design, so it is NOT whitelisted,
 # only type-checked. Adding a new supported capability means a module backs it.
-SUPPORTED_VOCAB = {"LEDs", "WiFi", "Ethernet", "Audio (microphone)"}
+SUPPORTED_VOCAB = {"LEDs", "WiFi", "Ethernet", "Audio"}
 
 # Boot-wired singletons: present on every device, added by code, so the catalog
 # references them by id without the factory creating them. Their catalog `type`

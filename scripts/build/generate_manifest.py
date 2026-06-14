@@ -46,11 +46,19 @@ from build_esp32 import FIRMWARES  # noqa: E402
 # each keyed by hex offset. We map IDF's output names to the firmware-bundle
 # filenames the release publishes (the same names release.yml stages from
 # esp32/build/).
+#
+# Two of the four parts are byte-identical across firmwares and so are shared
+# (uploaded once, every firmware's manifest points at the shared name):
+#   * ota_data_initial.bin — a fixed 0xFF region, identical for ALL firmwares.
+#   * partition-table.bin  — identical within a flash-size GROUP (4/8/16 MB), so
+#     it is named per group (`partition-table-<size>.bin`). The {size} field is
+#     filled from flasher_args' flash_settings.flash_size (see resolve below).
+# App + bootloader stay per-firmware ({prefix}), as both differ per variant.
 PART_NAME_MAP = {
     "projectMM.bin": "{prefix}.bin",
     "bootloader.bin": "{prefix}-bootloader.bin",
-    "partition-table.bin": "{prefix}-partition-table.bin",
-    "ota_data_initial.bin": "{prefix}-ota-data.bin",
+    "partition-table.bin": "partition-table-{size}.bin",
+    "ota_data_initial.bin": "shared-ota-data.bin",
 }
 
 # IDF target → chip family string ESP Web Tools accepts.
@@ -62,8 +70,13 @@ _TARGET_TO_FAMILY = {"esp32": "ESP32", "esp32s3": "ESP32-S3", "esp32p4": "ESP32-
 CHIP_FAMILIES = {f: _TARGET_TO_FAMILY[spec["chip"]] for f, spec in FIRMWARES.items()}
 
 
-def parts_from_flasher_args(flasher_args: dict, prefix: str) -> list[dict]:
-    """Convert IDF's flasher_args.json `flash_files` map into Web Tools parts."""
+def parts_from_flasher_args(flasher_args: dict, prefix: str, size: str) -> list[dict]:
+    """Convert IDF's flasher_args.json `flash_files` map into Web Tools parts.
+
+    `prefix` names the per-firmware parts (app + bootloader); `size` (e.g. "4mb")
+    names the shared partition-table group. `{prefix}` / `{size}` in the
+    PART_NAME_MAP templates are filled here — the shared parts ignore `prefix`.
+    """
     flash_files = flasher_args.get("flash_files", {})
     parts: list[dict] = []
     for offset_hex, bin_name in flash_files.items():
@@ -76,7 +89,7 @@ def parts_from_flasher_args(flasher_args: dict, prefix: str) -> list[dict]:
             continue
         offset = int(offset_hex, 16) if isinstance(offset_hex, str) else int(offset_hex)
         parts.append({
-            "path": template.format(prefix=prefix),
+            "path": template.format(prefix=prefix, size=size),
             "offset": offset,
         })
     # Web Tools doesn't require a specific order, but sorted-by-offset is the
@@ -104,11 +117,18 @@ def main() -> int:
         print(f"generate_manifest: {args.flasher_args} not valid JSON: {e}")
         return 2
 
-    # Firmware filenames in the release: firmware-<firmware>-v<version>{,-bootloader,-partition-table,-ota-data}.bin
+    # Per-firmware parts: firmware-<firmware>-v<version>{,-bootloader}.bin.
     prefix = f"firmware-{args.firmware}-v{args.version}"
     base_url = args.release_url.rstrip("/")
 
-    parts = parts_from_flasher_args(flasher_args, prefix)
+    # Flash-size group for the shared partition-table name (partition-table-<size>.bin).
+    # IDF records it in flasher_args; lowercased so "16MB" → "16mb".
+    size = str(flasher_args.get("flash_settings", {}).get("flash_size", "")).lower()
+    if not size:
+        print(f"generate_manifest: no flash_settings.flash_size in {args.flasher_args}")
+        return 2
+
+    parts = parts_from_flasher_args(flasher_args, prefix, size)
     if not parts:
         print(f"generate_manifest: no recognised parts in {args.flasher_args}")
         return 1

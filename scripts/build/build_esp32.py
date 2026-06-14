@@ -57,12 +57,19 @@ ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
 #                     which differ per SKU.
 # The Ethernet variants bake in Olimex ESP32-Gateway pin defaults
 # (sdkconfig.defaults.eth). Runtime PHY/pin selection is on the 2.0 roadmap.
+#
+# `ships`: True for variants the release matrix builds + publishes. A variant can
+# exist here (buildable from the CLI) yet be held out of CI with ships=False.
+# This dict is the SINGLE source of truth — generate_firmwares.py projects it to
+# docs/install/firmwares.json, which the CI matrix, the ESP Web Tools manifest
+# loops, and MoonDeck all read (check_firmwares.py guards the projection).
 FIRMWARES: dict[str, dict] = {
     "esp32": {
         "chip": "esp32",
         "fragments": ["sdkconfig.defaults"],
         "eth_only": False,
         "description": "ESP32 classic — WiFi only",
+        "ships": True,
     },
     "esp32-16mb": {
         "chip": "esp32",
@@ -72,24 +79,28 @@ FIRMWARES: dict[str, dict] = {
                        "as `esp32`; the 4 MB binary runs on these boards too, this "
                        "variant just uses the extra flash for bigger OTA slots + "
                        "filesystem (Serg boards, QuinLED Dig-Octa).",
+        "ships": True,
     },
     "esp32-eth": {
         "chip": "esp32",
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth"],
         "eth_only": True,
         "description": "ESP32 classic — Ethernet only (Olimex pins, WiFi compiled out)",
+        "ships": True,
     },
     "esp32-eth-wifi": {
         "chip": "esp32",
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth"],
         "eth_only": False,
         "description": "ESP32 classic — Ethernet + WiFi (Olimex pins)",
+        "ships": True,
     },
     "esp32s3-n16r8": {
         "chip": "esp32s3",
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32s3-n16r8"],
         "eth_only": False,
         "description": "ESP32-S3 DevKitC-1 (N16R8: 16 MB flash, 8 MB octal PSRAM) — WiFi only",
+        "ships": True,
     },
     "esp32s3-n8r8": {
         "chip": "esp32s3",
@@ -98,6 +109,7 @@ FIRMWARES: dict[str, dict] = {
         "description": "ESP32-S3 (N8R8: 8 MB flash, 8 MB octal PSRAM) — WiFi only. "
                        "Half the flash of N16R8; the N16R8 binary overruns an 8 MB "
                        "board, so N8R8 boards (LightCrafter etc.) need this variant.",
+        "ships": True,
     },
     "esp32p4-eth": {
         "chip": "esp32p4",
@@ -105,6 +117,7 @@ FIRMWARES: dict[str, dict] = {
         "eth_only": True,
         "description": "Waveshare ESP32-P4-NANO — Ethernet only (IP101 PHY). The "
                        "WiFi-less fallback; esp32p4-eth-wifi adds the C6 radio.",
+        "ships": True,
     },
     "esp32p4-eth-wifi": {
         "chip": "esp32p4",
@@ -114,6 +127,10 @@ FIRMWARES: dict[str, dict] = {
         "description": "Waveshare ESP32-P4-NANO — Ethernet + WiFi. WiFi runs on the "
                        "on-board ESP32-C6 over SDIO (esp_wifi_remote + esp_hosted, "
                        "pulled P4-only). First build is longer (managed components).",
+        # ships=False: the C6-slave WiFi Kconfig defaults don't survive a plain CI
+        # build (no `set-target`), so it isn't reproducible yet — held out of the
+        # release matrix. Buildable from the CLI. See backlog § ESP32-P4 round 3.
+        "ships": False,
     },
 }
 

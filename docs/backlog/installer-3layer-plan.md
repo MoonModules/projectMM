@@ -41,28 +41,19 @@ doc shrinks toward empty by the end of the branch. (Forward-looking, so it lives
 - **#5 Picture board picker** — built in [`install-alt/`](../install-alt/) per
   build-beside-swap; documented in the [installer README](../install/README.md#picture-board-picker-install-alt).
   **Pending the swap** (fold into `/install/`, delete `install-alt/`) once approved.
+- **#2 firmwares.json generator** — `FIRMWARES` (build_esp32.py) → generated
+  [`firmwares.json`](../install/firmwares.json) via `generate_firmwares.py`, drift-guarded by
+  `check_firmwares.py`; the CI matrix + both manifest loops + MoonDeck read it (collapsing
+  six hand-copied lists, one of which was wrong). A `ships` flag holds `esp32p4-eth-wifi` out
+  of the matrix. The shipping-list machinery #8 reuses.
+- **#8 Release-asset dedup** — `ota_data_initial.bin` (byte-identical for all firmwares) is
+  published once as `shared-ota-data.bin`, and `partition-table.bin` once per flash-size group
+  as `partition-table-<size>.bin` (group key = flasher_args' `flash_settings.flash_size`).
+  `generate_manifest.py` emits the shared names; `release.yml` stages + publishes them once;
+  `preview_installer.py` mirrors it. App + bootloader stay per-firmware. Verified: 6 manifests
+  reference 1 ota-data + 3 partition-table files (down from 6+6), groups match the measured md5s.
 
 ## Remaining workstreams
-
-### 2. firmwares.json — GENERATE, don't hand-author
-
-The firmware list is the **`FIRMWARES` dict** in
-[scripts/build/build_esp32.py](../../scripts/build/build_esp32.py) (line ~60) — the
-single source of truth (chip + sdkconfig fragments + eth-only flag + description;
-validates `--firmware`; burns the key into the binary via `-DMM_FIRMWARE_NAME`).
-The list is currently duplicated **4×**: the dict + three hand-copied lists in
-[.github/workflows/release.yml](../../.github/workflows/release.yml) (CI matrix,
-release manifest loop, Pages manifest loop).
-
-Decision: **emit `firmwares.json` from the `FIRMWARES` dict at release time** (the
-same step that builds the ESP Web Tools manifests), not a 5th hand-kept copy. The
-same generator can emit the matrix JSON and collapse the duplicated lists too — one
-source, zero drift.
-
-- **Caveat:** `FIRMWARES` has 8 entries but only 7 *ship* (`esp32p4-eth-wifi` is out
-  of the CI matrix — it doesn't build reproducibly yet, see
-  [backlog § ESP32-P4 rounds 3-4](backlog.md#esp32-p4-support--rounds-3-4-in-progress)).
-  The generator needs a per-entry "shipping" flag, not just "exists."
 
 ### 4. Catalog + picture model — remaining: `devices.json`, MCU layer, annotated pins
 
@@ -117,28 +108,6 @@ The prerequisite is
 [backlog § Runtime PHY / pin config for Ethernet](backlog.md#release-20--distribution-catches-up-to-the-source-tree):
 `ethInit()` selects pins/PHY at runtime and no-ops when no PHY is present.
 
-### 8. Release-asset dedup — share the boring per-firmware files
-
-Each firmware ships **4** release assets: `bootloader.bin`, `partition-table.bin`,
-`ota-data.bin`, app `.bin`. Measured across all 7 builds, only app + bootloader are
-truly per-firmware:
-
-| Asset | Distinct across 7 | Shareable? |
-|---|---|---|
-| `ota-data.bin` | **1** — byte-identical | ✅ **globally** (a fixed 0x2000 `0xFF` region, chip-/app-independent) |
-| `partition-table.bin` | **3** — one per CSV group (4/16/8 MB) | ◐ **per partition group** (mirrors the CSVs) |
-| `bootloader.bin` | **7** — all differ | ❌ never (chip + flash-size/mode baked in) |
-| app `.bin` | 7 | ❌ the unique payload |
-
-So the dedup removes redundant **ota-data** (7→1) and **partition-table** (7→3) — ~10
-files today, and **it pays off as the firmware count grows** (one-per-MCU → 15+
-variants → ~25+ redundant files). Cost: the web installer flashes a manifest of
-`{bootloader, partition-table, ota-data, app}` at fixed offsets, so sharing those
-filenames means every generated manifest points at the shared name — slightly weakening
-the "one self-contained asset set per firmware" property. Done via the **manifest
-generator** (#2's machinery), not by hand, so the shared-name references stay
-drift-free. Sequence **after** the firmwares.json generator exists.
-
 ### 9. EIM coordination — disambiguate the two "installs"
 
 Two **unrelated "installers"**, worth stating as the firmware-variant work grows:
@@ -157,12 +126,41 @@ generator. EIM itself is tracked in
 [building.md](../building.md#esp-idf-version) / [backlog § ESP-IDF version pinning](backlog.md#esp-idf-version-pinning-pending);
 this workstream's job is only to keep the two tracks coordinated — adopt EIM early.
 
+### 10. Detected-chip vs `boards.json` chip — granularity mismatch in the flash guard
+
+The shared picker warns before flashing when the picked board's chip differs from the
+connected device (`board.chip !== state.detectedChip`, [install-picker.js](../../src/ui/install-picker.js)
+~line 595, the `installBtn` click handler). The problem: **the two strings live at different
+granularities.** `boards.json` uses the coarse *family* (`"ESP32"`, `"ESP32-S3"`, `"ESP32-P4"` —
+also what the picker's chip filter keys on), and `onDetect()` is *documented* to return a
+family (the comment at ~line 566 says `"ESP32" | "ESP32-S3" | …`), but on the **web installer
+path the detect actually passes esptool's raw silicon name through** (`"ESP32-D0WD-V3"`,
+`"ESP32-S3 (revision …)"`). So for a correct classic-ESP32 flash the guard fires a false
+"you picked X but the device is Y. Flash anyway?" — exactly what was observed flashing the
+ESP32-16MB testbench onto an ESP32-D0WD-V3. The normalisation seam already exists in intent
+(onDetect's contract); the web path just isn't honouring it.
+
+**The question to resolve (not yet decided):** should `boards.json` carry the finer chip
+identity, or should the *comparison* normalise to a family?
+- **Option A — normalise at compare time (likely):** map the detected silicon down to its
+  family (`ESP32-D0WD-V3` → `ESP32`, `ESP32-S3 (rev n)` → `ESP32-S3`) before comparing, and
+  only warn on a genuine family mismatch (e.g. picked an S3 board, plugged in a classic).
+  Keeps `boards.json` coarse (the picker filter already wants family), no per-board churn.
+  The esptool→family map is small and chip-stable. **Lowest friction, recommended.**
+- **Option B — finer `boards.json` chip:** store the exact silicon per board. Rejected by
+  the sequencing rule unless a consumer needs that precision — the picker filter and the
+  flash guard both only need *family*, so the extra precision earns nothing today and adds
+  per-board maintenance (every new SKU revision would need an entry).
+
+Decision pending; lean A. Until then the guard is a confirm() the user can wave through, so
+it's a UX papercut, not a blocker. (Tie-in: this is the same family-vs-SKU distinction the
+[backlog § module variant + PSRAM](backlog.md) note raises for `getChipDescription()`.)
+
 ## Suggested build order
 
-1. **firmwares.json generator** (#2) — small, removes the 4× duplication; the machinery
-   #8 reuses.
-2. **Release-asset dedup** (#8) — share ota-data + partition-table via #2's generator.
-3. **Annotated-pin model** (#4 remainder) — once its consumer exists.
+1. ~~**firmwares.json generator** (#2)~~ — done (see Done above).
+2. ~~**Release-asset dedup** (#8)~~ — done (see Done above).
+3. **Annotated-pin model** (#4 remainder) — once its consumer exists. ← next
 4. **Shared-code factoring** (#6) — when ≥2 helpers earn the glue.
 5. **Runtime PHY config**, then **variant collapse** (#7) — its own branch.
 

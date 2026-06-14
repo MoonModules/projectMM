@@ -61,6 +61,22 @@ def _load_boards():
 
 BOARDS = _load_boards()
 
+FIRMWARES_FILE = ROOT / "docs" / "install" / "firmwares.json"
+
+
+def _load_firmwares():
+    """Shipping firmware-variant names from docs/install/firmwares.json — the
+    generated projection of build_esp32's FIRMWARES dict (the single source of
+    truth, shared with the CI release matrix). Returns [] on missing/malformed
+    file, so the MoonDeck UI just shows no firmware entries. Filtering on
+    `ships` keeps held-out variants (e.g. esp32p4-eth-wifi) out of the picker.
+    """
+    try:
+        doc = json.loads(FIRMWARES_FILE.read_text(encoding="utf-8"))
+        return [f["name"] for f in doc["firmwares"] if f.get("ships")]
+    except (OSError, json.JSONDecodeError, KeyError):
+        return []
+
 
 # ---------------------------------------------------------------------------
 # Script definitions (loaded from scripts.json)
@@ -74,7 +90,7 @@ def load_scripts():
 
 _scripts_data = load_scripts()
 SCRIPTS = _scripts_data["scripts"]
-FIRMWARES = _scripts_data["firmwares"]
+FIRMWARES = _load_firmwares()
 
 # ---------------------------------------------------------------------------
 # Device discovery

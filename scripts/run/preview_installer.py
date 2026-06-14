@@ -34,6 +34,7 @@ Stop kills the python process (matched by script name via pkill).
 """
 
 import http.server
+import json
 import socketserver
 import subprocess
 import sys
@@ -201,16 +202,21 @@ def stage_local_builds(builds: list[Path]) -> list[str]:
         prefix = f"firmware-{firmware}-v{LOCAL_VERSION}"
 
         # The four .bin files that go alongside a firmware in the release.
-        # Mirrors release.yml line ~116-119 exactly.
+        # Mirrors release.yml's "Stage release artifacts" step: app + bootloader
+        # are per-firmware; ota-data + partition-table are SHARED (ota-data once
+        # globally, partition-table once per flash-size group), matching the names
+        # generate_manifest.py emits so the preview's manifests resolve them.
         try:
+            flasher = json.loads((build_dir / "flasher_args.json").read_text())
+            size = str(flasher.get("flash_settings", {}).get("flash_size", "")).lower()
             shutil.copy(build_dir / "projectMM.bin",
                         releases_dir / f"{prefix}.bin")
             shutil.copy(build_dir / "bootloader" / "bootloader.bin",
                         releases_dir / f"{prefix}-bootloader.bin")
             shutil.copy(build_dir / "partition_table" / "partition-table.bin",
-                        releases_dir / f"{prefix}-partition-table.bin")
+                        releases_dir / f"partition-table-{size}.bin")
             shutil.copy(build_dir / "ota_data_initial.bin",
-                        releases_dir / f"{prefix}-ota-data.bin")
+                        releases_dir / "shared-ota-data.bin")
         except FileNotFoundError as e:
             # Partial build (bootloader / partition-table missing) — skip this
             # firmware rather than half-stage it, the picker would offer it

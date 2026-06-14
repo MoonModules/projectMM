@@ -25,6 +25,8 @@
       --muted:  #a0a0b0;
       --accent: #a78bfa;
       --border: #2a3a6a;
+      --ok:     #57c97a;   /* green — "supported" capability chips */
+      --plan:   #e8923a;   /* orange — "planned" capability chips (not yet supported) */
     }
     * { box-sizing: border-box; }
     body {
@@ -189,11 +191,17 @@
     .bg-body { padding: 8px 9px; display: flex; flex-direction: column; gap: 3px; }
     .bg-name { font-weight: 600; font-size: 12px; line-height: 1.2; }
     .bg-meta { color: var(--muted); font-size: 11px; }
-    /* Capability chips: supported (solid) vs planned/not-yet (dashed, muted). */
-    .bg-caps { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
-    .bg-cap { font-size: 10px; line-height: 1.4; padding: 0 6px; border-radius: 999px; white-space: nowrap; }
-    .bg-cap.sup { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
-    .bg-cap.soon { border: 1px dashed var(--muted); color: var(--muted); }
+    /* Capability chips: supported (green) vs planned (orange) — distinguished by
+       colour, not by extra text. Labels are kept short in boards.json so every
+       chip fits the ~150px card; the full label + state is in the chip's title
+       tooltip. */
+    .bg-caps { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+    .bg-cap {
+      font-size: 9px; line-height: 1.5; padding: 0 5px; border-radius: 999px;
+      max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .bg-cap.sup { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+    .bg-cap.plan { background: color-mix(in srgb, var(--plan) 20%, transparent); color: var(--plan); }
     .bg-link { color: var(--accent); font-size: 11px; text-decoration: none; }
     .bg-link:hover { text-decoration: underline; }
 
@@ -1626,20 +1634,21 @@
         const meta = document.createElement("div"); meta.className = "bg-meta";
         meta.textContent = b.chip + (ledDriver(b) ? " · " + ledDriver(b) : "");
         body.appendChild(meta);
-        // Capability chips: supported = solid accent, planned = dashed "soon".
-        // "soon" entries are the backlog seed (a peripheral the board has but no
-        // module drives yet); they read as informative, not as a broken promise.
+        // Capability chips: supported = violet, planned = amber (colour, not text,
+        // carries the distinction). Planned entries are the backlog seed (a
+        // peripheral the board has but no module drives yet). All chips are shown
+        // (labels are kept short in boards.json so they fit the card).
         const caps = [
           ...(Array.isArray(b.supported) ? b.supported.map(c => ({ c, cls: "sup" })) : []),
-          ...(Array.isArray(b.planned) ? b.planned.map(c => ({ c, cls: "soon" })) : []),
+          ...(Array.isArray(b.planned) ? b.planned.map(c => ({ c, cls: "plan" })) : []),
         ];
         if (caps.length) {
           const capsEl = document.createElement("div"); capsEl.className = "bg-caps";
           for (const { c, cls } of caps) {
             const chip = document.createElement("span");
             chip.className = "bg-cap " + cls;
-            chip.textContent = cls === "soon" ? c + " (soon)" : c;
-            if (cls === "soon") chip.title = "Hardware present on this board — firmware support is planned, not available yet";
+            chip.textContent = c;   // colour conveys supported (violet) vs planned (amber)
+            chip.title = cls === "plan" ? c + " — planned" : c + " — supported";
             capsEl.appendChild(chip);
           }
           body.appendChild(capsEl);

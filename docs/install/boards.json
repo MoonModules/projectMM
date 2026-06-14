@@ -15,8 +15,8 @@
       "Ethernet"
     ],
     "planned": [
-      "Onboard button",
-      "MicroSD"
+      "Button",
+      "SD card"
     ],
     "modules": [
       {
@@ -48,7 +48,7 @@
       "WiFi"
     ],
     "planned": [
-      "Battery charge connector"
+      "Battery"
     ],
     "modules": [
       {
@@ -109,10 +109,10 @@
       "WiFi"
     ],
     "planned": [
-      "Onboard button",
-      "IR receiver",
-      "Microphone (audio-reactive)",
-      "Relay (LED power)"
+      "Button",
+      "IR",
+      "Microphone",
+      "Relay"
     ],
     "modules": [
       {
@@ -147,9 +147,9 @@
       "WiFi"
     ],
     "planned": [
-      "Onboard button",
-      "Microphone (audio-reactive)",
-      "Per-channel relay"
+      "Button",
+      "Microphone",
+      "Relay"
     ],
     "modules": [
       {
@@ -177,7 +177,7 @@
       "esp32"
     ],
     "default_firmware": "esp32",
-    "image": "assets/boards/quinled-dig-uno-v3.png",
+    "image": "assets/boards/quinled-dig-uno-v3.jpg",
     "url": "https://quinled.info/pre-assembled-quinled-dig-uno/",
     "supported": [
       "LEDs",
@@ -185,7 +185,7 @@
       "Ethernet"
     ],
     "planned": [
-      "Temperature sensor (DS18B20)"
+      "Temperature"
     ],
     "modules": [
       {
@@ -213,7 +213,7 @@
       "esp32"
     ],
     "default_firmware": "esp32",
-    "image": "assets/boards/quinled-dig-quad-v3.png",
+    "image": "assets/boards/quinled-dig-quad-v3.jpg",
     "url": "https://quinled.info/pre-assembled-quinled-dig-quad/",
     "supported": [
       "LEDs",
@@ -221,8 +221,8 @@
       "Ethernet"
     ],
     "planned": [
-      "Temperature sensor (DS18B20)",
-      "Relay trigger"
+      "Temperature",
+      "Relay"
     ],
     "modules": [
       {
@@ -250,7 +250,7 @@
       "esp32-16mb"
     ],
     "default_firmware": "esp32-16mb",
-    "image": "assets/boards/quinled-dig-octa-32-8l.png",
+    "image": "assets/boards/quinled-dig-octa-32-8l.jpg",
     "url": "https://quinled.info/quinled-dig-octa-brainboard-32-8l/",
     "supported": [
       "LEDs",
@@ -258,10 +258,10 @@
       "Ethernet"
     ],
     "planned": [
-      "Onboard button",
-      "Temperature/humidity sensor (SHT30)",
-      "Relay trigger",
-      "MicroSD"
+      "Button",
+      "Temperature",
+      "Relay",
+      "SD card"
     ],
     "modules": [
       {
@@ -289,16 +289,17 @@
       "esp32-16mb"
     ],
     "default_firmware": "esp32-16mb",
+    "image": "assets/boards/serg-unishield-v5.jpg",
     "url": "https://www.tindie.com/stores/serg74/",
     "supported": [
       "LEDs",
       "WiFi"
     ],
     "planned": [
-      "Onboard button",
-      "IR receiver",
-      "Temperature sensor",
-      "Relay (LED power)"
+      "Button",
+      "IR",
+      "Temperature",
+      "Relay"
     ],
     "modules": [
       {
@@ -312,7 +313,10 @@
       {
         "type": "RmtLedDriver",
         "id": "RmtLed",
-        "parent_id": "Drivers"
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "16,3"
+        }
       }
     ]
   },
@@ -330,8 +334,8 @@
       "WiFi"
     ],
     "planned": [
-      "Onboard button",
-      "Microphone (audio-reactive)",
+      "Button",
+      "Microphone",
       "Relay"
     ],
     "modules": [
@@ -346,7 +350,10 @@
       {
         "type": "RmtLedDriver",
         "id": "RmtLed",
-        "parent_id": "Drivers"
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "16"
+        }
       }
     ]
   },
@@ -374,7 +381,10 @@
       {
         "type": "RmtLedDriver",
         "id": "RmtLed",
-        "parent_id": "Drivers"
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "12,13,16,18"
+        }
       }
     ]
   },
@@ -385,11 +395,15 @@
       "esp32"
     ],
     "default_firmware": "esp32",
+    "image": "assets/boards/mhc-v57-pro.jpg",
+    "url": "https://shop.myhome-control.de/en/ABC-WLED-controller-PRO-V57-with-iMOSFET/HW10030",
     "supported": [
       "LEDs",
       "WiFi"
     ],
-    "planned": [],
+    "planned": [
+      "iMOSFET"
+    ],
     "modules": [
       {
         "type": "Board",
@@ -402,7 +416,10 @@
       {
         "type": "RmtLedDriver",
         "id": "RmtLed",
-        "parent_id": "Drivers"
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "12,13,18,32"
+        }
       }
     ]
   },
@@ -430,7 +447,10 @@
       {
         "type": "RmtLedDriver",
         "id": "RmtLed",
-        "parent_id": "Drivers"
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "3"
+        }
       }
     ]
   },
@@ -458,7 +478,10 @@
       {
         "type": "RmtLedDriver",
         "id": "RmtLed",
-        "parent_id": "Drivers"
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "22,21,14,18,5,4,2,15,13,12"
+        }
       }
     ]
   },
@@ -475,7 +498,7 @@
       "WiFi"
     ],
     "planned": [
-      "Onboard RGB LED"
+      "RGB LED"
     ],
     "modules": [
       {
@@ -507,13 +530,14 @@
       "esp32s3-n16r8"
     ],
     "default_firmware": "esp32s3-n16r8",
+    "image": "assets/boards/esp32-s3-n16r8-dev.jpg",
     "supported": [
       "LEDs",
       "WiFi",
-      "Audio (microphone)"
+      "Audio"
     ],
     "planned": [
-      "Onboard RGB LED"
+      "RGB LED"
     ],
     "modules": [
       {
@@ -560,6 +584,7 @@
       "esp32-16mb"
     ],
     "default_firmware": "esp32-16mb",
+    "image": "assets/boards/esp32-d0-16mb.jpg",
     "supported": [
       "LEDs",
       "WiFi"
@@ -593,14 +618,15 @@
       "esp32p4-eth"
     ],
     "default_firmware": "esp32p4-eth",
+    "image": "assets/boards/waveshare-esp32-p4-nano.jpg",
     "supported": [
       "LEDs",
       "Ethernet"
     ],
     "planned": [
-      "Microphone (audio-reactive)",
-      "Audio codec (ES8311)",
-      "Camera (MIPI-CSI)"
+      "Microphone",
+      "Audio codec",
+      "Camera"
     ],
     "modules": [
       {
@@ -636,7 +662,9 @@
     "supported": [
       "LEDs"
     ],
-    "planned": [],
+    "planned": [
+      "16-ch parallel LEDs (I2S, not yet)"
+    ],
     "modules": [
       {
         "type": "Board",
@@ -660,10 +688,13 @@
       "esp32s3-n8r8"
     ],
     "default_firmware": "esp32s3-n8r8",
+    "image": "assets/boards/esp32-s3-stephanelec-16p.jpg",
     "supported": [
       "LEDs"
     ],
-    "planned": [],
+    "planned": [
+      "16-ch parallel LEDs (I2S, not yet)"
+    ],
     "modules": [
       {
         "type": "Board",
@@ -695,9 +726,9 @@
       "Ethernet"
     ],
     "planned": [
-      "Microphone (audio-reactive)",
-      "Audio codec (ES8311)",
-      "Camera (MIPI-CSI)"
+      "Microphone",
+      "Audio codec",
+      "Camera"
     ],
     "modules": [
       {
@@ -712,6 +743,45 @@
         "type": "ParlioLedDriver",
         "id": "ParlioLed",
         "parent_id": "Drivers"
+      }
+    ]
+  },
+  {
+    "name": "ABC-WLED ESP32-P4 shield",
+    "chip": "ESP32-P4",
+    "firmwares": [
+      "esp32p4-eth"
+    ],
+    "default_firmware": "esp32p4-eth",
+    "image": "assets/boards/abc-wled-esp32-p4-shield.jpg",
+    "url": "https://shop.myhome-control.de/en/ABC-WLED-ESP32-P4-shield/HW10027",
+    "supported": [
+      "LEDs",
+      "WiFi",
+      "Ethernet",
+      "Audio"
+    ],
+    "planned": [
+      "RS-485 / DMX",
+      "Inputs",
+      "16-ch parallel LEDs (8+ not yet)"
+    ],
+    "modules": [
+      {
+        "type": "Board",
+        "id": "Board",
+        "parent_id": "System",
+        "controls": {
+          "board": "ABC-WLED ESP32-P4 shield"
+        }
+      },
+      {
+        "type": "ParlioLedDriver",
+        "id": "ParlioLed",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "21,20,25,5,22,23,24,27"
+        }
       }
     ]
   }
