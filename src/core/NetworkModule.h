@@ -35,8 +35,9 @@ public:
 
     // Improv SET_TX_POWER path: persist + apply the TX-power cap (whole dBm,
     // 0 = lift). Must run BEFORE setWifiCredentials when both arrive from one
-    // provisioning flow — brown-out-prone boards (LOLIN S3) fail WiFi auth at
-    // full power, so the cap has to be in place for the association attempt.
+    // provisioning flow — a weak-powered board / WiFi module (thin LDO, marginal
+    // USB supply) browns out and fails WiFi auth at full power, so the cap has to
+    // be in place for the association attempt.
     void setTxPowerSetting(uint8_t dBm) {
         if (dBm > 21) return;
         txPowerSetting_ = dBm;
@@ -75,7 +76,7 @@ public:
                 stateChangeTime_ = platform::millis();
                 // Apply the TX-power cap NOW, before the radio's first
                 // probe / auth / assoc burst — that's the window the
-                // LOLIN brown-out fix exists to protect. Waiting for the
+                // weak-power brown-out cap exists to protect. Waiting for the
                 // next loop1s() tick to syncTxPower would leave up to
                 // 1 s of full-power TX during association, the exact
                 // failure mode the cap defends against. syncTxPower
@@ -164,14 +165,14 @@ public:
                                   || state_ == State::WaitingSta
                                   || state_ == State::AP);
             controls_.setHidden(controls_.count() - 1, !radioOn);
-            // Writable TX-power cap (LOLIN WiFi fix). Range 0..21 dBm.
+            // Writable TX-power cap (the weak-power / brown-out WiFi cap). Range 0..21 dBm.
             // 0 = "no override" (sentinel — syncTxPower then writes the
             // ESP-IDF ceiling, ~20 dBm, to actively lift any prior cap;
             // setting back to 0 truly restores default power). 1 is in
             // the bound but the platform layer clamps it up to 2 dBm
             // (ESP-IDF's minimum) — write 2 or higher for predictable
             // behavior. Always bound on radio-capable builds; the
-            // boards.json catalog injects 8 dBm for LOLIN boards.
+            // boards.json catalog injects 8 dBm for brown-out-prone boards.
             controls_.addInt16("txPowerSetting", txPowerSetting_, 0, 21);
         }
         controls_.addBool("mDNS", mdnsEnabled_);
@@ -526,7 +527,7 @@ private:
     // TX-power state on stop, so our cached `applied` value no longer
     // reflects what the radio thinks. Without this, the equality check
     // in syncTxPower() short-circuits and the cap never lands on the
-    // restarted radio — the LOLIN board would associate at full power
+    // restarted radio — a brown-out-prone board would associate at full power
     // (brown-out hazard) until the user touched the control to force a
     // resync.
     void noteRadioStopped() { appliedTxPowerSetting_ = -1; }

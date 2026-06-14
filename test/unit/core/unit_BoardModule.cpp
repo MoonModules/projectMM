@@ -67,8 +67,8 @@ TEST_CASE("BoardModule::setBoard accepts valid value and marks dirty") {
     // a no-op return). clearDirty between writes so we see the second
     // dirty assertion as a real signal.
     board.clearDirty();
-    CHECK(board.setBoard("Generic ESP32 DevKit"));
-    CHECK(std::strcmp(board.board(), "Generic ESP32 DevKit") == 0);
+    CHECK(board.setBoard("Generic ESP32 Dev"));
+    CHECK(std::strcmp(board.board(), "Generic ESP32 Dev") == 0);
     CHECK(board.dirty());
 }
 

@@ -5,6 +5,7 @@
 #include "light/drivers/Correction.h"
 #include "light/drivers/LcdLedDriver.h"
 #include "light/layers/Buffer.h"
+#include "unit/core/conditional_controls.h"  // shared conditional-control helpers
 
 #include <cstring>
 
@@ -199,16 +200,15 @@ TEST_CASE("LcdLedDriver loopbackRxPin tracks the loopbackTest toggle") {
 }
 
 // loopbackTxPin (optional lane-0 TX override) is bound always, hidden until the
-// test is on — same conditional-control contract as loopbackRxPin.
+// test is on — same conditional-control contract as loopbackRxPin. The override's
+// lane-0 substitution is hardware-only (lcdLanes==0 on desktop); the visibility
+// contract is host-testable here via the shared helper (toggles loopbackTest both
+// ways and asserts the control stays bound while flipping visibility).
 TEST_CASE("LcdLedDriver loopbackTxPin tracks the loopbackTest toggle") {
     mm::LcdLedDriver d;
     d.onBuildControls();
-    bool found = false;
-    for (uint8_t i = 0; i < d.controls().count(); i++) {
-        if (std::strcmp(d.controls()[i].name, "loopbackTxPin") == 0) {
-            found = true;
-            CHECK(d.controls()[i].hidden == true);   // test mode off by default
-        }
-    }
-    CHECK(found);
+    auto setTest = [&](bool on) {
+        mm::test::setControlValue<bool>(d, "loopbackTest", on);
+    };
+    mm::test::checkConditionalControl(d, "loopbackTxPin", setTest, /*visibleWhenTrue=*/true);
 }

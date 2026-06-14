@@ -423,6 +423,39 @@ jobs:
           cp src/ui/install-picker.js pages/install/
           # library.json — install page reads the project version from it.
           cp library.json pages/install/
+          # Board picker images live in docs/assets/boards/ (the project's asset
+          # home, also a library for boards not yet in the catalog). Stage ONLY the
+          # images a boards.json entry actually references, under install/assets/,
+          # so an "image": "assets/boards/<slug>.jpg" resolves same-origin from
+          # /install/ without shipping the unused library to Pages.
+          mkdir -p pages/install/assets/boards
+          # rel is "assets/boards/<slug>.<ext>" (the path served from /install/);
+          # the source file lives in docs/<rel> (i.e. docs/assets/boards/...).
+          jq -r '.[].image // empty' docs/install/boards.json | while read -r rel; do
+            src="docs/$rel"
+            [ -f "$src" ] && cp "$src" "pages/install/$rel" \
+              || echo "WARNING: boards.json image not found: $src"
+          done
+          # install-alt: the picture-board-picker installer, deployed BESIDE the
+          # stable one (unlinked URL) per the build-beside / swap-at-end rule
+          # (docs/backlog/installer-3layer-plan.md). Self-contained: its own page +
+          # orchestrator + devices, the shared install-picker.js, a copy of the
+          # canonical boards.json (single source — not a fork), and the referenced
+          # board images. The stable /install/ is untouched; /install-alt/ is the
+          # live test ground until the UX is proven and folded into /install/.
+          mkdir -p pages/install-alt/assets/boards
+          cp docs/install-alt/index.html pages/install-alt/
+          cp docs/install/install-orchestrator.js pages/install-alt/   # canonical, reused unchanged
+          cp docs/install-alt/devices.js pages/install-alt/
+          cp docs/install-alt/favicon.png pages/install-alt/ 2>/dev/null || true
+          cp src/ui/install-picker.js pages/install-alt/
+          cp library.json pages/install-alt/
+          cp docs/install/boards.json pages/install-alt/   # canonical catalog, copied
+          jq -r '.[].image // empty' docs/install/boards.json | while read -r rel; do
+            src="docs/$rel"
+            [ -f "$src" ] && cp "$src" "pages/install-alt/$rel" \
+              || echo "WARNING: install-alt image not found: $src"
+          done
           # Root landing page (moonmodules.org/projectMM/) → Flash button + repo
           # links. Without it the bare root 404s; only /install/ would exist.
           cp docs/landing/index.html pages/index.html

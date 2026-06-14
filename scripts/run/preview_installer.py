@@ -43,8 +43,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 INSTALL_DIR = ROOT / "docs" / "install"
+INSTALL_ALT_DIR = ROOT / "docs" / "install-alt"
+ASSETS_BOARDS_DIR = ROOT / "docs" / "assets" / "boards"
 PICKER_JS = ROOT / "src" / "ui" / "install-picker.js"
 STAGE_DIR = ROOT / "build" / "install-preview"
+# The preview mirrors the GitHub Pages layout: the stable installer at
+# /install/, the picture installer at /install-alt/, board images under
+# /install/assets/boards/, and the releases tree under /install/releases/.
+# So install-alt's "../install/releases/" path (and "../install/<image>")
+# resolves identically here and on Pages — one path, no per-context special
+# casing. A root redirect (/ → /install/) keeps the old entry point working.
+STAGE_INSTALL = STAGE_DIR / "install"
+STAGE_INSTALL_ALT = STAGE_DIR / "install-alt"
 BUILD_ROOT = ROOT / "build"
 GENERATE_MANIFEST = ROOT / "scripts" / "build" / "generate_manifest.py"
 # Stage under the tag the picker WILL surface from the live GitHub Releases
@@ -63,19 +73,54 @@ LOCAL_VERSION = "local-dev"
 PORT = 8000
 
 
+def _stage_runtime_files(src_dir: Path, dst_dir: Path):
+    """Copy every browser-loadable file (.html/.js/.css/.json/.png/.ico) from
+    src_dir to dst_dir — mirrors release.yml's `cp -r docs/<dir>/. pages/<dir>/`.
+    README.md / other .md are docs, skipped."""
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    for src in src_dir.iterdir():
+        if src.is_file() and src.suffix.lower() in (".html", ".js", ".css", ".json", ".png", ".ico"):
+            shutil.copy(src, dst_dir / src.name)
+
+
+def _stage_referenced_board_images(dst_dir: Path):
+    """Stage only the board images a boards.json entry references (mirrors the
+    deploy's filtered copy), under <dst_dir>/assets/boards/."""
+    boards_json = INSTALL_DIR / "boards.json"
+    if not boards_json.exists():
+        return
+    import json
+    try:
+        boards = json.loads(boards_json.read_text())
+    except (ValueError, OSError):
+        return
+    for b in boards:
+        rel = b.get("image")            # e.g. "assets/boards/<slug>.jpg"
+        if not rel:
+            continue
+        src = ROOT / "docs" / rel       # source lives in docs/assets/boards/
+        if src.is_file():
+            out = dst_dir / rel
+            out.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(src, out)
+
+
 def stage_install_page():
-    """Refresh the preview dir with the current install-page sources.
+    """Refresh the preview dir, mirroring the GitHub Pages layout.
 
     Re-staging on every run keeps the local copy honest — if you edit
     index.html or any sibling JS while the server is up, restart via
     the Stop/Run cycle to pick up changes (or rely on the `?nocache=1`
     query parameter the picker honours).
 
-    Stages every browser-loadable file under docs/install/ (.html / .js
-    / .css), not just index.html, so future additions land in the
-    preview for free. The install-picker module lives separately under
-    src/ui/ (it's shared with the on-device UI) and is copied over
-    alongside. README.md is skipped — docs only.
+    Layout matches Pages exactly: the stable installer under /install/, the
+    picture installer (install-alt) under /install-alt/, board images under
+    /install/assets/boards/ (and /install-alt/assets/boards/, since install-alt
+    is self-contained). install-alt reuses /install/'s releases tree, so it
+    needs no firmware of its own. A root index.html redirects / → /install/ so
+    the historical `localhost:8000/` entry point still lands on the installer.
+    The shared install-picker.js (under src/ui/, shared with the on-device UI)
+    is copied into both.
     """
     if STAGE_DIR.exists():
         shutil.rmtree(STAGE_DIR)
@@ -88,22 +133,36 @@ def stage_install_page():
         print(f"ERROR: install-picker.js not found at {PICKER_JS}", file=sys.stderr)
         sys.exit(1)
 
-    # Mirror release.yml's "cp -r docs/install/. pages/install/" step:
-    # take every runtime file in docs/install/ (so devices.js etc. land too,
-    # not just index.html). README.md is docs, skip it; .md in general is
-    # docs not runtime. `.json` covers the boards.json catalog the picker
-    # fetches; future JSON catalogs land here too.
-    for src in INSTALL_DIR.iterdir():
-        if src.is_file() and src.suffix.lower() in (".html", ".js", ".css", ".json", ".png", ".ico"):
-            shutil.copy(src, STAGE_DIR / src.name)
-    # install-picker.js lives in src/ui/ (shared with the on-device UI).
-    shutil.copy(PICKER_JS, STAGE_DIR / "install-picker.js")
-    # library.json — install page reads the project version from it.
-    # Same path the picker fetches relative to (./library.json). Pages
-    # mirror via release.yml's "cp library.json pages/install/" step.
     library_json = ROOT / "library.json"
+
+    # --- stable installer → /install/ ---
+    _stage_runtime_files(INSTALL_DIR, STAGE_INSTALL)
+    shutil.copy(PICKER_JS, STAGE_INSTALL / "install-picker.js")
     if library_json.exists():
-        shutil.copy(library_json, STAGE_DIR / "library.json")
+        shutil.copy(library_json, STAGE_INSTALL / "library.json")
+    _stage_referenced_board_images(STAGE_INSTALL)
+
+    # --- picture installer → /install-alt/ (self-contained, reuses /install/'s
+    # releases tree via ../install/releases/). Skipped if the folder is absent. ---
+    if INSTALL_ALT_DIR.exists():
+        _stage_runtime_files(INSTALL_ALT_DIR, STAGE_INSTALL_ALT)
+        shutil.copy(PICKER_JS, STAGE_INSTALL_ALT / "install-picker.js")
+        if library_json.exists():
+            shutil.copy(library_json, STAGE_INSTALL_ALT / "library.json")
+        # install-alt fetches ./boards.json (its own copy = the canonical one)
+        # and resolves its own image paths same-origin.
+        shutil.copy(INSTALL_DIR / "boards.json", STAGE_INSTALL_ALT / "boards.json")
+        # install-alt reuses /install/'s flash machinery unchanged, so the
+        # orchestrator is single-sourced from /install/ rather than forked.
+        shutil.copy(INSTALL_DIR / "install-orchestrator.js",
+                    STAGE_INSTALL_ALT / "install-orchestrator.js")
+        _stage_referenced_board_images(STAGE_INSTALL_ALT)
+
+    # --- root redirect / → /install/ (keeps the old entry point working) ---
+    (STAGE_DIR / "index.html").write_text(
+        '<!doctype html><meta http-equiv="refresh" content="0; url=./install/">'
+        '<a href="./install/">projectMM installer →</a>\n'
+    )
 
 
 def find_local_builds() -> list[Path]:
@@ -129,9 +188,10 @@ def stage_local_builds(builds: list[Path]) -> list[str]:
     Mirrors .github/workflows/release.yml's "Stage release artifacts" +
     "Generate ESP Web Tools manifests" steps, just into the preview
     staging dir and using a fixed `local-dev` tag instead of a git tag.
-    Returns the list of firmware keys staged (used in the boot log).
+    Releases live under /install/releases/ (matching Pages); install-alt
+    reuses them via ../install/releases/. Returns the staged firmware keys.
     """
-    releases_dir = STAGE_DIR / "releases" / LOCAL_TAG
+    releases_dir = STAGE_INSTALL / "releases" / LOCAL_TAG
     releases_dir.mkdir(parents=True, exist_ok=True)
 
     staged: list[str] = []
@@ -230,6 +290,9 @@ def main() -> int:
         print(f"    run `uv run scripts/build/build_esp32.py --firmware <variant>` first to enable end-to-end flash")
 
     print(f"==> serving at http://localhost:{PORT}/")
+    print(f"    stable installer : http://localhost:{PORT}/install/")
+    if STAGE_INSTALL_ALT.exists():
+        print(f"    picture installer: http://localhost:{PORT}/install-alt/  (install-alt — reuses /install/ releases)")
     print("    open in Chrome / Edge / Opera (Web Serial requires one of these)")
     print("    add ?nocache=1 to bypass the picker's 5-min sessionStorage cache")
     print()

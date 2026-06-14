@@ -710,7 +710,7 @@ export const installPicker = {
      * The picked board's boards.json TX-power cap
      * (controls.Network.txPowerSetting), or null when the board has none /
      * no board is picked. The orchestrator pushes it over Improv BEFORE
-     * provisioning — brown-out-prone boards (LOLIN S3/S2) fail their first
+     * provisioning — brown-out-prone boards (a weak LDO / marginal supply) fail their first
      * association at full power, so the cap can't wait for the post-online
      * HTTP fan-out.
      */

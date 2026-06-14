@@ -159,9 +159,9 @@ LUT is half desktop size (uint16_t vs uint32_t per entry). The 1:1 (no-modifier)
 
 ---
 
-## ESP32-S3 — LOLIN S3 N16R8 (16 MB flash, 8 MB octal PSRAM)
+## ESP32-S3 — ESP32-S3 N16R8 Dev (16 MB flash, 8 MB octal PSRAM)
 
-`esp32s3-n16r8` firmware on LOLIN S3 N16R8 at `Network.txPowerSetting=8` dBm (the brown-out cap injected by `boards.json`). 128×128 grid, Mirror XY, ArtNet over WiFi STA — the `scenario_GridLayout_grid_sizes.json` sweep against the live device. Per-step tick/heap live in `observed.esp32s3-n16r8` across the scenarios. Numbers below are the 128×128 step.
+`esp32s3-n16r8` firmware on the ESP32-S3 N16R8 Dev at `Network.txPowerSetting=8` dBm (the brown-out cap injected by `boards.json`). 128×128 grid, Mirror XY, ArtNet over WiFi STA — the `scenario_GridLayout_grid_sizes.json` sweep against the live device. Per-step tick/heap live in `observed.esp32s3-n16r8` across the scenarios. Numbers below are the 128×128 step.
 
 | Metric | Value | Notes |
 |---|---|---|
@@ -177,9 +177,9 @@ Per-grid-size FPS from the same sweep: 16×16 → 1672, 32×32 → 287, 64×64 �
 
 ### Why ArtNet is slower at 8 dBm
 
-The LOLIN brown-out fix caps TX power 12 dB below default (8 dBm vs ~20 dBm). At lower TX power, the WiFi PHY rate-adaptation algorithm picks a slower MCS rate to maintain link margin — for a frame burst this means more time on-air per packet. ~960 µs/packet × 97 packets = the ~93 ms ArtNet budget. The cap is the price of a stable association on this hardware; without it the radio brown-outs and ArtNet doesn't get sent at all.
+The brown-out cap drops TX power 12 dB below default (8 dBm vs ~20 dBm). At lower TX power, the WiFi PHY rate-adaptation algorithm picks a slower MCS rate to maintain link margin — for a frame burst this means more time on-air per packet. ~960 µs/packet × 97 packets = the ~93 ms ArtNet budget. The cap is the price of a stable association on this hardware; without it the radio brown-outs and ArtNet doesn't get sent at all.
 
-**Use Ethernet-capable boards for high-FPS ArtNet workloads.** The LOLIN S3 N16R8 fits the "lots of PSRAM, accept WiFi compromise" niche — large pixel buffers or feature-heavy effects that wouldn't fit in 320 KB internal RAM.
+**Use Ethernet-capable boards for high-FPS ArtNet workloads.** The ESP32-S3 N16R8 Dev fits the "lots of PSRAM, accept WiFi compromise" niche — large pixel buffers or feature-heavy effects that wouldn't fit in 320 KB internal RAM.
 
 ### Memory at 128×128 with mirror
 

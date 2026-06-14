@@ -1062,7 +1062,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             cmd.extend(["--module", params["module"]])
         # pass_board: forward the board picked in the UI's provisioning
         # dropdown (state.provisionBoard) so improv_provision.py injects that
-        # board's TX-power cap BEFORE provisioning (the LOLIN brown-out fix).
+        # board's TX-power cap BEFORE provisioning (the weak-power brown-out fix).
         # No firmware-deduce fallback: the only pass_board script
         # (improv_provision) doesn't declare needs_firmware, so params never
         # carries a firmware to deduce from — the dropdown is the sole source.

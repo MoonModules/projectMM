@@ -7,6 +7,8 @@
       "esp32-eth-wifi"
     ],
     "default_firmware": "esp32-eth-wifi",
+    "image": "assets/boards/olimex-esp32-gateway-rev-g.jpg",
+    "url": "https://www.olimex.com/Products/IoT/ESP32/ESP32-GATEWAY/open-source-hardware",
     "modules": [
       {
         "type": "Board",
@@ -30,6 +32,8 @@
       "esp32"
     ],
     "default_firmware": "esp32",
+    "image": "assets/boards/lolin-d32.jpg",
+    "url": "https://www.wemos.cc/en/latest/d32/d32.html",
     "modules": [
       {
         "type": "Board",
@@ -47,19 +51,20 @@
     ]
   },
   {
-    "name": "Generic ESP32 DevKit",
+    "name": "Generic ESP32 Dev",
     "chip": "ESP32",
     "firmwares": [
       "esp32"
     ],
     "default_firmware": "esp32",
+    "image": "assets/boards/generic-esp32-dev.jpg",
     "modules": [
       {
         "type": "Board",
         "id": "Board",
         "parent_id": "System",
         "controls": {
-          "board": "Generic ESP32 DevKit"
+          "board": "Generic ESP32 Dev"
         }
       },
       {
@@ -76,6 +81,8 @@
       "esp32"
     ],
     "default_firmware": "esp32",
+    "image": "assets/boards/quinled-dig-2-go.jpg",
+    "url": "https://quinled.info/quinled-dig2go/",
     "modules": [
       {
         "type": "Board",
@@ -99,6 +106,8 @@
       "esp32"
     ],
     "default_firmware": "esp32",
+    "image": "assets/boards/quinled-dig-next-2.jpg",
+    "url": "https://quinled.info/dig-next-2/",
     "modules": [
       {
         "type": "Board",
@@ -122,6 +131,8 @@
       "esp32"
     ],
     "default_firmware": "esp32",
+    "image": "assets/boards/quinled-dig-uno-v3.png",
+    "url": "https://quinled.info/pre-assembled-quinled-dig-uno/",
     "modules": [
       {
         "type": "Board",
@@ -145,6 +156,8 @@
       "esp32"
     ],
     "default_firmware": "esp32",
+    "image": "assets/boards/quinled-dig-quad-v3.png",
+    "url": "https://quinled.info/pre-assembled-quinled-dig-quad/",
     "modules": [
       {
         "type": "Board",
@@ -168,6 +181,8 @@
       "esp32-16mb"
     ],
     "default_firmware": "esp32-16mb",
+    "image": "assets/boards/quinled-dig-octa-32-8l.png",
+    "url": "https://quinled.info/quinled-dig-octa-brainboard-32-8l/",
     "modules": [
       {
         "type": "Board",
@@ -191,6 +206,7 @@
       "esp32-16mb"
     ],
     "default_firmware": "esp32-16mb",
+    "url": "https://www.tindie.com/stores/serg74/",
     "modules": [
       {
         "type": "Board",
@@ -214,6 +230,8 @@
       "esp32-16mb"
     ],
     "default_firmware": "esp32-16mb",
+    "image": "assets/boards/serg-minishield.jpg",
+    "url": "https://www.tindie.com/stores/serg74/",
     "modules": [
       {
         "type": "Board",
@@ -323,25 +341,33 @@
     ]
   },
   {
-    "name": "ESP32-S3 N16R8 DevKit",
+    "name": "ESP32-S3 N16R8 Dev",
     "chip": "ESP32-S3",
     "firmwares": [
       "esp32s3-n16r8"
     ],
     "default_firmware": "esp32s3-n16r8",
+    "image": "assets/boards/esp32-s3-n16r8-dev.jpg",
     "modules": [
       {
         "type": "Board",
         "id": "Board",
         "parent_id": "System",
         "controls": {
-          "board": "ESP32-S3 N16R8 DevKit"
+          "board": "ESP32-S3 N16R8 Dev"
         }
       },
       {
         "type": "RmtLedDriver",
         "id": "RmtLed",
         "parent_id": "Drivers"
+      },
+      {
+        "type": "NetworkModule",
+        "id": "Network",
+        "controls": {
+          "txPowerSetting": 8
+        }
       }
     ]
   },
@@ -379,6 +405,13 @@
           "pins": "18",
           "loopbackTxPin": 13,
           "loopbackRxPin": 12
+        }
+      },
+      {
+        "type": "NetworkModule",
+        "id": "Network",
+        "controls": {
+          "txPowerSetting": 8
         }
       }
     ]
@@ -441,42 +474,14 @@
     ]
   },
   {
-    "name": "LOLIN S3 N16R8",
-    "chip": "ESP32-S3",
-    "firmwares": [
-      "esp32s3-n16r8"
-    ],
-    "default_firmware": "esp32s3-n16r8",
-    "modules": [
-      {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
-        "controls": {
-          "board": "LOLIN S3 N16R8"
-        }
-      },
-      {
-        "type": "RmtLedDriver",
-        "id": "RmtLed",
-        "parent_id": "Drivers"
-      },
-      {
-        "type": "NetworkModule",
-        "id": "Network",
-        "controls": {
-          "txPowerSetting": 8
-        }
-      }
-    ]
-  },
-  {
     "name": "LightCrafter 16",
     "chip": "ESP32-S3",
     "firmwares": [
       "esp32s3-n8r8"
     ],
     "default_firmware": "esp32s3-n8r8",
+    "image": "assets/boards/lightcrafter-16.jpg",
+    "url": "https://lightcrafter.eu/",
     "modules": [
       {
         "type": "Board",
@@ -523,6 +528,8 @@
       "esp32p4-eth"
     ],
     "default_firmware": "esp32p4-eth",
+    "image": "assets/boards/waveshare-esp32-p4-nano.jpg",
+    "url": "https://www.waveshare.com/esp32-p4-nano.htm",
     "modules": [
       {
         "type": "Board",

@@ -417,7 +417,7 @@ The build IDF is `v6.1-dev-399-gd1b91b79b5`, a dev-branch snapshot (2025-11-05) 
 
 ### Three-level device model: MCU → Board → Device (config provenance)
 
-Moved to its own initiative doc: [installer-3layer-plan.md](installer-3layer-plan.md) — the MCU/Board/Device provenance model, the `txPowerSetting` worked example, and the installer + MoonDeck device-profile deliverable all live there now (one home, tied to the other installer workstreams). This entry is a pointer.
+The model itself is now a shipped design — see [architecture.md § Config provenance](../architecture.md#config-provenance-mcu--board--device) (the three levels + the `txPowerSetting` example + "default only at the level that fixes it"). The catalog that carries it is [`install/boards.json`](../install/boards.json) ([schema](../install/README.md)). The remaining forward-looking pieces (devices.json/MCU-layer split, MoonDeck device-profile save/restore, annotated-pin images) are in [installer-3layer-plan.md § 4](installer-3layer-plan.md).
 
 ### ESP32-P4 support — rounds 3-4 (in progress)
 

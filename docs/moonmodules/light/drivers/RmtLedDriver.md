@@ -27,7 +27,7 @@ The source buffer is split into **consecutive slices**, one per pin, in list ord
 - `ledsPerPin` (text, default empty) — comma-separated lights-per-pin, e.g. `100,100,50`, matched to `pins` by position. May be empty or shorter than `pins`; see Buffer slicing above.
 - `loopbackTxPin` (uint16_t, default unset) — optional **TX override** for the self-test: when set, the loopback transmits on this pin instead of the first pin in `pins`, so the test can run on a dedicated jumper without re-typing the operational `pins`. Falls back to `pins[0]` when unset. Test-only — normal output always uses `pins`. Shown only while `loopbackTest` is on.
 - `loopbackRxPin` (uint16_t, default unset) — the RX pin for the loopback self-test; set it when you wire the jumper (the bench used 5). Jumper it to the TX pin (`loopbackTxPin` if set, else the **first** pin in `pins`) to run the test. Shown only while `loopbackTest` is on.
-- `loopbackTest` (bool) — a persistent on/off mode for the RMT TX→RX loopback self-test (see Self-test below). While it is on, the test re-runs whenever a relevant control changes (`pins`, `loopbackRxPin`, `loopbackFrame`), so the pins can be set in any order and the result always reflects the current wiring; the verdict lands in the module's status field. Turning it off clears the verdict.
+- `loopbackTest` (bool) — a persistent on/off mode for the RMT TX→RX loopback self-test (see Self-test below). While it is on, the test re-runs whenever a relevant control changes (`pins`, `loopbackTxPin`, `loopbackRxPin`, `loopbackFrame`), so the pins can be set in any order and the result always reflects the current wiring; the verdict lands in the module's status field. Turning it off clears the verdict.
 - `loopbackFrame` (bool) — whole-frame variant of the self-test, shown only while `loopbackTest` is on. Instead of a 24-bit burst it transmits a real frame (the first pin's slice, or 64 lights) back to back and bit-verifies the entire capture. This is what catches frame-rate corruption and RF interference on the data line — a 24-bit burst can pass through a wire that mangles a sustained frame. On failure the status names the first corrupted bit and light.
 
 ## Cross-domain wiring
@@ -56,7 +56,7 @@ When 1–3 all come back clean, the fix is electrical, in rough order of effecti
 - **Add a ~330 Ω series resistor** at the GPIO, close to the board, to damp reflections.
 - **Shorten / shield the data wire**, and keep it away from the power leads and the antenna.
 - **Share a solid, thick common ground** between the strip's supply and the board.
-- If RF coupling was implicated by step 3, set a per-board `Network.txPowerSetting` cap (the same `boards.json` mechanism the LOLIN S3 uses).
+- If RF coupling was implicated by step 3, set a per-board `Network.txPowerSetting` cap (the same `boards.json` mechanism the ESP32-S3 N16R8 Dev uses).
 
 ## Tests
 
@@ -65,6 +65,8 @@ Full case list in the generated [unit tests § RmtLedDriver](../../../tests/unit
 - **Encoder (CI, host):** the bit→symbol contract — MSB-first, exact T0H/T1H tick widths, GRB ordering via Correction, RGBW → 32 symbols/light — with no hardware; written red before the encoder, pins it now.
 - **Lifecycle (CI, host):** the symbol-buffer ownership — sized in `onBuildState`, survives a rebuild (reinit must not free it), freed on teardown — the class of bug that once reached hardware, now caught on every push.
 - **Pins (CI, host):** the `pins`/`ledsPerPin` parsing (bad tokens, duplicates, chip limit) and slice arithmetic (explicit counts, even-split remainder, clamping) down to the per-pin symbol offsets, plus the empty-default idle (an unconfigured driver claims no GPIO).
+- **`loopbackTxPin` control (CI, host):** the conditional control — bound always (so persistence can load it), shown only while `loopbackTest` is on.
+- **Hardware:** the driver is catalog-added (not boot-wired) — verified on the S3 and classic ESP32 bench: a fresh-erased board has no `RmtLed` until a board is selected, a catalog inject creates it under `Drivers` with its pins, and it persists across a reboot. The `loopbackTxPin` override is set distinct from the operational `pins` (S3: `pins`=18, `loopbackTxPin`=13; classic: `pins`=18, `loopbackTxPin`=4), so flipping `loopbackTest` runs the self-test on the jumper pin without retyping `pins`.
 
 ## Prior art
 

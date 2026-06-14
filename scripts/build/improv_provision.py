@@ -221,7 +221,7 @@ def main() -> int:
                     help="Max seconds to wait for a final response (default: 45)")
     ap.add_argument("--board", default=None, metavar="NAME",
                     help="Board name from docs/install/boards.json (e.g. "
-                         "'LOLIN S3 N16R8'). Resolves the board's TX-power cap "
+                         "'ESP32-S3 N16R8 Dev'). Resolves the board's TX-power cap "
                          "(controls.Network.txPowerSetting) automatically and "
                          "pushes the board name via SET_BOARD after "
                          "provisioning — the same injection the web installer "
@@ -229,7 +229,7 @@ def main() -> int:
     ap.add_argument("--tx-power", type=int, default=None, metavar="DBM",
                     help="Send the SET_TX_POWER vendor RPC (0..21 whole dBm) "
                          "BEFORE the credentials. Required for boards whose LDO "
-                         "browns out at full TX power (LOLIN S3/S2 → 8, see "
+                         "browns out at full TX power (weak-powered boards → 8, see "
                          "docs/install/boards.json) — without it the very first "
                          "association fails and the cap can never arrive over HTTP.")
     args = ap.parse_args()

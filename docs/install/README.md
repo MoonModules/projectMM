@@ -37,6 +37,27 @@ end-to-end, no ESP Web Tools dependency on the install path.
 - [`favicon.png`](favicon.png) — moon-man, same as the device UI.
 - [`README.md`](README.md) — this file.
 
+## Picture board picker (`../install-alt/`)
+
+A picture-based board picker — a visual card grid driven by each board's `image`
+and `url` catalog fields (see the schema below) — is built in
+[`../install-alt/`](../install-alt/), deployed **beside** this stable installer at
+a separate unlinked URL (`…/projectMM/install-alt/`) per the *build-beside / swap-at-end*
+rule ([installer-3layer-plan.md](../backlog/installer-3layer-plan.md)). It reuses
+this installer's flash machinery unchanged (`install-orchestrator.js` + the shared
+`install-picker.js`, which it drives through a hidden board `<select>`), and the
+shared picker / firmware UI are not modified — board images are a Pages-only asset,
+never flashed. When the UX is proven it folds into this stable installer and
+`install-alt/` is deleted (the swap).
+
+The board picker is a collapsed row consistent with the other fields; clicking it
+expands the searchable card grid, and picking a board collapses it back to a
+labelled summary with a thumbnail:
+
+| Collapsed | Expanded |
+|---|---|
+| ![Board picker collapsed](../assets/screenshots/installer-board-picker-collapsed.png) | ![Board picker expanded](../assets/screenshots/installer-board-picker-expanded.png) |
+
 ## Catalog schema (`boards.json`)
 
 A flat JSON array of catalog entries. Each entry is the single source of truth
@@ -98,6 +119,8 @@ declares only what is actually on that board.
 | `name` | yes | identifier **and** display label (no key/label split) |
 | `chip` | yes | the MCU family, for the picker's chip filter |
 | `firmwares` / `default_firmware` | yes | the firmware variants flashable on this hardware |
+| `image` | no | board photo for the picker — a local path under `assets/boards/`, named for the board's slug (e.g. `assets/boards/quinled-dig-2-go.jpg`). Host our own copy, never a vendor hotlink — see [§ Board images & links](#board-images--links) below |
+| `url` | no | product-page link the picker shows next to the board (the vendor's own page, e.g. `https://quinled.info/quinled-dig2go/`). A remote URL is fine here — it's a click-through link, not an asset the installer fetches |
 | `modules` | yes | the list of module-with-controls units that set the board up |
 
 Each `modules[]` unit is `{ type, id, parent_id?, controls? }`:
@@ -130,7 +153,7 @@ pins, board-fixed Ethernet pins). A bare board whose LED or mic pins the *user*
 wires omits them; the user adds the module and sets the pins manually later.
 Inject nothing you don't know. (This is the
 MCU/Board/Device provenance rule from
-[`docs/backlog/installer-3layer-plan.md`](../backlog/installer-3layer-plan.md):
+[architecture.md § Config provenance](../architecture.md#config-provenance-mcu--board--device):
 default a pin only at the level that fixes it.) The `projectMM testbench S3`
 entry above adds an `AudioModule` with the real, verified INMP441 mic pins
 (WS=4/SD=5/SCK=6, matching the bench wiring in
@@ -149,7 +172,30 @@ it — the project's *Specs before code* applied to catalog hardware. So vendor
 entries (the QuinLED Dig-2-Go, the Serg shields, …) carry only their **`Board`
 unit plus the default LED driver** until spec'n'tested for more; e.g. whether the
 Dig-2-Go's *onboard* mic is even supported is an open spec'n'test question, so its
-entry adds no `AudioModule`.
+entry adds no `AudioModule`. The per-board capability loop that drives this — read
+capabilities off the image/link, wire what we support, propose+test what we don't —
+is recorded in [decisions.md § catalog-driven installer branch](../history/decisions.md).
+
+### Board images & links
+
+The `image` (board photo, eventually pin-annotated) and `url` (product page) are
+the picker's visual layer **and** the inputs to the per-board capability loop above.
+
+- **`image` — host our own copy, never hotlink a vendor URL.** Three reasons:
+  (1) a hotlink breaks whenever a vendor reshuffles their CDN, and the installer must
+  keep working same-origin/offline (the same constraint that bundles firmware
+  manifests into Pages); (2) we want pin-annotated overlays anyway, which means a
+  *derived* image, not the raw shot; (3) third-party product photos are the vendor's
+  copyright — redistributing them needs permission. So: use the `url` to *find* the
+  reference photo, then either shoot/redraw our own **or** check a local copy into
+  [`docs/assets/boards/`](../assets/boards/) **with permission**, named for the
+  board's slug. The catalog stores a local path, never a remote image URL.
+- **`url` — a remote link is fine.** It's a click-through to the vendor's own page,
+  not an asset the installer fetches.
+- **Deploy** stages only the *referenced* images (not the whole `docs/assets/boards/`
+  library, which also holds photos for boards not yet in the catalog) into
+  `install/assets/boards/`, so an `image: "assets/boards/<slug>.jpg"` resolves
+  same-origin from `/install/boards.json`.
 
 **One entry type, no Board/Device split.** A "Device" (a finished rig like the
 `projectMM testbench S3` — board + a wired mic) is just an entry with *more* of
