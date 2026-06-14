@@ -226,8 +226,11 @@ def stage_local_builds(builds: list[Path]) -> list[str]:
         if not flasher_args.exists():
             print(f"==> skip {firmware}: missing flasher_args.json", file=sys.stderr)
             continue
+        # Run through `uv run` (project standard — see CLAUDE.md "Use uv for
+        # every Python invocation"), not the raw interpreter, so the managed
+        # venv resolves the manifest generator's deps.
         result = subprocess.run(
-            [sys.executable, str(GENERATE_MANIFEST),
+            ["uv", "run", "python", str(GENERATE_MANIFEST),
              "--firmware", firmware,
              "--version", LOCAL_VERSION,
              "--release-url", ".",

@@ -110,6 +110,7 @@ The narrow safety net: "this snapshot is internally consistent."
 5. Platform boundary, `check_platform_boundary.py`, if any file under `src/` (excluding `src/platform/`) changed.
 6. ESP32 build, `build_esp32.py`, if any file under `src/` (excluding `src/platform/desktop/`), `esp32/`, `CMakeLists.txt`, or `library.json` changed.
 7. KPI collection, `collect_kpi.py --commit`, if any file under `src/` changed. **The one-liner MUST include `tick:Xus(FPS:Y)` for every supported target** (PC + ESP32 today; Teensy/RPi when added). If a target's tick/FPS is missing (e.g. ESP32 wasn't monitored recently and `esp32/monitor.log` is stale), re-run a short live capture before committing, or note explicitly in the commit body why the value is absent.
+8. Board catalog, `check_boards.py`, fast (<1s), if `docs/install/boards.json` or `scripts/check/check_boards.py` changed. Validates the installer catalog: required fields, `default_firmware ∈ firmwares`, every `image` resolves on disk, each `Board.board` control equals its entry `name`, module `type`s are factory-registered (or boot-wired singletons), `pins` controls live only on `*LedDriver` modules, and `supported` capabilities stay within the known vocabulary.
 
 A commit that touches *only* `.github/`, `docs/`, `scripts/` (non-test), `README.md`, `CLAUDE.md`, or `.claude/` therefore runs only the spec check; the rest are no-ops because their triggers don't fire. This is the intended pre-commit cost for CI-only or doc-only changes.
 

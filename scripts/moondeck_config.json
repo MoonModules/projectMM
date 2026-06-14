@@ -65,6 +65,14 @@
       "script": "check/check_platform_boundary.py"
     },
     {
+      "id": "check_boards",
+      "tab": "pc",
+      "group": "check",
+      "label": "Board Catalog",
+      "help": "check_boards",
+      "script": "check/check_boards.py"
+    },
+    {
       "id": "collect_kpi",
       "tab": "pc",
       "group": "check",

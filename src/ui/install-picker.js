@@ -721,7 +721,10 @@ export const installPicker = {
         // the WiFi TX-power cap lives on the Network module's controls block.
         const net = entry && (entry.modules || []).find(m => m && m.id === "Network");
         const v = net && net.controls && net.controls.txPowerSetting;
-        return (typeof v === "number") ? v : null;
+        // The SET_TX_POWER RPC validates a whole-dBm value in 0..21 (platform.h);
+        // reject anything outside that so a bad catalog value can't poison the
+        // brown-out mitigation path.
+        return (Number.isInteger(v) && v >= 0 && v <= 21) ? v : null;
     },
 
     /**

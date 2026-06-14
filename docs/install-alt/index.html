@@ -189,6 +189,11 @@
     .bg-body { padding: 8px 9px; display: flex; flex-direction: column; gap: 3px; }
     .bg-name { font-weight: 600; font-size: 12px; line-height: 1.2; }
     .bg-meta { color: var(--muted); font-size: 11px; }
+    /* Capability chips: supported (solid) vs planned/not-yet (dashed, muted). */
+    .bg-caps { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+    .bg-cap { font-size: 10px; line-height: 1.4; padding: 0 6px; border-radius: 999px; white-space: nowrap; }
+    .bg-cap.sup { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+    .bg-cap.soon { border: 1px dashed var(--muted); color: var(--muted); }
     .bg-link { color: var(--accent); font-size: 11px; text-decoration: none; }
     .bg-link:hover { text-decoration: underline; }
 
@@ -503,7 +508,7 @@
         </div>
         <div id="board-expand" hidden>
           <div class="board-grid-controls">
-            <input id="board-search" type="search" placeholder="Search boards…" autocomplete="off">
+            <input id="board-search" type="search" placeholder="Search boards…" autocomplete="off" aria-label="Search boards">
             <button type="button" id="board-clear" class="board-clear">Generic / no board</button>
           </div>
           <div id="board-grid"></div>
@@ -1600,7 +1605,15 @@
       function card(b) {
         const el = document.createElement("div");
         el.className = "bg-card" + (selected === b.name ? " selected" : "");
+        // Keyboard-accessible: a focusable option that picks on Enter/Space, the
+        // same affordance the click handler gives the mouse.
+        el.tabIndex = 0;
+        el.setAttribute("role", "option");
+        el.setAttribute("aria-selected", selected === b.name ? "true" : "false");
         el.onclick = (ev) => { if (!ev.target.classList.contains("bg-link")) pickBoard(b.name); };
+        el.onkeydown = (ev) => {
+          if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); pickBoard(b.name); }
+        };
         const thumb = document.createElement("div");
         thumb.className = "bg-thumb" + (b.image ? "" : " noimg");
         // install-alt is self-contained: the deploy stages a copy of boards.json
@@ -1613,6 +1626,24 @@
         const meta = document.createElement("div"); meta.className = "bg-meta";
         meta.textContent = b.chip + (ledDriver(b) ? " · " + ledDriver(b) : "");
         body.appendChild(meta);
+        // Capability chips: supported = solid accent, planned = dashed "soon".
+        // "soon" entries are the backlog seed (a peripheral the board has but no
+        // module drives yet); they read as informative, not as a broken promise.
+        const caps = [
+          ...(Array.isArray(b.supported) ? b.supported.map(c => ({ c, cls: "sup" })) : []),
+          ...(Array.isArray(b.planned) ? b.planned.map(c => ({ c, cls: "soon" })) : []),
+        ];
+        if (caps.length) {
+          const capsEl = document.createElement("div"); capsEl.className = "bg-caps";
+          for (const { c, cls } of caps) {
+            const chip = document.createElement("span");
+            chip.className = "bg-cap " + cls;
+            chip.textContent = cls === "soon" ? c + " (soon)" : c;
+            if (cls === "soon") chip.title = "Hardware present on this board — firmware support is planned, not available yet";
+            capsEl.appendChild(chip);
+          }
+          body.appendChild(capsEl);
+        }
         if (b.url) {
           const a = document.createElement("a"); a.className = "bg-link"; a.href = b.url;
           a.target = "_blank"; a.rel = "noopener"; a.textContent = "product page ↗"; body.appendChild(a);

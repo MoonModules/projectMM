@@ -9,6 +9,15 @@
     "default_firmware": "esp32-eth-wifi",
     "image": "assets/boards/olimex-esp32-gateway-rev-g.jpg",
     "url": "https://www.olimex.com/Products/IoT/ESP32/ESP32-GATEWAY/open-source-hardware",
+    "supported": [
+      "LEDs",
+      "WiFi",
+      "Ethernet"
+    ],
+    "planned": [
+      "Onboard button",
+      "MicroSD"
+    ],
     "modules": [
       {
         "type": "Board",
@@ -34,6 +43,13 @@
     "default_firmware": "esp32",
     "image": "assets/boards/lolin-d32.jpg",
     "url": "https://www.wemos.cc/en/latest/d32/d32.html",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "planned": [
+      "Battery charge connector"
+    ],
     "modules": [
       {
         "type": "Board",
@@ -58,6 +74,11 @@
     ],
     "default_firmware": "esp32",
     "image": "assets/boards/generic-esp32-dev.jpg",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "planned": [],
     "modules": [
       {
         "type": "Board",
@@ -83,6 +104,16 @@
     "default_firmware": "esp32",
     "image": "assets/boards/quinled-dig-2-go.jpg",
     "url": "https://quinled.info/quinled-dig2go/",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "planned": [
+      "Onboard button",
+      "IR receiver",
+      "Microphone (audio-reactive)",
+      "Relay (LED power)"
+    ],
     "modules": [
       {
         "type": "Board",
@@ -95,7 +126,10 @@
       {
         "type": "RmtLedDriver",
         "id": "RmtLed",
-        "parent_id": "Drivers"
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "16"
+        }
       }
     ]
   },
@@ -108,6 +142,15 @@
     "default_firmware": "esp32",
     "image": "assets/boards/quinled-dig-next-2.jpg",
     "url": "https://quinled.info/dig-next-2/",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "planned": [
+      "Onboard button",
+      "Microphone (audio-reactive)",
+      "Per-channel relay"
+    ],
     "modules": [
       {
         "type": "Board",
@@ -120,7 +163,10 @@
       {
         "type": "RmtLedDriver",
         "id": "RmtLed",
-        "parent_id": "Drivers"
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "2,4"
+        }
       }
     ]
   },
@@ -133,6 +179,14 @@
     "default_firmware": "esp32",
     "image": "assets/boards/quinled-dig-uno-v3.png",
     "url": "https://quinled.info/pre-assembled-quinled-dig-uno/",
+    "supported": [
+      "LEDs",
+      "WiFi",
+      "Ethernet"
+    ],
+    "planned": [
+      "Temperature sensor (DS18B20)"
+    ],
     "modules": [
       {
         "type": "Board",
@@ -145,7 +199,10 @@
       {
         "type": "RmtLedDriver",
         "id": "RmtLed",
-        "parent_id": "Drivers"
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "16,3"
+        }
       }
     ]
   },
@@ -158,6 +215,15 @@
     "default_firmware": "esp32",
     "image": "assets/boards/quinled-dig-quad-v3.png",
     "url": "https://quinled.info/pre-assembled-quinled-dig-quad/",
+    "supported": [
+      "LEDs",
+      "WiFi",
+      "Ethernet"
+    ],
+    "planned": [
+      "Temperature sensor (DS18B20)",
+      "Relay trigger"
+    ],
     "modules": [
       {
         "type": "Board",
@@ -170,7 +236,10 @@
       {
         "type": "RmtLedDriver",
         "id": "RmtLed",
-        "parent_id": "Drivers"
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "16,3,1,4"
+        }
       }
     ]
   },
@@ -183,6 +252,17 @@
     "default_firmware": "esp32-16mb",
     "image": "assets/boards/quinled-dig-octa-32-8l.png",
     "url": "https://quinled.info/quinled-dig-octa-brainboard-32-8l/",
+    "supported": [
+      "LEDs",
+      "WiFi",
+      "Ethernet"
+    ],
+    "planned": [
+      "Onboard button",
+      "Temperature/humidity sensor (SHT30)",
+      "Relay trigger",
+      "MicroSD"
+    ],
     "modules": [
       {
         "type": "Board",
@@ -195,7 +275,10 @@
       {
         "type": "RmtLedDriver",
         "id": "RmtLed",
-        "parent_id": "Drivers"
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "0,1,2,3,4,5,12,13"
+        }
       }
     ]
   },
@@ -207,6 +290,16 @@
     ],
     "default_firmware": "esp32-16mb",
     "url": "https://www.tindie.com/stores/serg74/",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "planned": [
+      "Onboard button",
+      "IR receiver",
+      "Temperature sensor",
+      "Relay (LED power)"
+    ],
     "modules": [
       {
         "type": "Board",
@@ -232,6 +325,15 @@
     "default_firmware": "esp32-16mb",
     "image": "assets/boards/serg-minishield.jpg",
     "url": "https://www.tindie.com/stores/serg74/",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "planned": [
+      "Onboard button",
+      "Microphone (audio-reactive)",
+      "Relay"
+    ],
     "modules": [
       {
         "type": "Board",
@@ -255,6 +357,11 @@
       "esp32"
     ],
     "default_firmware": "esp32",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "planned": [],
     "modules": [
       {
         "type": "Board",
@@ -278,6 +385,11 @@
       "esp32"
     ],
     "default_firmware": "esp32",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "planned": [],
     "modules": [
       {
         "type": "Board",
@@ -301,6 +413,11 @@
       "esp32"
     ],
     "default_firmware": "esp32",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "planned": [],
     "modules": [
       {
         "type": "Board",
@@ -324,6 +441,11 @@
       "esp32"
     ],
     "default_firmware": "esp32",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "planned": [],
     "modules": [
       {
         "type": "Board",
@@ -348,6 +470,13 @@
     ],
     "default_firmware": "esp32s3-n16r8",
     "image": "assets/boards/esp32-s3-n16r8-dev.jpg",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "planned": [
+      "Onboard RGB LED"
+    ],
     "modules": [
       {
         "type": "Board",
@@ -378,6 +507,14 @@
       "esp32s3-n16r8"
     ],
     "default_firmware": "esp32s3-n16r8",
+    "supported": [
+      "LEDs",
+      "WiFi",
+      "Audio (microphone)"
+    ],
+    "planned": [
+      "Onboard RGB LED"
+    ],
     "modules": [
       {
         "type": "Board",
@@ -423,6 +560,11 @@
       "esp32-16mb"
     ],
     "default_firmware": "esp32-16mb",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "planned": [],
     "modules": [
       {
         "type": "Board",
@@ -451,6 +593,15 @@
       "esp32p4-eth"
     ],
     "default_firmware": "esp32p4-eth",
+    "supported": [
+      "LEDs",
+      "Ethernet"
+    ],
+    "planned": [
+      "Microphone (audio-reactive)",
+      "Audio codec (ES8311)",
+      "Camera (MIPI-CSI)"
+    ],
     "modules": [
       {
         "type": "Board",
@@ -482,6 +633,10 @@
     "default_firmware": "esp32s3-n8r8",
     "image": "assets/boards/lightcrafter-16.jpg",
     "url": "https://lightcrafter.eu/",
+    "supported": [
+      "LEDs"
+    ],
+    "planned": [],
     "modules": [
       {
         "type": "Board",
@@ -505,6 +660,10 @@
       "esp32s3-n8r8"
     ],
     "default_firmware": "esp32s3-n8r8",
+    "supported": [
+      "LEDs"
+    ],
+    "planned": [],
     "modules": [
       {
         "type": "Board",
@@ -530,6 +689,16 @@
     "default_firmware": "esp32p4-eth",
     "image": "assets/boards/waveshare-esp32-p4-nano.jpg",
     "url": "https://www.waveshare.com/esp32-p4-nano.htm",
+    "supported": [
+      "LEDs",
+      "WiFi",
+      "Ethernet"
+    ],
+    "planned": [
+      "Microphone (audio-reactive)",
+      "Audio codec (ES8311)",
+      "Camera (MIPI-CSI)"
+    ],
     "modules": [
       {
         "type": "Board",
