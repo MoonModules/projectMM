@@ -14,7 +14,8 @@ Each `controls_.addX(name, var, …)` call (signatures in `Control.h`) binds one
 |------|---------|-----|-----|
 | Uint8 | 1 byte, min/max | Slider (0–255) | Yes — preferred default |
 | Uint16 | 2 bytes | Number input | Yes (universe, port) |
-| Int16 | 2 bytes, min/max | Signed number input | Yes |
+| Int16 | 2 bytes, min/max | Slider (bounded; unbounded → ±percentage slider) | Yes |
+| Pin | 1 byte (`int8_t`), −1 = unused | Number input | No |
 | Bool | 1 byte | Toggle | Yes (0/1) |
 | Text | `char[N]` | Text input | No |
 | Password | `char[N]` | Masked input, hold-to-peek | No |
@@ -27,7 +28,8 @@ Each `controls_.addX(name, var, …)` call (signatures in `Control.h`) binds one
 Notes on the non-obvious ones (the rest are self-describing):
 
 - **Password** serializes XOR-obfuscated + base64 over `/api/state`, not plaintext — a first line of defence, trivially reversible by design (the XOR key is shared with `app.js`), not encryption.
-- **Int16** is for coordinate-style values where negatives are legal — e.g. a Layer's `startX`/`endX` dragged outside the visible grid by a modifier. Default bounds are the full int16 range; pass explicit bounds for a tighter one.
+- **Int16** is for coordinate-style values where negatives are legal — e.g. a Layer's `startX`/`endX` dragged outside the visible grid by a modifier. Default bounds are the full int16 range; pass explicit bounds for a tighter one. The UI renders it as a slider (an unbounded int16 falls back to a ±percentage slider for Layer positions).
+- **Pin** is a GPIO number — `int8_t` (one byte; a GPIO never exceeds ~54), `−1` = unused/default. Distinct from Int16 so the UI renders a plain **number input** (a GPIO has no meaningful range to drag) and to keep the byte. `min`/`max` are the valid-GPIO span, used only as a server-side write-clamp. [NetworkModule](NetworkModule.md)'s eth pin controls are the first users; LED-driver pins follow.
 - **ReadOnlyInt** stores 1 byte + a unit suffix instead of a ~10-byte string — see [coding-standards § Prefer integers](../../coding-standards.md#prefer-integers-store-values-in-their-native-shape). [NetworkModule](NetworkModule.md)'s `rssi` (`-58 dBm`) and `txPower` (`19 dBm`) are the first users.
 - **IPv4** stores 4 bytes but converts to/from the dotted-quad string at the JSON boundary (`parseDottedQuad`/`formatDottedQuad` in `Control.h`, used by API, persistence, and scenario set-control). Used for [NetworkModule](NetworkModule.md)'s static-IP fields.
 
