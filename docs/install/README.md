@@ -37,20 +37,17 @@ end-to-end, no ESP Web Tools dependency on the install path.
 - [`favicon.png`](favicon.png) — moon-man, same as the device UI.
 - [`README.md`](README.md) — this file.
 
-## Picture board picker (`../install-alt/`)
+## Picture board picker
 
-A picture-based board picker — a visual card grid driven by each board's `image`
-and `url` catalog fields (see the schema below) — is built in
-[`../install-alt/`](../install-alt/), deployed **beside** this stable installer at
-a separate unlinked URL (`…/projectMM/install-alt/`) per the *build-beside / swap-at-end*
-rule ([installer-3layer-plan.md](../backlog/installer-3layer-plan.md)). It reuses
-this installer's flash machinery unchanged (`install-orchestrator.js` + the shared
-`install-picker.js`, which it drives through a hidden board `<select>`), and the
-shared picker / firmware UI are not modified — board images are a Pages-only asset,
-never flashed. When the UX is proven it folds into this stable installer and
-`install-alt/` is deleted (the swap).
+The board picker is a visual card grid driven by each board's `image` and `url`
+catalog fields (see the schema below) plus its `supported`/`planned` capability
+chips. It reuses the installer's flash machinery unchanged — the grid drives the
+shared [`install-picker.js`](../../src/ui/install-picker.js) through a hidden board
+`<select>`, so the firmware-narrowing and flash flow are identical to a plain
+dropdown pick. Board images are a Pages-only asset (staged from
+`docs/assets/boards/`), never flashed.
 
-The board picker is a collapsed row consistent with the other fields; clicking it
+The picker is a collapsed row consistent with the other fields; clicking it
 expands the searchable card grid, and picking a board collapses it back to a
 labelled summary with a thumbnail:
 

@@ -227,6 +227,25 @@ def _push_board_to_device(ip: str, board: str) -> bool:
         modules = [{"type": "Board", "id": "Board", "parent_id": "System",
                     "controls": {"board": board}}]
 
+    return _apply_modules_to_device(ip, modules)
+
+
+def _apply_modules_to_device(ip: str, modules: list) -> bool:
+    """Add-then-configure a list of module-with-controls units on a device.
+
+    Each unit is `{type, id, parent_id?, controls?}` — the SAME shape boards.json
+    catalog entries use and a saved device-profile stores, so both the board push
+    (_push_board_to_device) and a profile restore share this one fan-out. Per
+    module: add it first when it has a parent_id (a fresh flash has no user-added
+    modules like AudioModule, so a control write would 404), then set its controls.
+    A module without parent_id is boot-wired/top-level (Board under System,
+    Network) that already exists — skip the add, just set controls. The add is
+    idempotent (an existing id returns 200). Returns True iff EVERY POST returned
+    200; best-effort (partial state may apply, the next refresh re-attempts).
+    """
+    import urllib.request
+    import urllib.error
+
     def _post(path: str, body_obj: dict) -> bool:
         body = json.dumps(body_obj).encode()
         try:
@@ -239,14 +258,6 @@ def _push_board_to_device(ip: str, board: str) -> bool:
         except (urllib.error.URLError, OSError):
             return False
 
-    # Each entry is a list of module-with-controls units:
-    #   {type, id, parent_id?, controls?}
-    # Per module: add it first (when it has a parent_id — a fresh flash has no
-    # user-added modules like AudioModule, so a control write would 404), then set
-    # its controls. A module without parent_id is boot-wired/top-level (Board under
-    # System, Network) that already exists — skip the add, just set controls. The
-    # add is idempotent (an existing id returns 200). Sequential is plenty for the
-    # 1-3 controls typical entries carry.
     for m in modules:
         if not isinstance(m, dict):
             continue
@@ -266,6 +277,63 @@ def _push_board_to_device(ip: str, board: str) -> bool:
             }):
                 return False
     return True
+
+
+# Module types whose controls a device-profile captures: the drivers + the
+# board/network/audio config a user sets by hand. Effects/layouts/layers are
+# animation state, not the device's physical pin wiring, so they're left out —
+# a profile is "the GPIO/peripheral setup", re-applied after a reflash wipes it.
+_PROFILE_MODULE_TYPES = {
+    "BoardModule", "NetworkModule", "AudioModule",
+    "RmtLedDriver", "LcdLedDriver", "ParlioLedDriver", "NetworkSendDriver",
+}
+
+
+def _capture_device_profile(ip: str) -> "list | None":
+    """Read /api/state and flatten the module tree into profile units.
+
+    Returns a list of `{type, id, parent_id?, controls}` units (the same shape
+    _apply_modules_to_device + boards.json use), or None if the device is
+    unreachable. Only the config-bearing module types in _PROFILE_MODULE_TYPES are
+    captured (the physical pin/peripheral setup), and each module's controls list
+    `[{name, value}]` is collapsed to a `{name: value}` dict. parent_id comes from
+    the tree position so restore re-creates user-added modules under the right
+    container. The catalog `type` is the short id the device reports as the module
+    type; we keep it verbatim (e.g. "RmtLedDriver"), matching boards.json.
+    """
+    import urllib.request
+    import urllib.error
+    host = ip.split(":")[0]
+    port = ip.split(":")[1] if ":" in ip else "8080"
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/api/state", timeout=1.0) as resp:
+            state = json.loads(resp.read())
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        return None
+
+    units: list = []
+
+    def _collect(modules, parent_id):
+        for m in modules or []:
+            mtype = m.get("type")
+            mid = m.get("name")   # /api/state reports the instance id under "name"
+            if mtype in _PROFILE_MODULE_TYPES and mid:
+                controls = {}
+                for c in m.get("controls", []):
+                    cn = c.get("name")
+                    if cn is not None and "value" in c:
+                        controls[cn] = c["value"]
+                unit = {"type": mtype, "id": mid}
+                if parent_id:
+                    unit["parent_id"] = parent_id
+                if controls:
+                    unit["controls"] = controls
+                units.append(unit)
+            # recurse with THIS module's id as the parent for its children
+            _collect(m.get("children", []), m.get("name"))
+
+    _collect(state.get("modules", []), None)
+    return units
 
 
 def _push_boards_in_parallel(pushes):
@@ -909,6 +977,56 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"error": "ip required"}, 400)
                 return
             ok = _push_board_to_device(ip, board)
+            self._send_json({"ok": ok})
+
+        elif self.path == "/api/save-profile":
+            # Capture a device's current pin/peripheral config (drivers, board,
+            # network, audio) and store it as a named profile under the device
+            # record in moondeck.json. Lets a user re-apply the GPIO setup after a
+            # reflash wipes config, or clone it to a second identical rig.
+            body = self._read_body()
+            params = json.loads(body) if body else {}
+            ip = params.get("ip", "")
+            name = (params.get("name") or "").strip()
+            if not ip or not name:
+                self._send_json({"error": "ip and name required"}, 400)
+                return
+            modules = _capture_device_profile(ip)
+            if modules is None:
+                self._send_json({"error": "device unreachable"}, 502)
+                return
+            # Store under the device whose ip matches, in the active network.
+            def _store(state):
+                for net in state.get("networks") or []:
+                    for d in net.get("devices") or []:
+                        if d.get("ip") == ip:
+                            profiles = [p for p in d.get("profiles", [])
+                                        if p.get("name") != name]   # replace same-named
+                            profiles.append({"name": name, "modules": modules})
+                            d["profiles"] = profiles
+            mutate_state(_store)
+            self._send_json({"ok": True, "moduleCount": len(modules)})
+
+        elif self.path == "/api/apply-profile":
+            # Re-apply a stored profile to a device (same or a second identical
+            # board) via the shared add-then-configure fan-out.
+            body = self._read_body()
+            params = json.loads(body) if body else {}
+            ip = params.get("ip", "")
+            name = (params.get("name") or "").strip()
+            if not ip or not name:
+                self._send_json({"error": "ip and name required"}, 400)
+                return
+            modules = None
+            for net in (load_state().get("networks") or []):
+                for d in net.get("devices") or []:
+                    for p in d.get("profiles", []):
+                        if p.get("name") == name:
+                            modules = p.get("modules")
+            if modules is None:
+                self._send_json({"error": "profile not found"}, 404)
+                return
+            ok = _apply_modules_to_device(ip, modules)
             self._send_json({"ok": ok})
 
         elif self.path == "/api/discover":

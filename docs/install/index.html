@@ -25,6 +25,8 @@
       --muted:  #a0a0b0;
       --accent: #a78bfa;
       --border: #2a3a6a;
+      --ok:     #57c97a;   /* green — "supported" capability chips */
+      --plan:   #e8923a;   /* orange — "planned" capability chips (not yet supported) */
     }
     * { box-sizing: border-box; }
     body {
@@ -127,6 +129,87 @@
       color: var(--muted);
     }
     .control-row select { flex: 1; }
+
+    /* the shared picker still renders its own board <select>
+       (#rp-board) — we keep it (so its change-listener wires) but hide its row;
+       the picture grid above drives it. The row is the .control-row that
+       contains #rp-board. */
+    .control-row:has(#rp-board) { display: none; }
+
+    /* Picture board grid — collapsed by default (a control-row field), expands
+       on click. The summary button is the row's field, so it flexes like the
+       selects (flex: 1) to line up with USB Port / Release / Firmware. */
+    #board-summary {
+      flex: 1; display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; padding: 10px 12px; background: var(--bg); color: var(--fg);
+      border: 1px solid var(--border); border-radius: 6px; font: inherit;
+      cursor: pointer; text-align: left;
+    }
+    #board-summary:hover { border-color: var(--accent); }
+    .board-summary-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .board-summary-thumb {
+      width: 36px; height: 24px; border-radius: 3px; flex-shrink: 0;
+      background: #0e1020 center/contain no-repeat; border: 1px solid var(--border);
+    }
+    #board-summary-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .board-summary-caret { color: var(--muted); transition: transform .15s; flex-shrink: 0; }
+    #board-summary[aria-expanded="true"] .board-summary-caret { transform: rotate(180deg); }
+    /* The expanded grid breaks out full-width below the row (aligns with the
+       field column by offsetting the label width + gap). */
+    #board-expand { margin: 0 0 10px 92px; }
+    .board-grid-controls { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+    #board-search {
+      flex: 1; min-width: 160px; padding: 8px 10px; background: var(--bg);
+      color: var(--fg); border: 1px solid var(--border); border-radius: 6px; font: inherit;
+    }
+    .board-clear {
+      background: transparent; color: var(--muted); border: 1px solid var(--border);
+      border-radius: 6px; padding: 8px 12px; font: inherit; font-size: 13px; cursor: pointer;
+    }
+    .board-clear:hover { color: var(--fg); border-color: var(--accent); }
+    .board-filter-notice { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+    .board-filter-notice button {
+      background: none; border: none; color: var(--accent); font: inherit; font-size: 12px;
+      cursor: pointer; padding: 0; text-decoration: underline;
+    }
+    #board-grid { max-height: 420px; overflow-y: auto; }   /* expanded grid scrolls, not the page */
+    #board-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;
+    }
+    .bg-chip-label {
+      grid-column: 1 / -1; color: var(--muted); font-size: 11px; text-transform: uppercase;
+      letter-spacing: .06em; margin: 6px 0 0;
+    }
+    .bg-card {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      overflow: hidden; cursor: pointer; transition: border-color .12s, background .12s;
+      display: flex; flex-direction: column;
+    }
+    .bg-card:hover { border-color: var(--accent); }
+    .bg-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+    .bg-thumb {
+      aspect-ratio: 16 / 10; background: #0e1020 center/contain no-repeat;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--muted); font-size: 10px; border-bottom: 1px solid var(--border);
+    }
+    .bg-thumb.noimg::after { content: "no photo"; }
+    .bg-body { padding: 8px 9px; display: flex; flex-direction: column; gap: 3px; }
+    .bg-name { font-weight: 600; font-size: 12px; line-height: 1.2; }
+    .bg-meta { color: var(--muted); font-size: 11px; }
+    /* Capability chips: supported (green) vs planned (orange) — distinguished by
+       colour, not by extra text. Labels are kept short in boards.json so every
+       chip fits the ~150px card; the full label + state is in the chip's title
+       tooltip. */
+    .bg-caps { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+    .bg-cap {
+      font-size: 9px; line-height: 1.5; padding: 0 5px; border-radius: 999px;
+      max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .bg-cap.sup { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+    .bg-cap.plan { background: color-mix(in srgb, var(--plan) 20%, transparent); color: var(--plan); }
+    .bg-link { color: var(--accent); font-size: 11px; text-decoration: none; }
+    .bg-link:hover { text-decoration: underline; }
+
     .action-btn {
       background: var(--accent);
       color: var(--bg);
@@ -414,10 +497,45 @@
         </label>
       </div>
 
-      <!-- Picker mounts here. Release (newest-first, RCs flagged) →
-           Board. Same module the on-device OTA UI uses. The picker slots
-           #erase-row into its tree at render time via the
-           installRowExtras option below. -->
+      <!-- picture board picker. Renders a visual card grid from
+           boards.json (image + product link), and on select drives the shared
+           picker's own (hidden) board <select> so the existing flash flow is
+           reused unchanged. The shared install-picker.js + firmware UI are NOT
+           modified (board images are a Pages-only asset, never flashed). -->
+      <!-- Board picker: a control-row consistent with USB Port / Release /
+           Firmware (left "Board" label + a field). The field is a collapsed
+           summary button; clicking expands the search + card grid full-width
+           below the row. Picking a board collapses it back to the summary.
+           The shared install-picker.js + firmware UI are NOT modified
+           (board images are a Pages-only asset, never flashed). -->
+      <div id="board-grid-card">
+        <div class="control-row">
+          <span class="control-label">Board</span>
+          <button type="button" id="board-summary" aria-expanded="false">
+            <span class="board-summary-left">
+              <span id="board-summary-thumb" class="board-summary-thumb" hidden></span>
+              <span id="board-summary-label">Pick a board</span>
+            </span>
+            <span class="board-summary-caret">▾</span>
+          </button>
+        </div>
+        <div id="board-expand" hidden>
+          <div class="board-grid-controls">
+            <input id="board-search" type="search" placeholder="Search boards…" autocomplete="off" aria-label="Search boards">
+            <button type="button" id="board-clear" class="board-clear">Generic / no board</button>
+          </div>
+          <!-- Shown only when a Detect has narrowed the grid to one chip family;
+               the toggle is the escape hatch if detection was wrong or your board
+               isn't in the detected family. -->
+          <div id="board-filter-notice" class="board-filter-notice" hidden></div>
+          <div id="board-grid"></div>
+        </div>
+      </div>
+
+      <!-- Picker mounts here. Release (newest-first, RCs flagged) → Board (the
+           board <select> is CSS-hidden; the grid above drives it).
+           Same module the on-device OTA UI uses. The picker slots #erase-row into
+           its tree at render time via the installRowExtras option below. -->
       <div id="picker-mount"></div>
 
       <!-- Monitor button: pre/post install serial viewer. Renders as a
@@ -700,6 +818,8 @@
       const m = /\/releases\/download\/([^/]+)\/([^/]+)$/.exec(githubUrl);
       if (!m) return githubUrl;  // unrecognised shape: pass through unchanged
       const [, tag, name] = m;
+      //   https://github.com/.../releases/download/<TAG>/<file>
+      //   → ./releases/<TAG>/<file>  (same-origin, served from this dir)
       return `./releases/${tag}/${name}`;
     }
 
@@ -1344,7 +1464,7 @@
     });
 
     // --- Picker wiring -------------------------------------------------
-    installPicker.init({
+    const _pickerReady = installPicker.init({
       container: document.getElementById("picker-mount"),
       ownFirmwareKey: null,  // web installer flashes any firmware variant
       installRowExtras: document.getElementById("erase-row"),
@@ -1421,6 +1541,216 @@
     if (!("serial" in navigator)) {
       document.getElementById("browser-warning").style.display = "block";
     }
+
+    // --- picture board grid --------------------------------
+    // Renders boards.json as a visual card grid; on select it drives the shared
+    // picker's own (hidden) #rp-board <select> via a dispatched change event, so
+    // the existing release/firmware narrowing + flash flow runs unchanged. The
+    // shared install-picker.js is NOT modified.
+    (async function boardGrid() {
+      let boards = [];
+      try {
+        const res = await fetch("./boards.json");   // same catalog as the picker
+        boards = await res.json();
+      } catch (e) {
+        document.getElementById("board-grid").textContent = "Could not load boards.json: " + e;
+        return;
+      }
+      await _pickerReady;   // ensure the picker has mounted its (hidden) #rp-board
+
+      const gridEl    = document.getElementById("board-grid");
+      const searchEl  = document.getElementById("board-search");
+      const summaryEl = document.getElementById("board-summary");
+      const labelEl   = document.getElementById("board-summary-label");
+      const thumbEl   = document.getElementById("board-summary-thumb");
+      const expandEl  = document.getElementById("board-expand");
+      const clearEl   = document.getElementById("board-clear");
+      let selected = installPicker.getSelectedBoard() || "";   // honour a restored pick
+
+      function ledDriver(b) {
+        const d = (b.modules || []).find(m => /LedDriver$/.test(m.type || ""));
+        return d ? d.type.replace(/Driver$/, "") : null;
+      }
+      function setExpanded(open) {
+        expandEl.hidden = !open;
+        summaryEl.setAttribute("aria-expanded", open ? "true" : "false");
+        if (open) { searchEl.focus(); }
+      }
+      // Reflect the current pick in the collapsed summary (label + thumbnail).
+      function updateSummary() {
+        const b = boards.find(x => x.name === selected);
+        if (b) {
+          labelEl.textContent = b.name;
+          if (b.image) { thumbEl.hidden = false; thumbEl.style.backgroundImage = `url("${b.image}")`; }
+          else { thumbEl.hidden = true; }
+        } else {
+          labelEl.textContent = "Pick a board";
+          thumbEl.hidden = true;
+        }
+      }
+      function pickBoard(name) {
+        selected = name;
+        // Drive the shared picker's hidden <select>: set value + fire change so
+        // its listener updates state.selectedBoard and re-filters firmware.
+        const rpBoard = document.getElementById("rp-board");
+        if (rpBoard) {
+          // A Detect narrows #rp-board's options to one family. With "show all
+          // boards" the grid can pick a board from ANOTHER family — whose option
+          // isn't in the narrowed list, so `value = name` would silently no-op
+          // (value stays "") and the firmware list wouldn't narrow. Ensure the
+          // option exists first so the assignment takes and selectedBoard is set.
+          if (name && !Array.from(rpBoard.options).some(o => o.value === name)) {
+            const o = document.createElement("option");
+            o.value = name; o.textContent = name;
+            rpBoard.appendChild(o);
+          }
+          rpBoard.value = name;
+          rpBoard.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        updateSummary();
+        setExpanded(false);   // collapse back to the summary after a pick
+        render();             // keep the grid's selected-card state in sync for next open
+      }
+      // After a Detect, the shared picker narrows its hidden #rp-board <select>
+      // to the matching-family boards (applyDetectedChip → fillBoardOptions). The
+      // grid mirrors that: it shows only boards whose name is a current #rp-board
+      // option. Before any detect, #rp-board holds the FULL catalog (plus the
+      // "(any board)" / "Other…" pass-through, which has no value), so the grid
+      // shows everything — only a detect narrows it. Returns null = no constraint.
+      // `showAll` is the user's escape hatch (the "show all boards" toggle) for a
+      // wrong/unhelpful detection — when set, the filter is bypassed.
+      let showAll = false;
+      function narrowedNames() {
+        const sel = document.getElementById("rp-board");
+        if (!sel) return null;
+        const names = Array.from(sel.options).map(o => o.value).filter(Boolean);
+        // If the option set equals the full catalog, there's no narrowing.
+        return names.length && names.length < boards.length ? new Set(names) : null;
+      }
+      function allowedNames() {
+        return showAll ? null : narrowedNames();
+      }
+      // The detected family label (from the narrowed boards' shared chip), for the
+      // "Detected <family> · show all" notice. null when not narrowed.
+      function detectedFamily() {
+        const allow = narrowedNames();
+        if (!allow) return null;
+        const fams = new Set(boards.filter(b => allow.has(b.name)).map(b => b.chip));
+        return fams.size === 1 ? [...fams][0] : null;
+      }
+      function renderFilterNotice() {
+        const notice = document.getElementById("board-filter-notice");
+        const fam = detectedFamily();
+        if (!fam) { notice.hidden = true; notice.replaceChildren(); return; }
+        notice.hidden = false;
+        notice.replaceChildren();
+        if (showAll) {
+          notice.append(`Showing all boards. `);
+          const a = document.createElement("button");
+          a.textContent = `Filter to detected ${fam}`;
+          a.onclick = () => { showAll = false; render(); };
+          notice.append(a);
+        } else {
+          notice.append(`Detected ${fam}. `);
+          const a = document.createElement("button");
+          a.textContent = "Show all boards";
+          a.title = "Detection wrong, or your board isn't in this family? Show the full catalog.";
+          a.onclick = () => { showAll = true; render(); };
+          notice.append(a);
+        }
+      }
+      function render() {
+        const q = (searchEl.value || "").toLowerCase();
+        const allow = allowedNames();
+        const shown = boards.filter(b =>
+          (!q || b.name.toLowerCase().includes(q)) &&
+          (!allow || allow.has(b.name)));
+        renderFilterNotice();
+        gridEl.replaceChildren();
+        const byChip = {};
+        for (const b of shown) (byChip[b.chip] ||= []).push(b);
+        for (const chip of Object.keys(byChip).sort()) {
+          const lbl = document.createElement("div");
+          lbl.className = "bg-chip-label"; lbl.textContent = chip;
+          gridEl.appendChild(lbl);
+          for (const b of byChip[chip]) gridEl.appendChild(card(b));
+        }
+        if (!shown.length) {
+          const e = document.createElement("p"); e.className = "note"; e.textContent = "No boards match.";
+          gridEl.appendChild(e);
+        }
+      }
+      function card(b) {
+        const el = document.createElement("div");
+        el.className = "bg-card" + (selected === b.name ? " selected" : "");
+        // Keyboard-accessible: a focusable option that picks on Enter/Space, the
+        // same affordance the click handler gives the mouse.
+        el.tabIndex = 0;
+        el.setAttribute("role", "option");
+        el.setAttribute("aria-selected", selected === b.name ? "true" : "false");
+        el.onclick = (ev) => { if (!ev.target.classList.contains("bg-link")) pickBoard(b.name); };
+        el.onkeydown = (ev) => {
+          if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); pickBoard(b.name); }
+        };
+        const thumb = document.createElement("div");
+        thumb.className = "bg-thumb" + (b.image ? "" : " noimg");
+        // the deploy stages a copy of boards.json
+        // + the referenced board images alongside this page, so an "image" path of
+        // "assets/boards/<slug>.jpg" resolves same-origin from this page.
+        if (b.image) thumb.style.backgroundImage = `url("${b.image}")`;
+        el.appendChild(thumb);
+        const body = document.createElement("div"); body.className = "bg-body";
+        const nm = document.createElement("div"); nm.className = "bg-name"; nm.textContent = b.name; body.appendChild(nm);
+        const meta = document.createElement("div"); meta.className = "bg-meta";
+        meta.textContent = b.chip + (ledDriver(b) ? " · " + ledDriver(b) : "");
+        body.appendChild(meta);
+        // Capability chips: supported = violet, planned = amber (colour, not text,
+        // carries the distinction). Planned entries are the backlog seed (a
+        // peripheral the board has but no module drives yet). All chips are shown
+        // (labels are kept short in boards.json so they fit the card).
+        const caps = [
+          ...(Array.isArray(b.supported) ? b.supported.map(c => ({ c, cls: "sup" })) : []),
+          ...(Array.isArray(b.planned) ? b.planned.map(c => ({ c, cls: "plan" })) : []),
+        ];
+        if (caps.length) {
+          const capsEl = document.createElement("div"); capsEl.className = "bg-caps";
+          for (const { c, cls } of caps) {
+            const chip = document.createElement("span");
+            chip.className = "bg-cap " + cls;
+            chip.textContent = c;   // colour conveys supported (violet) vs planned (amber)
+            chip.title = cls === "plan" ? c + " — planned" : c + " — supported";
+            capsEl.appendChild(chip);
+          }
+          body.appendChild(capsEl);
+        }
+        if (b.url) {
+          const a = document.createElement("a"); a.className = "bg-link"; a.href = b.url;
+          a.target = "_blank"; a.rel = "noopener"; a.textContent = "product page ↗"; body.appendChild(a);
+        }
+        el.appendChild(body);
+        return el;
+      }
+      searchEl.oninput = render;
+      summaryEl.addEventListener("click", () => setExpanded(expandEl.hidden));
+      clearEl.addEventListener("click", () => pickBoard(""));   // generic / no board
+
+      // Re-render when a Detect narrows the picker: applyDetectedChip swaps out
+      // #rp-board's <option>s, so observe its child list. The grid then filters
+      // to the detected family (allowedNames), and updateSummary picks up any
+      // auto-selected single match.
+      const rpBoard = document.getElementById("rp-board");
+      if (rpBoard) {
+        new MutationObserver(() => {
+          showAll = false;   // a fresh detect is a new context — re-apply the filter
+          selected = installPicker.getSelectedBoard() || selected;
+          updateSummary();
+          render();
+        }).observe(rpBoard, { childList: true });
+      }
+
+      updateSummary();   // reflect any restored pick in the collapsed summary
+      render();
+    })();
   </script>
 </body>
 </html>

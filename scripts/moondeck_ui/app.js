@@ -939,9 +939,79 @@ function renderDevices() {
         row3.className = "device-row device-row-board";
         row3.appendChild(boardPicker);
 
+        // row 4 — pin-profile save/apply. A profile is the device's captured
+        // GPIO/peripheral config (drivers, board, network, audio); saving stores
+        // it under this device in moondeck.json, applying re-pushes it (handy
+        // after a reflash wipes config, or to clone to a second identical rig).
+        const row4 = document.createElement("div");
+        row4.className = "device-row device-row-profile";
+
+        const profileSel = document.createElement("select");
+        profileSel.className = "device-profile-select";
+        profileSel.title = "Saved pin profiles for this device";
+        const phOpt = document.createElement("option");
+        phOpt.value = ""; phOpt.textContent = "(profiles)";
+        profileSel.appendChild(phOpt);
+        for (const p of (device.profiles || [])) {
+            const o = document.createElement("option");
+            o.value = p.name; o.textContent = p.name;
+            profileSel.appendChild(o);
+        }
+
+        const saveBtn = document.createElement("button");
+        saveBtn.className = "device-profile-btn";
+        saveBtn.textContent = "Save";
+        saveBtn.title = "Capture this device's current pins as a named profile";
+        saveBtn.addEventListener("click", async (e) => {
+            e.preventDefault();
+            const name = prompt(`Save pin profile for ${device.deviceName || device.ip} as:`);
+            if (!name) return;
+            saveBtn.disabled = true; saveBtn.textContent = "…";
+            try {
+                const res = await fetch("/api/save-profile", {
+                    method: "POST", headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({ip: device.ip, name}),
+                });
+                const j = await res.json();
+                if (j.ok) {
+                    // Reflect the new profile locally so the dropdown updates
+                    // without a full refresh (the server already persisted it).
+                    device.profiles = (device.profiles || []).filter(p => p.name !== name);
+                    device.profiles.push({name, modules: []});  // count-only placeholder; real modules live server-side
+                    renderDevices();
+                } else { alert("Save failed: " + (j.error || "unknown")); }
+            } catch (err) { alert("Save failed: " + err); }
+            finally { saveBtn.disabled = false; saveBtn.textContent = "Save"; }
+        });
+
+        const applyBtn = document.createElement("button");
+        applyBtn.className = "device-profile-btn";
+        applyBtn.textContent = "Apply";
+        applyBtn.title = "Re-apply the selected profile to this device";
+        applyBtn.addEventListener("click", async (e) => {
+            e.preventDefault();
+            const name = profileSel.value;
+            if (!name) { alert("Pick a profile to apply"); return; }
+            applyBtn.disabled = true; applyBtn.textContent = "…";
+            try {
+                const res = await fetch("/api/apply-profile", {
+                    method: "POST", headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({ip: device.ip, name}),
+                });
+                const j = await res.json();
+                if (!j.ok) alert("Apply failed: " + (j.error || "device unreachable"));
+            } catch (err) { alert("Apply failed: " + err); }
+            finally { applyBtn.disabled = false; applyBtn.textContent = "Apply"; }
+        });
+
+        row4.appendChild(profileSel);
+        row4.appendChild(saveBtn);
+        row4.appendChild(applyBtn);
+
         label.appendChild(row1);
         label.appendChild(row2);
         label.appendChild(row3);
+        label.appendChild(row4);
         el.appendChild(label);
     }
 }

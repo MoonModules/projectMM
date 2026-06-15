@@ -425,7 +425,7 @@ The build IDF is `v6.1-dev-399-gd1b91b79b5`, a dev-branch snapshot (2025-11-05) 
 
 ### Three-level device model: MCU → Board → Device (config provenance)
 
-The model itself is now a shipped design — see [architecture.md § Config provenance](../architecture.md#config-provenance-mcu--board--device) (the three levels + the `txPowerSetting` example + "default only at the level that fixes it"). The catalog that carries it is [`install/boards.json`](../install/boards.json) ([schema](../install/README.md)). The remaining forward-looking pieces (devices.json/MCU-layer split, MoonDeck device-profile save/restore, annotated-pin images) are in [installer-3layer-plan.md § 4](installer-3layer-plan.md).
+The model itself is now a shipped design — see [architecture.md § Config provenance](../architecture.md#config-provenance-mcu--board--device) (the three levels + the `txPowerSetting` example + "default only at the level that fixes it"). The catalog that carries it is [`install/boards.json`](../install/boards.json) ([schema](../install/README.md)). **MoonDeck device-profile save/restore is shipped** — capture a device's pin/peripheral config (`/api/save-profile`) and re-apply it after a reflash or to a clone (`/api/apply-profile`), stored per-device in `moondeck.json`. The remaining forward-looking pieces — a `devices.json`/MCU-layer split and annotated-pin images — stay gated by the sequencing rule (no catalog field ahead of a consumer); see the closed [installer-3layer-plan.md](installer-3layer-plan.md) for their status.
 
 ### ESP32-P4 support — rounds 3-4 (in progress)
 
