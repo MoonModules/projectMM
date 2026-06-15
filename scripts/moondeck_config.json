@@ -1,5 +1,4 @@
 {
-  "firmwares": ["esp32", "esp32-16mb", "esp32-eth", "esp32-eth-wifi", "esp32s3-n16r8", "esp32s3-n8r8"],
   "scripts": [
     {
       "id": "build_desktop",
@@ -63,6 +62,22 @@
       "label": "Platform Boundary",
       "help": "check_platform_boundary",
       "script": "check/check_platform_boundary.py"
+    },
+    {
+      "id": "check_boards",
+      "tab": "pc",
+      "group": "check",
+      "label": "Board Catalog",
+      "help": "check_boards",
+      "script": "check/check_boards.py"
+    },
+    {
+      "id": "check_firmwares",
+      "tab": "pc",
+      "group": "check",
+      "label": "Firmware List",
+      "help": "check_firmwares",
+      "script": "check/check_firmwares.py"
     },
     {
       "id": "collect_kpi",

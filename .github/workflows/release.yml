@@ -53,7 +53,13 @@ jobs:
     # (latest) and workflow_dispatch with a non-version tag.
     runs-on: ubuntu-latest
     steps:
+      # persist-credentials: false on every checkout that doesn't push — keeps the
+      # GITHUB_TOKEN out of .git/config where later steps (incl. third-party Docker
+      # actions) could read it. The `release` job is the one exception: its
+      # "Re-create latest" step does `git push -f`, so it keeps the credential.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v3
       - name: Verify tag matches library.json version
         if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v'))
@@ -66,15 +72,36 @@ jobs:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: uv run scripts/build/verify_version.py --tag "$TAG"
 
-  build-esp32:
+  # The shipping firmware list, read from the generated docs/install/firmwares.json
+  # (projected from build_esp32.py's FIRMWARES dict, drift-guarded by
+  # check_firmwares.py). Emitted as a JSON array so build-esp32's matrix can
+  # fromJSON() it — GitHub matrices can't read a file at parse time, so a job
+  # output is the standard bridge. This is the ONLY firmware list in CI now.
+  firmwares:
     needs: verify-version
+    runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.gen.outputs.list }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: gen
+        run: |
+          set -euo pipefail
+          echo "list=$(jq -c '[.firmwares[] | select(.ships) | .name]' docs/install/firmwares.json)" >> "$GITHUB_OUTPUT"
+
+  build-esp32:
+    needs: [verify-version, firmwares]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        firmware: [esp32, esp32-16mb, esp32-eth, esp32-eth-wifi, esp32s3-n16r8, esp32s3-n8r8, esp32p4-eth]
+        firmware: ${{ fromJSON(needs.firmwares.outputs.list) }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Cache ESP-IDF tooling
         uses: actions/cache@v4
@@ -115,9 +142,9 @@ jobs:
           # The IDF target follows the firmware-key prefix: esp32s3* → esp32s3,
           # esp32p4* → esp32p4 (the only target that pulls the ip101 PHY +
           # esp_hosted, both manifest-gated on target == esp32p4), everything
-          # else → esp32. (esp32p4-eth-wifi is intentionally NOT in the matrix
-          # yet — its C6-slave Kconfig defaults don't survive a plain CI build;
-          # tracked in backlog § ESP32-P4 round 3.)
+          # else → esp32. (The matrix is the `ships` subset of firmwares.json;
+          # esp32p4-eth-wifi has ships=False in build_esp32.py so it stays out —
+          # its C6-slave Kconfig defaults don't survive a plain CI build.)
           target: ${{ startsWith(matrix.firmware, 'esp32s3') && 'esp32s3' || startsWith(matrix.firmware, 'esp32p4') && 'esp32p4' || 'esp32' }}
           path: 'esp32'
           # We run our own builder (not the action's default `idf.py build`)
@@ -136,10 +163,18 @@ jobs:
           # CI uses one per matrix job, dev machines use as many as built.
           B=build/esp32-${{ matrix.firmware }}
           PREFIX="firmware-${{ matrix.firmware }}-v$V"
-          cp "$B/projectMM.bin"                       "dist/${PREFIX}.bin"
-          cp "$B/bootloader/bootloader.bin"           "dist/${PREFIX}-bootloader.bin"
-          cp "$B/partition_table/partition-table.bin" "dist/${PREFIX}-partition-table.bin"
-          cp "$B/ota_data_initial.bin"                "dist/${PREFIX}-ota-data.bin"
+          # App + bootloader are unique per firmware — staged with the prefix.
+          cp "$B/projectMM.bin"             "dist/${PREFIX}.bin"
+          cp "$B/bootloader/bootloader.bin" "dist/${PREFIX}-bootloader.bin"
+          # ota-data is byte-identical for ALL firmwares, and partition-table is
+          # identical within a flash-size group — staged under SHARED names so the
+          # release uploads each once instead of one-per-firmware. Every matrix job
+          # writes the same shared filename(s); the flatten step keeps one copy
+          # (byte-identical, so last-writer-wins is correct). The generated
+          # manifests point at these same names (generate_manifest.py).
+          SIZE=$(jq -r .flash_settings.flash_size "$B/flasher_args.json" | tr 'A-Z' 'a-z')
+          cp "$B/partition_table/partition-table.bin" "dist/partition-table-$SIZE.bin"
+          cp "$B/ota_data_initial.bin"                "dist/shared-ota-data.bin"
           # Per-firmware flasher_args.json — the release job feeds it to
           # generate_manifest.py so offsets come from the real build.
           cp "$B/flasher_args.json"                   "dist/flasher-${{ matrix.firmware }}.json"
@@ -154,6 +189,8 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       # CMakeLists.txt calls find_program(UV_EXECUTABLE … REQUIRED) so the
       # build-host Python (gzip / build_info.h) is reached through uv. The
       # runners don't ship uv by default — install it before package_desktop.
@@ -170,6 +207,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       # Same uv prerequisite as build-macos — see the comment there.
       - uses: astral-sh/setup-uv@v3
       - name: Build + package Windows x64
@@ -194,7 +233,12 @@ jobs:
     # tagged releases with zero binaries. Pages deploy lives in its own job
     # below (gated to main, the only ref the environment trusts).
     steps:
+      # NB: this checkout KEEPS persisted credentials (unlike the other jobs) —
+      # the "Re-create latest" step below force-pushes the `latest` tag with git,
+      # which needs the token in .git/config.
       - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
 
       - uses: actions/download-artifact@v4
         with:
@@ -235,11 +279,10 @@ jobs:
           # — no CORS). The Pages-relative manifests are generated in the
           # deploy-pages job, where the web installer (CORS-bound) consumes them.
           BASE="https://github.com/${REPO}/releases/download/$TAG"
-          # Keep in sync with the build-esp32 matrix above (the source of truth
-          # for which firmware variants exist). A variant missing here builds but
-          # gets no manifest, so the installer can't flash it.
-          for F in esp32 esp32-16mb esp32-eth esp32-eth-wifi esp32s3-n16r8 esp32s3-n8r8 esp32p4-eth; do
-            python scripts/build/generate_manifest.py \
+          # The shipping firmware list — the same docs/install/firmwares.json the
+          # build matrix reads, so manifests and builds can't drift.
+          for F in $(jq -r '.firmwares[] | select(.ships) | .name' docs/install/firmwares.json); do
+            uv run python scripts/build/generate_manifest.py \
               --firmware "$F" \
               --version "$V" \
               --release-url "$BASE" \
@@ -303,6 +346,8 @@ jobs:
           # is a glob pattern, the action does NOT strip `#` as comment syntax.
           files: |
             dist/firmware-*.bin
+            dist/shared-ota-data.bin
+            dist/partition-table-*.bin
             dist/manifest-*.json
             dist/projectMM-*.tar.gz
             dist/projectMM-*.zip
@@ -326,6 +371,10 @@ jobs:
       url: ${{ steps.deploy-pages.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v3
 
       - uses: actions/download-artifact@v4
         with:
@@ -346,10 +395,9 @@ jobs:
           # because the web installer is same-origin-bound by CORS. The
           # absolute release-asset manifests live in the `release` job.
           mkdir -p pages-manifests
-          # Keep in sync with the build-esp32 matrix above (the source of truth
-          # for which firmware variants exist). A variant missing here builds but
-          # gets no manifest, so the installer can't flash it.
-          for F in esp32 esp32-16mb esp32-eth esp32-eth-wifi esp32s3-n16r8 esp32s3-n8r8 esp32p4-eth; do
+          # The shipping firmware list — the same docs/install/firmwares.json the
+          # build matrix reads, so manifests and builds can't drift.
+          for F in $(jq -r '.firmwares[] | select(.ships) | .name' docs/install/firmwares.json); do
             python scripts/build/generate_manifest.py \
               --firmware "$F" \
               --version "$V" \
@@ -391,6 +439,8 @@ jobs:
             gh release download "$T" \
               --dir "pages/install/releases/$T" \
               --pattern 'firmware-*.bin' \
+              --pattern 'shared-ota-data.bin' \
+              --pattern 'partition-table-*.bin' \
               --pattern 'projectMM-*.tar.gz' \
               --pattern 'projectMM-*.zip' \
               || echo "  (skip $T — no matching assets)"
@@ -423,6 +473,19 @@ jobs:
           cp src/ui/install-picker.js pages/install/
           # library.json — install page reads the project version from it.
           cp library.json pages/install/
+          # Board picker images live in docs/assets/boards/ (the project's asset
+          # home, also a library for boards not yet in the catalog). Stage ONLY the
+          # images a boards.json entry actually references, under install/assets/,
+          # so an "image": "assets/boards/<slug>.jpg" resolves same-origin from
+          # /install/ without shipping the unused library to Pages.
+          mkdir -p pages/install/assets/boards
+          # rel is "assets/boards/<slug>.<ext>" (the path served from /install/);
+          # the source file lives in docs/<rel> (i.e. docs/assets/boards/...).
+          jq -r '.[].image // empty' docs/install/boards.json | while read -r rel; do
+            src="docs/$rel"
+            [ -f "$src" ] && cp "$src" "pages/install/$rel" \
+              || echo "WARNING: boards.json image not found: $src"
+          done
           # Root landing page (moonmodules.org/projectMM/) → Flash button + repo
           # links. Without it the bare root 404s; only /install/ would exist.
           cp docs/landing/index.html pages/index.html

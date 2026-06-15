@@ -18,7 +18,7 @@ A thin status surface for OTA flashing. The flash itself is driven by `POST /api
 Request body:
 
 ```json
-{ "url": "https://github.com/MoonModules/projectMM/releases/download/v1.0.0/firmware-esp32-eth-wifi-v1.0.0.bin" }
+{ "url": "https://github.com/MoonModules/projectMM/releases/download/v1.0.0/firmware-esp32-v1.0.0.bin" }
 ```
 
 Response:
@@ -32,7 +32,7 @@ The route returns immediately. Real progress streams via `update_status` + `upda
 
 ### Compatibility
 
-The OTA caller is responsible for picking a binary compatible with the running device. The web UI's install-picker enforces this via `src/ui/install-picker.js`'s `isCompatible()` — strip `-eth*` from both sides, equal identities are compatible. So `esp32` / `esp32-eth` / `esp32-eth-wifi` are mutually OTA-compatible (same chip, different feature flags); `esp32s3-n16r8` is only itself. Flashing the wrong firmware's binary fails at `esp_https_ota_begin` (chip family mismatch) or boot (partition table mismatch) — recoverable by re-flashing over USB, not the brick.
+The OTA caller is responsible for picking a binary compatible with the running device. The web UI's install-picker enforces this via `src/ui/install-picker.js`'s `isCompatible()` — strip `-eth*` from both sides, equal identities are compatible. So `esp32` and `esp32-eth` are mutually OTA-compatible (same chip, different feature flags), as is the legacy `esp32-eth-wifi` key (dropped in the variant collapse but still reported by devices flashed before it — it strips to `esp32`); `esp32s3-n16r8` is only itself. Flashing the wrong firmware's binary fails at `esp_https_ota_begin` (chip family mismatch) or boot (partition table mismatch) — recoverable by re-flashing over USB, not the brick.
 
 ## Lifecycle on flash
 

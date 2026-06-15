@@ -23,10 +23,22 @@ When a higher-priority connection becomes available, lower ones are torn down to
 - `password` (password) — WiFi STA password. Serialized to the API XOR-obfuscated + base64-encoded, not in plaintext — a first line of defence only, trivially reversible. See [ui.md § Control types](ui.md#control-types).
 - `rssi` (display-int, dBm) — current WiFi STA signal strength (e.g. `-58 dBm`). 1-byte storage on the device; the unit suffix lives in the descriptor, not in a per-control buffer. Hidden in every state except `ConnectedSta` — Ethernet/AP/Idle have no STA association to read from.
 - `txPower` (display-int, dBm) — current WiFi transmit power (e.g. `19 dBm`). 1-byte storage. Hidden when the radio is off (Ethernet, Idle); shown for STA (waiting + connected) and AP modes.
-- `txPowerSetting` (int16, 0..21 dBm) — user-settable cap on WiFi transmit power. 0 = no override (default). Applied after `esp_wifi_start()` and re-applied on change. Used by the LOLIN WiFi fix: `boards.json` injects `8` for boards whose on-module LDO brown-outs at full power (e.g. `LOLIN S3 N16R8`).
+- `txPowerSetting` (int16, 0..21 dBm) — user-settable cap on WiFi transmit power. 0 = no override (default). Applied after `esp_wifi_start()` and re-applied on change. Used by the weak-power / brown-out WiFi cap: `boards.json` injects `8` for boards whose on-module LDO brown-outs at full power (e.g. the `ESP32-S3 N16R8 Dev`).
 - `addressing` (dropdown: DHCP / Static) — IP addressing mode (applies to both Ethernet and WiFi STA)
 - When Static: `ip`, `gateway`, `subnet`, `dns` (ipv4 controls — 4 bytes of storage each, not 16-char strings; the wire shape is still a dotted-quad string). Shown dynamically via onBuildControls.
 - `mDNS` (bool) — enable/disable mDNS responder
+
+**Ethernet PHY/pin controls** (only on builds with an Ethernet driver — `platform::hasEthernet`). The PHY *driver* is compiled into the firmware per chip (internal-EMAC RMII on classic/P4, W5500 SPI on the S3); these controls pick *which* PHY a board uses and *on which pins* — runtime config, set per board in [`boards.json`](../../install/boards.json) (→ `setEthConfig` → `ethInit`), seeded from the per-chip default in `platform_config.h`. `ethType` is the switch: with it at 0 no pin rows show; choosing a type reveals only that type's pins (RMII rows for LAN8720/IP101, SPI rows for W5500). A W5500 change applies **live** (the SPI driver tears down + re-inits, no reboot); an RMII change saves and applies on the next boot (status hints "restart to apply"). See [architecture.md § Config provenance](../../architecture.md#config-provenance-mcu--board--device).
+- `ethType` (select) — PHY type dropdown, options `None` / `LAN8720` / `IP101` / `W5500` (stored as the index 0..3, matching the `EthPhyType` enum: 0 = none, 1 = LAN8720 RMII, 2 = IP101 RMII, 3 = W5500 SPI).
+- `ethPhyAddr` (pin) — SMI/PHY address (typically 0 or 1).
+- `ethRstGpio` (pin) — PHY reset GPIO (−1 = none / module self-resets).
+- `ethMdcGpio`, `ethMdioGpio` (pin) — RMII SMI clock / data GPIOs (−1 = IDF default). RMII only.
+- `ethClockGpio` (pin) — RMII 50 MHz reference-clock GPIO. RMII only.
+- `ethClockExtIn` (bool) — RMII clock direction: on = clock fed IN by the board, off = chip drives it OUT. RMII only.
+- `ethSpiMiso`, `ethSpiMosi`, `ethSpiSck`, `ethSpiCs`, `ethSpiIrq` (pin) — W5500 SPI pins (`ethSpiIrq` −1 = polling). W5500 only.
+
+(The `pin` controls are `ControlType::Pin` — a one-byte `int8_t` rendered as a plain number input, not a slider: a GPIO has no meaningful range to drag, and the P4 uses pins up to 52. −1 marks an unused/default pin.)
+
 No `status` *control*; the module surfaces its state via the generic `MoonModule::status()` slot — "Eth: 192.168.1.210", "WiFi: 10.0.0.5", "AP: MM-XXX @ 4.3.2.1", or "No network". The UI renders it as a chip in the card header (ℹ️ when connected, ❌ when no network) rather than a control row.
 
 Dynamic controls: `addressing` toggling shows/hides the static-IP fields. State transitions (cascade up to Ethernet, fall back to AP, STA reconnect) trigger a rebuildControls() so the rssi/txPower hidden flags re-evaluate. The metric strings refresh every loop1s() tick — same buffer addresses, so no rebuild is needed for value updates, only for visibility.
@@ -45,9 +57,9 @@ Included in NetworkModule (not separate). Registers the deviceName on whichever 
 
 ## Ethernet
 
-Ethernet init is part of NetworkModule::setup(). Board-specific GPIO config (MAC, PHY, clock pin, reset pin) is hardcoded per board via compile-time defines in `sdkconfig.defaults.<board>`.
+Ethernet init is part of `NetworkModule::setup()`, which calls `syncEthConfig()` (pushes the eth controls above into `platform::setEthConfig`) then `platform::ethInit()`. The PHY type and pins are **runtime** config (the `ethType` + pin controls above), not compile-time — see the controls list and [architecture.md § Config provenance](../../architecture.md#config-provenance-mcu--board--device).
 
-The firmware always includes Ethernet support — no separate firmware for Ethernet vs WiFi boards. On boards without Ethernet hardware, the init fails silently and WiFi STA becomes Plan A. The code overhead of unused Ethernet support is minimal (no runtime memory cost when not initialized).
+Which Ethernet *driver* is compiled in is per chip (the firmware variant): classic/P4 carry the internal-EMAC RMII driver, the S3 the W5500 SPI driver; a build with no Ethernet driver (`MM_NO_ETH`) stubs `ethInit()` to return false. When no PHY responds (no cable, or no hardware), `ethInit()` returns false and the cascade falls through to WiFi STA → AP — no GPIO grab, no hang.
 
 ## Memory
 

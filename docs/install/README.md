@@ -27,13 +27,200 @@ end-to-end, no ESP Web Tools dependency on the install path.
   user provisioned from this page so they can re-visit / erase / forget
   them. Renders a dedicated *Inject* button next to Visit for every entry
   with a `board` field; the button opens `<device>/?board=<name>` and the
-  device UI fetches the matching `boards.json` entry from Pages to fan out
-  each `controls.*` field via `/api/control`. Idempotent — safe to re-click
-  after a popup-blocker rejection or a follow-up catalog edit.
+  device UI fetches the matching `boards.json` entry from Pages and, for each of
+  its `modules`, adds the module (`/api/modules`) then sets its nested controls
+  (`/api/control`) — add-then-configure; see the schema below. Idempotent — safe
+  to re-click after a popup-blocker rejection or a follow-up catalog edit.
 - [`boards.json`](boards.json) — the board catalog (name → firmware
-  variants) the picker fetches and the BoardModule injector writes from.
+  variants + the modules/controls to inject) the picker fetches and the
+  installer / device-UI / MoonDeck injectors write from. Schema below.
 - [`favicon.png`](favicon.png) — moon-man, same as the device UI.
 - [`README.md`](README.md) — this file.
+
+## Picture board picker
+
+The board picker is a visual card grid driven by each board's `image` and
+(optional) `url` catalog fields (see the schema below — both are optional; a card
+without an `image` just shows no photo, without a `url` shows no product link) plus
+its `supported`/`planned` capability chips. It reuses the installer's flash machinery unchanged — the grid drives the
+shared [`install-picker.js`](../../src/ui/install-picker.js) through a hidden board
+`<select>`, so the firmware-narrowing and flash flow are identical to a plain
+dropdown pick. Board images are a Pages-only asset (staged from
+`docs/assets/boards/`), never flashed.
+
+The picker is a collapsed row consistent with the other fields; clicking it
+expands the searchable card grid, and picking a board collapses it back to a
+labelled summary with a thumbnail:
+
+| Collapsed | Expanded |
+|---|---|
+| ![Board picker collapsed](../assets/screenshots/installer-board-picker-collapsed.png) | ![Board picker expanded](../assets/screenshots/installer-board-picker-expanded.png) |
+
+## Catalog schema (`boards.json`)
+
+A flat JSON array of catalog entries. Each entry is the single source of truth
+for one piece of hardware and what to set up on it at install time. Three
+clients consume it identically — the web installer (`install-orchestrator.js`),
+the device UI's `?board=` inject (`src/ui/app.js`), and MoonDeck
+(`scripts/moondeck.py`) — so **adding another module-with-controls unit needs no
+client change**.
+
+```json
+{
+  "name": "projectMM testbench S3",
+  "chip": "ESP32-S3",
+  "firmwares": ["esp32s3-n16r8"],
+  "default_firmware": "esp32s3-n16r8",
+  "modules": [
+    { "type": "Board", "id": "Board", "parent_id": "System",
+      "controls": { "board": "projectMM testbench S3" } },
+    { "type": "AudioModule", "id": "Audio", "parent_id": "System",
+      "controls": { "wsPin": 4, "sdPin": 5, "sckPin": 6 } },
+    { "type": "RmtLedDriver", "id": "RmtLed", "parent_id": "Drivers",
+      "controls": { "pins": "18", "loopbackTxPin": 13, "loopbackRxPin": 12 } }
+  ]
+}
+```
+
+Each entry is a **list of module-with-controls units** — "create this module (if
+not already present), then set its controls" as one unit. This is the same shape
+the scenario test format expresses with `add_module` + `set_control`, so a catalog
+entry reads like a scenario's setup phase. Even `Board` is a module entry (it's a
+boot-wired child of `System`, so the add is an idempotent no-op and only its
+`board` control applies).
+
+**LED drivers are catalog-added, not boot-wired.** The only driver the firmware
+creates at boot is `Preview` (it needs the HTTP-server broadcaster the catalog
+can't supply); every other driver — `RmtLedDriver`, `LcdLedDriver`,
+`ParlioLedDriver`, `NetworkSendDriver` — is added per board through its `modules`
+block (to the `Drivers` container), so a device only carries the outputs its board
+actually has instead of every driver the chip is capable of. The default LED
+driver per chip: **classic ESP32 → `RmtLedDriver`**, **S3 → `RmtLedDriver`** (LCD
+needs the full 8-lane bus — see the [LcdLedDriver spec](../moonmodules/light/drivers/LcdLedDriver.md);
+1..8-pin LCD is a future extension), **P4 → `ParlioLedDriver`** (runs 1–8 lanes).
+
+The `RmtLed` `controls` block presets the loopback self-test pins so a bench
+operator just flips the `loopbackTest` switch — no re-typing. **`loopbackTxPin` and
+`loopbackRxPin` are the test jumper (tx→rx), separate from the operational `pins`**:
+on the S3 the strip runs on `pins`=18 while the loopback transmits on 13 and
+captures on 12. (Without `loopbackTxPin` the test would fall back to transmitting on
+`pins[0]` — fine when the jumper is on the LED pin, but the testbench's jumper is on
+a dedicated pin, which is exactly why the override is stored.) `loopbackTest` is left
+off (presetting pins doesn't auto-run the blocking test). The sibling
+`projectMM testbench ESP32-16MB` adds `RmtLedDriver` (`pins`=18, loopback tx=4/rx=5);
+the `…P4` adds `ParlioLedDriver` (`pins`=20–27, `ledsPerPin`=64, loopback tx=33/rx=32).
+Only the S3 bench has a mic wired, so only it carries `AudioModule`. Each entry
+declares only what is actually on that board.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `name` | yes | identifier **and** display label (no key/label split) |
+| `chip` | yes | the MCU family, for the picker's chip filter |
+| `firmwares` / `default_firmware` | yes | the firmware variants flashable on this hardware |
+| `image` | no | board photo for the picker — a local path under `assets/boards/`, named for the board's slug (e.g. `assets/boards/quinled-dig-2-go.jpg`). Host our own copy, never a vendor hotlink — see [§ Board images & links](#board-images--links) below |
+| `url` | no | product-page link the picker shows next to the board (the vendor's own page, e.g. `https://quinled.info/quinled-dig2go/`). A remote URL is fine here — it's a click-through link, not an asset the installer fetches |
+| `supported` | no | short capability labels the firmware drives on this board *today* (e.g. `["LEDs", "WiFi", "Ethernet"]`), grounded in the modules the entry actually adds. Rendered as solid chips on the picker card |
+| `planned` | no | short labels for peripherals the board physically has but no module drives *yet* (e.g. `["IR receiver", "Onboard button"]`) — the backlog seed for future spec + test work. Rendered as dashed "(soon)" chips on the picker card |
+| `modules` | yes | the list of module-with-controls units that set the board up |
+
+Each `modules[]` unit is `{ type, id, parent_id?, controls? }`:
+
+| Module field | Meaning |
+|---|---|
+| `type` | factory type to create (e.g. `RmtLedDriver`, `AudioModule`, `Board`) |
+| `id` | the module's name — used both as the `POST /api/modules` id **and** as the `module` in every `POST /api/control`, so the two stay in sync |
+| `parent_id` | the container to add it under (`Drivers`, `System`). **Omitted** for a module that already exists at boot (e.g. `Network`) — the client then skips the add and only sets controls |
+| `controls` | the controls to set on that module after it exists |
+
+`type` and `parent_id` are spelled out even though `id` could imply them
+(`RmtLed`→`RmtLedDriver` under `Drivers`). Kept explicit on purpose: the two
+consumers of this shape — the offline in-process scenario runner (C++) and the
+online installer clients (JS/Python over HTTP) — can't share an `id`→`type`
+inference table without triplicating it across three languages, which is worse
+duplication than the field repetition. So a unit stays fully self-describing, the
+same way a scenario `add_module` op is. The bloat is the honest cost of that.
+
+**Add-then-configure, per module.** For each unit the client adds the module
+(when it has a `parent_id` — a fresh flash has no user-added modules like
+`AudioModule`, so a control write would 404), then sets its `controls`.
+`POST /api/modules` is idempotent (an existing `id` returns 200), so re-running an
+inject is safe. The `id` is what the controls address, so it is set explicitly
+(factory display names disambiguate on collision).
+
+**Injection is opportunistic and partial.** A module's `controls` (and the units
+list itself) carry **only what is known and hardware-fixed** (vendor-soldered mic
+pins, board-fixed Ethernet pins). A bare board whose LED or mic pins the *user*
+wires omits them; the user adds the module and sets the pins manually later.
+Inject nothing you don't know. (This is the
+MCU/Board/Device provenance rule from
+[architecture.md § Config provenance](../architecture.md#config-provenance-mcu--board--device):
+default a pin only at the level that fixes it.) The `projectMM testbench S3`
+entry above adds an `AudioModule` with the real, verified INMP441 mic pins
+(WS=4/SD=5/SCK=6, matching the bench wiring in
+[`AudioModule.h`](../../src/core/AudioModule.h)) plus an `RmtLedDriver`
+(LEDs on `pins`=18, loopback jumper tx=13→rx=12) — a known-hardware Device on the
+maintainer's desk, so the inject is testable end-to-end. The `ESP32-16MB` sibling
+adds `RmtLedDriver` (LEDs=18, loopback tx=4/rx=5); the `P4` sibling adds
+`ParlioLedDriver` (LEDs=20–27, loopback tx=33/rx=32). Only the S3 has a mic
+wired. Each carries only what is physically present (LCD is not preset on the S3
+testbench — its 8-lane bus would clash with the mic pins 4/5/6).
+
+**Specific boards/devices: spec 'n test first.** A real product entry only grows
+a peripheral/pin unit once that hardware has its own spec (with the product-page
+link + grabbed images for installer selection and pin layout) and a test pinning
+it — the project's *Specs before code* applied to catalog hardware. So vendor
+entries (the QuinLED Dig-2-Go, the Serg shields, …) carry only their **`Board`
+unit plus the default LED driver** until spec'n'tested for more; e.g. whether the
+Dig-2-Go's *onboard* mic is even supported is an open spec'n'test question, so its
+entry adds no `AudioModule`. The per-board capability loop that drives this — read
+capabilities off the image/link, wire what we support, propose+test what we don't —
+is recorded in [decisions.md § catalog-driven installer branch](../history/decisions.md).
+
+### Board images & links
+
+The `image` (board photo, eventually pin-annotated) and `url` (product page) are
+the picker's visual layer **and** the inputs to the per-board capability loop above.
+
+- **`image` — host our own copy, never hotlink a vendor URL.** Three reasons:
+  (1) a hotlink breaks whenever a vendor reshuffles their CDN, and the installer must
+  keep working same-origin/offline (the same constraint that bundles firmware
+  manifests into Pages); (2) we want pin-annotated overlays anyway, which means a
+  *derived* image, not the raw shot; (3) third-party product photos are the vendor's
+  copyright — redistributing them needs permission. So: use the `url` to *find* the
+  reference photo, then either shoot/redraw our own **or** check a local copy into
+  [`docs/assets/boards/`](../assets/boards/) **with permission**, named for the
+  board's slug. The catalog stores a local path, never a remote image URL.
+- **`url` — a remote link is fine.** It's a click-through to the vendor's own page,
+  not an asset the installer fetches.
+- **Deploy** stages only the *referenced* images (not the whole `docs/assets/boards/`
+  library, which also holds photos for boards not yet in the catalog) into
+  `install/assets/boards/`, so an `image: "assets/boards/<slug>.jpg"` resolves
+  same-origin from `/install/boards.json`.
+
+**One entry type, no Board/Device split.** A "Device" (a finished rig like the
+`projectMM testbench S3` — board + a wired mic) is just an entry with *more* of
+`modules`/`controls` filled in than a bare "Board". Same schema; there is no
+separate `devices.json`.
+
+**`extends` (reserved, not yet resolved).** The carrier/shield pattern is
+literal extension (a Serg shield = a D1-Mini32 board *plus* the shield's pins),
+so a future optional **`extends: "<parent entry name>"`** lets an entry inherit
+another's `modules`/`controls` (multi-level MCU→carrier→device; child overrides
+parent at the same `{module, control}`; `modules` concatenate, deduped by `id`).
+The resolver is a client-side pre-pass to be built at the first real shared-base
+collision — today every entry is self-contained, so it isn't implemented yet.
+Don't author duplicated pin blocks expecting `extends` to dedupe them until it
+ships.
+
+**Shared op vocabulary.** A catalog entry's `modules` list is a test
+[scenario](../../test/scenarios/) setup phase minus the `measure` asserts — the
+same two operations per module: `add_module {type, id, parent_id}` (==
+`POST /api/modules`) and set-control (== `POST /api/control`). Both express
+"create a module, then configure it." (A scenario keeps a separate `props` block
+for in-process C++ construction wiring — `setLayouts`/`setChannelsPerLight`/grid
+dims that aren't control writes — which the catalog never needs, so the catalog
+unit carries only `controls`.) `scripts/scenario/run_live_scenario.py` already
+runs these ops over HTTP against a live device, the same channel the installer uses.
 
 ## What's *not* in this directory
 
@@ -98,7 +285,7 @@ RUN_ID=$(gh run list --workflow=release.yml --branch=$(git branch --show-current
 echo "Using run $RUN_ID"
 
 # Download the 4 firmware artefacts, flatten, regenerate Pages-relative manifests.
-for F in esp32 esp32-eth esp32-eth-wifi esp32s3-n16r8; do
+for F in esp32 esp32-eth esp32s3-n16r8; do
   TMP=$(mktemp -d)
   gh run download "$RUN_ID" -n "esp32-$F" -D "$TMP"
   cp "$TMP"/*.bin "$DIST/releases/$TAG/"

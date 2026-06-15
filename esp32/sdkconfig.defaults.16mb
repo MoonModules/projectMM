@@ -3,9 +3,10 @@
 # flash size + esp32dev.csv partition with a 16 MB layout. No PSRAM — this is a
 # classic-ESP32 WiFi build; the win is bigger OTA slots + filesystem, not RAM.
 
-# Custom partition table — 16MB layout (app0/app1 = 4 MB each, spiffs ~7.9 MB)
+# Custom partition table — shared 16 MB layout (app0/app1 = 4 MB each, spiffs
+# ~7.9 MB). Chip-independent flash map; same file for S3-N16R8 and P4-NANO.
 CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/esp32_16mb.csv"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/ota_16mb.csv"
 
 # Flash size override (base default is 4MB). Only the choice symbol — the
 # FLASHSIZE string is derived from it, matching the esp32s3-n16r8/n8r8 fragments.

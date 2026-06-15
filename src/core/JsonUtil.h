@@ -40,6 +40,17 @@ inline void parseString(const char* json, const char* key, char* out, size_t max
     out[oi] = 0;
 }
 
+// True when `key` is present in the JSON object. Lets callers distinguish a
+// genuinely-absent key from one whose value happens to be 0/false — parseInt and
+// parseBool can't, so applying their result for an absent key would clobber a
+// control's non-zero default (e.g. eth phyType=2) with 0 on a partial/older save.
+inline bool hasKey(const char* json, const char* key) {
+    if (!json || !key) return false;
+    char search[48];
+    std::snprintf(search, sizeof(search), "\"%s\":", key);
+    return std::strstr(json, search) != nullptr;
+}
+
 inline int parseInt(const char* json, const char* key) {
     if (!json || !key) return 0;
     char search[48];
@@ -65,7 +76,10 @@ inline bool parseBool(const char* json, const char* key) {
     if (!start) return false;
     const char* val = start + std::strlen(search);
     while (*val == ' ') val++;
-    return std::strncmp(val, "true", 4) == 0;
+    // Accept both the JSON literal `true` and a numeric `1` — boards.json / the
+    // catalog fan-out historically wrote 0/1 for flags that are now Bool controls
+    // (e.g. ethClockExtIn), and some HTTP clients send 1/0; treat either as true.
+    return std::strncmp(val, "true", 4) == 0 || *val == '1';
 }
 
 } // namespace mm::json

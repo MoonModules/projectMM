@@ -48,6 +48,10 @@ enum class ControlType : uint8_t {
                 // values are legal — e.g. a Layer's start/end dragged out of the
                 // visible area by a future modifier. (The light domain's grid
                 // coordinate type is int16 for this reason.)
+    Pin,        // a GPIO number (int8_t storage, -1 = unused/default). Distinct
+                // from Int16 so the UI renders a plain number input, not a slider:
+                // a GPIO has no meaningful range to drag, and pins span 0..~52
+                // across chips. Serializes/parses as a plain integer.
     Bool,
     Text,
     Password,   // secret text — /api/state serializes it XOR-obfuscated +
@@ -122,6 +126,17 @@ public:
                   int16_t min = INT16_MIN, int16_t max = INT16_MAX) {
         grow();
         controls_[count_++] = {&var, name, 0, ControlType::Int16, min, max};
+    }
+
+    // A GPIO pin number (int8_t storage — one byte; -1 = unused/default). A GPIO
+    // never exceeds ~54 on any ESP32-family chip, so int8 (−128..127) is ample and
+    // smaller than int16. Renders as a plain number input, not a slider (see
+    // ControlType::Pin): a GPIO has no meaningful range to drag. min/max are the
+    // valid-GPIO span (−1..52), used only as a server-side write-clamp guard; the
+    // UI keys rendering off the "pin" type string, not the range.
+    void addPin(const char* name, int8_t& var, int16_t min = -1, int16_t max = 52) {
+        grow();
+        controls_[count_++] = {&var, name, 0, ControlType::Pin, min, max};
     }
 
     void addBool(const char* name, bool& var) {

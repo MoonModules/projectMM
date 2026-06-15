@@ -38,7 +38,8 @@ import { ImprovSerial } from "https://unpkg.com/improv-wifi-serial-sdk@2.5.0/dis
 const IMPROV_CMD_SET_BOARD = 0xFE;
 
 // SET_TX_POWER vendor RPC command ID — the pre-association TX-power cap for
-// boards whose LDO browns out at full power (LOLIN S3/S2). Their boards.json
+// boards whose LDO browns out at full power (a thin on-module LDO or marginal
+// USB supply, e.g. some S2/S3 mini-class boards). Their boards.json
 // cap (controls.Network.txPowerSetting) used to arrive only via the HTTP
 // fan-out AFTER the device was online, which a browning-out board can never
 // reach: it fails WiFi auth at 20 dBm first (proven on the bench 2026-06-10).
@@ -248,8 +249,36 @@ async function tryHttpInjectBoard(deviceUrl, board) {
     } catch (_) {
         return false;
     }
-    if (!entry || !entry.controls) return false;
-    for (const [moduleName, controls] of Object.entries(entry.controls)) {
+    if (!entry) return false;
+    // Each entry is a list of module-with-controls units:
+    //   { type, id, parent_id?, controls? }
+    // Per module: add it first (when it has a parent_id — a fresh flash has no
+    // user-added modules like AudioModule, so a control write would 404), then set
+    // its controls. A module without parent_id is boot-wired/top-level (Board under
+    // System, Network) that already exists — skip the add, just set controls. The
+    // add is idempotent (an existing id returns 200). This is the install flow, so
+    // any failure aborts the inject (all-or-nothing).
+    const modules = Array.isArray(entry.modules) ? entry.modules : [];
+    for (const m of modules) {
+        if (!m || typeof m !== "object") continue;
+        // id keys both the module add and every control write below; a unit
+        // without one is malformed catalog data — skip it rather than POST a
+        // body the device can't route.
+        if (typeof m.id !== "string" || m.id === "") continue;
+        if (m.parent_id && m.type) {
+            try {
+                const res = await fetch(new URL("api/modules", deviceUrl), {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ type: m.type, id: m.id, parent_id: m.parent_id }),
+                    signal: AbortSignal.timeout(5000),
+                });
+                if (!res.ok) return false;
+            } catch (_) {
+                return false;
+            }
+        }
+        const controls = m.controls;
         if (!controls || typeof controls !== "object") continue;
         for (const [controlName, value] of Object.entries(controls)) {
             try {
@@ -257,7 +286,7 @@ async function tryHttpInjectBoard(deviceUrl, board) {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        module: moduleName,
+                        module: m.id,
                         control: controlName,
                         value,
                     }),
@@ -281,6 +310,28 @@ async function tryHttpInjectBoard(deviceUrl, board) {
 // second go on the RTS/DTR pulse). The rest of the body is reproduced
 // verbatim from esptool-js's ESPLoader.main — when the SDK pin bumps,
 // re-verify the sequence still matches upstream.
+// esptool's getChipDescription() reports the specific silicon (e.g.
+// "ESP32-D0WD-V3", "ESP32-S3 (QFN56) (revision v0.2)", "ESP32-C6 (revision v0.0)"),
+// but the picker compares against boards.json's coarse `chip` FAMILY — the same
+// vocabulary build_esp32's TARGET_TO_FAMILY defines and the ESP Web Tools manifest
+// carries as `chipFamily` ("ESP32", "ESP32-S3", "ESP32-P4", and any future
+// S2/C3/C6/… as projectMM grows to support every ESP32-family chip). Without
+// normalising, a classic ESP32 matches NO board
+// (filter) and the flash guard false-warns on a correct flash.
+//
+// Normalise by KEEPING the family token and dropping the package/revision tail —
+// not by collapsing distinct chips. A bare "ESP32-<X>…" keeps "ESP32-<X>"; classic
+// silicon (ESP32-D0WD*, ESP32-PICO-*, ESP32-U4WDH — no second family token) maps to
+// plain "ESP32". This is forward-proof: a new ESP32-C5 needs no code change here.
+function chipFamily(chipName) {
+    const s = String(chipName || "").trim();
+    // ESP32-<LETTER+DIGITS> at the start is a sub-family (S3/P4/S2/C3/C6/C5/H2/…).
+    const sub = s.match(/^ESP32-([A-Z]\d+)\b/);
+    if (sub) return "ESP32-" + sub[1];
+    if (/^ESP32\b/.test(s)) return "ESP32";   // classic — no sub-family token
+    return s;                                  // unknown — pass through so it's visible
+}
+
 async function connectAndDescribeChip(esploader) {
     await esploader.connect("default_reset", 2);
     const chipName = await esploader.chip.getChipDescription(esploader);
@@ -629,8 +680,8 @@ export const installer = {
             // Without this, port.open() raises before the kernel re-attaches
             // the new endpoint. 3 s rather than 2 s because the ESP32-S3
             // native-USB path reaches "app ready, Improv task installed"
-            // at ~1.85 s after reset (boot log measurement on LOLIN S3
-            // N16R8), and the original 2 s window left no margin for host-
+            // at ~1.85 s after reset (boot log measurement on an
+            // ESP32-S3-DevKitC clone), and the original 2 s window left no margin for host-
             // side USB re-enum (extra ~100-300 ms on macOS). The retry
             // button on the needs-ip dialog still catches the long tail —
             // this just makes the common case land without a retry click.
@@ -657,7 +708,7 @@ export const installer = {
                 port = await navigator.serial.requestPort({});
                 await port.open({ baudRate: 115200 });
             }
-            // Pre-association TX-power cap (LOLIN brown-out fix): push it
+            // Pre-association TX-power cap (weak-power brown-out fix): push it
             // while we still own the port, before ImprovSerial locks it.
             // The device applies + persists it within a second — long
             // before the user finishes the WiFi form below.
@@ -881,7 +932,7 @@ export const installer = {
             //     SET_BOARD over serial wasn't possible.
             //   - Improv-success: SET_BOARD already pushed `Board.board` over
             //     serial, but every OTHER field in `controls.*` (e.g.
-            //     `Network.txPowerSetting` for the LOLIN WiFi fix) needs
+            //     `Network.txPowerSetting` for the weak-power WiFi cap) needs
             //     this fan-out to reach the device. Without it the board
             //     identifier lands but the per-board tweaks don't.
             // Gated by `canFetchHttp(deviceUrl)` — on HTTPS Pages the
@@ -966,8 +1017,11 @@ export const installer = {
         });
         try {
             const chipName = await connectAndDescribeChip(esploader);
+            // Keep the raw silicon name in _detected for the flash-progress log
+            // (more informative there); hand the picker the FAMILY, which is what
+            // it compares against boards.json's `chip`.
             _detected = { port, transport, esploader, chipName };
-            return chipName;
+            return chipFamily(chipName);
         } catch (e) {
             // Failed before we could stash it — release the port so the next
             // attempt (or a manual flow) can re-open cleanly.

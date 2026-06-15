@@ -147,6 +147,20 @@ TEST_CASE("RmtLedDriver loopbackRxPin tracks the loopbackTest toggle") {
     mm::test::checkConditionalControl(d, "loopbackRxPin", setTest, /*visibleWhenTrue=*/true);
 }
 
+// loopbackTxPin is the optional TX override (transmit on it instead of pins[0]
+// during the self-test). Like loopbackRxPin it's a conditional control: always
+// bound (so a saved override loads), shown only while loopbackTest is on. The
+// override's effect on the transmitted pin is hardware-only (rmtTxChannels==0 on
+// desktop), but the conditional-visibility contract is host-testable here.
+TEST_CASE("RmtLedDriver loopbackTxPin tracks the loopbackTest toggle") {
+    mm::RmtLedDriver d;
+    d.onBuildControls();
+    auto setTest = [&](bool on) {
+        mm::test::setControlValue<bool>(d, "loopbackTest", on);
+    };
+    mm::test::checkConditionalControl(d, "loopbackTxPin", setTest, /*visibleWhenTrue=*/true);
+}
+
 // Editing `pins` while the loopback test is ON must refresh the parsed config
 // before the self-test runs — onUpdate fires before the buildState sweep re-parses,
 // so without the in-branch parseConfig() the test would transmit on the OLD pin and

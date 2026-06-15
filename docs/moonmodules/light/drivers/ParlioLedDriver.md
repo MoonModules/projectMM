@@ -37,7 +37,8 @@ Identical semantics to the [RMT driver](RmtLedDriver.md#buffer-slicing-across-pi
 - `pins` (text, default empty) — comma-separated data GPIOs, one lane each, **1 to 8** (no all-pins rule). Empty by default (the strand is user-soldered, so no pin is assumed — the driver idles until set). Choosing pins on the P4-NANO, **avoid**: STRAPPING pins **34–38** (boot-mode control — driving these can break boot, never use them for output), Ethernet RMII (28–31, 49–52), the ESP32-C6 SDIO (14–19, 54), and I2C (7–8). The clear GPIOs are **20–27, 32–33, 39–48**; a known-good bench set is `20,21,22,23,24,25,26,27`. Add pins for parallel strips. Changing it re-creates the Parlio TX unit **live, no reboot** ([§ Live reconfiguration](../../../architecture.md#live-reconfiguration-every-change-applies-without-a-reboot)). The loopback self-test transmits on the **first** pin.
 - `ledsPerPin` (text, default empty) — lights per lane, matched by position; empty = even split over the wired lanes (all lights on the first lane when one pin is set), remainder to the last lane. Same semantics as the RMT/LCD drivers.
 - `loopbackTest` (bool) — one-shot **whole-frame** signal self-test: TX on the first pin in `pins`, RX on `loopbackRxPin`. It builds the real frame (test pattern in every row on lane 0), transmits it back to back like the render loop through a private Parlio TX unit, captures the entire frame on the RX pin (RMT-RX with the P4's DMA backend — the [same `rmtWs2812RxCapture`](RmtLedDriver.md#loopback-self-test-on-device) the RMT/LCD rigs use, transmitter-agnostic), and bit-verifies every WS2812 bit. The verdict lands in the status field: `loopback PASS`, `loopback FAIL: bad bit N/M (light K)`, or `loopback: jumper not detected` (a plain-GPIO continuity pre-check runs first). The strip on lane 0 flickers once during the run; normal output resumes after.
-- `loopbackRxPin` (uint16_t, default unset) — the RX pin for the self-test; set it when you wire the jumper (the bench used 33, jumper GPIO 32 → 33, both strapping-safe). Shown only while `loopbackTest` is on.
+- `loopbackTxPin` (uint16_t, default unset) — optional **TX override** for the self-test: the loopback drives only lane 0 with the test pattern, so when this is set it transmits on this pin in place of lane 0 (`pins[0]`), the other lanes unchanged — letting the test run on a dedicated jumper without re-typing `pins`. Falls back to lane 0 when unset. Test-only — normal output uses `pins`. Shown only while `loopbackTest` is on.
+- `loopbackRxPin` (uint16_t, default unset) — the RX pin for the self-test; set it when you wire the jumper (the bench used 33, jumper the TX pin → 32, both strapping-safe). Shown only while `loopbackTest` is on.
 
 ## Memory
 
@@ -45,7 +46,7 @@ One internal-RAM DMA frame buffer owned by the platform (PSRAM is deliberately n
 
 ## Cross-domain wiring
 
-Added as a child of the `Drivers` container in `main.cpp` under `if constexpr (platform::parlioLanes > 0)` (SOC-derived: the P4 among current targets), wired by code like its siblings. The **slot encode** ([LcdSlots.h](../../../../src/light/drivers/LcdSlots.h), shared) is domain code, host-testable; the **peripheral** (`platform_esp32_parlio.cpp`, ESP-IDF's `esp_driver_parlio` TX unit + DMA) is the only IDF-touching part.
+The driver is added as a child of the `Drivers` container at runtime via the catalog (`POST /api/modules`, a board's [`boards.json`](../../../install/boards.json) `modules` entry) — not boot-wired, so it only exists on a board that selects it. The type is registered on every target, but the peripheral exists only where the SOC has the Parlio TX unit (the P4 among current targets): on a chip without it the driver is inert (`lanesAvailable()` is 0), so a board entry only lists `ParlioLedDriver` where it makes sense. Once added, `Drivers::passBufferToDrivers` wires it like any child. The **slot encode** ([LcdSlots.h](../../../../src/light/drivers/LcdSlots.h), shared) is domain code, host-testable; the **peripheral** (`platform_esp32_parlio.cpp`, ESP-IDF's `esp_driver_parlio` TX unit + DMA) is the only IDF-touching part.
 
 ## Tests
 
@@ -53,7 +54,8 @@ Full case list in the generated [unit tests § ParlioLedDriver](../../../tests/u
 
 - **Encoder (CI, host):** shared with the LCD driver — the 3-slot byte layout is covered under [LcdLedDriver](LcdLedDriver.md#tests); not re-tested here.
 - **Driver (CI, host):** lane slicing (including unequal leds-per-lane), frame-byte math (RGBW growth, alignment rounding, latch pad), the **1–8 lanes accepted** rule (the Parlio-vs-i80 difference), over-8 rejection, bad-pin status + recovery, the empty-default idle (no GPIO claimed until pins are set), zero-grid + loop() crash-safety, teardown.
-- **Hardware:** tick-scaling across grid sizes proves frames clock out; the whole-frame loopback self-test (jumper GPIO 32 → 33) bit-verifies the wire signal on the P4.
+- **`loopbackTxPin` control (CI, host):** the conditional control — bound always, shown only while `loopbackTest` is on.
+- **Hardware:** tick-scaling across grid sizes proves frames clock out; the whole-frame loopback self-test bit-verifies the wire signal on the P4. The driver is catalog-added (not boot-wired) — verified on the P4-NANO bench: a fresh-erased board has no `ParlioLed` until a board is selected, a catalog inject creates it under `Drivers` (`pins`=20–27, `ledsPerPin`=64, `loopbackTxPin`=33, `loopbackRxPin`=32), and it persists across a reboot. The loopback drives only lane 0, so `loopbackTxPin` substitutes for lane 0 (TX jumper 33 → RX 32) without retyping `pins`.
 
 ## Prior art
 

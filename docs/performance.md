@@ -128,10 +128,10 @@ Same source tree, same MCU (ESP32 classic, 160 MHz):
 
 | Board / firmware | 128×128 tick | ArtNet send |
 |---|---|---|
-| Olimex Gateway, `esp32` (WiFi-only) | 220 ms (4 FPS) | 155 ms |
-| Olimex Gateway, `esp32-eth-wifi` | 85–95 ms (10–12 FPS) | 38 ms |
+| Olimex Gateway, old WiFi-only `esp32` (pre-collapse) | 220 ms (4 FPS) | 155 ms |
+| Olimex Gateway, default `esp32` (WiFi + Ethernet; was `esp32-eth-wifi`) | 85–95 ms (10–12 FPS) | 38 ms |
 
-The Olimex `esp32` build is 4× slower at ArtNet than `esp32-eth-wifi` on the same board — `sdkconfig.defaults.eth` enlarges a shared lwIP/WiFi buffer pool via `CONFIG_ETH_DMA_*` that the WiFi-only build doesn't get. **Use `esp32-eth-wifi` for any ArtNet workload on classic ESP32**, even without Ethernet connected. Generic ESP32 boards (no PCB-trace antenna, less stable 3V3) vary wildly in WiFi TX quality vs the Olimex.
+The old WiFi-only `esp32` build was 4× slower at ArtNet than the build with the `.eth` fragment on the same board — `sdkconfig.defaults.eth` enlarges a shared lwIP/WiFi buffer pool via `CONFIG_ETH_DMA_*` that the WiFi-only build didn't get. The variant collapse made the eth-wifi build the **default `esp32`**, so today's default already carries those buffers — there is no longer a WiFi-only classic variant to fall behind. Generic ESP32 boards (no PCB-trace antenna, less stable 3V3) vary wildly in WiFi TX quality vs the Olimex.
 
 ### Memory at 128×128 with mirror
 
@@ -159,9 +159,9 @@ LUT is half desktop size (uint16_t vs uint32_t per entry). The 1:1 (no-modifier)
 
 ---
 
-## ESP32-S3 — LOLIN S3 N16R8 (16 MB flash, 8 MB octal PSRAM)
+## ESP32-S3 — ESP32-S3 N16R8 Dev (16 MB flash, 8 MB octal PSRAM)
 
-`esp32s3-n16r8` firmware on LOLIN S3 N16R8 at `Network.txPowerSetting=8` dBm (the brown-out cap injected by `boards.json`). 128×128 grid, Mirror XY, ArtNet over WiFi STA — the `scenario_GridLayout_grid_sizes.json` sweep against the live device. Per-step tick/heap live in `observed.esp32s3-n16r8` across the scenarios. Numbers below are the 128×128 step.
+`esp32s3-n16r8` firmware on the ESP32-S3 N16R8 Dev at `Network.txPowerSetting=8` dBm (the brown-out cap injected by `boards.json`). 128×128 grid, Mirror XY, ArtNet over WiFi STA — the `scenario_GridLayout_grid_sizes.json` sweep against the live device. Per-step tick/heap live in `observed.esp32s3-n16r8` across the scenarios. Numbers below are the 128×128 step.
 
 | Metric | Value | Notes |
 |---|---|---|
@@ -177,9 +177,9 @@ Per-grid-size FPS from the same sweep: 16×16 → 1672, 32×32 → 287, 64×64 �
 
 ### Why ArtNet is slower at 8 dBm
 
-The LOLIN brown-out fix caps TX power 12 dB below default (8 dBm vs ~20 dBm). At lower TX power, the WiFi PHY rate-adaptation algorithm picks a slower MCS rate to maintain link margin — for a frame burst this means more time on-air per packet. ~960 µs/packet × 97 packets = the ~93 ms ArtNet budget. The cap is the price of a stable association on this hardware; without it the radio brown-outs and ArtNet doesn't get sent at all.
+The brown-out cap drops TX power 12 dB below default (8 dBm vs ~20 dBm). At lower TX power, the WiFi PHY rate-adaptation algorithm picks a slower MCS rate to maintain link margin — for a frame burst this means more time on-air per packet. ~960 µs/packet × 97 packets = the ~93 ms ArtNet budget. The cap is the price of a stable association on this hardware; without it the radio brown-outs and ArtNet doesn't get sent at all.
 
-**Use Ethernet-capable boards for high-FPS ArtNet workloads.** The LOLIN S3 N16R8 fits the "lots of PSRAM, accept WiFi compromise" niche — large pixel buffers or feature-heavy effects that wouldn't fit in 320 KB internal RAM.
+**Use Ethernet-capable boards for high-FPS ArtNet workloads.** The ESP32-S3 N16R8 Dev fits the "lots of PSRAM, accept WiFi compromise" niche — large pixel buffers or feature-heavy effects that wouldn't fit in 320 KB internal RAM.
 
 ### Memory at 128×128 with mirror
 
@@ -195,7 +195,7 @@ The PSRAM-merged heap (`totalHeap() > totalInternalHeap()`) is auto-detected —
 
 ## ESP32 firmware size
 
-Board: `esp32-eth-wifi` (largest variant). Partition layout: app0/app1 = 1.75 MB each, LittleFS = 384 KB, coredump = 64 KB.
+Board: the default `esp32` (WiFi + Ethernet — the largest classic variant, measured pre-collapse as `esp32-eth-wifi`). Partition layout: app0/app1 = 1.75 MB each, LittleFS = 384 KB, coredump = 64 KB.
 
 | | Size |
 |---|---|
@@ -205,14 +205,14 @@ Board: `esp32-eth-wifi` (largest variant). Partition layout: app0/app1 = 1.75 MB
 | DRAM free | 142 KB |
 | `sizeof(MoonModule)` ESP32 | 56 bytes |
 
-### Component breakdown (`esp32-eth-wifi`)
+### Component breakdown (default `esp32`)
 
 Run from project root after a clean build:
 
 ```bash
-uv run scripts/build/build_esp32.py --firmware esp32-eth-wifi
-idf.py -B build/esp32-esp32-eth-wifi \
-       -DSDKCONFIG=build/esp32-esp32-eth-wifi/sdkconfig \
+uv run scripts/build/build_esp32.py --firmware esp32
+idf.py -B build/esp32-esp32 \
+       -DSDKCONFIG=build/esp32-esp32/sdkconfig \
        size-components | head -40
 ```
 
@@ -229,17 +229,18 @@ These numbers shift with IDF version + sdkconfig — treat as rough proportions.
 | Embedded UI assets | ~50 KB | `index.html`, `app.js`, `style.css`, `preview3d.js`, `install-picker.js`, logo PNG — packed as `constexpr uint8_t[]`. |
 | `esp_https_ota` + HTTP client | ~40 KB | OTA-from-URL machinery. |
 | LittleFS | ~30 KB | `joltwallet/esp_littlefs` component. |
-| Ethernet stack | ~30 KB | `esp_eth` + LAN8720 PHY. `esp32` variant drops this. |
+| Ethernet stack | ~30 KB | `esp_eth` + LAN8720 PHY. Present in every classic variant since the collapse (RMII driver is always compiled in). |
 | Misc (alignment, .rodata) | ~40 KB | Format strings, error tables, version metadata. |
 
 ### Variant size deltas
 
 | Variant | Image | Delta | Difference |
 |---|---|---|---|
-| `esp32-eth-wifi` | 1.27 MB | — | Everything compiled in |
-| `esp32` | 1.00 MB | −270 KB | No Eth driver + RMII config |
+| `esp32` (default, WiFi + RMII Eth) | 1.27 MB | — | Everything compiled in (was `esp32-eth-wifi` pre-collapse) |
 | `esp32-eth` | 0.60 MB | −670 KB | WiFi stack excluded (`EXCLUDE_COMPONENTS`) |
-| `esp32s3-n16r8` | ~1.27 MB | similar | Xtensa LX7, 16 MB flash, different partition table |
+| `esp32s3-n16r8` | ~1.27 MB | similar | Xtensa LX7, 16 MB flash, different partition table; W5500 SPI Eth instead of RMII |
+
+The pre-collapse WiFi-only `esp32` (no Eth driver) measured ~1.00 MB — that variant no longer ships; the default now carries both stacks.
 
 ### Size budget for upcoming features
 

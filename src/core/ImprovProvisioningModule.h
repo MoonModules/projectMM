@@ -73,8 +73,8 @@ public:
         // Vendor SET_TX_POWER RPC — handled BEFORE the credentials on purpose:
         // when an installer sends the cap and the credentials back-to-back,
         // both flags can land within one tick, and the cap must be persisted
-        // before the STA attempt starts or a brown-out-prone board (LOLIN S3)
-        // fails auth at full power — the exact hole this RPC closes.
+        // before the STA attempt starts or a brown-out-prone board (a weak LDO /
+        // marginal supply) fails auth at full power — the exact hole this RPC closes.
         if (pendingTxPowerReady_.load(std::memory_order_acquire) && networkModule_) {
             networkModule_->setTxPowerSetting(pendingTxPower_);
             pendingTxPowerReady_.store(false, std::memory_order_release);

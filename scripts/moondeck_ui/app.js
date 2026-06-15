@@ -23,7 +23,7 @@ let boards = []; // [{ key, label, firmwares: [...], default_firmware }]
 //     active_network_user_pinned: bool,   // set true when user picks the dropdown
 //     firmware, scenario, module, tab, flag_* }
 // `firmware` is the variant flashed onto the ESP32 (esp32 / esp32-eth /
-// esp32-eth-wifi / esp32s3-n16r8) — separate from the per-device `board`
+// esp32-16mb / esp32s3-n16r8) — separate from the per-device `board`
 // (physical hardware) inside each network's devices list. See
 // docs/architecture.md § Firmware vs board.
 // Devices and the active serial port now live INSIDE the active network.
@@ -939,9 +939,83 @@ function renderDevices() {
         row3.className = "device-row device-row-board";
         row3.appendChild(boardPicker);
 
+        // row 4 — pin-profile save/apply. A profile is the device's captured
+        // GPIO/peripheral config (drivers, board, network, audio); saving stores
+        // it under this device in moondeck.json, applying re-pushes it (handy
+        // after a reflash wipes config, or to clone to a second identical rig).
+        const row4 = document.createElement("div");
+        row4.className = "device-row device-row-profile";
+
+        const profileSel = document.createElement("select");
+        profileSel.className = "device-profile-select";
+        profileSel.title = "Saved pin profiles for this device";
+        const phOpt = document.createElement("option");
+        phOpt.value = ""; phOpt.textContent = "(profiles)";
+        profileSel.appendChild(phOpt);
+        for (const p of (device.profiles || [])) {
+            const o = document.createElement("option");
+            o.value = p.name; o.textContent = p.name;
+            profileSel.appendChild(o);
+        }
+
+        const saveBtn = document.createElement("button");
+        saveBtn.className = "device-profile-btn";
+        saveBtn.textContent = "Save";
+        saveBtn.title = "Capture this device's current pins as a named profile";
+        saveBtn.addEventListener("click", async (e) => {
+            e.preventDefault();
+            const name = prompt(`Save pin profile for ${device.deviceName || device.ip} as:`);
+            if (!name) return;
+            saveBtn.disabled = true; saveBtn.textContent = "…";
+            try {
+                const res = await fetch("/api/save-profile", {
+                    method: "POST", headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({ip: device.ip, name}),
+                });
+                const j = await res.json();
+                if (j.ok) {
+                    // The server captured + persisted the real modules. Re-fetch the
+                    // authoritative state so device.profiles holds the actual captured
+                    // config — NOT a {modules: []} placeholder, which the next
+                    // saveState() would POST back and clobber the server's real copy.
+                    try {
+                        const sr = await fetch("/api/state");
+                        state = await sr.json();
+                    } catch (_) { /* keep current state; dropdown refreshes on next load */ }
+                    renderDevices();
+                } else { alert("Save failed: " + (j.error || "unknown")); }
+            } catch (err) { alert("Save failed: " + err); }
+            finally { saveBtn.disabled = false; saveBtn.textContent = "Save"; }
+        });
+
+        const applyBtn = document.createElement("button");
+        applyBtn.className = "device-profile-btn";
+        applyBtn.textContent = "Apply";
+        applyBtn.title = "Re-apply the selected profile to this device";
+        applyBtn.addEventListener("click", async (e) => {
+            e.preventDefault();
+            const name = profileSel.value;
+            if (!name) { alert("Pick a profile to apply"); return; }
+            applyBtn.disabled = true; applyBtn.textContent = "…";
+            try {
+                const res = await fetch("/api/apply-profile", {
+                    method: "POST", headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({ip: device.ip, name}),
+                });
+                const j = await res.json();
+                if (!j.ok) alert("Apply failed: " + (j.error || "device unreachable"));
+            } catch (err) { alert("Apply failed: " + err); }
+            finally { applyBtn.disabled = false; applyBtn.textContent = "Apply"; }
+        });
+
+        row4.appendChild(profileSel);
+        row4.appendChild(saveBtn);
+        row4.appendChild(applyBtn);
+
         label.appendChild(row1);
         label.appendChild(row2);
         label.appendChild(row3);
+        label.appendChild(row4);
         el.appendChild(label);
     }
 }

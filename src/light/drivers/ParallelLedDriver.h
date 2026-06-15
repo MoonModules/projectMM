@@ -52,6 +52,16 @@ public:
     char ledsPerPin[48] = "";
 
     bool     loopbackTest = false;
+    uint16_t loopbackTxPin = 0;   // optional TX override for the self-test: when
+                                  // set (non-zero), the loopback transmits on THIS
+                                  // pin in place of lane 0 (laneList_[0]); other
+                                  // lanes are unchanged. Lets the bench loopback run
+                                  // on a dedicated jumper pin without re-typing the
+                                  // operational `pins`. Falls back to laneList_[0]
+                                  // when unset. The loopback only drives lane 0 with
+                                  // the test pattern, so a single override pin is all
+                                  // it needs. Test-only — normal output always uses
+                                  // the real `pins`.
     uint16_t loopbackRxPin = 0;
 
     void onBuildControls() override {
@@ -60,6 +70,8 @@ public:
         derived()->addBusControls();   // i80 adds clockPin/dcPin here; Parlio none
         controls_.addBool("loopbackTest", loopbackTest);
         // Always bound, shown only in test mode — the conditional-control shape.
+        controls_.addUint16("loopbackTxPin", loopbackTxPin);
+        controls_.setHidden(controls_.count() - 1, !loopbackTest);
         controls_.addUint16("loopbackRxPin", loopbackRxPin);
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
     }
@@ -72,6 +84,7 @@ public:
     void onUpdate(const char* name) override {
         const bool isTestControl = std::strcmp(name, "loopbackTest") == 0;
         const bool isPinControl  = std::strcmp(name, "pins") == 0
+                                || std::strcmp(name, "loopbackTxPin") == 0
                                 || std::strcmp(name, "loopbackRxPin") == 0;
         if (isTestControl && !loopbackTest) {
             // Toggling the test off clears the loopback's own verdict, then
@@ -320,8 +333,16 @@ protected:
         }
         const size_t dataBytes = static_cast<size_t>(maxLaneLights_) * outCh * 24;
         deinit();   // free the live bus; the test builds its own on the data pins
+        // TX override: the loopback drives lane 0 only, so when loopbackTxPin is
+        // set, transmit on it instead of laneList_[0] (the operational LED pin),
+        // letting the test run on a dedicated jumper without re-typing `pins`. The
+        // subclass busLoopback reads laneList_, so substitute lane 0 around the call
+        // and restore it after, so the following reinit() rebuilds the real bus.
+        const uint16_t realLane0 = laneList_[0];
+        if (loopbackTxPin != 0) laneList_[0] = loopbackTxPin;
         const auto r = derived()->busLoopback(frame, frameBytes_, dataBytes,
                                               static_cast<uint8_t>(outCh * 8));
+        laneList_[0] = realLane0;
         platform::free(frame);
         // Loopback result first, then reinit: if rebuilding the real bus fails
         // afterwards, kInitFailMsg overwrites the verdict — an unusable driver

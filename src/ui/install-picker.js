@@ -209,12 +209,13 @@ function parseFirmwaresFromAssets(assets, tag) {
 // ---------------------------------------------------------------------------
 
 // Bespoke rule for projectMM's firmware keys: strip the `-eth*` suffix from
-// both sides; equal identities are mutually OTA-compatible. So `esp32`,
-// `esp32-eth`, and `esp32-eth-wifi` can all flash each other (same physical
-// ESP32 silicon; the variant decides which radios are compiled in).
-// `esp32s3-n16r8` is only compatible with itself (different chip family AND
-// different partition table). Web installer passes ownFirmwareKey=null →
-// all candidates compatible.
+// both sides; equal identities are mutually OTA-compatible. So `esp32` and
+// `esp32-eth` can flash each other (same physical ESP32 silicon; the variant
+// decides which radios are compiled in) — as can the legacy `esp32-eth-wifi`
+// key (dropped in the variant collapse, but still reported by devices flashed
+// before it; it strips to `esp32` and stays OTA-compatible). `esp32s3-n16r8` is
+// only compatible with itself (different chip family AND different partition
+// table). Web installer passes ownFirmwareKey=null → all candidates compatible.
 function isCompatible(ownFirmwareKey, candidateFirmwareKey) {
     if (!ownFirmwareKey) return true;
     const strip = f => f.replace(/-eth.*$/, "");
@@ -484,10 +485,10 @@ function render(state) {
         //   2. localStorage saved pick wins next: a returning user expects
         //      their last choice to stick across page loads, including the
         //      case where they hit board.default_firmware once but actually
-        //      want a non-default variant (e.g. esp32-eth-wifi on Olimex,
-        //      where the catalog's default is esp32-eth). Filtered through
-        //      `compatible` so a stale saved value (release dropped that
-        //      firmware) falls through harmlessly.
+        //      want a non-default variant (e.g. esp32-eth on Olimex, where the
+        //      catalog's default is esp32). Filtered through `compatible` so a
+        //      stale saved value (release dropped that firmware) falls through
+        //      harmlessly.
         //   3. The board's default_firmware — fallback for first-time
         //      visitors who haven't picked anything yet.
         //   4. First option in the narrowed list — last-resort fallback.
@@ -710,16 +711,21 @@ export const installPicker = {
      * The picked board's boards.json TX-power cap
      * (controls.Network.txPowerSetting), or null when the board has none /
      * no board is picked. The orchestrator pushes it over Improv BEFORE
-     * provisioning — brown-out-prone boards (LOLIN S3/S2) fail their first
+     * provisioning — brown-out-prone boards (a weak LDO / marginal supply) fail their first
      * association at full power, so the cap can't wait for the post-online
      * HTTP fan-out.
      */
     getSelectedBoardTxPower() {
         if (!_lastState || !_lastState.selectedBoard || !_lastState.boards) return null;
         const entry = _lastState.boards.find(b => b.name === _lastState.selectedBoard);
-        const v = entry && entry.controls && entry.controls.Network
-            && entry.controls.Network.txPowerSetting;
-        return (typeof v === "number") ? v : null;
+        // New catalog shape: each board's modules list carries its own controls;
+        // the WiFi TX-power cap lives on the Network module's controls block.
+        const net = entry && (entry.modules || []).find(m => m && m.id === "Network");
+        const v = net && net.controls && net.controls.txPowerSetting;
+        // The SET_TX_POWER RPC validates a whole-dBm value in 0..21 (platform.h);
+        // reject anything outside that so a bad catalog value can't poison the
+        // brown-out mitigation path.
+        return (Number.isInteger(v) && v >= 0 && v <= 21) ? v : null;
     },
 
     /**

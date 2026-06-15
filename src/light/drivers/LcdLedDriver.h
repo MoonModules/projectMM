@@ -33,7 +33,7 @@ public:
     // runs to whatever GPIOs the user wired), so a hard-coded default would be a
     // guess that could drive a pin the user committed elsewhere — empty until set,
     // the driver idles meanwhile (the "default only when it cannot do harm" rule;
-    // see decisions.md). The LOLIN S3 bench wiring was pins "1,2,4,5,6,7,8,9",
+    // see decisions.md). The ESP32-S3 N16R8 Dev bench wiring is pins "1,2,4,5,6,7,8,9",
     // loopbackRxPin 12 (kept clear of the octal-PSRAM pins 26-37, USB 19/20, and
     // strapping pins) — set those again to reproduce the bench. (Base declares
     // pins="" and loopbackRxPin=0, so the empty default needs no code here.)

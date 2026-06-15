@@ -21,6 +21,14 @@
 #   managed_components/espressif__esp_hosted/examples/host_network_split__power_save/
 #   sdkconfig.defaults.esp32p4 (+ the example's shared sdkconfig.defaults).
 
+# --- Pull the WiFi-over-C6 managed components. main/idf_component.yml gates
+# esp_wifi_remote + esp_hosted on `CONFIG_MM_P4_WIFI` (declared in
+# main/Kconfig.projbuild) so they're compiled ONLY in this WiFi build — never in
+# esp32p4-eth, where esp_hosted's boot-time self-init would claim the default netif
+# and break the EMAC Ethernet DHCP path (link up, no IP). This must come before the
+# co-processor symbols below, which those components provide.
+CONFIG_MM_P4_WIFI=y
+
 # --- Co-processor = ESP32-C6. Two SEPARATE Kconfig choices must both point at the
 # C6, in this order, or the build fails:
 #   1. SLAVE_IDF_TARGET_ESP32C6 (esp_wifi_remote's slave select). It auto-defaults

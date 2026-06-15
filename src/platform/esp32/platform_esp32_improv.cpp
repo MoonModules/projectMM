@@ -27,7 +27,7 @@
 
 // USB-Serial-JTAG: ESP32-S3 / S2 / C3 / C6 have a built-in USB-Serial-JTAG
 // peripheral that exposes a USB-CDC endpoint without an external bridge chip.
-// LOLIN S3 mini / N16R8 and many cheap S3 dev boards wire the USB-C port to
+// Many cheap S3 dev boards wire the USB-C port to
 // this peripheral, not to UART0 — meaning Improv RPC bytes from the host
 // arrive on USB-Serial-JTAG, not UART0. Listen on BOTH so the same firmware
 // works on boards with an external USB-Serial bridge (UART0) AND boards
@@ -333,7 +333,7 @@ static void improvHandleSetBoard(const uint8_t* payload, uint8_t len) {
 }
 
 // SET_TX_POWER vendor RPC (command 0xFD) — the pre-association escape hatch
-// for boards whose LDO browns out at full TX power (LOLIN S3/S2). Their
+// for boards whose LDO browns out at full TX power (weak-powered boards). Their
 // boards.json cap (Network.txPowerSetting) normally arrives over HTTP after
 // the device is online — which a browning-out board can never reach: it fails
 // WiFi auth at 20 dBm before any HTTP exists (proven on the bench,
@@ -476,8 +476,8 @@ static void improvTask(void* /*arg*/) {
     }
 
 #if SOC_USB_SERIAL_JTAG_SUPPORTED
-    // USB-Serial-JTAG driver install. On native-USB boards (LOLIN S3 mini /
-    // N16R8 etc.) this is the interface the host actually talks to; UART0
+    // USB-Serial-JTAG driver install. On native-USB boards (S3 / S2 / C3
+    // etc.) this is the interface the host actually talks to; UART0
     // is unwired. Best-effort install — secondary console may have grabbed
     // the peripheral first on some sdkconfig combinations; if so, skip and
     // rely on UART0.

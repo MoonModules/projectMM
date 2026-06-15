@@ -31,6 +31,24 @@ constexpr bool hasI2sMic = false;
 // WiFi stubs and exercises the hasWiFi==true code path for compile coverage.
 constexpr bool hasWiFi = true;
 
+// Ethernet PHY config type — desktop has no Ethernet (ethInit() stubs to false),
+// but platform.h declares setEthConfig(const EthPinConfig&) for every platform, so
+// the type must exist here too. Mirror the esp32 struct; the desktop stub ignores it.
+enum EthPhyType { ethNone = 0, ethLan8720 = 1, ethIp101 = 2, ethW5500 = 3 };
+struct EthPinConfig {
+    int phyType; int phyAddr;
+    int mdcGpio; int mdioGpio; int rstGpio; int rmiiClockGpio; bool rmiiClockExtIn;
+    int spiMiso; int spiMosi; int spiSck; int spiCs; int spiIrq;
+};
+// Desktop has no Ethernet — hasEthernet false, the default is ethNone. NetworkModule
+// (shared code) `if constexpr (hasEthernet)`s the eth controls off, and seeds its
+// members from this default; both must exist here for that shared code to compile.
+constexpr bool hasEthernet = false;
+// No SPI-Ethernet (W5500) driver on desktop either — NetworkModule's live-reconfigure
+// path gates on this, so it must exist on every platform (mirrors the esp32 flag).
+constexpr bool hasEthW5500 = false;
+constexpr EthPinConfig ethConfigDefault{ ethNone, 0, -1, -1, -1, -1, false, -1, -1, -1, -1, -1 };
+
 // Desktop has no separate WiFi co-processor (the ESP32-P4 + C6 case); the
 // coprocessorWifi() read-out and its SystemModule control compile out here.
 constexpr bool hasWifiCoprocessor = false;

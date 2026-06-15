@@ -96,7 +96,15 @@ using FsListCb = void(*)(const char* name, bool isDir, void* user);
 void fsList(const char* dir, FsListCb cb, void* user);       // single-level listing
 
 // Network (ESP32 only, stubs on desktop)
+// setEthConfig overrides the per-chip default eth pin/PHY map (ethConfigDefault)
+// with a board's runtime config before ethInit — NetworkModule pushes the values
+// it got from boards.json. Call before ethInit(); takes effect on the next init.
+void setEthConfig(const EthPinConfig& cfg);
 bool ethInit();
+// Tear down a running Ethernet driver so ethInit() can re-init with new config —
+// the live reconfigure path (used for W5500/SPI, which tears down cleanly; RMII
+// keeps apply-on-next-init). Safe to call when nothing is running. Desktop: no-op.
+void ethStop();
 bool ethLinkUp();       // PHY link detected (cable plugged, fast check)
 bool ethConnected();    // IP assigned (DHCP complete)
 void ethGetIP(char* buf, size_t len);
@@ -122,11 +130,12 @@ int wifiTxPower();
 
 // Cap the WiFi transmit power. `quarterDbm` is in ESP-IDF's quarter-dBm units
 // (valid range 8..84 → 2..21 dBm); pass 0 to skip the override and let the
-// stack use its default. Used by NetworkModule to apply the LOLIN WiFi fix:
-// some LOLIN-branded boards (S2/S3 minis) brown-out the on-module LDO at
-// full TX power, dropping WiFi during association — capping to 8 dBm
-// (32 quarter-dBm, the value `boards.json` injects for the LOLIN entries)
-// keeps them stable. Returns true on success or when called with 0 (no-op).
+// stack use its default. Used by NetworkModule for the weak-power / brown-out
+// WiFi cap: some boards / WiFi modules (a thin on-module LDO, a marginal USB
+// supply — e.g. various S2/S3 mini-class boards) brown out at full TX power,
+// dropping WiFi during association. Capping to 8 dBm (32 quarter-dBm, the value
+// `boards.json` injects for brown-out-prone entries) keeps them stable. Returns
+// true on success or when called with 0 (no-op).
 // Call after esp_wifi_start() — earlier calls are silently ignored by ESP-IDF.
 bool wifiSetTxPower(int8_t quarterDbm);
 
@@ -187,7 +196,7 @@ struct ImprovDeviceInfo {
 // SET_TX_POWER RPC (command 0xFD) — when set, the Improv task validates the
 // 1-byte dBm payload (0..21), writes it to txPowerOut, and publishes via
 // txPowerReady's release-store. This is the pre-association escape hatch for
-// boards whose LDO browns out at full TX power (LOLIN S3/S2): their
+// boards whose LDO browns out at full TX power (weak-powered boards): their
 // boards.json cap normally arrives over HTTP *after* the device is online,
 // which such a board can never reach — proven on the bench 2026-06-10. Same
 // validate + buffer-write + flag-signal shape as SET_BOARD.

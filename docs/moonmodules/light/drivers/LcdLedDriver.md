@@ -14,11 +14,12 @@ Identical semantics to the [RMT driver](RmtLedDriver.md#buffer-slicing-across-pi
 
 ## Controls
 
-- `pins` (text, default empty) — comma-separated data GPIOs, one lane each, **exactly 8** (the i80 peripheral configures every data line of the bus width and rejects partial sets, so all 8 GPIOs are claimed even when fewer strands are wired). Empty by default (the strand is user-soldered, so no pin is assumed — the driver idles until set); a known-good LOLIN S3 set is `1,2,4,5,6,7,8,9`, which clears the octal-PSRAM pins (26–37), USB (19/20) and strapping pins. Changing it re-creates the i80 bus **live, no reboot** ([§ Live reconfiguration](../../../architecture.md#live-reconfiguration-every-change-applies-without-a-reboot)).
+- `pins` (text, default empty) — comma-separated data GPIOs, one lane each, **exactly 8** (the i80 peripheral configures every data line of the bus width and rejects partial sets, so all 8 GPIOs are claimed even when fewer strands are wired). Empty by default (the strand is user-soldered, so no pin is assumed — the driver idles until set); a known-good ESP32-S3 N16R8 Dev set is `1,2,4,5,6,7,8,9`, which clears the octal-PSRAM pins (26–37), USB (19/20) and strapping pins. Changing it re-creates the i80 bus **live, no reboot** ([§ Live reconfiguration](../../../architecture.md#live-reconfiguration-every-change-applies-without-a-reboot)).
 - `ledsPerPin` (text, default empty) — lights per lane, matched by position; empty = even split. To drive fewer than 8 strands, give the unused lanes `0` (or list only the used lanes' counts summing to the grid size — the remainder lanes get 0 and idle LOW).
 - `clockPin` (uint16_t, default 10) — the i80 bus WR line. The peripheral *requires* it on a real GPIO (the IDF i80 bus rejects `wr_gpio_num < 0`); WS2812 strands ignore the waveform. Peripheral-fixed (not user-strand wiring), so it keeps a sensible overridable default — point it at any otherwise-free GPIO if 10 is taken.
 - `dcPin` (uint16_t, default 11) — the i80 data/command line, same story: required by the peripheral (`dc_gpio_num < 0` is rejected), unused by the LEDs, overridable default.
 - `loopbackTest` (bool) — one-shot signal self-test: jumper the **first** pin in `pins` to `loopbackRxPin`, tick the box; the driver transmits its **real frame** (full size, real DMA chain, repeated back to back like the render loop) with a known pattern in every row, captures the whole frame back with an RMT RX channel (the increment-1 rig reused — RMT receive is transmitter-agnostic) and verifies every bit. Result lands in the status field; on failure it names the first corrupted light.
+- `loopbackTxPin` (uint16_t, default unset) — optional **TX override** for the self-test: the loopback drives only lane 0 with the test pattern, so when this is set it transmits on this pin in place of lane 0 (`pins[0]`), the other 7 lanes unchanged — letting the test run on a dedicated jumper without re-typing `pins`. Falls back to lane 0 when unset. Test-only — normal output uses `pins`. Shown only while `loopbackTest` is on.
 - `loopbackRxPin` (uint16_t, default unset) — the RX pin for the self-test; set it when you wire the jumper (the bench used 12). Shown only while `loopbackTest` is on.
 
 ## Memory
@@ -27,7 +28,7 @@ One internal-RAM DMA frame buffer owned by the platform (PSRAM is deliberately n
 
 ## Cross-domain wiring
 
-Added as a child of the `Drivers` container in `main.cpp` under `if constexpr (platform::lcdLanes > 0)` (SOC-derived: the S3 among current targets), wired by code like its siblings. The **slot encode** (`LcdSlots.h`) is domain code, host-testable; the **peripheral** (`platform_esp32_lcd.cpp`, ESP-IDF's [`esp_lcd` i80 bus](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/lcd/index.html) + GDMA) is the only IDF-touching part.
+The driver is added as a child of the `Drivers` container at runtime via the catalog (`POST /api/modules`, a board's [`boards.json`](../../../install/boards.json) `modules` entry) — not boot-wired, so it only exists on a board that selects it. The type is registered on every target, but the peripheral exists only where the SOC has the LCD_CAM i80 bus (the S3 among current targets): on a chip without it the driver is inert (`lanesAvailable()` is 0, so init / loopback report "not supported on this platform"), so a board entry only lists `LcdLedDriver` where it makes sense. Once added, `Drivers::passBufferToDrivers` wires it like any child. The **slot encode** (`LcdSlots.h`) is domain code, host-testable; the **peripheral** (`platform_esp32_lcd.cpp`, ESP-IDF's [`esp_lcd` i80 bus](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/lcd/index.html) + GDMA) is the only IDF-touching part.
 
 ## Tests
 
@@ -35,6 +36,7 @@ Full case list in the generated [unit tests § LcdLedDriver](../../../tests/unit
 
 - **Encoder (CI, host):** byte-exact 3-slot triplets — transpose across lanes, MSB-first, the unequal-lane idle-LOW rule, GRB via Correction, RGBW rows.
 - **Driver (CI, host):** lane slicing (including unequal leds-per-lane), frame-byte math (RGBW growth, alignment rounding), bad-pin status + recovery, the exactly-8-pins rule, the empty-default idle (no GPIO claimed until pins are set), zero-grid robustness, teardown.
+- **`loopbackTxPin` control (CI, host):** the conditional control — bound always, shown only while `loopbackTest` is on. The lane-0 override mechanism is shared with the Parlio driver (same `ParallelLedDriver` base) and hardware-verified there; the LCD hardware path itself is exercised by the loopback self-test above. The catalog-add path is verified on the sibling RMT/Parlio drivers (S3 boards currently default to RMT — LcdLed needs all 8 lanes, see the [backlog 1..8-pin LCD note](../../../backlog/backlog.md)).
 - **Hardware:** the loopback self-test above (jumper), and tick-scaling across grid sizes proves frames really clock out.
 
 ## Prior art

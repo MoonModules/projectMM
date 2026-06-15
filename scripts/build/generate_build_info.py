@@ -46,7 +46,7 @@ content = f'''#pragma once
 // (and the OTA path reads it to pick a matching release asset).
 //
 // "Firmware" here is the compiled-binary variant (esp32 / esp32-eth /
-// esp32-eth-wifi / esp32s3-n16r8) — see docs/architecture.md § Firmware
+// esp32-16mb / esp32s3-n16r8) — see docs/architecture.md § Firmware
 // vs board. The physical hardware ("board") is a separate concept the
 // device cannot identify on its own.
 //

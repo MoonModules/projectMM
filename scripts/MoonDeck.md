@@ -15,7 +15,8 @@ Below: the UI behaviours common to every card, described once, then one section 
 - **Tab persistence** — selected tab survives page refresh.
 - **Process detection** — on page load, checks if projectMM or idf.py is already running and shows Stop button.
 - **Network bar** (top of the sidebar): switch between known networks. Each network holds its own device list, last-used serial port, and WiFi credentials (consumed by Improv). On startup, MoonDeck auto-selects the network whose subnet matches the host's current LAN — moving the laptop between networks usually requires no clicks. Manual override (the dropdown) pins the selection until the pinned network's subnet stops matching the host. Add / Rename buttons next to the dropdown manage the catalog. State persisted in `scripts/moondeck.json` under `networks` + `active_network`.
-- **Board picker** on each device row: dropdown of physical boards from [docs/install/boards.json](../docs/install/boards.json) — the same catalog the web installer uses. When the device's firmware uniquely identifies one board (e.g. `esp32-eth-wifi` → Olimex Gateway), MoonDeck auto-deduces and mirrors the value to the device's [BoardModule](../docs/moonmodules/core/BoardModule.md) via `POST /api/control` on next discover. For firmwares with no unique board (`esp32` runs on multiple), the user picks; MoonDeck pushes that value too. A device-reported board not in the catalog still shows up as `<key> (unknown)` so the value survives.
+- **Board picker** on each device row: dropdown of physical boards from [docs/install/boards.json](../docs/install/boards.json) — the same catalog the web installer uses. When the device's firmware uniquely identifies one board (e.g. `esp32-eth` → Olimex Gateway), MoonDeck auto-deduces and mirrors the value to the device's [BoardModule](../docs/moonmodules/core/BoardModule.md) via `POST /api/control` on next discover. For firmwares with no unique board (`esp32` runs on multiple), the user picks; MoonDeck pushes that value too. A device-reported board not in the catalog still shows up as `<key> (unknown)` so the value survives. MoonDeck's picker is a **text dropdown for an already-running device** — distinct from the web installer's flash-time *picture* board picker; both read the same catalog, but MoonDeck doesn't need the per-board `image`/`url` fields (those are installer-picker UX). Selecting a board pushes its full catalog config — each entry is a list of `{type, id, parent_id?, controls?}` module units (the [nested catalog schema](../docs/install/README.md), add-then-configure), so MoonDeck adds the board's modules (`POST /api/modules`) then sets their controls (`POST /api/control`); see `_push_board_to_device` in [moondeck.py](moondeck.py).
+- **Pin profiles** on each device row (Save / Apply): a profile captures the device's current pin/peripheral config — the driver, board, network and audio modules and their control values, read from `GET /api/state` (effects/layouts and the always-on Preview are excluded; a profile is the *physical wiring*, not animation state). **Save** (`POST /api/save-profile`) stores it as a named entry under that device in `moondeck.json`; **Apply** (`POST /api/apply-profile`) re-pushes it through the same add-then-configure fan-out the board picker uses (`_apply_modules_to_device`, shared with `_push_board_to_device`). The captured unit shape is identical to a `boards.json` entry's `modules`, so save→apply round-trips. Use it to restore GPIOs after a reflash wipes config, or to clone a working setup onto a second identical rig.
 
 ## PC Tab
 
@@ -210,7 +211,7 @@ The tab is laid out top-to-bottom along the firmware workflow. Each dropdown sit
 
 ```text
 [Setup ESP-IDF] [Clean]            ← board-independent
-Firmware: [esp32 / esp32-eth / esp32-eth-wifi / esp32s3-n16r8]
+Firmware: [esp32 / esp32-eth / esp32-16mb / esp32s3-n16r8 / …]
 [Build]                            ← uses the selected Firmware
 Port:     [/dev/tty.usbserial-XXXX] [↻]
 [Flash] [Erase Flash]              ← uses the selected Port
@@ -241,27 +242,27 @@ Removes one ESP32 per-firmware build dir (`--firmware <name>`) or every `build/e
 
 ### build_esp32
 
-Build one of the four shipping ESP32 firmware variants. The MoonDeck **Build** button reads the **Firmware** dropdown and forwards `--firmware <selected>` to `build_esp32.py`. ("Firmware" is the compiled binary; the physical board is a separate concept — see [architecture.md § Firmware vs board](../docs/architecture.md#firmware-vs-board).)
+Build one of the shipping ESP32 firmware variants. The MoonDeck **Build** button reads the **Firmware** dropdown and forwards `--firmware <selected>` to `build_esp32.py`. The dropdown is populated from the `FIRMWARES` dict, the single source of truth. ("Firmware" is the compiled binary; the physical board is a separate concept — see [architecture.md § Firmware vs board](../docs/architecture.md#firmware-vs-board).)
 
 | Firmware key | Chip | What's in the image |
 |---|---|---|
-| `esp32` | `esp32` | WiFi only. No Eth pins reserved. |
-| `esp32-eth` | `esp32` | Ethernet only (WiFi compiled out → smaller image, more free RAM). Olimex ESP32-Gateway pin defaults (LAN8720 @ MDIO 0, PHY RST GPIO 5). |
-| `esp32-eth-wifi` | `esp32` | Ethernet + WiFi both available. Olimex pin defaults. |
-| `esp32s3-n16r8` | `esp32s3` | ESP32-S3 DevKitC-1 with the N16R8 module (16 MB flash, 8 MB octal PSRAM). WiFi only. |
+| `esp32` | `esp32` | WiFi **and** RMII Ethernet in one binary. Ethernet comes up only when a PHY responds; PHY type + pins are runtime config from `boards.json` (Olimex defaults). The default classic build. |
+| `esp32-eth` | `esp32` | Ethernet only (WiFi compiled out → smaller image, more free RAM). Same runtime PHY/pin config. |
+| `esp32-16mb` | `esp32` | Same as `esp32` but for 16 MB-flash classic boards (bigger OTA slots + filesystem). |
+| `esp32s3-n16r8` | `esp32s3` | ESP32-S3 DevKitC-1 (N16R8: 16 MB flash, 8 MB octal PSRAM). WiFi + W5500 SPI Ethernet (external module, pins per board in `boards.json`). |
 
 CLI equivalent:
 
 ```bash
 uv run scripts/build/build_esp32.py --firmware esp32
 uv run scripts/build/build_esp32.py --firmware esp32-eth
-uv run scripts/build/build_esp32.py --firmware esp32-eth-wifi
+uv run scripts/build/build_esp32.py --firmware esp32-16mb
 uv run scripts/build/build_esp32.py --firmware esp32s3-n16r8
 ```
 
-Auto-detects ESP-IDF installation, sets target if needed, builds, and shows flash/RAM usage summary. Each firmware writes into `build/esp32-<firmware>/`, so switching firmwares (or building all four in one session) keeps every variant on disk — no clean rebuild on switch.
+Auto-detects ESP-IDF installation, sets target if needed, builds, and shows flash/RAM usage summary. Each firmware writes into `build/esp32-<firmware>/`, so switching firmwares (or building several in one session) keeps every variant on disk — no clean rebuild on switch.
 
-Eth pin map is currently baked in at build time. The `esp32-eth` and `esp32-eth-wifi` builds were verified on the [Olimex ESP32-Gateway](https://www.olimex.com/Products/IoT/ESP32/ESP32-GATEWAY/open-source-hardware) (LAN8720 PHY, reset on GPIO 5, MDIO addr 0). Boards with the same PHY but different pins (e.g. WT32-ETH01: reset on GPIO 16) need a local rebuild today; runtime PHY/pin selection is on the 2.0 roadmap.
+The Ethernet PHY type and pin map are runtime config, not baked in: each firmware carries the driver(s) its chip can host (RMII EMAC for classic, W5500 SPI for S3), and `boards.json` supplies the per-board PHY/pins. The `esp32` / `esp32-eth` builds default to the [Olimex ESP32-Gateway](https://www.olimex.com/Products/IoT/ESP32/ESP32-GATEWAY/open-source-hardware) pins (LAN8720 PHY, reset on GPIO 5, MDIO addr 0); a board with different pins (e.g. WT32-ETH01: reset on GPIO 16) just needs a different `boards.json` entry — no rebuild.
 
 Each ESP32-S3 SKU has its own firmware key because the sdkconfig fragment encodes flash size, partition layout, and PSRAM mode — flashing an `n16r8` binary onto a different module (e.g. N8R2) misaligns the partition table or fails PSRAM init. New SKUs become new keys (e.g. `esp32s3-n8r8`); we don't ship a generic `esp32s3` shortcut.
 
@@ -274,18 +275,18 @@ Flash firmware to an ESP32 device. Reads `build/esp32-<firmware>/projectMM.bin` 
 The MoonDeck button forwards the Firmware dropdown as `--firmware`. Flash exits cleanly with a "no build for <firmware> — run Build first" message when that dir doesn't exist. The log line up front confirms which build is being flashed and how old it is, e.g.:
 
 ```text
-==> flashing esp32-eth-wifi build (1267 KB, built 3m ago) to /dev/tty.usbserial-0001
+==> flashing esp32 build (1267 KB, built 3m ago) to /dev/tty.usbserial-0001
 ```
 
 ```bash
-uv run scripts/build/flash_esp32.py --firmware esp32-eth-wifi --port /dev/tty.usbserial-0001
+uv run scripts/build/flash_esp32.py --firmware esp32 --port /dev/tty.usbserial-0001
 ```
 
 `--firmware` is required — there's no longer a single canonical `esp32/build/` to fall back to. For a rack flash, loop over ports AND specify the firmware explicitly:
 
 ```bash
 for port in /dev/tty.usbserial-*; do
-  uv run scripts/build/flash_esp32.py --firmware esp32-eth-wifi --port "$port"
+  uv run scripts/build/flash_esp32.py --firmware esp32 --port "$port"
 done
 ```
 
@@ -315,11 +316,11 @@ Push WiFi credentials to a running projectMM device over USB-serial. Uses the [I
 
 **One-click flow**: pick the device's port in MoonDeck, hit **Improv WiFi**. The script reads SSID + password from the **active network's WiFi block in `scripts/moondeck.json`** (the one shown in the network bar at the top of the sidebar). If that block is empty, it falls back to detecting the host machine's currently-joined WiFi (macOS Keychain / Linux NetworkManager / Windows `netsh`). The device replies with its new URL when STA comes up — typically 5-10 s end to end.
 
-**Board dropdown (pre-association injection)**: pick your physical board next to the Firmware dropdown and the flow forwards `--board` — the script then resolves the board's `boards.json` settings and pushes the TX-power cap over the `SET_TX_POWER` vendor RPC **before** the credentials, plus `SET_BOARD` after success. This matters for brown-out-prone boards (LOLIN S3/S2, cap 8 dBm): at full TX power they fail their very first WiFi association, so the cap can't wait for the post-online HTTP injection. Leave the dropdown on "(any board)" for boards without special settings.
+**Board dropdown (pre-association injection)**: pick your physical board next to the Firmware dropdown and the flow forwards `--board` — the script then resolves the board's `boards.json` settings and pushes the TX-power cap over the `SET_TX_POWER` vendor RPC **before** the credentials, plus `SET_BOARD` after success. This matters for brown-out-prone weak-powered boards (cap 8 dBm): at full TX power they fail their very first WiFi association, so the cap can't wait for the post-online HTTP injection. Leave the dropdown on "(any board)" for boards without special settings.
 
 ```bash
-# Equivalent CLI for a LOLIN S3 (cap resolved from boards.json):
-uv run scripts/build/improv_provision.py --port /dev/cu.usbmodem-XXX --board "LOLIN S3 N16R8"
+# Equivalent CLI for a weak-powered board (cap resolved from boards.json):
+uv run scripts/build/improv_provision.py --port /dev/cu.usbmodem-XXX --board "ESP32-S3 N16R8 Dev"
 # Or set the cap explicitly without a catalog entry:
 uv run scripts/build/improv_provision.py --port /dev/cu.usbmodem-XXX --tx-power 8
 ```

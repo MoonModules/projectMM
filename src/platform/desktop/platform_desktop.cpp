@@ -348,6 +348,8 @@ size_t filesystemTotal() {
 
 // Network stubs (desktop has no WiFi/Ethernet hardware)
 
+void setEthConfig(const EthPinConfig&) {}   // no eth on desktop; ethInit stubs false
+void ethStop() {}                           // no eth on desktop
 bool ethInit() { return false; }
 bool ethLinkUp() { return false; }
 bool ethConnected() { return false; }

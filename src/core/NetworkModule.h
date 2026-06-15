@@ -35,8 +35,9 @@ public:
 
     // Improv SET_TX_POWER path: persist + apply the TX-power cap (whole dBm,
     // 0 = lift). Must run BEFORE setWifiCredentials when both arrive from one
-    // provisioning flow — brown-out-prone boards (LOLIN S3) fail WiFi auth at
-    // full power, so the cap has to be in place for the association attempt.
+    // provisioning flow — a weak-powered board / WiFi module (thin LDO, marginal
+    // USB supply) browns out and fails WiFi auth at full power, so the cap has to
+    // be in place for the association attempt.
     void setTxPowerSetting(uint8_t dBm) {
         if (dBm > 21) return;
         txPowerSetting_ = dBm;
@@ -75,7 +76,7 @@ public:
                 stateChangeTime_ = platform::millis();
                 // Apply the TX-power cap NOW, before the radio's first
                 // probe / auth / assoc burst — that's the window the
-                // LOLIN brown-out fix exists to protect. Waiting for the
+                // weak-power brown-out cap exists to protect. Waiting for the
                 // next loop1s() tick to syncTxPower would leave up to
                 // 1 s of full-power TX during association, the exact
                 // failure mode the cap defends against. syncTxPower
@@ -103,6 +104,9 @@ public:
     bool respectsEnabled() const override { return false; }
 
     void setup() override {
+        // Push the board's eth config (persisted controls, loaded before setup)
+        // into the platform layer before ethInit reads it.
+        syncEthConfig();
         // Try Ethernet first (non-blocking)
         if (platform::ethInit()) {
             state_ = State::WaitingEth;
@@ -164,14 +168,14 @@ public:
                                   || state_ == State::WaitingSta
                                   || state_ == State::AP);
             controls_.setHidden(controls_.count() - 1, !radioOn);
-            // Writable TX-power cap (LOLIN WiFi fix). Range 0..21 dBm.
+            // Writable TX-power cap (the weak-power / brown-out WiFi cap). Range 0..21 dBm.
             // 0 = "no override" (sentinel — syncTxPower then writes the
             // ESP-IDF ceiling, ~20 dBm, to actively lift any prior cap;
             // setting back to 0 truly restores default power). 1 is in
             // the bound but the platform layer clamps it up to 2 dBm
             // (ESP-IDF's minimum) — write 2 or higher for predictable
             // behavior. Always bound on radio-capable builds; the
-            // boards.json catalog injects 8 dBm for LOLIN boards.
+            // boards.json catalog injects 8 dBm for brown-out-prone boards.
             controls_.addInt16("txPowerSetting", txPowerSetting_, 0, 21);
         }
         controls_.addBool("mDNS", mdnsEnabled_);
@@ -194,6 +198,50 @@ public:
         controls_.setHidden(controls_.count() - 1, hideStatic);
         controls_.addIPv4("dns", staticDns_);
         controls_.setHidden(controls_.count() - 1, hideStatic);
+
+        // Ethernet pin/PHY config — only on builds with an Ethernet driver. The
+        // board's boards.json eth block writes these; an un-provisioned board keeps
+        // the per-chip default. ethType picks the PHY (and which pin set applies):
+        // 1=LAN8720(RMII), 2=IP101(RMII), 3=W5500(SPI). The RMII vs SPI pin rows are
+        // shown by type so the UI isn't cluttered with the inapplicable set.
+        if constexpr (platform::hasEthernet) {
+            // ethType is the switch (always shown on an eth-capable build). When it
+            // is 0 (no Ethernet) NO pin rows show; choosing LAN8720/IP101 reveals
+            // the RMII rows, W5500 the SPI rows — only the applicable set is ever
+            // visible. (Same "show only what's relevant" shape as the LED drivers.)
+            controls_.addSelect("ethType", ethType_, ethTypeOptions_, 4);
+            const bool isRmii = (ethType_ == 1 || ethType_ == 2);
+            const bool isSpi  = (ethType_ == 3);
+            const bool isEth  = isRmii || isSpi;
+            // GPIO controls use addPin → a plain number input (ControlType::Pin),
+            // not a slider: a GPIO has no meaningful range to drag. -1 = unused.
+            // phyAddr is a PHY MDIO address (0..31), not a GPIO, but it's likewise
+            // a small number — a plain number input (addPin) fits it too.
+            controls_.addPin("ethPhyAddr", ethPhyAddr_, 0, 31);
+            controls_.setHidden(controls_.count() - 1, !isEth);
+            controls_.addPin("ethRstGpio", ethRstGpio_);
+            controls_.setHidden(controls_.count() - 1, !isEth);
+            controls_.addPin("ethMdcGpio", ethMdcGpio_);
+            controls_.setHidden(controls_.count() - 1, !isRmii);
+            controls_.addPin("ethMdioGpio", ethMdioGpio_);
+            controls_.setHidden(controls_.count() - 1, !isRmii);
+            controls_.addPin("ethClockGpio", ethClockGpio_);
+            controls_.setHidden(controls_.count() - 1, !isRmii);
+            // Clock direction is a boolean (true = clock IN / board feeds it,
+            // false = chip drives it OUT) — a toggle, not a 0..1 slider.
+            controls_.addBool("ethClockExtIn", ethClockExtIn_);
+            controls_.setHidden(controls_.count() - 1, !isRmii);
+            controls_.addPin("ethSpiMiso", ethSpiMiso_);
+            controls_.setHidden(controls_.count() - 1, !isSpi);
+            controls_.addPin("ethSpiMosi", ethSpiMosi_);
+            controls_.setHidden(controls_.count() - 1, !isSpi);
+            controls_.addPin("ethSpiSck", ethSpiSck_);
+            controls_.setHidden(controls_.count() - 1, !isSpi);
+            controls_.addPin("ethSpiCs", ethSpiCs_);
+            controls_.setHidden(controls_.count() - 1, !isSpi);
+            controls_.addPin("ethSpiIrq", ethSpiIrq_);
+            controls_.setHidden(controls_.count() - 1, !isSpi);
+        }
         // Chain to base is at the top of this method — see comment there.
     }
 
@@ -322,6 +370,7 @@ public:
 
         syncMdns();
         syncTxPower();
+        syncEthLive();   // hot-apply a W5500 eth config change (no reboot)
 
         // Refresh the live-readout values every tick — the UI polls /api/state
         // for them, so writing the same storage addresses is enough; no
@@ -408,7 +457,121 @@ private:
     int16_t txPowerSetting_ = 0;
     int16_t appliedTxPowerSetting_ = -1;   // -1 = never applied, forces first sync
 
+    // Ethernet pin/PHY config — runtime, seeded from the per-chip default
+    // (platform::ethConfigDefault) so an un-provisioned board still comes up on
+    // its historical pins; a board's boards.json eth block overrides via these
+    // controls. Pushed into the platform layer by syncEthConfig() before ethInit.
+    // Bound only on builds that have an Ethernet driver (platform::hasEthernet).
+    // -1 = "leave at IDF default / unused". ethType: 0=none,1=LAN8720,2=IP101,3=W5500.
+    // ethType_ is uint8_t (not int16_t like the pins) so it binds as a Select
+    // dropdown via addSelect — the value is the option index, which matches the
+    // EthPhyType enum order (None/LAN8720/IP101/W5500).
+    uint8_t ethType_       = static_cast<uint8_t>(platform::ethConfigDefault.phyType);
+    // GPIO/address members are int8_t (one byte; -1 = unused). A GPIO never exceeds
+    // ~54 on any ESP32-family chip, so int8 is ample — bound via addPin (Pin control
+    // → number input). ethConfigDefault's fields are plain int; the values are all
+    // small (≤52 / -1) so the copy into int8_t is lossless.
+    int8_t  ethPhyAddr_    = static_cast<int8_t>(platform::ethConfigDefault.phyAddr);
+    int8_t  ethMdcGpio_    = static_cast<int8_t>(platform::ethConfigDefault.mdcGpio);
+    int8_t  ethMdioGpio_   = static_cast<int8_t>(platform::ethConfigDefault.mdioGpio);
+    int8_t  ethRstGpio_    = static_cast<int8_t>(platform::ethConfigDefault.rstGpio);
+    int8_t  ethClockGpio_  = static_cast<int8_t>(platform::ethConfigDefault.rmiiClockGpio);
+    bool    ethClockExtIn_ = platform::ethConfigDefault.rmiiClockExtIn;
+    int8_t  ethSpiMiso_    = static_cast<int8_t>(platform::ethConfigDefault.spiMiso);
+    int8_t  ethSpiMosi_    = static_cast<int8_t>(platform::ethConfigDefault.spiMosi);
+    int8_t  ethSpiSck_     = static_cast<int8_t>(platform::ethConfigDefault.spiSck);
+    int8_t  ethSpiCs_      = static_cast<int8_t>(platform::ethConfigDefault.spiCs);
+    int8_t  ethSpiIrq_     = static_cast<int8_t>(platform::ethConfigDefault.spiIrq);
+    // Signature of the eth controls last applied, so loop1s() detects a UI/board
+    // change (same pattern as appliedTxPowerSetting_). ethSigApplied_ guards the
+    // "never applied yet" case rather than a sentinel value, since any uint32 is a
+    // valid hash output. setup()'s syncEthConfig() sets it before any compare.
+    uint32_t appliedEthSig_ = 0;
+    bool ethSigApplied_ = false;
+
+    // A cheap order-sensitive hash of the eth control members — changes whenever
+    // any eth control does, so loop1s() can detect a live reconfigure. uint32_t so
+    // the rolling multiply wraps deterministically (signed overflow is UB).
+    uint32_t ethSig() const {
+        uint32_t h = ethType_;
+        for (int16_t v : {ethPhyAddr_, ethRstGpio_, ethMdcGpio_, ethMdioGpio_,
+                          ethClockGpio_, ethSpiMiso_, ethSpiMosi_,
+                          ethSpiSck_, ethSpiCs_, ethSpiIrq_}) {
+            h = h * 131u + static_cast<uint32_t>(v);
+        }
+        h = h * 131u + (ethClockExtIn_ ? 1u : 0u);   // bool, folded in separately
+        return h;
+    }
+
+    // Build an EthPinConfig from the control members and push it to the platform
+    // layer. Called in setup() before ethInit() so persisted / board-pushed values
+    // take effect on init. (Eth bring-up is boot-time; this is not a live re-init.)
+    void syncEthConfig() {
+        if constexpr (platform::hasEthernet) {
+            platform::EthPinConfig cfg{};
+            cfg.phyType        = ethType_;
+            cfg.phyAddr        = ethPhyAddr_;
+            cfg.mdcGpio        = ethMdcGpio_;
+            cfg.mdioGpio       = ethMdioGpio_;
+            cfg.rstGpio        = ethRstGpio_;
+            cfg.rmiiClockGpio  = ethClockGpio_;
+            cfg.rmiiClockExtIn = ethClockExtIn_;
+            cfg.spiMiso        = ethSpiMiso_;
+            cfg.spiMosi        = ethSpiMosi_;
+            cfg.spiSck         = ethSpiSck_;
+            cfg.spiCs          = ethSpiCs_;
+            cfg.spiIrq         = ethSpiIrq_;
+            platform::setEthConfig(cfg);
+            appliedEthSig_ = ethSig();   // mark this config as applied
+            ethSigApplied_ = true;
+        }
+    }
+
+    // Live eth reconfigure — called each tick from loop1s(). When an eth control
+    // changed since the last apply AND the (new) type is W5500, tear the SPI driver
+    // down and re-init on the spot — no reboot (W5500 is just an SPI device, clean
+    // stop/uninstall/re-init). For RMII a live change only updates the stored config
+    // + flags a status hint; the EMAC/clock teardown is fiddlier and applies on the
+    // next boot (backlog: live RMII reconfigure). Same change-detect shape as
+    // syncTxPower's appliedTxPowerSetting_.
+    void syncEthLive() {
+        if constexpr (platform::hasEthernet) {
+            if (ethSigApplied_ && ethSig() == appliedEthSig_) return;   // nothing changed
+            // Hot re-init only when the new type is W5500 AND this firmware actually
+            // carries the W5500 driver (S3). Crucially NOT on a classic/P4 RMII board:
+            // there ethInit() can't bring up W5500, so a hot ethStop()+ethInit() would
+            // tear down the live RMII interface for a type it can't init, stranding the
+            // device with no network (and killing the very connection that set the
+            // control). On those boards — and for RMII/none everywhere — just save the
+            // config and apply on next boot (backlog: live RMII reconfigure). The
+            // EMAC/clock teardown is fiddlier and isn't hot-swappable yet anyway.
+            const bool hotReinit = (ethType_ == 3) && platform::hasEthW5500;
+            if (hotReinit) {
+                platform::ethStop();
+                syncEthConfig();                       // pushes cfg + records the new sig
+                if (platform::ethInit()) {
+                    state_ = State::WaitingEth;
+                    stateChangeTime_ = platform::millis();
+                    std::printf("NetworkModule: W5500 re-init (live config change)\n");
+                } else {
+                    std::snprintf(statusBuf_, sizeof(statusBuf_),
+                                  "W5500 re-init failed — check pins"); setStatus(statusBuf_, Severity::Error);
+                }
+            } else {
+                // RMII / none, or W5500 selected on a board without the SPI driver:
+                // record the new config so the next boot uses it; don't disturb the
+                // running interface.
+                syncEthConfig();
+                std::snprintf(statusBuf_, sizeof(statusBuf_),
+                              "Ethernet config saved — restart to apply"); setStatus(statusBuf_);
+            }
+        }
+    }
+
     static constexpr const char* addressingOptions_[] = {"DHCP", "Static"};
+    // ethType dropdown options — index order MUST match the EthPhyType enum
+    // (None=0, LAN8720=1, IP101=2, W5500=3) since the Select stores the index.
+    static constexpr const char* ethTypeOptions_[] = {"None", "LAN8720", "IP101", "W5500"};
 
     void startAP() {
         const char* apName = (systemModule_ && systemModule_->deviceName()[0] != 0)
@@ -526,7 +689,7 @@ private:
     // TX-power state on stop, so our cached `applied` value no longer
     // reflects what the radio thinks. Without this, the equality check
     // in syncTxPower() short-circuits and the cap never lands on the
-    // restarted radio — the LOLIN board would associate at full power
+    // restarted radio — a brown-out-prone board would associate at full power
     // (brown-out hazard) until the user touched the control to force a
     // resync.
     void noteRadioStopped() { appliedTxPowerSetting_ = -1; }

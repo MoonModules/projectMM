@@ -34,6 +34,7 @@ Stop kills the python process (matched by script name via pkill).
 """
 
 import http.server
+import json
 import socketserver
 import subprocess
 import sys
@@ -43,8 +44,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 INSTALL_DIR = ROOT / "docs" / "install"
+ASSETS_BOARDS_DIR = ROOT / "docs" / "assets" / "boards"
 PICKER_JS = ROOT / "src" / "ui" / "install-picker.js"
 STAGE_DIR = ROOT / "build" / "install-preview"
+# The preview mirrors the GitHub Pages layout: the installer at /install/,
+# board images under /install/assets/boards/, and the releases tree under
+# /install/releases/ — so an "image": "assets/boards/<slug>.jpg" path and the
+# "./releases/<tag>/" firmware path resolve identically here and on Pages, no
+# per-context special casing. A root redirect (/ → /install/) keeps the old
+# entry point working.
+STAGE_INSTALL = STAGE_DIR / "install"
 BUILD_ROOT = ROOT / "build"
 GENERATE_MANIFEST = ROOT / "scripts" / "build" / "generate_manifest.py"
 # Stage under the tag the picker WILL surface from the live GitHub Releases
@@ -63,19 +72,50 @@ LOCAL_VERSION = "local-dev"
 PORT = 8000
 
 
+def _stage_runtime_files(src_dir: Path, dst_dir: Path):
+    """Copy every browser-loadable file (.html/.js/.css/.json/.png/.ico) from
+    src_dir to dst_dir — mirrors release.yml's `cp -r docs/<dir>/. pages/<dir>/`.
+    README.md / other .md are docs, skipped."""
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    for src in src_dir.iterdir():
+        if src.is_file() and src.suffix.lower() in (".html", ".js", ".css", ".json", ".png", ".ico"):
+            shutil.copy(src, dst_dir / src.name)
+
+
+def _stage_referenced_board_images(dst_dir: Path):
+    """Stage only the board images a boards.json entry references (mirrors the
+    deploy's filtered copy), under <dst_dir>/assets/boards/."""
+    boards_json = INSTALL_DIR / "boards.json"
+    if not boards_json.exists():
+        return
+    try:
+        boards = json.loads(boards_json.read_text())
+    except (ValueError, OSError):
+        return
+    for b in boards:
+        rel = b.get("image")            # e.g. "assets/boards/<slug>.jpg"
+        if not rel:
+            continue
+        src = ROOT / "docs" / rel       # source lives in docs/assets/boards/
+        if src.is_file():
+            out = dst_dir / rel
+            out.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(src, out)
+
+
 def stage_install_page():
-    """Refresh the preview dir with the current install-page sources.
+    """Refresh the preview dir, mirroring the GitHub Pages layout.
 
     Re-staging on every run keeps the local copy honest — if you edit
     index.html or any sibling JS while the server is up, restart via
     the Stop/Run cycle to pick up changes (or rely on the `?nocache=1`
     query parameter the picker honours).
 
-    Stages every browser-loadable file under docs/install/ (.html / .js
-    / .css), not just index.html, so future additions land in the
-    preview for free. The install-picker module lives separately under
-    src/ui/ (it's shared with the on-device UI) and is copied over
-    alongside. README.md is skipped — docs only.
+    Layout matches Pages exactly: the installer under /install/, board images
+    under /install/assets/boards/, the releases tree under /install/releases/.
+    A root index.html redirects / → /install/ so the historical
+    `localhost:8000/` entry point still lands on the installer. The shared
+    install-picker.js (under src/ui/, shared with the on-device UI) is copied in.
     """
     if STAGE_DIR.exists():
         shutil.rmtree(STAGE_DIR)
@@ -88,22 +128,20 @@ def stage_install_page():
         print(f"ERROR: install-picker.js not found at {PICKER_JS}", file=sys.stderr)
         sys.exit(1)
 
-    # Mirror release.yml's "cp -r docs/install/. pages/install/" step:
-    # take every runtime file in docs/install/ (so devices.js etc. land too,
-    # not just index.html). README.md is docs, skip it; .md in general is
-    # docs not runtime. `.json` covers the boards.json catalog the picker
-    # fetches; future JSON catalogs land here too.
-    for src in INSTALL_DIR.iterdir():
-        if src.is_file() and src.suffix.lower() in (".html", ".js", ".css", ".json", ".png", ".ico"):
-            shutil.copy(src, STAGE_DIR / src.name)
-    # install-picker.js lives in src/ui/ (shared with the on-device UI).
-    shutil.copy(PICKER_JS, STAGE_DIR / "install-picker.js")
-    # library.json — install page reads the project version from it.
-    # Same path the picker fetches relative to (./library.json). Pages
-    # mirror via release.yml's "cp library.json pages/install/" step.
     library_json = ROOT / "library.json"
+
+    # --- installer → /install/ ---
+    _stage_runtime_files(INSTALL_DIR, STAGE_INSTALL)
+    shutil.copy(PICKER_JS, STAGE_INSTALL / "install-picker.js")
     if library_json.exists():
-        shutil.copy(library_json, STAGE_DIR / "library.json")
+        shutil.copy(library_json, STAGE_INSTALL / "library.json")
+    _stage_referenced_board_images(STAGE_INSTALL)
+
+    # --- root redirect / → /install/ (keeps the old entry point working) ---
+    (STAGE_DIR / "index.html").write_text(
+        '<!doctype html><meta http-equiv="refresh" content="0; url=./install/">'
+        '<a href="./install/">projectMM installer →</a>\n'
+    )
 
 
 def find_local_builds() -> list[Path]:
@@ -129,9 +167,10 @@ def stage_local_builds(builds: list[Path]) -> list[str]:
     Mirrors .github/workflows/release.yml's "Stage release artifacts" +
     "Generate ESP Web Tools manifests" steps, just into the preview
     staging dir and using a fixed `local-dev` tag instead of a git tag.
-    Returns the list of firmware keys staged (used in the boot log).
+    Releases live under /install/releases/ (matching Pages). Returns the staged
+    firmware keys.
     """
-    releases_dir = STAGE_DIR / "releases" / LOCAL_TAG
+    releases_dir = STAGE_INSTALL / "releases" / LOCAL_TAG
     releases_dir.mkdir(parents=True, exist_ok=True)
 
     staged: list[str] = []
@@ -141,16 +180,21 @@ def stage_local_builds(builds: list[Path]) -> list[str]:
         prefix = f"firmware-{firmware}-v{LOCAL_VERSION}"
 
         # The four .bin files that go alongside a firmware in the release.
-        # Mirrors release.yml line ~116-119 exactly.
+        # Mirrors release.yml's "Stage release artifacts" step: app + bootloader
+        # are per-firmware; ota-data + partition-table are SHARED (ota-data once
+        # globally, partition-table once per flash-size group), matching the names
+        # generate_manifest.py emits so the preview's manifests resolve them.
         try:
+            flasher = json.loads((build_dir / "flasher_args.json").read_text())
+            size = str(flasher.get("flash_settings", {}).get("flash_size", "")).lower()
             shutil.copy(build_dir / "projectMM.bin",
                         releases_dir / f"{prefix}.bin")
             shutil.copy(build_dir / "bootloader" / "bootloader.bin",
                         releases_dir / f"{prefix}-bootloader.bin")
             shutil.copy(build_dir / "partition_table" / "partition-table.bin",
-                        releases_dir / f"{prefix}-partition-table.bin")
+                        releases_dir / f"partition-table-{size}.bin")
             shutil.copy(build_dir / "ota_data_initial.bin",
-                        releases_dir / f"{prefix}-ota-data.bin")
+                        releases_dir / "shared-ota-data.bin")
         except FileNotFoundError as e:
             # Partial build (bootloader / partition-table missing) — skip this
             # firmware rather than half-stage it, the picker would offer it
@@ -166,8 +210,11 @@ def stage_local_builds(builds: list[Path]) -> list[str]:
         if not flasher_args.exists():
             print(f"==> skip {firmware}: missing flasher_args.json", file=sys.stderr)
             continue
+        # Run through `uv run` (project standard — see CLAUDE.md "Use uv for
+        # every Python invocation"), not the raw interpreter, so the managed
+        # venv resolves the manifest generator's deps.
         result = subprocess.run(
-            [sys.executable, str(GENERATE_MANIFEST),
+            ["uv", "run", "python", str(GENERATE_MANIFEST),
              "--firmware", firmware,
              "--version", LOCAL_VERSION,
              "--release-url", ".",
@@ -230,6 +277,7 @@ def main() -> int:
         print(f"    run `uv run scripts/build/build_esp32.py --firmware <variant>` first to enable end-to-end flash")
 
     print(f"==> serving at http://localhost:{PORT}/")
+    print(f"    installer: http://localhost:{PORT}/install/")
     print("    open in Chrome / Edge / Opera (Web Serial requires one of these)")
     print("    add ?nocache=1 to bypass the picker's 5-min sessionStorage cache")
     print()

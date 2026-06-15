@@ -13,7 +13,7 @@
     "Drivers",
     "PreviewDriver"
   ],
-  "description": "Add / configure / remove the AudioModule peripheral and an audio-reactive effect while the render pipeline runs, proving the robustness rule for the audio producer/consumer pair. AudioModule is a Peripheral (it sits beside the pipeline, publishing an AudioFrame), and the audio effects read it through the static AudioModule::latestFrame() accessor, NOT a boot-time pointer — so add/remove can happen in any order at runtime. The checks assert the pipeline keeps RENDERING (buffer non-null, fps measurable) through each mutation: adding the mic, setting its pins (the user-configures-then-runs flow), adding a consumer effect, and crucially REMOVING the mic while a consumer is still live (the consumer must fall back to a silent frame, never deref a dangling pointer — the bug the boot-loop fix and the unit lifecycle tests pin, here proven end-to-end through the Scheduler). On the host the mic is inert (hasI2sMic false), so this exercises the wiring/lifecycle, not real capture; capture is proven on hardware. Grid is 64x64 so the tick stays above the host microsecond clock at every step.",
+  "description": "Add / configure / remove the AudioModule peripheral and an audio-reactive effect while the render pipeline runs, proving the robustness rule for the audio producer/consumer pair. AudioModule is a Peripheral (it sits beside the pipeline, publishing an AudioFrame), and the audio effects read it through the static AudioModule::latestFrame() accessor, NOT a boot-time pointer — so add/remove can happen in any order at runtime. The checks assert the pipeline keeps RENDERING (buffer non-null, fps measurable) through each mutation: adding the mic, setting its three pins one at a time (the install fan-out's exact add-then-configure sequence — the web installer / MoonDeck / OTA picker add the AudioModule then POST wsPin/sdPin/sckPin as separate control writes from a catalog entry's modules+controls), adding a consumer effect, and crucially REMOVING the mic while a consumer is still live (the consumer must fall back to a silent frame, never deref a dangling pointer — the bug the boot-loop fix and the unit lifecycle tests pin, here proven end-to-end through the Scheduler). The per-pin sequence proves the self-correcting partial-fill: the first two writes leave a pin unset so AudioModule's guard makes the rebuild a no-op, the third completes the set — the pipeline never stalls through any of it. On the host the mic is inert (hasI2sMic false), so this exercises the wiring/lifecycle, not real capture; capture is proven on hardware. Grid is 64x64 so the tick stays above the host microsecond clock at every step.",
   "fixture": [
     {
       "name": "fix-system",
@@ -87,7 +87,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            9,
+            8,
             10
           ],
           "free_heap": [
@@ -100,7 +100,7 @@
           ],
           "at": [
             "2026-06-12",
-            "2026-06-12"
+            "2026-06-14"
           ]
         }
       }
@@ -126,7 +126,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            9,
+            8,
             9
           ],
           "free_heap": [
@@ -139,18 +139,65 @@
           ],
           "at": [
             "2026-06-12",
-            "2026-06-12"
+            "2026-06-14"
           ]
         }
       }
     },
     {
-      "name": "configure-audio-pins",
-      "description": "Set a mic pin — the user-configures-then-runs flow. On host the mic is inert, but the buildState rebuild must not disturb the running pipeline.",
+      "name": "configure-ws-pin",
+      "description": "Set the first mic pin (wsPin). This mirrors the install fan-out: a catalog entry's Audio pins arrive as separate /api/control writes, one per pin. After this single write wsPin is set but sdPin/sckPin are still 0, so AudioModule's unset-pin guard short-circuits before audioMicInit (no I2S init attempted) and the rebuild is a cheap no-op. The pipeline must keep rendering through it.",
+      "op": "set_control",
+      "id": "Audio",
+      "key": "wsPin",
+      "value": 4
+    },
+    {
+      "name": "configure-sd-pin",
+      "description": "Second pin (sdPin). Still one pin unset (sckPin=0), so still guarded — the second cheap no-op rebuild. Proves the partial-pin-fill sequence the install injection produces never disturbs the running pipeline.",
       "op": "set_control",
       "id": "Audio",
       "key": "sdPin",
       "value": 5
+    },
+    {
+      "name": "configure-sck-pin",
+      "description": "Third and final pin (sckPin). Now all three are set, so the guard passes and a real mic init is attempted. On host hasI2sMic is false so the mic stays inert regardless, but this is the write that completes the install-injected pin set; the buildState rebuild must not disturb the running pipeline.",
+      "op": "set_control",
+      "id": "Audio",
+      "key": "sckPin",
+      "value": 6
+    },
+    {
+      "name": "measure-pins-configured",
+      "description": "All three mic pins set via the sequential install-fan-out order: pipeline still renders through the full add-then-configure flow a catalog inject performs (add AudioModule, then wsPin/sdPin/sckPin one at a time).",
+      "op": "measure",
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min": 1
+        }
+      },
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            8,
+            11
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-13",
+            "2026-06-14"
+          ]
+        }
+      }
     },
     {
       "name": "add-audio-consumer",
@@ -173,7 +220,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            9,
+            8,
             10
           ],
           "free_heap": [
@@ -186,7 +233,7 @@
           ],
           "at": [
             "2026-06-12",
-            "2026-06-12"
+            "2026-06-14"
           ]
         }
       }
@@ -210,7 +257,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            9,
+            8,
             9
           ],
           "free_heap": [
@@ -223,7 +270,7 @@
           ],
           "at": [
             "2026-06-12",
-            "2026-06-12"
+            "2026-06-14"
           ]
         }
       }
@@ -247,7 +294,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            9,
+            8,
             10
           ],
           "free_heap": [
@@ -260,7 +307,7 @@
           ],
           "at": [
             "2026-06-12",
-            "2026-06-12"
+            "2026-06-14"
           ]
         }
       }
