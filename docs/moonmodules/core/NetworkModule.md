@@ -57,9 +57,9 @@ Included in NetworkModule (not separate). Registers the deviceName on whichever 
 
 ## Ethernet
 
-Ethernet init is part of NetworkModule::setup(). Board-specific GPIO config (MAC, PHY, clock pin, reset pin) is hardcoded per board via compile-time defines in `sdkconfig.defaults.<board>`.
+Ethernet init is part of `NetworkModule::setup()`, which calls `syncEthConfig()` (pushes the eth controls above into `platform::setEthConfig`) then `platform::ethInit()`. The PHY type and pins are **runtime** config (the `ethType` + pin controls above), not compile-time — see the controls list and [architecture.md § Config provenance](../../architecture.md#config-provenance-mcu--board--device).
 
-The firmware always includes Ethernet support — no separate firmware for Ethernet vs WiFi boards. On boards without Ethernet hardware, the init fails silently and WiFi STA becomes Plan A. The code overhead of unused Ethernet support is minimal (no runtime memory cost when not initialized).
+Which Ethernet *driver* is compiled in is per chip (the firmware variant): classic/P4 carry the internal-EMAC RMII driver, the S3 the W5500 SPI driver; a build with no Ethernet driver (`MM_NO_ETH`) stubs `ethInit()` to return false. When no PHY responds (no cable, or no hardware), `ethInit()` returns false and the cascade falls through to WiFi STA → AP — no GPIO grab, no hang.
 
 ## Memory
 
