@@ -561,8 +561,10 @@
         <code>esp32-eth</code> build was verified on the
         <a href="https://www.olimex.com/Products/IoT/ESP32/ESP32-GATEWAY/open-source-hardware"
            target="_blank" rel="noopener">Olimex ESP32-Gateway</a>
-        (LAN8720 PHY, reset on GPIO 5, MDIO addr 0). Boards with the same PHY
-        but different pins (e.g. WT32-ETH01: reset on GPIO 16) need a local rebuild.
+        (LAN8720 PHY, reset on GPIO 5, MDIO addr 0). The PHY type and pins are
+        runtime config now, not baked into the build — a board with the same PHY
+        but different pins (e.g. WT32-ETH01: reset on GPIO 16), or a W5500 SPI board,
+        is configured by its <code>boards.json</code> entry (no rebuild needed).
       </p>
     </div>
 
@@ -1742,7 +1744,10 @@
       if (rpBoard) {
         new MutationObserver(() => {
           showAll = false;   // a fresh detect is a new context — re-apply the filter
-          selected = installPicker.getSelectedBoard() || selected;
+          // Take the picker's value verbatim — an empty string means it cleared the
+          // selection (detected family with multiple matches → generic mode), and
+          // `|| selected` would wrongly keep the stale board in the summary.
+          selected = installPicker.getSelectedBoard();
           updateSummary();
           render();
         }).observe(rpBoard, { childList: true });

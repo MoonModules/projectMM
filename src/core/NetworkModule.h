@@ -213,27 +213,33 @@ public:
             const bool isRmii = (ethType_ == 1 || ethType_ == 2);
             const bool isSpi  = (ethType_ == 3);
             const bool isEth  = isRmii || isSpi;
-            controls_.addInt16("ethPhyAddr", ethPhyAddr_, 0, 31);
+            // GPIO controls use addPin → a plain number input (ControlType::Pin),
+            // not a slider: a GPIO has no meaningful range to drag. -1 = unused.
+            // phyAddr is a PHY MDIO address (0..31), not a GPIO, but it's likewise
+            // a small number — a plain number input (addPin) fits it too.
+            controls_.addPin("ethPhyAddr", ethPhyAddr_, 0, 31);
             controls_.setHidden(controls_.count() - 1, !isEth);
-            controls_.addInt16("ethRstGpio", ethRstGpio_, -1, 48);
+            controls_.addPin("ethRstGpio", ethRstGpio_);
             controls_.setHidden(controls_.count() - 1, !isEth);
-            controls_.addInt16("ethMdcGpio", ethMdcGpio_, -1, 48);
+            controls_.addPin("ethMdcGpio", ethMdcGpio_);
             controls_.setHidden(controls_.count() - 1, !isRmii);
-            controls_.addInt16("ethMdioGpio", ethMdioGpio_, -1, 48);
+            controls_.addPin("ethMdioGpio", ethMdioGpio_);
             controls_.setHidden(controls_.count() - 1, !isRmii);
-            controls_.addInt16("ethClockGpio", ethClockGpio_, -1, 50);
+            controls_.addPin("ethClockGpio", ethClockGpio_);
             controls_.setHidden(controls_.count() - 1, !isRmii);
-            controls_.addInt16("ethClockExtIn", ethClockExtIn_, 0, 1);
+            // Clock direction is a boolean (true = clock IN / board feeds it,
+            // false = chip drives it OUT) — a toggle, not a 0..1 slider.
+            controls_.addBool("ethClockExtIn", ethClockExtIn_);
             controls_.setHidden(controls_.count() - 1, !isRmii);
-            controls_.addInt16("ethSpiMiso", ethSpiMiso_, -1, 48);
+            controls_.addPin("ethSpiMiso", ethSpiMiso_);
             controls_.setHidden(controls_.count() - 1, !isSpi);
-            controls_.addInt16("ethSpiMosi", ethSpiMosi_, -1, 48);
+            controls_.addPin("ethSpiMosi", ethSpiMosi_);
             controls_.setHidden(controls_.count() - 1, !isSpi);
-            controls_.addInt16("ethSpiSck", ethSpiSck_, -1, 48);
+            controls_.addPin("ethSpiSck", ethSpiSck_);
             controls_.setHidden(controls_.count() - 1, !isSpi);
-            controls_.addInt16("ethSpiCs", ethSpiCs_, -1, 48);
+            controls_.addPin("ethSpiCs", ethSpiCs_);
             controls_.setHidden(controls_.count() - 1, !isSpi);
-            controls_.addInt16("ethSpiIrq", ethSpiIrq_, -1, 48);
+            controls_.addPin("ethSpiIrq", ethSpiIrq_);
             controls_.setHidden(controls_.count() - 1, !isSpi);
         }
         // Chain to base is at the top of this method — see comment there.
@@ -461,30 +467,39 @@ private:
     // dropdown via addSelect — the value is the option index, which matches the
     // EthPhyType enum order (None/LAN8720/IP101/W5500).
     uint8_t ethType_       = static_cast<uint8_t>(platform::ethConfigDefault.phyType);
-    int16_t ethPhyAddr_    = platform::ethConfigDefault.phyAddr;
-    int16_t ethMdcGpio_    = platform::ethConfigDefault.mdcGpio;
-    int16_t ethMdioGpio_   = platform::ethConfigDefault.mdioGpio;
-    int16_t ethRstGpio_    = platform::ethConfigDefault.rstGpio;
-    int16_t ethClockGpio_  = platform::ethConfigDefault.rmiiClockGpio;
-    int16_t ethClockExtIn_ = platform::ethConfigDefault.rmiiClockExtIn ? 1 : 0;
-    int16_t ethSpiMiso_    = platform::ethConfigDefault.spiMiso;
-    int16_t ethSpiMosi_    = platform::ethConfigDefault.spiMosi;
-    int16_t ethSpiSck_     = platform::ethConfigDefault.spiSck;
-    int16_t ethSpiCs_      = platform::ethConfigDefault.spiCs;
-    int16_t ethSpiIrq_     = platform::ethConfigDefault.spiIrq;
+    // GPIO/address members are int8_t (one byte; -1 = unused). A GPIO never exceeds
+    // ~54 on any ESP32-family chip, so int8 is ample — bound via addPin (Pin control
+    // → number input). ethConfigDefault's fields are plain int; the values are all
+    // small (≤52 / -1) so the copy into int8_t is lossless.
+    int8_t  ethPhyAddr_    = static_cast<int8_t>(platform::ethConfigDefault.phyAddr);
+    int8_t  ethMdcGpio_    = static_cast<int8_t>(platform::ethConfigDefault.mdcGpio);
+    int8_t  ethMdioGpio_   = static_cast<int8_t>(platform::ethConfigDefault.mdioGpio);
+    int8_t  ethRstGpio_    = static_cast<int8_t>(platform::ethConfigDefault.rstGpio);
+    int8_t  ethClockGpio_  = static_cast<int8_t>(platform::ethConfigDefault.rmiiClockGpio);
+    bool    ethClockExtIn_ = platform::ethConfigDefault.rmiiClockExtIn;
+    int8_t  ethSpiMiso_    = static_cast<int8_t>(platform::ethConfigDefault.spiMiso);
+    int8_t  ethSpiMosi_    = static_cast<int8_t>(platform::ethConfigDefault.spiMosi);
+    int8_t  ethSpiSck_     = static_cast<int8_t>(platform::ethConfigDefault.spiSck);
+    int8_t  ethSpiCs_      = static_cast<int8_t>(platform::ethConfigDefault.spiCs);
+    int8_t  ethSpiIrq_     = static_cast<int8_t>(platform::ethConfigDefault.spiIrq);
     // Signature of the eth controls last applied, so loop1s() detects a UI/board
-    // change (same pattern as appliedTxPowerSetting_). -1 = never applied.
-    long appliedEthSig_ = -1;
+    // change (same pattern as appliedTxPowerSetting_). ethSigApplied_ guards the
+    // "never applied yet" case rather than a sentinel value, since any uint32 is a
+    // valid hash output. setup()'s syncEthConfig() sets it before any compare.
+    uint32_t appliedEthSig_ = 0;
+    bool ethSigApplied_ = false;
 
     // A cheap order-sensitive hash of the eth control members — changes whenever
-    // any eth control does, so loop1s() can detect a live reconfigure.
-    long ethSig() const {
-        long h = ethType_;
+    // any eth control does, so loop1s() can detect a live reconfigure. uint32_t so
+    // the rolling multiply wraps deterministically (signed overflow is UB).
+    uint32_t ethSig() const {
+        uint32_t h = ethType_;
         for (int16_t v : {ethPhyAddr_, ethRstGpio_, ethMdcGpio_, ethMdioGpio_,
-                          ethClockGpio_, ethClockExtIn_, ethSpiMiso_, ethSpiMosi_,
+                          ethClockGpio_, ethSpiMiso_, ethSpiMosi_,
                           ethSpiSck_, ethSpiCs_, ethSpiIrq_}) {
-            h = h * 131 + v;
+            h = h * 131u + static_cast<uint32_t>(v);
         }
+        h = h * 131u + (ethClockExtIn_ ? 1u : 0u);   // bool, folded in separately
         return h;
     }
 
@@ -500,7 +515,7 @@ private:
             cfg.mdioGpio       = ethMdioGpio_;
             cfg.rstGpio        = ethRstGpio_;
             cfg.rmiiClockGpio  = ethClockGpio_;
-            cfg.rmiiClockExtIn = (ethClockExtIn_ != 0);
+            cfg.rmiiClockExtIn = ethClockExtIn_;
             cfg.spiMiso        = ethSpiMiso_;
             cfg.spiMosi        = ethSpiMosi_;
             cfg.spiSck         = ethSpiSck_;
@@ -508,6 +523,7 @@ private:
             cfg.spiIrq         = ethSpiIrq_;
             platform::setEthConfig(cfg);
             appliedEthSig_ = ethSig();   // mark this config as applied
+            ethSigApplied_ = true;
         }
     }
 
@@ -520,7 +536,7 @@ private:
     // syncTxPower's appliedTxPowerSetting_.
     void syncEthLive() {
         if constexpr (platform::hasEthernet) {
-            if (ethSig() == appliedEthSig_) return;   // nothing changed
+            if (ethSigApplied_ && ethSig() == appliedEthSig_) return;   // nothing changed
             // Hot re-init only when the new type is W5500 AND this firmware actually
             // carries the W5500 driver (S3). Crucially NOT on a classic/P4 RMII board:
             // there ethInit() can't bring up W5500, so a hot ethStop()+ethInit() would

@@ -320,7 +320,7 @@ def _capture_device_profile(ip: str) -> "list | None":
 
     units: list = []
 
-    def _collect(modules, parent_id):
+    def _collect(modules, parent_id) -> None:
         for m in modules or []:
             mtype = m.get("type")
             mid = m.get("name")   # /api/state reports the instance id under "name"
@@ -1011,15 +1011,19 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             if modules is None:
                 self._send_json({"error": "device unreachable"}, 502)
                 return
-            # Store under the device whose ip matches, in the active network.
-            def _store(state):
-                for net in state.get("networks") or []:
-                    for d in net.get("devices") or []:
-                        if d.get("ip") == ip:
-                            profiles = [p for p in d.get("profiles", [])
-                                        if p.get("name") != name]   # replace same-named
-                            profiles.append({"name": name, "modules": modules})
-                            d["profiles"] = profiles
+            # Store under the device whose ip matches, in the ACTIVE network only —
+            # scoping to one network avoids a collision when two networks have
+            # overlapping private subnets (both a 192.168.1.x device).
+            def _store(state) -> None:
+                net = _active_network(state)
+                if not net:
+                    return
+                for d in net.get("devices") or []:
+                    if d.get("ip") == ip:
+                        profiles = [p for p in d.get("profiles", [])
+                                    if p.get("name") != name]   # replace same-named
+                        profiles.append({"name": name, "modules": modules})
+                        d["profiles"] = profiles
             mutate_state(_store)
             self._send_json({"ok": True, "moduleCount": len(modules)})
 
@@ -1033,18 +1037,19 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             if not ip or not name:
                 self._send_json({"error": "ip and name required"}, 400)
                 return
-            # Scope the profile lookup to the device the UI applied it from (its
-            # profile dropdown lists that device's own profiles). Matching by name
-            # alone across every device would restore the wrong pin map when two
+            # Scope the profile lookup to the device the UI applied it from, in the
+            # ACTIVE network only (its profile dropdown lists that device's own
+            # profiles). Matching by name across every device — or across networks
+            # with overlapping subnets — would restore the wrong pin map when two
             # devices share a profile name like "default".
             modules = None
-            for net in (load_state().get("networks") or []):
-                for d in net.get("devices") or []:
-                    if d.get("ip") != ip:
-                        continue
-                    for p in d.get("profiles", []):
-                        if p.get("name") == name:
-                            modules = p.get("modules")
+            net = _active_network(load_state())
+            for d in (net.get("devices") or []) if net else []:
+                if d.get("ip") != ip:
+                    continue
+                for p in d.get("profiles", []):
+                    if p.get("name") == name:
+                        modules = p.get("modules")
             if modules is None:
                 self._send_json({"error": "profile not found"}, 404)
                 return

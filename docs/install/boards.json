@@ -40,7 +40,7 @@
           "ethPhyAddr": 0,
           "ethRstGpio": 5,
           "ethClockGpio": 17,
-          "ethClockExtIn": 0
+          "ethClockExtIn": false
         }
       }
     ]
@@ -298,7 +298,7 @@
           "ethType": 1,
           "ethPhyAddr": 0,
           "ethClockGpio": 17,
-          "ethClockExtIn": 0,
+          "ethClockExtIn": false,
           "ethMdcGpio": 23,
           "ethMdioGpio": 18
         }
@@ -802,7 +802,7 @@
           "ethMdioGpio": 52,
           "ethRstGpio": 51,
           "ethClockGpio": 50,
-          "ethClockExtIn": 1
+          "ethClockExtIn": true
         }
       }
     ]
@@ -854,7 +854,7 @@
           "ethMdioGpio": 52,
           "ethRstGpio": 51,
           "ethClockGpio": 50,
-          "ethClockExtIn": 1
+          "ethClockExtIn": true
         }
       }
     ]

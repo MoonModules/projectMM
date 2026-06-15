@@ -26,7 +26,7 @@ If you like projectMM, give it a ⭐️, fork it, or open an issue or pull reque
 
 💡 **DMX *and* addressable LEDs in one setup**: RGB strips, RGBW pixels, par lights, moving heads, all through the same pipeline.
 
-🔌 **Parallel WS2812 output**: drive many strands at once over three ESP32 peripherals — RMT (every chip), the S3's LCD_CAM i80 bus (8 lanes), and the P4's Parlio engine (up to 20 simultaneous strands on the P4) — each with an on-device loopback self-test that bit-verifies the wire signal.
+🔌 **Parallel WS2812 output**: drive many strands at once over three ESP32 peripherals — RMT (every chip), the S3's LCD_CAM i80 bus (8 lanes), and the P4's Parlio engine (up to 8 lanes) — each with an on-device loopback self-test that bit-verifies the wire signal.
 
 🌐 **Industry protocols, both directions**: send *and* receive [Art-Net](https://art-net.org.uk/), [E1.31/sACN](https://tsp.esta.org/tsp/documents/docs/ANSI_E1-31-2018.pdf), and [DDP](http://www.3waylabs.com/ddp/) over the network — interoperable with Falcon, Advatek, xLights, Resolume, LedFx and other industry gear.
 

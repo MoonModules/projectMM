@@ -565,6 +565,8 @@ void ethGetIP(char* buf, size_t len) {
       // wasn't layered. Provide stubs matching the desktop platform's no-eth
       // behaviour so NetworkModule's cascade falls straight to WiFi (or AP).
 
+void setEthConfig(const EthPinConfig&)  {}
+void ethStop()                          {}
 bool ethInit()                          { return false; }
 bool ethLinkUp()                        { return false; }
 bool ethConnected()                     { return false; }

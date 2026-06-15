@@ -66,4 +66,9 @@ TEST_CASE("Desktop Ethernet seam is a safe no-op") {
 
     mm::platform::ethStop();   // safe even though nothing came up
     CHECK_FALSE(mm::platform::ethConnected());
+
+    // Restore the platform default so this test leaves no shared eth-config state
+    // for later tests (setEthConfig writes a static on ESP32; a no-op on desktop,
+    // but keep the test order-independent regardless of platform).
+    mm::platform::setEthConfig(mm::platform::ethConfigDefault);
 }

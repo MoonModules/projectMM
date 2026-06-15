@@ -88,7 +88,6 @@ def _stage_referenced_board_images(dst_dir: Path):
     boards_json = INSTALL_DIR / "boards.json"
     if not boards_json.exists():
         return
-    import json
     try:
         boards = json.loads(boards_json.read_text())
     except (ValueError, OSError):

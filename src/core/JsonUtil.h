@@ -76,7 +76,10 @@ inline bool parseBool(const char* json, const char* key) {
     if (!start) return false;
     const char* val = start + std::strlen(search);
     while (*val == ' ') val++;
-    return std::strncmp(val, "true", 4) == 0;
+    // Accept both the JSON literal `true` and a numeric `1` — boards.json / the
+    // catalog fan-out historically wrote 0/1 for flags that are now Bool controls
+    // (e.g. ethClockExtIn), and some HTTP clients send 1/0; treat either as true.
+    return std::strncmp(val, "true", 4) == 0 || *val == '1';
 }
 
 } // namespace mm::json

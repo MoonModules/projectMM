@@ -94,6 +94,8 @@ def main():
             if non_str:
                 errors.append(f"{where}: firmwares entries must be strings, got "
                               f"{[type(f).__name__ for f in non_str]}")
+            elif any(not f for f in fws):
+                errors.append(f"{where}: firmwares entries must be non-empty strings")
             elif e.get("default_firmware") not in fws:
                 errors.append(f"{where}: default_firmware '{e.get('default_firmware')}' "
                               f"not in firmwares {fws}")

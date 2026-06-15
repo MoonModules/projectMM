@@ -25,6 +25,7 @@ const char* controlTypeName(ControlType t) {
         case ControlType::Uint8:       return "uint8";
         case ControlType::Uint16:      return "uint16";
         case ControlType::Int16:       return "int16";
+        case ControlType::Pin:         return "pin";
         case ControlType::Bool:        return "bool";
         case ControlType::Text:        return "text";
         case ControlType::Password:    return "password";
@@ -70,6 +71,9 @@ void writeControlValue(JsonSink& sink, const ControlDescriptor& c) {
         case ControlType::Int16:
             sink.appendf("%d", *static_cast<int16_t*>(c.ptr));
             return;
+        case ControlType::Pin:   // int8_t storage; serialized as a plain integer
+            sink.appendf("%d", *static_cast<int8_t*>(c.ptr));
+            return;
         case ControlType::Bool:
             sink.append(*static_cast<bool*>(c.ptr) ? "true" : "false");
             return;
@@ -110,8 +114,10 @@ void writeControlMetadata(JsonSink& sink, const ControlDescriptor& c) {
         case ControlType::Uint8:
         case ControlType::Uint16:
         case ControlType::Int16:
-            // All three numeric sliders carry a real [min,max] the UI renders
-            // as a range; %d on the int32 fields covers the full uint16 span.
+        case ControlType::Pin:
+            // Numeric controls carry a real [min,max]; the slider types render it
+            // as a range, Pin uses it only as a documented valid-GPIO span (the UI
+            // renders Pin as a plain number, keyed off the "pin" type string).
             sink.appendf(",\"min\":%d,\"max\":%d", static_cast<int>(c.min),
                          static_cast<int>(c.max));
             return;
@@ -194,6 +200,13 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
                 return ApplyResult::OutOfRange;
             }
             return clampInto(static_cast<int16_t*>(c.ptr), v, c.min, c.max);
+        }
+        case ControlType::Pin: {   // int8_t storage; [min,max] = valid-GPIO span
+            int v = mm::json::parseInt(json, key);
+            if (policy == ApplyPolicy::Strict && (v < c.min || v > c.max)) {
+                return ApplyResult::OutOfRange;
+            }
+            return clampInto(static_cast<int8_t*>(c.ptr), v, c.min, c.max);
         }
         case ControlType::Bool:
             *static_cast<bool*>(c.ptr) = mm::json::parseBool(json, key);

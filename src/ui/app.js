@@ -1069,6 +1069,30 @@ function createControl(moduleName, moduleType, ctrl) {
             }
             break;
         }
+        case "pin": {
+            // A GPIO pin: plain number input, never a slider (a pin has no range to
+            // drag). −1 = unused. ctrl.min/max are the valid-GPIO span used only to
+            // clamp the typed value before sending.
+            const pMin = Number(ctrl.min ?? -1);
+            const pMax = Number(ctrl.max ?? 52);
+            const input = document.createElement("input");
+            input.type = "number";
+            input.min = pMin;
+            input.max = pMax;
+            input.value = ctrl.value ?? -1;
+            input.dataset.mid = moduleName;
+            input.dataset.key = ctrl.name;
+            input.addEventListener("input", () => {
+                dragTs[key] = Date.now();
+                let v = parseInt(input.value, 10);
+                if (Number.isNaN(v)) v = -1;
+                v = Math.max(pMin, Math.min(pMax, v));
+                debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, v));
+            });
+            row.appendChild(input);
+            appendResetButton(row, moduleName, ctrl, def, () => { input.value = def; });
+            break;
+        }
         case "int16": {
             // ctrl.min/ctrl.max are always present (server sends them). Sentinel
             // values INT16_MIN (-32768) / INT16_MAX (32767) mean "unbounded" —
