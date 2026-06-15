@@ -58,20 +58,20 @@ The **Desktop** column is host-CPU-bound, not OS-bound: the numbers track the ma
 
 ### Frames per second
 
-| Grid | Lights | Desktop | Olimex `esp32-eth-wifi` | Olimex `esp32-eth` | LOLIN S3 N16R8 `esp32s3-n16r8` |
+| Grid | Lights | Desktop | Olimex `esp32` | Olimex `esp32-eth` | LOLIN S3 N16R8 `esp32s3-n16r8` |
 |---|---:|---:|---:|---:|---:|
 | 16×16 | 256 | *(below host clock resolution)* | 1,543 | 1,628 | 1,672 |
 | 32×32 | 1,024 | 166,667 | 447 | 432 | 287 |
 | 64×64 | 4,096 | 40,000 | 81 | 71 | 25 |
 | 128×128 | 16,384 | 9,708 | 11 | 10 | 6 |
 
-The LOLIN S3 N16R8 is WiFi-only and runs with `Network.txPowerSetting` capped to 8 dBm (the brown-out fix, see below). At 128×128 it's bound by ArtNet over WiFi at reduced TX power (~93 ms of the ~164 ms tick), which is why it trails the Ethernet boards despite a faster core. The board's niche is PSRAM headroom (8 MB) for large pixel buffers, not raw ArtNet FPS; use an Ethernet board when frame rate matters.
+The Olimex `esp32` figures were measured on the WiFi+Ethernet build (the pre-collapse `esp32-eth-wifi`, now the default `esp32`). The LOLIN S3 N16R8 was measured over WiFi with `Network.txPowerSetting` capped to 8 dBm (the brown-out fix, see below); at 128×128 it's bound by ArtNet over WiFi at reduced TX power (~93 ms of the ~164 ms tick), which is why it trails the Ethernet boards despite a faster core. (The S3 now also supports W5500 SPI Ethernet, which sidesteps that WiFi bottleneck on boards wired for it.) The board's niche is PSRAM headroom (8 MB) for large pixel buffers; use an Ethernet board when frame rate matters.
 
 ### Free heap
 
 Each cell is **free internal RAM / largest contiguous internal-RAM block**. Internal RAM is the scarce, comparable resource across all boards, so for PSRAM boards (the S3) this is internal-only, NOT the PSRAM-merged total (we assume the 8 MB PSRAM pool is large enough that it isn't the constraint). The block size is the memory-pressure signal that matters: free RAM can be ample while fragmentation leaves no single block big enough for the next allocation.
 
-| Grid | Desktop | Olimex `esp32-eth-wifi` | Olimex `esp32-eth` | LOLIN S3 N16R8 `esp32s3-n16r8` |
+| Grid | Desktop | Olimex `esp32` | Olimex `esp32-eth` | LOLIN S3 N16R8 `esp32s3-n16r8` |
 |---|---:|---:|---:|---:|
 | 16×16 | unlimited | 139 KB / 52 KB | 178 KB / 100 KB | 238 KB / 160 KB |
 | 32×32 | unlimited | 132 KB / 50 KB | 172 KB / 92 KB | 240 KB / 152 KB |
@@ -80,7 +80,7 @@ Each cell is **free internal RAM / largest contiguous internal-RAM block**. Inte
 
 The S3's internal-free stays flat across grid sizes because its Layer buffer + LUT live in PSRAM: growing the grid consumes PSRAM, not internal RAM. The Olimex boards hold those buffers in internal RAM, so their free heap drops as the grid grows.
 
-Build variants differ structurally: `esp32-eth-wifi` includes the WiFi stack (~270 KB flash, ~28 KB heap). `esp32-eth` drops WiFi for more free heap, at the cost of slightly slower tick on large grids (lwIP buffer-pool sizing is tuned for the eth-wifi sdkconfig). The right variant depends on whether the deployment needs WiFi, Ethernet, or large buffers.
+Build variants differ structurally: the default `esp32` includes the WiFi stack (~270 KB flash, ~28 KB heap) alongside Ethernet. `esp32-eth` drops WiFi for more free heap, at the cost of slightly slower tick on large grids (lwIP buffer-pool sizing is tuned for the WiFi+Ethernet sdkconfig). The right variant depends on whether the deployment needs WiFi at all, or only Ethernet plus the extra buffers.
 
 The numbers above are observations. The **contracts** projectMM commits to, what the device must hit on every CI run, live in [`test/scenarios/*.json`](test/scenarios/) as per-step `contract.<target>` blocks; see [docs/testing.md § Performance contracts](docs/testing.md#performance-contracts-contracttarget) for how they're set and renegotiated. The [docs/performance.md](docs/performance.md) page covers the *why* (WiFi vs Ethernet physics, sizeof tables, build-variant deltas).
 

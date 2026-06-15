@@ -40,6 +40,17 @@ inline void parseString(const char* json, const char* key, char* out, size_t max
     out[oi] = 0;
 }
 
+// True when `key` is present in the JSON object. Lets callers distinguish a
+// genuinely-absent key from one whose value happens to be 0/false — parseInt and
+// parseBool can't, so applying their result for an absent key would clobber a
+// control's non-zero default (e.g. eth phyType=2) with 0 on a partial/older save.
+inline bool hasKey(const char* json, const char* key) {
+    if (!json || !key) return false;
+    char search[48];
+    std::snprintf(search, sizeof(search), "\"%s\":", key);
+    return std::strstr(json, search) != nullptr;
+}
+
 inline int parseInt(const char* json, const char* key) {
     if (!json || !key) return 0;
     char search[48];

@@ -209,12 +209,13 @@ function parseFirmwaresFromAssets(assets, tag) {
 // ---------------------------------------------------------------------------
 
 // Bespoke rule for projectMM's firmware keys: strip the `-eth*` suffix from
-// both sides; equal identities are mutually OTA-compatible. So `esp32`,
-// `esp32-eth`, and `esp32-eth-wifi` can all flash each other (same physical
-// ESP32 silicon; the variant decides which radios are compiled in).
-// `esp32s3-n16r8` is only compatible with itself (different chip family AND
-// different partition table). Web installer passes ownFirmwareKey=null →
-// all candidates compatible.
+// both sides; equal identities are mutually OTA-compatible. So `esp32` and
+// `esp32-eth` can flash each other (same physical ESP32 silicon; the variant
+// decides which radios are compiled in) — as can the legacy `esp32-eth-wifi`
+// key (dropped in the variant collapse, but still reported by devices flashed
+// before it; it strips to `esp32` and stays OTA-compatible). `esp32s3-n16r8` is
+// only compatible with itself (different chip family AND different partition
+// table). Web installer passes ownFirmwareKey=null → all candidates compatible.
 function isCompatible(ownFirmwareKey, candidateFirmwareKey) {
     if (!ownFirmwareKey) return true;
     const strip = f => f.replace(/-eth.*$/, "");
@@ -484,10 +485,10 @@ function render(state) {
         //   2. localStorage saved pick wins next: a returning user expects
         //      their last choice to stick across page loads, including the
         //      case where they hit board.default_firmware once but actually
-        //      want a non-default variant (e.g. esp32-eth-wifi on Olimex,
-        //      where the catalog's default is esp32-eth). Filtered through
-        //      `compatible` so a stale saved value (release dropped that
-        //      firmware) falls through harmlessly.
+        //      want a non-default variant (e.g. esp32-eth on Olimex, where the
+        //      catalog's default is esp32). Filtered through `compatible` so a
+        //      stale saved value (release dropped that firmware) falls through
+        //      harmlessly.
         //   3. The board's default_firmware — fallback for first-time
         //      visitors who haven't picked anything yet.
         //   4. First option in the narrowed list — last-resort fallback.

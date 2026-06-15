@@ -1,0 +1,25 @@
+# projectMM build-time options.
+#
+# These exist so the IDF Component Manager's dependency `rules` (in
+# main/idf_component.yml) can branch on them: a rule's `if:` clause can test a
+# Kconfig symbol, but only one that is *declared* (an undeclared symbol raises
+# MissingKconfigError and fails the solve), so a plain sdkconfig.defaults line is
+# not enough — the option must be declared here too.
+
+menu "projectMM"
+
+    config MM_P4_WIFI
+        bool "ESP32-P4: include WiFi via the on-board ESP32-C6 (esp_hosted)"
+        default n
+        help
+            Pulls the esp_wifi_remote + esp_hosted managed components, which
+            present the P4's companion ESP32-C6 radio through the standard
+            esp_wifi_* API over SDIO. The P4 has no native radio.
+
+            OFF by default so the Ethernet-only P4 firmware (esp32p4-eth) does
+            NOT compile or boot esp_hosted — esp_hosted self-initialises at boot
+            and claims the default netif, which breaks the EMAC Ethernet DHCP
+            path on an eth-only build (link up but no IP). Only the WiFi build
+            (esp32p4-eth-wifi) sets this, via sdkconfig.defaults.esp32p4-eth-wifi.
+
+endmenu

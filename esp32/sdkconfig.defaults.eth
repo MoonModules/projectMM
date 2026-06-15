@@ -1,19 +1,18 @@
-# Ethernet — defaults for the Olimex ESP32-Gateway (LAN8720 RMII, MDIO addr 0,
-# PHY reset on GPIO 5). The esp32-eth and esp32-eth-wifi build variants were
-# tested on this board:
-#   https://www.olimex.com/Products/IoT/ESP32/ESP32-GATEWAY/open-source-hardware
+# Ethernet (internal EMAC, RMII) — enables the RMII *driver* for the classic
+# ESP32 / P4. Layered onto sdkconfig.defaults by scripts/build/build_esp32.py.
 #
-# Layered onto sdkconfig.defaults by scripts/build/build_esp32.py.
-#
-# Boards with the same PHY family (LAN8720) but different pin maps —
-# WT32-ETH01 (reset on GPIO 16, RMII clock output) — need a different
-# fragment or a local rebuild today; runtime PHY/pin selection is on the
-# 2.0 roadmap (see docs/plan.md).
+# Only the driver enable + DMA buffers live here (compile-time). The PHY addr,
+# reset GPIO, MDC/MDIO and RMII clock are RUNTIME config now — set per board in
+# boards.json (→ NetworkModule → ethInit reads them), seeded from the per-chip
+# default in platform_config.h (Olimex map on classic, IP101 on P4). So no
+# CONFIG_ETH_PHY_ADDR / _RST_GPIO here: they were dead (ethInit always overrode
+# them from the C++ struct) and a stale value would only mislead.
 
+# RMII is the only interface the internal EMAC supports and the IDF default
+# (ETH_ESP32_EMAC_DEFAULT_CONFIG sets .interface = EMAC_DATA_INTERFACE_RMII), so no
+# CONFIG_ETH_PHY_INTERFACE_RMII here — that symbol doesn't exist in IDF v6 (it only
+# produced an "unknown kconfig symbol" warning).
 CONFIG_ETH_USE_ESP32_EMAC=y
-CONFIG_ETH_PHY_INTERFACE_RMII=y
-CONFIG_ETH_PHY_ADDR=0
-CONFIG_ETH_PHY_RST_GPIO=5
 CONFIG_ETH_DMA_BUFFER_SIZE=512
 CONFIG_ETH_DMA_RX_BUFFER_NUM=10
 CONFIG_ETH_DMA_TX_BUFFER_NUM=10

@@ -16,12 +16,7 @@ Completed items are removed. This file is deleted when empty.
 - **Raspberry Pi** — ARM64, cross-built or native.
 - **macOS code-signing** — drops the Gatekeeper "downloaded from internet" prompt.
 - **Windows code-signing** — drops the SmartScreen warning on first run of `projectMM.exe`. Same shape as macOS signing; needs an EV / OV code-signing certificate (Microsoft Trusted Signing is the cheapest current option). Until then, the README notes the SmartScreen prompt.
-- **Runtime PHY / pin config for Ethernet** — replaces build-time Olimex-pin baking in `sdkconfig.defaults.eth` with a runtime picker via `platform::ethPresent()` / `platform::wifiPresent()`. Once landed, `esp32-eth*` variants stop being Olimex-specific; NetworkModule's `onBuildControls()` flips the `hidden` flag on absent-interface controls. **This unblocks the firmware-variant collapse below — it is the prerequisite.**
-
-  **Target end-state once runtime PHY config lands — collapse the three classic variants to two.** Today there are three (`esp32` = WiFi-only, `esp32-eth` = Eth-only-Olimex, `esp32-eth-wifi` = both-Olimex), because the `.eth` fragment *bakes in Olimex's RMII pins* (clock GPIO17, reset GPIO5, LAN8720, addr 0 — see `sdkconfig.defaults.eth` + `ethInit()` in `platform_esp32.cpp`). So Ethernet can't be in the default build: a LOLIN/QuinLED/Generic board flashing it would drive Olimex's pins as RMII lines and stall at boot waiting for a PHY that isn't there. Once `ethInit()` selects pins/PHY at runtime (and no-ops when no PHY is present), the variants become:
-  - **`esp32`** — the default: WiFi **and** Ethernet, Eth brought up only when a PHY is detected/configured. Replaces both `esp32` and `esp32-eth-wifi`.
-  - **`esp32-eth-only`** (today's `esp32-eth`) — Eth only, WiFi compiled out via `EXCLUDE_COMPONENTS`. Kept for two real reasons: it saves flash, and it guarantees no WiFi stack is present to interfere (relevant to the [WiFi ArtNet performance](#wifi-artnet-performance-pending-investigation) and the eth-flapping investigation). Only the Eth-only case earns a separate firmware — so this is variant *reduction*, not explosion.
-  - **PSRAM boards still get the default `esp32`/`esp32s3-*` build, Ethernet-capable, no extra firmware.** The **ESP32-S3 has no built-in EMAC**, but that does *not* mean a separate firmware: an external **SPI PHY (W5500) wired to GPIO pins** gives the S3 Ethernet, and which PHY/pins (RMII vs SPI, the W5500 MISO/MOSI/SCK/CS/IRQ above) is **runtime config**, exactly the runtime-PHY mechanism this item adds — the same way MoonLight handles it (`ethernetType: BoardDefault / LAN8720-RMII / W5500-SPI` per board). So the default firmware ships **both** the RMII and the SPI-PHY driver; whether Ethernet comes up, and over which PHY, is selected at runtime from the board/pin config. Classic ESP32 uses its internal RMII MAC; S3 uses an SPI PHY; neither needs its own firmware variant. (Product-owner proposal, recorded on PR #16.)
+- **Live RMII Ethernet reconfigure** — runtime PHY/pin config shipped (`ethType` + pin controls in NetworkModule, per-board defaults in `boards.json`, `platform::setEthConfig`/`ethInit` dispatch). W5500 (SPI) on S3 applies **live** — `ethStop()` tears down the SPI bus and `ethInit()` re-runs on the next `loop1s()` with no reboot. RMII (classic/P4 internal EMAC) still saves config and asks for a restart to apply, because the EMAC bring-up is fiddlier to hot-cycle cleanly. Make RMII live too: a hot `esp_eth_stop` + EMAC/netif teardown + re-init on config change, matching the W5500 path, so every interface honours the no-reboot principle.
 - **Installer UX polish** — clear "Pre-release (beta)" warning on RC/latest picks, yank-by-asset-tag instead of yank-by-release-deletion.
 
 ---
@@ -49,7 +44,7 @@ NetworkReceiveEffect accepts E1.31 via unicast only — the same scope MoonLight
 - WiFi STA 64×64 (4K LEDs, 24 universes)
 - WiFi STA 32×32 (1K LEDs, 6 universes)
 
-This determines the practical LED limit for WiFi-only boards. Until the `sdkconfig.defaults` TX-buffer fix lands (identified in the build-variant table), **use `esp32-eth-wifi` for any ArtNet workload on classic ESP32** even if Ethernet isn't physically connected.
+This determines the practical LED limit for WiFi-only boards. Until the `sdkconfig.defaults` TX-buffer fix lands (identified in the build-variant table), **prefer wired Ethernet for any ArtNet workload on classic ESP32** — the default `esp32` build carries both stacks, so Ethernet is available even when the original measurements were taken on the old `esp32-eth-wifi` variant.
 
 ### Network round-trip test — drop/reorder measurement (deferred)
 
@@ -192,7 +187,7 @@ The **classic ESP32 has 8 RMT TX channels** (`platform_config.h`: "8 on classic 
 
 ### Runtime board presets (multi-commit, partially landed)
 
-The firmware-vs-board separation is now in place across the codebase (see [architecture.md § Firmware vs board](../architecture.md#firmware-vs-board)). `build_esp32.py --firmware <variant>` picks the compiled binary; MoonDeck deduces the physical board where the firmware uniquely identifies hardware (`esp32-eth*` ⇒ `olimex-esp32-gateway-rev-g`) and lets the user pick from a short hardcoded list otherwise. Firmware variants stay separate — `esp32-eth` saves ~670 KB flash + ~30 KB DRAM vs `esp32-eth-wifi` (measured); merging would erase that win.
+The firmware-vs-board separation is now in place across the codebase (see [architecture.md § Firmware vs board](../architecture.md#firmware-vs-board)). `build_esp32.py --firmware <variant>` picks the compiled binary; MoonDeck deduces the physical board where the firmware uniquely identifies hardware (`esp32-eth*` ⇒ `olimex-esp32-gateway-rev-g`) and lets the user pick from a short hardcoded list otherwise. Firmware variants stay separate — `esp32-eth` saves ~670 KB flash + ~30 KB DRAM vs the default `esp32` (WiFi+Ethernet, measured); merging would erase that win.
 
 What still needs separation: the eth variants hardcode Olimex Gateway RMII pins in `src/platform/esp32/platform_esp32.cpp::ethInit()`, so they only work on that one PCB. As we add boards with different pins (LOLIN D32 tested 2026-06-02, QuinLED variants planned), runtime pin configuration becomes the next step.
 
@@ -456,4 +451,4 @@ For driving **lots of LEDs**, internal SRAM is the scarce resource and the paral
 
 ### WiFi runtime disable (backlog)
 
-Compile-time answer already ships: `--firmware esp32-eth` excludes the WiFi stack. This item is the runtime variant — a single `esp32-eth-wifi` binary that skips WiFi init when Ethernet hardware is present. Prerequisite: `platform::ethPresent()` / `platform::wifiPresent()` (listed under Release 2.0 above). Defer until that API lands.
+Compile-time answer already ships: `--firmware esp32-eth` excludes the WiFi stack. The default `esp32` already *cascades* — `ethInit()` runs first, WiFi only comes up if no PHY responds — so a wired board never associates over WiFi. What's still missing is reclaiming WiFi's **heap**: even when Ethernet wins the cascade, `esp_wifi_init`'s RX buffers stay allocated. This item skips that init entirely once Ethernet is up, freeing ~16 KB. Defer until the heap saving is worth the teardown-ordering risk.

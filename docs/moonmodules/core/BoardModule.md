@@ -49,8 +49,8 @@ Standard Improv framing (see `src/core/ImprovFrame.h`). Command ID `0xFE` (high 
 
 ```json
 { "name": "Olimex ESP32-Gateway Rev G",
-  "firmwares": ["esp32-eth", "esp32-eth-wifi"],
-  "default_firmware": "esp32-eth-wifi",
+  "firmwares": ["esp32-eth", "esp32"],
+  "default_firmware": "esp32",
   "controls": { "Board": { "board": "Olimex ESP32-Gateway Rev G" } } }
 ```
 

@@ -1,0 +1,177 @@
+{
+  "name": "scenario_NetworkModule_eth_reconfigure",
+  "module": "NetworkModule",
+  "mode": "mutate",
+  "live_only": true,
+  "description": "Cycle the Ethernet PHY type (ethType: None/LAN8720/IP101/W5500) live on a running device and confirm the render loop survives every transition. Pins the robustness principle for the runtime Ethernet config: changing ethType reshapes the platform eth config (NetworkModule.syncEthLive → setEthConfig, with a live ethStop+ethInit on W5500), and no value or transition order may crash or wedge the tick. Runs live only — the eth controls exist only on hasEthernet ESP32 builds, so the in-process desktop runner SKIPs it; on a device it drives the controls over HTTP. On RMII boards (Olimex) the change saves + asks for restart (no hot re-init), so the live HTTP connection is undisturbed; the W5500 path hot-reinits but the SPI bus teardown keeps the netif alive enough to keep serving.",
+  "reset": [
+    {
+      "name": "reset-grid-width",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "reset-grid-height",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64
+    },
+    {
+      "name": "reset-ethType",
+      "op": "set_control",
+      "id": "Network",
+      "key": "ethType",
+      "value": 1
+    }
+  ],
+  "steps": [
+    {
+      "name": "ethType-lan8720",
+      "description": "LAN8720 (RMII) — the classic-ESP32 default. Baseline: device renders with Ethernet RMII selected.",
+      "op": "set_control",
+      "id": "Network",
+      "key": "ethType",
+      "value": 1,
+      "measure": true,
+      "observed": {
+        "esp32": {
+          "tick_us": [
+            6869,
+            7491
+          ],
+          "free_heap": [
+            168788,
+            168792
+          ],
+          "max_alloc_block": [
+            110592,
+            110592
+          ],
+          "at": [
+            "2026-06-15",
+            "2026-06-15"
+          ]
+        }
+      }
+    },
+    {
+      "name": "ethType-none",
+      "description": "Switch to None (no Ethernet) live. The eth pin rows hide; the device must keep rendering and stay reachable.",
+      "op": "set_control",
+      "id": "Network",
+      "key": "ethType",
+      "value": 0,
+      "measure": true,
+      "observed": {
+        "esp32": {
+          "tick_us": [
+            6825,
+            6916
+          ],
+          "free_heap": [
+            168788,
+            168788
+          ],
+          "max_alloc_block": [
+            110592,
+            110592
+          ],
+          "at": [
+            "2026-06-15",
+            "2026-06-15"
+          ]
+        }
+      }
+    },
+    {
+      "name": "ethType-w5500",
+      "description": "Switch to W5500 (SPI) live. On an S3 this hot-reinits eth (ethStop + ethInit); on RMII boards it saves + flags restart. Either way the render loop must survive.",
+      "op": "set_control",
+      "id": "Network",
+      "key": "ethType",
+      "value": 3,
+      "measure": true,
+      "observed": {
+        "esp32": {
+          "tick_us": [
+            7401,
+            7504
+          ],
+          "free_heap": [
+            168788,
+            168788
+          ],
+          "max_alloc_block": [
+            110592,
+            110592
+          ],
+          "at": [
+            "2026-06-15",
+            "2026-06-15"
+          ]
+        }
+      }
+    },
+    {
+      "name": "ethType-ip101",
+      "description": "Switch to IP101 (RMII) live — the P4 PHY. Exercises the last dropdown value; render loop must survive.",
+      "op": "set_control",
+      "id": "Network",
+      "key": "ethType",
+      "value": 2,
+      "measure": true,
+      "observed": {
+        "esp32": {
+          "tick_us": [
+            6792,
+            6861
+          ],
+          "free_heap": [
+            168788,
+            168788
+          ],
+          "max_alloc_block": [
+            110592,
+            110592
+          ],
+          "at": [
+            "2026-06-15",
+            "2026-06-15"
+          ]
+        }
+      }
+    },
+    {
+      "name": "ethType-back-to-lan8720",
+      "description": "Return to LAN8720 — confirms the cycle is reversible and leaves the device in a sane state.",
+      "op": "set_control",
+      "id": "Network",
+      "key": "ethType",
+      "value": 1,
+      "measure": true,
+      "observed": {
+        "esp32": {
+          "tick_us": [
+            6911,
+            7475
+          ],
+          "free_heap": [
+            168788,
+            168788
+          ],
+          "max_alloc_block": [
+            110592,
+            110592
+          ],
+          "at": [
+            "2026-06-15",
+            "2026-06-15"
+          ]
+        }
+      }
+    }
+  ]
+}

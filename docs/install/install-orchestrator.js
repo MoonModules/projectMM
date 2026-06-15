@@ -313,9 +313,10 @@ async function tryHttpInjectBoard(deviceUrl, board) {
 // esptool's getChipDescription() reports the specific silicon (e.g.
 // "ESP32-D0WD-V3", "ESP32-S3 (QFN56) (revision v0.2)", "ESP32-C6 (revision v0.0)"),
 // but the picker compares against boards.json's coarse `chip` FAMILY — the same
-// vocabulary build_esp32's TARGET_TO_FAMILY emits into firmwares.json ("ESP32",
-// "ESP32-S3", "ESP32-P4", and any future S2/C3/C6/… as projectMM grows to support
-// every ESP32-family chip). Without normalising, a classic ESP32 matches NO board
+// vocabulary build_esp32's TARGET_TO_FAMILY defines and the ESP Web Tools manifest
+// carries as `chipFamily` ("ESP32", "ESP32-S3", "ESP32-P4", and any future
+// S2/C3/C6/… as projectMM grows to support every ESP32-family chip). Without
+// normalising, a classic ESP32 matches NO board
 // (filter) and the flash guard false-warns on a correct flash.
 //
 // Normalise by KEEPING the family token and dropping the package/revision tail —

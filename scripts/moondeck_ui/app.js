@@ -23,7 +23,7 @@ let boards = []; // [{ key, label, firmwares: [...], default_firmware }]
 //     active_network_user_pinned: bool,   // set true when user picks the dropdown
 //     firmware, scenario, module, tab, flag_* }
 // `firmware` is the variant flashed onto the ESP32 (esp32 / esp32-eth /
-// esp32-eth-wifi / esp32s3-n16r8) — separate from the per-device `board`
+// esp32-16mb / esp32s3-n16r8) — separate from the per-device `board`
 // (physical hardware) inside each network's devices list. See
 // docs/architecture.md § Firmware vs board.
 // Devices and the active serial port now live INSIDE the active network.
@@ -974,10 +974,14 @@ function renderDevices() {
                 });
                 const j = await res.json();
                 if (j.ok) {
-                    // Reflect the new profile locally so the dropdown updates
-                    // without a full refresh (the server already persisted it).
-                    device.profiles = (device.profiles || []).filter(p => p.name !== name);
-                    device.profiles.push({name, modules: []});  // count-only placeholder; real modules live server-side
+                    // The server captured + persisted the real modules. Re-fetch the
+                    // authoritative state so device.profiles holds the actual captured
+                    // config — NOT a {modules: []} placeholder, which the next
+                    // saveState() would POST back and clobber the server's real copy.
+                    try {
+                        const sr = await fetch("/api/state");
+                        state = await sr.json();
+                    } catch (_) { /* keep current state; dropdown refreshes on next load */ }
                     renderDevices();
                 } else { alert("Save failed: " + (j.error || "unknown")); }
             } catch (err) { alert("Save failed: " + err); }

@@ -288,6 +288,13 @@ _PROFILE_MODULE_TYPES = {
     "RmtLedDriver", "LcdLedDriver", "ParlioLedDriver", "NetworkSendDriver",
 }
 
+# Control types that must NOT go into a captured profile: password values are
+# XOR-obfuscated in /api/state (re-pushing double-encodes them), and display /
+# display-int / progress are device-derived read-outs. These mirror the device's
+# own isPersistable() exclusions (src/core/Control.cpp); strings are the JSON
+# `type` values from controlTypeName().
+_NON_REPLAYABLE_CONTROL_TYPES = {"password", "display", "display-int", "progress"}
+
 
 def _capture_device_profile(ip: str) -> "list | None":
     """Read /api/state and flatten the module tree into profile units.
@@ -321,6 +328,15 @@ def _capture_device_profile(ip: str) -> "list | None":
                 controls = {}
                 for c in m.get("controls", []):
                     cn = c.get("name")
+                    # Skip non-replayable control types: password values are
+                    # XOR-obfuscated in /api/state (replaying them would double-
+                    # encode), and display / display-int / progress are device-
+                    # derived read-outs the device overwrites every tick. These are
+                    # exactly the types the device's own isPersistable() (Control.cpp)
+                    # refuses to save — mirror that here so a profile only carries
+                    # writable config. Type strings come from controlTypeName().
+                    if c.get("type") in _NON_REPLAYABLE_CONTROL_TYPES:
+                        continue
                     if cn is not None and "value" in c:
                         controls[cn] = c["value"]
                 unit = {"type": mtype, "id": mid}
@@ -1017,9 +1033,15 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             if not ip or not name:
                 self._send_json({"error": "ip and name required"}, 400)
                 return
+            # Scope the profile lookup to the device the UI applied it from (its
+            # profile dropdown lists that device's own profiles). Matching by name
+            # alone across every device would restore the wrong pin map when two
+            # devices share a profile name like "default".
             modules = None
             for net in (load_state().get("networks") or []):
                 for d in net.get("devices") or []:
+                    if d.get("ip") != ip:
+                        continue
                     for p in d.get("profiles", []):
                         if p.get("name") == name:
                             modules = p.get("modules")

@@ -147,6 +147,16 @@ void writeControlMetadata(JsonSink& sink, const ControlDescriptor& c) {
 ApplyResult applyControlValue(const ControlDescriptor& c,
                               const char* json, const char* key,
                               ApplyPolicy policy) {
+    // Absent key → leave the control at its current value. parseInt/parseBool
+    // return 0/false for a missing key, indistinguishable from a real 0, so
+    // applying them would clobber a control's non-zero default (e.g. eth
+    // phyType=2) when an older/partial persisted file omits the key. The string
+    // types already no-op on absence (parseString returns early), but the
+    // numeric/select/bool types need this explicit guard. Skipping is correct for
+    // both callers: the persistence overlay should preserve defaults for keys it
+    // didn't save, and an HTTP /api/control write always includes the key it sets.
+    if (!mm::json::hasKey(json, key)) return ApplyResult::Ok;
+
     // Helper: clamp `v` into [lo, hi] and write to `*dst` of type T.
     // Always returns Ok (clamping is the action, not a failure).
     auto clampInto = [](auto* dst, int v, int lo, int hi) {

@@ -96,7 +96,15 @@ using FsListCb = void(*)(const char* name, bool isDir, void* user);
 void fsList(const char* dir, FsListCb cb, void* user);       // single-level listing
 
 // Network (ESP32 only, stubs on desktop)
+// setEthConfig overrides the per-chip default eth pin/PHY map (ethConfigDefault)
+// with a board's runtime config before ethInit — NetworkModule pushes the values
+// it got from boards.json. Call before ethInit(); takes effect on the next init.
+void setEthConfig(const EthPinConfig& cfg);
 bool ethInit();
+// Tear down a running Ethernet driver so ethInit() can re-init with new config —
+// the live reconfigure path (used for W5500/SPI, which tears down cleanly; RMII
+// keeps apply-on-next-init). Safe to call when nothing is running. Desktop: no-op.
+void ethStop();
 bool ethLinkUp();       // PHY link detected (cable plugged, fast check)
 bool ethConnected();    // IP assigned (DHCP complete)
 void ethGetIP(char* buf, size_t len);

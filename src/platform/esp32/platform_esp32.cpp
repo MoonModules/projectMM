@@ -35,6 +35,18 @@
 #ifdef CONFIG_IDF_TARGET_ESP32P4
 #include "esp_eth_phy_ip101.h"   // P4-NANO PHY — managed component espressif/ip101
 #endif
+// W5500 over SPI: the internal EMAC is absent on the S3, so when the SPI-Ethernet
+// driver is enabled (CONFIG_ETH_USE_SPI_ETHERNET, from sdkconfig.defaults.eth-spi)
+// AND there is no on-chip EMAC, pull the W5500 MAC/PHY ctors. IDF v6 removed the
+// per-PHY SPI drivers from esp_eth core into managed components — these headers
+// come from espressif/eth_w5500 (idf_component.yml, gated to the S3). The marker
+// MM_ETH_W5500 keeps the rest of the file from repeating this compound condition.
+#if defined(CONFIG_ETH_USE_SPI_ETHERNET) && !defined(CONFIG_ETH_USE_ESP32_EMAC)
+#define MM_ETH_W5500 1
+#include "driver/spi_master.h"   // W5500 SPI Ethernet (S3 boards) — bus + device config
+#include "esp_eth_mac_w5500.h"   // espressif/eth_w5500 managed component
+#include "esp_eth_phy_w5500.h"
+#endif
 #ifndef MM_NO_WIFI
 #include "esp_wifi.h"
 #if defined(CONFIG_IDF_TARGET_ESP32P4)
@@ -253,6 +265,15 @@ static const char* NET_TAG = "mm_net";
 static bool ethLinkUp_ = false;
 static bool ethConnected_ = false;
 static esp_netif_t* ethNetif_ = nullptr;
+// Retained so a live W5500 reconfigure (ethStop → re-init) can tear the driver
+// down cleanly. eth_handle is the running driver (set on both RMII and W5500 init);
+// ethSpiActive_ records that the SPI bus was initialised (so ethStop frees it) and
+// so only exists on W5500 builds — gating it keeps the classic/P4 (RMII-only) build
+// free of an unused-variable warning under -Werror.
+static esp_eth_handle_t ethHandle_ = nullptr;
+#ifdef MM_ETH_W5500
+static bool ethSpiActive_ = false;
+#endif
 #endif
 static bool netifInitDone_ = false;
 
@@ -295,27 +316,43 @@ static void ethEventHandler(void* /*arg*/, esp_event_base_t base,
     }
 }
 
-bool ethInit() {
-    ensureNetifInit();
+// Runtime eth pin/PHY config. Seeded with the per-chip default (ethConfigDefault)
+// so an un-provisioned board still comes up on its historical pins; NetworkModule
+// overrides it via setEthConfig() with the board's boards.json values before
+// ethInit(). The DRIVER for each phyType is compiled in per chip (RMII for
+// classic/P4, W5500 SPI for S3 — sdkconfig); this only selects pins + which to use.
+static EthPinConfig ethConfig_ = ethConfigDefault;
 
+void setEthConfig(const EthPinConfig& cfg) { ethConfig_ = cfg; }
+
+// Internal-EMAC RMII path — only on chips with an on-chip EMAC (classic ESP32,
+// P4). The S3 has no EMAC, so esp_eth_mac_new_esp32 / eth_esp32_emac_config_t /
+// EMAC_CLK_* don't exist there; gating on CONFIG_ETH_USE_ESP32_EMAC keeps this
+// function out of the S3 build (where Ethernet is W5500-over-SPI instead).
+#ifdef CONFIG_ETH_USE_ESP32_EMAC
+static bool ethInitRmii() {
     esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
     ethNetif_ = esp_netif_new(&netif_cfg);
 
-    // RMII / PHY pins come from the per-target ethPins config (platform_config.h)
-    // — the Olimex map by default, the P4-NANO's IP101 map on the P4. ethPins is
-    // a compile-time constant, so the unused branch (and its PHY ctor) is dropped.
+    // RMII / PHY pins from the runtime ethConfig_ (the Olimex map by default, the
+    // P4-NANO's IP101 map on the P4, or a board override pushed from boards.json).
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
     eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
     emac_config.clock_config.rmii.clock_mode =
-        ethPins.rmiiClockExtIn ? EMAC_CLK_EXT_IN : EMAC_CLK_OUT;
+        ethConfig_.rmiiClockExtIn ? EMAC_CLK_EXT_IN : EMAC_CLK_OUT;
     emac_config.clock_config.rmii.clock_gpio =
-        static_cast<gpio_num_t>(ethPins.rmiiClockGpio);
-    if (ethPins.mdcGpio >= 0)  emac_config.smi_gpio.mdc_num  = ethPins.mdcGpio;
-    if (ethPins.mdioGpio >= 0) emac_config.smi_gpio.mdio_num = ethPins.mdioGpio;
+        static_cast<gpio_num_t>(ethConfig_.rmiiClockGpio);
+    if (ethConfig_.mdcGpio >= 0)  emac_config.smi_gpio.mdc_num  = ethConfig_.mdcGpio;
+    if (ethConfig_.mdioGpio >= 0) emac_config.smi_gpio.mdio_num = ethConfig_.mdioGpio;
+    // NOTE: the RMII *data* GPIOs (TX_EN/TXD0/TXD1/CRS_DV/RXD0/RXD1) are left at the
+    // ETH_ESP32_EMAC_DEFAULT_CONFIG() defaults. On the classic ESP32 they're fixed in
+    // silicon; on the P4 the macro already defaults them to 49/34/35/28/29/30 (the
+    // NANO wiring) — the proven round-1 P4 build relied on exactly these defaults, so
+    // we don't override them. (boards.json doesn't carry them either.)
 
     eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
-    phy_config.phy_addr = ethPins.phyAddr;
-    phy_config.reset_gpio_num = ethPins.rstGpio;
+    phy_config.phy_addr = ethConfig_.phyAddr;
+    phy_config.reset_gpio_num = ethConfig_.rstGpio;
 
     // Helper to unwind whatever was created so far on any failure — ethInit
     // runs once at boot, but a clean teardown means a broken PHY/cable degrades
@@ -334,16 +371,15 @@ bool ethInit() {
     // IP101 (P4-NANO) is a managed-component PHY ctor (espressif/ip101 in
     // idf_component.yml; removed from esp_eth core in IDF v6); the generic ctor
     // (Olimex LAN8720) stays in core. The IP101 symbol is only declared on the
-    // P4 build (its header include is #ifdef'd), so the *call* must be guarded
-    // at the preprocessor level too — `if constexpr` discards a dead branch but
-    // still requires it to compile, and an undeclared symbol won't. ethPins is
-    // constexpr, so on P4 the runtime branch still folds away.
+    // P4 build (its header include is #ifdef'd), so the runtime phyType branch
+    // below must be wrapped in `#ifdef CONFIG_IDF_TARGET_ESP32P4` — otherwise the
+    // non-P4 build would fail to compile the undeclared esp_eth_phy_new_ip101 call.
     esp_eth_phy_t* phy;
 #ifdef CONFIG_IDF_TARGET_ESP32P4
-    if (ethPins.isIp101) phy = esp_eth_phy_new_ip101(&phy_config);
-    else                 phy = esp_eth_phy_new_generic(&phy_config);
+    if (ethConfig_.phyType == ethIp101) phy = esp_eth_phy_new_ip101(&phy_config);
+    else                                phy = esp_eth_phy_new_generic(&phy_config);
 #else
-    phy = esp_eth_phy_new_generic(&phy_config);
+    phy = esp_eth_phy_new_generic(&phy_config);   // LAN8720 / generic RMII
 #endif
     if (!phy) return fail("PHY create failed", mac, nullptr);
 
@@ -372,8 +408,139 @@ bool ethInit() {
         return false;
     }
 
-    ESP_LOGI(NET_TAG, "Ethernet init done (non-blocking)");
+    ethHandle_ = eth_handle;   // retained (ethStop is W5500-only today, but keep it set)
+    ESP_LOGI(NET_TAG, "Ethernet init done (RMII, non-blocking)");
     return true;
+}
+#endif // CONFIG_ETH_USE_ESP32_EMAC
+
+// W5500 external Ethernet over SPI — the S3 path (no internal EMAC). The whole
+// function is compiled only where MM_ETH_W5500 is set (SPI-eth driver enabled via
+// sdkconfig.defaults.eth-spi AND no on-chip EMAC — see the include block); the W5500
+// ctors come from the espressif/w5500 managed component, absent otherwise. The
+// ethInit() dispatch only calls it under the same guard, so gating the definition
+// keeps the classic/P4 (RMII-only) build free of an unused-function warning under
+// -Werror. Reads the SPI pins from the runtime ethConfig_ (a W5500 board MUST set
+// them via boards.json — no universal default). Returns false (→ WiFi cascade) on
+// any failure, including no W5500 present, so a build with the driver in but no
+// module attached degrades cleanly.
+#ifdef MM_ETH_W5500
+static bool ethInitSpi() {
+    if (ethConfig_.spiMiso < 0 || ethConfig_.spiMosi < 0 ||
+        ethConfig_.spiSck < 0 || ethConfig_.spiCs < 0) {
+        ESP_LOGW(NET_TAG, "W5500 selected but SPI pins unset — skipping (set them in boards.json)");
+        return false;
+    }
+    esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
+    ethNetif_ = esp_netif_new(&netif_cfg);
+
+    spi_bus_config_t buscfg = {};
+    buscfg.miso_io_num = ethConfig_.spiMiso;
+    buscfg.mosi_io_num = ethConfig_.spiMosi;
+    buscfg.sclk_io_num = ethConfig_.spiSck;
+    buscfg.quadwp_io_num = -1;
+    buscfg.quadhd_io_num = -1;
+    constexpr spi_host_device_t kSpiHost = SPI2_HOST;
+    if (spi_bus_initialize(kSpiHost, &buscfg, SPI_DMA_CH_AUTO) != ESP_OK) {
+        ESP_LOGE(NET_TAG, "W5500 SPI bus init failed");
+        if (ethNetif_) { esp_netif_destroy(ethNetif_); ethNetif_ = nullptr; }
+        return false;
+    }
+
+    spi_device_interface_config_t devcfg = {};
+    devcfg.mode = 0;
+    devcfg.clock_speed_hz = 20 * 1000 * 1000;   // 20 MHz — W5500 spec ceiling for stable SPI
+    devcfg.spics_io_num = ethConfig_.spiCs;
+    devcfg.queue_size = 20;
+
+    eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(kSpiHost, &devcfg);
+    w5500_config.int_gpio_num = ethConfig_.spiIrq;   // -1 → W5500 driver falls back to polling
+
+    eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
+    eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
+    phy_config.phy_addr = ethConfig_.phyAddr;
+    phy_config.reset_gpio_num = ethConfig_.rstGpio;   // -1 if the module self-resets
+
+    esp_eth_mac_t* mac = esp_eth_mac_new_w5500(&w5500_config, &mac_config);
+    esp_eth_phy_t* phy = esp_eth_phy_new_w5500(&phy_config);
+    auto fail = [&](const char* what) -> bool {
+        ESP_LOGE(NET_TAG, "W5500 %s", what);
+        if (phy) phy->del(phy);
+        if (mac) mac->del(mac);
+        if (ethNetif_) { esp_netif_destroy(ethNetif_); ethNetif_ = nullptr; }
+        spi_bus_free(kSpiHost);
+        return false;
+    };
+    if (!mac) return fail("MAC create failed");
+    if (!phy) return fail("PHY create failed");
+
+    esp_eth_config_t eth_config = ETH_DEFAULT_CONFIG(mac, phy);
+    esp_eth_handle_t eth_handle = nullptr;
+    if (esp_eth_driver_install(&eth_config, &eth_handle) != ESP_OK) return fail("driver install failed");
+
+    // W5500 has no factory MAC — derive one from the chip's efuse base MAC so the
+    // netif has a unique address (IDF requirement for SPI Ethernet).
+    uint8_t mac_addr[6];
+    esp_read_mac(mac_addr, ESP_MAC_ETH);
+    esp_eth_ioctl(eth_handle, ETH_CMD_S_MAC_ADDR, mac_addr);
+
+    ESP_ERROR_CHECK(esp_netif_attach(ethNetif_, esp_eth_new_netif_glue(eth_handle)));
+    ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &ethEventHandler, nullptr));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &ethEventHandler, nullptr));
+
+    if (esp_eth_start(eth_handle) != ESP_OK) {
+        esp_event_handler_unregister(ETH_EVENT, ESP_EVENT_ANY_ID, &ethEventHandler);
+        esp_event_handler_unregister(IP_EVENT, IP_EVENT_ETH_GOT_IP, &ethEventHandler);
+        esp_eth_driver_uninstall(eth_handle);
+        if (ethNetif_) { esp_netif_destroy(ethNetif_); ethNetif_ = nullptr; }
+        spi_bus_free(kSpiHost);
+        return false;
+    }
+    ethHandle_ = eth_handle;   // retained for a live reconfigure (ethStop)
+    ethSpiActive_ = true;
+    ESP_LOGI(NET_TAG, "Ethernet init done (W5500 SPI, non-blocking)");
+    return true;
+}
+#endif // MM_ETH_W5500
+
+// Tear down a running Ethernet driver so a fresh ethInit() can bring it up with
+// new config — the live-reconfigure path. Today only the W5500 SPI driver uses
+// this (clean stop/uninstall/free-bus); RMII keeps apply-on-next-init (its
+// teardown is fiddlier — backlog "live RMII reconfigure"). Safe to call when
+// nothing is running. After this, ethInit() can be called again.
+void ethStop() {
+    if (!ethHandle_) return;
+    esp_eth_stop(ethHandle_);
+    esp_event_handler_unregister(ETH_EVENT, ESP_EVENT_ANY_ID, &ethEventHandler);
+    esp_event_handler_unregister(IP_EVENT, IP_EVENT_ETH_GOT_IP, &ethEventHandler);
+    esp_eth_driver_uninstall(ethHandle_);
+    ethHandle_ = nullptr;
+    if (ethNetif_) { esp_netif_destroy(ethNetif_); ethNetif_ = nullptr; }
+#ifdef MM_ETH_W5500
+    if (ethSpiActive_) { spi_bus_free(SPI2_HOST); ethSpiActive_ = false; }
+#endif
+    ethLinkUp_ = false;
+    ethConnected_ = false;
+}
+
+bool ethInit() {
+    ensureNetifInit();
+    // Dispatch on the board's PHY type (runtime, from boards.json via setEthConfig).
+    // Each path returns false on any failure (incl. no PHY present) so NetworkModule
+    // cascades to WiFi — a default build with a driver compiled in but no PHY wired
+    // just falls through, no GPIO grab, no hang. A PHY whose driver isn't compiled
+    // into this chip's firmware (e.g. ethW5500 on a classic build, or RMII on the
+    // S3) returns false the same way — the case is gated to where the ctor exists.
+    switch (ethConfig_.phyType) {
+#ifdef MM_ETH_W5500
+        case ethW5500:   return ethInitSpi();
+#endif
+#ifdef CONFIG_ETH_USE_ESP32_EMAC
+        case ethLan8720:
+        case ethIp101:   return ethInitRmii();
+#endif
+        default:         return false;   // ethNone, or a PHY this firmware can't drive
+    }
 }
 
 bool ethLinkUp() {

@@ -5,42 +5,35 @@
       "chip": "esp32",
       "eth_only": false,
       "ships": true,
-      "description": "ESP32 classic — WiFi only"
+      "description": "ESP32 classic — WiFi + Ethernet (RMII; per-board pins/PHY from boards.json, Olimex defaults)."
     },
     {
       "name": "esp32-16mb",
       "chip": "esp32",
       "eth_only": false,
       "ships": true,
-      "description": "ESP32 classic with 16 MB flash — WiFi only. Same silicon as `esp32`; the 4 MB binary runs on these boards too, this variant just uses the extra flash for bigger OTA slots + filesystem (Serg boards, QuinLED Dig-Octa)."
+      "description": "ESP32 classic with 16 MB flash — WiFi + Ethernet. Same silicon as `esp32`; this variant uses the extra flash for bigger OTA slots + filesystem (Serg boards, QuinLED Dig-Octa)."
     },
     {
       "name": "esp32-eth",
       "chip": "esp32",
       "eth_only": true,
       "ships": true,
-      "description": "ESP32 classic — Ethernet only (Olimex pins, WiFi compiled out)"
-    },
-    {
-      "name": "esp32-eth-wifi",
-      "chip": "esp32",
-      "eth_only": false,
-      "ships": true,
-      "description": "ESP32 classic — Ethernet + WiFi (Olimex pins)"
+      "description": "ESP32 classic — Ethernet only (WiFi compiled out; smaller image, more RAM). Per-board pins/PHY from boards.json. The default `esp32` does WiFi+Ethernet — use this only to drop WiFi."
     },
     {
       "name": "esp32s3-n16r8",
       "chip": "esp32s3",
       "eth_only": false,
       "ships": true,
-      "description": "ESP32-S3 DevKitC-1 (N16R8: 16 MB flash, 8 MB octal PSRAM) — WiFi only"
+      "description": "ESP32-S3 DevKitC-1 (N16R8: 16 MB flash, 8 MB octal PSRAM) — WiFi + W5500 SPI Ethernet (external module, pins per board in boards.json)"
     },
     {
       "name": "esp32s3-n8r8",
       "chip": "esp32s3",
       "eth_only": false,
       "ships": true,
-      "description": "ESP32-S3 (N8R8: 8 MB flash, 8 MB octal PSRAM) — WiFi only. Half the flash of N16R8; the N16R8 binary overruns an 8 MB board, so N8R8 boards (LightCrafter etc.) need this variant."
+      "description": "ESP32-S3 (N8R8: 8 MB flash, 8 MB octal PSRAM) — WiFi + W5500 SPI Ethernet. Half the flash of N16R8; the N16R8 binary overruns an 8 MB board, so N8R8 boards (LightCrafter etc.) need this variant."
     },
     {
       "name": "esp32p4-eth",

@@ -89,9 +89,14 @@ def main():
         fws = e.get("firmwares")
         if not isinstance(fws, list):
             errors.append(f"{where}: firmwares must be a list, got {type(fws).__name__}")
-        elif e.get("default_firmware") not in fws:
-            errors.append(f"{where}: default_firmware '{e.get('default_firmware')}' "
-                          f"not in firmwares {fws}")
+        else:
+            non_str = [f for f in fws if not isinstance(f, str)]
+            if non_str:
+                errors.append(f"{where}: firmwares entries must be strings, got "
+                              f"{[type(f).__name__ for f in non_str]}")
+            elif e.get("default_firmware") not in fws:
+                errors.append(f"{where}: default_firmware '{e.get('default_firmware')}' "
+                              f"not in firmwares {fws}")
 
         # --- image resolves on disk + is a local path ---
         img = e.get("image")

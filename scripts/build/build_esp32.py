@@ -9,6 +9,7 @@ USB-serial, PSRAM). See docs/architecture.md § Firmware vs board.
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -47,16 +48,18 @@ ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
 
 # Firmware catalogue. Each entry describes one shipping firmware variant.
 # Keys combine chip name + feature flags + (for SKU-sensitive chips) module:
-#   esp32           — ESP32 classic, WiFi only
-#   esp32-eth       — ESP32 classic, Ethernet only (WiFi compiled out)
-#   esp32-eth-wifi  — ESP32 classic, Ethernet + WiFi (both available)
+#   esp32           — ESP32 classic, WiFi + Ethernet (RMII; eth comes up only
+#                     when a PHY is present, pins per board from boards.json)
+#   esp32-eth       — ESP32 classic, Ethernet only (WiFi compiled out — smaller)
 #   esp32s3-n16r8   — ESP32-S3 DevKitC-1 with the N16R8 module
 #                     (16 MB flash, 8 MB octal PSRAM). Other S3 SKUs (N8R2,
 #                     N8R8, …) get their own key — the sdkconfig fragment
 #                     encodes flash size + partition table + PSRAM mode,
 #                     which differ per SKU.
-# The Ethernet variants bake in Olimex ESP32-Gateway pin defaults
-# (sdkconfig.defaults.eth). Runtime PHY/pin selection is on the 2.0 roadmap.
+# The Ethernet driver is compiled into each chip's firmware (RMII EMAC for
+# classic/P4 via sdkconfig.defaults.eth, W5500 SPI for S3 via .eth-spi);
+# which PHY/pins a given board uses is runtime config (boards.json →
+# NetworkModule → ethInit), so one binary per chip serves every board.
 #
 # `ships`: True for variants the release matrix builds + publishes. A variant can
 # exist here (buildable from the CLI) yet be held out of CI with ships=False.
@@ -64,51 +67,56 @@ ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
 # docs/install/firmwares.json, which the CI matrix, the ESP Web Tools manifest
 # loops, and MoonDeck all read (check_firmwares.py guards the projection).
 FIRMWARES: dict[str, dict] = {
+    # Default classic ESP32: WiFi AND Ethernet in one binary. The RMII Ethernet
+    # driver compiles in (the .eth fragment); whether Eth comes up, and on which
+    # pins/PHY, is runtime config (boards.json → NetworkModule → ethInit). A
+    # WiFi-only board flashing this just gets WiFi — ethInit() no-ops when no PHY
+    # responds, then the WiFi cascade takes over (no GPIO grab, no hang). This
+    # replaces the old separate `esp32` (WiFi-only) + `esp32-eth-wifi` keys.
     "esp32": {
         "chip": "esp32",
-        "fragments": ["sdkconfig.defaults"],
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth"],
         "eth_only": False,
-        "description": "ESP32 classic — WiFi only",
+        "description": "ESP32 classic — WiFi + Ethernet (RMII; per-board pins/PHY "
+                       "from boards.json, Olimex defaults).",
         "ships": True,
     },
     "esp32-16mb": {
         "chip": "esp32",
-        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.16mb"],
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.16mb",
+                      "sdkconfig.defaults.eth"],
         "eth_only": False,
-        "description": "ESP32 classic with 16 MB flash — WiFi only. Same silicon "
-                       "as `esp32`; the 4 MB binary runs on these boards too, this "
-                       "variant just uses the extra flash for bigger OTA slots + "
-                       "filesystem (Serg boards, QuinLED Dig-Octa).",
+        "description": "ESP32 classic with 16 MB flash — WiFi + Ethernet. Same silicon "
+                       "as `esp32`; this variant uses the extra flash for bigger OTA "
+                       "slots + filesystem (Serg boards, QuinLED Dig-Octa).",
         "ships": True,
     },
     "esp32-eth": {
         "chip": "esp32",
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth"],
         "eth_only": True,
-        "description": "ESP32 classic — Ethernet only (Olimex pins, WiFi compiled out)",
-        "ships": True,
-    },
-    "esp32-eth-wifi": {
-        "chip": "esp32",
-        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth"],
-        "eth_only": False,
-        "description": "ESP32 classic — Ethernet + WiFi (Olimex pins)",
+        "description": "ESP32 classic — Ethernet only (WiFi compiled out; smaller "
+                       "image, more RAM). Per-board pins/PHY from boards.json. The "
+                       "default `esp32` does WiFi+Ethernet — use this only to drop WiFi.",
         "ships": True,
     },
     "esp32s3-n16r8": {
         "chip": "esp32s3",
-        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32s3-n16r8"],
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32s3-n16r8",
+                      "sdkconfig.defaults.eth-spi"],
         "eth_only": False,
-        "description": "ESP32-S3 DevKitC-1 (N16R8: 16 MB flash, 8 MB octal PSRAM) — WiFi only",
+        "description": "ESP32-S3 DevKitC-1 (N16R8: 16 MB flash, 8 MB octal PSRAM) — WiFi + "
+                       "W5500 SPI Ethernet (external module, pins per board in boards.json)",
         "ships": True,
     },
     "esp32s3-n8r8": {
         "chip": "esp32s3",
-        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32s3-n8r8"],
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32s3-n8r8",
+                      "sdkconfig.defaults.eth-spi"],
         "eth_only": False,
-        "description": "ESP32-S3 (N8R8: 8 MB flash, 8 MB octal PSRAM) — WiFi only. "
-                       "Half the flash of N16R8; the N16R8 binary overruns an 8 MB "
-                       "board, so N8R8 boards (LightCrafter etc.) need this variant.",
+        "description": "ESP32-S3 (N8R8: 8 MB flash, 8 MB octal PSRAM) — WiFi + W5500 SPI "
+                       "Ethernet. Half the flash of N16R8; the N16R8 binary overruns an "
+                       "8 MB board, so N8R8 boards (LightCrafter etc.) need this variant.",
         "ships": True,
     },
     "esp32p4-eth": {
@@ -136,9 +144,10 @@ FIRMWARES: dict[str, dict] = {
 
 # IDF target → chip-family label. ONE source for the family vocabulary, shared by:
 #   * the ESP Web Tools manifest (`chipFamily`, generate_manifest.py),
-#   * firmwares.json's per-variant `family` (generate_firmwares.py),
 #   * the installer's detect-vs-board comparison (boards.json `chip` uses these
 #     same strings; install-orchestrator.js normalises detected silicon to them).
+# (firmwares.json does NOT store a per-variant family — it's derivable from `chip`;
+# see generate_firmwares.py.)
 # projectMM aims to support every ESP32-family chip, so new SoCs are added HERE
 # once (S2 / C3 / C6 / C5 / H2 / P4 variants) and every consumer follows.
 TARGET_TO_FAMILY = {
@@ -303,14 +312,17 @@ def firmware_cmake_args(firmware: str, release: str = "") -> list[str]:
         # out the WiFi paths (MM_ETH_ONLY → esp32/main/CMakeLists.txt).
         args.append("-DEXCLUDE_COMPONENTS=" + ";".join(ETH_ONLY_EXCLUDE))
         args.append("-DMM_ETH_ONLY=1")
-    # Firmwares that don't enable the EMAC have no on-chip Ethernet headers
-    # (`eth_esp32_emac_config_t`, …), so platform_esp32.cpp's ethInit() won't
-    # compile — set MM_NO_ETH and the source provides stubs instead. A variant
-    # "has Ethernet" when any fragment carries an EMAC-enabling sdkconfig: the
-    # classic Olimex fragment is `sdkconfig.defaults.eth` (".eth"); board-specific
-    # ones append "-eth" (e.g. ".esp32p4-eth"). Match either so a new eth board
-    # doesn't silently stub Ethernet out.
-    has_eth_fragment = any(f.endswith(".eth") or f.endswith("-eth")
+    # Firmwares that have no Ethernet driver at all (no EMAC sdkconfig and no
+    # SPI-PHY sdkconfig) lack the headers platform_esp32.cpp's ethInit() needs,
+    # so it won't compile — set MM_NO_ETH and the source provides stubs instead.
+    # A variant "has Ethernet" when any sdkconfig fragment enables a PHY driver:
+    #   * RMII EMAC (classic/P4): `sdkconfig.defaults.eth` (".eth"), board-specific
+    #     ones append "-eth" (e.g. ".esp32p4-eth").
+    #   * W5500 SPI (S3, no EMAC): `sdkconfig.defaults.eth-spi` (".eth-spi").
+    # Match the "eth" segment in any of these forms so a new eth board (RMII or
+    # SPI) doesn't silently stub Ethernet out. The hyphen-suffix forms (`-eth`,
+    # `.eth-spi`) are why a bare endswith(".eth") isn't enough.
+    has_eth_fragment = any(".eth" in f or f.endswith("-eth")
                            for f in spec["fragments"])
     if not has_eth_fragment:
         args.append("-DMM_NO_ETH=1")
@@ -337,6 +349,36 @@ def resolve_firmware(args: argparse.Namespace) -> str:
 
     # No flag → keep the prior default behaviour (WiFi-only ESP32 classic).
     return "esp32"
+
+
+def stale_feature_cache(build_dir: Path, extra: list[str]) -> str | None:
+    """Detect a build dir whose cached feature flags disagree with this firmware.
+
+    CMake `-D` flags are written into CMakeCache.txt; *omitting* a flag on a
+    later configure does NOT clear it. So if a firmware key's Ethernet-ness
+    (MM_NO_ETH / MM_ETH_ONLY) changes while its build dir already exists, the
+    stale cache value wins and the binary silently builds for the old feature
+    set — e.g. the collapsed `esp32` (WiFi+Eth) reusing a pre-collapse
+    WiFi-only dir kept MM_NO_ETH=1 and stubbed Ethernet out (no link, no LED).
+    Erasing flash doesn't help: it's a compile-time define, not device state.
+
+    Returns a human-readable reason string when the cache is stale (caller
+    should clean + reconfigure), or None when it matches.
+    """
+    cache = build_dir / "CMakeCache.txt"
+    if not cache.exists():
+        return None
+    text = cache.read_text(encoding="utf-8", errors="replace")
+    # The feature toggles whose presence/absence changes which code compiles.
+    # For each, "wanted" = does this firmware pass the -D, "cached" = is it set
+    # in the existing cache. A disagreement means a stale dir.
+    for flag in ("MM_NO_ETH", "MM_ETH_ONLY", "MM_NO_WIFI"):
+        wanted = any(a.startswith(f"-D{flag}") for a in extra)
+        cached = f"{flag}:" in text  # CMake writes `MM_NO_ETH:UNINITIALIZED=1`
+        if wanted != cached:
+            return (f"{flag} {'set' if cached else 'unset'} in cache but "
+                    f"firmware wants it {'set' if wanted else 'unset'}")
+    return None
 
 
 def build_dir_for(firmware: str) -> Path:
@@ -420,6 +462,16 @@ def main():
     # docs/backlog/backlog.md (ESP32-P4 round 3). Until fixed, build this variant
     # with the manual sequence above.
     extra = firmware_cmake_args(firmware, args.release)
+
+    # Guard against a build dir configured for a different feature set (a stale
+    # MM_NO_ETH / MM_ETH_ONLY in CMakeCache that a plain reconfigure won't clear).
+    # Wiping the dir forces the set-target path below, which seeds a clean cache.
+    stale = stale_feature_cache(build_dir, extra)
+    if stale:
+        print(f"Build dir {build_dir.relative_to(ROOT)} has a stale feature "
+              f"cache ({stale}); removing it for a clean reconfigure.")
+        shutil.rmtree(build_dir)
+
     if not build_dir.exists():
         print(f"Setting target to {chip} (firmware: {firmware}, build dir: "
               f"{build_dir.relative_to(ROOT)})...")

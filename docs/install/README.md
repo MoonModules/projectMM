@@ -39,9 +39,10 @@ end-to-end, no ESP Web Tools dependency on the install path.
 
 ## Picture board picker
 
-The board picker is a visual card grid driven by each board's `image` and `url`
-catalog fields (see the schema below) plus its `supported`/`planned` capability
-chips. It reuses the installer's flash machinery unchanged — the grid drives the
+The board picker is a visual card grid driven by each board's `image` and
+(optional) `url` catalog fields (see the schema below — both are optional; a card
+without an `image` just shows no photo, without a `url` shows no product link) plus
+its `supported`/`planned` capability chips. It reuses the installer's flash machinery unchanged — the grid drives the
 shared [`install-picker.js`](../../src/ui/install-picker.js) through a hidden board
 `<select>`, so the firmware-narrowing and flash flow are identical to a plain
 dropdown pick. Board images are a Pages-only asset (staged from
@@ -284,7 +285,7 @@ RUN_ID=$(gh run list --workflow=release.yml --branch=$(git branch --show-current
 echo "Using run $RUN_ID"
 
 # Download the 4 firmware artefacts, flatten, regenerate Pages-relative manifests.
-for F in esp32 esp32-eth esp32-eth-wifi esp32s3-n16r8; do
+for F in esp32 esp32-eth esp32s3-n16r8; do
   TMP=$(mktemp -d)
   gh run download "$RUN_ID" -n "esp32-$F" -D "$TMP"
   cp "$TMP"/*.bin "$DIST/releases/$TAG/"

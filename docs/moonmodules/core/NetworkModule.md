@@ -27,6 +27,16 @@ When a higher-priority connection becomes available, lower ones are torn down to
 - `addressing` (dropdown: DHCP / Static) — IP addressing mode (applies to both Ethernet and WiFi STA)
 - When Static: `ip`, `gateway`, `subnet`, `dns` (ipv4 controls — 4 bytes of storage each, not 16-char strings; the wire shape is still a dotted-quad string). Shown dynamically via onBuildControls.
 - `mDNS` (bool) — enable/disable mDNS responder
+
+**Ethernet PHY/pin controls** (only on builds with an Ethernet driver — `platform::hasEthernet`). The PHY *driver* is compiled into the firmware per chip (internal-EMAC RMII on classic/P4, W5500 SPI on the S3); these controls pick *which* PHY a board uses and *on which pins* — runtime config, set per board in [`boards.json`](../../install/boards.json) (→ `setEthConfig` → `ethInit`), seeded from the per-chip default in `platform_config.h`. `ethType` is the switch: with it at 0 no pin rows show; choosing a type reveals only that type's pins (RMII rows for LAN8720/IP101, SPI rows for W5500). A W5500 change applies **live** (the SPI driver tears down + re-inits, no reboot); an RMII change saves and applies on the next boot (status hints "restart to apply"). See [architecture.md § Config provenance](../../architecture.md#config-provenance-mcu--board--device).
+- `ethType` (select) — PHY type dropdown, options `None` / `LAN8720` / `IP101` / `W5500` (stored as the index 0..3, matching the `EthPhyType` enum: 0 = none, 1 = LAN8720 RMII, 2 = IP101 RMII, 3 = W5500 SPI).
+- `ethPhyAddr` (int16, 0..31) — SMI/PHY address.
+- `ethRstGpio` (int16) — PHY reset GPIO (−1 = none / module self-resets).
+- `ethMdcGpio`, `ethMdioGpio` (int16) — RMII SMI clock / data GPIOs (−1 = IDF default). RMII only.
+- `ethClockGpio` (int16) — RMII 50 MHz reference-clock GPIO. RMII only.
+- `ethClockExtIn` (int16, 0/1) — RMII clock direction: 1 = clock fed IN by the board, 0 = chip drives it OUT. RMII only.
+- `ethSpiMiso`, `ethSpiMosi`, `ethSpiSck`, `ethSpiCs`, `ethSpiIrq` (int16) — W5500 SPI pins (`ethSpiIrq` −1 = polling). W5500 only.
+
 No `status` *control*; the module surfaces its state via the generic `MoonModule::status()` slot — "Eth: 192.168.1.210", "WiFi: 10.0.0.5", "AP: MM-XXX @ 4.3.2.1", or "No network". The UI renders it as a chip in the card header (ℹ️ when connected, ❌ when no network) rather than a control row.
 
 Dynamic controls: `addressing` toggling shows/hides the static-IP fields. State transitions (cascade up to Ethernet, fall back to AP, STA reconnect) trigger a rebuildControls() so the rssi/txPower hidden flags re-evaluate. The metric strings refresh every loop1s() tick — same buffer addresses, so no rebuild is needed for value updates, only for visibility.

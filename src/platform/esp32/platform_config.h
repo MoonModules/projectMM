@@ -16,15 +16,24 @@ constexpr bool hasPsram = false;
 
 // Which ESP32 silicon family this build targets. Capability gating
 // (rmtTxChannels, lcdLanes, parlioLanes, hasI2sMic) keys off SOC flags, not the
-// family, so a new chip works untouched and no general isEsp32/isEsp32S3 flag is
-// needed (the ones that existed had no users and were removed). isEsp32P4 remains
-// because the P4 has two genuinely chip-specific seams that aren't SOC-derived:
-// its Ethernet pin map (ethPins) and its co-processor WiFi (hasWifiCoprocessor).
+// family, so most new chips work untouched without a per-chip flag. Only two chips
+// earn an `is<Chip>` flag, for seams that aren't SOC-derived: isEsp32P4 (its
+// Ethernet pin defaults in `ethConfigDefault` + co-processor WiFi via
+// hasWifiCoprocessor) and isEsp32S3 (its W5500-SPI Ethernet default — see below).
 // Keyed off the IDF target macro; false on desktop.
 #ifdef CONFIG_IDF_TARGET_ESP32P4
 constexpr bool isEsp32P4 = true;
 #else
 constexpr bool isEsp32P4 = false;
+#endif
+
+// isEsp32S3 earns its place the same way isEsp32P4 does: a chip-specific seam not
+// derivable from a SOC flag — the S3 has no internal EMAC, so its Ethernet default
+// is W5500-over-SPI (where classic/P4 default to RMII). Used only for ethConfigDefault.
+#ifdef CONFIG_IDF_TARGET_ESP32S3
+constexpr bool isEsp32S3 = true;
+#else
+constexpr bool isEsp32S3 = false;
 #endif
 
 // RMT TX channels this chip offers (8 on classic ESP32, 4 on the S3 and P4,
@@ -109,33 +118,75 @@ constexpr bool hasEthernet = false;
 constexpr bool hasEthernet = true;
 #endif
 
-// Per-board Ethernet RMII / PHY pin map. The pins are NOT runtime-configurable
-// today (full runtime PHY/pin selection is a 2.0 backlog item); they are a
-// compile-time-per-target constant so the platform boundary stays clean — no
-// scattered #ifdefs in ethInit(), which reads this struct instead of literals.
-// Plain ints (not IDF enums) keep this header free of esp_eth includes; ethInit
-// translates rmiiClockExtIn → EMAC_CLK_EXT_IN/OUT and isIp101 → the PHY ctor.
+// Which Ethernet PHY *drivers* this firmware actually carries. The W5500 SPI
+// driver is compiled in only on chips with no internal EMAC and the SPI-eth
+// fragment (the S3 — CONFIG_ETH_USE_SPI_ETHERNET set, CONFIG_ETH_USE_ESP32_EMAC
+// not). NetworkModule gates the *live* W5500 reconfigure on this: on a classic /
+// P4 board (RMII only) ethInit() can't bring up W5500, so the live path must not
+// tear down the working RMII interface for a type it can't init. Mirrors the
+// MM_ETH_W5500 marker in platform_esp32.cpp; false on desktop (no SPI-eth there).
+#if defined(CONFIG_ETH_USE_SPI_ETHERNET) && !defined(CONFIG_ETH_USE_ESP32_EMAC)
+constexpr bool hasEthW5500 = true;
+#else
+constexpr bool hasEthW5500 = false;
+#endif
+
+// Ethernet PHY type. The DRIVER for each type is compiled into the firmware per
+// chip (RMII EMAC on classic/P4, W5500 SPI on the S3 — see the sdkconfig
+// fragments); WHICH type a given board uses, and its pins, are runtime config
+// (boards.json → NetworkModule → platform::setEthConfig). Plain int values keep
+// this header free of esp_eth includes; ethInit() maps them to the IDF ctors.
+enum EthPhyType {
+    ethNone    = 0,  // no Ethernet on this board (the default — WiFi only)
+    ethLan8720 = 1,  // RMII, generic PHY (Olimex Gateway, QuinLED Dig-Octa)
+    ethIp101   = 2,  // RMII, IP101 PHY (Waveshare P4-NANO; managed component, P4-only)
+    ethW5500   = 3,  // SPI, external W5500 module (ESP32-S3 boards — SE16, LightCrafter)
+};
+
+// Per-board Ethernet pin/PHY map — runtime-configurable (no longer a fixed
+// compile-time constant). RMII fields apply to LAN8720/IP101; the spi* fields to
+// W5500. ethInit() reads the runtime `ethConfig` (set from boards.json via
+// platform::setEthConfig); the per-chip `ethConfigDefault` below seeds it so an
+// un-provisioned board still works. -1 = "leave at IDF default / unused".
 struct EthPinConfig {
+    int phyType;        // EthPhyType
     int phyAddr;
-    int mdcGpio;        // SMI clock; -1 = leave at IDF default
-    int mdioGpio;       // SMI data;  -1 = leave at IDF default
+    // RMII (internal EMAC):
+    int mdcGpio;        // SMI clock; -1 = IDF default
+    int mdioGpio;       // SMI data;  -1 = IDF default
     int rstGpio;        // PHY reset
     int rmiiClockGpio;  // RMII 50 MHz reference clock pin
     bool rmiiClockExtIn;  // true = clock IN (board feeds it), false = chip drives it OUT
-    bool isIp101;       // true = IP101 PHY ctor, false = generic
+    // (RMII data lines TX_EN/TXD0/TXD1/CRS_DV/RXD0/RXD1 are not configurable here:
+    // fixed in silicon on the classic ESP32, and on the P4 the IDF EMAC macro already
+    // defaults them to the NANO wiring (49/34/35/28/29/30). No board varies them.)
+    // W5500 (external SPI MAC+PHY):
+    int spiMiso;
+    int spiMosi;
+    int spiSck;
+    int spiCs;
+    int spiIrq;
 };
 
-// ESP32-P4-NANO (Waveshare): IP101 PHY, addr 1, MDC/MDIO 31/52, reset 51,
-// external 50 MHz RMII clock fed IN on GPIO50. Source: Waveshare wiki +
-// schematic + the ESPHome device page (two independent sources agree).
-// Else: Olimex ESP32-Gateway Rev G — LAN8720 (generic PHY), addr 0, reset 5,
-// chip drives the RMII clock OUT on GPIO17, MDC/MDIO left at IDF defaults (the
-// pins this board has always used; now a named config instead of literals).
-constexpr EthPinConfig ethPins =
-    isEsp32P4 ? EthPinConfig{ /*phyAddr*/ 1, /*mdc*/ 31, /*mdio*/ 52, /*rst*/ 51,
-                              /*rmiiClk*/ 50, /*extIn*/ true,  /*ip101*/ true }
-              : EthPinConfig{ /*phyAddr*/ 0, /*mdc*/ -1, /*mdio*/ -1, /*rst*/ 5,
-                              /*rmiiClk*/ 17, /*extIn*/ false, /*ip101*/ false };
+// Per-chip default, seeding the runtime config so a board with no eth block in
+// boards.json still comes up on the historically-wired pins:
+//  - P4 → Waveshare P4-NANO: IP101, addr 1, MDC/MDIO 31/52, reset 51, ext 50 MHz
+//    clock IN on GPIO50 (Waveshare wiki + schematic + ESPHome page agree).
+//  - classic ESP32 → Olimex ESP32-Gateway Rev G: LAN8720, addr 0, reset 5, chip
+//    drives RMII clock OUT on GPIO17, MDC/MDIO at IDF defaults.
+//  - S3 → no built-in EMAC, so the default is W5500 SPI but with no pins set
+//    (phyType ethW5500, pins -1): a W5500 S3 board MUST provide its SPI pins via
+//    boards.json — there's no universal S3 default to guess.
+constexpr EthPinConfig ethConfigDefault =
+    isEsp32P4   ? EthPinConfig{ /*phyType*/ ethIp101, /*addr*/ 1, /*mdc*/ 31, /*mdio*/ 52,
+                                /*rst*/ 51, /*rmiiClk*/ 50, /*extIn*/ true,
+                                /*miso*/ -1, /*mosi*/ -1, /*sck*/ -1, /*cs*/ -1, /*irq*/ -1 }
+  : isEsp32S3   ? EthPinConfig{ /*phyType*/ ethW5500, /*addr*/ 1, /*mdc*/ -1, /*mdio*/ -1,
+                                /*rst*/ -1, /*rmiiClk*/ -1, /*extIn*/ false,
+                                /*miso*/ -1, /*mosi*/ -1, /*sck*/ -1, /*cs*/ -1, /*irq*/ -1 }
+              :   EthPinConfig{ /*phyType*/ ethLan8720, /*addr*/ 0, /*mdc*/ -1, /*mdio*/ -1,
+                                /*rst*/ 5, /*rmiiClk*/ 17, /*extIn*/ false,
+                                /*miso*/ -1, /*mosi*/ -1, /*sck*/ -1, /*cs*/ -1, /*irq*/ -1 };
 
 // OTA (esp_https_ota) is available on every ESP32 build — the OTA partition
 // layout in partitions/*.csv reserves app0/app1 unconditionally, and esp_https_ota

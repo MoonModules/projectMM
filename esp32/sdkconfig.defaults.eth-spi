@@ -1,0 +1,18 @@
+# Ethernet over SPI (W5500) — for chips with no internal EMAC (ESP32-S3). This
+# fragment only ENABLES the W5500 driver in the build; which board uses it and on
+# which SPI pins is runtime config (boards.json → NetworkModule → setEthConfig),
+# not baked here. Boards: SE16, LightCrafter (WIZ850IO).
+#
+# Layered onto sdkconfig.defaults by scripts/build/build_esp32.py. The filename's
+# `.eth-spi` segment is what flips the build to an Ethernet build (clears MM_NO_ETH
+# — build_esp32.py matches ".eth" in any fragment name), so platform::hasEthernet
+# becomes true and ethInit()'s W5500 path compiles.
+#
+# No internal EMAC on the S3, so CONFIG_ETH_USE_ESP32_EMAC stays off; only the
+# SPI-Ethernet + W5500 driver are pulled in (baseline esp_eth, no managed component).
+
+# IDF v6 enables SPI Ethernet via this single switch; the per-PHY W5500 driver is
+# no longer a core Kconfig symbol (it moved to the espressif/w5500 managed component,
+# pulled in esp32/main/idf_component.yml and gated to the S3). Setting the removed
+# CONFIG_ETH_SPI_ETHERNET_W5500 here only produced an "unknown kconfig symbol" warning.
+CONFIG_ETH_USE_SPI_ETHERNET=y

@@ -128,10 +128,10 @@ Same source tree, same MCU (ESP32 classic, 160 MHz):
 
 | Board / firmware | 128×128 tick | ArtNet send |
 |---|---|---|
-| Olimex Gateway, `esp32` (WiFi-only) | 220 ms (4 FPS) | 155 ms |
-| Olimex Gateway, `esp32-eth-wifi` | 85–95 ms (10–12 FPS) | 38 ms |
+| Olimex Gateway, old WiFi-only `esp32` (pre-collapse) | 220 ms (4 FPS) | 155 ms |
+| Olimex Gateway, default `esp32` (WiFi + Ethernet; was `esp32-eth-wifi`) | 85–95 ms (10–12 FPS) | 38 ms |
 
-The Olimex `esp32` build is 4× slower at ArtNet than `esp32-eth-wifi` on the same board — `sdkconfig.defaults.eth` enlarges a shared lwIP/WiFi buffer pool via `CONFIG_ETH_DMA_*` that the WiFi-only build doesn't get. **Use `esp32-eth-wifi` for any ArtNet workload on classic ESP32**, even without Ethernet connected. Generic ESP32 boards (no PCB-trace antenna, less stable 3V3) vary wildly in WiFi TX quality vs the Olimex.
+The old WiFi-only `esp32` build was 4× slower at ArtNet than the build with the `.eth` fragment on the same board — `sdkconfig.defaults.eth` enlarges a shared lwIP/WiFi buffer pool via `CONFIG_ETH_DMA_*` that the WiFi-only build didn't get. The variant collapse made the eth-wifi build the **default `esp32`**, so today's default already carries those buffers — there is no longer a WiFi-only classic variant to fall behind. Generic ESP32 boards (no PCB-trace antenna, less stable 3V3) vary wildly in WiFi TX quality vs the Olimex.
 
 ### Memory at 128×128 with mirror
 
@@ -195,7 +195,7 @@ The PSRAM-merged heap (`totalHeap() > totalInternalHeap()`) is auto-detected —
 
 ## ESP32 firmware size
 
-Board: `esp32-eth-wifi` (largest variant). Partition layout: app0/app1 = 1.75 MB each, LittleFS = 384 KB, coredump = 64 KB.
+Board: the default `esp32` (WiFi + Ethernet — the largest classic variant, measured pre-collapse as `esp32-eth-wifi`). Partition layout: app0/app1 = 1.75 MB each, LittleFS = 384 KB, coredump = 64 KB.
 
 | | Size |
 |---|---|
@@ -205,14 +205,14 @@ Board: `esp32-eth-wifi` (largest variant). Partition layout: app0/app1 = 1.75 MB
 | DRAM free | 142 KB |
 | `sizeof(MoonModule)` ESP32 | 56 bytes |
 
-### Component breakdown (`esp32-eth-wifi`)
+### Component breakdown (default `esp32`)
 
 Run from project root after a clean build:
 
 ```bash
-uv run scripts/build/build_esp32.py --firmware esp32-eth-wifi
-idf.py -B build/esp32-esp32-eth-wifi \
-       -DSDKCONFIG=build/esp32-esp32-eth-wifi/sdkconfig \
+uv run scripts/build/build_esp32.py --firmware esp32
+idf.py -B build/esp32-esp32 \
+       -DSDKCONFIG=build/esp32-esp32/sdkconfig \
        size-components | head -40
 ```
 
@@ -229,17 +229,18 @@ These numbers shift with IDF version + sdkconfig — treat as rough proportions.
 | Embedded UI assets | ~50 KB | `index.html`, `app.js`, `style.css`, `preview3d.js`, `install-picker.js`, logo PNG — packed as `constexpr uint8_t[]`. |
 | `esp_https_ota` + HTTP client | ~40 KB | OTA-from-URL machinery. |
 | LittleFS | ~30 KB | `joltwallet/esp_littlefs` component. |
-| Ethernet stack | ~30 KB | `esp_eth` + LAN8720 PHY. `esp32` variant drops this. |
+| Ethernet stack | ~30 KB | `esp_eth` + LAN8720 PHY. Present in every classic variant since the collapse (RMII driver is always compiled in). |
 | Misc (alignment, .rodata) | ~40 KB | Format strings, error tables, version metadata. |
 
 ### Variant size deltas
 
 | Variant | Image | Delta | Difference |
 |---|---|---|---|
-| `esp32-eth-wifi` | 1.27 MB | — | Everything compiled in |
-| `esp32` | 1.00 MB | −270 KB | No Eth driver + RMII config |
+| `esp32` (default, WiFi + RMII Eth) | 1.27 MB | — | Everything compiled in (was `esp32-eth-wifi` pre-collapse) |
 | `esp32-eth` | 0.60 MB | −670 KB | WiFi stack excluded (`EXCLUDE_COMPONENTS`) |
-| `esp32s3-n16r8` | ~1.27 MB | similar | Xtensa LX7, 16 MB flash, different partition table |
+| `esp32s3-n16r8` | ~1.27 MB | similar | Xtensa LX7, 16 MB flash, different partition table; W5500 SPI Eth instead of RMII |
+
+The pre-collapse WiFi-only `esp32` (no Eth driver) measured ~1.00 MB — that variant no longer ships; the default now carries both stacks.
 
 ### Size budget for upcoming features
 
