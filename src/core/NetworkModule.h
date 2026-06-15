@@ -629,17 +629,36 @@ private:
         if (scheduler_) scheduler_->buildState();
     }
 
-    void updateStatusIP() {
-        char ip[16] = {};
-        if (state_ == State::ConnectedEth) {
-            platform::ethGetIP(ip, sizeof(ip));
-            std::snprintf(statusBuf_, sizeof(statusBuf_), "Eth: %s", ip); setStatus(statusBuf_, Severity::Status);
-        } else if constexpr (platform::hasWiFi) {
-            if (state_ == State::ConnectedSta) {
-                platform::wifiStaGetIP(ip, sizeof(ip));
-                std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi: %s", ip); setStatus(statusBuf_, Severity::Status);
-            }
+public:
+    // Write the current LAN IP as octets into out[0..3] (all-zero = not connected).
+    // Octets, not a string: the IP's canonical form is uint8_t[4] (matching the
+    // static-IP controls and formatDottedQuad), and no IP string is held as state —
+    // the IP already lives as the netif's binding, so duplicating it into a member
+    // would just waste RAM. Callers that need text format with formatDottedQuad at
+    // their boundary. Read by main.cpp's per-second tick line, which appends it as a
+    // stable `MM_IP=<ip>` token for the web installer's post-flash serial read —
+    // riding the already-periodic tick line means the IP re-emits every second
+    // (timing-independent: DHCP can take several seconds — measured ~7s on the
+    // P4-NANO — and the installer reopens the port at its own pace, so a one-shot
+    // connect-time line is easy to miss).
+    void currentIp(uint8_t out[4]) const {
+        out[0] = out[1] = out[2] = out[3] = 0;
+        if (state_ == State::ConnectedEth) platform::ethGetIPv4(out);
+        else if constexpr (platform::hasWiFi) {
+            if (state_ == State::ConnectedSta) platform::wifiStaGetIPv4(out);
         }
+    }
+
+private:
+    void updateStatusIP() {
+        uint8_t ip[4];
+        currentIp(ip);   // same eth/wifi getter dispatch, in one place
+        if (!ip[0] && !ip[1] && !ip[2] && !ip[3]) return;   // not connected — keep prior status
+        char ipStr[16];
+        formatDottedQuad(ipStr, ip);
+        const char* label = (state_ == State::ConnectedEth) ? "Eth" : "WiFi";
+        std::snprintf(statusBuf_, sizeof(statusBuf_), "%s: %s", label, ipStr);
+        setStatus(statusBuf_, Severity::Status);
     }
 
     // Apply txPowerSetting_ to the radio whenever it changes (UI write,

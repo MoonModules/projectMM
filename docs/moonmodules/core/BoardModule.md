@@ -49,12 +49,11 @@ Standard Improv framing (see `src/core/ImprovFrame.h`). Command ID `0xFE` (high 
 
 ```json
 { "name": "Olimex ESP32-Gateway Rev G",
-  "firmwares": ["esp32-eth", "esp32"],
-  "default_firmware": "esp32",
+  "firmwares": ["esp32", "esp32-eth"],
   "controls": { "Board": { "board": "Olimex ESP32-Gateway Rev G" } } }
 ```
 
-`name` is both identifier and display label (no slug/label split). `firmwares[]` narrows the picker's firmware dropdown; `default_firmware` pre-selects one. `controls` is the injectable payload — a `{ "<Module>": { "<control>": <value> } }` map mirroring the `/api/control` POST body, one leaf per write. Every fan-out path iterates it generically, so a new leaf (e.g. `Network.txPowerSetting`, Ethernet pin maps) takes effect everywhere with no code change on device, MoonDeck, or installer.
+`name` is both identifier and display label (no slug/label split). `firmwares[]` narrows the picker's firmware dropdown; its **first entry is the default** the picker pre-selects (reorder the array to change the default). `controls` is the injectable payload — a `{ "<Module>": { "<control>": <value> } }` map mirroring the `/api/control` POST body, one leaf per write. Every fan-out path iterates it generically, so a new leaf (e.g. `Network.txPowerSetting`, Ethernet pin maps) takes effect everywhere with no code change on device, MoonDeck, or installer.
 
 The device does **not** validate against the catalog — it stores whatever it's told (subject to per-control validation). This keeps the device decoupled: adding a board or a field needs no firmware change. An unknown name renders as `<name> (unknown)` in MoonDeck (which then pushes only `Board.board`); the installer's Inject logs "no controls for board" and skips the fan-out.
 

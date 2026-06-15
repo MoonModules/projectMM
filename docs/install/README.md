@@ -70,7 +70,6 @@ client change**.
   "name": "projectMM testbench S3",
   "chip": "ESP32-S3",
   "firmwares": ["esp32s3-n16r8"],
-  "default_firmware": "esp32s3-n16r8",
   "modules": [
     { "type": "Board", "id": "Board", "parent_id": "System",
       "controls": { "board": "projectMM testbench S3" } },
@@ -116,7 +115,7 @@ declares only what is actually on that board.
 |---|---|---|
 | `name` | yes | identifier **and** display label (no key/label split) |
 | `chip` | yes | the MCU family, for the picker's chip filter |
-| `firmwares` / `default_firmware` | yes | the firmware variants flashable on this hardware |
+| `firmwares` | yes | the firmware variants flashable on this hardware; **the first entry is the default** the picker pre-selects (reorder the array to change the default) |
 | `image` | no | board photo for the picker — a local path under `assets/boards/`, named for the board's slug (e.g. `assets/boards/quinled-dig-2-go.jpg`). Host our own copy, never a vendor hotlink — see [§ Board images & links](#board-images--links) below |
 | `url` | no | product-page link the picker shows next to the board (the vendor's own page, e.g. `https://quinled.info/quinled-dig2go/`). A remote URL is fine here — it's a click-through link, not an asset the installer fetches |
 | `supported` | no | short capability labels the firmware drives on this board *today* (e.g. `["LEDs", "WiFi", "Ethernet"]`), grounded in the modules the entry actually adds. Rendered as solid chips on the picker card |

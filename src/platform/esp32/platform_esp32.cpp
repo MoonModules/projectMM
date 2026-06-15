@@ -185,6 +185,22 @@ const char* hostIp() {
     return "";
 }
 
+// Read a netif's current IPv4 as raw octets (out[0..3]); all-zero on no IP /
+// null netif. esp_ip4_addr_t.addr is little-endian-packed (octet i = byte i),
+// matching IP2STR's `(addr >> (8*i)) & 0xff` — so this is the byte-form of the
+// same value the old IPSTR getters printed. Shared by ethGetIPv4/wifiStaGetIPv4.
+static void netifIPv4(esp_netif_t* netif, uint8_t out[4]) {
+    out[0] = out[1] = out[2] = out[3] = 0;
+    if (!netif) return;
+    esp_netif_ip_info_t info;
+    if (esp_netif_get_ip_info(netif, &info) != ESP_OK) return;
+    const uint32_t a = info.ip.addr;
+    out[0] = static_cast<uint8_t>(a & 0xff);
+    out[1] = static_cast<uint8_t>((a >> 8) & 0xff);
+    out[2] = static_cast<uint8_t>((a >> 16) & 0xff);
+    out[3] = static_cast<uint8_t>((a >> 24) & 0xff);
+}
+
 const char* sdkVersion() {
     return esp_get_idf_version();
 }
@@ -551,14 +567,8 @@ bool ethConnected() {
     return ethConnected_;
 }
 
-void ethGetIP(char* buf, size_t len) {
-    if (!ethNetif_ || len == 0) { if (len > 0) buf[0] = 0; return; }
-    esp_netif_ip_info_t info;
-    if (esp_netif_get_ip_info(ethNetif_, &info) == ESP_OK) {
-        std::snprintf(buf, len, IPSTR, IP2STR(&info.ip));
-    } else {
-        buf[0] = 0;
-    }
+void ethGetIPv4(uint8_t out[4]) {
+    netifIPv4(ethNetif_, out);
 }
 
 #else // MM_NO_ETH — firmware excludes EMAC support (chip-side or sdkconfig fragment
@@ -570,7 +580,7 @@ void ethStop()                          {}
 bool ethInit()                          { return false; }
 bool ethLinkUp()                        { return false; }
 bool ethConnected()                     { return false; }
-void ethGetIP(char* buf, size_t len)    { if (len > 0) buf[0] = 0; }
+void ethGetIPv4(uint8_t out[4])         { out[0] = out[1] = out[2] = out[3] = 0; }
 
 #endif // MM_NO_ETH
 
@@ -712,14 +722,8 @@ bool wifiStaConnected() {
     return wifiStaConnected_;
 }
 
-void wifiStaGetIP(char* buf, size_t len) {
-    if (!staNetif_ || len == 0) { if (len > 0) buf[0] = 0; return; }
-    esp_netif_ip_info_t info;
-    if (esp_netif_get_ip_info(staNetif_, &info) == ESP_OK) {
-        std::snprintf(buf, len, IPSTR, IP2STR(&info.ip));
-    } else {
-        buf[0] = 0;
-    }
+void wifiStaGetIPv4(uint8_t out[4]) {
+    netifIPv4(staNetif_, out);
 }
 
 void wifiStaStop() {
@@ -854,7 +858,7 @@ bool wifiSetTxPower(int8_t quarterDbm) {
 // these stubs from the final image.
 bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) { return false; }
 bool wifiStaConnected() { return false; }
-void wifiStaGetIP(char* buf, size_t len) { if (len > 0) buf[0] = 0; }
+void wifiStaGetIPv4(uint8_t out[4])      { out[0] = out[1] = out[2] = out[3] = 0; }
 void wifiStaStop() {}
 int wifiStaRssi() { return 0; }
 bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }

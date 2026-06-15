@@ -3,7 +3,7 @@
 // Cut out of platform_esp32.cpp (plan-23) for size + readability. Self-
 // contained: the file owns the g_improv state in an anonymous namespace
 // and only reads back into the rest of the platform layer through the
-// public wifiStaConnected() / wifiStaGetIP() symbols declared in
+// public wifiStaConnected() / wifiStaGetIPv4() symbols declared in
 // platform.h. Move was a code-organisation change with no API delta.
 //
 // Whole file is compiled out on Ethernet-only builds (MM_NO_WIFI). A
@@ -236,11 +236,11 @@ static void improvHandleProvision(const improv::ImprovCommand& cmd) {
     improvSendCurrentState(improv::STATE_PROVISIONING);
 
     // Wait up to 30 s for IP. Polls existing platform state — no extra wiring.
-    char ip[32] = {};
+    uint8_t ip[4] = {};
     for (int i = 0; i < 300; i++) {  // 30 s @ 100 ms
         vTaskDelay(pdMS_TO_TICKS(100));
         if (wifiStaConnected()) {
-            wifiStaGetIP(ip, sizeof(ip));
+            wifiStaGetIPv4(ip);
             break;
         }
     }
@@ -250,9 +250,10 @@ static void improvHandleProvision(const improv::ImprovCommand& cmd) {
         return;
     }
     improvSetStatus("connected: %s", cmd.ssid.c_str());
-    // Success frame: RPC response carrying the device URL.
+    // Success frame: RPC response carrying the device URL. Format the dotted-quad
+    // inline (platform layer doesn't pull core/Control.h's formatDottedQuad).
     char url[64];
-    std::snprintf(url, sizeof(url), "http://%s/", ip);
+    std::snprintf(url, sizeof(url), "http://%u.%u.%u.%u/", ip[0], ip[1], ip[2], ip[3]);
     std::vector<std::string> urls = { url };
     auto rpc = improv::build_rpc_response(improv::WIFI_SETTINGS, urls, false);
     improvSend(ImprovFrameType::RpcResponse, rpc);
@@ -403,11 +404,11 @@ static void improvDispatchFrame(const ImprovFrameParser& parser) {
                 // is in-session-only, so this doesn't visibly change its UI;
                 // the value is protocol completeness, observable via
                 // improv_probe.py.
-                char ip[32] = {};
-                wifiStaGetIP(ip, sizeof(ip));
-                if (ip[0]) {
+                uint8_t ip[4] = {};
+                wifiStaGetIPv4(ip);
+                if (ip[0] || ip[1] || ip[2] || ip[3]) {
                     char url[64];
-                    std::snprintf(url, sizeof(url), "http://%s/", ip);
+                    std::snprintf(url, sizeof(url), "http://%u.%u.%u.%u/", ip[0], ip[1], ip[2], ip[3]);
                     std::vector<std::string> urls = { url };
                     auto rpc = improv::build_rpc_response(improv::WIFI_SETTINGS, urls, false);
                     improvSend(ImprovFrameType::RpcResponse, rpc);

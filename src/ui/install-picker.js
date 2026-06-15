@@ -84,6 +84,12 @@ function makeState() {
         firmware: null,        // selected firmware key
         boards: [],            // parsed docs/install/boards.json, [] if unavailable
         selectedBoard: null,   // user pick from board <select>; "" for (any board)
+        hasPort: null,         // web installer only: () => bool, "is a USB port
+                               // picked?". When set, Install is disabled until it
+                               // returns true (the host re-evaluates via
+                               // notifyPortChanged on every port change). null on
+                               // the on-device OTA picker (no serial-port concept),
+                               // which leaves the button ungated as before.
     };
 }
 
@@ -413,8 +419,28 @@ function render(state) {
                      : 0;
     releaseEl.value = String(state.releaseIdx);
 
+    // Whether the firmware dropdown currently holds a valid, flashable selection.
+    // refreshFirmwareDropdown() sets it; applyInstallEnabled() ANDs it with the
+    // port gate so a port-change can re-enable/disable Install without rebuilding
+    // the dropdown.
+    let firmwareReady = false;
+
+    // Final Install-button gate: a valid firmware AND (when the host supplied a
+    // hasPort predicate — web installer) a USB port picked. The on-device OTA
+    // picker passes no hasPort, so it's port-gate-free as before. Shows the reason
+    // as the button title so the disabled state isn't a mystery.
+    function applyInstallEnabled() {
+        const portOk = !state.hasPort || state.hasPort();
+        installBtn.disabled = !(firmwareReady && portOk);
+        installBtn.title = !firmwareReady ? "Select a firmware to flash"
+                         : !portOk ? "Select a USB port first"
+                         : "";
+    }
+    state.applyInstallEnabled = applyInstallEnabled;
+
     function refreshFirmwareDropdown() {
         firmwareEl.disabled = false;  // re-enable in case prior state had a single-firmware board
+        firmwareReady = false;
         const r = sorted[state.releaseIdx];
         if (!r) {
             firmwareEl.innerHTML = `<option value="">—</option>`;
@@ -484,13 +510,13 @@ function render(state) {
         //      passes null so this branch falls through.
         //   2. localStorage saved pick wins next: a returning user expects
         //      their last choice to stick across page loads, including the
-        //      case where they hit board.default_firmware once but actually
-        //      want a non-default variant (e.g. esp32-eth on Olimex, where the
-        //      catalog's default is esp32). Filtered through `compatible` so a
-        //      stale saved value (release dropped that firmware) falls through
-        //      harmlessly.
-        //   3. The board's default_firmware — fallback for first-time
-        //      visitors who haven't picked anything yet.
+        //      case where they once picked a non-default variant (e.g. esp32-eth
+        //      on Olimex, whose default is esp32). Filtered through `compatible`
+        //      so a stale saved value (release dropped that firmware) falls
+        //      through harmlessly.
+        //   3. The board's default firmware — the FIRST entry in its `firmwares`
+        //      array (firmwares[0] is the default by convention). Fallback for
+        //      first-time visitors.
         //   4. First option in the narrowed list — last-resort fallback.
         const savedFirmware = safeLocalGet(PREF_FIRMWARE_KEY);
         const savedHere = savedFirmware && compatible.find(f => f.firmware === savedFirmware);
@@ -501,9 +527,9 @@ function render(state) {
             preferred = savedFirmware;
         } else if (state.selectedBoard) {
             const board = state.boards.find(b => b.name === state.selectedBoard);
-            if (board && board.default_firmware
-                && compatible.find(f => f.firmware === board.default_firmware)) {
-                preferred = board.default_firmware;
+            const boardDefault = board && board.firmwares && board.firmwares[0];
+            if (boardDefault && compatible.find(f => f.firmware === boardDefault)) {
+                preferred = boardDefault;
             }
         }
         state.firmware = preferred || compatible[0].firmware;
@@ -513,7 +539,8 @@ function render(state) {
         // can't change it — there's nothing to change to). Re-enabled at the
         // top of refreshFirmwareDropdown for the next call.
         firmwareEl.disabled = (compatible.length === 1);
-        installBtn.disabled = false;
+        firmwareReady = true;
+        applyInstallEnabled();   // a valid firmware — but still gated on the port
     }
     refreshFirmwareDropdown();
 
@@ -533,7 +560,7 @@ function render(state) {
 
     if (boardEl) {
         // Picking a board narrows the firmware dropdown and may pre-select
-        // the board's default_firmware. Persisted to localStorage so a
+        // the board's default firmware (firmwares[0]). Persisted to localStorage so a
         // returning user (who usually flashes the same board over and over)
         // doesn't have to re-pick. Same rationale as PREF_FIRMWARE_KEY; if a
         // user is actually flashing a different board, they pick from the
@@ -584,6 +611,11 @@ function render(state) {
     installBtn.addEventListener("click", async () => {
         const r = sorted[state.releaseIdx];
         if (!r || !state.firmware) return;
+        // Belt-and-suspenders: never flash without a picked port when the host
+        // gates on one (the button is already disabled in that state, but a stale
+        // enablement shouldn't let a flash through). The dropdown stays the place
+        // to pick a port.
+        if (state.hasPort && !state.hasPort()) { applyInstallEnabled(); return; }
         const entry = (r.firmwares || []).find(f => f.firmware === state.firmware);
         if (!entry) return;
         // Mismatch guard: if Detect ran and the user then overrode the board to
@@ -648,7 +680,7 @@ export const installPicker = {
      *   listeners the caller wired on the element keep firing.
      */
     async init({ container, ownFirmwareKey, onInstall, onDetect = null,
-                 enableBoardPicker = true, installRowExtras = null }) {
+                 enableBoardPicker = true, installRowExtras = null, hasPort = null }) {
         const state = makeState();
         state.container = container;
         state.ownFirmwareKey = ownFirmwareKey || null;
@@ -656,6 +688,7 @@ export const installPicker = {
         state.onDetect = onDetect;
         state.enableBoardPicker = enableBoardPicker;
         state.installRowExtras = installRowExtras;
+        state.hasPort = hasPort;
 
         container.innerHTML =
             `<div class="control-row"><span class="control-label">Releases</span>` +
@@ -694,6 +727,16 @@ export const installPicker = {
             return;
         }
         render(state);
+    },
+
+    /**
+     * Re-evaluate the Install button's enabled state — call from the host
+     * whenever the USB-port selection changes, so the button enables once a
+     * port is picked and disables again if it's cleared. No-op until the picker
+     * has rendered (applyInstallEnabled is wired during render()).
+     */
+    notifyPortChanged() {
+        if (_lastState && _lastState.applyInstallEnabled) _lastState.applyInstallEnabled();
     },
 
     /**

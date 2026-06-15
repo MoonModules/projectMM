@@ -353,11 +353,11 @@ void ethStop() {}                           // no eth on desktop
 bool ethInit() { return false; }
 bool ethLinkUp() { return false; }
 bool ethConnected() { return false; }
-void ethGetIP(char* buf, size_t len) { if (len > 0) buf[0] = 0; }
+void ethGetIPv4(uint8_t out[4]) { out[0] = out[1] = out[2] = out[3] = 0; }
 
 bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) { return false; }
 bool wifiStaConnected() { return false; }
-void wifiStaGetIP(char* buf, size_t len) { if (len > 0) buf[0] = 0; }
+void wifiStaGetIPv4(uint8_t out[4]) { out[0] = out[1] = out[2] = out[3] = 0; }
 void wifiStaStop() {}
 int wifiStaRssi() { return 0; }
 

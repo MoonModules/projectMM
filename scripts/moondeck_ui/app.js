@@ -16,7 +16,7 @@ let testModules = []; // ["CamelCaseName", ...]
 // docs/install/boards.json). Replaces the previously-hardcoded boardOptions
 // list — same file the web installer (Step 2) will fetch directly from
 // GitHub Pages. Empty until init() loads it; renderDevices waits on init.
-let boards = []; // [{ key, label, firmwares: [...], default_firmware }]
+let boards = []; // [{ key, label, firmwares: [...] }]  (firmwares[0] is the default)
 // State shape (post-networks refactor):
 //   { networks: [{name, subnet, wifi: {ssid, password}, port, devices: [...]}],
 //     active_network: "Home",

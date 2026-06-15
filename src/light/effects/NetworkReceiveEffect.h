@@ -196,12 +196,14 @@ private:
     // Runs at most once per poll (controllers poll every few seconds) — the
     // 239-byte reply lives on the stack, no allocation.
     void replyToPoll(const uint8_t pollerIp[4]) {
-        char ipStr[16] = {};
-        platform::ethGetIP(ipStr, sizeof(ipStr));
-        if (!ipStr[0]) platform::wifiStaGetIP(ipStr, sizeof(ipStr));
-        if (!ipStr[0]) std::strncpy(ipStr, platform::hostIp(), sizeof(ipStr) - 1);
         uint8_t myIp[4];
-        if (!parseDottedQuad(ipStr, myIp)) return;   // no usable IP — stay silent
+        platform::ethGetIPv4(myIp);
+        if (!myIp[0] && !myIp[1] && !myIp[2] && !myIp[3]) platform::wifiStaGetIPv4(myIp);
+        // Desktop has no eth/wifi netif (both return 0.0.0.0); hostIp() reports the
+        // host's LAN IP as a string, so parse that as the last resort.
+        if (!myIp[0] && !myIp[1] && !myIp[2] && !myIp[3]) {
+            if (!parseDottedQuad(platform::hostIp(), myIp)) return;  // no usable IP — stay silent
+        }
         uint8_t mac[6];
         platform::getMacAddress(mac);
         uint8_t reply[ARTNET_POLL_REPLY_SIZE];

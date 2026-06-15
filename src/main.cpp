@@ -329,6 +329,23 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
                             static_cast<unsigned>(heap),
                             static_cast<unsigned>(mm::platform::maxInternalAllocBlock()));
             }
+            // Stable MM_IP=<ip> token for the web installer's post-flash serial
+            // read. It rides this already-periodic line (zero extra printf, re-emits
+            // every second so the installer catches it whenever it reopens the port).
+            // Gated to the first 60 s of uptime: the installer reads at ~3–15 s after
+            // boot, well inside that window; afterwards the device's IP comes from the
+            // REST API (http://<ip>/api/…), so a permanent token would just be noise on
+            // the perf line. All-zero octets until the network connects — printed only
+            // once there's an IP. Both buffers are reused stack locals, no allocation.
+            if (now < 60000) {
+                uint8_t ip[4];
+                networkModule->currentIp(ip);
+                if (ip[0] || ip[1] || ip[2] || ip[3]) {
+                    char ipStr[16];
+                    mm::formatDottedQuad(ipStr, ip);
+                    std::printf("  MM_IP=%s", ipStr);
+                }
+            }
             // Per-module timing (walk tree recursively)
             for (uint8_t i = 0; i < scheduler.moduleCount(); i++) {
                 printModuleMetrics(scheduler.module(i), 0);

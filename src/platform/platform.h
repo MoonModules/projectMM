@@ -107,11 +107,15 @@ bool ethInit();
 void ethStop();
 bool ethLinkUp();       // PHY link detected (cable plugged, fast check)
 bool ethConnected();    // IP assigned (DHCP complete)
-void ethGetIP(char* buf, size_t len);
+// Current IP as raw octets — out[0..3]. All-zero (0.0.0.0) means "no IP yet".
+// Octets, not a string: the IP's canonical form is uint8_t[4] (matching the
+// static-IP controls and formatDottedQuad); callers that need text format at
+// their own boundary, callers that need bytes (ArtNet) use them directly.
+void ethGetIPv4(uint8_t out[4]);
 
 bool wifiStaInit(const char* ssid, const char* password);
 bool wifiStaConnected();
-void wifiStaGetIP(char* buf, size_t len);
+void wifiStaGetIPv4(uint8_t out[4]);   // see ethGetIPv4 — same octet contract
 void wifiStaStop();
 
 // STA-side RSSI in dBm (negative, e.g. -58). Returns 0 when the STA isn't
