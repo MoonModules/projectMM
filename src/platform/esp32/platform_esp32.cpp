@@ -293,6 +293,34 @@ static bool ethSpiActive_ = false;
 #endif
 static bool netifInitDone_ = false;
 
+// DHCP hostname (option 12) pushed by NetworkModule before bring-up; applied to each
+// netif before its DHCP client starts (see setHostname's contract in platform.h).
+// 32 = the ESP-IDF lwIP hostname cap; empty means "leave the IDF default".
+static char hostname_[32] = {};
+
+void setHostname(const char* name) {
+    if (!name) { hostname_[0] = 0; return; }
+    std::strncpy(hostname_, name, sizeof(hostname_) - 1);
+    hostname_[sizeof(hostname_) - 1] = 0;
+}
+
+// Apply the stored hostname (DHCP option 12) to a netif so it rides the DISCOVER.
+// Call AFTER the interface is started (set_hostname returns IF_NOT_READY before).
+// Order is the crux — esp_netif_set_hostname only takes on a STOPPED DHCP client;
+// setting it while the client is running (which it is on Ethernet, started at
+// link-up) is ignored, so the DISCOVER goes out nameless and the router logs the
+// lease with a blank hostname. So: stop the client, set the name, start it — the
+// fresh DISCOVER then carries option 12. Stopping an already-stopped client is a
+// benign ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED, which we ignore. No-op when unset.
+static void applyHostname(esp_netif_t* netif) {
+    if (!netif || !hostname_[0]) return;
+    esp_netif_dhcpc_stop(netif);    // must be stopped for set_hostname to take; ignore ALREADY_STOPPED
+    esp_err_t e = esp_netif_set_hostname(netif, hostname_);
+    if (e != ESP_OK) ESP_LOGW(NET_TAG, "set_hostname('%s') failed: %s", hostname_, esp_err_to_name(e));
+    else ESP_LOGI(NET_TAG, "DHCP hostname: %s", hostname_);
+    esp_netif_dhcpc_start(netif);   // fresh DISCOVER carries the hostname
+}
+
 #ifndef MM_NO_WIFI
 // WiFi-only state — absent in the Ethernet-only build.
 static bool wifiStaConnected_ = false;
@@ -318,6 +346,14 @@ static void ethEventHandler(void* /*arg*/, esp_event_base_t base,
         if (id == ETHERNET_EVENT_CONNECTED) {
             ESP_LOGI(NET_TAG, "Ethernet link up");
             ethLinkUp_ = true;
+            // Set the DHCP hostname HERE, on link-up, not in ethInit(): IDF's default
+            // eth netif starts the DHCP client from its own CONNECTED handler, so a
+            // hostname set earlier (in ethInit, before link-up) is clobbered when that
+            // client (re)starts nameless — the lease lands blank. Bouncing the client
+            // here (after the netif is started, when set_hostname takes) makes the
+            // DISCOVER carry the name. WiFi doesn't need this: its DHCP client only
+            // starts on association, well after we set the name in wifiStaInit.
+            applyHostname(ethNetif_);
         } else if (id == ETHERNET_EVENT_DISCONNECTED) {
             ethLinkUp_ = false;
             ESP_LOGI(NET_TAG, "Ethernet link down");
@@ -423,6 +459,9 @@ static bool ethInitRmii() {
         if (ethNetif_) { esp_netif_destroy(ethNetif_); ethNetif_ = nullptr; }
         return false;
     }
+    // DHCP hostname is set in the ETHERNET_EVENT_CONNECTED handler, not here — see
+    // the comment there (IDF starts the eth DHCP client on link-up, which would
+    // clobber a name set at init time).
 
     ethHandle_ = eth_handle;   // retained (ethStop is W5500-only today, but keep it set)
     ESP_LOGI(NET_TAG, "Ethernet init done (RMII, non-blocking)");
@@ -512,6 +551,7 @@ static bool ethInitSpi() {
         spi_bus_free(kSpiHost);
         return false;
     }
+    // DHCP hostname is set in the ETHERNET_EVENT_CONNECTED handler (see note there).
     ethHandle_ = eth_handle;   // retained for a live reconfigure (ethStop)
     ethSpiActive_ = true;
     ESP_LOGI(NET_TAG, "Ethernet init done (W5500 SPI, non-blocking)");
@@ -695,6 +735,10 @@ bool wifiStaInit(const char* ssid, const char* password) {
         wifiStaStop();
         return false;
     }
+    // DHCP hostname (option 12) — after esp_wifi_start: the STA netif isn't "ready"
+    // (set_hostname returns IF_NOT_READY) until the WiFi driver glue starts it.
+    // Association + DHCP happen later still, so the name lands in the lease request.
+    applyHostname(staNetif_);
 
     // Disable WiFi modem power-save. IDF defaults to WIFI_PS_MIN_MODEM, which
     // DTIM-sleeps the radio between beacons — that sleep causes intermittent

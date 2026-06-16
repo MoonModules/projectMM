@@ -104,6 +104,11 @@ public:
     bool respectsEnabled() const override { return false; }
 
     void setup() override {
+        // Push the DHCP hostname (option 12) before any bring-up so the device shows
+        // its name — not "Unknown" — in the router's client list. Stored once; every
+        // netif the platform creates (eth, the wifi cascade, a later reconnect) reads
+        // it. Same name as mDNS/SoftAP: deviceName, default MM-XXXX.
+        platform::setHostname(hostName());
         // Push the board's eth config (persisted controls, loaded before setup)
         // into the platform layer before ethInit reads it.
         syncEthConfig();
@@ -713,11 +718,18 @@ private:
     // resync.
     void noteRadioStopped() { appliedTxPowerSetting_ = -1; }
 
+    // The device's network name — used for BOTH the DHCP hostname (router client
+    // list) and the mDNS .local name, so the two never diverge. deviceName (default
+    // MM-XXXX, set by SystemModule before our setup); "mm" only if it's somehow empty.
+    const char* hostName() const {
+        return (systemModule_ && systemModule_->deviceName()[0] != 0)
+               ? systemModule_->deviceName() : "mm";
+    }
+
     void syncMdns() {
         bool shouldRun = mdnsEnabled_ && (state_ == State::ConnectedEth || state_ == State::ConnectedSta);
         if (shouldRun && !mdnsRunning_) {
-            const char* devName = (systemModule_ && systemModule_->deviceName()[0] != 0)
-                                  ? systemModule_->deviceName() : "mm";
+            const char* devName = hostName();
             // Only mark running on success — leave false so loop1s retries next tick
             if (platform::mdnsInit(devName)) {
                 mdnsRunning_ = true;

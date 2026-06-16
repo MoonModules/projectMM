@@ -292,17 +292,25 @@ function applyDetectedChip(state, boardEl) {
         return `Detected ${state.detectedChip} — no matching board, pick manually`;
     }
     fillBoardOptions(boardEl, matches, `Other / generic ${state.detectedChip}`);
+    let autoName = "";   // a board we auto-selected (single match, or a generic default)
     if (matches.length === 1) {
         state.selectedBoard = matches[0].name;   // exactly one board → auto-pick
+        autoName = matches[0].name;
     } else if (!matches.find(b => b.name === state.selectedBoard)) {
-        // Several boards in this family; the prior pick (if any) belongs to the
-        // other family — clear it back to the generic pass-through so we don't
-        // carry a now-hidden selection.
-        state.selectedBoard = "";
+        // Several boards in this family and no current pick in it (fresh detect, or a
+        // prior pick from the other family). Prefer the catalog's generic board for
+        // this chip if one exists (e.g. "Generic ESP32 Dev") — a sensible no-overrides
+        // default; otherwise leave the "Other / generic <chip>" pass-through selected
+        // (S3/P4 ship no generic entry) so we don't guess a specific board.
+        const generic = matches.find(b => /generic/i.test(b.name));
+        state.selectedBoard = generic ? generic.name : "";
+        if (generic) autoName = generic.name;
+    } else {
+        autoName = state.selectedBoard;   // an in-family pick survives the detect
     }
     boardEl.value = state.selectedBoard || "";
-    return matches.length === 1
-        ? `Detected ${state.detectedChip} — selected ${matches[0].name}`
+    return autoName
+        ? `Detected ${state.detectedChip} — selected ${autoName}`
         : `Detected ${state.detectedChip} — pick your board (${matches.length} match)`;
 }
 
@@ -644,7 +652,9 @@ function render(state) {
         } catch (e) {
             statusEl.textContent = `Error: ${e && e.message ? e.message : e}`;
         } finally {
-            installBtn.disabled = false;
+            // Recompute via the gate, not a blind enable — a flash with no port
+            // picked (host gates on one) must stay disabled after the attempt.
+            applyInstallEnabled();
         }
     });
 }

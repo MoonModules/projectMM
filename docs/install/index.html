@@ -25,8 +25,9 @@
       --muted:  #a0a0b0;
       --accent: #a78bfa;
       --border: #2a3a6a;
-      --ok:     #57c97a;   /* green — "supported" capability chips */
-      --plan:   #e8923a;   /* orange — "planned" capability chips (not yet supported) */
+      --ok:     #57c97a;   /* green  — "active" capability (supported + a module configured in boards.json) */
+      --sup:    #e3c84a;   /* yellow — "supported" capability (firmware supports it, not pre-configured) */
+      --plan:   #e8923a;   /* orange — "planned" capability (no module yet; greener than red, by design) */
     }
     * { box-sizing: border-box; }
     body {
@@ -205,7 +206,8 @@
       font-size: 9px; line-height: 1.5; padding: 0 5px; border-radius: 999px;
       max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .bg-cap.sup { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+    .bg-cap.act { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+    .bg-cap.sup { background: color-mix(in srgb, var(--sup) 20%, transparent); color: var(--sup); }
     .bg-cap.plan { background: color-mix(in srgb, var(--plan) 20%, transparent); color: var(--plan); }
     .bg-link { color: var(--accent); font-size: 11px; text-decoration: none; }
     .bg-link:hover { text-decoration: underline; }
@@ -1639,6 +1641,21 @@
         const d = (b.modules || []).find(m => /LedDriver$/.test(m.type || ""));
         return d ? d.type.replace(/Driver$/, "") : null;
       }
+      // A supported capability is "active" (configured) when boards.json has a module
+      // backing it. The capability→module link is implicit in the data, so this map
+      // names it in one place (bespoke, but it just reads the modules[] already there —
+      // no duplicated `active` field to drift). A capability with no entry here, or
+      // whose module isn't present, stays merely "supported".
+      const CAP_MODULE = {
+        LEDs:     t => /LedDriver$/.test(t),
+        Ethernet: t => t === "NetworkModule",
+        WiFi:     t => t === "NetworkModule",
+        Audio:    t => /^Audio/.test(t),
+      };
+      function capActive(b, cap) {
+        const test = CAP_MODULE[cap];
+        return !!test && (b.modules || []).some(m => test(m.type || ""));
+      }
       function setExpanded(open) {
         expandEl.hidden = !open;
         summaryEl.setAttribute("aria-expanded", open ? "true" : "false");
@@ -1772,21 +1789,24 @@
         const meta = document.createElement("div"); meta.className = "bg-meta";
         meta.textContent = b.chip + (ledDriver(b) ? " · " + ledDriver(b) : "");
         body.appendChild(meta);
-        // Capability chips: supported = violet, planned = amber (colour, not text,
-        // carries the distinction). Planned entries are the backlog seed (a
-        // peripheral the board has but no module drives yet). All chips are shown
-        // (labels are kept short in boards.json so they fit the card).
+        // Capability chips, three states by colour (not text): green = active
+        // (supported AND a module configured in boards.json), yellow = supported
+        // (firmware supports it, not pre-configured), orange = planned (no module
+        // yet — the backlog seed). All chips are shown (labels kept short in
+        // boards.json so they fit the card).
         const caps = [
-          ...(Array.isArray(b.supported) ? b.supported.map(c => ({ c, cls: "sup" })) : []),
-          ...(Array.isArray(b.planned) ? b.planned.map(c => ({ c, cls: "plan" })) : []),
+          ...(Array.isArray(b.supported) ? b.supported.map(c =>
+            capActive(b, c) ? { c, cls: "act", label: "active" }
+                            : { c, cls: "sup", label: "supported" }) : []),
+          ...(Array.isArray(b.planned) ? b.planned.map(c => ({ c, cls: "plan", label: "planned" })) : []),
         ];
         if (caps.length) {
           const capsEl = document.createElement("div"); capsEl.className = "bg-caps";
-          for (const { c, cls } of caps) {
+          for (const { c, cls, label } of caps) {
             const chip = document.createElement("span");
             chip.className = "bg-cap " + cls;
-            chip.textContent = c;   // colour conveys supported (violet) vs planned (amber)
-            chip.title = cls === "plan" ? c + " — planned" : c + " — supported";
+            chip.textContent = c;   // colour conveys active / supported / planned
+            chip.title = c + " — " + label;
             capsEl.appendChild(chip);
           }
           body.appendChild(capsEl);

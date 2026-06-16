@@ -146,6 +146,15 @@ bool wifiSetTxPower(int8_t quarterDbm);
 bool mdnsInit(const char* deviceName);
 void mdnsStop();
 
+// Store the DHCP hostname (DHCP option 12) the next eth/wifi bring-up advertises.
+// Routers populate their client list from the DHCP request, not mDNS, so without
+// this a provisioned device shows as "Unknown" there. Call before ethInit() /
+// wifiStaInit() — the netif applies it before the DHCP client starts, so it lands
+// in the first DISCOVER. NetworkModule pushes deviceName (default MM-XXXX), keeping
+// the router name, the mDNS .local name and the SoftAP name one identity. A later
+// rename takes effect on the next DHCP renewal/reconnect. Desktop: no-op.
+void setHostname(const char* name);
+
 // OTA — fetch a firmware image from `url` and flash it to the next OTA partition.
 // ESP32: spawns a one-shot FreeRTOS task (the call returns immediately; the task
 // runs to completion or error). The task uses `esp_https_ota`, which rolls the

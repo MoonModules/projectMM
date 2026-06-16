@@ -647,7 +647,7 @@
         "id": "ParlioLed",
         "parent_id": "Drivers",
         "controls": {
-          "pins": "20,21,22,23,24,25,26,27",
+          "pins": "20",
           "loopbackTxPin": 33,
           "loopbackRxPin": 32
         }
@@ -769,7 +769,10 @@
       {
         "type": "ParlioLedDriver",
         "id": "ParlioLed",
-        "parent_id": "Drivers"
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "20,21,22,23,24,25,26,27"
+        }
       },
       {
         "type": "NetworkModule",

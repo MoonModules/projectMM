@@ -308,6 +308,8 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     std::fflush(stdout);
 
     uint32_t lastLog = mm::platform::millis();
+    const uint32_t bootMillis = lastLog;   // window start for the MM_IP serial token
+    bool mmIpWindowClosed = false;         // latches true once the 60 s window elapses
 
     while (keepRunning) {
         scheduler.tick();
@@ -335,15 +337,21 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
             // Gated to the first 60 s of uptime: the installer reads at ~3–15 s after
             // boot, well inside that window; afterwards the device's IP comes from the
             // REST API (http://<ip>/api/…), so a permanent token would just be noise on
-            // the perf line. All-zero octets until the network connects — printed only
-            // once there's an IP. Both buffers are reused stack locals, no allocation.
-            if (now < 60000) {
-                uint8_t ip[4];
-                networkModule->currentIp(ip);
-                if (ip[0] || ip[1] || ip[2] || ip[3]) {
-                    char ipStr[16];
-                    mm::formatDottedQuad(ipStr, ip);
-                    std::printf("  MM_IP=%s", ipStr);
+            // the perf line. The window latches off once for good — a plain `now <
+            // 60000` would re-open every ~49.7 days when millis() wraps. All-zero
+            // octets until the network connects — printed only once there's an IP.
+            // Both buffers are reused stack locals, no allocation.
+            if (!mmIpWindowClosed) {
+                if (now - bootMillis >= 60000) {
+                    mmIpWindowClosed = true;   // first 60 s elapsed; stop for the rest of uptime
+                } else {
+                    uint8_t ip[4];
+                    networkModule->currentIp(ip);
+                    if (ip[0] || ip[1] || ip[2] || ip[3]) {
+                        char ipStr[16];
+                        mm::formatDottedQuad(ipStr, ip);
+                        std::printf("  MM_IP=%s", ipStr);
+                    }
                 }
             }
             // Per-module timing (walk tree recursively)

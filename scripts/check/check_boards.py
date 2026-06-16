@@ -98,6 +98,11 @@ def main():
                               f"{[type(f).__name__ for f in non_str]}")
             elif any(not f for f in fws):
                 errors.append(f"{where}: firmwares entries must be non-empty strings")
+            elif any(f != f.strip() or not f.strip() for f in fws):
+                # Whitespace-only or padded keys (" ", "esp32 ") silently miss the
+                # exact firmware-key match downstream (picker, dedup, manifest names).
+                errors.append(f"{where}: firmwares entries must not be whitespace-only "
+                              f"or have leading/trailing whitespace")
 
         # --- image resolves on disk + is a local path ---
         img = e.get("image")

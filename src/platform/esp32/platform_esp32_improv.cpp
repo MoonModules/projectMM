@@ -235,16 +235,21 @@ static void improvHandleProvision(const improv::ImprovCommand& cmd) {
     g_improv.ready->store(true, std::memory_order_release);
     improvSendCurrentState(improv::STATE_PROVISIONING);
 
-    // Wait up to 30 s for IP. Polls existing platform state — no extra wiring.
+    // Wait up to 30 s for a usable IP. Polls existing platform state — no extra
+    // wiring. Loop until the lease actually lands (a non-zero address), not merely
+    // until association: DHCP completes shortly after WIFI_EVENT_STA_CONNECTED, so
+    // breaking on wifiStaConnected() alone could read 0.0.0.0.
     uint8_t ip[4] = {};
     for (int i = 0; i < 300; i++) {  // 30 s @ 100 ms
         vTaskDelay(pdMS_TO_TICKS(100));
         if (wifiStaConnected()) {
             wifiStaGetIPv4(ip);
-            break;
+            if (ip[0] || ip[1] || ip[2] || ip[3]) break;   // have a real address
         }
     }
-    if (!wifiStaConnected()) {
+    // No usable lease (never associated, or associated but DHCP never completed) is a
+    // failure, same as the timeout — http://0.0.0.0/ would be worse than an honest error.
+    if (!ip[0] && !ip[1] && !ip[2] && !ip[3]) {
         improvSetStatus("error: no IP after 30s");
         improvSendError(improv::ERROR_UNABLE_TO_CONNECT);
         return;
