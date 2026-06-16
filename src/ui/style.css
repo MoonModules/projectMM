@@ -457,7 +457,11 @@ body {
 /* List control (ControlType::List) — a column of clickable rows, each
    expanding to a read-only detail panel. The row stretches full width, so it
    overrides the flex layout to stack the label above the list. */
-.control-list-row { flex-direction: column; align-items: stretch; }
+.control-list-row { flex-direction: column; align-items: stretch; gap: 4px; }
+/* In the column layout the label's `flex: 0 0 100px` basis would reserve 100px of
+   HEIGHT (it's a fixed-width basis meant for the horizontal row) — the big gap above
+   the list. Reset it to auto height so the label hugs its text. */
+.control-list-row .control-label { flex: 0 0 auto; }
 .list-control {
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -479,7 +483,11 @@ body {
 }
 .list-detail-row { display: flex; gap: 8px; font-size: 12px; padding: 2px 0; }
 .list-detail-key { flex: 0 0 110px; color: var(--fg-muted); }
-.list-detail-val { flex: 1; min-width: 0; word-break: break-word; }
+.list-detail-val { flex: 1; min-width: 0; overflow-wrap: anywhere; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+/* Chips for multi-valued detail fields (a device's speaks / via discovery source). */
+.list-detail-chip { padding: 0 6px; border-radius: 8px; background: color-mix(in srgb, var(--border) 45%, transparent); font-size: 11px; line-height: 16px; }
+/* Muted detail value (e.g. a cached device's "last seen: cached" — not a live sighting). */
+.list-detail-muted { color: var(--fg-muted); font-style: italic; }
 
 .control-row input[type="range"] {
     flex: 1;

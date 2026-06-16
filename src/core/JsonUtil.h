@@ -230,9 +230,19 @@ struct JsonParser {
                 long v = std::strtol(p, &endp, 10);
                 if (endp == p) { ok = false; return -1; }
                 p = endp;
-                while ((*p >= '0' && *p <= '9') || *p == '.' || *p == 'e' || *p == 'E' ||
-                       *p == '+' || *p == '-')
-                    p++;            // skip a fractional/exponent tail if present
+                // Skip a well-formed fractional/exponent tail (we keep only the integer
+                // part — never persist floats). Precise so we stop at the number's real
+                // end and don't swallow a following token: `1-2` reads `1` then leaves
+                // `-2`, not one run. Fraction: '.' then digits. Exponent: e/E, optional
+                // sign, then digits.
+                auto digits = [&] { while (*p >= '0' && *p <= '9') p++; };
+                if (*p == '.') { p++; digits(); }
+                if (*p == 'e' || *p == 'E') {
+                    char* e = p++;
+                    if (*p == '+' || *p == '-') p++;
+                    if (*p >= '0' && *p <= '9') digits();
+                    else p = e;     // bare 'e' with no exponent digits — not part of the number
+                }
                 int idx = alloc();
                 if (idx < 0) return -1;
                 doc.nodes[idx].type = JsonType::Int;
@@ -394,22 +404,34 @@ inline bool readBool(const JsonNode* n, bool fallback = false) {
 // / heap). Non-object elements are skipped. Returns false on malformed/missing/non-array
 // (the caller's list is simply not restored). The JsonDoc lives on this call's stack —
 // boot-time load, not the hot path. Recognizable callback-iteration shape.
+// The non-template core: parse `json` and navigate to the array under `key`, returning
+// the array node (or nullptr on malformed/missing/non-array) along with the shared doc.
+// Lives in a .cpp-less inline but in its OWN non-template function so the heavy static
+// JsonDoc below is ONE copy in .bss regardless of how many callback types instantiate
+// forEachListElement — a per-instantiation static would multiply the ~8 KB doc by the
+// number of distinct lists (and "we'll add more lists"). The doc is a function-local
+// static (not a stack local: ~8 KB overflows the ESP32 task stack → boot-loop) and is
+// safe to share because JSON parsing is strictly serial — boot-time load or a single
+// control write, never concurrent (same single-owner-buffer reasoning as
+// FilesystemModule::fileBuf_). Returns the doc by out-param so the caller can read fields.
+inline const JsonNode* parseListArray(const char* json, const char* key, JsonDoc*& docOut) {
+    static JsonDoc doc;
+    docOut = &doc;
+    if (!parse(json, doc)) return nullptr;
+    const JsonNode* arr = member(doc, doc.rootNode(), key);
+    if (!arr || arr->type != JsonType::Array) return nullptr;
+    return arr;
+}
+
 template <typename Fn>
 inline bool forEachListElement(const char* json, const char* key, Fn&& fn) {
-    // JsonDoc is ~8 KB (text arena + node pool) — far too large for a stack frame on
-    // the ESP32 task that runs the persistence overlay (an on-stack JsonDoc here
-    // overflowed the stack → boot-loop). Make it a function-local static: one resident
-    // copy in .bss, reused, no per-call stack cost. Safe because JSON parsing is
-    // strictly serial — boot-time load or a single control write, never concurrent
-    // (same single-owner-buffer reasoning as FilesystemModule::fileBuf_).
-    static JsonDoc doc;
-    if (!parse(json, doc)) return false;
-    const JsonNode* arr = member(doc, doc.rootNode(), key);
-    if (!arr || arr->type != JsonType::Array) return false;
-    const int n = arraySize(doc, arr);
+    JsonDoc* doc = nullptr;
+    const JsonNode* arr = parseListArray(json, key, doc);
+    if (!arr) return false;
+    const int n = arraySize(*doc, arr);
     for (int i = 0; i < n; i++) {
-        const JsonNode* el = element(doc, arr, i);
-        if (el && el->type == JsonType::Object) fn(doc, el);
+        const JsonNode* el = element(*doc, arr, i);
+        if (el && el->type == JsonType::Object) fn(*doc, el);
     }
     return true;
 }

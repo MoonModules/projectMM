@@ -278,8 +278,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     if (improvModule) networkModule->addChild(improvModule);
     // Devices: discovers other devices on the LAN. Child of Network (discovery
     // depends on the network being up); wired-by-code so persistence preserves it
-    // on devices whose saved Network.json predates the child. May be promoted to a
-    // top-level module later if it grows submodules (see DevicesModule.md).
+    // on devices whose saved Network.json predates the child (see DevicesModule.md).
     auto* devicesModule = static_cast<mm::DevicesModule*>(
         mm::ModuleFactory::create("DevicesModule"));
     devicesModule->markWiredByCode();

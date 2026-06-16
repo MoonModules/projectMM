@@ -144,7 +144,34 @@ int wifiTxPower();
 bool wifiSetTxPower(int8_t quarterDbm);
 
 bool mdnsInit(const char* deviceName);
+// Stop advertising (clears the hostname) but keep the mDNS stack up so browse
+// queries still work. mdnsShutdown() does the full mdns_free — call at teardown.
 void mdnsStop();
+void mdnsShutdown();
+
+// mDNS service browse (discovery) — the standard, push-style way to find devices that
+// advertise a service (projectMM, WLED `_wled._tcp`, Home Assistant, ESPHome, …),
+// without an HTTP subnet sweep. Three calls form a NON-BLOCKING poll cycle so it never
+// stalls the render task (the synchronous IDF mdns_query_ptr blocks the full timeout —
+// not usable on the tick):
+//   mdnsBrowseStart(service, proto)  — kick off one async PTR query (e.g. "_http","_tcp").
+//                                      Returns false if mDNS isn't up / already querying.
+//   mdnsBrowsePoll(cb, user)         — call each tick; when results are ready, invokes
+//                                      cb once per found host then returns true (done).
+//                                      Returns false while still pending (cheap, no block).
+//   mdnsBrowseStop()                 — release the query (call after a done poll, or to
+//                                      abort). Idempotent.
+// One query in flight at a time (DevicesModule serialises service types). A found host is
+// reported as a small POD — no IDF types leak across the seam. Desktop: stubs (no mDNS).
+struct MdnsHost {
+    uint8_t ip[4] = {};        // resolved IPv4 (0.0.0.0 if unresolved)
+    char    hostname[32] = {}; // instance/host name (e.g. "wled-desk"), "" if none
+    uint16_t port = 0;         // advertised SRV port
+};
+using MdnsHostCb = void(*)(const MdnsHost& host, void* user);
+bool mdnsBrowseStart(const char* service, const char* proto);
+bool mdnsBrowsePoll(MdnsHostCb cb, void* user);
+void mdnsBrowseStop();
 
 // Store the DHCP hostname (DHCP option 12) the next eth/wifi bring-up advertises.
 // Routers populate their client list from the DHCP request, not mDNS, so without
@@ -180,10 +207,13 @@ bool http_fetch_to_ota(const char* url,
 // per-request timeout. Returns the HTTP status code (e.g. 200), 0 on connect
 // timeout / no response / error. DevicesModule uses this to probe each host on
 // the LAN and identify it from the response (projectMM /api/state, WLED
-// /json/info, else generic). Synchronous and blocking up to `timeoutMs` — the
-// caller (the scan) runs it off the render hot path, a few probes between ticks,
-// never in the tick itself. Desktop: real implementation (libcurl-free, plain
-// socket) so the scan works on a PC instance too.
+// /json/info, else generic). Synchronous and blocking up to `timeoutMs`. The scan
+// calls this from loop1s() (the render task), so it bounds the cost to ONE probe per
+// tick with a short timeout (~150 ms) and runs the sweep boot-once + on manual request
+// only — never continuously — so a blocked probe can't accumulate into LED flicker.
+// Moving the probe to its own task (the enabler for fast + periodic sweeping) is in the
+// backlog. Desktop: real implementation (libcurl-free, plain socket) so the scan works
+// on a PC instance too.
 int httpGet(const char* url, uint32_t timeoutMs, char* body, size_t bodyLen);
 
 // Improv WiFi provisioning over UART0.

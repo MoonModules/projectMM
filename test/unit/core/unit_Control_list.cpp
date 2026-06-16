@@ -7,8 +7,9 @@
 //   - the value serializes as a JSON array of summary objects (one per row),
 //   - the metadata carries a parallel `detail` array,
 //   - an empty source emits "[]" (robustness: a list with nothing found),
-//   - a List is read-only + non-persistable (one-direction wire path; the JSON
-//     parser is flat/non-recursive by design, so a List is never parsed back).
+//   - a List is read-only from the browser but PERSISTABLE: the saved array is
+//     parsed back on boot via ListSource::restoreList (the recursive mm::json
+//     reader's forEachListElement), seeding the cached list before the first scan.
 
 #include "doctest.h"
 #include "core/Control.h"

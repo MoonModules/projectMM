@@ -393,7 +393,7 @@ public:
         // Tear down children first (Improv on ESP32) so the platform-side
         // Improv task stops touching UART0 before we drop the network state.
         MoonModule::teardown();
-        platform::mdnsStop();
+        platform::mdnsShutdown();
         if constexpr (platform::hasWiFi) {
             if (state_ == State::AP) { platform::wifiApStop(); noteRadioStopped(); }
             if (state_ == State::ConnectedSta || state_ == State::WaitingSta) {

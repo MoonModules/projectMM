@@ -4,7 +4,9 @@
 #include "core/Control.h"
 #include "core/JsonSink.h"
 #include "core/JsonUtil.h"         // recursive reader — restoreList parses the persisted array
+#include "core/Sort.h"             // mm::insertionSort — generic bounded sort (core); we supply the comparator
 #include "core/DeviceIdentify.h"   // DevType, classifyDevice, extractDeviceName (pure, unit-tested)
+#include "core/FilesystemModule.h" // FilesystemModule::noteDirty — persist on sweep / age-out change
 #include "platform/platform.h"
 
 #include <cstdint>
@@ -54,7 +56,23 @@ public:
         sink.appendf(",\"ip\":\"%s\",\"url\":\"http://%s/\",\"type\":\"%s\"",
                      ip, ip, devTypeStr(d.type));
         writeSpeaks(sink, d.speaks);
-        if (d.self) sink.append(",\"self\":true");
+        writeVia(sink, d.via);   // how it was found (mdns / scan / udp) — for the UI badge
+        if (d.self) {
+            sink.append(",\"self\":true");   // self is always "now" — no meaningful age
+        } else if (d.cached) {
+            // Restored from persistence, not re-confirmed live this session — `ageSec`
+            // would be a fake "now" (the boot stamp), so emit `cached` instead. The UI
+            // shows "last seen: cached"; once a strategy re-sees it, cached clears and a
+            // real ageSec appears.
+            sink.append(",\"cached\":true");
+        } else {
+            // Seconds since this device was last seen by any strategy. Computed here
+            // (device-side) so the UI gets one finished number, not a raw boot-relative
+            // clock it would have to reconcile; the same `now - lastSeenMs` the age-out
+            // uses, in seconds. Snapshot at state-push time. Wrap-safe (unsigned).
+            uint32_t ageSec = (platform::millis() - d.lastSeenMs) / 1000u;
+            sink.appendf(",\"ageSec\":%u", static_cast<unsigned>(ageSec));
+        }
         sink.append("}");
     }
 
@@ -86,8 +104,13 @@ public:
                                                                   : DevType::Generic;
                 d.self = false;
                 d.speaks = ProtoHttp;
-                d.missed = 0;
+                d.via = 0;        // no live sighting yet — via fills in when a strategy re-sees it
+                d.cached = true;  // restored, not re-confirmed live → UI shows "cached", not a time
+                // Stamp "now" so the cached entry gets a full kStaleMs grace window to
+                // re-announce before age-out drops it (a still-alive but slow device).
+                d.lastSeenMs = platform::millis();
             });
+        sortByName();   // cached list shows alphabetically too, before the first sweep
         return true;
     }
 
@@ -143,6 +166,17 @@ public:
             localIp(local);
             if (local[0] || local[1] || local[2] || local[3]) restartScan();
         }
+        // mDNS browse runs EVERY tick, independent of the HTTP sweep: it's async and
+        // non-blocking (a cheap poll, no per-host timeout), so it's safe on loop1s
+        // where the blocking HTTP probe is not. It catches devices that advertise a
+        // service (WLED, projectMM, generic `_http._tcp`) as they come and go, without
+        // a subnet sweep — the standard, push-style discovery the architecture calls for.
+        stepMdns();
+        // Age out here, not at sweep-end: discovery now arrives on several cadences
+        // (a minutes-long HTTP sweep, a seconds-long mDNS lap, a future async UDP
+        // beacon), so freshness is a per-device timestamp and the drop is a simple
+        // "unseen too long" check every tick — independent of any one strategy's cycle.
+        ageOut();
     }
 
     ModuleRole role() const override { return ModuleRole::Generic; }
@@ -164,13 +198,34 @@ private:
         // … mDNS-advertised services, OSC, RTP-MIDI, etc. as strategies are added.
     };
 
+    // How a device was discovered, as a bitmask — a device can be found by more than
+    // one strategy at once (mDNS browse AND the HTTP sweep both see a projectMM peer),
+    // so this is OR-ed like `speaks`, not a single last-writer-wins value. The detail
+    // panel renders it so "what did mDNS find vs the scan" is visible. UDP (a future
+    // presence beacon) is the next bit; it arrives on its own async cadence, which is
+    // exactly why discovery freshness is a per-device timestamp, not a per-sweep
+    // counter (no single sweep boundary to hang a counter off — see lastSeenMs).
+    enum Via : uint8_t {
+        ViaScan = 1 << 0,   // answered the HTTP subnet sweep
+        ViaMdns = 1 << 1,   // advertised a browsed mDNS service
+        ViaUdp  = 1 << 2,   // announced via a UDP presence beacon (future)
+    };
+
     struct Device {
-        uint8_t ip[4] = {};
-        char    name[24] = {};
-        DevType type = DevType::Generic;
-        uint8_t speaks = 0;     // Proto bitmask — protocols this device is known to speak
-        bool    self = false;
-        uint8_t missed = 0;     // consecutive full sweeps not seen — age-out at kMaxMissed
+        uint8_t  ip[4] = {};
+        char     name[24] = {};
+        DevType  type = DevType::Generic;
+        uint8_t  speaks = 0;     // Proto bitmask — protocols this device is known to speak
+        uint8_t  via = 0;        // Via bitmask — which strategies have discovered it
+        bool     self = false;
+        bool     cached = false; // restored from persistence, not yet re-seen LIVE this
+                                 // session (via is still empty, lastSeenMs is the boot
+                                 // stamp, not a real sighting). Cleared on the first live
+                                 // sighting; until then the UI shows "cached", not a time.
+        uint32_t lastSeenMs = 0; // platform::millis() at the most recent sighting (any
+                                 // strategy). Age-out drops a non-self device unseen for
+                                 // kStaleMs — strategy-agnostic, so HTTP/mDNS/UDP, each on
+                                 // its own cadence, all just stamp "now" when they see it.
     };
 
     // Append a `speaks` JSON array (e.g. ["http"]) for a device's protocol bitmask.
@@ -189,6 +244,23 @@ private:
         sink.append("]");
     }
 
+    // Append a `via` JSON array (e.g. ["scan","mdns"]) for a device's discovery bitmask
+    // — how the device was found, so the UI can show mDNS-found vs scan-found at a glance.
+    static void writeVia(JsonSink& sink, uint8_t via) {
+        sink.append(",\"via\":[");
+        bool first = true;
+        auto emit = [&](uint8_t bit, const char* tag) {
+            if (!(via & bit)) return;
+            if (!first) sink.append(",");
+            sink.appendf("\"%s\"", tag);
+            first = false;
+        };
+        emit(ViaScan, "scan");
+        emit(ViaMdns, "mdns");
+        emit(ViaUdp, "udp");
+        sink.append("]");
+    }
+
     static constexpr uint8_t  kMaxDevices    = 32;  // a LAN's worth; bounded, no heap
     // One IP per tick: a probe blocks up to kProbeTimeoutMs on a dead host, and
     // loop1s must not stall the render loop. 1 IP/tick → a /24 sweep takes ~254 s
@@ -197,13 +269,14 @@ private:
     // URL), so a sparse subnet costs ~1×timeout per empty IP, not 3×.
     static constexpr uint8_t  kProbesPerTick = 1;
     static constexpr uint32_t kProbeTimeoutMs = 150;
-    // Drop a device after this many consecutive sweeps without a re-sighting.
-    // Mechanism: upsert() resets missed=0 when a device answers; ageOut() at each
-    // sweep's end drops anyone with missed>=kMaxMissed, then increments the rest.
-    // So a device seen on sweep N (missed→0, then →1 at N's end) is dropped at the
-    // end of sweep N+2: unseen on N+1 (→2), unseen on N+2 (2>=2 → drop). I.e. two
-    // consecutive missed sweeps.
-    static constexpr uint8_t  kMaxMissed     = 2;
+    // Drop a non-self device unseen by ANY strategy for this long. 24 h is deliberately
+    // generous: mDNS re-confirms its devices every few-second browse lap (cheap), but an
+    // HTTP-scan-only device (a PC instance, a generic host) has no cheap recurring
+    // refresh — the sweep is boot-once + manual, not periodic — so a short timeout would
+    // wrongly drop a still-alive device and force a re-scan. A day-long window lets such
+    // a device persist on its single sighting while a genuinely-departed device still
+    // clears itself within a day. Each sighting (HTTP/mDNS/UDP) restamps lastSeenMs.
+    static constexpr uint32_t kStaleMs       = 24u * 60u * 60u * 1000u;  // 24 hours
     Device  devices_[kMaxDevices];
     uint8_t deviceCount_ = 0;
     bool    sweptOnce_ = false;     // the one boot sweep has completed
@@ -232,6 +305,7 @@ private:
             std::snprintf(statusBuf_, sizeof(statusBuf_), "no network");
             setStatus(statusBuf_, Severity::Warning);
             hostCursor_ = -1;
+            scanProgress_ = 0;   // back to idle — no stale bar left showing
             return;
         }
         subnet_[0] = local[0]; subnet_[1] = local[1]; subnet_[2] = local[2];
@@ -257,15 +331,16 @@ private:
             // (projectMM, deviceName), and an HTTP request to ourselves mid-tick can
             // race the server / loopback and misclassify us as generic. Just keep it
             // fresh so age-out doesn't drop it.
-            if (ipEq(ip, local)) { if (Device* d = findByIp(ip)) d->missed = 0; continue; }
+            if (ipEq(ip, local)) { if (Device* d = findByIp(ip)) { d->lastSeenMs = platform::millis(); d->cached = false; } continue; }
             probe(ip);
         }
-        // Progress bar tracks the cursor (clamped to the 254 total for the last tick).
-        scanProgress_ = (hostCursor_ > 254) ? 254 : static_cast<uint32_t>(hostCursor_);
         if (hostCursor_ > 254) {
+            // Sweep finished — reset the bar to 0 (idle), not left full at 254.
+            scanProgress_ = 0;
             hostCursor_ = -1;
             sweptOnce_ = true;
-            ageOut();
+            // Age-out is no longer tied to the sweep end (it runs every tick in loop1s,
+            // off the per-device timestamp); the sweep just reports its result + persists.
             std::snprintf(statusBuf_, sizeof(statusBuf_), "%u device%s",
                           deviceCount_, deviceCount_ == 1 ? "" : "s");
             setStatus(statusBuf_);
@@ -277,6 +352,56 @@ private:
         }
     }
 
+
+    // mDNS service types browsed, in round-robin. `_http._tcp` catches projectMM (we
+    // advertise it via mdnsInit) and any generic web device; `_wled._tcp` is WLED's
+    // own service. The list is the discovery surface — add `_esphome._tcp`,
+    // `_home-assistant._tcp`, etc. here as classification for them lands (the hit's
+    // service type already maps to a DevType in mdnsTypeFor). No state reshuffle.
+    struct MdnsService { const char* service; const char* proto; DevType type; };
+    static constexpr MdnsService kMdnsServices[] = {
+        { "_http", "_tcp", DevType::Generic },   // projectMM + generic web devices
+        { "_wled", "_tcp", DevType::Wled    },
+    };
+    static constexpr uint8_t kMdnsServiceCount =
+        sizeof(kMdnsServices) / sizeof(kMdnsServices[0]);
+
+    uint8_t mdnsIndex_ = 0;        // which service in kMdnsServices is being browsed
+    bool    mdnsQuerying_ = false; // a browse query is in flight (Start succeeded)
+
+    // One non-blocking step of the mDNS browse cycle, called every tick. State:
+    //   not querying  → start a query for the current service type (advance on fail).
+    //   querying      → poll; when done, merge hits via the static callback, then stop
+    //                    and advance to the next service type for the next tick.
+    // The cycle wraps around kMdnsServices forever; new advertisers are picked up on
+    // the next pass. Cheap: Poll is a 0 ms async check, never blocks the render loop.
+    void stepMdns() {
+        if (!mdnsQuerying_) {
+            const MdnsService& s = kMdnsServices[mdnsIndex_];
+            mdnsQuerying_ = platform::mdnsBrowseStart(s.service, s.proto);
+            if (!mdnsQuerying_) advanceMdns();   // mDNS not up yet / busy — try next tick
+            return;
+        }
+        if (platform::mdnsBrowsePoll(&DevicesModule::onMdnsHost, this)) {
+            platform::mdnsBrowseStop();
+            mdnsQuerying_ = false;
+            advanceMdns();
+        }
+    }
+
+    void advanceMdns() { mdnsIndex_ = (mdnsIndex_ + 1) % kMdnsServiceCount; }
+
+    // platform::MdnsHostCb — a found host for the service type at mdnsIndex_. Trampoline
+    // to the instance; `user` is `this` (set in mdnsBrowsePoll above).
+    static void onMdnsHost(const platform::MdnsHost& host, void* user) {
+        static_cast<DevicesModule*>(user)->mergeMdnsHost(host);
+    }
+
+    void mergeMdnsHost(const platform::MdnsHost& host) {
+        if (host.ip[0] == 0 && host.ip[1] == 0 && host.ip[2] == 0 && host.ip[3] == 0)
+            return;   // unresolved — nothing to key on
+        upsertMdns(host.ip, kMdnsServices[mdnsIndex_].type, host.hostname);
+    }
 
     void localIp(uint8_t out[4]) const {
         platform::ethGetIPv4(out);
@@ -341,10 +466,44 @@ private:
         }
         d->type = type;
         d->self = isSelf;
-        d->missed = 0;
+        d->lastSeenMs = platform::millis();
+        d->cached = false;        // a live sighting — no longer just a cached entry
         d->speaks |= ProtoHttp;   // found via the HTTP scan → it speaks HTTP
+        d->via |= ViaScan;        // discovered by the HTTP subnet sweep
         extractDeviceName(type, body, d->name, sizeof(d->name));
         if (!d->name[0]) formatDottedQuad(d->name, ip);   // fall back to the IP
+        sortByName();   // keep the list ordered AS devices arrive — not just at sweep end
+    }
+
+    // Merge an mDNS browse hit. Like upsert() but the identity is weaker: mDNS proves
+    // the host advertises a service (so it speaks HTTP and is alive → missed=0), and
+    // for `_wled._tcp` the type is certain, but `_http._tcp` only says "some web
+    // device" — so a Generic hit must NOT downgrade a device the HTTP probe already
+    // identified as projectMM/WLED. We only raise the type (Generic → known), never
+    // lower it. The hostname becomes the display name only if we don't have a better
+    // one yet (the HTTP probe's deviceName wins when present). self is preserved.
+    void upsertMdns(const uint8_t ip[4], DevType type, const char* hostname) {
+        uint8_t local[4] = {};
+        localIp(local);
+        const bool isSelf = ipEq(ip, local);
+        Device* d = findByIp(ip);
+        if (!d) {
+            if (deviceCount_ >= kMaxDevices) return;
+            d = &devices_[deviceCount_++];
+            std::memcpy(d->ip, ip, 4);
+            d->type = type;            // first sighting — take the mDNS type as-is
+        } else if (type != DevType::Generic) {
+            d->type = type;            // a definite type (WLED) refines an existing row
+        }
+        d->self |= isSelf;
+        d->lastSeenMs = platform::millis();
+        d->cached = false;             // a live sighting — no longer just a cached entry
+        d->speaks |= ProtoHttp;        // advertised an HTTP service → speaks HTTP
+        d->via |= ViaMdns;             // discovered by the mDNS browse
+        if (!d->name[0] && hostname && hostname[0])
+            std::snprintf(d->name, sizeof(d->name), "%s", hostname);
+        if (!d->name[0]) formatDottedQuad(d->name, ip);
+        sortByName();
     }
 
     // Guarantee this device is listed (marked self) even before its IP is swept.
@@ -354,10 +513,15 @@ private:
             if (deviceCount_ >= kMaxDevices) return;
             d = &devices_[deviceCount_++];
             std::memcpy(d->ip, ip, 4);
-            d->type = DevType::ProjectMM;   // we are a projectMM
         }
+        // Refresh identity on BOTH paths: if this IP was first seen by a sweep/mDNS as
+        // generic, learning it's us must promote it to projectMM, not leave the stale
+        // type. We are a projectMM and we speak HTTP.
+        d->type = DevType::ProjectMM;
+        d->speaks |= ProtoHttp;
         d->self = true;
-        d->missed = 0;
+        d->cached = false;                    // self is live by definition, not cached
+        d->lastSeenMs = platform::millis();   // self is always "now" → never ages out
         if (!d->name[0]) {
             // Show our own name (deviceName, wired via setSelfName) so the self row
             // matches the status page / router / mDNS. "this device" is the last
@@ -365,6 +529,7 @@ private:
             const char* n = (selfName_ && selfName_[0]) ? selfName_ : "this device";
             std::snprintf(d->name, sizeof(d->name), "%s", n);
         }
+        sortByName();   // keep the list ordered (self slots in by name like any device)
     }
 
 
@@ -378,24 +543,52 @@ private:
         return std::memcmp(a, b, 4) == 0;
     }
 
-    // After a full sweep, bump missed-count on unseen devices and compact out the
-    // ones past kMaxMissed (a device that left the network). self never ages out.
+    // Drop non-self devices unseen by ANY strategy for longer than kStaleMs (a
+    // powered-off / departed device). Runs every tick off the per-device timestamp,
+    // so it's independent of any one strategy's cadence (HTTP sweep, mDNS lap, future
+    // UDP beacon). Stable compaction — preserves the by-name order upsert maintains.
+    // self never ages out (its timestamp is restamped to "now" on every sweep step).
+    // `now - lastSeenMs` in unsigned arithmetic is wrap-safe: the millis() counter
+    // wraps every ~49 days, but the elapsed interval (< kStaleMs) stays well below
+    // 2^31, so the subtraction yields the true elapsed time across a wrap.
     void ageOut() {
+        const uint32_t now = platform::millis();
         uint8_t w = 0;
         for (uint8_t r = 0; r < deviceCount_; r++) {
             Device& d = devices_[r];
-            if (!d.self) {
-                if (d.missed >= kMaxMissed) continue;   // drop
-            }
+            if (!d.self && (now - d.lastSeenMs) > kStaleMs) continue;   // drop, stale
             if (w != r) devices_[w] = d;
             w++;
         }
+        if (w == deviceCount_) return;   // nothing dropped — common case, no churn
         deviceCount_ = w;
-        // Arm missed-count for the NEXT sweep: anything not refreshed by upsert()
-        // (which resets missed to 0) gets counted as missed once this sweep ends.
-        for (uint8_t i = 0; i < deviceCount_; i++)
-            if (!devices_[i].self) devices_[i].missed++;
+        std::snprintf(statusBuf_, sizeof(statusBuf_), "%u device%s",
+                      deviceCount_, deviceCount_ == 1 ? "" : "s");
+        setStatus(statusBuf_);
+        // A drop changes the persisted set — save it so the cached list stays accurate.
+        markDirty();
+        FilesystemModule::noteDirty();
     }
+
+    // Order the list by device name (case-insensitive). Core's insertionSort does the
+    // work; we supply only the comparator — the domain stays a one-liner. Off the hot
+    // path (sweep-end / boot-load), bounded (<= kMaxDevices). The compare is inline
+    // (not strcasecmp/_stricmp, which differ across POSIX/Windows desktop).
+    void sortByName() {
+        mm::insertionSort(devices_, deviceCount_, [](const Device& a, const Device& b) {
+            return ciLess(a.name, b.name);
+        });
+    }
+
+    // a < b, ASCII case-insensitive.
+    static bool ciLess(const char* a, const char* b) {
+        for (; *a && *b; a++, b++) {
+            int ca = lower(*a), cb = lower(*b);
+            if (ca != cb) return ca < cb;
+        }
+        return lower(*a) < lower(*b);   // shorter string sorts first
+    }
+    static int lower(char c) { return (c >= 'A' && c <= 'Z') ? c + 32 : static_cast<unsigned char>(c); }
 };
 
 }  // namespace mm

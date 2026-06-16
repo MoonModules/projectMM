@@ -405,6 +405,12 @@ bool wifiSetTxPower(int8_t quarterDbm) { return quarterDbm == 0; }
 
 bool mdnsInit(const char* /*deviceName*/) { return false; }
 void mdnsStop() {}
+void mdnsShutdown() {}
+// No mDNS on desktop — browse is a no-op (Start fails, Poll reports "done" with no hits).
+// A PC instance discovers peers via the HTTP sweep instead (see DevicesModule).
+bool mdnsBrowseStart(const char* /*service*/, const char* /*proto*/) { return false; }
+bool mdnsBrowsePoll(MdnsHostCb /*cb*/, void* /*user*/) { return true; }
+void mdnsBrowseStop() {}
 
 // OTA — no-op on desktop (no OTA partition). The /api/firmware/url route
 // guards with `if constexpr (mm::platform::hasOta)` and returns 501 here,
@@ -510,7 +516,11 @@ int httpGet(const char* url, uint32_t timeoutMs, char* body, size_t bodyLen) {
     char req[256];
     int reqLen = std::snprintf(req, sizeof(req),
         "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", path, host);
-    if (reqLen <= 0 || ::send(sock(fd), req, reqLen, 0) != reqLen) {
+    // snprintf returns the length it WOULD have written: >= sizeof(req) means the
+    // request was truncated (an over-long path/host). Reject rather than send a
+    // truncated header or read past the buffer with the inflated length.
+    if (reqLen <= 0 || static_cast<size_t>(reqLen) >= sizeof(req) ||
+        ::send(sock(fd), req, reqLen, 0) != reqLen) {
         close_sock(fd);
         return 0;
     }

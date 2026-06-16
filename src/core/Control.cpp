@@ -296,8 +296,10 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
             // A live HTTP write to a List isn't a use case (discovery output), but the
             // persistence-overlay load IS — and it arrives through this same path.
             auto* src = static_cast<ListSource*>(c.ptr);
-            if (src) src->restoreList(json, key);
-            return ApplyResult::Ok;
+            // Propagate a parse failure (malformed / missing array) as Malformed rather
+            // than masking it as Ok — a corrupt persisted list is a real apply failure.
+            if (!src) return ApplyResult::ReadOnly;   // no source bound → nothing to restore
+            return src->restoreList(json, key) ? ApplyResult::Ok : ApplyResult::Malformed;
         }
         case ControlType::Button:
             // No value to store, but return Ok (NOT ReadOnly): the HTTP handler

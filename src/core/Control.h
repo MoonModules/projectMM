@@ -245,10 +245,11 @@ public:
     // A list of rows backed by a ListSource the caller owns (typically the module
     // itself). Read-only in the UI today. No per-row storage here — the source
     // produces rows on demand from the module's own data (see ControlType::List).
-    void addList(const char* name, const ListSource& source) {
+    void addList(const char* name, ListSource& source) {
         grow();
-        controls_[count_++] = {const_cast<ListSource*>(&source), name, 0,
-                               ControlType::List, 0, 0};
+        // Non-const ref: restoreList() mutates the source (repopulates its rows on a
+        // persistence load), so the control holds a mutable pointer — no const_cast.
+        controls_[count_++] = {&source, name, 0, ControlType::List, 0, 0};
     }
 
     // A momentary action button (ControlType::Button). No backing storage — a click

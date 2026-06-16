@@ -1368,8 +1368,12 @@ function buildListEntries(container, rows, details, openSet) {
         const detailPanel = document.createElement("div");
         detailPanel.className = "list-detail";
         detailPanel.hidden = !openSet.has(summary.textContent);
+        summary.setAttribute("aria-expanded", String(!detailPanel.hidden));
         fillListDetail(detailPanel, details[i] ?? item);
-        const toggle = () => { detailPanel.hidden = !detailPanel.hidden; };
+        const toggle = () => {
+            detailPanel.hidden = !detailPanel.hidden;
+            summary.setAttribute("aria-expanded", String(!detailPanel.hidden));
+        };
         summary.addEventListener("click", toggle);
         summary.addEventListener("keydown", (e) => {
             if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
@@ -1389,21 +1393,59 @@ function listSummaryText(item) {
         .join("  ·  ");
 }
 
-// Render a list row's detail object as read-only key/value rows.
+// Render a list row's detail object as read-only key/value rows. Scalars print as-is;
+// an array of scalars (e.g. a device's `speaks:["http"]` or `via:["mdns","scan"]`)
+// renders as small chips so multi-valued fields like the discovery source are visible
+// at a glance. Nested objects are still skipped (no use case yet). Generic — the engine
+// names the fields, so a new array field shows up with no UI change here.
 function fillListDetail(panel, detail) {
     panel.replaceChildren();
     if (!detail || typeof detail !== "object") return;
     for (const [k, v] of Object.entries(detail)) {
-        if (typeof v === "object") continue;   // v1: flat scalars only
+        const isScalarArray = Array.isArray(v) && v.every(e => typeof e !== "object");
+        if (typeof v === "object" && !isScalarArray) continue;
         const r = document.createElement("div");
         r.className = "list-detail-row";
         const kEl = document.createElement("span");
-        kEl.className = "list-detail-key"; kEl.textContent = k;
+        // A `*Sec` field is a duration in seconds (e.g. a device's `ageSec`) — show it
+        // under a plainer label ("last seen") and as a relative time, not a bare count.
+        // `cached` is the sibling: a restored device not yet re-seen live → "last seen:
+        // cached" rather than a fake recent time.
+        const isDuration = k.endsWith("Sec");
+        kEl.className = "list-detail-key";
+        kEl.textContent = (k === "ageSec" || k === "cached") ? "last seen" : k;
         const vEl = document.createElement("span");
-        vEl.className = "list-detail-val"; vEl.textContent = String(v);
+        vEl.className = "list-detail-val";
+        if (k === "cached") {
+            vEl.textContent = "cached";
+            vEl.classList.add("list-detail-muted");
+        } else if (isScalarArray) {
+            for (const e of v) {
+                const chip = document.createElement("span");
+                chip.className = "list-detail-chip";
+                chip.textContent = String(e);
+                vEl.appendChild(chip);
+            }
+        } else if (isDuration) {
+            vEl.textContent = relativeAge(Number(v));
+        } else {
+            vEl.textContent = String(v);
+        }
         r.append(kEl, vEl);
         panel.appendChild(r);
     }
+}
+
+// Render a seconds-ago count as a short relative time ("just now", "2m ago", "3h ago",
+// "5d ago"). Snapshot at state-push time — it refreshes when the list re-renders, not
+// per second. Mirrors the device-side ageSec (now - lastSeenMs); kept simple on purpose.
+function relativeAge(sec) {
+    if (!Number.isFinite(sec) || sec < 0) return "—";
+    if (sec < 10) return "just now";
+    if (sec < 60) return `${sec}s ago`;
+    if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+    return `${Math.floor(sec / 86400)}d ago`;
 }
 
 function appendResetButton(row, moduleName, ctrl, def, applyVisually) {

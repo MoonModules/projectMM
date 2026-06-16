@@ -930,23 +930,106 @@ bool wifiSetTxPower(int8_t quarterDbm) { return quarterDbm == 0; }
 
 #endif // MM_NO_WIFI
 
-bool mdnsInit(const char* deviceName) {
+// Bring the mDNS stack up (idempotent) and ADVERTISE this device as <deviceName>.local.
+// Advertising is gated by the user's mDNS toggle; the stack init is NOT — browse needs
+// the stack regardless (see mdnsBrowseStart), so mdns_init stays even when the toggle is
+// off. mdns_init is safe to call when already running (returns an already-init error we
+// treat as fine).
+static bool mdnsStackUp_ = false;
+
+static bool ensureMdnsStack() {
+    if (mdnsStackUp_) return true;
     esp_err_t err = mdns_init();
     if (err != ESP_OK) {
         ESP_LOGE(NET_TAG, "mDNS init failed: %s", esp_err_to_name(err));
         return false;
     }
-    err = mdns_hostname_set(deviceName);
+    mdnsStackUp_ = true;
+    return true;
+}
+
+bool mdnsInit(const char* deviceName) {
+    if (!ensureMdnsStack()) return false;
+    esp_err_t err = mdns_hostname_set(deviceName);
     if (err != ESP_OK) {
         ESP_LOGE(NET_TAG, "mDNS hostname set failed: %s", esp_err_to_name(err));
         return false;
     }
-    ESP_LOGI(NET_TAG, "mDNS started: %s.local", deviceName);
+    // Advertise an `_http._tcp` service so other devices DISCOVER us by browsing the
+    // service type (not just by resolving our hostname) — the standard, push-style way
+    // a web device announces itself (WLED, ESPHome, Hue all advertise `_http._tcp`).
+    // This is what lets two projectMM devices find each other over mDNS with no subnet
+    // sweep. The instance name is the deviceName; the port is the HTTP server's (80).
+    // mdns_service_add errors if the service already exists (a reconnect re-runs this),
+    // so add-once and otherwise just refresh the instance name to the current deviceName.
+    if (mdns_service_add(deviceName, "_http", "_tcp", 80, nullptr, 0) != ESP_OK)
+        mdns_service_instance_name_set("_http", "_tcp", deviceName);
+    ESP_LOGI(NET_TAG, "mDNS started: %s.local (advertising _http._tcp:80)", deviceName);
     return true;
 }
 
 void mdnsStop() {
-    mdns_free();
+    // Tearing the stack down would also kill browse. The toggle-off path wants to stop
+    // ADVERTISING, not lose discovery — so keep the stack but drop both the advertised
+    // hostname AND the _http._tcp service record; full mdns_free only on teardown
+    // (where everything stops anyway). mdns_service_remove is a no-op if not added.
+    if (mdnsStackUp_) {
+        mdns_service_remove("_http", "_tcp");
+        mdns_hostname_set("");
+    }
+}
+
+// Full stack teardown — only on module teardown, where browse stops too.
+void mdnsShutdown() {
+    if (mdnsStackUp_) { mdns_free(); mdnsStackUp_ = false; }
+}
+
+// --- mDNS service browse (async, non-blocking) ---
+// One in-flight async query at a time (DevicesModule serialises service types). The
+// synchronous mdns_query_ptr would block the full timeout on the render task; the async
+// handle lets us poll a few ms each tick instead.
+static mdns_search_once_t* mdnsSearch_ = nullptr;
+
+bool mdnsBrowseStart(const char* service, const char* proto) {
+    if (mdnsSearch_) return false;                 // one query at a time
+    // Browse needs only the mDNS stack, not advertising — so bring the stack up here
+    // regardless of the advertise toggle (mdnsStop clears the hostname but keeps the
+    // stack). A device that chooses not to advertise can still discover others.
+    if (!ensureMdnsStack()) return false;
+    // PTR query for the service type; 3 s window, up to 16 results. Returns immediately
+    // with a handle — results are gathered on the mDNS task, read via Poll below.
+    mdnsSearch_ = mdns_query_async_new(nullptr, service, proto, MDNS_TYPE_PTR,
+                                       3000, 16, nullptr);
+    return mdnsSearch_ != nullptr;
+}
+
+bool mdnsBrowsePoll(MdnsHostCb cb, void* user) {
+    if (!mdnsSearch_) return true;                 // nothing running == "done"
+    mdns_result_t* results = nullptr;
+    uint8_t num = 0;
+    // 0 ms timeout: pure poll, never blocks the tick. true == the query finished.
+    if (!mdns_query_async_get_results(mdnsSearch_, 0, &results, &num)) return false;
+    for (mdns_result_t* r = results; r && cb; r = r->next) {
+        MdnsHost h{};
+        if (r->hostname) std::snprintf(h.hostname, sizeof(h.hostname), "%s", r->hostname);
+        h.port = r->port;
+        // First IPv4 address in the result's addr list.
+        for (mdns_ip_addr_t* a = r->addr; a; a = a->next) {
+            if (a->addr.type == ESP_IPADDR_TYPE_V4) {
+                uint32_t v = a->addr.u_addr.ip4.addr;   // little-endian packed (octet i = byte i)
+                h.ip[0] = v & 0xff; h.ip[1] = (v >> 8) & 0xff;
+                h.ip[2] = (v >> 16) & 0xff; h.ip[3] = (v >> 24) & 0xff;
+                break;
+            }
+        }
+        cb(h, user);
+    }
+    if (results) mdns_query_results_free(results);
+    return true;                                   // done — caller calls mdnsBrowseStop()
+}
+
+void mdnsBrowseStop() {
+    if (mdnsSearch_) { mdns_query_async_delete(mdnsSearch_); mdnsSearch_ = nullptr; }
 }
 
 // UdpSocket
