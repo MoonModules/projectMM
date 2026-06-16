@@ -3,8 +3,11 @@
 // FilesystemModule — control-list-driven JSON persistence.
 //
 // Storage: one flat JSON file per top-level MoonModule under /.config/<TypeName>.json.
-// Children are encoded with "<index>." key prefix (positional). Parser is the flat
-// parseJsonString/Int/Bool from core/JsonUtil.h — no nested objects, no arrays.
+// Children are encoded with "<index>." key prefix (positional) — a deliberately flat
+// file shape, loaded with the cheap first-match key helpers (parseString/Int/Bool). A
+// control whose VALUE is structured — a List control's array of objects — is read back
+// with the recursive reader in core/JsonUtil.h via the control's own restore hook: the
+// file's top level stays flat, the structure lives inside one control's value string.
 //
 // Boot flow:
 //   Scheduler phase 1: onBuildControls (every module binds full control set incl. hidden ones)

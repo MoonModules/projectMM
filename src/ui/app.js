@@ -1330,38 +1330,7 @@ function createControl(moduleName, moduleType, ctrl) {
             list.className = "list-control";
             list.dataset.mid = moduleName;
             list.dataset.key = ctrl.name;
-            if (rows.length === 0) {
-                const empty = document.createElement("div");
-                empty.className = "list-empty";
-                empty.textContent = "(none)";
-                list.appendChild(empty);
-            }
-            rows.forEach((item, i) => {
-                const entry = document.createElement("div");
-                entry.className = "list-entry" + (item && item.self ? " list-self" : "");
-
-                const summary = document.createElement("div");
-                summary.className = "list-summary";
-                summary.tabIndex = 0;
-                summary.setAttribute("role", "button");
-                // Summary text: join the object's own scalar fields (skip the `self`
-                // flag, which is shown as a marker instead).
-                summary.textContent = listSummaryText(item);
-
-                const detailPanel = document.createElement("div");
-                detailPanel.className = "list-detail";
-                detailPanel.hidden = true;
-                fillListDetail(detailPanel, details[i] ?? item);
-
-                const toggle = () => { detailPanel.hidden = !detailPanel.hidden; };
-                summary.addEventListener("click", toggle);
-                summary.addEventListener("keydown", (e) => {
-                    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
-                });
-                entry.appendChild(summary);
-                entry.appendChild(detailPanel);
-                list.appendChild(entry);
-            });
+            buildListEntries(list, rows, details, new Set());   // initial: nothing expanded
             row.appendChild(list);
             break;
         }
@@ -1372,6 +1341,42 @@ function createControl(moduleName, moduleType, ctrl) {
     }
 
     return row;
+}
+
+// Rebuild a List control's entries inside `container` from `rows` (summary objects)
+// and `details` (parallel detail objects). `openSet` is a Set<string> of summary
+// texts whose detail panels start expanded — pass `new Set()` for a fresh build, or
+// the currently-open set on a live re-render so an expanded row stays open. Shared by
+// createControl (initial) and updateModuleControls (WS live patch) so the two can't drift.
+function buildListEntries(container, rows, details, openSet) {
+    container.replaceChildren();
+    if (rows.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "list-empty";
+        empty.textContent = "(none)";
+        container.appendChild(empty);
+        return;
+    }
+    rows.forEach((item, i) => {
+        const entry = document.createElement("div");
+        entry.className = "list-entry" + (item && item.self ? " list-self" : "");
+        const summary = document.createElement("div");
+        summary.className = "list-summary";
+        summary.tabIndex = 0;
+        summary.setAttribute("role", "button");
+        summary.textContent = listSummaryText(item);
+        const detailPanel = document.createElement("div");
+        detailPanel.className = "list-detail";
+        detailPanel.hidden = !openSet.has(summary.textContent);
+        fillListDetail(detailPanel, details[i] ?? item);
+        const toggle = () => { detailPanel.hidden = !detailPanel.hidden; };
+        summary.addEventListener("click", toggle);
+        summary.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+        });
+        entry.append(summary, detailPanel);
+        container.appendChild(entry);
+    });
 }
 
 // Join a list row's scalar fields into a one-line summary (skips the `self` marker
@@ -1715,37 +1720,15 @@ function updateModuleControls(mod) {
                 // refresh doesn't collapse a row the user just expanded.
                 const list = document.querySelector(`div.list-control[data-mid="${mid}"][data-key="${k}"]`);
                 if (!list) break;
+                // Preserve which detail panels are currently open (by summary text) so
+                // a live refresh doesn't collapse a row the user just expanded.
                 const open = new Set(
                     [...list.querySelectorAll(".list-entry")]
                         .filter(e => { const d = e.querySelector(".list-detail"); return d && !d.hidden; })
                         .map(e => e.querySelector(".list-summary")?.textContent));
                 const rows = Array.isArray(ctrl.value) ? ctrl.value : [];
                 const details = Array.isArray(ctrl.detail) ? ctrl.detail : [];
-                list.replaceChildren();
-                if (rows.length === 0) {
-                    const empty = document.createElement("div");
-                    empty.className = "list-empty"; empty.textContent = "(none)";
-                    list.appendChild(empty);
-                }
-                rows.forEach((item, i) => {
-                    const entry = document.createElement("div");
-                    entry.className = "list-entry" + (item && item.self ? " list-self" : "");
-                    const summary = document.createElement("div");
-                    summary.className = "list-summary";
-                    summary.tabIndex = 0; summary.setAttribute("role", "button");
-                    summary.textContent = listSummaryText(item);
-                    const detailPanel = document.createElement("div");
-                    detailPanel.className = "list-detail";
-                    detailPanel.hidden = !open.has(summary.textContent);
-                    fillListDetail(detailPanel, details[i] ?? item);
-                    const toggle = () => { detailPanel.hidden = !detailPanel.hidden; };
-                    summary.addEventListener("click", toggle);
-                    summary.addEventListener("keydown", (e) => {
-                        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
-                    });
-                    entry.append(summary, detailPanel);
-                    list.appendChild(entry);
-                });
+                buildListEntries(list, rows, details, open);
                 break;
             }
         }

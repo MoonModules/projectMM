@@ -283,6 +283,10 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     auto* devicesModule = static_cast<mm::DevicesModule*>(
         mm::ModuleFactory::create("DevicesModule"));
     devicesModule->markWiredByCode();
+    // Wire our own name so the self row in the device list matches the rest of the
+    // device's identity (status page / router / mDNS). deviceName has static lifetime
+    // (SystemModule's member); the module borrows the pointer.
+    devicesModule->setSelfName(systemModule->deviceName());
     networkModule->addChild(devicesModule);
     scheduler.addModule(networkModule);
     scheduler.addModule(layouts);

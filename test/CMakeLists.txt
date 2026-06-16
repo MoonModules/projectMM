@@ -11,6 +11,7 @@ add_executable(mm_tests
     unit/core/unit_DeviceIdentify.cpp
     unit/core/unit_FilesystemModule_persistence.cpp
     unit/core/unit_ImprovFrame.cpp
+    unit/core/unit_JsonUtil_parse.cpp
     unit/core/unit_MappingLUT.cpp
     unit/core/unit_ModuleFactory.cpp
     unit/core/unit_MoonModule.cpp

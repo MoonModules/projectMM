@@ -47,9 +47,13 @@ bool isPersistable(ControlType t) {
         case ControlType::ReadOnly:
         case ControlType::ReadOnlyInt:
         case ControlType::Progress:
-        case ControlType::List:        // device-discovery output, rebuilt each scan
         case ControlType::Button:      // momentary action — no value to save
             return false;
+        case ControlType::List:
+            // Persistable now: the List value is a JSON array the recursive mm::json
+            // reader round-trips, restored via ListSource::restoreList (see
+            // applyControlValue). The source owns its (de)serialization.
+            return true;
         default:
             return true;
     }
@@ -285,8 +289,16 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
         case ControlType::ReadOnly:
         case ControlType::ReadOnlyInt:
         case ControlType::Progress:
-        case ControlType::List:        // discovery output — not user-writable (v1)
             return ApplyResult::ReadOnly;
+        case ControlType::List: {
+            // Restore from persistence: hand the source the loaded JSON + this key so
+            // it parses the array (recursive mm::json reader) and repopulates itself.
+            // A live HTTP write to a List isn't a use case (discovery output), but the
+            // persistence-overlay load IS — and it arrives through this same path.
+            auto* src = static_cast<ListSource*>(c.ptr);
+            if (src) src->restoreList(json, key);
+            return ApplyResult::Ok;
+        }
         case ControlType::Button:
             // No value to store, but return Ok (NOT ReadOnly): the HTTP handler
             // runs onUpdate() only on a non-error apply, and onUpdate IS the

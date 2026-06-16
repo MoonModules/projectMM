@@ -35,6 +35,10 @@ HTTP discovery finds web-UI devices, but the wider ecosystem this module will ta
 
 After each full sweep, `ageOut()` drops devices not seen for `kMaxMissed` consecutive sweeps (a device that left the network); the self entry never ages out. Storage is a fixed `devices_[kMaxDevices]` array — bounded, no heap.
 
+## Persistence (instant boot list)
+
+The discovered list survives reboot: the `devices` [List control](Control.md) is persistable, so a completed sweep marks the module dirty and FilesystemModule saves the list as a JSON array; on boot the persistence overlay restores it (via `ListSource::restoreList`, which uses the recursive [JsonUtil](Control.md) reader's `forEachListElement` to walk the saved array) *before* the first sweep runs. So the UI shows the **last-known devices immediately** ("N devices (cached)") rather than waiting the minutes a fresh sweep takes — the real win for slow-to-find devices (a PC instance, a generic host) that aren't mDNS-discoverable. The self entry is not restored from the cache (its IP can change); `upsertSelf` re-adds it live with the current address.
+
 ## Self
 
 This device always appears in the list (`upsertSelf`, marked `self:true`), so the card shows the whole network including the host. The UI marks the self row distinctly (an accent edge). The self entry is identified by comparing each probed IP to the local IP.

@@ -3,6 +3,7 @@
 #include "core/MoonModule.h"
 #include "core/Control.h"
 #include "core/JsonSink.h"
+#include "core/JsonUtil.h"         // recursive reader — restoreList parses the persisted array
 #include "core/DeviceIdentify.h"   // DevType, classifyDevice, extractDeviceName (pure, unit-tested)
 #include "platform/platform.h"
 
@@ -23,6 +24,11 @@ namespace mm {
 // in the generic List control (this module is its ListSource). Read-only.
 class DevicesModule : public MoonModule, public ListSource {
 public:
+    // Wire this device's own name (deviceName) before setup so the self row in the
+    // list matches the status page / router / mDNS. Borrowed pointer — caller owns
+    // stable storage (e.g. SystemModule::deviceName()).
+    void setSelfName(const char* name) { selfName_ = name; }
+
     // ListSource — rows are produced straight from devices_ (no copy, no alloc).
     uint8_t listRowCount() const override { return deviceCount_; }
 
@@ -52,6 +58,39 @@ public:
         sink.append("}");
     }
 
+    // ListSource restore (persistence load): parse the saved `devices` array with the
+    // recursive mm::json reader and rebuild devices_, so the last-known list shows on
+    // boot before any scan. Tolerant of a malformed/over-large file (parse fails →
+    // false → empty list). Self is dropped (re-added live via upsertSelf with the
+    // current IP); missed=0 so a device that's truly gone ages out after the first
+    // live sweep.
+    bool restoreList(const char* json, const char* key) override {
+        deviceCount_ = 0;
+        // Core does the parse / array-navigate / iterate / malformed-safety
+        // (forEachListElement); this body is just "fill one device from this object".
+        return mm::json::forEachListElement(json, key,
+            [&](const mm::json::JsonDoc& doc, const mm::json::JsonNode* el) {
+                if (deviceCount_ >= kMaxDevices) return;
+                if (mm::json::readBool(mm::json::member(doc, el, "self"))) return;  // skip persisted self
+                char ipStr[16] = {}, name[24] = {}, typeStr[12] = {};
+                mm::json::readString(mm::json::member(doc, el, "ip"), ipStr, sizeof(ipStr));
+                mm::json::readString(mm::json::member(doc, el, "name"), name, sizeof(name));
+                mm::json::readString(mm::json::member(doc, el, "type"), typeStr, sizeof(typeStr));
+                uint8_t octets[4];
+                if (!parseDottedQuad(ipStr, octets)) return;
+                Device& d = devices_[deviceCount_++];
+                std::memcpy(d.ip, octets, 4);
+                std::snprintf(d.name, sizeof(d.name), "%s", name);
+                d.type = (std::strcmp(typeStr, "projectMM") == 0) ? DevType::ProjectMM
+                       : (std::strcmp(typeStr, "WLED") == 0)      ? DevType::Wled
+                                                                  : DevType::Generic;
+                d.self = false;
+                d.speaks = ProtoHttp;
+                d.missed = 0;
+            });
+        return true;
+    }
+
     void onBuildControls() override {
         MoonModule::onBuildControls();
         // `scan` is a momentary ACTION (rescan now), not an on/off state — a Button,
@@ -74,7 +113,16 @@ public:
 
     void setup() override {
         MoonModule::setup();
-        setStatus(statusBuf_);   // "idle" until the boot sweep starts
+        // The last-known device list is restored automatically before setup() by the
+        // persistence overlay (the `devices` List control is persistable and
+        // round-trips as JSON — restoreList rebuilt devices_). So the UI shows it
+        // INSTANTLY on boot — no waiting for a fresh sweep (the win for slow-to-
+        // discover devices like a PC instance or generic host that mDNS can't find).
+        if (deviceCount_) {
+            std::snprintf(statusBuf_, sizeof(statusBuf_), "%u device%s (cached)",
+                          deviceCount_, deviceCount_ == 1 ? "" : "s");
+        }
+        setStatus(statusBuf_);   // "idle", or the cached-count summary
         // Don't scan here — the network isn't up yet (DHCP lands a few seconds after
         // boot). loop1s() kicks the ONE boot sweep once a local IP appears.
     }
@@ -149,10 +197,17 @@ private:
     // URL), so a sparse subnet costs ~1×timeout per empty IP, not 3×.
     static constexpr uint8_t  kProbesPerTick = 1;
     static constexpr uint32_t kProbeTimeoutMs = 150;
-    static constexpr uint8_t  kMaxMissed     = 2;   // drop after this many empty sweeps
+    // Drop a device after this many consecutive sweeps without a re-sighting.
+    // Mechanism: upsert() resets missed=0 when a device answers; ageOut() at each
+    // sweep's end drops anyone with missed>=kMaxMissed, then increments the rest.
+    // So a device seen on sweep N (missed→0, then →1 at N's end) is dropped at the
+    // end of sweep N+2: unseen on N+1 (→2), unseen on N+2 (2>=2 → drop). I.e. two
+    // consecutive missed sweeps.
+    static constexpr uint8_t  kMaxMissed     = 2;
     Device  devices_[kMaxDevices];
     uint8_t deviceCount_ = 0;
     bool    sweptOnce_ = false;     // the one boot sweep has completed
+    const char* selfName_ = nullptr;  // this device's name (wired via setSelfName)
     uint32_t scanProgress_ = 0;     // current host index 1..254 (0 = idle), for the Progress bar
     char    statusBuf_[40] = "idle";
     // Probe response buffer — a member, not a per-call stack local: /api/state's
@@ -214,8 +269,14 @@ private:
             std::snprintf(statusBuf_, sizeof(statusBuf_), "%u device%s",
                           deviceCount_, deviceCount_ == 1 ? "" : "s");
             setStatus(statusBuf_);
+            // Persist the fresh set so the next boot shows it instantly. The `devices`
+            // List control is persistable — marking dirty arms the standard
+            // FilesystemModule debounce, which serializes the List as JSON.
+            markDirty();
+            FilesystemModule::noteDirty();
         }
     }
+
 
     void localIp(uint8_t out[4]) const {
         platform::ethGetIPv4(out);
@@ -246,8 +307,15 @@ private:
         std::snprintf(url, sizeof(url), "http://%s:%u/api/state", ipStr, port);
         int status = platform::httpGet(url, kProbeTimeoutMs, probeBuf_, sizeof(probeBuf_));
         if (status == 0) return false;   // nothing on this port
-        DevType t = classifyDevice(probeBuf_, nullptr);
-        if (t == DevType::ProjectMM) { upsert(ip, t, probeBuf_); return true; }
+        // Only a 200 body is real /api/state — a 404/500 error page that happens to
+        // contain "modules" must not be misread as a projectMM (the WLED branch below
+        // already gates on 200). A non-200 still means the host is ALIVE, so fall
+        // through to the WLED probe / generic classification.
+        if (status == 200) {
+            DevType t = classifyDevice(probeBuf_, nullptr);
+            if (t == DevType::ProjectMM) { upsert(ip, t, probeBuf_); return true; }
+        }
+        DevType t = DevType::Generic;
 
         // Not a projectMM — try the WLED info endpoint on this port.
         std::snprintf(url, sizeof(url), "http://%s:%u/json/info", ipStr, port);
@@ -290,7 +358,13 @@ private:
         }
         d->self = true;
         d->missed = 0;
-        if (!d->name[0]) std::snprintf(d->name, sizeof(d->name), "this device");
+        if (!d->name[0]) {
+            // Show our own name (deviceName, wired via setSelfName) so the self row
+            // matches the status page / router / mDNS. "this device" is the last
+            // resort when no name was wired — same robustness contract as the rest.
+            const char* n = (selfName_ && selfName_[0]) ? selfName_ : "this device";
+            std::snprintf(d->name, sizeof(d->name), "%s", n);
+        }
     }
 
 

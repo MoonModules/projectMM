@@ -111,6 +111,14 @@ struct ListSource {
     virtual void writeListRowDetail(JsonSink& sink, uint8_t row) const {
         writeListRow(sink, row);
     }
+    // Rebuild the list from persisted JSON. `json` is the full object FilesystemModule
+    // loaded; `key` is this control's name — the source parses `json` with the
+    // recursive mm::json reader, navigates to `key` (a JSON array of the same
+    // row-summary objects writeListRow produced), and repopulates its own storage.
+    // Default no-op: a List that doesn't override simply isn't restored. The model
+    // owns its (de)serialization — Control.h stays free of the JsonUtil include, and
+    // the control system stays generic. Returns true if it took.
+    virtual bool restoreList(const char* /*json*/, const char* /*key*/) { return false; }
 };
 
 struct ControlDescriptor {
