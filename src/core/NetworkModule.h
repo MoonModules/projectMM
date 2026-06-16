@@ -431,6 +431,10 @@ private:
     // MoonModule::status_); the named "Buf" suffix makes the ownership clear
     // and distinguishes it from MoonModule's own status accessors.
     char statusBuf_[48] = {};
+    // Lazily-filled MAC-derived hostname fallback (see hostName()). mutable: hostName()
+    // is const but caches here on first use. Empty until needed; normally unused
+    // because deviceName is set by SystemModule before bring-up.
+    mutable char hostNameFallback_[8] = {};   // "MM-XXXX" + NUL
 
     // Static IP fields. uint8_t[4] octets, not strings — saves 12 bytes per
     // address vs char[16] dotted-quad, and the wire/persistence layers
@@ -719,11 +723,22 @@ private:
     void noteRadioStopped() { appliedTxPowerSetting_ = -1; }
 
     // The device's network name — used for BOTH the DHCP hostname (router client
-    // list) and the mDNS .local name, so the two never diverge. deviceName (default
-    // MM-XXXX, set by SystemModule before our setup); "mm" only if it's somehow empty.
+    // list) and the mDNS .local name, so the two never diverge. Normally deviceName
+    // (default MM-XXXX, set by SystemModule before our setup). Fallback for the
+    // should-never-happen empty case: a UNIQUE MAC-derived MM-XXXX (same scheme
+    // SystemModule uses) — NOT a shared literal like "mm", which would collide across
+    // devices on one LAN (duplicate hostnames → the router shows one, mDNS clashes).
+    // Computed once into a member buffer so the returned pointer stays valid.
     const char* hostName() const {
-        return (systemModule_ && systemModule_->deviceName()[0] != 0)
-               ? systemModule_->deviceName() : "mm";
+        if (systemModule_ && systemModule_->deviceName()[0] != 0)
+            return systemModule_->deviceName();
+        if (!hostNameFallback_[0]) {
+            uint8_t mac[6] = {};
+            platform::getMacAddress(mac);
+            std::snprintf(hostNameFallback_, sizeof(hostNameFallback_),
+                          "MM-%02X%02X", mac[4], mac[5]);
+        }
+        return hostNameFallback_;
     }
 
     void syncMdns() {

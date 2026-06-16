@@ -64,10 +64,53 @@ enum class ControlType : uint8_t {
                 // RSSI, TX power, future numeric telemetry.
     Select,     // dropdown (ptr → uint8_t index, aux → options array pointer)
     Progress,   // bar with value/total (ptr → uint32_t value, aux = total)
-    IPv4        // dotted-quad IP address (ptr → uint8_t[4]). 4 bytes of storage
+    IPv4,       // dotted-quad IP address (ptr → uint8_t[4]). 4 bytes of storage
                 // vs ~16 for a "192.168.255.255\0" string. Serializes/parses as
                 // the dotted-quad string at the JSON boundary. Used for the
                 // static-IP / gateway / subnet / DNS fields in NetworkModule.
+    List,       // a variable list of rows (ptr → a ListSource the owning module
+                // implements). Each row serializes a flat summary object plus an
+                // optional detail object (the UI shows rows, expands a row to its
+                // detail). Read-only today — discovery output, not user-edited.
+                // The data lives in the module (a contiguous array it walks in
+                // place), NOT copied into the control system: a List adds zero
+                // persistent storage beyond the one descriptor pointer, the same
+                // "control holds a void* into module-owned data" shape every addX()
+                // uses, one level up. (Data-over-objects: no per-row object graph,
+                // no allocation on rebuild — see docs/architecture.md hot-path.)
+    Button      // a momentary action, not a stored value. The UI renders a button;
+                // a click POSTs a value and the module's onUpdate() runs the action.
+                // No backing storage (ptr unused) and non-persistable — distinct
+                // from Bool, which is an on/off STATE that renders as a toggle and a
+                // toggle is the wrong affordance for "do this now" (e.g. rescan).
+};
+
+// Forward-declared (defined below the enum) so the descriptor can hold a pointer.
+class JsonSink;
+
+// Backing for a ControlType::List control. The module that owns the data (e.g.
+// DevicesModule over its device array) implements this; the control descriptor's
+// `ptr` points at the implementation. Serialization (writeControlValue) walks
+// rowCount() and calls writeRow/writeRowDetail per row — the rows are produced
+// straight from the module's contiguous storage, never copied into the control
+// system. This is the standard data-source/adapter shape (cf. UITableView's data
+// source, Qt's QAbstractItemModel): the view is generic, the data stays with its
+// owner. v1 is read-only; an editable variant can add a writeBack later without
+// changing this interface's read path.
+struct ListSource {
+    virtual ~ListSource() = default;
+    // Number of rows currently in the list (may change between calls — e.g. a
+    // device scan found more). Bounded small (uint8_t) — these are LAN devices,
+    // UI list rows, not bulk data.
+    virtual uint8_t listRowCount() const = 0;
+    // Append the row's SUMMARY as a JSON object — the fields shown in the
+    // collapsed row (e.g. {"name":"MM-70BC","ip":"192.168.1.156","type":"projectMM"}).
+    virtual void writeListRow(JsonSink& sink, uint8_t row) const = 0;
+    // Append the row's DETAIL as a JSON object — the fields shown when the row is
+    // expanded. Default: same as the summary (override to show more).
+    virtual void writeListRowDetail(JsonSink& sink, uint8_t row) const {
+        writeListRow(sink, row);
+    }
 };
 
 struct ControlDescriptor {
@@ -175,9 +218,13 @@ public:
         controls_[count_++] = {&var, name, reinterpret_cast<uintptr_t>(options), ControlType::Select, 0, optionCount};
     }
 
-    void addProgress(const char* name, uint32_t& var, uint32_t total) {
+    // A progress bar (value / total). `bytes` true (default) labels it as KB — the
+    // heap / flash / filesystem gauges; false labels it as a plain "value / total"
+    // count (e.g. a scan position 0..254). The flag rides the descriptor's unused
+    // `min` field (Progress has no range), surfaced as "bytes" in the metadata.
+    void addProgress(const char* name, uint32_t& var, uint32_t total, bool bytes = true) {
         grow();
-        controls_[count_++] = {&var, name, total, ControlType::Progress, 0, 0};
+        controls_[count_++] = {&var, name, total, ControlType::Progress, bytes ? 1 : 0, 0};
     }
 
     // 4-byte dotted-quad IPv4 address. `var` must point at a uint8_t[4]
@@ -185,6 +232,23 @@ public:
     void addIPv4(const char* name, uint8_t* var) {
         grow();
         controls_[count_++] = {var, name, 0, ControlType::IPv4, 0, 0};
+    }
+
+    // A list of rows backed by a ListSource the caller owns (typically the module
+    // itself). Read-only in the UI today. No per-row storage here — the source
+    // produces rows on demand from the module's own data (see ControlType::List).
+    void addList(const char* name, const ListSource& source) {
+        grow();
+        controls_[count_++] = {const_cast<ListSource*>(&source), name, 0,
+                               ControlType::List, 0, 0};
+    }
+
+    // A momentary action button (ControlType::Button). No backing storage — a click
+    // POSTs through to the module's onUpdate(name), which performs the action. Use
+    // for "do this now" (rescan, reset, self-test); use addBool for on/off state.
+    void addButton(const char* name) {
+        grow();
+        controls_[count_++] = {nullptr, name, 0, ControlType::Button, 0, 0};
     }
 
     void clear() { count_ = 0; }

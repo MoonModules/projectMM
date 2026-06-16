@@ -33,6 +33,7 @@
 #include "core/AudioModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/ImprovProvisioningModule.h"
+#include "core/DevicesModule.h"
 #include "core/FilesystemModule.h"
 #include "core/ModuleFactory.h"
 #include "platform/platform.h"
@@ -85,6 +86,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule", "core/AudioModule.md");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/FirmwareUpdateModule.md");
     mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/ImprovProvisioningModule.md");
+    mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/DevicesModule.md");
     mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule", "core/NetworkModule.md");
     mm::ModuleFactory::registerType<mm::FilesystemModule>("FilesystemModule", "core/FilesystemModule.md");
 }
@@ -274,6 +276,14 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     scheduler.addModule(systemModule);
     scheduler.addModule(firmwareUpdateModule);
     if (improvModule) networkModule->addChild(improvModule);
+    // Devices: discovers other devices on the LAN. Child of Network (discovery
+    // depends on the network being up); wired-by-code so persistence preserves it
+    // on devices whose saved Network.json predates the child. May be promoted to a
+    // top-level module later if it grows submodules (see DevicesModule.md).
+    auto* devicesModule = static_cast<mm::DevicesModule*>(
+        mm::ModuleFactory::create("DevicesModule"));
+    devicesModule->markWiredByCode();
+    networkModule->addChild(devicesModule);
     scheduler.addModule(networkModule);
     scheduler.addModule(layouts);
     scheduler.addModule(layersContainer);

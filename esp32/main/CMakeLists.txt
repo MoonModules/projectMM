@@ -9,6 +9,7 @@ idf_component_register(
         "../../src/platform/esp32/platform_esp32.cpp"
         "../../src/platform/esp32/platform_esp32_fs.cpp"
         "../../src/platform/esp32/platform_esp32_ota.cpp"
+        "../../src/platform/esp32/platform_esp32_httpget.cpp"
         "../../src/platform/esp32/platform_esp32_improv.cpp"
         "../../src/platform/esp32/platform_esp32_rmt.cpp"
         "../../src/platform/esp32/platform_esp32_lcd.cpp"

@@ -296,6 +296,14 @@ static bool netifInitDone_ = false;
 // DHCP hostname (option 12) pushed by NetworkModule before bring-up; applied to each
 // netif before its DHCP client starts (see setHostname's contract in platform.h).
 // 32 = the ESP-IDF lwIP hostname cap; empty means "leave the IDF default".
+//
+// Threading / ordering contract: setHostname() is called from the app task in
+// NetworkModule::setup(), BEFORE ethInit() / wifiStaInit() bring an interface up.
+// applyHostname() (the only reader) runs later — from the eth link-up event handler
+// or right after esp_wifi_start — so hostname_[] is fully written before any reader
+// can execute, and no lock is needed. Do NOT call setHostname() concurrently with, or
+// after, bring-up (e.g. from another task or an event callback) without adding a
+// mutex / std::atomic; the single-writer-before-readers ordering is the whole safety.
 static char hostname_[32] = {};
 
 void setHostname(const char* name) {
@@ -318,7 +326,13 @@ static void applyHostname(esp_netif_t* netif) {
     esp_err_t e = esp_netif_set_hostname(netif, hostname_);
     if (e != ESP_OK) ESP_LOGW(NET_TAG, "set_hostname('%s') failed: %s", hostname_, esp_err_to_name(e));
     else ESP_LOGI(NET_TAG, "DHCP hostname: %s", hostname_);
-    esp_netif_dhcpc_start(netif);   // fresh DISCOVER carries the hostname
+    // Restart the DHCP client and check the result — if it fails, the interface has
+    // no DHCP client and will never acquire an IP, so surface it rather than silently
+    // leaving the device offline. (Don't return on stop/set failure above: we still
+    // must restart the client we stopped.)
+    esp_err_t se = esp_netif_dhcpc_start(netif);
+    if (se != ESP_OK)
+        ESP_LOGW(NET_TAG, "dhcpc_start after set_hostname failed: %s", esp_err_to_name(se));
 }
 
 #ifndef MM_NO_WIFI

@@ -1,0 +1,57 @@
+{
+  "name": "scenario_DevicesModule_scan",
+  "module": "DevicesModule",
+  "mode": "mutate",
+  "live_only": true,
+  "description": "Trigger the device-discovery sweep repeatedly on a running device and confirm the render loop survives every sweep. Pins the robustness principle for DevicesModule: pressing the `scan` button (a Button control on the Devices submodule of Network) re-runs the subnet sweep, whose HTTP probes block the render task up to the probe timeout per tick. No press, sweep state, or completion may crash or wedge the tick. Runs live only — discovery needs a real LAN to probe and the module only exists on a connected device, so the in-process desktop runner SKIPs it; on a device it presses the button over HTTP. The bound checks FPS stays within range across repeated sweeps (a sweep is a transient cost, not a permanent degradation), proving the scan never leaves the render loop in a wedged state. (Background: the sweep is boot-only + manual precisely because the blocking probe must not run continuously on the render task — see DevicesModule.md.)",
+  "reset": [
+    {
+      "name": "reset-grid-width",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "reset-grid-height",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64
+    }
+  ],
+  "steps": [
+    {
+      "name": "scan-1",
+      "description": "First manual sweep. Baseline: the device renders while a discovery sweep runs.",
+      "op": "set_control",
+      "id": "Devices",
+      "key": "scan",
+      "value": 1,
+      "measure": true
+    },
+    {
+      "name": "scan-2",
+      "description": "Re-trigger the sweep while the previous one's state is still settling — confirms a re-press mid-cycle doesn't wedge the loop.",
+      "op": "set_control",
+      "id": "Devices",
+      "key": "scan",
+      "value": 1,
+      "measure": true
+    },
+    {
+      "name": "scan-3",
+      "description": "Third sweep, bounded: FPS must stay within 20% of the first (a sweep is a transient cost; repeated scans must not permanently degrade the render loop).",
+      "op": "set_control",
+      "id": "Devices",
+      "key": "scan",
+      "value": 1,
+      "measure": true,
+      "bounds": {
+        "fps": {
+          "min_pct": 80
+        }
+      }
+    }
+  ]
+}

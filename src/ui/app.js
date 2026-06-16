@@ -1317,6 +1317,54 @@ function createControl(moduleName, moduleType, ctrl) {
             row.appendChild(btn);
             break;
         }
+        case "list": {
+            // A generic read-only list (ControlType::List). value = array of row
+            // summary objects; ctrl.detail = parallel array of detail objects (same
+            // order). Render one clickable row per summary; clicking toggles a detail
+            // panel below it. Self rows (summary.self === true) get a marker. Fully
+            // generic — the engine decides the fields; the UI just renders objects.
+            row.classList.add("control-list-row");
+            const rows = Array.isArray(ctrl.value) ? ctrl.value : [];
+            const details = Array.isArray(ctrl.detail) ? ctrl.detail : [];
+            const list = document.createElement("div");
+            list.className = "list-control";
+            list.dataset.mid = moduleName;
+            list.dataset.key = ctrl.name;
+            if (rows.length === 0) {
+                const empty = document.createElement("div");
+                empty.className = "list-empty";
+                empty.textContent = "(none)";
+                list.appendChild(empty);
+            }
+            rows.forEach((item, i) => {
+                const entry = document.createElement("div");
+                entry.className = "list-entry" + (item && item.self ? " list-self" : "");
+
+                const summary = document.createElement("div");
+                summary.className = "list-summary";
+                summary.tabIndex = 0;
+                summary.setAttribute("role", "button");
+                // Summary text: join the object's own scalar fields (skip the `self`
+                // flag, which is shown as a marker instead).
+                summary.textContent = listSummaryText(item);
+
+                const detailPanel = document.createElement("div");
+                detailPanel.className = "list-detail";
+                detailPanel.hidden = true;
+                fillListDetail(detailPanel, details[i] ?? item);
+
+                const toggle = () => { detailPanel.hidden = !detailPanel.hidden; };
+                summary.addEventListener("click", toggle);
+                summary.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+                });
+                entry.appendChild(summary);
+                entry.appendChild(detailPanel);
+                list.appendChild(entry);
+            });
+            row.appendChild(list);
+            break;
+        }
         default:
             // Unknown control type — skip silently. New types may be added engine-side
             // without breaking the UI; they just don't render until handled here.
@@ -1324,6 +1372,33 @@ function createControl(moduleName, moduleType, ctrl) {
     }
 
     return row;
+}
+
+// Join a list row's scalar fields into a one-line summary (skips the `self` marker
+// flag and any nested objects). Generic: the engine names the fields.
+function listSummaryText(item) {
+    if (!item || typeof item !== "object") return String(item ?? "");
+    return Object.entries(item)
+        .filter(([k, v]) => k !== "self" && typeof v !== "object")
+        .map(([, v]) => v)
+        .join("  ·  ");
+}
+
+// Render a list row's detail object as read-only key/value rows.
+function fillListDetail(panel, detail) {
+    panel.replaceChildren();
+    if (!detail || typeof detail !== "object") return;
+    for (const [k, v] of Object.entries(detail)) {
+        if (typeof v === "object") continue;   // v1: flat scalars only
+        const r = document.createElement("div");
+        r.className = "list-detail-row";
+        const kEl = document.createElement("span");
+        kEl.className = "list-detail-key"; kEl.textContent = k;
+        const vEl = document.createElement("span");
+        vEl.className = "list-detail-val"; vEl.textContent = String(v);
+        r.append(kEl, vEl);
+        panel.appendChild(r);
+    }
 }
 
 function appendResetButton(row, moduleName, ctrl, def, applyVisually) {
@@ -1385,6 +1460,9 @@ function fmtTime(sec) {
 function fmtProgressLabel(ctrl) {
     const v = Number(ctrl.value) || 0;
     const t = Number(ctrl.total) || 0;
+    // bytes === false → a plain count (e.g. a scan position "37 / 254"); otherwise
+    // KB (the heap / flash / filesystem gauges, the original use).
+    if (ctrl.bytes === false) return v + " / " + t;
     return Math.round(v / 1024) + "KB / " + Math.round(t / 1024) + "KB";
 }
 
@@ -1628,6 +1706,46 @@ function updateModuleControls(mod) {
                 }
                 const lbl = document.querySelector(`span.control-value[data-mid="${mid}"][data-key="${k}.label"]`);
                 if (lbl) lbl.textContent = fmtProgressLabel(ctrl);
+                break;
+            }
+            case "list": {
+                // Rows change wholesale between scans, so rebuild the list's entries
+                // in place rather than patching individual fields. Preserves which
+                // detail panels were open by summary text (best-effort) so a live
+                // refresh doesn't collapse a row the user just expanded.
+                const list = document.querySelector(`div.list-control[data-mid="${mid}"][data-key="${k}"]`);
+                if (!list) break;
+                const open = new Set(
+                    [...list.querySelectorAll(".list-entry")]
+                        .filter(e => { const d = e.querySelector(".list-detail"); return d && !d.hidden; })
+                        .map(e => e.querySelector(".list-summary")?.textContent));
+                const rows = Array.isArray(ctrl.value) ? ctrl.value : [];
+                const details = Array.isArray(ctrl.detail) ? ctrl.detail : [];
+                list.replaceChildren();
+                if (rows.length === 0) {
+                    const empty = document.createElement("div");
+                    empty.className = "list-empty"; empty.textContent = "(none)";
+                    list.appendChild(empty);
+                }
+                rows.forEach((item, i) => {
+                    const entry = document.createElement("div");
+                    entry.className = "list-entry" + (item && item.self ? " list-self" : "");
+                    const summary = document.createElement("div");
+                    summary.className = "list-summary";
+                    summary.tabIndex = 0; summary.setAttribute("role", "button");
+                    summary.textContent = listSummaryText(item);
+                    const detailPanel = document.createElement("div");
+                    detailPanel.className = "list-detail";
+                    detailPanel.hidden = !open.has(summary.textContent);
+                    fillListDetail(detailPanel, details[i] ?? item);
+                    const toggle = () => { detailPanel.hidden = !detailPanel.hidden; };
+                    summary.addEventListener("click", toggle);
+                    summary.addEventListener("keydown", (e) => {
+                        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+                    });
+                    entry.append(summary, detailPanel);
+                    list.appendChild(entry);
+                });
                 break;
             }
         }

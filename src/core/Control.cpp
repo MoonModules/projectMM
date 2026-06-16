@@ -34,6 +34,8 @@ const char* controlTypeName(ControlType t) {
         case ControlType::Select:      return "select";
         case ControlType::Progress:    return "progress";
         case ControlType::IPv4:        return "ipv4";
+        case ControlType::List:        return "list";
+        case ControlType::Button:      return "button";
     }
     return "unknown";
 }
@@ -45,6 +47,8 @@ bool isPersistable(ControlType t) {
         case ControlType::ReadOnly:
         case ControlType::ReadOnlyInt:
         case ControlType::Progress:
+        case ControlType::List:        // device-discovery output, rebuilt each scan
+        case ControlType::Button:      // momentary action — no value to save
             return false;
         default:
             return true;
@@ -106,6 +110,28 @@ void writeControlValue(JsonSink& sink, const ControlDescriptor& c) {
             sink.appendf("\"%s\"", ipStr);
             return;
         }
+        case ControlType::List: {
+            // value is an array of row summary objects; the source writes each
+            // object straight from the module's own data (no copy, no per-row
+            // alloc). Detail objects ride the metadata block (writeControlMetadata)
+            // so the value stays the lightweight summary the collapsed UI shows.
+            const auto* src = static_cast<const ListSource*>(c.ptr);
+            sink.append("[");
+            if (src) {
+                const uint8_t n = src->listRowCount();
+                for (uint8_t r = 0; r < n; r++) {
+                    if (r > 0) sink.append(",");
+                    src->writeListRow(sink, r);
+                }
+            }
+            sink.append("]");
+            return;
+        }
+        case ControlType::Button:
+            // Momentary action — no stored value. Emit a placeholder so the control
+            // object is well-formed JSON; the UI renders a button and ignores it.
+            sink.append("0");
+            return;
     }
 }
 
@@ -138,14 +164,34 @@ void writeControlMetadata(JsonSink& sink, const ControlDescriptor& c) {
             return;
         }
         case ControlType::Progress:
-            sink.appendf(",\"total\":%lu", static_cast<unsigned long>(c.aux));
+            // `bytes` (in min, see addProgress): 1 → KB label, 0 → plain count.
+            sink.appendf(",\"total\":%lu,\"bytes\":%s", static_cast<unsigned long>(c.aux),
+                         c.min ? "true" : "false");
             return;
+        case ControlType::List: {
+            // The summary rows are the `value` (writeControlValue); the per-row
+            // detail (shown when a row expands) rides here as a parallel `detail`
+            // array, same length and order. Keeping detail out of `value` keeps the
+            // collapsed-list payload small when details are richer than summaries.
+            const auto* src = static_cast<const ListSource*>(c.ptr);
+            sink.append(",\"detail\":[");
+            if (src) {
+                const uint8_t n = src->listRowCount();
+                for (uint8_t r = 0; r < n; r++) {
+                    if (r > 0) sink.append(",");
+                    src->writeListRowDetail(sink, r);
+                }
+            }
+            sink.append("]");
+            return;
+        }
         // Everything else: no extras.
         case ControlType::Bool:
         case ControlType::Text:
         case ControlType::Password:
         case ControlType::ReadOnly:
         case ControlType::IPv4:
+        case ControlType::Button:
             return;
     }
 }
@@ -239,7 +285,13 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
         case ControlType::ReadOnly:
         case ControlType::ReadOnlyInt:
         case ControlType::Progress:
+        case ControlType::List:        // discovery output — not user-writable (v1)
             return ApplyResult::ReadOnly;
+        case ControlType::Button:
+            // No value to store, but return Ok (NOT ReadOnly): the HTTP handler
+            // runs onUpdate() only on a non-error apply, and onUpdate IS the
+            // button's action. ReadOnly would 400 and swallow the click.
+            return ApplyResult::Ok;
     }
     return ApplyResult::Malformed;  // unreachable; quiets -Wreturn-type
 }
