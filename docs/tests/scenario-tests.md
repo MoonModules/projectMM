@@ -115,9 +115,9 @@ Both audio modules gone: back to the pipeline-only baseline, still rendering.
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | — / 100,000-125,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 90,909-125,000 | — / unlimited | — / unlimited |
 
-- `pc-macos`: observed 2026-06-12 → 2026-06-14
+- `pc-macos`: observed 2026-06-12 → 2026-06-17
 
 ## DevicesModule
 
@@ -154,6 +154,16 @@ Third sweep, bounded: FPS must stay within 20% of the first (a sweep is a transi
 
 Set grid height to 128 (alongside default width 128). Measures the heaviest config as the baseline for the next two steps.
 
+**Setup** (preceding non-measured steps):
+- `canvas-clear-layers` (clear_children) — Self-canvas: clear+rebuild the pipeline this scenario assumes, so it runs from any device state (the perf scenarios' pattern). Pre-wired apparatus (Preview/Board) survives clear_children. On the in-process runner the fixture already built the tree; clearing then rebuilding is harmless there and makes the live run order-independent.
+- `canvas-clear-layouts` (clear_children)
+- `canvas-clear-drivers` (clear_children)
+- `canvas-grid` (add_module)
+- `canvas-layer` (add_module)
+- `canvas-noise` (add_module)
+- `canvas-mirror` (add_module)
+- `canvas-artnet` (add_module)
+
 **Performance** (contract / observed) — tick stored, FPS shown:
 
 | Board | FPS | heap | block |
@@ -161,21 +171,20 @@ Set grid height to 128 (alongside default width 128). Measures the heaviest conf
 | `esp32` | — / 4.5 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 10.7-10.8 | — / 132KB | — / 48KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.4 | ≥ 103KB / 93KB | — / 48KB |
+| `esp32p4-eth` | — / 739-880 | — / 33218KB | — / 376KB |
 | `pc-macos` | ≥ 8,333 / 3,534-10,526 | unlimited / unlimited | — / unlimited |
 | `pc-windows` | — / 3,413-4,566 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `esp32p4-eth`: observed 2026-06-17
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 - `pc-windows`: observed 2026-06-07
 
 #### `shrink-to-128x64` (set_control)  📏
 
-Shrink to 128x64. Measured: FPS must stay within 20% of the baseline (proves the pipeline reallocs cleanly and there's no leak path).
-
-**Bounds**:
-- FPS ≥ 80% of baseline
+Shrink to 128x64. Measured: tick/heap captured so the runner reports the realloc behaviour against each target's contract. (The old relative-to-baseline FPS bound was removed — it compared against the runner's idle pre-scenario baseline, not the prior render step, so it false-failed on fast boards like the P4 where idle FPS dwarfs render FPS.)
 
 **Performance** (contract / observed) — tick stored, FPS shown:
 
@@ -184,12 +193,14 @@ Shrink to 128x64. Measured: FPS must stay within 20% of the baseline (proves the
 | `esp32` | — / 11.1 | — / 63KB | — / 17KB |
 | `esp32-eth` | — / 26.4-26.5 | — / 114KB | — / 48KB |
 | `esp32-eth-wifi` | ≥ 22.2 / 31.8 | ≥ 83KB / 75KB | — / 24KB |
+| `esp32p4-eth` | — / 1,527-1,739 | — / 33226KB | — / 376KB |
 | `pc-macos` | ≥ 16,667 / 4,695-21,739 | unlimited / unlimited | — / unlimited |
 | `pc-windows` | — / 7,299-10,638 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `esp32p4-eth`: observed 2026-06-17
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-08
 - `pc-windows`: observed 2026-06-07
 
@@ -204,12 +215,14 @@ Grow back to 128x128. Measured: confirms the heap can return to the heavy baseli
 | `esp32` | — / 4.0 | — / 83KB | — / 52KB |
 | `esp32-eth` | — / 10.4 | — / 132KB | — / 48KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 93KB | — / 52KB |
+| `esp32p4-eth` | — / 762-875 | — / 33218KB | — / 376KB |
 | `pc-macos` | ≥ 8,333 / 3,257-10,204 | unlimited / unlimited | — / unlimited |
 | `pc-windows` | — / 3,436-4,608 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `esp32p4-eth`: observed 2026-06-17
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-03
 - `pc-windows`: observed 2026-06-07
 
@@ -362,9 +375,13 @@ Bare minimum at 16²: Grid + Layer + Checkerboard, no output driver, audio/disco
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 7,752 | — / 134KB | — / 108KB |
+| `esp32p4-eth` | — / 14,925-15,873 | — / 33243KB-33244KB | — / 376KB |
 | `esp32s3-n16r8` | — / 7,519-8,197 | — / 8340KB | — / 104KB |
 | `pc-macos` | — / — | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -377,9 +394,13 @@ Bare minimum at 16²: Grid + Layer + Checkerboard, no output driver, audio/disco
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 8,621 | — / 134KB | — / 108KB |
+| `esp32p4-eth` | — / 18,519-18,868 | — / 33243KB-33244KB | — / 376KB |
 | `esp32s3-n16r8` | — / 9,009-9,091 | — / 8338KB-8340KB | — / 104KB |
 | `pc-macos` | — / — | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -394,9 +415,13 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 8,621 | — / 131KB | — / 108KB |
+| `esp32p4-eth` | — / 17,544-17,857 | — / 33243KB | — / 376KB |
 | `esp32s3-n16r8` | — / 8,929-9,091 | — / 8337KB-8340KB | — / 100KB-104KB |
 | `pc-macos` | — / — | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -409,9 +434,13 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 3,175 | — / 130KB | — / 108KB |
+| `esp32p4-eth` | — / 10,204-10,417 | — / 33241KB | — / 376KB |
 | `esp32s3-n16r8` | — / 3,425-3,968 | — / 8336KB-8338KB | — / 104KB |
 | `pc-macos` | — / — | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -425,9 +454,13 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 8,696 | — / 123KB | — / 108KB |
+| `esp32p4-eth` | — / 15,873-17,857 | — / 33243KB | — / 376KB |
 | `esp32s3-n16r8` | — / 8,475-8,772 | — / 8335KB-8340KB | — / 100KB-104KB |
 | `pc-macos` | — / — | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -440,9 +473,13 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 7,194 | — / 131KB | — / 108KB |
+| `esp32p4-eth` | — / 14,925-17,544 | — / 33240KB | — / 376KB |
 | `esp32s3-n16r8` | — / 7,092-8,065 | — / 8334KB-8337KB | — / 84KB-100KB |
 | `pc-macos` | — / — | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -456,9 +493,13 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 6,579 | — / 106KB | — / 84KB |
+| `esp32p4-eth` | — / 17,241-17,857 | — / 33219KB | — / 376KB |
 | `esp32s3-n16r8` | — / 8,333-8,475 | — / 8307KB-8315KB | — / 84KB-104KB |
 | `pc-macos` | — / — | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -472,9 +513,13 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 8,403 | — / 126KB | — / 108KB |
+| `esp32p4-eth` | — / 16,129-17,544 | — / 33243KB | — / 376KB |
 | `esp32s3-n16r8` | — / 7,042-8,403 | — / 8336KB-8338KB | — / 92KB-104KB |
 | `pc-macos` | — / — | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -488,9 +533,13 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 8,475 | — / 135KB | — / 108KB |
+| `esp32p4-eth` | — / 15,873-17,544 | — / 33243KB | — / 376KB |
 | `esp32s3-n16r8` | — / 7,692-8,475 | — / 8338KB | — / 104KB |
 | `pc-macos` | — / — | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -506,9 +555,13 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 6,711 | — / 134KB | — / 108KB |
+| `esp32p4-eth` | — / 16,393-18,868 | — / 33243KB | — / 376KB |
 | `esp32s3-n16r8` | — / 8,403-9,091 | — / 8336KB-8337KB | — / 100KB |
 | `pc-macos` | — / — | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -522,9 +575,13 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 2,801 | — / 134KB | — / 108KB |
+| `esp32p4-eth` | — / 7,463-7,519 | — / 33241KB | — / 376KB |
 | `esp32s3-n16r8` | — / 3,049-3,367 | — / 8331KB-8338KB | — / 100KB |
 | `pc-macos` | — / 1,000,000 | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -538,9 +595,13 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 872 | — / 125KB | — / 108KB |
+| `esp32p4-eth` | — / 2,008-2,212 | — / 33232KB | — / 376KB |
 | `esp32s3-n16r8` | — / 917-998 | — / 8312KB-8330KB | — / 88KB-104KB |
 | `pc-macos` | — / 250,000 | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -554,9 +615,13 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 229 | — / 89KB | — / 62KB |
+| `esp32p4-eth` | — / 515-559 | — / 33196KB | — / 376KB |
 | `esp32s3-n16r8` | — / 126-128 | — / 8291KB-8294KB | — / 100KB-104KB |
 | `pc-macos` | — / 58,824-62,500 | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -571,9 +636,13 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 990 | — / 136KB | — / 108KB |
+| `esp32p4-eth` | — / 2,899-3,311 | — / 33243KB | — / 376KB |
 | `esp32s3-n16r8` | — / 1,252-1,355 | — / 8342KB | — / 108KB |
 | `pc-macos` | — / 250,000-333,333 | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -587,9 +656,13 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 312 | — / 134KB | — / 108KB |
+| `esp32p4-eth` | — / 799-893 | — / 33241KB | — / 376KB |
 | `esp32s3-n16r8` | — / 353-356 | — / 8339KB-8340KB | — / 108KB |
-| `pc-macos` | — / 66,667-71,429 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 62,500-71,429 | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -603,9 +676,13 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 73.8 | — / 125KB | — / 108KB |
+| `esp32p4-eth` | — / 222-229 | — / 33232KB | — / 376KB |
 | `esp32s3-n16r8` | — / 89.0-89.8 | — / 8330KB-8331KB | — / 108KB |
 | `pc-macos` | — / 14,085-15,385 | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -619,9 +696,13 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 16.0 | — / 89KB | — / 62KB |
+| `esp32p4-eth` | — / 55.5-57.4 | — / 33196KB | — / 376KB |
 | `esp32s3-n16r8` | — / 19.8-20.3 | — / 8295KB | — / 108KB |
 | `pc-macos` | — / 2,915-3,236 | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -636,9 +717,15 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 2,193 | — / 135KB | — / 108KB |
+| `esp32p4-eth` | — / 6,135-6,494 | — / 33241KB | — / 376KB |
 | `esp32s3-n16r8` | — / 2,597 | — / 8340KB | — / 108KB |
+| `pc-macos` | — / 1,000,000 | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
+- `pc-macos`: observed 2026-06-17
 
 #### `measure-mod-32` (measure)  📏
 
@@ -650,9 +737,15 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 553 | — / 130KB | — / 108KB |
+| `esp32p4-eth` | — / 1,821-1,876 | — / 33235KB | — / 376KB |
 | `esp32s3-n16r8` | — / 636 | — / 8329KB | — / 100KB |
+| `pc-macos` | — / 250,000-333,333 | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
+- `pc-macos`: observed 2026-06-17
 
 #### `measure-mod-64` (measure)  📏
 
@@ -664,9 +757,15 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 144 | — / 111KB | — / 96KB |
+| `esp32p4-eth` | — / 461-486 | — / 33208KB | — / 376KB |
 | `esp32s3-n16r8` | — / 153 | — / 8307KB | — / 108KB |
+| `pc-macos` | — / 62,500-66,667 | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
+- `pc-macos`: observed 2026-06-17
 
 #### `measure-mod-128` (measure)  📏
 
@@ -678,9 +777,15 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 35.1 | — / 36KB | — / 26KB |
+| `esp32p4-eth` | — / 98.6-102 | — / 33103KB | — / 376KB |
 | `esp32s3-n16r8` | — / 33.7 | — / 8202KB | — / 108KB |
+| `pc-macos` | — / 14,286-15,385 | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
+- `pc-macos`: observed 2026-06-17
 
 ### scenario_perf_light
 
@@ -706,9 +811,13 @@ Bare minimum: Grid(16²) + Layer + Checkerboard (light effect). No modifier, no 
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 6,173-8,772 | — / 125KB-131KB | — / 108KB |
+| `esp32p4-eth` | — / 13,889-18,519 | — / 33243KB-33244KB | — / 376KB |
 | `esp32s3-n16r8` | — / 7,143-8,850 | — / 8316KB-8335KB | — / 80KB-100KB |
 | `pc-macos` | — / — | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -723,9 +832,13 @@ Cost of the modifier + LUT over the minimal pipeline. Heap delta vs measure-mini
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 3,077-3,289 | — / 131KB-135KB | — / 108KB |
+| `esp32p4-eth` | — / 9,615-10,204 | — / 33241KB-33242KB | — / 376KB |
 | `esp32s3-n16r8` | — / 3,922-4,032 | — / 8330KB-8331KB | — / 96KB |
 | `pc-macos` | — / — | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -737,9 +850,13 @@ PreviewDriver is the pre-wired apparatus — it survives clear_children and is a
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 3,247-3,289 | — / 132KB-133KB | — / 108KB |
+| `esp32p4-eth` | — / 10,638-10,753 | — / 33241KB | — / 376KB |
 | `esp32s3-n16r8` | — / 4,115-4,149 | — / 8330KB-8333KB | — / 96KB-100KB |
 | `pc-macos` | — / — | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -752,9 +869,13 @@ PreviewDriver is the pre-wired apparatus — it survives clear_children and is a
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 1,905-3,268 | — / 131KB | — / 108KB |
+| `esp32p4-eth` | — / 5,556-6,494 | — / 33241KB | — / 376KB |
 | `esp32s3-n16r8` | — / 2,463-2,469 | — / 8333KB | — / 100KB |
 | `pc-macos` | — / 1,000,000 | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -768,9 +889,13 @@ PreviewDriver is the pre-wired apparatus — it survives clear_children and is a
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 539-826 | — / 130KB | — / 108KB |
+| `esp32p4-eth` | — / 1,876-1,880 | — / 33235KB | — / 376KB |
 | `esp32s3-n16r8` | — / 562-655 | — / 8330KB-8333KB | — / 100KB-104KB |
-| `pc-macos` | — / 333,333 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 250,000-333,333 | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -784,9 +909,13 @@ PreviewDriver is the pre-wired apparatus — it survives clear_children and is a
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 151-227 | — / 111KB | — / 88KB-96KB |
+| `esp32p4-eth` | — / 485-491 | — / 33208KB | — / 376KB |
 | `esp32s3-n16r8` | — / 146-157 | — / 8305KB-8307KB | — / 96KB-108KB |
-| `pc-macos` | — / 66,667-71,429 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 62,500-71,429 | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-17
+- `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
 - `pc-macos`: observed 2026-06-17
 
@@ -895,8 +1024,15 @@ Pipeline renders with the single remaining grid, same as the baseline.
 
 Set NoiseEffect.scale=4 and measure baseline FPS (mirror on). Effect controls don't rebuild the pipeline — slider stutter check.
 
-**Bounds**:
-- FPS ≥ 80% of baseline
+**Setup** (preceding non-measured steps):
+- `canvas-clear-layers` (clear_children) — Self-canvas: clear+rebuild the pipeline this scenario assumes, so it runs from any device state (order-independent in a chained live run). Pre-wired apparatus survives clear_children; replaces the old fixture+reset model.
+- `canvas-clear-layouts` (clear_children)
+- `canvas-clear-drivers` (clear_children)
+- `canvas-grid` (add_module)
+- `canvas-layer` (add_module)
+- `canvas-noise` (add_module)
+- `canvas-mirror` (add_module)
+- `canvas-artnet` (add_module)
 
 **Performance** (contract / observed) — tick stored, FPS shown:
 
@@ -905,12 +1041,14 @@ Set NoiseEffect.scale=4 and measure baseline FPS (mirror on). Effect controls do
 | `esp32` | — / 3.9 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 10.5-10.6 | — / 133KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 94KB | — / 48KB |
+| `esp32p4-eth` | — / 4,926-6,250 | — / 33238KB | — / 376KB |
 | `pc-macos` | ≥ 8,333 / 4,505-10,309 | unlimited / unlimited | — / unlimited |
 | `pc-windows` | — / 4,000-4,405 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `esp32p4-eth`: observed 2026-06-17
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-07
 - `pc-windows`: observed 2026-06-07
 
@@ -925,12 +1063,14 @@ Disable mirrorX. Modifier control triggers a pipeline rebuild — measures the r
 | `esp32` | — / 4.8 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 10.4 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.0 | ≥ 103KB / 94KB | — / 48KB |
+| `esp32p4-eth` | — / 5,952-6,135 | — / 33238KB | — / 376KB |
 | `pc-macos` | ≥ 5,000 / 3,636-9,259 | unlimited / unlimited | — / unlimited |
 | `pc-windows` | — / 2,024-2,392 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `esp32p4-eth`: observed 2026-06-17
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-14
 - `pc-windows`: observed 2026-06-07
 
@@ -945,12 +1085,14 @@ Disable mirrorY. Mirror is now fully off — should land on the no-LUT path.
 | `esp32` | — / 4.4 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 8.9-9.0 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 11.1 | ≥ 103KB / 94KB | — / 48KB |
+| `esp32p4-eth` | — / 5,587-6,061 | — / 33238KB | — / 376KB |
 | `pc-macos` | ≥ 2,500 / 1,916-9,346 | unlimited / unlimited | — / unlimited |
 | `pc-windows` | — / 1,082-1,305 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `esp32p4-eth`: observed 2026-06-17
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-15
 - `pc-windows`: observed 2026-06-07
 
@@ -961,9 +1103,6 @@ Re-enable mirrorY and measure — the heavy LUT path must recover (FPS within 50
 **Setup** (preceding non-measured steps):
 - `re-enable-mirrors` (set_control) — Re-enable mirrorX (rebuild back to LUT path).
 
-**Bounds**:
-- FPS ≥ 50% of baseline
-
 **Performance** (contract / observed) — tick stored, FPS shown:
 
 | Board | FPS | heap | block |
@@ -971,12 +1110,14 @@ Re-enable mirrorY and measure — the heavy LUT path must recover (FPS within 50
 | `esp32` | — / 4.4 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 10.5-10.6 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.1 | ≥ 103KB / 94KB | — / 48KB |
+| `esp32p4-eth` | — / 5,319-6,098 | — / 33238KB | — / 376KB |
 | `pc-macos` | ≥ 8,333 / 3,390-10,417 | unlimited / unlimited | — / unlimited |
 | `pc-windows` | — / 4,065-4,854 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `esp32p4-eth`: observed 2026-06-17
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-16
 - `pc-windows`: observed 2026-06-07
 
@@ -1129,10 +1270,12 @@ mDNS on (default) — captures the baseline FPS for the next two steps.
 | `esp32` | — / 4.4 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 10.5-10.6 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.2 | ≥ 103KB / 93KB | — / 48KB |
+| `esp32p4-eth` | — / 47,619 | — / 33245KB | — / 376KB |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `esp32p4-eth`: observed 2026-06-17
 
 #### `mdns-off` (set_control)  📏
 
@@ -1145,17 +1288,16 @@ mDNS off — measured. Expected to match or exceed the baseline.
 | `esp32` | — / 3.6 | — / 88KB | — / 48KB |
 | `esp32-eth` | — / 10.3-10.5 | — / 137KB | — / 48KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.0 | ≥ 93KB / 98KB | — / 48KB |
+| `esp32p4-eth` | — / 47,619 | — / 33245KB | — / 376KB |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "shared heap budget; cumulative sweep state reduces standalone-mDNS-off heap by ~15KB" · observed 2026-06-02
+- `esp32p4-eth`: observed 2026-06-17
 
 #### `mdns-on-again` (set_control)  📏
 
 mDNS on again — measured with a bound: FPS must stay within 20% of the baseline (proves toggling doesn't leave the network task in a degraded state).
-
-**Bounds**:
-- FPS ≥ 80% of baseline
 
 **Performance** (contract / observed) — tick stored, FPS shown:
 
@@ -1164,10 +1306,12 @@ mDNS on again — measured with a bound: FPS must stay within 20% of the baselin
 | `esp32` | — / 4.3 | — / 83KB | — / 48KB |
 | `esp32-eth` | — / 9.1 | — / 132KB | — / 48KB-52KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 10.6 | ≥ 103KB / 93KB | — / 48KB |
+| `esp32p4-eth` | — / 45,455-50,000 | — / 33245KB | — / 376KB |
 
 - `esp32`: observed 2026-06-02
 - `esp32-eth`: observed 2026-06-02
 - `esp32-eth-wifi`: contract set 2026-06-02 "initial contract" · observed 2026-06-02
+- `esp32p4-eth`: observed 2026-06-17
 
 ## NetworkSendDriver
 

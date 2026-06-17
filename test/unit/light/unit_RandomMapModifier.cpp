@@ -1,7 +1,13 @@
 // @module RandomMapModifier
+// @also Layer
 
 #include "doctest.h"
 #include "light/modifiers/RandomMapModifier.h"
+#include "light/layers/Layers.h"
+#include "light/layers/Layer.h"
+#include "light/layouts/Layouts.h"
+#include "light/layouts/GridLayout.h"
+#include "platform/platform.h"
 
 #include <vector>
 
@@ -116,4 +122,50 @@ TEST_CASE("RandomMapModifier rebuilds on a grid resize") {
     std::vector<int> seen(n, 0);
     for (auto dst : big) { REQUIRE(dst < n); seen[dst]++; }
     for (mm::nrOfLightsType i = 0; i < n; i++) CHECK(seen[i] == 1);
+}
+
+// loop() timer behaviour, exercised through a real Layer (the modifier reads the
+// Layer's elapsed() clock and calls its onBuildState() on a beat). We observe the
+// MODIFIER'S MAPPING (mapToPhysical) before vs after a timed run — not the
+// rendered buffer, which an animating effect would change on its own and mask the
+// signal. A beat reshuffles the permutation (mapping differs); bpm=0 freezes it
+// (mapping identical) however far time advances. Mirrors the Layer + test-clock
+// pattern in unit_Layer_phase_animation.
+namespace {
+// Build a Layer with the modifier, run layer.loop() across total_ms of virtual
+// time, and return whether the modifier's mapping changed over the run.
+bool mappingChangesOverMs(uint8_t bpm, int total_ms) {
+    mm::Layouts layouts;
+    mm::GridLayout grid;
+    grid.width = 8; grid.height = 8; grid.depth = 1;
+    layouts.addChild(&grid);
+    mm::Layer layer;
+    layer.setLayouts(&layouts);
+    layer.setChannelsPerLight(3);
+    mm::RandomMapModifier mod;
+    mod.bpm = bpm;
+    layer.addChild(&mod);
+    layouts.onBuildState();
+    layer.onBuildState();
+
+    const auto before = mapAll(mod, 8, 8, 1);
+    uint32_t now = 1000;
+    for (int e = 0; e <= total_ms; e += 50) {
+        mm::platform::setTestNowMs(now + e);
+        layer.loop();   // sets the Layer clock, then ticks the modifier's loop()
+    }
+    const auto after = mapAll(mod, 8, 8, 1);
+    mm::platform::setTestNowMs(0);
+    return before != after;
+}
+} // namespace
+
+TEST_CASE("RandomMapModifier loop() reshuffles on a beat (bpm 60 ≈ 1/s)") {
+    // bpm 60 → one beat per 1000ms; 1500ms spans a boundary, so the mapping changes.
+    CHECK(mappingChangesOverMs(60, 1500) == true);
+}
+
+TEST_CASE("RandomMapModifier loop() with bpm 0 never reshuffles (frozen)") {
+    // bpm 0 → no beat ever; the permutation stays put no matter how far time runs.
+    CHECK(mappingChangesOverMs(0, 5000) == false);
 }

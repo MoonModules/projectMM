@@ -55,10 +55,11 @@ public:
     // (respectsEnabled() defaults to true, so we don't override it.)
 
     // --- controls: three I2S pins, sample rate, the two conditioning knobs, and
-    // two read-only read-outs. The pins default to UNSET (0): the module is user-
-    // added when a board has a mic, and stays idle (no I2S init) until the user
-    // enters the real GPIOs, so adding it can't grab arbitrary pins or wedge a
-    // board with no mic. The bench INMP441 wiring is WS=4 / SD=5 / SCK=6. ---
+    // two read-only read-outs. The pins default to UNSET (-1, the standard Pin-
+    // control sentinel — so GPIO 0 stays a usable mic pin): the module is user-added
+    // when a board has a mic, and stays idle (no I2S init) until the user enters the
+    // real GPIOs, so adding it can't grab arbitrary pins or wedge a board with no
+    // mic. The bench INMP441 wiring is WS=4 / SD=5 / SCK=6. ---
     int8_t wsPin = -1;           // word-select / LRCLK (-1 = unset)
     int8_t sdPin = -1;           // serial data in (-1 = unset)
     int8_t sckPin = -1;          // bit clock (-1 = unset)
@@ -196,9 +197,10 @@ private:
             return;
         }
         deinit();
-        // Pins unset (the default until the user wires a mic): stay idle, don't
-        // attempt an I2S init. A 0 GPIO is not a valid mic pin, and initialising
-        // I2S on unset/arbitrary pins is what hung a mic-less board's boot.
+        // Any pin unset (-1, the default until the user wires a mic): stay idle,
+        // don't attempt an I2S init — initialising I2S on unset pins is what hung a
+        // mic-less board's boot. GPIO 0 IS a valid mic pin now (the sentinel is -1,
+        // not 0), so the guard tests < 0, not == 0.
         if (wsPin < 0 || sdPin < 0 || sckPin < 0) {
             setStatus("mic: set wsPin / sdPin / sckPin", Severity::Status);
             return;

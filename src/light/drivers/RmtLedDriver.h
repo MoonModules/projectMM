@@ -103,7 +103,8 @@ public:
         // them any time) but only shown while the test mode is on — same always-
         // add-then-setHidden shape NetworkModule uses for its static-IP fields. The
         // rebuild after every control change (HttpServerModule) re-runs this and
-        // flips the flag. txPin is the optional override (0 = transmit on pins[0]).
+        // flips the flag. txPin is the optional override: -1 (unset) = transmit on
+        // pins[0]; a value >= 0 is an explicit GPIO override (0 is now a valid pin).
         controls_.addPin("loopbackTxPin", loopbackTxPin);
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
         controls_.addPin("loopbackRxPin", loopbackRxPin);
@@ -359,6 +360,14 @@ private:
         if (pinCount_ == 0) {
             clearFailBuf();
             setStatus("loopback: no valid pins", Severity::Warning);
+            return;
+        }
+        // The RX pin must be set: the loopback captures TX→RX over a jumper, so an
+        // unset rxPin (-1) has nothing to listen on. Guard before the uint8_t cast
+        // below, which would otherwise turn -1 into GPIO 255 (a bogus pin).
+        if (loopbackRxPin < 0) {
+            clearFailBuf();
+            setStatus("loopback: set loopbackRxPin (jumper it to the TX pin)", Severity::Status);
             return;
         }
         // The test reconfigures the first data pin as TX, so release ALL our TX

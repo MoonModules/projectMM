@@ -94,7 +94,16 @@ public:
         if (beat != lastBeat_) {
             lastBeat_ = beat;
             reshuffle();          // ask the next rebuild to produce a fresh permutation
-            lyr->onBuildState();  // rebuild the LUT now (re-runs mapToPhysical → reshuffle)
+            // The rebuild is what actually applies the reshuffle (re-runs mapToPhysical
+            // off the new generation); reshuffle() alone only bumps the counter, so
+            // without this the remap would never visibly change. This rebuild DOES
+            // alloc — but it is beat-gated (≤ once/sec at bpm 60, default every 10s),
+            // runs here AFTER the effect pass (not mid-render), and the permutation
+            // buffer is reused across beats (realloc only on a grid resize). That is
+            // the accepted, bounded cost — a transient one-frame hitch like a `scan`,
+            // not a per-tick hot-path alloc. (Removing it to "defer the rebuild" would
+            // break the feature: nothing else triggers the LUT rebuild on a beat.)
+            lyr->onBuildState();
         }
     }
 

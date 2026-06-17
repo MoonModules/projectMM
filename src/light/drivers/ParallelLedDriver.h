@@ -308,6 +308,13 @@ protected:
             setStatus("loopback: no valid pins", Severity::Warning);
             return;
         }
+        // RX pin must be set — an unset rxPin (-1) has nothing to capture on, and the
+        // uint16_t cast at the busLoopback call would turn -1 into a bogus pin.
+        if (loopbackRxPin < 0) {
+            clearFailBuf();
+            setStatus("loopback: set loopbackRxPin (jumper it to the TX pin)", Severity::Status);
+            return;
+        }
         const uint8_t outCh = correction_ ? correction_->outChannels : 0;
         if (frameBytes_ == 0 || maxLaneLights_ == 0 || outCh == 0) {
             clearFailBuf();

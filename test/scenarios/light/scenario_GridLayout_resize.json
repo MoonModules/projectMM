@@ -15,7 +15,43 @@
       "type": "Layouts"
     },
     {
-      "name": "fix-grid",
+      "name": "fix-layers",
+      "op": "add_module",
+      "id": "Layers",
+      "type": "Layers",
+      "props": {
+        "layouts": "Layouts"
+      }
+    },
+    {
+      "name": "fix-drivers",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "layers": "Layers"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "name": "canvas-clear-layers",
+      "description": "Self-canvas: clear+rebuild the pipeline this scenario assumes, so it runs from any device state (the perf scenarios' pattern). Pre-wired apparatus (Preview/Board) survives clear_children. On the in-process runner the fixture already built the tree; clearing then rebuilding is harmless there and makes the live run order-independent.",
+      "op": "clear_children",
+      "id": "Layers"
+    },
+    {
+      "name": "canvas-clear-layouts",
+      "op": "clear_children",
+      "id": "Layouts"
+    },
+    {
+      "name": "canvas-clear-drivers",
+      "op": "clear_children",
+      "id": "Drivers"
+    },
+    {
+      "name": "canvas-grid",
       "op": "add_module",
       "id": "Grid",
       "type": "GridLayout",
@@ -26,77 +62,36 @@
       }
     },
     {
-      "name": "fix-layer",
+      "name": "canvas-layer",
       "op": "add_module",
       "id": "Layer",
       "type": "Layer",
+      "parent_id": "Layers",
       "props": {
-        "layouts": "Layouts",
         "channelsPerLight": 3
       }
     },
     {
-      "name": "fix-noise",
+      "name": "canvas-noise",
       "op": "add_module",
       "id": "Noise",
       "type": "NoiseEffect",
       "parent_id": "Layer"
     },
     {
-      "name": "fix-mirror",
+      "name": "canvas-mirror",
       "op": "add_module",
       "id": "Multiply",
       "type": "MultiplyModifier",
       "parent_id": "Layer"
     },
     {
-      "name": "fix-drivers",
-      "op": "add_module",
-      "id": "Drivers",
-      "type": "Drivers",
-      "props": {
-        "layer": "Layer"
-      }
-    },
-    {
-      "name": "fix-artnet",
+      "name": "canvas-artnet",
       "op": "add_module",
       "id": "ArtNet",
       "type": "NetworkSendDriver",
       "parent_id": "Drivers"
-    }
-  ],
-  "reset": [
-    {
-      "name": "reset-grid-width",
-      "op": "set_control",
-      "id": "Grid",
-      "key": "width",
-      "value": 128
     },
-    {
-      "name": "reset-grid-height",
-      "op": "set_control",
-      "id": "Grid",
-      "key": "height",
-      "value": 128
-    },
-    {
-      "name": "reset-mirrorX",
-      "op": "set_control",
-      "id": "Multiply",
-      "key": "mirrorX",
-      "value": true
-    },
-    {
-      "name": "reset-mirrorY",
-      "op": "set_control",
-      "id": "Multiply",
-      "key": "mirrorY",
-      "value": true
-    }
-  ],
-  "steps": [
     {
       "name": "size-128x128",
       "description": "Set grid height to 128 (alongside default width 128). Measures the heaviest config as the baseline for the next two steps.",
@@ -209,22 +204,35 @@
             "2026-06-07",
             "2026-06-07"
           ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            1136,
+            1353
+          ],
+          "free_heap": [
+            34015075,
+            34015087
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
         }
       }
     },
     {
       "name": "shrink-to-128x64",
-      "description": "Shrink to 128x64. Measured: FPS must stay within 20% of the baseline (proves the pipeline reallocs cleanly and there's no leak path).",
+      "description": "Shrink to 128x64. Measured: tick/heap captured so the runner reports the realloc behaviour against each target's contract. (The old relative-to-baseline FPS bound was removed — it compared against the runner's idle pre-scenario baseline, not the prior render step, so it false-failed on fast boards like the P4 where idle FPS dwarfs render FPS.)",
       "op": "set_control",
       "id": "Grid",
       "key": "height",
       "value": 64,
       "measure": true,
-      "bounds": {
-        "fps": {
-          "min_pct": 80
-        }
-      },
       "contract": {
         "pc-macos": {
           "tick_us": 60,
@@ -328,6 +336,24 @@
           "at": [
             "2026-06-07",
             "2026-06-07"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            575,
+            655
+          ],
+          "free_heap": [
+            34023791,
+            34023819
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
           ]
         }
       }
@@ -443,6 +469,24 @@
           "at": [
             "2026-06-07",
             "2026-06-07"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            1143,
+            1312
+          ],
+          "free_heap": [
+            34014799,
+            34014827
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
           ]
         }
       }

@@ -34,6 +34,16 @@
 // run (no dead flash for an LCD_CAM driver on a chip without LCD_CAM). The same
 // SOC macros back the rmtTxChannels / lcdLanes / parlioLanes capability flags in
 // platform_config.h. Undefined on desktop, so none compile there.
+//
+// Why the preprocessor here and not `if constexpr` (the usual platform-branch
+// form): the goal is to *exclude the unused driver's code from the binary*, and
+// `if constexpr` still compiles every branch — it can't drop the include. The
+// include and the registration must share one condition (a missing include means
+// the type isn't declared), so both are `#if`. These are SOC-*capability* macros
+// (CONFIG_SOC_*), NOT the platform/OS `#ifdef`s the boundary rule forbids
+// (ESP_PLATFORM / CONFIG_IDF_TARGET_* / __APPLE__ / …) — check_platform_boundary.py
+// passes them, by design. The driver bodies themselves keep all hardware behind
+// the platform seam; this gate only decides which driver headers are present.
 #if defined(CONFIG_SOC_RMT_SUPPORTED)
 #include "light/drivers/RmtLedDriver.h"
 #endif
