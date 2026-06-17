@@ -72,7 +72,7 @@ The **one exception** is `esp32/main/CMakeLists.txt`: ESP-IDF builds use IDF's b
 
 The full gate lists per lifecycle event (commit, push, PR merge, release) live in **Lifecycle Events** below.
 
-**Mandatory subtraction.** Periodically review and remove code and docs that no longer earn their place. If nothing can be removed, justify why.
+**Mandatory subtraction.** Periodically review and remove code and docs that no longer earn their place. If nothing can be removed, justify why. This applies to `docs/backlog/` and `docs/history/` too: both grow *and shrink*. A backlog item that ships is deleted (it lives in the code now); a history entry whose lesson has been absorbed — folded into a principle, a doc, or simply internalised — gets pruned. The permanent record is the git commits; these two folders are a working narrative layered on top, kept only as long as they still earn it. Don't treat either as append-only.
 
 **Reference, don't copy.** Previous prototype branches have working solutions. Reference them for proven approaches but don't copy code structure.
 
@@ -83,8 +83,8 @@ Each commit produces visible output. The product owner picks what to build next.
 ### Per-feature workflow
 
 1. **Pick what to build.** One layout, one effect, one driver, one modifier, one system module: whatever adds the next useful capability.
-2. **Review only the relevant module drafts.** Select from `docs/backlog/moonmodules_draft/`. Promote only what's needed to `docs/moonmodules/`.
-3. **`/plan` it.** Plan references only the promoted specs + architecture docs. Plans are not promoted to the repo; the implemented code, docs, and commit message together describe what landed.
+2. **Spec it.** Write (or review) the module's spec. A spec-in-progress is a plain `.md` in `docs/backlog/` (like any other forward-looking note); when the module ships, its final spec is written in `docs/moonmodules/<Name>.md` and the temporary backlog draft (if any) is deleted. Most small modules go straight to `docs/moonmodules/` in the same change that implements them — the backlog draft is only for specs worth circulating before the code exists.
+3. **`/plan` it.** Plan references only the relevant `docs/moonmodules/` specs + architecture docs. Plans are not committed to the repo; the implemented code, docs, and commit message together describe what landed.
 4. **Implement in a branch** (`next-iteration` or feature branch). Test on hardware. Run the commit gates (see Lifecycle Events below). Commit.
 5. **Push.** Product owner pushes. CodeRabbit reviews the PR. Process findings.
 6. **Repeat.**
@@ -180,7 +180,7 @@ The "end users will use this" moment. Per-release criteria are defined by the pr
 
 What the agent reads:
 - Always: `CLAUDE.md`, `architecture.md`
-- For this commit: `docs/moonmodules/<only the promoted specs>`
+- For this commit: `docs/moonmodules/<only the specs relevant to this change>`
 - Never automatically: `docs/history/*`, `docs/backlog/*`
 
 ## Documentation
@@ -194,9 +194,8 @@ docs/
   testing.md               ← test inventory and strategy
   performance.md           ← per-module timing, memory, sizeof for each platform
   backlog/                 ← forward-looking: what to build next (not present-tense)
-    README.md              ← index: what's here (list + draft specs + design studies)
+    README.md              ← index: what's here (to-build list + design studies + in-flight draft specs)
     backlog.md             ← the prioritised to-build list
-    moonmodules_draft/     ← draft specs for unimplemented modules (promoted out as they ship)
   history/                 ← backward-looking: accumulated wisdom
     README.md              ← index: what's here + cross-repo trends + digest prompt
     decisions.md           ← actions, lessons, proven patterns
@@ -218,7 +217,7 @@ Do **not** repeat facts the `.h` already states: the controls list (the .h has `
 
 The `history/` folder is the distilled experience of years of building LED/light systems, from WLED, WLED-MM, StarLight, MoonLight, through projectMM. It contains proven patterns, memory tricks, control mechanisms, and hard-won lessons, studied under the [*Industry standards, our own code*](#principles) principle. Per-project credits live in the `history/` digests and the per-module "Prior art" sections.
 
-The `backlog/` folder is its forward-looking counterpart: `backlog.md` is the prioritised to-build list, and `moonmodules_draft/` holds specs for modules not yet implemented (selected and promoted to `moonmodules/` as each ships, then deleted from the draft). Both `history/` and `backlog/` are exempt from the present-tense rule and agents don't read them automatically; only when planning new work.
+The `backlog/` folder is its forward-looking counterpart: `backlog.md` is the prioritised to-build list, design studies sit alongside it, and a spec for a not-yet-built module can live here as a plain draft `.md` until it ships (its final spec then goes to `moonmodules/` and the draft is deleted). Both `history/` and `backlog/` are exempt from the present-tense rule and agents don't read them automatically; only when planning new work. Neither folder only accumulates: per [*Mandatory subtraction*](#process-rules), both shrink as well — shipped backlog items and absorbed history entries are deleted, since the git commits are the permanent record and these folders are just the working narrative above it.
 
 ## Code Style
 

@@ -2,6 +2,7 @@
 #include "light/layers/Layers.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/SphereLayout.h"
+#include "light/layouts/WheelLayout.h"
 #include "light/effects/LinesEffect.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/NoiseEffect.h"
@@ -20,8 +21,12 @@
 #include "light/effects/NetworkReceiveEffect.h"
 #include "light/effects/AudioVolumeEffect.h"
 #include "light/effects/AudioSpectrumEffect.h"
+#include "light/effects/SineEffect.h"
+#include "light/effects/DistortionWavesEffect.h"
 #include "light/modifiers/MultiplyModifier.h"
 #include "light/modifiers/CheckerboardModifier.h"
+#include "light/modifiers/RandomMapModifier.h"
+#include "light/modifiers/RotateModifier.h"
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
 #include "light/drivers/LcdLedDriver.h"
@@ -55,6 +60,7 @@ static void registerModuleTypes() {
     // so the UI's 📏/🟦/🧊 chip lights up without any per-domain wrapper.
     mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout", "light/layouts/GridLayout.md");
     mm::ModuleFactory::registerType<mm::SphereLayout>("SphereLayout", "light/layouts/SphereLayout.md");
+    mm::ModuleFactory::registerType<mm::WheelLayout>("WheelLayout", "light/layouts/WheelLayout.md");
     mm::ModuleFactory::registerType<mm::LinesEffect>("LinesEffect", "light/effects/LinesEffect.md");
     mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect", "light/effects/RainbowEffect.md");
     mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect", "light/effects/NoiseEffect.md");
@@ -73,8 +79,12 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::NetworkReceiveEffect>("NetworkReceiveEffect", "light/effects/NetworkReceiveEffect.md");
     mm::ModuleFactory::registerType<mm::AudioVolumeEffect>("AudioVolumeEffect", "light/effects/AudioVolumeEffect.md");
     mm::ModuleFactory::registerType<mm::AudioSpectrumEffect>("AudioSpectrumEffect", "light/effects/AudioSpectrumEffect.md");
+    mm::ModuleFactory::registerType<mm::SineEffect>("SineEffect", "light/effects/SineEffect.md");
+    mm::ModuleFactory::registerType<mm::DistortionWavesEffect>("DistortionWavesEffect", "light/effects/DistortionWavesEffect.md");
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier", "light/modifiers/MultiplyModifier.md");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers/CheckerboardModifier.md");
+    mm::ModuleFactory::registerType<mm::RandomMapModifier>("RandomMapModifier", "light/modifiers/RandomMapModifier.md");
+    mm::ModuleFactory::registerType<mm::RotateModifier>("RotateModifier", "light/modifiers/RotateModifier.md");
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver", "light/drivers/NetworkSendDriver.md");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers/PreviewDriver.md");
     mm::ModuleFactory::registerType<mm::RmtLedDriver>("RmtLedDriver", "light/drivers/RmtLedDriver.md");

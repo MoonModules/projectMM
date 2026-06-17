@@ -35,12 +35,15 @@ add_executable(mm_tests
     unit/light/unit_NetworkSendDriver_packet.cpp
     unit/light/unit_BlendMap.cpp
     unit/light/unit_CheckerboardEffect.cpp
+    unit/light/unit_SineEffect.cpp
+    unit/light/unit_DistortionWavesEffect.cpp
     unit/light/unit_Correction.cpp
     unit/light/unit_Drivers_container.cpp
     unit/light/unit_FireEffect.cpp
     unit/light/unit_GameOfLifeEffect.cpp
     unit/light/unit_GridLayout.cpp
     unit/light/unit_SphereLayout.cpp
+    unit/light/unit_WheelLayout.cpp
     unit/light/unit_Layer_extrude.cpp
     unit/light/unit_Layer_sparse_mapping.cpp
     unit/light/unit_Layer_phase_animation.cpp
@@ -52,6 +55,8 @@ add_executable(mm_tests
     unit/light/unit_MetaballsEffect.cpp
     unit/light/unit_MultiplyModifier.cpp
     unit/light/unit_CheckerboardModifier.cpp
+    unit/light/unit_RandomMapModifier.cpp
+    unit/light/unit_RotateModifier.cpp
     unit/light/unit_NoiseEffect.cpp
     unit/light/unit_ParticlesEffect.cpp
     unit/light/unit_PlasmaEffect.cpp

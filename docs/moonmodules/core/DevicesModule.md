@@ -24,10 +24,12 @@ Per host, `probe()` issues `platform::httpGet` (short timeout) and classifies th
 
 | Probe | Match | Type |
 |-------|-------|------|
-| `GET /api/state` | body contains `"modules"` | projectMM |
-| `GET /json/info` | body contains `WLED` | WLED |
-| (any other live host) | answered, not the above | generic |
+| `GET /api/state` | **HTTP 200** and body contains `"modules"` | projectMM |
+| `GET /json/info` | **HTTP 200** and body contains `WLED` | WLED |
+| (any other live host) | answered (any status), not the above | generic |
 | no response on 80 or 8080 | — | not listed |
+
+The status-200 gate matters: a 404/500 error page that happens to contain `"modules"` or `WLED` must not be misread as a real device. A non-200 response still proves the host is *alive*, so it falls through to the generic classification rather than being dropped.
 
 Both ports 80 and 8080 are probed per host: ESP32 devices and WLED serve on 80, a projectMM **desktop** instance serves its API on 8080. A live host on 80 stops there; the 8080 attempt only adds a second timeout on otherwise-empty IPs.
 

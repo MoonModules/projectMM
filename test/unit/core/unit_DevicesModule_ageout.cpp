@@ -25,6 +25,10 @@ using namespace mm;
 
 namespace {
 
+// RAII: restore the real clock on scope exit, even if a REQUIRE/CHECK throws mid-test
+// — otherwise a failing assertion would leave virtual time frozen for later cases.
+struct ClockGuard { ~ClockGuard() { platform::setTestNowMs(0); } };
+
 // True if the cached device at `ip` is still in the list (a serialized-row scan, the
 // only public window into the rows). The self entry the live tick adds is ignored —
 // we assert specifically on the two restored, non-self devices' survival.
@@ -42,6 +46,7 @@ bool present(const DevicesModule& dev, const char* ip) {
 // the self row — that's live behaviour and doesn't affect A's age-out timestamp, which
 // is what these cases pin.
 bool aPresentAfter(uint32_t t0, uint32_t dt) {
+    ClockGuard guard;   // real clock restored on return, even if a REQUIRE below fails
     platform::setTestNowMs(t0);
     DevicesModule dev;
     // Mirrors the persistence-overlay shape: the whole module JSON object, the array
@@ -54,9 +59,7 @@ bool aPresentAfter(uint32_t t0, uint32_t dt) {
     REQUIRE(dev.listRowCount() == 2);
     platform::setTestNowMs(t0 + dt);
     dev.loop1s();                           // runs ageOut() against the advanced clock
-    bool a = present(dev, "192.168.1.20");
-    platform::setTestNowMs(0);              // restore real clock for the next case
-    return a;
+    return present(dev, "192.168.1.20");    // ClockGuard restores the real clock on return
 }
 
 }  // namespace
@@ -71,9 +74,9 @@ TEST_CASE("DevicesModule: a device drops once past kStaleMs (24h)") {
 
 TEST_CASE("DevicesModule: restore tolerates an empty / malformed cache") {
     // Robustness: a malformed array yields an empty list, never a crash.
+    ClockGuard guard;   // restores the real clock on return, even if a CHECK fails
     platform::setTestNowMs(1);
     DevicesModule dev;
     CHECK(dev.restoreList("not json", "devices") == false);
     CHECK(dev.listRowCount() == 0);
-    platform::setTestNowMs(0);
 }

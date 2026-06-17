@@ -147,6 +147,16 @@ public:
             extrude(eff->dimensions());
             eff->addAccumUs(platform::micros() - start);
         }
+        // Tick dynamic modifiers AFTER the effect pass, so the frame's buffer is fully
+        // written before a modifier acts. A static modifier's loop() is empty (it only
+        // shapes the LUT, rebuilt on control change). A dynamic one (RandomMapModifier)
+        // may call our onBuildState() from here to rebuild the LUT on its timer — safe
+        // re-entrancy precisely because every effect write for this frame is already done.
+        for (uint8_t i = 0; i < childCount(); i++) {
+            if (child(i)->role() != ModuleRole::Modifier) continue;
+            if (!child(i)->enabled()) continue;
+            static_cast<ModifierBase*>(child(i))->loop();
+        }
     }
 
     // Copy the effect's written slice to fill the unused axes. Called after each

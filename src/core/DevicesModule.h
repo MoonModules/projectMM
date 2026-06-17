@@ -86,7 +86,9 @@ public:
         deviceCount_ = 0;
         // Core does the parse / array-navigate / iterate / malformed-safety
         // (forEachListElement); this body is just "fill one device from this object".
-        return mm::json::forEachListElement(json, key,
+        // Capture its result — we still need to sort before returning, so we can't
+        // `return` it inline (that skipped sortByName, leaving the cache unsorted).
+        const bool ok = mm::json::forEachListElement(json, key,
             [&](const mm::json::JsonDoc& doc, const mm::json::JsonNode* el) {
                 if (deviceCount_ >= kMaxDevices) return;
                 if (mm::json::readBool(mm::json::member(doc, el, "self"))) return;  // skip persisted self
@@ -111,7 +113,7 @@ public:
                 d.lastSeenMs = platform::millis();
             });
         sortByName();   // cached list shows alphabetically too, before the first sweep
-        return true;
+        return ok;      // false on a malformed/missing file (list left empty)
     }
 
     void onBuildControls() override {
@@ -334,6 +336,8 @@ private:
             if (ipEq(ip, local)) { if (Device* d = findByIp(ip)) { d->lastSeenMs = platform::millis(); d->cached = false; } continue; }
             probe(ip);
         }
+        // Advance the progress bar to the current cursor (1..254) so it tracks the sweep.
+        if (hostCursor_ <= 254) scanProgress_ = static_cast<uint32_t>(hostCursor_);
         if (hostCursor_ > 254) {
             // Sweep finished — reset the bar to 0 (idle), not left full at 254.
             scanProgress_ = 0;

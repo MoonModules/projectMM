@@ -19,7 +19,7 @@ The source buffer is split into **consecutive slices**, one per pin, in list ord
 
 ## Concurrent show (blocks the render tick for the longest strand)
 
-`loop()` encodes the whole frame once, then starts every pin's transmission (`platform::rmtWs2812Transmit`) before waiting on each (`platform::rmtWs2812Wait`) — the RMT channels clock out concurrently, so the render tick is charged roughly the **longest** strand, not the sum (~3 ms per 100 pixels on the longest slice), plus one shared reset gap. A dedicated core-1 driver task (the WiFi-glitch mitigation from the [LED driver analysis](../../../backlog/leddriver-analysis-top-down.md) § 7.2) and per-module core affinity are a later increment; until then, large strands or WiFi-interrupt-sensitive installs may show timing artifacts. See the [increment-2 plan](../../../backlog/leddriver-increment-2-plan.md).
+`loop()` encodes the whole frame once, then starts every pin's transmission (`platform::rmtWs2812Transmit`) before waiting on each (`platform::rmtWs2812Wait`) — the RMT channels clock out concurrently, so the render tick is charged roughly the **longest** strand, not the sum (~3 ms per 100 pixels on the longest slice), plus one shared reset gap. A dedicated core-1 driver task (the WiFi-glitch mitigation from the [LED driver analysis](../../../backlog/leddriver-analysis-top-down.md) § 7.2) and per-module core affinity are a later increment; until then, large strands or WiFi-interrupt-sensitive installs may show timing artifacts.
 
 ## Controls
 

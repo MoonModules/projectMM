@@ -33,10 +33,6 @@ One-time surveys of earlier projects, used to decide what to harvest into projec
 
 - [decisions.md](decisions.md) — hard-won lessons, proven patterns, and non-obvious decisions, recorded with the code that proved them (the PR-merge carry-forward gate writes here).
 
-### Runbooks
-
-- [repo-transfer.md](repo-transfer.md) — staged plan for moving the repo `MoonModules/projectMM` → `MoonModules/projectMM` and cutting the installer URLs to `moonmodules.org`. A handoff for a fresh Claude session post-transfer.
-
 ## Cross-repo trends
 
 Reading across the friend-repo digests, the themes the wider ESP32-LED ecosystem converged on over this release cycle (Sept 2025 → May 2026):

@@ -10,6 +10,12 @@ public:
     ModuleRole role() const override { return ModuleRole::Modifier; }
     virtual bool isStatic() const { return true; }
 
+    // A DYNAMIC modifier (e.g. RandomMapModifier) overrides MoonModule::loop() to run a
+    // per-frame tick; Layer::loop() calls it for each enabled modifier child AFTER the
+    // effect pass, so the frame's buffer is fully written before a modifier acts. A
+    // static modifier (the default) inherits the base no-op loop and shapes the LUT only
+    // on a control change. No new hook needed — loop() already exists on MoonModule.
+
     // A modifier control change alters the LUT shape, so the owning Layer must rebuild
     // its LUT — the pipeline-wide rebuild path. See MoonModule::onUpdate. (Even a
     // future dynamic modifier is harmless to rebuild on a control change.)

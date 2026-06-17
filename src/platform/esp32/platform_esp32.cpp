@@ -960,10 +960,16 @@ bool mdnsInit(const char* deviceName) {
     // a web device announces itself (WLED, ESPHome, Hue all advertise `_http._tcp`).
     // This is what lets two projectMM devices find each other over mDNS with no subnet
     // sweep. The instance name is the deviceName; the port is the HTTP server's (80).
-    // mdns_service_add errors if the service already exists (a reconnect re-runs this),
-    // so add-once and otherwise just refresh the instance name to the current deviceName.
-    if (mdns_service_add(deviceName, "_http", "_tcp", 80, nullptr, 0) != ESP_OK)
-        mdns_service_instance_name_set("_http", "_tcp", deviceName);
+    // Branch on whether the service already exists (a reconnect re-runs this) rather
+    // than treating ANY mdns_service_add failure as "already there" — an add failure
+    // could be OOM/invalid-state, which must surface, not be silently logged as started.
+    esp_err_t svcErr = mdns_service_exists("_http", "_tcp", nullptr)
+        ? mdns_service_instance_name_set("_http", "_tcp", deviceName)
+        : mdns_service_add(deviceName, "_http", "_tcp", 80, nullptr, 0);
+    if (svcErr != ESP_OK) {
+        ESP_LOGE(NET_TAG, "mDNS _http._tcp advertise failed: %s", esp_err_to_name(svcErr));
+        return false;   // hostname is set, but advertising failed — report it
+    }
     ESP_LOGI(NET_TAG, "mDNS started: %s.local (advertising _http._tcp:80)", deviceName);
     return true;
 }
