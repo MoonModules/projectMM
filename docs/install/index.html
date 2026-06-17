@@ -25,8 +25,9 @@
       --muted:  #a0a0b0;
       --accent: #a78bfa;
       --border: #2a3a6a;
-      --ok:     #57c97a;   /* green — "supported" capability chips */
-      --plan:   #e8923a;   /* orange — "planned" capability chips (not yet supported) */
+      --ok:     #57c97a;   /* green  — "active" capability (supported + a module configured in boards.json) */
+      --sup:    #e3c84a;   /* yellow — "supported" capability (firmware supports it, not pre-configured) */
+      --plan:   #e8923a;   /* orange — "planned" capability (no module yet; greener than red, by design) */
     }
     * { box-sizing: border-box; }
     body {
@@ -43,6 +44,19 @@
       padding: 24px 16px 64px;
     }
     main { width: 100%; max-width: 640px; }
+    .help-link {
+      display: inline-block;
+      margin-left: 8px;
+      width: 22px; height: 22px; line-height: 22px;
+      text-align: center;
+      font-size: 14px; font-weight: 600;
+      vertical-align: middle;
+      color: var(--accent);
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      text-decoration: none;
+    }
+    .help-link:hover { border-color: var(--accent); }
     .version-chip {
       display: inline-block;
       margin-left: 8px;
@@ -205,10 +219,50 @@
       font-size: 9px; line-height: 1.5; padding: 0 5px; border-radius: 999px;
       max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .bg-cap.sup { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+    .bg-cap.act { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+    .bg-cap.sup { background: color-mix(in srgb, var(--sup) 20%, transparent); color: var(--sup); }
     .bg-cap.plan { background: color-mix(in srgb, var(--plan) 20%, transparent); color: var(--plan); }
     .bg-link { color: var(--accent); font-size: 11px; text-decoration: none; }
     .bg-link:hover { text-decoration: underline; }
+
+    /* Board-details popup — native <dialog> (standard modal pattern: built-in
+       backdrop, ESC-to-close, focus trap; no bespoke modal JS). Shows the full
+       boards.json entry as a readable summary plus a collapsible raw-JSON block. */
+    #board-details::backdrop { background: rgba(0,0,0,0.6); }
+    #board-details {
+      background: var(--card); color: var(--fg);
+      border: 1px solid var(--border); border-radius: 10px;
+      padding: 0; max-width: 560px; width: calc(100% - 32px);
+      max-height: 80vh; overflow: auto;
+    }
+    .bd-head {
+      display: flex; align-items: baseline; justify-content: space-between;
+      gap: 12px; padding: 16px 18px 8px;
+    }
+    .bd-title { font-size: 16px; font-weight: 600; }
+    .bd-close {
+      background: none; border: none; color: var(--muted);
+      font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px;
+    }
+    .bd-close:hover { color: var(--fg); }
+    .bd-body { padding: 0 18px 18px; }
+    .bd-row { display: flex; gap: 8px; padding: 3px 0; font-size: 13px; }
+    .bd-key { color: var(--muted); min-width: 92px; }
+    .bd-val { flex: 1; min-width: 0; word-break: break-word; }
+    .bd-section { margin-top: 14px; font-weight: 600; font-size: 13px; }
+    .bd-mod { margin-top: 8px; padding-left: 10px; border-left: 2px solid var(--border); }
+    .bd-mod-name { font-size: 13px; }
+    .bd-mod-name .bd-mod-id { color: var(--muted); font-weight: normal; }
+    .bd-ctrl { font-size: 12px; color: var(--muted); padding-left: 8px; }
+    .bd-ctrl code { font-size: 11px; }
+    .bd-raw { margin-top: 16px; }
+    .bd-raw summary { cursor: pointer; color: var(--accent); font-size: 12px; }
+    .bd-raw pre {
+      margin: 8px 0 0; padding: 10px; background: var(--bg);
+      border: 1px solid var(--border); border-radius: 6px;
+      font-size: 11px; overflow: auto; white-space: pre;
+    }
+    .bg-link.bg-details { cursor: pointer; }
 
     .action-btn {
       background: var(--accent);
@@ -427,7 +481,9 @@
     });
   </script>
   <main>
-    <h1>projectMM Installer <span class="version-chip" id="version-chip" hidden></span></h1>
+    <h1>projectMM Installer <span class="version-chip" id="version-chip" hidden></span>
+      <a class="help-link" href="https://github.com/MoonModules/projectMM/blob/main/docs/install/README.md"
+         target="_blank" rel="noopener" title="Installer help (opens the docs in a new tab)">?</a></h1>
     <p class="tag">Plug in your ESP32. Pick a release + board. Flash. Get the device on your network. Open it in a browser.</p>
 
     <div class="card browser-warning" id="browser-warning">
@@ -532,6 +588,16 @@
         </div>
       </div>
 
+      <!-- Board-details popup, filled by showBoardDetails() from the card's
+           "details" link. Native <dialog>: backdrop, ESC, focus trap for free. -->
+      <dialog id="board-details">
+        <div class="bd-head">
+          <span class="bd-title" id="bd-title"></span>
+          <button type="button" class="bd-close" id="bd-close" aria-label="Close">✕</button>
+        </div>
+        <div class="bd-body" id="bd-body"></div>
+      </dialog>
+
       <!-- Picker mounts here. Release (newest-first, RCs flagged) → Board (the
            board <select> is CSS-hidden; the grid above drives it).
            Same module the on-device OTA UI uses. The picker slots #erase-row into
@@ -557,21 +623,19 @@
 
 
       <p class="note">
-        Ethernet (RMII) on the default <code>esp32</code> + the Ethernet-only
-        <code>esp32-eth</code> build was verified on the
-        <a href="https://www.olimex.com/Products/IoT/ESP32/ESP32-GATEWAY/open-source-hardware"
-           target="_blank" rel="noopener">Olimex ESP32-Gateway</a>
-        (LAN8720 PHY, reset on GPIO 5, MDIO addr 0). The PHY type and pins are
-        runtime config now, not baked into the build — a board with the same PHY
-        but different pins (e.g. WT32-ETH01: reset on GPIO 16), or a W5500 SPI board,
-        is configured by its <code>boards.json</code> entry (no rebuild needed).
+        Ethernet works out of the box for the board you pick — its PHY type and
+        pins come from the catalog, no rebuild. Boards without Ethernet just use
+        WiFi.
       </p>
     </div>
 
     <div class="card">
       <strong>Step 2 — Get the device on your network.</strong>
-      <p><strong>WiFi:</strong> the installer walks you through a <em>Configure Wi-Fi</em> step right after flashing — enter your SSID + password, click <strong>Connect</strong>, the device joins your network and the installer remembers it under "Your devices" below. If you skipped that step: the device boots a SoftAP named <code>MM-XXXX</code> (4 hex digits from the chip MAC). Join it from your phone or laptop, open <code>http://4.3.2.1</code>, enter your WiFi credentials. The device reboots and joins your network.</p>
-      <p><strong>Ethernet:</strong> plug a cable in. No credentials needed — the device joins immediately.</p>
+      <ul>
+        <li><strong>Already configured</strong> (Ethernet cable, or WiFi set on a previous flash) — nothing to do. The device joins on boot and appears under "Your devices" below automatically.</li>
+        <li><strong>New, over WiFi</strong> — the installer's <em>Configure Wi-Fi</em> step opens right after flashing: enter SSID + password, click <strong>Connect</strong>.</li>
+        <li><strong>Skipped that step?</strong> The device boots a SoftAP <code>MM-XXXX</code> (4 hex digits from the chip MAC). Join it, open <code>http://4.3.2.1</code>, enter your WiFi credentials.</li>
+      </ul>
     </div>
 
     <div class="card">
@@ -904,6 +968,13 @@
     }
     document.getElementById("done-close").addEventListener("click", closeModal);
     document.getElementById("error-close").addEventListener("click", closeModal);
+
+    // Board-details popup close button. The <dialog> also closes on ESC and a
+    // backdrop click (native); this wires the explicit ✕. A click on the dialog
+    // backdrop (the element itself, outside .bd-body) closes it too.
+    const bd = document.getElementById("board-details");
+    document.getElementById("bd-close").addEventListener("click", () => bd.close());
+    bd.addEventListener("click", (e) => { if (e.target === bd) bd.close(); });
 
     // Log panel: collapsible, fed by the orchestrator's onLog callback.
     // Auto-scrolls to bottom on append so the latest line is always visible.
@@ -1292,7 +1363,15 @@
       portSelect.value = "current";
     }
 
-    rebuildPortSelect();
+    // Reflect the port state in the picker's Install gate after every rebuild
+    // (init, post-pick, and any cancel that leaves pickedPort null). Wrapped so
+    // both rebuildPortSelect() exits and all call sites stay covered by one hook.
+    function syncPortState() {
+      rebuildPortSelect();
+      installPicker.notifyPortChanged();
+    }
+
+    syncPortState();
 
     async function openPortPicker() {
       let granted = false;
@@ -1305,7 +1384,7 @@
       } catch (_) {
         // User cancelled the picker — keep whatever was picked before.
       }
-      rebuildPortSelect();
+      syncPortState();
       // Auto-detect right after a fresh grant — the ESP Web Tools / ESPHome
       // model where picking the device detects it immediately, so the board
       // list narrows without a second click. Only on a genuine new grant (not
@@ -1470,6 +1549,10 @@
       container: document.getElementById("picker-mount"),
       ownFirmwareKey: null,  // web installer flashes any firmware variant
       installRowExtras: document.getElementById("erase-row"),
+      // Gate Install on a picked USB port — the web installer requires the user
+      // to choose the port in the dropdown before flashing. (notifyPortChanged()
+      // below re-evaluates the button whenever pickedPort changes.)
+      hasPort: () => !!pickedPort,
       onDetect: async () => {
         // The monitor (if open) holds the port — release it before esptool
         // claims it, same as the install path. detect() keeps the port open
@@ -1572,6 +1655,30 @@
       function ledDriver(b) {
         const d = (b.modules || []).find(m => /LedDriver$/.test(m.type || ""));
         return d ? d.type.replace(/Driver$/, "") : null;
+      }
+      // A supported capability is "active" (configured) when boards.json has a module
+      // backing it. The capability→module link is implicit in the data, so this map
+      // names it in one place (bespoke, but it just reads the modules[] already there —
+      // no duplicated `active` field to drift). A capability with no entry here, or no
+      // matching module, stays merely "supported". Each predicate gets the whole module
+      // object so it can inspect controls — needed to tell Ethernet from WiFi: both ride
+      // NetworkModule, but Ethernet is only ACTUALLY wired when the board's NetworkModule
+      // carries an ethType control set to a real PHY (not absent / "None"/0). WiFi is
+      // active wherever NetworkModule exists (the radio is always available); a board
+      // that lists WiFi as supported but ships no NetworkModule entry stays "supported".
+      const ethConfigured = (m) => {
+        const t = m.controls && m.controls.ethType;
+        return t !== undefined && t !== 0 && t !== "0" && t !== "None";
+      };
+      const CAP_MODULE = {
+        LEDs:     m => /LedDriver$/.test(m.type || ""),
+        Ethernet: m => m.type === "NetworkModule" && ethConfigured(m),
+        WiFi:     m => m.type === "NetworkModule",
+        Audio:    m => /^Audio/.test(m.type || ""),
+      };
+      function capActive(b, cap) {
+        const test = CAP_MODULE[cap];
+        return !!test && (b.modules || []).some(m => test(m));
       }
       function setExpanded(open) {
         expandEl.hidden = !open;
@@ -1706,21 +1813,24 @@
         const meta = document.createElement("div"); meta.className = "bg-meta";
         meta.textContent = b.chip + (ledDriver(b) ? " · " + ledDriver(b) : "");
         body.appendChild(meta);
-        // Capability chips: supported = violet, planned = amber (colour, not text,
-        // carries the distinction). Planned entries are the backlog seed (a
-        // peripheral the board has but no module drives yet). All chips are shown
-        // (labels are kept short in boards.json so they fit the card).
+        // Capability chips, three states by colour (not text): green = active
+        // (supported AND a module configured in boards.json), yellow = supported
+        // (firmware supports it, not pre-configured), orange = planned (no module
+        // yet — the backlog seed). All chips are shown (labels kept short in
+        // boards.json so they fit the card).
         const caps = [
-          ...(Array.isArray(b.supported) ? b.supported.map(c => ({ c, cls: "sup" })) : []),
-          ...(Array.isArray(b.planned) ? b.planned.map(c => ({ c, cls: "plan" })) : []),
+          ...(Array.isArray(b.supported) ? b.supported.map(c =>
+            capActive(b, c) ? { c, cls: "act", label: "active" }
+                            : { c, cls: "sup", label: "supported" }) : []),
+          ...(Array.isArray(b.planned) ? b.planned.map(c => ({ c, cls: "plan", label: "planned" })) : []),
         ];
         if (caps.length) {
           const capsEl = document.createElement("div"); capsEl.className = "bg-caps";
-          for (const { c, cls } of caps) {
+          for (const { c, cls, label } of caps) {
             const chip = document.createElement("span");
             chip.className = "bg-cap " + cls;
-            chip.textContent = c;   // colour conveys supported (violet) vs planned (amber)
-            chip.title = cls === "plan" ? c + " — planned" : c + " — supported";
+            chip.textContent = c;   // colour conveys active / supported / planned
+            chip.title = c + " — " + label;
             capsEl.appendChild(chip);
           }
           body.appendChild(capsEl);
@@ -1729,8 +1839,86 @@
           const a = document.createElement("a"); a.className = "bg-link"; a.href = b.url;
           a.target = "_blank"; a.rel = "noopener"; a.textContent = "product page ↗"; body.appendChild(a);
         }
+        // "details" opens the full boards.json entry in a popup. It carries the
+        // bg-link class so the card's onclick treats it as a non-select region
+        // (same guard the product-page link relies on).
+        const det = document.createElement("a");
+        det.className = "bg-link bg-details"; det.textContent = "details ⓘ";
+        det.setAttribute("role", "button"); det.tabIndex = 0;
+        det.onclick = (ev) => { ev.stopPropagation(); showBoardDetails(b); };
+        det.onkeydown = (ev) => {
+          if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); ev.stopPropagation(); showBoardDetails(b); }
+        };
+        body.appendChild(det);
         el.appendChild(body);
         return el;
+      }
+      // Fill + open the board-details popup from a boards.json entry: a readable
+      // summary (chip, firmwares, capabilities, modules + their controls) plus a
+      // collapsible raw-JSON block for the exact entry. Built with DOM nodes (not
+      // innerHTML) so board-supplied strings can't inject markup.
+      function showBoardDetails(b) {
+        const dlg = document.getElementById("board-details");
+        document.getElementById("bd-title").textContent = b.name || "Board";
+        const body = document.getElementById("bd-body");
+        body.replaceChildren();
+        const row = (key, val) => {
+          const r = document.createElement("div"); r.className = "bd-row";
+          const k = document.createElement("span"); k.className = "bd-key"; k.textContent = key;
+          const v = document.createElement("span"); v.className = "bd-val"; v.textContent = val;
+          r.append(k, v); body.appendChild(r);
+        };
+        // Same shape as row(), but the value is a clickable link. href + textContent
+        // only (no innerHTML), so a board-supplied URL can't inject markup. Opens in
+        // a new tab; only http(s) links are made clickable (else fall back to text).
+        const rowLink = (key, url) => {
+          const r = document.createElement("div"); r.className = "bd-row";
+          const k = document.createElement("span"); k.className = "bd-key"; k.textContent = key;
+          const v = document.createElement("span"); v.className = "bd-val";
+          const a = document.createElement("a");
+          a.href = url; a.target = "_blank"; a.rel = "noopener"; a.textContent = url;
+          v.appendChild(a); r.append(k, v); body.appendChild(r);
+        };
+        if (b.chip) row("Chip", b.chip);
+        if (Array.isArray(b.firmwares)) row("Firmwares", b.firmwares.join(", "));
+        if (Array.isArray(b.supported) && b.supported.length) row("Supported", b.supported.join(", "));
+        if (Array.isArray(b.planned) && b.planned.length) row("Planned", b.planned.join(", "));
+        if (b.url) {
+          if (/^https?:\/\//.test(b.url)) rowLink("Product page", b.url);
+          else row("Product page", b.url);
+        }
+
+        if (Array.isArray(b.modules) && b.modules.length) {
+          const h = document.createElement("div"); h.className = "bd-section"; h.textContent = "Modules";
+          body.appendChild(h);
+          for (const m of b.modules) {
+            const mod = document.createElement("div"); mod.className = "bd-mod";
+            const nm = document.createElement("div"); nm.className = "bd-mod-name";
+            nm.textContent = m.type || "?";
+            if (m.id && m.id !== m.type) {
+              const idEl = document.createElement("span"); idEl.className = "bd-mod-id";
+              idEl.textContent = "  (" + m.id + ")"; nm.appendChild(idEl);
+            }
+            mod.appendChild(nm);
+            const ctrls = m.controls && typeof m.controls === "object" ? m.controls : null;
+            if (ctrls) {
+              for (const [k, v] of Object.entries(ctrls)) {
+                const c = document.createElement("div"); c.className = "bd-ctrl";
+                const code = document.createElement("code"); code.textContent = k + " = " + v;
+                c.appendChild(code); mod.appendChild(c);
+              }
+            }
+            body.appendChild(mod);
+          }
+        }
+
+        // Collapsible raw JSON — the exact entry, for developers.
+        const raw = document.createElement("details"); raw.className = "bd-raw";
+        const sum = document.createElement("summary"); sum.textContent = "Raw JSON";
+        const pre = document.createElement("pre"); pre.textContent = JSON.stringify(b, null, 2);
+        raw.append(sum, pre); body.appendChild(raw);
+
+        dlg.showModal();
       }
       searchEl.oninput = render;
       summaryEl.addEventListener("click", () => setExpanded(expandEl.hidden));

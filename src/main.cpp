@@ -2,6 +2,7 @@
 #include "light/layers/Layers.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/SphereLayout.h"
+#include "light/layouts/WheelLayout.h"
 #include "light/effects/LinesEffect.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/NoiseEffect.h"
@@ -20,19 +21,45 @@
 #include "light/effects/NetworkReceiveEffect.h"
 #include "light/effects/AudioVolumeEffect.h"
 #include "light/effects/AudioSpectrumEffect.h"
+#include "light/effects/SineEffect.h"
+#include "light/effects/DistortionWavesEffect.h"
 #include "light/modifiers/MultiplyModifier.h"
 #include "light/modifiers/CheckerboardModifier.h"
+#include "light/modifiers/RandomMapModifier.h"
+#include "light/modifiers/RotateModifier.h"
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
-#include "light/drivers/LcdLedDriver.h"
-#include "light/drivers/ParlioLedDriver.h"
+// LED drivers are compiled in per chip, gated on the SOC peripheral the driver
+// needs — so a board's binary carries only the drivers its silicon can actually
+// run (no dead flash for an LCD_CAM driver on a chip without LCD_CAM). The same
+// SOC macros back the rmtTxChannels / lcdLanes / parlioLanes capability flags in
+// platform_config.h. Undefined on desktop, so none compile there.
+//
+// Why the preprocessor here and not `if constexpr` (the usual platform-branch
+// form): the goal is to *exclude the unused driver's code from the binary*, and
+// `if constexpr` still compiles every branch — it can't drop the include. The
+// include and the registration must share one condition (a missing include means
+// the type isn't declared), so both are `#if`. These are SOC-*capability* macros
+// (CONFIG_SOC_*), NOT the platform/OS `#ifdef`s the boundary rule forbids
+// (ESP_PLATFORM / CONFIG_IDF_TARGET_* / __APPLE__ / …) — check_platform_boundary.py
+// passes them, by design. The driver bodies themselves keep all hardware behind
+// the platform seam; this gate only decides which driver headers are present.
+#if defined(CONFIG_SOC_RMT_SUPPORTED)
 #include "light/drivers/RmtLedDriver.h"
+#endif
+#if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED)
+#include "light/drivers/LcdLedDriver.h"
+#endif
+#if defined(CONFIG_SOC_PARLIO_SUPPORTED)
+#include "light/drivers/ParlioLedDriver.h"
+#endif
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
 #include "core/BoardModule.h"
 #include "core/AudioModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/ImprovProvisioningModule.h"
+#include "core/DevicesModule.h"
 #include "core/FilesystemModule.h"
 #include "core/ModuleFactory.h"
 #include "platform/platform.h"
@@ -54,6 +81,7 @@ static void registerModuleTypes() {
     // so the UI's 📏/🟦/🧊 chip lights up without any per-domain wrapper.
     mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout", "light/layouts/GridLayout.md");
     mm::ModuleFactory::registerType<mm::SphereLayout>("SphereLayout", "light/layouts/SphereLayout.md");
+    mm::ModuleFactory::registerType<mm::WheelLayout>("WheelLayout", "light/layouts/WheelLayout.md");
     mm::ModuleFactory::registerType<mm::LinesEffect>("LinesEffect", "light/effects/LinesEffect.md");
     mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect", "light/effects/RainbowEffect.md");
     mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect", "light/effects/NoiseEffect.md");
@@ -72,19 +100,33 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::NetworkReceiveEffect>("NetworkReceiveEffect", "light/effects/NetworkReceiveEffect.md");
     mm::ModuleFactory::registerType<mm::AudioVolumeEffect>("AudioVolumeEffect", "light/effects/AudioVolumeEffect.md");
     mm::ModuleFactory::registerType<mm::AudioSpectrumEffect>("AudioSpectrumEffect", "light/effects/AudioSpectrumEffect.md");
+    mm::ModuleFactory::registerType<mm::SineEffect>("SineEffect", "light/effects/SineEffect.md");
+    mm::ModuleFactory::registerType<mm::DistortionWavesEffect>("DistortionWavesEffect", "light/effects/DistortionWavesEffect.md");
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier", "light/modifiers/MultiplyModifier.md");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers/CheckerboardModifier.md");
+    mm::ModuleFactory::registerType<mm::RandomMapModifier>("RandomMapModifier", "light/modifiers/RandomMapModifier.md");
+    mm::ModuleFactory::registerType<mm::RotateModifier>("RotateModifier", "light/modifiers/RotateModifier.md");
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver", "light/drivers/NetworkSendDriver.md");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers/PreviewDriver.md");
+    // Register only the LED drivers this chip's silicon can run (see the gated
+    // includes above) — keeps the type picker honest (no LcdLedDriver offered on a
+    // chip without LCD_CAM) and the binary lean.
+#if defined(CONFIG_SOC_RMT_SUPPORTED)
     mm::ModuleFactory::registerType<mm::RmtLedDriver>("RmtLedDriver", "light/drivers/RmtLedDriver.md");
+#endif
+#if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED)
     mm::ModuleFactory::registerType<mm::LcdLedDriver>("LcdLedDriver", "light/drivers/LcdLedDriver.md");
+#endif
+#if defined(CONFIG_SOC_PARLIO_SUPPORTED)
     mm::ModuleFactory::registerType<mm::ParlioLedDriver>("ParlioLedDriver", "light/drivers/ParlioLedDriver.md");
+#endif
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/HttpServerModule.md");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/SystemModule.md");
     mm::ModuleFactory::registerType<mm::BoardModule>("BoardModule", "core/BoardModule.md");
     mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule", "core/AudioModule.md");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/FirmwareUpdateModule.md");
     mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/ImprovProvisioningModule.md");
+    mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/DevicesModule.md");
     mm::ModuleFactory::registerType<mm::NetworkModule>("NetworkModule", "core/NetworkModule.md");
     mm::ModuleFactory::registerType<mm::FilesystemModule>("FilesystemModule", "core/FilesystemModule.md");
 }
@@ -274,6 +316,17 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     scheduler.addModule(systemModule);
     scheduler.addModule(firmwareUpdateModule);
     if (improvModule) networkModule->addChild(improvModule);
+    // Devices: discovers other devices on the LAN. Child of Network (discovery
+    // depends on the network being up); wired-by-code so persistence preserves it
+    // on devices whose saved Network.json predates the child (see DevicesModule.md).
+    auto* devicesModule = static_cast<mm::DevicesModule*>(
+        mm::ModuleFactory::create("DevicesModule"));
+    devicesModule->markWiredByCode();
+    // Wire our own name so the self row in the device list matches the rest of the
+    // device's identity (status page / router / mDNS). deviceName has static lifetime
+    // (SystemModule's member); the module borrows the pointer.
+    devicesModule->setSelfName(systemModule->deviceName());
+    networkModule->addChild(devicesModule);
     scheduler.addModule(networkModule);
     scheduler.addModule(layouts);
     scheduler.addModule(layersContainer);
@@ -308,6 +361,8 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     std::fflush(stdout);
 
     uint32_t lastLog = mm::platform::millis();
+    const uint32_t bootMillis = lastLog;   // window start for the MM_IP serial token
+    bool mmIpWindowClosed = false;         // latches true once the 60 s window elapses
 
     while (keepRunning) {
         scheduler.tick();
@@ -328,6 +383,29 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
                 std::printf("  free: %u  maxBlock: %u",
                             static_cast<unsigned>(heap),
                             static_cast<unsigned>(mm::platform::maxInternalAllocBlock()));
+            }
+            // Stable MM_IP=<ip> token for the web installer's post-flash serial
+            // read. It rides this already-periodic line (zero extra printf, re-emits
+            // every second so the installer catches it whenever it reopens the port).
+            // Gated to the first 60 s of uptime: the installer reads at ~3–15 s after
+            // boot, well inside that window; afterwards the device's IP comes from the
+            // REST API (http://<ip>/api/…), so a permanent token would just be noise on
+            // the perf line. The window latches off once for good — a plain `now <
+            // 60000` would re-open every ~49.7 days when millis() wraps. All-zero
+            // octets until the network connects — printed only once there's an IP.
+            // Both buffers are reused stack locals, no allocation.
+            if (!mmIpWindowClosed) {
+                if (now - bootMillis >= 60000) {
+                    mmIpWindowClosed = true;   // first 60 s elapsed; stop for the rest of uptime
+                } else {
+                    uint8_t ip[4];
+                    networkModule->currentIp(ip);
+                    if (ip[0] || ip[1] || ip[2] || ip[3]) {
+                        char ipStr[16];
+                        mm::formatDottedQuad(ipStr, ip);
+                        std::printf("  MM_IP=%s", ipStr);
+                    }
+                }
             }
             // Per-module timing (walk tree recursively)
             for (uint8_t i = 0; i < scheduler.moduleCount(); i++) {

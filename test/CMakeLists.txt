@@ -7,8 +7,12 @@ add_executable(mm_tests
     unit/core/unit_Buffer.cpp
     unit/core/unit_Color.cpp
     unit/core/unit_Control_apply_absent_key.cpp
+    unit/core/unit_Control_list.cpp
+    unit/core/unit_DeviceIdentify.cpp
+    unit/core/unit_DevicesModule_ageout.cpp
     unit/core/unit_FilesystemModule_persistence.cpp
     unit/core/unit_ImprovFrame.cpp
+    unit/core/unit_JsonUtil_parse.cpp
     unit/core/unit_MappingLUT.cpp
     unit/core/unit_ModuleFactory.cpp
     unit/core/unit_MoonModule.cpp
@@ -18,6 +22,7 @@ add_executable(mm_tests
     unit/core/unit_MoonModule_replacechild.cpp
     unit/core/unit_NetworkModule.cpp
     unit/core/unit_NetworkModule_ethernet.cpp
+    unit/core/unit_Sort.cpp
     unit/core/unit_platform_clock.cpp
     unit/core/unit_Scheduler_unique_names.cpp
     unit/core/unit_SystemModule.cpp
@@ -30,12 +35,15 @@ add_executable(mm_tests
     unit/light/unit_NetworkSendDriver_packet.cpp
     unit/light/unit_BlendMap.cpp
     unit/light/unit_CheckerboardEffect.cpp
+    unit/light/unit_SineEffect.cpp
+    unit/light/unit_DistortionWavesEffect.cpp
     unit/light/unit_Correction.cpp
     unit/light/unit_Drivers_container.cpp
     unit/light/unit_FireEffect.cpp
     unit/light/unit_GameOfLifeEffect.cpp
     unit/light/unit_GridLayout.cpp
     unit/light/unit_SphereLayout.cpp
+    unit/light/unit_WheelLayout.cpp
     unit/light/unit_Layer_extrude.cpp
     unit/light/unit_Layer_sparse_mapping.cpp
     unit/light/unit_Layer_phase_animation.cpp
@@ -47,6 +55,8 @@ add_executable(mm_tests
     unit/light/unit_MetaballsEffect.cpp
     unit/light/unit_MultiplyModifier.cpp
     unit/light/unit_CheckerboardModifier.cpp
+    unit/light/unit_RandomMapModifier.cpp
+    unit/light/unit_RotateModifier.cpp
     unit/light/unit_NoiseEffect.cpp
     unit/light/unit_ParticlesEffect.cpp
     unit/light/unit_PlasmaEffect.cpp

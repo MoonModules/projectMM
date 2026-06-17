@@ -53,6 +53,10 @@ inline int make_nonblocking(int fd) {
     u_long mode = 1;
     return ::ioctlsocket(sock(fd), FIONBIO, &mode);
 }
+inline int make_blocking(int fd) {
+    u_long mode = 0;
+    return ::ioctlsocket(sock(fd), FIONBIO, &mode);
+}
 #else
 inline int sock(int fd) { return fd; }
 inline int close_sock(int fd) { return ::close(fd); }
@@ -63,6 +67,10 @@ inline int open_sock(int domain, int type, int protocol) {
 inline int make_nonblocking(int fd) {
     int flags = ::fcntl(fd, F_GETFL, 0);
     return ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
+inline int make_blocking(int fd) {
+    int flags = ::fcntl(fd, F_GETFL, 0);
+    return ::fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
 }
 #endif
 #ifdef _WIN32
@@ -353,11 +361,31 @@ void ethStop() {}                           // no eth on desktop
 bool ethInit() { return false; }
 bool ethLinkUp() { return false; }
 bool ethConnected() { return false; }
-void ethGetIP(char* buf, size_t len) { if (len > 0) buf[0] = 0; }
+void ethGetIPv4(uint8_t out[4]) {
+    // Desktop has no real interface state, but DevicesModule needs the host's LAN
+    // IP to scan from (otherwise a PC projectMM instance reports "no network" and
+    // never sweeps). hostIp() resolves it via the outbound-route trick; report it
+    // as the "ethernet" IP so DevicesModule's localIp() (eth-first) picks it up.
+    out[0] = out[1] = out[2] = out[3] = 0;
+    const char* ip = hostIp();
+    if (ip && ip[0]) {
+        // Parse the dotted-quad to octets with inet_pton (already used in this file)
+        // — the platform layer doesn't include core/Control.h's parseDottedQuad.
+        in_addr a{};
+        if (inet_pton(AF_INET, ip, &a) == 1) {
+            uint32_t n = a.s_addr;   // network byte order: octet 0 is the low byte
+            out[0] = static_cast<uint8_t>(n & 0xff);
+            out[1] = static_cast<uint8_t>((n >> 8) & 0xff);
+            out[2] = static_cast<uint8_t>((n >> 16) & 0xff);
+            out[3] = static_cast<uint8_t>((n >> 24) & 0xff);
+        }
+    }
+}
 
 bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) { return false; }
 bool wifiStaConnected() { return false; }
-void wifiStaGetIP(char* buf, size_t len) { if (len > 0) buf[0] = 0; }
+void wifiStaGetIPv4(uint8_t out[4]) { out[0] = out[1] = out[2] = out[3] = 0; }
+void setHostname(const char* /*name*/) {}   // no DHCP client on desktop
 void wifiStaStop() {}
 int wifiStaRssi() { return 0; }
 
@@ -377,6 +405,12 @@ bool wifiSetTxPower(int8_t quarterDbm) { return quarterDbm == 0; }
 
 bool mdnsInit(const char* /*deviceName*/) { return false; }
 void mdnsStop() {}
+void mdnsShutdown() {}
+// No mDNS on desktop — browse is a no-op (Start fails, Poll reports "done" with no hits).
+// A PC instance discovers peers via the HTTP sweep instead (see DevicesModule).
+bool mdnsBrowseStart(const char* /*service*/, const char* /*proto*/) { return false; }
+bool mdnsBrowsePoll(MdnsHostCb /*cb*/, void* /*user*/) { return true; }
+void mdnsBrowseStop() {}
 
 // OTA — no-op on desktop (no OTA partition). The /api/firmware/url route
 // guards with `if constexpr (mm::platform::hasOta)` and returns 501 here,
@@ -390,6 +424,136 @@ bool http_fetch_to_ota(const char* /*url*/,
     if (bytesReadOut) *bytesReadOut = 0;
     if (bytesTotalOut) *bytesTotalOut = 0;
     return false;
+}
+
+// Short-timeout outbound HTTP GET for device discovery (DevicesModule's scan).
+// Real implementation on desktop (a PC projectMM instance must scan its LAN too):
+// a plain blocking socket with a receive/send timeout — no TLS, no libcurl, LAN
+// HTTP only. Parses http://host[:port]/path, returns the HTTP status code (0 on
+// any failure) and fills `body` with the response body (NUL-terminated, truncated).
+int httpGet(const char* url, uint32_t timeoutMs, char* body, size_t bodyLen) {
+    if (body && bodyLen) body[0] = '\0';
+    if (!url) return 0;
+
+    // Parse "http://host[:port]/path". Only plain http:// (LAN devices).
+    constexpr const char* kPrefix = "http://";
+    const size_t prefixLen = std::strlen(kPrefix);
+    if (std::strncmp(url, kPrefix, prefixLen) != 0) return 0;
+    const char* hostStart = url + prefixLen;
+    const char* slash = std::strchr(hostStart, '/');
+    const char* path = slash ? slash : "/";
+    char host[64] = {};
+    uint16_t port = 80;
+    {
+        const char* hostEnd = slash ? slash : (hostStart + std::strlen(hostStart));
+        const char* colon = static_cast<const char*>(
+            std::memchr(hostStart, ':', static_cast<size_t>(hostEnd - hostStart)));
+        const char* nameEnd = colon ? colon : hostEnd;
+        size_t hlen = static_cast<size_t>(nameEnd - hostStart);
+        if (hlen == 0 || hlen >= sizeof(host)) return 0;
+        std::memcpy(host, hostStart, hlen);
+        host[hlen] = '\0';
+        if (colon) {
+            int p = std::atoi(colon + 1);
+            if (p > 0 && p <= 65535) port = static_cast<uint16_t>(p);
+        }
+    }
+
+    int fd = open_sock(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return 0;
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    // Discovery probes a numeric IP (the scan walks the subnet), so inet_pton is
+    // enough — no DNS resolution needed for the LAN sweep.
+    if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) { close_sock(fd); return 0; }
+
+    // NON-BLOCKING connect bounded by select() — this is the crux. SO_RCVTIMEO /
+    // SO_SNDTIMEO do NOT bound connect() (a POSIX gotcha): a blocking connect() to a
+    // dead/firewalled IP hangs for the OS default (~75 s on macOS), which would
+    // freeze the single-threaded desktop loop on the first unreachable host in the
+    // sweep. So: make the socket non-blocking, start the connect, select() on
+    // writability with our short timeout, and check SO_ERROR. Then restore blocking
+    // mode for the recv/send (those ARE bounded by SO_*TIMEO).
+    make_nonblocking(fd);
+    int crc = ::connect(sock(fd), reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+#ifdef _WIN32
+    const bool inProgress = (crc != 0) && (::WSAGetLastError() == WSAEWOULDBLOCK);
+#else
+    const bool inProgress = (crc != 0) && (errno == EINPROGRESS);
+#endif
+    if (crc != 0 && !inProgress) { close_sock(fd); return 0; }
+    if (inProgress) {
+        fd_set wset;
+        FD_ZERO(&wset);
+        FD_SET(sock(fd), &wset);
+        timeval ctv{};
+        ctv.tv_sec = static_cast<long>(timeoutMs / 1000);
+        ctv.tv_usec = static_cast<long>((timeoutMs % 1000) * 1000);
+        int sel = ::select(static_cast<int>(sock(fd)) + 1, nullptr, &wset, nullptr, &ctv);
+        if (sel <= 0) { close_sock(fd); return 0; }   // timeout (0) or error (<0)
+        int soErr = 0;
+        socklen_t errLen = sizeof(soErr);
+        ::getsockopt(sock(fd), SOL_SOCKET, SO_ERROR,
+                     reinterpret_cast<char*>(&soErr), &errLen);
+        if (soErr != 0) { close_sock(fd); return 0; }  // connect failed (refused/unreachable)
+    }
+    // Connected. Back to blocking, with recv/send bounded by SO_*TIMEO.
+    make_blocking(fd);
+#ifdef _WIN32
+    DWORD tv = timeoutMs;
+#else
+    timeval tv{};
+    tv.tv_sec = static_cast<long>(timeoutMs / 1000);
+    tv.tv_usec = static_cast<long>((timeoutMs % 1000) * 1000);
+#endif
+    ::setsockopt(sock(fd), SOL_SOCKET, SO_RCVTIMEO,
+                 reinterpret_cast<const char*>(&tv), sizeof(tv));
+    ::setsockopt(sock(fd), SOL_SOCKET, SO_SNDTIMEO,
+                 reinterpret_cast<const char*>(&tv), sizeof(tv));
+
+    char req[256];
+    int reqLen = std::snprintf(req, sizeof(req),
+        "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", path, host);
+    // snprintf returns the length it WOULD have written: >= sizeof(req) means the
+    // request was truncated (an over-long path/host). Reject rather than send a
+    // truncated header or read past the buffer with the inflated length.
+    if (reqLen <= 0 || static_cast<size_t>(reqLen) >= sizeof(req) ||
+        ::send(sock(fd), req, reqLen, 0) != reqLen) {
+        close_sock(fd);
+        return 0;
+    }
+
+    // Read the whole (small) response into a local buffer, then split headers/body.
+    char resp[2048];
+    int total = 0;
+    while (total < static_cast<int>(sizeof(resp)) - 1) {
+        int n = ::recv(sock(fd), resp + total, static_cast<int>(sizeof(resp)) - 1 - total, 0);
+        if (n <= 0) break;
+        total += n;
+    }
+    close_sock(fd);
+    resp[total] = '\0';
+    if (total == 0) return 0;
+
+    // Status line: "HTTP/1.x <code> ...". Parse the code.
+    int status = 0;
+    const char* sp = std::strchr(resp, ' ');
+    if (sp) status = std::atoi(sp + 1);
+
+    // Body starts after the blank line (CRLFCRLF).
+    if (body && bodyLen > 1) {
+        const char* bodyStart = std::strstr(resp, "\r\n\r\n");
+        if (bodyStart) {
+            bodyStart += 4;
+            size_t blen = std::strlen(bodyStart);
+            if (blen > bodyLen - 1) blen = bodyLen - 1;
+            std::memcpy(body, bodyStart, blen);
+            body[blen] = '\0';
+        }
+    }
+    return status;
 }
 
 // Improv WiFi — no USB-serial path on desktop. The module gates with

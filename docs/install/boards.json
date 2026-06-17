@@ -3,10 +3,9 @@
     "name": "Olimex ESP32-Gateway Rev G",
     "chip": "ESP32",
     "firmwares": [
-      "esp32-eth",
-      "esp32"
+      "esp32",
+      "esp32-eth"
     ],
-    "default_firmware": "esp32",
     "image": "assets/boards/olimex-esp32-gateway-rev-g.jpg",
     "url": "https://www.olimex.com/Products/IoT/ESP32/ESP32-GATEWAY/open-source-hardware",
     "supported": [
@@ -51,7 +50,6 @@
     "firmwares": [
       "esp32"
     ],
-    "default_firmware": "esp32",
     "image": "assets/boards/lolin-d32.jpg",
     "url": "https://www.wemos.cc/en/latest/d32/d32.html",
     "supported": [
@@ -83,7 +81,6 @@
     "firmwares": [
       "esp32"
     ],
-    "default_firmware": "esp32",
     "image": "assets/boards/generic-esp32-dev.jpg",
     "supported": [
       "LEDs",
@@ -112,7 +109,6 @@
     "firmwares": [
       "esp32"
     ],
-    "default_firmware": "esp32",
     "image": "assets/boards/quinled-dig-2-go.jpg",
     "url": "https://quinled.info/quinled-dig2go/",
     "supported": [
@@ -150,7 +146,6 @@
     "firmwares": [
       "esp32"
     ],
-    "default_firmware": "esp32",
     "image": "assets/boards/quinled-dig-next-2.jpg",
     "url": "https://quinled.info/dig-next-2/",
     "supported": [
@@ -187,7 +182,6 @@
     "firmwares": [
       "esp32"
     ],
-    "default_firmware": "esp32",
     "image": "assets/boards/quinled-dig-uno-v3.jpg",
     "url": "https://quinled.info/pre-assembled-quinled-dig-uno/",
     "supported": [
@@ -223,7 +217,6 @@
     "firmwares": [
       "esp32"
     ],
-    "default_firmware": "esp32",
     "image": "assets/boards/quinled-dig-quad-v3.jpg",
     "url": "https://quinled.info/pre-assembled-quinled-dig-quad/",
     "supported": [
@@ -260,7 +253,6 @@
     "firmwares": [
       "esp32-16mb"
     ],
-    "default_firmware": "esp32-16mb",
     "image": "assets/boards/quinled-dig-octa-32-8l.jpg",
     "url": "https://quinled.info/quinled-dig-octa-brainboard-32-8l/",
     "supported": [
@@ -311,7 +303,6 @@
     "firmwares": [
       "esp32-16mb"
     ],
-    "default_firmware": "esp32-16mb",
     "image": "assets/boards/serg-unishield-v5.jpg",
     "url": "https://www.tindie.com/stores/serg74/",
     "supported": [
@@ -349,7 +340,6 @@
     "firmwares": [
       "esp32-16mb"
     ],
-    "default_firmware": "esp32-16mb",
     "image": "assets/boards/serg-minishield.jpg",
     "url": "https://www.tindie.com/stores/serg74/",
     "supported": [
@@ -386,7 +376,6 @@
     "firmwares": [
       "esp32"
     ],
-    "default_firmware": "esp32",
     "supported": [
       "LEDs",
       "WiFi"
@@ -417,7 +406,6 @@
     "firmwares": [
       "esp32"
     ],
-    "default_firmware": "esp32",
     "image": "assets/boards/mhc-v57-pro.jpg",
     "url": "https://shop.myhome-control.de/en/ABC-WLED-controller-PRO-V57-with-iMOSFET/HW10030",
     "supported": [
@@ -452,7 +440,6 @@
     "firmwares": [
       "esp32"
     ],
-    "default_firmware": "esp32",
     "supported": [
       "LEDs",
       "WiFi"
@@ -483,7 +470,6 @@
     "firmwares": [
       "esp32"
     ],
-    "default_firmware": "esp32",
     "supported": [
       "LEDs",
       "WiFi"
@@ -514,7 +500,6 @@
     "firmwares": [
       "esp32s3-n16r8"
     ],
-    "default_firmware": "esp32s3-n16r8",
     "image": "assets/boards/esp32-s3-n16r8-dev.jpg",
     "supported": [
       "LEDs",
@@ -552,7 +537,6 @@
     "firmwares": [
       "esp32s3-n16r8"
     ],
-    "default_firmware": "esp32s3-n16r8",
     "image": "assets/boards/esp32-s3-n16r8-dev.jpg",
     "supported": [
       "LEDs",
@@ -606,7 +590,6 @@
     "firmwares": [
       "esp32-16mb"
     ],
-    "default_firmware": "esp32-16mb",
     "image": "assets/boards/esp32-d0-16mb.jpg",
     "supported": [
       "LEDs",
@@ -640,7 +623,6 @@
     "firmwares": [
       "esp32p4-eth"
     ],
-    "default_firmware": "esp32p4-eth",
     "image": "assets/boards/waveshare-esp32-p4-nano.jpg",
     "supported": [
       "LEDs",
@@ -665,7 +647,7 @@
         "id": "ParlioLed",
         "parent_id": "Drivers",
         "controls": {
-          "pins": "20,21,22,23,24,25,26,27",
+          "pins": "20",
           "loopbackTxPin": 33,
           "loopbackRxPin": 32
         }
@@ -678,7 +660,6 @@
     "firmwares": [
       "esp32s3-n8r8"
     ],
-    "default_firmware": "esp32s3-n8r8",
     "image": "assets/boards/lightcrafter-16.jpg",
     "url": "https://lightcrafter.eu/",
     "supported": [
@@ -722,7 +703,6 @@
     "firmwares": [
       "esp32s3-n8r8"
     ],
-    "default_firmware": "esp32s3-n8r8",
     "image": "assets/boards/esp32-s3-stephanelec-16p.jpg",
     "supported": [
       "LEDs",
@@ -765,7 +745,6 @@
     "firmwares": [
       "esp32p4-eth"
     ],
-    "default_firmware": "esp32p4-eth",
     "image": "assets/boards/waveshare-esp32-p4-nano.jpg",
     "url": "https://www.waveshare.com/esp32-p4-nano.htm",
     "supported": [
@@ -790,7 +769,10 @@
       {
         "type": "ParlioLedDriver",
         "id": "ParlioLed",
-        "parent_id": "Drivers"
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "20,21,22,23,24,25,26,27"
+        }
       },
       {
         "type": "NetworkModule",
@@ -813,7 +795,6 @@
     "firmwares": [
       "esp32p4-eth"
     ],
-    "default_firmware": "esp32p4-eth",
     "image": "assets/boards/abc-wled-esp32-p4-shield.jpg",
     "url": "https://shop.myhome-control.de/en/ABC-WLED-ESP32-P4-shield/HW10027",
     "supported": [

@@ -185,6 +185,22 @@ const char* hostIp() {
     return "";
 }
 
+// Read a netif's current IPv4 as raw octets (out[0..3]); all-zero on no IP /
+// null netif. esp_ip4_addr_t.addr is little-endian-packed (octet i = byte i),
+// matching IP2STR's `(addr >> (8*i)) & 0xff` — so this is the byte-form of the
+// same value the old IPSTR getters printed. Shared by ethGetIPv4/wifiStaGetIPv4.
+static void netifIPv4(esp_netif_t* netif, uint8_t out[4]) {
+    out[0] = out[1] = out[2] = out[3] = 0;
+    if (!netif) return;
+    esp_netif_ip_info_t info;
+    if (esp_netif_get_ip_info(netif, &info) != ESP_OK) return;
+    const uint32_t a = info.ip.addr;
+    out[0] = static_cast<uint8_t>(a & 0xff);
+    out[1] = static_cast<uint8_t>((a >> 8) & 0xff);
+    out[2] = static_cast<uint8_t>((a >> 16) & 0xff);
+    out[3] = static_cast<uint8_t>((a >> 24) & 0xff);
+}
+
 const char* sdkVersion() {
     return esp_get_idf_version();
 }
@@ -277,6 +293,48 @@ static bool ethSpiActive_ = false;
 #endif
 static bool netifInitDone_ = false;
 
+// DHCP hostname (option 12) pushed by NetworkModule before bring-up; applied to each
+// netif before its DHCP client starts (see setHostname's contract in platform.h).
+// 32 = the ESP-IDF lwIP hostname cap; empty means "leave the IDF default".
+//
+// Threading / ordering contract: setHostname() is called from the app task in
+// NetworkModule::setup(), BEFORE ethInit() / wifiStaInit() bring an interface up.
+// applyHostname() (the only reader) runs later — from the eth link-up event handler
+// or right after esp_wifi_start — so hostname_[] is fully written before any reader
+// can execute, and no lock is needed. Do NOT call setHostname() concurrently with, or
+// after, bring-up (e.g. from another task or an event callback) without adding a
+// mutex / std::atomic; the single-writer-before-readers ordering is the whole safety.
+static char hostname_[32] = {};
+
+void setHostname(const char* name) {
+    if (!name) { hostname_[0] = 0; return; }
+    std::strncpy(hostname_, name, sizeof(hostname_) - 1);
+    hostname_[sizeof(hostname_) - 1] = 0;
+}
+
+// Apply the stored hostname (DHCP option 12) to a netif so it rides the DISCOVER.
+// Call AFTER the interface is started (set_hostname returns IF_NOT_READY before).
+// Order is the crux — esp_netif_set_hostname only takes on a STOPPED DHCP client;
+// setting it while the client is running (which it is on Ethernet, started at
+// link-up) is ignored, so the DISCOVER goes out nameless and the router logs the
+// lease with a blank hostname. So: stop the client, set the name, start it — the
+// fresh DISCOVER then carries option 12. Stopping an already-stopped client is a
+// benign ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED, which we ignore. No-op when unset.
+static void applyHostname(esp_netif_t* netif) {
+    if (!netif || !hostname_[0]) return;
+    esp_netif_dhcpc_stop(netif);    // must be stopped for set_hostname to take; ignore ALREADY_STOPPED
+    esp_err_t e = esp_netif_set_hostname(netif, hostname_);
+    if (e != ESP_OK) ESP_LOGW(NET_TAG, "set_hostname('%s') failed: %s", hostname_, esp_err_to_name(e));
+    else ESP_LOGI(NET_TAG, "DHCP hostname: %s", hostname_);
+    // Restart the DHCP client and check the result — if it fails, the interface has
+    // no DHCP client and will never acquire an IP, so surface it rather than silently
+    // leaving the device offline. (Don't return on stop/set failure above: we still
+    // must restart the client we stopped.)
+    esp_err_t se = esp_netif_dhcpc_start(netif);
+    if (se != ESP_OK)
+        ESP_LOGW(NET_TAG, "dhcpc_start after set_hostname failed: %s", esp_err_to_name(se));
+}
+
 #ifndef MM_NO_WIFI
 // WiFi-only state — absent in the Ethernet-only build.
 static bool wifiStaConnected_ = false;
@@ -302,6 +360,14 @@ static void ethEventHandler(void* /*arg*/, esp_event_base_t base,
         if (id == ETHERNET_EVENT_CONNECTED) {
             ESP_LOGI(NET_TAG, "Ethernet link up");
             ethLinkUp_ = true;
+            // Set the DHCP hostname HERE, on link-up, not in ethInit(): IDF's default
+            // eth netif starts the DHCP client from its own CONNECTED handler, so a
+            // hostname set earlier (in ethInit, before link-up) is clobbered when that
+            // client (re)starts nameless — the lease lands blank. Bouncing the client
+            // here (after the netif is started, when set_hostname takes) makes the
+            // DISCOVER carry the name. WiFi doesn't need this: its DHCP client only
+            // starts on association, well after we set the name in wifiStaInit.
+            applyHostname(ethNetif_);
         } else if (id == ETHERNET_EVENT_DISCONNECTED) {
             ethLinkUp_ = false;
             ESP_LOGI(NET_TAG, "Ethernet link down");
@@ -407,6 +473,9 @@ static bool ethInitRmii() {
         if (ethNetif_) { esp_netif_destroy(ethNetif_); ethNetif_ = nullptr; }
         return false;
     }
+    // DHCP hostname is set in the ETHERNET_EVENT_CONNECTED handler, not here — see
+    // the comment there (IDF starts the eth DHCP client on link-up, which would
+    // clobber a name set at init time).
 
     ethHandle_ = eth_handle;   // retained (ethStop is W5500-only today, but keep it set)
     ESP_LOGI(NET_TAG, "Ethernet init done (RMII, non-blocking)");
@@ -496,6 +565,7 @@ static bool ethInitSpi() {
         spi_bus_free(kSpiHost);
         return false;
     }
+    // DHCP hostname is set in the ETHERNET_EVENT_CONNECTED handler (see note there).
     ethHandle_ = eth_handle;   // retained for a live reconfigure (ethStop)
     ethSpiActive_ = true;
     ESP_LOGI(NET_TAG, "Ethernet init done (W5500 SPI, non-blocking)");
@@ -551,14 +621,8 @@ bool ethConnected() {
     return ethConnected_;
 }
 
-void ethGetIP(char* buf, size_t len) {
-    if (!ethNetif_ || len == 0) { if (len > 0) buf[0] = 0; return; }
-    esp_netif_ip_info_t info;
-    if (esp_netif_get_ip_info(ethNetif_, &info) == ESP_OK) {
-        std::snprintf(buf, len, IPSTR, IP2STR(&info.ip));
-    } else {
-        buf[0] = 0;
-    }
+void ethGetIPv4(uint8_t out[4]) {
+    netifIPv4(ethNetif_, out);
 }
 
 #else // MM_NO_ETH — firmware excludes EMAC support (chip-side or sdkconfig fragment
@@ -570,7 +634,7 @@ void ethStop()                          {}
 bool ethInit()                          { return false; }
 bool ethLinkUp()                        { return false; }
 bool ethConnected()                     { return false; }
-void ethGetIP(char* buf, size_t len)    { if (len > 0) buf[0] = 0; }
+void ethGetIPv4(uint8_t out[4])         { out[0] = out[1] = out[2] = out[3] = 0; }
 
 #endif // MM_NO_ETH
 
@@ -685,6 +749,10 @@ bool wifiStaInit(const char* ssid, const char* password) {
         wifiStaStop();
         return false;
     }
+    // DHCP hostname (option 12) — after esp_wifi_start: the STA netif isn't "ready"
+    // (set_hostname returns IF_NOT_READY) until the WiFi driver glue starts it.
+    // Association + DHCP happen later still, so the name lands in the lease request.
+    applyHostname(staNetif_);
 
     // Disable WiFi modem power-save. IDF defaults to WIFI_PS_MIN_MODEM, which
     // DTIM-sleeps the radio between beacons — that sleep causes intermittent
@@ -712,14 +780,8 @@ bool wifiStaConnected() {
     return wifiStaConnected_;
 }
 
-void wifiStaGetIP(char* buf, size_t len) {
-    if (!staNetif_ || len == 0) { if (len > 0) buf[0] = 0; return; }
-    esp_netif_ip_info_t info;
-    if (esp_netif_get_ip_info(staNetif_, &info) == ESP_OK) {
-        std::snprintf(buf, len, IPSTR, IP2STR(&info.ip));
-    } else {
-        buf[0] = 0;
-    }
+void wifiStaGetIPv4(uint8_t out[4]) {
+    netifIPv4(staNetif_, out);
 }
 
 void wifiStaStop() {
@@ -854,7 +916,7 @@ bool wifiSetTxPower(int8_t quarterDbm) {
 // these stubs from the final image.
 bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) { return false; }
 bool wifiStaConnected() { return false; }
-void wifiStaGetIP(char* buf, size_t len) { if (len > 0) buf[0] = 0; }
+void wifiStaGetIPv4(uint8_t out[4])      { out[0] = out[1] = out[2] = out[3] = 0; }
 void wifiStaStop() {}
 int wifiStaRssi() { return 0; }
 bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
@@ -868,23 +930,112 @@ bool wifiSetTxPower(int8_t quarterDbm) { return quarterDbm == 0; }
 
 #endif // MM_NO_WIFI
 
-bool mdnsInit(const char* deviceName) {
+// Bring the mDNS stack up (idempotent) and ADVERTISE this device as <deviceName>.local.
+// Advertising is gated by the user's mDNS toggle; the stack init is NOT — browse needs
+// the stack regardless (see mdnsBrowseStart), so mdns_init stays even when the toggle is
+// off. mdns_init is safe to call when already running (returns an already-init error we
+// treat as fine).
+static bool mdnsStackUp_ = false;
+
+static bool ensureMdnsStack() {
+    if (mdnsStackUp_) return true;
     esp_err_t err = mdns_init();
     if (err != ESP_OK) {
         ESP_LOGE(NET_TAG, "mDNS init failed: %s", esp_err_to_name(err));
         return false;
     }
-    err = mdns_hostname_set(deviceName);
+    mdnsStackUp_ = true;
+    return true;
+}
+
+bool mdnsInit(const char* deviceName) {
+    if (!ensureMdnsStack()) return false;
+    esp_err_t err = mdns_hostname_set(deviceName);
     if (err != ESP_OK) {
         ESP_LOGE(NET_TAG, "mDNS hostname set failed: %s", esp_err_to_name(err));
         return false;
     }
-    ESP_LOGI(NET_TAG, "mDNS started: %s.local", deviceName);
+    // Advertise an `_http._tcp` service so other devices DISCOVER us by browsing the
+    // service type (not just by resolving our hostname) — the standard, push-style way
+    // a web device announces itself (WLED, ESPHome, Hue all advertise `_http._tcp`).
+    // This is what lets two projectMM devices find each other over mDNS with no subnet
+    // sweep. The instance name is the deviceName; the port is the HTTP server's (80).
+    // Branch on whether the service already exists (a reconnect re-runs this) rather
+    // than treating ANY mdns_service_add failure as "already there" — an add failure
+    // could be OOM/invalid-state, which must surface, not be silently logged as started.
+    esp_err_t svcErr = mdns_service_exists("_http", "_tcp", nullptr)
+        ? mdns_service_instance_name_set("_http", "_tcp", deviceName)
+        : mdns_service_add(deviceName, "_http", "_tcp", 80, nullptr, 0);
+    if (svcErr != ESP_OK) {
+        ESP_LOGE(NET_TAG, "mDNS _http._tcp advertise failed: %s", esp_err_to_name(svcErr));
+        return false;   // hostname is set, but advertising failed — report it
+    }
+    ESP_LOGI(NET_TAG, "mDNS started: %s.local (advertising _http._tcp:80)", deviceName);
     return true;
 }
 
 void mdnsStop() {
-    mdns_free();
+    // Tearing the stack down would also kill browse. The toggle-off path wants to stop
+    // ADVERTISING, not lose discovery — so keep the stack but drop both the advertised
+    // hostname AND the _http._tcp service record; full mdns_free only on teardown
+    // (where everything stops anyway). mdns_service_remove is a no-op if not added.
+    if (mdnsStackUp_) {
+        mdns_service_remove("_http", "_tcp");
+        mdns_hostname_set("");
+    }
+}
+
+// Full stack teardown — only on module teardown, where browse stops too.
+void mdnsShutdown() {
+    if (mdnsStackUp_) { mdns_free(); mdnsStackUp_ = false; }
+}
+
+// --- mDNS service browse (async, non-blocking) ---
+// One in-flight async query at a time (DevicesModule serialises service types). The
+// synchronous mdns_query_ptr would block the full timeout on the render task; the async
+// handle lets us poll a few ms each tick instead.
+static mdns_search_once_t* mdnsSearch_ = nullptr;
+
+bool mdnsBrowseStart(const char* service, const char* proto) {
+    if (mdnsSearch_) return false;                 // one query at a time
+    // Browse needs only the mDNS stack, not advertising — so bring the stack up here
+    // regardless of the advertise toggle (mdnsStop clears the hostname but keeps the
+    // stack). A device that chooses not to advertise can still discover others.
+    if (!ensureMdnsStack()) return false;
+    // PTR query for the service type; 3 s window, up to 16 results. Returns immediately
+    // with a handle — results are gathered on the mDNS task, read via Poll below.
+    mdnsSearch_ = mdns_query_async_new(nullptr, service, proto, MDNS_TYPE_PTR,
+                                       3000, 16, nullptr);
+    return mdnsSearch_ != nullptr;
+}
+
+bool mdnsBrowsePoll(MdnsHostCb cb, void* user) {
+    if (!mdnsSearch_) return true;                 // nothing running == "done"
+    mdns_result_t* results = nullptr;
+    uint8_t num = 0;
+    // 0 ms timeout: pure poll, never blocks the tick. true == the query finished.
+    if (!mdns_query_async_get_results(mdnsSearch_, 0, &results, &num)) return false;
+    for (mdns_result_t* r = results; r && cb; r = r->next) {
+        MdnsHost h{};
+        if (r->hostname) std::snprintf(h.hostname, sizeof(h.hostname), "%s", r->hostname);
+        h.port = r->port;
+        // First IPv4 address in the result's addr list.
+        for (mdns_ip_addr_t* a = r->addr; a; a = a->next) {
+            if (a->addr.type == ESP_IPADDR_TYPE_V4) {
+                uint32_t v = a->addr.u_addr.ip4.addr;   // little-endian packed (octet i = byte i)
+                h.ip[0] = v & 0xff; h.ip[1] = (v >> 8) & 0xff;
+                h.ip[2] = (v >> 16) & 0xff; h.ip[3] = (v >> 24) & 0xff;
+                break;
+            }
+        }
+        cb(h, user);
+    }
+    if (results) mdns_query_results_free(results);
+    return true;                                   // done — caller calls mdnsBrowseStop()
+}
+
+void mdnsBrowseStop() {
+    if (mdnsSearch_) { mdns_query_async_delete(mdnsSearch_); mdnsSearch_ = nullptr; }
 }
 
 // UdpSocket

@@ -7,10 +7,12 @@ The forward-looking half of the docs (the backward-looking half is [`../history/
 ### The prioritised to-build list
 
 - [backlog.md](backlog.md) — what to build next, grouped by theme (distribution, effects, drivers, modifiers, …). Completed items are removed; the file is deleted when empty.
+- [ui-deferred.md](ui-deferred.md) — UI items not yet in the live [ui.md](../moonmodules/core/ui.md): deferred-to-1.x features, open design questions, and the gap analysis against v1. The backward-looking v1 UI reverse-engineering lives in [history/v1-inventory.md](../history/v1-inventory.md).
+- [leddriver-deferred.md](leddriver-deferred.md) — the LED-driver increments (RMT single-strand, multi-pin RMT, LCD_CAM on S3) all shipped; this is what's left and tracked nowhere else: the sigrok flicker test, the core-1 driver task, fuller show error handling, the per-driver buffer window, 16-bit/dither, and moving-head preview.
 
-### Draft module specs
+### In-flight draft specs
 
-- [moonmodules_draft/](moonmodules_draft/) — specs for modules not yet implemented, split into [core/](moonmodules_draft/core/) and [light/](moonmodules_draft/light/). Selected and promoted to [`../moonmodules/`](../moonmodules/) as each ships, then deleted from the draft.
+A spec for a not-yet-built module can live here as a plain draft `.md` (alongside the design studies below) until the module ships — at which point its final spec is written in [`../moonmodules/`](../moonmodules/) and the draft is deleted. There's no dedicated subfolder or promote step: a draft is just a forward-looking markdown file like the rest of `backlog/`. None are in flight right now (every drafted module has shipped; the former UI draft moved to [ui-deferred.md](ui-deferred.md) and [history/v1-inventory.md](../history/v1-inventory.md)).
 
 ### Design studies
 
@@ -18,6 +20,5 @@ One-off research documents that informed a future direction, kept for the reason
 
 - [leddriver-analysis-top-down.md](leddriver-analysis-top-down.md) — reasons from the end goal (driving WS2812-class LEDs from a GPIO pin) toward a generic driver architecture, per-platform implementation, and a testing strategy.
 - [leddriver-analysis-bottom-up.md](leddriver-analysis-bottom-up.md) — the companion landscape survey: catalogues the existing LED-driver libraries across ESP32, Teensy, Raspberry Pi, and PC, and recommends a path.
-- [leddriver-increment-1-plan.md](leddriver-increment-1-plan.md) — the concrete first-increment plan distilled from the two analyses: RMT/WS2812B on classic ESP32, the unified one-base driver hierarchy (ArtNet + LED + Preview as peer interpreters of the light preset), the platform seam, and the loopback + host-encoder test strategy. Locked product-owner decisions at the top.
-- [leddriver-increment-2-plan.md](leddriver-increment-2-plan.md) — the second increment: 2a multi-pin RMT (implemented; classic + S3 via SOC capability constants) and 2b parallel LCD_CAM on the S3 (open: lane count and LEDs-per-lane targets). Locked decisions and the deferred per-driver buffer window at the top.
-- [installer-3layer-plan.md](installer-3layer-plan.md) — the **remaining** installer increments (firmwares.json generator, release-asset dedup, annotated-pin images, shared-client code, firmware-variant collapse, EIM coordination) + build order. Durable parts already shipped have moved to permanent homes (the MCU→Board→Device model → `architecture.md`; the catalog schema → `install/README.md`; the hard-won principles → `history/decisions.md`); this doc shrinks toward empty as the rest lands.
+
+(The 3-layer installer plan these analyses' sibling produced shipped fully and its deferred items already had homes in [backlog.md](backlog.md), so its file was deleted per [*Mandatory subtraction*](../../CLAUDE.md#process-rules). The installer lives in `docs/install/` + `scripts/build/`; the durable reasoning is in `architecture.md` / `history/decisions.md`.)

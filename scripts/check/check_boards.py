@@ -9,8 +9,8 @@ catalog's counterpart to check_specs.py for module docs: a fast, dependency-free
 gate that pins the invariants the clients assume.
 
 Invariants checked per entry:
-  - required fields present (name, chip, firmwares, default_firmware, modules)
-  - default_firmware is one of firmwares
+  - required fields present (name, chip, firmwares, modules)
+  - firmwares is a non-empty list of non-empty strings (entry[0] is the default)
   - image (if set) is a local assets/boards/ path that resolves on disk
   - url (if set) is an absolute http(s) link
   - the Board module's `board` control value equals the entry `name`
@@ -76,7 +76,7 @@ def main():
             continue
 
         # --- required fields ---
-        for field in ("name", "chip", "firmwares", "default_firmware", "modules"):
+        for field in ("name", "chip", "firmwares", "modules"):
             if field not in e:
                 errors.append(f"{where}: missing required field '{field}'")
 
@@ -85,10 +85,12 @@ def main():
             errors.append(f"{where}: duplicate board name")
         names_seen.add(name)
 
-        # --- firmwares / default ---
+        # --- firmwares (firmwares[0] is the default the picker pre-selects) ---
         fws = e.get("firmwares")
         if not isinstance(fws, list):
             errors.append(f"{where}: firmwares must be a list, got {type(fws).__name__}")
+        elif not fws:
+            errors.append(f"{where}: firmwares must be a non-empty list (entry[0] is the default)")
         else:
             non_str = [f for f in fws if not isinstance(f, str)]
             if non_str:
@@ -96,9 +98,11 @@ def main():
                               f"{[type(f).__name__ for f in non_str]}")
             elif any(not f for f in fws):
                 errors.append(f"{where}: firmwares entries must be non-empty strings")
-            elif e.get("default_firmware") not in fws:
-                errors.append(f"{where}: default_firmware '{e.get('default_firmware')}' "
-                              f"not in firmwares {fws}")
+            elif any(f != f.strip() or not f.strip() for f in fws):
+                # Whitespace-only or padded keys (" ", "esp32 ") silently miss the
+                # exact firmware-key match downstream (picker, dedup, manifest names).
+                errors.append(f"{where}: firmwares entries must not be whitespace-only "
+                              f"or have leading/trailing whitespace")
 
         # --- image resolves on disk + is a local path ---
         img = e.get("image")

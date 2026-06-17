@@ -55,6 +55,16 @@ NetworkModule reads the deviceName from SystemModule (see [SystemModule.md](Syst
 
 Included in NetworkModule (not separate). Registers the deviceName on whichever interface is active. Re-registers when the active interface changes. Uses ESP-IDF's `mdns_init()` / `mdns_hostname_set()`.
 
+## `MM_IP=` boot token (web-installer contract)
+
+`NetworkModule::currentIp(out)` writes the device's current LAN IP as octets into a caller-owned `uint8_t[4]` (all-zero when not connected — the module holds no IP of its own; the IP already lives as the netif binding). `main.cpp` formats it with `formatDottedQuad` and appends the token to its tick line **for the first 60 s of uptime only** — long enough for the installer (which reads at ~3–15 s after boot), after which the IP comes from the REST API and the perf line stays clean. `main.cpp`'s once-per-second tick log appends it as a machine-parseable `MM_IP=<ip>` token whenever there's an IP — so it reaches the USB-CDC console via `std::printf` (unlike `ESP_LOGI`, which on some chips goes only to the UART pins) and re-emits every second for the whole uptime:
+
+```
+tick: 412us (FPS: 60)  free: 184320  maxBlock: 110592  MM_IP=192.168.1.210
+```
+
+The web installer reads this token from the device's boot serial log right after flashing (`readBootIp` in `install-orchestrator.js`): a device that comes up on Ethernet, or boots with saved WiFi credentials, announces its own IP — so the installer auto-adds it to *Your devices* and skips the "type the device's IP" prompt, with no mDNS/hostname guessing (works on every OS, survives a renamed `deviceName`). Because the token rides the already-periodic tick line, the read is timing-independent — whenever the installer reopens the port, the next tick carries the IP. Deliberately IP-only — once the installer has the IP it reads anything else (chip, firmware, modules) from the live REST API. A fresh device with no credentials never connects, so the token never appears, and the installer falls back to Improv provisioning + manual entry.
+
 ## Ethernet
 
 Ethernet init is part of `NetworkModule::setup()`, which calls `syncEthConfig()` (pushes the eth controls above into `platform::setEthConfig`) then `platform::ethInit()`. The PHY type and pins are **runtime** config (the `ethType` + pin controls above), not compile-time — see the controls list and [architecture.md § Config provenance](../../architecture.md#config-provenance-mcu--board--device).

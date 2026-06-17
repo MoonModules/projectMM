@@ -192,6 +192,57 @@ async function sendSetTxPowerFrame(port, dBm) {
     }
 }
 
+// Read the device's boot serial log for the one fact the browser can't get any other
+// way: the device's IP. projectMM appends a machine-parseable `MM_IP=<dotted-quad>`
+// token to its once-per-second tick log over USB (std::printf → reaches the USB-CDC
+// console, unlike ESP_LOGI) whenever Ethernet or WiFi-STA has an address — so a board
+// that comes up on Ethernet, or boots with saved WiFi credentials, announces its own IP
+// with no mDNS / hostname guessing (works on every OS, survives a renamed deviceName).
+// It rides the periodic tick line for the device's first 60 s of uptime, so the read
+// below is timing-independent — whenever the installer reopens the port within that
+// window (it reads at ~3–15 s after reset), the next tick carries the IP. Afterwards the
+// device's IP comes from the REST API, so the token stops to keep the perf line clean.
+//
+// Deliberately IP-only: once the host has the IP it reads everything else (chip,
+// firmware, modules, heap, …) from the live device's REST API (`http://<ip>/api/…`),
+// which is richer and always current — no reason to scrape more fields from a boot
+// log. Adding device info to the installer = call the REST API with this IP, not
+// grow this parser.
+//
+// Returns the IP string, or "" on timeout (a fresh device with no credentials never
+// connects, so never prints MM_IP → caller falls back to Improv provisioning + manual
+// entry). Caller owns opening the port; this acquires/releases one reader.
+async function readBootIp(port, timeoutMs) {
+    if (!port || !port.readable) return "";
+    const decoder = new TextDecoder();
+    let buf = "";
+    const reader = port.readable.getReader();
+    const deadline = Date.now() + timeoutMs;
+    try {
+        while (Date.now() < deadline) {
+            const remaining = deadline - Date.now();
+            // Race each read against the remaining budget so a silent device
+            // (no output) doesn't block past the timeout.
+            const timed = new Promise(res => setTimeout(() => res({ timeout: true }), remaining));
+            const result = await Promise.race([reader.read(), timed]);
+            if (result.timeout || result.done) break;
+            buf += decoder.decode(result.value, { stream: true });
+            // Primary: the explicit machine token. Fallback: the human-readable
+            // "… — Eth/WiFi: <ip>" status line (firmware predating MM_IP).
+            const m = buf.match(/MM_IP=(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/)
+                   || buf.match(/(?:Eth|WiFi):\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
+            if (m) return m[1];
+            if (buf.length > 8192) buf = buf.slice(-2048);  // cap; keep a tail for split lines
+        }
+    } catch (_) {
+        // Read error (port hiccup) — treat as "no IP seen", fall back.
+    } finally {
+        try { await reader.cancel(); } catch (_) { /* ignore */ }
+        try { reader.releaseLock(); } catch (_) { /* ignore */ }
+    }
+    return "";
+}
+
 // ---------------------------------------------------------------------------
 // HTTP fallback for Improv-less paths (alreadyOnline, esp32-eth)
 // ---------------------------------------------------------------------------
@@ -323,13 +374,19 @@ async function tryHttpInjectBoard(deviceUrl, board) {
 // not by collapsing distinct chips. A bare "ESP32-<X>…" keeps "ESP32-<X>"; classic
 // silicon (ESP32-D0WD*, ESP32-PICO-*, ESP32-U4WDH — no second family token) maps to
 // plain "ESP32". This is forward-proof: a new ESP32-C5 needs no code change here.
+//
+// The ESP32 token is matched ANYWHERE in the string, not anchored at the start:
+// esptool-js prefixes "unknown " when it doesn't fully recognise a chip (newer
+// silicon than the bundled esptool — observed: "unknown ESP32-P4 (revision v1.3)"),
+// and anchoring on ^ESP32 would let that prefix defeat the match and pass the raw
+// string through (→ no board matches, false "flash anyway?" warning).
 function chipFamily(chipName) {
     const s = String(chipName || "").trim();
-    // ESP32-<LETTER+DIGITS> at the start is a sub-family (S3/P4/S2/C3/C6/C5/H2/…).
-    const sub = s.match(/^ESP32-([A-Z]\d+)\b/);
+    // ESP32-<LETTER+DIGITS> is a sub-family (S3/P4/S2/C3/C6/C5/H2/…).
+    const sub = s.match(/ESP32-([A-Z]\d+)\b/);
     if (sub) return "ESP32-" + sub[1];
-    if (/^ESP32\b/.test(s)) return "ESP32";   // classic — no sub-family token
-    return s;                                  // unknown — pass through so it's visible
+    if (/ESP32\b/.test(s)) return "ESP32";   // classic — no sub-family token
+    return s;                                // truly unrecognised — pass through so it's visible
 }
 
 async function connectAndDescribeChip(esploader) {
@@ -708,6 +765,34 @@ export const installer = {
                 port = await navigator.serial.requestPort({});
                 await port.open({ baudRate: 115200 });
             }
+            // Read the boot log first: a device that comes up on Ethernet, or boots
+            // with saved WiFi credentials, prints its IP (MM_IP=…) and is ALREADY
+            // ONLINE — no Improv provisioning needed. Detecting it here turns the old
+            // "device didn't respond over USB, type its IP" chore into an automatic
+            // success with the IP pre-found. A fresh device with no credentials never
+            // connects, so readBootIp times out → "" and we fall through to the normal
+            // TX-power + Improv provisioning flow below.
+            //
+            // The device re-emits MM_IP= every second on its tick log (it rides the
+            // periodic tick line in main.cpp) for its first 60 s of uptime, so this read
+            // is timing-independent: it just has to overlap any one tick in that window.
+            // 12 s budget (port open from ~3 s to ~15 s after reset) sits comfortably
+            // inside the 60 s and covers DHCP variance (measured ~7 s on the P4-NANO)
+            // without making the fresh-device fallback feel slow.
+            trackProgress("connect-improv");
+            const bootIp = await readBootIp(port, 12000);
+
+            let deviceUrl = "";
+            let viaHttp = false;
+            let needsIp = false;
+            let alreadyOnline = false;
+
+            if (bootIp) {
+                if (onLog) onLog(`[orchestrator] device already online at ${bootIp} (from boot serial) — skipping Improv`);
+                deviceUrl = `http://${bootIp}/`;
+                viaHttp = true;
+                alreadyOnline = true;
+            } else {
             // Pre-association TX-power cap (weak-power brown-out fix): push it
             // while we still own the port, before ImprovSerial locks it.
             // The device applies + persists it within a second — long
@@ -740,8 +825,6 @@ export const installer = {
             // the device-side Improv task isn't installed until after
             // NetworkModule::setup() completes (~1.8 s on ESP32-S3), and
             // the host's 2 s reopen wait can land before it's ready.
-            let needsIp = false;
-            let alreadyOnline = false;
             const isImprovNotDetected = (e) => {
                 // Tied to the pinned `improv-wifi-serial-sdk` version at
                 // the top of this file — if you bump the SDK, re-verify
@@ -774,9 +857,7 @@ export const installer = {
                     throw e;
                 }
             }
-
-            let deviceUrl = "";
-            let viaHttp = false;
+            } // end of `else` (device was not already online from the boot log)
 
             // Retry loop. Entered when the first initialize() failed and
             // exited either:

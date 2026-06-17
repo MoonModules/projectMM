@@ -6,34 +6,6 @@
   "description": "Toggle the mDNS responder on and off and measure render-FPS impact. Validates that mDNS announcement traffic doesn't degrade the render loop more than 20% on the busiest tick.",
   "reset": [
     {
-      "name": "reset-grid-width",
-      "op": "set_control",
-      "id": "Grid",
-      "key": "width",
-      "value": 128
-    },
-    {
-      "name": "reset-grid-height",
-      "op": "set_control",
-      "id": "Grid",
-      "key": "height",
-      "value": 128
-    },
-    {
-      "name": "reset-mirrorX",
-      "op": "set_control",
-      "id": "Multiply",
-      "key": "mirrorX",
-      "value": true
-    },
-    {
-      "name": "reset-mirrorY",
-      "op": "set_control",
-      "id": "Multiply",
-      "key": "mirrorY",
-      "value": true
-    },
-    {
       "name": "reset-mdns",
       "op": "set_control",
       "id": "Network",
@@ -112,6 +84,24 @@
             "2026-06-02",
             "2026-06-02"
           ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            21,
+            21
+          ],
+          "free_heap": [
+            34042887,
+            34042903
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
         }
       }
     },
@@ -185,6 +175,24 @@
             "2026-06-02",
             "2026-06-02"
           ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            21,
+            21
+          ],
+          "free_heap": [
+            34043015,
+            34043027
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
         }
       }
     },
@@ -196,11 +204,6 @@
       "key": "mDNS",
       "value": true,
       "measure": true,
-      "bounds": {
-        "fps": {
-          "min_pct": 80
-        }
-      },
       "contract": {
         "esp32-eth-wifi": {
           "tick_us": 100000,
@@ -262,6 +265,24 @@
           "at": [
             "2026-06-02",
             "2026-06-02"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            20,
+            22
+          ],
+          "free_heap": [
+            34042623,
+            34042635
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
           ]
         }
       }

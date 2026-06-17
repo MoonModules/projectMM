@@ -45,8 +45,8 @@ public:
     // Ethernet pins). The data pins above gate startup, so the bus stays idle until
     // the user sets them regardless. (Dropping WR/DC entirely needs a direct-LCD_CAM
     // driver that bypasses esp_lcd, hpwit-style — backlogged, not this increment.)
-    uint16_t clockPin = 10;
-    uint16_t dcPin = 11;
+    int8_t clockPin = 10;
+    int8_t dcPin = 11;
 
     // --- CRTP hooks the base calls (all non-virtual; no vtable) ---
 
@@ -55,8 +55,8 @@ public:
     static constexpr const char* kInitFailMsg = "LCD init failed — check pins / memory";
 
     void addBusControls() {
-        controls_.addUint16("clockPin", clockPin);
-        controls_.addUint16("dcPin", dcPin);
+        controls_.addPin("clockPin", clockPin);
+        controls_.addPin("dcPin", dcPin);
     }
     bool busControlTriggersBuild(const char* name) const {
         return std::strcmp(name, "clockPin") == 0 || std::strcmp(name, "dcPin") == 0;
@@ -64,7 +64,8 @@ public:
 
     bool busInit(size_t frameBytes) {
         return platform::lcdWs2812Init(lcd_, laneList_, laneCount_,
-                                       clockPin, dcPin, frameBytes);
+                                       static_cast<uint16_t>(clockPin),
+                                       static_cast<uint16_t>(dcPin), frameBytes);
     }
     uint8_t* busBuffer()                 { return platform::lcdWs2812Buffer(lcd_); }
     size_t   busCapacity() const         { return platform::lcdWs2812BufferCapacity(lcd_); }
@@ -77,9 +78,11 @@ public:
     // on lane 0. Passes the WR/DC pins the init needs.
     platform::RmtLoopbackResult busLoopback(const uint8_t* frame, size_t frameBytes,
                                             size_t dataBytes, uint8_t rowBits) {
-        return platform::lcdWs2812Loopback(laneList_, laneCount_, clockPin, dcPin,
-                                           loopbackRxPin, frame, frameBytes,
-                                           dataBytes, rowBits);
+        return platform::lcdWs2812Loopback(laneList_, laneCount_,
+                                           static_cast<uint16_t>(clockPin),
+                                           static_cast<uint16_t>(dcPin),
+                                           static_cast<uint16_t>(loopbackRxPin),
+                                           frame, frameBytes, dataBytes, rowBits);
     }
 
     // Store WR/DC alongside the data pins, so a clockPin/dcPin edit rebuilds the
@@ -91,8 +94,8 @@ public:
 
 private:
     platform::LcdWs2812Handle lcd_;
-    uint16_t lastClockPin_ = 0;
-    uint16_t lastDcPin_ = 0;
+    int8_t lastClockPin_ = -1;
+    int8_t lastDcPin_ = -1;
 };
 
 } // namespace mm

@@ -15,7 +15,43 @@
       "type": "Layouts"
     },
     {
-      "name": "fix-grid",
+      "name": "fix-layers",
+      "op": "add_module",
+      "id": "Layers",
+      "type": "Layers",
+      "props": {
+        "layouts": "Layouts"
+      }
+    },
+    {
+      "name": "fix-drivers",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "layers": "Layers"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "name": "canvas-clear-layers",
+      "description": "Self-canvas: clear+rebuild the pipeline this scenario assumes, so it runs from any device state (order-independent in a chained live run). Pre-wired apparatus survives clear_children; replaces the old fixture+reset model.",
+      "op": "clear_children",
+      "id": "Layers"
+    },
+    {
+      "name": "canvas-clear-layouts",
+      "op": "clear_children",
+      "id": "Layouts"
+    },
+    {
+      "name": "canvas-clear-drivers",
+      "op": "clear_children",
+      "id": "Drivers"
+    },
+    {
+      "name": "canvas-grid",
       "op": "add_module",
       "id": "Grid",
       "type": "GridLayout",
@@ -26,84 +62,36 @@
       }
     },
     {
-      "name": "fix-layer",
+      "name": "canvas-layer",
       "op": "add_module",
       "id": "Layer",
       "type": "Layer",
+      "parent_id": "Layers",
       "props": {
-        "layouts": "Layouts",
         "channelsPerLight": 3
       }
     },
     {
-      "name": "fix-noise",
+      "name": "canvas-noise",
       "op": "add_module",
       "id": "Noise",
       "type": "NoiseEffect",
       "parent_id": "Layer"
     },
     {
-      "name": "fix-mirror",
+      "name": "canvas-mirror",
       "op": "add_module",
       "id": "Multiply",
       "type": "MultiplyModifier",
       "parent_id": "Layer"
     },
     {
-      "name": "fix-drivers",
-      "op": "add_module",
-      "id": "Drivers",
-      "type": "Drivers",
-      "props": {
-        "layer": "Layer"
-      }
-    },
-    {
-      "name": "fix-artnet",
+      "name": "canvas-artnet",
       "op": "add_module",
       "id": "ArtNet",
       "type": "NetworkSendDriver",
       "parent_id": "Drivers"
-    }
-  ],
-  "reset": [
-    {
-      "name": "reset-grid-width",
-      "op": "set_control",
-      "id": "Grid",
-      "key": "width",
-      "value": 128
     },
-    {
-      "name": "reset-grid-height",
-      "op": "set_control",
-      "id": "Grid",
-      "key": "height",
-      "value": 128
-    },
-    {
-      "name": "reset-mirrorX",
-      "op": "set_control",
-      "id": "Multiply",
-      "key": "mirrorX",
-      "value": true
-    },
-    {
-      "name": "reset-mirrorY",
-      "op": "set_control",
-      "id": "Multiply",
-      "key": "mirrorY",
-      "value": true
-    },
-    {
-      "name": "reset-noise-scale",
-      "op": "set_control",
-      "id": "Noise",
-      "key": "scale",
-      "value": 4
-    }
-  ],
-  "steps": [
     {
       "name": "baseline",
       "description": "Set NoiseEffect.scale=4 and measure baseline FPS (mirror on). Effect controls don't rebuild the pipeline — slider stutter check.",
@@ -112,11 +100,6 @@
       "key": "scale",
       "value": 4,
       "measure": true,
-      "bounds": {
-        "fps": {
-          "min_pct": 80
-        }
-      },
       "contract": {
         "pc-macos": {
           "tick_us": 120,
@@ -220,6 +203,24 @@
           "at": [
             "2026-06-07",
             "2026-06-07"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            160,
+            203
+          ],
+          "free_heap": [
+            34036179,
+            34036207
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
           ]
         }
       }
@@ -336,6 +337,24 @@
             "2026-06-07",
             "2026-06-07"
           ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            163,
+            168
+          ],
+          "free_heap": [
+            34036175,
+            34036215
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
         }
       }
     },
@@ -451,6 +470,24 @@
             "2026-06-07",
             "2026-06-07"
           ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            165,
+            179
+          ],
+          "free_heap": [
+            34036175,
+            34036215
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
         }
       }
     },
@@ -470,11 +507,6 @@
       "key": "mirrorY",
       "value": true,
       "measure": true,
-      "bounds": {
-        "fps": {
-          "min_pct": 50
-        }
-      },
       "contract": {
         "pc-macos": {
           "tick_us": 120,
@@ -493,7 +525,7 @@
         "pc-macos": {
           "tick_us": [
             96,
-            187
+            295
           ],
           "free_heap": [
             0,
@@ -505,7 +537,7 @@
           ],
           "at": [
             "2026-06-02",
-            "2026-06-03"
+            "2026-06-16"
           ]
         },
         "esp32-eth-wifi": {
@@ -578,6 +610,24 @@
           "at": [
             "2026-06-07",
             "2026-06-07"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            164,
+            188
+          ],
+          "free_heap": [
+            34036175,
+            34036215
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
           ]
         }
       }

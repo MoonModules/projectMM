@@ -312,9 +312,7 @@ This is the fundamental lesson: in agentic coding, the agent writes code but the
 
 ### Specs-before-code works
 
-Writing module specs before implementation prevented the architectural drift that plagued v1 and v2. Each spec documents: purpose, controls, behavior, edge cases, prior art. When the code deviates from the spec, one of them is wrong — the spec serves as the reference.
-
-Drafts live in `moonmodules_draft/`, get reviewed and promoted to `moonmodules/` just before implementation. Drafts for implemented modules are deleted — only one source of truth.
+Writing module specs before implementation prevented the architectural drift that plagued v1 and v2. Each spec documents: purpose, controls, behavior, edge cases, prior art. When the code deviates from the spec, one of them is wrong — the spec serves as the reference. One source of truth per module: the spec lives in `docs/moonmodules/`, deleted nowhere else.
 
 ### Zero-copy preview driver (memory lesson)
 
@@ -329,88 +327,6 @@ A single wrong character in the RFC 6455 magic GUID (`5AB5FDF632E5` instead of `
 Adding standardized KPIs (binary size, FPS, heap usage, test count, lizard warnings) to every commit message makes performance regressions visible in git history. The `collect_kpi.py --commit` script automates this.
 
 ## Lessons from projectMM v3 (this project)
-
-Extracted from the first implementation cycle (Steps 1-9, 2026-05-18).
-This cycle produced working code (effects, modifiers, ArtNet output
-visible on a hub75 panel) but accumulated enough bugs and architectural
-drift that we decided to restart implementation with better specs.
-
-### Rushing from architecture to code
-- We went from architecture.md directly to implementation in 9 rapid
-  steps. Each step introduced bugs that required debugging in later
-  steps. The debugging consumed more time than the implementation.
-- Plan mode was used per step but the plans were too shallow — they
-  described what to build, not how it should behave. Edge cases
-  (packet pacing, 2D rotation, mirror as kaleidoscope vs flip) were
-  discovered during testing, not during planning.
-
-### Architecture evolved during implementation
-- Major architectural changes happened mid-implementation:
-  Fixture → LayoutGroup rename, layouts changed from LUT-owners to
-  coordinate iterators, mirror changed from coordinate flip to
-  kaleidoscope (1:N mapping), DriverGroup took ownership of blend+map.
-- Each change required reworking already-written code and tests.
-  The architecture should have been stable before coding started.
-
-### Missing UI specification
-- The web UI was built from best guesses, then iteratively fixed
-  based on user feedback (dropdowns not working, checkboxes not
-  responding, sliders not smooth, cache issues).
-- A UI specification should exist before implementation. The UI
-  should be designed, not discovered through bug reports.
-
-### Module docs should precede code
-- Module documentation was written AFTER implementation as reverse
-  engineering. It should be written BEFORE as specifications.
-  Each module doc should define: controls, behavior, edge cases,
-  interaction with other modules.
-
-### The "it works on my test but not in the app" problem
-- Standalone tests (e.g. mirror mapping coverage test) passed
-  perfectly, but the running app showed wrong output. Root cause
-  was ArtNet packet flooding, not rendering bugs. Symptoms and
-  causes can be in completely different subsystems.
-- Need integration tests that exercise the full pipeline, not just
-  unit tests per component.
-
-### Timing-dependent bugs are the worst
-- The ArtNet packet pacing issue: without a printf in the main loop,
-  the receiver dropped packets and output looked wrong. With the
-  printf (adding ~1ms delay), it worked. The "debug code fixes it"
-  pattern is a classic timing bug indicator.
-- All output drivers need explicit pacing. Never blast network
-  packets in a tight loop.
-
-### dynamic_cast coupling
-- Layer::render() uses dynamic_cast<MirrorModifier*> and
-  dynamic_cast<RotateModifier*> to dispatch modifier behavior.
-  This tightly couples Layer to specific modifier types.
-- Modifiers should have a virtual interface (transformCoord,
-  transformLights) that Layer calls without knowing the concrete type.
-
-### Hot-path allocation in RotateModifier
-- The RotateModifier allocated a temporary buffer every frame via
-  platform::alloc. This violates the zero-alloc hot path rule and
-  was never caught by tests (tests don't check for allocations).
-- Need a zero-alloc render loop test that intercepts malloc/free.
-
-### The LayoutBase adapter boilerplate
-- GridLayout uses templates for forEachCoord (for type-safe lambdas)
-  but LayoutGroup needs virtual dispatch (function pointer + void*).
-  This requires a GridAdapter class that inherits both GridLayout
-  and LayoutBase — pure boilerplate in every layout and every test.
-- Layouts should implement virtual dispatch directly, or the
-  template/virtual split should be resolved.
-
-### Rebuild propagation is ad-hoc
-- When a layout or modifier control changes, the Layer needs to
-  rebuild its LUT and the DriverGroup needs to reallocate its
-  output buffer. This is handled by explicit dirty flag checks in
-  main_desktop.cpp — one check per module, manually maintained.
-- This doesn't scale. Adding a new module type that affects the
-  pipeline requires adding another dirty check to main.cpp.
-- Need an event/observer system or a centralized "pipeline changed"
-  signal.
 
 ### Single-file MoonModules are good
 - Keeping each MoonModule in a single .h file (no .cpp) reduces
@@ -456,55 +372,6 @@ drift that we decided to restart implementation with better specs.
 
 ### setName must copy, not store pointer
 - HTTP module creation stored a pointer to a stack-local buffer. After the function returned, the name was garbage. Fixed by making name_ a char[24] buffer with memcpy in setName().
-
-### Cycle-1 assessment (May 2026)
-A point-in-time evaluation written during PR #3 ([feature/more-effects](https://github.com/MoonModules/projectMM/pull/3)). Captured here because the full doc didn't earn a place in `history/` (160 lines, fast-aging) but the conclusions are worth keeping.
-
-**Where v3 actually stood:** end-to-end pipeline working (layout → layer → effects/modifier → blend/LUT → drivers → HTTP/WebSocket UI), serious testing (unit + scenario + live), ESP32 hardware proven. **Not** a specs-only project. Vertical-slice completeness ~65-70%; Release 1.0 progress ~50%; full architectural vision ~25-30%.
-
-**What was working well:**
-- Engineering discipline holding: CLAUDE.md + architecture docs + `check_platform_boundary.py` + promoted specs that actually match the code. Avoiding the drift v1/v2 hit.
-- MoonModule pattern earning its weight — one lifecycle, generic children, runtime CRUD via factory, no UI rewrites per effect.
-- Memory-conscious by design: `memory-1to1` and `memory-lut` scenarios prove the LUT-vs-no-LUT decision; `performance.md` actively measured.
-- Test ladder mature (unit → scenario → live on hardware) for the project's age.
-- UI philosophy holding: no npm chain, controls render from module state, WebSocket-driven.
-
-**Real technical debt called out:**
-- `HttpServerModule.h` is a monolith — every concern in one header. Functional, but the antithesis of the rest of the codebase's per-file simplicity.
-- `Scheduler::rebuild()` calls `onAllocateMemory()` on **all** top-level modules for every control change. Coarse-grained; the spec'd fine-grained rebuild propagation isn't there.
-- ArtNet UDP dominates ESP32 tick time (~51% at 128×128). Not blocking, but a known scaling cliff.
-- Documentation-vs-reality drift: README still said "implementation starting" when live ESP32 scenarios were passing. Internal docs were good; external were stale.
-
-**Implementation gaps that became plan items:**
-- No System MoonModule in the tree (diagnostics existed in `/api/system` but not as a queryable module). → Landed as part of plan-10's foundation work.
-- No WiFi, no persistence, no UI type picker. → Persistence landed (plan-10); WiFi/AP cascade landed earlier; type picker is plan-12.
-- Multi-layer support documented but not coded. → Backlog (plan.md "Multi-layer pipeline").
-- WS2812/APA102/direct-DMX output absent (only ArtNet). → Out-of-scope for Release 1.0; backlog.
-- Teensy and Raspberry Pi platforms documented but not implemented. → Same.
-
-**Dimension scores given at the time** (for calibration when re-assessing later):
-
-| Dimension | Score | Status |
-|---|---|---|
-| Architecture | 8/10 | Clear core/domain separation, MoonModule everywhere |
-| Core implementation | 7/10 | Pipeline works, tested, hardware-proven |
-| Extensibility | 7/10 | Factory + specs; UI not yet fully generic for "everything from browser" |
-| Testing & quality | 8/10 | Strong for project size |
-| Product/UX (end-user) | 5/10 | Works locally; no WiFi flash flow, no persistence, no type picker |
-| Performance (ESP32) | 6/10 | 128×128 works; ArtNet dominates; no LED DMA path |
-| Documentation | 7/10 | Excellent internally; README/plan out of sync |
-
-**What's already aged since the assessment** (the doc was written pre-plan-10): persistence is done, the 10 effects and `GET /api/types` are imminent via PR #3, more effects in `moonmodules_draft/` are being promoted. Use this entry as the baseline; the next assessment should compare deltas.
-
-### What to do differently next time
-- Write module specifications BEFORE code (docs/modules/*.md)
-- Write UI specification BEFORE implementing the web UI
-- Stabilize architecture.md BEFORE starting implementation
-- Use integration tests (full pipeline, not just unit tests)
-- Add a zero-alloc hot path test from the start
-- Resolve the template/virtual dispatch split in layouts
-- Design a proper modifier interface (virtual methods, not dynamic_cast)
-- Build the rebuild propagation into the framework, not main.cpp
 
 ## Lessons from the next-iteration branch (plans 08-12)
 

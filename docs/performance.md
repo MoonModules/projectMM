@@ -50,7 +50,7 @@ Individual measurements vary ~5–10% on the Olimex board with no configuration 
 
 ### All-effects sweep (every effect, no modifier, Ethernet + ArtNet)
 
-`scenario_AllEffects_grid_sizes` runs each effect alone over a Layer (no modifier) at four square grids, through the real ArtNet + Preview drivers — the per-effect cost of the same pipeline the README's single-effect headline row measures. Numbers are `observed.esp32-eth` from a live run; apply the ~5–10% variance above.
+This Olimex sweep ran each effect alone over a Layer (no modifier) at four square grids, through the real ArtNet + Preview drivers — the per-effect cost of the same pipeline the README's single-effect headline row measures. Numbers are from a live run; apply the ~5–10% variance above. (The per-effect sweep merged into the light/heavy bracket of `scenario_perf_full`; this table is the archived Olimex run.)
 
 **FPS** (= 1,000,000 / tick µs):
 
@@ -161,7 +161,7 @@ LUT is half desktop size (uint16_t vs uint32_t per entry). The 1:1 (no-modifier)
 
 ## ESP32-S3 — ESP32-S3 N16R8 Dev (16 MB flash, 8 MB octal PSRAM)
 
-`esp32s3-n16r8` firmware on the ESP32-S3 N16R8 Dev at `Network.txPowerSetting=8` dBm (the brown-out cap injected by `boards.json`). 128×128 grid, Mirror XY, ArtNet over WiFi STA — the `scenario_GridLayout_grid_sizes.json` sweep against the live device. Per-step tick/heap live in `observed.esp32s3-n16r8` across the scenarios. Numbers below are the 128×128 step.
+`esp32s3-n16r8` firmware on the ESP32-S3 N16R8 Dev at `Network.txPowerSetting=8` dBm (the brown-out cap injected by `boards.json`). 128×128 grid, Mirror XY, ArtNet over WiFi STA — the grid sweep (now part of `scenario_perf_full`) against the live device. Per-step tick/heap live in `observed.esp32s3-n16r8` across the scenarios. Numbers below are the 128×128 step.
 
 | Metric | Value | Notes |
 |---|---|---|
@@ -191,7 +191,98 @@ The brown-out cap drops TX power 12 dB below default (8 dBm vs ~20 dBm). At lowe
 
 The PSRAM-merged heap (`totalHeap() > totalInternalHeap()`) is auto-detected — SystemModule binds the `psram` progress control only when this comparison is true. See `docs/moonmodules/core/SystemModule.md`.
 
+### All-effects sweep — render-only (no output driver, audio + discovery disabled)
+
+A render-only per-effect sweep on the S3 (`observed.esp32s3-n16r8`, build `Jun 17 2026`; this curve is what `scenario_perf_full`'s light/heavy bracket now measures on-device). Unlike the Olimex sweep above (which runs through the ArtNet driver and is output-bound at 128²), this one measures **raw render cost**: audio (I2S sampling) and the Devices module (the blocking HTTP discovery sweep) are disabled and **no output driver** is attached, so the tick is Layout→Layer→effect only. On the S3 the Layer buffer lives in PSRAM, so effect-compute is visible all the way to 16K pixels (it never converges to an output-bound floor the way the no-PSRAM Olimex does).
+
+**Tick (µs)** — render only, ~5–10% run-to-run variance applies:
+
+| Effect | 16² (256) | 32² (1K) | 64² (4K) | 128² (16K) |
+|--------|----:|----:|----:|-----:|
+| Lines | 88 | 96 | 179 | 6,425 |
+| Rainbow | 285 | 849 | 3,228 | 16,207 |
+| Noise | 913 | 2,951 | 11,661 | 51,230 |
+| Plasma | 352 | 1,020 | 3,744 | 20,020 |
+| PlasmaPalette | 146 | 423 | 1,765 | 10,085 |
+| Metaballs | 462 | 1,757 | 6,108 | 28,576 |
+| Fire | 382 | 1,138 | 4,505 | 22,745 |
+| Particles | 229 | 535 | 1,945 | 15,792 |
+| GlowParticles | 580 | 1,874 | 6,959 | 31,479 |
+| Checkerboard | 121 | 345 | 1,098 | 8,500 |
+| Spiral | 465 | 1,379 | 6,712 | 24,666 |
+| Rings | 852 | 2,455 | 9,383 | 41,403 |
+| LavaLamp | 309 | 974 | 3,612 | 21,243 |
+| GameOfLife | 138 | 413 | 1,870 | 16,127 |
+
+The cheapest (Lines, Checkerboard, PlasmaPalette) clear ~100 FPS even at 16K; the heaviest is **Noise** (51 ms = ~19 FPS at 16K — simplex noise per pixel), then Rings and GlowParticles. Effect-compute differences stay visible across the whole range because nothing is output-bound here.
+
+**Free internal heap** holds ~8.54 MB at small grids and ~8.46–8.49 MB at 16K — the ~50–100 KB delta is just the grid-sized render buffer (the `model` array), and it returns to ~8.54 MB whenever the grid shrinks: **no leak, no fragmentation creep** across the sweep. Largest free internal block stays ~90–110 KB throughout. (Internal RAM is not the constraint on this PSRAM board; the Layer buffer is in PSRAM.)
+
 ---
+
+## Incremental cost analysis (`scenario_perf_light` / `scenario_perf_full`)
+
+These two scenarios start from a clean canvas and add one subsystem at a time, measuring the tick/heap delta per step, so each module's cost is isolated. Measured live (2026-06-17, render-only, audio + discovery disabled) on all three boards:
+
+- **classic** — Olimex Gateway, ESP32 @240MHz, **no PSRAM** (320KB internal), `nrOfLightsType`=uint16
+- **S3** — ESP32-S3 N16R8 @240MHz, 8MB PSRAM, uint32
+- **P4** — Waveshare P4-NANO, ESP32-P4 @400MHz dual-core, 32MB PSRAM, uint32
+
+All figures tick µs at 16² unless a grid is named; ~5–10% run-to-run variance, so small (<~30µs) deltas are near the noise floor.
+
+### Per-subsystem cost (added one at a time, 16² grid)
+
+Absolute tick at each step (the diff vs the prior row is that subsystem's cost):
+
+| Step | classic | S3 | P4 | Reading |
+|---|--:|--:|--:|---|
+| Render floor (Grid+Layer+Checkerboard) | 129 | 133 | 67 | the baseline; P4 ~2× faster |
+| − AudioModule disabled | 116 | 111 | n/a | **audio ≈ +13–22µs/tick** (fixed I2S block-read; no mic on the P4) |
+| − Devices discovery disabled | 116 | 112 | 56 | idle discovery is free (boot sweep is one-shot) |
+| + MultiplyModifier (2×2) | 315 | 292 | 96 | **+180–200µs** — the per-frame blend+map over the LUT |
+| + PreviewDriver | 115 | 118 | 56 | apparatus; free |
+| + NetworkSendDriver | 139 | 141 | 67 | ArtNet/DDP build+send; cheap at this size |
+| + RmtLedDriver (64 LEDs) | 152 | 120 | 56 | per-frame encode+transmit at a fixed 64-LED output |
+| + LcdLedDriver (64 LEDs) | n/a¹ | 142 | 57² | S3 LCD_CAM i80 |
+| + ParlioLedDriver (64 LEDs) | n/a¹ | n/a | 58 | P4 Parlio |
+
+¹ classic has only RMT; the LCD/Parlio rows there are **not** real measurements (the driver isn't compiled/registered on classic, the optional add is skipped, so the row just re-measures the prior pipeline). Gating these drivers out per chip is tracked in the backlog. ² P4 has LCD_CAM too, but Parlio is its scale path. "n/a" = driver absent on that chip.
+
+**Expected, and confirmed everywhere:** audio is a small fixed per-tick cost; idle discovery is free; output drivers are cheap at a capped 64-LED output (none dominates the render path). The modifier's +~190µs at 16² is the one notable per-frame add — explained below (it's the blend+map, and it *pays for itself* at large grids).
+
+### Effect compute — light vs heavy bracket, across grid sizes (render-only)
+
+Tick µs; FPS in parens for the 16K row:
+
+| Grid (pixels) | classic | S3 | P4 |
+|---|--:|--:|--:|
+| **Checkerboard (light)** | | | |
+| 16² (256) | 149 | 119 | 61 |
+| 32² (1K) | 357 | 328 | 133 |
+| 64² (4K) | 1,147 | 1,090 | 452 |
+| 128² (16K) | 4,360 | 7,949 | 1,940 |
+| **Noise (heavy)** | | | |
+| 16² (256) | 1,010 | 799 | 313 |
+| 32² (1K) | 3,203 | 2,831 | 1,120 |
+| 64² (4K) | 13,547 | 11,235 | 4,358 |
+| 128² (16K) | 62,316 (16 FPS) | 50,555 (20 FPS) | 17,433 (57 FPS) |
+
+All curves scale **~linear in pixel count** (no superlinear blowup → no realloc/fragmentation pathology). The heavy effect is the 16K bottleneck on every board, and the board ranking is P4 ≫ S3 > classic on heavy compute (the P4's 400MHz dual-core is ~3× the S3). **Surprise worth noting:** at light-16K the *classic* (4,360µs) beats the S3 (7,949µs) — the S3's PSRAM-resident buffer has higher access latency than the classic's internal RAM for the cheap Checkerboard inner loop, and classic's uint16 LUT is half the size; on the heavy effect the compute dominates and the S3 pulls ahead again. See the [NoiseEffect cost backlog item](backlog/backlog.md) for the fixed-point / strided-sampling ideas.
+
+### MultiplyModifier — compute down, memory up (Noise effect)
+
+Often misread (I misread it first): with the default 2×2 kaleidoscope the modifier makes the *logical* grid ¼-size, so the effect computes on fewer pixels — the modifier **reduces** tick at large grids, and its real cost is the 1:N mapping-LUT **memory**.
+
+Tick µs, Noise alone vs Noise+Multiply:
+
+| Grid (physical) | classic alone | classic +Mult | S3 alone | S3 +Mult | P4 alone | P4 +Mult |
+|---|--:|--:|--:|--:|--:|--:|
+| 16² | 1,010 | 456 | 799 | 385 | 313 | 163 |
+| 32² | 3,203 | 1,808 | 2,831 | 1,573 | 1,120 | 533 |
+| 64² | 13,547 | 6,958 | 11,235 | 6,552 | 4,358 | 2,058 |
+| 128² (16K) | 62,316 | **28,466 (35 FPS)** | 50,555 | 29,647 | 17,433 | **9,964 (100 FPS)** |
+
+So the modifier roughly **halves** the heavy tick at every grid (¼ logical area, but the 1:N map adds back some cost). The memory price is the LUT-destinations array — on the S3 it cost +1.7KB(16²)→+93KB(16K); on the **classic at 16K it ran with ~36KB free heap / ~26KB largest block** — tight but working, no crash, no degrade. This **confirms the no-PSRAM viability**: 16K Noise+Multiply runs on the classic at 35 FPS render-only (and has historically run at 10–20 FPS when also sending out over **ArtNet** — that send, not the render, was the limiter). Not a no-PSRAM blocker.
 
 ## ESP32 firmware size
 

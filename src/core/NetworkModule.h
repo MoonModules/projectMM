@@ -104,6 +104,11 @@ public:
     bool respectsEnabled() const override { return false; }
 
     void setup() override {
+        // Push the DHCP hostname (option 12) before any bring-up so the device shows
+        // its name — not "Unknown" — in the router's client list. Stored once; every
+        // netif the platform creates (eth, the wifi cascade, a later reconnect) reads
+        // it. Same name as mDNS/SoftAP: deviceName, default MM-XXXX.
+        platform::setHostname(hostName());
         // Push the board's eth config (persisted controls, loaded before setup)
         // into the platform layer before ethInit reads it.
         syncEthConfig();
@@ -388,7 +393,7 @@ public:
         // Tear down children first (Improv on ESP32) so the platform-side
         // Improv task stops touching UART0 before we drop the network state.
         MoonModule::teardown();
-        platform::mdnsStop();
+        platform::mdnsShutdown();
         if constexpr (platform::hasWiFi) {
             if (state_ == State::AP) { platform::wifiApStop(); noteRadioStopped(); }
             if (state_ == State::ConnectedSta || state_ == State::WaitingSta) {
@@ -426,6 +431,10 @@ private:
     // MoonModule::status_); the named "Buf" suffix makes the ownership clear
     // and distinguishes it from MoonModule's own status accessors.
     char statusBuf_[48] = {};
+    // Lazily-filled MAC-derived hostname fallback (see hostName()). mutable: hostName()
+    // is const but caches here on first use. Empty until needed; normally unused
+    // because deviceName is set by SystemModule before bring-up.
+    mutable char hostNameFallback_[8] = {};   // "MM-XXXX" + NUL
 
     // Static IP fields. uint8_t[4] octets, not strings — saves 12 bytes per
     // address vs char[16] dotted-quad, and the wire/persistence layers
@@ -629,17 +638,36 @@ private:
         if (scheduler_) scheduler_->buildState();
     }
 
-    void updateStatusIP() {
-        char ip[16] = {};
-        if (state_ == State::ConnectedEth) {
-            platform::ethGetIP(ip, sizeof(ip));
-            std::snprintf(statusBuf_, sizeof(statusBuf_), "Eth: %s", ip); setStatus(statusBuf_, Severity::Status);
-        } else if constexpr (platform::hasWiFi) {
-            if (state_ == State::ConnectedSta) {
-                platform::wifiStaGetIP(ip, sizeof(ip));
-                std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi: %s", ip); setStatus(statusBuf_, Severity::Status);
-            }
+public:
+    // Write the current LAN IP as octets into out[0..3] (all-zero = not connected).
+    // Octets, not a string: the IP's canonical form is uint8_t[4] (matching the
+    // static-IP controls and formatDottedQuad), and no IP string is held as state —
+    // the IP already lives as the netif's binding, so duplicating it into a member
+    // would just waste RAM. Callers that need text format with formatDottedQuad at
+    // their boundary. Read by main.cpp's per-second tick line, which appends it as a
+    // stable `MM_IP=<ip>` token for the web installer's post-flash serial read —
+    // riding the already-periodic tick line means the IP re-emits every second
+    // (timing-independent: DHCP can take several seconds — measured ~7s on the
+    // P4-NANO — and the installer reopens the port at its own pace, so a one-shot
+    // connect-time line is easy to miss).
+    void currentIp(uint8_t out[4]) const {
+        out[0] = out[1] = out[2] = out[3] = 0;
+        if (state_ == State::ConnectedEth) platform::ethGetIPv4(out);
+        else if constexpr (platform::hasWiFi) {
+            if (state_ == State::ConnectedSta) platform::wifiStaGetIPv4(out);
         }
+    }
+
+private:
+    void updateStatusIP() {
+        uint8_t ip[4];
+        currentIp(ip);   // same eth/wifi getter dispatch, in one place
+        if (!ip[0] && !ip[1] && !ip[2] && !ip[3]) return;   // not connected — keep prior status
+        char ipStr[16];
+        formatDottedQuad(ipStr, ip);
+        const char* label = (state_ == State::ConnectedEth) ? "Eth" : "WiFi";
+        std::snprintf(statusBuf_, sizeof(statusBuf_), "%s: %s", label, ipStr);
+        setStatus(statusBuf_, Severity::Status);
     }
 
     // Apply txPowerSetting_ to the radio whenever it changes (UI write,
@@ -694,11 +722,29 @@ private:
     // resync.
     void noteRadioStopped() { appliedTxPowerSetting_ = -1; }
 
+    // The device's network name — used for BOTH the DHCP hostname (router client
+    // list) and the mDNS .local name, so the two never diverge. Normally deviceName
+    // (default MM-XXXX, set by SystemModule before our setup). Fallback for the
+    // should-never-happen empty case: a UNIQUE MAC-derived MM-XXXX (same scheme
+    // SystemModule uses) — NOT a shared literal like "mm", which would collide across
+    // devices on one LAN (duplicate hostnames → the router shows one, mDNS clashes).
+    // Computed once into a member buffer so the returned pointer stays valid.
+    const char* hostName() const {
+        if (systemModule_ && systemModule_->deviceName()[0] != 0)
+            return systemModule_->deviceName();
+        if (!hostNameFallback_[0]) {
+            uint8_t mac[6] = {};
+            platform::getMacAddress(mac);
+            std::snprintf(hostNameFallback_, sizeof(hostNameFallback_),
+                          "MM-%02X%02X", mac[4], mac[5]);
+        }
+        return hostNameFallback_;
+    }
+
     void syncMdns() {
         bool shouldRun = mdnsEnabled_ && (state_ == State::ConnectedEth || state_ == State::ConnectedSta);
         if (shouldRun && !mdnsRunning_) {
-            const char* devName = (systemModule_ && systemModule_->deviceName()[0] != 0)
-                                  ? systemModule_->deviceName() : "mm";
+            const char* devName = hostName();
             // Only mark running on success — leave false so loop1s retries next tick
             if (platform::mdnsInit(devName)) {
                 mdnsRunning_ = true;

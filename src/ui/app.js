@@ -1317,6 +1317,23 @@ function createControl(moduleName, moduleType, ctrl) {
             row.appendChild(btn);
             break;
         }
+        case "list": {
+            // A generic read-only list (ControlType::List). value = array of row
+            // summary objects; ctrl.detail = parallel array of detail objects (same
+            // order). Render one clickable row per summary; clicking toggles a detail
+            // panel below it. Self rows (summary.self === true) get a marker. Fully
+            // generic — the engine decides the fields; the UI just renders objects.
+            row.classList.add("control-list-row");
+            const rows = Array.isArray(ctrl.value) ? ctrl.value : [];
+            const details = Array.isArray(ctrl.detail) ? ctrl.detail : [];
+            const list = document.createElement("div");
+            list.className = "list-control";
+            list.dataset.mid = moduleName;
+            list.dataset.key = ctrl.name;
+            buildListEntries(list, rows, details, new Set());   // initial: nothing expanded
+            row.appendChild(list);
+            break;
+        }
         default:
             // Unknown control type — skip silently. New types may be added engine-side
             // without breaking the UI; they just don't render until handled here.
@@ -1324,6 +1341,111 @@ function createControl(moduleName, moduleType, ctrl) {
     }
 
     return row;
+}
+
+// Rebuild a List control's entries inside `container` from `rows` (summary objects)
+// and `details` (parallel detail objects). `openSet` is a Set<string> of summary
+// texts whose detail panels start expanded — pass `new Set()` for a fresh build, or
+// the currently-open set on a live re-render so an expanded row stays open. Shared by
+// createControl (initial) and updateModuleControls (WS live patch) so the two can't drift.
+function buildListEntries(container, rows, details, openSet) {
+    container.replaceChildren();
+    if (rows.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "list-empty";
+        empty.textContent = "(none)";
+        container.appendChild(empty);
+        return;
+    }
+    rows.forEach((item, i) => {
+        const entry = document.createElement("div");
+        entry.className = "list-entry" + (item && item.self ? " list-self" : "");
+        const summary = document.createElement("div");
+        summary.className = "list-summary";
+        summary.tabIndex = 0;
+        summary.setAttribute("role", "button");
+        summary.textContent = listSummaryText(item);
+        const detailPanel = document.createElement("div");
+        detailPanel.className = "list-detail";
+        detailPanel.hidden = !openSet.has(summary.textContent);
+        summary.setAttribute("aria-expanded", String(!detailPanel.hidden));
+        fillListDetail(detailPanel, details[i] ?? item);
+        const toggle = () => {
+            detailPanel.hidden = !detailPanel.hidden;
+            summary.setAttribute("aria-expanded", String(!detailPanel.hidden));
+        };
+        summary.addEventListener("click", toggle);
+        summary.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+        });
+        entry.append(summary, detailPanel);
+        container.appendChild(entry);
+    });
+}
+
+// Join a list row's scalar fields into a one-line summary (skips the `self` marker
+// flag and any nested objects). Generic: the engine names the fields.
+function listSummaryText(item) {
+    if (!item || typeof item !== "object") return String(item ?? "");
+    return Object.entries(item)
+        .filter(([k, v]) => k !== "self" && typeof v !== "object")
+        .map(([, v]) => v)
+        .join("  ·  ");
+}
+
+// Render a list row's detail object as read-only key/value rows. Scalars print as-is;
+// an array of scalars (e.g. a device's `speaks:["http"]` or `via:["mdns","scan"]`)
+// renders as small chips so multi-valued fields like the discovery source are visible
+// at a glance. Nested objects are still skipped (no use case yet). Generic — the engine
+// names the fields, so a new array field shows up with no UI change here.
+function fillListDetail(panel, detail) {
+    panel.replaceChildren();
+    if (!detail || typeof detail !== "object") return;
+    for (const [k, v] of Object.entries(detail)) {
+        const isScalarArray = Array.isArray(v) && v.every(e => typeof e !== "object");
+        if (typeof v === "object" && !isScalarArray) continue;
+        const r = document.createElement("div");
+        r.className = "list-detail-row";
+        const kEl = document.createElement("span");
+        // A `*Sec` field is a duration in seconds (e.g. a device's `ageSec`) — show it
+        // under a plainer label ("last seen") and as a relative time, not a bare count.
+        // `cached` is the sibling: a restored device not yet re-seen live → "last seen:
+        // cached" rather than a fake recent time.
+        const isDuration = k.endsWith("Sec");
+        kEl.className = "list-detail-key";
+        kEl.textContent = (k === "ageSec" || k === "cached") ? "last seen" : k;
+        const vEl = document.createElement("span");
+        vEl.className = "list-detail-val";
+        if (k === "cached") {
+            vEl.textContent = "cached";
+            vEl.classList.add("list-detail-muted");
+        } else if (isScalarArray) {
+            for (const e of v) {
+                const chip = document.createElement("span");
+                chip.className = "list-detail-chip";
+                chip.textContent = String(e);
+                vEl.appendChild(chip);
+            }
+        } else if (isDuration) {
+            vEl.textContent = relativeAge(Number(v));
+        } else {
+            vEl.textContent = String(v);
+        }
+        r.append(kEl, vEl);
+        panel.appendChild(r);
+    }
+}
+
+// Render a seconds-ago count as a short relative time ("just now", "2m ago", "3h ago",
+// "5d ago"). Snapshot at state-push time — it refreshes when the list re-renders, not
+// per second. Mirrors the device-side ageSec (now - lastSeenMs); kept simple on purpose.
+function relativeAge(sec) {
+    if (!Number.isFinite(sec) || sec < 0) return "—";
+    if (sec < 10) return "just now";
+    if (sec < 60) return `${sec}s ago`;
+    if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+    return `${Math.floor(sec / 86400)}d ago`;
 }
 
 function appendResetButton(row, moduleName, ctrl, def, applyVisually) {
@@ -1385,6 +1507,9 @@ function fmtTime(sec) {
 function fmtProgressLabel(ctrl) {
     const v = Number(ctrl.value) || 0;
     const t = Number(ctrl.total) || 0;
+    // bytes === false → a plain count (e.g. a scan position "37 / 254"); otherwise
+    // KB (the heap / flash / filesystem gauges, the original use).
+    if (ctrl.bytes === false) return v + " / " + t;
     return Math.round(v / 1024) + "KB / " + Math.round(t / 1024) + "KB";
 }
 
@@ -1628,6 +1753,24 @@ function updateModuleControls(mod) {
                 }
                 const lbl = document.querySelector(`span.control-value[data-mid="${mid}"][data-key="${k}.label"]`);
                 if (lbl) lbl.textContent = fmtProgressLabel(ctrl);
+                break;
+            }
+            case "list": {
+                // Rows change wholesale between scans, so rebuild the list's entries
+                // in place rather than patching individual fields. Preserves which
+                // detail panels were open by summary text (best-effort) so a live
+                // refresh doesn't collapse a row the user just expanded.
+                const list = document.querySelector(`div.list-control[data-mid="${mid}"][data-key="${k}"]`);
+                if (!list) break;
+                // Preserve which detail panels are currently open (by summary text) so
+                // a live refresh doesn't collapse a row the user just expanded.
+                const open = new Set(
+                    [...list.querySelectorAll(".list-entry")]
+                        .filter(e => { const d = e.querySelector(".list-detail"); return d && !d.hidden; })
+                        .map(e => e.querySelector(".list-summary")?.textContent));
+                const rows = Array.isArray(ctrl.value) ? ctrl.value : [];
+                const details = Array.isArray(ctrl.detail) ? ctrl.detail : [];
+                buildListEntries(list, rows, details, open);
                 break;
             }
         }

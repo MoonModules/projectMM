@@ -52,17 +52,19 @@ public:
     char ledsPerPin[48] = "";
 
     bool     loopbackTest = false;
-    uint16_t loopbackTxPin = 0;   // optional TX override for the self-test: when
-                                  // set (non-zero), the loopback transmits on THIS
+    int8_t   loopbackTxPin = -1;  // optional TX override for the self-test: when
+                                  // set (>= 0), the loopback transmits on THIS
                                   // pin in place of lane 0 (laneList_[0]); other
                                   // lanes are unchanged. Lets the bench loopback run
                                   // on a dedicated jumper pin without re-typing the
                                   // operational `pins`. Falls back to laneList_[0]
-                                  // when unset. The loopback only drives lane 0 with
-                                  // the test pattern, so a single override pin is all
-                                  // it needs. Test-only — normal output always uses
-                                  // the real `pins`.
-    uint16_t loopbackRxPin = 0;
+                                  // when unset (-1). The loopback only drives lane 0
+                                  // with the test pattern, so a single override pin is
+                                  // all it needs. Test-only — normal output always uses
+                                  // the real `pins`. int8_t + addPin (not uint16): the
+                                  // standard single-GPIO control, and -1 = unset keeps
+                                  // GPIO 0 usable as a loopback pin.
+    int8_t   loopbackRxPin = -1;
 
     void onBuildControls() override {
         controls_.addText("pins", pins, sizeof(pins));
@@ -70,9 +72,9 @@ public:
         derived()->addBusControls();   // i80 adds clockPin/dcPin here; Parlio none
         controls_.addBool("loopbackTest", loopbackTest);
         // Always bound, shown only in test mode — the conditional-control shape.
-        controls_.addUint16("loopbackTxPin", loopbackTxPin);
+        controls_.addPin("loopbackTxPin", loopbackTxPin);
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
-        controls_.addUint16("loopbackRxPin", loopbackRxPin);
+        controls_.addPin("loopbackRxPin", loopbackRxPin);
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
     }
 
@@ -306,6 +308,13 @@ protected:
             setStatus("loopback: no valid pins", Severity::Warning);
             return;
         }
+        // RX pin must be set — an unset rxPin (-1) has nothing to capture on, and the
+        // uint16_t cast at the busLoopback call would turn -1 into a bogus pin.
+        if (loopbackRxPin < 0) {
+            clearFailBuf();
+            setStatus("loopback: set loopbackRxPin (jumper it to the TX pin)", Severity::Status);
+            return;
+        }
         const uint8_t outCh = correction_ ? correction_->outChannels : 0;
         if (frameBytes_ == 0 || maxLaneLights_ == 0 || outCh == 0) {
             clearFailBuf();
@@ -339,7 +348,7 @@ protected:
         // subclass busLoopback reads laneList_, so substitute lane 0 around the call
         // and restore it after, so the following reinit() rebuilds the real bus.
         const uint16_t realLane0 = laneList_[0];
-        if (loopbackTxPin != 0) laneList_[0] = loopbackTxPin;
+        if (loopbackTxPin >= 0) laneList_[0] = static_cast<uint16_t>(loopbackTxPin);
         const auto r = derived()->busLoopback(frame, frameBytes_, dataBytes,
                                               static_cast<uint8_t>(outCh * 8));
         laneList_[0] = realLane0;

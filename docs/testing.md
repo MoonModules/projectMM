@@ -211,11 +211,11 @@ Every `scenario_*.json` carries top-level metadata plus a `description` per step
 
 ```json
 {
-  "name": "scenario_GridLayout_grid_sizes",
+  "name": "scenario_example_grid_sweep",
   "module": "GridLayout",
   "mode": "mutate",
   "also": ["Layer", "MultiplyModifier", "Drivers", "NetworkSendDriver"],
-  "description": "Walk the grid through 16x16 → 32x32 → 64x64 → 128x128 and assert a per-size FPS floor.",
+  "description": "Illustrative shape only (not a real file). Walk the grid through 16x16 → 32x32 → 64x64 → 128x128 and assert a per-size FPS floor.",
   "fixture": [
     { "name": "fix-layouts", "op": "add_module", "id": "Layouts", "type": "Layouts" },
     { "name": "fix-grid", "op": "add_module", "id": "Grid", "type": "GridLayout", "parent_id": "Layouts", "props": {"width": 16, "height": 16} },

@@ -55,13 +55,14 @@ public:
     // (respectsEnabled() defaults to true, so we don't override it.)
 
     // --- controls: three I2S pins, sample rate, the two conditioning knobs, and
-    // two read-only read-outs. The pins default to UNSET (0): the module is user-
-    // added when a board has a mic, and stays idle (no I2S init) until the user
-    // enters the real GPIOs, so adding it can't grab arbitrary pins or wedge a
-    // board with no mic. The bench INMP441 wiring is WS=4 / SD=5 / SCK=6. ---
-    uint16_t wsPin = 0;          // word-select / LRCLK
-    uint16_t sdPin = 0;          // serial data in
-    uint16_t sckPin = 0;         // bit clock
+    // two read-only read-outs. The pins default to UNSET (-1, the standard Pin-
+    // control sentinel — so GPIO 0 stays a usable mic pin): the module is user-added
+    // when a board has a mic, and stays idle (no I2S init) until the user enters the
+    // real GPIOs, so adding it can't grab arbitrary pins or wedge a board with no
+    // mic. The bench INMP441 wiring is WS=4 / SD=5 / SCK=6. ---
+    int8_t wsPin = -1;           // word-select / LRCLK (-1 = unset)
+    int8_t sdPin = -1;           // serial data in (-1 = unset)
+    int8_t sckPin = -1;          // bit clock (-1 = unset)
     // Sample rate is a discrete choice (the standard audio rates), so it's a
     // dropdown over a fixed set, not a free number. sampleRateSel indexes
     // kSampleRates; sampleRate() resolves it to Hz. Default index 2 = 22050.
@@ -79,9 +80,9 @@ public:
                                                        ? sampleRateSel : 2]; }
 
     void onBuildControls() override {
-        controls_.addUint16("wsPin", wsPin);
-        controls_.addUint16("sdPin", sdPin);
-        controls_.addUint16("sckPin", sckPin);
+        controls_.addPin("wsPin", wsPin);
+        controls_.addPin("sdPin", sdPin);
+        controls_.addPin("sckPin", sckPin);
         static constexpr const char* kRateOptions[] = {"8000", "16000", "22050", "44100"};
         controls_.addSelect("sampleRate", sampleRateSel, kRateOptions, kSampleRateCount);
         controls_.addUint8("floor", floor, 0, 255);
@@ -196,14 +197,17 @@ private:
             return;
         }
         deinit();
-        // Pins unset (the default until the user wires a mic): stay idle, don't
-        // attempt an I2S init. A 0 GPIO is not a valid mic pin, and initialising
-        // I2S on unset/arbitrary pins is what hung a mic-less board's boot.
-        if (wsPin == 0 || sdPin == 0 || sckPin == 0) {
+        // Any pin unset (-1, the default until the user wires a mic): stay idle,
+        // don't attempt an I2S init — initialising I2S on unset pins is what hung a
+        // mic-less board's boot. GPIO 0 IS a valid mic pin now (the sentinel is -1,
+        // not 0), so the guard tests < 0, not == 0.
+        if (wsPin < 0 || sdPin < 0 || sckPin < 0) {
             setStatus("mic: set wsPin / sdPin / sckPin", Severity::Status);
             return;
         }
-        inited_ = platform::audioMicInit(mic_, wsPin, sdPin, sckPin, sampleRate());
+        inited_ = platform::audioMicInit(mic_, static_cast<uint16_t>(wsPin),
+                                         static_cast<uint16_t>(sdPin),
+                                         static_cast<uint16_t>(sckPin), sampleRate());
         if (!inited_) {
             setStatus(kInitFailMsg, Severity::Error);
             return;

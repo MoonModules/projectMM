@@ -1,0 +1,618 @@
+{
+  "name": "scenario_perf_light",
+  "module": "Layer",
+  "mode": "mutate",
+  "also": [
+    "Layouts",
+    "GridLayout",
+    "Drivers",
+    "PreviewDriver",
+    "CheckerboardEffect",
+    "NoiseEffect",
+    "MultiplyModifier"
+  ],
+  "description": "Fast incremental performance check: start from the bare minimum render pipeline and add one thing at a time, measuring the tick/heap delta each step, so a regression shows up as a per-step jump. The LIGHT companion to scenario_perf_full — it stays small (≤64²) and driver-free so it runs in seconds. Mutate mode + canvas-preparing: the steps clear_children whatever Layouts/Layers/Drivers the device already had (the pre-wired apparatus like PreviewDriver/Board survives — clear_children only drops user-editable children) and rebuild a known tree, so it runs from any starting state and always measures the same minimal pipeline. Order: (1) minimal = Grid(16²)+Layer+a LIGHT effect (Checkerboard, the cheapest), no modifier/driver/audio/discovery; (2) +MultiplyModifier (adds the mapping LUT — the heavy memory path); (3) +PreviewDriver; (4) swap to a HEAVY effect (Noise) to bracket the compute range; (5) grid 16²→32²→64² to show the size scaling. Full 128²/16K sweep, real LED/network drivers, audio+discovery cost: see scenario_perf_full.",
+  "fixture": [
+    {
+      "name": "fix-layouts",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "fix-layers",
+      "op": "add_module",
+      "id": "Layers",
+      "type": "Layers",
+      "props": {
+        "layouts": "Layouts"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "name": "disable-audio",
+      "description": "Quiet I2S sampling so it can't pollute the tick (optional — device only).",
+      "op": "set_control",
+      "id": "AudioModule",
+      "key": "enabled",
+      "value": false,
+      "optional": true
+    },
+    {
+      "name": "disable-devices",
+      "description": "Stop the blocking HTTP discovery sweep (optional — device only).",
+      "op": "set_control",
+      "id": "Devices",
+      "key": "enabled",
+      "value": false,
+      "optional": true
+    },
+    {
+      "name": "clear-layers",
+      "description": "Drop whatever effects/modifiers the device had — start clean.",
+      "op": "clear_children",
+      "id": "Layers"
+    },
+    {
+      "name": "clear-layouts",
+      "op": "clear_children",
+      "id": "Layouts"
+    },
+    {
+      "name": "clear-drivers",
+      "description": "Drop any output driver; the pre-wired PreviewDriver is non-deletable and survives.",
+      "op": "clear_children",
+      "id": "Drivers"
+    },
+    {
+      "name": "build-grid",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 16,
+        "height": 16
+      }
+    },
+    {
+      "name": "build-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "parent_id": "Layers",
+      "props": {
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "build-fx",
+      "op": "add_module",
+      "id": "FX",
+      "type": "CheckerboardEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "measure-minimal",
+      "description": "Bare minimum: Grid(16²) + Layer + Checkerboard (light effect). No modifier, no driver. The render floor everything else is measured against.",
+      "op": "measure",
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            0
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            113,
+            140
+          ],
+          "free_heap": [
+            8515895,
+            8535151
+          ],
+          "max_alloc_block": [
+            81920,
+            102400
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            114,
+            162
+          ],
+          "free_heap": [
+            127980,
+            134020
+          ],
+          "max_alloc_block": [
+            110592,
+            110592
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            54,
+            72
+          ],
+          "free_heap": [
+            34040943,
+            34041859
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        }
+      }
+    },
+    {
+      "name": "add-modifier",
+      "description": "+MultiplyModifier: allocates the mapping LUT (the heavy memory path vs the 1:1 no-LUT case).",
+      "op": "add_module",
+      "id": "Mod",
+      "type": "MultiplyModifier",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "measure-with-modifier",
+      "description": "Cost of the modifier + LUT over the minimal pipeline. Heap delta vs measure-minimal is the LUT allocation.",
+      "op": "measure",
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            0
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            248,
+            255
+          ],
+          "free_heap": [
+            8530367,
+            8531367
+          ],
+          "max_alloc_block": [
+            98304,
+            98304
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            304,
+            325
+          ],
+          "free_heap": [
+            134620,
+            138024
+          ],
+          "max_alloc_block": [
+            110592,
+            110592
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            98,
+            104
+          ],
+          "free_heap": [
+            34039139,
+            34039419
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        }
+      }
+    },
+    {
+      "name": "measure-with-preview",
+      "description": "PreviewDriver is the pre-wired apparatus — it survives clear_children and is already attached, so the measures above already include it (no add step needed; adding a second Preview is rejected). This is a stable repeat of the effect+modifier config for run-to-run variance.",
+      "op": "measure",
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            0
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            241,
+            243
+          ],
+          "free_heap": [
+            8529571,
+            8532931
+          ],
+          "max_alloc_block": [
+            98304,
+            102400
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            304,
+            308
+          ],
+          "free_heap": [
+            135620,
+            136192
+          ],
+          "max_alloc_block": [
+            110592,
+            110592
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            93,
+            94
+          ],
+          "free_heap": [
+            34039139,
+            34039207
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        }
+      }
+    },
+    {
+      "name": "swap-heavy-fx",
+      "description": "Swap the light effect for a HEAVY one (Noise — simplex per pixel) to bracket the compute range at the same 16².",
+      "op": "replace_module",
+      "id": "FX",
+      "type": "NoiseEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "measure-heavy-16",
+      "op": "measure",
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            1,
+            1
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            405,
+            406
+          ],
+          "free_heap": [
+            8532915,
+            8532939
+          ],
+          "max_alloc_block": [
+            102400,
+            102400
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            306,
+            525
+          ],
+          "free_heap": [
+            134596,
+            134612
+          ],
+          "max_alloc_block": [
+            110592,
+            110592
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            154,
+            180
+          ],
+          "free_heap": [
+            34039163,
+            34039219
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        }
+      }
+    },
+    {
+      "name": "grid-32-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 32
+    },
+    {
+      "name": "grid-32-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32
+    },
+    {
+      "name": "measure-heavy-32",
+      "op": "measure",
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            3,
+            4
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            1527,
+            1778
+          ],
+          "free_heap": [
+            8530103,
+            8533407
+          ],
+          "max_alloc_block": [
+            102400,
+            106496
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            1211,
+            1856
+          ],
+          "free_heap": [
+            133364,
+            133396
+          ],
+          "max_alloc_block": [
+            110592,
+            110592
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            532,
+            533
+          ],
+          "free_heap": [
+            34032431,
+            34032475
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        }
+      }
+    },
+    {
+      "name": "grid-64-w",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 64
+    },
+    {
+      "name": "grid-64-h",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 64
+    },
+    {
+      "name": "measure-heavy-64",
+      "op": "measure",
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            14,
+            16
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            6386,
+            6830
+          ],
+          "free_heap": [
+            8504719,
+            8506427
+          ],
+          "max_alloc_block": [
+            98304,
+            110592
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        },
+        "esp32": {
+          "tick_us": [
+            4412,
+            6633
+          ],
+          "free_heap": [
+            113668,
+            113788
+          ],
+          "max_alloc_block": [
+            90112,
+            98304
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            2038,
+            2061
+          ],
+          "free_heap": [
+            34005455,
+            34005499
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-17",
+            "2026-06-17"
+          ]
+        }
+      }
+    }
+  ]
+}
