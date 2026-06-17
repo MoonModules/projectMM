@@ -66,14 +66,17 @@ public:
     // severity. loopbackTest is a persistent on/off mode (see onUpdate): while on,
     // the test re-runs on every relevant change; turning it off clears the verdict.
     bool     loopbackTest = false;  // checkbox: on = run + keep re-running on change
-    uint16_t loopbackTxPin = 0;     // optional TX override for the test: when set
-                                    // (non-zero), the loopback transmits on THIS
-                                    // pin in place of pins[0], so the test can run
-                                    // on a dedicated jumper without re-typing the
+    int8_t   loopbackTxPin = -1;    // optional TX override for the test: when set
+                                    // (>= 0), the loopback transmits on THIS pin in
+                                    // place of pins[0], so the test can run on a
+                                    // dedicated jumper without re-typing the
                                     // operational `pins`. Falls back to pins[0] when
-                                    // unset. Test-only — normal output uses `pins`.
-    uint16_t loopbackRxPin = 0;     // jumper this to the TX pin for the test
-                                    // (unset by default; bench used pin 5)
+                                    // unset (-1). Test-only — normal output uses `pins`.
+                                    // int8_t + addPin (not uint16): single-GPIO controls
+                                    // use the standard Pin control, and -1 = unset lets
+                                    // GPIO 0 be a valid loopback pin (0-as-unset wouldn't).
+    int8_t   loopbackRxPin = -1;    // jumper this to the TX pin for the test
+                                    // (unset = -1 by default; bench used pin 5)
 
     // Whole-frame stress variant: instead of a 24-bit burst, transmit a real
     // frame the size of the first pin's slice, back to back, and bit-verify the
@@ -101,9 +104,9 @@ public:
         // add-then-setHidden shape NetworkModule uses for its static-IP fields. The
         // rebuild after every control change (HttpServerModule) re-runs this and
         // flips the flag. txPin is the optional override (0 = transmit on pins[0]).
-        controls_.addUint16("loopbackTxPin", loopbackTxPin);
+        controls_.addPin("loopbackTxPin", loopbackTxPin);
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
-        controls_.addUint16("loopbackRxPin", loopbackRxPin);
+        controls_.addPin("loopbackRxPin", loopbackRxPin);
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
         controls_.addBool("loopbackFrame", loopbackFrame);
         controls_.setHidden(controls_.count() - 1, !loopbackTest);
@@ -366,7 +369,7 @@ private:
         // TX override: when loopbackTxPin is set, transmit on it instead of the
         // first data pin, so the bench loopback runs on a dedicated jumper without
         // re-typing `pins`. Falls back to pins[0] when unset.
-        const uint8_t txPin = loopbackTxPin != 0
+        const uint8_t txPin = loopbackTxPin >= 0
             ? static_cast<uint8_t>(loopbackTxPin)
             : static_cast<uint8_t>(pinList_[0]);
         const uint8_t rxPin = static_cast<uint8_t>(loopbackRxPin);

@@ -115,6 +115,23 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - `scale8(v, f)` multiplies two 8-bit values and returns 8 bits. Factor 255 is identity, factor 0 zeroes, factor 128 halves (within integer rounding).
 - `scale8` is also `constexpr`.
 
+## Control
+
+`test/unit/core/unit_Control_apply_absent_key.cpp`
+*Also touches: FilesystemModule.*
+
+- hasKey distinguishes an absent key from one whose value is 0 — the capability the fix relies on. parseInt alone can't (returns 0 for both).
+- The core regression: a control bound with a non-zero value, overlaid with a JSON that does NOT contain its key, must keep its value — not snap to 0.
+- A present key still applies (the fix must not break the normal load path).
+- A present key whose value IS 0 must apply the 0 (don't confuse "present 0" with "absent"). Guards against an over-eager fix that skipped on value rather than key.
+
+`test/unit/core/unit_Control_list.cpp`
+
+- _ControlType::List value serializes as an array of row summaries_
+- _ControlType::List metadata carries a parallel detail array_
+- _ControlType::List with an empty source emits []_
+- _ControlType::List type identity + persistable + restore round-trip_
+
 ## Correction
 
 `test/unit/light/unit_Correction.cpp`
@@ -128,6 +145,35 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - GRBW preset combines the GRB reorder with the W derivation (G, R, B, W=min).
 - Brightness scaling runs before white derivation so W = min of the *scaled* RGB values.
 - rebuild() can switch the output channel count between RGB (3) and RGBW (4) on the fly.
+
+## DevicesModule
+
+`test/unit/core/unit_DeviceIdentify.cpp`
+
+- _classifyDevice: projectMM from /api/state modules array_
+- _classifyDevice: WLED from /json/info brand_
+- _classifyDevice: a live non-projectMM/non-WLED host is generic_
+- _classifyDevice: a truncated projectMM body still classifies (modules is early)_
+- _extractDeviceName: projectMM reads the deviceName control's value, not the type_
+- _extractDeviceName: WLED reads the top-level name field_
+- _extractDeviceName: generic / garbage / null bodies yield empty_
+- _extractDeviceName: respects the output buffer size (no overflow)_
+- _devTypeStr maps every type_
+
+`test/unit/core/unit_DevicesModule_ageout.cpp`
+
+- _DevicesModule: a still-fresh device survives just under kStaleMs (24h)_
+- _DevicesModule: a device drops once past kStaleMs (24h)_
+- _DevicesModule: restore tolerates an empty / malformed cache_
+
+## DistortionWavesEffect
+
+`test/unit/light/unit_DistortionWavesEffect.cpp`
+
+- _DistortionWavesEffect writes non-zero RGB data_
+- _DistortionWavesEffect produces spatial variation_
+- _DistortionWavesEffect speed 0 is frozen (stable across ticks)_
+- _DistortionWavesEffect survives a 0x0x0 grid_
 
 ## Drivers
 
@@ -200,6 +246,20 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - When the byte after MagicV isn't the version but happens to be 'I', the parser re-enters magic search at Magic1 — recovers a new frame that arrives right after a corrupted header.
 - Every defined ImprovFrameType (CurrentState, ErrorState, Rpc, RpcResponse) round-trips through builder + parser cleanly.
 - After FrameReady the parser returns to Magic0 and parses the next frame on the same instance without reset.
+
+## JsonUtil
+
+`test/unit/core/unit_JsonUtil_parse.cpp`
+
+- _parse a flat object reads each typed field_
+- _parse an array of objects (the persisted device list use case)_
+- _parse a nested object_
+- _escaped quotes and backslashes round-trip inside a string value_
+- _negative and fractional numbers_
+- _malformed inputs fail cleanly without crashing_
+- _overflow safety: too many nodes fails cleanly_
+- _overflow safety: nesting deeper than kMaxDepth fails cleanly_
+- _input longer than the text buffer fails cleanly_
 
 ## Layer
 
@@ -292,6 +352,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - A 0×0×0 grid is a clean idle: zero counts, zero frame (no pad for an empty frame), no crash.
 - setup/teardown cycles leave no residue (status clean, ASAN-checked heap).
 - loopbackRxPin is bound always, visible only while loopbackTest is on.
+- loopbackTxPin (optional lane-0 TX override) is bound always, hidden until the test is on — same conditional-control contract as loopbackRxPin. The override's lane-0 substitution is hardware-only (lcdLanes==0 on desktop); the visibility contract is host-testable here via the shared helper (toggles loopbackTest both ways and asserts the control stays bound while flipping visibility).
 
 `test/unit/light/unit_LcdLedEncoder.cpp`
 *Also touches: Correction.*
@@ -413,6 +474,12 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - In WiFi-capable builds (anything other than --firmware esp32-eth), the rssi and txPower controls are present and start hidden — Idle/Ethernet don't expose live WiFi metrics. The Ethernet-only build compiles them out entirely so the iteration finds nothing, which is still a valid pass shape.
 - Conditional controls: the static-IP fields (ip/gateway/subnet/dns) are visible only when addressing == Static (1), hidden under DHCP (0) — but ALWAYS bound so persistence can load a saved static config regardless of the live mode. This is the documented add-then-setHidden pattern (architecture.md § Conditional controls); the test pins it both ways so a regression (e.g. dropping setHidden, or conditionally NOT adding the field) fails here, not on hardware.
 
+`test/unit/core/unit_NetworkModule_ethernet.cpp`
+
+- The enum values are a wire contract: the Select index, the ethInit() switch, and every boards.json `ethType` all agree on these. Pin them so a reorder fails here.
+- Desktop has no Ethernet: the default PHY type is ethNone, so a board that never pushes an eth config still reports "no Ethernet" and the cascade falls through.
+- The platform seam must accept any runtime config and never bring Ethernet up on desktop — ethInit() returns false so NetworkModule cascades to WiFi/AP. Pushing a fully-populated W5500 config and an RMII config both leave ethInit() false and ethConnected() false; ethStop() is safe to call when nothing is running.
+
 ## NetworkReceiveEffect
 
 `test/unit/light/unit_NetworkReceiveEffect.cpp`
@@ -487,6 +554,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - loop() is crash-safe across single-pin / multi-pin / pre-init configs (the transmit path is gated out on the host; this pins the reachable contract).
 - setup/teardown cycles leave no residue (status clean, ASAN-checked heap).
 - loopbackRxPin is bound always, visible only while loopbackTest is on.
+- loopbackTxPin (optional lane-0 TX override) is bound always, hidden until the test is on — same conditional-control contract as loopbackRxPin. The override's lane-0 substitution is hardware-only (parlioLanes==0 on desktop); the visibility contract is host-testable here via the shared helper (toggles loopbackTest both ways and asserts the control stays bound while flipping visibility).
 
 ## ParticlesEffect
 
@@ -524,6 +592,18 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Pixel (0,0) is at full saturation and value (one channel exactly 255) — confirms hsvToRgb wiring.
 - Distant pixels carry different hues (the rainbow gradient is spatial, not uniform).
 
+## RandomMapModifier
+
+`test/unit/light/unit_RandomMapModifier.cpp`
+
+- A remap doesn't resize the logical box.
+- _RandomMapModifier maxMultiplier is 1_
+- The core property: the mapping is a true bijection over [0, w*h*d) — every destination index appears exactly once (no gaps, no duplicates).
+- A fresh modifier with the same generation produces the same permutation (deterministic seed → reproducible, which is what makes it testable).
+- Reshuffling (a beat) changes the mapping, and the result is still a bijection.
+- Robustness: an empty (0×0×0) grid must not crash — maxOut 0 yields no destination.
+- A resize (different box count) rebuilds the permutation to the new size, still a bijection.
+
 ## RmtLedDriver
 
 `test/unit/light/unit_RmtLedDriver_lifecycle.cpp`
@@ -536,6 +616,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - _RmtLedDriver releases the symbol buffer on teardown_
 - MoonModule contract: teardown reverses setup, so setup→teardown→setup→teardown cycles leave no residue — no leaked heap (ASAN in the test runner catches that), no stuck state. After each teardown the driver must look untouched: no symbol buffer, no status. Run several cycles to surface any accumulation.
 - Conditional control: loopbackRxPin is visible only while loopbackTest is on, hidden otherwise — but always bound (so a saved rxPin loads regardless). Same add-then-setHidden pattern as NetworkModule (architecture.md § Conditional controls). This pins the exact behavior that, with the old UI, showed the pin at the wrong times; a regression in the C++ flag now fails here.
+- loopbackTxPin is the optional TX override (transmit on it instead of pins[0] during the self-test). Like loopbackRxPin it's a conditional control: always bound (so a saved override loads), shown only while loopbackTest is on. The override's effect on the transmitted pin is hardware-only (rmtTxChannels==0 on desktop), but the conditional-visibility contract is host-testable here.
 - Editing `pins` while the loopback test is ON must refresh the parsed config before the self-test runs — onUpdate fires before the buildState sweep re-parses, so without the in-branch parseConfig() the test would transmit on the OLD pin and show a verdict for it. Mirrors the fix in ParallelLedDriver; this pins the RMT sibling that the dedup left behind. Host-observable via pinCount(): the refresh re-parses to the new pin set even though the platform loopback itself is inert.
 
 `test/unit/light/unit_RmtLedDriver_pins.cpp`
@@ -568,6 +649,16 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - _encoder: GRB ordering comes from Correction, encoder is order-agnostic_
 - _encoder: RGBW preset yields 32 symbols per light_
 
+## RotateModifier
+
+`test/unit/light/unit_RotateModifier.cpp`
+
+- _RotateModifier logicalDimensions are identity_
+- _RotateModifier maxMultiplier is 1_
+- At the initial angle (0) the rotation is identity — every light maps to itself.
+- Every emitted destination is in range (no out-of-bounds index), and the count is always 0 or 1 (a remap never fans out).
+- _RotateModifier tolerates an empty grid_
+
 ## Scheduler
 
 `test/unit/core/unit_Scheduler_unique_names.cpp`
@@ -578,6 +669,25 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - deduplicateNamesInTree() walks the entire module tree in one pass and disambiguates every duplicate (used after persistence load).
 - firstByName(name) returns the first match in DFS order, or nullptr if no module carries that name.
 - If the disambiguating suffix would overflow the 16-byte name buffer, ensureUniqueName refuses to truncate and keeps the colliding name (sharp edge, documented).
+
+## SineEffect
+
+`test/unit/light/unit_SineEffect.cpp`
+
+- _SineEffect writes non-zero RGB data_
+- _SineEffect amplitude 0 yields a black buffer_
+- _SineEffect varies across the x axis (R channel follows x)_
+- _SineEffect survives a 0x0x0 grid_
+
+## Sort
+
+`test/unit/core/unit_Sort.cpp`
+
+- _insertionSort orders ints ascending_
+- _insertionSort with a custom (descending) comparator_
+- _insertionSort orders C-strings (the device-name use case)_
+- _insertionSort is stable — equal keys keep input order_
+- _insertionSort handles empty and single-element arrays_
 
 ## SphereLayout
 
@@ -601,6 +711,15 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - SystemModule accepts user-added Peripheral children (sensors/actuators the user solders on); the role string drives the type-picker filter + add policy.
 - Regression: SystemModule overrides setup() and loop1s(); both must chain to MoonModule's base so a Peripheral child's setup()/loop1s() actually fire. Without the chain a sensor would never init or poll (the "children miss callbacks" trap from history/decisions.md). loop20ms() isn't overridden, so the base default already propagates it.
 - roleName maps the new Peripheral enum to its lowercase API string.
+
+## WheelLayout
+
+`test/unit/light/unit_WheelLayout.cpp`
+
+- _WheelLayout lightCount = spokes * ledsPerSpoke and matches the iterator_
+- _WheelLayout indices are dense [0, count)_
+- _WheelLayout coordinates are non-negative (centre-shifted into address space)_
+- _WheelLayout different spoke counts give different layouts_
 
 ## platform
 

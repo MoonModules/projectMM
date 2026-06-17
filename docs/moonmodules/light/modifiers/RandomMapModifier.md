@@ -2,7 +2,7 @@
 
 A **modifier** that randomly remaps every light to another light — a true 1:1 permutation (every light goes somewhere, no two lights land on the same place, none are dropped) — and reshuffles to a fresh random permutation on a `bpm` timer. The image scrambles into a new arrangement every beat; the *content* is untouched, only *where each pixel lands* changes.
 
-This is the first **dynamic** modifier: where a static modifier (Multiply, Checkerboard) shapes the layer's mapping once, RandomMapModifier re-shapes it on a timer.
+It is a **dynamic** modifier: where a static modifier (Multiply, Checkerboard) shapes the layer's mapping once, RandomMapModifier re-shapes it on a timer.
 
 ## Controls
 

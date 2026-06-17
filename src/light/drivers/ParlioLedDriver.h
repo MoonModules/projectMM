@@ -27,8 +27,8 @@ namespace mm {
 class ParlioLedDriver : public ParallelLedDriver<ParlioLedDriver> {
 public:
     // All controls default to UNSET — pins="", ledsPerPin="" (= all lights on the
-    // first lane, even-split with one lane), loopbackRxPin=0 — so no constructor is
-    // needed (the base zero-initialises them). Pins/loopback are unset because the
+    // first lane, even-split with one lane), loopbackRxPin=-1 — so no constructor is
+    // needed (the base default-initialises them). Pins/loopback are unset because the
     // strand is user-soldered: a hard-coded pin would guess the user's wiring and
     // could drive a pin committed elsewhere ("default only when it cannot do harm",
     // see decisions.md). The P4-NANO bench used pins "20,21,22,23,24,25,26,27",
@@ -66,7 +66,8 @@ public:
     // unit on lane 0 (no i80 full-bus workaround needed; no WR/DC to pass).
     platform::RmtLoopbackResult busLoopback(const uint8_t* frame, size_t frameBytes,
                                             size_t dataBytes, uint8_t rowBits) {
-        return platform::parlioWs2812Loopback(laneList_, laneCount_, loopbackRxPin,
+        return platform::parlioWs2812Loopback(laneList_, laneCount_,
+                                              static_cast<uint16_t>(loopbackRxPin),
                                               frame, frameBytes, dataBytes, rowBits);
     }
 

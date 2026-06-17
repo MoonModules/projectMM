@@ -4,13 +4,15 @@ Acquires an audio source and publishes an **AudioFrame** — an overall sound **
 
 It is named for what it does, audio acquisition plus analysis, not for one source: today the source is a digital I²S MEMS microphone (the only one wired), and the same analysis pipeline is built to serve other sources (line-in, USB audio) behind the platform read seam as they are added. The candidate source types — I²S with an MCLK for line-in, PDM mics, analog line-in, and I²C-configured codecs — are surveyed in the [Troy (troyhacks)](#prior-art) prior-art notes below. Most of the module is the analysis (DC-blocker, RMS level, windowed FFT, band mapping), which is source-independent.
 
-A SystemModule **Peripheral**, **added by the user** (not auto-wired on a default flash). It is a microphone peripheral, useful only on a board that actually has an I²S mic, so it follows the same model as the effects: registered in the factory, added through the UI when wanted, not boot-wired. (Auto-wiring it forced an I²S init on every board, which on the classic ESP32 hung `setup()` and boot-looped a mic-less device.) When added, its pins default to **unset (0)** and it stays idle, with a status note, until the user enters the real GPIOs, so adding it never grabs arbitrary pins. The audio effects reach the live frame through the static `AudioModule::latestFrame()`, which returns a permanently-silent frame when no mic exists, so they simply stay dark.
+A SystemModule **Peripheral**, **added by the user** (not auto-wired on a default flash). It is a microphone peripheral, useful only on a board that actually has an I²S mic, so it follows the same model as the effects: registered in the factory, added through the UI when wanted, not boot-wired. (Auto-wiring it forced an I²S init on every board, which on the classic ESP32 hung `setup()` and boot-looped a mic-less device.) When added, its pins default to **unset (−1)** (the standard [Pin control](Control.md) sentinel, so GPIO 0 stays a usable mic pin) and it stays idle, with a status note, until the user enters the real GPIOs, so adding it never grabs arbitrary pins. The audio effects reach the live frame through the static `AudioModule::latestFrame()`, which returns a permanently-silent frame when no mic exists, so they simply stay dark.
 
 ## Hardware: INMP441-class digital mic
 
 Built and tested against an **[INMP441](https://invensense.tdk.com/wp-content/uploads/2015/02/INMP441.pdf)** (a self-clocked I²S MEMS microphone): standard/Philips framing, 24-bit data left-justified in a 32-bit slot, mono. Three wires plus power:
 
-| Control | Default | Pin |
+Each pin defaults to −1 (unset); the values below are the bench INMP441 wiring, not code defaults.
+
+| Control | Bench pin | Role |
 |---|---|---|
 | `wsPin` | 4 | word-select / LRCLK |
 | `sdPin` | 5 | serial data out of the mic |

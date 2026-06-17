@@ -29,9 +29,20 @@
 #include "light/modifiers/RotateModifier.h"
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
-#include "light/drivers/LcdLedDriver.h"
-#include "light/drivers/ParlioLedDriver.h"
+// LED drivers are compiled in per chip, gated on the SOC peripheral the driver
+// needs — so a board's binary carries only the drivers its silicon can actually
+// run (no dead flash for an LCD_CAM driver on a chip without LCD_CAM). The same
+// SOC macros back the rmtTxChannels / lcdLanes / parlioLanes capability flags in
+// platform_config.h. Undefined on desktop, so none compile there.
+#if defined(CONFIG_SOC_RMT_SUPPORTED)
 #include "light/drivers/RmtLedDriver.h"
+#endif
+#if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED)
+#include "light/drivers/LcdLedDriver.h"
+#endif
+#if defined(CONFIG_SOC_PARLIO_SUPPORTED)
+#include "light/drivers/ParlioLedDriver.h"
+#endif
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
 #include "core/BoardModule.h"
@@ -87,9 +98,18 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::RotateModifier>("RotateModifier", "light/modifiers/RotateModifier.md");
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver", "light/drivers/NetworkSendDriver.md");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers/PreviewDriver.md");
+    // Register only the LED drivers this chip's silicon can run (see the gated
+    // includes above) — keeps the type picker honest (no LcdLedDriver offered on a
+    // chip without LCD_CAM) and the binary lean.
+#if defined(CONFIG_SOC_RMT_SUPPORTED)
     mm::ModuleFactory::registerType<mm::RmtLedDriver>("RmtLedDriver", "light/drivers/RmtLedDriver.md");
+#endif
+#if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED)
     mm::ModuleFactory::registerType<mm::LcdLedDriver>("LcdLedDriver", "light/drivers/LcdLedDriver.md");
+#endif
+#if defined(CONFIG_SOC_PARLIO_SUPPORTED)
     mm::ModuleFactory::registerType<mm::ParlioLedDriver>("ParlioLedDriver", "light/drivers/ParlioLedDriver.md");
+#endif
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/HttpServerModule.md");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/SystemModule.md");
     mm::ModuleFactory::registerType<mm::BoardModule>("BoardModule", "core/BoardModule.md");

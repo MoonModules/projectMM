@@ -23,12 +23,13 @@
 TEST_CASE("AudioModule: a fresh, unconfigured module is idle (pins default unset)") {
     mm::AudioModule a;
     a.onBuildControls();
-    // Pins default to 0 (unset): the module is user-added when a board has a mic
-    // and waits for the real GPIOs. It must never have inited a mic by merely
-    // existing — the auto-init-on-boot path is what hung a mic-less classic.
-    CHECK(a.wsPin == 0);
-    CHECK(a.sdPin == 0);
-    CHECK(a.sckPin == 0);
+    // Pins default to -1 (unset, the standard Pin-control sentinel): the module is
+    // user-added when a board has a mic and waits for the real GPIOs. It must never
+    // have inited a mic by merely existing — the auto-init-on-boot path is what hung
+    // a mic-less classic. (-1, not 0, so GPIO 0 stays a usable mic pin.)
+    CHECK(a.wsPin == -1);
+    CHECK(a.sdPin == -1);
+    CHECK(a.sckPin == -1);
     a.setup();           // settles the status; no I2S touched on host or unset pins
     a.loop();            // must be a quiet no-op, not a crash, with nothing inited
     a.teardown();

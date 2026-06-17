@@ -89,11 +89,12 @@ public:
         if (lastElapsed_ == 0) lastElapsed_ = now;
         const uint32_t dt = now - lastElapsed_;
         lastElapsed_ = now;
-        // Accumulate dt*speed; one full turn (256 steps) per (256*256/speed) ms ballpark.
+        // Accumulate dt*speed; the step is phaseNum_/64 (mod 256), so one step takes
+        // 64/speed ms and a full turn (256 steps = 16384 units) takes 16384/speed ms.
         // Read the high bits as the angle step — the same integer accumulator idiom the
         // effects use so a sub-ms dt isn't lost.
         phaseNum_ += static_cast<uint64_t>(dt) * speed;
-        const uint8_t step = static_cast<uint8_t>(phaseNum_ >> 6);   // ~one step per 64 units
+        const uint8_t step = static_cast<uint8_t>(phaseNum_ >> 6);   // one step per 64 units
         if (step != angle_) {
             angle_ = step;
             lyr->onBuildState();   // rebuild the LUT at the new angle (re-runs mapToPhysical)
