@@ -278,6 +278,21 @@
     .rp-status { color: var(--muted); font-size: 13px; }
     .rp-status-row { min-height: 1.5em; }
 
+    /* Inline spinner shown in a field while its data is still being fetched
+       (install-picker renderSkeleton). A 1em spinning ring, sized to sit next
+       to the select's "Loading…" placeholder. */
+    .rp-spinner {
+      display: inline-block;
+      width: 1em; height: 1em;
+      vertical-align: -0.15em;
+      margin-right: 0.4em;
+      border: 2px solid var(--muted);
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: rp-spin 0.7s linear infinite;
+    }
+    @keyframes rp-spin { to { transform: rotate(360deg); } }
+
     /* "Your devices" card — one row per provisioned device. The row
        is the picker's `.control-row` flex shape with the device info
        on the left and action buttons on the right. */
@@ -860,6 +875,9 @@
     import { installPicker } from "./install-picker.js";
     import { myDevices }    from "./devices.js";
     import { installer }    from "./install-orchestrator.js";
+    // Board catalog + chip detection — web-installer only, kept out of the
+    // firmware-embedded install-picker.js and injected here via boardSupport.
+    import * as boardSupport from "./install-picker-boards.js";
 
     // Show the project version next to the heading. library.json ships
     // alongside index.html (preview_installer.py + release.yml both copy
@@ -1275,7 +1293,7 @@
       if (retrying) input.value = "";
     }
 
-    function handleSuccess({ url, board, viaHttp, httpBoardOk, alreadyOnline }) {
+    function handleSuccess({ url, mdns, board, viaHttp, httpBoardOk, alreadyOnline }) {
       disarmUnloadGuard();
       if (!url) {
         // User skipped the IP prompt. They've already read the
@@ -1287,8 +1305,14 @@
       }
       showSection("done");
       const a = document.getElementById("done-url");
-      a.href = url;
-      a.textContent = url;
+      // Prefer the device's <deviceName>.local address when the boot serial
+      // reported one — it survives a DHCP lease change, where the bare IP can
+      // go stale. deviceName is the device's single identity (the same name
+      // drives mDNS, the AP, and the DHCP hostname), so this link tracks the
+      // device, not its current address. Falls back to the IP URL otherwise.
+      const linkUrl = mdns ? `http://${mdns}/` : url;
+      a.href = linkUrl;
+      a.textContent = linkUrl;
       // Pending-board flag: set whenever the in-orchestrator HTTP push
       // didn't succeed AND there's a board name to push. Covers both
       // paths now:
@@ -1549,6 +1573,7 @@
       container: document.getElementById("picker-mount"),
       ownFirmwareKey: null,  // web installer flashes any firmware variant
       installRowExtras: document.getElementById("erase-row"),
+      boardSupport,  // board catalog + chip detection (web-installer-only module)
       // Gate Install on a picked USB port — the web installer requires the user
       // to choose the port in the dropdown before flashing. (notifyPortChanged()
       // below re-evaluates the button whenever pickedPort changes.)

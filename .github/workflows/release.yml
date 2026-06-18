@@ -471,6 +471,10 @@ jobs:
           mkdir -p pages/install
           cp -r docs/install/. pages/install/
           cp src/ui/install-picker.js pages/install/
+          # The board-catalog / chip-detection half of the picker — web-installer
+          # only (not embedded in firmware), imported by index.html. Must ship to
+          # Pages alongside install-picker.js or the ES-module import 404s.
+          cp src/ui/install-picker-boards.js pages/install/
           # library.json — install page reads the project version from it.
           cp library.json pages/install/
           # Board picker images live in docs/assets/boards/ (the project's asset

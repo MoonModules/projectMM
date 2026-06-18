@@ -192,28 +192,35 @@ async function sendSetTxPowerFrame(port, dBm) {
     }
 }
 
-// Read the device's boot serial log for the one fact the browser can't get any other
-// way: the device's IP. projectMM appends a machine-parseable `MM_IP=<dotted-quad>`
-// token to its once-per-second tick log over USB (std::printf → reaches the USB-CDC
-// console, unlike ESP_LOGI) whenever Ethernet or WiFi-STA has an address — so a board
-// that comes up on Ethernet, or boots with saved WiFi credentials, announces its own IP
-// with no mDNS / hostname guessing (works on every OS, survives a renamed deviceName).
-// It rides the periodic tick line for the device's first 60 s of uptime, so the read
-// below is timing-independent — whenever the installer reopens the port within that
-// window (it reads at ~3–15 s after reset), the next tick carries the IP. Afterwards the
-// device's IP comes from the REST API, so the token stops to keep the perf line clean.
+// Read the device's boot serial log for the two facts the browser can't get any other
+// way: the device's IP and its mDNS `<deviceName>.local` address. projectMM appends
+// machine-parseable `MM_IP=<dotted-quad>` and `MM_DEVICE=<deviceName>.local` tokens to
+// its once-per-second tick log over USB (std::printf → reaches the USB-CDC console,
+// unlike ESP_LOGI) whenever Ethernet or WiFi-STA has an address — so a board that comes
+// up on Ethernet, or boots with saved WiFi credentials, announces its own address (works
+// on every OS). The deviceName is the device's single identity (mDNS name = AP name =
+// DHCP hostname), so `<deviceName>.local` is exactly what resolves on the LAN. The tokens
+// ride the periodic tick line for the device's first 60 s of uptime, so the read below
+// is timing-independent — whenever the installer reopens the port within that window (it
+// reads at ~3–15 s after reset), the next tick carries them. Afterwards the device's IP
+// comes from the REST API, so the tokens stop to keep the perf line clean.
 //
-// Deliberately IP-only: once the host has the IP it reads everything else (chip,
+// IP + device name only: once the host has the IP it reads everything else (chip,
 // firmware, modules, heap, …) from the live device's REST API (`http://<ip>/api/…`),
-// which is richer and always current — no reason to scrape more fields from a boot
-// log. Adding device info to the installer = call the REST API with this IP, not
-// grow this parser.
+// which is richer and always current — no reason to scrape more fields from a boot log.
+// The device name is the one exception that CAN'T come from REST: on the HTTPS Pages site
+// a fetch to the plain-http device is blocked by mixed-content (see canFetchHttp), so the
+// `.local` address has to ride the serial log too. Adding any OTHER device info to the
+// installer = call the REST API with this IP, not grow this parser.
 //
-// Returns the IP string, or "" on timeout (a fresh device with no credentials never
-// connects, so never prints MM_IP → caller falls back to Improv provisioning + manual
-// entry). Caller owns opening the port; this acquires/releases one reader.
+// Returns { ip, mdns } — ip is the dotted-quad ("" on timeout), mdns is the
+// "<deviceName>.local" address ("" if the firmware predates MM_DEVICE). A fresh device
+// with no credentials never connects, so never prints MM_IP → ip "" → caller falls back
+// to Improv provisioning + manual entry. Caller owns opening the port; this acquires/
+// releases one reader. Resolves as soon as MM_IP is seen (the MM_DEVICE token, on the
+// same tick line, is captured if it already arrived in the buffer).
 async function readBootIp(port, timeoutMs) {
-    if (!port || !port.readable) return "";
+    if (!port || !port.readable) return { ip: "", mdns: "" };
     const decoder = new TextDecoder();
     let buf = "";
     const reader = port.readable.getReader();
@@ -231,7 +238,13 @@ async function readBootIp(port, timeoutMs) {
             // "… — Eth/WiFi: <ip>" status line (firmware predating MM_IP).
             const m = buf.match(/MM_IP=(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/)
                    || buf.match(/(?:Eth|WiFi):\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
-            if (m) return m[1];
+            if (m) {
+                // MM_DEVICE rides the same tick line as MM_IP, so by the time MM_IP is in
+                // the buffer the device token usually is too. Capture it if present; "" if
+                // the firmware predates it (graceful — caller just shows the IP link).
+                const d = buf.match(/MM_DEVICE=(\S+\.local)/);
+                return { ip: m[1], mdns: d ? d[1] : "" };
+            }
             if (buf.length > 8192) buf = buf.slice(-2048);  // cap; keep a tail for split lines
         }
     } catch (_) {
@@ -240,7 +253,7 @@ async function readBootIp(port, timeoutMs) {
         try { await reader.cancel(); } catch (_) { /* ignore */ }
         try { reader.releaseLock(); } catch (_) { /* ignore */ }
     }
-    return "";
+    return { ip: "", mdns: "" };
 }
 
 // ---------------------------------------------------------------------------
@@ -485,7 +498,12 @@ export const installer = {
      *   guidance message — the OS picker is modal and covers the install
      *   modal. Optional; degrade gracefully to a silent re-prompt when
      *   omitted (older host pages just lose the guidance section).
-     * @param {(detail: {url: string, board: string, viaHttp?: boolean, httpBoardOk?: boolean, alreadyOnline?: boolean}) => void} opts.onSuccess
+     * @param {(detail: {url: string, mdns?: string, board: string, viaHttp?: boolean, httpBoardOk?: boolean, alreadyOnline?: boolean}) => void} opts.onSuccess
+     *   `mdns` is the device's `<deviceName>.local` address from the boot serial
+     *   (deviceName is the single identity — mDNS = AP = DHCP hostname all follow
+     *   it), or "" if the firmware predates the MM_DEVICE token. The host shows it
+     *   as the clickable success link when present (survives a DHCP IP change),
+     *   falling back to the IP `url` otherwise.
      *   `alreadyOnline:true` is set when the device booted into
      *   STATE_PROVISIONED (saved WiFi from a previous flash) — the SDK's
      *   initialize() fails and the orchestrator falls through to the
@@ -780,16 +798,18 @@ export const installer = {
             // inside the 60 s and covers DHCP variance (measured ~7 s on the P4-NANO)
             // without making the fresh-device fallback feel slow.
             trackProgress("connect-improv");
-            const bootIp = await readBootIp(port, 12000);
+            const { ip: bootIp, mdns: bootMdns } = await readBootIp(port, 12000);
 
             let deviceUrl = "";
+            let deviceMdns = "";   // "<deviceName>.local" from the boot log, "" if unknown
             let viaHttp = false;
             let needsIp = false;
             let alreadyOnline = false;
 
             if (bootIp) {
-                if (onLog) onLog(`[orchestrator] device already online at ${bootIp} (from boot serial) — skipping Improv`);
+                if (onLog) onLog(`[orchestrator] device already online at ${bootIp}${bootMdns ? ` (${bootMdns})` : ""} (from boot serial) — skipping Improv`);
                 deviceUrl = `http://${bootIp}/`;
+                deviceMdns = bootMdns;
                 viaHttp = true;
                 alreadyOnline = true;
             } else {
@@ -1036,6 +1056,7 @@ export const installer = {
             trackProgress("done");
             onSuccess({
                 url: deviceUrl,
+                mdns: deviceMdns,   // "<deviceName>.local" from the boot serial, "" if unknown
                 board: board || "",
                 viaHttp,
                 httpBoardOk,

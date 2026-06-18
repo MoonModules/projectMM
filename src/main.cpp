@@ -404,6 +404,16 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
                         char ipStr[16];
                         mm::formatDottedQuad(ipStr, ip);
                         std::printf("  MM_IP=%s", ipStr);
+                        // Alongside MM_IP: the device's mDNS .local name, so the web
+                        // installer can offer a clickable http://<deviceName>.local link
+                        // that survives a later DHCP IP change. deviceName is owned by
+                        // SystemModule and is the device's single network identity (the
+                        // SAME string NetworkModule registers for mDNS, the AP SSID, and
+                        // the DHCP hostname; SystemModule keeps it a valid hostname), so
+                        // this is exactly what resolves on the LAN. Serial-borne because
+                        // the installer's REST fallback is blocked by mixed-content on the
+                        // HTTPS Pages site.
+                        std::printf("  MM_DEVICE=%s.local", systemModule->deviceName());
                     }
                 }
             }

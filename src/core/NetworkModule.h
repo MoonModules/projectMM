@@ -108,7 +108,7 @@ public:
         // its name — not "Unknown" — in the router's client list. Stored once; every
         // netif the platform creates (eth, the wifi cascade, a later reconnect) reads
         // it. Same name as mDNS/SoftAP: deviceName, default MM-XXXX.
-        platform::setHostname(hostName());
+        platform::setHostname(readDeviceName());
         // Push the board's eth config (persisted controls, loaded before setup)
         // into the platform layer before ethInit reads it.
         syncEthConfig();
@@ -420,6 +420,11 @@ private:
     uint32_t stateChangeTime_ = 0;
     bool apShutdownPending_ = false;
     bool mdnsRunning_ = false;
+    // The device name last registered with mDNS, so syncMdns() can detect a live
+    // rename (deviceName changed in SystemModule) and re-advertise — without it,
+    // the .local name would keep announcing the old name until a reconnect. 24 =
+    // SystemModule's deviceName_ capacity (the source of hostName()).
+    char lastMdnsName_[24] = {};
 
     // Controls
     char ssid_[33] = {};
@@ -431,10 +436,6 @@ private:
     // MoonModule::status_); the named "Buf" suffix makes the ownership clear
     // and distinguishes it from MoonModule's own status accessors.
     char statusBuf_[48] = {};
-    // Lazily-filled MAC-derived hostname fallback (see hostName()). mutable: hostName()
-    // is const but caches here on first use. Empty until needed; normally unused
-    // because deviceName is set by SystemModule before bring-up.
-    mutable char hostNameFallback_[8] = {};   // "MM-XXXX" + NUL
 
     // Static IP fields. uint8_t[4] octets, not strings — saves 12 bytes per
     // address vs char[16] dotted-quad, and the wire/persistence layers
@@ -583,8 +584,10 @@ private:
     static constexpr const char* ethTypeOptions_[] = {"None", "LAN8720", "IP101", "W5500"};
 
     void startAP() {
-        const char* apName = (systemModule_ && systemModule_->deviceName()[0] != 0)
-                             ? systemModule_->deviceName() : "MM-AP";
+        // Same identity as the DHCP hostname and the mDNS .local name — all three read
+        // SystemModule's deviceName, so a device shows ONE name everywhere. (Previously
+        // had a separate "MM-AP" fallback, which could diverge when the name was empty.)
+        const char* apName = readDeviceName();
         if (platform::wifiApInit(apName, "4.3.2.1")) {
             state_ = State::AP;
             stateChangeTime_ = platform::millis();
@@ -659,6 +662,17 @@ public:
     }
 
 private:
+    // The device's network name is owned solely by SystemModule; NetworkModule only
+    // READS it. This is the single identity behind every network name — the mDNS
+    // `<name>.local`, the SoftAP SSID, and the DHCP hostname are all this exact string,
+    // so a device shows one name everywhere. SystemModule guarantees it is a valid,
+    // non-empty hostname (sanitised + MAC-fallback in its setup/loop1s). Read through
+    // this one null-guard (systemModule_ is wired at boot; "" if somehow unwired — the
+    // platform name setters no-op on an empty string). NOT a deviceName of our own:
+    // it's SystemModule's, fetched.
+    const char* readDeviceName() const {
+        return systemModule_ ? systemModule_->deviceName() : "";
+    }
     void updateStatusIP() {
         uint8_t ip[4];
         currentIp(ip);   // same eth/wifi getter dispatch, in one place
@@ -722,32 +736,24 @@ private:
     // resync.
     void noteRadioStopped() { appliedTxPowerSetting_ = -1; }
 
-    // The device's network name — used for BOTH the DHCP hostname (router client
-    // list) and the mDNS .local name, so the two never diverge. Normally deviceName
-    // (default MM-XXXX, set by SystemModule before our setup). Fallback for the
-    // should-never-happen empty case: a UNIQUE MAC-derived MM-XXXX (same scheme
-    // SystemModule uses) — NOT a shared literal like "mm", which would collide across
-    // devices on one LAN (duplicate hostnames → the router shows one, mDNS clashes).
-    // Computed once into a member buffer so the returned pointer stays valid.
-    const char* hostName() const {
-        if (systemModule_ && systemModule_->deviceName()[0] != 0)
-            return systemModule_->deviceName();
-        if (!hostNameFallback_[0]) {
-            uint8_t mac[6] = {};
-            platform::getMacAddress(mac);
-            std::snprintf(hostNameFallback_, sizeof(hostNameFallback_),
-                          "MM-%02X%02X", mac[4], mac[5]);
-        }
-        return hostNameFallback_;
-    }
-
     void syncMdns() {
         bool shouldRun = mdnsEnabled_ && (state_ == State::ConnectedEth || state_ == State::ConnectedSta);
+        const char* devName = readDeviceName();
         if (shouldRun && !mdnsRunning_) {
-            const char* devName = hostName();
-            // Only mark running on success — leave false so loop1s retries next tick
+            // Only mark running on success — leave false so loop1s retries next tick.
             if (platform::mdnsInit(devName)) {
                 mdnsRunning_ = true;
+                std::strncpy(lastMdnsName_, devName, sizeof(lastMdnsName_) - 1);
+                lastMdnsName_[sizeof(lastMdnsName_) - 1] = 0;
+            }
+        } else if (shouldRun && mdnsRunning_ && std::strcmp(devName, lastMdnsName_) != 0) {
+            // Live rename: the device name changed (SystemModule deviceName) while
+            // mDNS is already up. Re-register so the .local name follows immediately —
+            // no reconnect needed (the "no reboot to apply config" rule). mdnsInit is
+            // idempotent: it just resets the hostname + _http instance name.
+            if (platform::mdnsInit(devName)) {
+                std::strncpy(lastMdnsName_, devName, sizeof(lastMdnsName_) - 1);
+                lastMdnsName_[sizeof(lastMdnsName_) - 1] = 0;
             }
         } else if (!shouldRun && mdnsRunning_) {
             platform::mdnsStop();

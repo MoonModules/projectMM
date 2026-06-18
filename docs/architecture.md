@@ -25,6 +25,7 @@ Coding conventions live in [coding-standards.md](coding-standards.md); how to bu
   - [Firmware vs board](#firmware-vs-board)
   - [Peripherals](#peripherals)
   - [Multi-device runtime](#multi-device-runtime)
+    - [Device name: one identity, every network name derives from it](#device-name-one-identity-every-network-name-derives-from-it)
 - [Light domain](#light-domain)
   - [The pipeline](#the-pipeline)
   - [3D from the start](#3d-from-the-start)
@@ -264,6 +265,14 @@ Two domain-neutral services let several controllers act as one installation. The
 - **🚧 Clock sync**: one leader broadcasts its elapsed time (millis); followers compute their offset, targeting sub-millisecond accuracy. A shared monotonic clock is the foundation any cross-device coordination builds on. The committed design; not yet wired.
 
 What the synced clock is *for* is a domain question; the light domain's use of it (synced animation across a wall) is in [§ Multi-device sync](#multi-device-sync).
+
+### Device name: one identity, every network name derives from it
+
+A device has **one** network name, `deviceName`, and every name the device presents on the network is that exact string: the mDNS hostname (`<deviceName>.local`), the SoftAP SSID (the captive-portal network shown when unprovisioned), and the DHCP hostname (what the router's client list shows). They are not three settings that happen to match — there is a single source and the others *read* it, so a device shows one identity everywhere and the three can never drift apart.
+
+- **Sole owner: `SystemModule`.** `deviceName` is a control on `SystemModule` (default `MM-XXXX` from the MAC). It is the only place the name is stored or edited. Every consumer reads `SystemModule::deviceName()`; no other module holds a name of its own. `NetworkModule` reads it for the mDNS / AP / DHCP names; `main.cpp` reads it for the `MM_DEVICE=<deviceName>.local` boot-serial token the [web installer](install/README.md) uses to offer a clickable `.local` link. So to know what name a device advertises, you read one accessor — you never inspect NetworkModule or the platform to discover it.
+- **Always a valid hostname.** Because all three uses are DNS/SSID names, `deviceName` must satisfy the RFC-1123 label rules (`[A-Za-z0-9-]`, no spaces, no leading/trailing hyphen). `SystemModule` enforces this at the source: it runs `mm::sanitizeHostname()` (in `core/Control.h`) on the value in `setup()` and every `loop1s()`, coercing whatever the user typed or persistence restored (`"My Living Room!"` → `"My-Living-Room"`) and falling back to the MAC-derived `MM-XXXX` if the result is empty. Sanitising *at the owner* means every consumer is correct for free — no per-consumer validation, no chance a raw name reaches mDNS. (`unit_sanitizeHostname` pins the rule.)
+- **Follows a live rename.** Renaming the device re-advertises immediately, no reboot — the [live-reconfiguration](#live-reconfiguration-every-change-applies-without-a-reboot) rule applied to identity. `NetworkModule::syncMdns()` (called each `loop1s()`) compares the current name to the last-registered one and re-registers mDNS when it changed, so `<new-name>.local` resolves within a tick.
 
 # Light domain
 

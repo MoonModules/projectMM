@@ -41,6 +41,12 @@ let wsPaused = false;            // gated by document.visibilityState
 
 const dragTimers = {};           // per-control debounce timers (clearTimeout handles)
 const dragTs = {};               // per-control last-touched timestamp (ms)
+// Control types whose value the user can edit — updateModuleControls suppresses a
+// WS state push for one of these while the user is mid-edit (see dragTs). The
+// read-only types (display/display-int/time/progress) and the composite `list`
+// are absent on purpose: they always reflect the latest push.
+const EDITABLE_CONTROL_TYPES = new Set(
+    ["uint8", "uint16", "int16", "pin", "bool", "text", "password", "select", "ipv4"]);
 const TIMING_MODES = ["fps", "ms"];
 
 // localStorage keys per ui.md
@@ -1002,6 +1008,7 @@ function createControl(moduleName, moduleType, ctrl) {
                 debounceSend(key, 150, () => sendControl(moduleName, ctrl.name, parseInt(input.value)));
             });
             numInput.addEventListener("input", () => {
+                dragTs[key] = Date.now();   // stamp so a WS push can't revert what's being typed
                 const v = Math.max(Number(input.min), Math.min(Number(input.max), parseInt(numInput.value) || 0));
                 input.value = v;
                 debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, v));
@@ -1040,6 +1047,7 @@ function createControl(moduleName, moduleType, ctrl) {
                     debounceSend(key, 150, () => sendControl(moduleName, ctrl.name, parseInt(input.value)));
                 });
                 numInput.addEventListener("input", () => {
+                    dragTs[key] = Date.now();   // stamp so a WS push can't revert what's being typed
                     const v = Math.max(uMin, Math.min(uMax, parseInt(numInput.value) || 0));
                     input.value = v;
                     debounceSend(key, 150, () => sendControl(moduleName, ctrl.name, v));
@@ -1122,6 +1130,7 @@ function createControl(moduleName, moduleType, ctrl) {
                 debounceSend(key, 150, () => sendControl(moduleName, ctrl.name, parseInt(input.value)));
             });
             numInput.addEventListener("input", () => {
+                dragTs[key] = Date.now();   // stamp so a WS push can't revert what's being typed
                 const v = Math.max(min, Math.min(max, parseInt(numInput.value) || 0));
                 input.value = v;
                 debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, v));
@@ -1364,7 +1373,18 @@ function buildListEntries(container, rows, details, openSet) {
         summary.className = "list-summary";
         summary.tabIndex = 0;
         summary.setAttribute("role", "button");
-        summary.textContent = listSummaryText(item);
+        // Freshness dot (always-visible age at a glance) when the row carries a `*Sec`
+        // duration; coloured by ageBucketClass. Generic — no device knowledge here.
+        const ageClass = rowAgeClass(item);
+        if (ageClass) {
+            const dot = document.createElement("span");
+            dot.className = "age-dot " + ageClass;
+            dot.setAttribute("aria-hidden", "true");
+            summary.appendChild(dot);
+        }
+        const label = document.createElement("span");
+        label.textContent = listSummaryText(item);
+        summary.appendChild(label);
         const detailPanel = document.createElement("div");
         detailPanel.className = "list-detail";
         detailPanel.hidden = !openSet.has(summary.textContent);
@@ -1428,12 +1448,38 @@ function fillListDetail(panel, detail) {
             }
         } else if (isDuration) {
             vEl.textContent = relativeAge(Number(v));
+            const ageClass = ageBucketClass(Number(v));   // tint to match the summary dot
+            if (ageClass) vEl.classList.add(ageClass);
         } else {
             vEl.textContent = String(v);
         }
         r.append(kEl, vEl);
         panel.appendChild(r);
     }
+}
+
+// Freshness bucket for a duration-in-seconds (a `*Sec` field): green < 1 min, orange
+// < 1 hour, red beyond. Generic — any duration field a ListSource emits gets the same
+// scale; nothing device-specific here. (DevicesModule's ageSec is the first user: a
+// device unseen > 24h is aged out of the list entirely, so "red" spans 1h–24h.)
+function ageBucketClass(sec) {
+    if (!Number.isFinite(sec) || sec < 0) return "";
+    if (sec < 60) return "age-fresh";
+    if (sec < 3600) return "age-recent";
+    return "age-stale";
+}
+
+// Find a row's freshness CSS class from its first `*Sec` scalar field, or "" if it has
+// none. `self` is always "now" → fresh; a `cached` row (restored, not re-seen) is
+// unknown-age → no dot (the detail says "cached"). Generic over field names.
+function rowAgeClass(item) {
+    if (!item || typeof item !== "object") return "";
+    if (item.self) return "age-fresh";
+    if (item.cached) return "";
+    for (const [k, v] of Object.entries(item)) {
+        if (k.endsWith("Sec") && typeof v === "number") return ageBucketClass(v);
+    }
+    return "";
 }
 
 // Render a seconds-ago count as a short relative time ("just now", "2m ago", "3h ago",
@@ -1677,11 +1723,18 @@ function updateModuleControls(mod) {
         const ts = dragTs[dragKey] || 0;
         const userActive = Date.now() - ts < 1000;
 
+        // One guard for every editable control: while the user is mid-edit (a
+        // keystroke / drag within the last second, tracked by dragTs), don't let a
+        // WS state push overwrite the field with the value it had before the edit
+        // landed. The read-only types (display/display-int/time/progress) and the
+        // composite `list` aren't in this set — they always reflect the latest push.
+        if (userActive && EDITABLE_CONTROL_TYPES.has(ctrl.type)) continue;
+
         switch (ctrl.type) {
             case "uint8":
             case "uint16":
-            case "int16": {
-                if (userActive) break;
+            case "int16":
+            case "pin": {   // pin is a plain number input (no slider sibling); patches the same way
                 const input = document.querySelector(`input[data-mid="${mid}"][data-key="${k}"]`);
                 if (input && Number(input.value) !== Number(ctrl.value)) {
                     input.value = ctrl.value ?? 0;
@@ -1691,19 +1744,16 @@ function updateModuleControls(mod) {
                 break;
             }
             case "bool": {
-                if (userActive) break;
                 const input = document.querySelector(`input[data-mid="${mid}"][data-key="${k}"]`);
                 if (input && input.checked !== !!ctrl.value) input.checked = !!ctrl.value;
                 break;
             }
             case "text": {
-                if (userActive) break;
                 const input = document.querySelector(`input[type="text"][data-mid="${mid}"][data-key="${k}"]`);
                 if (input && input.value !== (ctrl.value ?? "")) input.value = ctrl.value ?? "";
                 break;
             }
             case "password": {
-                if (userActive) break;
                 // The peek button flips the input to type="text", so match either.
                 const input = document.querySelector(`input[data-mid="${mid}"][data-key="${k}"]`);
                 const decoded = decodePassword(ctrl.value);
@@ -1711,7 +1761,6 @@ function updateModuleControls(mod) {
                 break;
             }
             case "select": {
-                if (userActive) break;
                 const sel = document.querySelector(`select[data-mid="${mid}"][data-key="${k}"]`);
                 if (sel && Number(sel.value) !== Number(ctrl.value)) sel.value = ctrl.value;
                 break;
@@ -1732,12 +1781,9 @@ function updateModuleControls(mod) {
                 break;
             }
             case "ipv4": {
+                // Guarded by the shared userActive check above (same as text).
                 const input = document.querySelector(`input.ipv4-input[data-mid="${mid}"][data-key="${k}"]`);
-                // Don't clobber an input the user is currently editing —
-                // matches how text inputs handle WS pushes elsewhere.
-                if (input && document.activeElement !== input) {
-                    input.value = ctrl.value ?? "";
-                }
+                if (input && input.value !== (ctrl.value ?? "")) input.value = ctrl.value ?? "";
                 break;
             }
             case "time": {

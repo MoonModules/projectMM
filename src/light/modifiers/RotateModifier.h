@@ -97,7 +97,15 @@ public:
         const uint8_t step = static_cast<uint8_t>(phaseNum_ >> 6);   // one step per 64 units
         if (step != angle_) {
             angle_ = step;
-            lyr->onBuildState();   // rebuild the LUT at the new angle (re-runs mapToPhysical)
+           // Rebuild the LUT at the new angle (re-runs mapToPhysical). Like
+            // RandomMapModifier this is a step-gated rebuild from loop(), an accepted
+            // bounded cost (runs after the effect pass, not per-tick) — but the bound
+            // here is the angle-step rate, not a bpm cap: one step per 64 accumulator
+            // units → speed/64 rebuilds/sec, i.e. up to ~4/sec at speed 255 (vs
+            // RandomMap's ≤1/sec at bpm 60). Each rebuild does the alloc/free
+            // rebuildLUT() does; that ~4/sec ceiling on the render task is the cost of
+            // smooth rotation. Lower `speed` for fewer rebuilds.
+            lyr->onBuildState();
         }
     }
 

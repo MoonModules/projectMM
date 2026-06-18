@@ -23,6 +23,7 @@ add_executable(mm_tests
     unit/core/unit_NetworkModule.cpp
     unit/core/unit_NetworkModule_ethernet.cpp
     unit/core/unit_Sort.cpp
+    unit/core/unit_sanitizeHostname.cpp
     unit/core/unit_platform_clock.cpp
     unit/core/unit_Scheduler_unique_names.cpp
     unit/core/unit_SystemModule.cpp

@@ -41,6 +41,41 @@ inline void formatDottedQuad(char out[16], const uint8_t ip[4]) {
     std::snprintf(out, 16, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
 }
 
+// Coerce a string in-place into a valid DNS/mDNS hostname label (RFC 1123):
+// keep only [A-Za-z0-9-], turn any run of other characters (spaces, punctuation,
+// dots) into a single '-', and strip leading/trailing '-'. Used on the device
+// name, which is the single identity behind the mDNS `<name>.local`, the SoftAP
+// SSID, and the DHCP hostname — so a user typing "My Living Room!" gets the valid,
+// resolvable "My-Living-Room" everywhere rather than a name mDNS would reject.
+// Idempotent: an already-valid name is unchanged. Leaves an empty buffer empty
+// (every invalid char) — the caller supplies the fallback (SystemModule's MAC name).
+// The 63-char RFC label cap is enforced by the caller's buffer (deviceName_ is 24).
+inline void sanitizeHostname(char* buf) {
+    if (!buf) return;
+    char* w = buf;                       // write cursor (compacts in place; w <= read)
+    bool pendingDash = false;            // saw invalid char(s); emit one '-' before next keeper
+    for (const char* r = buf; *r; ++r) {
+        const char c = *r;
+        const bool keep = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+                       || (c >= '0' && c <= '9') || c == '-';
+        if (keep) {
+            // Never lead with a '-' (RFC: no leading hyphen) — whether from an invalid-
+            // char run (pendingDash) or a literal '-' at the start (w == buf).
+            if (c == '-' && w == buf) continue;
+            // Collapse a run of invalid chars to a single '-', but never lead with one.
+            if (pendingDash && w != buf) *w++ = '-';
+            pendingDash = false;
+            *w++ = c;
+        } else {
+            pendingDash = true;          // defer — drops a trailing run entirely
+        }
+    }
+    // Trim a trailing '-' left by the input ending in '-' (a run was dropped via
+    // pendingDash, so only a literal trailing hyphen can remain).
+    if (w != buf && w[-1] == '-') --w;
+    *w = '\0';
+}
+
 enum class ControlType : uint8_t {
     Uint8,
     Uint16,

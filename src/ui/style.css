@@ -477,6 +477,23 @@ body {
 }
 .list-summary:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .list-self { box-shadow: inset 3px 0 0 var(--accent); }   /* this device, marked */
+/* Freshness dot on a list summary row + matching tint on its detail "last seen"
+   value. Driven by a `*Sec` duration field (generic, set in app.js's ageBucketClass):
+   green < 1 min, orange < 1 hour, red beyond. */
+.age-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 7px;
+    vertical-align: 1px;
+}
+.age-fresh  { color: var(--green); }
+.age-recent { color: var(--yellow); }
+.age-stale  { color: var(--red); }
+.age-dot.age-fresh  { background: var(--green); }
+.age-dot.age-recent { background: var(--yellow); }
+.age-dot.age-stale  { background: var(--red); }
 .list-detail {
     padding: 4px 10px 8px 18px;
     background: color-mix(in srgb, var(--border) 20%, transparent);
@@ -600,6 +617,21 @@ body {
     color: var(--fg);
     font-variant-numeric: tabular-nums;
 }
+
+/* Inline spinner shown while a picker field is still fetching (install-picker
+   renderSkeleton). Mirrors the installer page's .rp-spinner so the on-device
+   OTA picker shows the same waiting state. */
+.rp-spinner {
+    display: inline-block;
+    width: 1em; height: 1em;
+    vertical-align: -0.15em;
+    margin-right: 0.4em;
+    border: 2px solid var(--fg-muted);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: rp-spin 0.7s linear infinite;
+}
+@keyframes rp-spin { to { transform: rotate(360deg); } }
 
 .status-value { flex: 1; font-size: 12px; }
 .status-value[data-sev="error"]   { color: #e94560; }

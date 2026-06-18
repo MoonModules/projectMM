@@ -27,7 +27,12 @@ public:
 
     void setup() override {
         // Compute default deviceName from MAC: MM-XXXX. Skip if a persisted value was
-        // already overlaid by Scheduler phase 2 (deviceName_ non-empty).
+        // already overlaid by Scheduler phase 2 (deviceName_ non-empty). Sanitize first
+        // in case the persisted value is an invalid hostname (older firmware let any
+        // text through); coerce + MAC-fallback so deviceName_ is a valid, non-empty
+        // hostname from the very first read — every network name (mDNS/AP/DHCP) derives
+        // from it directly, so it must be valid before NetworkModule::setup() reads it.
+        sanitizeHostname(deviceName_);
         if (deviceName_[0] == 0) {
             uint8_t mac[6];
             platform::getMacAddress(mac);
@@ -144,6 +149,18 @@ public:
     }
 
     void loop1s() override {
+        // deviceName is the single network identity (mDNS <name>.local, SoftAP SSID,
+        // DHCP hostname all derive from it), so it must stay a valid hostname whatever
+        // the user typed or persistence restored. Coerce it here each tick — idempotent
+        // on an already-valid name, and it runs before NetworkModule::loop1s() reads it,
+        // so a live rename ("My Room" → "My-Room") propagates everywhere within a tick.
+        sanitizeHostname(deviceName_);
+        if (deviceName_[0] == 0) {        // user cleared it / all-invalid → MAC fallback
+            uint8_t mac[6];
+            platform::getMacAddress(mac);
+            std::snprintf(deviceName_, sizeof(deviceName_), "MM-%02X%02X", mac[4], mac[5]);
+        }
+
         // Update dynamic values
         uint32_t uptimeSec = scheduler_ ? scheduler_->elapsed() / 1000 : 0;
         uint32_t hours = uptimeSec / 3600;
