@@ -104,8 +104,8 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
     // expects a bare path. RFC 3986 §3.4: the query starts at the first '?'
     // and is not part of the path. Browsers send `/?foo=bar` for query-on-
     // root; without this split the GET / route falls through to 404. The web
-    // installer's Inject button hits us as `/?board=<name>` to hand off the
-    // boards.json entry — see docs/moonmodules/core/BoardModule.md.
+    // installer's Inject button hits us as `/?deviceModel=<name>` to hand off the
+    // deviceModels.json entry — see docs/moonmodules/core/SystemModule.md.
     char* queryStart = std::strchr(path, '?');
     if (queryStart) *queryStart = 0;
 

@@ -34,7 +34,7 @@ The whole frame goes out inline in `loop()` — ~35 ms over Ethernet / ~90 ms ov
 
 ## Cross-domain wiring
 
-The driver is added as a child of the `Drivers` container at runtime — not boot-wired, but added per board through the catalog (`POST /api/modules`, the board's [`boards.json`](../../../install/boards.json) `modules` entry), so a device only carries the outputs its board actually has. Once added it receives `setSourceBuffer` / `setCorrection` from `Drivers::passBufferToDrivers` (which wires every child generically, boot-added or runtime-added) and applies the shared `const Correction*` before every send — the same correction the RMT LED driver applies, so network and wired outputs show identical colours. The added child persists across reboot via `FilesystemModule`.
+The driver is added as a child of the `Drivers` container at runtime — not boot-wired, but added per board through the catalog (`POST /api/modules`, the board's [`deviceModels.json`](../../../install/deviceModels.json) `modules` entry), so a device only carries the outputs its board actually has. Once added it receives `setSourceBuffer` / `setCorrection` from `Drivers::passBufferToDrivers` (which wires every child generically, boot-added or runtime-added) and applies the shared `const Correction*` before every send — the same correction the RMT LED driver applies, so network and wired outputs show identical colours. The added child persists across reboot via `FilesystemModule`.
 
 ## Tests
 

@@ -82,7 +82,7 @@ function makeState() {
         sortedReleases: [],    // releases sorted newest-first; render() fills this
         releaseIdx: 0,         // index into sortedReleases
         firmware: null,        // selected firmware key
-        boards: [],            // parsed docs/install/boards.json, [] if unavailable
+        boards: [],            // parsed docs/install/deviceModels.json, [] if unavailable
         selectedBoard: null,   // user pick from board <select>; "" for (any board)
         hasPort: null,         // web installer only: () => bool, "is a USB port
                                // picked?". When set, Install is disabled until it
@@ -265,7 +265,7 @@ function relativeTime(iso) {
 // the real options. Same row markup as render() so the swap is seamless. The
 // Board row is included whenever the picker is in board-picker mode — if the
 // catalog ends up empty, render() simply omits it (the skeleton row vanishes on
-// the swap, which on a fast same-origin boards.json fetch is imperceptible).
+// the swap, which on a fast same-origin deviceModels.json fetch is imperceptible).
 function renderSkeleton(state) {
     // A select can't host an animated element in its option text, so the spinning
     // ring (.rp-spinner, styled by the installer page) sits in the row next to a
@@ -276,7 +276,7 @@ function renderSkeleton(state) {
         `<select class="rp-select" disabled><option>Loading…</option></select>`;
     const row = (label) =>
         `<div class="control-row"><span class="control-label">${label}</span>${field}</div>`;
-    const boardRow = state.enableBoardPicker ? row("Board") : "";
+    const boardRow = state.enableBoardPicker ? row("Device") : "";
     state.container.innerHTML = row("Release") + boardRow + row("Firmware") + `
         <div class="control-row rp-status-row">
             <span class="control-label"></span>
@@ -304,7 +304,7 @@ function render(state) {
     // back to a two-row Release+Firmware layout with no board narrowing.
     const boardRow = (state.enableBoardPicker && state.boards.length > 0) ? `
         <div class="control-row">
-            <span class="control-label">Board</span>
+            <span class="control-label">Device</span>
             <select id="rp-board" class="rp-select"></select>
         </div>` : "";
     state.container.innerHTML = `
@@ -644,7 +644,7 @@ export const installPicker = {
      * @param {boolean} [opts.enableBoardPicker=true] - true on the web
      *   installer (renders a board <select> above firmware, narrows firmware
      *   list to the board's compatible variants); false on the on-device OTA
-     *   picker where the device already knows its board (BoardModule).
+     *   picker where the device already knows its deviceModel (SystemModule).
      * @param {HTMLElement} [opts.installRowExtras] - optional caller-owned
      *   element rendered just above the Install button row. Web installer
      *   uses this for the "Erase chip first" checkbox; on-device OTA omits
@@ -685,7 +685,7 @@ export const installPicker = {
         // the error branches below replace it with their message.
         renderSkeleton(state);
         const bypass = new URLSearchParams(location.search).get("nocache") === "1";
-        // Parallel: GitHub Releases API (slow, ~200ms) + local boards.json
+        // Parallel: GitHub Releases API (slow, ~200ms) + local deviceModels.json
         // (fast, ~5ms). The boards fetch only runs when the board picker is on AND
         // the host injected boardSupport (web installer) — the on-device OTA picker
         // does neither, so it skips the fetch and ships no board code.
@@ -737,14 +737,14 @@ export const installPicker = {
      * most recently mounted picker, or "" when the picker is in
      * "(any board)" mode, the catalog is unavailable, or the picker isn't
      * mounted yet. Used by the install-orchestrator to know what to push
-     * via Improv SET_BOARD after WiFi provisioning succeeds.
+     * via Improv SET_DEVICE_MODEL after WiFi provisioning succeeds.
      */
     getSelectedBoard() {
         return _lastState ? (_lastState.selectedBoard || "") : "";
     },
 
     /**
-     * The picked board's boards.json TX-power cap
+     * The picked board's deviceModels.json TX-power cap
      * (controls.Network.txPowerSetting), or null when the board has none /
      * no board is picked. The orchestrator pushes it over Improv BEFORE
      * provisioning — brown-out-prone boards (a weak LDO / marginal supply) fail their first

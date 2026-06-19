@@ -25,7 +25,7 @@
       --muted:  #a0a0b0;
       --accent: #a78bfa;
       --border: #2a3a6a;
-      --ok:     #57c97a;   /* green  — "active" capability (supported + a module configured in boards.json) */
+      --ok:     #57c97a;   /* green  — "active" capability (supported + a module configured in deviceModels.json) */
       --sup:    #e3c84a;   /* yellow — "supported" capability (firmware supports it, not pre-configured) */
       --plan:   #e8923a;   /* orange — "planned" capability (no module yet; greener than red, by design) */
     }
@@ -211,7 +211,7 @@
     .bg-name { font-weight: 600; font-size: 12px; line-height: 1.2; }
     .bg-meta { color: var(--muted); font-size: 11px; }
     /* Capability chips: supported (green) vs planned (orange) — distinguished by
-       colour, not by extra text. Labels are kept short in boards.json so every
+       colour, not by extra text. Labels are kept short in deviceModels.json so every
        chip fits the ~150px card; the full label + state is in the chip's title
        tooltip. */
     .bg-caps { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
@@ -227,7 +227,7 @@
 
     /* Board-details popup — native <dialog> (standard modal pattern: built-in
        backdrop, ESC-to-close, focus trap; no bespoke modal JS). Shows the full
-       boards.json entry as a readable summary plus a collapsible raw-JSON block. */
+       deviceModels.json entry as a readable summary plus a collapsible raw-JSON block. */
     #board-details::backdrop { background: rgba(0,0,0,0.6); }
     #board-details {
       background: var(--card); color: var(--fg);
@@ -569,31 +569,31 @@
       </div>
 
       <!-- picture board picker. Renders a visual card grid from
-           boards.json (image + product link), and on select drives the shared
+           deviceModels.json (image + product link), and on select drives the shared
            picker's own (hidden) board <select> so the existing flash flow is
            reused unchanged. The shared install-picker.js + firmware UI are NOT
            modified (board images are a Pages-only asset, never flashed). -->
       <!-- Board picker: a control-row consistent with USB Port / Release /
-           Firmware (left "Board" label + a field). The field is a collapsed
+           Firmware (left "Device" label + a field). The field is a collapsed
            summary button; clicking expands the search + card grid full-width
            below the row. Picking a board collapses it back to the summary.
            The shared install-picker.js + firmware UI are NOT modified
            (board images are a Pages-only asset, never flashed). -->
       <div id="board-grid-card">
         <div class="control-row">
-          <span class="control-label">Board</span>
+          <span class="control-label">Device</span>
           <button type="button" id="board-summary" aria-expanded="false">
             <span class="board-summary-left">
               <span id="board-summary-thumb" class="board-summary-thumb" hidden></span>
-              <span id="board-summary-label">Pick a board</span>
+              <span id="board-summary-label">Pick a device</span>
             </span>
             <span class="board-summary-caret">▾</span>
           </button>
         </div>
         <div id="board-expand" hidden>
           <div class="board-grid-controls">
-            <input id="board-search" type="search" placeholder="Search boards…" autocomplete="off" aria-label="Search boards">
-            <button type="button" id="board-clear" class="board-clear">Generic / no board</button>
+            <input id="board-search" type="search" placeholder="Search devices…" autocomplete="off" aria-label="Search devices">
+            <button type="button" id="board-clear" class="board-clear">Generic / no device</button>
           </div>
           <!-- Shown only when a Detect has narrowed the grid to one chip family;
                the toggle is the escape hatch if detection was wrong or your board
@@ -766,7 +766,7 @@
            (alreadyOnline branch, or an Improv-less firmware like esp32-eth).
            User types the IP/hostname so we can still add the device to
            "Your devices" and hand the picked board off through the Visit
-           click's same-origin URL (?board=…).
+           click's same-origin URL (?deviceModel=…).
            Retry button: cheap second chance at Improv before falling back
            to manual IP entry. Some boards (LOLIN S3 mini, slow-booting
            variants) lose the race against the post-flash 2 s reopen window;
@@ -1318,13 +1318,13 @@
       // paths now:
       //   - viaHttp (needs-ip / typed-IP): HTTP push is the ONLY board-
       //     injection channel, so if it failed nothing landed.
-      //   - Improv-success: SET_BOARD over serial already wrote
-      //     Board.board, but the per-board controls in `controls.*`
+      //   - Improv-success: SET_DEVICE_MODEL over serial already wrote
+      //     System.deviceModel, but the per-device-model controls in `controls.*`
       //     (e.g. Network.txPowerSetting for the weak-power WiFi cap)
       //     only ship via the HTTP fan-out. If that fan-out failed —
       //     exactly the failure mode the fix exists to defend against —
       //     `pendingBoard` ensures the Inject button decorates the
-      //     row and the device-side `?board=` consume path can land
+      //     row and the device-side `?deviceModel=` consume path can land
       //     the controls on first visit.
       const pendingBoardPush = !!(board && !httpBoardOk);
       myDevices.addProvisionedDevice(url, board, { pendingBoardPush });
@@ -1653,17 +1653,17 @@
     }
 
     // --- picture board grid --------------------------------
-    // Renders boards.json as a visual card grid; on select it drives the shared
+    // Renders deviceModels.json as a visual card grid; on select it drives the shared
     // picker's own (hidden) #rp-board <select> via a dispatched change event, so
     // the existing release/firmware narrowing + flash flow runs unchanged. The
     // shared install-picker.js is NOT modified.
     (async function boardGrid() {
       let boards = [];
       try {
-        const res = await fetch("./boards.json");   // same catalog as the picker
+        const res = await fetch("./deviceModels.json");   // same catalog as the picker
         boards = await res.json();
       } catch (e) {
-        document.getElementById("board-grid").textContent = "Could not load boards.json: " + e;
+        document.getElementById("board-grid").textContent = "Could not load deviceModels.json: " + e;
         return;
       }
       await _pickerReady;   // ensure the picker has mounted its (hidden) #rp-board
@@ -1681,7 +1681,7 @@
         const d = (b.modules || []).find(m => /LedDriver$/.test(m.type || ""));
         return d ? d.type.replace(/Driver$/, "") : null;
       }
-      // A supported capability is "active" (configured) when boards.json has a module
+      // A supported capability is "active" (configured) when deviceModels.json has a module
       // backing it. The capability→module link is implicit in the data, so this map
       // names it in one place (bespoke, but it just reads the modules[] already there —
       // no duplicated `active` field to drift). A capability with no entry here, or no
@@ -1828,7 +1828,7 @@
         };
         const thumb = document.createElement("div");
         thumb.className = "bg-thumb" + (b.image ? "" : " noimg");
-        // the deploy stages a copy of boards.json
+        // the deploy stages a copy of deviceModels.json
         // + the referenced board images alongside this page, so an "image" path of
         // "assets/boards/<slug>.jpg" resolves same-origin from this page.
         if (b.image) thumb.style.backgroundImage = `url("${b.image}")`;
@@ -1839,10 +1839,10 @@
         meta.textContent = b.chip + (ledDriver(b) ? " · " + ledDriver(b) : "");
         body.appendChild(meta);
         // Capability chips, three states by colour (not text): green = active
-        // (supported AND a module configured in boards.json), yellow = supported
+        // (supported AND a module configured in deviceModels.json), yellow = supported
         // (firmware supports it, not pre-configured), orange = planned (no module
         // yet — the backlog seed). All chips are shown (labels kept short in
-        // boards.json so they fit the card).
+        // deviceModels.json so they fit the card).
         const caps = [
           ...(Array.isArray(b.supported) ? b.supported.map(c =>
             capActive(b, c) ? { c, cls: "act", label: "active" }
@@ -1864,7 +1864,7 @@
           const a = document.createElement("a"); a.className = "bg-link"; a.href = b.url;
           a.target = "_blank"; a.rel = "noopener"; a.textContent = "product page ↗"; body.appendChild(a);
         }
-        // "details" opens the full boards.json entry in a popup. It carries the
+        // "details" opens the full deviceModels.json entry in a popup. It carries the
         // bg-link class so the card's onclick treats it as a non-select region
         // (same guard the product-page link relies on).
         const det = document.createElement("a");
@@ -1878,13 +1878,13 @@
         el.appendChild(body);
         return el;
       }
-      // Fill + open the board-details popup from a boards.json entry: a readable
+      // Fill + open the board-details popup from a deviceModels.json entry: a readable
       // summary (chip, firmwares, capabilities, modules + their controls) plus a
       // collapsible raw-JSON block for the exact entry. Built with DOM nodes (not
       // innerHTML) so board-supplied strings can't inject markup.
       function showBoardDetails(b) {
         const dlg = document.getElementById("board-details");
-        document.getElementById("bd-title").textContent = b.name || "Board";
+        document.getElementById("bd-title").textContent = b.name || "Device";
         const body = document.getElementById("bd-body");
         body.replaceChildren();
         const row = (key, val) => {

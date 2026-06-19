@@ -384,7 +384,7 @@ static void ethEventHandler(void* /*arg*/, esp_event_base_t base,
 
 // Runtime eth pin/PHY config. Seeded with the per-chip default (ethConfigDefault)
 // so an un-provisioned board still comes up on its historical pins; NetworkModule
-// overrides it via setEthConfig() with the board's boards.json values before
+// overrides it via setEthConfig() with the board's deviceModels.json values before
 // ethInit(). The DRIVER for each phyType is compiled in per chip (RMII for
 // classic/P4, W5500 SPI for S3 — sdkconfig); this only selects pins + which to use.
 static EthPinConfig ethConfig_ = ethConfigDefault;
@@ -401,7 +401,7 @@ static bool ethInitRmii() {
     ethNetif_ = esp_netif_new(&netif_cfg);
 
     // RMII / PHY pins from the runtime ethConfig_ (the Olimex map by default, the
-    // P4-NANO's IP101 map on the P4, or a board override pushed from boards.json).
+    // P4-NANO's IP101 map on the P4, or a board override pushed from deviceModels.json).
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
     eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
     emac_config.clock_config.rmii.clock_mode =
@@ -414,7 +414,7 @@ static bool ethInitRmii() {
     // ETH_ESP32_EMAC_DEFAULT_CONFIG() defaults. On the classic ESP32 they're fixed in
     // silicon; on the P4 the macro already defaults them to 49/34/35/28/29/30 (the
     // NANO wiring) — the proven round-1 P4 build relied on exactly these defaults, so
-    // we don't override them. (boards.json doesn't carry them either.)
+    // we don't override them. (deviceModels.json doesn't carry them either.)
 
     eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
     phy_config.phy_addr = ethConfig_.phyAddr;
@@ -490,14 +490,14 @@ static bool ethInitRmii() {
 // ethInit() dispatch only calls it under the same guard, so gating the definition
 // keeps the classic/P4 (RMII-only) build free of an unused-function warning under
 // -Werror. Reads the SPI pins from the runtime ethConfig_ (a W5500 board MUST set
-// them via boards.json — no universal default). Returns false (→ WiFi cascade) on
+// them via deviceModels.json — no universal default). Returns false (→ WiFi cascade) on
 // any failure, including no W5500 present, so a build with the driver in but no
 // module attached degrades cleanly.
 #ifdef MM_ETH_W5500
 static bool ethInitSpi() {
     if (ethConfig_.spiMiso < 0 || ethConfig_.spiMosi < 0 ||
         ethConfig_.spiSck < 0 || ethConfig_.spiCs < 0) {
-        ESP_LOGW(NET_TAG, "W5500 selected but SPI pins unset — skipping (set them in boards.json)");
+        ESP_LOGW(NET_TAG, "W5500 selected but SPI pins unset — skipping (set them in deviceModels.json)");
         return false;
     }
     esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
@@ -595,7 +595,7 @@ void ethStop() {
 
 bool ethInit() {
     ensureNetifInit();
-    // Dispatch on the board's PHY type (runtime, from boards.json via setEthConfig).
+    // Dispatch on the board's PHY type (runtime, from deviceModels.json via setEthConfig).
     // Each path returns false on any failure (incl. no PHY present) so NetworkModule
     // cascades to WiFi — a default build with a driver compiled in but no PHY wired
     // just falls through, no GPIO grab, no hang. A PHY whose driver isn't compiled

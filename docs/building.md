@@ -188,7 +188,7 @@ If a firmware *key* changes its feature set (e.g. the classic `esp32` collapse t
 
 Each ESP32-S3 SKU has its own firmware key because the sdkconfig fragment encodes flash size, partition table, and PSRAM mode — flashing an `n16r8` binary onto a different module (e.g. N8R2) either misaligns the partition table (boot loop) or fails PSRAM init. New SKUs become new keys (e.g. `esp32s3-n8r8`); there is no generic `esp32s3` shortcut.
 
-The Ethernet PHY type and pin map are runtime config, not baked into the build: each firmware carries the driver(s) its chip can host (RMII EMAC for classic/P4, W5500 SPI for S3), and `boards.json` supplies the per-board PHY/pins (pushed into NetworkModule's eth controls at provision). The Olimex pins are the classic chip default, so a board with the same LAN8720 PHY but different pinout (e.g. WT32-ETH01 with reset on GPIO 16) just needs a different `boards.json` entry — no rebuild.
+The Ethernet PHY type and pin map are runtime config, not baked into the build: each firmware carries the driver(s) its chip can host (RMII EMAC for classic/P4, W5500 SPI for S3), and `deviceModels.json` supplies the per-board PHY/pins (pushed into NetworkModule's eth controls at provision). The Olimex pins are the classic chip default, so a board with the same LAN8720 PHY but different pinout (e.g. WT32-ETH01 with reset on GPIO 16) just needs a different `deviceModels.json` entry — no rebuild.
 
 `--profile` is accepted one release for migration: `--profile default` → `--firmware esp32`, `--profile eth-only` → `--firmware esp32-eth`. The legacy `build_esp32_ethonly.py` wrapper still works (it now forwards `--firmware esp32-eth`).
 

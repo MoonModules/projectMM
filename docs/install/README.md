@@ -6,7 +6,7 @@ This directory holds the source for the **custom installer page** (driven by
 
 End users land here, pick a channel + board, click Install. The browser flashes
 the device over USB (Web Serial → ESP32), then runs Improv-Serial provisioning,
-SET_BOARD, and HTTP control fan-out — all from the same orchestrator,
+SET_DEVICE_MODEL, and HTTP control fan-out — all from the same orchestrator,
 end-to-end, no ESP Web Tools dependency on the install path.
 
 ## What's in this directory
@@ -16,22 +16,23 @@ end-to-end, no ESP Web Tools dependency on the install path.
   the picker's GitHub-release URLs to same-origin Pages URLs before handing
   them to the custom orchestrator (Web Serial is CORS-bound).
 - [`install-orchestrator.js`](install-orchestrator.js) — owns the
-  SerialPort across flash → reboot → Improv provision → SET_BOARD RPC.
+  SerialPort across flash → reboot → Improv provision → SET_DEVICE_MODEL RPC.
   Replaces the ESP Web Tools install button so the post-provision board
   push works (EWT 10.x's `state-changed` event fires inside a shadow DOM
   that's invisible to the host page; the orchestrator side-steps that by
   owning the whole flow). Falls through to a "device IP" prompt when the
-  device doesn't speak Improv back — see [BoardModule.md → Web installer
-  HTTP fallback](../moonmodules/core/BoardModule.md#web-installer--http-fallback-via-visit-board).
+  device doesn't speak Improv back — the picked deviceModel is handed off via the
+  `?deviceModel=` query param + HTTP `/api/control` inject (see the `deviceModel`
+  control on [SystemModule.md](../moonmodules/core/SystemModule.md)).
 - [`devices.js`](devices.js) — the *Your devices* list. Stores devices the
   user provisioned from this page so they can re-visit / erase / forget
   them. Renders a dedicated *Inject* button next to Visit for every entry
-  with a `board` field; the button opens `<device>/?board=<name>` and the
-  device UI fetches the matching `boards.json` entry from Pages and, for each of
+  with a `board` field; the button opens `<device>/?deviceModel=<name>` and the
+  device UI fetches the matching `deviceModels.json` entry from Pages and, for each of
   its `modules`, adds the module (`/api/modules`) then sets its nested controls
   (`/api/control`) — add-then-configure; see the schema below. Idempotent — safe
   to re-click after a popup-blocker rejection or a follow-up catalog edit.
-- [`boards.json`](boards.json) — the board catalog (name → firmware
+- [`deviceModels.json`](deviceModels.json) — the board catalog (name → firmware
   variants + the modules/controls to inject) the picker fetches and the
   installer / device-UI / MoonDeck injectors write from. Schema below.
 - [`favicon.png`](favicon.png) — moon-man, same as the device UI.
@@ -56,12 +57,12 @@ labelled summary with a thumbnail:
 |---|---|
 | ![Board picker collapsed](../assets/screenshots/installer-board-picker-collapsed.png) | ![Board picker expanded](../assets/screenshots/installer-board-picker-expanded.png) |
 
-## Catalog schema (`boards.json`)
+## Catalog schema (`deviceModels.json`)
 
 A flat JSON array of catalog entries. Each entry is the single source of truth
 for one piece of hardware and what to set up on it at install time. Three
 clients consume it identically — the web installer (`install-orchestrator.js`),
-the device UI's `?board=` inject (`src/ui/app.js`), and MoonDeck
+the device UI's `?deviceModel=` inject (`src/ui/app.js`), and MoonDeck
 (`scripts/moondeck.py`) — so **adding another module-with-controls unit needs no
 client change**.
 
@@ -194,7 +195,7 @@ the picker's visual layer **and** the inputs to the per-board capability loop ab
 - **Deploy** stages only the *referenced* images (not the whole `docs/assets/boards/`
   library, which also holds photos for boards not yet in the catalog) into
   `install/assets/boards/`, so an `image: "assets/boards/<slug>.jpg"` resolves
-  same-origin from `/install/boards.json`.
+  same-origin from `/install/deviceModels.json`.
 
 **One entry type, no Board/Device split.** A "Device" (a finished rig like the
 `projectMM testbench S3` — board + a wired mic) is just an entry with *more* of

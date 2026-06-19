@@ -65,15 +65,15 @@ struct ImprovTaskState {
     char* statusBuf = nullptr;        // module shows as `provision_status`
     size_t statusBufLen = 0;
 
-    // Vendor SET_BOARD RPC (command 0xFE): module-owned BoardModule buffer
-    // sized by BoardModule::boardKey_ at the caller (see boardOutLen). The
-    // Improv handler caps str_len dynamically against boardOutLen so the
+    // Vendor SET_DEVICE_MODEL RPC (command 0xFE): module-owned deviceModel buffer
+    // sized by SystemModule::deviceModel_ at the caller (see deviceModelOutLen). The
+    // Improv handler caps str_len dynamically against deviceModelOutLen so the
     // wire spec adapts when the buffer resizes. Same producer/consumer
     // dance as ssid/password.
     // Nullable: opt out by leaving null (desktop stub doesn't pass any).
-    char* boardOut = nullptr;
-    size_t boardOutLen = 0;
-    std::atomic<bool>* boardReady = nullptr;
+    char* deviceModelOut = nullptr;
+    size_t deviceModelOutLen = 0;
+    std::atomic<bool>* deviceModelReady = nullptr;
 
     // Vendor SET_TX_POWER RPC (command 0xFD): pre-association TX-power cap in
     // whole dBm for brown-out-prone boards. Same producer/consumer dance.
@@ -265,7 +265,7 @@ static void improvHandleProvision(const improv::ImprovCommand& cmd) {
     improvSendCurrentState(improv::STATE_PROVISIONED);
 }
 
-// SET_BOARD vendor RPC (command 0xFE) — Step 3 of the board-injection plan.
+// SET_DEVICE_MODEL vendor RPC (command 0xFE) — Step 3 of the deviceModel-injection plan.
 // The web installer's orchestrator sends this after WiFi provisioning so the
 // device persists its physical-board name (e.g. "LOLIN D32") without needing
 // MoonDeck or an HTTP fetch (which is blocked by mixed-content on Pages).
@@ -273,7 +273,7 @@ static void improvHandleProvision(const improv::ImprovCommand& cmd) {
 // Frame payload layout (after the standard Improv frame header):
 //   [0xFE]              command
 //   [data_len]          number of bytes that follow (= 1 + str_len)
-//   [str_len]           1..(BoardModule buffer - 1), length of board name in bytes
+//   [str_len]           1..(deviceModel buffer - 1), length of deviceModel name in bytes
 //   [str_bytes...]      ASCII-printable 0x20..0x7E only
 //
 // We parse the raw payload directly instead of going through
@@ -282,25 +282,25 @@ static void improvHandleProvision(const improv::ImprovCommand& cmd) {
 // the fields for unknown command IDs. Single-bytestring vendor commands are
 // cleaner to handle inline.
 //
-// On valid: write into g_improv.boardOut, set boardReady. The module's
-// loop1s() picks it up and calls BoardModule::setBoard which arms
+// On valid: write into g_improv.deviceModelOut, set deviceModelReady. The module's
+// loop1s() picks it up and calls SystemModule::setDeviceModel which arms
 // FilesystemModule's debounced save. RpcResponse fires immediately —
 // validation already passed.
 //
-// On invalid: ErrorState 0x80 (ERROR_INVALID_BOARD, new vendor error code).
-static constexpr uint8_t IMPROV_CMD_SET_BOARD = 0xFE;
-static constexpr uint8_t IMPROV_ERROR_INVALID_BOARD = 0x80;
+// On invalid: ErrorState 0x80 (ERROR_INVALID_DEVICE_MODEL, vendor error code).
+static constexpr uint8_t IMPROV_CMD_SET_DEVICE_MODEL = 0xFE;
+static constexpr uint8_t IMPROV_ERROR_INVALID_DEVICE_MODEL = 0x80;
 
-static void improvHandleSetBoard(const uint8_t* payload, uint8_t len) {
-    if (!g_improv.boardOut || !g_improv.boardReady) {
-        // Module didn't opt in (no BoardModule wired). Mostly defensive —
+static void improvHandleSetDeviceModel(const uint8_t* payload, uint8_t len) {
+    if (!g_improv.deviceModelOut || !g_improv.deviceModelReady) {
+        // Module didn't opt in (no SystemModule wired). Mostly defensive —
         // production wires it in main.cpp; failing-safe here keeps the dispatch
         // path well-defined.
         improvSendError(improv::ERROR_UNKNOWN_RPC);
         return;
     }
     if (len < 3) {
-        improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_BOARD));
+        improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_DEVICE_MODEL));
         return;
     }
     // payload[0] is the command byte (0xFE) — we already dispatched on it.
@@ -312,35 +312,35 @@ static void improvHandleSetBoard(const uint8_t* payload, uint8_t len) {
     // wire-level length byte; these checks enforce internal consistency.
     uint8_t dataLen = payload[1];
     uint8_t strLen = payload[2];
-    if (strLen == 0 || strLen >= g_improv.boardOutLen
+    if (strLen == 0 || strLen >= g_improv.deviceModelOutLen
             || dataLen != static_cast<uint8_t>(1u + strLen)
             || len != static_cast<size_t>(3u + strLen)) {
-        improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_BOARD));
+        improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_DEVICE_MODEL));
         return;
     }
     for (uint8_t i = 0; i < strLen; i++) {
         uint8_t b = payload[3 + i];
         if (b < 0x20 || b > 0x7E) {
-            improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_BOARD));
+            improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_DEVICE_MODEL));
             return;
         }
     }
-    std::memcpy(g_improv.boardOut, payload + 3, strLen);
-    g_improv.boardOut[strLen] = 0;
+    std::memcpy(g_improv.deviceModelOut, payload + 3, strLen);
+    g_improv.deviceModelOut[strLen] = 0;
     // release-store: pairs with the module's acquire-load in loop1s() so the
     // buffer write is visible before the consumer sees ready=true.
-    g_improv.boardReady->store(true, std::memory_order_release);
+    g_improv.deviceModelReady->store(true, std::memory_order_release);
     // Empty-payload RpcResponse for command 0xFE — signals success. The
     // browser orchestrator can treat any RpcResponse with cmd=0xFE as ack.
     auto rpc = improv::build_rpc_response(
-        static_cast<improv::Command>(IMPROV_CMD_SET_BOARD),
+        static_cast<improv::Command>(IMPROV_CMD_SET_DEVICE_MODEL),
         std::vector<std::string>{}, false);
     improvSend(ImprovFrameType::RpcResponse, rpc);
 }
 
 // SET_TX_POWER vendor RPC (command 0xFD) — the pre-association escape hatch
 // for boards whose LDO browns out at full TX power (weak-powered boards). Their
-// boards.json cap (Network.txPowerSetting) normally arrives over HTTP after
+// deviceModels.json cap (Network.txPowerSetting) normally arrives over HTTP after
 // the device is online — which a browning-out board can never reach: it fails
 // WiFi auth at 20 dBm before any HTTP exists (proven on the bench,
 // 2026-06-10). This RPC carries the cap over the same serial channel as the
@@ -379,13 +379,13 @@ static void improvHandleSetTxPower(const uint8_t* payload, uint8_t len) {
 // we care about; the spec lets the other types through silently.
 static void improvDispatchFrame(const ImprovFrameParser& parser) {
     if (parser.lastType() != improv::TYPE_RPC) return;
-    // SET_BOARD short-circuits the standard improv::parse_improv_data path
+    // SET_DEVICE_MODEL short-circuits the standard improv::parse_improv_data path
     // because that helper is WIFI_SETTINGS-shaped (n length-prefixed strings).
     // Peek at the command byte first; vendor-RPC parsing handles its own payload.
     const uint8_t* raw = parser.lastPayload();
     uint8_t rawLen = parser.lastPayloadLen();
-    if (rawLen >= 1 && raw[0] == IMPROV_CMD_SET_BOARD) {
-        improvHandleSetBoard(raw, rawLen);
+    if (rawLen >= 1 && raw[0] == IMPROV_CMD_SET_DEVICE_MODEL) {
+        improvHandleSetDeviceModel(raw, rawLen);
         return;
     }
     if (rawLen >= 1 && raw[0] == IMPROV_CMD_SET_TX_POWER) {
@@ -584,8 +584,8 @@ bool improvProvisioningInit(const ImprovDeviceInfo& info,
                             char* passwordOut, size_t passwordOutLen,
                             std::atomic<bool>* ready,
                             char* statusBuf, size_t statusBufLen,
-                            char* boardOut, size_t boardOutLen,
-                            std::atomic<bool>* boardReady,
+                            char* deviceModelOut, size_t deviceModelOutLen,
+                            std::atomic<bool>* deviceModelReady,
                             uint8_t* txPowerOut,
                             std::atomic<bool>* txPowerReady) {
     if (!info.name || !info.chipFamily || !info.firmwareVersion ||
@@ -604,10 +604,10 @@ bool improvProvisioningInit(const ImprovDeviceInfo& info,
     g_improv.ready = ready;
     g_improv.statusBuf = statusBuf;
     g_improv.statusBufLen = statusBufLen;
-    // SET_BOARD opt-in: caller may pass null/0/null to skip vendor-RPC support.
-    g_improv.boardOut = boardOut;
-    g_improv.boardOutLen = boardOutLen;
-    g_improv.boardReady = boardReady;
+    // SET_DEVICE_MODEL opt-in: caller may pass null/0/null to skip vendor-RPC support.
+    g_improv.deviceModelOut = deviceModelOut;
+    g_improv.deviceModelOutLen = deviceModelOutLen;
+    g_improv.deviceModelReady = deviceModelReady;
     // SET_TX_POWER opt-in, same shape.
     g_improv.txPowerOut = txPowerOut;
     g_improv.txPowerReady = txPowerReady;
@@ -641,8 +641,8 @@ bool improvProvisioningInit(const ImprovDeviceInfo& /*info*/,
                             char* /*passwordOut*/, size_t /*passwordOutLen*/,
                             std::atomic<bool>* /*ready*/,
                             char* statusBuf, size_t statusBufLen,
-                            char* /*boardOut*/, size_t /*boardOutLen*/,
-                            std::atomic<bool>* /*boardReady*/,
+                            char* /*deviceModelOut*/, size_t /*deviceModelOutLen*/,
+                            std::atomic<bool>* /*deviceModelReady*/,
                             uint8_t* /*txPowerOut*/,
                             std::atomic<bool>* /*txPowerReady*/) {
     if (statusBuf && statusBufLen > 0) {

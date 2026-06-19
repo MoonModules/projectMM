@@ -148,14 +148,14 @@ async function init() {
         state = await resp.json();
         // Pending-board handoff from the web installer. The installer page
         // (docs/install/devices.js → Inject button) opens us with
-        // `?board=<name>` when the orchestrator couldn't push the board
+        // `?deviceModel=<name>` when the orchestrator couldn't push the board
         // itself (HTTPS Pages → HTTP device blocked by mixed-content, OR
         // an Improv-less firmware variant). We consume it once, fetch the
-        // boards.json entry from Pages, add its modules + set their controls
+        // deviceModels.json entry from Pages, add its modules + set their controls
         // via the standard `/api/modules` + `/api/control` writes, then strip the param via
         // history.replaceState. Fire-and-forget — the WS state push driven
         // by sendControl re-renders the affected fields.
-        consumePendingBoardParam();
+        consumePendingDeviceModelParam();
         const savedSel = lsRead(LS_SELECTED, "mm.selectedModule", null);
         if (state.modules && state.modules.length > 0) {
             const exists = savedSel && state.modules.some(m => m.name === savedSel);
@@ -180,7 +180,7 @@ async function init() {
 
 async function sendControl(moduleName, controlName, value) {
     // Best-effort by design — failures are not retried here (see
-    // consumePendingBoardParam's "No retry" contract). The query param is
+    // consumePendingDeviceModelParam's "No retry" contract). The query param is
     // single-shot. Non-ok responses + network errors are logged to console
     // so a user with devtools open can see what went wrong (e.g. a board-
     // injected control value that the device-side validator rejected).
@@ -224,19 +224,19 @@ async function sendAddModule(m) {
 }
 
 // Public Pages URL of the board catalog. The installer page also serves
-// this at `./boards.json` (same-origin from the installer's perspective),
+// this at `./deviceModels.json` (same-origin from the installer's perspective),
 // but the device UI is on a different origin (the device's HTTP server),
 // so we fetch the canonical Pages copy. CORS: GitHub Pages static assets
 // ship `Access-Control-Allow-Origin: *`, so a cross-origin fetch from
 // http://<device>/ to https://moonmodules.org succeeds without proxying.
 // Hardcoded rather than configurable: the catalog is project-global, not
 // per-installation. During local development, flip this to
-// `http://localhost:8000/boards.json` and re-flash; preview_installer.py
+// `http://localhost:8000/deviceModels.json` and re-flash; preview_installer.py
 // sends the same `Access-Control-Allow-Origin: *` header production does.
-const BOARDS_JSON_URL = "https://moonmodules.org/projectMM/install/boards.json";
+const DEVICE_MODELS_JSON_URL = "https://moonmodules.org/projectMM/install/deviceModels.json";
 
-// Consume an installer-emitted `?board=<name>` query param: look the name
-// up in boards.json on Pages, then for each module in the entry add it
+// Consume an installer-emitted `?deviceModel=<name>` query param: look the name
+// up in deviceModels.json on Pages, then for each module in the entry add it
 // (`/api/modules`) and set its nested controls (`/api/control`) so each
 // module's validation runs.
 // Strip the query param BEFORE the network round-trip so a mid-fetch
@@ -244,37 +244,37 @@ const BOARDS_JSON_URL = "https://moonmodules.org/projectMM/install/boards.json";
 // leave the device unchanged; user re-runs the Inject button or sets the
 // fields manually via MoonDeck.
 //
-// See docs/moonmodules/core/BoardModule.md (Injection paths) for the
-// boards.json schema and the full handoff sequence.
-async function consumePendingBoardParam() {
+// See docs/moonmodules/core/SystemModule.md (the deviceModel control) for the
+// deviceModels.json schema and the full handoff sequence.
+async function consumePendingDeviceModelParam() {
     const params = new URLSearchParams(location.search);
-    const pendingBoard = params.get("board");
-    if (!pendingBoard) return;
+    const pendingDeviceModel = params.get("deviceModel");
+    if (!pendingDeviceModel) return;
     // Strip the param up-front so a refresh during the async fetch doesn't
     // re-trigger the injection.
-    params.delete("board");
+    params.delete("deviceModel");
     const qs = params.toString();
     history.replaceState({}, "",
         location.pathname + (qs ? "?" + qs : "") + location.hash);
 
     let entry;
     try {
-        const res = await fetch(BOARDS_JSON_URL);
-        if (!res.ok) throw new Error(`boards.json HTTP ${res.status}`);
+        const res = await fetch(DEVICE_MODELS_JSON_URL);
+        if (!res.ok) throw new Error(`deviceModels.json HTTP ${res.status}`);
         const catalog = await res.json();
         entry = Array.isArray(catalog)
-            ? catalog.find(b => b && b.name === pendingBoard)
+            ? catalog.find(b => b && b.name === pendingDeviceModel)
             : null;
     } catch (e) {
-        // Network down, Pages outage, or boards.json missing the entry.
+        // Network down, Pages outage, or deviceModels.json missing the entry.
         // Surface in the console so a user with devtools open can see why
         // injection didn't take; don't show a modal since the rest of the
         // UI is operational and most users just want to use the device.
-        console.warn("[board-inject] failed to fetch boards.json:", e);
+        console.warn("[board-inject] failed to fetch deviceModels.json:", e);
         return;
     }
     if (!entry) {
-        console.warn(`[board-inject] no catalog entry for board "${pendingBoard}"`);
+        console.warn(`[board-inject] no catalog entry for deviceModel "${pendingDeviceModel}"`);
         return;
     }
     // Each entry is a list of module-with-controls units:
@@ -282,7 +282,7 @@ async function consumePendingBoardParam() {
     // Per module: add it first (when it has a parent_id — a fresh flash has no
     // user-added modules like AudioModule, so a control write would 404), then
     // set its controls. A module WITHOUT parent_id is a boot-wired/top-level one
-    // (Board under System, Network) that already exists — skip the add, just set
+    // (System, Network, Drivers) that already exists — skip the add, just set
     // controls. The add is idempotent (an existing id returns 200). If an add
     // fails, skip that module's controls (writing them would 404) but keep going —
     // a single failed module shouldn't abort the whole inject (best-effort
@@ -635,14 +635,17 @@ function createCard(mod, depth) {
     card.appendChild(title);
 
     // -- Controls --
-    // Modules whose primary purpose is hosting user-added children (Layers,
-    // Layer, Drivers, Layouts) collapse their own controls so the children
-    // are the focus by default. Modules that merely host a code-wired child
-    // (Network → Improv) keep their controls expanded — the parent's settings
-    // are the main point, the code-wired child is informational. Leaf modules
-    // render controls inline (no wrapper at all).
+    // Child-hosting modules deeper in the tree (Layers, Layer, Drivers, Layouts)
+    // collapse their own controls so the children are the focus by default.
+    // Modules that merely host a code-wired child (Network → Improv) keep their
+    // controls expanded — the parent's settings are the main point, the code-wired
+    // child is informational. Leaf modules render controls inline (no wrapper).
+    // EXCEPTION: a top-level module (depth 0 — the selected root, e.g. System,
+    // Network) never collapses its own controls, even though it accepts children
+    // (System hosts peripherals). It's the card the user is looking at, so its
+    // settings should be visible, not hidden behind a "controls" disclosure.
     const hasVisibleControls = mod.controls && mod.controls.some(c => !c.hidden);
-    const wrapInDetails = acceptsNewChildren(mod) && hasVisibleControls;
+    const wrapInDetails = depth > 0 && acceptsNewChildren(mod) && hasVisibleControls;
     const controlsHost = wrapInDetails ? (() => {
         const d = document.createElement("details");
         d.className = "card-controls-collapse";
@@ -698,7 +701,7 @@ function createCard(mod, depth) {
         installPicker.init({
             container: mount,
             ownFirmwareKey,
-            // Device already knows its board (BoardModule) — picker is for
+            // Device already knows its deviceModel (SystemModule) — picker is for
             // releases + firmware compatibility only. Showing a board picker
             // here would invite the user to mis-narrow the firmware list.
             enableBoardPicker: false,
@@ -914,7 +917,7 @@ function acceptsNewChildren(mod) {
 // The set of child roles ANY loaded type accepts — the union of every type's
 // acceptsChildRoles. A module is "user-managed as a child" iff its role is in
 // this set, which is how the UI decides to show delete/replace/drag without
-// hardcoding role names. Code-wired children (ImprovProvisioning, BoardModule
+// hardcoding role names. Code-wired children (ImprovProvisioning,
 // — roles no container declares) correctly fall outside it.
 function allAcceptedChildRoles() {
     const roles = new Set();
@@ -1429,9 +1432,11 @@ function fillListDetail(panel, detail) {
         if (typeof v === "object" && !isScalarArray) continue;
         // `cached` and `ageSec` both render as "last seen"; a projectMM device emits
         // exactly one (mutually exclusive in DevicesModule), but skip ageSec when a
-        // truthy `cached` is also present so any other source can't produce two
-        // conflicting "last seen" rows. (Robust-to-any-input, generic.)
-        if (k === "ageSec" && detail.cached) continue;
+        // `cached` key is also present so any other source can't produce two conflicting
+        // "last seen" rows. Match the cached branch's render condition, which fires on
+        // key EXISTENCE (`k === "cached"`), not truthiness — so gate on the key being
+        // present, not on its value. (Robust-to-any-input, generic.)
+        if (k === "ageSec" && "cached" in detail) continue;
         const r = document.createElement("div");
         r.className = "list-detail-row";
         const kEl = document.createElement("span");

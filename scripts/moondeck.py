@@ -44,11 +44,11 @@ APP_VERSION = _app_version()
 # Boards catalog (single source of truth, shared with the web installer)
 # ---------------------------------------------------------------------------
 
-BOARDS_FILE = ROOT / "docs" / "install" / "boards.json"
+BOARDS_FILE = ROOT / "docs" / "install" / "deviceModels.json"
 
 
 def _load_boards():
-    """Load docs/install/boards.json. Returns [] on missing/malformed file —
+    """Load docs/install/deviceModels.json. Returns [] on missing/malformed file —
     `_deduce_board` then always returns "" (no firmware uniquely identifies
     a board), MoonDeck JS shows only the empty default. The web installer
     Step 2 picker will share this file.
@@ -140,7 +140,7 @@ def _probe_device(ip, port=8080, timeout=0.4):
       `board` when the device hasn't been told its board yet. See
       docs/architecture.md § Firmware vs board.
     - `board` is the physical hardware key. Preferred source: the device's
-      own `board` control on BoardModule (the value MoonDeck pushed earlier
+      own `deviceModel` control on SystemModule (the value MoonDeck pushed earlier
       and the device persisted). Fall back to firmware-based deduction
       (catalog lookup) when the device hasn't been told yet — then MoonDeck
       pushes the deduced value on next discover, the device persists it,
@@ -158,15 +158,15 @@ def _probe_device(ip, port=8080, timeout=0.4):
             firmware = ""
             device_board = ""
             for m in _walk_modules(modules):
+                # deviceName, firmware AND deviceModel all live on SystemModule now
+                # (the deviceModel identity was folded in from the former BoardModule).
                 if m.get("type") == "SystemModule":
                     for c in m.get("controls", []):
                         if c.get("name") == "deviceName":
                             device_name = c.get("value", "") or ""
                         elif c.get("name") == "firmware":
                             firmware = c.get("value", "") or ""
-                elif m.get("type") == "BoardModule":
-                    for c in m.get("controls", []):
-                        if c.get("name") == "board":
+                        elif c.get("name") == "deviceModel":
                             device_board = c.get("value", "") or ""
             return {
                 "ip": f"{ip}:{port}",
@@ -182,7 +182,7 @@ def _deduce_board(firmware: str) -> str:
     """Firmware → board name when exactly one catalog entry claims this
     firmware. Returns "" when zero (unknown firmware) or multiple boards
     claim it (ambiguous — user picks). Catalog lives at
-    docs/install/boards.json; see docs/architecture.md § Firmware vs board.
+    docs/install/deviceModels.json; see docs/architecture.md § Firmware vs board.
     """
     if not firmware:
         return ""
@@ -191,14 +191,14 @@ def _deduce_board(firmware: str) -> str:
 
 
 def _push_board_to_device(ip: str, board: str) -> bool:
-    """POST /api/control on the device for every per-board control in boards.json.
+    """POST /api/control on the device for every per-board control in deviceModels.json.
 
-    For boards that have a catalog entry in docs/install/boards.json: fans
+    For boards that have a catalog entry in docs/install/deviceModels.json: fans
     out the full `controls.<Module>.<control>` block (matching the web
-    installer's and the device-side `?board=` Inject path — same generic
+    installer's and the device-side `?deviceModel=` Inject path — same generic
     iteration, so adding a new field to a board entry Just Works without
     code changes here). For boards without a catalog entry (custom names,
-    unknown firmware): still pushes `Board.board` so the bare name lands —
+    unknown firmware): still pushes `System.deviceModel` so the bare name lands —
     keeps the legacy single-field behaviour as the fallback.
 
     Returns True iff EVERY POST returned 200. False on any failure (timeout,
@@ -215,17 +215,18 @@ def _push_board_to_device(ip: str, board: str) -> bool:
     import urllib.request
     import urllib.error
     # Look up the catalog entry. BOARDS is loaded at module init; we don't
-    # re-read boards.json per push so a tight discover-refresh cycle
-    # doesn't hammer the disk. If the user edits boards.json, restart
+    # re-read deviceModels.json per push so a tight discover-refresh cycle
+    # doesn't hammer the disk. If the user edits deviceModels.json, restart
     # MoonDeck (same as every other catalog change).
     entry = next((b for b in BOARDS if b.get("name") == board), None)
     if entry is not None:
         modules = entry.get("modules") or []
     else:
-        # Custom / unknown board: just push the bare name as a Board module.
-        # Mirrors the legacy behaviour so existing custom-board users don't regress.
-        modules = [{"type": "Board", "id": "Board", "parent_id": "System",
-                    "controls": {"board": board}}]
+        # Custom / unknown deviceModel: push the bare name onto System's `deviceModel`
+        # control (the identity lives on SystemModule now — no parent_id, it's the
+        # boot-wired top-level module, so _apply just sets the control, no add).
+        modules = [{"type": "System", "id": "System",
+                    "controls": {"deviceModel": board}}]
 
     return _apply_modules_to_device(ip, modules)
 
@@ -233,7 +234,7 @@ def _push_board_to_device(ip: str, board: str) -> bool:
 def _apply_modules_to_device(ip: str, modules: list) -> bool:
     """Add-then-configure a list of module-with-controls units on a device.
 
-    Each unit is `{type, id, parent_id?, controls?}` — the SAME shape boards.json
+    Each unit is `{type, id, parent_id?, controls?}` — the SAME shape deviceModels.json
     catalog entries use and a saved device-profile stores, so both the board push
     (_push_board_to_device) and a profile restore share this one fan-out. Per
     module: add it first when it has a parent_id (a fresh flash has no user-added
@@ -280,11 +281,14 @@ def _apply_modules_to_device(ip: str, modules: list) -> bool:
 
 
 # Module types whose controls a device-profile captures: the drivers + the
-# board/network/audio config a user sets by hand. Effects/layouts/layers are
+# system/network/audio config a user sets by hand. Effects/layouts/layers are
 # animation state, not the device's physical pin wiring, so they're left out —
 # a profile is "the GPIO/peripheral setup", re-applied after a reflash wipes it.
+# SystemModule carries the device identity (deviceName + deviceModel, the latter
+# folded in from the former BoardModule); its read-only telemetry controls are
+# dropped by the _NON_REPLAYABLE_CONTROL_TYPES filter, leaving just the Text config.
 _PROFILE_MODULE_TYPES = {
-    "BoardModule", "NetworkModule", "AudioModule",
+    "SystemModule", "NetworkModule", "AudioModule",
     "RmtLedDriver", "LcdLedDriver", "ParlioLedDriver", "NetworkSendDriver",
 }
 
@@ -300,13 +304,13 @@ def _capture_device_profile(ip: str) -> "list | None":
     """Read /api/state and flatten the module tree into profile units.
 
     Returns a list of `{type, id, parent_id?, controls}` units (the same shape
-    _apply_modules_to_device + boards.json use), or None if the device is
+    _apply_modules_to_device + deviceModels.json use), or None if the device is
     unreachable. Only the config-bearing module types in _PROFILE_MODULE_TYPES are
     captured (the physical pin/peripheral setup), and each module's controls list
     `[{name, value}]` is collapsed to a `{name: value}` dict. parent_id comes from
     the tree position so restore re-creates user-added modules under the right
     container. The catalog `type` is the short id the device reports as the module
-    type; we keep it verbatim (e.g. "RmtLedDriver"), matching boards.json.
+    type; we keep it verbatim (e.g. "RmtLedDriver"), matching deviceModels.json.
     """
     import urllib.request
     import urllib.error
@@ -906,7 +910,7 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"modules": test_meta.list_test_modules()})
 
         elif self.path == "/api/boards":
-            # Serves docs/install/boards.json (loaded at startup). The web
+            # Serves docs/install/deviceModels.json (loaded at startup). The web
             # installer (Step 2) will fetch the same file directly from
             # Pages; MoonDeck reads it locally and exposes it here so the
             # JS UI shares one source of truth with the Python deduce path.
@@ -981,8 +985,8 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             # Push a single (ip, board) to a device. Called by the JS when the
             # user picks a board from the per-device dropdown — saveState
             # alone persists the value in moondeck.json but the device also
-            # needs to hear about it (BoardModule on the device persists its
-            # own /.config/BoardModule.json). The bulk push from discover /
+            # needs to hear about it (the device persists its `deviceModel` control,
+            # now on SystemModule, to /.config/SystemModule.json). The bulk push from discover /
             # refresh covers the multi-device case; this covers the
             # one-device-at-a-time UI mutation.
             body = self._read_body()

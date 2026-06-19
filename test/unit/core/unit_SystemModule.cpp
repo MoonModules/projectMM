@@ -59,6 +59,9 @@ void writeDeviceName(mm::SystemModule& sys, const char* value) {
             return;
         }
     }
+    // No `deviceName` control found — a setup regression. Fail loudly rather than
+    // silently no-op, which would let the calling test "pass" against a stale buffer.
+    REQUIRE_MESSAGE(false, "writeDeviceName: no 'deviceName' control on SystemModule");
 }
 } // namespace
 

@@ -405,10 +405,15 @@ private:
         if (host.ip[0] == 0 && host.ip[1] == 0 && host.ip[2] == 0 && host.ip[3] == 0)
             return;   // unresolved — nothing to key on
         // The browsed service type maps to a DevType (Generic for `_http`, Wled for
-        // `_wled`), but a `_http` host carrying our `mm=1` TXT marker is a projectMM
-        // device — promote it, so an mDNS-only sighting classifies + names it correctly
-        // without waiting for the HTTP scan.
-        DevType type = host.isProjectMM ? DevType::ProjectMM : kMdnsServices[mdnsIndex_].type;
+        // `_wled`). A host on the GENERIC `_http` service carrying our `mm=1` TXT marker
+        // is a projectMM device — promote it, so an mDNS-only sighting classifies + names
+        // it without waiting for the HTTP scan. The promotion is gated on the base type
+        // being Generic: a definite service type (e.g. `_wled`) already says what the
+        // host is, so the marker must not override it (defensive — a real WLED won't
+        // carry `mm=1`, but a future service mustn't be silently relabelled projectMM).
+        const DevType baseType = kMdnsServices[mdnsIndex_].type;
+        DevType type = (host.isProjectMM && baseType == DevType::Generic)
+                       ? DevType::ProjectMM : baseType;
         upsertMdns(host.ip, type, host.hostname);
     }
 

@@ -5,7 +5,7 @@
       "chip": "esp32",
       "eth_only": false,
       "ships": true,
-      "description": "ESP32 classic — WiFi + Ethernet (RMII; per-board pins/PHY from boards.json, Olimex defaults)."
+      "description": "ESP32 classic — WiFi + Ethernet (RMII; per-board pins/PHY from deviceModels.json, Olimex defaults)."
     },
     {
       "name": "esp32-16mb",
@@ -19,14 +19,14 @@
       "chip": "esp32",
       "eth_only": true,
       "ships": true,
-      "description": "ESP32 classic — Ethernet only (WiFi compiled out; smaller image, more RAM). Per-board pins/PHY from boards.json. The default `esp32` does WiFi+Ethernet — use this only to drop WiFi."
+      "description": "ESP32 classic — Ethernet only (WiFi compiled out; smaller image, more RAM). Per-board pins/PHY from deviceModels.json. The default `esp32` does WiFi+Ethernet — use this only to drop WiFi."
     },
     {
       "name": "esp32s3-n16r8",
       "chip": "esp32s3",
       "eth_only": false,
       "ships": true,
-      "description": "ESP32-S3 DevKitC-1 (N16R8: 16 MB flash, 8 MB octal PSRAM) — WiFi + W5500 SPI Ethernet (external module, pins per board in boards.json)"
+      "description": "ESP32-S3 DevKitC-1 (N16R8: 16 MB flash, 8 MB octal PSRAM) — WiFi + W5500 SPI Ethernet (external module, pins per board in deviceModels.json)"
     },
     {
       "name": "esp32s3-n8r8",

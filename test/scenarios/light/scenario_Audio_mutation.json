@@ -17,7 +17,7 @@
   "fixture": [
     {
       "name": "fix-system",
-      "description": "SystemModule: the top-level container peripherals (mic, board) hang under, mirroring main.cpp where the user adds AudioModule beside BoardModule.",
+      "description": "SystemModule: the top-level container peripherals (mic, board) hang under, mirroring main.cpp where the user adds AudioModule beside the System peripherals.",
       "op": "add_module",
       "id": "System",
       "type": "SystemModule"

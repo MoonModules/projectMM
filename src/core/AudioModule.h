@@ -45,7 +45,7 @@ public:
 
     ModuleRole role() const override { return ModuleRole::Peripheral; }
 
-    // Unlike a zero-cost diagnostic peripheral (BoardModule), this module pays a
+    // Unlike a zero-cost diagnostic peripheral, this module pays a
     // real per-tick cost (the FFT) that IS the capability, not an optional extra,
     // so it must not run when the user turns it off. We therefore respect `enabled`
     // (the default): the Scheduler skips loop() entirely while disabled, so the FFT,

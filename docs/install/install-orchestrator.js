@@ -15,7 +15,7 @@
 //   3. release the flash locks, hand the same port to ImprovSerial
 //   4. show a WiFi creds form, await user input
 //   5. provision via Improv standard SEND_WIFI_CREDENTIALS
-//   6. send SET_BOARD vendor RPC (0xFE) with the picked board name
+//   6. send SET_DEVICE_MODEL vendor RPC (0xFE) with the picked board name
 //   7. callback with { url, board } so the host page populates
 //      "Your devices" + shows a "Visit device" link
 //
@@ -31,15 +31,15 @@ import { ImprovSerial } from "https://unpkg.com/improv-wifi-serial-sdk@2.5.0/dis
 // Constants
 // ---------------------------------------------------------------------------
 
-// SET_BOARD vendor RPC command ID. High end of the conventional 0x80-0xFE
+// SET_DEVICE_MODEL vendor RPC command ID. High end of the conventional 0x80-0xFE
 // vendor extension range to maximize headroom against future Improv-spec
 // expansion into the low vendor range. Matches the device-side handler at
 // src/platform/esp32/platform_esp32_improv.cpp.
-const IMPROV_CMD_SET_BOARD = 0xFE;
+const IMPROV_CMD_SET_DEVICE_MODEL = 0xFE;
 
 // SET_TX_POWER vendor RPC command ID — the pre-association TX-power cap for
 // boards whose LDO browns out at full power (a thin on-module LDO or marginal
-// USB supply, e.g. some S2/S3 mini-class boards). Their boards.json
+// USB supply, e.g. some S2/S3 mini-class boards). Their deviceModels.json
 // cap (controls.Network.txPowerSetting) used to arrive only via the HTTP
 // fan-out AFTER the device was online, which a browning-out board can never
 // reach: it fails WiFi auth at 20 dBm first (proven on the bench 2026-06-10).
@@ -132,8 +132,8 @@ function buildImprovFrame(type, payload) {
     return frame;
 }
 
-// Encodes the SET_BOARD RPC payload that the device parser at
-// platform_esp32_improv.cpp::improvHandleSetBoard expects.
+// Encodes the SET_DEVICE_MODEL RPC payload that the device parser at
+// platform_esp32_improv.cpp::improvHandleSetDeviceModel expects.
 //
 // RPC payload (inside the Improv frame, before the checksum):
 //   [0xFE]          command
@@ -141,23 +141,23 @@ function buildImprovFrame(type, payload) {
 //   [str_len]       1..31, length of board name in bytes
 //   [str_bytes]     ASCII-printable 0x20..0x7E only
 //
-// The 31-char cap mirrors BoardModule::boardKey_'s 32-byte buffer
+// The 31-char cap mirrors SystemModule::deviceModel_'s 32-byte buffer
 // (sizeof - 1 for NUL); the device-side handler validates against
-// g_improv.boardOutLen dynamically, so the wire spec follows the buffer.
-function encodeSetBoardPayload(board) {
+// g_improv.deviceModelOutLen dynamically, so the wire spec follows the buffer.
+function encodeSetDeviceModelPayload(board) {
     const nameBytes = new TextEncoder().encode(board);
     if (nameBytes.length === 0 || nameBytes.length > 31) {
         throw new Error(`board name length ${nameBytes.length}: must be 1..31`);
     }
     const out = new Uint8Array(3 + nameBytes.length);
-    out[0] = IMPROV_CMD_SET_BOARD;
+    out[0] = IMPROV_CMD_SET_DEVICE_MODEL;
     out[1] = 1 + nameBytes.length;
     out[2] = nameBytes.length;
     out.set(nameBytes, 3);
     return out;
 }
 
-// Sends the SET_BOARD frame on a port we own. ImprovSerial's
+// Sends the SET_DEVICE_MODEL frame on a port we own. ImprovSerial's
 // writePacketToStream is private (verified in improv-wifi-serial-sdk@2.5.0's
 // serial.d.ts), so we encode the frame ourselves and write raw bytes.
 // ImprovSerial holds the writable stream's lock during its lifetime — to
@@ -166,7 +166,7 @@ function encodeSetBoardPayload(board) {
 // ImprovSerial is still active is blocked, so we close ImprovSerial first
 // (we're done with it — the WiFi provision succeeded) and write directly.
 async function sendSetBoardFrame(port, board) {
-    const payload = encodeSetBoardPayload(board);
+    const payload = encodeSetDeviceModelPayload(board);
     const frame = buildImprovFrame(IMPROV_FRAME_TYPE_RPC, payload);
     const writer = port.writable.getWriter();
     try {
@@ -178,8 +178,8 @@ async function sendSetBoardFrame(port, board) {
 
 // Sends the SET_TX_POWER frame ([0xFD][1][dBm]) on a port we own — called
 // BEFORE ImprovSerial takes the port's locks, so no close/reopen dance is
-// needed. Fire-and-forget like SET_BOARD: the device acks with RpcResponse
-// we don't read; the HTTP fan-out later re-applies the same boards.json
+// needed. Fire-and-forget like SET_DEVICE_MODEL: the device acks with RpcResponse
+// we don't read; the HTTP fan-out later re-applies the same deviceModels.json
 // value as the late fallback.
 async function sendSetTxPowerFrame(port, dBm) {
     const frame = buildImprovFrame(IMPROV_FRAME_TYPE_RPC,
@@ -309,7 +309,7 @@ function canFetchHttp(deviceUrl) {
 }
 
 // Fan out every `controls.<Module>.<control>` field for `board` from the
-// same-origin `./boards.json` into the device's `/api/control`. Mirrors
+// same-origin `./deviceModels.json` into the device's `/api/control`. Mirrors
 // what the device UI's `consumePendingBoardParam()` does for the Inject-
 // button path — keeps preview-mode parity with production. Returns true
 // if every POST returned 2xx, false otherwise (any failure short-circuits
@@ -318,7 +318,7 @@ function canFetchHttp(deviceUrl) {
 async function tryHttpInjectBoard(deviceUrl, board) {
     let entry;
     try {
-        const res = await fetch("./boards.json", { signal: AbortSignal.timeout(5000) });
+        const res = await fetch("./deviceModels.json", { signal: AbortSignal.timeout(5000) });
         if (!res.ok) return false;
         const catalog = await res.json();
         entry = Array.isArray(catalog)
@@ -390,7 +390,7 @@ async function tryHttpInjectBoard(deviceUrl, board) {
 // re-verify the sequence still matches upstream.
 // esptool's getChipDescription() reports the specific silicon (e.g.
 // "ESP32-D0WD-V3", "ESP32-S3 (QFN56) (revision v0.2)", "ESP32-C6 (revision v0.0)"),
-// but the picker compares against boards.json's coarse `chip` FAMILY — the same
+// but the picker compares against deviceModels.json's coarse `chip` FAMILY — the same
 // vocabulary build_esp32's TARGET_TO_FAMILY defines and the ESP Web Tools manifest
 // carries as `chipFamily` ("ESP32", "ESP32-S3", "ESP32-P4", and any future
 // S2/C3/C6/… as projectMM grows to support every ESP32-family chip). Without
@@ -457,14 +457,14 @@ async function releaseDetected() {
 export const installer = {
     /**
      * Drive the full install flow: request port, flash via esptool-js,
-     * provision WiFi via Improv, push SET_BOARD if a board was picked,
+     * provision WiFi via Improv, push SET_DEVICE_MODEL if a board was picked,
      * report success with the device URL.
      *
      * @param {object} opts
      * @param {string} opts.manifestUrl - URL to an ESP Web Tools manifest
-     * @param {string} [opts.board] - board name from boards.json to push
-     *   via SET_BOARD after provisioning. Omit / empty for "(any board)".
-     * @param {number|null} [opts.txPower] - boards.json
+     * @param {string} [opts.board] - board name from deviceModels.json to push
+     *   via SET_DEVICE_MODEL after provisioning. Omit / empty for "(any board)".
+     * @param {number|null} [opts.txPower] - deviceModels.json
      *   controls.Network.txPowerSetting for the picked board (whole dBm).
      *   When set, the SET_TX_POWER vendor RPC is pushed BEFORE provisioning
      *   so brown-out-prone boards associate at the capped power. Omit /
@@ -833,7 +833,7 @@ export const installer = {
             // before the user finishes the WiFi form below.
             if (txPower != null) {
                 trackProgress("set-tx-power");
-                if (onLog) onLog(`[orchestrator] SET_TX_POWER ${txPower} dBm (boards.json cap)`);
+                if (onLog) onLog(`[orchestrator] SET_TX_POWER ${txPower} dBm (deviceModels.json cap)`);
                 await sendSetTxPowerFrame(port, txPower);
                 await new Promise(r => setTimeout(r, 200));
             }
@@ -1015,7 +1015,7 @@ export const installer = {
                     throw new Error("provision succeeded but no device URL returned");
                 }
 
-                // Push SET_BOARD vendor RPC if the user picked a board.
+                // Push SET_DEVICE_MODEL vendor RPC if the user picked a board.
                 // ImprovSerial holds the writable lock — close it first so
                 // we can write our own raw frame. We're done with
                 // ImprovSerial anyway (provision is the last standard
@@ -1039,20 +1039,20 @@ export const installer = {
                 }
             }
 
-            // HTTP injection attempt — fans out the boards.json `controls.*`
+            // HTTP injection attempt — fans out the deviceModels.json `controls.*`
             // entries to the device's `/api/control`, mirroring what the
             // device UI's `consumePendingBoardParam` does for the Inject-
             // button path. Runs for BOTH paths:
             //   - needsIp (typed IP): the only board-injection path, since
-            //     SET_BOARD over serial wasn't possible.
-            //   - Improv-success: SET_BOARD already pushed `Board.board` over
+            //     SET_DEVICE_MODEL over serial wasn't possible.
+            //   - Improv-success: SET_DEVICE_MODEL already pushed `System.deviceModel` over
             //     serial, but every OTHER field in `controls.*` (e.g.
             //     `Network.txPowerSetting` for the weak-power WiFi cap) needs
             //     this fan-out to reach the device. Without it the board
             //     identifier lands but the per-board tweaks don't.
             // Gated by `canFetchHttp(deviceUrl)` — on HTTPS Pages the
             // browser blocks fetches to http:// device URLs (mixed-content);
-            // those users get the controls via the `?board=` query-param
+            // those users get the controls via the `?deviceModel=` query-param
             // handoff after clicking Visit. Successful HTTP push tells the
             // host page to skip the pending-board handoff via `httpBoardOk`.
             let httpBoardOk = false;
@@ -1062,9 +1062,9 @@ export const installer = {
                 if (onLog) onLog(`[orchestrator] HTTP inject ${httpBoardOk ? "succeeded" : "failed"}`);
             } else if (board && onLog) {
                 // Skipped — most commonly HTTPS Pages → http:// device URL
-                // blocked by mixed-content. The `?board=` handoff via the
+                // blocked by mixed-content. The `?deviceModel=` handoff via the
                 // Visit button picks up the controls fan-out same-origin.
-                onLog(`[orchestrator] HTTP inject skipped (cross-origin / mixed-content); relying on ?board= handoff`);
+                onLog(`[orchestrator] HTTP inject skipped (cross-origin / mixed-content); relying on ?deviceModel= handoff`);
             }
 
             trackProgress("done");
@@ -1135,7 +1135,7 @@ export const installer = {
             const chipName = await connectAndDescribeChip(esploader);
             // Keep the raw silicon name in _detected for the flash-progress log
             // (more informative there); hand the picker the FAMILY, which is what
-            // it compares against boards.json's `chip`.
+            // it compares against deviceModels.json's `chip`.
             _detected = { port, transport, esploader, chipName };
             return chipFamily(chipName);
         } catch (e) {

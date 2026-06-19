@@ -7,7 +7,7 @@
 // (src/ui/embed_ui.cmake gzips it verbatim — there is no bundler or tree-shaking
 // in this project, so whatever is in that file ships on the board). The board
 // catalog and chip detection are only meaningful during a first USB flash from
-// the browser; on-device OTA already knows its board (BoardModule). Keeping this
+// the browser; on-device OTA already knows its deviceModel (SystemModule). Keeping this
 // code out of install-picker.js keeps it out of every device's flash. The
 // injection seam (init({ boardSupport })) is the standard "host supplies the
 // optional capability" pattern: the Pages page wires it in, the device passes
@@ -17,14 +17,14 @@
 // install-orchestrator.js and reach this code only via the onDetect callback
 // install-picker.js already owns).
 
-// Boards catalog — same-origin docs/install/boards.json. ~1 KB, no rate-limit
+// Boards catalog — same-origin docs/install/deviceModels.json. ~1 KB, no rate-limit
 // concern (CDN serves it on the public site, preview_installer serves it from
 // disk locally), so no sessionStorage cache: caching adds invalidation bugs
 // without saving bytes. Graceful degradation: any fetch / parse failure returns
 // [] and the picker silently omits the board <select>.
 export async function loadBoards() {
     try {
-        const res = await fetch("./boards.json");
+        const res = await fetch("./deviceModels.json");
         if (!res.ok) return [];
         const data = await res.json();
         return Array.isArray(data) ? data : [];

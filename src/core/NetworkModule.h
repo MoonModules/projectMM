@@ -189,7 +189,7 @@ public:
             // the bound but the platform layer clamps it up to 2 dBm
             // (ESP-IDF's minimum) — write 2 or higher for predictable
             // behavior. Always bound on radio-capable builds; the
-            // boards.json catalog injects 8 dBm for brown-out-prone boards.
+            // deviceModels.json catalog injects 8 dBm for brown-out-prone boards.
             controls_.addInt16("txPowerSetting", txPowerSetting_, 0, 21);
         }
         controls_.addBool("mDNS", mdnsEnabled_);
@@ -214,7 +214,7 @@ public:
         controls_.setHidden(controls_.count() - 1, hideStatic);
 
         // Ethernet pin/PHY config — only on builds with an Ethernet driver. The
-        // board's boards.json eth block writes these; an un-provisioned board keeps
+        // board's deviceModels.json eth block writes these; an un-provisioned board keeps
         // the per-chip default. ethType picks the PHY (and which pin set applies):
         // 1=LAN8720(RMII), 2=IP101(RMII), 3=W5500(SPI). The RMII vs SPI pin rows are
         // shown by type so the UI isn't cluttered with the inapplicable set.
@@ -478,7 +478,7 @@ private:
 
     // Ethernet pin/PHY config — runtime, seeded from the per-chip default
     // (platform::ethConfigDefault) so an un-provisioned board still comes up on
-    // its historical pins; a board's boards.json eth block overrides via these
+    // its historical pins; a board's deviceModels.json eth block overrides via these
     // controls. Pushed into the platform layer by syncEthConfig() before ethInit.
     // Bound only on builds that have an Ethernet driver (platform::hasEthernet).
     // -1 = "leave at IDF default / unused". ethType: 0=none,1=LAN8720,2=IP101,3=W5500.

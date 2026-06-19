@@ -5,9 +5,9 @@ firmwares.json is a generated projection of build_esp32.py's FIRMWARES (the sing
 source of truth), read by the CI release matrix, the ESP Web Tools manifest loops,
 and MoonDeck. This guard regenerates the projection in-memory and fails if the
 committed file drifted — so editing FIRMWARES without regenerating is caught at
-commit time, not at release. The catalog counterpart to check_boards.py.
+commit time, not at release. The catalog counterpart to check_devices.py.
 
-Exit 1 on drift (with the regenerate command), mirroring check_boards.py.
+Exit 1 on drift (with the regenerate command), mirroring check_devices.py.
 """
 
 import json

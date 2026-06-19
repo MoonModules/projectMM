@@ -134,7 +134,7 @@ constexpr bool hasEthW5500 = false;
 // Ethernet PHY type. The DRIVER for each type is compiled into the firmware per
 // chip (RMII EMAC on classic/P4, W5500 SPI on the S3 — see the sdkconfig
 // fragments); WHICH type a given board uses, and its pins, are runtime config
-// (boards.json → NetworkModule → platform::setEthConfig). Plain int values keep
+// (deviceModels.json → NetworkModule → platform::setEthConfig). Plain int values keep
 // this header free of esp_eth includes; ethInit() maps them to the IDF ctors.
 enum EthPhyType {
     ethNone    = 0,  // no Ethernet on this board (the default — WiFi only)
@@ -145,7 +145,7 @@ enum EthPhyType {
 
 // Per-board Ethernet pin/PHY map — runtime-configurable (no longer a fixed
 // compile-time constant). RMII fields apply to LAN8720/IP101; the spi* fields to
-// W5500. ethInit() reads the runtime `ethConfig` (set from boards.json via
+// W5500. ethInit() reads the runtime `ethConfig` (set from deviceModels.json via
 // platform::setEthConfig); the per-chip `ethConfigDefault` below seeds it so an
 // un-provisioned board still works. -1 = "leave at IDF default / unused".
 struct EthPinConfig {
@@ -169,14 +169,14 @@ struct EthPinConfig {
 };
 
 // Per-chip default, seeding the runtime config so a board with no eth block in
-// boards.json still comes up on the historically-wired pins:
+// deviceModels.json still comes up on the historically-wired pins:
 //  - P4 → Waveshare P4-NANO: IP101, addr 1, MDC/MDIO 31/52, reset 51, ext 50 MHz
 //    clock IN on GPIO50 (Waveshare wiki + schematic + ESPHome page agree).
 //  - classic ESP32 → Olimex ESP32-Gateway Rev G: LAN8720, addr 0, reset 5, chip
 //    drives RMII clock OUT on GPIO17, MDC/MDIO at IDF defaults.
 //  - S3 → no built-in EMAC, so the default is W5500 SPI but with no pins set
 //    (phyType ethW5500, pins -1): a W5500 S3 board MUST provide its SPI pins via
-//    boards.json — there's no universal S3 default to guess.
+//    deviceModels.json — there's no universal S3 default to guess.
 constexpr EthPinConfig ethConfigDefault =
     isEsp32P4   ? EthPinConfig{ /*phyType*/ ethIp101, /*addr*/ 1, /*mdc*/ 31, /*mdio*/ 52,
                                 /*rst*/ 51, /*rmiiClk*/ 50, /*extIn*/ true,
