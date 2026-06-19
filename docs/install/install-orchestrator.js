@@ -146,8 +146,16 @@ function buildImprovFrame(type, payload) {
 // g_improv.deviceModelOutLen dynamically, so the wire spec follows the buffer.
 function encodeSetDeviceModelPayload(board) {
     const nameBytes = new TextEncoder().encode(board);
+    // Reject non-printable bytes here, before the device does — the ESP32 handler
+    // (SystemModule::setDeviceModel) accepts only 0x20..0x7E, so a name with a
+    // control byte / non-ASCII char would fail on-device after we'd already sent it.
+    for (const b of nameBytes) {
+        if (b < 0x20 || b > 0x7E) {
+            throw new Error(`deviceModel name has a non-printable-ASCII byte (0x${b.toString(16)})`);
+        }
+    }
     if (nameBytes.length === 0 || nameBytes.length > 31) {
-        throw new Error(`board name length ${nameBytes.length}: must be 1..31`);
+        throw new Error(`deviceModel name length ${nameBytes.length}: must be 1..31`);
     }
     const out = new Uint8Array(3 + nameBytes.length);
     out[0] = IMPROV_CMD_SET_DEVICE_MODEL;

@@ -153,6 +153,12 @@ def main():
             if not isinstance(mid, str) or not mid:
                 errors.append(f"{where}: module '{mtype}' has no non-empty 'id'")
 
+            # replaceChildren (optional) — a container unit sets it true to clear its
+            # existing children before the entry's children are added (the installer
+            # inject path). Must be a bool when present so a typo'd value is caught here.
+            if "replaceChildren" in m and not isinstance(m["replaceChildren"], bool):
+                errors.append(f"{where}: module '{mid}' replaceChildren must be true/false")
+
             controls = m.get("controls") or {}
             # System.deviceModel control must equal the entry name (the identity key).
             if mtype == "System" and isinstance(controls, dict) and "deviceModel" in controls:
@@ -164,7 +170,10 @@ def main():
             if isinstance(controls, dict) and "pins" in controls and not str(mtype).endswith("LedDriver"):
                 errors.append(f"{where}: module '{mtype}' has a 'pins' control but is not a *LedDriver")
 
-        if mods and not board_control_seen:
+        # Every entry must carry the deviceModel identity (a System unit with the
+        # `deviceModel` control). An empty `modules` list is also a failure — it has no
+        # identity at all — so this is gated only on board_control_seen, not on `mods`.
+        if not board_control_seen:
             errors.append(f"{where}: no System module sets the 'deviceModel' identity control")
 
     # Report (mirrors check_specs.py's shape).

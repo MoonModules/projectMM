@@ -65,7 +65,7 @@ export function applyDetectedChip(state, boardEl) {
     if (matches.length === 0) {
         // A chip we ship no board for: don't strand the user — leave the full
         // list and report it. (selectedBoard unchanged.)
-        return `Detected ${state.detectedChip} — no matching board, pick manually`;
+        return `Detected ${state.detectedChip} — no matching device, pick manually`;
     }
     fillBoardOptions(boardEl, matches, `Other / generic ${state.detectedChip}`);
     let autoName = "";   // a board we auto-selected (single match, or a generic default)
@@ -87,5 +87,5 @@ export function applyDetectedChip(state, boardEl) {
     boardEl.value = state.selectedBoard || "";
     return autoName
         ? `Detected ${state.detectedChip} — selected ${autoName}`
-        : `Detected ${state.detectedChip} — pick your board (${matches.length} match)`;
+        : `Detected ${state.detectedChip} — pick your device (${matches.length} match)`;
 }

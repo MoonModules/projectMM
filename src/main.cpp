@@ -252,13 +252,12 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // setLayouts wires the shared Layouts to the container AND propagates to every child Layer.
     layersContainer->setLayouts(layouts);
 
+    // One default effect so a bare device (no catalog inject) still shows lights out
+    // of the box — but NO default modifier: the boot Layer is just an effect on a
+    // 16x16 grid. A device-model catalog entry can REPLACE this (replaceChildren) with
+    // its own effects/modifiers — e.g. the testbench swaps in AudioSpectrum + RandomMap.
     auto* noise = mm::ModuleFactory::create("NoiseEffect");
     layer->addChild(noise);
-
-    // MultiplyModifier with its default mult=2 / mirror=true on X,Y reproduces
-    // the old MirrorModifier-XY canonical pipeline (fold each axis in half).
-    auto* multiply = mm::ModuleFactory::create("MultiplyModifier");
-    layer->addChild(multiply);
 
     // Drivers: top-level container; one or more Driver children. Bound to the
     // Layers container — Drivers re-resolves the active Layer from it at every

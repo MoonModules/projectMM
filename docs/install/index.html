@@ -499,7 +499,7 @@
     <h1>projectMM Installer <span class="version-chip" id="version-chip" hidden></span>
       <a class="help-link" href="https://github.com/MoonModules/projectMM/blob/main/docs/install/README.md"
          target="_blank" rel="noopener" title="Installer help (opens the docs in a new tab)">?</a></h1>
-    <p class="tag">Plug in your ESP32. Pick a release + board. Flash. Get the device on your network. Open it in a browser.</p>
+    <p class="tag">Plug in your ESP32. Pick a release + device. Flash. Get the device on your network. Open it in a browser.</p>
 
     <div class="card browser-warning" id="browser-warning">
       <strong>This browser can't flash directly.</strong>
@@ -510,7 +510,7 @@
     </div>
 
     <div class="card">
-      <strong>Step 1 — Pick a release + board and flash.</strong>
+      <strong>Step 1 — Pick a release + device and flash.</strong>
       <p class="note" style="margin-top: 4px">
         The picker shows stable releases, release candidates (<code>v…-rc…</code>),
         and a <code>latest</code> build published on every merge to main — all flagged
@@ -638,7 +638,7 @@
 
 
       <p class="note">
-        Ethernet works out of the box for the board you pick — its PHY type and
+        Ethernet works out of the box for the device you pick — its PHY type and
         pins come from the catalog, no rebuild. Boards without Ethernet just use
         WiFi.
       </p>
@@ -801,6 +801,7 @@
       <div class="install-section" id="section-done">
         <div class="install-status">Device is online!</div>
         <a class="install-success-url" id="done-url" target="_blank" rel="noopener"></a>
+        <a class="install-success-url" id="done-url-mdns" target="_blank" rel="noopener" hidden></a>
         <div class="install-actions">
           <button type="button" class="primary" id="done-close">Close</button>
         </div>
@@ -1304,15 +1305,32 @@
         return;
       }
       showSection("done");
+      // Always show the IP link — it's the address that's guaranteed to work, and the
+      // installer always has it here. When the boot serial also reported the device's
+      // <deviceName>.local name, show that as a SECOND link below it: it survives a DHCP
+      // lease change (the IP can go stale) but only resolves where mDNS works, so it's
+      // the friendly extra, not the primary. When there's no mdns name, only the IP shows.
+      // When the in-orchestrator HTTP push of the device-model controls didn't land
+      // (pendingBoardPush), decorate the clicked link with `?deviceModel=<name>` so
+      // visiting it runs the device-side consume path and applies the controls on first
+      // visit — no separate Inject click needed. Displayed text stays the clean URL.
+      const pendingBoardPush = !!(board && !httpBoardOk);
+      const withParam = (u) => pendingBoardPush
+        ? u + (u.includes("?") ? "&" : "?") + "deviceModel=" + encodeURIComponent(board)
+        : u;
+      const ipUrl = url;
       const a = document.getElementById("done-url");
-      // Prefer the device's <deviceName>.local address when the boot serial
-      // reported one — it survives a DHCP lease change, where the bare IP can
-      // go stale. deviceName is the device's single identity (the same name
-      // drives mDNS, the AP, and the DHCP hostname), so this link tracks the
-      // device, not its current address. Falls back to the IP URL otherwise.
-      const linkUrl = mdns ? `http://${mdns}/` : url;
-      a.href = linkUrl;
-      a.textContent = linkUrl;
+      a.textContent = ipUrl;
+      a.href = withParam(ipUrl);
+      const aMdns = document.getElementById("done-url-mdns");
+      if (mdns) {
+        const mdnsUrl = `http://${mdns}/`;
+        aMdns.textContent = mdnsUrl;
+        aMdns.href = withParam(mdnsUrl);
+        aMdns.hidden = false;
+      } else {
+        aMdns.hidden = true;
+      }
       // Pending-board flag: set whenever the in-orchestrator HTTP push
       // didn't succeed AND there's a board name to push. Covers both
       // paths now:
@@ -1325,8 +1343,8 @@
       //     exactly the failure mode the fix exists to defend against —
       //     `pendingBoard` ensures the Inject button decorates the
       //     row and the device-side `?deviceModel=` consume path can land
-      //     the controls on first visit.
-      const pendingBoardPush = !!(board && !httpBoardOk);
+      //     the controls on first visit. (pendingBoardPush is computed above, where
+      //     it also gates the `?deviceModel=` on the success link.)
       myDevices.addProvisionedDevice(url, board, { pendingBoardPush });
     }
 
@@ -1640,6 +1658,7 @@
             const a = document.getElementById("done-url");
             a.removeAttribute("href");
             a.textContent = "Erase complete — flash a fresh firmware to use the device again.";
+            document.getElementById("done-url-mdns").hidden = true;  // no device URL after erase
           },
           onError: handleError,
           onLog: appendLog,
@@ -1718,7 +1737,7 @@
           if (b.image) { thumbEl.hidden = false; thumbEl.style.backgroundImage = `url("${b.image}")`; }
           else { thumbEl.hidden = true; }
         } else {
-          labelEl.textContent = "Pick a board";
+          labelEl.textContent = "Pick a device";
           thumbEl.hidden = true;
         }
       }

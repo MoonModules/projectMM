@@ -70,9 +70,10 @@ inline void sanitizeHostname(char* buf) {
             pendingDash = true;          // defer — drops a trailing run entirely
         }
     }
-    // Trim a trailing '-' left by the input ending in '-' (a run was dropped via
-    // pendingDash, so only a literal trailing hyphen can remain).
-    if (w != buf && w[-1] == '-') --w;
+    // Trim trailing '-' (RFC: no trailing hyphen). An invalid-char run was dropped via
+    // pendingDash, but literal hyphens are kept as written, so e.g. "a--" lands here as
+    // "a--" — loop to strip them all, not just one.
+    while (w != buf && w[-1] == '-') --w;
     *w = '\0';
 }
 

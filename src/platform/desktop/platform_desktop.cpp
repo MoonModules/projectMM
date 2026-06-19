@@ -565,7 +565,9 @@ bool improvProvisioningInit(const ImprovDeviceInfo& /*info*/,
                             std::atomic<bool>* /*ready*/,
                             char* statusBuf, size_t statusBufLen,
                             char* /*deviceModelOut*/, size_t /*deviceModelOutLen*/,
-                            std::atomic<bool>* /*deviceModelReady*/) {
+                            std::atomic<bool>* /*deviceModelReady*/,
+                            uint8_t* /*txPowerOut*/,
+                            std::atomic<bool>* /*txPowerReady*/) {
     if (statusBuf && statusBufLen > 0) {
         std::snprintf(statusBuf, statusBufLen, "unsupported on desktop");
     }

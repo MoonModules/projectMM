@@ -4,7 +4,7 @@ This directory holds the source for the **custom installer page** (driven by
 `install-orchestrator.js`, not ESP Web Tools) at
 <https://moonmodules.org/projectMM/install/>.
 
-End users land here, pick a channel + board, click Install. The browser flashes
+End users land here, pick a channel + device, click Install. The browser flashes
 the device over USB (Web Serial → ESP32), then runs Improv-Serial provisioning,
 SET_DEVICE_MODEL, and HTTP control fan-out — all from the same orchestrator,
 end-to-end, no ESP Web Tools dependency on the install path.
@@ -72,12 +72,16 @@ client change**.
   "chip": "ESP32-S3",
   "firmwares": ["esp32s3-n16r8"],
   "modules": [
-    { "type": "Board", "id": "Board", "parent_id": "System",
-      "controls": { "board": "projectMM testbench S3" } },
+    { "type": "System", "id": "System",
+      "controls": { "deviceModel": "projectMM testbench S3" } },
     { "type": "AudioModule", "id": "Audio", "parent_id": "System",
       "controls": { "wsPin": 4, "sdPin": 5, "sckPin": 6 } },
     { "type": "RmtLedDriver", "id": "RmtLed", "parent_id": "Drivers",
-      "controls": { "pins": "18", "loopbackTxPin": 13, "loopbackRxPin": 12 } }
+      "controls": { "pins": "18", "loopbackTxPin": 13, "loopbackRxPin": 12 } },
+    { "type": "GridLayout", "id": "Grid", "controls": { "width": 8, "height": 8 } },
+    { "type": "Layer", "id": "Layer", "replaceChildren": true },
+    { "type": "AudioSpectrumEffect", "id": "AudioSpectrum", "parent_id": "Layer" },
+    { "type": "RandomMapModifier", "id": "RandomMap", "parent_id": "Layer" }
   ]
 }
 ```
@@ -85,9 +89,18 @@ client change**.
 Each entry is a **list of module-with-controls units** — "create this module (if
 not already present), then set its controls" as one unit. This is the same shape
 the scenario test format expresses with `add_module` + `set_control`, so a catalog
-entry reads like a scenario's setup phase. Even `Board` is a module entry (it's a
-boot-wired child of `System`, so the add is an idempotent no-op and only its
-`board` control applies).
+entry reads like a scenario's setup phase. The `deviceModel` identity is a unit too:
+`System` is boot-wired, so its add is an idempotent no-op and only its `deviceModel`
+control applies.
+
+**`replaceChildren`** (optional, on a container unit like `Layer` / `Layouts` /
+`Drivers`): set it `true` to *replace* the container's boot-wired defaults instead of
+adding alongside them. The inject is otherwise add-only, and a `Layer` renders only
+its FIRST enabled effect/modifier — so a catalog entry that wants its own effect to
+show (the testbench above swaps the default `NoiseEffect` for `AudioSpectrumEffect` +
+`RandomMapModifier`) marks the container `replaceChildren`, which DELETEs the
+container's current children before the entry's children are added. Without it, the
+entry's effect would sit behind the boot default and never render.
 
 **LED drivers are catalog-added, not boot-wired.** The only driver the firmware
 creates at boot is `Preview` (it needs the HTTP-server broadcaster the catalog
@@ -127,10 +140,11 @@ Each `modules[]` unit is `{ type, id, parent_id?, controls? }`:
 
 | Module field | Meaning |
 |---|---|
-| `type` | factory type to create (e.g. `RmtLedDriver`, `AudioModule`, `Board`) |
+| `type` | factory type to create (e.g. `RmtLedDriver`, `AudioModule`, `AudioSpectrumEffect`) |
 | `id` | the module's name — used both as the `POST /api/modules` id **and** as the `module` in every `POST /api/control`, so the two stay in sync |
-| `parent_id` | the container to add it under (`Drivers`, `System`). **Omitted** for a module that already exists at boot (e.g. `Network`) — the client then skips the add and only sets controls |
+| `parent_id` | the container to add it under (`Drivers`, `System`, `Layer`). **Omitted** for a module that already exists at boot (e.g. `Network`, `System`, `Grid`, `Layer`) — the client then skips the add and only sets controls |
 | `controls` | the controls to set on that module after it exists |
+| `replaceChildren` | optional bool on a container unit (`Layer` / `Layouts` / `Drivers`): when `true`, the inject DELETEs the container's current children before adding this entry's, so the entry's effects/modifiers replace the boot defaults rather than stack behind them |
 
 `type` and `parent_id` are spelled out even though `id` could imply them
 (`RmtLed`→`RmtLedDriver` under `Drivers`). Kept explicit on purpose: the two

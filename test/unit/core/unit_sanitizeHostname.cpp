@@ -50,6 +50,9 @@ TEST_CASE("sanitizeHostname trims leading and trailing dashes / invalid runs") {
     CHECK(sane("trailing ") == "trailing");
     CHECK(sane("-keep-") == "keep");
     CHECK(sane("!!mid!!") == "mid");
+    CHECK(sane("name--") == "name");      // multiple literal trailing hyphens all trimmed
+    CHECK(sane("---name") == "name");     // multiple leading hyphens all dropped
+    CHECK(sane("a-b-c") == "a-b-c");      // interior hyphens preserved
 }
 
 TEST_CASE("sanitizeHostname yields empty for all-invalid input (caller falls back)") {

@@ -565,6 +565,29 @@
         "controls": {
           "txPowerSetting": 8
         }
+      },
+      {
+        "type": "GridLayout",
+        "id": "Grid",
+        "controls": {
+          "width": 8,
+          "height": 8
+        }
+      },
+      {
+        "type": "Layer",
+        "id": "Layer",
+        "replaceChildren": true
+      },
+      {
+        "type": "AudioSpectrumEffect",
+        "id": "AudioSpectrum",
+        "parent_id": "Layer"
+      },
+      {
+        "type": "RandomMapModifier",
+        "id": "RandomMap",
+        "parent_id": "Layer"
       }
     ]
   },

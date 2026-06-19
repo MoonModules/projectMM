@@ -278,7 +278,7 @@ async function consumePendingDeviceModelParam() {
         return;
     }
     // Each entry is a list of module-with-controls units:
-    //   entry.modules = [ { type, id, parent_id?, controls? }, ... ]
+    //   entry.modules = [ { type, id, parent_id?, controls?, replaceChildren? }, ... ]
     // Per module: add it first (when it has a parent_id — a fresh flash has no
     // user-added modules like AudioModule, so a control write would 404), then
     // set its controls. A module WITHOUT parent_id is a boot-wired/top-level one
@@ -288,7 +288,23 @@ async function consumePendingDeviceModelParam() {
     // a single failed module shouldn't abort the whole inject (best-effort
     // contract; sendControl never aborts either). Sequential so each
     // FilesystemModule debounced-save sees the full set.
-    for (const m of entry.modules ?? []) {
+    //
+    // replaceChildren: a container unit (Layer, Layouts, Drivers) sets it to REPLACE
+    // the boot-wired defaults rather than add alongside them. The catalog inject is
+    // otherwise add-only, but a Layer only renders its FIRST enabled effect/modifier —
+    // so to make a device's catalog effects actually show (e.g. the testbench's
+    // AudioSpectrum instead of the default Noise) the container's existing children
+    // must be cleared first. We do that here by DELETE-ing each current child of the
+    // named container before its catalog children are added (same enumerate-then-delete
+    // the live scenario runner's clear_children uses). Done once per replaceChildren
+    // container, up front, so the subsequent add units land in an empty container.
+    // Defensive: a malformed catalog entry could have `modules` as a non-array (or
+    // absent) — normalise to [] so the loops below can't throw on bad JSON.
+    const modules = Array.isArray(entry.modules) ? entry.modules : [];
+    for (const c of modules) {
+        if (c && c.replaceChildren && c.id) await clearModuleChildren(c.id);
+    }
+    for (const m of modules) {
         if (!m || typeof m !== "object") continue;
         if (m.parent_id && m.type) {
             if (!(await sendAddModule(m))) {
@@ -301,6 +317,35 @@ async function consumePendingDeviceModelParam() {
                 await sendControl(m.id, controlName, value);
             }
         }
+    }
+}
+
+// DELETE every current child of the module named `parentName` — used by the catalog
+// inject's replaceChildren so an entry's effects/modifiers replace the boot defaults
+// instead of stacking behind them. Best-effort (mirrors the inject's no-retry
+// contract): fetch the live tree, find the container, DELETE each child by name.
+// Only deletable (user-editable) children go; the device rejects a code-wired
+// child's DELETE, which is fine — those aren't what a catalog entry replaces.
+async function clearModuleChildren(parentName) {
+    let tree;
+    try {
+        const res = await fetch("/api/state");
+        if (!res.ok) return;
+        tree = await res.json();
+    } catch (_) { return; }
+    const findByName = (mods, name) => {
+        for (const m of mods ?? []) {
+            if (m.name === name) return m;
+            const hit = findByName(m.children, name);
+            if (hit) return hit;
+        }
+        return null;
+    };
+    const parent = findByName(tree.modules, parentName);
+    for (const child of (parent && parent.children) || []) {
+        try {
+            await fetch("/api/modules/" + encodeURIComponent(child.name), { method: "DELETE" });
+        } catch (_) { /* best-effort; keep clearing the rest */ }
     }
 }
 
