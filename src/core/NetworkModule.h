@@ -108,6 +108,15 @@ public:
         // its name — not "Unknown" — in the router's client list. Stored once; every
         // netif the platform creates (eth, the wifi cascade, a later reconnect) reads
         // it. Same name as mDNS/SoftAP: deviceName, default MM-XXXX.
+        //
+        // Live-rename boundary: setHostname() is single-writer-before-readers by
+        // contract (see platform_esp32.cpp) — NOT safe to re-call after bring-up from
+        // loop1s without platform-side synchronization. And the DHCP hostname only
+        // rides the DISCOVER, so it can't change until the next lease renewal regardless.
+        // So a live deviceName rename updates mDNS immediately (syncMdns re-registers)
+        // and the SoftAP SSID on its next start; the DHCP/router-list name follows on the
+        // next renewal or reconnect, picking up the new value here. That lag is inherent
+        // to DHCP, not a bug; forcing a reconnect to refresh it would drop the LAN link.
         platform::setHostname(readDeviceName());
         // Push the board's eth config (persisted controls, loaded before setup)
         // into the platform layer before ethInit reads it.

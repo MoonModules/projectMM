@@ -217,43 +217,57 @@ async function sendSetTxPowerFrame(port, dBm) {
 // "<deviceName>.local" address ("" if the firmware predates MM_DEVICE). A fresh device
 // with no credentials never connects, so never prints MM_IP → ip "" → caller falls back
 // to Improv provisioning + manual entry. Caller owns opening the port; this acquires/
-// releases one reader. Resolves as soon as MM_IP is seen (the MM_DEVICE token, on the
-// same tick line, is captured if it already arrived in the buffer).
+// releases one reader.
+//
+// MM_IP and MM_DEVICE are printed on the same tick line, but serial reads chunk
+// arbitrarily — MM_IP can land in one read and MM_DEVICE in the next. So we don't return
+// the instant MM_IP matches: we return as soon as BOTH are seen, and if only the IP has
+// shown by a short grace window after it (older firmware that never sends MM_DEVICE) we
+// return IP-only. Both regexes re-run over the growing buffer each read, so a token split
+// across chunks is matched once all its bytes have arrived.
 async function readBootIp(port, timeoutMs) {
     if (!port || !port.readable) return { ip: "", mdns: "" };
     const decoder = new TextDecoder();
     let buf = "";
+    let ip = "", mdns = "";
     const reader = port.readable.getReader();
     const deadline = Date.now() + timeoutMs;
+    // Once the IP is seen, keep reading only a short grace window for MM_DEVICE (it may be
+    // in the next chunk), not the whole budget — so a device on older firmware that never
+    // sends MM_DEVICE still returns its IP promptly. 1500ms covers same-tick-line chunk
+    // separation without a noticeable wait.
+    const DEVICE_GRACE_MS = 1500;
+    let graceDeadline = Infinity;
     try {
-        while (Date.now() < deadline) {
-            const remaining = deadline - Date.now();
+        while (Date.now() < Math.min(deadline, graceDeadline)) {
+            const remaining = Math.min(deadline, graceDeadline) - Date.now();
             // Race each read against the remaining budget so a silent device
             // (no output) doesn't block past the timeout.
             const timed = new Promise(res => setTimeout(() => res({ timeout: true }), remaining));
             const result = await Promise.race([reader.read(), timed]);
             if (result.timeout || result.done) break;
             buf += decoder.decode(result.value, { stream: true });
-            // Primary: the explicit machine token. Fallback: the human-readable
-            // "… — Eth/WiFi: <ip>" status line (firmware predating MM_IP).
-            const m = buf.match(/MM_IP=(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/)
-                   || buf.match(/(?:Eth|WiFi):\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
-            if (m) {
-                // MM_DEVICE rides the same tick line as MM_IP, so by the time MM_IP is in
-                // the buffer the device token usually is too. Capture it if present; "" if
-                // the firmware predates it (graceful — caller just shows the IP link).
-                const d = buf.match(/MM_DEVICE=(\S+\.local)/);
-                return { ip: m[1], mdns: d ? d[1] : "" };
+            if (!ip) {
+                // Primary: the explicit machine token. Fallback: the human-readable
+                // "… — Eth/WiFi: <ip>" status line (firmware predating MM_IP).
+                const m = buf.match(/MM_IP=(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/)
+                       || buf.match(/(?:Eth|WiFi):\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
+                if (m) { ip = m[1]; graceDeadline = Date.now() + DEVICE_GRACE_MS; }
             }
+            if (!mdns) {
+                const d = buf.match(/MM_DEVICE=(\S+\.local)/);
+                if (d) mdns = d[1];
+            }
+            if (ip && mdns) return { ip, mdns };   // both in → done
             if (buf.length > 8192) buf = buf.slice(-2048);  // cap; keep a tail for split lines
         }
     } catch (_) {
-        // Read error (port hiccup) — treat as "no IP seen", fall back.
+        // Read error (port hiccup) — return whatever we captured (IP-only or nothing).
     } finally {
         try { await reader.cancel(); } catch (_) { /* ignore */ }
         try { reader.releaseLock(); } catch (_) { /* ignore */ }
     }
-    return { ip: "", mdns: "" };
+    return { ip, mdns };
 }
 
 // ---------------------------------------------------------------------------

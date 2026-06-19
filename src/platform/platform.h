@@ -167,6 +167,10 @@ struct MdnsHost {
     uint8_t ip[4] = {};        // resolved IPv4 (0.0.0.0 if unresolved)
     char    hostname[32] = {}; // instance/host name (e.g. "wled-desk"), "" if none
     uint16_t port = 0;         // advertised SRV port
+    bool isProjectMM = false;  // the host's _http._tcp advertisement carries our TXT
+                               // marker (`mm=1`) — proves it's a projectMM device, not
+                               // just some web box on the same `_http._tcp` service.
+                               // Lets a browse classify a peer without an HTTP probe.
 };
 using MdnsHostCb = void(*)(const MdnsHost& host, void* user);
 bool mdnsBrowseStart(const char* service, const char* proto);

@@ -3,6 +3,8 @@
 #include "doctest.h"
 #include "core/SystemModule.h"
 
+#include <cstring>
+
 namespace {
 // Stand-in Peripheral child: counts the lifecycle callbacks a real sensor would
 // use (setup to init hardware, loop20ms/loop1s to poll + format). Pins that
@@ -42,6 +44,55 @@ TEST_CASE("SystemModule deviceName control") {
         }
     }
     CHECK(found);
+}
+
+namespace {
+// Overwrite SystemModule's deviceName buffer through its bound control pointer —
+// the same buffer the persistence overlay and an /api/control write target. Lets a
+// test seed an invalid name and then drive the module's sanitisation.
+void writeDeviceName(mm::SystemModule& sys, const char* value) {
+    for (uint8_t i = 0; i < sys.controls().count(); i++) {
+        if (std::strcmp(sys.controls()[i].name, "deviceName") == 0) {
+            char* buf = static_cast<char*>(sys.controls()[i].ptr);
+            std::strncpy(buf, value, 23);
+            buf[23] = 0;
+            return;
+        }
+    }
+}
+} // namespace
+
+// deviceName is the single network identity, so SystemModule keeps it a valid hostname.
+// A live edit to an invalid value ("My Room!") is coerced on the next loop1s tick
+// (mm::sanitizeHostname), the same path mDNS/AP/DHCP read — so they never see spaces.
+TEST_CASE("SystemModule sanitises a live deviceName edit") {
+    mm::SystemModule sys;
+    sys.setup();
+    sys.onBuildControls();
+    writeDeviceName(sys, "My Living Room!");
+    sys.loop1s();                                   // the tick that coerces it
+    CHECK(std::strcmp(sys.deviceName(), "My-Living-Room") == 0);
+}
+
+// An all-invalid name collapses to empty after sanitising; the MAC fallback then fills
+// it, so deviceName is never empty (mDNS/AP/DHCP always have a name to register).
+TEST_CASE("SystemModule falls back to the MAC name when deviceName is all-invalid") {
+    mm::SystemModule sys;
+    sys.setup();
+    sys.onBuildControls();
+    writeDeviceName(sys, "!@#$");
+    sys.loop1s();
+    CHECK(std::strcmp(sys.deviceName(), "MM-CAFE") == 0);   // desktop MAC fallback
+}
+
+// An already-valid name is left untouched (idempotent) — a normal user name survives.
+TEST_CASE("SystemModule leaves a valid deviceName unchanged") {
+    mm::SystemModule sys;
+    sys.setup();
+    sys.onBuildControls();
+    writeDeviceName(sys, "Bench-S3");
+    sys.loop1s();
+    CHECK(std::strcmp(sys.deviceName(), "Bench-S3") == 0);
 }
 
 // The `firmware` control is always present and non-empty (either a real firmware key from build_info.h or the fallback "unknown").

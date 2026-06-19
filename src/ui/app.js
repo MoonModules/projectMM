@@ -1375,7 +1375,10 @@ function buildListEntries(container, rows, details, openSet) {
         summary.setAttribute("role", "button");
         // Freshness dot (always-visible age at a glance) when the row carries a `*Sec`
         // duration; coloured by ageBucketClass. Generic — no device knowledge here.
-        const ageClass = rowAgeClass(item);
+        // The age fields (`ageSec`/`cached`) live in the DETAIL object, not the summary,
+        // so read the detail for the dot (it also carries `self`); fall back to the
+        // summary item when a list has no separate detail.
+        const ageClass = rowAgeClass(details[i] ?? item);
         if (ageClass) {
             const dot = document.createElement("span");
             dot.className = "age-dot " + ageClass;
@@ -1424,6 +1427,11 @@ function fillListDetail(panel, detail) {
     for (const [k, v] of Object.entries(detail)) {
         const isScalarArray = Array.isArray(v) && v.every(e => typeof e !== "object");
         if (typeof v === "object" && !isScalarArray) continue;
+        // `cached` and `ageSec` both render as "last seen"; a projectMM device emits
+        // exactly one (mutually exclusive in DevicesModule), but skip ageSec when a
+        // truthy `cached` is also present so any other source can't produce two
+        // conflicting "last seen" rows. (Robust-to-any-input, generic.)
+        if (k === "ageSec" && detail.cached) continue;
         const r = document.createElement("div");
         r.className = "list-detail-row";
         const kEl = document.createElement("span");

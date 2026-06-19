@@ -970,7 +970,16 @@ bool mdnsInit(const char* deviceName) {
         ESP_LOGE(NET_TAG, "mDNS _http._tcp advertise failed: %s", esp_err_to_name(svcErr));
         return false;   // hostname is set, but advertising failed — report it
     }
-    ESP_LOGI(NET_TAG, "mDNS started: %s.local (advertising _http._tcp:80)", deviceName);
+    // Tag the service with a `mm=1` TXT record so a browsing projectMM peer can tell us
+    // apart from a generic `_http._tcp` web box (WLED/ESPHome/Hue all share that service)
+    // WITHOUT an HTTP probe — DevicesModule reads this to classify the peer as projectMM
+    // straight from the browse. Idempotent: set on both the add and reconnect paths. A
+    // TXT failure is non-fatal (advertising still works; the peer just falls back to the
+    // HTTP scan to classify us), so it's logged, not returned.
+    esp_err_t txtErr = mdns_service_txt_item_set("_http", "_tcp", "mm", "1");
+    if (txtErr != ESP_OK)
+        ESP_LOGW(NET_TAG, "mDNS _http._tcp TXT mm=1 set failed: %s", esp_err_to_name(txtErr));
+    ESP_LOGI(NET_TAG, "mDNS started: %s.local (advertising _http._tcp:80, mm=1)", deviceName);
     return true;
 }
 
@@ -1017,8 +1026,24 @@ bool mdnsBrowsePoll(MdnsHostCb cb, void* user) {
     if (!mdns_query_async_get_results(mdnsSearch_, 0, &results, &num)) return false;
     for (mdns_result_t* r = results; r && cb; r = r->next) {
         MdnsHost h{};
-        if (r->hostname) std::snprintf(h.hostname, sizeof(h.hostname), "%s", r->hostname);
+        // A PTR/service browse gives the friendly service *instance* name in
+        // `instance_name` (what we advertise — the deviceName, e.g. "Bench-P4") and the
+        // lower-level host record in `hostname`. Prefer the instance name so a peer shows
+        // the device's name, not its `.local` host; fall back to hostname if absent.
+        const char* name = (r->instance_name && r->instance_name[0]) ? r->instance_name
+                          : (r->hostname ? r->hostname : nullptr);
+        if (name) std::snprintf(h.hostname, sizeof(h.hostname), "%s", name);
         h.port = r->port;
+        // Scan the service's TXT records for our `mm=1` marker — a projectMM device tags
+        // its _http._tcp advertisement with it (see mdnsInit), so a peer browsing the
+        // generic _http._tcp service can classify us without an HTTP probe.
+        for (size_t i = 0; i < r->txt_count; i++) {
+            if (r->txt[i].key && std::strcmp(r->txt[i].key, "mm") == 0
+                && r->txt_value_len[i] == 1 && r->txt[i].value && r->txt[i].value[0] == '1') {
+                h.isProjectMM = true;
+                break;
+            }
+        }
         // First IPv4 address in the result's addr list.
         for (mdns_ip_addr_t* a = r->addr; a; a = a->next) {
             if (a->addr.type == ESP_IPADDR_TYPE_V4) {

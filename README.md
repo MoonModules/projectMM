@@ -10,13 +10,13 @@ Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi,
 
 🛠️ **Building / hacking on it?** [MoonDeck](scripts/MoonDeck.md), our browser-based dev console (build · flash · test · live device discovery), comes in the repo.
 
-Open Chrome or Edge, plug in your board, and you'll see lights in under a minute.
+Open Chrome or Edge, plug in your device, and you'll see lights in under a minute.
 
 If you like projectMM, give it a ⭐️, fork it, or open an issue or pull request; it helps the project grow, improve, and get noticed.
 
 ## What makes projectMM different
 
-🔵 **16,384 LEDs on a *classic* ESP32**, not just the S3 or P4. Memory-adaptive from a 16×16 panel up to 128×128, degrading gracefully on tight boards instead of crashing.
+🔵 **16,384 LEDs on a *classic* ESP32**, not just the S3 or P4. Memory-adaptive from a 16×16 panel up to 128×128, degrading gracefully on tight devices instead of crashing.
 
 🧊 **Native 3D from the ground up**: 2D and 1D are just the cases where a dimension is size 1. Effects never pick a mode.
 
@@ -38,7 +38,7 @@ If you like projectMM, give it a ⭐️, fork it, or open an issue or pull reque
 
 🎨 **Plug in, open a browser, see lights**: a live 3D preview of every effect, modifier, and layout, controllable from the same tab. The interface renders any module from its declared controls, so adding a module needs zero UI code.
 
-⚡ **Flash from your browser in seconds**: the web installer picks your board, flashes the matching firmware, and hands WiFi credentials to the device over USB via Improv. No serial monitor, no recompile.
+⚡ **Flash from your browser in seconds**: the web installer picks your device, flashes the matching firmware, and hands WiFi credentials to the device over USB via Improv. No serial monitor, no recompile.
 
 ## Under the hood
 
@@ -65,11 +65,11 @@ The **Desktop** column is host-CPU-bound, not OS-bound: the numbers track the ma
 | 64×64 | 4,096 | 40,000 | 81 | 71 | 25 |
 | 128×128 | 16,384 | 9,708 | 11 | 10 | 6 |
 
-The Olimex `esp32` figures were measured on the WiFi+Ethernet build (the pre-collapse `esp32-eth-wifi`, now the default `esp32`). The LOLIN S3 N16R8 was measured over WiFi with `Network.txPowerSetting` capped to 8 dBm (the brown-out fix, see below); at 128×128 it's bound by ArtNet over WiFi at reduced TX power (~93 ms of the ~164 ms tick), which is why it trails the Ethernet boards despite a faster core. (The S3 now also supports W5500 SPI Ethernet, which sidesteps that WiFi bottleneck on boards wired for it.) The board's niche is PSRAM headroom (8 MB) for large pixel buffers; use an Ethernet board when frame rate matters.
+The Olimex `esp32` figures were measured on the WiFi+Ethernet build (the pre-collapse `esp32-eth-wifi`, now the default `esp32`). The LOLIN S3 N16R8 was measured over WiFi with `Network.txPowerSetting` capped to 8 dBm (the brown-out fix, see below); at 128×128 it's bound by ArtNet over WiFi at reduced TX power (~93 ms of the ~164 ms tick), which is why it trails the Ethernet devices despite a faster core. (The S3 now also supports W5500 SPI Ethernet, which sidesteps that WiFi bottleneck on devices wired for it.) This device's niche is PSRAM headroom (8 MB) for large pixel buffers; use an Ethernet device when frame rate matters.
 
 ### Free heap
 
-Each cell is **free internal RAM / largest contiguous internal-RAM block**. Internal RAM is the scarce, comparable resource across all boards, so for PSRAM boards (the S3) this is internal-only, NOT the PSRAM-merged total (we assume the 8 MB PSRAM pool is large enough that it isn't the constraint). The block size is the memory-pressure signal that matters: free RAM can be ample while fragmentation leaves no single block big enough for the next allocation.
+Each cell is **free internal RAM / largest contiguous internal-RAM block**. Internal RAM is the scarce, comparable resource across all devices, so for PSRAM devices (the S3) this is internal-only, NOT the PSRAM-merged total (we assume the 8 MB PSRAM pool is large enough that it isn't the constraint). The block size is the memory-pressure signal that matters: free RAM can be ample while fragmentation leaves no single block big enough for the next allocation.
 
 | Grid | Desktop | Olimex `esp32` | Olimex `esp32-eth` | LOLIN S3 N16R8 `esp32s3-n16r8` |
 |---|---:|---:|---:|---:|
@@ -78,7 +78,7 @@ Each cell is **free internal RAM / largest contiguous internal-RAM block**. Inte
 | 64×64 | unlimited | 108 KB / 48 KB | 147 KB / 62 KB | 236 KB / 152 KB |
 | 128×128 | unlimited | 129 KB / 52 KB | 132 KB / 48 KB | 240 KB / 164 KB |
 
-The S3's internal-free stays flat across grid sizes because its Layer buffer + LUT live in PSRAM: growing the grid consumes PSRAM, not internal RAM. The Olimex boards hold those buffers in internal RAM, so their free heap drops as the grid grows.
+The S3's internal-free stays flat across grid sizes because its Layer buffer + LUT live in PSRAM: growing the grid consumes PSRAM, not internal RAM. The Olimex devices hold those buffers in internal RAM, so their free heap drops as the grid grows.
 
 Build variants differ structurally: the default `esp32` includes the WiFi stack (~270 KB flash, ~28 KB heap) alongside Ethernet. `esp32-eth` drops WiFi for more free heap, at the cost of slightly slower tick on large grids (lwIP buffer-pool sizing is tuned for the WiFi+Ethernet sdkconfig). The right variant depends on whether the deployment needs WiFi at all, or only Ethernet plus the extra buffers.
 
@@ -88,7 +88,7 @@ The numbers above are observations. The **contracts** projectMM commits to, what
 
 ### From a release
 
-**ESP32: flash from your browser.** Open the [web installer](https://moonmodules.org/projectMM/install/) in Chrome or Edge; it walks you through release, board and firmware selection, flashing, and network setup. The installer lists stable releases and a `latest` build (published automatically on every merge to main) carrying the newest unreleased changes.
+**ESP32: flash from your browser.** Open the [web installer](https://moonmodules.org/projectMM/install/) in Chrome or Edge; it walks you through release, device and firmware selection, flashing, and network setup. The installer lists stable releases and a `latest` build (published automatically on every merge to main) carrying the newest unreleased changes.
 
 ![Installer](docs/assets/screenshots/installer.png)
 
@@ -162,7 +162,7 @@ projectMM is a community project, built in the open, shaped by the people who us
 
 - **Ideas and requests**: an effect, a layout, a driver, a fixture you want supported? [Open an issue](https://github.com/MoonModules/projectMM/issues) and tell us.
 - **Help build it**: pick something from the [issues](https://github.com/MoonModules/projectMM/issues), or propose a MoonModule. See [How we work](#how-we-work) for the process.
-- **Test on hardware**: run it on your panels, boards, and fixtures, and report what works and what doesn't.
+- **Test on hardware**: run it on your panels, devices, and fixtures, and report what works and what doesn't.
 - **Talk to us**: questions, show-and-tell, and design discussion on [Discord](https://discord.gg/TC8NSUSCdV).
 
 Find the MoonModules community on [Discord](https://discord.gg/TC8NSUSCdV), [Reddit](https://reddit.com/r/moonmodules), [YouTube](https://www.youtube.com/@MoonModulesLighting), and [GitHub](https://github.com/MoonModules).
