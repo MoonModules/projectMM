@@ -97,7 +97,7 @@ public:
         const uint8_t step = static_cast<uint8_t>(phaseNum_ >> 6);   // one step per 64 units
         if (step != angle_) {
             angle_ = step;
-           // Rebuild the LUT at the new angle (re-runs mapToPhysical). Like
+            // Rebuild the LUT at the new angle (re-runs mapToPhysical). Like
             // RandomMapModifier this is a step-gated rebuild from loop(), an accepted
             // bounded cost (runs after the effect pass, not per-tick) — but the bound
             // here is the angle-step rate, not a bpm cap: one step per 64 accumulator

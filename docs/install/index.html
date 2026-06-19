@@ -1354,7 +1354,11 @@
       //     row and the device-side `?deviceModel=` consume path can land
       //     the controls on first visit. (pendingBoardPush is computed above, where
       //     it also gates the `?deviceModel=` on the success link.)
-      myDevices.addProvisionedDevice(url, board, { pendingBoardPush });
+      // When defaults were NOT applied (applyDefaults:false — a re-flash keeping the
+      // device's own config), store no board: the saved entry must not claim a model
+      // the device wasn't configured to, and its Inject button must not offer to push
+      // one the user chose to skip.
+      myDevices.addProvisionedDevice(url, applyDefaults ? board : "", { pendingBoardPush });
     }
 
     function handleError(stage, error) {

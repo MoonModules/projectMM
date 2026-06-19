@@ -316,11 +316,51 @@ function canFetchHttp(deviceUrl) {
     return window.location.protocol !== "https:";
 }
 
+// DELETE every current child of the module named `parentName` on `deviceUrl` —
+// the installer-side counterpart of the device UI's clearModuleChildren, used by
+// tryHttpInjectBoard's replaceChildren so an entry's effects replace the boot
+// defaults instead of stacking. Fetch the live tree, find the container, DELETE
+// each child by name. Returns false on a fetch/DELETE failure so the caller can
+// abort (all-or-nothing, matching the inject's contract).
+async function clearDeviceChildren(deviceUrl, parentName) {
+    let tree;
+    try {
+        const res = await fetch(new URL("api/state", deviceUrl), { signal: AbortSignal.timeout(5000) });
+        if (!res.ok) return false;
+        tree = await res.json();
+    } catch (_) {
+        return false;
+    }
+    const findByName = (mods, name) => {
+        if (!Array.isArray(mods)) return null;
+        for (const m of mods) {
+            if (m && m.name === name) return m;
+            const hit = findByName(m && m.children, name);
+            if (hit) return hit;
+        }
+        return null;
+    };
+    const parent = findByName(tree.modules, parentName);
+    const children = parent && Array.isArray(parent.children) ? parent.children : [];
+    for (const child of children) {
+        try {
+            const res = await fetch(new URL("api/modules/" + encodeURIComponent(child.name), deviceUrl),
+                                    { method: "DELETE", signal: AbortSignal.timeout(5000) });
+            if (!res.ok) return false;
+        } catch (_) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // Fan out every `controls.<Module>.<control>` field for `board` from the
 // same-origin `./deviceModels.json` into the device's `/api/control`. Mirrors
-// what the device UI's `consumePendingBoardParam()` does for the Inject-
-// button path — keeps preview-mode parity with production. Returns true
-// if every POST returned 2xx, false otherwise (any failure short-circuits
+// what the device UI's `consumePendingDeviceModelParam()` does for the Inject-
+// button path — keeps preview-mode parity with production, INCLUDING the
+// `replaceChildren` clear-then-add (so an entry's effects replace the boot
+// defaults rather than stack behind them, same as the device-UI path). Returns
+// true if every POST returned 2xx, false otherwise (any failure short-circuits
 // further pushes so a half-applied state is visible in the logs).
 // 5s per-request timeout — generous for the bench; a typo'd IP fails fast.
 async function tryHttpInjectBoard(deviceUrl, board) {
@@ -337,14 +377,23 @@ async function tryHttpInjectBoard(deviceUrl, board) {
     }
     if (!entry) return false;
     // Each entry is a list of module-with-controls units:
-    //   { type, id, parent_id?, controls? }
+    //   { type, id, parent_id?, controls?, replaceChildren? }
     // Per module: add it first (when it has a parent_id — a fresh flash has no
     // user-added modules like AudioModule, so a control write would 404), then set
-    // its controls. A module without parent_id is boot-wired/top-level (Board under
-    // System, Network) that already exists — skip the add, just set controls. The
-    // add is idempotent (an existing id returns 200). This is the install flow, so
-    // any failure aborts the inject (all-or-nothing).
+    // its controls. A module without parent_id is boot-wired/top-level (System,
+    // Network) that already exists — skip the add, just set controls. The add is
+    // idempotent (an existing id returns 200). This is the install flow, so any
+    // failure aborts the inject (all-or-nothing).
     const modules = Array.isArray(entry.modules) ? entry.modules : [];
+    // replaceChildren pre-pass: a container unit (Layer/Layouts/Drivers) marked
+    // replaceChildren clears its boot defaults before this entry's children are
+    // added — without it the entry's effect sits behind the default and never
+    // renders. Same enumerate-then-DELETE as the device-UI path's clearModuleChildren.
+    for (const m of modules) {
+        if (m && m.replaceChildren && typeof m.id === "string" && m.id) {
+            if (!(await clearDeviceChildren(deviceUrl, m.id))) return false;
+        }
+    }
     for (const m of modules) {
         if (!m || typeof m !== "object") continue;
         // id keys both the module add and every control write below; a unit
@@ -1061,7 +1110,7 @@ export const installer = {
 
             // HTTP injection attempt — fans out the deviceModels.json `controls.*`
             // entries to the device's `/api/control`, mirroring what the
-            // device UI's `consumePendingBoardParam` does for the Inject-
+            // device UI's `consumePendingDeviceModelParam` does for the Inject-
             // button path. Runs for BOTH paths:
             //   - needsIp (typed IP): the only board-injection path, since
             //     SET_DEVICE_MODEL over serial wasn't possible.
