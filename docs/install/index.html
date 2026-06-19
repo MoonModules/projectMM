@@ -440,7 +440,8 @@
       word-break: break-word;
     }
     .install-success-url {
-      display: inline-block;
+      display: block;  /* IP and <name>.local each on their own line */
+      width: fit-content;
       margin-top: 8px;
       color: var(--accent);
       text-decoration: none;
@@ -565,6 +566,11 @@
           <input type="checkbox" id="erase-before-flash">
           Erase chip first
           <span class="note erase-note">— wipes saved WiFi + board, adds ~12 s. Tick when switching firmware variant or starting clean.</span>
+        </label>
+        <label>
+          <input type="checkbox" id="apply-device-defaults">
+          Apply device defaults
+          <span class="note erase-note">— sets this device model's recommended modules/settings. Auto-ticks with erase; untick to keep your current config when re-flashing a configured device.</span>
         </label>
       </div>
 
@@ -1294,7 +1300,7 @@
       if (retrying) input.value = "";
     }
 
-    function handleSuccess({ url, mdns, board, viaHttp, httpBoardOk, alreadyOnline }) {
+    function handleSuccess({ url, mdns, board, applyDefaults = true, viaHttp, httpBoardOk, alreadyOnline }) {
       disarmUnloadGuard();
       if (!url) {
         // User skipped the IP prompt. They've already read the
@@ -1314,7 +1320,10 @@
       // (pendingBoardPush), decorate the clicked link with `?deviceModel=<name>` so
       // visiting it runs the device-side consume path and applies the controls on first
       // visit — no separate Inject click needed. Displayed text stays the clean URL.
-      const pendingBoardPush = !!(board && !httpBoardOk);
+      // Only pending when the user actually wanted defaults applied — applyDefaults:false
+      // (re-flash keeping config) must NOT decorate the link or Inject button with
+      // ?deviceModel=, or clicking it would re-inject what the user chose to skip.
+      const pendingBoardPush = !!(board && applyDefaults && !httpBoardOk);
       const withParam = (u) => pendingBoardPush
         ? u + (u.includes("?") ? "&" : "?") + "deviceModel=" + encodeURIComponent(board)
         : u;
@@ -1616,11 +1625,20 @@
         showSection("connecting");
         document.getElementById("connecting-detail").textContent = "";
         const eraseBefore = document.getElementById("erase-before-flash").checked;
+        // Apply the device-model's catalog defaults (modules + controls) after flashing.
+        // Default-ticked-with-erase (see the change listener below): a clean slate wants
+        // defaults; re-flashing a configured device should NOT silently re-inject (the
+        // catalog's replaceChildren would delete the user's effects). Untick to flash the
+        // firmware while keeping the device's current config. txPower (the brown-out cap)
+        // is a hardware trait, not a "default", so it still applies regardless — only the
+        // module/control inject is gated.
+        const applyDefaults = document.getElementById("apply-device-defaults").checked;
         await installer.start({
           // pickedPort may be null — orchestrator falls back to requestPort.
           port: pickedPort,
           manifestUrl: localUrl,
-          board,
+          board,         // names the install title + identifies the catalog entry
+          applyDefaults, // gates the SET_DEVICE_MODEL + controls inject (not txPower)
           txPower,
           eraseBefore,
           onProgress: handleProgress,
@@ -1634,6 +1652,18 @@
         });
       },
     });
+
+    // Auto-tie "Apply device defaults" to "Erase chip first": ticking erase (a clean
+    // slate) ticks defaults; unticking erase unticks it. The user can still override
+    // either box independently afterwards — the tie only fires on an erase toggle. Both
+    // start unticked (erase's default), so a plain re-flash keeps the device's config.
+    (() => {
+      const eraseBox = document.getElementById("erase-before-flash");
+      const defaultsBox = document.getElementById("apply-device-defaults");
+      if (eraseBox && defaultsBox) {
+        eraseBox.addEventListener("change", () => { defaultsBox.checked = eraseBox.checked; });
+      }
+    })();
 
     myDevices.init({
       container: document.getElementById("devices-mount"),

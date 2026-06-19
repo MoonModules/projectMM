@@ -547,7 +547,8 @@ export const installer = {
      *   omitted/null OR when opening this handle fails (stale grant after
      *   the device was unplugged and replugged).
      */
-    async start({ manifestUrl, board, txPower = null, eraseBefore = false, port: prePickedPort,
+    async start({ manifestUrl, board, applyDefaults = true, txPower = null, eraseBefore = false,
+                   port: prePickedPort,
                    onProgress, uiWaitForCreds, uiWaitForIp, uiShowNeedsIpRetrying,
                    uiWaitForPortRetry,
                    onSuccess, onError, onLog }) {
@@ -1022,13 +1023,24 @@ export const installer = {
                 if (!deviceUrl) {
                     throw new Error("provision succeeded but no device URL returned");
                 }
+                // The Improv WIFI_SETTINGS result carries only the bare-IP URL (the SDK
+                // keeps just the first URL of the list). But the device already told us
+                // its name in the GET_DEVICE_INFO response that `initialize()` fetched —
+                // `info.name` is the deviceName, the same identity that drives mDNS — so
+                // build `<deviceName>.local` from it. This is how the WiFi-provision path
+                // gets the .local link the Ethernet/already-online paths read off serial.
+                const provName = improvClient.info && improvClient.info.name;
+                if (provName) deviceMdns = `${provName}.local`;
 
                 // Push SET_DEVICE_MODEL vendor RPC if the user picked a board.
                 // ImprovSerial holds the writable lock — close it first so
                 // we can write our own raw frame. We're done with
                 // ImprovSerial anyway (provision is the last standard
                 // command we need).
-                if (board) {
+                // applyDefaults gates the catalog inject: when the user unticked
+                // "Apply device defaults" (e.g. re-flashing a configured device), skip
+                // pushing SET_DEVICE_MODEL so the device's existing config is left intact.
+                if (board && applyDefaults) {
                     trackProgress("set-board");
                     await improvClient.close();
                     improvClient = null;
@@ -1063,12 +1075,15 @@ export const installer = {
             // those users get the controls via the `?deviceModel=` query-param
             // handoff after clicking Visit. Successful HTTP push tells the
             // host page to skip the pending-board handoff via `httpBoardOk`.
+            // Gated by applyDefaults too (see the SET_DEVICE_MODEL site above) — an
+            // unticked "Apply device defaults" skips the controls fan-out, leaving a
+            // re-flashed device's existing config untouched.
             let httpBoardOk = false;
-            if (board && canFetchHttp(deviceUrl)) {
+            if (board && applyDefaults && canFetchHttp(deviceUrl)) {
                 if (onLog) onLog(`[orchestrator] attempting HTTP inject for board="${board}" to ${deviceUrl}`);
                 httpBoardOk = await tryHttpInjectBoard(deviceUrl, board);
                 if (onLog) onLog(`[orchestrator] HTTP inject ${httpBoardOk ? "succeeded" : "failed"}`);
-            } else if (board && onLog) {
+            } else if (board && applyDefaults && onLog) {
                 // Skipped — most commonly HTTPS Pages → http:// device URL
                 // blocked by mixed-content. The `?deviceModel=` handoff via the
                 // Visit button picks up the controls fan-out same-origin.
@@ -1080,6 +1095,7 @@ export const installer = {
                 url: deviceUrl,
                 mdns: deviceMdns,   // "<deviceName>.local" from the boot serial, "" if unknown
                 board: board || "",
+                applyDefaults,      // false → host page skips the ?deviceModel= first-visit handoff
                 viaHttp,
                 httpBoardOk,
                 alreadyOnline,

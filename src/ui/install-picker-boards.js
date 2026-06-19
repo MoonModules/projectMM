@@ -87,5 +87,5 @@ export function applyDetectedChip(state, boardEl) {
     boardEl.value = state.selectedBoard || "";
     return autoName
         ? `Detected ${state.detectedChip} — selected ${autoName}`
-        : `Detected ${state.detectedChip} — pick your device (${matches.length} match)`;
+        : `Detected ${state.detectedChip} — pick your device (${matches.length} ${matches.length === 1 ? "match" : "matches"})`;
 }

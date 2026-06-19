@@ -1072,7 +1072,13 @@ UdpSocket::~UdpSocket() {
 bool UdpSocket::open() {
     if (fd_ >= 0) return true;
     fd_ = socket(AF_INET, SOCK_DGRAM, 0);
-    return fd_ >= 0;
+    if (fd_ < 0) return false;
+    // Allow sends to a broadcast address (e.g. 255.255.255.255 for an Art-Net /
+    // E1.31 spray to every device on the LAN). Without SO_BROADCAST the stack
+    // rejects such a send; it has no effect on unicast/multicast sends.
+    const int on = 1;
+    setsockopt(fd_, SOL_SOCKET, SO_BROADCAST, &on, sizeof(on));
+    return true;
 }
 
 bool UdpSocket::connect(const char* ip, uint16_t port) {

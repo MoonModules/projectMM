@@ -5,8 +5,9 @@ straight from your web browser — no software to download, no command line. In 
 few minutes you'll have lights running and the device on your network.
 
 **You need:** an ESP32 board, a USB cable that carries data (not charge-only),
-and **Google Chrome or Microsoft Edge** on a computer (the installer uses a
-browser feature only those two support).
+and a **Chromium-based browser** on a computer — Google Chrome, Microsoft Edge,
+or Opera (the installer uses the Web Serial API, which Safari and Firefox don't
+support).
 
 > Want the bigger picture of what projectMM is first? See the
 > [project overview](../README.md).
@@ -36,6 +37,10 @@ see exactly what it is and what gets set up on it.
 ![Picking a device](assets/gettingstarted/04-pick-device.png)
 
 ![Device details](assets/gettingstarted/06-device-setup.png)
+
+These details are how your device is set up out of the box — the modules and
+settings shown here are applied automatically when you install. Nothing is locked
+in: once the device is running you can change any of it later in the UI.
 
 Leave **Release** and **Firmware** at their suggested values (the newest stable
 build, and the firmware that matches your device). Tick **Erase chip first** only

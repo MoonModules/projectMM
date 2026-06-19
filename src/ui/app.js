@@ -334,15 +334,17 @@ async function clearModuleChildren(parentName) {
         tree = await res.json();
     } catch (_) { return; }
     const findByName = (mods, name) => {
-        for (const m of mods ?? []) {
-            if (m.name === name) return m;
-            const hit = findByName(m.children, name);
+        if (!Array.isArray(mods)) return null;   // malformed payload — no children here
+        for (const m of mods) {
+            if (m && m.name === name) return m;
+            const hit = findByName(m && m.children, name);
             if (hit) return hit;
         }
         return null;
     };
     const parent = findByName(tree.modules, parentName);
-    for (const child of (parent && parent.children) || []) {
+    const children = parent && Array.isArray(parent.children) ? parent.children : [];
+    for (const child of children) {
         try {
             await fetch("/api/modules/" + encodeURIComponent(child.name), { method: "DELETE" });
         } catch (_) { /* best-effort; keep clearing the rest */ }

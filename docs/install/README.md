@@ -23,7 +23,14 @@ end-to-end, no ESP Web Tools dependency on the install path.
   owning the whole flow). Falls through to a "device IP" prompt when the
   device doesn't speak Improv back — the picked deviceModel is handed off via the
   `?deviceModel=` query param + HTTP `/api/control` inject (see the `deviceModel`
-  control on [SystemModule.md](../moonmodules/core/SystemModule.md)).
+  control on [SystemModule.md](../moonmodules/core/SystemModule.md)). An **Apply
+  device defaults** checkbox gates this whole inject (all three channels:
+  SET_DEVICE_MODEL, the HTTP `/api/control` fan-out, and the `?deviceModel=`
+  first-visit handoff). It auto-ticks with **Erase chip first** (a clean slate wants
+  defaults) and starts unticked otherwise, so re-flashing a configured device keeps
+  its current modules/controls instead of having the catalog's `replaceChildren`
+  delete the user's effects. The board's `txPower` brown-out cap still applies either
+  way — it's a hardware trait, not a default.
 - [`devices.js`](devices.js) — the *Your devices* list. Stores devices the
   user provisioned from this page so they can re-visit / erase / forget
   them. Renders a dedicated *Inject* button next to Visit for every entry
@@ -183,8 +190,8 @@ testbench — its 8-lane bus would clash with the mic pins 4/5/6).
 a peripheral/pin unit once that hardware has its own spec (with the product-page
 link + grabbed images for installer selection and pin layout) and a test pinning
 it — the project's *Specs before code* applied to catalog hardware. So vendor
-entries (the QuinLED Dig-2-Go, the Serg shields, …) carry only their **`Board`
-unit plus the default LED driver** until spec'n'tested for more; e.g. whether the
+entries (the QuinLED Dig-2-Go, the Serg shields, …) carry only their **`System`
+unit (with the `deviceModel` control) plus the default LED driver** until spec'n'tested for more; e.g. whether the
 Dig-2-Go's *onboard* mic is even supported is an open spec'n'test question, so its
 entry adds no `AudioModule`. The per-board capability loop that drives this — read
 capabilities off the image/link, wire what we support, propose+test what we don't —

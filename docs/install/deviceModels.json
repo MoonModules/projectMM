@@ -536,7 +536,8 @@
         "type": "System",
         "id": "System",
         "controls": {
-          "deviceModel": "projectMM testbench S3"
+          "deviceModel": "projectMM testbench S3",
+          "deviceName": "projectMM-testbench-S3"
         }
       },
       {
@@ -588,6 +589,11 @@
         "type": "RandomMapModifier",
         "id": "RandomMap",
         "parent_id": "Layer"
+      },
+      {
+        "type": "NetworkSendDriver",
+        "id": "NetworkSend",
+        "parent_id": "Drivers"
       }
     ]
   },
@@ -608,7 +614,8 @@
         "type": "System",
         "id": "System",
         "controls": {
-          "deviceModel": "projectMM testbench ESP32-16MB"
+          "deviceModel": "projectMM testbench ESP32-16MB",
+          "deviceName": "projectMM-testbench-ESP32-16MB"
         }
       },
       {
@@ -644,7 +651,8 @@
         "type": "System",
         "id": "System",
         "controls": {
-          "deviceModel": "projectMM testbench P4"
+          "deviceModel": "projectMM testbench P4",
+          "deviceName": "projectMM-testbench-P4"
         }
       },
       {
@@ -656,6 +664,16 @@
           "loopbackTxPin": 33,
           "loopbackRxPin": 32
         }
+      },
+      {
+        "type": "Layer",
+        "id": "Layer",
+        "replaceChildren": true
+      },
+      {
+        "type": "NetworkReceiveEffect",
+        "id": "NetworkReceive",
+        "parent_id": "Layer"
       }
     ]
   },
