@@ -41,6 +41,12 @@ let wsPaused = false;            // gated by document.visibilityState
 
 const dragTimers = {};           // per-control debounce timers (clearTimeout handles)
 const dragTs = {};               // per-control last-touched timestamp (ms)
+// Control types whose value the user can edit — updateModuleControls suppresses a
+// WS state push for one of these while the user is mid-edit (see dragTs). The
+// read-only types (display/display-int/time/progress) and the composite `list`
+// are absent on purpose: they always reflect the latest push.
+const EDITABLE_CONTROL_TYPES = new Set(
+    ["uint8", "uint16", "int16", "pin", "bool", "text", "password", "select", "ipv4"]);
 const TIMING_MODES = ["fps", "ms"];
 
 // localStorage keys per ui.md
@@ -142,14 +148,14 @@ async function init() {
         state = await resp.json();
         // Pending-board handoff from the web installer. The installer page
         // (docs/install/devices.js → Inject button) opens us with
-        // `?board=<name>` when the orchestrator couldn't push the board
+        // `?deviceModel=<name>` when the orchestrator couldn't push the board
         // itself (HTTPS Pages → HTTP device blocked by mixed-content, OR
         // an Improv-less firmware variant). We consume it once, fetch the
-        // boards.json entry from Pages, add its modules + set their controls
+        // deviceModels.json entry from Pages, add its modules + set their controls
         // via the standard `/api/modules` + `/api/control` writes, then strip the param via
         // history.replaceState. Fire-and-forget — the WS state push driven
         // by sendControl re-renders the affected fields.
-        consumePendingBoardParam();
+        consumePendingDeviceModelParam();
         const savedSel = lsRead(LS_SELECTED, "mm.selectedModule", null);
         if (state.modules && state.modules.length > 0) {
             const exists = savedSel && state.modules.some(m => m.name === savedSel);
@@ -174,7 +180,7 @@ async function init() {
 
 async function sendControl(moduleName, controlName, value) {
     // Best-effort by design — failures are not retried here (see
-    // consumePendingBoardParam's "No retry" contract). The query param is
+    // consumePendingDeviceModelParam's "No retry" contract). The query param is
     // single-shot. Non-ok responses + network errors are logged to console
     // so a user with devtools open can see what went wrong (e.g. a board-
     // injected control value that the device-side validator rejected).
@@ -218,19 +224,19 @@ async function sendAddModule(m) {
 }
 
 // Public Pages URL of the board catalog. The installer page also serves
-// this at `./boards.json` (same-origin from the installer's perspective),
+// this at `./deviceModels.json` (same-origin from the installer's perspective),
 // but the device UI is on a different origin (the device's HTTP server),
 // so we fetch the canonical Pages copy. CORS: GitHub Pages static assets
 // ship `Access-Control-Allow-Origin: *`, so a cross-origin fetch from
 // http://<device>/ to https://moonmodules.org succeeds without proxying.
 // Hardcoded rather than configurable: the catalog is project-global, not
 // per-installation. During local development, flip this to
-// `http://localhost:8000/boards.json` and re-flash; preview_installer.py
+// `http://localhost:8000/deviceModels.json` and re-flash; preview_installer.py
 // sends the same `Access-Control-Allow-Origin: *` header production does.
-const BOARDS_JSON_URL = "https://moonmodules.org/projectMM/install/boards.json";
+const DEVICE_MODELS_JSON_URL = "https://moonmodules.org/projectMM/install/deviceModels.json";
 
-// Consume an installer-emitted `?board=<name>` query param: look the name
-// up in boards.json on Pages, then for each module in the entry add it
+// Consume an installer-emitted `?deviceModel=<name>` query param: look the name
+// up in deviceModels.json on Pages, then for each module in the entry add it
 // (`/api/modules`) and set its nested controls (`/api/control`) so each
 // module's validation runs.
 // Strip the query param BEFORE the network round-trip so a mid-fetch
@@ -238,51 +244,67 @@ const BOARDS_JSON_URL = "https://moonmodules.org/projectMM/install/boards.json";
 // leave the device unchanged; user re-runs the Inject button or sets the
 // fields manually via MoonDeck.
 //
-// See docs/moonmodules/core/BoardModule.md (Injection paths) for the
-// boards.json schema and the full handoff sequence.
-async function consumePendingBoardParam() {
+// See docs/moonmodules/core/SystemModule.md (the deviceModel control) for the
+// deviceModels.json schema and the full handoff sequence.
+async function consumePendingDeviceModelParam() {
     const params = new URLSearchParams(location.search);
-    const pendingBoard = params.get("board");
-    if (!pendingBoard) return;
+    const pendingDeviceModel = params.get("deviceModel");
+    if (!pendingDeviceModel) return;
     // Strip the param up-front so a refresh during the async fetch doesn't
     // re-trigger the injection.
-    params.delete("board");
+    params.delete("deviceModel");
     const qs = params.toString();
     history.replaceState({}, "",
         location.pathname + (qs ? "?" + qs : "") + location.hash);
 
     let entry;
     try {
-        const res = await fetch(BOARDS_JSON_URL);
-        if (!res.ok) throw new Error(`boards.json HTTP ${res.status}`);
+        const res = await fetch(DEVICE_MODELS_JSON_URL);
+        if (!res.ok) throw new Error(`deviceModels.json HTTP ${res.status}`);
         const catalog = await res.json();
         entry = Array.isArray(catalog)
-            ? catalog.find(b => b && b.name === pendingBoard)
+            ? catalog.find(b => b && b.name === pendingDeviceModel)
             : null;
     } catch (e) {
-        // Network down, Pages outage, or boards.json missing the entry.
+        // Network down, Pages outage, or deviceModels.json missing the entry.
         // Surface in the console so a user with devtools open can see why
         // injection didn't take; don't show a modal since the rest of the
         // UI is operational and most users just want to use the device.
-        console.warn("[board-inject] failed to fetch boards.json:", e);
+        console.warn("[board-inject] failed to fetch deviceModels.json:", e);
         return;
     }
     if (!entry) {
-        console.warn(`[board-inject] no catalog entry for board "${pendingBoard}"`);
+        console.warn(`[board-inject] no catalog entry for deviceModel "${pendingDeviceModel}"`);
         return;
     }
     // Each entry is a list of module-with-controls units:
-    //   entry.modules = [ { type, id, parent_id?, controls? }, ... ]
+    //   entry.modules = [ { type, id, parent_id?, controls?, replaceChildren? }, ... ]
     // Per module: add it first (when it has a parent_id — a fresh flash has no
     // user-added modules like AudioModule, so a control write would 404), then
     // set its controls. A module WITHOUT parent_id is a boot-wired/top-level one
-    // (Board under System, Network) that already exists — skip the add, just set
+    // (System, Network, Drivers) that already exists — skip the add, just set
     // controls. The add is idempotent (an existing id returns 200). If an add
     // fails, skip that module's controls (writing them would 404) but keep going —
     // a single failed module shouldn't abort the whole inject (best-effort
     // contract; sendControl never aborts either). Sequential so each
     // FilesystemModule debounced-save sees the full set.
-    for (const m of entry.modules ?? []) {
+    //
+    // replaceChildren: a container unit (Layer, Layouts, Drivers) sets it to REPLACE
+    // the boot-wired defaults rather than add alongside them. The catalog inject is
+    // otherwise add-only, but a Layer only renders its FIRST enabled effect/modifier —
+    // so to make a device's catalog effects actually show (e.g. the testbench's
+    // AudioSpectrum instead of the default Noise) the container's existing children
+    // must be cleared first. We do that here by DELETE-ing each current child of the
+    // named container before its catalog children are added (same enumerate-then-delete
+    // the live scenario runner's clear_children uses). Done once per replaceChildren
+    // container, up front, so the subsequent add units land in an empty container.
+    // Defensive: a malformed catalog entry could have `modules` as a non-array (or
+    // absent) — normalise to [] so the loops below can't throw on bad JSON.
+    const modules = Array.isArray(entry.modules) ? entry.modules : [];
+    for (const c of modules) {
+        if (c && c.replaceChildren && c.id) await clearModuleChildren(c.id);
+    }
+    for (const m of modules) {
         if (!m || typeof m !== "object") continue;
         if (m.parent_id && m.type) {
             if (!(await sendAddModule(m))) {
@@ -295,6 +317,37 @@ async function consumePendingBoardParam() {
                 await sendControl(m.id, controlName, value);
             }
         }
+    }
+}
+
+// DELETE every current child of the module named `parentName` — used by the catalog
+// inject's replaceChildren so an entry's effects/modifiers replace the boot defaults
+// instead of stacking behind them. Best-effort (mirrors the inject's no-retry
+// contract): fetch the live tree, find the container, DELETE each child by name.
+// Only deletable (user-editable) children go; the device rejects a code-wired
+// child's DELETE, which is fine — those aren't what a catalog entry replaces.
+async function clearModuleChildren(parentName) {
+    let tree;
+    try {
+        const res = await fetch("/api/state");
+        if (!res.ok) return;
+        tree = await res.json();
+    } catch (_) { return; }
+    const findByName = (mods, name) => {
+        if (!Array.isArray(mods)) return null;   // malformed payload — no children here
+        for (const m of mods) {
+            if (m && m.name === name) return m;
+            const hit = findByName(m && m.children, name);
+            if (hit) return hit;
+        }
+        return null;
+    };
+    const parent = findByName(tree.modules, parentName);
+    const children = parent && Array.isArray(parent.children) ? parent.children : [];
+    for (const child of children) {
+        try {
+            await fetch("/api/modules/" + encodeURIComponent(child.name), { method: "DELETE" });
+        } catch (_) { /* best-effort; keep clearing the rest */ }
     }
 }
 
@@ -629,14 +682,17 @@ function createCard(mod, depth) {
     card.appendChild(title);
 
     // -- Controls --
-    // Modules whose primary purpose is hosting user-added children (Layers,
-    // Layer, Drivers, Layouts) collapse their own controls so the children
-    // are the focus by default. Modules that merely host a code-wired child
-    // (Network → Improv) keep their controls expanded — the parent's settings
-    // are the main point, the code-wired child is informational. Leaf modules
-    // render controls inline (no wrapper at all).
+    // Child-hosting modules deeper in the tree (Layers, Layer, Drivers, Layouts)
+    // collapse their own controls so the children are the focus by default.
+    // Modules that merely host a code-wired child (Network → Improv) keep their
+    // controls expanded — the parent's settings are the main point, the code-wired
+    // child is informational. Leaf modules render controls inline (no wrapper).
+    // EXCEPTION: a top-level module (depth 0 — the selected root, e.g. System,
+    // Network) never collapses its own controls, even though it accepts children
+    // (System hosts peripherals). It's the card the user is looking at, so its
+    // settings should be visible, not hidden behind a "controls" disclosure.
     const hasVisibleControls = mod.controls && mod.controls.some(c => !c.hidden);
-    const wrapInDetails = acceptsNewChildren(mod) && hasVisibleControls;
+    const wrapInDetails = depth > 0 && acceptsNewChildren(mod) && hasVisibleControls;
     const controlsHost = wrapInDetails ? (() => {
         const d = document.createElement("details");
         d.className = "card-controls-collapse";
@@ -692,7 +748,7 @@ function createCard(mod, depth) {
         installPicker.init({
             container: mount,
             ownFirmwareKey,
-            // Device already knows its board (BoardModule) — picker is for
+            // Device already knows its deviceModel (SystemModule) — picker is for
             // releases + firmware compatibility only. Showing a board picker
             // here would invite the user to mis-narrow the firmware list.
             enableBoardPicker: false,
@@ -908,7 +964,7 @@ function acceptsNewChildren(mod) {
 // The set of child roles ANY loaded type accepts — the union of every type's
 // acceptsChildRoles. A module is "user-managed as a child" iff its role is in
 // this set, which is how the UI decides to show delete/replace/drag without
-// hardcoding role names. Code-wired children (ImprovProvisioning, BoardModule
+// hardcoding role names. Code-wired children (ImprovProvisioning,
 // — roles no container declares) correctly fall outside it.
 function allAcceptedChildRoles() {
     const roles = new Set();
@@ -1002,6 +1058,7 @@ function createControl(moduleName, moduleType, ctrl) {
                 debounceSend(key, 150, () => sendControl(moduleName, ctrl.name, parseInt(input.value)));
             });
             numInput.addEventListener("input", () => {
+                dragTs[key] = Date.now();   // stamp so a WS push can't revert what's being typed
                 const v = Math.max(Number(input.min), Math.min(Number(input.max), parseInt(numInput.value) || 0));
                 input.value = v;
                 debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, v));
@@ -1040,6 +1097,7 @@ function createControl(moduleName, moduleType, ctrl) {
                     debounceSend(key, 150, () => sendControl(moduleName, ctrl.name, parseInt(input.value)));
                 });
                 numInput.addEventListener("input", () => {
+                    dragTs[key] = Date.now();   // stamp so a WS push can't revert what's being typed
                     const v = Math.max(uMin, Math.min(uMax, parseInt(numInput.value) || 0));
                     input.value = v;
                     debounceSend(key, 150, () => sendControl(moduleName, ctrl.name, v));
@@ -1122,6 +1180,7 @@ function createControl(moduleName, moduleType, ctrl) {
                 debounceSend(key, 150, () => sendControl(moduleName, ctrl.name, parseInt(input.value)));
             });
             numInput.addEventListener("input", () => {
+                dragTs[key] = Date.now();   // stamp so a WS push can't revert what's being typed
                 const v = Math.max(min, Math.min(max, parseInt(numInput.value) || 0));
                 input.value = v;
                 debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, v));
@@ -1364,7 +1423,21 @@ function buildListEntries(container, rows, details, openSet) {
         summary.className = "list-summary";
         summary.tabIndex = 0;
         summary.setAttribute("role", "button");
-        summary.textContent = listSummaryText(item);
+        // Freshness dot (always-visible age at a glance) when the row carries a `*Sec`
+        // duration; coloured by ageBucketClass. Generic — no device knowledge here.
+        // The age fields (`ageSec`/`cached`) live in the DETAIL object, not the summary,
+        // so read the detail for the dot (it also carries `self`); fall back to the
+        // summary item when a list has no separate detail.
+        const ageClass = rowAgeClass(details[i] ?? item);
+        if (ageClass) {
+            const dot = document.createElement("span");
+            dot.className = "age-dot " + ageClass;
+            dot.setAttribute("aria-hidden", "true");
+            summary.appendChild(dot);
+        }
+        const label = document.createElement("span");
+        label.textContent = listSummaryText(item);
+        summary.appendChild(label);
         const detailPanel = document.createElement("div");
         detailPanel.className = "list-detail";
         detailPanel.hidden = !openSet.has(summary.textContent);
@@ -1404,6 +1477,13 @@ function fillListDetail(panel, detail) {
     for (const [k, v] of Object.entries(detail)) {
         const isScalarArray = Array.isArray(v) && v.every(e => typeof e !== "object");
         if (typeof v === "object" && !isScalarArray) continue;
+        // `cached` and `ageSec` both render as "last seen"; a projectMM device emits
+        // exactly one (mutually exclusive in DevicesModule), but skip ageSec when a
+        // `cached` key is also present so any other source can't produce two conflicting
+        // "last seen" rows. Match the cached branch's render condition, which fires on
+        // key EXISTENCE (`k === "cached"`), not truthiness — so gate on the key being
+        // present, not on its value. (Robust-to-any-input, generic.)
+        if (k === "ageSec" && "cached" in detail) continue;
         const r = document.createElement("div");
         r.className = "list-detail-row";
         const kEl = document.createElement("span");
@@ -1428,12 +1508,38 @@ function fillListDetail(panel, detail) {
             }
         } else if (isDuration) {
             vEl.textContent = relativeAge(Number(v));
+            const ageClass = ageBucketClass(Number(v));   // tint to match the summary dot
+            if (ageClass) vEl.classList.add(ageClass);
         } else {
             vEl.textContent = String(v);
         }
         r.append(kEl, vEl);
         panel.appendChild(r);
     }
+}
+
+// Freshness bucket for a duration-in-seconds (a `*Sec` field): green < 1 min, orange
+// < 1 hour, red beyond. Generic — any duration field a ListSource emits gets the same
+// scale; nothing device-specific here. (DevicesModule's ageSec is the first user: a
+// device unseen > 24h is aged out of the list entirely, so "red" spans 1h–24h.)
+function ageBucketClass(sec) {
+    if (!Number.isFinite(sec) || sec < 0) return "";
+    if (sec < 60) return "age-fresh";
+    if (sec < 3600) return "age-recent";
+    return "age-stale";
+}
+
+// Find a row's freshness CSS class from its first `*Sec` scalar field, or "" if it has
+// none. `self` is always "now" → fresh; a `cached` row (restored, not re-seen) is
+// unknown-age → no dot (the detail says "cached"). Generic over field names.
+function rowAgeClass(item) {
+    if (!item || typeof item !== "object") return "";
+    if (item.self) return "age-fresh";
+    if (item.cached) return "";
+    for (const [k, v] of Object.entries(item)) {
+        if (k.endsWith("Sec") && typeof v === "number") return ageBucketClass(v);
+    }
+    return "";
 }
 
 // Render a seconds-ago count as a short relative time ("just now", "2m ago", "3h ago",
@@ -1677,11 +1783,18 @@ function updateModuleControls(mod) {
         const ts = dragTs[dragKey] || 0;
         const userActive = Date.now() - ts < 1000;
 
+        // One guard for every editable control: while the user is mid-edit (a
+        // keystroke / drag within the last second, tracked by dragTs), don't let a
+        // WS state push overwrite the field with the value it had before the edit
+        // landed. The read-only types (display/display-int/time/progress) and the
+        // composite `list` aren't in this set — they always reflect the latest push.
+        if (userActive && EDITABLE_CONTROL_TYPES.has(ctrl.type)) continue;
+
         switch (ctrl.type) {
             case "uint8":
             case "uint16":
-            case "int16": {
-                if (userActive) break;
+            case "int16":
+            case "pin": {   // pin is a plain number input (no slider sibling); patches the same way
                 const input = document.querySelector(`input[data-mid="${mid}"][data-key="${k}"]`);
                 if (input && Number(input.value) !== Number(ctrl.value)) {
                     input.value = ctrl.value ?? 0;
@@ -1691,19 +1804,16 @@ function updateModuleControls(mod) {
                 break;
             }
             case "bool": {
-                if (userActive) break;
                 const input = document.querySelector(`input[data-mid="${mid}"][data-key="${k}"]`);
                 if (input && input.checked !== !!ctrl.value) input.checked = !!ctrl.value;
                 break;
             }
             case "text": {
-                if (userActive) break;
                 const input = document.querySelector(`input[type="text"][data-mid="${mid}"][data-key="${k}"]`);
                 if (input && input.value !== (ctrl.value ?? "")) input.value = ctrl.value ?? "";
                 break;
             }
             case "password": {
-                if (userActive) break;
                 // The peek button flips the input to type="text", so match either.
                 const input = document.querySelector(`input[data-mid="${mid}"][data-key="${k}"]`);
                 const decoded = decodePassword(ctrl.value);
@@ -1711,7 +1821,6 @@ function updateModuleControls(mod) {
                 break;
             }
             case "select": {
-                if (userActive) break;
                 const sel = document.querySelector(`select[data-mid="${mid}"][data-key="${k}"]`);
                 if (sel && Number(sel.value) !== Number(ctrl.value)) sel.value = ctrl.value;
                 break;
@@ -1732,12 +1841,9 @@ function updateModuleControls(mod) {
                 break;
             }
             case "ipv4": {
+                // Guarded by the shared userActive check above (same as text).
                 const input = document.querySelector(`input.ipv4-input[data-mid="${mid}"][data-key="${k}"]`);
-                // Don't clobber an input the user is currently editing —
-                // matches how text inputs handle WS pushes elsewhere.
-                if (input && document.activeElement !== input) {
-                    input.value = ctrl.value ?? "";
-                }
+                if (input && input.value !== (ctrl.value ?? "")) input.value = ctrl.value ?? "";
                 break;
             }
             case "time": {

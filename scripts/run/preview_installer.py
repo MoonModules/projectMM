@@ -6,7 +6,7 @@ module) and serves it with `python -m http.server`, plus the
 `Access-Control-Allow-Origin: *` header that GitHub Pages serves on its
 static assets by default — needed so the device UI's
 `consumePendingBoardParam` can cross-origin-fetch a localhost-served
-boards.json the same way it would fetch the production one. Two modes
+deviceModels.json the same way it would fetch the production one. Two modes
 depending on what's been built locally:
 
   - **render-only** (no `build/esp32-*/projectMM.bin` present): the
@@ -46,6 +46,9 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 INSTALL_DIR = ROOT / "docs" / "install"
 ASSETS_BOARDS_DIR = ROOT / "docs" / "assets" / "boards"
 PICKER_JS = ROOT / "src" / "ui" / "install-picker.js"
+# Board-catalog / chip-detection half of the picker — web-installer only (not
+# embedded in firmware), imported by index.html. Staged alongside PICKER_JS.
+PICKER_BOARDS_JS = ROOT / "src" / "ui" / "install-picker-boards.js"
 STAGE_DIR = ROOT / "build" / "install-preview"
 # The preview mirrors the GitHub Pages layout: the installer at /install/,
 # board images under /install/assets/boards/, and the releases tree under
@@ -83,9 +86,9 @@ def _stage_runtime_files(src_dir: Path, dst_dir: Path):
 
 
 def _stage_referenced_board_images(dst_dir: Path):
-    """Stage only the board images a boards.json entry references (mirrors the
+    """Stage only the board images a deviceModels.json entry references (mirrors the
     deploy's filtered copy), under <dst_dir>/assets/boards/."""
-    boards_json = INSTALL_DIR / "boards.json"
+    boards_json = INSTALL_DIR / "deviceModels.json"
     if not boards_json.exists():
         return
     try:
@@ -127,12 +130,16 @@ def stage_install_page():
     if not PICKER_JS.exists():
         print(f"ERROR: install-picker.js not found at {PICKER_JS}", file=sys.stderr)
         sys.exit(1)
+    if not PICKER_BOARDS_JS.exists():
+        print(f"ERROR: install-picker-boards.js not found at {PICKER_BOARDS_JS}", file=sys.stderr)
+        sys.exit(1)
 
     library_json = ROOT / "library.json"
 
     # --- installer → /install/ ---
     _stage_runtime_files(INSTALL_DIR, STAGE_INSTALL)
     shutil.copy(PICKER_JS, STAGE_INSTALL / "install-picker.js")
+    shutil.copy(PICKER_BOARDS_JS, STAGE_INSTALL / "install-picker-boards.js")
     if library_json.exists():
         shutil.copy(library_json, STAGE_INSTALL / "library.json")
     _stage_referenced_board_images(STAGE_INSTALL)
@@ -285,7 +292,7 @@ def main() -> int:
 
     # Mirror GitHub Pages' default static-asset CORS behaviour
     # (`Access-Control-Allow-Origin: *`). The device-UI's
-    # `consumePendingBoardParam` fetches boards.json cross-origin
+    # `consumePendingBoardParam` fetches deviceModels.json cross-origin
     # (http://<device>/ → https://moonmodules.org/…). In dev we point that
     # constant at this preview server so we can iterate on the schema; the
     # device's browser will refuse the fetch unless we serve the same CORS
@@ -294,10 +301,10 @@ def main() -> int:
     class CorsHandler(http.server.SimpleHTTPRequestHandler):
         def end_headers(self):
             self.send_header("Access-Control-Allow-Origin", "*")
-            # no-store so edits to boards.json / index.html / install-picker.js
+            # no-store so edits to deviceModels.json / index.html / install-picker.js
             # show on a normal reload. Python's http.server sends only
             # Last-Modified (no Cache-Control), so browsers heuristically cache
-            # and a stale boards.json survives a restage until a hard reload.
+            # and a stale deviceModels.json survives a restage until a hard reload.
             # Dev-preview only; production Pages sets its own cache headers.
             self.send_header("Cache-Control", "no-store")
             super().end_headers()

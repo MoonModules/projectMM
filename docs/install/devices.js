@@ -18,14 +18,14 @@
 // the render path treats it as absent. A schema bump (v2, …) is how future
 // migrations land; additive fields like this one don't need one.
 //
-// `pendingBoard` carries a board name (the key into boards.json) the
+// `pendingBoard` carries a board name (the key into deviceModels.json) the
 // installer couldn't push directly — Improv RPC unavailable AND the in-
 // orchestrator HTTP fallback blocked by mixed-content. It only influences
 // the *styling* of the **Inject** button (primary-flavoured when present);
 // the button itself renders whenever the entry has a `board` field at all.
 // Re-clicks are idempotent (the device just re-writes the same `controls.*`
 // values), so we never gate the button on a one-shot flag — popup blockers,
-// mistyped URLs, or a follow-up boards.json edit all need the action to
+// mistyped URLs, or a follow-up deviceModels.json edit all need the action to
 // stay reachable. `acknowledgeBoardInject` clears `pendingBoard` after a
 // click; the button stays, just neutral-styled.
 
@@ -133,7 +133,7 @@ function render() {
         // Board line (between URL and last-seen) renders only when set —
         // legacy entries from before the field was added stay unchanged.
         // The orchestrator passes board into addProvisionedDevice() when
-        // SET_BOARD succeeded; "(any board)" provisions skip the field.
+        // SET_DEVICE_MODEL succeeded; "(any board)" provisions skip the field.
         if (device.board) {
             const boardEl = document.createElement("div");
             boardEl.className = "device-board-name";
@@ -150,12 +150,12 @@ function render() {
         }, "Open the device UI in a new tab");
         // Inject button: always rendered when the entry has a board name on
         // it (whether or not we still have a `pendingBoard` flag). Opens the
-        // device UI with `?board=<name>` so the device's app.js fetches the
-        // matching boards.json entry from Pages and POSTs each `controls.*`
+        // device UI with `?deviceModel=<name>` so the device's app.js fetches the
+        // matching deviceModels.json entry from Pages and POSTs each `controls.*`
         // field to `/api/control`. Re-clicks are idempotent (same value
         // written to the same controls), so we don't gate the button on a
         // one-shot flag — popup blockers, mistyped URLs, and "the device
-        // rejected one field, retry after fixing boards.json" all need the
+        // rejected one field, retry after fixing deviceModels.json" all need the
         // button to stay reachable. `pendingBoard` (set by the orchestrator
         // when the in-page HTTP push didn't succeed) only affects styling:
         // primary-flavoured when there's an unconfirmed push, neutral once
@@ -166,12 +166,12 @@ function render() {
                 if (!confirm(
                     `Open ${device.name} and inject the board config for ` +
                     `"${labelName}"?\n\n` +
-                    `The device will fetch the matching entry from boards.json ` +
+                    `The device will fetch the matching entry from deviceModels.json ` +
                     `and apply every field via /api/control. Safe to re-run — ` +
                     `the values are idempotent.`)) return;
                 window.open(buildInjectUrl(device), "_blank", "noopener");
                 acknowledgeBoardInject(device);
-            }, `Push the boards.json config for "${labelName}" to the device`);
+            }, `Push the deviceModels.json config for "${labelName}" to the device`);
             if (device.pendingBoard) inject.classList.add("primary");
             actions.append(inject);
         }
@@ -205,20 +205,21 @@ function makeBtn(label, handler, title) {
     return b;
 }
 
-// Build `<device.url>?board=<name>` for the Inject button. The device UI's
-// `consumePendingBoardParam()` reads the param, fetches the matching entry
-// from boards.json on Pages, and POSTs each `controls.*` field to the
+// Build `<device.url>?deviceModel=<name>` for the Inject button. The device UI's
+// `consumePendingDeviceModelParam()` reads the param, fetches the matching entry
+// from deviceModels.json on Pages, and POSTs each `controls.*` field to the
 // device's `/api/control`. URLSearchParams handles encoding so names with
 // spaces (e.g. "Olimex ESP32-Gateway Rev G") round-trip cleanly.
 // `pendingBoard` is the name the orchestrator couldn't push directly;
 // after the first Inject click that flag clears, but the button stays
-// reachable and re-injects using the persistent `board` field.
+// reachable and re-injects using the persistent `board` field (devices.js's own
+// per-device record key — distinct from the device's `deviceModel` control).
 function buildInjectUrl(device) {
     const name = device.pendingBoard || device.board;
     if (!name) return device.url;
     try {
         const u = new URL(device.url);
-        u.searchParams.set("board", name);
+        u.searchParams.set("deviceModel", name);
         return u.toString();
     } catch (_) {
         return device.url;
@@ -228,7 +229,7 @@ function buildInjectUrl(device) {
 // Single-shot: once the user clicks Inject, drop `pendingBoard` from the
 // entry so the button doesn't reappear next time. The fetch + fan-out on
 // the device side either succeeded (board fields applied) or failed
-// (network error, BoardModule validation rejected a value) — either way
+// (network error, SystemModule.setDeviceModel validation rejected a value) — either way
 // we don't auto-retry; the user re-adds via a fresh install or sets the
 // fields manually via MoonDeck.
 function acknowledgeBoardInject(device) {
@@ -264,7 +265,7 @@ export const myDevices = {
      * @param {string} url
      * @param {string} [board] - physical board name from the picker
      *   (Step 3 of the board-injection plan). Empty / undefined = user
-     *   picked "(any board)" or the SET_BOARD RPC was skipped; the bookmark
+     *   picked "(any board)" or the SET_DEVICE_MODEL RPC was skipped; the bookmark
      *   row omits the board line. Non-empty updates an existing entry's
      *   board on re-flash; never blanks a previously-set value.
      * @param {object} [opts]

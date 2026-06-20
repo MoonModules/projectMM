@@ -471,20 +471,24 @@ jobs:
           mkdir -p pages/install
           cp -r docs/install/. pages/install/
           cp src/ui/install-picker.js pages/install/
+          # The board-catalog / chip-detection half of the picker — web-installer
+          # only (not embedded in firmware), imported by index.html. Must ship to
+          # Pages alongside install-picker.js or the ES-module import 404s.
+          cp src/ui/install-picker-boards.js pages/install/
           # library.json — install page reads the project version from it.
           cp library.json pages/install/
           # Board picker images live in docs/assets/boards/ (the project's asset
           # home, also a library for boards not yet in the catalog). Stage ONLY the
-          # images a boards.json entry actually references, under install/assets/,
+          # images a deviceModels.json entry actually references, under install/assets/,
           # so an "image": "assets/boards/<slug>.jpg" resolves same-origin from
           # /install/ without shipping the unused library to Pages.
           mkdir -p pages/install/assets/boards
           # rel is "assets/boards/<slug>.<ext>" (the path served from /install/);
           # the source file lives in docs/<rel> (i.e. docs/assets/boards/...).
-          jq -r '.[].image // empty' docs/install/boards.json | while read -r rel; do
+          jq -r '.[].image // empty' docs/install/deviceModels.json | while read -r rel; do
             src="docs/$rel"
             [ -f "$src" ] && cp "$src" "pages/install/$rel" \
-              || echo "WARNING: boards.json image not found: $src"
+              || echo "WARNING: deviceModels.json image not found: $src"
           done
           # Root landing page (moonmodules.org/projectMM/) → Flash button + repo
           # links. Without it the bare root 404s; only /install/ would exist.

@@ -31,7 +31,10 @@ public:
     // values in their native shape. The platform UdpSocket::connect() takes
     // a string, so connectIfDestChanged() formats on a stack buffer at the
     // boundary — the long-lived storage stays integer.
-    uint8_t ip[4] = {192, 168, 1, 70};
+    // Default to the limited-broadcast address so a fresh sender reaches every
+    // receiver on the LAN with no IP to type — set a unicast IP in the UI to target
+    // one device. Broadcast needs SO_BROADCAST, which platform UdpSocket::open sets.
+    uint8_t ip[4] = {255, 255, 255, 255};
     uint8_t protocol = 0;        // index into kProtocolOptions
     uint16_t universeStart = 0;  // first universe (ArtNet/E1.31; DDP is byte-addressed)
     uint8_t fps = 50;

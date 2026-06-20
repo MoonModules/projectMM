@@ -3,9 +3,11 @@
 #include "core/MoonModule.h"
 #include "core/Scheduler.h"
 #include "core/build_info.h"
+#include "core/FilesystemModule.h"   // setDeviceModel() arms the debounced save (noteDirty)
 #include "platform/platform.h"
 
 #include <cstdio>
+#include <cstring>
 
 namespace mm {
 
@@ -20,14 +22,19 @@ public:
     // Accepts user-added Peripheral children (sensors, actuators — bridges to
     // hardware/network the user solders on or off). The same firmware runs with
     // or without them, so the user adds/deletes them at runtime; the add/replace/
-    // delete + persistence machinery is the generic MoonModule path. BoardModule
-    // (also a System child) is code-wired and opts out of deletion via its own
-    // userEditable() == false.
+    // delete + persistence machinery is the generic MoonModule path. (The deviceModel
+    // identity is a SystemModule control above, not a child module — SystemModule owns
+    // the device's identity, name + model, directly.)
     const char* acceptsChildRoles() const override { return "peripheral"; }
 
     void setup() override {
         // Compute default deviceName from MAC: MM-XXXX. Skip if a persisted value was
-        // already overlaid by Scheduler phase 2 (deviceName_ non-empty).
+        // already overlaid by Scheduler phase 2 (deviceName_ non-empty). Sanitize first
+        // in case the persisted value is an invalid hostname (older firmware let any
+        // text through); coerce + MAC-fallback so deviceName_ is a valid, non-empty
+        // hostname from the very first read — every network name (mDNS/AP/DHCP) derives
+        // from it directly, so it must be valid before NetworkModule::setup() reads it.
+        sanitizeHostname(deviceName_);
         if (deviceName_[0] == 0) {
             uint8_t mac[6];
             platform::getMacAddress(mac);
@@ -61,7 +68,7 @@ public:
                           static_cast<unsigned>(chipFlashVal_ / (1024 * 1024)));
         }
 
-        // Chain to base so children (BoardModule, user-added Peripherals) get
+        // Chain to base so children (user-added Peripherals) get
         // their setup() — a peripheral initialises its hardware here. Overriding
         // setup() shadows the base default that would otherwise propagate.
         MoonModule::setup();
@@ -79,6 +86,17 @@ public:
 
         // Device name on top
         controls_.addText("deviceName", deviceName_, sizeof(deviceName_));
+
+        // deviceModel — the physical-hardware identity (the catalog entry name, e.g.
+        // "Olimex ESP32-Gateway Rev G"). The device can't self-identify its hardware, so
+        // this is INJECTED by tooling: MoonDeck / the device UI's ?deviceModel= inject via
+        // HTTP /api/control, or the web installer via the Improv SET_DEVICE_MODEL RPC
+        // (which routes through setDeviceModel() below). Display-only in the UI (pushed,
+        // never user-typed at the device); bound as Text — not ReadOnly — because Text is
+        // auto-persisted by FilesystemModule, and the readonly flag is a UI-render hint
+        // that doesn't change persistence or HTTP-write semantics.
+        controls_.addText("deviceModel", deviceModel_, sizeof(deviceModel_));
+        controls_.setReadOnly(controls_.count() - 1, true);
 
         // Dynamic (updated every second)
         controls_.addReadOnly("uptime", uptimeStr_, sizeof(uptimeStr_));
@@ -134,7 +152,7 @@ public:
             controls_.addReadOnly("wifiCoproc", coprocStr_, sizeof(coprocStr_));
         }
 
-        // Chain into children (BoardModule today). Per the override-and-chain
+        // Chain into children (user-added Peripherals). Per the override-and-chain
         // convention in architecture.md § Lifecycle propagation to children:
         // `onBuildControls` cascades to children via MoonModule's base default;
         // overriding the method shadows that default, so we must call it
@@ -144,6 +162,18 @@ public:
     }
 
     void loop1s() override {
+        // deviceName is the single network identity (mDNS <name>.local, SoftAP SSID,
+        // DHCP hostname all derive from it), so it must stay a valid hostname whatever
+        // the user typed or persistence restored. Coerce it here each tick — idempotent
+        // on an already-valid name, and it runs before NetworkModule::loop1s() reads it,
+        // so a live rename ("My Room" → "My-Room") propagates everywhere within a tick.
+        sanitizeHostname(deviceName_);
+        if (deviceName_[0] == 0) {        // user cleared it / all-invalid → MAC fallback
+            uint8_t mac[6];
+            platform::getMacAddress(mac);
+            std::snprintf(deviceName_, sizeof(deviceName_), "MM-%02X%02X", mac[4], mac[5]);
+        }
+
         // Update dynamic values
         uint32_t uptimeSec = scheduler_ ? scheduler_->elapsed() / 1000 : 0;
         uint32_t hours = uptimeSec / 3600;
@@ -192,11 +222,53 @@ public:
 
     const char* deviceName() const { return deviceName_; }
 
+    const char* deviceModel() const { return deviceModel_; }
+
+    // External setter for transports that bypass /api/control (today: the web installer's
+    // Improv vendor RPC SET_DEVICE_MODEL, routed here by ImprovProvisioningModule).
+    // Validates: 1..31 chars, ASCII-printable (0x20–0x7E), no embedded NUL. The printable
+    // floor rejects control bytes / NULs that would corrupt downstream consumers — JSON
+    // serialization (control bytes need \u escaping at best, break naive emitters at
+    // worst), the device UI (rendered verbatim; a BEL/ESC would mangle the page), and
+    // C-string handling (no embedded NUL → strlen/strcpy round-trip cleanly). Printable
+    // ASCII still contains `"` and `\`, which serializers must escape normally — the
+    // floor isn't a license to skip escaping. Returns false on rejection so the Improv
+    // handler can map to ErrorState. On accept: copies into deviceModel_ and arms
+    // FilesystemModule's debounced save — same idiom as NetworkModule::setWifiCredentials.
+    //
+    // Known asymmetry: HTTP POST /api/control writes to `deviceModel` go through the
+    // generic Text-control write in applyControlValue() (Control.cpp), which does NO
+    // printable-ASCII check. A malicious LAN client could write control bytes / NUL via
+    // that path. Acceptable today because the HTTP-write callers (MoonDeck, the
+    // installer's HTTP inject) source the value from the device-model catalog, which the
+    // project controls; there is no end-user-typed input on this field. If the threat
+    // model grows, the right fix is a per-control validator hook on ControlDescriptor —
+    // not a one-off HTTP dispatch exception. Until then this validation lives only on the
+    // SET_DEVICE_MODEL-over-Improv path, the only path where wire-untrusted bytes arrive.
+    bool setDeviceModel(const char* value) {
+        if (!value) return false;
+        size_t n = std::strlen(value);
+        if (n == 0 || n >= sizeof(deviceModel_)) return false;
+        for (size_t i = 0; i < n; i++) {
+            unsigned char b = static_cast<unsigned char>(value[i]);
+            if (b < 0x20 || b > 0x7E) return false;
+        }
+        std::strncpy(deviceModel_, value, sizeof(deviceModel_) - 1);
+        deviceModel_[sizeof(deviceModel_) - 1] = 0;
+        markDirty();
+        FilesystemModule::noteDirty();
+        return true;
+    }
+
 private:
     Scheduler* scheduler_ = nullptr;
 
     // Configurable
     char deviceName_[24] = {};
+    // Physical-hardware identity (catalog entry name). 32-byte buffer fits the longest
+    // entry ("Olimex ESP32-Gateway Rev G" = 26) with headroom; the Improv RPC handler
+    // caps str_len against this size dynamically.
+    char deviceModel_[32] = {};
 
     // Dynamic (updated in loop1s)
     char uptimeStr_[16] = {};

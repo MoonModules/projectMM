@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Validate the installer board catalog (docs/install/boards.json).
+"""Validate the installer board catalog (docs/install/deviceModels.json).
 
 The catalog is hand-maintained data consumed identically by three clients (the
-web installer, the device UI's ?board= inject, and MoonDeck), so a typo drifts
+web installer, the device UI's ?deviceModel= inject, and MoonDeck), so a typo drifts
 silently — a broken image path, a board name that no longer matches its
-Board.board control, a driver pin list on a board that has no driver. This is the
+System.deviceModel control, a driver pin list on an entry that has no driver. This is the
 catalog's counterpart to check_specs.py for module docs: a fast, dependency-free
 gate that pins the invariants the clients assume.
 
@@ -13,7 +13,7 @@ Invariants checked per entry:
   - firmwares is a non-empty list of non-empty strings (entry[0] is the default)
   - image (if set) is a local assets/boards/ path that resolves on disk
   - url (if set) is an absolute http(s) link
-  - the Board module's `board` control value equals the entry `name`
+  - the System module's `deviceModel` control value equals the entry `name`
   - every module `type` is factory-registered (or a known boot-wired singleton)
   - a driver's `pins` control only appears on an actual *LedDriver module
   - supported/planned (if set) are string arrays drawn from the known vocabulary
@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-CATALOG = ROOT / "docs" / "install" / "boards.json"
+CATALOG = ROOT / "docs" / "install" / "deviceModels.json"
 MAIN_CPP = ROOT / "src" / "main.cpp"
 DOCS = ROOT / "docs"
 
@@ -39,8 +39,8 @@ SUPPORTED_VOCAB = {"LEDs", "WiFi", "Ethernet", "Audio"}
 
 # Boot-wired singletons: present on every device, added by code, so the catalog
 # references them by id without the factory creating them. Their catalog `type`
-# is the short id, not the factory class name (e.g. "Board", not "BoardModule").
-BOOT_WIRED_TYPES = {"Board", "System", "Network", "Drivers"}
+# is the short id, not the factory class name (e.g. "System", not "SystemModule").
+BOOT_WIRED_TYPES = {"System", "Network", "Drivers"}
 
 
 def registered_types():
@@ -59,7 +59,7 @@ def main():
         sys.exit(1)
 
     if not isinstance(catalog, list):
-        print("Board check: boards.json must be a JSON array")
+        print("Board check: deviceModels.json must be a JSON array")
         sys.exit(1)
 
     factory_types = registered_types()
@@ -153,19 +153,28 @@ def main():
             if not isinstance(mid, str) or not mid:
                 errors.append(f"{where}: module '{mtype}' has no non-empty 'id'")
 
+            # replaceChildren (optional) — a container unit sets it true to clear its
+            # existing children before the entry's children are added (the installer
+            # inject path). Must be a bool when present so a typo'd value is caught here.
+            if "replaceChildren" in m and not isinstance(m["replaceChildren"], bool):
+                errors.append(f"{where}: module '{mid}' replaceChildren must be true/false")
+
             controls = m.get("controls") or {}
-            # Board.board control must equal the entry name (the device's identity key).
-            if mtype == "Board" and isinstance(controls, dict) and "board" in controls:
+            # System.deviceModel control must equal the entry name (the identity key).
+            if mtype == "System" and isinstance(controls, dict) and "deviceModel" in controls:
                 board_control_seen = True
-                if controls["board"] != name:
-                    errors.append(f"{where}: Board.board control '{controls['board']}' "
+                if controls["deviceModel"] != name:
+                    errors.append(f"{where}: System.deviceModel control '{controls['deviceModel']}' "
                                   f"!= entry name '{name}'")
             # A `pins` control only makes sense on an LED driver module.
             if isinstance(controls, dict) and "pins" in controls and not str(mtype).endswith("LedDriver"):
                 errors.append(f"{where}: module '{mtype}' has a 'pins' control but is not a *LedDriver")
 
-        if mods and not board_control_seen:
-            errors.append(f"{where}: no Board module sets the 'board' identity control")
+        # Every entry must carry the deviceModel identity (a System unit with the
+        # `deviceModel` control). An empty `modules` list is also a failure — it has no
+        # identity at all — so this is gated only on board_control_seen, not on `mods`.
+        if not board_control_seen:
+            errors.append(f"{where}: no System module sets the 'deviceModel' identity control")
 
     # Report (mirrors check_specs.py's shape).
     print(f"Board check: {len(catalog)} boards, {len(errors)} issue(s)")

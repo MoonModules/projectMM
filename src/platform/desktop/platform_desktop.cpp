@@ -564,8 +564,10 @@ bool improvProvisioningInit(const ImprovDeviceInfo& /*info*/,
                             char* /*passwordOut*/, size_t /*passwordOutLen*/,
                             std::atomic<bool>* /*ready*/,
                             char* statusBuf, size_t statusBufLen,
-                            char* /*boardOut*/, size_t /*boardOutLen*/,
-                            std::atomic<bool>* /*boardReady*/) {
+                            char* /*deviceModelOut*/, size_t /*deviceModelOutLen*/,
+                            std::atomic<bool>* /*deviceModelReady*/,
+                            uint8_t* /*txPowerOut*/,
+                            std::atomic<bool>* /*txPowerReady*/) {
     if (statusBuf && statusBufLen > 0) {
         std::snprintf(statusBuf, statusBufLen, "unsupported on desktop");
     }
@@ -590,7 +592,14 @@ UdpSocket::~UdpSocket() {
 bool UdpSocket::open() {
     if (fd_ >= 0) return true;
     fd_ = open_sock(AF_INET, SOCK_DGRAM, 0);
-    return fd_ >= 0;
+    if (fd_ < 0) return false;
+    // Allow sends to a broadcast address (e.g. 255.255.255.255 for an Art-Net /
+    // E1.31 spray to every device on the LAN). Without SO_BROADCAST the OS rejects
+    // such a send with EACCES; it has no effect on unicast/multicast sends.
+    const int on = 1;
+    ::setsockopt(sock(fd_), SOL_SOCKET, SO_BROADCAST,
+                 reinterpret_cast<const char*>(&on), sizeof(on));
+    return true;
 }
 
 bool UdpSocket::connect(const char* ip, uint16_t port) {

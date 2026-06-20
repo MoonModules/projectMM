@@ -25,7 +25,7 @@
       --muted:  #a0a0b0;
       --accent: #a78bfa;
       --border: #2a3a6a;
-      --ok:     #57c97a;   /* green  — "active" capability (supported + a module configured in boards.json) */
+      --ok:     #57c97a;   /* green  — "active" capability (supported + a module configured in deviceModels.json) */
       --sup:    #e3c84a;   /* yellow — "supported" capability (firmware supports it, not pre-configured) */
       --plan:   #e8923a;   /* orange — "planned" capability (no module yet; greener than red, by design) */
     }
@@ -211,7 +211,7 @@
     .bg-name { font-weight: 600; font-size: 12px; line-height: 1.2; }
     .bg-meta { color: var(--muted); font-size: 11px; }
     /* Capability chips: supported (green) vs planned (orange) — distinguished by
-       colour, not by extra text. Labels are kept short in boards.json so every
+       colour, not by extra text. Labels are kept short in deviceModels.json so every
        chip fits the ~150px card; the full label + state is in the chip's title
        tooltip. */
     .bg-caps { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
@@ -227,7 +227,7 @@
 
     /* Board-details popup — native <dialog> (standard modal pattern: built-in
        backdrop, ESC-to-close, focus trap; no bespoke modal JS). Shows the full
-       boards.json entry as a readable summary plus a collapsible raw-JSON block. */
+       deviceModels.json entry as a readable summary plus a collapsible raw-JSON block. */
     #board-details::backdrop { background: rgba(0,0,0,0.6); }
     #board-details {
       background: var(--card); color: var(--fg);
@@ -277,6 +277,21 @@
     .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .rp-status { color: var(--muted); font-size: 13px; }
     .rp-status-row { min-height: 1.5em; }
+
+    /* Inline spinner shown in a field while its data is still being fetched
+       (install-picker renderSkeleton). A 1em spinning ring, sized to sit next
+       to the select's "Loading…" placeholder. */
+    .rp-spinner {
+      display: inline-block;
+      width: 1em; height: 1em;
+      vertical-align: -0.15em;
+      margin-right: 0.4em;
+      border: 2px solid var(--muted);
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: rp-spin 0.7s linear infinite;
+    }
+    @keyframes rp-spin { to { transform: rotate(360deg); } }
 
     /* "Your devices" card — one row per provisioned device. The row
        is the picker's `.control-row` flex shape with the device info
@@ -343,6 +358,7 @@
     .install-section { display: none; }
     .install-section.active { display: block; }
     .install-status { margin: 8px 0; color: var(--muted); }
+    .install-done-note { margin: 4px 0 10px; font-size: 13px; color: var(--muted); }
     .install-warn { color: #d4a052; font-size: 12px; margin-top: 8px; }
     .install-progress {
       height: 8px;
@@ -425,7 +441,8 @@
       word-break: break-word;
     }
     .install-success-url {
-      display: inline-block;
+      display: block;  /* IP and <name>.local each on their own line */
+      width: fit-content;
       margin-top: 8px;
       color: var(--accent);
       text-decoration: none;
@@ -484,7 +501,7 @@
     <h1>projectMM Installer <span class="version-chip" id="version-chip" hidden></span>
       <a class="help-link" href="https://github.com/MoonModules/projectMM/blob/main/docs/install/README.md"
          target="_blank" rel="noopener" title="Installer help (opens the docs in a new tab)">?</a></h1>
-    <p class="tag">Plug in your ESP32. Pick a release + board. Flash. Get the device on your network. Open it in a browser.</p>
+    <p class="tag">Plug in your ESP32. Pick a release + device. Flash. Get the device on your network. Open it in a browser.</p>
 
     <div class="card browser-warning" id="browser-warning">
       <strong>This browser can't flash directly.</strong>
@@ -495,7 +512,7 @@
     </div>
 
     <div class="card">
-      <strong>Step 1 — Pick a release + board and flash.</strong>
+      <strong>Step 1 — Pick a release + device and flash.</strong>
       <p class="note" style="margin-top: 4px">
         The picker shows stable releases, release candidates (<code>v…-rc…</code>),
         and a <code>latest</code> build published on every merge to main — all flagged
@@ -551,34 +568,39 @@
           Erase chip first
           <span class="note erase-note">— wipes saved WiFi + board, adds ~12 s. Tick when switching firmware variant or starting clean.</span>
         </label>
+        <label>
+          <input type="checkbox" id="apply-device-defaults">
+          Apply device defaults
+          <span class="note erase-note">— sets this device model's recommended modules/settings. Auto-ticks with erase; untick to keep your current config when re-flashing a configured device.</span>
+        </label>
       </div>
 
       <!-- picture board picker. Renders a visual card grid from
-           boards.json (image + product link), and on select drives the shared
+           deviceModels.json (image + product link), and on select drives the shared
            picker's own (hidden) board <select> so the existing flash flow is
            reused unchanged. The shared install-picker.js + firmware UI are NOT
            modified (board images are a Pages-only asset, never flashed). -->
       <!-- Board picker: a control-row consistent with USB Port / Release /
-           Firmware (left "Board" label + a field). The field is a collapsed
+           Firmware (left "Device" label + a field). The field is a collapsed
            summary button; clicking expands the search + card grid full-width
            below the row. Picking a board collapses it back to the summary.
            The shared install-picker.js + firmware UI are NOT modified
            (board images are a Pages-only asset, never flashed). -->
       <div id="board-grid-card">
         <div class="control-row">
-          <span class="control-label">Board</span>
+          <span class="control-label">Device</span>
           <button type="button" id="board-summary" aria-expanded="false">
             <span class="board-summary-left">
               <span id="board-summary-thumb" class="board-summary-thumb" hidden></span>
-              <span id="board-summary-label">Pick a board</span>
+              <span id="board-summary-label">Pick a device</span>
             </span>
             <span class="board-summary-caret">▾</span>
           </button>
         </div>
         <div id="board-expand" hidden>
           <div class="board-grid-controls">
-            <input id="board-search" type="search" placeholder="Search boards…" autocomplete="off" aria-label="Search boards">
-            <button type="button" id="board-clear" class="board-clear">Generic / no board</button>
+            <input id="board-search" type="search" placeholder="Search devices…" autocomplete="off" aria-label="Search devices">
+            <button type="button" id="board-clear" class="board-clear">Generic / no device</button>
           </div>
           <!-- Shown only when a Detect has narrowed the grid to one chip family;
                the toggle is the escape hatch if detection was wrong or your board
@@ -623,7 +645,7 @@
 
 
       <p class="note">
-        Ethernet works out of the box for the board you pick — its PHY type and
+        Ethernet works out of the box for the device you pick — its PHY type and
         pins come from the catalog, no rebuild. Boards without Ethernet just use
         WiFi.
       </p>
@@ -751,7 +773,7 @@
            (alreadyOnline branch, or an Improv-less firmware like esp32-eth).
            User types the IP/hostname so we can still add the device to
            "Your devices" and hand the picked board off through the Visit
-           click's same-origin URL (?board=…).
+           click's same-origin URL (?deviceModel=…).
            Retry button: cheap second chance at Improv before falling back
            to manual IP entry. Some boards (LOLIN S3 mini, slow-booting
            variants) lose the race against the post-flash 2 s reopen window;
@@ -785,7 +807,9 @@
 
       <div class="install-section" id="section-done">
         <div class="install-status">Device is online!</div>
+        <div class="install-done-note" id="done-defaults" hidden></div>
         <a class="install-success-url" id="done-url" target="_blank" rel="noopener"></a>
+        <a class="install-success-url" id="done-url-mdns" target="_blank" rel="noopener" hidden></a>
         <div class="install-actions">
           <button type="button" class="primary" id="done-close">Close</button>
         </div>
@@ -860,6 +884,9 @@
     import { installPicker } from "./install-picker.js";
     import { myDevices }    from "./devices.js";
     import { installer }    from "./install-orchestrator.js";
+    // Board catalog + chip detection — web-installer only, kept out of the
+    // firmware-embedded install-picker.js and injected here via boardSupport.
+    import * as boardSupport from "./install-picker-boards.js";
 
     // Show the project version next to the heading. library.json ships
     // alongside index.html (preview_installer.py + release.yml both copy
@@ -1091,6 +1118,13 @@
           document.getElementById("provisioning-status").textContent =
             "Setting board identity…";
           break;
+        case "apply-defaults":
+          showSection("provisioning");
+          document.getElementById("provisioning-status").textContent =
+            detail && detail.board
+              ? `Applying device defaults for ${detail.board}…`
+              : "Applying device defaults…";
+          break;
         case "needs-ip":
           showSection("needsIp");
           // Focus the input so the user can start typing immediately.
@@ -1275,7 +1309,7 @@
       if (retrying) input.value = "";
     }
 
-    function handleSuccess({ url, board, viaHttp, httpBoardOk, alreadyOnline }) {
+    function handleSuccess({ url, mdns, board, applyDefaults = true, viaHttp, httpBoardOk, alreadyOnline }) {
       disarmUnloadGuard();
       if (!url) {
         // User skipped the IP prompt. They've already read the
@@ -1286,24 +1320,71 @@
         return;
       }
       showSection("done");
+      // Always show the IP link — it's the address that's guaranteed to work, and the
+      // installer always has it here. When the boot serial also reported the device's
+      // <deviceName>.local name, show that as a SECOND link below it: it survives a DHCP
+      // lease change (the IP can go stale) but only resolves where mDNS works, so it's
+      // the friendly extra, not the primary. When there's no mdns name, only the IP shows.
+      // When the in-orchestrator HTTP push of the device-model controls didn't land
+      // (pendingBoardPush), decorate the clicked link with `?deviceModel=<name>` so
+      // visiting it runs the device-side consume path and applies the controls on first
+      // visit — no separate Inject click needed. Displayed text stays the clean URL.
+      // Only pending when the user actually wanted defaults applied — applyDefaults:false
+      // (re-flash keeping config) must NOT decorate the link or Inject button with
+      // ?deviceModel=, or clicking it would re-inject what the user chose to skip.
+      const pendingBoardPush = !!(board && applyDefaults && !httpBoardOk);
+      const withParam = (u) => pendingBoardPush
+        ? u + (u.includes("?") ? "&" : "?") + "deviceModel=" + encodeURIComponent(board)
+        : u;
+      // Fold the "applying device defaults" outcome into this popup (which stays up),
+      // since the in-progress status flashes by. Three cases mirror the orchestrator's
+      // log line: applied now (HTTP push succeeded), applied-on-first-visit (push didn't
+      // land, so the link below carries ?deviceModel= and the device applies them when
+      // opened), or not applied (checkbox unticked → config kept as-is).
+      const note = document.getElementById("done-defaults");
+      if (board && applyDefaults) {
+        note.textContent = httpBoardOk
+          ? `Applied ${board} defaults.`
+          : `${board} defaults will be applied when you open the device below.`;
+        note.hidden = false;
+      } else if (board) {
+        note.textContent = `Kept the device's existing config (device defaults not applied).`;
+        note.hidden = false;
+      } else {
+        note.hidden = true;
+      }
+      const ipUrl = url;
       const a = document.getElementById("done-url");
-      a.href = url;
-      a.textContent = url;
+      a.textContent = ipUrl;
+      a.href = withParam(ipUrl);
+      const aMdns = document.getElementById("done-url-mdns");
+      if (mdns) {
+        const mdnsUrl = `http://${mdns}/`;
+        aMdns.textContent = mdnsUrl;
+        aMdns.href = withParam(mdnsUrl);
+        aMdns.hidden = false;
+      } else {
+        aMdns.hidden = true;
+      }
       // Pending-board flag: set whenever the in-orchestrator HTTP push
       // didn't succeed AND there's a board name to push. Covers both
       // paths now:
       //   - viaHttp (needs-ip / typed-IP): HTTP push is the ONLY board-
       //     injection channel, so if it failed nothing landed.
-      //   - Improv-success: SET_BOARD over serial already wrote
-      //     Board.board, but the per-board controls in `controls.*`
+      //   - Improv-success: SET_DEVICE_MODEL over serial already wrote
+      //     System.deviceModel, but the per-device-model controls in `controls.*`
       //     (e.g. Network.txPowerSetting for the weak-power WiFi cap)
       //     only ship via the HTTP fan-out. If that fan-out failed —
       //     exactly the failure mode the fix exists to defend against —
       //     `pendingBoard` ensures the Inject button decorates the
-      //     row and the device-side `?board=` consume path can land
-      //     the controls on first visit.
-      const pendingBoardPush = !!(board && !httpBoardOk);
-      myDevices.addProvisionedDevice(url, board, { pendingBoardPush });
+      //     row and the device-side `?deviceModel=` consume path can land
+      //     the controls on first visit. (pendingBoardPush is computed above, where
+      //     it also gates the `?deviceModel=` on the success link.)
+      // When defaults were NOT applied (applyDefaults:false — a re-flash keeping the
+      // device's own config), store no board: the saved entry must not claim a model
+      // the device wasn't configured to, and its Inject button must not offer to push
+      // one the user chose to skip.
+      myDevices.addProvisionedDevice(url, applyDefaults ? board : "", { pendingBoardPush });
     }
 
     function handleError(stage, error) {
@@ -1549,6 +1630,7 @@
       container: document.getElementById("picker-mount"),
       ownFirmwareKey: null,  // web installer flashes any firmware variant
       installRowExtras: document.getElementById("erase-row"),
+      boardSupport,  // board catalog + chip detection (web-installer-only module)
       // Gate Install on a picked USB port — the web installer requires the user
       // to choose the port in the dropdown before flashing. (notifyPortChanged()
       // below re-evaluates the button whenever pickedPort changes.)
@@ -1573,11 +1655,20 @@
         showSection("connecting");
         document.getElementById("connecting-detail").textContent = "";
         const eraseBefore = document.getElementById("erase-before-flash").checked;
+        // Apply the device-model's catalog defaults (modules + controls) after flashing.
+        // Default-ticked-with-erase (see the change listener below): a clean slate wants
+        // defaults; re-flashing a configured device should NOT silently re-inject (the
+        // catalog's replaceChildren would delete the user's effects). Untick to flash the
+        // firmware while keeping the device's current config. txPower (the brown-out cap)
+        // is a hardware trait, not a "default", so it still applies regardless — only the
+        // module/control inject is gated.
+        const applyDefaults = document.getElementById("apply-device-defaults").checked;
         await installer.start({
           // pickedPort may be null — orchestrator falls back to requestPort.
           port: pickedPort,
           manifestUrl: localUrl,
-          board,
+          board,         // names the install title + identifies the catalog entry
+          applyDefaults, // gates the SET_DEVICE_MODEL + controls inject (not txPower)
           txPower,
           eraseBefore,
           onProgress: handleProgress,
@@ -1591,6 +1682,18 @@
         });
       },
     });
+
+    // Auto-tie "Apply device defaults" to "Erase chip first": ticking erase (a clean
+    // slate) ticks defaults; unticking erase unticks it. The user can still override
+    // either box independently afterwards — the tie only fires on an erase toggle. Both
+    // start unticked (erase's default), so a plain re-flash keeps the device's config.
+    (() => {
+      const eraseBox = document.getElementById("erase-before-flash");
+      const defaultsBox = document.getElementById("apply-device-defaults");
+      if (eraseBox && defaultsBox) {
+        eraseBox.addEventListener("change", () => { defaultsBox.checked = eraseBox.checked; });
+      }
+    })();
 
     myDevices.init({
       container: document.getElementById("devices-mount"),
@@ -1615,6 +1718,8 @@
             const a = document.getElementById("done-url");
             a.removeAttribute("href");
             a.textContent = "Erase complete — flash a fresh firmware to use the device again.";
+            document.getElementById("done-url-mdns").hidden = true;  // no device URL after erase
+            document.getElementById("done-defaults").hidden = true;  // nothing applied on erase
           },
           onError: handleError,
           onLog: appendLog,
@@ -1628,17 +1733,17 @@
     }
 
     // --- picture board grid --------------------------------
-    // Renders boards.json as a visual card grid; on select it drives the shared
+    // Renders deviceModels.json as a visual card grid; on select it drives the shared
     // picker's own (hidden) #rp-board <select> via a dispatched change event, so
     // the existing release/firmware narrowing + flash flow runs unchanged. The
     // shared install-picker.js is NOT modified.
     (async function boardGrid() {
       let boards = [];
       try {
-        const res = await fetch("./boards.json");   // same catalog as the picker
+        const res = await fetch("./deviceModels.json");   // same catalog as the picker
         boards = await res.json();
       } catch (e) {
-        document.getElementById("board-grid").textContent = "Could not load boards.json: " + e;
+        document.getElementById("board-grid").textContent = "Could not load deviceModels.json: " + e;
         return;
       }
       await _pickerReady;   // ensure the picker has mounted its (hidden) #rp-board
@@ -1656,7 +1761,7 @@
         const d = (b.modules || []).find(m => /LedDriver$/.test(m.type || ""));
         return d ? d.type.replace(/Driver$/, "") : null;
       }
-      // A supported capability is "active" (configured) when boards.json has a module
+      // A supported capability is "active" (configured) when deviceModels.json has a module
       // backing it. The capability→module link is implicit in the data, so this map
       // names it in one place (bespoke, but it just reads the modules[] already there —
       // no duplicated `active` field to drift). A capability with no entry here, or no
@@ -1693,7 +1798,7 @@
           if (b.image) { thumbEl.hidden = false; thumbEl.style.backgroundImage = `url("${b.image}")`; }
           else { thumbEl.hidden = true; }
         } else {
-          labelEl.textContent = "Pick a board";
+          labelEl.textContent = "Pick a device";
           thumbEl.hidden = true;
         }
       }
@@ -1803,7 +1908,7 @@
         };
         const thumb = document.createElement("div");
         thumb.className = "bg-thumb" + (b.image ? "" : " noimg");
-        // the deploy stages a copy of boards.json
+        // the deploy stages a copy of deviceModels.json
         // + the referenced board images alongside this page, so an "image" path of
         // "assets/boards/<slug>.jpg" resolves same-origin from this page.
         if (b.image) thumb.style.backgroundImage = `url("${b.image}")`;
@@ -1814,10 +1919,10 @@
         meta.textContent = b.chip + (ledDriver(b) ? " · " + ledDriver(b) : "");
         body.appendChild(meta);
         // Capability chips, three states by colour (not text): green = active
-        // (supported AND a module configured in boards.json), yellow = supported
+        // (supported AND a module configured in deviceModels.json), yellow = supported
         // (firmware supports it, not pre-configured), orange = planned (no module
         // yet — the backlog seed). All chips are shown (labels kept short in
-        // boards.json so they fit the card).
+        // deviceModels.json so they fit the card).
         const caps = [
           ...(Array.isArray(b.supported) ? b.supported.map(c =>
             capActive(b, c) ? { c, cls: "act", label: "active" }
@@ -1839,7 +1944,7 @@
           const a = document.createElement("a"); a.className = "bg-link"; a.href = b.url;
           a.target = "_blank"; a.rel = "noopener"; a.textContent = "product page ↗"; body.appendChild(a);
         }
-        // "details" opens the full boards.json entry in a popup. It carries the
+        // "details" opens the full deviceModels.json entry in a popup. It carries the
         // bg-link class so the card's onclick treats it as a non-select region
         // (same guard the product-page link relies on).
         const det = document.createElement("a");
@@ -1853,13 +1958,13 @@
         el.appendChild(body);
         return el;
       }
-      // Fill + open the board-details popup from a boards.json entry: a readable
+      // Fill + open the board-details popup from a deviceModels.json entry: a readable
       // summary (chip, firmwares, capabilities, modules + their controls) plus a
       // collapsible raw-JSON block for the exact entry. Built with DOM nodes (not
       // innerHTML) so board-supplied strings can't inject markup.
       function showBoardDetails(b) {
         const dlg = document.getElementById("board-details");
-        document.getElementById("bd-title").textContent = b.name || "Board";
+        document.getElementById("bd-title").textContent = b.name || "Device";
         const body = document.getElementById("bd-body");
         body.replaceChildren();
         const row = (key, val) => {

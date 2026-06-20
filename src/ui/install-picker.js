@@ -82,7 +82,7 @@ function makeState() {
         sortedReleases: [],    // releases sorted newest-first; render() fills this
         releaseIdx: 0,         // index into sortedReleases
         firmware: null,        // selected firmware key
-        boards: [],            // parsed docs/install/boards.json, [] if unavailable
+        boards: [],            // parsed docs/install/deviceModels.json, [] if unavailable
         selectedBoard: null,   // user pick from board <select>; "" for (any board)
         hasPort: null,         // web installer only: () => bool, "is a USB port
                                // picked?". When set, Install is disabled until it
@@ -90,6 +90,9 @@ function makeState() {
                                // notifyPortChanged on every port change). null on
                                // the on-device OTA picker (no serial-port concept),
                                // which leaves the button ungated as before.
+        boardSupport: null,    // board-catalog + chip-detect helpers injected by
+                               // the web installer (install-picker-boards.js); null
+                               // on-device, so no board code ships in the firmware.
     };
 }
 
@@ -150,22 +153,6 @@ async function loadReleases({ bypassCache = false } = {}) {
         const raw = safeStorageGet(CACHE_KEY);
         if (raw) try { return JSON.parse(raw).data; } catch (_) { /* fall through */ }
         return null;
-    }
-}
-
-// Boards catalog — same-origin docs/install/boards.json. ~1 KB, no rate-limit
-// concern (CDN serves it on the public site, preview_installer serves it
-// from disk locally), so no sessionStorage cache: caching adds invalidation
-// bugs without saving bytes. Graceful degradation: any fetch / parse failure
-// returns [] and the picker silently omits the board <select>.
-async function loadBoards() {
-    try {
-        const res = await fetch("./boards.json");
-        if (!res.ok) return [];
-        const data = await res.json();
-        return Array.isArray(data) ? data : [];
-    } catch (_) {
-        return [];
     }
 }
 
@@ -256,63 +243,12 @@ function relativeTime(iso) {
 // 6. DOM construction + event wiring
 // ---------------------------------------------------------------------------
 
-// Rebuild a board <select>: a leading pass-through option (label varies by
-// context) followed by one option per board. Shared by render() (full catalog)
-// and applyDetectedChip() (chip-narrowed list) so the option-building shape
-// lives in one place. Pure DOM — no serial, no network: safe in the firmware
-// build (this file embeds into the device via embed_ui.cmake).
-function fillBoardOptions(boardEl, boards, passthroughLabel) {
-    boardEl.replaceChildren();
-    const any = document.createElement("option");
-    any.value = "";
-    any.textContent = passthroughLabel;
-    boardEl.appendChild(any);
-    for (const b of boards) {
-        const opt = document.createElement("option");
-        opt.value = b.name;
-        opt.textContent = b.name;
-        boardEl.appendChild(opt);
-    }
-}
-
-// After a successful Detect, narrow the board <select> to ONLY the boards whose
-// `chip` matches the detected family — the other family is removed from the list
-// entirely (plug in an S3, the classic-ESP32 boards disappear, and vice versa).
-// The pass-through is relabelled "Other / generic <chip>" so a user with a board
-// not in the catalog can still flash the right firmware for their silicon. The
-// returned status string is shown next to the Detect button.
-// Detection gives chip FAMILY only — it can't tell esp32 / esp32-eth /
-// esp32-eth-wifi apart (same silicon, different wiring), so when several boards
-// share the family we narrow + let the user pick rather than guessing.
-function applyDetectedChip(state, boardEl) {
-    const matches = state.boards.filter(b => b.chip === state.detectedChip);
-    if (matches.length === 0) {
-        // A chip we ship no board for: don't strand the user — leave the full
-        // list and report it. (selectedBoard unchanged.)
-        return `Detected ${state.detectedChip} — no matching board, pick manually`;
-    }
-    fillBoardOptions(boardEl, matches, `Other / generic ${state.detectedChip}`);
-    let autoName = "";   // a board we auto-selected (single match, or a generic default)
-    if (matches.length === 1) {
-        state.selectedBoard = matches[0].name;   // exactly one board → auto-pick
-        autoName = matches[0].name;
-    } else if (!matches.find(b => b.name === state.selectedBoard)) {
-        // Several boards in this family and no current pick in it (fresh detect, or a
-        // prior pick from the other family). Prefer the catalog's generic board for
-        // this chip if one exists (e.g. "Generic ESP32 Dev") — a sensible no-overrides
-        // default; otherwise leave the "Other / generic <chip>" pass-through selected
-        // (S3/P4 ship no generic entry) so we don't guess a specific board.
-        const generic = matches.find(b => /generic/i.test(b.name));
-        state.selectedBoard = generic ? generic.name : "";
-        if (generic) autoName = generic.name;
-    } else {
-        autoName = state.selectedBoard;   // an in-family pick survives the detect
-    }
-    boardEl.value = state.selectedBoard || "";
-    return autoName
-        ? `Detected ${state.detectedChip} — selected ${autoName}`
-        : `Detected ${state.detectedChip} — pick your board (${matches.length} match)`;
-}
+// The board catalog + chip-detection logic (loadBoards / fillBoardOptions /
+// applyDetectedChip) lives in install-picker-boards.js and is injected via
+// init({ boardSupport }) — WEB INSTALLER ONLY. This file embeds into the device
+// firmware (embed_ui.cmake), and the device's OTA picker passes no boardSupport,
+// so none of that code ships on the board. render() reaches the injected
+// functions through state.boardSupport; every use is guarded by it being set.
 
 // Builds the picker UI into `state.container`. Idempotent — calling more than
 // once just rebuilds.
@@ -322,6 +258,32 @@ function applyDetectedChip(state, boardEl) {
 // the card it's mounted in. The web installer overrides these with its own
 // styles in docs/install/index.html, which gives the installer page the same
 // look without app.js loading.
+// Draw the field rows immediately, before the network fetches resolve, so the
+// user sees the full form straight away instead of a lone "Loading…" line that
+// pops into Release/Board/Firmware on a slow connection. Each <select> is
+// disabled and shows a spinning "Loading…" placeholder until render() swaps in
+// the real options. Same row markup as render() so the swap is seamless. The
+// Board row is included whenever the picker is in board-picker mode — if the
+// catalog ends up empty, render() simply omits it (the skeleton row vanishes on
+// the swap, which on a fast same-origin deviceModels.json fetch is imperceptible).
+function renderSkeleton(state) {
+    // A select can't host an animated element in its option text, so the spinning
+    // ring (.rp-spinner, styled by the installer page) sits in the row next to a
+    // disabled select showing a plain "Loading…" placeholder. Where .rp-spinner
+    // isn't defined (the on-device picker's host page), the span is simply empty —
+    // the "Loading…" text still reads as a waiting state.
+    const field = `<span class="rp-spinner"></span>` +
+        `<select class="rp-select" disabled><option>Loading…</option></select>`;
+    const row = (label) =>
+        `<div class="control-row"><span class="control-label">${label}</span>${field}</div>`;
+    const boardRow = state.enableBoardPicker ? row("Device") : "";
+    state.container.innerHTML = row("Release") + boardRow + row("Firmware") + `
+        <div class="control-row rp-status-row">
+            <span class="control-label"></span>
+            <span class="rp-status">Fetching releases…</span>
+        </div>`;
+}
+
 function render(state) {
     // newest-first; releases without `published_at` (drafts) sort last.
     const sorted = state.releases.slice().sort((a, b) => {
@@ -342,7 +304,7 @@ function render(state) {
     // back to a two-row Release+Firmware layout with no board narrowing.
     const boardRow = (state.enableBoardPicker && state.boards.length > 0) ? `
         <div class="control-row">
-            <span class="control-label">Board</span>
+            <span class="control-label">Device</span>
             <select id="rp-board" class="rp-select"></select>
         </div>` : "";
     state.container.innerHTML = `
@@ -379,11 +341,11 @@ function render(state) {
     const installBtn = state.container.querySelector("#rp-install");
     const statusEl = state.container.querySelector("#rp-status");
 
-    if (boardEl) {
+    if (boardEl && state.boardSupport) {
         // Full catalog, no chip filter yet. The "(any board)" pass-through
         // means the firmware dropdown shows every compatible firmware, just
         // as if the board picker didn't exist.
-        fillBoardOptions(boardEl, state.boards, "(any board)");
+        state.boardSupport.fillBoardOptions(boardEl, state.boards, "(any board)");
         // Restore the user's last picked board if it's still in the catalog
         // (the catalog may have changed since their last visit; falling
         // through to "(any board)" if their pick is gone is the safe shape).
@@ -580,7 +542,7 @@ function render(state) {
         });
     }
 
-    if (boardEl && state.onDetect) {
+    if (boardEl && state.onDetect && state.boardSupport) {
         // The detect routine: opens the serial port (via onDetect — the seam to
         // the serial/esptool code in install-orchestrator.js), reads the chip
         // family, narrows the board list to that family. The Detect BUTTON lives
@@ -600,11 +562,11 @@ function render(state) {
             let status;
             try {
                 state.detectedChip = await state.onDetect();   // "ESP32" | "ESP32-S3" | ...
-                status = applyDetectedChip(state, boardEl);
+                status = state.boardSupport.applyDetectedChip(state, boardEl);
             } catch (e) {
                 // Restore the full, unfiltered board list — detection didn't land,
                 // so don't keep any narrowing from a previous attempt.
-                fillBoardOptions(boardEl, state.boards, "(any board)");
+                state.boardSupport.fillBoardOptions(boardEl, state.boards, "(any board)");
                 state.selectedBoard = "";
                 boardEl.value = "";
                 status = `Detect failed: ${e && e.message ? e.message : e}`;
@@ -682,15 +644,31 @@ export const installPicker = {
      * @param {boolean} [opts.enableBoardPicker=true] - true on the web
      *   installer (renders a board <select> above firmware, narrows firmware
      *   list to the board's compatible variants); false on the on-device OTA
-     *   picker where the device already knows its board (BoardModule).
+     *   picker where the device already knows its deviceModel (SystemModule).
      * @param {HTMLElement} [opts.installRowExtras] - optional caller-owned
      *   element rendered just above the Install button row. Web installer
      *   uses this for the "Erase chip first" checkbox; on-device OTA omits
      *   it. The picker re-attaches the SAME node on every render(), so
      *   listeners the caller wired on the element keep firing.
+     * @param {object} [opts.boardSupport] - the board-catalog + chip-detection
+     *   helpers ({ loadBoards, fillBoardOptions, applyDetectedChip }) from
+     *   install-picker-boards.js. WEB INSTALLER ONLY — the Pages page imports
+     *   that module and passes it here. Omitted on the on-device OTA picker, so
+     *   the board code never has to ship in the firmware (this file embeds into
+     *   the device; install-picker-boards.js does not). With no boardSupport the
+     *   board <select> is simply not populated and the picker is Release+Firmware.
+     *
+     *   This is dependency injection: the host that needs the optional board
+     *   capability supplies it, and this shared file never imports the board
+     *   module itself. That keeps the dependency pointing the right way (the
+     *   embedded-everywhere picker knows nothing installer-specific) AND keeps the
+     *   board code physically out of the firmware — an `import` can't, since the
+     *   device would then have to embed the imported file too (no bundler /
+     *   tree-shaking here; embed_ui.cmake gzips this file verbatim).
      */
     async init({ container, ownFirmwareKey, onInstall, onDetect = null,
-                 enableBoardPicker = true, installRowExtras = null, hasPort = null }) {
+                 enableBoardPicker = true, installRowExtras = null, hasPort = null,
+                 boardSupport = null }) {
         const state = makeState();
         state.container = container;
         state.ownFirmwareKey = ownFirmwareKey || null;
@@ -699,16 +677,21 @@ export const installPicker = {
         state.enableBoardPicker = enableBoardPicker;
         state.installRowExtras = installRowExtras;
         state.hasPort = hasPort;
+        state.boardSupport = boardSupport;
 
-        container.innerHTML =
-            `<div class="control-row"><span class="control-label">Releases</span>` +
-            `<span class="rp-status">Loading…</span></div>`;
+        // Show the full field skeleton immediately (each select spins) instead of
+        // a single "Loading…" row, so a slow GitHub fetch doesn't leave the form
+        // looking empty under the Port row. render() replaces this on success;
+        // the error branches below replace it with their message.
+        renderSkeleton(state);
         const bypass = new URLSearchParams(location.search).get("nocache") === "1";
-        // Parallel: GitHub Releases API (slow, ~200ms) + local boards.json
-        // (fast, ~5ms). Boards-disabled path skips the fetch entirely.
+        // Parallel: GitHub Releases API (slow, ~200ms) + local deviceModels.json
+        // (fast, ~5ms). The boards fetch only runs when the board picker is on AND
+        // the host injected boardSupport (web installer) — the on-device OTA picker
+        // does neither, so it skips the fetch and ships no board code.
         const [data, boards] = await Promise.all([
             loadReleases({ bypassCache: bypass }),
-            enableBoardPicker ? loadBoards() : Promise.resolve([]),
+            (enableBoardPicker && boardSupport) ? boardSupport.loadBoards() : Promise.resolve([]),
         ]);
         state.boards = boards;
         _lastState = state;
@@ -754,14 +737,14 @@ export const installPicker = {
      * most recently mounted picker, or "" when the picker is in
      * "(any board)" mode, the catalog is unavailable, or the picker isn't
      * mounted yet. Used by the install-orchestrator to know what to push
-     * via Improv SET_BOARD after WiFi provisioning succeeds.
+     * via Improv SET_DEVICE_MODEL after WiFi provisioning succeeds.
      */
     getSelectedBoard() {
         return _lastState ? (_lastState.selectedBoard || "") : "";
     },
 
     /**
-     * The picked board's boards.json TX-power cap
+     * The picked board's deviceModels.json TX-power cap
      * (controls.Network.txPowerSetting), or null when the board has none /
      * no board is picked. The orchestrator pushes it over Improv BEFORE
      * provisioning — brown-out-prone boards (a weak LDO / marginal supply) fail their first

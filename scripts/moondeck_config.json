@@ -64,12 +64,12 @@
       "script": "check/check_platform_boundary.py"
     },
     {
-      "id": "check_boards",
+      "id": "check_devices",
       "tab": "pc",
       "group": "check",
       "label": "Board Catalog",
-      "help": "check_boards",
-      "script": "check/check_boards.py"
+      "help": "check_devices",
+      "script": "check/check_devices.py"
     },
     {
       "id": "check_firmwares",

@@ -4,9 +4,9 @@ This directory holds the source for the **custom installer page** (driven by
 `install-orchestrator.js`, not ESP Web Tools) at
 <https://moonmodules.org/projectMM/install/>.
 
-End users land here, pick a channel + board, click Install. The browser flashes
+End users land here, pick a channel + device, click Install. The browser flashes
 the device over USB (Web Serial → ESP32), then runs Improv-Serial provisioning,
-SET_BOARD, and HTTP control fan-out — all from the same orchestrator,
+SET_DEVICE_MODEL, and HTTP control fan-out — all from the same orchestrator,
 end-to-end, no ESP Web Tools dependency on the install path.
 
 ## What's in this directory
@@ -16,22 +16,30 @@ end-to-end, no ESP Web Tools dependency on the install path.
   the picker's GitHub-release URLs to same-origin Pages URLs before handing
   them to the custom orchestrator (Web Serial is CORS-bound).
 - [`install-orchestrator.js`](install-orchestrator.js) — owns the
-  SerialPort across flash → reboot → Improv provision → SET_BOARD RPC.
+  SerialPort across flash → reboot → Improv provision → SET_DEVICE_MODEL RPC.
   Replaces the ESP Web Tools install button so the post-provision board
   push works (EWT 10.x's `state-changed` event fires inside a shadow DOM
   that's invisible to the host page; the orchestrator side-steps that by
   owning the whole flow). Falls through to a "device IP" prompt when the
-  device doesn't speak Improv back — see [BoardModule.md → Web installer
-  HTTP fallback](../moonmodules/core/BoardModule.md#web-installer--http-fallback-via-visit-board).
+  device doesn't speak Improv back — the picked deviceModel is handed off via the
+  `?deviceModel=` query param + HTTP `/api/control` inject (see the `deviceModel`
+  control on [SystemModule.md](../moonmodules/core/SystemModule.md)). An **Apply
+  device defaults** checkbox gates this whole inject (all three channels:
+  SET_DEVICE_MODEL, the HTTP `/api/control` fan-out, and the `?deviceModel=`
+  first-visit handoff). It auto-ticks with **Erase chip first** (a clean slate wants
+  defaults) and starts unticked otherwise, so re-flashing a configured device keeps
+  its current modules/controls instead of having the catalog's `replaceChildren`
+  delete the user's effects. The board's `txPower` brown-out cap still applies either
+  way — it's a hardware trait, not a default.
 - [`devices.js`](devices.js) — the *Your devices* list. Stores devices the
   user provisioned from this page so they can re-visit / erase / forget
   them. Renders a dedicated *Inject* button next to Visit for every entry
-  with a `board` field; the button opens `<device>/?board=<name>` and the
-  device UI fetches the matching `boards.json` entry from Pages and, for each of
+  with a `board` field; the button opens `<device>/?deviceModel=<name>` and the
+  device UI fetches the matching `deviceModels.json` entry from Pages and, for each of
   its `modules`, adds the module (`/api/modules`) then sets its nested controls
   (`/api/control`) — add-then-configure; see the schema below. Idempotent — safe
   to re-click after a popup-blocker rejection or a follow-up catalog edit.
-- [`boards.json`](boards.json) — the board catalog (name → firmware
+- [`deviceModels.json`](deviceModels.json) — the board catalog (name → firmware
   variants + the modules/controls to inject) the picker fetches and the
   installer / device-UI / MoonDeck injectors write from. Schema below.
 - [`favicon.png`](favicon.png) — moon-man, same as the device UI.
@@ -56,12 +64,12 @@ labelled summary with a thumbnail:
 |---|---|
 | ![Board picker collapsed](../assets/screenshots/installer-board-picker-collapsed.png) | ![Board picker expanded](../assets/screenshots/installer-board-picker-expanded.png) |
 
-## Catalog schema (`boards.json`)
+## Catalog schema (`deviceModels.json`)
 
 A flat JSON array of catalog entries. Each entry is the single source of truth
 for one piece of hardware and what to set up on it at install time. Three
 clients consume it identically — the web installer (`install-orchestrator.js`),
-the device UI's `?board=` inject (`src/ui/app.js`), and MoonDeck
+the device UI's `?deviceModel=` inject (`src/ui/app.js`), and MoonDeck
 (`scripts/moondeck.py`) — so **adding another module-with-controls unit needs no
 client change**.
 
@@ -71,12 +79,16 @@ client change**.
   "chip": "ESP32-S3",
   "firmwares": ["esp32s3-n16r8"],
   "modules": [
-    { "type": "Board", "id": "Board", "parent_id": "System",
-      "controls": { "board": "projectMM testbench S3" } },
+    { "type": "System", "id": "System",
+      "controls": { "deviceModel": "projectMM testbench S3" } },
     { "type": "AudioModule", "id": "Audio", "parent_id": "System",
       "controls": { "wsPin": 4, "sdPin": 5, "sckPin": 6 } },
     { "type": "RmtLedDriver", "id": "RmtLed", "parent_id": "Drivers",
-      "controls": { "pins": "18", "loopbackTxPin": 13, "loopbackRxPin": 12 } }
+      "controls": { "pins": "18", "loopbackTxPin": 13, "loopbackRxPin": 12 } },
+    { "type": "GridLayout", "id": "Grid", "controls": { "width": 8, "height": 8 } },
+    { "type": "Layer", "id": "Layer", "replaceChildren": true },
+    { "type": "AudioSpectrumEffect", "id": "AudioSpectrum", "parent_id": "Layer" },
+    { "type": "RandomMapModifier", "id": "RandomMap", "parent_id": "Layer" }
   ]
 }
 ```
@@ -84,9 +96,18 @@ client change**.
 Each entry is a **list of module-with-controls units** — "create this module (if
 not already present), then set its controls" as one unit. This is the same shape
 the scenario test format expresses with `add_module` + `set_control`, so a catalog
-entry reads like a scenario's setup phase. Even `Board` is a module entry (it's a
-boot-wired child of `System`, so the add is an idempotent no-op and only its
-`board` control applies).
+entry reads like a scenario's setup phase. The `deviceModel` identity is a unit too:
+`System` is boot-wired, so its add is an idempotent no-op and only its `deviceModel`
+control applies.
+
+**`replaceChildren`** (optional, on a container unit like `Layer` / `Layouts` /
+`Drivers`): set it `true` to *replace* the container's boot-wired defaults instead of
+adding alongside them. The inject is otherwise add-only, and a `Layer` renders only
+its FIRST enabled effect/modifier — so a catalog entry that wants its own effect to
+show (the testbench above swaps the default `NoiseEffect` for `AudioSpectrumEffect` +
+`RandomMapModifier`) marks the container `replaceChildren`, which DELETEs the
+container's current children before the entry's children are added. Without it, the
+entry's effect would sit behind the boot default and never render.
 
 **LED drivers are catalog-added, not boot-wired.** The only driver the firmware
 creates at boot is `Preview` (it needs the HTTP-server broadcaster the catalog
@@ -126,10 +147,11 @@ Each `modules[]` unit is `{ type, id, parent_id?, controls? }`:
 
 | Module field | Meaning |
 |---|---|
-| `type` | factory type to create (e.g. `RmtLedDriver`, `AudioModule`, `Board`) |
+| `type` | factory type to create (e.g. `RmtLedDriver`, `AudioModule`, `AudioSpectrumEffect`) |
 | `id` | the module's name — used both as the `POST /api/modules` id **and** as the `module` in every `POST /api/control`, so the two stay in sync |
-| `parent_id` | the container to add it under (`Drivers`, `System`). **Omitted** for a module that already exists at boot (e.g. `Network`) — the client then skips the add and only sets controls |
+| `parent_id` | the container to add it under (`Drivers`, `System`, `Layer`). **Omitted** for a module that already exists at boot (e.g. `Network`, `System`, `Grid`, `Layer`) — the client then skips the add and only sets controls |
 | `controls` | the controls to set on that module after it exists |
+| `replaceChildren` | optional bool on a container unit (`Layer` / `Layouts` / `Drivers`): when `true`, the inject DELETEs the container's current children before adding this entry's, so the entry's effects/modifiers replace the boot defaults rather than stack behind them |
 
 `type` and `parent_id` are spelled out even though `id` could imply them
 (`RmtLed`→`RmtLedDriver` under `Drivers`). Kept explicit on purpose: the two
@@ -168,8 +190,8 @@ testbench — its 8-lane bus would clash with the mic pins 4/5/6).
 a peripheral/pin unit once that hardware has its own spec (with the product-page
 link + grabbed images for installer selection and pin layout) and a test pinning
 it — the project's *Specs before code* applied to catalog hardware. So vendor
-entries (the QuinLED Dig-2-Go, the Serg shields, …) carry only their **`Board`
-unit plus the default LED driver** until spec'n'tested for more; e.g. whether the
+entries (the QuinLED Dig-2-Go, the Serg shields, …) carry only their **`System`
+unit (with the `deviceModel` control) plus the default LED driver** until spec'n'tested for more; e.g. whether the
 Dig-2-Go's *onboard* mic is even supported is an open spec'n'test question, so its
 entry adds no `AudioModule`. The per-board capability loop that drives this — read
 capabilities off the image/link, wire what we support, propose+test what we don't —
@@ -194,7 +216,7 @@ the picker's visual layer **and** the inputs to the per-board capability loop ab
 - **Deploy** stages only the *referenced* images (not the whole `docs/assets/boards/`
   library, which also holds photos for boards not yet in the catalog) into
   `install/assets/boards/`, so an `image: "assets/boards/<slug>.jpg"` resolves
-  same-origin from `/install/boards.json`.
+  same-origin from `/install/deviceModels.json`.
 
 **One entry type, no Board/Device split.** A "Device" (a finished rig like the
 `projectMM testbench S3` — board + a wired mic) is just an entry with *more* of

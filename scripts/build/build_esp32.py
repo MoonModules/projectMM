@@ -49,7 +49,7 @@ ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
 # Firmware catalogue. Each entry describes one shipping firmware variant.
 # Keys combine chip name + feature flags + (for SKU-sensitive chips) module:
 #   esp32           — ESP32 classic, WiFi + Ethernet (RMII; eth comes up only
-#                     when a PHY is present, pins per board from boards.json)
+#                     when a PHY is present, pins per board from deviceModels.json)
 #   esp32-eth       — ESP32 classic, Ethernet only (WiFi compiled out — smaller)
 #   esp32s3-n16r8   — ESP32-S3 DevKitC-1 with the N16R8 module
 #                     (16 MB flash, 8 MB octal PSRAM). Other S3 SKUs (N8R2,
@@ -58,7 +58,7 @@ ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
 #                     which differ per SKU.
 # The Ethernet driver is compiled into each chip's firmware (RMII EMAC for
 # classic/P4 via sdkconfig.defaults.eth, W5500 SPI for S3 via .eth-spi);
-# which PHY/pins a given board uses is runtime config (boards.json →
+# which PHY/pins a given board uses is runtime config (deviceModels.json →
 # NetworkModule → ethInit), so one binary per chip serves every board.
 #
 # `ships`: True for variants the release matrix builds + publishes. A variant can
@@ -69,7 +69,7 @@ ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
 FIRMWARES: dict[str, dict] = {
     # Default classic ESP32: WiFi AND Ethernet in one binary. The RMII Ethernet
     # driver compiles in (the .eth fragment); whether Eth comes up, and on which
-    # pins/PHY, is runtime config (boards.json → NetworkModule → ethInit). A
+    # pins/PHY, is runtime config (deviceModels.json → NetworkModule → ethInit). A
     # WiFi-only board flashing this just gets WiFi — ethInit() no-ops when no PHY
     # responds, then the WiFi cascade takes over (no GPIO grab, no hang). This
     # replaces the old separate `esp32` (WiFi-only) + `esp32-eth-wifi` keys.
@@ -78,7 +78,7 @@ FIRMWARES: dict[str, dict] = {
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth"],
         "eth_only": False,
         "description": "ESP32 classic — WiFi + Ethernet (RMII; per-board pins/PHY "
-                       "from boards.json, Olimex defaults).",
+                       "from deviceModels.json, Olimex defaults).",
         "ships": True,
     },
     "esp32-16mb": {
@@ -96,7 +96,7 @@ FIRMWARES: dict[str, dict] = {
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth"],
         "eth_only": True,
         "description": "ESP32 classic — Ethernet only (WiFi compiled out; smaller "
-                       "image, more RAM). Per-board pins/PHY from boards.json. The "
+                       "image, more RAM). Per-board pins/PHY from deviceModels.json. The "
                        "default `esp32` does WiFi+Ethernet — use this only to drop WiFi.",
         "ships": True,
     },
@@ -106,7 +106,7 @@ FIRMWARES: dict[str, dict] = {
                       "sdkconfig.defaults.eth-spi"],
         "eth_only": False,
         "description": "ESP32-S3 DevKitC-1 (N16R8: 16 MB flash, 8 MB octal PSRAM) — WiFi + "
-                       "W5500 SPI Ethernet (external module, pins per board in boards.json)",
+                       "W5500 SPI Ethernet (external module, pins per board in deviceModels.json)",
         "ships": True,
     },
     "esp32s3-n8r8": {
@@ -144,7 +144,7 @@ FIRMWARES: dict[str, dict] = {
 
 # IDF target → chip-family label. ONE source for the family vocabulary, shared by:
 #   * the ESP Web Tools manifest (`chipFamily`, generate_manifest.py),
-#   * the installer's detect-vs-board comparison (boards.json `chip` uses these
+#   * the installer's detect-vs-board comparison (deviceModels.json `chip` uses these
 #     same strings; install-orchestrator.js normalises detected silicon to them).
 # (firmwares.json does NOT store a per-variant family — it's derivable from `chip`;
 # see generate_firmwares.py.)

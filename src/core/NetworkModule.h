@@ -108,7 +108,16 @@ public:
         // its name — not "Unknown" — in the router's client list. Stored once; every
         // netif the platform creates (eth, the wifi cascade, a later reconnect) reads
         // it. Same name as mDNS/SoftAP: deviceName, default MM-XXXX.
-        platform::setHostname(hostName());
+        //
+        // Live-rename boundary: setHostname() is single-writer-before-readers by
+        // contract (see platform_esp32.cpp) — NOT safe to re-call after bring-up from
+        // loop1s without platform-side synchronization. And the DHCP hostname only
+        // rides the DISCOVER, so it can't change until the next lease renewal regardless.
+        // So a live deviceName rename updates mDNS immediately (syncMdns re-registers)
+        // and the SoftAP SSID on its next start; the DHCP/router-list name follows on the
+        // next renewal or reconnect, picking up the new value here. That lag is inherent
+        // to DHCP, not a bug; forcing a reconnect to refresh it would drop the LAN link.
+        platform::setHostname(readDeviceName());
         // Push the board's eth config (persisted controls, loaded before setup)
         // into the platform layer before ethInit reads it.
         syncEthConfig();
@@ -180,7 +189,7 @@ public:
             // the bound but the platform layer clamps it up to 2 dBm
             // (ESP-IDF's minimum) — write 2 or higher for predictable
             // behavior. Always bound on radio-capable builds; the
-            // boards.json catalog injects 8 dBm for brown-out-prone boards.
+            // deviceModels.json catalog injects 8 dBm for brown-out-prone boards.
             controls_.addInt16("txPowerSetting", txPowerSetting_, 0, 21);
         }
         controls_.addBool("mDNS", mdnsEnabled_);
@@ -205,7 +214,7 @@ public:
         controls_.setHidden(controls_.count() - 1, hideStatic);
 
         // Ethernet pin/PHY config — only on builds with an Ethernet driver. The
-        // board's boards.json eth block writes these; an un-provisioned board keeps
+        // board's deviceModels.json eth block writes these; an un-provisioned board keeps
         // the per-chip default. ethType picks the PHY (and which pin set applies):
         // 1=LAN8720(RMII), 2=IP101(RMII), 3=W5500(SPI). The RMII vs SPI pin rows are
         // shown by type so the UI isn't cluttered with the inapplicable set.
@@ -420,6 +429,11 @@ private:
     uint32_t stateChangeTime_ = 0;
     bool apShutdownPending_ = false;
     bool mdnsRunning_ = false;
+    // The device name last registered with mDNS, so syncMdns() can detect a live
+    // rename (deviceName changed in SystemModule) and re-advertise — without it,
+    // the .local name would keep announcing the old name until a reconnect. 24 =
+    // SystemModule's deviceName_ capacity (the source of hostName()).
+    char lastMdnsName_[24] = {};
 
     // Controls
     char ssid_[33] = {};
@@ -431,10 +445,6 @@ private:
     // MoonModule::status_); the named "Buf" suffix makes the ownership clear
     // and distinguishes it from MoonModule's own status accessors.
     char statusBuf_[48] = {};
-    // Lazily-filled MAC-derived hostname fallback (see hostName()). mutable: hostName()
-    // is const but caches here on first use. Empty until needed; normally unused
-    // because deviceName is set by SystemModule before bring-up.
-    mutable char hostNameFallback_[8] = {};   // "MM-XXXX" + NUL
 
     // Static IP fields. uint8_t[4] octets, not strings — saves 12 bytes per
     // address vs char[16] dotted-quad, and the wire/persistence layers
@@ -468,7 +478,7 @@ private:
 
     // Ethernet pin/PHY config — runtime, seeded from the per-chip default
     // (platform::ethConfigDefault) so an un-provisioned board still comes up on
-    // its historical pins; a board's boards.json eth block overrides via these
+    // its historical pins; a board's deviceModels.json eth block overrides via these
     // controls. Pushed into the platform layer by syncEthConfig() before ethInit.
     // Bound only on builds that have an Ethernet driver (platform::hasEthernet).
     // -1 = "leave at IDF default / unused". ethType: 0=none,1=LAN8720,2=IP101,3=W5500.
@@ -583,8 +593,10 @@ private:
     static constexpr const char* ethTypeOptions_[] = {"None", "LAN8720", "IP101", "W5500"};
 
     void startAP() {
-        const char* apName = (systemModule_ && systemModule_->deviceName()[0] != 0)
-                             ? systemModule_->deviceName() : "MM-AP";
+        // Same identity as the DHCP hostname and the mDNS .local name — all three read
+        // SystemModule's deviceName, so a device shows ONE name everywhere. (Previously
+        // had a separate "MM-AP" fallback, which could diverge when the name was empty.)
+        const char* apName = readDeviceName();
         if (platform::wifiApInit(apName, "4.3.2.1")) {
             state_ = State::AP;
             stateChangeTime_ = platform::millis();
@@ -659,6 +671,17 @@ public:
     }
 
 private:
+    // The device's network name is owned solely by SystemModule; NetworkModule only
+    // READS it. This is the single identity behind every network name — the mDNS
+    // `<name>.local`, the SoftAP SSID, and the DHCP hostname are all this exact string,
+    // so a device shows one name everywhere. SystemModule guarantees it is a valid,
+    // non-empty hostname (sanitised + MAC-fallback in its setup/loop1s). Read through
+    // this one null-guard (systemModule_ is wired at boot; "" if somehow unwired — the
+    // platform name setters no-op on an empty string). NOT a deviceName of our own:
+    // it's SystemModule's, fetched.
+    const char* readDeviceName() const {
+        return systemModule_ ? systemModule_->deviceName() : "";
+    }
     void updateStatusIP() {
         uint8_t ip[4];
         currentIp(ip);   // same eth/wifi getter dispatch, in one place
@@ -722,32 +745,24 @@ private:
     // resync.
     void noteRadioStopped() { appliedTxPowerSetting_ = -1; }
 
-    // The device's network name — used for BOTH the DHCP hostname (router client
-    // list) and the mDNS .local name, so the two never diverge. Normally deviceName
-    // (default MM-XXXX, set by SystemModule before our setup). Fallback for the
-    // should-never-happen empty case: a UNIQUE MAC-derived MM-XXXX (same scheme
-    // SystemModule uses) — NOT a shared literal like "mm", which would collide across
-    // devices on one LAN (duplicate hostnames → the router shows one, mDNS clashes).
-    // Computed once into a member buffer so the returned pointer stays valid.
-    const char* hostName() const {
-        if (systemModule_ && systemModule_->deviceName()[0] != 0)
-            return systemModule_->deviceName();
-        if (!hostNameFallback_[0]) {
-            uint8_t mac[6] = {};
-            platform::getMacAddress(mac);
-            std::snprintf(hostNameFallback_, sizeof(hostNameFallback_),
-                          "MM-%02X%02X", mac[4], mac[5]);
-        }
-        return hostNameFallback_;
-    }
-
     void syncMdns() {
         bool shouldRun = mdnsEnabled_ && (state_ == State::ConnectedEth || state_ == State::ConnectedSta);
+        const char* devName = readDeviceName();
         if (shouldRun && !mdnsRunning_) {
-            const char* devName = hostName();
-            // Only mark running on success — leave false so loop1s retries next tick
+            // Only mark running on success — leave false so loop1s retries next tick.
             if (platform::mdnsInit(devName)) {
                 mdnsRunning_ = true;
+                std::strncpy(lastMdnsName_, devName, sizeof(lastMdnsName_) - 1);
+                lastMdnsName_[sizeof(lastMdnsName_) - 1] = 0;
+            }
+        } else if (shouldRun && mdnsRunning_ && std::strcmp(devName, lastMdnsName_) != 0) {
+            // Live rename: the device name changed (SystemModule deviceName) while
+            // mDNS is already up. Re-register so the .local name follows immediately —
+            // no reconnect needed (the "no reboot to apply config" rule). mdnsInit is
+            // idempotent: it just resets the hostname + _http instance name.
+            if (platform::mdnsInit(devName)) {
+                std::strncpy(lastMdnsName_, devName, sizeof(lastMdnsName_) - 1);
+                lastMdnsName_[sizeof(lastMdnsName_) - 1] = 0;
             }
         } else if (!shouldRun && mdnsRunning_) {
             platform::mdnsStop();

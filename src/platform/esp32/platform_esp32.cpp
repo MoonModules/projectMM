@@ -384,7 +384,7 @@ static void ethEventHandler(void* /*arg*/, esp_event_base_t base,
 
 // Runtime eth pin/PHY config. Seeded with the per-chip default (ethConfigDefault)
 // so an un-provisioned board still comes up on its historical pins; NetworkModule
-// overrides it via setEthConfig() with the board's boards.json values before
+// overrides it via setEthConfig() with the board's deviceModels.json values before
 // ethInit(). The DRIVER for each phyType is compiled in per chip (RMII for
 // classic/P4, W5500 SPI for S3 — sdkconfig); this only selects pins + which to use.
 static EthPinConfig ethConfig_ = ethConfigDefault;
@@ -401,7 +401,7 @@ static bool ethInitRmii() {
     ethNetif_ = esp_netif_new(&netif_cfg);
 
     // RMII / PHY pins from the runtime ethConfig_ (the Olimex map by default, the
-    // P4-NANO's IP101 map on the P4, or a board override pushed from boards.json).
+    // P4-NANO's IP101 map on the P4, or a board override pushed from deviceModels.json).
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
     eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
     emac_config.clock_config.rmii.clock_mode =
@@ -414,7 +414,7 @@ static bool ethInitRmii() {
     // ETH_ESP32_EMAC_DEFAULT_CONFIG() defaults. On the classic ESP32 they're fixed in
     // silicon; on the P4 the macro already defaults them to 49/34/35/28/29/30 (the
     // NANO wiring) — the proven round-1 P4 build relied on exactly these defaults, so
-    // we don't override them. (boards.json doesn't carry them either.)
+    // we don't override them. (deviceModels.json doesn't carry them either.)
 
     eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
     phy_config.phy_addr = ethConfig_.phyAddr;
@@ -490,14 +490,14 @@ static bool ethInitRmii() {
 // ethInit() dispatch only calls it under the same guard, so gating the definition
 // keeps the classic/P4 (RMII-only) build free of an unused-function warning under
 // -Werror. Reads the SPI pins from the runtime ethConfig_ (a W5500 board MUST set
-// them via boards.json — no universal default). Returns false (→ WiFi cascade) on
+// them via deviceModels.json — no universal default). Returns false (→ WiFi cascade) on
 // any failure, including no W5500 present, so a build with the driver in but no
 // module attached degrades cleanly.
 #ifdef MM_ETH_W5500
 static bool ethInitSpi() {
     if (ethConfig_.spiMiso < 0 || ethConfig_.spiMosi < 0 ||
         ethConfig_.spiSck < 0 || ethConfig_.spiCs < 0) {
-        ESP_LOGW(NET_TAG, "W5500 selected but SPI pins unset — skipping (set them in boards.json)");
+        ESP_LOGW(NET_TAG, "W5500 selected but SPI pins unset — skipping (set them in deviceModels.json)");
         return false;
     }
     esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
@@ -595,7 +595,7 @@ void ethStop() {
 
 bool ethInit() {
     ensureNetifInit();
-    // Dispatch on the board's PHY type (runtime, from boards.json via setEthConfig).
+    // Dispatch on the board's PHY type (runtime, from deviceModels.json via setEthConfig).
     // Each path returns false on any failure (incl. no PHY present) so NetworkModule
     // cascades to WiFi — a default build with a driver compiled in but no PHY wired
     // just falls through, no GPIO grab, no hang. A PHY whose driver isn't compiled
@@ -970,7 +970,16 @@ bool mdnsInit(const char* deviceName) {
         ESP_LOGE(NET_TAG, "mDNS _http._tcp advertise failed: %s", esp_err_to_name(svcErr));
         return false;   // hostname is set, but advertising failed — report it
     }
-    ESP_LOGI(NET_TAG, "mDNS started: %s.local (advertising _http._tcp:80)", deviceName);
+    // Tag the service with a `mm=1` TXT record so a browsing projectMM peer can tell us
+    // apart from a generic `_http._tcp` web box (WLED/ESPHome/Hue all share that service)
+    // WITHOUT an HTTP probe — DevicesModule reads this to classify the peer as projectMM
+    // straight from the browse. Idempotent: set on both the add and reconnect paths. A
+    // TXT failure is non-fatal (advertising still works; the peer just falls back to the
+    // HTTP scan to classify us), so it's logged, not returned.
+    esp_err_t txtErr = mdns_service_txt_item_set("_http", "_tcp", "mm", "1");
+    if (txtErr != ESP_OK)
+        ESP_LOGW(NET_TAG, "mDNS _http._tcp TXT mm=1 set failed: %s", esp_err_to_name(txtErr));
+    ESP_LOGI(NET_TAG, "mDNS started: %s.local (advertising _http._tcp:80, mm=1)", deviceName);
     return true;
 }
 
@@ -1017,8 +1026,24 @@ bool mdnsBrowsePoll(MdnsHostCb cb, void* user) {
     if (!mdns_query_async_get_results(mdnsSearch_, 0, &results, &num)) return false;
     for (mdns_result_t* r = results; r && cb; r = r->next) {
         MdnsHost h{};
-        if (r->hostname) std::snprintf(h.hostname, sizeof(h.hostname), "%s", r->hostname);
+        // A PTR/service browse gives the friendly service *instance* name in
+        // `instance_name` (what we advertise — the deviceName, e.g. "Bench-P4") and the
+        // lower-level host record in `hostname`. Prefer the instance name so a peer shows
+        // the device's name, not its `.local` host; fall back to hostname if absent.
+        const char* name = (r->instance_name && r->instance_name[0]) ? r->instance_name
+                          : (r->hostname ? r->hostname : nullptr);
+        if (name) std::snprintf(h.hostname, sizeof(h.hostname), "%s", name);
         h.port = r->port;
+        // Scan the service's TXT records for our `mm=1` marker — a projectMM device tags
+        // its _http._tcp advertisement with it (see mdnsInit), so a peer browsing the
+        // generic _http._tcp service can classify us without an HTTP probe.
+        for (size_t i = 0; i < r->txt_count; i++) {
+            if (r->txt[i].key && std::strcmp(r->txt[i].key, "mm") == 0
+                && r->txt_value_len[i] == 1 && r->txt[i].value && r->txt[i].value[0] == '1') {
+                h.isProjectMM = true;
+                break;
+            }
+        }
         // First IPv4 address in the result's addr list.
         for (mdns_ip_addr_t* a = r->addr; a; a = a->next) {
             if (a->addr.type == ESP_IPADDR_TYPE_V4) {
@@ -1047,7 +1072,13 @@ UdpSocket::~UdpSocket() {
 bool UdpSocket::open() {
     if (fd_ >= 0) return true;
     fd_ = socket(AF_INET, SOCK_DGRAM, 0);
-    return fd_ >= 0;
+    if (fd_ < 0) return false;
+    // Allow sends to a broadcast address (e.g. 255.255.255.255 for an Art-Net /
+    // E1.31 spray to every device on the LAN). Without SO_BROADCAST the stack
+    // rejects such a send; it has no effect on unicast/multicast sends.
+    const int on = 1;
+    setsockopt(fd_, SOL_SOCKET, SO_BROADCAST, &on, sizeof(on));
+    return true;
 }
 
 bool UdpSocket::connect(const char* ip, uint16_t port) {

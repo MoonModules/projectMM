@@ -19,11 +19,10 @@
     ],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "Olimex ESP32-Gateway Rev G"
+          "deviceModel": "Olimex ESP32-Gateway Rev G"
         }
       },
       {
@@ -61,11 +60,10 @@
     ],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "LOLIN D32"
+          "deviceModel": "LOLIN D32"
         }
       },
       {
@@ -89,11 +87,10 @@
     "planned": [],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "Generic ESP32 Dev"
+          "deviceModel": "Generic ESP32 Dev"
         }
       },
       {
@@ -123,11 +120,10 @@
     ],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "QuinLED Dig-2-Go"
+          "deviceModel": "QuinLED Dig-2-Go"
         }
       },
       {
@@ -159,11 +155,10 @@
     ],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "QuinLED Dig-Next-2"
+          "deviceModel": "QuinLED Dig-Next-2"
         }
       },
       {
@@ -194,11 +189,10 @@
     ],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "QuinLED Dig-Uno V3"
+          "deviceModel": "QuinLED Dig-Uno V3"
         }
       },
       {
@@ -230,11 +224,10 @@
     ],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "QuinLED Dig-Quad V3"
+          "deviceModel": "QuinLED Dig-Quad V3"
         }
       },
       {
@@ -268,11 +261,10 @@
     ],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "QuinLED Dig-Octa 32-8L"
+          "deviceModel": "QuinLED Dig-Octa 32-8L"
         }
       },
       {
@@ -317,11 +309,10 @@
     ],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "Serg UniShield V5"
+          "deviceModel": "Serg UniShield V5"
         }
       },
       {
@@ -353,11 +344,10 @@
     ],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "Serg MiniShield"
+          "deviceModel": "Serg MiniShield"
         }
       },
       {
@@ -383,11 +373,10 @@
     "planned": [],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "MHC V4.3"
+          "deviceModel": "MHC V4.3"
         }
       },
       {
@@ -417,11 +406,10 @@
     ],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "MHC V5.7 PRO"
+          "deviceModel": "MHC V5.7 PRO"
         }
       },
       {
@@ -447,11 +435,10 @@
     "planned": [],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "Yves V4.8"
+          "deviceModel": "Yves V4.8"
         }
       },
       {
@@ -477,11 +464,10 @@
     "planned": [],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "Cube 2020-10"
+          "deviceModel": "Cube 2020-10"
         }
       },
       {
@@ -510,11 +496,10 @@
     ],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "ESP32-S3 N16R8 Dev"
+          "deviceModel": "ESP32-S3 N16R8 Dev"
         }
       },
       {
@@ -548,11 +533,11 @@
     ],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "projectMM testbench S3"
+          "deviceModel": "projectMM testbench S3",
+          "deviceName": "projectMM-testbench-S3"
         }
       },
       {
@@ -581,6 +566,34 @@
         "controls": {
           "txPowerSetting": 8
         }
+      },
+      {
+        "type": "GridLayout",
+        "id": "Grid",
+        "controls": {
+          "width": 8,
+          "height": 8
+        }
+      },
+      {
+        "type": "Layer",
+        "id": "Layer",
+        "replaceChildren": true
+      },
+      {
+        "type": "AudioSpectrumEffect",
+        "id": "AudioSpectrum",
+        "parent_id": "Layer"
+      },
+      {
+        "type": "RandomMapModifier",
+        "id": "RandomMap",
+        "parent_id": "Layer"
+      },
+      {
+        "type": "NetworkSendDriver",
+        "id": "NetworkSend",
+        "parent_id": "Drivers"
       }
     ]
   },
@@ -598,11 +611,11 @@
     "planned": [],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "projectMM testbench ESP32-16MB"
+          "deviceModel": "projectMM testbench ESP32-16MB",
+          "deviceName": "projectMM-testbench-ESP32-16MB"
         }
       },
       {
@@ -635,11 +648,11 @@
     ],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "projectMM testbench P4"
+          "deviceModel": "projectMM testbench P4",
+          "deviceName": "projectMM-testbench-P4"
         }
       },
       {
@@ -651,6 +664,31 @@
           "loopbackTxPin": 33,
           "loopbackRxPin": 32
         }
+      },
+      {
+        "type": "Drivers",
+        "id": "Drivers",
+        "controls": {
+          "brightness": 255
+        }
+      },
+      {
+        "type": "GridLayout",
+        "id": "Grid",
+        "controls": {
+          "width": 8,
+          "height": 8
+        }
+      },
+      {
+        "type": "Layer",
+        "id": "Layer",
+        "replaceChildren": true
+      },
+      {
+        "type": "NetworkReceiveEffect",
+        "id": "NetworkReceive",
+        "parent_id": "Layer"
       }
     ]
   },
@@ -671,11 +709,10 @@
     ],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "LightCrafter 16"
+          "deviceModel": "LightCrafter 16"
         }
       },
       {
@@ -713,11 +750,10 @@
     ],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "SE 16 V1"
+          "deviceModel": "SE 16 V1"
         }
       },
       {
@@ -759,11 +795,10 @@
     ],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "Waveshare ESP32-P4-NANO"
+          "deviceModel": "Waveshare ESP32-P4-NANO"
         }
       },
       {
@@ -810,11 +845,10 @@
     ],
     "modules": [
       {
-        "type": "Board",
-        "id": "Board",
-        "parent_id": "System",
+        "type": "System",
+        "id": "System",
         "controls": {
-          "board": "ABC-WLED ESP32-P4 shield"
+          "deviceModel": "ABC-WLED ESP32-P4 shield"
         }
       },
       {

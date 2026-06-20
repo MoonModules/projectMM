@@ -679,12 +679,12 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 | `esp32` | — / 73.8 | — / 125KB | — / 108KB |
 | `esp32p4-eth` | — / 222-229 | — / 33232KB | — / 376KB |
 | `esp32s3-n16r8` | — / 89.0-89.8 | — / 8330KB-8331KB | — / 108KB |
-| `pc-macos` | — / 14,085-15,385 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 14,085-16,129 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17
 - `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
-- `pc-macos`: observed 2026-06-17
+- `pc-macos`: observed 2026-06-17 → 2026-06-19
 
 #### `measure-heavy-128` (measure)  📏
 
@@ -699,12 +699,12 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 | `esp32` | — / 16.0 | — / 89KB | — / 62KB |
 | `esp32p4-eth` | — / 55.5-57.4 | — / 33196KB | — / 376KB |
 | `esp32s3-n16r8` | — / 19.8-20.3 | — / 8295KB | — / 108KB |
-| `pc-macos` | — / 2,915-3,236 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 2,915-3,247 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17
 - `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
-- `pc-macos`: observed 2026-06-17
+- `pc-macos`: observed 2026-06-17 → 2026-06-19
 
 #### `measure-mod-16` (measure)  📏
 
@@ -760,7 +760,7 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 | `esp32` | — / 144 | — / 111KB | — / 96KB |
 | `esp32p4-eth` | — / 461-486 | — / 33208KB | — / 376KB |
 | `esp32s3-n16r8` | — / 153 | — / 8307KB | — / 108KB |
-| `pc-macos` | — / 62,500-66,667 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 62,500-71,429 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17
 - `esp32p4-eth`: observed 2026-06-17
@@ -780,12 +780,12 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 | `esp32` | — / 35.1 | — / 36KB | — / 26KB |
 | `esp32p4-eth` | — / 98.6-102 | — / 33103KB | — / 376KB |
 | `esp32s3-n16r8` | — / 33.7 | — / 8202KB | — / 108KB |
-| `pc-macos` | — / 14,286-15,385 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 14,286-15,873 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17
 - `esp32p4-eth`: observed 2026-06-17
 - `esp32s3-n16r8`: observed 2026-06-17
-- `pc-macos`: observed 2026-06-17
+- `pc-macos`: observed 2026-06-17 → 2026-06-18
 
 ### scenario_perf_light
 

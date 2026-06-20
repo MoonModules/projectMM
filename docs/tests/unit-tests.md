@@ -52,20 +52,6 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - The default (overwrites=true) path plain-copies: two sources mapped to the same physical means the LAST writer wins, no addition. Pins the fast path.
 - Sparse overwrite mapping clears untouched physical cells. A sphere-style layout maps only a subset of the physical box to a source; the rest must end up black, not retain stale data from a previous frame. Pre-fills dst dirty and asserts unmapped cells are zeroed — fails if BlendMap's dst.clear() is removed (the regression target).
 
-## BoardModule
-
-`test/unit/core/unit_BoardModule.cpp`
-
-- After onBuildControls, BoardModule exposes exactly one `board` control, bound as Text to a 32-byte buffer.
-- Default state is the empty string — MoonDeck pushes a value on first reach.
-- respectsEnabled() returns false so the `board` value stays visible even when the module is disabled — identity-class data shouldn't vanish.
-- setBoard happy path: valid value lands in the buffer + marks dirty so FilesystemModule's debounced save picks it up. Mirrors the shape of NetworkModule::setWifiCredentials' unit-test pattern.
-- Empty string is rejected — no buffer write, no dirty flag.
-- 32+ char value is rejected (buffer is 32 bytes including NUL, so 31 max).
-- Non-printable bytes are rejected. Catches accidental binary smuggling (would also break the persistence JSON encoder).
-- nullptr is rejected (defensive — a bogus caller shouldn't crash the device).
-- BoardModule is a code-wired System child and must NOT be user-deletable — now that SystemModule accepts user add/remove of (peripheral) children, the board identity opts out via userEditable() == false so the user can't delete it.
-
 ## Buffer
 
 `test/unit/core/unit_Buffer.cpp`
@@ -476,7 +462,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 `test/unit/core/unit_NetworkModule_ethernet.cpp`
 
-- The enum values are a wire contract: the Select index, the ethInit() switch, and every boards.json `ethType` all agree on these. Pin them so a reorder fails here.
+- The enum values are a wire contract: the Select index, the ethInit() switch, and every deviceModels.json `ethType` all agree on these. Pin them so a reorder fails here.
 - Desktop has no Ethernet: the default PHY type is ethNone, so a board that never pushes an eth config still reports "no Ethernet" and the cascade falls through.
 - The platform seam must accept any runtime config and never bring Ethernet up on desktop — ethInit() returns false so NetworkModule cascades to WiFi/AP. Pushing a fully-populated W5500 config and an RMII config both leave ethInit() false and ethConnected() false; ethStop() is safe to call when nothing is running.
 
@@ -595,6 +581,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 ## RandomMapModifier
 
 `test/unit/light/unit_RandomMapModifier.cpp`
+*Also touches: Layer.*
 
 - A remap doesn't resize the logical box.
 - _RandomMapModifier maxMultiplier is 1_
@@ -603,6 +590,8 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Reshuffling (a beat) changes the mapping, and the result is still a bijection.
 - Robustness: an empty (0×0×0) grid must not crash — maxOut 0 yields no destination.
 - A resize (different box count) rebuilds the permutation to the new size, still a bijection.
+- _RandomMapModifier loop() reshuffles on a beat (bpm 60 ≈ 1/s)_
+- _RandomMapModifier loop() with bpm 0 never reshuffles (frozen)_
 
 ## RmtLedDriver
 
@@ -706,11 +695,23 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 - On the desktop platform (MAC DE:AD:BE:EF:CA:FE), the auto-generated device name is "MM-CAFE" (last two MAC bytes).
 - deviceName is bound as a Text control to the MAC-derived default ("MM-CAFE" on the desktop platform).
+- deviceName is the single network identity, so SystemModule keeps it a valid hostname. A live edit to an invalid value ("My Room!") is coerced on the next loop1s tick (mm::sanitizeHostname), the same path mDNS/AP/DHCP read — so they never see spaces.
+- An all-invalid name collapses to empty after sanitising; the MAC fallback then fills it, so deviceName is never empty (mDNS/AP/DHCP always have a name to register).
+- An already-valid name is left untouched (idempotent) — a normal user name survives.
 - The `firmware` control is always present and non-empty (either a real firmware key from build_info.h or the fallback "unknown").
 - The `bootReason` control is populated from platform::resetReason; on desktop it reports "OK".
 - SystemModule accepts user-added Peripheral children (sensors/actuators the user solders on); the role string drives the type-picker filter + add policy.
 - Regression: SystemModule overrides setup() and loop1s(); both must chain to MoonModule's base so a Peripheral child's setup()/loop1s() actually fire. Without the chain a sensor would never init or poll (the "children miss callbacks" trap from history/decisions.md). loop20ms() isn't overridden, so the base default already propagates it.
 - roleName maps the new Peripheral enum to its lowercase API string.
+
+`test/unit/core/unit_sanitizeHostname.cpp`
+*Also touches: NetworkModule.*
+
+- _sanitizeHostname leaves a valid hostname unchanged (idempotent)_
+- _sanitizeHostname replaces spaces with a single dash_
+- _sanitizeHostname strips punctuation and other invalid chars_
+- _sanitizeHostname trims leading and trailing dashes / invalid runs_
+- _sanitizeHostname yields empty for all-invalid input (caller falls back)_
 
 ## WheelLayout
 

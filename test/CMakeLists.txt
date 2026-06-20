@@ -3,7 +3,6 @@
 # cross-domain references travel through the @also list, not the directory.
 add_executable(mm_tests
     # core/
-    unit/core/unit_BoardModule.cpp
     unit/core/unit_Buffer.cpp
     unit/core/unit_Color.cpp
     unit/core/unit_Control_apply_absent_key.cpp
@@ -23,6 +22,7 @@ add_executable(mm_tests
     unit/core/unit_NetworkModule.cpp
     unit/core/unit_NetworkModule_ethernet.cpp
     unit/core/unit_Sort.cpp
+    unit/core/unit_sanitizeHostname.cpp
     unit/core/unit_platform_clock.cpp
     unit/core/unit_Scheduler_unique_names.cpp
     unit/core/unit_SystemModule.cpp

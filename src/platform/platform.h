@@ -98,7 +98,7 @@ void fsList(const char* dir, FsListCb cb, void* user);       // single-level lis
 // Network (ESP32 only, stubs on desktop)
 // setEthConfig overrides the per-chip default eth pin/PHY map (ethConfigDefault)
 // with a board's runtime config before ethInit — NetworkModule pushes the values
-// it got from boards.json. Call before ethInit(); takes effect on the next init.
+// it got from deviceModels.json. Call before ethInit(); takes effect on the next init.
 void setEthConfig(const EthPinConfig& cfg);
 bool ethInit();
 // Tear down a running Ethernet driver so ethInit() can re-init with new config —
@@ -138,7 +138,7 @@ int wifiTxPower();
 // WiFi cap: some boards / WiFi modules (a thin on-module LDO, a marginal USB
 // supply — e.g. various S2/S3 mini-class boards) brown out at full TX power,
 // dropping WiFi during association. Capping to 8 dBm (32 quarter-dBm, the value
-// `boards.json` injects for brown-out-prone entries) keeps them stable. Returns
+// `deviceModels.json` injects for brown-out-prone entries) keeps them stable. Returns
 // true on success or when called with 0 (no-op).
 // Call after esp_wifi_start() — earlier calls are silently ignored by ESP-IDF.
 bool wifiSetTxPower(int8_t quarterDbm);
@@ -167,6 +167,10 @@ struct MdnsHost {
     uint8_t ip[4] = {};        // resolved IPv4 (0.0.0.0 if unresolved)
     char    hostname[32] = {}; // instance/host name (e.g. "wled-desk"), "" if none
     uint16_t port = 0;         // advertised SRV port
+    bool isProjectMM = false;  // the host's _http._tcp advertisement carries our TXT
+                               // marker (`mm=1`) — proves it's a projectMM device, not
+                               // just some web box on the same `_http._tcp` service.
+                               // Lets a browse classify a peer without an HTTP probe.
 };
 using MdnsHostCb = void(*)(const MdnsHost& host, void* user);
 bool mdnsBrowseStart(const char* service, const char* proto);
@@ -241,26 +245,26 @@ struct ImprovDeviceInfo {
     const char* chipFamily;      // "ESP32" / "ESP32-S3" / ...
     const char* firmwareVersion; // e.g. "1.0.0-rc2"
 };
-// Board-extension args (boardOut/boardOutLen/boardReady) are for the vendor
-// SET_BOARD RPC (command 0xFE) — when set, the Improv task validates the RPC
-// payload, writes the board name into boardOut, and publishes via
-// boardReady's release-store. Pass nullptr/0/nullptr to opt out (desktop
-// stub, future targets without BoardModule). Mirrors the ssid/password
-// triple: validate + buffer-write + flag-signal, scheduler thread reads.
+// deviceModel-extension args (deviceModelOut/deviceModelOutLen/deviceModelReady)
+// are for the vendor SET_DEVICE_MODEL RPC (command 0xFE) — when set, the Improv
+// task validates the RPC payload, writes the deviceModel name into deviceModelOut,
+// and publishes via deviceModelReady's release-store. Pass nullptr/0/nullptr to opt
+// out (desktop stub). Mirrors the ssid/password triple: validate + buffer-write +
+// flag-signal, scheduler thread reads.
 // SET_TX_POWER RPC (command 0xFD) — when set, the Improv task validates the
 // 1-byte dBm payload (0..21), writes it to txPowerOut, and publishes via
 // txPowerReady's release-store. This is the pre-association escape hatch for
 // boards whose LDO browns out at full TX power (weak-powered boards): their
-// boards.json cap normally arrives over HTTP *after* the device is online,
+// catalog cap normally arrives over HTTP *after* the device is online,
 // which such a board can never reach — proven on the bench 2026-06-10. Same
-// validate + buffer-write + flag-signal shape as SET_BOARD.
+// validate + buffer-write + flag-signal shape as SET_DEVICE_MODEL.
 bool improvProvisioningInit(const ImprovDeviceInfo& info,
                             char* ssidOut, size_t ssidOutLen,
                             char* passwordOut, size_t passwordOutLen,
                             std::atomic<bool>* ready,
                             char* statusBuf, size_t statusBufLen,
-                            char* boardOut = nullptr, size_t boardOutLen = 0,
-                            std::atomic<bool>* boardReady = nullptr,
+                            char* deviceModelOut = nullptr, size_t deviceModelOutLen = 0,
+                            std::atomic<bool>* deviceModelReady = nullptr,
                             uint8_t* txPowerOut = nullptr,
                             std::atomic<bool>* txPowerReady = nullptr);
 

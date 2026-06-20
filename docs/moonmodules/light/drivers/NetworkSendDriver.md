@@ -7,7 +7,7 @@ Streams the light buffer over UDP in one of three industry protocols, selected b
 ## Controls
 
 - `protocol` (select: ArtNet / E1.31 / DDP, default ArtNet) — the wire protocol; the destination port follows it automatically (6454 / 5568 / 4048). Changing it re-targets the socket **live, no reboot** ([§ Live reconfiguration](../../../architecture.md#live-reconfiguration-every-change-applies-without-a-reboot)) — switch output protocol on a running device mid-show.
-- `ip` (IPv4, default 192.168.1.70) — unicast destination. Changing it re-binds live; E1.31 multicast is deliberately not implemented (see Interop below).
+- `ip` (IPv4, default 255.255.255.255) — destination address. The default is the limited-broadcast address, so a fresh sender reaches every receiver on the LAN with no IP to type; set a unicast address to target one device. Changing it re-binds live. E1.31 multicast is deliberately not implemented (see Interop below).
 - `universe_start` (uint16_t, default 0) — first universe for ArtNet and E1.31; DDP is byte-addressed and ignores it.
 - `fps` (uint8_t, default 50, range 1-120) — frame rate limit. Without it the loop would re-send on every render tick; receivers expect a steady frame cadence.
 
@@ -26,7 +26,7 @@ E1.31 framing facts an integrator needs: CID is stable per device (derived from 
 ## Interop notes
 
 - **Universe rule (both ends):** buffer offset = (universe − `universe_start`) × 510, and the sender emits from `universe_start` verbatim — no hidden 1-based adjustment for E1.31. Strict sACN gear reserves universe 0, so set `universe_start ≥ 1` on **both** ends when talking to it; the matching default of 0 on our own receiver keeps device↔device pairs aligned out of the box.
-- **Unicast only.** E1.31 multicast (group 239.255.x.x) is deferred — the platform has no IGMP join yet; MoonLight ships unicast-only too. See the backlog entry.
+- **Unicast or broadcast; not multicast.** The destination can be a single device (unicast) or the limited-broadcast address `255.255.255.255` (the default), which sprays the frame to every device on the LAN — the platform socket sets `SO_BROADCAST` so this works for all three protocols. The standard Art-Net convention is broadcast; a device↔device pair works out of the box with no IP typed. E1.31 multicast (group 239.255.x.x) is not implemented — the platform has no IGMP join; MoonLight ships without it too. See the backlog entry for the planned work.
 
 ## Synchronous send (blocks the render tick)
 
@@ -34,7 +34,7 @@ The whole frame goes out inline in `loop()` — ~35 ms over Ethernet / ~90 ms ov
 
 ## Cross-domain wiring
 
-The driver is added as a child of the `Drivers` container at runtime — not boot-wired, but added per board through the catalog (`POST /api/modules`, the board's [`boards.json`](../../../install/boards.json) `modules` entry), so a device only carries the outputs its board actually has. Once added it receives `setSourceBuffer` / `setCorrection` from `Drivers::passBufferToDrivers` (which wires every child generically, boot-added or runtime-added) and applies the shared `const Correction*` before every send — the same correction the RMT LED driver applies, so network and wired outputs show identical colours. The added child persists across reboot via `FilesystemModule`.
+The driver is added as a child of the `Drivers` container at runtime — not boot-wired, but added per board through the catalog (`POST /api/modules`, the board's [`deviceModels.json`](../../../install/deviceModels.json) `modules` entry), so a device only carries the outputs its board actually has. Once added it receives `setSourceBuffer` / `setCorrection` from `Drivers::passBufferToDrivers` (which wires every child generically, boot-added or runtime-added) and applies the shared `const Correction*` before every send — the same correction the RMT LED driver applies, so network and wired outputs show identical colours. The added child persists across reboot via `FilesystemModule`.
 
 ## Tests
 

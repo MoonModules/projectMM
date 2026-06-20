@@ -11,7 +11,7 @@
 //      stores the option index, and platform_esp32.cpp's ethInit() switches on
 //      the same values; both assume None=0, LAN8720=1, IP101=2, W5500=3. A silent
 //      reorder of the enum would desync the dropdown labels from the dispatch and
-//      from every boards.json `ethType` value — caught here, not on hardware.
+//      from every deviceModels.json `ethType` value — caught here, not on hardware.
 //
 //   2. The desktop platform seam (setEthConfig / ethStop / ethInit) is a safe
 //      no-op. NetworkModule::setup() calls setEthConfig() then ethInit() on every
@@ -30,7 +30,7 @@
 #include "platform/platform.h" // setEthConfig / ethStop / ethInit / ethConnected
 
 // The enum values are a wire contract: the Select index, the ethInit() switch, and
-// every boards.json `ethType` all agree on these. Pin them so a reorder fails here.
+// every deviceModels.json `ethType` all agree on these. Pin them so a reorder fails here.
 TEST_CASE("EthPhyType enum values match the dropdown/dispatch contract") {
     CHECK(mm::platform::ethNone    == 0);
     CHECK(mm::platform::ethLan8720 == 1);

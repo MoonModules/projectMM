@@ -13,7 +13,7 @@ let firmwares = [];
 let scenarios = [];   // [{name, module, also}]
 let testModules = []; // ["CamelCaseName", ...]
 // Boards catalog loaded from /api/boards (served by moondeck.py from
-// docs/install/boards.json). Replaces the previously-hardcoded boardOptions
+// docs/install/deviceModels.json). Replaces the previously-hardcoded boardOptions
 // list — same file the web installer (Step 2) will fetch directly from
 // GitHub Pages. Empty until init() loads it; renderDevices waits on init.
 let boards = []; // [{ key, label, firmwares: [...] }]  (firmwares[0] is the default)
@@ -585,7 +585,7 @@ async function runScriptOnce(script, btn, extraParams) {
 // ESP32 controls
 // ---------------------------------------------------------------------------
 
-// Board picker for provisioning scripts (pass_board): boards.json entries
+// Board picker for provisioning scripts (pass_board): deviceModels.json entries
 // whose `firmwares` include the selected firmware. "(any board)" = no
 // injection. Distinct state key from the LEGACY `state.board` (which meant
 // firmware — see the migration in init) and from per-device boards.
@@ -858,7 +858,7 @@ function renderDevices() {
         if (device.firmware) infoParts.push(`fw:${device.firmware}`);
         infoText.textContent = infoParts.join(" · ");
 
-        // Board picker — options derived from boards.json (loaded via
+        // Board picker — options derived from deviceModels.json (loaded via
         // /api/boards). Auto-deduced for firmwares that map to a single
         // board (probe sets device.board); user-set when the firmware can
         // run on multiple boards (e.g. `esp32` on LOLIN D32 vs generic
@@ -890,7 +890,7 @@ function renderDevices() {
             device.board = boardPicker.value;
             saveState();
             // Mirror the change to the device immediately. Without this, the
-            // device's BoardModule wouldn't hear about the picker until the
+            // device's SystemModule wouldn't hear about the picker until the
             // next discover/refresh probe — and the user expects the device
             // UI to update right after they pick. Fire-and-forget; failure
             // (timeout / device offline) is recovered on the next refresh

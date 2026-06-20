@@ -404,7 +404,17 @@ private:
     void mergeMdnsHost(const platform::MdnsHost& host) {
         if (host.ip[0] == 0 && host.ip[1] == 0 && host.ip[2] == 0 && host.ip[3] == 0)
             return;   // unresolved — nothing to key on
-        upsertMdns(host.ip, kMdnsServices[mdnsIndex_].type, host.hostname);
+        // The browsed service type maps to a DevType (Generic for `_http`, Wled for
+        // `_wled`). A host on the GENERIC `_http` service carrying our `mm=1` TXT marker
+        // is a projectMM device — promote it, so an mDNS-only sighting classifies + names
+        // it without waiting for the HTTP scan. The promotion is gated on the base type
+        // being Generic: a definite service type (e.g. `_wled`) already says what the
+        // host is, so the marker must not override it (defensive — a real WLED won't
+        // carry `mm=1`, but a future service mustn't be silently relabelled projectMM).
+        const DevType baseType = kMdnsServices[mdnsIndex_].type;
+        DevType type = (host.isProjectMM && baseType == DevType::Generic)
+                       ? DevType::ProjectMM : baseType;
+        upsertMdns(host.ip, type, host.hostname);
     }
 
     void localIp(uint8_t out[4]) const {
@@ -479,6 +489,15 @@ private:
         sortByName();   // keep the list ordered AS devices arrive — not just at sweep end
     }
 
+    // True when `name` is just the device's own IP as a dotted quad — i.e. a placeholder
+    // a sighting fell back to because no real name was known yet. A later sighting with a
+    // genuine name should overwrite it (see upsertMdns); a real name never matches its IP.
+    static bool isIpPlaceholder(const char* name, const uint8_t ip[4]) {
+        char ipStr[16];
+        formatDottedQuad(ipStr, ip);
+        return std::strcmp(name, ipStr) == 0;
+    }
+
     // Merge an mDNS browse hit. Like upsert() but the identity is weaker: mDNS proves
     // the host advertises a service (so it speaks HTTP and is alive → missed=0), and
     // for `_wled._tcp` the type is certain, but `_http._tcp` only says "some web
@@ -504,7 +523,12 @@ private:
         d->cached = false;             // a live sighting — no longer just a cached entry
         d->speaks |= ProtoHttp;        // advertised an HTTP service → speaks HTTP
         d->via |= ViaMdns;             // discovered by the mDNS browse
-        if (!d->name[0] && hostname && hostname[0])
+        // Take the mDNS name when we don't have a real one yet. "No real name" means
+        // either empty OR a dotted-quad IP placeholder a prior sighting fell back to —
+        // a genuine advertised name (the peer's deviceName) should replace that IP.
+        // A name from the HTTP probe (a real deviceName) still wins: it's not an IP, so
+        // the isIpPlaceholder check leaves it alone.
+        if (hostname && hostname[0] && (!d->name[0] || isIpPlaceholder(d->name, ip)))
             std::snprintf(d->name, sizeof(d->name), "%s", hostname);
         if (!d->name[0]) formatDottedQuad(d->name, ip);
         sortByName();

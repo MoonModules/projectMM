@@ -161,7 +161,7 @@ LUT is half desktop size (uint16_t vs uint32_t per entry). The 1:1 (no-modifier)
 
 ## ESP32-S3 — ESP32-S3 N16R8 Dev (16 MB flash, 8 MB octal PSRAM)
 
-`esp32s3-n16r8` firmware on the ESP32-S3 N16R8 Dev at `Network.txPowerSetting=8` dBm (the brown-out cap injected by `boards.json`). 128×128 grid, Mirror XY, ArtNet over WiFi STA — the grid sweep (now part of `scenario_perf_full`) against the live device. Per-step tick/heap live in `observed.esp32s3-n16r8` across the scenarios. Numbers below are the 128×128 step.
+`esp32s3-n16r8` firmware on the ESP32-S3 N16R8 Dev at `Network.txPowerSetting=8` dBm (the brown-out cap injected by `deviceModels.json`). 128×128 grid, Mirror XY, ArtNet over WiFi STA — the grid sweep (now part of `scenario_perf_full`) against the live device. Per-step tick/heap live in `observed.esp32s3-n16r8` across the scenarios. Numbers below are the 128×128 step.
 
 | Metric | Value | Notes |
 |---|---|---|

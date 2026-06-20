@@ -55,7 +55,6 @@
 #endif
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
-#include "core/BoardModule.h"
 #include "core/AudioModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/ImprovProvisioningModule.h"
@@ -122,7 +121,6 @@ static void registerModuleTypes() {
 #endif
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/HttpServerModule.md");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/SystemModule.md");
-    mm::ModuleFactory::registerType<mm::BoardModule>("BoardModule", "core/BoardModule.md");
     mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule", "core/AudioModule.md");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/FirmwareUpdateModule.md");
     mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/ImprovProvisioningModule.md");
@@ -179,13 +177,10 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     auto* systemModule = static_cast<mm::SystemModule*>(mm::ModuleFactory::create("SystemModule"));
     systemModule->setScheduler(&scheduler);
 
-    // BoardModule — owns the physical-board identity (e.g. "olimex-esp32-gateway-rev-g").
-    // Code-wired child of System; markWiredByCode preserves it on devices whose
-    // saved SystemModule.json predates the addition (same mechanic that kept
-    // Improv alive under Network).
-    auto* boardModule = static_cast<mm::BoardModule*>(mm::ModuleFactory::create("BoardModule"));
-    systemModule->addChild(boardModule);
-    boardModule->markWiredByCode();
+    // The deviceModel identity (e.g. "Olimex ESP32-Gateway Rev G") is now SystemModule's
+    // `deviceModel` control — no separate module. SystemModule owns the device identity
+    // (deviceName + deviceModel) directly; tooling injects deviceModel via /api/control or
+    // the Improv SET_DEVICE_MODEL RPC (routed to SystemModule::setDeviceModel by Improv).
 
     // AudioModule is NOT auto-wired. It is a mic peripheral, useful only on a board
     // that actually has an I2S microphone, so the user adds it through the UI when
@@ -231,11 +226,11 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
             mm::ModuleFactory::create("ImprovProvisioningModule"));
         improvModule->setSystemModule(systemModule);
         improvModule->setNetworkModule(networkModule);
-        // SET_BOARD vendor RPC (command 0xFE, see platform_esp32_improv.cpp).
-        // ImprovProvisioningModule's loop1s() picks up the validated payload
-        // and forwards to boardModule->setBoard(), which arms the standard
-        // FilesystemModule debounced save — same idiom as MoonDeck's HTTP push.
-        improvModule->setBoardModule(boardModule);
+        // SET_DEVICE_MODEL vendor RPC (command 0xFE, see platform_esp32_improv.cpp).
+        // ImprovProvisioningModule's loop1s() picks up the validated payload and forwards
+        // to systemModule->setDeviceModel() (the deviceModel identity lives on SystemModule
+        // now), arming the standard FilesystemModule debounced save — same idiom as
+        // MoonDeck's HTTP push. (systemModule is already wired above.)
         // Mark wired-by-code so applyNode's trim loop preserves it on devices
         // whose saved Network.json predates the Improv child (the upgrade case).
         improvModule->markWiredByCode();
@@ -257,13 +252,12 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // setLayouts wires the shared Layouts to the container AND propagates to every child Layer.
     layersContainer->setLayouts(layouts);
 
+    // One default effect so a bare device (no catalog inject) still shows lights out
+    // of the box — but NO default modifier: the boot Layer is just an effect on a
+    // 16x16 grid. A device-model catalog entry can REPLACE this (replaceChildren) with
+    // its own effects/modifiers — e.g. the testbench swaps in AudioSpectrum + RandomMap.
     auto* noise = mm::ModuleFactory::create("NoiseEffect");
     layer->addChild(noise);
-
-    // MultiplyModifier with its default mult=2 / mirror=true on X,Y reproduces
-    // the old MirrorModifier-XY canonical pipeline (fold each axis in half).
-    auto* multiply = mm::ModuleFactory::create("MultiplyModifier");
-    layer->addChild(multiply);
 
     // Drivers: top-level container; one or more Driver children. Bound to the
     // Layers container — Drivers re-resolves the active Layer from it at every
@@ -294,7 +288,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     drivers->addChild(preview);
     // Marked wired-by-code so a persistence load can't replace the wired instance
     // with a fresh factory one that lost its broadcaster — same protection
-    // BoardModule / ImprovProvisioning use.
+    // ImprovProvisioning uses.
     preview->markWiredByCode();
 
     auto* httpServer = static_cast<mm::HttpServerModule*>(mm::ModuleFactory::create("HttpServerModule"));
@@ -404,6 +398,16 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
                         char ipStr[16];
                         mm::formatDottedQuad(ipStr, ip);
                         std::printf("  MM_IP=%s", ipStr);
+                        // Alongside MM_IP: the device's mDNS .local name, so the web
+                        // installer can offer a clickable http://<deviceName>.local link
+                        // that survives a later DHCP IP change. deviceName is owned by
+                        // SystemModule and is the device's single network identity (the
+                        // SAME string NetworkModule registers for mDNS, the AP SSID, and
+                        // the DHCP hostname; SystemModule keeps it a valid hostname), so
+                        // this is exactly what resolves on the LAN. Serial-borne because
+                        // the installer's REST fallback is blocked by mixed-content on the
+                        // HTTPS Pages site.
+                        std::printf("  MM_DEVICE=%s.local", systemModule->deviceName());
                     }
                 }
             }

@@ -39,7 +39,7 @@ def build_doc() -> dict:
     is deliberately NOT stored here: it's derivable from `chip` via build_esp32's
     TARGET_TO_FAMILY, and no firmwares.json consumer needs it — the ESP Web Tools
     manifest gets `chipFamily` from that map at generation time, and the installer's
-    runtime family check uses boards.json + esptool detection, not this file. Adding
+    runtime family check uses deviceModels.json + esptool detection, not this file. Adding
     it would be redundant data ahead of a consumer. `fragments` is build-internal
     and likewise omitted. check_firmwares.py imports this so the generator and
     checker can't disagree.
@@ -66,7 +66,7 @@ def main() -> int:
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     # ensure_ascii=False keeps the em-dashes in descriptions literal (readable
-    # diffs), matching the hand-authored boards.json sibling.
+    # diffs), matching the hand-authored deviceModels.json sibling.
     args.out.write_text(json.dumps(build_doc(), indent=2, ensure_ascii=False) + "\n")
     print(f"generate_firmwares: wrote {args.out} ({len(FIRMWARES)} variants)")
     return 0

@@ -41,6 +41,42 @@ inline void formatDottedQuad(char out[16], const uint8_t ip[4]) {
     std::snprintf(out, 16, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
 }
 
+// Coerce a string in-place into a valid DNS/mDNS hostname label (RFC 1123):
+// keep only [A-Za-z0-9-], turn any run of other characters (spaces, punctuation,
+// dots) into a single '-', and strip leading/trailing '-'. Used on the device
+// name, which is the single identity behind the mDNS `<name>.local`, the SoftAP
+// SSID, and the DHCP hostname — so a user typing "My Living Room!" gets the valid,
+// resolvable "My-Living-Room" everywhere rather than a name mDNS would reject.
+// Idempotent: an already-valid name is unchanged. Leaves an empty buffer empty
+// (every invalid char) — the caller supplies the fallback (SystemModule's MAC name).
+// The 63-char RFC label cap is enforced by the caller's buffer (deviceName_ is 24).
+inline void sanitizeHostname(char* buf) {
+    if (!buf) return;
+    char* w = buf;                       // write cursor (compacts in place; w <= read)
+    bool pendingDash = false;            // saw invalid char(s); emit one '-' before next keeper
+    for (const char* r = buf; *r; ++r) {
+        const char c = *r;
+        const bool keep = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+                       || (c >= '0' && c <= '9') || c == '-';
+        if (keep) {
+            // Never lead with a '-' (RFC: no leading hyphen) — whether from an invalid-
+            // char run (pendingDash) or a literal '-' at the start (w == buf).
+            if (c == '-' && w == buf) continue;
+            // Collapse a run of invalid chars to a single '-', but never lead with one.
+            if (pendingDash && w != buf) *w++ = '-';
+            pendingDash = false;
+            *w++ = c;
+        } else {
+            pendingDash = true;          // defer — drops a trailing run entirely
+        }
+    }
+    // Trim trailing '-' (RFC: no trailing hyphen). An invalid-char run was dropped via
+    // pendingDash, but literal hyphens are kept as written, so e.g. "a--" lands here as
+    // "a--" — loop to strip them all, not just one.
+    while (w != buf && w[-1] == '-') --w;
+    *w = '\0';
+}
+
 enum class ControlType : uint8_t {
     Uint8,
     Uint16,
@@ -139,7 +175,7 @@ struct ControlDescriptor {
                             // types are persistable but normally editable; this flag asks the UI
                             // to render the control as display-only (no input affordance). Used for
                             // values that must persist but are pushed by tooling, not edited by
-                            // users (e.g. BoardModule.board, which MoonDeck and the web installer
+                            // users (e.g. SystemModule.deviceModel, which MoonDeck and the web installer
                             // inject via POST /api/control). HTTP writes still succeed — the flag
                             // is a UI rendering hint, not a write gate. Set via setReadOnly().
 };
@@ -273,7 +309,7 @@ public:
 
     // Flip the readonly flag on a previously-added control. Typical use: call addText()
     // then setReadOnly(count() - 1, true) for a value that's persisted via the standard
-    // path but pushed by tooling rather than user-edited (e.g. BoardModule.board).
+    // path but pushed by tooling rather than user-edited (e.g. SystemModule.deviceModel).
     // The UI renders the control display-only; HTTP /api/control writes still apply.
     void setReadOnly(uint8_t i, bool readonly) {
         if (i < count_) controls_[i].readonly = readonly;
