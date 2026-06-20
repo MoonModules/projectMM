@@ -316,21 +316,40 @@ function canFetchHttp(deviceUrl) {
     return window.location.protocol !== "https:";
 }
 
+// One device request with bounded retries. A fresh-flashed device (especially
+// the P4 over Ethernet, busy with link bring-up + per-add buildState right after
+// flash) intermittently times out or 5xx's a single call; without retry one blip
+// would abandon the whole inject. So: retry on timeout / network error / 5xx with
+// a short backoff, but NOT on a 4xx (a 404/400 is deterministic — the module/control
+// genuinely doesn't exist, retrying won't change that). Returns the Response on a
+// final 2xx/4xx, or null if every attempt threw (timeout/network). `label` + `onLog`
+// surface what happened. 5s per-attempt timeout — generous for the bench.
+async function deviceFetch(url, opts, label, onLog, attempts = 3) {
+    for (let i = 1; i <= attempts; i++) {
+        try {
+            const res = await fetch(url, { ...opts, signal: AbortSignal.timeout(5000) });
+            if (res.ok || (res.status >= 400 && res.status < 500)) return res;   // settled (success or deterministic 4xx)
+            if (onLog) onLog(`[orchestrator] ${label}: HTTP ${res.status} (attempt ${i}/${attempts})`);
+        } catch (e) {
+            if (onLog) onLog(`[orchestrator] ${label}: ${e && e.name === "TimeoutError" ? "timeout" : (e && e.message) || e} (attempt ${i}/${attempts})`);
+        }
+        if (i < attempts) await new Promise(r => setTimeout(r, 200 * i));   // linear backoff
+    }
+    return null;   // every attempt threw
+}
+
 // DELETE every current child of the module named `parentName` on `deviceUrl` —
 // the installer-side counterpart of the device UI's clearModuleChildren, used by
 // tryHttpInjectBoard's replaceChildren so an entry's effects replace the boot
 // defaults instead of stacking. Fetch the live tree, find the container, DELETE
-// each child by name. Returns false on a fetch/DELETE failure so the caller can
-// abort (all-or-nothing, matching the inject's contract).
-async function clearDeviceChildren(deviceUrl, parentName) {
+// each child by name. Best-effort with retry (deviceFetch): a child that won't
+// delete is logged and skipped rather than aborting — the worst case is an effect
+// stacking behind a leftover default, not a half-set-up device.
+async function clearDeviceChildren(deviceUrl, parentName, onLog) {
+    const res = await deviceFetch(new URL("api/state", deviceUrl), {}, "replaceChildren read state", onLog);
+    if (!res || !res.ok) return;
     let tree;
-    try {
-        const res = await fetch(new URL("api/state", deviceUrl), { signal: AbortSignal.timeout(5000) });
-        if (!res.ok) return false;
-        tree = await res.json();
-    } catch (_) {
-        return false;
-    }
+    try { tree = await res.json(); } catch (_) { return; }
     const findByName = (mods, name) => {
         if (!Array.isArray(mods)) return null;
         for (const m of mods) {
@@ -343,15 +362,12 @@ async function clearDeviceChildren(deviceUrl, parentName) {
     const parent = findByName(tree.modules, parentName);
     const children = parent && Array.isArray(parent.children) ? parent.children : [];
     for (const child of children) {
-        try {
-            const res = await fetch(new URL("api/modules/" + encodeURIComponent(child.name), deviceUrl),
-                                    { method: "DELETE", signal: AbortSignal.timeout(5000) });
-            if (!res.ok) return false;
-        } catch (_) {
-            return false;
+        const d = await deviceFetch(new URL("api/modules/" + encodeURIComponent(child.name), deviceUrl),
+                                    { method: "DELETE" }, `replaceChildren DELETE ${child.name}`, onLog);
+        if (!d || !d.ok) {
+            if (onLog) onLog(`[orchestrator] replaceChildren: could not delete ${child.name} — continuing`);
         }
     }
-    return true;
 }
 
 // Fan out every `controls.<Module>.<control>` field for `board` from the
@@ -359,11 +375,13 @@ async function clearDeviceChildren(deviceUrl, parentName) {
 // what the device UI's `consumePendingDeviceModelParam()` does for the Inject-
 // button path — keeps preview-mode parity with production, INCLUDING the
 // `replaceChildren` clear-then-add (so an entry's effects replace the boot
-// defaults rather than stack behind them, same as the device-UI path). Returns
-// true if every POST returned 2xx, false otherwise (any failure short-circuits
-// further pushes so a half-applied state is visible in the logs).
-// 5s per-request timeout — generous for the bench; a typo'd IP fails fast.
-async function tryHttpInjectBoard(deviceUrl, board) {
+// defaults rather than stack behind them, same as the device-UI path).
+// BEST-EFFORT (matching the device-UI handoff's contract, not all-or-nothing): a
+// unit whose add or control write fails after retries is logged and skipped, so one
+// transient hiccup on a flaky device (the P4 right after flash) can't abandon the
+// rest of setup. Returns true only if EVERY unit applied cleanly; false if anything
+// was skipped, so the caller still knows to fall back to the `?deviceModel=` handoff.
+async function tryHttpInjectBoard(deviceUrl, board, onLog) {
     let entry;
     try {
         const res = await fetch("./deviceModels.json", { signal: AbortSignal.timeout(5000) });
@@ -382,16 +400,16 @@ async function tryHttpInjectBoard(deviceUrl, board) {
     // user-added modules like AudioModule, so a control write would 404), then set
     // its controls. A module without parent_id is boot-wired/top-level (System,
     // Network) that already exists — skip the add, just set controls. The add is
-    // idempotent (an existing id returns 200). This is the install flow, so any
-    // failure aborts the inject (all-or-nothing).
+    // idempotent (an existing id returns 200).
     const modules = Array.isArray(entry.modules) ? entry.modules : [];
+    let allOk = true;
     // replaceChildren pre-pass: a container unit (Layer/Layouts/Drivers) marked
     // replaceChildren clears its boot defaults before this entry's children are
     // added — without it the entry's effect sits behind the default and never
     // renders. Same enumerate-then-DELETE as the device-UI path's clearModuleChildren.
     for (const m of modules) {
         if (m && m.replaceChildren && typeof m.id === "string" && m.id) {
-            if (!(await clearDeviceChildren(deviceUrl, m.id))) return false;
+            await clearDeviceChildren(deviceUrl, m.id, onLog);
         }
     }
     for (const m of modules) {
@@ -401,39 +419,34 @@ async function tryHttpInjectBoard(deviceUrl, board) {
         // body the device can't route.
         if (typeof m.id !== "string" || m.id === "") continue;
         if (m.parent_id && m.type) {
-            try {
-                const res = await fetch(new URL("api/modules", deviceUrl), {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ type: m.type, id: m.id, parent_id: m.parent_id }),
-                    signal: AbortSignal.timeout(5000),
-                });
-                if (!res.ok) return false;
-            } catch (_) {
-                return false;
+            const res = await deviceFetch(new URL("api/modules", deviceUrl), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ type: m.type, id: m.id, parent_id: m.parent_id }),
+            }, `add ${m.id}`, onLog);
+            if (!res || !res.ok) {
+                // Add failed after retries — skip this unit's controls (they'd 404
+                // on a module that isn't there) but keep going with the rest.
+                if (onLog) onLog(`[orchestrator] add ${m.id} failed — skipping its controls, continuing`);
+                allOk = false;
+                continue;
             }
         }
         const controls = m.controls;
         if (!controls || typeof controls !== "object") continue;
         for (const [controlName, value] of Object.entries(controls)) {
-            try {
-                const res = await fetch(new URL("api/control", deviceUrl), {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        module: m.id,
-                        control: controlName,
-                        value,
-                    }),
-                    signal: AbortSignal.timeout(5000),
-                });
-                if (!res.ok) return false;
-            } catch (_) {
-                return false;
+            const res = await deviceFetch(new URL("api/control", deviceUrl), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ module: m.id, control: controlName, value }),
+            }, `set ${m.id}.${controlName}`, onLog);
+            if (!res || !res.ok) {
+                if (onLog) onLog(`[orchestrator] set ${m.id}.${controlName} failed — continuing`);
+                allOk = false;
             }
         }
     }
-    return true;
+    return allOk;
 }
 
 // Inline of esptool-js@0.4.7's ESPLoader.main, with attempts=2 instead of
@@ -1091,6 +1104,7 @@ export const installer = {
                 // pushing SET_DEVICE_MODEL so the device's existing config is left intact.
                 if (board && applyDefaults) {
                     trackProgress("set-board");
+                    if (onLog) onLog(`[orchestrator] SET_DEVICE_MODEL "${board}" over Improv serial`);
                     await improvClient.close();
                     improvClient = null;
                     await sendSetBoardFrame(port, board);
@@ -1105,6 +1119,25 @@ export const installer = {
                     // Small grace period so the device's UART task
                     // finishes processing before we close the port.
                     await new Promise(r => setTimeout(r, 200));
+                }
+            }
+
+            // One clear top-level line so the log shows whether this device's
+            // catalog defaults are being applied — and if not, why. Three cases:
+            // applying (a model was picked + the checkbox is ticked), skipped-by-
+            // choice (model picked but "Apply device defaults" unticked — a re-flash
+            // keeping config), or no-model ("(any board)" was selected).
+            // Visible modal status (not just the hidden log) so the user actually sees
+            // the defaults being applied — fires on BOTH the Improv and the eth/typed-IP
+            // (viaHttp) paths, unlike the earlier set-board stage which is Improv-only.
+            if (board && applyDefaults) trackProgress("apply-defaults", { board });
+            if (onLog) {
+                if (board && applyDefaults) {
+                    onLog(`[orchestrator] applying device defaults for "${board}" (deviceModels.json)`);
+                } else if (board) {
+                    onLog(`[orchestrator] NOT applying device defaults for "${board}" — "Apply device defaults" unticked; device config left as-is`);
+                } else {
+                    onLog(`[orchestrator] no device model selected — no defaults to apply`);
                 }
             }
 
@@ -1130,7 +1163,7 @@ export const installer = {
             let httpBoardOk = false;
             if (board && applyDefaults && canFetchHttp(deviceUrl)) {
                 if (onLog) onLog(`[orchestrator] attempting HTTP inject for board="${board}" to ${deviceUrl}`);
-                httpBoardOk = await tryHttpInjectBoard(deviceUrl, board);
+                httpBoardOk = await tryHttpInjectBoard(deviceUrl, board, onLog);
                 if (onLog) onLog(`[orchestrator] HTTP inject ${httpBoardOk ? "succeeded" : "failed"}`);
             } else if (board && applyDefaults && onLog) {
                 // Skipped — most commonly HTTPS Pages → http:// device URL

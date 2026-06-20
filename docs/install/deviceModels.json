@@ -666,6 +666,21 @@
         }
       },
       {
+        "type": "Drivers",
+        "id": "Drivers",
+        "controls": {
+          "brightness": 255
+        }
+      },
+      {
+        "type": "GridLayout",
+        "id": "Grid",
+        "controls": {
+          "width": 8,
+          "height": 8
+        }
+      },
+      {
         "type": "Layer",
         "id": "Layer",
         "replaceChildren": true

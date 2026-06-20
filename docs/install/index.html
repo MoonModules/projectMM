@@ -358,6 +358,7 @@
     .install-section { display: none; }
     .install-section.active { display: block; }
     .install-status { margin: 8px 0; color: var(--muted); }
+    .install-done-note { margin: 4px 0 10px; font-size: 13px; color: var(--muted); }
     .install-warn { color: #d4a052; font-size: 12px; margin-top: 8px; }
     .install-progress {
       height: 8px;
@@ -806,6 +807,7 @@
 
       <div class="install-section" id="section-done">
         <div class="install-status">Device is online!</div>
+        <div class="install-done-note" id="done-defaults" hidden></div>
         <a class="install-success-url" id="done-url" target="_blank" rel="noopener"></a>
         <a class="install-success-url" id="done-url-mdns" target="_blank" rel="noopener" hidden></a>
         <div class="install-actions">
@@ -1116,6 +1118,13 @@
           document.getElementById("provisioning-status").textContent =
             "Setting board identity…";
           break;
+        case "apply-defaults":
+          showSection("provisioning");
+          document.getElementById("provisioning-status").textContent =
+            detail && detail.board
+              ? `Applying device defaults for ${detail.board}…`
+              : "Applying device defaults…";
+          break;
         case "needs-ip":
           showSection("needsIp");
           // Focus the input so the user can start typing immediately.
@@ -1327,6 +1336,23 @@
       const withParam = (u) => pendingBoardPush
         ? u + (u.includes("?") ? "&" : "?") + "deviceModel=" + encodeURIComponent(board)
         : u;
+      // Fold the "applying device defaults" outcome into this popup (which stays up),
+      // since the in-progress status flashes by. Three cases mirror the orchestrator's
+      // log line: applied now (HTTP push succeeded), applied-on-first-visit (push didn't
+      // land, so the link below carries ?deviceModel= and the device applies them when
+      // opened), or not applied (checkbox unticked → config kept as-is).
+      const note = document.getElementById("done-defaults");
+      if (board && applyDefaults) {
+        note.textContent = httpBoardOk
+          ? `Applied ${board} defaults.`
+          : `${board} defaults will be applied when you open the device below.`;
+        note.hidden = false;
+      } else if (board) {
+        note.textContent = `Kept the device's existing config (device defaults not applied).`;
+        note.hidden = false;
+      } else {
+        note.hidden = true;
+      }
       const ipUrl = url;
       const a = document.getElementById("done-url");
       a.textContent = ipUrl;
@@ -1693,6 +1719,7 @@
             a.removeAttribute("href");
             a.textContent = "Erase complete — flash a fresh firmware to use the device again.";
             document.getElementById("done-url-mdns").hidden = true;  // no device URL after erase
+            document.getElementById("done-defaults").hidden = true;  // nothing applied on erase
           },
           onError: handleError,
           onLog: appendLog,
