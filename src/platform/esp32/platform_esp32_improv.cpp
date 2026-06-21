@@ -1,25 +1,27 @@
-// Improv WiFi listener — UART0 RPC dispatch + credential pump.
+// Improv-serial listener — UART0 + native-USB RPC dispatch.
 //
-// Cut out of platform_esp32.cpp (plan-23) for size + readability. Self-
-// contained: the file owns the g_improv state in an anonymous namespace
-// and only reads back into the rest of the platform layer through the
-// public wifiStaConnected() / wifiStaGetIPv4() symbols declared in
-// platform.h. Move was a code-organisation change with no API delta.
+// Cut out of platform_esp32.cpp (plan-23) for size + readability. Self-contained:
+// owns the g_improv state in an anonymous namespace, reaching back into the rest of
+// the platform layer only through public accessors declared in platform.h.
 //
-// Whole file is compiled out on Ethernet-only builds (MM_NO_WIFI). A
-// link-parity stub at the bottom satisfies the platform.h declaration
-// on those profiles (ImprovProvisioningModule guards the call with
-// `if constexpr (hasImprov)`, so it's never invoked at runtime).
+// Runs on EVERY ESP32 target, including Ethernet-only builds (MM_NO_WIFI). The serial
+// transport + the vendor RPCs (SET_DEVICE_MODEL, SET_TX_POWER, APPLY_OP — "Improv =
+// REST over serial") need no WiFi, so the installer can push a device-model's config
+// over serial to an eth device too. Only the WiFi-PROVISIONING RPCs (WIFI_SETTINGS,
+// GET_WIFI_NETWORKS) and their `esp_wifi_*` calls are `#ifndef MM_NO_WIFI`-guarded —
+// on eth those commands aren't offered (there's no WiFi STA to provision), and
+// GET_CURRENT_STATE reports based on the Ethernet link instead.
 
 #include "platform/platform.h"
 
-#ifndef MM_NO_WIFI
-
 #include "core/ImprovFrame.h"
+#include "core/ImprovOpReassembler.h"
 
 #include "driver/uart.h"
 #include "esp_log.h"
-#include "esp_wifi.h"
+#ifndef MM_NO_WIFI
+#include "esp_wifi.h"   // only the WiFi-provisioning RPCs touch esp_wifi_*
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "improv.h"
@@ -79,6 +81,18 @@ struct ImprovTaskState {
     // whole dBm for brown-out-prone boards. Same producer/consumer dance.
     uint8_t* txPowerOut = nullptr;
     std::atomic<bool>* txPowerReady = nullptr;
+
+    // Vendor APPLY_OP RPC (command 0xFC): one REST operation as JSON, pushed over
+    // serial during provisioning ("Improv = REST over serial"). The frame carries
+    // [0xFC][seq][last][chunk bytes…]; chunks are appended to opOut until last=1,
+    // then opReady is set and the module's loop applies the op on the MAIN loop
+    // (never the Improv task). Same producer/consumer dance as deviceModel; the
+    // buffer is module-owned and sized to hold the largest op (a long pins list).
+    // Chunk reassembly + the sequence guard live in mm::ImprovOpReassembler, bound
+    // to opOut in the handler — only the buffer + the ready flag are shared state here.
+    char* opOut = nullptr;
+    size_t opOutLen = 0;
+    std::atomic<bool>* opReady = nullptr;
 };
 static ImprovTaskState g_improv;  // single global — only one Improv task per device
 
@@ -173,6 +187,10 @@ static void improvSendDeviceInfo() {
     improvSend(ImprovFrameType::RpcResponse, rpc);
 }
 
+#ifndef MM_NO_WIFI
+// --- WiFi-provisioning RPCs: only on WiFi builds. On Ethernet-only (MM_NO_WIFI)
+// these aren't offered (no STA to provision) and the esp_wifi_* calls aren't linked. ---
+
 static void improvSendWifiNetworks() {
     // Synchronous-ish scan. Replies one network per RPC frame per the Improv
     // spec, then a final empty payload to mark end-of-list. Limit to 10
@@ -264,6 +282,8 @@ static void improvHandleProvision(const improv::ImprovCommand& cmd) {
     improvSend(ImprovFrameType::RpcResponse, rpc);
     improvSendCurrentState(improv::STATE_PROVISIONED);
 }
+
+#endif // MM_NO_WIFI — end WiFi-provisioning RPCs
 
 // SET_DEVICE_MODEL vendor RPC (command 0xFE) — Step 3 of the deviceModel-injection plan.
 // The web installer's orchestrator sends this after WiFi provisioning so the
@@ -375,6 +395,81 @@ static void improvHandleSetTxPower(const uint8_t* payload, uint8_t len) {
     improvSend(ImprovFrameType::RpcResponse, rpc);
 }
 
+// APPLY_OP vendor RPC (command 0xFC) — "Improv = REST over serial". Carries ONE
+// REST operation as JSON (the same shape an HTTP /api/modules or /api/control body
+// has): {"op":"add",…} / {"op":"set",…} / {"op":"clearChildren",…}. The installer
+// pushes these during provisioning while it owns the serial port, so device-model
+// defaults apply over serial — no HTTP, no mixed-content, no browser pull/handoff.
+//
+// Frame payload layout (after the standard Improv frame header):
+//   [0xFC]              command
+//   [seq]               chunk index, 0-based (seq 0 resets the reassembly buffer)
+//   [last]              1 if this is the final chunk, else 0
+//   [chunk bytes…]      a slice of the op JSON (≤ kImprovMaxPayload-3 bytes)
+// Most ops fit one frame (seq 0, last 1); a long value (e.g. a big pins list)
+// chunks. On last=1 the reassembled JSON is NUL-terminated and opReady is set; the
+// module's loop applies it on the MAIN loop (the factory/tree mutation must not run
+// on the Improv task). Ack each frame so the installer can pace + retry.
+static constexpr uint8_t IMPROV_CMD_APPLY_OP = 0xFC;
+static constexpr uint8_t IMPROV_ERROR_INVALID_OP = 0x82;
+
+static void improvHandleApplyOp(const uint8_t* payload, uint8_t len) {
+    if (!g_improv.opOut || !g_improv.opReady) {
+        improvSendError(improv::ERROR_UNKNOWN_RPC);
+        return;
+    }
+    // Single-buffered: refuse a new op while the module hasn't consumed the previous
+    // one (opReady still set), so a fast installer can't overwrite an unapplied op.
+    // The installer treats this error as "retry shortly" and re-sends. Acquire-load
+    // pairs with the module's release-store when it clears the flag after applying.
+    if (g_improv.opReady->load(std::memory_order_acquire)) {
+        improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_OP));
+        return;
+    }
+    // [0xFC][seq][last] header = 3 bytes; chunk is the rest.
+    if (len < 3) {
+        improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_OP));
+        return;
+    }
+    uint8_t seq = payload[1];
+    uint8_t last = payload[2];
+    const uint8_t* chunk = payload + 3;
+    size_t chunkLen = static_cast<size_t>(len) - 3;
+
+    // `last` is a boolean flag on the wire; anything but 0/1 is a malformed frame
+    // (a desync the parser's checksum didn't catch, or a non-conforming sender).
+    // Reject before reassembly rather than coerce a stray value to "more chunks".
+    if (last > 1) {
+        improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_OP));
+        return;
+    }
+
+    // Chunk reassembly + the out-of-order/duplicate sequence guard live in
+    // mm::ImprovOpReassembler (core, desktop-unit-tested) so the algorithm is proven
+    // without hardware; this handler keeps only the serial I/O around it. Bound once
+    // to g_improv.opOut at first call — improvProvisioningInit sets opOut before the
+    // task starts, and there is a single Improv task per device for its lifetime, so
+    // the static never sees a stale buffer. Re-init with a different buffer is not
+    // supported (would need rebinding); the single-task design makes that moot.
+    static mm::ImprovOpReassembler reasm(g_improv.opOut, g_improv.opOutLen);
+    switch (reasm.feed(seq, last, chunk, chunkLen)) {
+        case mm::ImprovOpReassembler::Result::Error:
+            improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_OP));
+            return;
+        case mm::ImprovOpReassembler::Result::Continue:
+            break;
+        case mm::ImprovOpReassembler::Result::Ready:
+            // release-store pairs with the module's acquire-load before it applies.
+            g_improv.opReady->store(true, std::memory_order_release);
+            break;
+    }
+    // Ack every chunk (empty RpcResponse for 0xFC) so the installer awaits each.
+    auto rpc = improv::build_rpc_response(
+        static_cast<improv::Command>(IMPROV_CMD_APPLY_OP),
+        std::vector<std::string>{}, false);
+    improvSend(ImprovFrameType::RpcResponse, rpc);
+}
+
 // Dispatch a completed frame from the parser. Only RPC frames carry commands
 // we care about; the spec lets the other types through silently.
 static void improvDispatchFrame(const ImprovFrameParser& parser) {
@@ -392,47 +487,50 @@ static void improvDispatchFrame(const ImprovFrameParser& parser) {
         improvHandleSetTxPower(raw, rawLen);
         return;
     }
+    if (rawLen >= 1 && raw[0] == IMPROV_CMD_APPLY_OP) {
+        improvHandleApplyOp(raw, rawLen);
+        return;
+    }
     improv::ImprovCommand cmd = improv::parse_improv_data(
         parser.lastPayload(), parser.lastPayloadLen(), false);
     switch (cmd.command) {
-        case improv::GET_CURRENT_STATE:
-            if (wifiStaConnected()) {
+        case improv::GET_CURRENT_STATE: {
+            // "Connected" means: on WiFi, the STA has an IP; on Ethernet-only, the eth
+            // link is up with a DHCP lease. Either way report PROVISIONED + the device
+            // URL (the way ESPHome does — makes the protocol self-describing on every
+            // reconnect; observable via improv_probe.py). Not connected → AUTHORIZED.
+            uint8_t ip[4] = {};
+            bool connected = false;
+#ifndef MM_NO_WIFI
+            if (wifiStaConnected()) { wifiStaGetIPv4(ip); connected = true; }
+            else
+#endif
+            if (ethConnected()) { ethGetIPv4(ip); connected = true; }
+            if (connected) {
                 improvSendCurrentState(improv::STATE_PROVISIONED);
-                // Follow up the state frame with the device URL on the
-                // WIFI_SETTINGS RPC, the way ESPHome does. The state frame
-                // alone tells a tool the device is on WiFi but doesn't say
-                // *where*; the URL follow-up makes the protocol self-
-                // describing on every reconnect (any future Improv client —
-                // a browser tab post-refresh, a re-run of improv_probe.py,
-                // another tool — can find the device without re-provisioning).
-                // ESP Web Tools' current rich-panel "Visit Device" affordance
-                // is in-session-only, so this doesn't visibly change its UI;
-                // the value is protocol completeness, observable via
-                // improv_probe.py.
-                uint8_t ip[4] = {};
-                wifiStaGetIPv4(ip);
                 if (ip[0] || ip[1] || ip[2] || ip[3]) {
                     char url[64];
                     std::snprintf(url, sizeof(url), "http://%u.%u.%u.%u/", ip[0], ip[1], ip[2], ip[3]);
                     std::vector<std::string> urls = { url };
-                    auto rpc = improv::build_rpc_response(improv::WIFI_SETTINGS, urls, false);
-                    improvSend(ImprovFrameType::RpcResponse, rpc);
+                    improvSend(ImprovFrameType::RpcResponse,
+                               improv::build_rpc_response(improv::WIFI_SETTINGS, urls, false));
                 }
             } else {
                 improvSendCurrentState(improv::STATE_AUTHORIZED);
             }
             break;
+        }
         case improv::GET_DEVICE_INFO: improvSendDeviceInfo(); break;
+#ifndef MM_NO_WIFI
         case improv::GET_WIFI_NETWORKS:
-            // Refuse scans while WiFi STA is connected — esp_wifi_scan_start
-            // puts the radio into scan mode for 2-5 s, dropping inbound ArtNet.
-            // On large installs (16K+ LEDs) that's a visible glitch. The state
-            // returned by GET_CURRENT_STATE already tells the browser the device
-            // is online; a scan adds no new diagnostic value once provisioned.
+            // Refuse scans while WiFi STA is connected — esp_wifi_scan_start puts the
+            // radio into scan mode for 2-5 s, dropping inbound ArtNet (a visible glitch
+            // on a 16K-LED rig). GET_CURRENT_STATE already reports online.
             if (wifiStaConnected()) improvSendError(improv::ERROR_UNABLE_TO_CONNECT);
             else                    improvSendWifiNetworks();
             break;
         case improv::WIFI_SETTINGS: improvHandleProvision(cmd); break;
+#endif
         default:                    improvSendError(improv::ERROR_UNKNOWN_RPC); break;
     }
 }
@@ -587,7 +685,9 @@ bool improvProvisioningInit(const ImprovDeviceInfo& info,
                             char* deviceModelOut, size_t deviceModelOutLen,
                             std::atomic<bool>* deviceModelReady,
                             uint8_t* txPowerOut,
-                            std::atomic<bool>* txPowerReady) {
+                            std::atomic<bool>* txPowerReady,
+                            char* opOut, size_t opOutLen,
+                            std::atomic<bool>* opReady) {
     if (!info.name || !info.chipFamily || !info.firmwareVersion ||
         !ssidOut || ssidOutLen == 0 ||
         !passwordOut || passwordOutLen == 0 ||
@@ -611,6 +711,10 @@ bool improvProvisioningInit(const ImprovDeviceInfo& info,
     // SET_TX_POWER opt-in, same shape.
     g_improv.txPowerOut = txPowerOut;
     g_improv.txPowerReady = txPowerReady;
+    // APPLY_OP opt-in, same shape (the op reassembly buffer + ready flag).
+    g_improv.opOut = opOut;
+    g_improv.opOutLen = opOutLen;
+    g_improv.opReady = opReady;
 
     // 6 KB stack: parser is small, scan response uses std::vector + std::string
     // (some short-string-optimised, some heap). Priority 4 — below OTA (5),
@@ -624,33 +728,3 @@ bool improvProvisioningInit(const ImprovDeviceInfo& info,
 }
 
 } // namespace mm::platform
-
-#else // MM_NO_WIFI — Ethernet-only build: no Improv listener.
-
-#include <atomic>
-#include <cstdio>
-
-namespace mm::platform {
-
-// Stub for link parity. ImprovProvisioningModule guards the call with
-// `if constexpr (hasImprov)`, which evaluates false on MM_NO_WIFI builds —
-// so this is never invoked at runtime. Kept as a symbol so the platform.h
-// declaration links cleanly on every build profile.
-bool improvProvisioningInit(const ImprovDeviceInfo& /*info*/,
-                            char* /*ssidOut*/,    size_t /*ssidOutLen*/,
-                            char* /*passwordOut*/, size_t /*passwordOutLen*/,
-                            std::atomic<bool>* /*ready*/,
-                            char* statusBuf, size_t statusBufLen,
-                            char* /*deviceModelOut*/, size_t /*deviceModelOutLen*/,
-                            std::atomic<bool>* /*deviceModelReady*/,
-                            uint8_t* /*txPowerOut*/,
-                            std::atomic<bool>* /*txPowerReady*/) {
-    if (statusBuf && statusBufLen > 0) {
-        std::snprintf(statusBuf, statusBufLen, "not supported (no WiFi)");
-    }
-    return false;
-}
-
-} // namespace mm::platform
-
-#endif // MM_NO_WIFI

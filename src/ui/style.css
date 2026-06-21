@@ -666,6 +666,7 @@ body {
     color: var(--fg-muted);
     width: 24px;
     height: 24px;
+    flex-shrink: 0;   /* never let a wide input (e.g. an ipv4 field) squeeze the reset ↺ off the row */
     border-radius: 4px;
     cursor: pointer;
     font-size: 14px;

@@ -10,7 +10,9 @@ add_executable(mm_tests
     unit/core/unit_DeviceIdentify.cpp
     unit/core/unit_DevicesModule_ageout.cpp
     unit/core/unit_FilesystemModule_persistence.cpp
+    unit/core/unit_HttpServerModule_apply.cpp
     unit/core/unit_ImprovFrame.cpp
+    unit/core/unit_ImprovOpReassembler.cpp
     unit/core/unit_JsonUtil_parse.cpp
     unit/core/unit_MappingLUT.cpp
     unit/core/unit_ModuleFactory.cpp

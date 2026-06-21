@@ -3,10 +3,12 @@
 #include "core/MoonModule.h"
 #include "core/NetworkModule.h"
 #include "core/SystemModule.h"
+#include "core/HttpServerModule.h"
 #include "core/build_info.h"
 #include "platform/platform.h"
 
 #include <atomic>
+#include <cstdio>
 #include <cstring>
 
 namespace mm {
@@ -31,6 +33,9 @@ class ImprovProvisioningModule : public MoonModule {
 public:
     void setSystemModule(SystemModule* s) { systemModule_ = s; }
     void setNetworkModule(NetworkModule* n) { networkModule_ = n; }
+    // For the APPLY_OP vendor RPC — the module routes a pushed REST op to the
+    // HttpServerModule's apply-core (the same code /api/modules + /api/control use).
+    void setHttpServerModule(HttpServerModule* h) { httpServerModule_ = h; }
 
     // Diagnostics keep ticking; matches FirmwareUpdateModule / SystemModule.
     bool respectsEnabled() const override { return false; }
@@ -57,7 +62,8 @@ public:
                 statusStr_, sizeof(statusStr_),
                 pendingDeviceModel_, sizeof(pendingDeviceModel_),
                 &pendingDeviceModelReady_,
-                &pendingTxPower_, &pendingTxPowerReady_);
+                &pendingTxPower_, &pendingTxPowerReady_,
+                pendingOp_, sizeof(pendingOp_), &pendingOpReady_);
         } else {
             std::strncpy(statusStr_, "not supported on this platform", sizeof(statusStr_) - 1);
         }
@@ -100,9 +106,39 @@ public:
         }
     }
 
+    // APPLY_OP is polled per-TICK (not loop1s) because the installer pushes a burst
+    // of ops during provisioning and single-buffers them: the Improv task refuses a
+    // new op until this consumes the previous (clears pendingOpReady_), so a fast
+    // poll keeps the busy-window to ~one tick and the install snappy. Applying on the
+    // main loop here (not the Improv task) keeps the factory/tree mutation off the
+    // serial task — the same discipline the credentials/deviceModel paths follow.
+    void loop() override {
+        if (pendingOpReady_.load(std::memory_order_acquire) && httpServerModule_) {
+            // The Improv task already acked frame RECEIPT; the op is APPLIED here. A
+            // failed op (UnknownType, OutOfRange, a not-found target) can't travel back
+            // on that spent ack, so surface it: log it over serial and park it in
+            // provision_status, so a silently-misconfigured device is visible on a
+            // monitor and via /api/state rather than looking like a clean install.
+            // Ok and AlreadyExists are both success (a re-pushed op is idempotent);
+            // only a genuine failure is surfaced.
+            auto r = httpServerModule_->applyOp(pendingOp_);
+            if (r != HttpServerModule::OpResult::Ok &&
+                r != HttpServerModule::OpResult::AlreadyExists) {
+                std::printf("Improv APPLY_OP failed (result=%d): %s\n",
+                            static_cast<int>(r), pendingOp_);
+                std::snprintf(statusStr_, sizeof(statusStr_), "error: apply failed (%d)",
+                              static_cast<int>(r));
+            }
+            std::memset(pendingOp_, 0, sizeof(pendingOp_));
+            pendingOpReady_.store(false, std::memory_order_release);
+        }
+        MoonModule::loop();   // tick children (none today, but keep the contract)
+    }
+
 private:
-    SystemModule*  systemModule_  = nullptr;
-    NetworkModule* networkModule_ = nullptr;
+    SystemModule*     systemModule_     = nullptr;
+    NetworkModule*    networkModule_    = nullptr;
+    HttpServerModule* httpServerModule_ = nullptr;
     char statusStr_[64] = "listening";
 
     // Buffers the platform task writes; sized to NetworkModule's storage.
@@ -124,6 +160,12 @@ private:
     // for brown-out-prone boards; same producer/consumer shape as the above.
     uint8_t pendingTxPower_ = 0;
     std::atomic<bool> pendingTxPowerReady_{false};
+
+    // Vendor APPLY_OP RPC — one REST op as JSON, reassembled by the Improv task and
+    // applied here on the main loop via HttpServerModule::applyOp. Sized for the
+    // largest op (a long pins list fits comfortably in 512 bytes).
+    char pendingOp_[512] = {};
+    std::atomic<bool> pendingOpReady_{false};
 };
 
 } // namespace mm

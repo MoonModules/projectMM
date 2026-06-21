@@ -299,6 +299,12 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // owns the preview wire format end to end; core just writes the bytes.
     preview->setBroadcaster(httpServer);
 
+    // APPLY_OP vendor RPC (0xFC): the installer pushes the device-model's catalog
+    // ops over serial during provisioning, and ImprovProvisioningModule routes each
+    // to the HttpServerModule apply-core (the same code /api/modules + /api/control
+    // use) — "Improv = REST over serial". Wired here once httpServer exists.
+    if (improvModule) improvModule->setHttpServerModule(httpServer);
+
     // Register top-level modules with scheduler (scheduler deletes on teardown).
     // Order matters: filesystem first (load hook runs before any module's setup),
     // then system (deviceName), firmwareUpdate (status surface, no deps), network

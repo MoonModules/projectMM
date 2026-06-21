@@ -43,12 +43,51 @@ test/
 ├── unit/
 │   ├── core/      unit_<Module>[_<topic>].cpp        # mirrors src/core/
 │   └── light/     unit_<Module>[_<topic>].cpp        # mirrors src/light/
-└── scenarios/
-    ├── core/      scenario_<Module>_<topic>.json     # mirrors src/core/
-    └── light/     scenario_<Module>_<topic>.json     # mirrors src/light/
+├── scenarios/
+│   ├── core/      scenario_<Module>_<topic>.json     # mirrors src/core/
+│   └── light/     scenario_<Module>_<topic>.json     # mirrors src/light/
+├── python/        test_<topic>.py                    # host-side: MoonDeck / build-script logic
+└── js/            <topic>.test.mjs                    # host-side: web-installer logic
 ```
 
 A test lives under the subfolder of its **primary** `@module`'s source domain (e.g. `Layer` lives in `src/light/`, so `unit_Layer_extrude.cpp` goes in `test/unit/light/`). Cross-domain awareness travels through the `@also` list, not the directory. There's no `platform/` subfolder today — `src/platform/` is a pure abstraction layer whose desktop backend every unit test implicitly exercises; ESP32 platform code never runs on the desktop, so there's nothing to put there yet.
+
+### Host-side tests (Python + JS)
+
+The C++ `ctest` / scenario suites can't reach the **Python** (MoonDeck, build scripts) or **JS** (web installer) code, so those get their own host-side unit tier — `test/python/` (pytest, run `uv run --with pytest --with pyserial pytest test/python`) and `test/js/` (Node's built-in runner, run `node --test "test/js/**/*.test.mjs"`; no `package.json`/`npm install`). Both run in `.github/workflows/test.yml` on every PR and are commit gates (CLAUDE.md Event 1, gate 10) when `scripts/` / `docs/install/` / the test dirs change. Python test files carry their deps in a PEP-723 `# /// script` block (the repo's convention — there's no central `pyproject.toml`); pyserial is a dep only because `improv_provision.py`'s import guard exits without it, not because the frame logic needs it.
+
+#### What's covered today: the Improv frame wire format
+
+The Improv serial frame is implemented **three times** — device C++ (`src/core/ImprovFrame.h`), Python (`scripts/build/improv_provision.py`), and installer JS (`docs/install/improv-frame.js`) — so a drift in any one silently breaks provisioning. Both suites assert the **same golden vector** so the Python and JS builders provably agree (hand-verified against the C++ sum-mod-256 checksum):
+
+```
+buildImprovFrame(type=0x03, payload=[0x01])  ==  49 4d 50 52 4f 56 01 03 01 01 e3
+                                                  └IMPROV┘ v  t  l  p  checksum
+```
+
+**`test/python/test_improv_frame.py`** (pytest) — pins the *shared envelope* that MoonDeck and the provisioning scripts speak (`build_frame` / `checksum` in `improv_provision.py`):
+
+| Test | Pins |
+|---|---|
+| `test_checksum_is_sum_mod_256` | checksum is `sum(bytes) & 0xFF` — empty → 0, `0xFF 0xFF` → `0xFE` (wraps) |
+| `test_frame_layout` | `IMPROV` magic, version 1, type, length, payload, total length |
+| `test_golden_vector_g1` | the exact 11-byte golden frame above (the cross-impl anchor) |
+| `test_checksum_covers_header_through_payload` | checksum spans header→payload, excludes the checksum byte itself |
+
+**`test/js/improv-frame.test.mjs`** (node:test) — pins the same envelope *plus* the `APPLY_OP` chunking that only the installer JS and device C++ implement (Python's provisioning path does WIFI_SETTINGS, not config push):
+
+| Test | Pins |
+|---|---|
+| frame layout | magic / version / type / length / payload / checksum positions |
+| checksum is sum-mod-256 | matches Python + C++ |
+| golden vector G1 | the same 11-byte frame as the pytest anchor |
+| G2 — small APPLY_OP `set` is a single frame | `[0xFC][seq=0][last=1]` header + the op JSON byte-identical in the payload |
+| G3 — a >125-byte op chunks into ordered frames | two frames, `seq` 0→1, `last` 0→1, the 125-byte chunk boundary, reassembly reproduces the op JSON exactly |
+| at-least-one-frame | an empty op still emits one frame with `last=1` (so `last` always sends) |
+
+The JS suite proves the installer *chunks* an op correctly; the **device side that reassembles those chunks** is pinned by the C++ `unit_ImprovOpReassembler` suite (`src/core/ImprovOpReassembler.h`, the pure state machine behind the device's `APPLY_OP` handler — extracted from `platform_esp32_improv.cpp` so it's desktop-testable). It covers the full receive contract: in-order multi-chunk reassembly + NUL-termination, **duplicate-chunk rejection** and **out-of-order/skipped-seq rejection** (the guard against an installer retry corrupting the buffer), **overflow** rejection at the buffer-minus-NUL boundary, mid-stream `seq 0` abandoning a partial op, and clean recovery after every error. Encode (JS) + reassemble (C++) together prove APPLY_OP end to end without hardware.
+
+This is the first host-side suite; MoonDeck's pure logic (catalog reverse-lookup, state migration) and the installer's op-walk / storage are the next candidates as they accrete regression risk.
 
 ### Naming convention
 

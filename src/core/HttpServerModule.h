@@ -50,6 +50,36 @@ public:
     void loop20ms() override;
     void loop1s() override;
 
+    // -----------------------------------------------------------------------
+    // Transport-free apply-core — "the REST API, callable in-process"
+    // -----------------------------------------------------------------------
+    // The add/set/clear-children operations the HTTP handlers do, factored out of
+    // the TcpConnection so any transport can drive them. Two callers today: the
+    // HTTP handlers (thin wrappers that map OpResult → status code) and the Improv
+    // serial path (ImprovProvisioningModule applies a pushed op on the main loop —
+    // "Improv = REST over serial"). One home for the apply logic; transports differ
+    // only in how they frame the request and report the result.
+    enum class OpResult : uint8_t {
+        Ok,
+        AlreadyExists,   // add is a no-op: a module with this id is already in the tree (still success)
+        ModuleNotFound,  // module / parent name not in the tree
+        ControlNotFound, // module exists but has no such control (a distinct 404)
+        UnknownType,     // factory doesn't know the type
+        BadRequest,      // missing field, top-level add, parent rejected child
+        OutOfRange,      // numeric value outside bounds
+        Malformed,       // value didn't parse (e.g. IPv4)
+        ReadOnly,        // tried to write a display-only control
+    };
+    // body is a small JSON object: {"type","id","parent_id"} / {"module","control","value"}.
+    OpResult applyAddModule(const char* typeName, const char* id, const char* parentId);
+    OpResult applySetControl(const char* moduleName, const char* controlName, const char* valueJson);
+    // Enumerate-then-DELETE every child of `parentName` (the catalog inject's
+    // replaceChildren). Returns NotFound if the parent doesn't exist, else Ok.
+    OpResult applyClearChildren(const char* parentName);
+    // Parse a single REST op object ({"op":"add|set|clearChildren", …}) and dispatch
+    // to the three above. The wire shape the Improv APPLY_OP frame carries.
+    OpResult applyOp(const char* opJson);
+
 private:
     platform::TcpServer server_;
     Scheduler* scheduler_ = nullptr;
