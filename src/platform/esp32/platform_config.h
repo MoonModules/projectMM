@@ -194,16 +194,15 @@ constexpr EthPinConfig ethConfigDefault =
 // `if constexpr` on this so desktop builds get a 501-returning stub instead.
 constexpr bool hasOta = true;
 
-// Improv WiFi listens on UART0 for WiFi credentials. Disabled on Ethernet-only
-// firmwares (--firmware esp32-eth) — the WiFi headers and the esp_wifi_scan_* calls
-// the listener uses are not linked there, and there's no WiFi STA to provision
-// either way. The S3's native USB-Serial-JTAG (separate from UART0) is not
-// supported by the Improv listener; see the ImprovProvisioningModule spec for
-// the user-facing footnote.
-#ifdef MM_NO_WIFI
-constexpr bool hasImprov = false;
-#else
+// Improv-serial is the device's serial RPC channel (UART0 + native USB-Serial-JTAG):
+// the WiFi-provisioning RPCs (WIFI_SETTINGS, GET_WIFI_NETWORKS) AND the vendor RPCs
+// (SET_DEVICE_MODEL, SET_TX_POWER, APPLY_OP — "Improv = REST over serial"). The
+// transport is always available on ESP32, so the listener runs everywhere — including
+// Ethernet-only builds (`--firmware esp32-eth*`), where the WiFi-only RPCs are compiled
+// out (the `esp_wifi_*` calls aren't linked) but the vendor RPCs still work, so the web
+// installer can push a device-model's config over serial to an eth device just as it
+// does to a WiFi one. `hasImprov` is therefore true on every ESP32 target; only desktop
+// (no serial peripheral) leaves it false.
 constexpr bool hasImprov = true;
-#endif
 
 } // namespace mm::platform

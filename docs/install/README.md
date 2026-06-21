@@ -5,9 +5,13 @@ This directory holds the source for the **custom installer page** (driven by
 <https://moonmodules.org/projectMM/install/>.
 
 End users land here, pick a channel + device, click Install. The browser flashes
-the device over USB (Web Serial → ESP32), then runs Improv-Serial provisioning,
-SET_DEVICE_MODEL, and HTTP control fan-out — all from the same orchestrator,
-end-to-end, no ESP Web Tools dependency on the install path.
+the device over USB (Web Serial → ESP32), runs Improv-Serial provisioning, then
+pushes the picked device-model's whole config over the **same serial port** as REST
+operations (**"Improv = REST over serial"**: SET_DEVICE_MODEL + APPLY_OP) — all from
+the same orchestrator, no ESP Web Tools dependency. Pushing over serial (not HTTP)
+is what makes the deployed HTTPS installer work: a browser blocks an HTTPS page from
+POSTing to a plain-`http://` device (mixed-content), so the old HTTP fan-out + the
+`?deviceModel=` browser handoff are gone; serial bypasses the network entirely.
 
 ## What's in this directory
 
@@ -16,32 +20,28 @@ end-to-end, no ESP Web Tools dependency on the install path.
   the picker's GitHub-release URLs to same-origin Pages URLs before handing
   them to the custom orchestrator (Web Serial is CORS-bound).
 - [`install-orchestrator.js`](install-orchestrator.js) — owns the
-  SerialPort across flash → reboot → Improv provision → SET_DEVICE_MODEL RPC.
-  Replaces the ESP Web Tools install button so the post-provision board
-  push works (EWT 10.x's `state-changed` event fires inside a shadow DOM
-  that's invisible to the host page; the orchestrator side-steps that by
-  owning the whole flow). Falls through to a "device IP" prompt when the
-  device doesn't speak Improv back — the picked deviceModel is handed off via the
-  `?deviceModel=` query param + HTTP `/api/control` inject (see the `deviceModel`
-  control on [SystemModule.md](../moonmodules/core/SystemModule.md)). An **Apply
-  device defaults** checkbox gates this whole inject (all three channels:
-  SET_DEVICE_MODEL, the HTTP `/api/control` fan-out, and the `?deviceModel=`
-  first-visit handoff). It auto-ticks with **Erase chip first** (a clean slate wants
-  defaults) and starts unticked otherwise, so re-flashing a configured device keeps
-  its current modules/controls instead of having the catalog's `replaceChildren`
-  delete the user's effects. The board's `txPower` brown-out cap still applies either
-  way — it's a hardware trait, not a default.
+  SerialPort across flash → reboot → Improv provision → config push. Replaces the
+  ESP Web Tools install button (EWT 10.x's `state-changed` event fires inside a
+  shadow DOM invisible to the host page; the orchestrator owns the whole flow so it
+  can write its own vendor RPC frames). After provisioning it pushes the picked
+  device-model's catalog over serial as APPLY_OP ops (a `clearChildren` pre-pass for
+  any `replaceChildren` container, then an `add` per module + a `set` per control) —
+  same operations the HTTP REST API does, applied by the same device-side core. An
+  **Apply device defaults** checkbox gates that push: it auto-ticks with **Erase chip
+  first** (a clean slate wants defaults) and starts unticked otherwise, so re-flashing
+  a configured device keeps its current modules/controls. The board's `txPower`
+  brown-out cap is still sent via its own `SET_TX_POWER` RPC **before** provisioning
+  (it must land before the first association on weak-power boards). When the device
+  doesn't speak Improv back (typed-IP / eth-only path), no serial push happens — apply
+  the defaults later from MoonDeck on the LAN (plain HTTP REST, no mixed-content).
 - [`devices.js`](devices.js) — the *Your devices* list. Stores devices the
-  user provisioned from this page so they can re-visit / erase / forget
-  them. Renders a dedicated *Inject* button next to Visit for every entry
-  with a `board` field; the button opens `<device>/?deviceModel=<name>` and the
-  device UI fetches the matching `deviceModels.json` entry from Pages and, for each of
-  its `modules`, adds the module (`/api/modules`) then sets its nested controls
-  (`/api/control`) — add-then-configure; see the schema below. Idempotent — safe
-  to re-click after a popup-blocker rejection or a follow-up catalog edit.
-- [`deviceModels.json`](deviceModels.json) — the board catalog (name → firmware
-  variants + the modules/controls to inject) the picker fetches and the
-  installer / device-UI / MoonDeck injectors write from. Schema below.
+  user provisioned from this page so they can re-visit / erase / forget them
+  (Visit / Erase / Forget). The device-model defaults are applied during the install
+  over serial, so there is no "inject" button here — to re-apply a model to an
+  already-running device, use MoonDeck on the LAN.
+- [`deviceModels.json`](deviceModels.json) — the device-model catalog (name → firmware
+  variants + the modules/controls). The installer walks it to emit the APPLY_OP ops;
+  MoonDeck and the picker also read it. Schema below.
 - [`favicon.png`](favicon.png) — moon-man, same as the device UI.
 - [`README.md`](README.md) — this file.
 
@@ -67,11 +67,11 @@ labelled summary with a thumbnail:
 ## Catalog schema (`deviceModels.json`)
 
 A flat JSON array of catalog entries. Each entry is the single source of truth
-for one piece of hardware and what to set up on it at install time. Three
-clients consume it identically — the web installer (`install-orchestrator.js`),
-the device UI's `?deviceModel=` inject (`src/ui/app.js`), and MoonDeck
-(`scripts/moondeck.py`) — so **adding another module-with-controls unit needs no
-client change**.
+for one piece of hardware and what to set up on it at install time. Two clients
+consume it identically — the web installer (`install-orchestrator.js`, which emits
+the entry's units as APPLY_OP ops over serial) and MoonDeck (`scripts/moondeck.py`,
+which POSTs them over HTTP REST on the LAN) — so **adding another module-with-controls
+unit needs no client change** (both walk the same entry; only the transport differs).
 
 ```json
 {

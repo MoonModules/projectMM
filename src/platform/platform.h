@@ -258,6 +258,11 @@ struct ImprovDeviceInfo {
 // catalog cap normally arrives over HTTP *after* the device is online,
 // which such a board can never reach — proven on the bench 2026-06-10. Same
 // validate + buffer-write + flag-signal shape as SET_DEVICE_MODEL.
+// opOut/opOutLen/opReady carry the APPLY_OP vendor RPC (0xFC) — one REST operation
+// as JSON, pushed over serial during provisioning ("Improv = REST over serial").
+// Chunks reassemble into opOut; on the last chunk opReady's release-store publishes
+// it and ImprovProvisioningModule applies the op on the main loop. Same buffer +
+// flag shape as deviceModel; opt out by leaving null (desktop stub does).
 bool improvProvisioningInit(const ImprovDeviceInfo& info,
                             char* ssidOut, size_t ssidOutLen,
                             char* passwordOut, size_t passwordOutLen,
@@ -266,7 +271,9 @@ bool improvProvisioningInit(const ImprovDeviceInfo& info,
                             char* deviceModelOut = nullptr, size_t deviceModelOutLen = 0,
                             std::atomic<bool>* deviceModelReady = nullptr,
                             uint8_t* txPowerOut = nullptr,
-                            std::atomic<bool>* txPowerReady = nullptr);
+                            std::atomic<bool>* txPowerReady = nullptr,
+                            char* opOut = nullptr, size_t opOutLen = 0,
+                            std::atomic<bool>* opReady = nullptr);
 
 class UdpSocket {
 public:

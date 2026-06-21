@@ -146,16 +146,6 @@ async function init() {
     try {
         const resp = await fetch("/api/state");
         state = await resp.json();
-        // Pending-board handoff from the web installer. The installer page
-        // (docs/install/devices.js → Inject button) opens us with
-        // `?deviceModel=<name>` when the orchestrator couldn't push the board
-        // itself (HTTPS Pages → HTTP device blocked by mixed-content, OR
-        // an Improv-less firmware variant). We consume it once, fetch the
-        // deviceModels.json entry from Pages, add its modules + set their controls
-        // via the standard `/api/modules` + `/api/control` writes, then strip the param via
-        // history.replaceState. Fire-and-forget — the WS state push driven
-        // by sendControl re-renders the affected fields.
-        consumePendingDeviceModelParam();
         const savedSel = lsRead(LS_SELECTED, "mm.selectedModule", null);
         if (state.modules && state.modules.length > 0) {
             const exists = savedSel && state.modules.some(m => m.name === savedSel);
@@ -179,11 +169,9 @@ async function init() {
 }
 
 async function sendControl(moduleName, controlName, value) {
-    // Best-effort by design — failures are not retried here (see
-    // consumePendingDeviceModelParam's "No retry" contract). The query param is
-    // single-shot. Non-ok responses + network errors are logged to console
-    // so a user with devtools open can see what went wrong (e.g. a board-
-    // injected control value that the device-side validator rejected).
+    // Best-effort by design — failures are not retried here. Non-ok responses +
+    // network errors are logged to console so a user with devtools open can see
+    // what went wrong (e.g. a control value the device-side validator rejected).
     try {
         const res = await fetch("/api/control", {
             method: "POST",
@@ -195,159 +183,6 @@ async function sendControl(moduleName, controlName, value) {
         }
     } catch (e) {
         console.warn(`[control] POST ${moduleName}.${controlName} failed (error=${e && e.message ? e.message : e})`);
-    }
-}
-
-async function sendAddModule(m) {
-    // Best-effort add for the board-inject path, same no-retry contract as
-    // sendControl. Mirrors POST /api/modules {type, id, parent_id}; the
-    // endpoint is idempotent (an existing id returns 200), so re-running an
-    // inject re-adds nothing. Distinct from the interactive addModule() helper,
-    // which refetches state per call (wrong inside a batch loop). Returns true
-    // on success so the caller can skip a failed module's controls (writing
-    // them would just 404 against a module that was never created).
-    try {
-        const res = await fetch("/api/modules", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({type: m.type, id: m.id, parent_id: m.parent_id})
-        });
-        if (!res.ok) {
-            console.warn(`[board-inject] add module ${m.type} failed (status=${res.status})`);
-            return false;
-        }
-        return true;
-    } catch (e) {
-        console.warn(`[board-inject] add module ${m.type} failed (error=${e && e.message ? e.message : e})`);
-        return false;
-    }
-}
-
-// Public Pages URL of the board catalog. The installer page also serves
-// this at `./deviceModels.json` (same-origin from the installer's perspective),
-// but the device UI is on a different origin (the device's HTTP server),
-// so we fetch the canonical Pages copy. CORS: GitHub Pages static assets
-// ship `Access-Control-Allow-Origin: *`, so a cross-origin fetch from
-// http://<device>/ to https://moonmodules.org succeeds without proxying.
-// Hardcoded rather than configurable: the catalog is project-global, not
-// per-installation. During local development, flip this to
-// `http://localhost:8000/deviceModels.json` and re-flash; preview_installer.py
-// sends the same `Access-Control-Allow-Origin: *` header production does.
-const DEVICE_MODELS_JSON_URL = "https://moonmodules.org/projectMM/install/deviceModels.json";
-
-// Consume an installer-emitted `?deviceModel=<name>` query param: look the name
-// up in deviceModels.json on Pages, then for each module in the entry add it
-// (`/api/modules`) and set its nested controls (`/api/control`) so each
-// module's validation runs.
-// Strip the query param BEFORE the network round-trip so a mid-fetch
-// refresh doesn't double-push. No retry — failures (network, rejection)
-// leave the device unchanged; user re-runs the Inject button or sets the
-// fields manually via MoonDeck.
-//
-// See docs/moonmodules/core/SystemModule.md (the deviceModel control) for the
-// deviceModels.json schema and the full handoff sequence.
-async function consumePendingDeviceModelParam() {
-    const params = new URLSearchParams(location.search);
-    const pendingDeviceModel = params.get("deviceModel");
-    if (!pendingDeviceModel) return;
-    // Strip the param up-front so a refresh during the async fetch doesn't
-    // re-trigger the injection.
-    params.delete("deviceModel");
-    const qs = params.toString();
-    history.replaceState({}, "",
-        location.pathname + (qs ? "?" + qs : "") + location.hash);
-
-    let entry;
-    try {
-        const res = await fetch(DEVICE_MODELS_JSON_URL);
-        if (!res.ok) throw new Error(`deviceModels.json HTTP ${res.status}`);
-        const catalog = await res.json();
-        entry = Array.isArray(catalog)
-            ? catalog.find(b => b && b.name === pendingDeviceModel)
-            : null;
-    } catch (e) {
-        // Network down, Pages outage, or deviceModels.json missing the entry.
-        // Surface in the console so a user with devtools open can see why
-        // injection didn't take; don't show a modal since the rest of the
-        // UI is operational and most users just want to use the device.
-        console.warn("[board-inject] failed to fetch deviceModels.json:", e);
-        return;
-    }
-    if (!entry) {
-        console.warn(`[board-inject] no catalog entry for deviceModel "${pendingDeviceModel}"`);
-        return;
-    }
-    // Each entry is a list of module-with-controls units:
-    //   entry.modules = [ { type, id, parent_id?, controls?, replaceChildren? }, ... ]
-    // Per module: add it first (when it has a parent_id — a fresh flash has no
-    // user-added modules like AudioModule, so a control write would 404), then
-    // set its controls. A module WITHOUT parent_id is a boot-wired/top-level one
-    // (System, Network, Drivers) that already exists — skip the add, just set
-    // controls. The add is idempotent (an existing id returns 200). If an add
-    // fails, skip that module's controls (writing them would 404) but keep going —
-    // a single failed module shouldn't abort the whole inject (best-effort
-    // contract; sendControl never aborts either). Sequential so each
-    // FilesystemModule debounced-save sees the full set.
-    //
-    // replaceChildren: a container unit (Layer, Layouts, Drivers) sets it to REPLACE
-    // the boot-wired defaults rather than add alongside them. The catalog inject is
-    // otherwise add-only, but a Layer only renders its FIRST enabled effect/modifier —
-    // so to make a device's catalog effects actually show (e.g. the testbench's
-    // AudioSpectrum instead of the default Noise) the container's existing children
-    // must be cleared first. We do that here by DELETE-ing each current child of the
-    // named container before its catalog children are added (same enumerate-then-delete
-    // the live scenario runner's clear_children uses). Done once per replaceChildren
-    // container, up front, so the subsequent add units land in an empty container.
-    // Defensive: a malformed catalog entry could have `modules` as a non-array (or
-    // absent) — normalise to [] so the loops below can't throw on bad JSON.
-    const modules = Array.isArray(entry.modules) ? entry.modules : [];
-    for (const c of modules) {
-        if (c && c.replaceChildren && c.id) await clearModuleChildren(c.id);
-    }
-    for (const m of modules) {
-        if (!m || typeof m !== "object") continue;
-        if (m.parent_id && m.type) {
-            if (!(await sendAddModule(m))) {
-                console.warn(`[board-inject] skipping controls for ${m.id || m.type} — its add failed`);
-                continue;
-            }
-        }
-        if (m.controls && typeof m.controls === "object") {
-            for (const [controlName, value] of Object.entries(m.controls)) {
-                await sendControl(m.id, controlName, value);
-            }
-        }
-    }
-}
-
-// DELETE every current child of the module named `parentName` — used by the catalog
-// inject's replaceChildren so an entry's effects/modifiers replace the boot defaults
-// instead of stacking behind them. Best-effort (mirrors the inject's no-retry
-// contract): fetch the live tree, find the container, DELETE each child by name.
-// Only deletable (user-editable) children go; the device rejects a code-wired
-// child's DELETE, which is fine — those aren't what a catalog entry replaces.
-async function clearModuleChildren(parentName) {
-    let tree;
-    try {
-        const res = await fetch("/api/state");
-        if (!res.ok) return;
-        tree = await res.json();
-    } catch (_) { return; }
-    const findByName = (mods, name) => {
-        if (!Array.isArray(mods)) return null;   // malformed payload — no children here
-        for (const m of mods) {
-            if (m && m.name === name) return m;
-            const hit = findByName(m && m.children, name);
-            if (hit) return hit;
-        }
-        return null;
-    };
-    const parent = findByName(tree.modules, parentName);
-    const children = parent && Array.isArray(parent.children) ? parent.children : [];
-    for (const child of children) {
-        try {
-            await fetch("/api/modules/" + encodeURIComponent(child.name), { method: "DELETE" });
-        } catch (_) { /* best-effort; keep clearing the rest */ }
     }
 }
 
@@ -1334,7 +1169,6 @@ function createControl(moduleName, moduleType, ctrl) {
             input.value = ctrl.value ?? "";
             input.placeholder = "0.0.0.0";
             input.maxLength = 15;  // "255.255.255.255" = 15
-            input.size = 15;
             input.addEventListener("input", () => {
                 dragTs[key] = Date.now();
                 debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, input.value));

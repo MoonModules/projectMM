@@ -444,76 +444,83 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
     }
 }
 
-void HttpServerModule::handleSetControl(platform::TcpConnection& conn, const char* body) {
-    // Parse: {"module":"Noise","control":"scale","value":8}
-    char moduleName[32] = {};
-    char controlName[32] = {};
-    mm::json::parseString(body, "module", moduleName, sizeof(moduleName));
-    mm::json::parseString(body, "control", controlName, sizeof(controlName));
-
-    // Find the module by name
+// Apply-core: set one control's value. `valueJson` is a small JSON object holding
+// the value under the "value" key ({"value":8}) — the same body the HTTP handler
+// receives, so applyControlValue (which reads by key) is reused verbatim. Transport-
+// free: no TcpConnection, returns an OpResult the caller maps to its own reporting.
+HttpServerModule::OpResult HttpServerModule::applySetControl(
+        const char* moduleName, const char* controlName, const char* valueJson) {
     MoonModule* target = findModuleByName(moduleName);
-    if (!target) {
-        sendResponse(conn, 404, "application/json", "{\"error\":\"module not found\"}");
-        return;
-    }
+    if (!target) return OpResult::NotFound;
 
-    // Handle module-level "enabled" property
+    // Module-level "enabled" pseudo-control.
     if (std::strcmp(controlName, "enabled") == 0) {
-        target->setEnabled(mm::json::parseBool(body, "value"));
+        target->setEnabled(mm::json::parseBool(valueJson, "value"));
         target->markDirty();
         FilesystemModule::noteDirty();
         if (scheduler_) scheduler_->buildState();
-        sendResponse(conn, 200, "application/json", "{\"ok\":true}");
-        return;
+        return OpResult::Ok;
     }
 
-    // Find the control by name and set value
     auto& ctrls = target->controls();
     for (uint8_t i = 0; i < ctrls.count(); i++) {
         auto& c = ctrls[i];
         if (std::strcmp(c.name, controlName) != 0) continue;
 
-        // Per-type parse + validate + apply lives in Control.cpp. We map
-        // the result to specific HTTP responses; non-Ok results leave the
-        // storage untouched, so no need to roll anything back.
-        ApplyResult r = applyControlValue(c, body, "value");
+        // Per-type parse + validate + apply lives in Control.cpp. Non-Ok leaves the
+        // storage untouched, so no rollback needed.
+        ApplyResult r = applyControlValue(c, valueJson, "value");
         switch (r) {
-            case ApplyResult::Ok:
-                break;
-            case ApplyResult::OutOfRange:
-                sendResponse(conn, 400, "application/json", "{\"error\":\"value out of range\"}");
-                return;
-            case ApplyResult::Malformed:
-                sendResponse(conn, 400, "application/json", "{\"error\":\"value malformed\"}");
-                return;
-            case ApplyResult::ReadOnly:
-                sendResponse(conn, 400, "application/json", "{\"error\":\"control is read-only\"}");
-                return;
+            case ApplyResult::Ok:        break;
+            case ApplyResult::OutOfRange: return OpResult::OutOfRange;
+            case ApplyResult::Malformed:  return OpResult::Malformed;
+            case ApplyResult::ReadOnly:   return OpResult::ReadOnly;
         }
         // Rebuild the control list after every change so onBuildControls() can
-        // re-evaluate which controls are visible for the new value — any control
-        // can reshape the list (a Select picking static-IP fields, a checkbox
-        // revealing its options). rebuildControls() is clear()+onBuildControls(),
-        // which the contract requires to be cheap and idempotent, so running it
-        // per-change costs nothing for the common case where the list is unchanged.
+        // re-evaluate which controls are visible for the new value (a Select
+        // revealing fields, etc.). clear()+onBuildControls(), cheap + idempotent.
         target->rebuildControls();
-        // Three-tier control-change reaction (see MoonModule::onUpdate):
-        //   1. onUpdate — always, cheap. Lets the module recompute a small LUT etc.
-        //   2. rebuild — only when the control changes physical dims / mapping shape
-        //      (Layout, Modifier). Most controls (effect values, brightness) skip this,
-        //      so dragging a slider stays fluent with no tree-wide realloc sweep.
+        // Three-tier control-change reaction (see MoonModule::onUpdate): onUpdate
+        // always; a tree-wide buildState only when the control reshapes dims/mapping.
         target->onUpdate(controlName);
         target->markDirty();
         FilesystemModule::noteDirty();
         if (target->controlChangeTriggersBuildState(controlName) && scheduler_) {
             scheduler_->buildState();
         }
-
-        sendResponse(conn, 200, "application/json", "{\"ok\":true}");
-        return;
+        return OpResult::Ok;
     }
-    sendResponse(conn, 404, "application/json", "{\"error\":\"control not found\"}");
+    return OpResult::NotFound;   // control name not on this module
+}
+
+void HttpServerModule::handleSetControl(platform::TcpConnection& conn, const char* body) {
+    // Parse: {"module":"Noise","control":"scale","value":8} — the apply-core reads
+    // the value out of `body` itself (so it sees the exact same JSON the API got).
+    char moduleName[32] = {};
+    char controlName[32] = {};
+    mm::json::parseString(body, "module", moduleName, sizeof(moduleName));
+    mm::json::parseString(body, "control", controlName, sizeof(controlName));
+
+    switch (applySetControl(moduleName, controlName, body)) {
+        case OpResult::Ok:
+            sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+            return;
+        case OpResult::NotFound:
+            sendResponse(conn, 404, "application/json", "{\"error\":\"module or control not found\"}");
+            return;
+        case OpResult::OutOfRange:
+            sendResponse(conn, 400, "application/json", "{\"error\":\"value out of range\"}");
+            return;
+        case OpResult::Malformed:
+            sendResponse(conn, 400, "application/json", "{\"error\":\"value malformed\"}");
+            return;
+        case OpResult::ReadOnly:
+            sendResponse(conn, 400, "application/json", "{\"error\":\"control is read-only\"}");
+            return;
+        default:
+            sendResponse(conn, 400, "application/json", "{\"error\":\"bad request\"}");
+            return;
+    }
 }
 
 MoonModule* HttpServerModule::findModuleByName(const char* name) {
@@ -588,6 +595,51 @@ void HttpServerModule::writeModuleMetricsJson(JsonSink& sink, MoonModule* mod, b
     }
 }
 
+// Apply-core: add one module under a named parent. Transport-free; returns an
+// OpResult. Idempotent on the id (an existing name returns Ok, "already there").
+HttpServerModule::OpResult HttpServerModule::applyAddModule(
+        const char* typeName, const char* id, const char* parentId) {
+    if (!typeName || typeName[0] == 0) return OpResult::BadRequest;
+
+    // Top-level modules (Layouts/Layers/Drivers/Filesystem/System/Network/HttpServer)
+    // are policy-fixed and wired in main.cpp at boot. Only *child* adds are allowed —
+    // anything else would orphan the module (never ticked, leaked).
+    if (!parentId || parentId[0] == 0) return OpResult::BadRequest;
+
+    // Idempotent: an existing module with this name is success, not an error — so a
+    // re-run of the catalog inject (or a double APPLY_OP) is a no-op, not a dup.
+    if (id && id[0] != 0 && findModuleByName(id)) return OpResult::Ok;
+
+    // Resolve the parent before allocating — failure means we never make an orphan.
+    auto* parent = findModuleByName(parentId);
+    if (!parent) return OpResult::NotFound;
+
+    auto* mod = ModuleFactory::create(typeName);
+    if (!mod) return OpResult::UnknownType;
+    if (id && id[0] != 0) mod->setName(id);
+
+    if (!parent->addChild(mod)) {
+        delete mod;
+        return OpResult::BadRequest;   // parent rejected the child
+    }
+
+    // Disambiguate a colliding name (a second "Layer" etc.) — same pass the Scheduler
+    // runs after persistence load; single source of truth.
+    if (scheduler_) scheduler_->ensureUniqueName(mod);
+
+    // Lifecycle in Scheduler::setup() order: onBuildControls() (bind buffers) →
+    // setup() (may read them) → onBuildState().
+    mod->onBuildControls();
+    mod->setup();
+    mod->onBuildState();
+    if (scheduler_) scheduler_->buildState();
+
+    // Persist the new tree shape (debounced save via noteDirty).
+    parent->markDirty();
+    FilesystemModule::noteDirty();
+    return OpResult::Ok;
+}
+
 void HttpServerModule::handleAddModule(platform::TcpConnection& conn, const char* body) {
     char typeName[32] = {};
     char id[32] = {};
@@ -596,81 +648,82 @@ void HttpServerModule::handleAddModule(platform::TcpConnection& conn, const char
     mm::json::parseString(body, "id", id, sizeof(id));
     mm::json::parseString(body, "parent_id", parentId, sizeof(parentId));
 
-    if (typeName[0] == 0) {
-        sendResponse(conn, 400, "application/json", "{\"error\":\"missing type\"}");
-        return;
+    switch (applyAddModule(typeName, id, parentId)) {
+        case OpResult::Ok:
+            sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+            return;
+        case OpResult::NotFound:
+            sendResponse(conn, 404, "application/json", "{\"error\":\"parent not found\"}");
+            return;
+        case OpResult::UnknownType:
+            sendResponse(conn, 400, "application/json", "{\"error\":\"unknown type\"}");
+            return;
+        case OpResult::BadRequest:
+        default:
+            sendResponse(conn, 400, "application/json",
+                         "{\"error\":\"missing type, or parent_id required (top-level modules are policy-fixed in main.cpp), or parent rejected child\"}");
+            return;
     }
+}
 
-    // Top-level modules (Layouts/Layers/Drivers/Filesystem/System/Network/HttpServer)
-    // are policy-fixed and wired in main.cpp at boot. The HTTP surface only
-    // allows adding *child* modules to an existing parent — anything else
-    // would be an orphan (not added to any tree, not registered with the
-    // scheduler, never ticked, leaked). Reject early and symmetrically with
-    // handleDeleteModule / handleReplaceModule (both also 400 on top-level).
-    // Scenario tests adding top-level modules go through scenario_runner.cpp's
-    // in-process path, not this HTTP handler.
-    if (parentId[0] == 0) {
-        sendResponse(conn, 400, "application/json",
-                     "{\"error\":\"parent_id required (top-level modules are policy-fixed in main.cpp)\"}");
-        return;
+// Apply-core: DELETE every user-editable child of `parentName` (the catalog
+// inject's replaceChildren — an entry's effects replace the boot defaults instead
+// of stacking). Same removeChild → teardown → deleteTree the HTTP delete does.
+// Code-wired children (Preview, Improv) are left in place; they aren't what a
+// catalog entry replaces. Transport-free.
+HttpServerModule::OpResult HttpServerModule::applyClearChildren(const char* parentName) {
+    auto* parent = findModuleByName(parentName);
+    if (!parent) return OpResult::NotFound;
+    bool removedAny = false;
+    // Iterate from the end: removeChild compacts the array, so back-to-front keeps
+    // indices valid as we delete.
+    for (int i = static_cast<int>(parent->childCount()) - 1; i >= 0; i--) {
+        auto* c = parent->child(static_cast<uint8_t>(i));
+        if (!c || !c->userEditable()) continue;
+        parent->removeChild(c);
+        c->teardown();
+        Scheduler::deleteTree(c);
+        removedAny = true;
     }
-
-    // Check if module with this name already exists
-    if (id[0] != 0 && findModuleByName(id)) {
-        sendResponse(conn, 200, "application/json", "{\"ok\":true,\"note\":\"already exists\"}");
-        return;
+    if (removedAny) {
+        if (scheduler_) scheduler_->buildState();
+        parent->markDirty();
+        FilesystemModule::noteDirty();
     }
+    return OpResult::Ok;
+}
 
-    // Resolve the parent before allocating — failure here means we never
-    // construct an orphan module.
-    auto* parent = findModuleByName(parentId);
-    if (!parent) {
-        sendResponse(conn, 404, "application/json", "{\"error\":\"parent not found\"}");
-        return;
+// Apply-core dispatcher: one REST op as a JSON object. This is the wire shape the
+// Improv APPLY_OP frame carries — "REST over serial". The op is a small flat object:
+//   {"op":"add","type":"...","id":"...","parent":"..."}
+//   {"op":"set","module":"...","control":"...","value":...}
+//   {"op":"clearChildren","parent":"..."}
+// For "set" the whole op JSON is handed to applySetControl, which reads "value" by
+// key — the same way the HTTP /api/control handler reads it from the request body,
+// so any value type rides through unchanged.
+HttpServerModule::OpResult HttpServerModule::applyOp(const char* opJson) {
+    if (!opJson) return OpResult::BadRequest;
+    char op[16] = {};
+    mm::json::parseString(opJson, "op", op, sizeof(op));
+    if (std::strcmp(op, "add") == 0) {
+        char type[32] = {}, id[32] = {}, parent[32] = {};
+        mm::json::parseString(opJson, "type", type, sizeof(type));
+        mm::json::parseString(opJson, "id", id, sizeof(id));
+        mm::json::parseString(opJson, "parent", parent, sizeof(parent));
+        return applyAddModule(type, id, parent);
     }
-
-    // Create module via factory
-    auto* mod = ModuleFactory::create(typeName);
-    if (!mod) {
-        sendResponse(conn, 400, "application/json", "{\"error\":\"unknown type\"}");
-        return;
+    if (std::strcmp(op, "set") == 0) {
+        char module[32] = {}, control[32] = {};
+        mm::json::parseString(opJson, "module", module, sizeof(module));
+        mm::json::parseString(opJson, "control", control, sizeof(control));
+        return applySetControl(module, control, opJson);
     }
-    if (id[0] != 0) mod->setName(id);
-
-    if (!parent->addChild(mod)) {
-        delete mod;
-        sendResponse(conn, 400, "application/json", "{\"error\":\"parent rejected child\"}");
-        return;
+    if (std::strcmp(op, "clearChildren") == 0) {
+        char parent[32] = {};
+        mm::json::parseString(opJson, "parent", parent, sizeof(parent));
+        return applyClearChildren(parent);
     }
-
-    // Disambiguate the name if something else in the tree already carries
-    // it. Factory display names like "Layer" collide when a second Layer is
-    // added (factory has no per-instance state), and findModuleByName does
-    // a first-match DFS so the second one becomes unreachable. The
-    // Scheduler also runs the same pass over the whole tree after
-    // persistence load (see Scheduler::setup phase 2a). Single source of
-    // truth — both paths go through Scheduler::ensureUniqueName.
-    if (scheduler_) scheduler_->ensureUniqueName(mod);
-
-    // Lifecycle: same phase order as Scheduler::setup() — onBuildControls() first so
-    // control buffers are bound, then setup() (which may read those bound members),
-    // then onBuildState(). Getting this order wrong means a module's setup() sees
-    // uninitialized control state.
-    mod->onBuildControls();
-    mod->setup();
-    mod->onBuildState();
-
-    if (scheduler_) scheduler_->buildState();
-
-    // Persist the new tree shape — marking the parent dirty causes saveSubtree
-    // to write the parent's file with the new child slot included. The save is
-    // debounced (2s after the last dirty mark) so an immediate reboot won't catch
-    // the write; callers wanting a synchronous save can call FilesystemModule::flush().
-    // parent is guaranteed non-null by the top-of-function checks.
-    parent->markDirty();
-    FilesystemModule::noteDirty();
-
-    sendResponse(conn, 200, "application/json", "{\"ok\":true}");
+    return OpResult::BadRequest;   // unknown op
 }
 
 void HttpServerModule::handleDeleteModule(platform::TcpConnection& conn, const char* moduleName) {

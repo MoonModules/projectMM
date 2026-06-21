@@ -326,7 +326,7 @@
       font-size: 12px;
       cursor: pointer;
     }
-    .device-board-name { color: var(--fg); font-size: 12px; margin-top: 2px; }
+    .device-model-name { color: var(--fg); font-size: 12px; margin-top: 2px; }
     .device-btn:hover { background: rgba(123, 158, 255, 0.08); }
 
     /* Install modal — backdrop + centered card. Replaces the ESP Web Tools
@@ -772,8 +772,8 @@
       <!-- Needs-IP form: shown when the device didn't speak Improv back
            (alreadyOnline branch, or an Improv-less firmware like esp32-eth).
            User types the IP/hostname so we can still add the device to
-           "Your devices" and hand the picked board off through the Visit
-           click's same-origin URL (?deviceModel=…).
+           "Your devices". (No serial config push happens on this path — the
+           device-model defaults are applied later via MoonDeck on the LAN.)
            Retry button: cheap second chance at Improv before falling back
            to manual IP entry. Some boards (LOLIN S3 mini, slow-booting
            variants) lose the race against the post-flash 2 s reopen window;
@@ -1309,43 +1309,54 @@
       if (retrying) input.value = "";
     }
 
-    function handleSuccess({ url, mdns, board, applyDefaults = true, viaHttp, httpBoardOk, alreadyOnline }) {
+    function handleSuccess({ url, mdns, board, applyDefaults = true, defaultsApplied = false, viaHttp, alreadyOnline }) {
       disarmUnloadGuard();
+      // Device-model defaults are applied DURING the install over serial (Improv =
+      // REST over serial — SET_DEVICE_MODEL + APPLY_OP). So there's no "open this
+      // link to finish" step any more; the success screen just confirms + links.
       if (!url) {
-        // User skipped the IP prompt. They've already read the
-        // needs-ip section's hints ("find it on your router's admin page",
-        // "Leave blank and Skip…"), so a second consolation screen would
-        // just add a click — close the modal directly.
+        // No device URL (user skipped the IP prompt, or an eth-only/no-Improv device).
+        // On that path no serial config push happened. If a model was picked, say so —
+        // it can be applied later from MoonDeck on the LAN — else just close.
+        if (board && applyDefaults) {
+          showSection("done");
+          document.getElementById("done-url").removeAttribute("href");
+          document.getElementById("done-url").textContent = "";
+          document.getElementById("done-url-mdns").hidden = true;
+          document.getElementById("done-defaults").textContent =
+            `Flashed. ${board} defaults weren't applied (no device address) — apply them later from MoonDeck on your network.`;
+          document.getElementById("done-defaults").hidden = false;
+          return;
+        }
         closeModal();
         return;
       }
       showSection("done");
-      // Always show the IP link — it's the address that's guaranteed to work, and the
-      // installer always has it here. When the boot serial also reported the device's
-      // <deviceName>.local name, show that as a SECOND link below it: it survives a DHCP
-      // lease change (the IP can go stale) but only resolves where mDNS works, so it's
-      // the friendly extra, not the primary. When there's no mdns name, only the IP shows.
-      // When the in-orchestrator HTTP push of the device-model controls didn't land
-      // (pendingBoardPush), decorate the clicked link with `?deviceModel=<name>` so
-      // visiting it runs the device-side consume path and applies the controls on first
-      // visit — no separate Inject click needed. Displayed text stays the clean URL.
-      // Only pending when the user actually wanted defaults applied — applyDefaults:false
-      // (re-flash keeping config) must NOT decorate the link or Inject button with
-      // ?deviceModel=, or clicking it would re-inject what the user chose to skip.
-      const pendingBoardPush = !!(board && applyDefaults && !httpBoardOk);
-      const withParam = (u) => pendingBoardPush
-        ? u + (u.includes("?") ? "&" : "?") + "deviceModel=" + encodeURIComponent(board)
-        : u;
-      // Fold the "applying device defaults" outcome into this popup (which stays up),
-      // since the in-progress status flashes by. Three cases mirror the orchestrator's
-      // log line: applied now (HTTP push succeeded), applied-on-first-visit (push didn't
-      // land, so the link below carries ?deviceModel= and the device applies them when
-      // opened), or not applied (checkbox unticked → config kept as-is).
+      // Always show the IP link (guaranteed to work). When the boot serial also
+      // reported the device's <deviceName>.local name, show it as a second link —
+      // it survives a DHCP lease change but only resolves where mDNS works.
+      const a = document.getElementById("done-url");
+      a.textContent = url;
+      a.href = url;
+      const aMdns = document.getElementById("done-url-mdns");
+      if (mdns) {
+        const mdnsUrl = `http://${mdns}/`;
+        aMdns.textContent = mdnsUrl;
+        aMdns.href = mdnsUrl;
+        aMdns.hidden = false;
+      } else {
+        aMdns.hidden = true;
+      }
+      // Report the defaults outcome HONESTLY, from `defaultsApplied` (did the serial
+      // push actually run?), not `applyDefaults` (the checkbox intent): applied,
+      // wanted-but-couldn't (model picked + ticked but no push happened — e.g. an
+      // Improv-less path), or kept-config (unticked).
       const note = document.getElementById("done-defaults");
-      if (board && applyDefaults) {
-        note.textContent = httpBoardOk
-          ? `Applied ${board} defaults.`
-          : `${board} defaults will be applied when you open the device below.`;
+      if (defaultsApplied) {
+        note.textContent = `Applied ${board} defaults.`;
+        note.hidden = false;
+      } else if (board && applyDefaults) {
+        note.textContent = `Flashed, but ${board} defaults weren't applied — apply them from MoonDeck on your network.`;
         note.hidden = false;
       } else if (board) {
         note.textContent = `Kept the device's existing config (device defaults not applied).`;
@@ -1353,38 +1364,9 @@
       } else {
         note.hidden = true;
       }
-      const ipUrl = url;
-      const a = document.getElementById("done-url");
-      a.textContent = ipUrl;
-      a.href = withParam(ipUrl);
-      const aMdns = document.getElementById("done-url-mdns");
-      if (mdns) {
-        const mdnsUrl = `http://${mdns}/`;
-        aMdns.textContent = mdnsUrl;
-        aMdns.href = withParam(mdnsUrl);
-        aMdns.hidden = false;
-      } else {
-        aMdns.hidden = true;
-      }
-      // Pending-board flag: set whenever the in-orchestrator HTTP push
-      // didn't succeed AND there's a board name to push. Covers both
-      // paths now:
-      //   - viaHttp (needs-ip / typed-IP): HTTP push is the ONLY board-
-      //     injection channel, so if it failed nothing landed.
-      //   - Improv-success: SET_DEVICE_MODEL over serial already wrote
-      //     System.deviceModel, but the per-device-model controls in `controls.*`
-      //     (e.g. Network.txPowerSetting for the weak-power WiFi cap)
-      //     only ship via the HTTP fan-out. If that fan-out failed —
-      //     exactly the failure mode the fix exists to defend against —
-      //     `pendingBoard` ensures the Inject button decorates the
-      //     row and the device-side `?deviceModel=` consume path can land
-      //     the controls on first visit. (pendingBoardPush is computed above, where
-      //     it also gates the `?deviceModel=` on the success link.)
-      // When defaults were NOT applied (applyDefaults:false — a re-flash keeping the
-      // device's own config), store no board: the saved entry must not claim a model
-      // the device wasn't configured to, and its Inject button must not offer to push
-      // one the user chose to skip.
-      myDevices.addProvisionedDevice(url, applyDefaults ? board : "", { pendingBoardPush });
+      // Store no board unless the defaults actually applied, so the saved entry doesn't
+      // claim a model the device wasn't configured to.
+      myDevices.addProvisionedDevice(url, defaultsApplied ? board : "");
     }
 
     function handleError(stage, error) {

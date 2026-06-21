@@ -15,7 +15,11 @@
 //   3. release the flash locks, hand the same port to ImprovSerial
 //   4. show a WiFi creds form, await user input
 //   5. provision via Improv standard SEND_WIFI_CREDENTIALS
-//   6. send SET_DEVICE_MODEL vendor RPC (0xFE) with the picked board name
+//   6. push the device-model config over serial — "Improv = REST over serial":
+//      SET_DEVICE_MODEL (0xFE, the identity name) then APPLY_OP (0xFC) frames for
+//      the deviceModels.json entry's modules + controls. No HTTP, no browser pull,
+//      so it works identically on the HTTPS deployed installer and local preview
+//      (the old HTTP /api/control fan-out couldn't run HTTPS→http — mixed-content).
 //   7. callback with { url, board } so the host page populates
 //      "Your devices" + shows a "Visit device" link
 //
@@ -46,6 +50,18 @@ const IMPROV_CMD_SET_DEVICE_MODEL = 0xFE;
 // Sent BEFORE provisioning so the very first association runs capped.
 // Matches the device-side handler at src/platform/esp32/platform_esp32_improv.cpp.
 const IMPROV_CMD_SET_TX_POWER = 0xFD;
+
+// APPLY_OP vendor RPC command ID — "Improv = REST over serial". Carries ONE REST
+// operation as JSON ({"op":"add|set|clearChildren",…}, the same shape an HTTP
+// /api/modules or /api/control body has). The installer pushes the device-model's
+// catalog ops over serial during provisioning, so the defaults apply with no HTTP
+// (which an HTTPS installer page can't make to an http:// device — mixed-content)
+// and no browser pull/handoff. Frame payload: [0xFC][seq][last][chunk…]. Matches
+// improvHandleApplyOp at src/platform/esp32/platform_esp32_improv.cpp.
+const IMPROV_CMD_APPLY_OP = 0xFC;
+// Max op-JSON bytes per frame: the device's kImprovMaxPayload (128) minus the
+// 3-byte [cmd][seq][last] header. A longer op (a big pins list) chunks.
+const APPLY_OP_CHUNK_MAX = 128 - 3;
 
 // Improv frame type for RPC commands (matches src/core/ImprovFrame.h).
 const IMPROV_FRAME_TYPE_RPC = 0x03;
@@ -200,6 +216,103 @@ async function sendSetTxPowerFrame(port, dBm) {
     }
 }
 
+// Send ONE REST op (a JS object like {op:"add",type,id,parent}) to the device over
+// serial as APPLY_OP frames — "Improv = REST over serial". The op JSON is chunked
+// into [0xFC][seq][last][chunk] frames (≤ APPLY_OP_CHUNK_MAX op bytes each; most ops
+// are one frame). We own the port here (ImprovSerial closed after provision), so we
+// write directly. Best-effort fire: the device acks each frame with an RpcResponse
+// we don't read back (Web Serial duplex read while we hold the writer is awkward),
+// and the single-buffer busy-guard on the device + a small inter-op delay keep the
+// device from being overrun. Returns nothing; throws only on a write error.
+async function sendApplyOpFrame(port, op) {
+    const bytes = new TextEncoder().encode(JSON.stringify(op));
+    const writer = port.writable.getWriter();
+    try {
+        const total = bytes.length;
+        // At least one frame even for an (impossible) empty op, so `last` always sends.
+        const chunks = Math.max(1, Math.ceil(total / APPLY_OP_CHUNK_MAX));
+        for (let seq = 0; seq < chunks; seq++) {
+            const start = seq * APPLY_OP_CHUNK_MAX;
+            const slice = bytes.subarray(start, start + APPLY_OP_CHUNK_MAX);
+            const last = seq === chunks - 1 ? 1 : 0;
+            const payload = new Uint8Array(3 + slice.length);
+            payload[0] = IMPROV_CMD_APPLY_OP;
+            payload[1] = seq & 0xFF;
+            payload[2] = last;
+            payload.set(slice, 3);
+            await writer.write(buildImprovFrame(IMPROV_FRAME_TYPE_RPC, payload));
+        }
+    } finally {
+        writer.releaseLock();
+    }
+    // Small pace so the device's main loop consumes the op (clears its single buffer)
+    // before the next op's frame arrives — the device refuses a new op while busy.
+    await new Promise(r => setTimeout(r, 30));
+}
+
+// Apply a device-model's catalog defaults over serial: SET_DEVICE_MODEL (the identity
+// name) then the full config as APPLY_OP ops. The caller must OWN the serial port (no
+// ImprovSerial holding the writable lock). Works on any reachable device — fresh-
+// provisioned (WiFi) OR already-online at boot (Ethernet) — because the serial RPCs
+// need no provisioning state, only the open port. Gated by applyDefaults: when the
+// "Apply device defaults" checkbox is unticked, push nothing (keep the device's
+// config). Returns true iff the catalog push actually ran (so the success note can
+// report honestly rather than always claiming "Applied").
+async function pushDefaultsOverSerial(port, board, applyDefaults, trackProgress, onLog) {
+    if (!(board && applyDefaults)) {
+        if (onLog) onLog(board
+            ? `[orchestrator] NOT applying ${board} defaults — "Apply device defaults" unticked; device config left as-is`
+            : `[orchestrator] no device model selected — no defaults to apply`);
+        return false;
+    }
+    trackProgress("apply-defaults", { board });
+    if (onLog) onLog(`[orchestrator] applying ${board} defaults over serial (SET_DEVICE_MODEL + APPLY_OP)`);
+    await sendSetBoardFrame(port, board);
+    await new Promise(r => setTimeout(r, 100));   // let the UART task settle
+    return await sendConfigOverSerial(port, board, onLog);
+}
+
+// Push a device-model's whole catalog config to the device over serial. Walks the
+// SAME deviceModels.json entry the HTTP path used (replaceChildren pre-pass, then
+// per-module add + per-control set) but emits APPLY_OP ops instead of HTTP requests
+// — so the defaults apply during provisioning with no HTTP and no browser handoff.
+// Returns true if the entry was found + pushed, false if no catalog entry for `board`.
+async function sendConfigOverSerial(port, board, onLog) {
+    let entry;
+    try {
+        const res = await fetch("./deviceModels.json", { signal: AbortSignal.timeout(5000) });
+        if (!res.ok) return false;
+        const catalog = await res.json();
+        entry = Array.isArray(catalog) ? catalog.find(b => b && b.name === board) : null;
+    } catch (e) {
+        if (onLog) onLog(`[orchestrator] serial config: catalog fetch failed (${e && e.message || e})`);
+        return false;
+    }
+    if (!entry) return false;
+    const modules = Array.isArray(entry.modules) ? entry.modules : [];
+    // replaceChildren pre-pass: clear a container's boot defaults before its catalog
+    // children are added (so the entry's effects replace, not stack).
+    for (const m of modules) {
+        if (m && m.replaceChildren && typeof m.id === "string" && m.id) {
+            await sendApplyOpFrame(port, { op: "clearChildren", parent: m.id });
+        }
+    }
+    for (const m of modules) {
+        if (!m || typeof m !== "object" || typeof m.id !== "string" || m.id === "") continue;
+        if (m.parent_id && m.type) {
+            await sendApplyOpFrame(port, { op: "add", type: m.type, id: m.id, parent: m.parent_id });
+        }
+        const controls = m.controls;
+        if (controls && typeof controls === "object") {
+            for (const [control, value] of Object.entries(controls)) {
+                await sendApplyOpFrame(port, { op: "set", module: m.id, control, value });
+            }
+        }
+    }
+    if (onLog) onLog(`[orchestrator] applied ${board} defaults over serial`);
+    return true;
+}
+
 // Read the device's boot serial log for the two facts the browser can't get any other
 // way: the device's IP and its mDNS `<deviceName>.local` address. projectMM appends
 // machine-parseable `MM_IP=<dotted-quad>` and `MM_DEVICE=<deviceName>.local` tokens to
@@ -217,9 +330,9 @@ async function sendSetTxPowerFrame(port, dBm) {
 // firmware, modules, heap, …) from the live device's REST API (`http://<ip>/api/…`),
 // which is richer and always current — no reason to scrape more fields from a boot log.
 // The device name is the one exception that CAN'T come from REST: on the HTTPS Pages site
-// a fetch to the plain-http device is blocked by mixed-content (see canFetchHttp), so the
-// `.local` address has to ride the serial log too. Adding any OTHER device info to the
-// installer = call the REST API with this IP, not grow this parser.
+// a fetch to the plain-http device is blocked by mixed-content, so the `.local` address has
+// to ride the serial log too. Adding any OTHER device info to the installer = call the REST
+// API with this IP, not grow this parser.
 //
 // Returns { ip, mdns } — ip is the dotted-quad ("" on timeout), mdns is the
 // "<deviceName>.local" address ("" if the firmware predates MM_DEVICE). A fresh device
@@ -303,151 +416,6 @@ function normalizeDeviceUrl(input) {
     }
 }
 
-// Mixed-content guard: the installer page can only fetch() a plain http://
-// device URL when the page itself is on http:// (i.e. localhost preview).
-// On https://moonmodules.org the browser blocks the fetch silently — caller
-// must fall through to the query-param handoff via the Visit button. file:
-// pages count as http for this purpose.
-function canFetchHttp(deviceUrl) {
-    if (!deviceUrl) return false;
-    let target;
-    try { target = new URL(deviceUrl); } catch (_) { return false; }
-    if (target.protocol !== "http:") return true;  // https device → no block
-    return window.location.protocol !== "https:";
-}
-
-// One device request with bounded retries. A fresh-flashed device (especially
-// the P4 over Ethernet, busy with link bring-up + per-add buildState right after
-// flash) intermittently times out or 5xx's a single call; without retry one blip
-// would abandon the whole inject. So: retry on timeout / network error / 5xx with
-// a short backoff, but NOT on a 4xx (a 404/400 is deterministic — the module/control
-// genuinely doesn't exist, retrying won't change that). Returns the Response on a
-// final 2xx/4xx, or null if every attempt threw (timeout/network). `label` + `onLog`
-// surface what happened. 5s per-attempt timeout — generous for the bench.
-async function deviceFetch(url, opts, label, onLog, attempts = 3) {
-    for (let i = 1; i <= attempts; i++) {
-        try {
-            const res = await fetch(url, { ...opts, signal: AbortSignal.timeout(5000) });
-            if (res.ok || (res.status >= 400 && res.status < 500)) return res;   // settled (success or deterministic 4xx)
-            if (onLog) onLog(`[orchestrator] ${label}: HTTP ${res.status} (attempt ${i}/${attempts})`);
-        } catch (e) {
-            if (onLog) onLog(`[orchestrator] ${label}: ${e && e.name === "TimeoutError" ? "timeout" : (e && e.message) || e} (attempt ${i}/${attempts})`);
-        }
-        if (i < attempts) await new Promise(r => setTimeout(r, 200 * i));   // linear backoff
-    }
-    return null;   // every attempt threw
-}
-
-// DELETE every current child of the module named `parentName` on `deviceUrl` —
-// the installer-side counterpart of the device UI's clearModuleChildren, used by
-// tryHttpInjectBoard's replaceChildren so an entry's effects replace the boot
-// defaults instead of stacking. Fetch the live tree, find the container, DELETE
-// each child by name. Best-effort with retry (deviceFetch): a child that won't
-// delete is logged and skipped rather than aborting — the worst case is an effect
-// stacking behind a leftover default, not a half-set-up device.
-async function clearDeviceChildren(deviceUrl, parentName, onLog) {
-    const res = await deviceFetch(new URL("api/state", deviceUrl), {}, "replaceChildren read state", onLog);
-    if (!res || !res.ok) return;
-    let tree;
-    try { tree = await res.json(); } catch (_) { return; }
-    const findByName = (mods, name) => {
-        if (!Array.isArray(mods)) return null;
-        for (const m of mods) {
-            if (m && m.name === name) return m;
-            const hit = findByName(m && m.children, name);
-            if (hit) return hit;
-        }
-        return null;
-    };
-    const parent = findByName(tree.modules, parentName);
-    const children = parent && Array.isArray(parent.children) ? parent.children : [];
-    for (const child of children) {
-        const d = await deviceFetch(new URL("api/modules/" + encodeURIComponent(child.name), deviceUrl),
-                                    { method: "DELETE" }, `replaceChildren DELETE ${child.name}`, onLog);
-        if (!d || !d.ok) {
-            if (onLog) onLog(`[orchestrator] replaceChildren: could not delete ${child.name} — continuing`);
-        }
-    }
-}
-
-// Fan out every `controls.<Module>.<control>` field for `board` from the
-// same-origin `./deviceModels.json` into the device's `/api/control`. Mirrors
-// what the device UI's `consumePendingDeviceModelParam()` does for the Inject-
-// button path — keeps preview-mode parity with production, INCLUDING the
-// `replaceChildren` clear-then-add (so an entry's effects replace the boot
-// defaults rather than stack behind them, same as the device-UI path).
-// BEST-EFFORT (matching the device-UI handoff's contract, not all-or-nothing): a
-// unit whose add or control write fails after retries is logged and skipped, so one
-// transient hiccup on a flaky device (the P4 right after flash) can't abandon the
-// rest of setup. Returns true only if EVERY unit applied cleanly; false if anything
-// was skipped, so the caller still knows to fall back to the `?deviceModel=` handoff.
-async function tryHttpInjectBoard(deviceUrl, board, onLog) {
-    let entry;
-    try {
-        const res = await fetch("./deviceModels.json", { signal: AbortSignal.timeout(5000) });
-        if (!res.ok) return false;
-        const catalog = await res.json();
-        entry = Array.isArray(catalog)
-            ? catalog.find(b => b && b.name === board)
-            : null;
-    } catch (_) {
-        return false;
-    }
-    if (!entry) return false;
-    // Each entry is a list of module-with-controls units:
-    //   { type, id, parent_id?, controls?, replaceChildren? }
-    // Per module: add it first (when it has a parent_id — a fresh flash has no
-    // user-added modules like AudioModule, so a control write would 404), then set
-    // its controls. A module without parent_id is boot-wired/top-level (System,
-    // Network) that already exists — skip the add, just set controls. The add is
-    // idempotent (an existing id returns 200).
-    const modules = Array.isArray(entry.modules) ? entry.modules : [];
-    let allOk = true;
-    // replaceChildren pre-pass: a container unit (Layer/Layouts/Drivers) marked
-    // replaceChildren clears its boot defaults before this entry's children are
-    // added — without it the entry's effect sits behind the default and never
-    // renders. Same enumerate-then-DELETE as the device-UI path's clearModuleChildren.
-    for (const m of modules) {
-        if (m && m.replaceChildren && typeof m.id === "string" && m.id) {
-            await clearDeviceChildren(deviceUrl, m.id, onLog);
-        }
-    }
-    for (const m of modules) {
-        if (!m || typeof m !== "object") continue;
-        // id keys both the module add and every control write below; a unit
-        // without one is malformed catalog data — skip it rather than POST a
-        // body the device can't route.
-        if (typeof m.id !== "string" || m.id === "") continue;
-        if (m.parent_id && m.type) {
-            const res = await deviceFetch(new URL("api/modules", deviceUrl), {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ type: m.type, id: m.id, parent_id: m.parent_id }),
-            }, `add ${m.id}`, onLog);
-            if (!res || !res.ok) {
-                // Add failed after retries — skip this unit's controls (they'd 404
-                // on a module that isn't there) but keep going with the rest.
-                if (onLog) onLog(`[orchestrator] add ${m.id} failed — skipping its controls, continuing`);
-                allOk = false;
-                continue;
-            }
-        }
-        const controls = m.controls;
-        if (!controls || typeof controls !== "object") continue;
-        for (const [controlName, value] of Object.entries(controls)) {
-            const res = await deviceFetch(new URL("api/control", deviceUrl), {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ module: m.id, control: controlName, value }),
-            }, `set ${m.id}.${controlName}`, onLog);
-            if (!res || !res.ok) {
-                if (onLog) onLog(`[orchestrator] set ${m.id}.${controlName} failed — continuing`);
-                allOk = false;
-            }
-        }
-    }
-    return allOk;
-}
 
 // Inline of esptool-js@0.4.7's ESPLoader.main, with attempts=2 instead of
 // the default 7. The default takes ~60 s to fail when the user picks a
@@ -582,7 +550,7 @@ export const installer = {
      *   guidance message — the OS picker is modal and covers the install
      *   modal. Optional; degrade gracefully to a silent re-prompt when
      *   omitted (older host pages just lose the guidance section).
-     * @param {(detail: {url: string, mdns?: string, board: string, viaHttp?: boolean, httpBoardOk?: boolean, alreadyOnline?: boolean}) => void} opts.onSuccess
+     * @param {(detail: {url: string, mdns?: string, board: string, applyDefaults?: boolean, viaHttp?: boolean, alreadyOnline?: boolean}) => void} opts.onSuccess
      *   `mdns` is the device's `<deviceName>.local` address from the boot serial
      *   (deviceName is the single identity — mDNS = AP = DHCP hostname all follow
      *   it), or "" if the firmware predates the MM_DEVICE token. The host shows it
@@ -593,11 +561,8 @@ export const installer = {
      *   initialize() fails and the orchestrator falls through to the
      *   needs-ip prompt. `viaHttp:true` is set whenever the URL came from
      *   the user-typed IP form (alreadyOnline OR Improv-less firmware).
-     *   `httpBoardOk:true` is set when an HTTP `/api/control` push of the
-     *   picked board succeeded inside the orchestrator — only possible in
-     *   localhost preview, since HTTPS Pages can't fetch the device's HTTP
-     *   URL (mixed-content). Host uses `httpBoardOk` to skip the pending-
-     *   board query-param handoff in `addProvisionedDevice`.
+     *   `applyDefaults` reflects the "Apply device defaults" checkbox; the host
+     *   uses it to word the success note (applied over serial vs config kept).
      * @param {(stage: string, error: Error) => void} opts.onError
      * @param {(line: string) => void} [opts.onLog] - optional: each line
      *   esptool-js writes to its "terminal" gets forwarded here. Host
@@ -890,13 +855,23 @@ export const installer = {
             let viaHttp = false;
             let needsIp = false;
             let alreadyOnline = false;
+            let defaultsApplied = false;   // true once the serial config push actually ran
 
             if (bootIp) {
-                if (onLog) onLog(`[orchestrator] device already online at ${bootIp}${bootMdns ? ` (${bootMdns})` : ""} (from boot serial) — skipping Improv`);
+                // Device is already online at boot — typically an Ethernet device (eth
+                // links up instantly, so it prints MM_IP before we'd provision) or a
+                // device with saved WiFi. We skip Improv *provisioning* (no creds needed),
+                // but we STILL own the serial port, and the device's Improv listener runs
+                // on eth too now — so push the device-model defaults over serial right
+                // here. (Before, this path skipped the push entirely, leaving an eth
+                // device flashed-but-unconfigured.) The TX-power cap isn't needed on an
+                // already-associated device, so it's skipped on this branch.
+                if (onLog) onLog(`[orchestrator] device already online at ${bootIp}${bootMdns ? ` (${bootMdns})` : ""} (from boot serial) — skipping Improv provisioning`);
                 deviceUrl = `http://${bootIp}/`;
                 deviceMdns = bootMdns;
                 viaHttp = true;
                 alreadyOnline = true;
+                defaultsApplied = await pushDefaultsOverSerial(port, board, applyDefaults, trackProgress, onLog);
             } else {
             // Pre-association TX-power cap (weak-power brown-out fix): push it
             // while we still own the port, before ImprovSerial locks it.
@@ -979,19 +954,24 @@ export const installer = {
                 try { if (improvClient) await improvClient.close(); } catch (_) { /* ignore */ }
                 improvClient = null;
                 if (!uiWaitForIp) {
-                    // uiWaitForIp may be omitted on older host pages —
-                    // degrade gracefully to the legacy empty-URL exit
-                    // (no retry button without the dialog to host it).
+                    // uiWaitForIp may be omitted on older host pages — degrade to the
+                    // legacy empty-URL exit (no retry button without the dialog).
+                    // This path never reached Improv-success, so no serial config push
+                    // happened; carry board + applyDefaults so the success note can tell
+                    // the user the defaults weren't applied (apply later via MoonDeck on
+                    // the LAN). Defaults over serial only happen on the Improv path below.
                     trackProgress("done");
-                    onSuccess({ url: "", board: "", alreadyOnline: true });
+                    onSuccess({ url: "", board, applyDefaults, alreadyOnline: true });
                     return;
                 }
                 trackProgress("needs-ip");
                 const ipResult = await uiWaitForIp();
                 if (!ipResult || ipResult.action === "skip") {
-                    // User skipped the IP prompt; mirror the old behaviour.
+                    // User skipped the IP prompt. No serial config push on this path;
+                    // carry board + applyDefaults so the success note says the defaults
+                    // weren't applied (apply later via MoonDeck on the LAN).
                     trackProgress("done");
-                    onSuccess({ url: "", board: "", alreadyOnline });
+                    onSuccess({ url: "", board, applyDefaults, alreadyOnline });
                     return;
                 }
                 if (ipResult.action === "ip") {
@@ -1071,8 +1051,10 @@ export const installer = {
                 // outcomes ("we got a URL" vs "we didn't"). Different
                 // shapes for different cardinalities, not drift.
                 if (!ssid) {
+                    // Empty SSID (Skip in the creds form). Keep board + applyDefaults
+                    // so the success screen guides the user to apply defaults later.
                     trackProgress("done");
-                    onSuccess({ url: "", board: "", alreadyOnline: false });
+                    onSuccess({ url: "", board, applyDefaults, alreadyOnline: false });
                     return;
                 }
 
@@ -1094,82 +1076,12 @@ export const installer = {
                 const provName = improvClient.info && improvClient.info.name;
                 if (provName) deviceMdns = `${provName}.local`;
 
-                // Push SET_DEVICE_MODEL vendor RPC if the user picked a board.
-                // ImprovSerial holds the writable lock — close it first so
-                // we can write our own raw frame. We're done with
-                // ImprovSerial anyway (provision is the last standard
-                // command we need).
-                // applyDefaults gates the catalog inject: when the user unticked
-                // "Apply device defaults" (e.g. re-flashing a configured device), skip
-                // pushing SET_DEVICE_MODEL so the device's existing config is left intact.
-                if (board && applyDefaults) {
-                    trackProgress("set-board");
-                    if (onLog) onLog(`[orchestrator] SET_DEVICE_MODEL "${board}" over Improv serial`);
-                    await improvClient.close();
-                    improvClient = null;
-                    await sendSetBoardFrame(port, board);
-                    // The device-side handler responds with RpcResponse,
-                    // but we don't wait for it — failures (validation
-                    // rejection, etc.) are reported via ErrorState which
-                    // we'd need to re-open a reader to see. Best-effort:
-                    // device persists in next 2s via FilesystemModule's
-                    // debounced save. If push silently failed, the field
-                    // stays empty and the user can pick the board via
-                    // MoonDeck later.
-                    // Small grace period so the device's UART task
-                    // finishes processing before we close the port.
-                    await new Promise(r => setTimeout(r, 200));
-                }
-            }
-
-            // One clear top-level line so the log shows whether this device's
-            // catalog defaults are being applied — and if not, why. Three cases:
-            // applying (a model was picked + the checkbox is ticked), skipped-by-
-            // choice (model picked but "Apply device defaults" unticked — a re-flash
-            // keeping config), or no-model ("(any board)" was selected).
-            // Visible modal status (not just the hidden log) so the user actually sees
-            // the defaults being applied — fires on BOTH the Improv and the eth/typed-IP
-            // (viaHttp) paths, unlike the earlier set-board stage which is Improv-only.
-            if (board && applyDefaults) trackProgress("apply-defaults", { board });
-            if (onLog) {
-                if (board && applyDefaults) {
-                    onLog(`[orchestrator] applying device defaults for "${board}" (deviceModels.json)`);
-                } else if (board) {
-                    onLog(`[orchestrator] NOT applying device defaults for "${board}" — "Apply device defaults" unticked; device config left as-is`);
-                } else {
-                    onLog(`[orchestrator] no device model selected — no defaults to apply`);
-                }
-            }
-
-            // HTTP injection attempt — fans out the deviceModels.json `controls.*`
-            // entries to the device's `/api/control`, mirroring what the
-            // device UI's `consumePendingDeviceModelParam` does for the Inject-
-            // button path. Runs for BOTH paths:
-            //   - needsIp (typed IP): the only board-injection path, since
-            //     SET_DEVICE_MODEL over serial wasn't possible.
-            //   - Improv-success: SET_DEVICE_MODEL already pushed `System.deviceModel` over
-            //     serial, but every OTHER field in `controls.*` (e.g.
-            //     `Network.txPowerSetting` for the weak-power WiFi cap) needs
-            //     this fan-out to reach the device. Without it the board
-            //     identifier lands but the per-board tweaks don't.
-            // Gated by `canFetchHttp(deviceUrl)` — on HTTPS Pages the
-            // browser blocks fetches to http:// device URLs (mixed-content);
-            // those users get the controls via the `?deviceModel=` query-param
-            // handoff after clicking Visit. Successful HTTP push tells the
-            // host page to skip the pending-board handoff via `httpBoardOk`.
-            // Gated by applyDefaults too (see the SET_DEVICE_MODEL site above) — an
-            // unticked "Apply device defaults" skips the controls fan-out, leaving a
-            // re-flashed device's existing config untouched.
-            let httpBoardOk = false;
-            if (board && applyDefaults && canFetchHttp(deviceUrl)) {
-                if (onLog) onLog(`[orchestrator] attempting HTTP inject for board="${board}" to ${deviceUrl}`);
-                httpBoardOk = await tryHttpInjectBoard(deviceUrl, board, onLog);
-                if (onLog) onLog(`[orchestrator] HTTP inject ${httpBoardOk ? "succeeded" : "failed"}`);
-            } else if (board && applyDefaults && onLog) {
-                // Skipped — most commonly HTTPS Pages → http:// device URL
-                // blocked by mixed-content. The `?deviceModel=` handoff via the
-                // Visit button picks up the controls fan-out same-origin.
-                onLog(`[orchestrator] HTTP inject skipped (cross-origin / mixed-content); relying on ?deviceModel= handoff`);
+                // Apply the device-model's catalog config over serial — "Improv = REST
+                // over serial". Close ImprovSerial first so we own the writable lock
+                // (provision was the last standard command we need it for), then push.
+                await improvClient.close();
+                improvClient = null;
+                defaultsApplied = await pushDefaultsOverSerial(port, board, applyDefaults, trackProgress, onLog);
             }
 
             trackProgress("done");
@@ -1177,9 +1089,9 @@ export const installer = {
                 url: deviceUrl,
                 mdns: deviceMdns,   // "<deviceName>.local" from the boot serial, "" if unknown
                 board: board || "",
-                applyDefaults,      // false → host page skips the ?deviceModel= first-visit handoff
+                applyDefaults,      // the checkbox state (intent)
+                defaultsApplied,    // whether the serial config push actually ran (truth)
                 viaHttp,
-                httpBoardOk,
                 alreadyOnline,
             });
         } catch (e) {

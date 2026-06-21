@@ -55,7 +55,7 @@ The design rationale for each rule below lives in [docs/architecture.md](docs/ar
 
 Then check the recommendation against [§ Principles](#principles) (minimalism, data over objects, concrete first) and propose it as a question, not a fait accompli. The product owner picks; the agent implements only what was picked. If the picked option turns out to need a follow-up change (e.g. an updated naming convention to make the new layout consistent), surface that *before* starting the move so it's a single coherent refactor, not three round-trips.
 
-**Plan before implementing.** Use `/plan` mode before every feature. Review plans for: unnecessary files, inheritance where structs suffice, modifications outside the relevant directory. Reject and regenerate bad plans.
+**Plan before implementing.** Use `/plan` mode before every feature. Review plans for: unnecessary files, inheritance where structs suffice, modifications outside the relevant directory. Reject and regenerate bad plans. **Save every approved plan** to `docs/history/plans/` named `Plan-YYYYDDMM - <title>.md` (note the **DDMM** day-before-month order, e.g. `Plan-20262006 - Improv-as-REST.md` for 2026-06-20), as the first implementation step. The plan is the design record that complements `decisions.md` (the lesson record): the plan says what we set out to build and why; decisions.md captures what we learned doing it. Like the rest of `history/`, plans are pruned under *Mandatory subtraction* once their design is fully absorbed into the code + module specs.
 
 **Use `uv` for every Python invocation.** Never type `python` or `python3` directly; always go through `uv run` (e.g. `uv run scripts/build/build_desktop.py`, `uv run python -c "…"`). This applies to shell commands, CMake `add_custom_command` / `execute_process`, documentation examples, and anything that shells out. In CMake, resolve `find_program(UV_EXECUTABLE NAMES uv REQUIRED HINTS "$ENV{USERPROFILE}/.local/bin" "$ENV{HOME}/.local/bin")` once and use `${UV_EXECUTABLE} run python …` thereafter. Reason: uv manages the project venv and is the project standard ([scripts/MoonDeck.md](scripts/MoonDeck.md)); bare `python3` isn't on PATH on Windows (and macOS Python Launcher pops a Store prompt). If you catch yourself about to type `python`, stop and prefix with `uv run`.
 
@@ -85,7 +85,7 @@ Each commit produces visible output. The product owner picks what to build next.
 
 1. **Pick what to build.** One layout, one effect, one driver, one modifier, one system module: whatever adds the next useful capability.
 2. **Spec it.** Write (or review) the module's spec. A spec-in-progress is a plain `.md` in `docs/backlog/` (like any other forward-looking note); when the module ships, its final spec is written in `docs/moonmodules/<Name>.md` and the temporary backlog draft (if any) is deleted. Most small modules go straight to `docs/moonmodules/` in the same change that implements them — the backlog draft is only for specs worth circulating before the code exists.
-3. **`/plan` it.** Plan references only the relevant `docs/moonmodules/` specs + architecture docs. Plans are not committed to the repo; the implemented code, docs, and commit message together describe what landed.
+3. **`/plan` it.** Plan references only the relevant `docs/moonmodules/` specs + architecture docs. The approved plan is saved to `docs/history/plans/` (see *Plan before implementing*); the implemented code, docs, and commit message together describe what actually landed (which may diverge from the plan — that's expected, the plan is the intent record, not a contract).
 4. **Implement in a branch** (`next-iteration` or feature branch). Test on hardware. Run the commit gates (see Lifecycle Events below). Commit.
 5. **Push.** Product owner pushes. CodeRabbit reviews the PR. Process findings.
 6. **Repeat.**
@@ -200,6 +200,7 @@ docs/
   history/                 ← backward-looking: accumulated wisdom
     README.md              ← index: what's here + cross-repo trends + digest prompt
     decisions.md           ← actions, lessons, proven patterns
+    plans/                 ← approved feature plans (Plan-YYYYDDMM - <title>.md)
     *-inventory.md         ← prior-project surveys (v1, v2, moonlight)
     <repo>.md              ← friend-repo monthly activity digests (FastLED, WLED, …)
   moonmodules/             ← one page per MoonModule (specs before code)
