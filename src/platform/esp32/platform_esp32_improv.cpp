@@ -15,6 +15,7 @@
 #include "platform/platform.h"
 
 #include "core/ImprovFrame.h"
+#include "core/ImprovOpReassembler.h"
 
 #include "driver/uart.h"
 #include "esp_log.h"
@@ -87,10 +88,10 @@ struct ImprovTaskState {
     // then opReady is set and the module's loop applies the op on the MAIN loop
     // (never the Improv task). Same producer/consumer dance as deviceModel; the
     // buffer is module-owned and sized to hold the largest op (a long pins list).
-    // opLen tracks the reassembly write position across chunks.
+    // Chunk reassembly + the sequence guard live in mm::ImprovOpReassembler, bound
+    // to opOut in the handler — only the buffer + the ready flag are shared state here.
     char* opOut = nullptr;
     size_t opOutLen = 0;
-    size_t opLen = 0;          // bytes reassembled so far (reset on seq 0)
     std::atomic<bool>* opReady = nullptr;
 };
 static ImprovTaskState g_improv;  // single global — only one Improv task per device
@@ -435,22 +436,21 @@ static void improvHandleApplyOp(const uint8_t* payload, uint8_t len) {
     const uint8_t* chunk = payload + 3;
     size_t chunkLen = static_cast<size_t>(len) - 3;
 
-    if (seq == 0) g_improv.opLen = 0;   // first chunk resets the reassembly buffer
-
-    // Overflow guard: keep room for the NUL. Drop + error rather than truncate.
-    if (g_improv.opLen + chunkLen >= g_improv.opOutLen) {
-        g_improv.opLen = 0;
-        improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_OP));
-        return;
-    }
-    std::memcpy(g_improv.opOut + g_improv.opLen, chunk, chunkLen);
-    g_improv.opLen += chunkLen;
-
-    if (last) {
-        g_improv.opOut[g_improv.opLen] = 0;
-        g_improv.opLen = 0;             // ready for the next op
-        // release-store pairs with the module's acquire-load before it applies.
-        g_improv.opReady->store(true, std::memory_order_release);
+    // Chunk reassembly + the out-of-order/duplicate sequence guard live in
+    // mm::ImprovOpReassembler (core, desktop-unit-tested) so the algorithm is proven
+    // without hardware; this handler keeps only the serial I/O around it. The
+    // reassembler is bound once to g_improv.opOut (the module-owned buffer).
+    static mm::ImprovOpReassembler reasm(g_improv.opOut, g_improv.opOutLen);
+    switch (reasm.feed(seq, last, chunk, chunkLen)) {
+        case mm::ImprovOpReassembler::Result::Error:
+            improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_OP));
+            return;
+        case mm::ImprovOpReassembler::Result::Continue:
+            break;
+        case mm::ImprovOpReassembler::Result::Ready:
+            // release-store pairs with the module's acquire-load before it applies.
+            g_improv.opReady->store(true, std::memory_order_release);
+            break;
     }
     // Ack every chunk (empty RpcResponse for 0xFC) so the installer awaits each.
     auto rpc = improv::build_rpc_response(
@@ -703,7 +703,6 @@ bool improvProvisioningInit(const ImprovDeviceInfo& info,
     // APPLY_OP opt-in, same shape (the op reassembly buffer + ready flag).
     g_improv.opOut = opOut;
     g_improv.opOutLen = opOutLen;
-    g_improv.opLen = 0;
     g_improv.opReady = opReady;
 
     // 6 KB stack: parser is small, scan response uses std::vector + std::string

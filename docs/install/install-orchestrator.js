@@ -35,39 +35,17 @@ import { ImprovSerial } from "https://unpkg.com/improv-wifi-serial-sdk@2.5.0/dis
 // Constants
 // ---------------------------------------------------------------------------
 
-// SET_DEVICE_MODEL vendor RPC command ID. High end of the conventional 0x80-0xFE
-// vendor extension range to maximize headroom against future Improv-spec
-// expansion into the low vendor range. Matches the device-side handler at
-// src/platform/esp32/platform_esp32_improv.cpp.
-const IMPROV_CMD_SET_DEVICE_MODEL = 0xFE;
-
-// SET_TX_POWER vendor RPC command ID — the pre-association TX-power cap for
-// boards whose LDO browns out at full power (a thin on-module LDO or marginal
-// USB supply, e.g. some S2/S3 mini-class boards). Their deviceModels.json
-// cap (controls.Network.txPowerSetting) used to arrive only via the HTTP
-// fan-out AFTER the device was online, which a browning-out board can never
-// reach: it fails WiFi auth at 20 dBm first (proven on the bench 2026-06-10).
-// Sent BEFORE provisioning so the very first association runs capped.
-// Matches the device-side handler at src/platform/esp32/platform_esp32_improv.cpp.
-const IMPROV_CMD_SET_TX_POWER = 0xFD;
-
-// APPLY_OP vendor RPC command ID — "Improv = REST over serial". Carries ONE REST
-// operation as JSON ({"op":"add|set|clearChildren",…}, the same shape an HTTP
-// /api/modules or /api/control body has). The installer pushes the device-model's
-// catalog ops over serial during provisioning, so the defaults apply with no HTTP
-// (which an HTTPS installer page can't make to an http:// device — mixed-content)
-// and no browser pull/handoff. Frame payload: [0xFC][seq][last][chunk…]. Matches
-// improvHandleApplyOp at src/platform/esp32/platform_esp32_improv.cpp.
-const IMPROV_CMD_APPLY_OP = 0xFC;
-// Max op-JSON bytes per frame: the device's kImprovMaxPayload (128) minus the
-// 3-byte [cmd][seq][last] header. A longer op (a big pins list) chunks.
-const APPLY_OP_CHUNK_MAX = 128 - 3;
-
-// Improv frame type for RPC commands (matches src/core/ImprovFrame.h).
-const IMPROV_FRAME_TYPE_RPC = 0x03;
-
-// Magic bytes that prefix every Improv frame. ASCII "IMPROV".
-const IMPROV_MAGIC = [0x49, 0x4d, 0x50, 0x52, 0x4f, 0x56];
+// Improv frame building lives in improv-frame.js — the pure, dependency-free wire
+// core shared with the frame-contract tests (test/js, test/python pin a golden
+// vector so the device C++, Python, and JS implementations can't drift). The
+// command IDs + frame layout are documented there.
+import {
+    IMPROV_CMD_SET_DEVICE_MODEL,
+    IMPROV_CMD_SET_TX_POWER,
+    IMPROV_FRAME_TYPE_RPC,
+    buildImprovFrame,
+    encodeApplyOpFrames,
+} from "./improv-frame.js";
 
 // ---------------------------------------------------------------------------
 // Manifest parser
@@ -128,25 +106,8 @@ function bufferToBinaryString(buffer) {
 }
 
 // ---------------------------------------------------------------------------
-// Improv frame encoder (fallback for the private writePacketToStream)
+// Improv RPC payload encoders (frame building is in improv-frame.js)
 // ---------------------------------------------------------------------------
-
-// Mirrors buildImprovFrame in src/core/ImprovFrame.h. The wire format is:
-//   [I][M][P][R][O][V][version=1][type][length][payload×length][checksum]
-// Checksum = sum-mod-256 of the first 9+length bytes.
-function buildImprovFrame(type, payload) {
-    const len = payload.length;
-    const frame = new Uint8Array(6 + 1 + 1 + 1 + len + 1);
-    frame.set(IMPROV_MAGIC, 0);
-    frame[6] = 0x01;   // version
-    frame[7] = type;
-    frame[8] = len;
-    frame.set(payload, 9);
-    let sum = 0;
-    for (let i = 0; i < 9 + len; i++) sum = (sum + frame[i]) & 0xff;
-    frame[9 + len] = sum;
-    return frame;
-}
 
 // Encodes the SET_DEVICE_MODEL RPC payload that the device parser at
 // platform_esp32_improv.cpp::improvHandleSetDeviceModel expects.
@@ -225,29 +186,23 @@ async function sendSetTxPowerFrame(port, dBm) {
 // and the single-buffer busy-guard on the device + a small inter-op delay keep the
 // device from being overrun. Returns nothing; throws only on a write error.
 async function sendApplyOpFrame(port, op) {
-    const bytes = new TextEncoder().encode(JSON.stringify(op));
+    const frames = encodeApplyOpFrames(op);   // [0xFC][seq][last][chunk…] per frame
     const writer = port.writable.getWriter();
     try {
-        const total = bytes.length;
-        // At least one frame even for an (impossible) empty op, so `last` always sends.
-        const chunks = Math.max(1, Math.ceil(total / APPLY_OP_CHUNK_MAX));
-        for (let seq = 0; seq < chunks; seq++) {
-            const start = seq * APPLY_OP_CHUNK_MAX;
-            const slice = bytes.subarray(start, start + APPLY_OP_CHUNK_MAX);
-            const last = seq === chunks - 1 ? 1 : 0;
-            const payload = new Uint8Array(3 + slice.length);
-            payload[0] = IMPROV_CMD_APPLY_OP;
-            payload[1] = seq & 0xFF;
-            payload[2] = last;
-            payload.set(slice, 3);
-            await writer.write(buildImprovFrame(IMPROV_FRAME_TYPE_RPC, payload));
-        }
+        for (const frame of frames) await writer.write(frame);
     } finally {
         writer.releaseLock();
     }
-    // Small pace so the device's main loop consumes the op (clears its single buffer)
-    // before the next op's frame arrives — the device refuses a new op while busy.
-    await new Promise(r => setTimeout(r, 30));
+    // Pace so the device's main loop consumes the op (clears its single buffer) before
+    // the next op's frame arrives — the device refuses a new op while busy. This is
+    // open-loop (we don't read the ack back: a Web Serial duplex read while we hold the
+    // writer is awkward), so the delay must clear the worst-case consume window. A
+    // loaded tick (large grid, many modules) can run a few hundred µs, but the op is
+    // applied at the START of the next loop() poll, not after a full render — so ~120 ms
+    // comfortably covers it with headroom. (A read-back ack + retry-on-busy is the
+    // closed-loop upgrade; backlogged until a real install drops an op, since each op is
+    // also idempotent so a lost one would re-apply cleanly on a re-flash.)
+    await new Promise(r => setTimeout(r, 120));
 }
 
 // Apply a device-model's catalog defaults over serial: SET_DEVICE_MODEL (the identity

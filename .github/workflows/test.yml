@@ -1,0 +1,57 @@
+name: Test
+
+# Fast host-side unit tests for the Python (MoonDeck / build scripts) and JS
+# (web installer) code that the C++ ctest/scenario suites can't reach. Runs on
+# every PR and on pushes to main/next-iteration. Scoped to the paths these tests
+# cover so a docs-only or pure-firmware change doesn't spend a runner here.
+#
+# Today this pins the Improv frame wire format (test/python + test/js assert a
+# shared golden vector so the device C++, Python, and JS builders can't drift).
+# New Python/JS unit suites land under test/python and test/js and run here.
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - 'docs/install/**'
+      - 'test/python/**'
+      - 'test/js/**'
+      - '.github/workflows/test.yml'
+  push:
+    branches:
+      - main
+      - next-iteration
+    paths:
+      - 'scripts/**'
+      - 'docs/install/**'
+      - 'test/python/**'
+      - 'test/js/**'
+      - '.github/workflows/test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v3
+      # pytest + pyserial come from the test file's inline PEP-723 block; passing
+      # them via --with is the explicit, discovery-friendly form (a bare `pytest
+      # <dir>` doesn't honour a test file's own inline deps).
+      - name: pytest
+        run: uv run --with pytest --with pyserial pytest test/python -q
+
+  js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Node's built-in test runner — no npm install, no package.json. The glob
+      # form is required: a bare directory arg is treated as a module to execute.
+      - name: node --test
+        run: node --test "test/js/**/*.test.mjs"

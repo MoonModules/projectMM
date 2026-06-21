@@ -68,13 +68,14 @@ TEST_CASE("apply-core: applyAddModule adds a child, idempotent on the id") {
     CHECK(http.applyAddModule("Knob", "K", "Root") == OpResult::Ok);
     CHECK(childNamed(root, "K") != nullptr);
 
-    // Idempotent: re-adding the same id is Ok (no duplicate), not an error.
-    CHECK(http.applyAddModule("Knob", "K", "Root") == OpResult::Ok);
+    // Idempotent: re-adding the same id is AlreadyExists (no duplicate) — a distinct
+    // success the HTTP handler reports as {"ok":true,"note":"already exists"}.
+    CHECK(http.applyAddModule("Knob", "K", "Root") == OpResult::AlreadyExists);
     CHECK(root->childCount() == 1);
 
     // Unknown type / missing parent / top-level add are typed failures, not crashes.
     CHECK(http.applyAddModule("NopeType", "X", "Root") == OpResult::UnknownType);
-    CHECK(http.applyAddModule("Knob", "Y", "NoSuchParent") == OpResult::NotFound);
+    CHECK(http.applyAddModule("Knob", "Y", "NoSuchParent") == OpResult::ModuleNotFound);
     CHECK(http.applyAddModule("Knob", "Z", "") == OpResult::BadRequest);  // no parent → top-level
 
     s.deleteTree(root);
@@ -102,9 +103,10 @@ TEST_CASE("apply-core: applySetControl writes a value, rejects out-of-range / un
     CHECK(http.applySetControl("K", "value", "{\"value\":999}") == OpResult::OutOfRange);
     CHECK(k->value == 42);
 
-    // Unknown module or control → NotFound, no crash.
-    CHECK(http.applySetControl("Nope", "value", "{\"value\":1}") == OpResult::NotFound);
-    CHECK(http.applySetControl("K", "nope", "{\"value\":1}") == OpResult::NotFound);
+    // Unknown module vs unknown control → distinct typed failures (each a 404 with
+    // its own body on the HTTP path), no crash.
+    CHECK(http.applySetControl("Nope", "value", "{\"value\":1}") == OpResult::ModuleNotFound);
+    CHECK(http.applySetControl("K", "nope", "{\"value\":1}") == OpResult::ControlNotFound);
 
     s.deleteTree(root);
 }
@@ -126,9 +128,9 @@ TEST_CASE("apply-core: applyClearChildren empties a container (replaceChildren)"
     CHECK(http.applyClearChildren("Root") == OpResult::Ok);
     CHECK(root->childCount() == 0);
 
-    // Clearing a non-existent parent is NotFound, not a crash. Clearing an
+    // Clearing a non-existent parent is ModuleNotFound, not a crash. Clearing an
     // already-empty container is Ok.
-    CHECK(http.applyClearChildren("Nope") == OpResult::NotFound);
+    CHECK(http.applyClearChildren("Nope") == OpResult::ModuleNotFound);
     CHECK(http.applyClearChildren("Root") == OpResult::Ok);
 
     s.deleteTree(root);

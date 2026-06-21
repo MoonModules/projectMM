@@ -451,7 +451,7 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
 HttpServerModule::OpResult HttpServerModule::applySetControl(
         const char* moduleName, const char* controlName, const char* valueJson) {
     MoonModule* target = findModuleByName(moduleName);
-    if (!target) return OpResult::NotFound;
+    if (!target) return OpResult::ModuleNotFound;
 
     // Module-level "enabled" pseudo-control.
     if (std::strcmp(controlName, "enabled") == 0) {
@@ -490,7 +490,7 @@ HttpServerModule::OpResult HttpServerModule::applySetControl(
         }
         return OpResult::Ok;
     }
-    return OpResult::NotFound;   // control name not on this module
+    return OpResult::ControlNotFound;   // control name not on this module
 }
 
 void HttpServerModule::handleSetControl(platform::TcpConnection& conn, const char* body) {
@@ -505,8 +505,11 @@ void HttpServerModule::handleSetControl(platform::TcpConnection& conn, const cha
         case OpResult::Ok:
             sendResponse(conn, 200, "application/json", "{\"ok\":true}");
             return;
-        case OpResult::NotFound:
-            sendResponse(conn, 404, "application/json", "{\"error\":\"module or control not found\"}");
+        case OpResult::ModuleNotFound:
+            sendResponse(conn, 404, "application/json", "{\"error\":\"module not found\"}");
+            return;
+        case OpResult::ControlNotFound:
+            sendResponse(conn, 404, "application/json", "{\"error\":\"control not found\"}");
             return;
         case OpResult::OutOfRange:
             sendResponse(conn, 400, "application/json", "{\"error\":\"value out of range\"}");
@@ -607,12 +610,14 @@ HttpServerModule::OpResult HttpServerModule::applyAddModule(
     if (!parentId || parentId[0] == 0) return OpResult::BadRequest;
 
     // Idempotent: an existing module with this name is success, not an error — so a
-    // re-run of the catalog inject (or a double APPLY_OP) is a no-op, not a dup.
-    if (id && id[0] != 0 && findModuleByName(id)) return OpResult::Ok;
+    // re-run of the catalog inject (or a double APPLY_OP) is a no-op, not a dup. The
+    // distinct AlreadyExists (vs Ok) lets the HTTP handler report "already exists" so a
+    // client can tell created-now from already-there; both are success.
+    if (id && id[0] != 0 && findModuleByName(id)) return OpResult::AlreadyExists;
 
     // Resolve the parent before allocating — failure means we never make an orphan.
     auto* parent = findModuleByName(parentId);
-    if (!parent) return OpResult::NotFound;
+    if (!parent) return OpResult::ModuleNotFound;
 
     auto* mod = ModuleFactory::create(typeName);
     if (!mod) return OpResult::UnknownType;
@@ -652,7 +657,10 @@ void HttpServerModule::handleAddModule(platform::TcpConnection& conn, const char
         case OpResult::Ok:
             sendResponse(conn, 200, "application/json", "{\"ok\":true}");
             return;
-        case OpResult::NotFound:
+        case OpResult::AlreadyExists:
+            sendResponse(conn, 200, "application/json", "{\"ok\":true,\"note\":\"already exists\"}");
+            return;
+        case OpResult::ModuleNotFound:
             sendResponse(conn, 404, "application/json", "{\"error\":\"parent not found\"}");
             return;
         case OpResult::UnknownType:
@@ -673,7 +681,7 @@ void HttpServerModule::handleAddModule(platform::TcpConnection& conn, const char
 // catalog entry replaces. Transport-free.
 HttpServerModule::OpResult HttpServerModule::applyClearChildren(const char* parentName) {
     auto* parent = findModuleByName(parentName);
-    if (!parent) return OpResult::NotFound;
+    if (!parent) return OpResult::ModuleNotFound;
     bool removedAny = false;
     // Iterate from the end: removeChild compacts the array, so back-to-front keeps
     // indices valid as we delete.
@@ -701,6 +709,12 @@ HttpServerModule::OpResult HttpServerModule::applyClearChildren(const char* pare
 // For "set" the whole op JSON is handed to applySetControl, which reads "value" by
 // key — the same way the HTTP /api/control handler reads it from the request body,
 // so any value type rides through unchanged.
+// The wire shape the Improv APPLY_OP frame carries. NOTE the serial op's add uses the
+// key "parent", while the HTTP POST /api/modules body uses "parent_id" for the same
+// field — both feed the one applyAddModule() core, but the two transports parse different
+// JSON keys, so an HTTP payload is NOT a drop-in APPLY_OP (rename parent_id → parent). The
+// serial op stays terse because every byte counts against the 128-byte frame budget; the
+// discrepancy is documented in docs/moonmodules/core/ImprovProvisioningModule.md.
 HttpServerModule::OpResult HttpServerModule::applyOp(const char* opJson) {
     if (!opJson) return OpResult::BadRequest;
     char op[16] = {};
@@ -709,7 +723,7 @@ HttpServerModule::OpResult HttpServerModule::applyOp(const char* opJson) {
         char type[32] = {}, id[32] = {}, parent[32] = {};
         mm::json::parseString(opJson, "type", type, sizeof(type));
         mm::json::parseString(opJson, "id", id, sizeof(id));
-        mm::json::parseString(opJson, "parent", parent, sizeof(parent));
+        mm::json::parseString(opJson, "parent", parent, sizeof(parent));  // "parent", not HTTP's "parent_id"
         return applyAddModule(type, id, parent);
     }
     if (std::strcmp(op, "set") == 0) {

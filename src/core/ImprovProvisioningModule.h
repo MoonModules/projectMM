@@ -8,6 +8,7 @@
 #include "platform/platform.h"
 
 #include <atomic>
+#include <cstdio>
 #include <cstring>
 
 namespace mm {
@@ -113,7 +114,21 @@ public:
     // serial task — the same discipline the credentials/deviceModel paths follow.
     void loop() override {
         if (pendingOpReady_.load(std::memory_order_acquire) && httpServerModule_) {
-            httpServerModule_->applyOp(pendingOp_);   // result currently informational; ack already sent
+            // The Improv task already acked frame RECEIPT; the op is APPLIED here. A
+            // failed op (UnknownType, OutOfRange, a not-found target) can't travel back
+            // on that spent ack, so surface it: log it over serial and park it in
+            // provision_status, so a silently-misconfigured device is visible on a
+            // monitor and via /api/state rather than looking like a clean install.
+            // Ok and AlreadyExists are both success (a re-pushed op is idempotent);
+            // only a genuine failure is surfaced.
+            auto r = httpServerModule_->applyOp(pendingOp_);
+            if (r != HttpServerModule::OpResult::Ok &&
+                r != HttpServerModule::OpResult::AlreadyExists) {
+                std::printf("Improv APPLY_OP failed (result=%d): %s\n",
+                            static_cast<int>(r), pendingOp_);
+                std::snprintf(statusStr_, sizeof(statusStr_), "error: apply failed (%d)",
+                              static_cast<int>(r));
+            }
             std::memset(pendingOp_, 0, sizeof(pendingOp_));
             pendingOpReady_.store(false, std::memory_order_release);
         }

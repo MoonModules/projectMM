@@ -61,7 +61,9 @@ public:
     // only in how they frame the request and report the result.
     enum class OpResult : uint8_t {
         Ok,
-        NotFound,        // module / parent / control name not in the tree
+        AlreadyExists,   // add is a no-op: a module with this id is already in the tree (still success)
+        ModuleNotFound,  // module / parent name not in the tree
+        ControlNotFound, // module exists but has no such control (a distinct 404)
         UnknownType,     // factory doesn't know the type
         BadRequest,      // missing field, top-level add, parent rejected child
         OutOfRange,      // numeric value outside bounds
