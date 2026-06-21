@@ -42,6 +42,11 @@ export const IMPROV_MAGIC = [0x49, 0x4d, 0x50, 0x52, 0x4f, 0x56];
 //   IMPROV + version(1) + type + length + payload + checksum(sum-mod-256).
 export function buildImprovFrame(type, payload) {
     const len = payload.length;
+    // The length is a single byte on the wire — a payload over 255 would truncate
+    // silently and emit a corrupt frame. Throw instead. (Callers chunk well under
+    // the device's 128-byte kImprovMaxPayload, so this never fires in practice; it
+    // guards a future caller, matching ImprovFrame.h's oversize-payload rejection.)
+    if (len > 255) throw new Error(`Improv payload length ${len} exceeds 255 (one-byte length field)`);
     const frame = new Uint8Array(6 + 1 + 1 + 1 + len + 1);
     frame.set(IMPROV_MAGIC, 0);
     frame[6] = 0x01;   // version

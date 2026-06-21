@@ -9,24 +9,28 @@ name: Test
 # shared golden vector so the device C++, Python, and JS builders can't drift).
 # New Python/JS unit suites land under test/python and test/js and run here.
 
+# Paths cover every input to the host-side tests: the Python/JS sources under test
+# (scripts, docs/install), the test files themselves, AND the device-side C++ frame
+# contract (src/core/Improv*.h + the platform handler) — a wire-format change in the
+# firmware must run the cross-language golden-vector tests so it can't drift from the
+# Python/JS builders silently. pull_request gates every PR; push runs main only (a
+# direct-to-main hotfix). A PR branch is covered by pull_request alone — listing
+# feature branches under push too would double-run every PR (push + pull_request).
 on:
   pull_request:
-    paths:
+    paths: &test-paths
       - 'scripts/**'
       - 'docs/install/**'
+      - 'src/core/ImprovFrame.h'
+      - 'src/core/ImprovOpReassembler.h'
+      - 'src/platform/esp32/platform_esp32_improv.cpp'
       - 'test/python/**'
       - 'test/js/**'
       - '.github/workflows/test.yml'
   push:
     branches:
       - main
-      - next-iteration
-    paths:
-      - 'scripts/**'
-      - 'docs/install/**'
-      - 'test/python/**'
-      - 'test/js/**'
-      - '.github/workflows/test.yml'
+    paths: *test-paths
 
 permissions:
   contents: read

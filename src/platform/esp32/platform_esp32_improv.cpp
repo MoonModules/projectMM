@@ -436,10 +436,21 @@ static void improvHandleApplyOp(const uint8_t* payload, uint8_t len) {
     const uint8_t* chunk = payload + 3;
     size_t chunkLen = static_cast<size_t>(len) - 3;
 
+    // `last` is a boolean flag on the wire; anything but 0/1 is a malformed frame
+    // (a desync the parser's checksum didn't catch, or a non-conforming sender).
+    // Reject before reassembly rather than coerce a stray value to "more chunks".
+    if (last > 1) {
+        improvSendError(static_cast<improv::Error>(IMPROV_ERROR_INVALID_OP));
+        return;
+    }
+
     // Chunk reassembly + the out-of-order/duplicate sequence guard live in
     // mm::ImprovOpReassembler (core, desktop-unit-tested) so the algorithm is proven
-    // without hardware; this handler keeps only the serial I/O around it. The
-    // reassembler is bound once to g_improv.opOut (the module-owned buffer).
+    // without hardware; this handler keeps only the serial I/O around it. Bound once
+    // to g_improv.opOut at first call — improvProvisioningInit sets opOut before the
+    // task starts, and there is a single Improv task per device for its lifetime, so
+    // the static never sees a stale buffer. Re-init with a different buffer is not
+    // supported (would need rebinding); the single-task design makes that moot.
     static mm::ImprovOpReassembler reasm(g_improv.opOut, g_improv.opOutLen);
     switch (reasm.feed(seq, last, chunk, chunkLen)) {
         case mm::ImprovOpReassembler::Result::Error:
