@@ -212,46 +212,80 @@ body {
     font-size: 11px;
 }
 
-/* The content area right of the nav. Full width — the preview spans all of it.
-   The module card column is capped separately (#main below) so cards stay a
-   readable single-column width while the preview goes edge to edge. */
+/* The content area right of the nav. */
 .main-area {
     flex: 1;
     min-width: 0;
     padding: 12px;
 }
 
-/* Module cards: capped width, centered under the full-width preview. */
-#main {
-    max-width: 500px;
-    margin: 0 auto;
-}
-
 /* ============================================================
-   3D preview (sticky, scroll-shrink)
+   Workspace: preview pane + module cards
+   Two modes (class on .workspace, toggled by preview3d.js::setupLayout):
+   - .mode-docked  (wide ≥960px): a row — preview pane (flex) beside a fixed-width
+     card column that scrolls on its own. The preview is stable, no scroll-shrink.
+   - .mode-pip     (narrow, or popped out): cards full-width; the preview detaches
+     into a fixed, draggable picture-in-picture (the same one canvas, restyled in
+     place — never duplicated, so the single WebGL context survives the switch).
    ============================================================ */
 
-.preview-wrap {
+.workspace.mode-docked {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 16px;
+}
+
+/* Docked preview: fills the pane, sticky so it stays put while cards scroll. */
+.mode-docked .preview-pane {
     position: sticky;
-    top: 44px;
-    z-index: 5;
-    background: var(--bg-0);
-    padding: 8px 0;
-    margin-bottom: 12px;
+    top: 56px;
+    flex: 1;
+    min-width: 0;
+}
+.mode-docked #main {
+    flex: 0 0 480px;
+    max-width: 480px;
+    /* Cards own their scroll — the page itself doesn't scroll in docked mode, so
+       the preview beside them stays fixed. 44px status bar + 12px padding above. */
+    max-height: calc(100vh - 56px);
+    overflow-y: auto;
 }
 
 #preview {
     display: block;
     width: 100%;
     aspect-ratio: 1 / 1;
-    max-height: 50vh;
-    transition: max-height 0.05s linear;
+    max-height: calc(100vh - 72px);
     touch-action: none;
 }
 
+/* The drag bar is docked-mode-hidden (only PiP needs a grab handle); the dock /
+   close buttons stay available so a wide-screen user can pop the preview out. */
+.preview-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 4px;
+}
+.preview-grip { display: none; color: var(--fg-muted); cursor: grab; user-select: none; font-size: 14px; }
+.preview-bar-spacer { flex: 1; }
+.preview-bar-btn {
+    background: transparent;
+    border: none;
+    color: var(--fg-muted);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 4px;
+    opacity: 0.6;
+}
+.preview-bar-btn:hover { opacity: 1; color: var(--accent); }
+
 #preview-reset {
     position: absolute;
-    top: 16px;
+    top: 30px;
     right: 8px;
     background: var(--bg-1);
     border: 1px solid var(--border);
@@ -269,6 +303,52 @@ body {
     opacity: 0.6;
 }
 #preview-reset:hover { opacity: 1; color: var(--accent); border-color: var(--accent); }
+
+/* ---- PiP mode: cards full width, preview floats ---- */
+.workspace.mode-pip { display: block; }
+.mode-pip #main {
+    max-width: 560px;
+    margin: 0 auto;
+}
+.mode-pip .preview-pane {
+    position: fixed;
+    z-index: 70;
+    width: 200px;
+    /* JS sets left/top from the snapped corner; these are the fallback (bottom-right). */
+    right: 12px;
+    bottom: 12px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+}
+.mode-pip .preview-pane.dragging { opacity: 0.85; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55); }
+.mode-pip .preview-grip { display: inline; }
+.mode-pip .preview-bar { cursor: grab; background: var(--bg-2); }
+.mode-pip #preview { max-height: none; }
+.mode-pip #preview-reset { top: 28px; width: 22px; height: 22px; font-size: 13px; }
+/* Expanded PiP: a larger floating view when the user taps ⤢ in PiP. */
+.mode-pip .preview-pane.expanded { width: min(80vw, 360px); }
+
+/* When the PiP is dismissed, hide the pane and show the re-show pill. */
+.workspace.preview-hidden .preview-pane { display: none; }
+.preview-show {
+    position: fixed;
+    right: 12px;
+    bottom: 12px;
+    z-index: 70;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    color: var(--fg-muted);
+    border-radius: 16px;
+    padding: 6px 12px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+.preview-show:hover { color: var(--accent); border-color: var(--accent); }
 
 /* ============================================================
    Cards

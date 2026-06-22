@@ -165,7 +165,7 @@ async function init() {
     }
     connectWs();
     preview.init();
-    preview.setupShrink();
+    preview.setupLayout();
 }
 
 async function sendControl(moduleName, controlName, value) {

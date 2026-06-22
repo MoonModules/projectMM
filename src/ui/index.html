@@ -23,11 +23,27 @@
         <nav id="nav"></nav>
         <div id="nav-overlay"></div>
         <div class="main-area">
-            <div class="preview-wrap">
-                <canvas id="preview"></canvas>
-                <button type="button" id="preview-reset" title="Reset camera">⌖</button>
+            <!-- Workspace: preview pane + module cards side by side on wide screens
+                 (.mode-docked), or cards full-width with the preview as a floating,
+                 draggable picture-in-picture on narrow screens / when popped out
+                 (.mode-pip). The mode class is toggled by preview3d.js::setupLayout. -->
+            <div class="workspace mode-docked">
+                <div class="preview-pane">
+                    <!-- Drag handle: only grabbable in PiP mode (a separate element so
+                         it never fights the canvas's camera-orbit pointer handler). -->
+                    <div class="preview-bar">
+                        <span class="preview-grip" title="Drag preview">⠿</span>
+                        <span class="preview-bar-spacer"></span>
+                        <button type="button" id="preview-dock" class="preview-bar-btn" title="Pop preview out / dock">⤢</button>
+                        <button type="button" id="preview-close" class="preview-bar-btn" title="Hide preview">✕</button>
+                    </div>
+                    <canvas id="preview"></canvas>
+                    <button type="button" id="preview-reset" title="Reset camera">⌖</button>
+                </div>
+                <main id="main"></main>
             </div>
-            <main id="main"></main>
+            <!-- Re-show affordance: appears only when the PiP is dismissed. -->
+            <button type="button" id="preview-show" class="preview-show" title="Show preview" hidden>◳ preview</button>
         </div>
     </div>
     <script type="module" src="app.js"></script>

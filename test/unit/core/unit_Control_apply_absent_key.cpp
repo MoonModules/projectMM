@@ -141,6 +141,25 @@ TEST_CASE("a per-control validator accepts a valid value and rejects bad input")
     CHECK(std::strcmp(deviceModel, "LOLIN D32") == 0);
 }
 
+// Length boundary of the deviceModel validator (accepts 1..31). Uses a buffer wider than
+// the validator's limit so the 32-char value reaches the validator intact (parseString
+// truncates to bufSize-1, so the buffer must exceed 32 for the validator's own length
+// check — not parse truncation — to be what rejects it). The scratch buffer in
+// applyControlValue is sized to bufSize, so a long value isn't truncated before validation.
+TEST_CASE("the validator enforces its length limit on the long end") {
+    mm::ControlList controls;
+    char label[64] = "init";   // wider than the validator's 31-char limit
+    controls.addText("label", label, sizeof(label), acceptPrintableAscii);
+
+    const char s31[] = "{\"label\":\"1234567890123456789012345678901\"}";   // 31 chars
+    CHECK(mm::applyControlValue(controls[0], s31, "label", mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(std::strlen(label) == 31);
+
+    const char s32[] = "{\"label\":\"12345678901234567890123456789012\"}";  // 32 chars → rejected
+    CHECK(mm::applyControlValue(controls[0], s32, "label", mm::ApplyPolicy::Clamp) == mm::ApplyResult::Malformed);
+    CHECK(std::strlen(label) == 31);   // prior 31-char value preserved, not overwritten/truncated
+}
+
 TEST_CASE("a Text control with no validator accepts anything that fits") {
     mm::ControlList controls;
     char label[16] = {};

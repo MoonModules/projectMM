@@ -2,7 +2,7 @@
 // cloud. Extracted from app.js as a self-contained module (same pattern as
 // install-picker.js): app.js wires it at three points only —
 //   preview.init()            once, after the canvas exists
-//   preview.setupShrink()     once, for the scroll-shrink behaviour
+//   preview.setupLayout()     once, for docked-split ↔ floating-PiP responsiveness
 //   preview.onBinaryMessage(buf)  per WebSocket binary frame
 // It owns its own GL context, camera, and geometry; it talks to the rest of the
 // app only through the DOM (#preview canvas, --bg-0 theme colour) and
@@ -158,30 +158,126 @@ function initWebGL() {
 
 }
 
-// Scroll-shrink preview: 0..1 ratio over 0..300px of main scroll.
-function setupPreviewShrink() {
+// Responsive layout: docked split-pane on wide screens, a draggable floating
+// picture-in-picture on narrow screens (or when the user pops the preview out).
+// One canvas throughout — only the wrapper's class/position change, so the WebGL
+// context is never lost. Width drives the default mode; a manual toggle overrides.
+const PIP_BELOW = 960;           // px: auto-PiP under this width
+const LS_KEY = "projectMM.preview.v1";   // {corner, dismissed, forcePip}
+
+// Hostile-storage guards (a 3-line idiom shared with the rest of the UI; localStorage
+// throws in private mode / when disabled, and may hold a hand-edited non-JSON value).
+function loadPrefs() {
+    try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}") || {}; }
+    catch (_) { return {}; }
+}
+function savePrefs(p) {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(p)); } catch (_) { /* ignore */ }
+}
+
+function setupLayout() {
+    const ws = document.querySelector(".workspace");
+    const pane = document.querySelector(".preview-pane");
+    const bar = document.querySelector(".preview-bar");
     const canvas = document.getElementById("preview");
-    if (!canvas) return;
-    let naturalMaxH = null;
-    let ticking = false;
-    const SHRINK_OVER = 300;
-    function apply() {
-        ticking = false;
-        if (!naturalMaxH) {
-            naturalMaxH = canvas.getBoundingClientRect().height || (window.innerHeight * 0.5);
-        }
-        const r = Math.min(1, Math.max(0, window.scrollY / SHRINK_OVER));
-        canvas.style.maxHeight = Math.round(naturalMaxH * (1 - r * 0.5)) + "px";
-        if (lastVerts) redrawCached();
+    if (!ws || !pane || !bar || !canvas) return;
+
+    const prefs = loadPrefs();
+    let forcePip = !!prefs.forcePip;          // user popped the preview out on a wide screen
+    let dismissed = !!prefs.dismissed;        // user hid the PiP entirely
+    let corner = prefs.corner || "br";        // tl | tr | bl | br
+
+    const refit = () => { if (lastVerts) redrawCached(); };
+
+    // Place the PiP at its snapped corner (left/top so dragging can move it freely).
+    function placeCorner() {
+        if (!ws.classList.contains("mode-pip")) { pane.style.left = pane.style.top = ""; return; }
+        const m = 12, w = pane.offsetWidth, h = pane.offsetHeight;
+        const x = corner.includes("l") ? m : window.innerWidth - w - m;
+        const y = corner.includes("t") ? 56 : window.innerHeight - h - m;
+        pane.style.left = x + "px";
+        pane.style.top = y + "px";
+        pane.style.right = "auto";
+        pane.style.bottom = "auto";
     }
-    window.addEventListener("scroll", () => {
-        if (!ticking) { requestAnimationFrame(apply); ticking = true; }
-    }, {passive: true});
+
+    // Pick the mode from width + the manual override, apply classes, re-fit the canvas.
+    function applyMode() {
+        const pip = forcePip || window.innerWidth < PIP_BELOW;
+        ws.classList.toggle("mode-pip", pip);
+        ws.classList.toggle("mode-docked", !pip);
+        ws.classList.toggle("preview-hidden", pip && dismissed);
+        const showBtn = document.getElementById("preview-show");
+        if (showBtn) showBtn.hidden = !(pip && dismissed);
+        // The dock button means "pop out" when docked, "re-dock" when floating.
+        const dockBtn = document.getElementById("preview-dock");
+        if (dockBtn) dockBtn.textContent = pip ? "⤡" : "⤢";
+        requestAnimationFrame(() => { placeCorner(); refit(); });
+    }
+
+    // matchMedia would only catch the breakpoint crossing; a resize listener also keeps
+    // the PiP pinned to its corner as the window changes. rAF-throttled.
+    let ticking = false;
     window.addEventListener("resize", () => {
-        naturalMaxH = null;
-        canvas.style.maxHeight = "";
-        if (lastVerts) redrawCached();
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(() => { ticking = false; applyMode(); });
     });
+
+    // Dock / pop-out toggle.
+    document.getElementById("preview-dock")?.addEventListener("click", () => {
+        forcePip = !ws.classList.contains("mode-pip") ? true : false;
+        savePrefs({ corner, dismissed, forcePip });
+        applyMode();
+    });
+    // Hide the PiP; reveal the re-show pill.
+    document.getElementById("preview-close")?.addEventListener("click", () => {
+        dismissed = true;
+        savePrefs({ corner, dismissed, forcePip });
+        applyMode();
+    });
+    document.getElementById("preview-show")?.addEventListener("click", () => {
+        dismissed = false;
+        savePrefs({ corner, dismissed, forcePip });
+        applyMode();
+    });
+
+    // Drag the PiP by its bar; snap to the nearest corner on release. Pointer events
+    // on the BAR only (the canvas keeps its own orbit handler, untouched).
+    let drag = null;
+    bar.addEventListener("pointerdown", (e) => {
+        if (!ws.classList.contains("mode-pip")) return;          // bar inert when docked
+        if (e.target.closest(".preview-bar-btn")) return;        // let buttons click
+        const r = pane.getBoundingClientRect();
+        drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+        pane.classList.add("dragging");
+        bar.setPointerCapture(e.pointerId);
+        e.preventDefault();
+    });
+    bar.addEventListener("pointermove", (e) => {
+        if (!drag) return;
+        const w = pane.offsetWidth, h = pane.offsetHeight;
+        let x = e.clientX - drag.dx, y = e.clientY - drag.dy;
+        x = Math.max(0, Math.min(window.innerWidth - w, x));     // clamp to viewport
+        y = Math.max(44, Math.min(window.innerHeight - h, y));
+        pane.style.left = x + "px";
+        pane.style.top = y + "px";
+        pane.style.right = pane.style.bottom = "auto";
+    });
+    bar.addEventListener("pointerup", (e) => {
+        if (!drag) return;
+        drag = null;
+        pane.classList.remove("dragging");
+        try { bar.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+        // Snap to nearest corner by the pane's center.
+        const r = pane.getBoundingClientRect();
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        corner = (cy < window.innerHeight / 2 ? "t" : "b") + (cx < window.innerWidth / 2 ? "l" : "r");
+        savePrefs({ corner, dismissed, forcePip });
+        placeCorner();
+    });
+
+    applyMode();
 }
 
 // True-shape preview: two binary message types on the preview WebSocket.
@@ -369,10 +465,10 @@ function buildMVP(ex, ey, ez, aspect) {
     return m;
 }
 
-// Public surface — the only three entry points app.js touches.
+// Public surface — the only entry points app.js touches.
 export const preview = {
     init: initWebGL,
-    setupShrink: setupPreviewShrink,
+    setupLayout: setupLayout,
     onBinaryMessage: renderPreviewBinary,
     resetCamera: resetCamera,
 };

@@ -271,9 +271,12 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
             // write, so a reject leaves the stored value untouched (no partial write).
             // Parse into a scratch buffer first, validate, then commit — this is the
             // one backend home every write path shares (HTTP, APPLY_OP, persistence).
+            // scratch is sized to the control's full buffer (maxLen, which is c.max, an
+            // 8-bit bufSize ≤ 255) so a long-but-valid value isn't truncated before the
+            // validator sees it. 256 bytes covers any Text/Password buffer.
             if (c.validate) {
-                char scratch[64];
-                mm::json::parseString(json, key, scratch, sizeof(scratch) < maxLen ? sizeof(scratch) : maxLen);
+                char scratch[256];
+                mm::json::parseString(json, key, scratch, maxLen);
                 if (!c.validate(scratch)) return ApplyResult::Malformed;
                 std::strncpy(static_cast<char*>(c.ptr), scratch, maxLen - 1);
                 static_cast<char*>(c.ptr)[maxLen - 1] = 0;
