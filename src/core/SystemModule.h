@@ -89,13 +89,14 @@ public:
 
         // deviceModel — the physical-hardware identity (the catalog entry name, e.g.
         // "Olimex ESP32-Gateway Rev G"). The device can't self-identify its hardware, so
-        // this is INJECTED by tooling: MoonDeck / the device UI's ?deviceModel= inject via
-        // HTTP /api/control, or the web installer via the Improv SET_DEVICE_MODEL RPC
-        // (which routes through setDeviceModel() below). Display-only in the UI (pushed,
-        // never user-typed at the device); bound as Text — not ReadOnly — because Text is
-        // auto-persisted by FilesystemModule, and the readonly flag is a UI-render hint
-        // that doesn't change persistence or HTTP-write semantics.
-        controls_.addText("deviceModel", deviceModel_, sizeof(deviceModel_));
+        // this is INJECTED by tooling: MoonDeck / the device UI via HTTP /api/control, or
+        // the web installer via an APPLY_OP `set System.deviceModel` over serial. It's a
+        // normal Text control like any other default — the printable-ASCII rule below is a
+        // per-control validator (see ControlDescriptor::validate) so EVERY write path
+        // checks it in the backend, wherever the write comes from. Display-only in
+        // the UI (pushed, never user-typed); bound as Text — not ReadOnly — because Text is
+        // auto-persisted and the readonly flag is only a UI-render hint.
+        controls_.addText("deviceModel", deviceModel_, sizeof(deviceModel_), validateDeviceModel);
         controls_.setReadOnly(controls_.count() - 1, true);
 
         // Dynamic (updated every second)
@@ -224,39 +225,25 @@ public:
 
     const char* deviceModel() const { return deviceModel_; }
 
-    // External setter for transports that bypass /api/control (today: the web installer's
-    // Improv vendor RPC SET_DEVICE_MODEL, routed here by ImprovProvisioningModule).
-    // Validates: 1..31 chars, ASCII-printable (0x20–0x7E), no embedded NUL. The printable
-    // floor rejects control bytes / NULs that would corrupt downstream consumers — JSON
-    // serialization (control bytes need \u escaping at best, break naive emitters at
-    // worst), the device UI (rendered verbatim; a BEL/ESC would mangle the page), and
-    // C-string handling (no embedded NUL → strlen/strcpy round-trip cleanly). Printable
-    // ASCII still contains `"` and `\`, which serializers must escape normally — the
-    // floor isn't a license to skip escaping. Returns false on rejection so the Improv
-    // handler can map to ErrorState. On accept: copies into deviceModel_ and arms
-    // FilesystemModule's debounced save — same idiom as NetworkModule::setWifiCredentials.
-    //
-    // Known asymmetry: HTTP POST /api/control writes to `deviceModel` go through the
-    // generic Text-control write in applyControlValue() (Control.cpp), which does NO
-    // printable-ASCII check. A malicious LAN client could write control bytes / NUL via
-    // that path. Acceptable today because the HTTP-write callers (MoonDeck, the
-    // installer's HTTP inject) source the value from the device-model catalog, which the
-    // project controls; there is no end-user-typed input on this field. If the threat
-    // model grows, the right fix is a per-control validator hook on ControlDescriptor —
-    // not a one-off HTTP dispatch exception. Until then this validation lives only on the
-    // SET_DEVICE_MODEL-over-Improv path, the only path where wire-untrusted bytes arrive.
-    bool setDeviceModel(const char* value) {
+    // Per-control validator for `deviceModel`, applied on EVERY write path (HTTP
+    // /api/control, APPLY_OP over serial, persistence load) via ControlDescriptor::validate.
+    // Accepts 1..31 chars, ASCII-printable (0x20–0x7E), no embedded NUL. The printable floor
+    // rejects control bytes / NULs that would corrupt downstream consumers — JSON
+    // serialization (control bytes need \u escaping at best, break naive emitters at worst),
+    // the device UI (rendered verbatim; a BEL/ESC would mangle the page), and C-string
+    // handling (no embedded NUL → strlen/strcpy round-trip cleanly). Printable ASCII still
+    // contains `"` and `\`, which serializers must escape normally — the floor isn't a
+    // license to skip escaping. (Length: the 31-char cap matches deviceModel_'s 32-byte
+    // buffer; over-long is rejected, not truncated.) Declaring the rule on the control
+    // keeps it with the data, so it holds for every transport that writes deviceModel.
+    static bool validateDeviceModel(const char* value) {
         if (!value) return false;
         size_t n = std::strlen(value);
-        if (n == 0 || n >= sizeof(deviceModel_)) return false;
+        if (n == 0 || n >= 32) return false;   // 1..31 (32-byte buffer, NUL-terminated)
         for (size_t i = 0; i < n; i++) {
             unsigned char b = static_cast<unsigned char>(value[i]);
             if (b < 0x20 || b > 0x7E) return false;
         }
-        std::strncpy(deviceModel_, value, sizeof(deviceModel_) - 1);
-        deviceModel_[sizeof(deviceModel_) - 1] = 0;
-        markDirty();
-        FilesystemModule::noteDirty();
         return true;
     }
 

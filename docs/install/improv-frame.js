@@ -12,11 +12,6 @@
 //   [I][M][P][R][O][V][version=1][type][length][payload×length][checksum]
 //   checksum = sum-mod-256 of the first 9+length bytes.
 
-// SET_DEVICE_MODEL vendor RPC command ID. High end of the conventional 0x80-0xFE
-// vendor extension range. Matches the device-side handler at
-// src/platform/esp32/platform_esp32_improv.cpp.
-export const IMPROV_CMD_SET_DEVICE_MODEL = 0xFE;
-
 // SET_TX_POWER vendor RPC command ID — the pre-association TX-power cap for boards
 // whose LDO browns out at full power. Sent BEFORE provisioning so the very first
 // association runs capped. Matches the device-side handler.

@@ -7,7 +7,7 @@ This directory holds the source for the **custom installer page** (driven by
 End users land here, pick a channel + device, click Install. The browser flashes
 the device over USB (Web Serial → ESP32), runs Improv-Serial provisioning, then
 pushes the picked device-model's whole config over the **same serial port** as REST
-operations (**"Improv = REST over serial"**: SET_DEVICE_MODEL + APPLY_OP) — all from
+operations (**"Improv = REST over serial"**: `APPLY_OP` frames, one per control/module) — all from
 the same orchestrator, no ESP Web Tools dependency. Pushing over serial (not HTTP)
 is what makes the deployed HTTPS installer work: a browser blocks an HTTPS page from
 POSTing to a plain-`http://` device (mixed-content), so the old HTTP fan-out + the

@@ -99,3 +99,54 @@ TEST_CASE("applyControlValue applies an explicit zero when the key is present") 
           == mm::ApplyResult::Ok);
     CHECK(ethType == 0);    // explicit 0 IS applied
 }
+
+// A per-control validator (ControlDescriptor::validate) runs on EVERY write path —
+// the backend home for input rules that used to live in a bespoke per-transport RPC
+// (e.g. deviceModel's printable-ASCII check, formerly the SET_DEVICE_MODEL Improv RPC).
+// A reject returns Malformed and leaves the stored value untouched (no partial write);
+// any transport (HTTP, APPLY_OP over serial, persistence) gets the check for free.
+static bool acceptPrintableAscii(const char* v) {
+    if (!v) return false;
+    size_t n = std::strlen(v);
+    if (n == 0 || n >= 32) return false;
+    for (size_t i = 0; i < n; i++) {
+        unsigned char b = static_cast<unsigned char>(v[i]);
+        if (b < 0x20 || b > 0x7E) return false;
+    }
+    return true;
+}
+
+TEST_CASE("a per-control validator accepts a valid value and rejects bad input") {
+    mm::ControlList controls;
+    char deviceModel[32] = "initial";
+    controls.addText("deviceModel", deviceModel, sizeof(deviceModel), acceptPrintableAscii);
+
+    // Valid printable-ASCII → applied.
+    CHECK(mm::applyControlValue(controls[0], "{\"deviceModel\":\"LOLIN D32\"}",
+                                "deviceModel", mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(std::strcmp(deviceModel, "LOLIN D32") == 0);
+
+    // A raw non-printable byte embedded in the value (0x01) — parseString copies bytes
+    // verbatim (it only un-escapes \" and \\), so a wire-untrusted control byte reaches
+    // the validator, which rejects it → Malformed, prior value preserved (no partial write).
+    const char bad[] = {'{','"','d','e','v','i','c','e','M','o','d','e','l','"',':','"',
+                        'b','a','d', 0x01, 'x','"','}', 0};
+    CHECK(mm::applyControlValue(controls[0], bad,
+                                "deviceModel", mm::ApplyPolicy::Clamp) == mm::ApplyResult::Malformed);
+    CHECK(std::strcmp(deviceModel, "LOLIN D32") == 0);   // unchanged
+
+    // Empty string → Malformed (the validator rejects 0-length), prior value preserved.
+    CHECK(mm::applyControlValue(controls[0], "{\"deviceModel\":\"\"}",
+                                "deviceModel", mm::ApplyPolicy::Clamp) == mm::ApplyResult::Malformed);
+    CHECK(std::strcmp(deviceModel, "LOLIN D32") == 0);
+}
+
+TEST_CASE("a Text control with no validator accepts anything that fits") {
+    mm::ControlList controls;
+    char label[16] = {};
+    controls.addText("label", label, sizeof(label));   // no validator
+
+    CHECK(mm::applyControlValue(controls[0], "{\"label\":\"hi\"}",
+                                "label", mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    CHECK(std::strcmp(label, "hi") == 0);
+}

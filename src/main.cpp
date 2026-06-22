@@ -179,8 +179,9 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
 
     // The deviceModel identity (e.g. "Olimex ESP32-Gateway Rev G") is now SystemModule's
     // `deviceModel` control — no separate module. SystemModule owns the device identity
-    // (deviceName + deviceModel) directly; tooling injects deviceModel via /api/control or
-    // the Improv SET_DEVICE_MODEL RPC (routed to SystemModule::setDeviceModel by Improv).
+    // (deviceName + deviceModel) directly; tooling injects deviceModel like any catalog
+    // default — via /api/control (MoonDeck) or an APPLY_OP `set System.deviceModel` over
+    // serial (the installer) — both routed through the apply-core + the control's validator.
 
     // AudioModule is NOT auto-wired. It is a mic peripheral, useful only on a board
     // that actually has an I2S microphone, so the user adds it through the UI when
@@ -226,11 +227,9 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
             mm::ModuleFactory::create("ImprovProvisioningModule"));
         improvModule->setSystemModule(systemModule);
         improvModule->setNetworkModule(networkModule);
-        // SET_DEVICE_MODEL vendor RPC (command 0xFE, see platform_esp32_improv.cpp).
-        // ImprovProvisioningModule's loop1s() picks up the validated payload and forwards
-        // to systemModule->setDeviceModel() (the deviceModel identity lives on SystemModule
-        // now), arming the standard FilesystemModule debounced save — same idiom as
-        // MoonDeck's HTTP push. (systemModule is already wired above.)
+        // systemModule is wired for GET_DEVICE_INFO (the device name) and networkModule
+        // for WIFI_SETTINGS credentials; deviceModel arrives as an APPLY_OP
+        // `set System.deviceModel`, like any catalog default.
         // Mark wired-by-code so applyNode's trim loop preserves it on devices
         // whose saved Network.json predates the Improv child (the upgrade case).
         improvModule->markWiredByCode();

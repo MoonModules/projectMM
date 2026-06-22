@@ -178,6 +178,13 @@ struct ControlDescriptor {
                             // users (e.g. SystemModule.deviceModel, which MoonDeck and the web installer
                             // inject via POST /api/control). HTTP writes still succeed — the flag
                             // is a UI rendering hint, not a write gate. Set via setReadOnly().
+    // Optional per-control input validator (Text/Password only; nullptr = accept anything
+    // that fits the buffer). applyControlValue calls it on the incoming string BEFORE the
+    // write and returns ApplyResult::Malformed on reject, so the check covers EVERY write
+    // path — HTTP /api/control, APPLY_OP over serial, persistence load — in one place.
+    // A control with a wire-format constraint (e.g. deviceModel's printable-ASCII rule)
+    // declares it here, so the rule lives with the control, not with any one transport.
+    bool (*validate)(const char* value) = nullptr;
 };
 
 class ControlList {
@@ -231,9 +238,12 @@ public:
         controls_[count_++] = {&var, name, 0, ControlType::Bool, 0, 1};
     }
 
-    void addText(const char* name, char* var, uint8_t bufSize = 16) {
+    // validate (optional): a per-control input check applied on every write path
+    // (see ControlDescriptor::validate). nullptr accepts anything that fits the buffer.
+    void addText(const char* name, char* var, uint8_t bufSize = 16,
+                 bool (*validate)(const char*) = nullptr) {
         grow();
-        controls_[count_++] = {var, name, 0, ControlType::Text, 0, bufSize};
+        controls_[count_++] = {var, name, 0, ControlType::Text, 0, bufSize, false, false, validate};
     }
 
     // Like addText but the value is a secret: the API serializes it
