@@ -1,6 +1,7 @@
 #pragma once
 
 #include "platform/platform.h"  // platform::WriteChunk
+#include <cstdint>
 
 namespace mm {
 
@@ -14,6 +15,14 @@ struct BinaryBroadcaster {
     // (the implementation prepends the WS frame header). Backpressured clients
     // skip the frame; corrupt / dead sockets are dropped.
     virtual void broadcastBinary(const platform::WriteChunk* payload, int chunkCount) = 0;
+
+    // A counter that increments each time a new client connects. A producer whose
+    // first message is stateful (e.g. PreviewDriver's coordinate table, which colour
+    // frames then reference) watches this: when it changes, a fresh client just joined
+    // and needs that priming message re-sent NOW, rather than waiting for the producer's
+    // periodic re-broadcast. Cheap, broadcast-only (no per-client send / inbound routing):
+    // the producer re-broadcasts to everyone, idempotent on existing clients.
+    virtual uint32_t clientGeneration() const = 0;
 
 protected:
     ~BinaryBroadcaster() = default;  // not owned through this interface

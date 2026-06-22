@@ -37,6 +37,11 @@ let previewCoords_ = null;   // Float32Array[count*3], normalised + box-centred 
 let previewCoordCount_ = 0;
 let previewMaxDim_ = 1;
 let previewBox_ = null;      // {x,y,z} bounding-box extent for camera auto-fit
+let lineProgram = null;      // separate program for the wireframe bounding box
+let lineLocs = null;
+let lineBuffer = null;
+let boxVerts = null;         // 12-edge wireframe (24 line endpoints) for the current box
+let boxKey = "";             // cache key so the box buffer rebuilds only when extents change
 
 function initWebGL() {
     const canvas = document.getElementById("preview");
@@ -48,6 +53,7 @@ function initWebGL() {
         attribute vec3 aPos;
         attribute vec3 aCol;
         varying vec3 vCol;
+        varying float vSize;
         uniform mat4 uMVP;
         uniform float uPointSize;
         void main() {
@@ -55,18 +61,36 @@ function initWebGL() {
             gl_Position = uMVP * vec4(aPos, 1.0);
             // Depth-corrected point size — closer LEDs render larger
             gl_PointSize = uPointSize / gl_Position.w;
+            vSize = gl_PointSize;   // px size, so the fragment can keep the AA edge ~1px wide
         }
     `;
     const fsrc = `
         precision mediump float;
         varying vec3 vCol;
+        varying float vSize;
         void main() {
-            float d = length(gl_PointCoord - vec2(0.5));
-            if (d > 0.5) discard;
-            float a = 1.0 - smoothstep(0.25, 0.5, d);
-            // Gamma 0.7 lifts mid-greys so dim effects stay readable in the preview; not sRGB-correct
+            float d = length(gl_PointCoord - vec2(0.5));   // 0 at center .. 0.5 at rim
+            // Anti-alias band ~1px wide regardless of sprite size: crisp disc at 8x8
+            // (huge sprites) AND smooth at large grids (tiny sprites). Replaces the old
+            // half-radius alpha fade that read as "blurry" when each LED was big.
+            float aa = clamp(1.0 / max(vSize, 1.0), 0.004, 0.12);
+            float disc = 1.0 - smoothstep(0.5 - aa, 0.5, d);   // filled disc, thin soft rim
+            // Gamma 0.7 lifts mid-greys so dim effects stay readable; not sRGB-correct.
             vec3 bright = pow(vCol, vec3(0.7));
-            gl_FragColor = vec4(bright * a, a);
+            float lum = max(max(vCol.r, vCol.g), vCol.b);
+            // How "lit" the LED is, ramped over the bottom of the range so a near-off LED
+            // is treated as off (drawn as a placeholder) but a genuinely lit one is solid.
+            float lit = smoothstep(0.02, 0.10, lum);
+            // Off / near-black LEDs would otherwise vanish into the background, hiding the
+            // grid shape (and making an all-off scene a black screen). Draw the unlit ones
+            // as a faint hollow placeholder ring so the layout is always visible. A lit LED
+            // is a full solid disc; an off LED is just its grey outline.
+            float ringInner = 0.5 - aa - 0.08;
+            float ring = smoothstep(ringInner - aa, ringInner, d);          // 1 only on the rim band
+            vec3  col = mix(vec3(0.35), bright, lit);                       // grey rim when off, real color when lit
+            float a   = mix(ring * 0.5, disc, lit);                        // faint ring when off, solid disc when lit
+            if (a < 0.01) discard;
+            gl_FragColor = vec4(col, a);
         }
     `;
 
@@ -88,6 +112,23 @@ function initWebGL() {
     gl.enable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+    // A second, minimal program for the wireframe bounding box (a faint cuboid around
+    // the light volume — gives the scene bounds + 3D orientation while orbiting, and a
+    // frame even when every LED is off). Flat colour, no per-vertex attributes beyond pos.
+    const lvs = `attribute vec3 aPos; uniform mat4 uMVP; void main(){ gl_Position = uMVP * vec4(aPos,1.0); }`;
+    const lfs = `precision mediump float; uniform vec4 uColor; void main(){ gl_FragColor = uColor; }`;
+    const lv = gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(lv, lvs); gl.compileShader(lv);
+    const lf = gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(lf, lfs); gl.compileShader(lf);
+    lineProgram = gl.createProgram();
+    gl.attachShader(lineProgram, lv); gl.attachShader(lineProgram, lf);
+    gl.linkProgram(lineProgram);
+    lineLocs = {
+        aPos:   gl.getAttribLocation(lineProgram, "aPos"),
+        uMVP:   gl.getUniformLocation(lineProgram, "uMVP"),
+        uColor: gl.getUniformLocation(lineProgram, "uColor"),
+    };
+    lineBuffer = gl.createBuffer();
 
     // Orbit controls (mouse + touch)
     let dragging = false, lastX = 0, lastY = 0;
@@ -230,14 +271,19 @@ function setupLayout() {
         savePrefs({ corner, dismissed, forcePip });
         applyMode();
     });
-    // Hide the PiP; reveal the re-show pill.
+    // Hide the preview; reveal the re-show pill. Dismissal only takes visible effect in
+    // PiP mode (the pill replaces the floating preview); closing from docked mode also
+    // pops it out (forcePip) so the result is immediate — a dismissed docked preview that
+    // only vanished later when narrow auto-PiP kicked in would be a confusing surprise.
     document.getElementById("preview-close")?.addEventListener("click", () => {
         dismissed = true;
+        if (!ws.classList.contains("mode-pip")) forcePip = true;
         savePrefs({ corner, dismissed, forcePip });
         applyMode();
     });
     document.getElementById("preview-show")?.addEventListener("click", () => {
         dismissed = false;
+        forcePip = false;   // bring it back in the width-appropriate mode (docked on wide)
         savePrefs({ corner, dismissed, forcePip });
         applyMode();
     });
@@ -334,18 +380,20 @@ function renderPreviewFrame(view, buf) {
     if (!vertsBuf || vertsBuf.length < n * 6) vertsBuf = new Float32Array(n * 6);
     let vi = 0;
     for (let i = 0; i < n; i++) {
-        const r = rgb[i * 3], g = rgb[i * 3 + 1], b = rgb[i * 3 + 2];
-        if (!(r | g | b)) continue;          // skip dark points
+        // Include EVERY light, dark ones too: the shader draws an off LED as a faint
+        // placeholder ring (a lit one as a solid disc), so the grid shape stays visible
+        // and an all-off scene shows the layout instead of a black screen. (The count is
+        // already bounded by the table's stride downsampling for large grids.)
         vertsBuf[vi++] = previewCoords_[i * 3 + 0];
         vertsBuf[vi++] = previewCoords_[i * 3 + 1];
         vertsBuf[vi++] = previewCoords_[i * 3 + 2];
-        vertsBuf[vi++] = r / 255;
-        vertsBuf[vi++] = g / 255;
-        vertsBuf[vi++] = b / 255;
+        vertsBuf[vi++] = rgb[i * 3] / 255;
+        vertsBuf[vi++] = rgb[i * 3 + 1] / 255;
+        vertsBuf[vi++] = rgb[i * 3 + 2] / 255;
     }
     const vertCount = vi / 6;
 
-    if (vi === 0) return;  // all-dark frame — keep the last geometry, let rAF idle
+    if (vi === 0) return;  // no coords at all — keep the last geometry, let rAF idle
     lastVerts = vertsBuf.subarray(0, vi);
     lastVertCount = vertCount;
     lastMaxDim = previewMaxDim_;
@@ -425,6 +473,41 @@ function drawVerts() {
     gl.uniform1f(glLocs.uPointSize, pointSize);
 
     gl.drawArrays(gl.POINTS, 0, lastVertCount);
+
+    drawBoundingBox(mvp);
+}
+
+// Faint wireframe cuboid around the light volume. Rebuilt only when the box extent
+// changes (cached by boxKey). Half-extents match the normalised, box-centred point
+// coords (pos/maxDim - 0.5*box/maxDim), plus half a cell so the box encloses the
+// outermost LED centres rather than bisecting them.
+function drawBoundingBox(mvp) {
+    if (!lineProgram || !previewBox_ || !previewMaxDim_) return;
+    const md = previewMaxDim_;
+    const key = previewBox_.x + "x" + previewBox_.y + "x" + previewBox_.z + "@" + md;
+    if (key !== boxKey) {
+        const hx = (previewBox_.x) / 2 / md, hy = (previewBox_.y) / 2 / md, hz = (previewBox_.z) / 2 / md;
+        // 8 corners → 12 edges → 24 endpoints.
+        const c = [
+            [-hx,-hy,-hz],[ hx,-hy,-hz],[ hx, hy,-hz],[-hx, hy,-hz],
+            [-hx,-hy, hz],[ hx,-hy, hz],[ hx, hy, hz],[-hx, hy, hz],
+        ];
+        const E = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+        boxVerts = new Float32Array(E.length * 6);
+        let k = 0;
+        for (const [a, b] of E) { boxVerts.set(c[a], k); k += 3; boxVerts.set(c[b], k); k += 3; }
+        boxKey = key;
+    }
+    gl.useProgram(lineProgram);
+    gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, boxVerts, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(lineLocs.aPos);
+    gl.vertexAttribPointer(lineLocs.aPos, 3, gl.FLOAT, false, 0, 0);
+    gl.uniformMatrix4fv(lineLocs.uMVP, false, mvp);
+    // Faint, theme-neutral grey — visible on both dark and light backgrounds.
+    gl.uniform4f(lineLocs.uColor, 0.5, 0.5, 0.55, 0.25);
+    gl.drawArrays(gl.LINES, 0, boxVerts.length / 3);
+    gl.useProgram(glProgram);   // restore the points program for the next frame
 }
 
 function buildMVP(ex, ey, ez, aspect) {

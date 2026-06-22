@@ -151,18 +151,15 @@ void mdnsShutdown();
 
 // mDNS service browse (discovery) — the standard, push-style way to find devices that
 // advertise a service (projectMM, WLED `_wled._tcp`, Home Assistant, ESPHome, …),
-// without an HTTP subnet sweep. Three calls form a NON-BLOCKING poll cycle so it never
-// stalls the render task (the synchronous IDF mdns_query_ptr blocks the full timeout —
-// not usable on the tick):
-//   mdnsBrowseStart(service, proto)  — kick off one async PTR query (e.g. "_http","_tcp").
-//                                      Returns false if mDNS isn't up / already querying.
-//   mdnsBrowsePoll(cb, user)         — call each tick; when results are ready, invokes
-//                                      cb once per found host then returns true (done).
-//                                      Returns false while still pending (cheap, no block).
-//   mdnsBrowseStop()                 — release the query (call after a done poll, or to
-//                                      abort). Idempotent.
-// One query in flight at a time (DevicesModule serialises service types). A found host is
-// reported as a small POD — no IDF types leak across the seam. Desktop: stubs (no mDNS).
+// without an HTTP subnet sweep. ONE synchronous call per invocation — it queries, invokes
+// `cb` for each found host, frees everything, and returns. It blocks up to `timeoutMs`, so
+// the caller runs it on a slow cadence (DevicesModule on loop1s, one service type per tick
+// with a small timeout — NOT the render hot path), the standard mDNS-query pattern.
+// Deliberately not the async poll-a-handle API: holding the IDF search handle across ticks
+// raced the mDNS task's own expiry timer (it freed the search's queue mid-poll → a
+// null-queue assert that crashed on a UI refresh); a self-contained call holds no handle,
+// so that window can't exist. A found host is reported as a small POD — no IDF types leak
+// across the seam. Desktop: stub (no mDNS).
 struct MdnsHost {
     uint8_t ip[4] = {};        // resolved IPv4 (0.0.0.0 if unresolved)
     char    hostname[32] = {}; // instance/host name (e.g. "wled-desk"), "" if none
@@ -173,9 +170,8 @@ struct MdnsHost {
                                // Lets a browse classify a peer without an HTTP probe.
 };
 using MdnsHostCb = void(*)(const MdnsHost& host, void* user);
-bool mdnsBrowseStart(const char* service, const char* proto);
-bool mdnsBrowsePoll(MdnsHostCb cb, void* user);
-void mdnsBrowseStop();
+bool mdnsBrowse(const char* service, const char* proto, uint32_t timeoutMs,
+                MdnsHostCb cb, void* user);
 
 // Store the DHCP hostname (DHCP option 12) the next eth/wifi bring-up advertises.
 // Routers populate their client list from the DHCP request, not mDNS, so without

@@ -25,6 +25,7 @@ namespace {
 struct CaptureBroadcaster : mm::BinaryBroadcaster {
     int coordMsgs = 0, frameMsgs = 0;
     std::vector<uint8_t> lastCoord, lastFrame;
+    uint32_t generation = 0;   // bump to simulate a new client connecting
 
     void broadcastBinary(const mm::platform::WriteChunk* payload, int chunkCount) override {
         std::vector<uint8_t> buf;
@@ -34,6 +35,7 @@ struct CaptureBroadcaster : mm::BinaryBroadcaster {
         if (buf[0] == 0x03) { coordMsgs++; lastCoord = buf; }
         else if (buf[0] == 0x02) { frameMsgs++; lastFrame = buf; }
     }
+    uint32_t clientGeneration() const override { return generation; }
 
     int coordCount() const { return lastCoord.size() >= 3 ? lastCoord[1] | (lastCoord[2] << 8) : -1; }
     int frameCount() const { return lastFrame.size() >= 3 ? lastFrame[1] | (lastFrame[2] << 8) : -1; }
@@ -173,4 +175,34 @@ TEST_CASE("PreviewDriver tolerates the active Layer being deleted") {
     preview->buildAndSendCoordTable();
     preview->sendFrame();
     CHECK(cap.frameMsgs == 0);           // nothing to send with no layer
+}
+
+// Coordinates are sent ONLY when the geometry changes or a new client connects — never
+// per-frame and never on a timer (a periodic full-table rebuild would starve the tick).
+// A new client (clientGeneration bump) re-sends immediately so a page refresh shows the
+// preview at once. Driven through loop() with a frozen clock for determinism.
+TEST_CASE("PreviewDriver sends coordinates only on change / new client, never on a timer") {
+    mm::platform::setTestNowMs(100000);
+    PreviewRig rig(new mm::GridLayout(), 3);
+
+    rig.preview->loop();                 // first loop: coords sent (count was 0)
+    int afterFirst = rig.cap.coordMsgs;
+    CHECK(afterFirst >= 1);
+
+    // Advance a FULL 3 seconds with no new client and no rebuild: loop() keeps sending
+    // colour frames but must NOT re-send the coordinate table. This is the regression
+    // guard — the removed ~1 Hz timer would have re-sent ~3 times here.
+    for (int t = 1; t <= 3; t++) {
+        mm::platform::setTestNowMs(100000 + t * 1000);
+        rig.preview->loop();
+    }
+    CHECK(rig.cap.coordMsgs == afterFirst);   // no timer-driven re-send across 3s
+
+    // A new client connects (generation bumps). The next loop() re-sends coords at once.
+    rig.cap.generation++;
+    mm::platform::setTestNowMs(104200);
+    rig.preview->loop();
+    CHECK(rig.cap.coordMsgs == afterFirst + 1);   // re-sent for the fresh client
+
+    mm::platform::setTestNowMs(0);       // restore the real clock for other tests
 }

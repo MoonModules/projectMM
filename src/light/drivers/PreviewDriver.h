@@ -15,8 +15,9 @@ namespace mm {
 // per frame). Two message types — PreviewDriver owns both wire formats; the
 // HTTP server is a domain-neutral BinaryBroadcaster that just writes the bytes:
 //
-//   0x03 coordinate table (one-time, on every LUT rebuild + periodic re-send so
-//        new clients catch it):
+//   0x03 coordinate table (sent when the geometry changes — every LUT/layout rebuild
+//        via onBuildState — and when a new client connects, so a refresh gets it; never
+//        per-frame):
 //        [0x03][count:u16][bx:u8][by:u8][bz:u8][stride:u16][(x,y,z):u8×3 × count]
 //        bx/by/bz = bounding-box extent (for client centring); positions are
 //        1 byte/axis (a layout box ≤255/axis is the realistic case).
@@ -66,13 +67,16 @@ public:
         if (now - lastSendTime_ < interval) return;  // rate-limit gate
         lastSendTime_ = now;
 
-        // Rebuild + re-broadcast the coordinate table ~once per second (and
-        // immediately while it's still empty). The ~1 Hz cadence lets a client
-        // that connected after the last onBuildState catch the positions, and
-        // rebuilding (not just re-sending a cache) self-heals the case where the
-        // layout/source wasn't wired yet at onBuildState time — cheap on the
-        // cold path and idempotent on the client.
-        if (coordCount_ == 0 || now - lastCoordTime_ >= 1000) {
+        // The coordinate table is sent only when the geometry actually changes
+        // (onBuildState — a grid resize, layout/LUT rebuild) or when the UI asks for it
+        // (a new WS client bumps the broadcaster's clientGeneration, so a page refresh
+        // gets the positions immediately). NOT per-frame and NOT on a timer: rebuilding
+        // the full table every tick would starve the render loop, and the colour frames
+        // below already reference the last-sent positions. coordCount_==0 covers the cold
+        // case where the layout wasn't wired yet at onBuildState time.
+        uint32_t gen = broadcaster_ ? broadcaster_->clientGeneration() : 0;
+        if (coordCount_ == 0 || gen != lastClientGen_) {
+            lastClientGen_ = gen;
             buildAndSendCoordTable();
         }
 
@@ -130,7 +134,6 @@ public:
             p->out++;
         }, &pc);
 
-        lastCoordTime_ = platform::millis();
         sendCoordTable();
     }
 
@@ -218,7 +221,7 @@ private:
     uint8_t bx_ = 0, by_ = 0, bz_ = 0;
     int32_t posScale_ = 0;            // 0 = positions 1:1; else largest box edge (>255) to scale by
     uint32_t lastSendTime_ = 0;
-    uint32_t lastCoordTime_ = 0;
+    uint32_t lastClientGen_ = 0;   // last seen broadcaster_->clientGeneration() — re-send coords on change
 };
 
 } // namespace mm

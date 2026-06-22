@@ -38,6 +38,10 @@ public:
     // Producers (PreviewDriver) build the payload chunks; this prepends the WS
     // header. Domain-neutral: no knowledge of what the bytes carry.
     void broadcastBinary(const platform::WriteChunk* payload, int chunkCount) override;
+    // Bumped on each new WS client (see handleWebSocketUpgrade). PreviewDriver watches
+    // it to re-send its coordinate table the moment a fresh page connects, so a refresh
+    // shows the preview immediately instead of waiting for the next ~1 Hz re-broadcast.
+    uint32_t clientGeneration() const override { return wsClientGeneration_; }
 
     // Keep running even when "disabled" via the UI — otherwise the user has no way
     // to re-enable themselves through the same UI. The `enabled` checkbox on this
@@ -87,6 +91,7 @@ private:
 
     static constexpr int MAX_WS_CLIENTS = 4;
     platform::TcpConnection wsClients_[MAX_WS_CLIENTS];
+    uint32_t wsClientGeneration_ = 0;   // ++ on each new WS client; see clientGeneration()
 
     // All JSON API responses (/api/state, /api/types, /api/system) and the WS
     // state push stream through a JsonSink — no shared fixed-size buffer.

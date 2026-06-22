@@ -886,6 +886,17 @@ function renderDevices() {
             if (deviceBoard === val) opt.selected = true;
             boardPicker.appendChild(opt);
         }
+        // Push a board's full deviceModels.json defaults to the device (POST
+        // /api/push-board → _push_board_to_device fans out controls.<Module>.<control>).
+        // `onDone(ok)` lets the explicit button below show success/failure; the picker
+        // change path passes nothing (fire-and-forget, recovered on next refresh).
+        const pushBoard = (board, onDone) => {
+            fetch("/api/push-board", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ip: device.ip, board}),
+            }).then(r => onDone && onDone(r.ok)).catch(() => onDone && onDone(false));
+        };
         boardPicker.addEventListener("change", () => {
             device.board = boardPicker.value;
             saveState();
@@ -895,11 +906,27 @@ function renderDevices() {
             // UI to update right after they pick. Fire-and-forget; failure
             // (timeout / device offline) is recovered on the next refresh
             // when discover/refresh's bulk push catches up.
-            fetch("/api/push-board", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ip: device.ip, board: boardPicker.value}),
-            }).catch(() => { /* best-effort */ });
+            pushBoard(boardPicker.value);
+        });
+
+        // Explicit "inject defaults" — re-push the SELECTED board's full config on demand,
+        // without having to change the picker. Distinct intent from the implicit on-change
+        // push: re-apply after a reflash wiped config, or re-assert defaults a user edited
+        // away. Brief inline feedback so a no-op (timeout / offline) isn't silent.
+        const injectBtn = document.createElement("button");
+        injectBtn.className = "device-inject";
+        injectBtn.textContent = "inject defaults";
+        injectBtn.title = "Push the selected device-model's deviceModels.json defaults to this device now";
+        injectBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            const board = boardPicker.value;
+            if (!board) { injectBtn.textContent = "pick a board first"; setTimeout(() => injectBtn.textContent = "inject defaults", 1500); return; }
+            injectBtn.disabled = true;
+            injectBtn.textContent = "injecting…";
+            pushBoard(board, (ok) => {
+                injectBtn.textContent = ok ? "injected ✓" : "failed ✗";
+                setTimeout(() => { injectBtn.textContent = "inject defaults"; injectBtn.disabled = false; }, 1800);
+            });
         });
 
         const removeBtn = document.createElement("button");
@@ -938,6 +965,7 @@ function renderDevices() {
         const row3 = document.createElement("div");
         row3.className = "device-row device-row-board";
         row3.appendChild(boardPicker);
+        row3.appendChild(injectBtn);
 
         // row 4 — pin-profile save/apply. A profile is the device's captured
         // GPIO/peripheral config (drivers, board, network, audio); saving stores

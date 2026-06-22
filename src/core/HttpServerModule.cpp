@@ -1075,6 +1075,9 @@ void HttpServerModule::handleWebSocketUpgrade(platform::TcpConnection& conn, con
     for (auto& ws : wsClients_) {
         if (!ws.valid()) {
             ws = std::move(conn);
+            // A fresh client joined — bump the generation so stateful producers
+            // (PreviewDriver's coordinate table) re-send their priming message now.
+            wsClientGeneration_++;
             return;
         }
     }

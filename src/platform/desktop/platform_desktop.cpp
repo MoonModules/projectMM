@@ -406,11 +406,10 @@ bool wifiSetTxPower(int8_t quarterDbm) { return quarterDbm == 0; }
 bool mdnsInit(const char* /*deviceName*/) { return false; }
 void mdnsStop() {}
 void mdnsShutdown() {}
-// No mDNS on desktop — browse is a no-op (Start fails, Poll reports "done" with no hits).
-// A PC instance discovers peers via the HTTP sweep instead (see DevicesModule).
-bool mdnsBrowseStart(const char* /*service*/, const char* /*proto*/) { return false; }
-bool mdnsBrowsePoll(MdnsHostCb /*cb*/, void* /*user*/) { return true; }
-void mdnsBrowseStop() {}
+// No mDNS on desktop — browse is a no-op (no hosts found). A PC instance discovers peers
+// via the HTTP sweep instead (see DevicesModule).
+bool mdnsBrowse(const char* /*service*/, const char* /*proto*/, uint32_t /*timeoutMs*/,
+                MdnsHostCb /*cb*/, void* /*user*/) { return false; }
 
 // OTA — no-op on desktop (no OTA partition). The /api/firmware/url route
 // guards with `if constexpr (mm::platform::hasOta)` and returns 501 here,

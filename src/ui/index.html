@@ -34,16 +34,16 @@
                     <div class="preview-bar">
                         <span class="preview-grip" title="Drag preview">⠿</span>
                         <span class="preview-bar-spacer"></span>
-                        <button type="button" id="preview-dock" class="preview-bar-btn" title="Pop preview out / dock">⤢</button>
-                        <button type="button" id="preview-close" class="preview-bar-btn" title="Hide preview">✕</button>
+                        <button type="button" id="preview-dock" class="preview-bar-btn" aria-label="Pop preview out or dock" title="Pop preview out / dock">⤢</button>
+                        <button type="button" id="preview-close" class="preview-bar-btn" aria-label="Hide preview" title="Hide preview">✕</button>
                     </div>
                     <canvas id="preview"></canvas>
-                    <button type="button" id="preview-reset" title="Reset camera">⌖</button>
+                    <button type="button" id="preview-reset" aria-label="Reset camera" title="Reset camera">⌖</button>
                 </div>
                 <main id="main"></main>
             </div>
             <!-- Re-show affordance: appears only when the PiP is dismissed. -->
-            <button type="button" id="preview-show" class="preview-show" title="Show preview" hidden>◳ preview</button>
+            <button type="button" id="preview-show" class="preview-show" aria-label="Show preview" title="Show preview" hidden>◳ preview</button>
         </div>
     </div>
     <script type="module" src="app.js"></script>

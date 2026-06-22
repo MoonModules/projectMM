@@ -1002,28 +1002,26 @@ void mdnsShutdown() {
 // --- mDNS service browse (async, non-blocking) ---
 // One in-flight async query at a time (DevicesModule serialises service types). The
 // synchronous mdns_query_ptr would block the full timeout on the render task; the async
-// handle lets us poll a few ms each tick instead.
-static mdns_search_once_t* mdnsSearch_ = nullptr;
+// handle lets us poll a few ms each tick instead. (mdnsSearch_ is forward-declared above,
+// next to cancelMdnsBrowse, so mdnsInit/mdnsStop can cancel an in-flight query.)
 
-bool mdnsBrowseStart(const char* service, const char* proto) {
-    if (mdnsSearch_) return false;                 // one query at a time
-    // Browse needs only the mDNS stack, not advertising — so bring the stack up here
-    // regardless of the advertise toggle (mdnsStop clears the hostname but keeps the
-    // stack). A device that chooses not to advertise can still discover others.
+// One synchronous PTR browse for `service`/`proto`, blocking up to `timeoutMs`, then it
+// frees everything it allocated before returning. Self-contained ON PURPOSE: the earlier
+// async API (mdns_query_async_new + poll-the-handle-across-ticks) raced the mDNS task's
+// own search-expiry timer — when a query's window lapsed, the component freed the search's
+// internal queue, and our next-tick poll asserted on it (xQueueSemaphoreTake on a null
+// queue, crashing on a UI refresh). Holding no handle across ticks closes that window by
+// construction. The cost is a bounded blocking call: DevicesModule calls this on loop1s
+// (not the render hot path) for ONE service type per tick with a small timeout, the
+// standard mDNS-query pattern (WLED/ESPHome do the same), so the tick budget is fine.
+bool mdnsBrowse(const char* service, const char* proto, uint32_t timeoutMs,
+                MdnsHostCb cb, void* user) {
+    // Browse needs only the mDNS stack, not advertising — bring it up regardless of the
+    // advertise toggle (mdnsStop clears the hostname but keeps the stack), so a device
+    // that doesn't advertise can still discover others.
     if (!ensureMdnsStack()) return false;
-    // PTR query for the service type; 3 s window, up to 16 results. Returns immediately
-    // with a handle — results are gathered on the mDNS task, read via Poll below.
-    mdnsSearch_ = mdns_query_async_new(nullptr, service, proto, MDNS_TYPE_PTR,
-                                       3000, 16, nullptr);
-    return mdnsSearch_ != nullptr;
-}
-
-bool mdnsBrowsePoll(MdnsHostCb cb, void* user) {
-    if (!mdnsSearch_) return true;                 // nothing running == "done"
     mdns_result_t* results = nullptr;
-    uint8_t num = 0;
-    // 0 ms timeout: pure poll, never blocks the tick. true == the query finished.
-    if (!mdns_query_async_get_results(mdnsSearch_, 0, &results, &num)) return false;
+    if (mdns_query_ptr(service, proto, timeoutMs, 16, &results) != ESP_OK) return false;
     for (mdns_result_t* r = results; r && cb; r = r->next) {
         MdnsHost h{};
         // A PTR/service browse gives the friendly service *instance* name in
@@ -1056,11 +1054,7 @@ bool mdnsBrowsePoll(MdnsHostCb cb, void* user) {
         cb(h, user);
     }
     if (results) mdns_query_results_free(results);
-    return true;                                   // done — caller calls mdnsBrowseStop()
-}
-
-void mdnsBrowseStop() {
-    if (mdnsSearch_) { mdns_query_async_delete(mdnsSearch_); mdnsSearch_ = nullptr; }
+    return true;
 }
 
 // UdpSocket

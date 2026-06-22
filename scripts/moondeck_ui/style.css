@@ -302,20 +302,29 @@ select {
     font-size: 11px;
 }
 
+/* Picker + inject button share the board row; the picker flexes, the button
+   stays its natural width. */
+.device-row-board { display: flex; gap: 6px; align-items: center; }
 .device-board {
     font-size: 11px; background: #1c2535; color: #c0c0c0;
     border: 1px solid #2a3548; border-radius: 3px; padding: 1px 4px;
-    /* Picker lives alone in its own row (.device-row-board) and aligns
-       left. max-width clamps long labels (e.g. "Olimex ESP32-Gateway Rev G"
-       = 26ch) so the dropdown text doesn't overflow the card's right edge;
-       ellipsis triple handles the truncation on the selected option's
-       display text when collapsed. */
-    max-width: 100%;
-    display: inline-block;
+    /* Flexes to fill the row; max-width/ellipsis clamp long labels (e.g.
+       "Olimex ESP32-Gateway Rev G" = 26ch) so the dropdown text doesn't push
+       the inject button off the card's right edge. */
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+.device-inject {
+    flex: 0 0 auto;
+    font-size: 11px; background: #1c2535; color: #8ab4f8;
+    border: 1px solid #2a3548; border-radius: 3px; padding: 1px 6px;
+    cursor: pointer; white-space: nowrap;
+}
+.device-inject:hover:not(:disabled) { border-color: #8ab4f8; }
+.device-inject:disabled { opacity: 0.6; cursor: default; }
 .device-remove {
     background: none; border: none; color: #666;
     cursor: pointer; font-size: 11px; padding: 0 4px;
