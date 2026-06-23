@@ -11,10 +11,18 @@ namespace mm {
 // producer depends only on "something I can send bytes to" — not on the HTTP
 // server's full surface. Domain-neutral: the bytes' meaning is the caller's.
 struct BinaryBroadcaster {
-    // Send one binary WS frame whose payload is the given scatter-gather chunks
-    // (the implementation prepends the WS frame header). Backpressured clients
-    // skip the frame; corrupt / dead sockets are dropped.
-    virtual void broadcastBinary(const platform::WriteChunk* payload, int chunkCount) = 0;
+    // Stage one binary WS frame (the implementation prepends the WS header) for non-blocking
+    // fan-out to all clients. Returns true if the frame was accepted, false if DROPPED because
+    // a previous frame is still draining (backpressure) — the producer reads that as "the link
+    // can't keep up at this rate" and can adapt (e.g. PreviewDriver downscales the preview).
+    virtual bool broadcastBinary(const platform::WriteChunk* payload, int chunkCount) = 0;
+
+    // How many transport-poll ticks the LAST fully-sent frame took to drain to all clients
+    // (1 = went out immediately; higher = the link is backpressured). This is the real
+    // "can the link keep up" signal — unlike a dropped-frame count, which a producer running
+    // faster than the per-frame drain trips even on a healthy link. PreviewDriver reads this
+    // to adapt its resolution: high latency → downscale, low → refine back to full.
+    virtual uint16_t lastDrainTicks() const = 0;
 
     // A counter that increments each time a new client connects. A producer whose
     // first message is stateful (e.g. PreviewDriver's coordinate table, which colour

@@ -325,6 +325,12 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
     baseline = collect_metrics(client, settle_s=settle_s)
     print(f"\n  Baseline: tick={baseline.get('tickTimeUs', '?')}us (FPS={baseline.get('fps', '?')})  heap={baseline.get('freeHeap', '?')}")
 
+    # ids whose optional add_module was skipped (a platform-gated module absent on this
+    # target — e.g. the Parlio driver on a non-P4 board). A later optional measure/remove
+    # that names a skipped id is itself skipped, so an absent driver leaves no trace rather
+    # than failing the run. (perf_full's add/measure/remove driver triples are all optional.)
+    skipped_ids = set()
+
     # Live runs `steps` only — `fixture` is the in-process equivalent of what
     # main.cpp already wired on the device.
     for step_index, step in enumerate(scenario.get("steps", [])):
@@ -332,17 +338,46 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
         op = step.get("op", "")
         step_result = {"name": step_name, "op": op}
 
+        # An optional measure/control on a module whose optional add was skipped is a
+        # no-op — the module isn't there to measure. Skip before any REST call.
+        if step.get("optional") and step.get("id") in skipped_ids and op in ("measure", "set_control"):
+            step_result["status"] = "ok"
+            print(f"  {op:5} {step.get('id','?')} — skipped (optional, module not present on {target})")
+            results["steps"].append(step_result)
+            continue
+
         try:
             if op == "add_module":
                 data = {"type": step["type"], "id": step.get("id", ""),
                         "parent_id": step.get("parent_id", "")}
-                resp = client.post("/api/modules", data)
-                step_result["status"] = "ok" if resp.get("ok") else "error"
-                if resp.get("note") == "already exists":
-                    print(f"  =     {step.get('id', '?')} (exists)")
-                else:
-                    print(f"  +     {step.get('id', '?')} ({step['type']})")
-                    created_modules.append(step.get("id", ""))
+                # An `optional` add of a type this target doesn't have is a SKIP, not a
+                # fail — perf_full adds every LED driver (RMT/LCD/Parlio), but each is
+                # platform-gated (LCD/RMT on classic+S3, Parlio on P4), so the absent
+                # ones return "unknown type". The device replies either 400 (HTTPError)
+                # or 200 + ok:false depending on the path; treat both as skip when the
+                # step is optional. Mirrors the optional set_control handling below.
+                try:
+                    resp = client.post("/api/modules", data)
+                    if resp.get("ok"):
+                        step_result["status"] = "ok"
+                        if resp.get("note") == "already exists":
+                            print(f"  =     {step.get('id', '?')} (exists)")
+                        else:
+                            print(f"  +     {step.get('id', '?')} ({step['type']})")
+                            created_modules.append(step.get("id", ""))
+                    elif step.get("optional"):
+                        step_result["status"] = "ok"
+                        skipped_ids.add(step.get("id", ""))
+                        print(f"  +     {step.get('id','?')} ({step['type']}) — skipped (optional, type unavailable on {target})")
+                    else:
+                        step_result["status"] = "error"
+                except urllib.error.HTTPError:
+                    if step.get("optional"):
+                        step_result["status"] = "ok"
+                        skipped_ids.add(step.get("id", ""))
+                        print(f"  +     {step.get('id','?')} ({step['type']}) — skipped (optional, type unavailable on {target})")
+                    else:
+                        raise
 
             elif op == "set_control":
                 data = {"module": step["id"], "control": step["key"],
@@ -381,9 +416,24 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                 # reads identically on the in-process runner (which uses
                 # `remove_module`) and here. The two runners must never diverge
                 # on op names, or a scenario silently no-ops on one tier.
-                resp = client.delete(_mod_path(step["id"]))
-                step_result["status"] = "ok" if resp.get("ok") else "error"
-                print(f"  -     {step.get('id', '?')}")
+                # An `optional` remove of a module that was never added (its
+                # optional add was skipped — a platform-gated driver absent on this
+                # target) is a SKIP, not a fail: the device returns 404 "module not
+                # found" or ok:false. Pairs with the optional add above.
+                try:
+                    resp = client.delete(_mod_path(step["id"]))
+                    if resp.get("ok") or not step.get("optional"):
+                        step_result["status"] = "ok" if resp.get("ok") else "error"
+                        print(f"  -     {step.get('id', '?')}")
+                    else:
+                        step_result["status"] = "ok"
+                        print(f"  -     {step.get('id','?')} — skipped (optional, not present)")
+                except urllib.error.HTTPError:
+                    if step.get("optional"):
+                        step_result["status"] = "ok"
+                        print(f"  -     {step.get('id','?')} — skipped (optional, not present)")
+                    else:
+                        raise
 
             elif op == "clear_children":
                 # Delete every child of a container, leaving the container.

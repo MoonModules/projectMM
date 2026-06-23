@@ -26,20 +26,32 @@ struct CaptureBroadcaster : mm::BinaryBroadcaster {
     int coordMsgs = 0, frameMsgs = 0;
     std::vector<uint8_t> lastCoord, lastFrame;
     uint32_t generation = 0;   // bump to simulate a new client connecting
+    bool acceptNext = true;    // false → drop colour frames (simulate backpressure)
+    bool dropCoord = false;    // true → drop coord tables too (simulate a 0x03 lost to backpressure)
 
-    void broadcastBinary(const mm::platform::WriteChunk* payload, int chunkCount) override {
+    bool broadcastBinary(const mm::platform::WriteChunk* payload, int chunkCount) override {
         std::vector<uint8_t> buf;
         for (int i = 0; i < chunkCount; i++)
             buf.insert(buf.end(), payload[i].data, payload[i].data + payload[i].len);
-        if (buf.empty()) return;
+        if (buf.empty()) return false;
+        if (dropCoord && buf[0] == 0x03) return false;     // coord table dropped under backpressure
+        if (!acceptNext && buf[0] == 0x02) return false;   // colour frame dropped on demand
         if (buf[0] == 0x03) { coordMsgs++; lastCoord = buf; }
         else if (buf[0] == 0x02) { frameMsgs++; lastFrame = buf; }
+        return true;
     }
     uint32_t clientGeneration() const override { return generation; }
+    uint16_t drainTicks = 1;   // simulate link latency for the adaptive-downscale test
+    uint16_t lastDrainTicks() const override { return drainTicks; }
 
-    int coordCount() const { return lastCoord.size() >= 3 ? lastCoord[1] | (lastCoord[2] << 8) : -1; }
-    int frameCount() const { return lastFrame.size() >= 3 ? lastFrame[1] | (lastFrame[2] << 8) : -1; }
-    int coordStride() const { return lastCoord.size() >= 8 ? lastCoord[6] | (lastCoord[7] << 8) : -1; }
+    // 0x03 = [type][count:u32][bx][by][bz][stride:u16] (10-byte header)
+    // 0x02 = [type][count:u32][stride:u16] (7-byte header)
+    static uint32_t u32le(const std::vector<uint8_t>& b, size_t o) {
+        return b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (static_cast<uint32_t>(b[o + 3]) << 24);
+    }
+    int coordCount() const { return lastCoord.size() >= 5 ? static_cast<int>(u32le(lastCoord, 1)) : -1; }
+    int frameCount() const { return lastFrame.size() >= 5 ? static_cast<int>(u32le(lastFrame, 1)) : -1; }
+    int coordStride() const { return lastCoord.size() >= 10 ? lastCoord[8] | (lastCoord[9] << 8) : -1; }
 };
 
 // Wire PreviewDriver under Drivers, over a Layer + single layout, with a
@@ -84,8 +96,8 @@ TEST_CASE("PreviewDriver coordinate table carries the real lights, not the box")
     REQUIRE(rig.cap.coordMsgs > 0);
     CHECK(rig.cap.coordCount() == 210);   // the shell, not 729
     CHECK(rig.cap.coordStride() == 1);    // small → exact, no downsample
-    // 0x03 = [0x03][count:u16][bx][by][bz][stride:u16] + count*3 position bytes
-    CHECK(rig.cap.lastCoord.size() == 8u + 210u * 3u);
+    // 0x03 = [0x03][count:u32][bx][by][bz][stride:u16] (10-byte hdr) + count*3 position bytes
+    CHECK(rig.cap.lastCoord.size() == 10u + 210u * 3u);
 }
 
 // Per-frame 0x02 RGB count matches the coordinate-table count.
@@ -97,8 +109,8 @@ TEST_CASE("PreviewDriver per-frame RGB count matches the coordinate table") {
 
     REQUIRE(rig.cap.frameMsgs > 0);
     CHECK(rig.cap.frameCount() == 210);
-    // 0x02 = [0x02][count:u16][stride:u16] + count*3 RGB bytes
-    CHECK(rig.cap.lastFrame.size() == 5u + 210u * 3u);
+    // 0x02 = [0x02][count:u32][stride:u16] (7-byte hdr) + count*3 RGB bytes
+    CHECK(rig.cap.lastFrame.size() == 7u + 210u * 3u);
 }
 
 // A small grid sends every light at its grid position (stride 1, exact).
@@ -113,23 +125,77 @@ TEST_CASE("PreviewDriver small grid sends all lights exactly") {
     CHECK(rig.cap.coordStride() == 1);
 }
 
-// A large layout is index-downsampled (stride > 1) so the payload fits the
-// send-buffer cap — but at REAL positions, not a padded box.
-TEST_CASE("PreviewDriver downsamples a large layout via index stride") {
+// A large layout is SPATIALLY downsampled (a regular per-axis lattice, not every-Nth-flat-
+// index) so the payload fits the send-buffer cap without the diagonal moiré that linear
+// stride produced on a grid whose width didn't divide the stride. The wire "stride" field
+// carries the per-axis lattice/downscale factor (colour k still maps 1:1 to coord k).
+TEST_CASE("PreviewDriver downsamples a large layout on a regular spatial lattice") {
     mm::GridLayout g;
-    g.width = 128; g.height = 128; g.depth = 1;   // 16384 lights > 1800-point cap
+    g.width = 512; g.height = 512; g.depth = 1;   // 262144 lights > the desktop/PSRAM 131072 cap
     PreviewRig rig(&g);
     rig.produce();
 
-    CHECK(rig.cap.coordStride() > 1);             // strided
-    CHECK(rig.cap.coordCount() <= 1800);          // fits the send-buffer cap
-    CHECK(rig.cap.coordCount() == rig.cap.frameCount());  // table + RGB agree
+    CHECK(rig.cap.coordStride() >= 2);            // RAM cap forces a lattice step (the factor)
+    CHECK(rig.cap.coordCount() <= 131072);        // downsampled to the desktop (PSRAM-tier) cap
+    CHECK(rig.cap.coordCount() > 0);
+    CHECK(rig.cap.coordCount() == rig.cap.frameCount());  // table + RGB agree (lockstep)
+
+    // Regular lattice check: every sent X coordinate is a multiple of the same step, and so
+    // is every Y — i.e. the kept points sit on a grid, with NO per-row column drift (the
+    // diagonal-streak bug). Read the packed u8 positions back from the coord message.
+    const auto& cd = rig.cap.lastCoord;
+    const int hdr = 10;                           // [0x03][count:u32][bx][by][bz][stride:u16]
+    REQUIRE(cd.size() >= static_cast<size_t>(hdr + 3));
+    // Derive the X step from the first two distinct X values, then assert all X are multiples.
+    int stepX = 0, x0 = cd[hdr];
+    for (size_t p = hdr; p + 2 < cd.size(); p += 3) {
+        int dx = cd[p] - x0;
+        if (dx != 0) { stepX = dx > 0 ? dx : -dx; break; }
+    }
+    REQUIRE(stepX > 0);
+    bool regular = true;
+    for (size_t p = hdr; p + 2 < cd.size(); p += 3) {
+        if (((cd[p] - x0) % stepX) != 0) { regular = false; break; }   // X off the lattice → drift
+    }
+    CHECK(regular);                               // no diagonal moiré
 }
 
 // Default fps is the rate-limited preview stream rate.
 TEST_CASE("PreviewDriver fps default") {
     mm::PreviewDriver driver;
     CHECK(driver.fps == 24);
+}
+
+// Regression: a coordinate table dropped under backpressure must be RETRIED, and colour
+// frames withheld until it lands — otherwise the device sends 0x02 frames the browser skips
+// (count mismatch) and the preview freezes for the whole session. Drives loop() (where the
+// coord-pending logic lives) with a broadcaster that drops every 0x03, then lets it through.
+TEST_CASE("PreviewDriver retries a dropped coordinate table, withholds frames until it lands") {
+    mm::GridLayout g; g.width = 16; g.height = 16; g.depth = 1;   // 256 lights, full res
+    PreviewRig rig(&g);
+    rig.cap.dropCoord = true;                 // every coord table is lost to backpressure
+    rig.cap.frameMsgs = 0;                     // ignore any frame from rig construction
+    rig.cap.generation = 1;                    // a "new client" — forces loop() to rebuild+resend
+                                               // the coord table, which dropCoord now loses
+
+    // Advance the test clock past the fps gate (interval = 1000/24 ≈ 42 ms) before each loop().
+    uint32_t t = 1000;
+    auto tick = [&] { t += 100; mm::platform::setTestNowMs(t); rig.preview->loop(); };
+
+    // Pump loop() several times. The rebuilt 0x03 never lands, so NO colour frame may go out —
+    // a 0x02 now would carry a count the browser can't map (the freeze the guard prevents).
+    for (int i = 0; i < 5; i++) tick();
+    CHECK(rig.cap.frameMsgs == 0);            // frames withheld while the table is pending
+
+    // Link recovers: the table now lands, and frames resume — matching the same count.
+    rig.cap.dropCoord = false;
+    tick();                                    // retries the pending table (it lands)
+    tick();                                    // now a colour frame may go out
+    CHECK(rig.cap.coordMsgs > 0);              // the table finally reached the client
+    CHECK(rig.cap.frameMsgs > 0);              // frames resumed
+    CHECK(rig.cap.coordCount() == rig.cap.frameCount());   // and they agree (no freeze)
+
+    mm::platform::setTestNowMs(0);             // release the clock override
 }
 
 // Regression: deleting the active Layer must not leave a driver holding a

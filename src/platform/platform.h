@@ -299,16 +299,9 @@ private:
     int fd_ = -1;
 };
 
-// One contiguous span for a scatter-gather write.
+// One contiguous span. broadcastBinary() takes an array of these (a frame's header +
+// payload) and stages them into one buffer for the non-blocking drain (see writeSome).
 struct WriteChunk { const uint8_t* data; size_t len; };
-
-// Outcome of a non-blocking scatter-gather write (TcpConnection::writeChunks).
-enum class WriteResult {
-    Complete,    // every byte across all chunks was sent
-    WouldBlock,  // socket buffer full, NOTHING was sent — caller may retry later
-    Partial,     // some bytes sent — the message is truncated, caller MUST close()
-    Error        // socket error — caller MUST close()
-};
 
 class TcpConnection {
 public:
@@ -328,12 +321,12 @@ public:
     bool valid() const { return fd_ >= 0; }
     int read(uint8_t* buf, size_t maxLen);   // non-blocking: >0 data, 0 closed, -1 nothing
     bool write(const uint8_t* data, size_t len);  // blocking — retries until all sent
-
-    // Single non-blocking scatter-gather write (one writev). Never blocks.
-    // Used for the preview broadcast so a backpressured browser cannot stall
-    // the render task. `count` must be 1..MAX_WRITE_CHUNKS.
-    static constexpr int MAX_WRITE_CHUNKS = 3;
-    WriteResult writeChunks(const WriteChunk* chunks, int count);
+    // Non-blocking partial write: send as many of `len` bytes as the socket accepts right
+    // now, return the count actually written (0..len). -1 = socket error (caller closes);
+    // 0 = WouldBlock (buffer full, try later) or len==0. The caller advances its own offset
+    // and re-calls — used by the preview drain to stream a frame across ticks without ever
+    // blocking the render task. Never spins, never yields. (int mirrors read()'s contract.)
+    int writeSome(const uint8_t* data, size_t len);
 
     void close();
 

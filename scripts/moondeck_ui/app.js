@@ -891,11 +891,17 @@ function renderDevices() {
         // `onDone(ok)` lets the explicit button below show success/failure; the picker
         // change path passes nothing (fire-and-forget, recovered on next refresh).
         const pushBoard = (board, onDone) => {
+            // Success is the device-side result in the JSON body ({"ok": bool} from
+            // _push_board_to_device) — HTTP 200 alone can wrap a failed push (a device
+            // timeout / non-2xx mid-fan-out), so r.ok would falsely report success.
+            // 10s AbortSignal timeout so a stalled request can't wedge the button forever.
             fetch("/api/push-board", {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({ip: device.ip, board}),
-            }).then(r => onDone && onDone(r.ok)).catch(() => onDone && onDone(false));
+                signal: AbortSignal.timeout(10000),
+            }).then(r => r.json()).then(j => onDone && onDone(!!j.ok))
+              .catch(() => onDone && onDone(false));
         };
         boardPicker.addEventListener("change", () => {
             device.board = boardPicker.value;

@@ -260,6 +260,19 @@ body {
     touch-action: none;
 }
 
+/* Sequence-number overlay: a 2D canvas sized + positioned to exactly cover #preview
+   (the preview-pane is the positioned ancestor). pointer-events:none so orbit/drag pass
+   through to the WebGL canvas underneath. preview3d.js projects each light through the
+   same MVP as the GL render, so labels track LEDs in 2D AND 3D layouts. */
+#preview-labels {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
 /* The drag bar is docked-mode-hidden (only PiP needs a grab handle); the dock /
    close buttons stay available so a wide-screen user can pop the preview out. */
 .preview-bar {
@@ -269,6 +282,7 @@ body {
     padding: 2px 4px;
 }
 .preview-grip { display: none; color: var(--fg-muted); cursor: grab; user-select: none; font-size: 14px; }
+.preview-status { color: var(--fg-muted); font-size: 11px; opacity: 0.8; white-space: nowrap; }
 .preview-bar-spacer { flex: 1; }
 .preview-bar-btn {
     background: transparent;
@@ -282,27 +296,20 @@ body {
     opacity: 0.6;
 }
 .preview-bar-btn:hover { opacity: 1; color: var(--accent); }
+.preview-bar-btn.active { opacity: 1; color: var(--accent); }
 
-#preview-reset {
-    position: absolute;
-    top: 30px;
-    right: 8px;
-    background: var(--bg-1);
-    border: 1px solid var(--border);
-    color: var(--fg-muted);
-    border-radius: 4px;
-    width: 26px;
-    height: 26px;
-    font-size: 15px;
-    line-height: 1;
-    padding: 0;
+/* Compact dot-size slider in the preview bar. accent-color tints the native control to
+   match the theme without a full custom track/thumb (recognisable + minimal). */
+.preview-dot {
+    width: 70px;
+    height: 14px;
+    margin: 0 2px;
     cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    accent-color: var(--accent);
     opacity: 0.6;
 }
-#preview-reset:hover { opacity: 1; color: var(--accent); border-color: var(--accent); }
+.preview-dot:hover { opacity: 1; }
+
 
 /* ---- PiP mode: cards full width, preview floats ---- */
 .workspace.mode-pip { display: block; }

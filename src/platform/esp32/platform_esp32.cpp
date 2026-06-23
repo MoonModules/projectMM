@@ -72,7 +72,6 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
-#include <sys/uio.h>
 #include <unistd.h>
 
 namespace mm::platform {
@@ -999,11 +998,7 @@ void mdnsShutdown() {
     if (mdnsStackUp_) { mdns_free(); mdnsStackUp_ = false; }
 }
 
-// --- mDNS service browse (async, non-blocking) ---
-// One in-flight async query at a time (DevicesModule serialises service types). The
-// synchronous mdns_query_ptr would block the full timeout on the render task; the async
-// handle lets us poll a few ms each tick instead. (mdnsSearch_ is forward-declared above,
-// next to cancelMdnsBrowse, so mdnsInit/mdnsStop can cancel an in-flight query.)
+// --- mDNS service browse (synchronous, bounded) ---
 
 // One synchronous PTR browse for `service`/`proto`, blocking up to `timeoutMs`, then it
 // frees everything it allocated before returning. Self-contained ON PURPOSE: the earlier
@@ -1165,67 +1160,16 @@ bool TcpConnection::write(const uint8_t* data, size_t len) {
     return true;
 }
 
-WriteResult TcpConnection::writeChunks(const WriteChunk* chunks, int count) {
-    if (fd_ < 0) return WriteResult::Error;
-    if (count < 1 || count > MAX_WRITE_CHUNKS) return WriteResult::Error;
-    struct iovec iov[MAX_WRITE_CHUNKS];
-    size_t total = 0;
-    for (int i = 0; i < count; i++) {
-        iov[i].iov_base = const_cast<uint8_t*>(chunks[i].data);
-        iov[i].iov_len = chunks[i].len;
-        total += chunks[i].len;
-    }
-    // Single non-blocking writev — the socket is already O_NONBLOCK.
-    ssize_t n = lwip_writev(fd_, iov, count);
-    if (n < 0) {
-        return (errno == EAGAIN || errno == EWOULDBLOCK)
-                   ? WriteResult::WouldBlock : WriteResult::Error;
-    }
-    if (n == 0) return WriteResult::WouldBlock;
-    if (static_cast<size_t>(n) == total) return WriteResult::Complete;
-
-    // Partial: some bytes of this WS frame went out, so we MUST finish the rest
-    // — a half-sent frame corrupts the stream and the caller would otherwise
-    // drop the connection. This happens under backpressure when the link is
-    // saturated (e.g. ArtNet + a large preview frame on a slow 128×128 tick):
-    // the lwIP send buffer can't take the whole frame at once but drains in
-    // microseconds. Drain the unsent tail with a bounded retry loop; only if it
-    // still can't complete (a genuinely stuck socket) do we report Partial so
-    // the caller closes. lwIP exposes no free-TX-space query (SO_SNDBUF is
-    // unimplemented), so a pre-check isn't possible — finishing the write is the
-    // way to keep the stream intact without dropping.
-    size_t sent = static_cast<size_t>(n);
-    // Small cap: a partial tail (a few KB) drains in 1-2 ms as TCP ACKs arrive;
-    // 8 ms is plenty for a transient. A genuinely saturated link blows past it —
-    // then we give up (report Partial → caller closes, browser reconnects),
-    // rather than stall the render tick. Bounds the worst-case tick hit to ~8 ms.
-    constexpr int kMaxDrainTries = 8;    // each yields up to 1ms
-    for (int tries = 0; sent < total && tries < kMaxDrainTries; ) {
-        // Locate the chunk + offset where `sent` lands, write its remaining tail.
-        size_t acc = 0;
-        const uint8_t* p = nullptr; size_t remain = 0;
-        for (int i = 0; i < count; i++) {
-            if (sent < acc + chunks[i].len) {
-                size_t off = sent - acc;
-                p = chunks[i].data + off;
-                remain = chunks[i].len - off;
-                break;
-            }
-            acc += chunks[i].len;
-        }
-        if (!p) break;  // shouldn't happen (sent < total)
-        ssize_t w = lwip_write(fd_, p, remain);
-        if (w > 0) {
-            sent += static_cast<size_t>(w);
-        } else if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            vTaskDelay(pdMS_TO_TICKS(1));   // buffer full — let it drain
-            tries++;
-        } else {
-            return WriteResult::Error;       // real socket error
-        }
-    }
-    return (sent == total) ? WriteResult::Complete : WriteResult::Partial;
+int TcpConnection::writeSome(const uint8_t* data, size_t len) {
+    if (fd_ < 0) return -1;
+    if (len == 0) return 0;
+    ssize_t n = lwip_write(fd_, data, len);
+    if (n > 0) return static_cast<int>(n);
+    if (n == 0) return 0;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;  // buffer full — try later
+    return -1;                                              // real socket error
 }
+
 
 void TcpConnection::close() {
     if (fd_ >= 0) {

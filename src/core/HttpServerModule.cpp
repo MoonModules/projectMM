@@ -38,6 +38,9 @@ void HttpServerModule::setup() {
 void HttpServerModule::teardown() {
     for (auto& ws : wsClients_) ws.close();
     server_.close();
+    if (wsPreviewBuf_) { platform::free(wsPreviewBuf_); wsPreviewBuf_ = nullptr; }
+    wsPreviewCap_ = wsPreviewLen_ = 0;
+    for (auto& s : wsPreviewSent_) s = 0;
 }
 
 void HttpServerModule::loop20ms() {
@@ -48,9 +51,11 @@ void HttpServerModule::loop20ms() {
         return; // don't broadcast in same tick as accept (WebSocket needs time to process 101)
     }
 
-    // Binary frames (e.g. the 3D preview) are no longer polled here — their
-    // producer (PreviewDriver) pushes them via broadcastBinary() from its own
-    // loop. HttpServer owns only the transport, not the content.
+    // Drain the live-preview frame queued by broadcastBinary() — a slice per tick, never
+    // blocking. This is the consumer side of the preview producer/consumer handoff; the
+    // producer (PreviewDriver) only stages bytes, the transport poll sends them. (When the
+    // §145 two-task split lands, this call moves to the consumer/network task unchanged.)
+    drainWsSends();
 }
 
 void HttpServerModule::loop1s() {
@@ -1072,12 +1077,15 @@ void HttpServerModule::handleWebSocketUpgrade(platform::TcpConnection& conn, con
     conn.write(reinterpret_cast<const uint8_t*>(response), respLen);
 
     // Store connection as WebSocket client
-    for (auto& ws : wsClients_) {
-        if (!ws.valid()) {
-            ws = std::move(conn);
+    for (int i = 0; i < MAX_WS_CLIENTS; i++) {
+        if (!wsClients_[i].valid()) {
+            wsClients_[i] = std::move(conn);
             // A fresh client joined — bump the generation so stateful producers
             // (PreviewDriver's coordinate table) re-send their priming message now.
             wsClientGeneration_++;
+            // Start this client at the END of any in-flight preview frame so it doesn't
+            // receive a half-frame mid-stream; it picks up cleanly from the next frame.
+            wsPreviewSent_[i] = wsPreviewLen_;
             return;
         }
     }
@@ -1126,16 +1134,28 @@ bool HttpServerModule::sendWsTextFrame(platform::TcpConnection& conn, const char
     return conn.write(reinterpret_cast<const uint8_t*>(data), len);
 }
 
-void HttpServerModule::broadcastBinary(const platform::WriteChunk* payload, int chunkCount) {
-    if (!payload || chunkCount <= 0) return;
+bool HttpServerModule::broadcastBinary(const platform::WriteChunk* payload, int chunkCount) {
+    if (!payload || chunkCount <= 0) return false;
 
     // Total payload length = sum of the caller's chunks.
     size_t totalLen = 0;
     for (int i = 0; i < chunkCount; i++) totalLen += payload[i].len;
-    if (totalLen == 0) return;
+    if (totalLen == 0) return false;
 
-    // WebSocket frame header for a binary message of totalLen bytes.
-    uint8_t wsHeader[4];
+    bool anyClient = false;
+    for (auto& ws : wsClients_) if (ws.valid()) { anyClient = true; break; }
+    if (!anyClient) return false;
+
+    // BACKPRESSURE: the staging buffer holds ONE frame, fanned out to all clients. While any
+    // client is still draining it (wsPreviewLen_ != 0), refuse a new frame — overwriting it
+    // would corrupt the in-flight sends. The new frame is DROPPED (return false → the producer
+    // reads this as "the link can't keep up" and downscales); this is what keeps a slow client
+    // from ever stalling the render task. drainWsSends() clears wsPreviewLen_ when all are done.
+    if (wsPreviewLen_ != 0) return false;
+
+    // WebSocket binary frame header. 16-bit length form up to 65535 B; the 64-bit form
+    // (RFC 6455) above that, so a full-resolution preview frame (tens of KB to >MB) is legal.
+    uint8_t wsHeader[10];
     int wsHeaderLen = 0;
     wsHeader[0] = 0x82; // FIN + binary opcode
     if (totalLen < 126) {
@@ -1147,36 +1167,83 @@ void HttpServerModule::broadcastBinary(const platform::WriteChunk* payload, int 
         wsHeader[3] = static_cast<uint8_t>(totalLen & 0xFF);
         wsHeaderLen = 4;
     } else {
-        return; // frame too large for the 16-bit length form
+        wsHeader[1] = 127;
+        for (int i = 0; i < 8; i++) {
+            wsHeader[2 + i] = static_cast<uint8_t>((static_cast<uint64_t>(totalLen) >> (56 - 8 * i)) & 0xFF);
+        }
+        wsHeaderLen = 10;
     }
 
-    // Scatter-gather: our WS header, then the caller's payload chunks. The
-    // payload buffers are caller-owned (e.g. PreviewDriver's downsample buffer);
-    // no copy here. Stack array sized for WS header + a small fixed payload
-    // (the preview uses 2 chunks). MAX_PAYLOAD_CHUNKS caps it so this stays a
-    // stack array, not an allocation in the broadcast path.
-    static constexpr int MAX_PAYLOAD_CHUNKS = 4;
-    if (chunkCount > MAX_PAYLOAD_CHUNKS) return;  // caller bug; don't allocate
-    platform::WriteChunk chunks[1 + MAX_PAYLOAD_CHUNKS];
-    chunks[0] = { wsHeader, static_cast<size_t>(wsHeaderLen) };
-    for (int i = 0; i < chunkCount; i++) chunks[1 + i] = payload[i];
-    const int totalChunks = 1 + chunkCount;
+    // Stage the whole frame (header + payload) ONCE into the owned buffer, then return — the
+    // socket writes happen later in drainWsSends() on the transport poll, never here on the
+    // render task. (This copy is the producer→consumer handoff the §145 two-task split needs;
+    // the staging buffer is the queue.) Grow the buffer if a bigger grid needs more room.
+    const size_t frameLen = static_cast<size_t>(wsHeaderLen) + totalLen;
+    if (wsPreviewCap_ < frameLen) {
+        if (wsPreviewBuf_) platform::free(wsPreviewBuf_);
+        wsPreviewBuf_ = static_cast<uint8_t*>(platform::alloc(frameLen));
+        wsPreviewCap_ = wsPreviewBuf_ ? frameLen : 0;
+    }
+    if (!wsPreviewBuf_) { wsPreviewCap_ = 0; return false; }  // OOM: drop the frame, stay healthy
 
-    for (auto& ws : wsClients_) {
+    std::memcpy(wsPreviewBuf_, wsHeader, wsHeaderLen);
+    size_t off = wsHeaderLen;
+    for (int i = 0; i < chunkCount; i++) {
+        std::memcpy(wsPreviewBuf_ + off, payload[i].data, payload[i].len);
+        off += payload[i].len;
+    }
+    wsPreviewLen_ = frameLen;
+    wsPreviewAge_ = 0;
+    wsPreviewDrainTicks_ = 0;
+    for (int i = 0; i < MAX_WS_CLIENTS; i++) wsPreviewSent_[i] = 0;  // every client starts at 0
+    return true;
+}
+
+void HttpServerModule::drainWsSends() {
+    if (wsPreviewLen_ == 0) return;  // nothing queued
+    wsPreviewDrainTicks_++;          // this frame has now been draining for one more tick
+
+    // Push each client's remaining bytes (non-blocking, never spins). We own the per-client
+    // offset, so a mid-frame partial is correct — the WS message finishes across successive
+    // loop20ms calls. The frame stays staged until EVERY client has drained it (or dropped
+    // out); only then is wsPreviewLen_ cleared so broadcastBinary stages the next one. A slow
+    // client just lags its own offset; it can't overwrite the buffer or stall the others.
+    bool allDone = true;
+    size_t progressed = 0;
+    for (int i = 0; i < MAX_WS_CLIENTS; i++) {
+        platform::TcpConnection& ws = wsClients_[i];
         if (!ws.valid()) continue;
-        switch (ws.writeChunks(chunks, totalChunks)) {
-            case platform::WriteResult::Complete:
-            case platform::WriteResult::WouldBlock:
-                // WouldBlock: browser is backpressured — skip this frame,
-                // keep the connection open (the next frame may fit).
-                break;
-            case platform::WriteResult::Partial:
-            case platform::WriteResult::Error:
-                // Partial: a truncated WS message went out — the stream is
-                // corrupt, the connection must be dropped. Error: dead socket.
-                ws.close();
-                break;
+        if (wsPreviewSent_[i] >= wsPreviewLen_) continue;   // this client already finished
+        int n = ws.writeSome(wsPreviewBuf_ + wsPreviewSent_[i], wsPreviewLen_ - wsPreviewSent_[i]);
+        if (n < 0) {                       // socket error — drop this client, not the frame
+            ws.close();
+            wsPreviewSent_[i] = wsPreviewLen_;   // mark done so it doesn't hold up the frame
+            continue;
         }
+        progressed += static_cast<size_t>(n);
+        wsPreviewSent_[i] += static_cast<size_t>(n);
+        if (wsPreviewSent_[i] < wsPreviewLen_) allDone = false;  // still bytes to send next tick
+    }
+    if (allDone) {
+        wsPreviewLastDrainTicks_ = wsPreviewDrainTicks_;   // how long this frame took (latency)
+        wsPreviewLen_ = 0; wsPreviewAge_ = 0;
+        return;
+    }
+
+    // Stuck-client guard. Count only ticks with NO forward progress (a big frame on a healthy
+    // link legitimately spans many ticks — any progress resets the counter). If a client
+    // wedges (TCP window stuck, never erroring) and nothing moves for kPreviewMaxDrainTicks,
+    // we must free the buffer for the next frame — BUT a client still mid-send has a half-sent
+    // WS message, and staging a new frame would splice its bytes into that message (a torn,
+    // garbled frame in the browser). So CLOSE any unfinished client instead of just abandoning:
+    // a clean reconnect resyncs it. Finished clients are untouched.
+    if (progressed > 0) { wsPreviewAge_ = 0; return; }
+    if (++wsPreviewAge_ >= kPreviewMaxDrainTicks) {
+        for (int i = 0; i < MAX_WS_CLIENTS; i++) {
+            if (wsClients_[i].valid() && wsPreviewSent_[i] < wsPreviewLen_) wsClients_[i].close();
+        }
+        wsPreviewLen_ = 0;
+        wsPreviewAge_ = 0;
     }
 }
 
