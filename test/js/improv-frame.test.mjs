@@ -80,3 +80,51 @@ test("APPLY_OP always emits at least one frame (so `last` always sends)", () => 
     assert.equal(frames.length, 1);
     assert.equal(frames[0][9 + 2], 1, "last=1 on the lone frame");
 });
+
+// ---------------------------------------------------------------------------
+// PR: removal of IMPROV_CMD_SET_DEVICE_MODEL (0xFE) — export surface tests
+// ---------------------------------------------------------------------------
+
+import * as improvModule from "../../docs/install/improv-frame.js";
+
+test("IMPROV_CMD_SET_DEVICE_MODEL (0xFE) is NOT exported — the vendor RPC was removed", () => {
+    // SET_DEVICE_MODEL was removed from the wire protocol in favour of pushing the
+    // deviceModel identity as a plain APPLY_OP set op (System.deviceModel).
+    // If this fails, something re-exported the old constant.
+    assert.equal(improvModule.IMPROV_CMD_SET_DEVICE_MODEL, undefined,
+        "0xFE SET_DEVICE_MODEL must not be present in the export surface");
+});
+
+test("IMPROV_CMD_SET_TX_POWER (0xFD) is still exported with the correct command byte", () => {
+    // SET_TX_POWER is the pre-association TX-power cap vendor RPC — still needed.
+    assert.equal(improvModule.IMPROV_CMD_SET_TX_POWER, 0xFD,
+        "SET_TX_POWER must remain 0xFD");
+});
+
+test("IMPROV_CMD_APPLY_OP (0xFC) is still exported with the correct command byte", () => {
+    assert.equal(improvModule.IMPROV_CMD_APPLY_OP, 0xFC,
+        "APPLY_OP must remain 0xFC");
+});
+
+test("golden vector G4: SET_TX_POWER frame (8 dBm) matches expected bytes", () => {
+    // SET_TX_POWER payload: [0xFD][0x01][dBm]  — command, length=1, value
+    // Frame bytes hand-verified: IMPROV magic + version=1 + type=0x03 + length=3
+    //   + [0xFD, 0x01, 0x08] + checksum.
+    // Checksum: sum(0x49+0x4d+0x50+0x52+0x4f+0x56+0x01+0x03+0x03+0xfd+0x01+0x08) mod 256
+    //         = 746 mod 256 = 234 = 0xEA.
+    const { buildImprovFrame, IMPROV_FRAME_TYPE_RPC, IMPROV_CMD_SET_TX_POWER } = improvModule;
+    const frame = buildImprovFrame(IMPROV_FRAME_TYPE_RPC,
+        new Uint8Array([IMPROV_CMD_SET_TX_POWER, 0x01, 0x08]));
+    assert.equal(hex(frame), "49 4d 50 52 4f 56 01 03 03 fd 01 08 ea");
+});
+
+test("regression: no exported constant has value 0xFE (the old SET_DEVICE_MODEL byte)", () => {
+    // Guard against a future re-add of the 0xFE command under any name.
+    // Numeric exports only (skip functions, arrays, non-numeric values).
+    const numericExports = Object.entries(improvModule)
+        .filter(([, v]) => typeof v === "number");
+    for (const [name, val] of numericExports) {
+        assert.notEqual(val, 0xFE,
+            `exported constant '${name}' must not be 0xFE (SET_DEVICE_MODEL was removed)`);
+    }
+});
