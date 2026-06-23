@@ -440,8 +440,11 @@ function setupLayout() {
 function updatePreviewStatus() {
     const el = document.getElementById("preview-status");
     if (!el) return;
-    if (previewStride_ > 1) {
-        el.textContent = `preview 1/${previewStride_} · link limited`;
+    const parts = [];
+    if (previewStride_ > 1) parts.push(`1/${previewStride_} · link limited`);   // resolution shed
+    if (effectiveFps_ > 0)  parts.push(`${Math.round(effectiveFps_)} fps`);      // adaptive rate
+    if (parts.length) {
+        el.textContent = "preview " + parts.join(" · ");
         el.hidden = false;
     } else {
         el.hidden = true;
@@ -502,6 +505,24 @@ function renderPreviewFrame(view, buf) {
     // Skip such a frame; the matching coord table arrives within ~1 frame and they realign.
     if (count !== previewCoordCount_ || stride !== previewStride_) return;
     drawLights(rgb);
+    measureFrameRate();
+}
+
+// Effective preview frame rate, measured browser-side as a SLIDING-WINDOW COUNT: how many frames
+// arrived in the last second of wall time. The device drains each resumable frame across transport
+// ticks, so frames arrive BURSTY (several back-to-back, then a gap) — an instantaneous 1000/Δt
+// reading would spike to absurd values on a 0 ms gap (the "200 fps" artifact). Counting over a
+// fixed window is immune to that: it's the true delivered rate. performance.now() is the standard
+// high-resolution browser clock.
+const frameStamps_ = [];        // arrival times (ms) within the trailing window
+let effectiveFps_ = 0;
+function measureFrameRate() {
+    const now = performance.now();
+    frameStamps_.push(now);
+    const cutoff = now - 1000;                                  // 1-second trailing window
+    while (frameStamps_.length && frameStamps_[0] < cutoff) frameStamps_.shift();
+    effectiveFps_ = frameStamps_.length;                        // frames in the last second = fps
+    updatePreviewStatus();
 }
 
 // Build the vertex buffer from previewCoords_ + per-light colour and (re)start the render loop.

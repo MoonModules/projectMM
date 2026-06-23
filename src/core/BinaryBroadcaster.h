@@ -26,6 +26,28 @@ struct BinaryBroadcaster {
     virtual void pushBinaryFrame(const uint8_t* data, size_t len) = 0;
     virtual bool endBinaryFrame() = 0;
 
+    // RESUMABLE one-frame send for a payload that lives in a STABLE caller-owned buffer (no copy):
+    // one WS message = `header` (copied — small, may be a stack local) followed by `body` (a pointer
+    // the caller guarantees stable until the send completes or is cancelled). The implementation
+    // drains it across transport-poll ticks (a bounded chunk per tick, non-blocking), so a large
+    // frame never spins the caller's loop. The frame is still ONE atomic WS message to the browser
+    // — "resumable" means delivered over wall-clock, not split into multiple messages.
+    //   sendBufferedFrame(...) — begin a send; while one is in flight a new call is DROPPED
+    //                            (newest-wins backpressure), the caller reads that as "link busy".
+    //   bufferedSendIdle()     — true when no send is in flight (the previous frame fully drained
+    //                            or was cancelled). The caller gates the next frame on this, so the
+    //                            effective frame rate self-limits to what the link sustains.
+    //   cancelBufferedSend()   — abandon the in-flight send NOW (its WS messages end incomplete →
+    //                            the browser discards them). The caller MUST call this before the
+    //                            `body` buffer is freed/reallocated (e.g. a geometry rebuild), so a
+    //                            cursor never reads freed memory.
+    // Only PreviewDriver uses this today (the full-res colour frame, whose payload is the producer
+    // buffer). The coord table / downsampled frames keep the begin/push/end path.
+    virtual bool sendBufferedFrame(const uint8_t* header, size_t headerLen,
+                                   const uint8_t* body, size_t bodyLen) = 0;
+    virtual bool bufferedSendIdle() const = 0;
+    virtual void cancelBufferedSend() = 0;
+
     // A counter that increments each time a new client connects. A producer whose
     // first message is stateful (e.g. PreviewDriver's coordinate table, which colour
     // frames then reference) watches this: when it changes, a fresh client just joined

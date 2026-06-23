@@ -270,7 +270,12 @@ private:
     // probe short-circuits after the FIRST GET times out (a dead host answers no
     // URL), so a sparse subnet costs ~1×timeout per empty IP, not 3×.
     static constexpr uint8_t  kProbesPerTick = 1;
-    static constexpr uint32_t kProbeTimeoutMs = 150;
+    // Short timeout: this GET blocks the scheduler thread (and thus one render tick) on a dead host,
+    // so it must stay small or the boot sweep stutters animation once a second for the ~4 min the
+    // /24 takes. A live host on a LAN answers in a few ms; 30 ms covers a slow responder while
+    // keeping the worst-case per-tick stall to ~30 ms. (The real fix — running the probe on its own
+    // task so it never touches the render thread — is backlogged; this just bounds the symptom.)
+    static constexpr uint32_t kProbeTimeoutMs = 30;
     // Drop a non-self device unseen by ANY strategy for this long. 24 h is deliberately
     // generous: mDNS re-confirms its devices every few-second browse lap (cheap), but an
     // HTTP-scan-only device (a PC instance, a generic host) has no cheap recurring
@@ -375,14 +380,14 @@ private:
     // continuous (every tick cycles to the next service type), so a short timeout per call
     // mdnsBrowse is synchronous and blocks the FULL timeout (the IDF query waits the whole
     // window for late responders — it does not return early), and loop1s shares the tick
-    // thread, so this time is charged to the tick. Keep the timeout modest AND browse only
-    // every kMdnsEveryTicks-th tick: one ~60 ms hiccup every ~8 s is invisible for a
+    // thread, so this time is charged to the tick. Keep the timeout SHORT AND browse only
+    // every kMdnsEveryTicks-th tick: one ~20 ms hiccup every ~15 s is invisible for a
     // discovery feature (peers don't come and go faster than that), and FPS is untouched in
     // between. (The old async API polled cheaply every tick but raced the mDNS task's expiry
     // timer and crashed on a UI refresh; a bounded synchronous call holds no handle, so it
     // can't. The throttle is how we keep that safety without the per-tick block cost.)
-    static constexpr uint32_t kMdnsBrowseMs = 60;
-    static constexpr uint8_t kMdnsEveryTicks = 8;
+    static constexpr uint32_t kMdnsBrowseMs = 20;    // shorter blocking window → smaller render hiccup
+    static constexpr uint8_t kMdnsEveryTicks = 15;   // browse less often → the hiccup is rarer (~15 s)
 
     uint8_t mdnsIndex_ = 0;        // which service in kMdnsServices is browsed
     uint8_t mdnsTick_ = 0;         // throttle counter for the browse cadence

@@ -40,6 +40,13 @@ public:
     void beginBinaryFrame(size_t totalLen) override;
     void pushBinaryFrame(const uint8_t* data, size_t len) override;
     bool endBinaryFrame() override;
+
+    // Resumable one-frame send from a stable caller-owned buffer (no copy), drained across
+    // loop20ms ticks so a large frame never spins this module's loop. See BinaryBroadcaster.
+    bool sendBufferedFrame(const uint8_t* header, size_t headerLen,
+                           const uint8_t* body, size_t bodyLen) override;
+    bool bufferedSendIdle() const override { return !previewSend_.active; }
+    void cancelBufferedSend() override { previewSend_.active = false; }
     // Bumped on each new WS client (see handleWebSocketUpgrade). PreviewDriver watches it to
     // re-stream its coordinate table the moment a fresh page connects, so a refresh shows the
     // preview immediately.
@@ -102,11 +109,32 @@ private:
     // current frame's all-sent result across the push calls.
     bool wsFrameAllSent_ = true;
     // Max TOTAL WouldBlock spins for one span in sendAllOrClose before a stuck client is closed.
-    // A healthy socket WouldBlocks only a handful of times even for a 49 KB frame (the lwIP
-    // buffer drains between writes), so this is generous enough not to drop a full-res frame on a
-    // good link, yet finite so a wedged client can't spin forever. (No sleep — a slow link still
-    // briefly occupies the caller's loop; the resumable cross-tick send is the follow-up for that.)
+    // Used by the begin/push/end stream (coord table + downsampled colour frame); the full-res
+    // colour frame goes through the resumable sendBufferedFrame instead, which never spins.
     static constexpr int kDirectSendSpins = 2000;
+
+    // Resumable full-frame send (BinaryBroadcaster::sendBufferedFrame). One WS message = a copied
+    // header + a pointer into the caller's STABLE body buffer (the PreviewDriver producer buffer),
+    // drained a bounded chunk per client per loop20ms via writeSome — so a large frame is delivered
+    // over wall-clock ticks without spinning any loop, yet stays ONE atomic WS message to the
+    // browser. One in flight at a time (newest-wins drop). bodyGeneration_ invalidates a send whose
+    // body the caller is about to free (cancelBufferedSend bumps nothing — the caller cancels; this
+    // tag guards a stale drain if the body is swapped between cancel and the next begin).
+    struct PreviewSend {
+        uint8_t hdr[16] = {};                 // WS + app header, copied (caller's may be a stack local)
+        size_t hdrLen = 0;
+        const uint8_t* body = nullptr;        // caller-owned, stable until done/cancelled — NOT copied
+        size_t bodyLen = 0;
+        size_t sent[MAX_WS_CLIENTS] = {};     // per-client cursor over [hdr ++ body]; a slow client lags
+        bool active = false;
+    };
+    PreviewSend previewSend_;
+    // Drain one memory-adaptive chunk per client of the in-flight resumable send; mark it done when
+    // every live client has the whole frame. Called from loop20ms. No-op when none is active.
+    void drainPreviewSend();
+    // Largest chunk to push per client per drain tick, derived from free contiguous memory so a
+    // tight board takes small bites (bounded tick occupancy) and a roomy board drains fast.
+    size_t previewChunkBytes() const;
 
     // All JSON API responses (/api/state, /api/types, /api/system) and the WS
     // state push stream through a JsonSink — no shared fixed-size buffer.

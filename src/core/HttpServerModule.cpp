@@ -36,14 +36,22 @@ void HttpServerModule::setup() {
 }
 
 void HttpServerModule::teardown() {
+    previewSend_.active = false;   // drop any in-flight send before the clients go (body is borrowed)
     for (auto& ws : wsClients_) ws.close();
     server_.close();
 }
 
 void HttpServerModule::loop20ms() {
-    // Accept one HTTP connection per tick. (Preview frames are streamed synchronously by
-    // PreviewDriver via begin/push/endBinaryFrame on its own rate-limited loop — no queue to
-    // drain here.)
+    // Drain the in-flight resumable preview frame on the TRANSPORT-poll cadence (20 ms), NOT the
+    // per-render-tick loop(): pushing frame bytes to the socket must not be charged to the LED
+    // render hot path. The render tick stays free of preview work; the preview frame rate is
+    // bounded by this 20 ms drain cadence (a few fps at large full-res frames) — an acceptable
+    // trade, since the preview is a *view* and the LEDs are not. (When the two-core render/transport
+    // split lands — architecture.md § Parallelism — this drain moves to the transport task and the
+    // cadence limit lifts; the seam is already here.) Drain BEFORE accept so a connection burst
+    // can't starve an active send. No-op when nothing is in flight.
+    drainPreviewSend();
+    // Accept one HTTP connection per tick.
     auto conn = server_.accept();
     if (conn.valid()) handleConnection(conn);
 }
@@ -1070,8 +1078,12 @@ void HttpServerModule::handleWebSocketUpgrade(platform::TcpConnection& conn, con
     for (int i = 0; i < MAX_WS_CLIENTS; i++) {
         if (!wsClients_[i].valid()) {
             wsClients_[i] = std::move(conn);
-            // A fresh client joined — bump the generation so stateful producers
-            // (PreviewDriver's coordinate table) re-stream their priming message now.
+            previewSend_.sent[i] = 0;   // fresh slot: clear any stale cursor a prior client left here
+            // Abandon any in-flight buffered frame: this new client would otherwise either be skipped
+            // (its stale cursor ≥ total looked "done", so it got no frame and the browser showed
+            // nothing) or spliced into a half-sent message. Cancelling makes the next frame start
+            // clean for every client. The generation bump re-streams the coord table first.
+            previewSend_.active = false;
             wsClientGeneration_++;
             return;
         }
@@ -1121,23 +1133,18 @@ bool HttpServerModule::sendWsTextFrame(platform::TcpConnection& conn, const char
     return conn.write(reinterpret_cast<const uint8_t*>(data), len);
 }
 
-// Write the whole span via repeated non-blocking writeSome; close the client + return false if
-// it can't all go right now (WouldBlock with bytes remaining). Bounded: a tiny retry budget,
-// since DIRECT frames are small by construction (the producer downscales them to fit one shot).
+// Write the whole span via repeated non-blocking writeSome; close the client + return false if it
+// can't all go right now. Bounded TOTAL would-block spins (not reset on progress) hard-bound how
+// long this synchronous send can occupy the caller's loop; a span that doesn't complete in budget
+// closes the client (the browser reconnects). Used by the begin/push/end stream (the coord table
+// and downsampled colour frame); the full-res colour frame uses the resumable sendBufferedFrame.
 bool HttpServerModule::sendAllOrClose(platform::TcpConnection& ws, const uint8_t* data, size_t len) {
     size_t sent = 0;
-    int stalls = 0;     // TOTAL WouldBlock spins this span (NOT reset on progress) — hard-bounds
-                        // how long this synchronous send can occupy the tick.
+    int stalls = 0;
     while (sent < len) {
         int n = ws.writeSome(data + sent, len - sent);
         if (n < 0) { ws.close(); return false; }       // real socket error
         if (n == 0) {                                  // WouldBlock — lwIP send buffer momentarily full
-            // Brief no-sleep spin to let the lwIP buffer drain (TCP ACKs free it sub-ms). Capped
-            // on TOTAL spins so a slow link can't hold the tick: once the budget is spent the
-            // send gives up (close + false), and the producer's adaptive downscale shrinks the
-            // next frame so it fits. NOTE: this whole send is still synchronous on the caller's
-            // loop — a large frame on a slow link briefly pauses it. The resumable cross-tick
-            // send (carry a byte cursor, resume next loop) is the follow-up that removes that.
             if (++stalls > kDirectSendSpins) { ws.close(); return false; }
             continue;
         }
@@ -1180,5 +1187,97 @@ void HttpServerModule::pushBinaryFrame(const uint8_t* data, size_t len) {
 }
 
 bool HttpServerModule::endBinaryFrame() { return wsFrameAllSent_; }
+
+// Resumable full-frame send. One WS message = WS framing header + the caller's app header (both
+// copied into previewSend_.hdr) + the caller's `body` (a pointer, NOT copied). Each client's
+// cursor walks the logical stream [hdr ++ body], drained a chunk at a time in drainPreviewSend.
+bool HttpServerModule::sendBufferedFrame(const uint8_t* header, size_t headerLen,
+                                         const uint8_t* body, size_t bodyLen) {
+    // Newest-wins backpressure: one frame in flight at a time. A caller that asks while a send is
+    // active is told "busy" and drops this frame — the producer reads that as the link not keeping
+    // up (so it doesn't queue and doesn't stall).
+    if (previewSend_.active) return false;
+
+    const size_t totalLen = headerLen + bodyLen;   // WS payload length = app header + body
+    // Build the WS frame header (FIN + binary opcode, unmasked; 7/16/64-bit length form) directly
+    // into previewSend_.hdr, followed by the app header — so the cursor streams them as one span.
+    uint8_t* h = previewSend_.hdr;
+    size_t wsLen;
+    h[0] = 0x82;
+    if (totalLen < 126) { h[1] = static_cast<uint8_t>(totalLen); wsLen = 2; }
+    else if (totalLen < 65536) {
+        h[1] = 126; h[2] = static_cast<uint8_t>((totalLen >> 8) & 0xFF);
+        h[3] = static_cast<uint8_t>(totalLen & 0xFF); wsLen = 4;
+    } else {
+        h[1] = 127;
+        for (int i = 0; i < 8; i++)
+            h[2 + i] = static_cast<uint8_t>((static_cast<uint64_t>(totalLen) >> (56 - 8 * i)) & 0xFF);
+        wsLen = 10;
+    }
+    // The app header follows the WS header in the same buffer. sizeof(hdr)=16 holds the 10-byte WS
+    // form + the preview app headers (≤10 bytes); guard so a future larger header can't overrun.
+    if (wsLen + headerLen > sizeof(previewSend_.hdr)) return false;
+    for (size_t i = 0; i < headerLen; i++) previewSend_.hdr[wsLen + i] = header[i];
+
+    previewSend_.hdrLen = wsLen + headerLen;
+    previewSend_.body = body;
+    previewSend_.bodyLen = bodyLen;
+    for (int i = 0; i < MAX_WS_CLIENTS; i++) previewSend_.sent[i] = 0;
+    previewSend_.active = true;
+    // Deliberately do NOT drain here. sendBufferedFrame is called from PreviewDriver's loop() on the
+    // RENDER thread; a socket writeSome is variable-cost (0..~ms) and would land that cost — and its
+    // jitter — directly on the render tick, hitching the LEDs. So we only queue the frame (copy the
+    // header, point at the body) and let drainPreviewSend() push bytes purely on loop20ms, off the
+    // render hot path. The frame starts draining within one transport poll (≤20 ms).
+    return true;
+}
+
+// Per-client cursor over the logical [hdr ++ body] stream: write whatever the socket takes now (up
+// to one memory-adaptive chunk), advance the cursor, leave the rest for the next tick. A real
+// socket error closes that client (its WS message ends incomplete → the browser discards it). The
+// send completes when every live client has the whole frame, or when no client is left.
+void HttpServerModule::drainPreviewSend() {
+    if (!previewSend_.active) return;
+    const size_t total = previewSend_.hdrLen + previewSend_.bodyLen;
+    const size_t chunk = previewChunkBytes();
+    bool anyLiveClient = false;
+    bool allDone = true;
+    for (int i = 0; i < MAX_WS_CLIENTS; i++) {
+        auto& ws = wsClients_[i];
+        if (!ws.valid()) continue;
+        anyLiveClient = true;
+        size_t& cur = previewSend_.sent[i];
+        size_t budget = chunk;   // bound bytes pushed to THIS client this tick → bounded tick cost
+        while (cur < total && budget > 0) {
+            // Source the next byte run from hdr (cursor < hdrLen) or body (cursor >= hdrLen).
+            const uint8_t* src;
+            size_t span;
+            if (cur < previewSend_.hdrLen) { src = previewSend_.hdr + cur; span = previewSend_.hdrLen - cur; }
+            else { src = previewSend_.body + (cur - previewSend_.hdrLen); span = total - cur; }
+            if (span > budget) span = budget;
+            int n = ws.writeSome(src, span);
+            if (n < 0) { ws.close(); break; }    // real error — drop this client
+            if (n == 0) break;                   // WouldBlock — leave the rest for next tick (no spin)
+            cur += static_cast<size_t>(n);
+            budget -= static_cast<size_t>(n);
+        }
+        if (ws.valid() && cur < total) allDone = false;
+    }
+    // Done when every live client finished, or no client remains to send to.
+    if (!anyLiveClient || allDone) previewSend_.active = false;
+}
+
+// Per-tick per-client chunk cap, derived from free contiguous memory: a tight board takes small
+// bites (so one drain can't dominate the tick), a roomy board drains a big frame in a tick or two.
+// Bounded both ways — never below a floor (forward progress) nor above a ceiling (tick occupancy).
+size_t HttpServerModule::previewChunkBytes() const {
+    constexpr size_t kFloor = 2048;     // always make real progress, even on a fragmented board
+    constexpr size_t kCeil  = 65536;    // cap tick occupancy regardless of how much RAM is free
+    const size_t block = platform::maxAllocBlock();
+    size_t chunk = block / 8;           // a fraction of the largest contiguous block
+    if (chunk < kFloor) chunk = kFloor;
+    if (chunk > kCeil)  chunk = kCeil;
+    return chunk;
+}
 
 } // namespace mm

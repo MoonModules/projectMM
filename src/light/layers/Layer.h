@@ -250,7 +250,7 @@ public:
             width_ = physicalWidth_;
             height_ = physicalHeight_;
             depth_ = physicalDepth_;
-            if (!sparse && isNaturalOrder(boxCount)) {
+            if (!sparse && isNaturalOrder()) {
                 // Dense grid in natural order: box cell i IS driver light i. Identity (memcpy).
                 lut_.setIdentity(boxCount);
                 allocateBuffer(boxCount);
@@ -380,11 +380,12 @@ public:
     // per-layout hint to keep in sync. True → the dense memcpy fast path is valid; false → a
     // reordered grid (serpentine) needs the box→driver LUT. Only meaningful for a dense layout
     // (boxCount == driverCount); a sparse layout already routes to the LUT via the count check.
-    bool isNaturalOrder(nrOfLightsType boxCount) const {
-        struct Ctx { lengthType w, h; nrOfLightsType box; bool ok; };
-        Ctx ctx{physicalWidth_, physicalHeight_, boxCount, true};
+    bool isNaturalOrder() const {
+        struct Ctx { lengthType w, h; bool ok; };
+        Ctx ctx{physicalWidth_, physicalHeight_, true};
         layouts_->forEachCoord([](void* c, nrOfLightsType driverIdx, lengthType x, lengthType y, lengthType z) {
             auto* k = static_cast<Ctx*>(c);
+            if (!k->ok) return;   // once a mismatch is found the answer is settled; skip the rest
             nrOfLightsType box = static_cast<nrOfLightsType>(z) * k->w * k->h
                                + static_cast<nrOfLightsType>(y) * k->w + x;
             if (driverIdx != box) k->ok = false;
