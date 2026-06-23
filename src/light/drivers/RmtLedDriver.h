@@ -197,7 +197,12 @@ public:
         if constexpr (platform::rmtTxChannels == 0) return;  // inert off RMT chips
         if (!inited_ || !sourceBuffer_ || !sourceBuffer_->data() || !correction_) return;
 
-        const nrOfLightsType n = sourceBuffer_->count();
+        // Encode only the lights the pins actually transmit (Σ pinCounts_), NOT the whole source
+        // buffer: a strand config of e.g. 64 leds/pin on a 16K-light grid drives 64, so encoding
+        // all 16384 would burn ~100× the work the output needs (the rest is never clocked out).
+        // Bounded by the buffer too, in case config outruns the current frame.
+        const nrOfLightsType bufN = sourceBuffer_->count();
+        const nrOfLightsType n = txLightCount_ < bufN ? txLightCount_ : bufN;
         const uint8_t outCh = correction_->outChannels;
         // Same defensive guard ArtNet uses: skip rather than overrun if the
         // symbol buffer is stale (e.g. correction swapped without a resize).
@@ -261,6 +266,7 @@ private:
     uint16_t       pinList_[kMaxPins] = {};    // parsed pins, list order
     nrOfLightsType pinCounts_[kMaxPins] = {};  // lights per pin (slice lengths)
     size_t         pinOffsets_[kMaxPins] = {}; // slice start in symbols_, words
+    nrOfLightsType txLightCount_ = 0;          // Σ pinCounts_ — lights actually transmitted/encoded
     uint8_t pinCount_ = 0;                     // 0 = idle (parse error / no pins)
     bool inited_ = false;                      // all-or-nothing across the pins
     uint32_t* symbols_ = nullptr;   // owned; one word per WS2812 data bit
@@ -315,9 +321,11 @@ private:
         pinCount_ = n;
         const uint8_t outCh = correction_ ? correction_->outChannels : 0;
         size_t off = 0;
+        txLightCount_ = 0;
         for (uint8_t i = 0; i < pinCount_; i++) {
             pinOffsets_[i] = off;
             off += static_cast<size_t>(pinCounts_[i]) * outCh * 8;
+            txLightCount_ = static_cast<nrOfLightsType>(txLightCount_ + pinCounts_[i]);
         }
         clearConfigErr();
         return true;

@@ -21,28 +21,37 @@
 
 namespace {
 
-// Captures the two preview message types so tests can inspect them.
+// Captures the two preview message types so tests can inspect them. PreviewDriver STREAMS each
+// frame via begin/push/end (no frame buffer); the mock reassembles the pushed slices, strips the
+// WS header (begin is given the PAYLOAD length, so what's pushed is exactly the payload), and
+// classifies by first byte at end. dropCoord/acceptNext make endBinaryFrame report a client that
+// didn't get the whole frame (false) to drive the coord-pending retry + adaptive-downscale paths.
 struct CaptureBroadcaster : mm::BinaryBroadcaster {
     int coordMsgs = 0, frameMsgs = 0;
     std::vector<uint8_t> lastCoord, lastFrame;
-    uint32_t generation = 0;   // bump to simulate a new client connecting
-    bool acceptNext = true;    // false → drop colour frames (simulate backpressure)
-    bool dropCoord = false;    // true → drop coord tables too (simulate a 0x03 lost to backpressure)
+    std::vector<uint8_t> cur_;     // payload accumulated across pushBinaryFrame between begin/end
+    uint32_t generation = 0;       // bump to simulate a new client connecting
+    bool acceptNext = true;        // false → endBinaryFrame reports a colour frame not fully sent
+    bool dropCoord = false;        // true → endBinaryFrame reports a coord table not fully sent
 
-    bool broadcastBinary(const mm::platform::WriteChunk* payload, int chunkCount) override {
-        std::vector<uint8_t> buf;
-        for (int i = 0; i < chunkCount; i++)
-            buf.insert(buf.end(), payload[i].data, payload[i].data + payload[i].len);
-        if (buf.empty()) return false;
-        if (dropCoord && buf[0] == 0x03) return false;     // coord table dropped under backpressure
-        if (!acceptNext && buf[0] == 0x02) return false;   // colour frame dropped on demand
-        if (buf[0] == 0x03) { coordMsgs++; lastCoord = buf; }
-        else if (buf[0] == 0x02) { frameMsgs++; lastFrame = buf; }
+    void beginBinaryFrame(size_t /*totalLen*/) override { cur_.clear(); }
+    void pushBinaryFrame(const uint8_t* data, size_t len) override {
+        cur_.insert(cur_.end(), data, data + len);
+    }
+    bool endBinaryFrame() override {
+        if (cur_.empty()) return false;
+        const uint8_t type = cur_[0];
+        if (type == 0x03) {
+            if (dropCoord) return false;       // simulate the table not reaching the client
+            coordMsgs++; lastCoord = cur_; return true;
+        }
+        if (type == 0x02) {
+            if (!acceptNext) return false;     // simulate the colour frame not reaching the client
+            frameMsgs++; lastFrame = cur_; return true;
+        }
         return true;
     }
     uint32_t clientGeneration() const override { return generation; }
-    uint16_t drainTicks = 1;   // simulate link latency for the adaptive-downscale test
-    uint16_t lastDrainTicks() const override { return drainTicks; }
 
     // 0x03 = [type][count:u32][bx][by][bz][stride:u16] (10-byte header)
     // 0x02 = [type][count:u32][stride:u16] (7-byte header)
@@ -158,6 +167,23 @@ TEST_CASE("PreviewDriver downsamples a large layout on a regular spatial lattice
         if (((cd[p] - x0) % stepX) != 0) { regular = false; break; }   // X off the lattice → drift
     }
     CHECK(regular);                               // no diagonal moiré
+}
+
+// A SPARSE layout with a huge bounding box but a light count UNDER the cap must NOT be
+// downsampled: the lattice bound is the bounding-box cell count, so naively growing the stride
+// until that fits the cap would prematurely strip a sparse layout (which already fits). A
+// radius-64 sphere has a 129³≈2.1M-cell box but only a ~51K-light shell (< the 131072 cap), so
+// it must send every light at full resolution (stride 1).
+TEST_CASE("PreviewDriver keeps a sparse large-box layout at full resolution") {
+    mm::SphereLayout s;
+    s.radius = 64;                                // huge box, shell light-count well under cap
+    PreviewRig rig(&s);
+    rig.produce();
+
+    CHECK(rig.cap.coordCount() > 0);
+    CHECK(rig.cap.coordCount() < 131072);         // the shell fits the cap...
+    CHECK(rig.cap.coordStride() == 1);            // ...so it is sent whole, not downsampled
+    CHECK(rig.cap.coordCount() == rig.cap.frameCount());
 }
 
 // Default fps is the rate-limited preview stream rate.

@@ -283,6 +283,11 @@ body {
 }
 .preview-grip { display: none; color: var(--fg-muted); cursor: grab; user-select: none; font-size: 14px; }
 .preview-status { color: var(--fg-muted); font-size: 11px; opacity: 0.8; white-space: nowrap; }
+/* Standard screen-reader-only pattern: present in the DOM (labels a control) but not shown. */
+.visually-hidden {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
 .preview-bar-spacer { flex: 1; }
 .preview-bar-btn {
     background: transparent;

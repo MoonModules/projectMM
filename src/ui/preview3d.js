@@ -54,7 +54,10 @@ let showSeqNumbers_ = false; // sequence-number overlay toggle (preview-numbers 
 // Dot-size multiplier on the auto-computed "filled-panel" base (1 = ¾-fill). A user knob
 // because the ideal fill is subjective and layout-dependent — a 2D panel reads best solid,
 // a 3D cube reads best with smaller dots so the back layers show through. Persisted.
-let dotScale_ = parseFloat(localStorage.getItem("mm_preview_dot") || "1") || 1;
+const DOT_MIN = 0.25, DOT_MAX = 1.5;   // matches the slider range; clamp so a bad
+const clampDot = (v) => Math.min(DOT_MAX, Math.max(DOT_MIN, Number.isFinite(v) ? v : 1));
+// localStorage value (or a manual edit) can't push the dot size to a performance-killing extreme.
+let dotScale_ = clampDot(parseFloat(localStorage.getItem("mm_preview_dot")));
 let resetLayout_ = null;     // set by setupLayout(): restores docked/PiP state to defaults
 let previewBox_ = null;      // {x,y,z} bounding-box extent for camera auto-fit
 let lineProgram = null;      // separate program for the wireframe bounding box
@@ -377,7 +380,7 @@ function setupLayout() {
     if (dotSlider) {
         dotSlider.value = String(dotScale_);
         dotSlider.addEventListener("input", () => {
-            dotScale_ = parseFloat(dotSlider.value) || 1;
+            dotScale_ = clampDot(parseFloat(dotSlider.value));
             localStorage.setItem("mm_preview_dot", String(dotScale_));
             if (lastVerts) redrawCached();
         });
@@ -479,21 +482,21 @@ function parsePreviewCoords(view, buf) {
 function renderPreviewFrame(view, buf) {
     if (!gl) initWebGL();
     if (!gl) return;
-    // Hold frames until positions have arrived (the table is sent on rebuild +
-    // ~1 Hz, so a fresh client catches up within a second).
+    // Hold frames until positions have arrived (the device sends the table on a geometry
+    // rebuild and when a new client connects, so a fresh client gets it on connect).
     if (!previewCoords_ || previewCoordCount_ === 0) return;
     // Header: [0x02][count:u32][stride:u16] = 7 bytes.
     if (buf.byteLength < 7) return;
     const count = view.getUint32(1, true);
+    const stride = view.getUint16(5, true) || 1;
     if (buf.byteLength < 7 + count * 3) return;
     const rgb = new Uint8Array(buf, 7);
-    // RGB[i] colours the light at previewCoords_[i]. The colour frame and the coordinate
-    // table MUST describe the same light set — if their counts disagree, a geometry rebuild
-    // (a resize, or the device's adaptive downscale changing the lattice) is mid-flight: the
-    // new-count colours would land on the old-count positions, mapping colours to the wrong
-    // lights (a visibly scrambled frame). Skip such a frame; the matching coord table arrives
-    // within ~1 frame and they realign cleanly.
-    if (count !== previewCoordCount_) return;
+    // RGB[i] colours the light at previewCoords_[i]. The colour frame and the coordinate table
+    // MUST describe the same light set — if their count OR stride (downscale factor) disagree, a
+    // geometry rebuild (a resize, or the device's adaptive downscale changing the lattice) is
+    // mid-flight: the colours would land on the wrong positions (a visibly scrambled frame).
+    // Skip such a frame; the matching coord table arrives within ~1 frame and they realign.
+    if (count !== previewCoordCount_ || stride !== previewStride_) return;
     const n = count;
 
     if (!vertsBuf || vertsBuf.length < n * 6) vertsBuf = new Float32Array(n * 6);

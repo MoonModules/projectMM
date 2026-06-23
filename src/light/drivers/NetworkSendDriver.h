@@ -37,12 +37,17 @@ public:
     uint8_t ip[4] = {255, 255, 255, 255};
     uint8_t protocol = 0;        // index into kProtocolOptions
     uint16_t universeStart = 0;  // first universe (ArtNet/E1.31; DDP is byte-addressed)
+    uint16_t lightCount = 0;     // lights to send (0 = the whole buffer); >0 sends the FIRST N,
+                                 // so a sink can cover just its slice (e.g. some lights to LEDs,
+                                 // the rest to ArtNet) instead of every light. A start offset for
+                                 // arbitrary slices is a planned follow-up across all drivers.
     uint8_t fps = 50;
 
     void onBuildControls() override {
         controls_.addSelect("protocol", protocol, kProtocolOptions, kProtocolCount);
         controls_.addIPv4("ip", ip);
         controls_.addUint16("universe_start", universeStart);
+        controls_.addUint16("light_count", lightCount);
         controls_.addUint8("fps", fps, 1, 120);
     }
 
@@ -113,7 +118,11 @@ public:
         // earlier in-loop allocate had if the allocation itself failed.
         const uint8_t* data;
         size_t totalBytes;
-        const nrOfLightsType nLights = sourceBuffer_->count();
+        // Send the first light_count lights (0 = the whole buffer), so this sink covers only its
+        // slice instead of every light — and so a frame isn't packed/sent for lights it doesn't own.
+        const nrOfLightsType bufLights = sourceBuffer_->count();
+        const nrOfLightsType nLights =
+            (lightCount > 0 && lightCount < bufLights) ? lightCount : bufLights;
         // Three guards before applying correction: (a) correction wired,
         // (b) corrected_ has the row count we need, (c) corrected_'s
         // per-light stride is at least outChannels — otherwise dst + i *

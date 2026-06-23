@@ -30,7 +30,7 @@ Three seams, all in core transport + the driver. No new task yet (it arrives wit
 
 - **One staging buffer for the live-preview client**, sized to the RAM-derived point cap, allocated once via `platform::alloc` (PSRAM-preferred; classic falls back to internal RAM). Single live client (§2) → one buffer.
 - `broadcastBinary` → **non-blocking enqueue**: **backpressure gate first** — if the live client still has unsent bytes from the previous frame, **drop this frame** (newest-wins). Else copy WS header + payload into the staging buffer, set `len`, `sent=0`, return. Never blocks.
-- New **`HttpServerModule::drainWsSends()`** called from `loop20ms()` (after the accept early-return): flush the staging buffer with the **non-blocking** `writeChunks` — send what the socket takes now, advance `sent`, leave the rest for the next tick. Mid-frame partial is expected (we own the offset); only a real socket `Error` closes. The exact function §145 later hosts on the consumer task.
+- New **`HttpServerModule::drainWsSends()`** called from `loop20ms()`: flush the staging buffer with the **non-blocking** `writeSome` — send what the socket takes now, advance `sent`, leave the rest for the next tick. Mid-frame partial is expected (we own the offset); only a real socket error closes. The exact function §145 later hosts on the consumer task. (As implemented, the drain runs before the accept so a connection burst can't strand it.)
 - **Extend `broadcastBinary`'s WS header to the 64-bit length form** so a >65535-byte frame is legal (replaces the current `else { return; }`).
 
 ### 2. Single live-preview client (bound the memory)
@@ -73,4 +73,4 @@ The preview is a *live view* — one viewer at a time is the real use case, and 
 - **Two-task forward-compat:** `drainWsSends()` is a standalone entry point §145 moves to the consumer task without a rewrite.
 - **Downsampling stays** — raised, not removed; the lattice fallback is the tested graceful-degrade path.
 - **Deferred (next commit):** zero-copy producer-buffer reuse + channelsPerLight/offset wire model.
-- **`maxDrainMs`** added to `writeChunks` during diagnosis: revert to keep the diff tight.
+- The diagnostic `writeChunks`/`maxDrainMs` machinery was removed entirely; the transport primitive is the non-blocking `writeSome`.

@@ -4,7 +4,6 @@
 #include "light/light_types.h"  // lengthType, nrOfLightsType
 #include "core/BinaryBroadcaster.h"
 #include "platform/platform.h"
-#include <new>                  // std::nothrow
 
 namespace mm {
 
@@ -70,58 +69,47 @@ public:
         if (now - lastSendTime_ < interval) return;  // rate-limit gate
         lastSendTime_ = now;
 
-        // The coordinate table is sent only when the geometry actually changes
-        // (onBuildState — a grid resize, layout/LUT rebuild) or when the UI asks for it
-        // (a new WS client bumps the broadcaster's clientGeneration, so a page refresh
-        // gets the positions immediately). NOT per-frame and NOT on a timer: rebuilding
-        // the full table every tick would starve the render loop, and the colour frames
-        // below already reference the last-sent positions. coordCount_==0 covers the cold
-        // case where the layout wasn't wired yet at onBuildState time.
+        // The coordinate table is (re)streamed only when the geometry changes (onBuildState — a
+        // resize / LUT rebuild), when a new client connects (clientGeneration bump, so a page
+        // refresh gets positions immediately), when the adaptive factor changes, or while a
+        // previous stream didn't reach every client (coordPending_ retry). NOT per frame: the
+        // colour frames below reference the last-streamed positions. coordCount_==0 = cold start.
         uint32_t gen = broadcaster_ ? broadcaster_->clientGeneration() : 0;
-        if (coordCount_ == 0 || gen != lastClientGen_) {
+        if (coordCount_ == 0 || gen != lastClientGen_ || coordPending_) {
             lastClientGen_ = gen;
-            buildAndSendCoordTable();   // sets coordPending_ if the 0x03 was dropped
-        } else if (coordPending_) {
-            // A previous coord table was dropped under backpressure. Retry it (no rebuild —
-            // the geometry hasn't changed, just re-broadcast the same bytes) until it lands.
-            coordPending_ = !sendCoordTable();
+            buildAndSendCoordTable();   // streams positions; sets coordPending_ if not all clients got it
         }
 
-        // Hold colour frames until the browser has the matching coordinate table: a 0x02 with
-        // the new count plotted against the old coords would be skipped by the browser's
-        // count-mismatch guard, and if the 0x03 stays dropped that would freeze the preview.
-        if (!coordPending_) sendFrame();
+        // Hold colour frames until the browser has the matching coordinate table — a 0x02 whose
+        // count/stride don't match the last 0x03 is skipped by the browser, and streaming it
+        // anyway wastes the link. sendFrame() returns false if a client couldn't take the whole
+        // frame (it gets closed); treat that as "link can't keep up" for the adaptive step.
+        bool frameOk = true;
+        if (!coordPending_) frameOk = sendFrame();
 
-        // Adaptive downscaling, driven by DRAIN LATENCY (not dropped frames). A dropped frame
-        // is normal — at fps=24 the producer naturally outruns the per-frame socket drain even
-        // on a fast link, so "frame dropped" over-triggers. The real signal is how many
-        // transport-poll ticks the last frame took to fully send: 1-2 ticks = the link keeps
-        // up; many ticks = genuinely backpressured. Coarsen (downscale_++) when latency is high
-        // for a sustained run; refine (downscale_--) when it's been low. Hysteresis via the
-        // streaks stops oscillation. A change rebuilds the coordinate table (the lattice
-        // changed) and re-primes the browser, whose status line shows the new factor. Skip the
-        // adaptation while a coord table is still pending — don't stack another rebuild on top.
-        const uint16_t drainTicks = broadcaster_ ? broadcaster_->lastDrainTicks() : 1;
-        if (coordPending_) {
-            // pending coord table: don't change the factor until it lands
-        } else if (drainTicks > kDrainTicksHigh) {
+        // Adaptive resolution. The streamed send is all-or-nothing per client (a client that
+        // can't take the whole frame is closed), so a NOT-all-sent result — for the colour frame
+        // (frameOk false) OR the coord table (coordPending_) — means the link can't sustain this
+        // resolution: coarsen (downscale_++) after a short run so the rebuilt lattice sends fewer
+        // points. A sustained all-sent run refines back toward full resolution (downscale_--).
+        // Hysteresis via the streaks stops oscillation; the factor rides the wire stride field to
+        // the browser's status line. (On a memory-tight board the coord table is simply too big
+        // to push until downscaled — coordPending_ is that "too big" signal.)
+        const bool linkStruggling = coordPending_ || !frameOk;
+        if (linkStruggling) {
             cleanStreak_ = 0;
             if (++slowStreak_ >= kDownscaleAfterSlow && downscale_ < 64) {
                 slowStreak_ = 0;
                 downscale_++;
                 buildAndSendCoordTable();
             }
-        } else if (drainTicks <= kDrainTicksLow) {
+        } else {
             slowStreak_ = 0;
             if (downscale_ > 1 && ++cleanStreak_ >= kUpscaleAfterFast) {
                 cleanStreak_ = 0;
                 downscale_--;
                 buildAndSendCoordTable();
             }
-        } else {
-            // Mid-range latency: stable, hold the current factor (don't drift either way).
-            slowStreak_ = 0;
-            cleanStreak_ = 0;
         }
     }
 
@@ -149,129 +137,124 @@ public:
         by_ = scaleAxis(layer_->physicalHeight());
         bz_ = scaleAxis(layer_->physicalDepth());
 
-        // Downsample SPATIALLY, not by flat index. Picking every Nth light in driver
-        // order moirés on a 2D grid (the sampled column drifts each row when N doesn't
-        // divide the width → diagonal blank streaks). Instead, keep a light only when its
-        // grid position falls on a coarse lattice (qx%sx==0 && qy%sy==0 && qz%sz==0): a
-        // regular sub-grid, no drift — and it generalises to 3D (cube, sphere) since the
-        // lattice is per-axis on the real coordinates, not the index. sx/sy/sz are chosen
-        // so the kept count fits MAX_PREVIEW_POINTS. The kept lights' DRIVER indices are
-        // recorded in sampledIdx_ so the per-frame colour pass sends the SAME lights in the
-        // SAME order (lockstep); the wire stride is 1 (the browser maps colour k → coord k).
+        // Per-axis downsample step s (lattice skip x%s && y%s && z%s). The cell count of the
+        // bounding box is the upper bound on kept lights, so grow s until it fits the cap — but
+        // ONLY when the layout has more lights than the cap (a sparse layout — big box, few
+        // lights — fits at s==1 and must not be downsampled for its box size alone). The wire
+        // "stride" field carries s to the browser (1 = full res; >1 = "1/s shown, link limited").
         const lengthType ax = layer_->physicalWidth()  > 0 ? layer_->physicalWidth()  : 1;
         const lengthType ay = layer_->physicalHeight() > 0 ? layer_->physicalHeight() : 1;
         const lengthType az = layer_->physicalDepth()  > 0 ? layer_->physicalDepth()  : 1;
-        nrOfLightsType sx = 1, sy = 1, sz = 1;
-        // Grow the per-axis lattice stride uniformly until the lattice-point count fits.
-        // (Active axes only — a flat 2D grid leaves sz at 1.)
-        auto latticeCount = [&](nrOfLightsType s) {
-            nrOfLightsType cx = (ax + s - 1) / s, cy = (ay + s - 1) / s, cz = (az + s - 1) / s;
-            return static_cast<uint32_t>(cx) * cy * cz;
-        };
         nrOfLightsType s = 1;
-        while (latticeCount(s) > MAX_PREVIEW_POINTS) s++;
+        if (n > MAX_PREVIEW_POINTS) {
+            auto latticeCount = [&](nrOfLightsType step) {
+                nrOfLightsType cx = (ax + step - 1) / step, cy = (ay + step - 1) / step,
+                               cz = (az + step - 1) / step;
+                return static_cast<uint32_t>(cx) * cy * cz;
+            };
+            while (latticeCount(s) > MAX_PREVIEW_POINTS) s++;
+        }
         if (s < downscale_) s = downscale_;   // adaptive: never finer than the link sustains
-        sx = sy = sz = s;
+        previewStride_ = s;
 
-        // Buffers sized to the points we'll actually send — min(n, cap) — not the full cap:
-        // an 8×8 grid uses 192 B, not 65 KB. A grid ≤ ~145² sends every light (s==1); only a
-        // bigger one downsamples (s>1) and the lattice count is the upper bound. coords_/rgb_
-        // are PSRAM-backed (platform::alloc); sampledIdx_ is the index list.
-        const nrOfLightsType sendCap = n < MAX_PREVIEW_POINTS ? n : MAX_PREVIEW_POINTS;
-        if (!coords_.data() || coords_.count() < sendCap) {
-            coords_.allocate(sendCap, 3);  // owned u8×3 position buffer
-        }
-        if (!sampledIdx_ || sampledIdxCap_ < sendCap) {
-            delete[] sampledIdx_;
-            // nothrow so the !sampledIdx_ guard below actually catches OOM — plain new aborts
-            // on the ESP32, which would crash the device instead of degrading the preview.
-            sampledIdx_ = new (std::nothrow) nrOfLightsType[sendCap];
-            sampledIdxCap_ = sampledIdx_ ? sendCap : 0;
-        }
-        if (!coords_.data() || !sampledIdx_) { coordCount_ = 0; coordPending_ = false; return; }
+        // Count the lights the lattice keeps (one cheap forEachCoord pass — no allocation). This
+        // is the 0x03 count, and the per-frame colour pass re-applies the SAME predicate over the
+        // SAME forEachCoord order, so colour[k] lines up with coord[k] with no stored index map.
+        struct CountCtx { nrOfLightsType s, out; };
+        CountCtx cc{s, 0};
+        layouts->forEachCoord([](void* c, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
+            auto* p = static_cast<CountCtx*>(c);
+            if (x % p->s == 0 && y % p->s == 0 && z % p->s == 0) p->out++;
+        }, &cc);
+        coordCount_ = cc.out;
+        if (coordCount_ == 0) { coordPending_ = false; return; }
 
-        struct PackCtx {
-            PreviewDriver* self; uint8_t* dst; nrOfLightsType* idxOut;
-            nrOfLightsType sx, sy, sz, out, cap;
-        };
-        PackCtx pc{this, coords_.data(), sampledIdx_, sx, sy, sz, 0, sendCap};
-        layouts->forEachCoord([](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
-            auto* p = static_cast<PackCtx*>(c);
-            // Keep only lattice points — a regular spatial sub-sample (works in 2D and 3D).
-            if (x % p->sx != 0 || y % p->sy != 0 || z % p->sz != 0) return;
-            if (p->out >= p->cap) return;
-            uint8_t* d = p->dst + static_cast<size_t>(p->out) * 3;
-            d[0] = p->self->scaleAxis(x); d[1] = p->self->scaleAxis(y); d[2] = p->self->scaleAxis(z);
-            p->idxOut[p->out] = idx;       // driver index → colour pass reads the same lights
-            p->out++;
-        }, &pc);
-        coordCount_ = pc.out;
-        // The wire "stride" field now carries the effective DOWNSCALE factor (per axis) for the
-        // browser's status line — colour k still maps 1:1 to coord k (the index list picks the
-        // lights). 1 = full resolution; >1 = "showing 1/s of the lights, link can't keep up".
-        stride_ = s;
-
-        // Header: [0x03][count:u32 LE][bx][by][bz][stride:u16 LE]  (10 bytes)
-        uint8_t* h = coordHeader_;
+        // STREAM the coordinate table: WS header (count + box + stride), then push each kept
+        // light's scaled (x,y,z) straight from forEachCoord — no coords_ buffer ever exists.
+        // (positions are sent rarely: on geometry change / new client / downscale change.)
+        uint8_t h[10];
         h[0] = 0x03;
         h[1] = static_cast<uint8_t>(coordCount_ & 0xFF);
         h[2] = static_cast<uint8_t>((coordCount_ >> 8) & 0xFF);
         h[3] = static_cast<uint8_t>((coordCount_ >> 16) & 0xFF);
         h[4] = static_cast<uint8_t>((coordCount_ >> 24) & 0xFF);
         h[5] = bx_; h[6] = by_; h[7] = bz_;
-        h[8] = static_cast<uint8_t>(stride_ & 0xFF);
-        h[9] = static_cast<uint8_t>(stride_ >> 8);
+        h[8] = static_cast<uint8_t>(s & 0xFF);
+        h[9] = static_cast<uint8_t>(s >> 8);
 
-        // The coordinate table MUST reach the browser before colour frames that carry the new
-        // count — else the browser's count-mismatch guard skips every colour frame and the
-        // preview freezes. broadcastBinary can DROP the 0x03 under backpressure (a colour frame
-        // still draining), so track whether it landed; loop() retries while pending and holds
-        // off colour frames until it lands.
-        coordPending_ = !sendCoordTable();
+        if (!broadcaster_) { coordPending_ = true; return; }
+        broadcaster_->beginBinaryFrame(sizeof(h) + static_cast<size_t>(coordCount_) * 3);
+        broadcaster_->pushBinaryFrame(h, sizeof(h));
+        // Push positions in small slices: forEachCoord fills a stack scratch, flushed when full.
+        struct StreamCtx {
+            PreviewDriver* self; mm::BinaryBroadcaster* bc; nrOfLightsType s;
+            uint8_t buf[1536]; uint16_t fill;
+        };
+        StreamCtx sc{this, broadcaster_, s, {}, 0};
+        layouts->forEachCoord([](void* c, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
+            auto* p = static_cast<StreamCtx*>(c);
+            if (x % p->s != 0 || y % p->s != 0 || z % p->s != 0) return;
+            p->buf[p->fill++] = p->self->scaleAxis(x);
+            p->buf[p->fill++] = p->self->scaleAxis(y);
+            p->buf[p->fill++] = p->self->scaleAxis(z);
+            if (p->fill > sizeof(p->buf) - 3) { p->bc->pushBinaryFrame(p->buf, p->fill); p->fill = 0; }
+        }, &sc);
+        if (sc.fill) broadcaster_->pushBinaryFrame(sc.buf, sc.fill);
+        // The coord table must reach the browser before colour frames carrying the new count
+        // (else the browser's count-mismatch guard skips them). endBinaryFrame() reports whether
+        // every client got it; loop() retries while pending and withholds colour frames.
+        coordPending_ = !broadcaster_->endBinaryFrame();
     }
 
-    // Produce + push one per-frame 0x02 RGB message. Returns the broadcaster's accept/drop
-    // result (false = dropped under backpressure) so loop() can drive adaptive downscaling.
-    // Public so tests can drive it without the loop() rate-limit.
+    // STREAM one per-frame 0x02 RGB message from the producer buffer — no intermediate buffer.
+    // Returns whether every client got it (false → loop() drives adaptive downscaling). Public
+    // so tests can drive it without the loop() rate-limit.
     bool sendFrame() {
         if (!broadcaster_ || !sourceBuffer_ || !sourceBuffer_->data() || coordCount_ == 0) return false;
         const uint8_t* src = sourceBuffer_->data();
-        uint8_t cpl = sourceBuffer_->channelsPerLight();
-        nrOfLightsType n = sourceBuffer_->count();
+        const uint8_t cpl = sourceBuffer_->channelsPerLight();
+        const nrOfLightsType n = sourceBuffer_->count();
+        const nrOfLightsType s = previewStride_;
 
-        // RGB for exactly the lights the coordinate table sampled, in the same order —
-        // sampledIdx_[k] is the driver index of sent point k (built in buildAndSendCoordTable
-        // by the spatial lattice). Iterating that list keeps colour ↔ position in lockstep
-        // regardless of how the sampling chose them.
-        if (!rgb_.data() || rgb_.count() < coordCount_) rgb_.allocate(coordCount_, 3);
-        if (!rgb_.data() || !sampledIdx_) return false;
-        uint8_t* dst = rgb_.data();
-        nrOfLightsType out = 0;
-        for (nrOfLightsType k = 0; k < coordCount_; k++) {
-            nrOfLightsType i = sampledIdx_[k];
-            if (i >= n) continue;                  // layout shrank since the table was built
-            const uint8_t* s = src + static_cast<size_t>(i) * cpl;
-            dst[out * 3 + 0] = s[0];
-            dst[out * 3 + 1] = cpl >= 2 ? s[1] : 0;
-            dst[out * 3 + 2] = cpl >= 3 ? s[2] : 0;
-            out++;
-        }
-
-        // Header: [0x02][count:u32 LE][stride:u16 LE]  (7 bytes)
+        // Header: [0x02][count:u32 LE][stride:u16 LE]  (7 bytes). count = the kept lights.
         uint8_t header[7];
         header[0] = 0x02;
-        header[1] = static_cast<uint8_t>(out & 0xFF);
-        header[2] = static_cast<uint8_t>((out >> 8) & 0xFF);
-        header[3] = static_cast<uint8_t>((out >> 16) & 0xFF);
-        header[4] = static_cast<uint8_t>((out >> 24) & 0xFF);
-        header[5] = static_cast<uint8_t>(stride_ & 0xFF);
-        header[6] = static_cast<uint8_t>(stride_ >> 8);
+        header[1] = static_cast<uint8_t>(coordCount_ & 0xFF);
+        header[2] = static_cast<uint8_t>((coordCount_ >> 8) & 0xFF);
+        header[3] = static_cast<uint8_t>((coordCount_ >> 16) & 0xFF);
+        header[4] = static_cast<uint8_t>((coordCount_ >> 24) & 0xFF);
+        header[5] = static_cast<uint8_t>(s & 0xFF);
+        header[6] = static_cast<uint8_t>(s >> 8);
 
-        const platform::WriteChunk payload[] = {
-            { header, sizeof(header) },
-            { dst, static_cast<size_t>(out) * 3 },
-        };
-        return broadcaster_->broadcastBinary(payload, 2);
+        broadcaster_->beginBinaryFrame(sizeof(header) + static_cast<size_t>(coordCount_) * 3);
+        broadcaster_->pushBinaryFrame(header, sizeof(header));
+
+        if (s == 1 && cpl == 3 && coordCount_ <= n) {
+            // FULL RES, RGB: the producer buffer IS the payload — push it 1:1, no copy, no walk.
+            // The common case (any grid ≤ cap, incl. 16K on a no-PSRAM classic): zero buffers.
+            broadcaster_->pushBinaryFrame(src, static_cast<size_t>(coordCount_) * 3);
+        } else {
+            // Downsampled (s>1) or non-RGB (cpl≠3): walk forEachCoord with the SAME lattice skip
+            // the coord table used — same subset, same order, so colour[k] ↔ coord[k] line up
+            // with no stored index map. Push 3 bytes/light through a small stack scratch (the RGB
+            // is read straight from the producer buffer at the light's driver index).
+            struct ColCtx {
+                mm::BinaryBroadcaster* bc; const uint8_t* src; nrOfLightsType n; uint8_t cpl, s;
+                uint8_t buf[1536]; uint16_t fill;
+            };
+            ColCtx col{broadcaster_, src, n, cpl, static_cast<uint8_t>(s > 255 ? 255 : s), {}, 0};
+            layer_->layouts()->forEachCoord([](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
+                auto* p = static_cast<ColCtx*>(c);
+                if (x % p->s != 0 || y % p->s != 0 || z % p->s != 0) return;
+                const uint8_t* px = (idx < p->n) ? p->src + static_cast<size_t>(idx) * p->cpl : nullptr;
+                p->buf[p->fill++] = px ? px[0] : 0;
+                p->buf[p->fill++] = (px && p->cpl >= 2) ? px[1] : 0;
+                p->buf[p->fill++] = (px && p->cpl >= 3) ? px[2] : 0;
+                if (p->fill > sizeof(p->buf) - 3) { p->bc->pushBinaryFrame(p->buf, p->fill); p->fill = 0; }
+            }, &col);
+            if (col.fill) broadcaster_->pushBinaryFrame(col.buf, col.fill);
+        }
+        return broadcaster_->endBinaryFrame();
     }
 
 private:
@@ -301,55 +284,29 @@ private:
         return s > 255 ? 255 : static_cast<uint8_t>(s);
     }
 
-    // Returns whether the broadcaster accepted the table (false = dropped under backpressure).
-    bool sendCoordTable() {
-        if (!broadcaster_ || coordCount_ == 0 || !coords_.data()) return false;
-        const platform::WriteChunk payload[] = {
-            { coordHeader_, sizeof(coordHeader_) },
-            { coords_.data(), static_cast<size_t>(coordCount_) * 3 },
-        };
-        return broadcaster_->broadcastBinary(payload, 2);
-    }
-
     Buffer* sourceBuffer_ = nullptr;
     BinaryBroadcaster* broadcaster_ = nullptr;
-    Buffer coords_;               // owned; u8×3 positions, one per sent point
-    Buffer rgb_;                  // owned; u8×3 colours, one per sent point
-    uint8_t coordHeader_[10] = {};   // [0x03][count:u32][bx][by][bz][stride:u16]
-    nrOfLightsType coordCount_ = 0;   // points actually sent
-    nrOfLightsType stride_ = 1;       // wire field: the lattice/downscale factor (1 = full res)
-    bool coordPending_ = false;       // a coord table was dropped under backpressure; loop() retries it
-    // Driver indices of the sampled lights (sent point k = driver light sampledIdx_[k]).
-    // Built in buildAndSendCoordTable, read by sendFrame so colour ↔ position stay locked.
-    // Raw heap (not Buffer) because it holds indices, not the u8×3 the Buffer helper packs.
-    nrOfLightsType* sampledIdx_ = nullptr;
-    nrOfLightsType sampledIdxCap_ = 0;
+    nrOfLightsType coordCount_ = 0;        // lights the lattice keeps = the streamed 0x03/0x02 count
+    nrOfLightsType previewStride_ = 1;     // wire field: the lattice/downscale factor (1 = full res)
+    bool coordPending_ = false;            // coord table not yet delivered; loop() retries it
     uint8_t bx_ = 0, by_ = 0, bz_ = 0;
     int32_t posScale_ = 0;            // 0 = positions 1:1; else largest box edge (>255) to scale by
     uint32_t lastSendTime_ = 0;
     uint32_t lastClientGen_ = 0;   // last seen broadcaster_->clientGeneration() — re-send coords on change
 
-    // Adaptive downscaling. The preview streams at the finest resolution the WS link sustains;
-    // when a frame takes too many transport ticks to drain (high latency) we coarsen the
-    // lattice (downscale_++) so frames shrink and catch up. A low-latency stretch steps it
-    // back toward full resolution. Hysteresis (streak thresholds) stops oscillation. downscale_
-    // is an extra floor on the per-axis lattice stride, so it composes with the RAM-cap
-    // downsample. It rides the coord header's stride field to the browser, which shows
-    // "preview 1/N · link limited" while > 1. (kept ≥1; 1 = full resolution / no downscale.)
+    // Adaptive downscaling. The preview streams at the finest resolution the link sustains.
+    // The streamed send is all-or-nothing per client, so a frame (colour or coord table) that
+    // doesn't reach every client means the link can't keep up at this resolution: coarsen
+    // (downscale_++) after a short run of such frames so the rebuilt lattice sends fewer points.
+    // A sustained run of fully-sent frames refines back toward full resolution (downscale_--).
+    // downscale_ is an extra floor on the per-axis lattice stride, composing with the cap
+    // downsample; it rides the wire stride field to the browser's "preview 1/N · link limited"
+    // status. (≥1; 1 = full resolution.) Hysteresis via the streak thresholds stops oscillation.
     nrOfLightsType downscale_ = 1;
-    uint8_t slowStreak_ = 0;       // consecutive HIGH-latency frames
-    uint8_t cleanStreak_ = 0;      // consecutive LOW-latency frames
-    // Latency thresholds in transport-poll ticks (~20 ms each). A frame that drains in ≤2 ticks
-    // means the link has headroom; >4 ticks means it's struggling. The streak counts give
-    // hysteresis: coarsen after a short slow run, refine after a longer fast run (slower to
-    // refine so it doesn't flap right back into trouble).
-    static constexpr uint16_t kDrainTicksLow  = 2;
-    static constexpr uint16_t kDrainTicksHigh = 4;
-    static constexpr uint8_t  kDownscaleAfterSlow = 4;    // coarsen after this many slow frames
-    static constexpr uint8_t  kUpscaleAfterFast   = 20;   // refine after this many fast frames
-
-public:
-    ~PreviewDriver() override { delete[] sampledIdx_; }
+    uint8_t slowStreak_ = 0;       // consecutive frames the link couldn't fully send
+    uint8_t cleanStreak_ = 0;      // consecutive fully-sent frames
+    static constexpr uint8_t kDownscaleAfterSlow = 4;    // coarsen after this many struggling frames
+    static constexpr uint8_t kUpscaleAfterFast   = 20;   // refine after this many clean frames
 };
 
 } // namespace mm

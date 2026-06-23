@@ -701,14 +701,25 @@ bool TcpConnection::write(const uint8_t* data, size_t len) {
 int TcpConnection::writeSome(const uint8_t* data, size_t len) {
     if (fd_ < 0) return -1;
     if (len == 0) return 0;
+    // The client socket is blocking (SO_RCVTIMEO drives recv's read timeout), so a plain
+    // ::send() would block when the kernel send buffer is full. Toggle non-blocking around the
+    // send to keep this truly non-blocking, then restore so recv's timeout semantics hold.
+    // Evaluate the would-block / EINTR status BEFORE make_blocking, since that ioctl/fcntl
+    // can clobber the error state.
+    make_nonblocking(fd_);
     auto n = ::send(sock(fd_), reinterpret_cast<const char*>(data), static_cast<int>(len), 0);
+    bool wouldBlock = (n < 0) && sockWouldBlock();
+#ifndef _WIN32
+    bool interrupted = (n < 0) && (errno == EINTR);
+#endif
+    make_blocking(fd_);
     if (n > 0) return static_cast<int>(n);
     if (n == 0) return 0;
-    if (sockWouldBlock()) return 0;     // buffer full — try later
+    if (wouldBlock) return 0;               // buffer full — try later
 #ifndef _WIN32
-    if (errno == EINTR) return 0;       // interrupted — try later
+    if (interrupted) return 0;              // interrupted — try later
 #endif
-    return -1;                          // real socket error
+    return -1;                              // real socket error
 }
 
 

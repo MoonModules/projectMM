@@ -20,7 +20,7 @@ The listener serves **both** serial transports: UART0 (external USB-to-UART brid
 
 ## Wire contract
 
-Both transports speak the same Improv-WiFi serial protocol — frames of `IMPROV` + version byte + type + length + payload + checksum. Full protocol details: <https://www.improv-wifi.com/serial/>. The on-device implementation supports four standard RPC commands plus three vendor extensions:
+Both transports speak the same Improv-WiFi serial protocol — frames of `IMPROV` + version byte + type + length + payload + checksum. Full protocol details: <https://www.improv-wifi.com/serial/>. The on-device implementation supports four standard RPC commands plus two vendor extensions:
 
 - `GET_CURRENT_STATE` — returns "authorized" or "provisioned" depending on whether WiFi STA is connected.
 - `GET_DEVICE_INFO` — returns `[firmware, version, chipFamily, deviceName]` (where `firmware` = `"projectMM"`, `version` from `kVersion` in `build_info.h`, `chipFamily` from `platform::chipModel()`, `deviceName` from `SystemModule`).

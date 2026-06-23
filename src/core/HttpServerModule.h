@@ -34,15 +34,16 @@ public:
     void setScheduler(Scheduler* s) { scheduler_ = s; }
     void setUiPath(const char* path) { uiPath_ = path; }
 
-    // BinaryBroadcaster — send a binary WS frame to every connected client.
-    // Producers (PreviewDriver) build the payload chunks; this prepends the WS
-    // header. Domain-neutral: no knowledge of what the bytes carry.
-    bool broadcastBinary(const platform::WriteChunk* payload, int chunkCount) override;
-    // Bumped on each new WS client (see handleWebSocketUpgrade). PreviewDriver watches
-    // it to re-send its coordinate table the moment a fresh page connects, so a refresh
-    // shows the preview immediately instead of waiting for the next ~1 Hz re-broadcast.
+    // BinaryBroadcaster — stream one binary WS frame to every connected client, pushed
+    // incrementally so no frame-sized buffer is held. Producers (PreviewDriver) push the
+    // payload bytes; this prepends the WS header. Domain-neutral: no knowledge of the content.
+    void beginBinaryFrame(size_t totalLen) override;
+    void pushBinaryFrame(const uint8_t* data, size_t len) override;
+    bool endBinaryFrame() override;
+    // Bumped on each new WS client (see handleWebSocketUpgrade). PreviewDriver watches it to
+    // re-stream its coordinate table the moment a fresh page connects, so a refresh shows the
+    // preview immediately.
     uint32_t clientGeneration() const override { return wsClientGeneration_; }
-    uint16_t lastDrainTicks() const override { return wsPreviewLastDrainTicks_; }
 
     // Keep running even when "disabled" via the UI — otherwise the user has no way
     // to re-enable themselves through the same UI. The `enabled` checkbox on this
@@ -94,31 +95,18 @@ private:
     platform::TcpConnection wsClients_[MAX_WS_CLIENTS];
     uint32_t wsClientGeneration_ = 0;   // ++ on each new WS client; see clientGeneration()
 
-    // Live-preview send queue. broadcastBinary() copies ONE in-flight frame here and
-    // returns — it never blocks the render task on the socket. drainWsSends() (called from
-    // loop20ms, the transport poll) flushes it across ticks as each client's socket accepts
-    // bytes. The frame is staged ONCE (one buffer, not ×clients — the no-PSRAM RAM budget);
-    // the only per-client state is a sent-byte offset, so the same staged frame fans out to
-    // every connected client. Backpressure is PER CLIENT: broadcastBinary refuses a new frame
-    // while ANY client is still draining the previous one (the buffer is single — we can't
-    // overwrite it mid-send), so a slow browser drops frames (its offset just lags) without
-    // ever stalling the tick or overflowing. This producer→consumer handoff is the seam the
-    // architecture's two-task split (§145) will host on the consumer/network task.
-    uint8_t* wsPreviewBuf_ = nullptr;             // owned; WS header + payload of one frame
-    size_t   wsPreviewCap_ = 0;                   // allocated capacity (bytes)
-    size_t   wsPreviewLen_ = 0;                   // bytes of the current frame (0 = idle/empty)
-    size_t   wsPreviewSent_[MAX_WS_CLIENTS] = {}; // per-client bytes already written
-    uint16_t wsPreviewAge_ = 0;                   // consecutive NO-PROGRESS drain ticks
-    uint16_t wsPreviewDrainTicks_ = 0;            // ticks the CURRENT frame has been draining
-    uint16_t wsPreviewLastDrainTicks_ = 1;        // ticks the last COMPLETED frame took (lastDrainTicks)
-    // Stuck-client guard: counts only drain ticks where NOT ONE byte moved (any progress
-    // resets it), so a big frame on a healthy link legitimately spans many ticks. If a client
-    // wedges (TCP window stuck, never erroring) and nothing moves for this many ticks, the
-    // frame is abandoned so the preview never freezes for everyone; the lagging client resyncs
-    // on the next self-contained frame. ~3 s of ZERO progress at 20 ms/tick — long enough that
-    // a momentarily-busy (rendering-bound) browser, which still reads a little each tick, is
-    // never killed; only a genuinely wedged socket trips it.
-    static constexpr uint16_t kPreviewMaxDrainTicks = 150;
+    // begin/push/endBinaryFrame stream a binary WS frame straight to every client with NO
+    // frame-sized buffer: the header goes out on begin, each pushed slice is fanned to all
+    // clients, and end reports whether every client got the whole frame. A producer (PreviewDriver
+    // streaming the producer buffer / forEachCoord) holds no copy. wsFrameAllSent_ tracks the
+    // current frame's all-sent result across the push calls.
+    bool wsFrameAllSent_ = true;
+    // Max TOTAL WouldBlock spins for one span in sendAllOrClose before a stuck client is closed.
+    // A healthy socket WouldBlocks only a handful of times even for a 49 KB frame (the lwIP
+    // buffer drains between writes), so this is generous enough not to drop a full-res frame on a
+    // good link, yet finite so a wedged client can't spin forever. (No sleep — a slow link still
+    // briefly occupies the caller's loop; the resumable cross-tick send is the follow-up for that.)
+    static constexpr int kDirectSendSpins = 2000;
 
     // All JSON API responses (/api/state, /api/types, /api/system) and the WS
     // state push stream through a JsonSink — no shared fixed-size buffer.
@@ -185,9 +173,9 @@ private:
     void handleWebSocketUpgrade(platform::TcpConnection& conn, const char* req);
     void pushStateToWebSockets();
     static bool sendWsTextFrame(platform::TcpConnection& conn, const char* data, int len);
-    // Flush the live-preview staging buffer to its client a slice at a time (non-blocking).
-    // Called each loop20ms; finishes a frame across as many ticks as the socket needs.
-    void drainWsSends();
+    // Write the whole span to one client via repeated non-blocking writeSome; close it + return
+    // false if it can't all go (a stuck/too-slow client). The push primitive behind begin/push/end.
+    static bool sendAllOrClose(platform::TcpConnection& ws, const uint8_t* data, size_t len);
 };
 
 } // namespace mm
