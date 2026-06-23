@@ -399,7 +399,7 @@ static bool ethInitRmii() {
     esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
     ethNetif_ = esp_netif_new(&netif_cfg);
 
-    // RMII / PHY pins from the runtime ethConfig_ (the Olimex map by default, the
+    // RMII / PHY pins from the runtime ethConfig_ (the default LAN8720 map by default, the
     // P4-NANO's IP101 map on the P4, or a board override pushed from deviceModels.json).
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
     eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
@@ -435,7 +435,7 @@ static bool ethInitRmii() {
     if (!mac) return fail("MAC create failed", nullptr, nullptr);
     // IP101 (P4-NANO) is a managed-component PHY ctor (espressif/ip101 in
     // idf_component.yml; removed from esp_eth core in IDF v6); the generic ctor
-    // (Olimex LAN8720) stays in core. The IP101 symbol is only declared on the
+    // (LAN8720) stays in core. The IP101 symbol is only declared on the
     // P4 build (its header include is #ifdef'd), so the runtime phyType branch
     // below must be wrapped in `#ifdef CONFIG_IDF_TARGET_ESP32P4` — otherwise the
     // non-P4 build would fail to compile the undeclared esp_eth_phy_new_ip101 call.

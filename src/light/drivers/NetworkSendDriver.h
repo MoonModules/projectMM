@@ -39,8 +39,7 @@ public:
     uint16_t universeStart = 0;  // first universe (ArtNet/E1.31; DDP is byte-addressed)
     uint16_t lightCount = 0;     // lights to send (0 = the whole buffer); >0 sends the FIRST N,
                                  // so a sink can cover just its slice (e.g. some lights to LEDs,
-                                 // the rest to ArtNet) instead of every light. A start offset for
-                                 // arbitrary slices is a planned follow-up across all drivers.
+                                 // the rest to ArtNet) instead of every light.
     uint8_t fps = 50;
 
     void onBuildControls() override {
@@ -146,8 +145,10 @@ public:
             data = dst;
             totalBytes = static_cast<size_t>(nLights) * outCh;
         } else {
+            // Passthrough (no correction): honour the same light_count cap as the corrected path,
+            // so a sliced sink doesn't fall back to sending the whole buffer.
             data = sourceBuffer_->data();
-            totalBytes = sourceBuffer_->bytes();
+            totalBytes = static_cast<size_t>(nLights) * sourceBuffer_->channelsPerLight();
         }
 
         // Send the whole frame in one burst — receivers expect a complete

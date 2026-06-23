@@ -47,6 +47,39 @@ TEST_CASE("Layer: dense grid stays on the identity path (no LUT)") {
     CHECK(rig.layer.buffer().count() == 64);        // render buffer == box == lights
 }
 
+// Serpentine grid: dense (every box cell is a light, so the count check alone would pick the
+// identity fast path) but SHUFFLED (driver index i != box cell i). isNaturalOrder() measures that
+// from the coords and routes it through the box->driver LUT instead. This is the lever for
+// exercising the non-identity mapping path without a sparse layout or a modifier.
+TEST_CASE("Layer: serpentine grid leaves the identity path and builds a LUT") {
+    mm::GridLayout g;
+    g.width = 4; g.height = 4; g.depth = 1;   // 16 lights, dense
+    g.serpentine = true;
+    LayerRig rig(&g);
+
+    CHECK(rig.layer.lut().hasLUT());                // dense-but-shuffled → a real LUT, not memcpy
+    CHECK(rig.layer.physicalLightCount() == 16);
+    CHECK(rig.layer.buffer().count() == 16);        // render buffer still the dense box
+
+    // The LUT maps box cell -> driver index. Row 0 (even) is natural: box 0 -> driver 0.
+    // Row 1 (odd) is reversed: box cell (x=0,y=1) = box 4 should map to driver 7 (the strip
+    // enters that row from the high-x end), and box (x=3,y=1) = box 7 -> driver 4.
+    const mm::MappingLUT& lut = rig.layer.lut();
+    auto driverOf = [&](mm::nrOfLightsType box) {
+        mm::nrOfLightsType d = 0xFFFF;
+        lut.forEachDestination(box, [&](mm::nrOfLightsType dst) { d = dst; });
+        return d;
+    };
+    CHECK(driverOf(0) == 0);    // row 0, x=0 — natural
+    CHECK(driverOf(4) == 7);    // row 1, x=0 — reversed: last of the row's driver indices
+    CHECK(driverOf(7) == 4);    // row 1, x=3 — reversed: first
+
+    // Flipping serpentine off returns it to the identity fast path (no LUT).
+    g.serpentine = false;
+    rig.layer.onBuildState();
+    CHECK_FALSE(rig.layer.lut().hasLUT());
+}
+
 // Sparse sphere: a LUT is built; its destinations are driver indices in
 // [0, lightCount), and the render buffer stays the dense bounding box.
 TEST_CASE("Layer: sparse sphere builds a box->driver LUT, no out-of-range index") {

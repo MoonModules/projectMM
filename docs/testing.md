@@ -401,7 +401,7 @@ One live-tier test lives outside the scenario JSON schema because it spans **mul
 
 All live scenarios pass on both desktop and ESP32 with `min_pct: 80` relative bounds. Per-module timing, memory allocation, and sizeof measurements for each platform are in [performance.md](performance.md).
 
-### ESP32 — Olimex ESP32-Gateway Rev G (no PSRAM)
+### ESP32 — classic, no PSRAM (measured on an Olimex ESP32-Gateway Rev G)
 
 - 128×128 grid (16,384 lights) — all live scenarios pass.
 - Memory tracking verified: mirror toggle shows heap changes, returns to baseline (no leaks).

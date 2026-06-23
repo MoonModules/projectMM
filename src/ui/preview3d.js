@@ -477,6 +477,10 @@ function parsePreviewCoords(view, buf) {
     }
     previewCoordCount_ = count;
     previewBox_ = { x: bx, y: by, z: bz };
+    // Draw the grid layout NOW, off (placeholder rings), so a fresh page / UI refresh shows the
+    // geometry the instant the table arrives — not only once the first colour frame happens to land
+    // (which never comes if the scene is paused/idle). Colour frames then light it.
+    drawLights(null);
 }
 
 function renderPreviewFrame(view, buf) {
@@ -497,7 +501,18 @@ function renderPreviewFrame(view, buf) {
     // mid-flight: the colours would land on the wrong positions (a visibly scrambled frame).
     // Skip such a frame; the matching coord table arrives within ~1 frame and they realign.
     if (count !== previewCoordCount_ || stride !== previewStride_) return;
-    const n = count;
+    drawLights(rgb);
+}
+
+// Build the vertex buffer from previewCoords_ + per-light colour and (re)start the render loop.
+// rgb may be null — then every light is drawn off (the shader's placeholder ring), so the grid
+// LAYOUT shows the instant the coordinate table arrives (a fresh page / UI refresh), before any
+// colour frame. A colour frame then calls this again with its rgb to light the scene.
+function drawLights(rgb) {
+    if (!gl) initWebGL();
+    if (!gl) return;
+    if (!previewCoords_ || previewCoordCount_ === 0) return;
+    const n = previewCoordCount_;
 
     if (!vertsBuf || vertsBuf.length < n * 6) vertsBuf = new Float32Array(n * 6);
     let vi = 0;
@@ -509,9 +524,9 @@ function renderPreviewFrame(view, buf) {
         vertsBuf[vi++] = previewCoords_[i * 3 + 0];
         vertsBuf[vi++] = previewCoords_[i * 3 + 1];
         vertsBuf[vi++] = previewCoords_[i * 3 + 2];
-        vertsBuf[vi++] = rgb[i * 3] / 255;
-        vertsBuf[vi++] = rgb[i * 3 + 1] / 255;
-        vertsBuf[vi++] = rgb[i * 3 + 2] / 255;
+        vertsBuf[vi++] = rgb ? rgb[i * 3] / 255 : 0;
+        vertsBuf[vi++] = rgb ? rgb[i * 3 + 1] / 255 : 0;
+        vertsBuf[vi++] = rgb ? rgb[i * 3 + 2] / 255 : 0;
     }
     const vertCount = vi / 6;
 

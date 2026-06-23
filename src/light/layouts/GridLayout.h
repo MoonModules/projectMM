@@ -18,11 +18,14 @@ public:
     lengthType width = defaultGridSize;
     lengthType height = defaultGridSize;
     lengthType depth = 1;
+    bool serpentine = false;   // odd rows wired in reverse (boustrophedon) — the standard matrix
+                               // strip layout where the strip snakes back and forth row to row.
 
     void onBuildControls() override {
         controls_.addInt16("width",  width,  1, 512);
         controls_.addInt16("height", height, 1, 512);
         controls_.addInt16("depth",  depth,  1, 512);
+        controls_.addBool("serpentine", serpentine);
     }
 
     nrOfLightsType lightCount() const override {
@@ -40,7 +43,13 @@ public:
         uint32_t idx = 0;
         for (lengthType z = 0; z < depth && idx < limit; z++) {
             for (lengthType y = 0; y < height && idx < limit; y++) {
-                for (lengthType x = 0; x < width && idx < limit; x++) {
+                // Serpentine: the strip enters odd rows from the high-x end, so the driver index
+                // walks x in reverse there. The emitted COORDINATE is still the true (x,y,z) — only
+                // the index→position order changes, which is exactly what makes the mapping
+                // non-identity (driver index i ≠ box cell i).
+                const bool reverse = serpentine && (y & 1);
+                for (lengthType i = 0; i < width && idx < limit; i++) {
+                    const lengthType x = reverse ? static_cast<lengthType>(width - 1 - i) : i;
                     cb(ctx, static_cast<nrOfLightsType>(idx++), x, y, z);
                 }
             }

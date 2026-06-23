@@ -239,10 +239,13 @@ public:
             // with no stored index map. Push 3 bytes/light through a small stack scratch (the RGB
             // is read straight from the producer buffer at the light's driver index).
             struct ColCtx {
-                mm::BinaryBroadcaster* bc; const uint8_t* src; nrOfLightsType n; uint8_t cpl, s;
+                mm::BinaryBroadcaster* bc; const uint8_t* src; nrOfLightsType n, s; uint8_t cpl;
                 uint8_t buf[1536]; uint16_t fill;
             };
-            ColCtx col{broadcaster_, src, n, cpl, static_cast<uint8_t>(s > 255 ? 255 : s), {}, 0};
+            // s is the FULL lattice stride (not clamped): the colour pass must use the SAME
+            // predicate as buildAndSendCoordTable's, else above stride 255 the two disagree and
+            // colour[k] no longer lines up with coord[k] (browser drops the mismatched frame).
+            ColCtx col{broadcaster_, src, n, s, cpl, {}, 0};
             layer_->layouts()->forEachCoord([](void* c, nrOfLightsType idx, lengthType x, lengthType y, lengthType z) {
                 auto* p = static_cast<ColCtx*>(c);
                 if (x % p->s != 0 || y % p->s != 0 || z % p->s != 0) return;
@@ -259,17 +262,16 @@ public:
 
 private:
     // Frame cap: the most points one preview frame carries before the spatial-lattice
-    // downsample engages. The old ~1800 limit was the single-writev wall; that's gone now —
-    // broadcastBinary enqueues the frame and HttpServerModule::drainWsSends() streams it
-    // across loop20ms ticks (non-blocking), so the cap is no longer "what fits one writev"
-    // but "how big a frame the device can stage + stream comfortably". That's RAM-bound:
-    // the staging frame is points×3 bytes (16K LEDs = 48 KB), so a no-PSRAM classic board
-    // tops out around 16K in internal RAM while PSRAM boards go far higher. Two compile-time
-    // tiers off platform::hasPsram; downsampling stays as the graceful fallback above the cap.
-    // Tune these against the per-board live sweep (the break point each board actually hits).
-    // The literals are split so each fits its board's nrOfLightsType (u16 on classic, u32 on
-    // PSRAM) — a single ternary would force both constants through the u16 type on a classic
-    // build and overflow.
+    // downsample engages. There is no per-frame buffer — the colour frame streams straight from
+    // the producer buffer (and the coord table from forEachCoord) through the broadcaster's
+    // beginBinaryFrame/pushBinaryFrame/endBinaryFrame, so the cap isn't a buffer size but the
+    // point count the device can stream comfortably without the per-frame work and wire bytes
+    // dominating its loop. PSRAM boards stream far more points than a no-PSRAM classic; two
+    // compile-time tiers off platform::hasPsram, with the spatial-lattice downsample as the
+    // graceful fallback above the cap. Tune against the per-board live sweep (the break point
+    // each board actually hits). The literals are split so each fits its board's nrOfLightsType
+    // (u16 on classic, u32 on PSRAM) — a single ternary would force both constants through the
+    // u16 type on a classic build and overflow.
     static constexpr nrOfLightsType MAX_PREVIEW_POINTS =
         platform::hasPsram ? static_cast<nrOfLightsType>(131072u)   // PSRAM: 128K pts (384 KB) into PSRAM
                            : static_cast<nrOfLightsType>(16384u);   // classic: ~16K pts (48 KB) internal RAM

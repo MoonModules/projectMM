@@ -407,7 +407,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                 # for us), still give the device a moment — a set_control that
                 # triggers buildState briefly mutates the module tree, and the
                 # very next API call can hit a transient "module not found".
-                # 500 ms is empirically enough on the Olimex; cheap insurance.
+                # 500 ms is empirically enough on the classic board; cheap insurance.
                 if not (step.get("measure") or op == "measure"):
                     time.sleep(0.5)
 

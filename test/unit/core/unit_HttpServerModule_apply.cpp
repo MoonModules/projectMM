@@ -208,9 +208,9 @@ TEST_CASE("apply-core: a control validator rejects bad input on the set/APPLY_OP
     CHECK(std::strcmp(tag->label, "LOLIN D32") == 0);
 
     // ... and via applyOp (the APPLY_OP-over-serial path) — same shape the installer sends.
-    CHECK(http.applyOp("{\"op\":\"set\",\"module\":\"T\",\"control\":\"label\",\"value\":\"Olimex Gateway\"}")
+    CHECK(http.applyOp("{\"op\":\"set\",\"module\":\"T\",\"control\":\"label\",\"value\":\"Living Room\"}")
           == OpResult::Ok);
-    CHECK(std::strcmp(tag->label, "Olimex Gateway") == 0);
+    CHECK(std::strcmp(tag->label, "Living Room") == 0);
 
     // A raw control byte in the value → Malformed on the APPLY_OP path, prior value kept.
     const char badOp[] = {'{','"','o','p','"',':','"','s','e','t','"',',',
@@ -218,11 +218,11 @@ TEST_CASE("apply-core: a control validator rejects bad input on the set/APPLY_OP
                           '"','c','o','n','t','r','o','l','"',':','"','l','a','b','e','l','"',',',
                           '"','v','a','l','u','e','"',':','"','x', 0x01, '"','}', 0};
     CHECK(http.applyOp(badOp) == OpResult::Malformed);
-    CHECK(std::strcmp(tag->label, "Olimex Gateway") == 0);   // unchanged — no partial write
+    CHECK(std::strcmp(tag->label, "Living Room") == 0);   // unchanged — no partial write
 
     // Empty string → Malformed too (the validator rejects 0-length), prior value kept.
     CHECK(http.applySetControl("T", "label", "{\"value\":\"\"}") == OpResult::Malformed);
-    CHECK(std::strcmp(tag->label, "Olimex Gateway") == 0);
+    CHECK(std::strcmp(tag->label, "Living Room") == 0);
 
     s.deleteTree(root);
 }

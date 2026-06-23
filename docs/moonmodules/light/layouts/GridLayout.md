@@ -2,11 +2,11 @@
 
 ![GridLayout controls](../../../assets/screenshots/GridLayout.png)
 
-Arranges lights in a 3D grid, row-major (x fastest, then y, then z). Full-density — every position maps to a light. Controls: `width`, `height`, `depth`.
+Arranges lights in a 3D grid, row-major (x fastest, then y, then z). Full-density — every position maps to a light. Controls: `width`, `height`, `depth`, `serpentine`.
 
 ## Mapping
 
-Default settings (no serpentine, X-then-Y) are **1:1 unshuffled** — the `oneToOneMapping` flag is set and the mapping table skipped entirely. The Layer buffer and driver buffer are separate when memory allows (for parallelism), shared when memory is tight. `defaultGridSize` (16) is owned here and also read by the composition roots to size the boot grid.
+A plain grid (`serpentine` off) emits driver index `i` at box cell `i`, so the Layer takes the **1:1 unshuffled memcpy fast path** — the mapping isn't *declared* identity, it's *measured*: the Layer walks the coords once and only skips the mapping table when the order is natural. `serpentine` wires odd rows in reverse (boustrophedon — the strip snakes back and forth), so driver index `i` no longer equals box cell `i`: the grid is dense but **shuffled**, which routes it through the box→driver mapping LUT exactly as a sparse layout does. A handy lever for exercising both the identity and non-identity mapping paths from one layout. The Layer buffer and driver buffer are separate when memory allows (for parallelism), shared when memory is tight. `defaultGridSize` (16) is owned here and also read by the composition roots to size the boot grid.
 
 ## Tests
 

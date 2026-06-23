@@ -393,6 +393,22 @@ The preview index-downsamples a large layout to fit the WS send budget (e.g. 128
 
 Not simple — own planning pass. Until then the preview is a faithful strided *sample* (correct shape/colour/motion, not per-pixel). A cheap interim (point-size scaled by stride to fatten samples into their cells) was tried and reverted as not what's wanted — it filled the volume but didn't add real points.
 
+### Self-describing preview frame header (mid term)
+
+The preview wire format is a private opcode protocol: `0x02` per-frame channels, `0x03` coordinate table, each a hand-rolled byte layout, and the colour payload is **always RGB** regardless of the buffer's `channelsPerLight`. Every new data kind (RGBW display, beam direction, …) means inventing another opcode and another fixed layout by hand. The minimal fix that stops that sprawl: a small **typed header** — `[type][format][count][stride]` where `format` enumerates `{RGB, RGBW, …}` — so one message kind carries any per-light channel layout and the browser shader reads `format` to interpret the payload. Do it concrete-first, when RGBW *display* (below) is actually wanted, not speculatively. Prereq for both items below.
+
+### RGBW preview end-to-end (mid term)
+
+The light `Buffer` already holds `channelsPerLight = 4` (RGBW), and the device output drivers handle it, but the **preview only ever sends/draws RGB** — the W channel is invisible in the UI. (The full-res fast path no longer penalises a cpl≥3 buffer — see the short-term fix — but it still drops W on the wire.) Once the self-describing header lands, carry the W channel on the wire and render it in the shader (W as a warm-white tint / brightness lift on the disc). Small, but gated on the header so it isn't another bespoke opcode.
+
+### Fixture model — moving heads, beams (long term)
+
+Today a "light" is a point at a static coordinate with a colour. A **moving head** is a fixture that emits a *beam* in a direction it controls live (pan + tilt), plus colour, beam-width, etc. — per-light **vector** state, not just colour, and a different draw (a cone/ray, not a disc). The static-positions-`0x03` + colour-`0x02` split can't express "this fixture's beam now points here." The industry-standard model is **DMX/GDTF fixtures**: a fixture has a position *and* a set of typed attributes (color, pan, tilt, beam). The preview becomes a fixture renderer (disc for a pixel, cone for a beam); this is also the "make Preview a general-purpose module, not light-specific" goal. A domain-model change (the fixture/attribute model), not just transport. Plan when moving heads are actually on the bench.
+
+### Extract the resumable backpressure transport as a domain-neutral channel (long term)
+
+The preview's transport — resumable cross-tick send from a stable buffer + newest-wins backpressure drop + adaptive graceful degradation (see [architecture.md § graceful degradation under transport backpressure](../architecture.md)) — is **payload-agnostic**: any bulky throttled stream (a future MJPEG/video preview, fixture-state streams, fleet telemetry) could ride it. The *payload* model (count/stride/RGB) is light-specific; the *byte-pump* is not. When a second consumer for this transport appears, promote the pump into a domain-neutral core primitive (a `ThrottledChannel`-style sink) that PreviewDriver becomes *a* producer on, rather than owning the protocol. Concrete-first: extract on the second use, not before — until then the seam stays inside HttpServerModule/PreviewDriver.
+
 ---
 
 ## Testing

@@ -231,11 +231,21 @@ public:
         // no done-callback, so waiting on it would block the full 1000 ms timeout
         // and a single bad pin would stall the tick (the same guard the LCD /
         // Parlio loops use, here per channel).
+        // Transmit only up to the n lights actually encoded this frame: pins are laid out
+        // contiguously from light 0, so pin i covers lights [pinStart, pinStart+pinCounts_[i]).
+        // Normally Σ pinCounts_ == n, but if the buffer shrank since the last parseConfig (a grid
+        // resize lands a tick before the config re-parse) n can be below Σ pinCounts_ — cap each
+        // pin at the encoded boundary so it never clocks out stale symbols past what we wrote.
+        const size_t wordsPerLight = static_cast<size_t>(outCh) * 8;
         bool started[kMaxPins] = {};
         for (uint8_t i = 0; i < pinCount_; i++) {
-            if (pinCounts_[i] == 0) continue;
+            const nrOfLightsType pinStart = static_cast<nrOfLightsType>(pinOffsets_[i] / wordsPerLight);
+            if (pinStart >= n) break;  // contiguous: this pin and all later ones are past the encoded lights
+            const nrOfLightsType pinLights =
+                (pinStart + pinCounts_[i] > n) ? static_cast<nrOfLightsType>(n - pinStart) : pinCounts_[i];
+            if (pinLights == 0) continue;
             started[i] = platform::rmtWs2812Transmit(rmt_[i], symbols_ + pinOffsets_[i],
-                                        static_cast<size_t>(pinCounts_[i]) * outCh * 8);
+                                        static_cast<size_t>(pinLights) * wordsPerLight);
         }
         for (uint8_t i = 0; i < pinCount_; i++) {
             if (started[i]) platform::rmtWs2812Wait(rmt_[i], 1000 /* ms */);
