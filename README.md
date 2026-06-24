@@ -4,7 +4,7 @@ Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi,
 
 ![Web UI](docs/assets/screenshots/ui_overview.png)
 
-👉 **Try it now:** flash an ESP32 straight from your browser → <https://moonmodules.org/projectMM/install/>
+👉 **Try it now:** flash an ESP32 straight from your browser → <https://moonmodules.org/projectMM/install/> — step-by-step in the [Getting started guide](docs/gettingstarted.md).
 
 📦 **Release + downloads:** [latest release](https://github.com/MoonModules/projectMM/releases/latest)
 
