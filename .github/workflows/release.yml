@@ -227,6 +227,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write     # softprops/action-gh-release needs this
+    # Expose the resolved tag so the tag-only restage job below can dispatch a
+    # main-context Pages deploy for it (the github-pages environment trusts only
+    # the `main` ref, so a tag push can't deploy Pages itself).
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     # No `environment: github-pages` here: that environment's protection rule
     # only allows `main`, so binding asset-publishing to it made every vX.Y.Z
     # tag run fail BEFORE any step ran — including the asset upload — leaving
@@ -501,3 +506,32 @@ jobs:
 
       - id: deploy-pages
         uses: actions/deploy-pages@v4
+
+  # Stage a TAG release onto Pages. A vX.Y.Z tag push builds + publishes the
+  # release assets (the `release` job), but it can NOT deploy Pages itself: the
+  # github-pages environment trusts only the `main` ref, so deploy-pages is gated
+  # to main and a tag push skips it — leaving the installer's same-origin
+  # manifests for that version un-staged (a 404 at /install/releases/<tag>/).
+  # Rather than relax the environment's branch policy (needs repo-admin), this
+  # job re-invokes the workflow on `main` with `tag=<the tag>`, which runs
+  # deploy-pages under the allowed `main` ref AND sets CUR_TAG=<the tag> (via the
+  # `tag` input) so the manifests land in releases/<tag>/. Tag-push only, so it
+  # never recurses (the dispatched run is a workflow_dispatch, not a tag push).
+  restage-pages-for-tag:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [release]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write      # gh workflow run (dispatch this same workflow)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Dispatch a main-context Pages deploy for this tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          echo "Dispatching release.yml on main to stage Pages for $TAG"
+          gh workflow run release.yml --ref main -f tag="$TAG"
