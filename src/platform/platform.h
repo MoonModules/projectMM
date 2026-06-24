@@ -299,10 +299,6 @@ private:
     int fd_ = -1;
 };
 
-// One contiguous span. broadcastBinary() takes an array of these (a frame's header +
-// payload) and stages them into one buffer for the non-blocking drain (see writeSome).
-struct WriteChunk { const uint8_t* data; size_t len; };
-
 class TcpConnection {
 public:
     TcpConnection() = default;

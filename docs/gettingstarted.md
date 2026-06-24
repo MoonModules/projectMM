@@ -204,6 +204,13 @@ other.
 > [NetworkModule](moonmodules/core/NetworkModule.md) ·
 > [DevicesModule](moonmodules/core/DevicesModule.md)
 
+> **Lights are just one use.** Everything above — the modules, the live controls, the
+> 3D view, the web UI, the networking — is a general-purpose engine that knows nothing
+> about LEDs. The light show below is one *domain* built on top of it; you could build
+> a different one and reuse all the same machinery. [FastLED-MM](https://github.com/MoonModules/FastLED-MM)
+> is an example, driving its LEDs with [FastLED](https://github.com/FastLED/FastLED) (on
+> hold until projectMM ships as a reusable library).
+
 ## Building a light show: layouts → layers → drivers
 
 The bottom three modules are where the fun is. They form a simple pipeline: a

@@ -177,11 +177,6 @@ The annoyance is purely that the device boots degraded and needs a poke to recov
 
 Related: this is the render/output-buffer face of the same non-PSRAM fragmentation cliff the paged `MappingLUT` already addressed for the *LUT*. The buffers themselves still allocate as single contiguous blocks.
 
-### Preview memory optimizations (backlog)
-
-- **Defer Preview allocation** — allocate the preview buffer on first WebSocket client connect; free on last disconnect. Saves ~5 KB when no browser is open.
-- **Cap `detail` at 2 by default** — `detail = 3` adds ~14 ms/tick (see [performance.md](../performance.md) "Preview detail cost"). Straightforward guard in PreviewDriver.
-
 ### Task core-pinning (backlog)
 
 No FreeRTOS tasks are pinned today. At 16K LEDs the render task takes ~52 ms/tick; if OTA download or Improv scan causes tick-variance spikes, pin render → core 1, OTA/Improv → core 0 (where WiFi already lives via `CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_0=y`). Defer until contention is observed — neither OTA nor Improv runs during normal operation.

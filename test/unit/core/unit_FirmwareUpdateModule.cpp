@@ -30,10 +30,11 @@ TEST_CASE("FirmwareUpdateModule firmware control populated") {
     }
     CHECK(found);
 
-    // version + build are also present (firmware identity moved here). firmwarePartition is gated on
-    // platform::firmwarePartition() > 0 (the app-partition size), so it appears on a real device but
-    // NOT on desktop/test where firmwarePartition() returns 0 — assert its TYPE only when present
-    // (a Progress control), rather than its presence, so this stays valid on both.
+    // version + build are part of this module's firmware-identity controls, so they're present too.
+    // firmwarePartition is gated on platform::firmwarePartition() > 0 (the app-partition size), so it
+    // appears on a real device but NOT on desktop/test where firmwarePartition() returns 0 — assert
+    // its TYPE only when present (a Progress control), rather than its presence, so this stays valid
+    // on both.
     bool hasVersion = false, hasBuild = false;
     for (uint8_t i = 0; i < fw.controls().count(); i++) {
         const auto& c = fw.controls()[i];

@@ -168,9 +168,9 @@ public:
 
         // Track the PEAK level across the 1 s display window. frame_.level is recomputed every
         // ~23 ms audio block, but the UI string is snapshotted only once a second — sampling the
-        // instantaneous value caught the gaps between beats and read 0 even while the LEDs (driven
-        // live every render tick) showed the music. Displaying the window peak gives a representative
-        // reading. Display-only — the live frame_.level the effects/LEDs use is untouched.
+        // instantaneous value lands in the gaps between beats and reads 0 even while the LEDs (driven
+        // live every render tick) move with the music. The window peak is the representative reading.
+        // Display-only — the live frame_.level the effects/LEDs use is untouched.
         if (frame_.level > levelPeak_) levelPeak_ = frame_.level;
     }
 

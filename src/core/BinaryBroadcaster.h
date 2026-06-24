@@ -1,6 +1,5 @@
 #pragma once
 
-#include "platform/platform.h"  // platform::WriteChunk
 #include <cstdint>
 #include <cstddef>  // size_t
 

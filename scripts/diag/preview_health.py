@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run python
 """Browser-faithful preview-stream health probe.
 
 Measures the device's 3D-preview WebSocket stream the way a real browser tab experiences it, so the
@@ -122,11 +122,24 @@ class _Ws:
 # --- measurement (browser-faithful: reconnect + keepalive) -----------------------------------------
 
 def measure(host, seconds, grid):
+    # --grid resizes the device's Grid for the run; snapshot the original so we restore it afterwards
+    # (the probe stays non-destructive, like the live scenarios — decisions.md). The restore is in the
+    # finally at the end of the function.
+    saved_grid = _read_grid(host) if grid else {}
     if grid:
         for ctrl in (("width", grid), ("height", grid), ("depth", 1)):
             _set_control(host, "Grid", ctrl[0], ctrl[1])
         time.sleep(3)  # let the geometry rebuild settle
 
+    try:
+        return _measure_loop(host, seconds, grid)
+    finally:
+        for name, val in saved_grid.items():
+            if val is not None:
+                _set_control(host, "Grid", name, val)
+
+
+def _measure_loop(host, seconds, grid):
     t0 = time.monotonic()
     deadline = t0 + seconds
     colour = coord = reconnects = 0
@@ -165,9 +178,12 @@ def measure(host, seconds, grid):
                     coord += 1
                     if len(payload) >= 5:
                         pts = struct.unpack("<I", payload[1:5])[0]
-            backoff = 0.5
+            backoff = 0.5                    # a session that ran to the deadline resets the backoff
         except Exception:
-            pass                             # closed/timeout → outer loop reconnects (like the browser)
+            # Closed/timeout → reconnect like the browser, after the same 500ms→5s backoff it applies
+            # on ANY close (app.js ws.onclose), not only on a failed handshake.
+            time.sleep(min(backoff, max(0.0, deadline - time.monotonic())))
+            backoff = min(backoff * 2, 5.0)
         finally:
             ws.close()
 
@@ -193,6 +209,28 @@ def _set_control(host, module, control, value):
         urllib.request.urlopen(req, timeout=5).read()
     except Exception as e:
         print(f"  (warn) set {module}.{control}={value} failed: {e}", file=sys.stderr)
+
+
+def _read_grid(host):
+    """Current Grid {width,height,depth} from /api/state, or {} if unavailable — used to snapshot
+    the grid before --grid changes it, so the probe restores it (non-destructive, like the live
+    scenarios). Children live under the `children` key."""
+    h, _, p = host.partition(":")
+    try:
+        with urllib.request.urlopen(f"http://{h}:{p or 80}/api/state", timeout=5) as r:
+            state = json.load(r)
+    except Exception:
+        return {}
+    out = {}
+    def walk(m):
+        for c in m.get("controls", []):
+            if c.get("name") in ("width", "height", "depth"):
+                out[c["name"]] = c.get("value")
+        for ch in m.get("children", []):
+            walk(ch)
+    for m in state.get("modules", []):
+        walk(m)
+    return out
 
 
 def _online_devices():
@@ -224,11 +262,14 @@ def main():
         return 1
     print(f"Preview health — {args.seconds}s per device"
           f"{f', grid {args.grid}²' if args.grid else ''}:")
-    worst_ok = True
+    all_smooth = True
     for h in hosts:
         v = measure(h, args.seconds, args.grid)
-        worst_ok = worst_ok and v == "SMOOTH"
-    return 0 if worst_ok else 0  # diagnostic, not a gate: always exit 0 (report, don't fail CI)
+        all_smooth = all_smooth and v == "SMOOTH"
+    # Exit non-zero if any device was not SMOOTH, so the exit code is honest — MoonDeck's Live tab
+    # reads it (a CHOPPY/DEAD run shows as failed) and a CLI/CI caller can branch on it. The per-device
+    # verdict is always printed regardless, so the line above is the human-readable detail.
+    return 0 if all_smooth else 1
 
 
 if __name__ == "__main__":
