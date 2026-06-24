@@ -202,6 +202,19 @@ uv run scripts/scenario/run_network_roundtrip.py --host 192.168.1.156 --repeats 
 
 Captures and restores each device's grid and removes the temporary NetworkReceive on exit (also on failure). Exit codes match the matrix test: `0` = at least one device measured, `1` = none returned a frame, `2` = environment problem (no checked/reachable devices).
 
+### preview_health
+
+Browser-faithful **3D-preview stream health probe** — measures the device's `/ws` preview the way a real browser tab experiences it, so the numbers match what a person watching the [PreviewDriver](../docs/moonmodules/light/drivers/PreviewDriver.md) preview sees. A plain one-shot WebSocket reader gives up the moment the device closes the socket, so it reports stalls a browser never shows (the browser reconnects) and misses the brief blips a browser does show; this probe replicates the real client in [app.js](../src/ui/app.js)'s `connectWs` — reads the binary frames, sends a `"ping"` text frame every 25 s, and **auto-reconnects on close with 500 ms→5 s backoff** — so a momentary device-side close registers as a short blip, not a frozen preview. Pure WebSocket client: **no device-side changes**, it observes the unmodified stream the device already broadcasts. Reports, per device: colour frames + sustained fps, reconnects (each a visible blip), `maxgap` (the longest stretch with no colour frame — the real "did it freeze?" number), and a `SMOOTH` / `CHOPPY` / `DEAD` verdict. Diagnostic, not a gate — it always exits `0`; read the verdict. Runs against **every device checked in the Live tab** (or an explicit `--host`); with no host it sweeps every online device on the active network.
+
+```bash
+uv run scripts/diag/preview_health.py                              # every online device, 30s each
+uv run scripts/diag/preview_health.py --host 192.168.1.156         # one explicit device
+uv run scripts/diag/preview_health.py localhost:8080 --grid 128    # PC build, force a 128×128 grid first
+uv run scripts/diag/preview_health.py 192.168.1.132 --seconds 60   # longer window to catch rare stalls
+```
+
+When the verdict is `CHOPPY`/`DEAD`, the *cause* (which close path fired on the device) needs device-side serial logging — that scaffolding is added on-demand during diagnosis, separate from this always-on probe. Stamps nothing on the device; safe to run against a live preview a browser is also watching (subject to the 4-client `/ws` limit).
+
 ## ESP32 Tab
 
 

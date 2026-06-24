@@ -1193,9 +1193,9 @@ bool HttpServerModule::endBinaryFrame() { return wsFrameAllSent_; }
 // cursor walks the logical stream [hdr ++ body], drained a chunk at a time in drainPreviewSend.
 bool HttpServerModule::sendBufferedFrame(const uint8_t* header, size_t headerLen,
                                          const uint8_t* body, size_t bodyLen) {
-    // Newest-wins backpressure: one frame in flight at a time. A caller that asks while a send is
-    // active is told "busy" and drops this frame — the producer reads that as the link not keeping
-    // up (so it doesn't queue and doesn't stall).
+    // Drop-new backpressure: one frame in flight at a time. A caller that asks while a send is active
+    // is told "busy" — the in-flight frame is kept and this new one is rejected, which the producer
+    // reads as "link is behind" and uses to shed frame rate (it requeues nothing, so the loop runs on).
     if (previewSend_.active) return false;
 
     const size_t totalLen = headerLen + bodyLen;   // WS payload length = app header + body

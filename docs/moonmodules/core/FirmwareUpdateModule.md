@@ -46,7 +46,7 @@ The OTA caller is responsible for picking a binary compatible with the running d
 4. `esp_https_ota_perform` loops; `update_pct` advances 0 → 100.
 5. `esp_https_ota_finish` commits the new image to the next OTA partition and flips the boot pointer.
 6. Status flips to `"rebooting"`. 600 ms delay (HTTP response makes it to the browser first). `esp_restart()`.
-7. Device boots into the new firmware. UI auto-reconnects via WS, picks up the new `version` + `firmware` on the SystemModule card.
+7. Device boots into the new firmware. UI auto-reconnects via WS, picks up the new `version` + `firmware` on this Firmware card.
 
 ## Errors
 

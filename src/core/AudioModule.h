@@ -90,6 +90,11 @@ public:
         // Read-only live read-outs (formatted in loop1s). Derived every second,
         // nothing to persist, so ReadOnly (the display-only type) not a flipped
         // Text — same idiom as SystemModule's uptime/fps.
+        // "level RMS" = the RMS loudness; the DISPLAYED number is its peak over the 1-second window
+        // (loop1s publishes levelPeak_, the max of the per-block RMS level, then resets it), so a
+        // beat that lands between samples still registers. The live frame_.level the LEDs use is the
+        // instantaneous RMS, recomputed every audio block — this read-out is the human-readable
+        // summary of it, not a separate statistic.
         controls_.addReadOnly("level RMS", levelStr_, sizeof(levelStr_));
         controls_.addReadOnly("peakHz", peakStr_, sizeof(peakStr_));
         MoonModule::onBuildControls();

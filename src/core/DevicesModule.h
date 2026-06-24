@@ -373,13 +373,14 @@ private:
     };
     static constexpr uint8_t kMdnsServiceCount =
         sizeof(kMdnsServices) / sizeof(kMdnsServices[0]);
-    // mdnsBrowse is SYNCHRONOUS and blocks the full timeout (the IDF query waits the whole window
-    // for late responders — it does not return early), on the loop1s tick thread, so the time is
-    // charged to the tick. The timeout stays short AND the browse runs only every kMdnsEveryTicks-th
-    // tick: one ~20 ms hiccup every ~15 s is invisible for a discovery feature (peers don't come and
-    // go faster than that), and FPS is untouched in between. A peer that doesn't answer within the
-    // window is caught on a later pass — discovery is continuous (each browse cycles to the next
-    // service type). The synchronous call holds no handle, so a UI refresh can't race it.
+    // mdnsBrowse is SYNCHRONOUS and blocks up to the timeout (the IDF PTR query waits the window for
+    // responders, returning when it elapses or the result cap fills), on the loop1s tick thread, so
+    // the time is charged to the tick. The timeout stays short AND the browse runs only every
+    // kMdnsEveryTicks-th tick: one ~20 ms hiccup every ~15 s stays invisible for a discovery feature
+    // (peers come and go on a slower scale than that), and FPS is untouched in between. A peer that
+    // answers after the window is caught on a later pass — discovery is continuous (each browse
+    // cycles to the next service type). The synchronous call holds no handle, so it stays correct
+    // under a concurrent UI refresh.
     static constexpr uint32_t kMdnsBrowseMs = 20;    // shorter blocking window → smaller render hiccup
     static constexpr uint8_t kMdnsEveryTicks = 15;   // browse less often → the hiccup is rarer (~15 s)
 

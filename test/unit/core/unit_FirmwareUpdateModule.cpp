@@ -30,11 +30,16 @@ TEST_CASE("FirmwareUpdateModule firmware control populated") {
     }
     CHECK(found);
 
-    // version + build are also present (firmware identity moved here).
+    // version + build are also present (firmware identity moved here). firmwarePartition is gated on
+    // platform::firmwarePartition() > 0 (the app-partition size), so it appears on a real device but
+    // NOT on desktop/test where firmwarePartition() returns 0 — assert its TYPE only when present
+    // (a Progress control), rather than its presence, so this stays valid on both.
     bool hasVersion = false, hasBuild = false;
     for (uint8_t i = 0; i < fw.controls().count(); i++) {
-        if (std::strcmp(fw.controls()[i].name, "version") == 0) hasVersion = true;
-        if (std::strcmp(fw.controls()[i].name, "build") == 0) hasBuild = true;
+        const auto& c = fw.controls()[i];
+        if (std::strcmp(c.name, "version") == 0) hasVersion = true;
+        if (std::strcmp(c.name, "build") == 0) hasBuild = true;
+        if (std::strcmp(c.name, "firmwarePartition") == 0) CHECK(c.type == mm::ControlType::Progress);
     }
     CHECK(hasVersion);
     CHECK(hasBuild);

@@ -41,8 +41,9 @@ public:
     void pushBinaryFrame(const uint8_t* data, size_t len) override;
     bool endBinaryFrame() override;
 
-    // Resumable one-frame send from a stable caller-owned buffer (no copy), drained across
-    // loop20ms ticks so a large frame never spins this module's loop. See BinaryBroadcaster.
+    // Resumable one-frame send from a stable caller-owned buffer (no copy), drained a bounded chunk
+    // per client per loop20ms (drainPreviewSend) so a large frame stays off this module's hot path;
+    // a would-block socket resumes next tick. See BinaryBroadcaster.
     bool sendBufferedFrame(const uint8_t* header, size_t headerLen,
                            const uint8_t* body, size_t bodyLen) override;
     bool bufferedSendIdle() const override { return !previewSend_.active; }
