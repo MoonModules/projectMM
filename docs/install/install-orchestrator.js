@@ -415,6 +415,12 @@ export const installer = {
      *   WiFi credentials, board name). Adds ~12 s. Default false because
      *   a normal re-flash overwrites in place and users usually want
      *   persistent state to survive a firmware bump.
+     * @param {boolean} [opts.ethOnly=false] - the picked firmware has WiFi compiled
+     *   out (firmwares.json `eth_only`: esp32-eth, esp32p4-eth). Such a build connects
+     *   over Ethernet only and has no WiFi-provisioning RPC, so when the device isn't
+     *   already online from the boot log we SKIP the WiFi-credentials step (which would
+     *   otherwise send WIFI_SETTINGS and get UNKNOWN_RPC_COMMAND) and report a clear
+     *   "connect an Ethernet cable" outcome instead.
      * @param {(stage: string, detail?: object) => void} opts.onProgress
      *   Stages: request-port, connect-flash, fetch-firmware, erase,
      *   flash, reboot, connect-improv, set-tx-power, wifi-creds-form,
@@ -453,7 +459,7 @@ export const installer = {
      *   guidance message — the OS picker is modal and covers the install
      *   modal. Optional; degrade gracefully to a silent re-prompt when
      *   omitted (older host pages just lose the guidance section).
-     * @param {(detail: {url: string, mdns?: string, board: string, applyDefaults?: boolean, viaHttp?: boolean, alreadyOnline?: boolean}) => void} opts.onSuccess
+     * @param {(detail: {url: string, mdns?: string, board: string, applyDefaults?: boolean, viaHttp?: boolean, alreadyOnline?: boolean, ethOnlyNoLink?: boolean}) => void} opts.onSuccess
      *   `mdns` is the device's `<deviceName>.local` address from the boot serial
      *   (deviceName is the single identity — mDNS = AP = DHCP hostname all follow
      *   it), or "" if the firmware predates the MM_DEVICE token. The host shows it
@@ -478,6 +484,7 @@ export const installer = {
      *   the device was unplugged and replugged).
      */
     async start({ manifestUrl, board, applyDefaults = true, txPower = null, eraseBefore = false,
+                   ethOnly = false,
                    port: prePickedPort,
                    onProgress, uiWaitForCreds, uiWaitForIp, uiShowNeedsIpRetrying,
                    uiWaitForPortRetry,
@@ -775,6 +782,19 @@ export const installer = {
                 viaHttp = true;
                 alreadyOnline = true;
                 defaultsApplied = await pushDefaultsOverSerial(port, board, applyDefaults, trackProgress, onLog);
+            } else if (ethOnly) {
+                // Ethernet-only firmware (WiFi compiled out: esp32-eth, esp32p4-eth) that
+                // did NOT print an IP — i.e. no Ethernet cable was connected at boot. There
+                // is no point attempting WiFi provisioning: the build has no WIFI_SETTINGS
+                // RPC, so sending one returns UNKNOWN_RPC_COMMAND (the error users hit). The
+                // device's Improv listener still runs over serial, though, so we push the
+                // device-model defaults here, then report success telling the user to plug in
+                // Ethernet — the device comes online on its own once a cable is connected.
+                if (onLog) onLog(`[orchestrator] eth-only firmware, no IP from boot log — skipping WiFi provisioning (connect Ethernet)`);
+                defaultsApplied = await pushDefaultsOverSerial(port, board, applyDefaults, trackProgress, onLog);
+                trackProgress("done");
+                onSuccess({ url: "", board, applyDefaults, defaultsApplied, ethOnlyNoLink: true });
+                return;
             } else {
             // Pre-association TX-power cap (weak-power brown-out fix): push it
             // while we still own the port, before ImprovSerial locks it.

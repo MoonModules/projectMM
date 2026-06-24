@@ -359,6 +359,15 @@
     .install-section.active { display: block; }
     .install-status { margin: 8px 0; color: var(--muted); }
     .install-done-note { margin: 4px 0 10px; font-size: 13px; color: var(--muted); }
+    /* Notice variant — for a flashed-OK-but-action-needed outcome (e.g. eth-only firmware
+       waiting on a cable). Amber, like the "supported" capability chip (var(--sup)): reads as
+       "do this next", not a plain note and not a red error. */
+    .install-done-note.install-done-note--notice {
+      color: var(--sup);
+      background: color-mix(in srgb, var(--sup) 12%, transparent);
+      border-left: 3px solid var(--sup);
+      padding: 8px 10px; border-radius: 4px;
+    }
     .install-warn { color: #d4a052; font-size: 12px; margin-top: 8px; }
     .install-progress {
       height: 8px;
@@ -806,7 +815,7 @@
       </div>
 
       <div class="install-section" id="section-done">
-        <div class="install-status">Device is online!</div>
+        <div class="install-status" id="done-status">Device is online!</div>
         <div class="install-done-note" id="done-defaults" hidden></div>
         <a class="install-success-url" id="done-url" target="_blank" rel="noopener"></a>
         <a class="install-success-url" id="done-url-mdns" target="_blank" rel="noopener" hidden></a>
@@ -1309,11 +1318,40 @@
       if (retrying) input.value = "";
     }
 
-    function handleSuccess({ url, mdns, board, applyDefaults = true, defaultsApplied = false, viaHttp, alreadyOnline }) {
+    function handleSuccess({ url, mdns, board, applyDefaults = true, defaultsApplied = false, viaHttp, alreadyOnline, ethOnlyNoLink }) {
       disarmUnloadGuard();
+      // Clear the amber notice styling from any prior install in this session — only the
+      // eth-only-no-link branch re-adds it, so every other outcome shows the plain note.
+      document.getElementById("done-defaults").classList.remove("install-done-note--notice");
+      // Default header: most done outcomes mean the device reported an IP (it's reachable).
+      // The eth-only-no-link branch overrides it (the device isn't online until a cable is in).
+      document.getElementById("done-status").textContent = "Device is online!";
       // Device-model defaults are applied DURING the install over serial (Improv =
       // REST over serial — APPLY_OP). The success screen just confirms + links;
       // the device is already fully configured by the time it shows.
+      if (ethOnlyNoLink) {
+        // Ethernet-only firmware flashed, but no cable was connected so the device isn't
+        // online yet (and this build has no WiFi to provision). Defaults WERE pushed over
+        // serial. Tell the user the one thing they need to do: plug in Ethernet — the device
+        // then comes online on its own and the link appears at its IP / <name>.local.
+        showSection("done");
+        document.getElementById("done-status").textContent = "Flashed — connect Ethernet";
+        document.getElementById("done-url").removeAttribute("href");
+        document.getElementById("done-url").textContent = "";
+        document.getElementById("done-url-mdns").hidden = true;
+        const note = document.getElementById("done-defaults");
+        // The device-model defaults are pushed over SERIAL during install (no network needed), so on
+        // this eth-only path they normally DID apply — report that honestly. The only "next step" is
+        // the network cable. Append a defaults caveat only when the push actually didn't run.
+        const defaultsNote = defaultsApplied
+          ? ` ${board} defaults were applied.`
+          : (board && applyDefaults ? ` ${board} defaults weren't applied — apply them later from MoonDeck.` : "");
+        note.textContent =
+          `Flashed. This is an Ethernet-only firmware — connect a network cable and the device comes online on its own (find it via its IP or <name>.local, or in MoonDeck).${defaultsNote}`;
+        note.classList.add("install-done-note--notice");   // amber: flashed OK, action needed (plug in Ethernet)
+        note.hidden = false;
+        return;
+      }
       if (!url) {
         // No device URL (user skipped the IP prompt, or an eth-only/no-Improv device).
         // On that path no serial config push happened. If a model was picked, say so —
@@ -1645,6 +1683,11 @@
         // is a hardware trait, not a "default", so it still applies regardless — only the
         // module/control inject is gated.
         const applyDefaults = document.getElementById("apply-device-defaults").checked;
+        // Ethernet-only firmware: WiFi compiled out (firmwares.json `eth_only`). Keyed off the
+        // name like isCompatible's `-eth*` rule — a `-eth` variant is eth-only UNLESS it's the
+        // `-eth-wifi` co-processor build. The orchestrator uses this to skip WiFi provisioning
+        // (the build has no WIFI_SETTINGS RPC) and tell the user to connect Ethernet instead.
+        const ethOnly = /-eth$/.test(firmware);
         await installer.start({
           // pickedPort may be null — orchestrator falls back to requestPort.
           port: pickedPort,
@@ -1653,6 +1696,7 @@
           applyDefaults, // gates the APPLY_OP config push (not txPower, sent earlier)
           txPower,
           eraseBefore,
+          ethOnly,
           onProgress: handleProgress,
           uiWaitForCreds,
           uiWaitForIp,
