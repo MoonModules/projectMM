@@ -72,7 +72,6 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
-#include <sys/uio.h>
 #include <unistd.h>
 
 namespace mm::platform {
@@ -400,7 +399,7 @@ static bool ethInitRmii() {
     esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
     ethNetif_ = esp_netif_new(&netif_cfg);
 
-    // RMII / PHY pins from the runtime ethConfig_ (the Olimex map by default, the
+    // RMII / PHY pins from the runtime ethConfig_ (the default LAN8720 map by default, the
     // P4-NANO's IP101 map on the P4, or a board override pushed from deviceModels.json).
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
     eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
@@ -436,7 +435,7 @@ static bool ethInitRmii() {
     if (!mac) return fail("MAC create failed", nullptr, nullptr);
     // IP101 (P4-NANO) is a managed-component PHY ctor (espressif/ip101 in
     // idf_component.yml; removed from esp_eth core in IDF v6); the generic ctor
-    // (Olimex LAN8720) stays in core. The IP101 symbol is only declared on the
+    // (LAN8720) stays in core. The IP101 symbol is only declared on the
     // P4 build (its header include is #ifdef'd), so the runtime phyType branch
     // below must be wrapped in `#ifdef CONFIG_IDF_TARGET_ESP32P4` — otherwise the
     // non-P4 build would fail to compile the undeclared esp_eth_phy_new_ip101 call.
@@ -999,31 +998,25 @@ void mdnsShutdown() {
     if (mdnsStackUp_) { mdns_free(); mdnsStackUp_ = false; }
 }
 
-// --- mDNS service browse (async, non-blocking) ---
-// One in-flight async query at a time (DevicesModule serialises service types). The
-// synchronous mdns_query_ptr would block the full timeout on the render task; the async
-// handle lets us poll a few ms each tick instead.
-static mdns_search_once_t* mdnsSearch_ = nullptr;
+// --- mDNS service browse (synchronous, bounded) ---
 
-bool mdnsBrowseStart(const char* service, const char* proto) {
-    if (mdnsSearch_) return false;                 // one query at a time
-    // Browse needs only the mDNS stack, not advertising — so bring the stack up here
-    // regardless of the advertise toggle (mdnsStop clears the hostname but keeps the
-    // stack). A device that chooses not to advertise can still discover others.
+// One synchronous PTR browse for `service`/`proto`, blocking up to `timeoutMs`, then it
+// frees everything it allocated before returning. Self-contained ON PURPOSE: the earlier
+// async API (mdns_query_async_new + poll-the-handle-across-ticks) raced the mDNS task's
+// own search-expiry timer — when a query's window lapsed, the component freed the search's
+// internal queue, and our next-tick poll asserted on it (xQueueSemaphoreTake on a null
+// queue, crashing on a UI refresh). Holding no handle across ticks closes that window by
+// construction. The cost is a bounded blocking call: DevicesModule calls this on loop1s
+// (not the render hot path) for ONE service type per tick with a small timeout, the
+// standard mDNS-query pattern (WLED/ESPHome do the same), so the tick budget is fine.
+bool mdnsBrowse(const char* service, const char* proto, uint32_t timeoutMs,
+                MdnsHostCb cb, void* user) {
+    // Browse needs only the mDNS stack, not advertising — bring it up regardless of the
+    // advertise toggle (mdnsStop clears the hostname but keeps the stack), so a device
+    // that doesn't advertise can still discover others.
     if (!ensureMdnsStack()) return false;
-    // PTR query for the service type; 3 s window, up to 16 results. Returns immediately
-    // with a handle — results are gathered on the mDNS task, read via Poll below.
-    mdnsSearch_ = mdns_query_async_new(nullptr, service, proto, MDNS_TYPE_PTR,
-                                       3000, 16, nullptr);
-    return mdnsSearch_ != nullptr;
-}
-
-bool mdnsBrowsePoll(MdnsHostCb cb, void* user) {
-    if (!mdnsSearch_) return true;                 // nothing running == "done"
     mdns_result_t* results = nullptr;
-    uint8_t num = 0;
-    // 0 ms timeout: pure poll, never blocks the tick. true == the query finished.
-    if (!mdns_query_async_get_results(mdnsSearch_, 0, &results, &num)) return false;
+    if (mdns_query_ptr(service, proto, timeoutMs, 16, &results) != ESP_OK) return false;
     for (mdns_result_t* r = results; r && cb; r = r->next) {
         MdnsHost h{};
         // A PTR/service browse gives the friendly service *instance* name in
@@ -1056,11 +1049,7 @@ bool mdnsBrowsePoll(MdnsHostCb cb, void* user) {
         cb(h, user);
     }
     if (results) mdns_query_results_free(results);
-    return true;                                   // done — caller calls mdnsBrowseStop()
-}
-
-void mdnsBrowseStop() {
-    if (mdnsSearch_) { mdns_query_async_delete(mdnsSearch_); mdnsSearch_ = nullptr; }
+    return true;
 }
 
 // UdpSocket
@@ -1171,67 +1160,16 @@ bool TcpConnection::write(const uint8_t* data, size_t len) {
     return true;
 }
 
-WriteResult TcpConnection::writeChunks(const WriteChunk* chunks, int count) {
-    if (fd_ < 0) return WriteResult::Error;
-    if (count < 1 || count > MAX_WRITE_CHUNKS) return WriteResult::Error;
-    struct iovec iov[MAX_WRITE_CHUNKS];
-    size_t total = 0;
-    for (int i = 0; i < count; i++) {
-        iov[i].iov_base = const_cast<uint8_t*>(chunks[i].data);
-        iov[i].iov_len = chunks[i].len;
-        total += chunks[i].len;
-    }
-    // Single non-blocking writev — the socket is already O_NONBLOCK.
-    ssize_t n = lwip_writev(fd_, iov, count);
-    if (n < 0) {
-        return (errno == EAGAIN || errno == EWOULDBLOCK)
-                   ? WriteResult::WouldBlock : WriteResult::Error;
-    }
-    if (n == 0) return WriteResult::WouldBlock;
-    if (static_cast<size_t>(n) == total) return WriteResult::Complete;
-
-    // Partial: some bytes of this WS frame went out, so we MUST finish the rest
-    // — a half-sent frame corrupts the stream and the caller would otherwise
-    // drop the connection. This happens under backpressure when the link is
-    // saturated (e.g. ArtNet + a large preview frame on a slow 128×128 tick):
-    // the lwIP send buffer can't take the whole frame at once but drains in
-    // microseconds. Drain the unsent tail with a bounded retry loop; only if it
-    // still can't complete (a genuinely stuck socket) do we report Partial so
-    // the caller closes. lwIP exposes no free-TX-space query (SO_SNDBUF is
-    // unimplemented), so a pre-check isn't possible — finishing the write is the
-    // way to keep the stream intact without dropping.
-    size_t sent = static_cast<size_t>(n);
-    // Small cap: a partial tail (a few KB) drains in 1-2 ms as TCP ACKs arrive;
-    // 8 ms is plenty for a transient. A genuinely saturated link blows past it —
-    // then we give up (report Partial → caller closes, browser reconnects),
-    // rather than stall the render tick. Bounds the worst-case tick hit to ~8 ms.
-    constexpr int kMaxDrainTries = 8;    // each yields up to 1ms
-    for (int tries = 0; sent < total && tries < kMaxDrainTries; ) {
-        // Locate the chunk + offset where `sent` lands, write its remaining tail.
-        size_t acc = 0;
-        const uint8_t* p = nullptr; size_t remain = 0;
-        for (int i = 0; i < count; i++) {
-            if (sent < acc + chunks[i].len) {
-                size_t off = sent - acc;
-                p = chunks[i].data + off;
-                remain = chunks[i].len - off;
-                break;
-            }
-            acc += chunks[i].len;
-        }
-        if (!p) break;  // shouldn't happen (sent < total)
-        ssize_t w = lwip_write(fd_, p, remain);
-        if (w > 0) {
-            sent += static_cast<size_t>(w);
-        } else if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            vTaskDelay(pdMS_TO_TICKS(1));   // buffer full — let it drain
-            tries++;
-        } else {
-            return WriteResult::Error;       // real socket error
-        }
-    }
-    return (sent == total) ? WriteResult::Complete : WriteResult::Partial;
+int TcpConnection::writeSome(const uint8_t* data, size_t len) {
+    if (fd_ < 0) return -1;
+    if (len == 0) return 0;
+    ssize_t n = lwip_write(fd_, data, len);
+    if (n > 0) return static_cast<int>(n);
+    if (n == 0) return 0;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;  // buffer full — try later
+    return -1;                                              // real socket error
 }
+
 
 void TcpConnection::close() {
     if (fd_ >= 0) {

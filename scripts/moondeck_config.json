@@ -153,6 +153,15 @@
       "script": "scenario/run_network_roundtrip.py"
     },
     {
+      "id": "preview_health",
+      "tab": "live",
+      "group": "scenario",
+      "label": "Preview Health",
+      "help": "preview_health",
+      "script": "diag/preview_health.py",
+      "needs_device": true
+    },
+    {
       "id": "setup_esp_idf",
       "tab": "esp32",
       "group": "setup",

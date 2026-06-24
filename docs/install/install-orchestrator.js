@@ -16,8 +16,8 @@
 //   4. show a WiFi creds form, await user input
 //   5. provision via Improv standard SEND_WIFI_CREDENTIALS
 //   6. push the device-model config over serial — "Improv = REST over serial":
-//      SET_DEVICE_MODEL (0xFE, the identity name) then APPLY_OP (0xFC) frames for
-//      the deviceModels.json entry's modules + controls. No HTTP, no browser pull,
+//      APPLY_OP (0xFC) frames for the deviceModels.json entry's modules + controls
+//      (the deviceModel name is just one of those controls). No HTTP, no browser pull,
 //      so it works identically on the HTTPS deployed installer and local preview
 //      (the old HTTP /api/control fan-out couldn't run HTTPS→http — mixed-content).
 //   7. callback with { url, board } so the host page populates
@@ -40,7 +40,6 @@ import { ImprovSerial } from "https://unpkg.com/improv-wifi-serial-sdk@2.5.0/dis
 // vector so the device C++, Python, and JS implementations can't drift). The
 // command IDs + frame layout are documented there.
 import {
-    IMPROV_CMD_SET_DEVICE_MODEL,
     IMPROV_CMD_SET_TX_POWER,
     IMPROV_FRAME_TYPE_RPC,
     buildImprovFrame,
@@ -109,63 +108,12 @@ function bufferToBinaryString(buffer) {
 // Improv RPC payload encoders (frame building is in improv-frame.js)
 // ---------------------------------------------------------------------------
 
-// Encodes the SET_DEVICE_MODEL RPC payload that the device parser at
-// platform_esp32_improv.cpp::improvHandleSetDeviceModel expects.
-//
-// RPC payload (inside the Improv frame, before the checksum):
-//   [0xFE]          command
-//   [data_len]      1 + str_len
-//   [str_len]       1..31, length of board name in bytes
-//   [str_bytes]     ASCII-printable 0x20..0x7E only
-//
-// The 31-char cap mirrors SystemModule::deviceModel_'s 32-byte buffer
-// (sizeof - 1 for NUL); the device-side handler validates against
-// g_improv.deviceModelOutLen dynamically, so the wire spec follows the buffer.
-function encodeSetDeviceModelPayload(board) {
-    const nameBytes = new TextEncoder().encode(board);
-    // Reject non-printable bytes here, before the device does — the ESP32 handler
-    // (SystemModule::setDeviceModel) accepts only 0x20..0x7E, so a name with a
-    // control byte / non-ASCII char would fail on-device after we'd already sent it.
-    for (const b of nameBytes) {
-        if (b < 0x20 || b > 0x7E) {
-            throw new Error(`deviceModel name has a non-printable-ASCII byte (0x${b.toString(16)})`);
-        }
-    }
-    if (nameBytes.length === 0 || nameBytes.length > 31) {
-        throw new Error(`deviceModel name length ${nameBytes.length}: must be 1..31`);
-    }
-    const out = new Uint8Array(3 + nameBytes.length);
-    out[0] = IMPROV_CMD_SET_DEVICE_MODEL;
-    out[1] = 1 + nameBytes.length;
-    out[2] = nameBytes.length;
-    out.set(nameBytes, 3);
-    return out;
-}
-
-// Sends the SET_DEVICE_MODEL frame on a port we own. ImprovSerial's
-// writePacketToStream is private (verified in improv-wifi-serial-sdk@2.5.0's
-// serial.d.ts), so we encode the frame ourselves and write raw bytes.
-// ImprovSerial holds the writable stream's lock during its lifetime — to
-// get our own writer we temporarily release ImprovSerial's hold by
-// disconnecting then reconnecting. Easier alternative: write while
-// ImprovSerial is still active is blocked, so we close ImprovSerial first
-// (we're done with it — the WiFi provision succeeded) and write directly.
-async function sendSetBoardFrame(port, board) {
-    const payload = encodeSetDeviceModelPayload(board);
-    const frame = buildImprovFrame(IMPROV_FRAME_TYPE_RPC, payload);
-    const writer = port.writable.getWriter();
-    try {
-        await writer.write(frame);
-    } finally {
-        writer.releaseLock();
-    }
-}
-
 // Sends the SET_TX_POWER frame ([0xFD][1][dBm]) on a port we own — called
 // BEFORE ImprovSerial takes the port's locks, so no close/reopen dance is
-// needed. Fire-and-forget like SET_DEVICE_MODEL: the device acks with RpcResponse
-// we don't read; the HTTP fan-out later re-applies the same deviceModels.json
-// value as the late fallback.
+// needed. Fire-and-forget like APPLY_OP: the device acks with RpcResponse we don't
+// read. This must precede provisioning because the cap has to land before the radio
+// associates; the APPLY_OP config push later also carries Network.txPowerSetting, but
+// that arrives too late for the first association on a brown-out-prone board.
 async function sendSetTxPowerFrame(port, dBm) {
     const frame = buildImprovFrame(IMPROV_FRAME_TYPE_RPC,
                                    new Uint8Array([IMPROV_CMD_SET_TX_POWER, 1, dBm & 0xFF]));
@@ -205,14 +153,15 @@ async function sendApplyOpFrame(port, op) {
     await new Promise(r => setTimeout(r, 120));
 }
 
-// Apply a device-model's catalog defaults over serial: SET_DEVICE_MODEL (the identity
-// name) then the full config as APPLY_OP ops. The caller must OWN the serial port (no
-// ImprovSerial holding the writable lock). Works on any reachable device — fresh-
-// provisioned (WiFi) OR already-online at boot (Ethernet) — because the serial RPCs
-// need no provisioning state, only the open port. Gated by applyDefaults: when the
-// "Apply device defaults" checkbox is unticked, push nothing (keep the device's
-// config). Returns true iff the catalog push actually ran (so the success note can
-// report honestly rather than always claiming "Applied").
+// Apply a device-model's catalog defaults over serial, as APPLY_OP ops. The caller must
+// OWN the serial port (no ImprovSerial holding the writable lock). Works on any reachable
+// device — fresh-provisioned (WiFi) OR already-online at boot (Ethernet) — because the
+// serial RPCs need no provisioning state, only the open port. The deviceModel name is just
+// one of the catalog controls (System.deviceModel), so it rides the same APPLY_OP `set`
+// pass as every other default.
+// Gated by applyDefaults: when the "Apply device defaults" checkbox is unticked, push
+// nothing (keep the device's config). Returns true iff the catalog push actually ran (so
+// the success note can report honestly rather than always claiming "Applied").
 async function pushDefaultsOverSerial(port, board, applyDefaults, trackProgress, onLog) {
     if (!(board && applyDefaults)) {
         if (onLog) onLog(board
@@ -221,9 +170,7 @@ async function pushDefaultsOverSerial(port, board, applyDefaults, trackProgress,
         return false;
     }
     trackProgress("apply-defaults", { board });
-    if (onLog) onLog(`[orchestrator] applying ${board} defaults over serial (SET_DEVICE_MODEL + APPLY_OP)`);
-    await sendSetBoardFrame(port, board);
-    await new Promise(r => setTimeout(r, 100));   // let the UART task settle
+    if (onLog) onLog(`[orchestrator] applying ${board} defaults over serial (APPLY_OP)`);
     return await sendConfigOverSerial(port, board, onLog);
 }
 
@@ -450,13 +397,14 @@ async function releaseDetected() {
 export const installer = {
     /**
      * Drive the full install flow: request port, flash via esptool-js,
-     * provision WiFi via Improv, push SET_DEVICE_MODEL if a board was picked,
-     * report success with the device URL.
+     * provision WiFi via Improv, push the device-model config over serial (APPLY_OP)
+     * if a board was picked, report success with the device URL.
      *
      * @param {object} opts
      * @param {string} opts.manifestUrl - URL to an ESP Web Tools manifest
-     * @param {string} [opts.board] - board name from deviceModels.json to push
-     *   via SET_DEVICE_MODEL after provisioning. Omit / empty for "(any board)".
+     * @param {string} [opts.board] - device-model name from deviceModels.json whose
+     *   defaults (incl. the deviceModel control) are pushed via APPLY_OP after
+     *   provisioning. Omit / empty for "(any board)".
      * @param {number|null} [opts.txPower] - deviceModels.json
      *   controls.Network.txPowerSetting for the picked board (whole dBm).
      *   When set, the SET_TX_POWER vendor RPC is pushed BEFORE provisioning

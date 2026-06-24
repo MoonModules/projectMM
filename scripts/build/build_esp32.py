@@ -78,7 +78,7 @@ FIRMWARES: dict[str, dict] = {
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth"],
         "eth_only": False,
         "description": "ESP32 classic — WiFi + Ethernet (RMII; per-board pins/PHY "
-                       "from deviceModels.json, Olimex defaults).",
+                       "from deviceModels.json, default LAN8720 pins).",
         "ships": True,
     },
     "esp32-16mb": {

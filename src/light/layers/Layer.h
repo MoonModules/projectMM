@@ -250,14 +250,15 @@ public:
             width_ = physicalWidth_;
             height_ = physicalHeight_;
             depth_ = physicalDepth_;
-            if (!sparse) {
-                // Dense grid: box cell i IS light i. Identity (memcpy) — unchanged.
+            if (!sparse && isNaturalOrder()) {
+                // Dense grid in natural order: box cell i IS driver light i. Identity (memcpy).
                 lut_.setIdentity(boxCount);
                 allocateBuffer(boxCount);
                 return;
             }
-            // Sparse: build box→driver LUT (each box cell → its driver index, or
-            // nothing). logicalCount = boxCount, ≤1 destination per cell.
+            // Sparse (some box cells have no light) OR dense-but-shuffled (a serpentine grid: same
+            // count, but driver index i ≠ box cell i) → build the box→driver LUT so the driver
+            // buffer is the real lights in driver order. logicalCount = boxCount, ≤1 dest per cell.
             buildSparseIdentityLUT(boxCount, driverCount);
             allocateBuffer(boxCount);   // layer (render) buffer stays the dense box
             return;
@@ -372,6 +373,25 @@ public:
 
     // Sentinel: a box cell that is not a real light (no driver index).
     static constexpr nrOfLightsType kNoDriver = static_cast<nrOfLightsType>(-1);
+
+    // Does the layout emit lights in natural box order — driver index i == box cell i (x fastest,
+    // then y, then z)? Measured, not declared: one allocation-free forEachCoord pass over the same
+    // coords the LUT build would walk, so there's a single source of truth (the coords) and no
+    // per-layout hint to keep in sync. True → the dense memcpy fast path is valid; false → a
+    // reordered grid (serpentine) needs the box→driver LUT. Only meaningful for a dense layout
+    // (boxCount == driverCount); a sparse layout already routes to the LUT via the count check.
+    bool isNaturalOrder() const {
+        struct Ctx { lengthType w, h; bool ok; };
+        Ctx ctx{physicalWidth_, physicalHeight_, true};
+        layouts_->forEachCoord([](void* c, nrOfLightsType driverIdx, lengthType x, lengthType y, lengthType z) {
+            auto* k = static_cast<Ctx*>(c);
+            if (!k->ok) return;   // once a mismatch is found the answer is settled; skip the rest
+            nrOfLightsType box = static_cast<nrOfLightsType>(z) * k->w * k->h
+                               + static_cast<nrOfLightsType>(y) * k->w + x;
+            if (driverIdx != box) k->ok = false;
+        }, &ctx);
+        return ctx.ok;
+    }
 
     // Allocate + fill a box-cell → driver-index map from the layout's real
     // lights (Layouts::forEachCoord emits (driverIdx, x, y, z) in driver order).

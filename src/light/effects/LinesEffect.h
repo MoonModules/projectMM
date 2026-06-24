@@ -47,10 +47,19 @@ public:
             if (cpl >= 3) buf[off + 2] = b;
         };
 
+        // Sweep position: map the 0–65535 beat into N equal buckets, beat * N / 65536, giving each
+        // index 0..N-1 an equal 1/N slice of the cycle. Crucially this REACHES N-1: `beat` tops out
+        // below 65535 (it is (elapsed % period) * 65535 / period, and elapsed % period maxes at
+        // period-1), so the textbook `beat * (N-1) / 65535` truncates to N-2 at the top and the
+        // sweep never lights the last row/column — the off-by-one this fixes. `beat * N / 65536`
+        // maps that same sub-full-scale top to N-1 (e.g. 65502*8/65536 = 7 for N=8).
+        auto sweepIndex = [&](lengthType n) {
+            return static_cast<lengthType>(static_cast<uint32_t>(beat) * n / 65536u);
+        };
+
         // Red — YZ plane at x = beat position, sweeps left→right
         if (w > 1 && (axis == 0 || axis == 1)) {
-            const lengthType x = static_cast<lengthType>(
-                static_cast<uint32_t>(beat) * (w - 1) / 65535u);
+            const lengthType x = sweepIndex(w);
             for (lengthType z = 0; z < d; z++)
                 for (lengthType y = 0; y < h; y++)
                     setRGB(x, y, z, 255, 0, 0);
@@ -58,8 +67,7 @@ public:
 
         // Green — XZ plane at y = beat position, sweeps top→bottom
         if (h > 1 && (axis == 0 || axis == 2)) {
-            const lengthType y = static_cast<lengthType>(
-                static_cast<uint32_t>(beat) * (h - 1) / 65535u);
+            const lengthType y = sweepIndex(h);
             for (lengthType z = 0; z < d; z++)
                 for (lengthType x = 0; x < w; x++)
                     setRGB(x, y, z, 0, 255, 0);
@@ -67,8 +75,7 @@ public:
 
         // Blue — XY plane at z = beat position, sweeps front→back (3D only)
         if (d > 1 && (axis == 0 || axis == 3)) {
-            const lengthType z = static_cast<lengthType>(
-                static_cast<uint32_t>(beat) * (d - 1) / 65535u);
+            const lengthType z = sweepIndex(d);
             for (lengthType y = 0; y < h; y++)
                 for (lengthType x = 0; x < w; x++)
                     setRGB(x, y, z, 0, 0, 255);

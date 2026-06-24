@@ -59,6 +59,41 @@ TEST_CASE("GridLayout 4x4x1 produces 16 coords in row-major order") {
     CHECK(coords[15].z == 0);
 }
 
+// Serpentine reverses x on odd rows (boustrophedon), so the strip snakes back and forth: driver
+// index advances linearly while the emitted x zigzags. Even rows L→R, odd rows R→L. The COORDINATE
+// is always the true (x,y) — only the index→position order changes, which is what makes the
+// mapping non-identity.
+TEST_CASE("GridLayout serpentine reverses x on odd rows") {
+    mm::GridLayout grid;
+    grid.width = 4;
+    grid.height = 3;
+    grid.depth = 1;
+    grid.serpentine = true;
+
+    std::vector<CoordEntry> coords;
+    grid.forEachCoord(collectCoord, &coords);
+    REQUIRE(coords.size() == 12);
+
+    // Row 0 (even): left→right, x = 0,1,2,3 at idx 0..3
+    CHECK(coords[0].x == 0); CHECK(coords[0].y == 0);
+    CHECK(coords[3].x == 3); CHECK(coords[3].y == 0);
+    // Row 1 (odd): right→left, x = 3,2,1,0 at idx 4..7 — the serpentine turn
+    CHECK(coords[4].idx == 4); CHECK(coords[4].x == 3); CHECK(coords[4].y == 1);
+    CHECK(coords[5].x == 2); CHECK(coords[5].y == 1);
+    CHECK(coords[7].x == 0); CHECK(coords[7].y == 1);
+    // Row 2 (even again): left→right, x = 0,1,2,3 at idx 8..11
+    CHECK(coords[8].x == 0); CHECK(coords[8].y == 2);
+    CHECK(coords[11].x == 3); CHECK(coords[11].y == 2);
+
+    // Non-serpentine is unchanged: index i lands at natural box order.
+    grid.serpentine = false;
+    coords.clear();
+    grid.forEachCoord(collectCoord, &coords);
+    REQUIRE(coords.size() >= 6);   // guard the index accesses below (clear test failure, not UB)
+    CHECK(coords[4].x == 0);   // row 1 starts at x=0 again
+    CHECK(coords[5].x == 1);
+}
+
 // A 3D 2×2×2 grid yields 8 lights with z-plane separation (indices 0-3 at z=0, 4-7 at z=1).
 TEST_CASE("GridLayout 2x2x2 produces 8 coords with z") {
     mm::GridLayout grid;

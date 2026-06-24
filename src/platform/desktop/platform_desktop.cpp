@@ -20,7 +20,6 @@
 #include <io.h>     // _fileno, _commit (POSIX fileno/fsync equivalents)
 #else
 #include <sys/socket.h>
-#include <sys/uio.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -406,11 +405,10 @@ bool wifiSetTxPower(int8_t quarterDbm) { return quarterDbm == 0; }
 bool mdnsInit(const char* /*deviceName*/) { return false; }
 void mdnsStop() {}
 void mdnsShutdown() {}
-// No mDNS on desktop — browse is a no-op (Start fails, Poll reports "done" with no hits).
-// A PC instance discovers peers via the HTTP sweep instead (see DevicesModule).
-bool mdnsBrowseStart(const char* /*service*/, const char* /*proto*/) { return false; }
-bool mdnsBrowsePoll(MdnsHostCb /*cb*/, void* /*user*/) { return true; }
-void mdnsBrowseStop() {}
+// No mDNS on desktop — browse is a no-op (no hosts found). A PC instance discovers peers
+// via the HTTP sweep instead (see DevicesModule).
+bool mdnsBrowse(const char* /*service*/, const char* /*proto*/, uint32_t /*timeoutMs*/,
+                MdnsHostCb /*cb*/, void* /*user*/) { return false; }
 
 // OTA — no-op on desktop (no OTA partition). The /api/firmware/url route
 // guards with `if constexpr (mm::platform::hasOta)` and returns 501 here,
@@ -564,8 +562,6 @@ bool improvProvisioningInit(const ImprovDeviceInfo& /*info*/,
                             char* /*passwordOut*/, size_t /*passwordOutLen*/,
                             std::atomic<bool>* /*ready*/,
                             char* statusBuf, size_t statusBufLen,
-                            char* /*deviceModelOut*/, size_t /*deviceModelOutLen*/,
-                            std::atomic<bool>* /*deviceModelReady*/,
                             uint8_t* /*txPowerOut*/,
                             std::atomic<bool>* /*txPowerReady*/,
                             char* /*opOut*/, size_t /*opOutLen*/,
@@ -702,58 +698,30 @@ bool TcpConnection::write(const uint8_t* data, size_t len) {
     return true;
 }
 
-WriteResult TcpConnection::writeChunks(const WriteChunk* chunks, int count) {
-    if (fd_ < 0) return WriteResult::Error;
-    if (count < 1 || count > MAX_WRITE_CHUNKS) return WriteResult::Error;
-#ifdef _WIN32
-    // WSASend takes a WSABUF[] — same scatter-gather shape as iovec[]. Windows
-    // has no MSG_DONTWAIT flag, so flip the socket to non-blocking just for the
-    // duration of this call (and back). The socket is blocking by default for
-    // recv()'s SO_RCVTIMEO behaviour (see TcpServer::accept).
-    WSABUF bufs[MAX_WRITE_CHUNKS];
-    size_t total = 0;
-    for (int i = 0; i < count; i++) {
-        bufs[i].buf = reinterpret_cast<char*>(const_cast<uint8_t*>(chunks[i].data));
-        bufs[i].len = static_cast<ULONG>(chunks[i].len);
-        total += chunks[i].len;
-    }
-    u_long nonblocking = 1;
-    ::ioctlsocket(sock(fd_), FIONBIO, &nonblocking);
-    DWORD sentBytes = 0;
-    int rc = ::WSASend(sock(fd_), bufs, static_cast<DWORD>(count),
-                       &sentBytes, 0, nullptr, nullptr);
-    int err = (rc == SOCKET_ERROR) ? ::WSAGetLastError() : 0;
-    u_long blocking = 0;
-    ::ioctlsocket(sock(fd_), FIONBIO, &blocking);
-    if (rc == SOCKET_ERROR) {
-        return (err == WSAEWOULDBLOCK) ? WriteResult::WouldBlock : WriteResult::Error;
-    }
-    if (sentBytes == 0) return WriteResult::WouldBlock;
-    if (static_cast<size_t>(sentBytes) == total) return WriteResult::Complete;
-    return WriteResult::Partial;
-#else
-    struct iovec iov[MAX_WRITE_CHUNKS];
-    size_t total = 0;
-    for (int i = 0; i < count; i++) {
-        iov[i].iov_base = const_cast<uint8_t*>(chunks[i].data);
-        iov[i].iov_len = chunks[i].len;
-        total += chunks[i].len;
-    }
-    // sendmsg + MSG_DONTWAIT makes this single scatter-gather write non-blocking
-    // regardless of the socket's blocking mode (the desktop client socket uses a
-    // read timeout, not O_NONBLOCK, so writev alone would block).
-    struct msghdr msg{};
-    msg.msg_iov = iov;
-    msg.msg_iovlen = static_cast<decltype(msg.msg_iovlen)>(count);
-    ssize_t n = ::sendmsg(fd_, &msg, MSG_DONTWAIT);
-    if (n < 0) {
-        return sockWouldBlock() ? WriteResult::WouldBlock : WriteResult::Error;
-    }
-    if (n == 0) return WriteResult::WouldBlock;
-    if (static_cast<size_t>(n) == total) return WriteResult::Complete;
-    return WriteResult::Partial;
+int TcpConnection::writeSome(const uint8_t* data, size_t len) {
+    if (fd_ < 0) return -1;
+    if (len == 0) return 0;
+    // The client socket is blocking (SO_RCVTIMEO drives recv's read timeout), so a plain
+    // ::send() would block when the kernel send buffer is full. Toggle non-blocking around the
+    // send to keep this truly non-blocking, then restore so recv's timeout semantics hold.
+    // Evaluate the would-block / EINTR status BEFORE make_blocking, since that ioctl/fcntl
+    // can clobber the error state.
+    make_nonblocking(fd_);
+    auto n = ::send(sock(fd_), reinterpret_cast<const char*>(data), static_cast<int>(len), 0);
+    bool wouldBlock = (n < 0) && sockWouldBlock();
+#ifndef _WIN32
+    bool interrupted = (n < 0) && (errno == EINTR);
 #endif
+    make_blocking(fd_);
+    if (n > 0) return static_cast<int>(n);
+    if (n == 0) return 0;
+    if (wouldBlock) return 0;               // buffer full — try later
+#ifndef _WIN32
+    if (interrupted) return 0;              // interrupted — try later
+#endif
+    return -1;                              // real socket error
 }
+
 
 void TcpConnection::close() {
     if (fd_ >= 0) {
@@ -807,7 +775,7 @@ TcpConnection TcpServer::accept() {
     int clientFd = static_cast<int>(client);
     // Match POSIX: socket stays blocking, SO_RCVTIMEO gives recv a 2-second
     // timeout. Windows SO_RCVTIMEO takes a DWORD millisecond count (not a
-    // timeval). writeChunks toggles non-blocking around its WSASend call to
+    // timeval). writeSome() toggles non-blocking around its send call to
     // emulate POSIX's MSG_DONTWAIT.
     DWORD timeoutMs = 2000;
     ::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO,

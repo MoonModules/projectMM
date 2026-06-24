@@ -98,30 +98,8 @@ TEST_CASE("SystemModule leaves a valid deviceName unchanged") {
     CHECK(std::strcmp(sys.deviceName(), "Bench-S3") == 0);
 }
 
-// The `firmware` control is always present and non-empty (either a real firmware key from build_info.h or the fallback "unknown").
-TEST_CASE("SystemModule firmware control populated") {
-    // The firmware control is wired in setup() from kFirmwareName (build_info.h).
-    // Local desktop builds fall through to "unknown" because CMake doesn't
-    // pass -DMM_FIRMWARE_NAME; release builds get the real key. Either way,
-    // the control must exist and be non-empty so the OTA path has something
-    // to read. (See docs/architecture.md § Firmware vs board — "firmware" is
-    // the compiled-binary variant; the physical board is a separate concept.)
-    mm::SystemModule sys;
-    sys.setup();
-    sys.onBuildControls();
-
-    bool found = false;
-    for (uint8_t i = 0; i < sys.controls().count(); i++) {
-        if (std::strcmp(sys.controls()[i].name, "firmware") == 0) {
-            CHECK(sys.controls()[i].type == mm::ControlType::ReadOnly);
-            const char* val = static_cast<const char*>(sys.controls()[i].ptr);
-            CHECK(val != nullptr);
-            CHECK(val[0] != '\0');  // non-empty (either a real key or "unknown")
-            found = true;
-        }
-    }
-    CHECK(found);
-}
+// (firmware identity controls — version / build / firmware — moved to FirmwareUpdateModule;
+// see test/unit/core/unit_FirmwareUpdateModule.cpp.)
 
 // The `bootReason` control is populated from platform::resetReason; on desktop it reports "OK".
 TEST_CASE("SystemModule bootReason control populated") {

@@ -109,7 +109,7 @@ constexpr bool hasWiFi = true;
 constexpr bool hasWifiCoprocessor = isEsp32P4 && hasWiFi;
 
 // Ethernet is only available on firmware variants whose sdkconfig fragment
-// enables the ESP32 EMAC (sdkconfig.defaults.eth — Olimex pin map). Other
+// enables the ESP32 EMAC (sdkconfig.defaults.eth — the default LAN8720 RMII pin map). Other
 // firmwares (plain ESP32 WiFi-only, ESP32-S3 with no EMAC) define MM_NO_ETH
 // and get stubbed-out platform::eth* functions, mirroring the desktop layer.
 #ifdef MM_NO_ETH
@@ -172,8 +172,8 @@ struct EthPinConfig {
 // deviceModels.json still comes up on the historically-wired pins:
 //  - P4 → Waveshare P4-NANO: IP101, addr 1, MDC/MDIO 31/52, reset 51, ext 50 MHz
 //    clock IN on GPIO50 (Waveshare wiki + schematic + ESPHome page agree).
-//  - classic ESP32 → Olimex ESP32-Gateway Rev G: LAN8720, addr 0, reset 5, chip
-//    drives RMII clock OUT on GPIO17, MDC/MDIO at IDF defaults.
+//  - classic ESP32 → the common LAN8720 RMII wiring: addr 0, reset 5, chip drives
+//    RMII clock OUT on GPIO17, MDC/MDIO at IDF defaults (e.g. Olimex ESP32-Gateway).
 //  - S3 → no built-in EMAC, so the default is W5500 SPI but with no pins set
 //    (phyType ethW5500, pins -1): a W5500 S3 board MUST provide its SPI pins via
 //    deviceModels.json — there's no universal S3 default to guess.

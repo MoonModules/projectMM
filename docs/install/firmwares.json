@@ -5,7 +5,7 @@
       "chip": "esp32",
       "eth_only": false,
       "ships": true,
-      "description": "ESP32 classic — WiFi + Ethernet (RMII; per-board pins/PHY from deviceModels.json, Olimex defaults)."
+      "description": "ESP32 classic — WiFi + Ethernet (RMII; per-board pins/PHY from deviceModels.json, default LAN8720 pins)."
     },
     {
       "name": "esp32-16mb",

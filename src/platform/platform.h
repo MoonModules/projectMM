@@ -151,18 +151,15 @@ void mdnsShutdown();
 
 // mDNS service browse (discovery) — the standard, push-style way to find devices that
 // advertise a service (projectMM, WLED `_wled._tcp`, Home Assistant, ESPHome, …),
-// without an HTTP subnet sweep. Three calls form a NON-BLOCKING poll cycle so it never
-// stalls the render task (the synchronous IDF mdns_query_ptr blocks the full timeout —
-// not usable on the tick):
-//   mdnsBrowseStart(service, proto)  — kick off one async PTR query (e.g. "_http","_tcp").
-//                                      Returns false if mDNS isn't up / already querying.
-//   mdnsBrowsePoll(cb, user)         — call each tick; when results are ready, invokes
-//                                      cb once per found host then returns true (done).
-//                                      Returns false while still pending (cheap, no block).
-//   mdnsBrowseStop()                 — release the query (call after a done poll, or to
-//                                      abort). Idempotent.
-// One query in flight at a time (DevicesModule serialises service types). A found host is
-// reported as a small POD — no IDF types leak across the seam. Desktop: stubs (no mDNS).
+// without an HTTP subnet sweep. ONE synchronous call per invocation — it queries, invokes
+// `cb` for each found host, frees everything, and returns. It blocks up to `timeoutMs`, so
+// the caller runs it on a slow cadence (DevicesModule on loop1s, one service type per tick
+// with a small timeout — NOT the render hot path), the standard mDNS-query pattern.
+// Deliberately not the async poll-a-handle API: holding the IDF search handle across ticks
+// raced the mDNS task's own expiry timer (it freed the search's queue mid-poll → a
+// null-queue assert that crashed on a UI refresh); a self-contained call holds no handle,
+// so that window can't exist. A found host is reported as a small POD — no IDF types leak
+// across the seam. Desktop: stub (no mDNS).
 struct MdnsHost {
     uint8_t ip[4] = {};        // resolved IPv4 (0.0.0.0 if unresolved)
     char    hostname[32] = {}; // instance/host name (e.g. "wled-desk"), "" if none
@@ -173,9 +170,8 @@ struct MdnsHost {
                                // Lets a browse classify a peer without an HTTP probe.
 };
 using MdnsHostCb = void(*)(const MdnsHost& host, void* user);
-bool mdnsBrowseStart(const char* service, const char* proto);
-bool mdnsBrowsePoll(MdnsHostCb cb, void* user);
-void mdnsBrowseStop();
+bool mdnsBrowse(const char* service, const char* proto, uint32_t timeoutMs,
+                MdnsHostCb cb, void* user);
 
 // Store the DHCP hostname (DHCP option 12) the next eth/wifi bring-up advertises.
 // Routers populate their client list from the DHCP request, not mDNS, so without
@@ -245,31 +241,26 @@ struct ImprovDeviceInfo {
     const char* chipFamily;      // "ESP32" / "ESP32-S3" / ...
     const char* firmwareVersion; // e.g. "1.0.0-rc2"
 };
-// deviceModel-extension args (deviceModelOut/deviceModelOutLen/deviceModelReady)
-// are for the vendor SET_DEVICE_MODEL RPC (command 0xFE) — when set, the Improv
-// task validates the RPC payload, writes the deviceModel name into deviceModelOut,
-// and publishes via deviceModelReady's release-store. Pass nullptr/0/nullptr to opt
-// out (desktop stub). Mirrors the ssid/password triple: validate + buffer-write +
-// flag-signal, scheduler thread reads.
 // SET_TX_POWER RPC (command 0xFD) — when set, the Improv task validates the
 // 1-byte dBm payload (0..21), writes it to txPowerOut, and publishes via
 // txPowerReady's release-store. This is the pre-association escape hatch for
 // boards whose LDO browns out at full TX power (weak-powered boards): their
 // catalog cap normally arrives over HTTP *after* the device is online,
-// which such a board can never reach — proven on the bench 2026-06-10. Same
-// validate + buffer-write + flag-signal shape as SET_DEVICE_MODEL.
+// which such a board can never reach — proven on the bench 2026-06-10. It stays
+// a dedicated RPC (not an APPLY_OP) precisely because it must land BEFORE the
+// radio associates, whereas APPLY_OP ops apply once the device is up.
 // opOut/opOutLen/opReady carry the APPLY_OP vendor RPC (0xFC) — one REST operation
 // as JSON, pushed over serial during provisioning ("Improv = REST over serial").
 // Chunks reassemble into opOut; on the last chunk opReady's release-store publishes
-// it and ImprovProvisioningModule applies the op on the main loop. Same buffer +
-// flag shape as deviceModel; opt out by leaving null (desktop stub does).
+// it and ImprovProvisioningModule applies the op on the main loop. This is how the
+// deviceModel and every other catalog default arrive: a `set`/`add` op routed through
+// the apply-core + per-control validators, the same path the HTTP API uses.
+// Opt out by leaving null (desktop stub does).
 bool improvProvisioningInit(const ImprovDeviceInfo& info,
                             char* ssidOut, size_t ssidOutLen,
                             char* passwordOut, size_t passwordOutLen,
                             std::atomic<bool>* ready,
                             char* statusBuf, size_t statusBufLen,
-                            char* deviceModelOut = nullptr, size_t deviceModelOutLen = 0,
-                            std::atomic<bool>* deviceModelReady = nullptr,
                             uint8_t* txPowerOut = nullptr,
                             std::atomic<bool>* txPowerReady = nullptr,
                             char* opOut = nullptr, size_t opOutLen = 0,
@@ -308,17 +299,6 @@ private:
     int fd_ = -1;
 };
 
-// One contiguous span for a scatter-gather write.
-struct WriteChunk { const uint8_t* data; size_t len; };
-
-// Outcome of a non-blocking scatter-gather write (TcpConnection::writeChunks).
-enum class WriteResult {
-    Complete,    // every byte across all chunks was sent
-    WouldBlock,  // socket buffer full, NOTHING was sent — caller may retry later
-    Partial,     // some bytes sent — the message is truncated, caller MUST close()
-    Error        // socket error — caller MUST close()
-};
-
 class TcpConnection {
 public:
     TcpConnection() = default;
@@ -337,12 +317,12 @@ public:
     bool valid() const { return fd_ >= 0; }
     int read(uint8_t* buf, size_t maxLen);   // non-blocking: >0 data, 0 closed, -1 nothing
     bool write(const uint8_t* data, size_t len);  // blocking — retries until all sent
-
-    // Single non-blocking scatter-gather write (one writev). Never blocks.
-    // Used for the preview broadcast so a backpressured browser cannot stall
-    // the render task. `count` must be 1..MAX_WRITE_CHUNKS.
-    static constexpr int MAX_WRITE_CHUNKS = 3;
-    WriteResult writeChunks(const WriteChunk* chunks, int count);
+    // Non-blocking partial write: send as many of `len` bytes as the socket accepts right
+    // now, return the count actually written (0..len). -1 = socket error (caller closes);
+    // 0 = WouldBlock (buffer full, try later) or len==0. The caller advances its own offset
+    // and re-calls — used by the preview drain to stream a frame across ticks without ever
+    // blocking the render task. Never spins, never yields. (int mirrors read()'s contract.)
+    int writeSome(const uint8_t* data, size_t len);
 
     void close();
 

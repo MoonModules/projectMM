@@ -30,6 +30,26 @@ struct Box : public mm::MoonModule {
     // accepts any child (the HTTP role gate lives above the apply-core).
 };
 
+// A leaf with a VALIDATED Text control — mirrors SystemModule.deviceModel: the printable-
+// ASCII rule is a per-control validator, so a bad value is rejected on EVERY write path
+// (including the APPLY_OP `set` the installer uses), not in a bespoke per-transport RPC.
+struct Tag : public mm::MoonModule {
+    char label[32] = "init";
+    static bool printableAscii(const char* v) {
+        if (!v) return false;
+        size_t n = std::strlen(v);
+        if (n == 0 || n >= 32) return false;
+        for (size_t i = 0; i < n; i++) {
+            unsigned char b = static_cast<unsigned char>(v[i]);
+            if (b < 0x20 || b > 0x7E) return false;
+        }
+        return true;
+    }
+    void onBuildControls() override {
+        controls_.addText("label", label, sizeof(label), printableAscii);
+    }
+};
+
 // Build a tree: scheduler root "Root" (a Box) with HttpServerModule wired to it.
 // Returns via out-params so each case starts clean. Caller owns teardown via the
 // scheduler.
@@ -38,6 +58,7 @@ void registerTestTypes() {
     if (done) return;
     mm::ModuleFactory::registerType<Knob>("Knob");
     mm::ModuleFactory::registerType<Box>("Box");
+    mm::ModuleFactory::registerType<Tag>("Tag");
     done = true;
 }
 
@@ -160,6 +181,48 @@ TEST_CASE("apply-core: applyOp dispatches each op type and tolerates bad input")
     // the robustness rule: any pushed bytes are tolerated.
     CHECK(http.applyOp("{\"op\":\"frobnicate\"}") == OpResult::BadRequest);
     CHECK(http.applyOp("{\"nope\":1}") == OpResult::BadRequest);
+
+    s.deleteTree(root);
+}
+
+// A per-control validator (like SystemModule.deviceModel's printable-ASCII rule) is
+// enforced THROUGH the apply-core — so the APPLY_OP `set` the installer pushes over
+// serial is guarded exactly like an HTTP write, with no per-transport special-casing.
+// This is the point of moving validation onto the control: one backend check, every path.
+TEST_CASE("apply-core: a control validator rejects bad input on the set/APPLY_OP path") {
+    registerTestTypes();
+    mm::Scheduler s;
+    auto* root = new Box();
+    root->setName("Root");
+    s.addModule(root);
+    mm::HttpServerModule http;
+    http.setScheduler(&s);
+    using OpResult = mm::HttpServerModule::OpResult;
+
+    REQUIRE(http.applyAddModule("Tag", "T", "Root") == OpResult::Ok);
+    auto* tag = static_cast<Tag*>(childNamed(root, "T"));
+    REQUIRE(tag != nullptr);
+
+    // Valid value applies — via applySetControl (HTTP path) ...
+    CHECK(http.applySetControl("T", "label", "{\"value\":\"LOLIN D32\"}") == OpResult::Ok);
+    CHECK(std::strcmp(tag->label, "LOLIN D32") == 0);
+
+    // ... and via applyOp (the APPLY_OP-over-serial path) — same shape the installer sends.
+    CHECK(http.applyOp("{\"op\":\"set\",\"module\":\"T\",\"control\":\"label\",\"value\":\"Living Room\"}")
+          == OpResult::Ok);
+    CHECK(std::strcmp(tag->label, "Living Room") == 0);
+
+    // A raw control byte in the value → Malformed on the APPLY_OP path, prior value kept.
+    const char badOp[] = {'{','"','o','p','"',':','"','s','e','t','"',',',
+                          '"','m','o','d','u','l','e','"',':','"','T','"',',',
+                          '"','c','o','n','t','r','o','l','"',':','"','l','a','b','e','l','"',',',
+                          '"','v','a','l','u','e','"',':','"','x', 0x01, '"','}', 0};
+    CHECK(http.applyOp(badOp) == OpResult::Malformed);
+    CHECK(std::strcmp(tag->label, "Living Room") == 0);   // unchanged — no partial write
+
+    // Empty string → Malformed too (the validator rejects 0-length), prior value kept.
+    CHECK(http.applySetControl("T", "label", "{\"value\":\"\"}") == OpResult::Malformed);
+    CHECK(std::strcmp(tag->label, "Living Room") == 0);
 
     s.deleteTree(root);
 }

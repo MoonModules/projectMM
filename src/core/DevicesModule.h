@@ -270,7 +270,11 @@ private:
     // probe short-circuits after the FIRST GET times out (a dead host answers no
     // URL), so a sparse subnet costs ~1×timeout per empty IP, not 3×.
     static constexpr uint8_t  kProbesPerTick = 1;
-    static constexpr uint32_t kProbeTimeoutMs = 150;
+    // Short timeout: this GET blocks the scheduler thread (and thus one render tick) on a dead host,
+    // so it stays small to keep the boot sweep from stuttering animation during the ~4 min the /24
+    // takes. A live host on a LAN answers in a few ms; 30 ms covers a slow responder while keeping
+    // the worst-case per-tick stall to ~30 ms.
+    static constexpr uint32_t kProbeTimeoutMs = 30;
     // Drop a non-self device unseen by ANY strategy for this long. 24 h is deliberately
     // generous: mDNS re-confirms its devices every few-second browse lap (cheap), but an
     // HTTP-scan-only device (a PC instance, a generic host) has no cheap recurring
@@ -369,28 +373,29 @@ private:
     };
     static constexpr uint8_t kMdnsServiceCount =
         sizeof(kMdnsServices) / sizeof(kMdnsServices[0]);
+    // mdnsBrowse is SYNCHRONOUS and blocks up to the timeout (the IDF PTR query waits the window for
+    // responders, returning when it elapses or the result cap fills), on the loop1s tick thread, so
+    // the time is charged to the tick. The timeout stays short AND the browse runs only every
+    // kMdnsEveryTicks-th tick: one ~20 ms hiccup every ~15 s stays invisible for a discovery feature
+    // (peers come and go on a slower scale than that), and FPS is untouched in between. A peer that
+    // answers after the window is caught on a later pass — discovery is continuous (each browse
+    // cycles to the next service type). The synchronous call holds no handle, so it stays correct
+    // under a concurrent UI refresh.
+    static constexpr uint32_t kMdnsBrowseMs = 20;    // shorter blocking window → smaller render hiccup
+    static constexpr uint8_t kMdnsEveryTicks = 15;   // browse less often → the hiccup is rarer (~15 s)
 
-    uint8_t mdnsIndex_ = 0;        // which service in kMdnsServices is being browsed
-    bool    mdnsQuerying_ = false; // a browse query is in flight (Start succeeded)
+    uint8_t mdnsIndex_ = 0;        // which service in kMdnsServices is browsed
+    uint8_t mdnsTick_ = 0;         // throttle counter for the browse cadence
 
-    // One non-blocking step of the mDNS browse cycle, called every tick. State:
-    //   not querying  → start a query for the current service type (advance on fail).
-    //   querying      → poll; when done, merge hits via the static callback, then stop
-    //                    and advance to the next service type for the next tick.
-    // The cycle wraps around kMdnsServices forever; new advertisers are picked up on
-    // the next pass. Cheap: Poll is a 0 ms async check, never blocks the render loop.
+    // Browse one service type on the throttled cadence: query it (blocking, bounded), merge
+    // hits via the static callback, advance to the next type. The cycle wraps kMdnsServices
+    // forever, so new advertisers are picked up on later passes.
     void stepMdns() {
-        if (!mdnsQuerying_) {
-            const MdnsService& s = kMdnsServices[mdnsIndex_];
-            mdnsQuerying_ = platform::mdnsBrowseStart(s.service, s.proto);
-            if (!mdnsQuerying_) advanceMdns();   // mDNS not up yet / busy — try next tick
-            return;
-        }
-        if (platform::mdnsBrowsePoll(&DevicesModule::onMdnsHost, this)) {
-            platform::mdnsBrowseStop();
-            mdnsQuerying_ = false;
-            advanceMdns();
-        }
+        if (++mdnsTick_ < kMdnsEveryTicks) return;
+        mdnsTick_ = 0;
+        const MdnsService& s = kMdnsServices[mdnsIndex_];
+        platform::mdnsBrowse(s.service, s.proto, kMdnsBrowseMs, &DevicesModule::onMdnsHost, this);
+        advanceMdns();
     }
 
     void advanceMdns() { mdnsIndex_ = (mdnsIndex_ + 1) % kMdnsServiceCount; }

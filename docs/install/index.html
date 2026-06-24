@@ -692,7 +692,7 @@
       <a href="https://github.com/improv-wifi/sdk-js" target="_blank" rel="noopener">improv-wifi-serial-sdk</a>
       (WiFi provisioning), and the
       <a href="https://www.improv-wifi.com/serial/" target="_blank" rel="noopener">Improv-Serial protocol</a>
-      for the secure handshake.
+      for provisioning and pushing device defaults over USB.
     </p>
   </footer>
 
@@ -1312,8 +1312,8 @@
     function handleSuccess({ url, mdns, board, applyDefaults = true, defaultsApplied = false, viaHttp, alreadyOnline }) {
       disarmUnloadGuard();
       // Device-model defaults are applied DURING the install over serial (Improv =
-      // REST over serial — SET_DEVICE_MODEL + APPLY_OP). So there's no "open this
-      // link to finish" step any more; the success screen just confirms + links.
+      // REST over serial — APPLY_OP). The success screen just confirms + links;
+      // the device is already fully configured by the time it shows.
       if (!url) {
         // No device URL (user skipped the IP prompt, or an eth-only/no-Improv device).
         // On that path no serial config push happened. If a model was picked, say so —
@@ -1650,7 +1650,7 @@
           port: pickedPort,
           manifestUrl: localUrl,
           board,         // names the install title + identifies the catalog entry
-          applyDefaults, // gates the SET_DEVICE_MODEL + controls inject (not txPower)
+          applyDefaults, // gates the APPLY_OP config push (not txPower, sent earlier)
           txPower,
           eraseBefore,
           onProgress: handleProgress,
