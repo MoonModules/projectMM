@@ -44,7 +44,7 @@ Three concrete patterns, all already common in this codebase:
 - **Methods on the owning class.** [Buffer.h](../src/light/layers/Buffer.h)'s `allocate` / `free` / `clear`; [Scheduler.h](../src/core/Scheduler.h)'s `addModule` / `tick` / `buildState`; [ControlList](../src/core/Control.h)'s `addX` family. Best when the class has identity and the operations naturally form a small interface.
 - **Virtual methods on a base class.** [MoonModule.h](../src/core/MoonModule.h)'s lifecycle (`setup`, `loop`, `loop1s`, `onBuildControls`, `onBuildState`, …). Best when polymorphism is already in play.
 
-Counter-example to avoid: a `switch (c.type)` on `ControlType` duplicated in HttpServerModule, FilesystemModule, and scenario_runner — what the codebase used to look like before [Control.cpp](../src/core/Control.cpp). Adding a new ControlType meant edits in four places and the compiler couldn't catch a missed switch on a non-exhaustive enum. The fix was to move the per-type dispatch next to `ControlType`; consumers now call `writeControlValue(sink, c)` and don't need to know the enum's shape.
+Counter-example to avoid: a `switch (c.type)` on `ControlType` duplicated in HttpServerModule, FilesystemModule, and scenario_runner. That shape forces a new ControlType to be added in four places, and the compiler can't catch a missed switch on a non-exhaustive enum. The per-type dispatch instead lives next to `ControlType` in [Control.cpp](../src/core/Control.cpp); consumers call `writeControlValue(sink, c)` and don't need to know the enum's shape.
 
 When a `switch (type)` outside the type's home file is legitimate: the caller has a genuinely different concern (HttpServerModule mapping `ApplyResult` to HTTP status codes is a transport policy, not per-type behaviour; scenario_runner's `switch (JsonVal::type)` dispatches on *its own* discriminator, not `ControlType`). The rule is "per-type dispatch lives with the type", not "switches are banned".
 
@@ -96,7 +96,7 @@ All targets build warnings-as-errors: `-Wall -Wextra -Werror` on Clang/GCC (macO
 ## Static checks
 
 - **Platform boundary** (`scripts/check/check_platform_boundary.py`) — scans all files outside `src/platform/` for `#ifdef` / `#if defined` with platform macros and `#include` of platform-specific headers (`esp_*`, `freertos/*`, `driver/*`, `SDL.h`, `wiringPi.h`, …). Fails if any are found. The platform boundary rule itself: [architecture.md § Platform abstraction](architecture.md#platform-abstraction).
-- **Hot path lint** — flags allocation calls (`new`, `malloc`, `make_unique`, `make_shared`, `push_back`, `std::string` constructors) inside functions identified as hot path (render loop and callees). Today a code-review convention; will become an automated clang-tidy check as the codebase grows. The hot path rule itself: [architecture.md § Hot path discipline](architecture.md#hot-path-discipline).
+- **Hot path lint** — flags allocation calls (`new`, `malloc`, `make_unique`, `make_shared`, `push_back`, `std::string` constructors) inside functions identified as hot path (render loop and callees). A code-review convention, enforced by hand. The hot path rule itself: [architecture.md § Hot path discipline](architecture.md#hot-path-discipline).
 - **Code formatting** — `clang-format` with a project `.clang-format` file. Applied in CI; code that doesn't match fails the check. Run locally via editor integration or `clang-format -i`.
 
 ## When checks run

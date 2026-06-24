@@ -129,9 +129,9 @@ Same source tree, same MCU (ESP32 classic, 160 MHz):
 | Board / firmware | 128×128 tick | ArtNet send |
 |---|---|---|
 | Olimex Gateway, old WiFi-only `esp32` (pre-collapse) | 220 ms (4 FPS) | 155 ms |
-| Olimex Gateway, default `esp32` (WiFi + Ethernet; was `esp32-eth-wifi`) | 85–95 ms (10–12 FPS) | 38 ms |
+| Olimex Gateway, default `esp32` (WiFi + Ethernet) | 85–95 ms (10–12 FPS) | 38 ms |
 
-The old WiFi-only `esp32` build was 4× slower at ArtNet than the build with the `.eth` fragment on the same board — `sdkconfig.defaults.eth` enlarges a shared lwIP/WiFi buffer pool via `CONFIG_ETH_DMA_*` that the WiFi-only build didn't get. The variant collapse made the eth-wifi build the **default `esp32`**, so today's default already carries those buffers — there is no longer a WiFi-only classic variant to fall behind. Generic ESP32 boards (no PCB-trace antenna, less stable 3V3) vary wildly in WiFi TX quality vs the Olimex.
+The default `esp32` build carries both the WiFi and Ethernet stacks, and `sdkconfig.defaults.eth` enlarges the shared lwIP/WiFi buffer pool via `CONFIG_ETH_DMA_*` — those buffers roughly quadruple ArtNet throughput versus a WiFi-only buffer pool. Generic ESP32 boards (no PCB-trace antenna, less stable 3V3) vary wildly in WiFi TX quality vs the Olimex.
 
 ### Memory at 128×128 with mirror
 
@@ -327,11 +327,11 @@ These numbers shift with IDF version + sdkconfig — treat as rough proportions.
 
 | Variant | Image | Delta | Difference |
 |---|---|---|---|
-| `esp32` (default, WiFi + RMII Eth) | 1.27 MB | — | Everything compiled in (was `esp32-eth-wifi` pre-collapse) |
+| `esp32` (default, WiFi + RMII Eth) | 1.27 MB | — | Everything compiled in |
 | `esp32-eth` | 0.60 MB | −670 KB | WiFi stack excluded (`EXCLUDE_COMPONENTS`) |
 | `esp32s3-n16r8` | ~1.27 MB | similar | Xtensa LX7, 16 MB flash, different partition table; W5500 SPI Eth instead of RMII |
 
-The pre-collapse WiFi-only `esp32` (no Eth driver) measured ~1.00 MB — that variant no longer ships; the default now carries both stacks.
+The default `esp32` carries both the WiFi and Ethernet stacks (1.27 MB); `esp32-eth` is the Ethernet-only build that drops the WiFi stack for ~670 KB less image.
 
 ### Size budget for upcoming features
 

@@ -6,7 +6,7 @@
 
 Expanding concentric rings from random centre points. Each ring grows outward and respawns once it has expanded past the visible area. Multiple rings overlap with additive blending.
 
-(Formerly named "Ripples" — that name now belongs to the MoonLight sine-wave water-surface effect. This concentric-rings effect is "Rings".)
+(This concentric-rings effect is "Rings"; the name "Ripples" belongs to the MoonLight sine-wave water-surface effect.)
 
 ## Controls
 
