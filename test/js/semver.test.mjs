@@ -41,6 +41,13 @@ test("compare: prerelease identifier precedence (§11)", () => {
     assert.equal(compare("1.0.0-rc.1.1", "1.0.0-rc.1"), 1);       // longer set wins when prefix equal
 });
 
+test("compare: monotonic -dev.<N> ordering (the latest-channel case)", () => {
+    assert.equal(compare("2.1.0-dev.7", "2.1.0-dev.6"), 1);   // newer latest build
+    assert.equal(compare("2.1.0-dev.10", "2.1.0-dev.9"), 1);  // numeric, not string (10 > 9)
+    assert.equal(compare("2.1.0-dev.1", "2.1.0-dev"), 1);     // a numbered dev outranks the bare -dev (local)
+    assert.equal(isNewer("2.1.0-dev.7", "2.1.0-dev.7"), false); // same latest build → no update
+});
+
 test("compare: unparseable side sorts lowest (never falsely claims newer)", () => {
     assert.equal(compare("garbage", "1.0.0"), -1);
     assert.equal(compare("1.0.0", "garbage"), 1);

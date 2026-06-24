@@ -1,0 +1,472 @@
+/* projectMM web installer styles. Extracted from index.html — a static GitHub Pages
+   page (not embedded like the device UI), so an external stylesheet is free. */
+    :root {
+      --bg:     #1a1a2e;
+      --card:   #16213e;
+      --fg:     #e0e0e0;
+      --muted:  #a0a0b0;
+      --accent: #a78bfa;
+      --border: #2a3a6a;
+      --ok:     #57c97a;   /* green  — "active" capability (supported + a module configured in deviceModels.json) */
+      --sup:    #e3c84a;   /* yellow — "supported" capability (firmware supports it, not pre-configured) */
+      --plan:   #e8923a;   /* orange — "planned" capability (no module yet; greener than red, by design) */
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 15px;
+      line-height: 1.55;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px 64px;
+    }
+    main { width: 100%; max-width: 640px; }
+    .help-link {
+      display: inline-block;
+      margin-left: 8px;
+      width: 22px; height: 22px; line-height: 22px;
+      text-align: center;
+      font-size: 14px; font-weight: 600;
+      vertical-align: middle;
+      color: var(--accent);
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      text-decoration: none;
+    }
+    .help-link:hover { border-color: var(--accent); }
+    .version-chip {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 2px 8px;
+      background: var(--card);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: normal;
+      vertical-align: middle;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      color: var(--accent);
+    }
+    p.tag { margin: 0 0 24px; color: var(--muted); }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    label { display: block; font-weight: 600; margin-bottom: 6px; }
+    select {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg);
+      color: var(--fg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font: inherit;
+    }
+    .button-row { margin-top: 16px; }
+    .note { color: var(--muted); font-size: 13px; margin-top: 10px; }
+    /* `.windows-only` elements are `hidden` by default in the HTML; the tiny
+       userAgent check at the top of <body> below removes `hidden` only on
+       Windows. Inverse to a CSS-only approach because CSS can't detect the
+       host OS — `[hidden]` already wins specificity-wise. */
+    .erase-row { margin-top: 12px; font-size: 13px; }
+    .erase-row label { cursor: pointer; }
+    .erase-row input { vertical-align: middle; margin-right: 6px; }
+    .erase-note { display: inline; margin-top: 0; }
+    a { color: var(--accent); }
+    code {
+      background: rgba(255,255,255,0.06);
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 13px;
+    }
+    .browser-warning {
+      background: #3a2a1a;
+      border: 1px solid #6a4a2a;
+      color: #e6c890;
+      display: none;
+    }
+    ol { padding-left: 22px; }
+    ol li { margin-bottom: 6px; }
+    .credits {
+      max-width: 720px;
+      margin: 32px auto 24px;
+      padding: 0 16px;
+      text-align: center;
+      border-top: 1px solid var(--border);
+      padding-top: 16px;
+    }
+    .credits .note { margin-top: 0; }
+
+    /* Minimal mirror of the device UI's control-row shape so the shared
+       install-picker module (src/ui/install-picker.js) renders the same
+       way on the installer page. The picker emits `.control-row` + child
+       `<select>` markup; without these rules the rows wouldn't lay out. */
+    .control-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 10px 0;
+    }
+    .control-label {
+      flex: 0 0 80px;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    .control-row select { flex: 1; }
+
+    /* the shared picker still renders its own board <select>
+       (#rp-board) — we keep it (so its change-listener wires) but hide its row;
+       the picture grid above drives it. The row is the .control-row that
+       contains #rp-board. */
+    .control-row:has(#rp-board) { display: none; }
+
+    /* Picture board grid — collapsed by default (a control-row field), expands
+       on click. The summary button is the row's field, so it flexes like the
+       selects (flex: 1) to line up with USB Port / Release / Firmware. */
+    #board-summary {
+      flex: 1; display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; padding: 10px 12px; background: var(--bg); color: var(--fg);
+      border: 1px solid var(--border); border-radius: 6px; font: inherit;
+      cursor: pointer; text-align: left;
+    }
+    #board-summary:hover { border-color: var(--accent); }
+    .board-summary-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .board-summary-thumb {
+      width: 36px; height: 24px; border-radius: 3px; flex-shrink: 0;
+      background: #0e1020 center/contain no-repeat; border: 1px solid var(--border);
+    }
+    #board-summary-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .board-summary-caret { color: var(--muted); transition: transform .15s; flex-shrink: 0; }
+    #board-summary[aria-expanded="true"] .board-summary-caret { transform: rotate(180deg); }
+    /* The expanded grid breaks out full-width below the row (aligns with the
+       field column by offsetting the label width + gap). */
+    #board-expand { margin: 0 0 10px 92px; }
+    .board-grid-controls { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+    #board-search {
+      flex: 1; min-width: 160px; padding: 8px 10px; background: var(--bg);
+      color: var(--fg); border: 1px solid var(--border); border-radius: 6px; font: inherit;
+    }
+    .board-clear {
+      background: transparent; color: var(--muted); border: 1px solid var(--border);
+      border-radius: 6px; padding: 8px 12px; font: inherit; font-size: 13px; cursor: pointer;
+    }
+    .board-clear:hover { color: var(--fg); border-color: var(--accent); }
+    .board-filter-notice { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+    .board-filter-notice button {
+      background: none; border: none; color: var(--accent); font: inherit; font-size: 12px;
+      cursor: pointer; padding: 0; text-decoration: underline;
+    }
+    #board-grid { max-height: 420px; overflow-y: auto; }   /* expanded grid scrolls, not the page */
+    #board-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;
+    }
+    .bg-chip-label {
+      grid-column: 1 / -1; color: var(--muted); font-size: 11px; text-transform: uppercase;
+      letter-spacing: .06em; margin: 6px 0 0;
+    }
+    .bg-card {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      overflow: hidden; cursor: pointer; transition: border-color .12s, background .12s;
+      display: flex; flex-direction: column;
+    }
+    .bg-card:hover { border-color: var(--accent); }
+    .bg-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+    .bg-thumb {
+      aspect-ratio: 16 / 10; background: #0e1020 center/contain no-repeat;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--muted); font-size: 10px; border-bottom: 1px solid var(--border);
+    }
+    .bg-thumb.noimg::after { content: "no photo"; }
+    .bg-body { padding: 8px 9px; display: flex; flex-direction: column; gap: 3px; }
+    .bg-name { font-weight: 600; font-size: 12px; line-height: 1.2; }
+    .bg-meta { color: var(--muted); font-size: 11px; }
+    /* Capability chips: supported (green) vs planned (orange) — distinguished by
+       colour, not by extra text. Labels are kept short in deviceModels.json so every
+       chip fits the ~150px card; the full label + state is in the chip's title
+       tooltip. */
+    .bg-caps { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+    .bg-cap {
+      font-size: 9px; line-height: 1.5; padding: 0 5px; border-radius: 999px;
+      max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .bg-cap.act { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+    .bg-cap.sup { background: color-mix(in srgb, var(--sup) 20%, transparent); color: var(--sup); }
+    .bg-cap.plan { background: color-mix(in srgb, var(--plan) 20%, transparent); color: var(--plan); }
+    .bg-link { color: var(--accent); font-size: 11px; text-decoration: none; }
+    .bg-link:hover { text-decoration: underline; }
+
+    /* Board-details popup — native <dialog> (standard modal pattern: built-in
+       backdrop, ESC-to-close, focus trap; no bespoke modal JS). Shows the full
+       deviceModels.json entry as a readable summary plus a collapsible raw-JSON block. */
+    #board-details::backdrop { background: rgba(0,0,0,0.6); }
+    #board-details {
+      background: var(--card); color: var(--fg);
+      border: 1px solid var(--border); border-radius: 10px;
+      padding: 0; max-width: 560px; width: calc(100% - 32px);
+      max-height: 80vh; overflow: auto;
+    }
+    .bd-head {
+      display: flex; align-items: baseline; justify-content: space-between;
+      gap: 12px; padding: 16px 18px 8px;
+    }
+    .bd-title { font-size: 16px; font-weight: 600; }
+    .bd-close {
+      background: none; border: none; color: var(--muted);
+      font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px;
+    }
+    .bd-close:hover { color: var(--fg); }
+    .bd-body { padding: 0 18px 18px; }
+    .bd-row { display: flex; gap: 8px; padding: 3px 0; font-size: 13px; }
+    .bd-key { color: var(--muted); min-width: 92px; }
+    .bd-val { flex: 1; min-width: 0; word-break: break-word; }
+    .bd-section { margin-top: 14px; font-weight: 600; font-size: 13px; }
+    .bd-mod { margin-top: 8px; padding-left: 10px; border-left: 2px solid var(--border); }
+    .bd-mod-name { font-size: 13px; }
+    .bd-mod-name .bd-mod-id { color: var(--muted); font-weight: normal; }
+    .bd-ctrl { font-size: 12px; color: var(--muted); padding-left: 8px; }
+    .bd-ctrl code { font-size: 11px; }
+    .bd-raw { margin-top: 16px; }
+    .bd-raw summary { cursor: pointer; color: var(--accent); font-size: 12px; }
+    .bd-raw pre {
+      margin: 8px 0 0; padding: 10px; background: var(--bg);
+      border: 1px solid var(--border); border-radius: 6px;
+      font-size: 11px; overflow: auto; white-space: pre;
+    }
+    .bg-link.bg-details { cursor: pointer; }
+
+    .action-btn {
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      border-radius: 6px;
+      padding: 10px 20px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .rp-status { color: var(--muted); font-size: 13px; }
+    .rp-status-row { min-height: 1.5em; }
+
+    /* Inline spinner shown in a field while its data is still being fetched
+       (install-picker renderSkeleton). A 1em spinning ring, sized to sit next
+       to the select's "Loading…" placeholder. */
+    .rp-spinner {
+      display: inline-block;
+      width: 1em; height: 1em;
+      vertical-align: -0.15em;
+      margin-right: 0.4em;
+      border: 2px solid var(--muted);
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: rp-spin 0.7s linear infinite;
+    }
+    @keyframes rp-spin { to { transform: rotate(360deg); } }
+
+    /* "Your devices" card — one row per provisioned device. The row
+       is the picker's `.control-row` flex shape with the device info
+       on the left and action buttons on the right. */
+    .device-row {
+      justify-content: space-between;
+      padding: 8px 0;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+    .device-row:first-child { border-top: 0; }
+    .device-info { min-width: 0; flex: 1; }
+    .device-url {
+      display: block;
+      font-family: ui-monospace, monospace;
+      color: var(--muted);
+      font-size: 12px;
+      text-decoration: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .device-url:hover { color: var(--accent); text-decoration: underline; }
+    .device-seen { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .device-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .device-btn {
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 4px;
+      padding: 4px 10px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .device-model-name { color: var(--fg); font-size: 12px; margin-top: 2px; }
+    .device-btn:hover { background: rgba(123, 158, 255, 0.08); }
+
+    /* Install modal — backdrop + centered card. Replaces the ESP Web Tools
+       <esp-web-install-button> shadow-DOM dialog. Sections show one at a
+       time via .install-section.active. */
+    .install-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0, 0, 0, 0.65);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .install-backdrop.open { display: flex; }
+    .install-modal {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+      max-width: 480px;
+      width: calc(100% - 32px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    }
+    .install-modal h2 {
+      margin: 0 0 16px;
+      font-size: 20px;
+      color: var(--accent);
+    }
+    .install-section { display: none; }
+    .install-section.active { display: block; }
+    .install-status { margin: 8px 0; color: var(--muted); }
+    .install-done-note { margin: 4px 0 10px; font-size: 13px; color: var(--muted); }
+    /* Notice variant — for a flashed-OK-but-action-needed outcome (e.g. eth-only firmware
+       waiting on a cable). Amber, like the "supported" capability chip (var(--sup)): reads as
+       "do this next", not a plain note and not a red error. */
+    .install-done-note.install-done-note--notice {
+      color: var(--sup);
+      background: color-mix(in srgb, var(--sup) 12%, transparent);
+      border-left: 3px solid var(--sup);
+      padding: 8px 10px; border-radius: 4px;
+    }
+    .install-warn { color: #d4a052; font-size: 12px; margin-top: 8px; }
+    .install-progress {
+      height: 8px;
+      background: var(--bg);
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 12px 0;
+    }
+    .install-progress-bar {
+      height: 100%;
+      background: var(--accent);
+      width: 0;
+      transition: width 0.2s;
+    }
+    /* Indeterminate state — esptool-js's eraseFlash() doesn't report
+       progress (12 s of "wait and hope"), so we animate a marquee-style
+       bar to confirm the page hasn't hung. Toggled by adding the
+       .indeterminate class to .install-progress-bar; width set to 100%
+       so the animation has something to clip. */
+    .install-progress-bar.indeterminate {
+      width: 100%;
+      background: linear-gradient(
+        90deg,
+        var(--bg) 0%,
+        var(--accent) 40%,
+        var(--accent) 60%,
+        var(--bg) 100%);
+      background-size: 200% 100%;
+      animation: install-marquee 1.4s linear infinite;
+      transition: none;
+    }
+    @keyframes install-marquee {
+      from { background-position: 100% 0; }
+      to   { background-position: -100% 0; }
+    }
+    .install-form label {
+      display: block;
+      margin: 12px 0 4px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .install-form input[type="text"],
+    .install-form input[type="password"] {
+      width: 100%;
+      padding: 8px 12px;
+      background: var(--bg);
+      color: var(--fg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font: inherit;
+    }
+    .install-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 16px;
+    }
+    .install-actions button {
+      padding: 8px 16px;
+      font: inherit;
+      font-weight: 600;
+      border: 0;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .install-actions button.primary {
+      background: var(--accent);
+      color: #1a1a2e;
+    }
+    .install-actions button.secondary {
+      background: transparent;
+      color: var(--fg);
+      border: 1px solid var(--border);
+    }
+    .install-error {
+      color: #f8a5a5;
+      font-size: 13px;
+      margin: 12px 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .install-success-url {
+      display: block;  /* IP and <name>.local each on their own line */
+      width: fit-content;
+      margin-top: 8px;
+      color: var(--accent);
+      text-decoration: none;
+      font-family: ui-monospace, monospace;
+    }
+    .install-success-url:hover { text-decoration: underline; }
+    .install-log-wrap {
+      margin-top: 16px;
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+    }
+    .install-log-toggle {
+      background: transparent;
+      color: var(--muted);
+      border: 0;
+      padding: 0;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      text-decoration: underline;
+    }
+    .install-log-toggle:hover { color: var(--fg); }
+    .install-log {
+      margin-top: 8px;
+      max-height: 240px;
+      overflow: auto;
+      background: var(--bg);
+      color: var(--muted);
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }

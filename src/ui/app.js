@@ -5,7 +5,7 @@
 // default; entry-point is the WS init at the bottom — no ordering surprises.
 import { installPicker } from "/install-picker.js";
 import { preview } from "/preview3d.js";
-import { isNewer } from "/semver.js";
+import { isNewer, parse } from "/semver.js";
 
 // Sections (top to bottom):
 //   1. State + storage
@@ -2173,27 +2173,39 @@ function updateStatusBar() {
 // ---------------------------------------------------------------------------
 // 8b. Firmware-update badge
 // ---------------------------------------------------------------------------
-// Browser-side "a newer stable firmware is out" check, modelled on ESP32-sveltekit's
+// Browser-side "a newer firmware is out" check, modelled on ESP32-sveltekit's
 // UpdateIndicator (the upstream firmware lineage) — our own code. The device fetches
 // nothing; the browser compares the running version (FirmwareUpdateModule.version, pure
-// semver) against the newest GitHub *stable* release (the /latest endpoint excludes
-// prereleases) and, when newer AND a compatible .bin exists, shows the status-bar badge.
-// Cached in localStorage (1 h TTL) so it doesn't slow page load; a fresh check is forced
-// when the Firmware card opens. Best-effort: any failure hides the badge, never throws.
+// semver) against GitHub releases and, when newer AND a compatible .bin exists, shows the
+// status-bar badge. Two channels:
+//   - STABLE: a device compares against the newest stable release (the /latest endpoint
+//     excludes prereleases). Applies to every device.
+//   - DEV (latest): a device already on a prerelease build (-dev.<N>) ALSO compares against
+//     the moving `latest` release, so a stale latest build is nudged to the newest latest.
+//     The `latest` release's tag is "latest" (not a semver), so its version is read from the
+//     per-firmware manifest (manifest-<firmware>.json carries "version", e.g. 2.1.0-dev.7).
+// A stable update wins over a dev update. Cached in localStorage (1 h TTL) so it doesn't
+// slow page load; a fresh check is forced when the Firmware card opens. Best-effort: any
+// failure hides the badge, never throws.
 
-const RELEASES_LATEST_URL = "https://api.github.com/repos/MoonModules/projectMM/releases/latest";
-const UPDATE_CACHE_KEY = "projectMM.update.latest.v1";
+const RELEASES_API = "https://api.github.com/repos/MoonModules/projectMM/releases";
+const RELEASE_DOWNLOAD = "https://github.com/MoonModules/projectMM/releases/download";
 const UPDATE_TTL_MS = 60 * 60 * 1000;                     // 1 h — best-effort, well under GitHub's rate limit
 const PICKER_RELEASE_KEY = "projectMM.picker.releaseTag"; // install-picker restores from this on init
 
 function safeLocalGet(key) { try { return localStorage.getItem(key); } catch (_) { return null; } }
 function safeLocalSet(key, v) { try { localStorage.setItem(key, v); } catch (_) { /* ignore */ } }
 
-// The latest stable release as {tag_name, assetNames[]}, cached. Re-fetches only when the
-// cache is older than the TTL or `force` is set; serves stale on a fetch failure.
-async function getLatestStableRelease(force) {
+// In-flight fetches keyed by cache slot. updateStatusBar() calls checkFirmwareUpdate(false)
+// every WS tick (1 Hz); on a cold cache they'd each start a duplicate releases/latest request
+// before the first writes the cache. Share the pending promise so concurrent callers reuse it.
+const inFlightFetches = {};
+
+// A cached JSON fetch: returns the parsed body, re-fetching only when the cache is older than
+// the TTL or `force` is set, and serving stale on a fetch failure. `key` is the cache slot.
+async function cachedJson(url, key, force) {
     if (!force) {
-        const raw = safeLocalGet(UPDATE_CACHE_KEY);
+        const raw = safeLocalGet(key);
         if (raw) {
             try {
                 const obj = JSON.parse(raw);
@@ -2201,19 +2213,26 @@ async function getLatestStableRelease(force) {
             } catch (_) { /* fall through to fetch */ }
         }
     }
-    try {
-        const res = await fetch(RELEASES_LATEST_URL, { headers: { accept: "application/vnd.github+json" } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const j = await res.json();
-        const data = { tag_name: j.tag_name, assetNames: (j.assets || []).map(a => a.name) };
-        safeLocalSet(UPDATE_CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
-        return data;
-    } catch (e) {
-        console.warn("[update] release check failed:", e && e.message ? e.message : e);
-        const raw = safeLocalGet(UPDATE_CACHE_KEY);          // serve stale on failure
-        if (raw) { try { return JSON.parse(raw).data; } catch (_) { /* none */ } }
-        return null;
-    }
+    // Coalesce concurrent fetches for the same slot onto one request.
+    if (inFlightFetches[key]) return inFlightFetches[key];
+    const p = (async () => {
+        try {
+            const res = await fetch(url, { headers: { accept: "application/json" } });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            safeLocalSet(key, JSON.stringify({ ts: Date.now(), data }));
+            return data;
+        } catch (e) {
+            console.warn("[update] fetch failed:", url, e && e.message ? e.message : e);
+            const raw = safeLocalGet(key);                   // serve stale on failure
+            if (raw) { try { return JSON.parse(raw).data; } catch (_) { /* none */ } }
+            return null;
+        } finally {
+            delete inFlightFetches[key];                     // clear once settled, ok or not
+        }
+    })();
+    inFlightFetches[key] = p;
+    return p;
 }
 
 // Read the device's running version + firmware-variant key off the FirmwareUpdateModule.
@@ -2227,29 +2246,56 @@ function deviceFirmwareInfo() {
     return version ? { version, firmware } : null;
 }
 
+// Light the badge for an available update. `tag` is the release the picker should pre-select
+// (a vX.Y.Z stable tag, or "latest"); `label` is what the badge shows.
+function showUpdateBadge(badge, tag, label) {
+    badge.textContent = `⬆ ${label}`;
+    badge.title = `Firmware update available: ${label} — open Firmware to install`;
+    badge.dataset.tag = tag;
+    badge.hidden = false;
+}
+
+// Is there a newer STABLE release than the device's version, with a compatible .bin?
+// Returns the stable tag (e.g. "v2.1.0") or null. /latest excludes prereleases.
+async function stableUpdate(dev, force) {
+    const rel = await cachedJson(`${RELEASES_API}/latest`, "projectMM.update.latest.v1", force);
+    if (!rel || !rel.tag_name) return null;
+    const assetNames = (rel.assets || []).map(a => a.name);
+    const hasBinary = !dev.firmware ||
+        assetNames.some(n => n === `firmware-${dev.firmware}-${rel.tag_name}.bin`);
+    return (isNewer(rel.tag_name, dev.version) && hasBinary) ? rel.tag_name : null;
+}
+
+// For a device already on a -dev build: is the moving `latest` release newer? Returns its
+// version string (e.g. "2.1.0-dev.7") or null. The latest release's tag is "latest", so its
+// version comes from the per-firmware manifest it publishes.
+async function devUpdate(dev, force) {
+    if (!dev.firmware) return null;                          // can't resolve a manifest without the key
+    const url = `${RELEASE_DOWNLOAD}/latest/manifest-${dev.firmware}.json`;
+    const manifest = await cachedJson(url, "projectMM.update.dev.v1", force);
+    const v = manifest && manifest.version;
+    return (v && isNewer(v, dev.version)) ? v : null;
+}
+
 // Show/hide the badge. `force` bypasses the cache (used when the Firmware card opens).
+// Stable update takes precedence; a -dev device additionally checks the latest channel.
 async function checkFirmwareUpdate(force) {
     const badge = document.getElementById("fw-update-badge");
     if (!badge) return;
     const dev = deviceFirmwareInfo();
     if (!dev) { badge.hidden = true; return; }
 
-    const latest = await getLatestStableRelease(force);
-    if (!latest || !latest.tag_name) { badge.hidden = true; return; }
+    const stableTag = await stableUpdate(dev, force);
+    if (stableTag) { showUpdateBadge(badge, stableTag, stableTag); return; }
 
-    // Newer stable available AND it ships a binary for this device's firmware key (mirrors
-    // sveltekit's asset-target check — never badge an update with no .bin for this board).
-    const newer = isNewer(latest.tag_name, dev.version);
-    const hasBinary = !dev.firmware ||
-        latest.assetNames.some(n => n === `firmware-${dev.firmware}-${latest.tag_name}.bin`);
-    if (newer && hasBinary) {
-        badge.textContent = `⬆ ${latest.tag_name}`;
-        badge.title = `Firmware update available: ${latest.tag_name} — open Firmware to install`;
-        badge.dataset.tag = latest.tag_name;
-        badge.hidden = false;
-    } else {
-        badge.hidden = true;
+    // Only a prerelease (-dev…) build follows the moving latest channel; a stable device is
+    // not nudged toward an unreleased build.
+    const onPrerelease = (parse(dev.version)?.prerelease.length || 0) > 0;
+    if (onPrerelease) {
+        const devVer = await devUpdate(dev, force);
+        if (devVer) { showUpdateBadge(badge, "latest", `latest (${devVer})`); return; }
     }
+    badge.hidden = true;
 }
 
 // Badge click → pre-select the new release in the picker (it restores from PICKER_RELEASE_KEY

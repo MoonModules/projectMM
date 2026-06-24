@@ -288,12 +288,17 @@ def idf_cmd(idf_path: Path) -> list[str]:
     return [python_exe, str(idf_path / "tools" / "idf.py")]
 
 
-def firmware_cmake_args(firmware: str, release: str = "") -> list[str]:
+def firmware_cmake_args(firmware: str, release: str = "", version: str = "") -> list[str]:
     """Extra -D cache args for the requested firmware.
 
     `release` is the release-channel tag (e.g. "latest", "v1.0.0") to burn
     into the binary as MM_RELEASE. Empty for local builds — SystemModule
     then shows the bare semver with no channel suffix.
+
+    `version` overrides MM_VERSION with the pipeline-computed semver
+    (compute_version.py): the core for a stable tag, `<core>-dev.<N>` for a
+    moving `latest` build. Empty for local builds — build_info.h's #ifndef
+    default (library.json) applies.
     """
     spec = FIRMWARES[firmware]
     fragments = ";".join(spec["fragments"])
@@ -307,6 +312,9 @@ def firmware_cmake_args(firmware: str, release: str = "") -> list[str]:
     # local build needs no flag.
     if release:
         args.append(f'-DMM_RELEASE="{release}"')
+    # Same for the computed version — empty leaves build_info.h's library.json default.
+    if version:
+        args.append(f'-DMM_VERSION="{version}"')
     if spec["eth_only"]:
         # Drop the WiFi components from the link, and tell our code to compile
         # out the WiFi paths (MM_ETH_ONLY → esp32/main/CMakeLists.txt).
@@ -378,6 +386,20 @@ def stale_feature_cache(build_dir: Path, extra: list[str]) -> str | None:
         if wanted != cached:
             return (f"{flag} {'set' if cached else 'unset'} in cache but "
                     f"firmware wants it {'set' if wanted else 'unset'}")
+    # Value flags (not just present/absent): MM_VERSION / MM_RELEASE carry a string
+    # that changes per build. CMake keeps the OLD cached value when the same dir is
+    # reused, so a changed --version would silently build the stale version (it's a
+    # compile-time define, like the feature flags above). Detect a value mismatch and
+    # force a clean reconfigure so the binary never lies about its version.
+    for flag in ("MM_VERSION", "MM_RELEASE"):
+        wanted = next((a[len(f"-D{flag}="):] for a in extra
+                       if a.startswith(f"-D{flag}=")), None)
+        if wanted is None:
+            continue  # not passed this build — leave the cache alone
+        m = re.search(rf"^{flag}:[^=]*=(.*)$", text, re.MULTILINE)
+        cached = m.group(1) if m else None
+        if cached is not None and cached != wanted:
+            return f"{flag} cached as {cached!r} but this build wants {wanted!r}"
     return None
 
 
@@ -406,6 +428,11 @@ def main():
                         help="Release-channel tag to burn into the binary as "
                              "MM_RELEASE (e.g. 'latest', 'v1.0.0'). Set by the "
                              "release workflow; omit for local builds.")
+    parser.add_argument("--version", default="",
+                        help="Override MM_VERSION with the pipeline-computed semver "
+                             "(see compute_version.py): core for a stable tag, "
+                             "'<core>-dev.<N>' for latest. Omit for local builds "
+                             "(library.json applies).")
     args = parser.parse_args()
 
     firmware = resolve_firmware(args)
@@ -461,7 +488,7 @@ def main():
     # but this wrapper does not yet reproduce it reliably — tracked in
     # docs/backlog/backlog.md (ESP32-P4 round 3). Until fixed, build this variant
     # with the manual sequence above.
-    extra = firmware_cmake_args(firmware, args.release)
+    extra = firmware_cmake_args(firmware, args.release, args.version)
 
     # Guard against a build dir configured for a different feature set (a stale
     # MM_NO_ETH / MM_ETH_ONLY in CMakeCache that a plain reconfigure won't clear).

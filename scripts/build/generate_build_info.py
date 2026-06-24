@@ -4,7 +4,12 @@
 Writes a single header carrying every compile-time identity fact the runtime
 exposes through SystemModule:
 
-  MM_VERSION       — semver, from library.json. Auto-generated section.
+  MM_VERSION       — semver. Defaults to library.json (local/dev builds), but
+                     the release pipeline overrides it with a -D flag (same
+                     mechanism as MM_RELEASE / MM_FIRMWARE_NAME) so a published
+                     build carries a precise version: the core semver for a
+                     stable release, or a monotonic `<core>-dev.<N>` for a
+                     moving `latest` build (see scripts/build/compute_version.py).
   MM_BUILD_DATE    — __DATE__ " " __TIME__, evaluated by the compiler.
   MM_FIRMWARE_NAME — set by the build system as a -D flag (see
                      scripts/build/build_esp32.py firmware_cmake_args() and
@@ -38,7 +43,14 @@ content = f'''#pragma once
 // Auto-generated from library.json by scripts/build/generate_build_info.py
 // -- do not edit by hand. Regenerated when library.json changes.
 
+// MM_VERSION defaults to the in-tree library.json semver, but the release
+// pipeline overrides it with -DMM_VERSION="<computed>" (compute_version.py):
+// the core semver for a stable tag, or `<core>-dev.<N>` for a moving `latest`
+// build so successive latest builds are orderable. #ifndef so a local build
+// needs no flag.
+#ifndef MM_VERSION
 #define MM_VERSION    "{version}"
+#endif
 #define MM_BUILD_DATE __DATE__ " " __TIME__
 
 // Compile-time identity from build flags. The build script that knows the

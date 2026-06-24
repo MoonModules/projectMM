@@ -108,6 +108,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # Full history: compute_version.py counts commits since the last v* tag
+          # for the `latest` build's `-dev.<N>` suffix. A shallow clone (the default)
+          # has no tags / partial history and would yield a wrong count.
+          fetch-depth: 0
 
       - name: Cache ESP-IDF tooling
         uses: actions/cache@v4
@@ -135,6 +139,18 @@ jobs:
           elif [ "$IS_MAIN" = "true" ]; then echo "tag=latest" >> "$GITHUB_OUTPUT"
           else echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"; fi
 
+      # The semver burned into the binary + stamped on the assets/manifest. A
+      # `latest` build gets `<core>-dev.<N>` (N = commits since the last v* tag)
+      # so successive latest builds are orderable; a stable tag gets the core.
+      # Computed once here and reused by build + staging so all three agree.
+      - name: Compute version
+        id: ver
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.tag.outputs.tag }}" = "latest" ]; then CH=latest; else CH=stable; fi
+          V=$(python scripts/build/compute_version.py --channel "$CH")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
       - name: Build firmware
         uses: espressif/esp-idf-ci-action@v1
         with:
@@ -156,13 +172,13 @@ jobs:
           # We run our own builder (not the action's default `idf.py build`)
           # so the sdkconfig fragments and EXCLUDE_COMPONENTS go through the
           # same code path as local builds. --release burns the channel tag in.
-          command: python ../scripts/build/build_esp32.py --firmware ${{ matrix.firmware }} --release "${{ steps.tag.outputs.tag }}"
+          command: python ../scripts/build/build_esp32.py --firmware ${{ matrix.firmware }} --release "${{ steps.tag.outputs.tag }}" --version "${{ steps.ver.outputs.version }}"
 
       - name: Stage release artifacts
         run: |
           set -euo pipefail
           mkdir -p dist
-          V=$(jq -r .version library.json)
+          V="${{ steps.ver.outputs.version }}"   # computed once above; matches the binary's MM_VERSION
           # Per-firmware build dir under build/esp32-<firmware>/ (plan-19.1).
           # build_esp32.py points idf.py at this dir via -B, so the build
           # tree lives outside esp32/ and multiple firmwares can coexist —
@@ -248,6 +264,10 @@ jobs:
       # the "Re-create latest" step below force-pushes the `latest` tag with git,
       # which needs the token in .git/config.
       - uses: actions/checkout@v4
+        with:
+          # Full history: compute_version.py counts commits since the last v* tag
+          # for the manifest's `-dev.<N>` version (must match the binary's).
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@v3
 
@@ -278,13 +298,23 @@ jobs:
             echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"
           fi
 
+      # Same computation as the build job's "Compute version" — the manifest's
+      # version must match the binary's MM_VERSION + the asset names.
+      - name: Compute version
+        id: ver
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.tag.outputs.tag }}" = "latest" ]; then CH=latest; else CH=stable; fi
+          V=$(uv run python scripts/build/compute_version.py --channel "$CH")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
       - name: Generate ESP Web Tools manifests (release-asset URLs)
         env:
           TAG: ${{ steps.tag.outputs.tag }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          V=$(jq -r .version library.json)
+          V="${{ steps.ver.outputs.version }}"   # computed once above; matches binary + asset names
           # Absolute GitHub release-asset URLs. Uploaded as release assets;
           # read by the on-device OTA picker (device fetches the .bin directly
           # — no CORS). The Pages-relative manifests are generated in the

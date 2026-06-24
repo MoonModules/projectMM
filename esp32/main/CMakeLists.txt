@@ -69,6 +69,14 @@ if(MM_RELEASE)
     # #ifndef "" default.
     target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_RELEASE=${MM_RELEASE})
 endif()
+if(MM_VERSION)
+    # Same quoting note again. The computed semver (compute_version.py): the core
+    # for a stable tag, <core>-dev.<N> for a moving latest build. Only the release
+    # pipeline sets it; a local build falls through to build_info.h's #ifndef
+    # default (library.json). Overrides the header's #ifndef so the binary, the
+    # release asset names, and the manifest all carry the same version.
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_VERSION=${MM_VERSION})
+endif()
 if(MM_ETH_ONLY)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_NO_WIFI)
 endif()
