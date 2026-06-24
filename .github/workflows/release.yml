@@ -397,7 +397,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          V=$(jq -r .version library.json)   # current build's version, used for the `latest` tag's manifests
           # Keep the last 5 stable + 5 prerelease releases on Pages so their
           # binaries stay flashable (Web Serial is CORS-bound and GitHub
           # release assets don't return CORS headers).
@@ -411,49 +410,40 @@ jobs:
           echo "Releases to keep on Pages:"
           echo "$KEEP" | sed 's/^/  /'
 
-          # NOTE: deliberately NOT downloading manifest-*.json from the release.
-          # The release's manifests carry ABSOLUTE github.com asset URLs (built
-          # with --release-url=https://github.com/.../releases/download/... in the
-          # `release` job), which the web installer CANNOT fetch — GitHub release
-          # downloads don't return CORS headers, so a browser fetch() fails with
-          # "Failed to fetch" at the fetch-firmware stage. The installer needs
-          # RELATIVE-path manifests (paths like ./firmware-*.bin, resolved
-          # same-origin against the Pages dir); those are GENERATED per kept tag
-          # in the loop below, not pulled from the release.
+          # For each kept tag, stage its binaries AND its manifests onto Pages. A
+          # GitHub Pages deploy is a full-tree REPLACE (not cumulative — that wrong
+          # assumption is what made a tag's manifests vanish on the next deploy), so
+          # every run must reconstruct ALL served tags, not just the one being built.
+          #
+          # Use each release's OWN published manifest, not a freshly generated one:
+          # the asset-naming scheme has changed across releases (v1.0.0 used
+          # per-firmware `firmware-<F>-v<ver>-partition-table.bin` / `-ota-data.bin`;
+          # v2.0.0 uses shared `partition-table-<size>.bin` / `shared-ota-data.bin`),
+          # so regenerating an old tag's manifest with today's generator points it at
+          # files that release never published → a fetch-firmware 404. Each release's
+          # own manifest already names its own files correctly; we just rewrite its
+          # ABSOLUTE github.com asset URLs (which a browser can't fetch — no CORS) to
+          # RELATIVE basenames, so the installer fetches them same-origin from the
+          # Pages dir alongside the binaries we download next to them.
           for T in $KEEP; do
             mkdir -p "pages/install/releases/$T"
             gh release download "$T" \
               --dir "pages/install/releases/$T" \
               --pattern 'firmware-*.bin' \
+              --pattern '*-ota-data.bin' \
               --pattern 'shared-ota-data.bin' \
               --pattern 'partition-table-*.bin' \
+              --pattern 'manifest-*.json' \
               --pattern 'projectMM-*.tar.gz' \
               --pattern 'projectMM-*.zip' \
               || echo "  (skip $T — no matching assets)"
-          done
-
-          # Generate the relative-path manifests for EVERY kept tag, not just the
-          # one being built. A GitHub Pages deploy is a full-tree REPLACE (not
-          # cumulative — that earlier assumption is what made a vX manifest vanish
-          # the next time a main push redeployed with CUR_TAG=latest), so each run
-          # must reconstruct the manifests for all tags it serves. The manifest is
-          # a tiny JSON of relative `.bin` filenames stamped with the tag's version
-          # (firmware-<F>-v<ver>.bin), so we regenerate it per tag from that tag's
-          # version. The flasher offsets in flasher-$F.json are stable per chip
-          # family, so the current build's copy is valid for any version of the
-          # same firmware. `latest` uses the current build's version ($V).
-          for T in $KEEP; do
-            [ -d "pages/install/releases/$T" ] || continue
-            if [ "$T" = "latest" ]; then TV="$V"; else TV="${T#v}"; fi
-            for F in $(jq -r '.firmwares[] | select(.ships) | .name' docs/install/firmwares.json); do
-              python scripts/build/generate_manifest.py \
-                --firmware "$F" \
-                --version "$TV" \
-                --release-url . \
-                --flasher-args "dist/flasher-$F.json" \
-                --out "pages/install/releases/$T/manifest-$F.json"
+            # Rewrite each manifest's part paths to relative basenames (strip the
+            # absolute release-asset URL); jq edits in place via a temp file.
+            for M in pages/install/releases/$T/manifest-*.json; do
+              [ -f "$M" ] || continue
+              jq '.builds[].parts[].path |= (sub("^.*/"; "./"))' "$M" > "$M.tmp" && mv "$M.tmp" "$M"
             done
-            echo "Staged relative manifests into releases/$T (version $TV)"
+            echo "Staged binaries + relative manifests into releases/$T"
           done
 
       - name: Stage GitHub Pages site
