@@ -1,5 +1,7 @@
 # Plan — Stream the preview from the producer buffer; eliminate all preview-side buffers
 
+> Saved per CLAUDE.md *Plan before implementing*. Product-owner archive (intentionally forward-looking — it records what we set out to build); agents don't auto-read it.
+
 ## Context
 
 The non-blocking preview rework (committed 1e48e92) made the WebSocket preview stream without stalling the render tick, but it introduced/retained **frame-sized buffers** in the preview path: `coords_` (~49 KB packed positions), `rgb_` (per-frame colour copy), `sampledIdx_` (the lattice index map), and the HttpServer **staging buffer** (~49 KB). On a no-PSRAM classic ESP32 these compete for scarce *contiguous* internal RAM: at 128² (16384 lights) the render buffer (49 KB) and a preview buffer (49 KB) can't both find a contiguous block once the heap fragments from grid-resize churn — so the preview (and sometimes the render) fails to allocate. Measured on the bench: a clean boot has a 108 KB contiguous block (128² fits); after resize churn it collapses to ~20–40 KB (128² fails).

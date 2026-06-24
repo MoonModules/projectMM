@@ -106,7 +106,7 @@ public:
                 sentThisSlot = true;
                 framesWaiting_ = 0;
             } else {
-                framesWaiting_++;               // still draining the previous frame — link is behind
+                if (framesWaiting_ < 255) framesWaiting_++;  // still draining — link behind (saturate, no wrap)
             }
         }
 

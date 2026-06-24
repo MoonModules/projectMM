@@ -335,7 +335,7 @@ function setupLayout() {
         applyMode();
     };
 
-    // matchMedia would only catch the breakpoint crossing; a resize listener also keeps
+    // matchMedia catches only the breakpoint crossing; this resize listener also keeps
     // the PiP pinned to its corner as the window changes. rAF-throttled.
     let ticking = false;
     window.addEventListener("resize", () => {
@@ -350,10 +350,10 @@ function setupLayout() {
         savePrefs({ corner, dismissed, forcePip });
         applyMode();
     });
-    // Hide the preview; reveal the re-show pill. Dismissal only takes visible effect in
+    // Hide the preview; reveal the re-show pill. Dismissal takes visible effect only in
     // PiP mode (the pill replaces the floating preview); closing from docked mode also
-    // pops it out (forcePip) so the result is immediate — a dismissed docked preview that
-    // only vanished later when narrow auto-PiP kicked in would be a confusing surprise.
+    // pops it out (forcePip) so the result is immediate — closing a docked preview hides
+    // it now rather than only when narrow auto-PiP later kicks in.
     document.getElementById("preview-close")?.addEventListener("click", () => {
         dismissed = true;
         if (!ws.classList.contains("mode-pip")) forcePip = true;
@@ -466,9 +466,11 @@ function parsePreviewCoords(view, buf) {
     if (buf.byteLength < 10) return;
     const count = view.getUint32(1, true);
     const bx = view.getUint8(5), by = view.getUint8(6), bz = view.getUint8(7);
+    // Validate the full payload BEFORE mutating any parser state — a truncated buffer must leave
+    // previewStride_ / the status line untouched (else they'd describe coords we never stored).
+    if (buf.byteLength < 10 + count * 3) return;
     previewStride_ = view.getUint16(8, true) || 1;   // = device's adaptive downscale factor
     updatePreviewStatus();
-    if (buf.byteLength < 10 + count * 3) return;
     const pos = new Uint8Array(buf, 10);
     const maxDim = Math.max(1, bx, by, bz);
     previewMaxDim_ = maxDim;

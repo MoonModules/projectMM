@@ -89,6 +89,7 @@ TEST_CASE("GridLayout serpentine reverses x on odd rows") {
     grid.serpentine = false;
     coords.clear();
     grid.forEachCoord(collectCoord, &coords);
+    REQUIRE(coords.size() >= 6);   // guard the index accesses below (clear test failure, not UB)
     CHECK(coords[4].x == 0);   // row 1 starts at x=0 again
     CHECK(coords[5].x == 1);
 }

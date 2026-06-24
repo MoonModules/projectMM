@@ -117,9 +117,9 @@ private:
     // header + a pointer into the caller's STABLE body buffer (the PreviewDriver producer buffer),
     // drained a bounded chunk per client per loop20ms via writeSome — so a large frame is delivered
     // over wall-clock ticks without spinning any loop, yet stays ONE atomic WS message to the
-    // browser. One in flight at a time (newest-wins drop). bodyGeneration_ invalidates a send whose
-    // body the caller is about to free (cancelBufferedSend bumps nothing — the caller cancels; this
-    // tag guards a stale drain if the body is swapped between cancel and the next begin).
+    // browser. One in flight at a time (drop-new: a frame offered while one is active is rejected,
+    // the in-flight one kept). The caller calls cancelBufferedSend() before freeing/reallocating the
+    // body (a geometry rebuild), so a cursor never reads freed memory.
     struct PreviewSend {
         uint8_t hdr[16] = {};                 // WS + app header, copied (caller's may be a stack local)
         size_t hdrLen = 0;

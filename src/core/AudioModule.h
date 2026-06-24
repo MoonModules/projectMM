@@ -90,7 +90,7 @@ public:
         // Read-only live read-outs (formatted in loop1s). Derived every second,
         // nothing to persist, so ReadOnly (the display-only type) not a flipped
         // Text — same idiom as SystemModule's uptime/fps.
-        controls_.addReadOnly("level", levelStr_, sizeof(levelStr_));
+        controls_.addReadOnly("level RMS", levelStr_, sizeof(levelStr_));
         controls_.addReadOnly("peakHz", peakStr_, sizeof(peakStr_));
         MoonModule::onBuildControls();
     }
@@ -160,11 +160,19 @@ public:
         // Peak frequency: the exact-Hz FFT bin, held when there's no real signal so
         // it doesn't wander in silence.
         if (peakMag > 8) { frame_.peakHz = peakHz; frame_.peakMag = peakMag; }
+
+        // Track the PEAK level across the 1 s display window. frame_.level is recomputed every
+        // ~23 ms audio block, but the UI string is snapshotted only once a second — sampling the
+        // instantaneous value caught the gaps between beats and read 0 even while the LEDs (driven
+        // live every render tick) showed the music. Displaying the window peak gives a representative
+        // reading. Display-only — the live frame_.level the effects/LEDs use is untouched.
+        if (frame_.level > levelPeak_) levelPeak_ = frame_.level;
     }
 
     void loop1s() override {
-        std::snprintf(levelStr_, sizeof(levelStr_), "%u", static_cast<unsigned>(frame_.level));
+        std::snprintf(levelStr_, sizeof(levelStr_), "%u", static_cast<unsigned>(levelPeak_));
         std::snprintf(peakStr_, sizeof(peakStr_), "%u Hz", static_cast<unsigned>(frame_.peakHz));
+        levelPeak_ = 0;   // reset for the next window
         MoonModule::loop1s();
     }
 
@@ -188,6 +196,7 @@ private:
 
     char levelStr_[12] = {};
     char peakStr_[12] = {};
+    uint8_t levelPeak_ = 0;   // peak frame_.level across the current 1 s display window (UI only)
 
     static constexpr const char* kInitFailMsg = "mic init failed — check pins / rate";
 

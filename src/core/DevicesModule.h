@@ -271,10 +271,9 @@ private:
     // URL), so a sparse subnet costs ~1×timeout per empty IP, not 3×.
     static constexpr uint8_t  kProbesPerTick = 1;
     // Short timeout: this GET blocks the scheduler thread (and thus one render tick) on a dead host,
-    // so it must stay small or the boot sweep stutters animation once a second for the ~4 min the
-    // /24 takes. A live host on a LAN answers in a few ms; 30 ms covers a slow responder while
-    // keeping the worst-case per-tick stall to ~30 ms. (The real fix — running the probe on its own
-    // task so it never touches the render thread — is backlogged; this just bounds the symptom.)
+    // so it stays small to keep the boot sweep from stuttering animation during the ~4 min the /24
+    // takes. A live host on a LAN answers in a few ms; 30 ms covers a slow responder while keeping
+    // the worst-case per-tick stall to ~30 ms.
     static constexpr uint32_t kProbeTimeoutMs = 30;
     // Drop a non-self device unseen by ANY strategy for this long. 24 h is deliberately
     // generous: mDNS re-confirms its devices every few-second browse lap (cheap), but an
@@ -374,18 +373,13 @@ private:
     };
     static constexpr uint8_t kMdnsServiceCount =
         sizeof(kMdnsServices) / sizeof(kMdnsServices[0]);
-    // Per-tick mDNS query timeout. Small: this is a blocking call on loop1s, so it must
-    // stay well under the 1 s tick budget (and it shares loop1s with the HTTP sweep). A
-    // peer that doesn't answer within this window is caught on a later pass — discovery is
-    // continuous (every tick cycles to the next service type), so a short timeout per call
-    // mdnsBrowse is synchronous and blocks the FULL timeout (the IDF query waits the whole
-    // window for late responders — it does not return early), and loop1s shares the tick
-    // thread, so this time is charged to the tick. Keep the timeout SHORT AND browse only
-    // every kMdnsEveryTicks-th tick: one ~20 ms hiccup every ~15 s is invisible for a
-    // discovery feature (peers don't come and go faster than that), and FPS is untouched in
-    // between. (The old async API polled cheaply every tick but raced the mDNS task's expiry
-    // timer and crashed on a UI refresh; a bounded synchronous call holds no handle, so it
-    // can't. The throttle is how we keep that safety without the per-tick block cost.)
+    // mdnsBrowse is SYNCHRONOUS and blocks the full timeout (the IDF query waits the whole window
+    // for late responders — it does not return early), on the loop1s tick thread, so the time is
+    // charged to the tick. The timeout stays short AND the browse runs only every kMdnsEveryTicks-th
+    // tick: one ~20 ms hiccup every ~15 s is invisible for a discovery feature (peers don't come and
+    // go faster than that), and FPS is untouched in between. A peer that doesn't answer within the
+    // window is caught on a later pass — discovery is continuous (each browse cycles to the next
+    // service type). The synchronous call holds no handle, so a UI refresh can't race it.
     static constexpr uint32_t kMdnsBrowseMs = 20;    // shorter blocking window → smaller render hiccup
     static constexpr uint8_t kMdnsEveryTicks = 15;   // browse less often → the hiccup is rarer (~15 s)
 

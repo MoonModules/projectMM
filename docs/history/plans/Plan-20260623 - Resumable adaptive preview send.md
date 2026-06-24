@@ -29,7 +29,7 @@ This invariant is the headline acceptance criterion: at every grid size on every
 ### §1 Resumable send (core)
 `BinaryBroadcaster::sendBufferedFrame(header, hdrLen, body, bodyLen)` — `body` is the caller's stable producer buffer (pointer, NOT copied). HttpServerModule holds one in-flight send:
 
-```
+```text
 struct PreviewSend {
   uint8_t hdr[16]; size_t hdrLen;       // small WS+app header, COPIED (caller's is a stack local)
   const uint8_t* body; size_t bodyLen;   // producer buffer — pointer only
@@ -44,6 +44,7 @@ struct PreviewSend {
 - **Subsumes CodeRabbit R5**: `PreviewSend` IS the frame-level state R5 asked for (remaining = `bodyLen - sent[i]`, a frame-wide budget, over-push guard) — built once, here, instead of grafting it onto the spinning `sendAllOrClose`.
 
 ### §2 Adaptive frame rate (the elegant part)
+
 PreviewDriver only calls `sendBufferedFrame` when `bufferedSendIdle()` (previous frame fully drained). So:
 - Fast link → drains in ~1 tick → next frame fires next loop → runs at the `fps` ceiling.
 - Slow link → drains over many ticks → next frame waits → **effective fps drops automatically to what the link sustains.** Zero extra logic; the resumable send *is* the rate limiter.

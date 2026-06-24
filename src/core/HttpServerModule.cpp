@@ -46,10 +46,10 @@ void HttpServerModule::loop20ms() {
     // per-render-tick loop(): pushing frame bytes to the socket must not be charged to the LED
     // render hot path. The render tick stays free of preview work; the preview frame rate is
     // bounded by this 20 ms drain cadence (a few fps at large full-res frames) — an acceptable
-    // trade, since the preview is a *view* and the LEDs are not. (When the two-core render/transport
-    // split lands — architecture.md § Parallelism — this drain moves to the transport task and the
-    // cadence limit lifts; the seam is already here.) Drain BEFORE accept so a connection burst
-    // can't starve an active send. No-op when nothing is in flight.
+    // trade, since the preview is a *view* and the LEDs are not. This drain is the consumer-side
+    // transport step, kept as a standalone call so it sits cleanly on the render/transport seam
+    // (architecture.md § Parallelism). Drain BEFORE accept so a connection burst can't starve an
+    // active send. No-op when nothing is in flight.
     drainPreviewSend();
     // Accept one HTTP connection per tick.
     auto conn = server_.accept();

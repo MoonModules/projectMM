@@ -1,8 +1,11 @@
 #pragma once
 
 #include "core/MoonModule.h"
+#include "core/build_info.h"   // kVersion / kRelease / kBuildDate / kFirmwareName
+#include "platform/platform.h" // firmwareSize / firmwarePartition
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 namespace mm {
@@ -57,9 +60,31 @@ public:
         statusStr_[sizeof(statusStr_) - 1] = '\0';
         bytesRead_ = g_otaBytesRead;
         totalSnap_ = g_otaBytesTotal;
+
+        // Firmware identity (static for this build). version = semver + release channel when the
+        // pipeline burned one in ("1.0.0-rc2 (latest)"); kRelease is "" on local/dev builds, where
+        // we show the bare semver (build_info.h's MM_VERSION vs MM_RELEASE split).
+        if (kRelease[0] != 0) {
+            std::snprintf(versionStr_, sizeof(versionStr_), "%s (%s)", kVersion, kRelease);
+        } else {
+            std::snprintf(versionStr_, sizeof(versionStr_), "%s", kVersion);
+        }
+        std::snprintf(buildStr_, sizeof(buildStr_), "%s", kBuildDate);
+        std::snprintf(firmwareStr_, sizeof(firmwareStr_), "%s", kFirmwareName);
     }
 
     void onBuildControls() override {
+        // Firmware identity (static), then OTA progress. firmwarePartition is the running app
+        // partition's usage; queried here (idempotent, no I/O) so the gate sees a real total.
+        controls_.addReadOnly("version", versionStr_, sizeof(versionStr_));
+        controls_.addReadOnly("build", buildStr_, sizeof(buildStr_));
+        controls_.addReadOnly("firmware", firmwareStr_, sizeof(firmwareStr_));
+        firmwareSizeVal_ = static_cast<uint32_t>(platform::firmwareSize());
+        totalFlashVal_ = static_cast<uint32_t>(platform::firmwarePartition());
+        if (totalFlashVal_ > 0) {
+            controls_.addProgress("firmwarePartition", firmwareSizeVal_, totalFlashVal_);
+        }
+
         controls_.addReadOnly("update_status", statusStr_, sizeof(statusStr_));
         // Total is captured by value into the descriptor's `aux`; we re-bind
         // (via markDirty → HttpServerModule rebuildControls) when totalSnap_
@@ -91,6 +116,12 @@ private:
     char     statusStr_[64] = "idle";
     uint32_t bytesRead_     = 0;
     uint32_t totalSnap_     = 0;
+    // Firmware identity (static for this build) + the running app-partition usage.
+    char     versionStr_[32] = {};   // semver + " (channel)" — e.g. "1.0.0-rc2 (latest)"
+    char     buildStr_[24]   = {};
+    char     firmwareStr_[24] = {};  // build variant name, e.g. "esp32s3-n16r8"
+    uint32_t firmwareSizeVal_ = 0;   // bytes used in the app partition
+    uint32_t totalFlashVal_   = 0;   // app partition size
 };
 
 } // namespace mm

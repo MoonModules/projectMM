@@ -33,14 +33,17 @@ struct BinaryBroadcaster {
     // frame never spins the caller's loop. The frame is still ONE atomic WS message to the browser
     // — "resumable" means delivered over wall-clock, not split into multiple messages.
     //   sendBufferedFrame(...) — begin a send; while one is in flight a new call is DROPPED
-    //                            (newest-wins backpressure), the caller reads that as "link busy".
+    //                            (drop-new backpressure — the in-flight frame is kept, the new one
+    //                            rejected), and the caller reads that as "link busy".
     //   bufferedSendIdle()     — true when no send is in flight (the previous frame fully drained
     //                            or was cancelled). The caller gates the next frame on this, so the
     //                            effective frame rate self-limits to what the link sustains.
-    //   cancelBufferedSend()   — abandon the in-flight send NOW (its WS messages end incomplete →
-    //                            the browser discards them). The caller MUST call this before the
-    //                            `body` buffer is freed/reallocated (e.g. a geometry rebuild), so a
-    //                            cursor never reads freed memory.
+    //   cancelBufferedSend()   — abandon the in-flight send NOW. The caller MUST call this before the
+    //                            `body` buffer is freed/reallocated (e.g. a geometry rebuild) so a
+    //                            cursor never reads freed memory. Today the only caller cancels on a
+    //                            new-client connect, which also bumps clientGeneration() and re-sends
+    //                            a fresh coordinate table — so a client that received a partial frame
+    //                            is re-primed by the next full message rather than left mis-framed.
     // Only PreviewDriver uses this today (the full-res colour frame, whose payload is the producer
     // buffer). The coord table / downsampled frames keep the begin/push/end path.
     virtual bool sendBufferedFrame(const uint8_t* header, size_t headerLen,

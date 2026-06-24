@@ -133,7 +133,7 @@ def count_lights(client: Client) -> int:
 def _detect_target(state: dict) -> str:
     """Identify the build target so per-step contract values can be looked up.
 
-    ESP32: read SystemModule.firmware (`esp32`, `esp32-eth`, `esp32-eth-wifi`,
+    ESP32: read FirmwareUpdateModule.firmware (`esp32`, `esp32-eth`, `esp32-eth-wifi`,
     `esp32s3-n16r8`, …) — set at compile time from MM_FIRMWARE_NAME and
     exposed through the `firmware` control. Desktop: same key but reports
     `unknown`, so we substitute pc-<host-os> using the runtime os name (still
@@ -143,7 +143,7 @@ def _detect_target(state: dict) -> str:
     import platform
     firmware = None
     for m in state.get("modules", []):
-        if m.get("type") != "SystemModule":
+        if m.get("type") != "FirmwareUpdateModule":
             continue
         for c in m.get("controls", []):
             if c.get("name") == "firmware":

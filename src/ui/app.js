@@ -568,13 +568,9 @@ function createCard(mod, depth) {
     // the data path. See docs/architecture.md § Firmware vs board.
     if (mod.type === "FirmwareUpdateModule") {
         const ownFirmwareKey = (() => {
-            if (!state || !state.modules) return null;
-            // Look up by stable type first; the name fallback is a
-            // belt-and-braces safety net (mod.name is user-editable in
-            // principle, so it's not load-bearing for this lookup).
-            const sys = state.modules.find(m => m.type === "SystemModule")
-                     || state.modules.find(m => m.name === "System");
-            const fwCtrl = sys && (sys.controls || []).find(c => c.name === "firmware");
+            // The `firmware` variant key is this module's own control now (moved here from
+            // SystemModule), so read it straight off mod — no cross-module lookup.
+            const fwCtrl = (mod.controls || []).find(c => c.name === "firmware");
             return fwCtrl && fwCtrl.value ? fwCtrl.value : null;
         })();
         const mount = document.createElement("div");

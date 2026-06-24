@@ -38,7 +38,7 @@ The DSP choices are the textbook defaults on purpose: a **Hann** window, **RMS**
 - `sampleRate`: a dropdown over the standard rates (8000 / 16000 / 22050 / 44100 Hz), default **22050** (~11 kHz Nyquist covers the range that matters for light). Changing it re-creates the channel live.
 - `floor`, the noise floor: bands and level below this read as silence, so an ambient room stays dark. Raise it for a noisy room, lower it for a quiet one. Default 100.
 - `gain`, sensitivity: higher = more (a narrower dB window, so a given sound fills more of the bar). Default 222.
-- `level`: read-only live sound level (updates each second).
+- `level RMS`: read-only RMS sound level. The display shows the PEAK level over each 1-second window (the live value the LEDs use is recomputed ~43×/s; sampling it once a second would read 0 between beats even while the meter LEDs move).
 - `peakHz`: read-only dominant frequency (updates each second).
 
 ## Cross-domain wiring
