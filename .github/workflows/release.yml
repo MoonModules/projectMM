@@ -26,6 +26,12 @@ on:
       - 'CMakeLists.txt'
       - 'library.json'
       - '.github/workflows/release.yml'
+      # The web installer + landing page are served from Pages by the deploy-pages job
+      # below; a change to them must trigger a deploy or it never reaches the live site
+      # (the eth-only-provisioning fix shipped a commit that didn't auto-deploy because
+      # docs/install was missing here). src/ui/install-picker*.js is already covered by src/**.
+      - 'docs/install/**'
+      - 'docs/landing/**'
   workflow_dispatch:
     inputs:
       tag:

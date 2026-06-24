@@ -97,6 +97,21 @@ body {
 .ws-dot.connected { background: var(--green); }
 .ws-dot.disconnected { background: #888; }
 
+/* Firmware-update badge: shown by app.js when a newer stable release exists for this device.
+   Accent-filled pill (attention, not alarm) sitting in the status bar; click opens Firmware. */
+.fw-update-badge {
+    border: 1px solid var(--accent);
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--accent);
+    font-size: 12px;
+    line-height: 1;
+    padding: 4px 8px;
+    border-radius: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.fw-update-badge:hover { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+
 .header-btn {
     background: transparent;
     border: 1px solid var(--border);

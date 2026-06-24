@@ -5,6 +5,7 @@
 // default; entry-point is the WS init at the bottom — no ordering surprises.
 import { installPicker } from "/install-picker.js";
 import { preview } from "/preview3d.js";
+import { isNewer } from "/semver.js";
 
 // Sections (top to bottom):
 //   1. State + storage
@@ -143,6 +144,7 @@ window.addEventListener("pageshow", (e) => {
 async function init() {
     applyTheme(theme);
     setupStatusBarButtons();
+    setupUpdateBadge();
     try {
         const resp = await fetch("/api/state");
         state = await resp.json();
@@ -567,6 +569,10 @@ function createCard(mod, depth) {
     // device fetches the binary via /api/firmware/url — no browser CORS in
     // the data path. See docs/architecture.md § Firmware vs board.
     if (mod.type === "FirmwareUpdateModule") {
+        // Opening the Firmware card forces a fresh update check (the badge otherwise refreshes
+        // only on the 1 h cache cadence) — so the badge agrees with the picker the user is about
+        // to use. Fire-and-forget; best-effort.
+        checkFirmwareUpdate(true);
         const ownFirmwareKey = (() => {
             // The `firmware` variant key is this module's own control now (moved here from
             // SystemModule), so read it straight off mod — no cross-module lookup.
@@ -2158,6 +2164,103 @@ function updateStatusBar() {
         if (crashed) rebootBtn.title = "Last boot: " + reasonCtrl.value + " (click to reboot)";
         else rebootBtn.title = "Reboot device";
     }
+
+    // Cache-first update check: instant from the localStorage cache, background-fetches only
+    // when stale (>1 h). Fire-and-forget — best-effort, never blocks the status-bar render.
+    checkFirmwareUpdate(false);
+}
+
+// ---------------------------------------------------------------------------
+// 8b. Firmware-update badge
+// ---------------------------------------------------------------------------
+// Browser-side "a newer stable firmware is out" check, modelled on ESP32-sveltekit's
+// UpdateIndicator (the upstream firmware lineage) — our own code. The device fetches
+// nothing; the browser compares the running version (FirmwareUpdateModule.version, pure
+// semver) against the newest GitHub *stable* release (the /latest endpoint excludes
+// prereleases) and, when newer AND a compatible .bin exists, shows the status-bar badge.
+// Cached in localStorage (1 h TTL) so it doesn't slow page load; a fresh check is forced
+// when the Firmware card opens. Best-effort: any failure hides the badge, never throws.
+
+const RELEASES_LATEST_URL = "https://api.github.com/repos/MoonModules/projectMM/releases/latest";
+const UPDATE_CACHE_KEY = "projectMM.update.latest.v1";
+const UPDATE_TTL_MS = 60 * 60 * 1000;                     // 1 h — best-effort, well under GitHub's rate limit
+const PICKER_RELEASE_KEY = "projectMM.picker.releaseTag"; // install-picker restores from this on init
+
+function safeLocalGet(key) { try { return localStorage.getItem(key); } catch (_) { return null; } }
+function safeLocalSet(key, v) { try { localStorage.setItem(key, v); } catch (_) { /* ignore */ } }
+
+// The latest stable release as {tag_name, assetNames[]}, cached. Re-fetches only when the
+// cache is older than the TTL or `force` is set; serves stale on a fetch failure.
+async function getLatestStableRelease(force) {
+    if (!force) {
+        const raw = safeLocalGet(UPDATE_CACHE_KEY);
+        if (raw) {
+            try {
+                const obj = JSON.parse(raw);
+                if (Date.now() - obj.ts < UPDATE_TTL_MS) return obj.data;
+            } catch (_) { /* fall through to fetch */ }
+        }
+    }
+    try {
+        const res = await fetch(RELEASES_LATEST_URL, { headers: { accept: "application/vnd.github+json" } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const j = await res.json();
+        const data = { tag_name: j.tag_name, assetNames: (j.assets || []).map(a => a.name) };
+        safeLocalSet(UPDATE_CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
+        return data;
+    } catch (e) {
+        console.warn("[update] release check failed:", e && e.message ? e.message : e);
+        const raw = safeLocalGet(UPDATE_CACHE_KEY);          // serve stale on failure
+        if (raw) { try { return JSON.parse(raw).data; } catch (_) { /* none */ } }
+        return null;
+    }
+}
+
+// Read the device's running version + firmware-variant key off the FirmwareUpdateModule.
+function deviceFirmwareInfo() {
+    if (!state || !state.modules) return null;
+    const fw = findModule("Firmware") || (state.modules.find(m => m.type === "FirmwareUpdateModule"));
+    if (!fw) return null;
+    const ctrls = fw.controls || [];
+    const version = (ctrls.find(c => c.name === "version") || {}).value;
+    const firmware = (ctrls.find(c => c.name === "firmware") || {}).value;
+    return version ? { version, firmware } : null;
+}
+
+// Show/hide the badge. `force` bypasses the cache (used when the Firmware card opens).
+async function checkFirmwareUpdate(force) {
+    const badge = document.getElementById("fw-update-badge");
+    if (!badge) return;
+    const dev = deviceFirmwareInfo();
+    if (!dev) { badge.hidden = true; return; }
+
+    const latest = await getLatestStableRelease(force);
+    if (!latest || !latest.tag_name) { badge.hidden = true; return; }
+
+    // Newer stable available AND it ships a binary for this device's firmware key (mirrors
+    // sveltekit's asset-target check — never badge an update with no .bin for this board).
+    const newer = isNewer(latest.tag_name, dev.version);
+    const hasBinary = !dev.firmware ||
+        latest.assetNames.some(n => n === `firmware-${dev.firmware}-${latest.tag_name}.bin`);
+    if (newer && hasBinary) {
+        badge.textContent = `⬆ ${latest.tag_name}`;
+        badge.title = `Firmware update available: ${latest.tag_name} — open Firmware to install`;
+        badge.dataset.tag = latest.tag_name;
+        badge.hidden = false;
+    } else {
+        badge.hidden = true;
+    }
+}
+
+// Badge click → pre-select the new release in the picker (it restores from PICKER_RELEASE_KEY
+// on init) and open the Firmware card, so the user lands one click from Install.
+function setupUpdateBadge() {
+    const badge = document.getElementById("fw-update-badge");
+    if (!badge) return;
+    badge.addEventListener("click", () => {
+        if (badge.dataset.tag) safeLocalSet(PICKER_RELEASE_KEY, badge.dataset.tag);
+        selectModule("Firmware");
+    });
 }
 
 // ---------------------------------------------------------------------------

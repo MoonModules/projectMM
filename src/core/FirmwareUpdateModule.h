@@ -61,14 +61,15 @@ public:
         bytesRead_ = g_otaBytesRead;
         totalSnap_ = g_otaBytesTotal;
 
-        // Firmware identity (static for this build). version = semver + release channel when the
-        // pipeline burned one in ("1.0.0-rc2 (latest)"); kRelease is "" on local/dev builds, where
-        // we show the bare semver (build_info.h's MM_VERSION vs MM_RELEASE split).
-        if (kRelease[0] != 0) {
-            std::snprintf(versionStr_, sizeof(versionStr_), "%s (%s)", kVersion, kRelease);
-        } else {
-            std::snprintf(versionStr_, sizeof(versionStr_), "%s", kVersion);
-        }
+        // Firmware identity (static for this build). version is PURE SEMVER (kVersion from
+        // library.json): a clean "2.0.0" on a stable release, or a prerelease like "2.1.0-dev" on a
+        // moving/dev build (semver.org §9 — the prerelease suffix is how a not-yet-released build is
+        // expressed). The release channel is derivable from the version itself (a prerelease suffix
+        // means "not a stable release"), so it is NOT mixed into the string; kRelease stays the
+        // separate build-channel tag (which git tag this binary shipped under) without polluting the
+        // machine-comparable version. This keeps `version` a clean semver the UI's update check can
+        // compare against the newest GitHub release.
+        std::snprintf(versionStr_, sizeof(versionStr_), "%s", kVersion);
         std::snprintf(buildStr_, sizeof(buildStr_), "%s", kBuildDate);
         std::snprintf(firmwareStr_, sizeof(firmwareStr_), "%s", kFirmwareName);
     }
