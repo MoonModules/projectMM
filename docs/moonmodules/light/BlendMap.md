@@ -4,7 +4,7 @@
 
 The LUT picks one of two paths: when each physical light is written at most once (every current layout/modifier — mirror, shuffle, sparse box→driver), it overwrite-copies source→destination (no read-back, no clamp, ~4× faster); when sources can overlap a destination (multi-layer composition), it additively blends with clamping. Physical indices are bounds-checked so an out-of-range LUT entry can't overrun the buffer.
 
-Configurable per-layer blend modes (beyond additive) land with multi-layer composition — a [backlog](../../backlog/backlog.md) item.
+Configurable per-layer blend modes (beyond additive) land with multi-layer composition — a [backlog](../../backlog/README.md) item.
 
 ## Source
 

@@ -20,7 +20,7 @@ INSTALL_SCRIPT_NAME = "install.bat" if sys.platform == "win32" else "install.sh"
 # the clone), but it warns loudly when the installed IDF differs — a silent
 # `git pull` or a fresh shallow clone landing on a newer dev-branch commit is
 # exactly what turns a green build red with no code change (see
-# docs/backlog/backlog.md "ESP-IDF version pinning"). To pin: in ~/esp/esp-idf,
+# docs/backlog/, "ESP-IDF version pinning"). To pin: in ~/esp/esp-idf,
 # `git fetch && git checkout <commit>`. Migrating off this dev snapshot to a
 # stable tag (v6.1 lands 2026-07-31) is a deliberate re-test pass, not a pull.
 PINNED_IDF_COMMIT = "d1b91b79b5ff12d9d4b21fe1cf5406ab6044b8ff"

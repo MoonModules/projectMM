@@ -68,7 +68,7 @@ Audio-reactive lighting is a long-standing idea in the LED-controller world (WLE
 - **Analog line-in.** Long held to "only the original ESP32," but the field has moved: **[DedeHai](https://github.com/DedeHai) got analog input working on the S3**, and **Troy got it working in his ParrotRadio project**. Troy flags a *testing-confidence* nuance worth recording: he considers his own ParrotRadio analog path **better exercised** — he was actually recording and playing audio back through it and chasing down real issues — whereas an unlistened-to analog path elsewhere may not be as accurate as it looks, "if nobody's ever listened to it." So if projectMM adopts analog line-in, **validate by listening**, not just by watching the level meter move.
 - **I²C-configured codecs** (e.g. the **ES8311**): the right move is explicitly **not** to hand-roll each codec's register config (which is what Troy did in WLED). Espressif ships an **[`esp_codec_dev`](https://components.espressif.com/components/espressif/esp_codec_dev) "codecs" component** for IDF that already carries the option tables for many codecs; pulling it in would support "a bunch more codecs for free" and let users configure them for their own hardware. If something Troy hand-rolled turns out to be missing from the component, the codec class is extensible — but he doubts anything is. This is the [*Industry standards, our own code*](../../../CLAUDE.md#principles) call applied to codec bring-up: take Espressif's component rather than a bespoke per-codec config.
 
-Troy also has **DSP boards on his desk** — essentially I²S front-ends "waaaaay beyond the regular codecs" — a class of source recorded here so the line-in / codec work leaves room for it rather than only the simple cases. All of the above is **source-seam** work: it widens what feeds the pipeline, leaving the DC-blocker / RMS / FFT / band analysis untouched. Tracked under [backlog § sensor input](../../backlog/backlog.md#sensor-input-on-raspberry-pi-5--microphone-imu-line-in-post-10-multi-commit).
+Troy also has **DSP boards on his desk** — essentially I²S front-ends "waaaaay beyond the regular codecs" — a class of source recorded here so the line-in / codec work leaves room for it rather than only the simple cases. All of the above is **source-seam** work: it widens what feeds the pipeline, leaving the DC-blocker / RMS / FFT / band analysis untouched. Tracked under [backlog](../../backlog/README.md).
 
 ## Adaptive noise gate: forward-looking
 
@@ -95,7 +95,7 @@ Five design constraints come with it, and they are the load-bearing part: (1) sa
 
 ### Does our per-band floor already cover part of this?
 
-Partly, and that overlap is the key to sequencing. The backlogged [per-band noise-floor](../../backlog/backlog.md#sensors-and-audio-reactive-input) learns each band's idle baseline and subtracts it, so a *steady single-frequency* tone (our bench's ~258 Hz mains hum) gates to dark while the other bands stay live. The proposed time-domain gate answers a *different* question, "is there any sound at all," across the whole signal. They are complementary halves, not competitors: the per-band floor is the **frequency-domain** noise floor, the gate is the **time-domain** one. The per-band floor is also the smaller, already-planned step, so it is the natural first increment, and it is genuinely "part of this idea," not a thing the gate replaces.
+Partly, and that overlap is the key to sequencing. The backlogged [per-band noise-floor](../../backlog/README.md) learns each band's idle baseline and subtracts it, so a *steady single-frequency* tone (our bench's ~258 Hz mains hum) gates to dark while the other bands stay live. The proposed time-domain gate answers a *different* question, "is there any sound at all," across the whole signal. They are complementary halves, not competitors: the per-band floor is the **frequency-domain** noise floor, the gate is the **time-domain** one. The per-band floor is also the smaller, already-planned step, so it is the natural first increment, and it is genuinely "part of this idea," not a thing the gate replaces.
 
 ### How to decompose it: cherry-pick, step by step
 
@@ -108,7 +108,7 @@ The whole proposal is more than one increment. Taken apart, most of its value la
 
 Each step is its own commit, host-tested red-first, and leaves the system working; none requires touching `AudioBands.h` or the effect consumers. Steps 1–2 deliver most of the benefit (a self-calibrating floor in both domains) with almost no timing cost; 3–4 are polish to layer on only if the bench says they earn their place.
 
-**What it eventually retires:** the `floor` knob's role as a hard squelch. `floor` would become the *display* noise-floor only (the dB-window bottom in `magToByte`), while the learned gate decides "is there sound." That is a clean subtraction, but it is the *end* of the path, not the first step. Tracked under [backlog § audio follow-ups](../../backlog/backlog.md#sensors-and-audio-reactive-input).
+**What it eventually retires:** the `floor` knob's role as a hard squelch. `floor` would become the *display* noise-floor only (the dB-window bottom in `magToByte`), while the learned gate decides "is there sound." That is a clean subtraction, but it is the *end* of the path, not the first step. Tracked under [backlog](../../backlog/README.md).
 
 ## Tests
 

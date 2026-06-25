@@ -46,3 +46,33 @@ def test_latest_is_core_dev_n(monkeypatch, tmp_path):
 def test_local_is_verbatim(monkeypatch, tmp_path):
     monkeypatch.setattr(cv, "LIBRARY_JSON", _lib(tmp_path, "2.1.0-dev"))
     assert cv.compute("local") == "2.1.0-dev"
+
+
+def test_stable_rc_tag_keeps_prerelease(monkeypatch, tmp_path):
+    # An -rc tag is itself a precise prerelease semver — carried through verbatim
+    # (minus the leading v), not collapsed to the core, so the RC binary doesn't
+    # masquerade as the stable release.
+    monkeypatch.setattr(cv, "LIBRARY_JSON", _lib(tmp_path, "2.1.0-dev"))
+    assert cv.compute("stable", "v2.1.0-rc1") == "2.1.0-rc1"
+    assert cv.compute("stable", "v2.1.0") == "2.1.0"      # plain stable tag → core
+    assert cv.compute("stable", "") == "2.1.0"            # no tag → core
+
+
+def test_no_tag_fallback_counts_from_root(monkeypatch, tmp_path):
+    # First-release case: with no v* tag, `git describe --match v*` fails and the
+    # helper falls back to counting all commits from the root (rev-list HEAD).
+    import subprocess
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        if "describe" in cmd:
+            raise subprocess.CalledProcessError(128, cmd)   # no v* tag
+        # rev-list --count HEAD → some count
+        return subprocess.CompletedProcess(cmd, 0, stdout="42\n", stderr="")
+
+    monkeypatch.setattr(cv.subprocess, "run", fake_run)
+    assert cv.commits_since_last_stable() == 42
+    # The fallback range must be HEAD (not <tag>..HEAD).
+    rev_list = next(c for c in calls if "rev-list" in c)
+    assert rev_list[-1] == "HEAD"

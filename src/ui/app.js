@@ -2225,7 +2225,15 @@ async function cachedJson(url, key, force) {
         } catch (e) {
             console.warn("[update] fetch failed:", url, e && e.message ? e.message : e);
             const raw = safeLocalGet(key);                   // serve stale on failure
-            if (raw) { try { return JSON.parse(raw).data; } catch (_) { /* none */ } }
+            if (raw) {
+                try {
+                    const obj = JSON.parse(raw);
+                    // Refresh the timestamp so the per-tick check doesn't re-attempt a
+                    // failing fetch every second — back off until the next TTL window.
+                    safeLocalSet(key, JSON.stringify({ ts: Date.now(), data: obj.data }));
+                    return obj.data;
+                } catch (_) { /* none */ }
+            }
             return null;
         } finally {
             delete inFlightFetches[key];                     // clear once settled, ok or not
@@ -2272,7 +2280,9 @@ async function stableUpdate(dev, force) {
 async function devUpdate(dev, force) {
     if (!dev.firmware) return null;                          // can't resolve a manifest without the key
     const url = `${RELEASE_DOWNLOAD}/latest/manifest-${dev.firmware}.json`;
-    const manifest = await cachedJson(url, "projectMM.update.dev.v1", force);
+    // Per-firmware cache slot: the manifest URL is firmware-specific, so one variant
+    // must not reuse another's cached latest manifest.
+    const manifest = await cachedJson(url, `projectMM.update.dev.${dev.firmware}.v1`, force);
     const v = manifest && manifest.version;
     return (v && isNewer(v, dev.version)) ? v : null;
 }

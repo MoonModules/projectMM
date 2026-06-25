@@ -1,8 +1,6 @@
-# What to build next
+# Backlog — core
 
-Completed items are removed. This file is deleted when empty.
-
----
+Forward-looking to-build items for the **core / infrastructure** domain (`src/core/`, `src/platform/`, build, CI, network, persistence, UI). The light-domain counterpart is [backlog-light.md](backlog-light.md); items that genuinely span both are in [backlog-mixed.md](backlog-mixed.md). Index + overview: [README.md](README.md). Completed items are removed.
 
 ## Distribution
 
@@ -28,25 +26,7 @@ DevicesModule discovers via two strategies that merge into one list: an **mDNS b
 - **More mDNS service types + UDP** — the mDNS browse cycle (`kMdnsServices`) extends one entry at a time as classification lands for each (Home Assistant `_home-assistant._tcp`, ESPHome `_esphome._tcp`, RTP-MIDI `_apple-midi._udp`). Separately, the **four-mechanism split** (decided): discovery and messaging are separate axes, none replaces another — **mDNS** = discovery (standard, whole ecosystem), **HTTP sweep** = discovery fallback (what mDNS misses, e.g. a PC instance on :8080), **REST `/api/control`** = *reliable* messaging (config push, fleet OTA — TCP guarantees delivery, already built), **UDP** = *lossy real-time streaming* only (SuperSync clock / live timing, where drop-and-continue is fine and low latency matters). The MoonLight "messages sometimes didn't arrive" pain came from using UDP for must-arrive messages — route must-arrive over REST, reserve UDP for streams. A UDP *presence beacon* could also seed projectMM↔projectMM discovery, but mDNS is preferred there as the recognizable standard. UDP receive is a cheap non-blocking poll; UDP *send* of large frames is throughput-bound (see Async ArtNet) and belongs off the render task.
 - **Deterministic full-pipeline scan scenario (canned `httpGet`)** — `scenario_DevicesModule_scan.json` is live-only (needs a real LAN, runs on hardware). A desktop-runnable parallel that exercises scan → classify → upsert → age-out → list-serialization with *canned* `httpGet` responses would pin the whole discovery pipeline without flakiness. Needs a new platform seam: a settable response table the desktop `httpGet` consults (mirroring the existing `setTestNowMs` clock override). Today the age-out + restore + serialize paths are covered by `unit_DevicesModule_ageout.cpp` and classify by `unit_DeviceIdentify.cpp`, so this is breadth, not a gap — deferred so the httpGet-mock seam gets its own focused change rather than riding in on a review batch.
 
----
-
 ## ESP32 performance and memory
-
-### MultiplyModifier mapping-LUT memory at large grids (investigation, re-verify on classic)
-
-`scenario_perf_full` on the S3 (2026-06-17) measured the MultiplyModifier's cost across grid sizes. The finding, stated correctly: the modifier **reduces compute** (with the default 2×2 kaleidoscope the effect renders only the ¼-size logical quadrant — Noise+Multiply at 16K is 29,647µs vs 50,555µs for Noise alone), and its real cost is **memory** — the 1:N fan-out mapping LUT. Measured modifier heap cost on the S3: 16²→1.7KB, 32²→10.8KB, 64²→23.5KB, **128²(16K)→93KB** (the LUT destinations array; `nrOfLightsType` is `uint32_t` on a PSRAM board). On the S3's 8MB PSRAM this is trivial.
-
-**This is NOT a no-PSRAM blocker** — 16K Noise + Multiply has run on a classic ESP32 (no PSRAM, 320KB internal) before at **10–20 FPS** (WiFi vs Ethernet), sending frames out over **ArtNet to a display, not physical LED drivers**. It works there because classic's `nrOfLightsType` is `uint16_t` (half the LUT size) and the modifier shrinks the logical render grid. So the action is **re-verify the working classic setup when a classic board is connected** (find the config — grid, mirror, ArtNet target — that reproduces the historical 10–20 FPS), not "fix an impossibility." Worth investigating only if that re-verification shows the LUT memory has regressed since: the destinations array is the obvious lever (it stores a `nrOfLightsType` per physical destination; a 2× kaleidoscope is 1:1 in *count* so the LUT need not store fan-out > the physical count — confirm it isn't over-allocating to `maxMultiplier()` when the effective fan-out is 1). Capture the classic numbers into performance.md's multi-board table first.
-
-### Intermittent ~0.5 s LED pauses with the RMT driver (pending investigation)
-
-Observed on the bench (2026-06): LED output running on the RMT driver occasionally freezes for about half a second. Postponed by the product owner until more observations exist. Ranked suspects from the initial analysis, each with a cheap experiment:
-
-1. **WiFi modem power-save never disabled** — nothing in `src/` calls `esp_wifi_set_ps(WIFI_PS_NONE)`, so the IDF default `WIFI_PS_MIN_MODEM` is active; the radio's DTIM sleep causes exactly this class of intermittent multi-hundred-ms stall. WLED and the v1/v2 lineage disable sleep. Experiment: one line in the ESP32 platform code after association.
-2. **NetworkSendDriver sending synchronously every tick to an absent destination** (default `192.168.1.70`) — lwIP keeps re-ARPing a dead address while the send sits in the render tick. Data point (2026-06-10): the bench esp32-16mb had NetworkSend *disabled* in its persisted config, consistent with the pauses being annoying enough to switch the sender off. Experiment: point the ArtNet IP at a live host (or disable the driver) and see if the pauses stop.
-3. **`rmt_tx_wait_all_done` 1 s timeout** — a wedged transmission blocks the tick up to a full second (multi-pin: up to N×1 s). Least likely (~1 s, not ~0.5 s) but it's the only hard block in the driver itself.
-
-If pauses correlate with UI control changes, also consider the 2 s-debounced SPIFFS save stalling flash-resident code. The per-tick KPI log around a pause discriminates between these immediately.
 
 ### E1.31 multicast receive (IGMP join)
 
@@ -108,21 +88,6 @@ What we still don't know (all **physical** tests — no code change is warranted
 
 Bottom line: intermittent, build-independent, reset-correlated → a hardware/PHY issue, not a firmware bug. The earlier "slow DHCP at boot" is likely the same root cause (the PHY cycling many times before one window holds long enough to complete DHCP). Pick this up with the physical tests above before touching any code.
 
-### NoiseEffect simplex cost on ESP32 (investigation)
-
-With mirror XY at 128×128, NoiseEffect renders the 64×64 logical quadrant in **~11 ms/tick** on the Olimex (measured) — the simplex math dominates, since the Xtensa LX6 has no FPU and float math is software-emulated. (RainbowEffect on the same pipeline is much cheaper.) This is correct, non-degraded behaviour; it's only worth revisiting if a deployment needs Noise faster than ~11 ms at this grid.
-
-Worth investigating if so:
-
-- **Q16 fixed-point simplex** instead of float (kills the software-float emulation cost).
-- **Lower-precision hash** — current simplex uses a 256-entry permutation lookup; a smaller / SIMD-friendly hash may be faster on Xtensa.
-- **Strided sampling + interpolation** — render at 32×32, bilinear up to 64×64. Visual quality cost; needs A/B comparison.
-- **Inline / unroll the inner per-pixel loop** to keep the simplex state in registers.
-
-None of these are obviously free, and a fixed-point port may shift the visual signature. Defer until there's a real use case — on the no-PSRAM Olimex at large grids the tick is dominated by the synchronous ArtNet send (~35 ms), not Noise, so the effect is rarely the bottleneck there.
-
-**S3 render-only data point (2026-06-17, `scenario_perf_full`):** on the PSRAM S3 with **no output driver**, Noise is the dominant cost at every grid and there's no ArtNet floor to hide it: 16²→738µs, 32²→2,831µs, 64²→11,235µs, **128²(16K)→50,555µs (~20 FPS)** — clean ~linear-in-pixels (67×), so no fragmentation/realloc pathology, just raw simplex compute. The light effect (Checkerboard) on the same sweep is 6–11× faster (16K→7,949µs, ~128 FPS). So on a PSRAM board the heavy effect IS the 16K bottleneck (where on the Olimex the network send was). This is the strongest case for the fixed-point/strided-sampling ideas above, since a PSRAM board can run 16K grids that the network-bound Olimex never reaches. The S3 has a real FPU (LX7), so the win is less about software-float emulation and more about per-pixel simplex work; profile before committing.
-
 ### MoonDeck doc-asset endpoint hardening (backlog)
 
 `scripts/moondeck.py::_serve_doc_asset` accepts any ROOT-relative path and serves the file. Path traversal *is* blocked (`asset_path.relative_to(ROOT.resolve())`), but inside the repo any file is served — including local-only artefacts like `scripts/build/wifi_credentials.json` if present. MoonDeck binds to all interfaces by design (the existing comment in `main()` explicitly enables LAN reach), so anyone on the LAN can hit the endpoint.
@@ -181,8 +146,6 @@ Related: this is the render/output-buffer face of the same non-PSRAM fragmentati
 
 No FreeRTOS tasks are pinned today. At 16K LEDs the render task takes ~52 ms/tick; if OTA download or Improv scan causes tick-variance spikes, pin render → core 1, OTA/Improv → core 0 (where WiFi already lives via `CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_0=y`). Defer until contention is observed — neither OTA nor Improv runs during normal operation.
 
----
-
 ## Architecture
 
 ### Disabling a module should release its resources, not just stop its loop (backlog)
@@ -207,18 +170,6 @@ Today `setEnabled(false)` only makes the Scheduler skip the module's `loop`/`loo
 
 **Related:** [§ Disabling a module should release its resources](#disabling-a-module-should-release-its-resources-not-just-stop-its-loop-backlog) — a disabled module freeing its pins is what lets the same GPIO be reassigned live without a conflict-reject.
 
-### Extract shared lane-driver scaffolding when the 3rd parallel backend lands (deferred)
-
-The LcdLedDriver (S3 LCD_CAM i80) and ParlioLedDriver (P4 Parlio) share ~245 of 362 lines, and their platform-side loopback capture+verify is ~100 lines byte-for-byte identical (`platform_esp32_parlio.cpp` even notes "The RX capture half is byte-for-byte identical" to the LCD one). The status-string lifecycle (`failBuf_` / `configErr_` / `clearFailBuf` / `clearConfigErr`) is triplicated across all three LED drivers (RMT/LCD/Parlio), ~60 lines. The branch deliberately extracted the *encoders* (`LcdSlots.h` shared by i80+Parlio, `RmtSymbol.h`, `PinList.h`) on the "extract when the second user lands" rule, but stopped at the lifecycle/loopback scaffolding. **Accepted for this merge** (the reviewer agreed driver-level extraction can wait): the duplication is in mechanical lifecycle/test scaffolding, not domain logic, and a DriverBase-level refactor touching three drivers is riskier than the duplication it removes. **Do it when the third parallel backend arrives** (16-lane widening, or Teensy FlexIO), at which point the pattern is proven three ways: (a) a `detail::` platform helper for capture+verify (the only per-peripheral difference is the transmit call, pass a callback, beside the already-shared `loopbackJumperOk`), and (b) a small owned-status helper or DriverBase members for the fail/config strings. Until then the cost is line count, not correctness.
-
-### 1..8-pin LCD output (future) — would let S3 default to LCD
-
-`LcdLedDriver` requires **all 8** i80 data lanes (`kExactLaneCount = true`, `LcdLedDriver.h`): the ESP-IDF `esp_lcd` i80 bus configures every data line of the bus width and rejects a partial set, so even a few WS2812 strands claim 8 GPIOs. That's why **S3 boards default to `RmtLedDriver`** in `deviceModels.json` (RMT runs one channel per pin, 1..N) rather than LCD — a board with fewer than 8 strips can't sensibly use the LCD driver, and the 8-lane LCD bench wiring (`1,2,4,5,6,7,8,9`) collides with common peripheral pins (e.g. the mic on 4/5/6). A **1..8-pin LCD mode** (drive only the lanes named in `pins`, leave the rest unclaimed — matching Parlio's flexibility) would let the parallel S3 path run any lane count, at which point an S3 board entry could choose LCD vs RMT by intent. Parlio already does this (`kExactLaneCount = false`, 1..8 lanes), so the P4 default *is* the parallel driver. Until LCD gains the same flexibility, S3 stays on RMT by default. Low priority — RMT covers the few-strip S3 case today.
-
-### Classic ESP32 I2S 16-lane parallel LED driver (future) — beyond RMT's 8 channels
-
-The **classic ESP32 has 8 RMT TX channels** (`platform_config.h`: "8 on classic ESP32, 4 on the S3 and P4"), so RMT covers up to 8 parallel outputs on classic ESP32 — e.g. the 8-output QuinLED Dig-Octa runs fine on `RmtLedDriver`. For **more than 8 lanes on classic ESP32**, the established trick drives the **I2S peripheral in LCD/parallel mode** (the hpwit [I2SClocklessLedDriver](https://github.com/hpwit/I2SClocklessLedDriver) / FastLED I2S lineage), clocking out up to **16 lanes** from one autonomous DMA transfer. This is the classic ESP32's high-lane-count path, distinct from the S3 (LCD_CAM → `LcdLedDriver`, plus the [1..8-pin LCD item](#18-pin-lcd-output-future--would-let-s3-default-to-lcd) above) and the P4 (Parlio). No catalog board needs it today (none exceeds 8 outputs), so no board's `planned` list points at it yet; it's the marker for a future ≥9-output classic-ESP32 board. Studied under *Industry standards, our own code* — carry the idea, write our own against the project architecture (host-testable encoder in `src/light/`, peripheral seam in `src/platform/esp32/`). **When it lands**, follow the per-chip driver-gating pattern now in `main.cpp` (each LED driver's `#include` + `registerType` is wrapped in `#if defined(CONFIG_SOC_<PERIPHERAL>_SUPPORTED)`, keyed off the SOC capability macro that backs its `platform_config.h` lane-count flag): the I2S driver gates on the relevant I2S/LCD SOC macro so it compiles + registers on classic ESP32 only, and adds an `i2sLanes` capability flag beside `rmtTxChannels`/`lcdLanes`/`parlioLanes`. Prior art: hpwit's I2SClockless lineage and FastLED's I2S driver; the same parallel-DMA lineage is already credited in [LcdLedDriver.md § Prior art](../moonmodules/light/drivers/LcdLedDriver.md#prior-art).
-
 ### Runtime board presets (multi-commit, partially landed)
 
 The firmware-vs-board separation is now in place across the codebase (see [architecture.md § Firmware vs deviceModel vs board](../architecture.md#firmware-vs-devicemodel-vs-board)). `build_esp32.py --firmware <variant>` picks the compiled binary; MoonDeck deduces the physical board where the firmware uniquely identifies hardware (`esp32-eth*` ⇒ `olimex-esp32-gateway-rev-g`) and lets the user pick from a short hardcoded list otherwise. Firmware variants stay separate — `esp32-eth` saves ~670 KB flash + ~30 KB DRAM vs the default `esp32` (WiFi+Ethernet, measured); merging would erase that win.
@@ -242,7 +193,7 @@ Board preset catalog + upload (later, when the runtime config has real consumers
 - **LED output pins** — per-strip data GPIOs (1–16 outputs/board); the first real consumer (a Driver pin control) unblocks multi-output boards (QuinLED Dig-Quad/Octa, SE16, LightCrafter).
 - **Ethernet PHY config** — LAN8720/RMII (MDC/MDIO/CLK/power-pin/PHY-addr/clock-mode) vs W5500/SPI (MISO/MOSI/SCK/CS/IRQ); the consumer is the runtime `Network.eth_*` controls listed above, replacing the hardcoded Olimex pins.
 - **Power budget** — `maxPower` (Watts) per board, for a future current-limit / brightness-cap control.
-- **Audio / I2S** — SD/WS/SCK/MCLK pins, the input side of audio-reactive effects ([Pi-5 sensor note](#sensor-input-on-raspberry-pi-5--microphone-imu-line-in-post-10-multi-commit) is the desktop counterpart).
+- **Audio / I2S** — SD/WS/SCK/MCLK pins, the input side of audio-reactive effects ([Pi-5 sensor note](backlog-light.md#sensor-input-on-raspberry-pi-5--microphone-imu-line-in-post-10-multi-commit) is the desktop counterpart).
 - **Buttons & inputs** — push/toggle/lights-on, PIR, digital-input; needs an input-event concept the firmware doesn't have yet.
 - **Relays & power control** — relay / lights-on / high-low pins.
 - **Infrared** — IR receive pin (remote control).
@@ -291,67 +242,11 @@ Device-model injection over Improv shipped as **"Improv = REST over serial"** (t
 
 **Open follow-up: shared JS helpers across device-UI and web-installer.** `safeLocalGet` / `safeLocalSet` (3-line hostile-storage guards) are duplicated in `src/ui/install-picker.js` (device firmware, embedded as a C string via `embed_ui.cmake`) and `docs/install/devices.js` (web installer page, served from Pages). The two live in different build contexts so the shared extract isn't trivial — it'd need a new `src/ui/safe-storage.js` plus updates to: `embed_ui.cmake` (embed the new file), `ui_embedded.h` generator (new C array), HTTP server file routing (new path served), `release.yml` workflow staging, `preview_installer.py` staging. Five files for one 3-line helper is too much pre-merge. Worth doing when the next shared helper arrives — `relativeTime` and `formatBytes` are candidates. Two helpers earn the build-glue cost; one doesn't.
 
----
+### Live scripting — author effects/layouts/modifiers/drivers/sensor logic on-device (multi-commit, design phase)
 
-## Sensors and audio-reactive input
+Run user-authored scripts on a running device — a scripted effect, layout, modifier, driver, or core sensor rule, pushed as text and live on the next tick with no reflash/reboot — the leap WLED took with ARTI-FX and the heart of the PixelBlaze product. A scripted module **is** a MoonModule (controls, `loop()`, role, generic UI). The engine lives in core (domain-neutral: also "transform sensor data") and serves the light domain specifically. Targets in order: ESP32 classic + S3 first, then P4/other ESP32, then Teensy, then desktop. Must be blazingly fast (runs in the render hot path at 16K+ lights × 50 FPS), memory-smart (IRAM/PSRAM via `platform::alloc`, compile-once), and synced (Scheduler tick, tick-atomic hot-swap, live reconfig).
 
-### Audio-reactive follow-ups
-
-The manual level + 16-band FFT spectrum has shipped ([AudioModule](../moonmodules/core/AudioModule.md); what landed and why is in [decisions.md](../history/decisions.md)). These are the deferred follow-ups, each its own increment:
-
-- **Per-band noise-floor (kill a steady single-frequency hum)** — the bench mic picks up a constant ~258 Hz tone (a mains harmonic via the mic/supply) that lights one band even in silence. A high-pass can't remove it (it's well above the ~40 Hz DC-blocker cutoff) without also killing real bass; the clean fix is a per-band adaptive floor that learns each band's idle baseline and subtracts it, so a constant tone in one band gates to dark while the others stay sensitive. Minimal version ≈ 16 floats of state + ~16 ops/frame. This is the next concrete audio step.
-- **Adaptive conditioning** — auto noise-floor / auto-gain / smoothing so the display self-calibrates to a room ("sound off → dark, sound on → vivid") instead of being tuned by hand. A self-calibrating version was prototyped and removed; the manual `floor`/`gain` is the shipped baseline. Reinvent from scratch when wanted, and **tune it in a quiet room** — a noisy environment (a strong, varying low-frequency ambient) is the adversarial case that made the prototype hard to settle. (The per-band floor above is the first piece of this.)
-- **Adaptive noise gate** — replace the borrowed `squelch`/`floor`-as-gate with a real noise gate: asymmetric bang-bang timing (open fast, close slow), a relative "detect silence" test (thresholds as factors of a learned floor, not absolute sample counts), keying off the RMS envelope we already compute, GEQ/FFT bands left untouched. A softhack007 concept; analysed and judged in full (good idea, industry-standard, but tight on the <30ms budget; decompose into steps rather than overhaul) in [AudioModule.md § Adaptive noise gate](../moonmodules/core/AudioModule.md#adaptive-noise-gate-forward-looking). The recommended sequencing: the per-band floor above is step 1 (its complementary frequency-domain half), the relative-threshold-over-RMS is the cheap high-value cherry-pick as step 2, hysteresis/timing step 3, log-domain + soft-gate optional. Eventually retires the manual squelch.
-- **Pin auto-scan** — detect the mic's `sdPin` with `wsPin`/`sckPin` fixed (a noise-prompt + confirm convenience); ships today with explicit pin controls.
-- **Beat / onset detection** beyond the raw peak; more audio effects (2D / palette-driven frequency-reactive).
-
-### GyroDriver → core Peripheral move + AudioModule-consistency pass (branched, not merged)
-
-A working **GyroDriver** (MPU6050 IMU over I²C) exists on an unmerged branch (commit `11f8eb7`, "Add GyroDriver (MPU6050) + generic platform I2C layer"); it is not in this branch's tree. This entry reverse-engineers that commit so the move is tracked now. **Verify against the real implementation when the branch merges, then delete this entry.**
-
-What the commit contains (reverse-engineered):
-
-- `src/light/drivers/GyroDriver.h` — reads an MPU6050 over I²C and surfaces five read-only telemetry controls (`gyroX`/`gyroY`/`gyroZ` rates in °/s, `pitch`/`roll` tilt angles). Polls the sensor in `loop20ms()` (50 Hz), formats the display strings in `loop1s()`. WHO_AM_I probe + wake on `setup()`, big-endian 14-byte burst parse, `atan2`-based tilt (no fusion filter).
-- A **generic, domain-neutral platform I²C master** (`platform::i2cInit`/`i2cWriteReg`/`i2cReadRegs`, 7-bit addressing) so future sensors reuse it; ESP32 impl on the IDF v6 `i2c_master` driver in a new `platform_esp32_i2c.cpp`, plus an MPU6050-shaped desktop simulation so the UI and host tests see live values without hardware.
-- `unit_GyroDriver.cpp` — WHO_AM_I probe, simulated burst parse, control formatting, time-ramp tracking.
-
-The move: it currently masquerades as an input-only **driver** under the Drivers container (a no-op `setSourceBuffer(Buffer*) override {}` is the tell). It belongs as a **SystemModule Peripheral** child, exactly like [AudioModule](../moonmodules/core/AudioModule.md) — both are sensor peripherals that poll hardware and publish read-only telemetry. On the move, make it consistent with AudioModule (the established sibling pattern):
-
-- **Relocate** `src/light/drivers/GyroDriver.h` → `src/core/` and its spec `docs/moonmodules/light/drivers/GyroDriver.md` → `docs/moonmodules/core/`; change `role()` to `Peripheral`; delete the `setSourceBuffer` no-op; rewrite the doc's "input-only driver under the Drivers container" framing.
-- **Pin controls + rebuild path.** GyroDriver hardcodes SDA/SCL (`static constexpr` 21/22, with its own "Hardcoded until BoardModule exposes I2C pin mapping" comment). AudioModule already shows the pattern: editable `uint16` pin controls + `controlChangeTriggersBuildState` + a `reinit()` on `onBuildState`. Adopting it retires the hardcoded-pins TODO and satisfies the robustness rule (reconfigure in any order).
-- **Lifecycle.** GyroDriver has `setup()` only — no `teardown()`. Add teardown for symmetry with AudioModule's setup/teardown/reinit (the shared I²C bus has little per-instance state to free, so this is consistency, not a leak fix).
-- **Document the cadence difference.** GyroDriver polls in `loop20ms()` (50 Hz is plenty for tilt); AudioModule reads in `loop()` every tick because I²S DMA must be drained promptly or it overflows. Both are correct; add a one-line "why this cadence" comment at each so the two siblings aren't "harmonised" into a bug.
-- **Wire it** in `main.cpp` as a Peripheral child of System under `markWiredByCode`, the same shape as AudioModule.
-
-Already done on this branch (the reverse direction): AudioModule's two live read-outs were switched from `addText`+`setReadOnly` to `addReadOnly` (the display-only type, matching SystemModule and the way GyroDriver already does it correctly) — so the telemetry idiom is consistent before the gyro branch even lands.
-
-### Sensor input on Raspberry Pi 5 — microphone, IMU, line-in (post-1.0, multi-commit)
-
-Audio-reactive lighting (and motion-reactive) is core to what WLED-MM / MoonLight are known for. The Pi 5 is the right host for it: it has the CPU and RAM for real FFT-based audio analysis that the Xtensa ESP32 struggles with, and a full Linux audio + I²C stack. None of this exists today — the codebase has no sensor, audio, or IMU concept, and the Pi currently runs the **desktop** platform backend (there is no `src/platform/rpi/`), which has no hardware access. So this is a domain expansion built on a real platform-backend prerequisite, not a small add.
-
-**Target sensors and their Pi 5 interfaces:**
-
-- **Microphone** — I²S MEMS mic, or a USB audio device read via ALSA. The high-value one: FFT → frequency bands + beat detection drive audio-reactive effects.
-- **Line-in** — the Pi 5 has no native analog input, so this is a USB audio interface / DAC HAT feeding the same audio pipeline as the mic; only the source differs.
-- **IMU / gyro** — an I²C device (MPU-6050 / 9250-class) on the Pi's I²C bus; tilt / motion → effect parameters.
-
-**How it fits the architecture (the load-bearing part):**
-
-1. **The module category exists — `ModuleRole::Peripheral`.** Peripherals are user-add/deletable children of SystemModule (a gyro `Peripheral` already lands there via the GyroDriver→core move). What's missing for audio-reactive is the *consumption* side: a sensor reads hardware and *produces* values (audio bands, IMU axes) that effects consume — the producer side of the [producer/consumer data-exchange model](../architecture.md#data-exchange-between-modules) (a sensor produces an `AudioFrame` / `ImuState` the way effects produce a buffer that drivers consume). Define the producer struct domain-neutrally so it isn't audio-specific. Today's peripherals are display-only; wiring them into effects is the new work.
-2. **All hardware access stays behind the platform boundary.** New `platform::` APIs (e.g. `readAudio()` returning PCM/FFT, `readImu()` returning axes) with the ALSA / I²S / I²C implementation in a real `src/platform/rpi/` backend — which is itself the prerequisite that doesn't exist yet (the Pi uses the desktop backend today). No ALSA/I²C include or call outside `src/platform/`.
-3. **Effects consume sensor data the same way they read the layer.** An audio-reactive effect reads the current `AudioFrame` (bands/level/beat) the way `PreviewDriver` reads what `Layer` produces — through a plain data structure wired in `main.cpp`, not a direct hardware call.
-
-**Increments (each a normal domain addition, picked up one at a time):**
-
-1. A real `src/platform/rpi/` hardware backend (GPIO/I²C/I²S/ALSA) — the prerequisite; until it lands, the Pi runs the desktop backend with no sensors.
-2. The producer struct(s) (`AudioFrame` / `ImuState`) + the `platform::read*` APIs. (The `Peripheral` role + SystemModule add/delete already exist.)
-3. The first audio peripheral — **MicrophoneModule** (canonical, highest value: FFT bands + beat).
-4. The first audio-reactive effect(s) consuming it.
-5. IMU and line-in slot into the same source-module + platform-API shape afterwards.
-
-Study the proven audio pipeline in MoonLight / WLED-MM (FFT band layout, AGC, beat detection) to inform our own — reference the approach, don't port their code, per [history](../history/README.md) practice. Specs before code: a `MicrophoneModule.md` (and the source-category contract) get written and reviewed before implementation.
-
----
+The **bottom-up landscape survey** is done — [livescripts-analysis-bottom-up.md](livescripts-analysis-bottom-up.md): deep-reads the [ESPLiveScript fork](https://github.com/ewowi/ESPLiveScript/tree/fix-warnings) (a from-scratch C-like JIT that emits **native Xtensa** machine code — blazingly fast but **Xtensa-only**, so it covers classic+S3 and *not* P4/Teensy/desktop), surveys the field (PixelBlaze bytecode VM + web editor, WLED ARTI-FX AST-walking interpreter, embedded VMs / WASM / lightweight multi-ISA JITs), and extracts the load-bearing decisions (execution strategy, the IR seam ESPLiveScript lacks, the MoonModule binding, the per-pixel contract, memory placement, sync, sandboxing). Its thesis to validate: a **portable bytecode-VM baseline that runs on every target on day one + an optional native back-end for the hot ISAs behind a shared IR**. **Next: the top-down redesign** — the prompt that generates `livescripts-analysis-top-down.md` is at the bottom of the bottom-up doc; it produces the reference architecture + staged spike plan. Implementation is multi-commit, spike-ordered, after the top-down lands. Credits: [history/hpwit-ESPLiveScript.md](../history/hpwit-ESPLiveScript.md).
 
 ## HTTP and OTA
 
@@ -369,42 +264,6 @@ What to build (~4 h):
 ### HTTP file serving blocks the render tick (backlog)
 
 `HttpServerModule::handleConnection()` serves large embedded files (`app.js`, `style.css`) with the blocking `TcpConnection::write` — a page load can briefly stall `loop20ms`. One-shot per load (lower priority than the per-tick preview issue, which is fixed). Fix: serve large HTTP responses with `writeChunks` (the same non-blocking path used for preview frames).
-
----
-
-## Effects and preview
-
-### Add real z-axis variation to 2D effects (pending)
-
-Only **NoiseEffect**, **PlasmaEffect** and **RipplesEffect** have z-aware math. The other honest-D2 effects use `Layer::extrude` to duplicate the z=0 plane, so every z-slice is identical on 3D layers. Candidates for genuine D3 promotion: Metaballs/GlowParticles (add z to blob coordinates), Plasma palette/Spiral (add z-driven phase term), Fire (z-drift heat grid), Rings/LavaLamp/Checkerboard/Particles (add z to each element). Prioritise after seeing real 3D installations; each promoted effect also needs its `dynamicBytes` budget for the full 3D buffer.
-
-### Full-density interpolated preview for large layouts (backlog)
-
-The preview index-downsamples a large layout to fit the WS send budget (e.g. 128×128 = 16384 lights → ~1639 sent at stride 10), so the UI shows a sparse sample, not every light. To show **all** lights at their real positions with **interpolated** colours for the unsent ones:
-
-- Decouple the `0x03` coordinate-table density from the per-frame `0x02` stride. Positions are static and sent once, so the table can carry **all** light coordinates (16384 × 3 = ~48 KB one-time — acceptable off the per-frame path, possibly chunked) while the per-frame RGB stays strided to protect ArtNet/the link.
-- The browser holds the full position set and, per frame, interpolates each unsent light's colour from its nearest sent neighbours (the sent indices are known from the stride). True positions, guessed colours — better than the removed dense-box block-replicate because positions are exact.
-- Open questions: 48 KB one-time table vs `MAX_WRITE_CHUNKS` / send-buffer (needs chunked send or a raised cap, with the same partial-write care as `writeChunks`' drain); interpolation cost on a 16384-point cloud each frame in JS; whether nearest-neighbour or weighted is worth it.
-
-Not simple — own planning pass. Until then the preview is a faithful strided *sample* (correct shape/colour/motion, not per-pixel). A cheap interim (point-size scaled by stride to fatten samples into their cells) was tried and reverted as not what's wanted — it filled the volume but didn't add real points.
-
-### Self-describing preview frame header (mid term)
-
-The preview wire format is a private opcode protocol: `0x02` per-frame channels, `0x03` coordinate table, each a hand-rolled byte layout, and the colour payload is **always RGB** regardless of the buffer's `channelsPerLight`. Every new data kind (RGBW display, beam direction, …) means inventing another opcode and another fixed layout by hand. The minimal fix that stops that sprawl: a small **typed header** — `[type][format][count][stride]` where `format` enumerates `{RGB, RGBW, …}` — so one message kind carries any per-light channel layout and the browser shader reads `format` to interpret the payload. Do it concrete-first, when RGBW *display* (below) is actually wanted, not speculatively. Prereq for both items below.
-
-### RGBW preview end-to-end (mid term)
-
-The light `Buffer` already holds `channelsPerLight = 4` (RGBW), and the device output drivers handle it, but the **preview only ever sends/draws RGB** — the W channel is invisible in the UI. (The full-res fast path no longer penalises a cpl≥3 buffer — see the short-term fix — but it still drops W on the wire.) Once the self-describing header lands, carry the W channel on the wire and render it in the shader (W as a warm-white tint / brightness lift on the disc). Small, but gated on the header so it isn't another bespoke opcode.
-
-### Fixture model — moving heads, beams (long term)
-
-Today a "light" is a point at a static coordinate with a colour. A **moving head** is a fixture that emits a *beam* in a direction it controls live (pan + tilt), plus colour, beam-width, etc. — per-light **vector** state, not just colour, and a different draw (a cone/ray, not a disc). The static-positions-`0x03` + colour-`0x02` split can't express "this fixture's beam now points here." The industry-standard model is **DMX/GDTF fixtures**: a fixture has a position *and* a set of typed attributes (color, pan, tilt, beam). The preview becomes a fixture renderer (disc for a pixel, cone for a beam); this is also the "make Preview a general-purpose module, not light-specific" goal. A domain-model change (the fixture/attribute model), not just transport. Plan when moving heads are actually on the bench.
-
-### Extract the resumable backpressure transport as a domain-neutral channel (long term)
-
-The preview's transport — resumable cross-tick send from a stable buffer + newest-wins backpressure drop + adaptive graceful degradation (see [architecture.md § graceful degradation under transport backpressure](../architecture.md)) — is **payload-agnostic**: any bulky throttled stream (a future MJPEG/video preview, fixture-state streams, fleet telemetry) could ride it. The *payload* model (count/stride/RGB) is light-specific; the *byte-pump* is not. When a second consumer for this transport appears, promote the pump into a domain-neutral core primitive (a `ThrottledChannel`-style sink) that PreviewDriver becomes *a* producer on, rather than owning the protocol. Concrete-first: extract on the second use, not before — until then the seam stays inside HttpServerModule/PreviewDriver.
-
----
 
 ## Testing
 
@@ -424,8 +283,6 @@ The preview's transport — resumable cross-tick send from a stable buffer + new
 Run a bare-leaving scenario before a tree-assuming one and the latter fails pre-flight ("references ids neither on the device nor added by an earlier step"). Each passes **in-process** (fresh tree per scenario — the authoritative gate) and **live individually** (after a clean boot); only the chained live run trips. Not a product bug — a consequence of the "scenarios own their state, no restore" model the canvas-preparing scenarios follow, which the older ones predate.
 
 Fix options: (a) make every live mutate scenario clear+rebuild its own canvas (consistent with the newer ones) so order never matters; or (b) have the live runner reboot / restore the canonical tree between scenarios. (a) is the cleaner long-term shape. Until then, the in-process suite is the gate; live full-suite runs need a clean boot per scenario, or run scenarios individually.
-
----
 
 ## Housekeeping
 
@@ -466,18 +323,62 @@ Rounds 1 (board + Ethernet-only) and 2 (Parlio LED driver) have landed. Remainin
 
   **Dev-loop note — reading the P4's runtime log over USB.** The P4-NANO's primary console is **UART on GPIO 37/38** (`CONFIG_ESP_CONSOLE_UART_DEFAULT`), not the USB port, so `ESP_LOGI` / `mm_net` lines are *not* visible over `/dev/cu.usbmodem*` by default — only the ROM boot banner and `std::printf`-to-stdout (which routes to the **secondary** USB-Serial-JTAG console) come through. Two workarounds when you need the runtime log over USB: (a) temporarily set `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y` (note the JTAG endpoint re-enumerates when the app starts, so a reader must reconnect across the drop — `idf.py monitor` handles it; a plain fixed `pyserial` handle dies); or (b) hang a USB-UART adapter on GPIO 37/38. This cost real time during the P4 no-DHCP hunt; the fastest signal there turned out to be a `printf` of the runtime struct (stdout → secondary JTAG console) plus a `git worktree` bisect (build an old commit, flash, check LAN reachability) to prove code-vs-hardware without needing the log at all.
 
-### Drop the i80 WR/DC sacrificial pins (S3 LcdLedDriver) via direct LCD_CAM
-
-The S3 i80 LED path costs **two GPIOs the LEDs never use**: the IDF `esp_lcd` i80 bus hard-requires a WR (pixel clock) and a DC pin on real GPIOs (`esp_lcd_panel_io_i80.c`: `wr_gpio_num >= 0 && dc_gpio_num >= 0`), even though WS2812 strands ignore both. Today `LcdLedDriver` keeps overridable defaults (clockPin=10, dcPin=11) — peripheral-required, not user-strand wiring, so a default cannot do harm. **Two ways to reclaim the pins, neither trivial:**
-- **Cannot reuse a data pin for WR/DC.** A GPIO carries exactly one peripheral signal (`esp_rom_gpio_connect_out_signal` binds data_sig[i] / wr_sig / dc_sig each to its own pin); routing WR onto a data lane would clock the *clock* waveform onto that strand instead of its colour bytes. WR/DC must be distinct *physical* pins from the 8 data pins. (You CAN already point them at any otherwise-free or unstrapped GPIO via the controls — that's the "reuse a pin you're not using" answer; it's the *spare* pin you avoid, not a data pin.)
-- **Zero WR/DC pins needs bypassing esp_lcd** and driving the LCD_CAM peripheral's registers directly (hpwit's I2SClockless approach — legacy parallel mode has no DC concept and emits WR without a dedicated config pin). That's the only path to 8-pins-total on the S3. Cost: leaving the recognisable IDF `esp_lcd` API for register-banging (a *Common patterns first* hit), re-proving the driver bit-perfect on hardware (the loopback self-test is the proof). Benefit: 2 GPIOs back on a tight S3 board. Its own increment, not a pin-default tweak. Parlio (P4) already needs no extra pins (`clk_out_gpio_num = GPIO_NUM_NC`), so this is S3-i80-only.
-
-### LCD/Parlio DMA frame buffer → PSRAM (free internal SRAM for big frames)
-
-For driving **lots of LEDs**, internal SRAM is the scarce resource and the parallel-driver DMA frame buffer is the biggest consumer (8 lanes × lights × outCh × 24 slot-bytes + latch pad). Today both parallel drivers allocate it as `MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL` (`platform_esp32_lcd.cpp`, `platform_esp32_parlio.cpp`) — **internal SRAM only**, so a large frame can exhaust DRAM while PSRAM sits unused. The IDF confirms both peripherals' GDMA **can burst straight from PSRAM** on the S3/P4: `esp_lcd_panel_io_i80.c` sets `access_ext_mem = true` and itself allocates the buffer with `MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA` when asked; `esp_driver_parlio/src/parlio_tx.c:158` sets `access_ext_mem = true  // support transmit PSRAM buffer`. (RMT already does the right thing — its symbol buffer goes through `platform::alloc`, which is PSRAM-first with an internal fallback.)
-
-**The change:** allocate the LCD/Parlio buffer `MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM` first, falling back to internal when PSRAM is absent/full, using the **external-memory alignment** the IDF requires (`gdma_get_alignment_constraints` → `ext_mem_align`, typically the cache line — larger than the current 64-byte internal alignment) and keeping the buffer cache-aligned + its size a multiple of that alignment. **Why it's its own increment, not this commit:** it changes the proven hot DMA path, PSRAM DMA has real caveats (cache-line alignment, write-back/coherence on the encode→DMA handoff, and lower PSRAM bandwidth that the IDF guards with a CPU-MAX DFS lock during transmit), and it **must be re-proven on S3 + P4 hardware** (the loopback self-test bit-verifies it, then a real strip). Measure the bandwidth headroom too: a very wide, long frame at speed may want internal SRAM regardless. Scope: the two `heap_caps_aligned_alloc` sites + their `bufferBytes` alignment rounding + the capacity check; no domain-code change (the encode loop already writes through `dmaBuf_`).
-
 ### WiFi runtime disable (backlog)
 
 Compile-time answer already ships: `--firmware esp32-eth` excludes the WiFi stack. The default `esp32` already *cascades* — `ethInit()` runs first, WiFi only comes up if no PHY responds — so a wired board never associates over WiFi. What's still missing is reclaiming WiFi's **heap**: even when Ethernet wins the cascade, `esp_wifi_init`'s RX buffers stay allocated. This item skips that init entirely once Ethernet is up, freeing ~16 KB. Defer until the heap saving is worth the teardown-ordering risk.
+
+
+## UI
+
+Forward-looking companion to the shipped UI spec, [moonmodules/core/ui.md](../moonmodules/core/ui.md). The live spec describes the UI as shipped; this file holds what is **not** in it yet: deferred items, open design questions for 1.0, and the gap analysis against projectMM v1. The backward-looking half (how v1/v2 actually worked, patterns consciously rejected, recorded quirks) lives in [history/v1-inventory.md](../history/v1-inventory.md).
+
+### Deferred to 1.x
+
+- Side nav with drag-reorder of root modules (root order is fixed in `main.cpp` today; not painful — and arguably correct, see the gap-analysis note below)
+- Health panel (`<details>` + `GET /api/test`)
+- Log panel (`<details>` + WS `{t:"log",m:"…"}`)
+- Core affinity badge (C0/C1) — only meaningful when core pinning lands
+- Module `category()` field — taxonomy beyond `role()` for the picker (decision: derive from `role()` for now)
+
+### Open design questions
+
+These don't block the shipped baseline but should be answered before 1.0:
+
+- **Multi-layer UI** — [architecture.md](../architecture.md) plans for N layers blended into one Drivers. The current card layout shows one Layer. Likely needs a tab/accordion to switch layers, or a per-layer column.
+- **Modifier chain visualization** — show the modifier order visually (the `children[]` order is the apply order). Today they're a flat list.
+- **Presets** — save/load named bundles of control values. Persistence already stores them; needs a UI surface.
+- **Canvas/node-graph view** — v2 attempted this. Powerful for complex setups but doubles the UI surface. A reasonable v3 follow-up gated on user demand.
+
+### Gap analysis — v1 features not yet in v3
+
+Inventory of v1 frontend behaviours v3 lacks, with a recommendation each. Items already shipped (control types, dragTs, two-timescale inputs, type picker, theme, scroll-shrink preview, status bar, reset-to-default, fps/ms toggle, drag reorder, side nav + drawer + footer) are not repeated.
+
+Legend: **Adopt-1.0** (small, high value) · **Defer-1.x** (needs engine work or a feature we lack) · **Drop** (not needed).
+
+### Per-card features
+
+| v1 feature | v3 today | Recommendation |
+|---|---|---|
+| Header: setup-dot before name | name only | **Defer-1.x** — needs `setupOk()` + `health()` on MoonModule with a real failure mode. Today both would always be `true` / `""`. |
+| Module ID shown separately from name | name only | **Defer-1.x** — add when instances need disambiguating (e.g. two effects of the same type under one Layer). |
+| Category emoji badge on the card header | role emoji in the picker, not on the card | **Defer-1.x** — `ROLE_EMOJI` already exists in `app.js`; showing it per-card is a small step if card scannability needs it. |
+| Core affinity badge (C0/C1) | core pinning not implemented | **Drop** until core pinning is a real engine feature. |
+| Memory split heap vs PSRAM | `static+dynamic` shown on the card | **Defer-1.x** — splitting `dynamicBytes` further needs `platform::isPsramPointer(p)` or per-alloc tracking, neither exists yet. |
+
+### WebSocket / panels
+
+| v1 feature | v3 today | Recommendation |
+|---|---|---|
+| Drag-to-reorder *root* modules (`POST /api/modules/reorder`) | not supported | **Drop** — root order is fixed in `main.cpp` and that's correct: Layouts/Layers/Drivers + system modules are mandatory and ordered. Children reorder via drag already. |
+| Log channel `{t:"log",m:"…"}` pushed by server | no server log push | **Defer-1.x** — needs an engine-side log producer. Gate: when boot/network/persistence logs become interesting to non-developers. |
+| Schema channel `{t:"schema",modules:[…]}` for tree-shape changes | full `/api/state` push every update | **Drop** — keep the full-tree push; re-evaluate only if WS bandwidth becomes a problem with large trees. |
+| System health panel (polls `GET /api/test`, pass/fail table) | none | **Defer-1.x** — needs a runtime `/api/test` that runs the doctest suite; `ctest` covers this for now. |
+| Log panel (ring buffer, severity colouring, stick-to-bottom, `GET /api/log` backfill) | none | **Defer-1.x** — pairs with the log WS channel; both arrive together. |
+
+### Cost / decision table
+
+| Cost class | Items |
+|---|---|
+| Tiny (< 30 lines, no backend) | category emoji badge on the card header |
+| Medium (minor backend change) | help-link mapping (needs docs site); richer `category()` than role()-derived |
+| Large (separate plan) | health panel + `/api/test`; log panel + WS log channel; OTA + GitHub-update badge; full multi-layer UI; presets UI |

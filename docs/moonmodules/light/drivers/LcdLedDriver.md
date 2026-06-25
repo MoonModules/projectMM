@@ -36,7 +36,7 @@ Full case list in the generated [unit tests § LcdLedDriver](../../../tests/unit
 
 - **Encoder (CI, host):** byte-exact 3-slot triplets — transpose across lanes, MSB-first, the unequal-lane idle-LOW rule, GRB via Correction, RGBW rows.
 - **Driver (CI, host):** lane slicing (including unequal leds-per-lane), frame-byte math (RGBW growth, alignment rounding), bad-pin status + recovery, the exactly-8-pins rule, the empty-default idle (no GPIO claimed until pins are set), zero-grid robustness, teardown.
-- **`loopbackTxPin` control (CI, host):** the conditional control — bound always, shown only while `loopbackTest` is on. The lane-0 override mechanism is shared with the Parlio driver (same `ParallelLedDriver` base) and hardware-verified there; the LCD hardware path itself is exercised by the loopback self-test above. The catalog-add path is verified on the sibling RMT/Parlio drivers (S3 boards currently default to RMT — LcdLed needs all 8 lanes, see the [backlog 1..8-pin LCD note](../../../backlog/backlog.md)).
+- **`loopbackTxPin` control (CI, host):** the conditional control — bound always, shown only while `loopbackTest` is on. The lane-0 override mechanism is shared with the Parlio driver (same `ParallelLedDriver` base) and hardware-verified there; the LCD hardware path itself is exercised by the loopback self-test above. The catalog-add path is verified on the sibling RMT/Parlio drivers (S3 boards currently default to RMT — LcdLed needs all 8 lanes).
 - **Hardware:** the loopback self-test above (jumper), and tick-scaling across grid sizes proves frames really clock out.
 
 ## Prior art

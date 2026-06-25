@@ -43,7 +43,7 @@ IDF_SEARCH_PATHS = [
 # *build-time* cost only: the linker dead-strips the unused code, so they add ~0
 # bytes of flash to esp32p4-eth (our coprocessorWifi() is the empty stub there, so
 # no esp_hosted symbol is referenced — confirmed: their .text size is 0x0 in the
-# .map). Left as-is rather than fought; see docs/backlog/backlog.md.
+# .map). Left as-is rather than fought; see docs/backlog/.
 ETH_ONLY_EXCLUDE = ["esp_wifi", "wpa_supplicant", "esp_coex"]
 
 # Firmware catalogue. Each entry describes one shipping firmware variant.
@@ -486,7 +486,7 @@ def main():
     #   rm -rf build/esp32-esp32p4-eth-wifi && idf.py -B <dir> -DSDKCONFIG=<dir>/sdkconfig \
     #     -DSDKCONFIG_DEFAULTS="..." set-target esp32p4 && (same) build
     # but this wrapper does not yet reproduce it reliably — tracked in
-    # docs/backlog/backlog.md (ESP32-P4 round 3). Until fixed, build this variant
+    # docs/backlog/ (ESP32-P4 round 3). Until fixed, build this variant
     # with the manual sequence above.
     extra = firmware_cmake_args(firmware, args.release, args.version)
 

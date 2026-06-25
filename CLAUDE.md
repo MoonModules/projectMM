@@ -178,7 +178,7 @@ The "end users will use this" moment. Per-release criteria are defined by the pr
 
 5. **Changelog / release notes**: drafted in the GitHub release body. Skip only for unreleased pre-1.0 tags.
 6. **Cross-platform smoke**: run scenarios on every supported platform (today: PC + ESP32; later: + Teensy, RPi), if the release claims new platform support or the version bumps a major or minor.
-7. **Principles audit**: sweep `docs/` (except `docs/backlog/` and `docs/history/`) and `src/` for forward-looking language ("roadmap", "will be", "planned", "in the future", "currently lacks", `TODO`, `FIXME`) and other violations of § Principles. Acceptable hits carry a one-line justification; the rest get rewritten present-tense or moved to `docs/backlog/backlog.md` / `docs/history/`. The reviewer agent can run this end-to-end. Skip only for releases where the diff against the previous tag is doc-empty.
+7. **Principles audit**: sweep `docs/` (except `docs/backlog/` and `docs/history/`) and `src/` for forward-looking language ("roadmap", "will be", "planned", "in the future", "currently lacks", `TODO`, `FIXME`) and other violations of § Principles. Acceptable hits carry a one-line justification; the rest get rewritten present-tense or moved to `docs/backlog/` / `docs/history/`. The reviewer agent can run this end-to-end. Skip only for releases where the diff against the previous tag is doc-empty.
 
 What the agent reads:
 - Always: `CLAUDE.md`, `architecture.md`
@@ -196,8 +196,10 @@ docs/
   testing.md               ← test inventory and strategy
   performance.md           ← per-module timing, memory, sizeof for each platform
   backlog/                 ← forward-looking: what to build next (not present-tense)
-    README.md              ← index: what's here (to-build list + design studies + in-flight draft specs)
-    backlog.md             ← the prioritised to-build list
+    README.md              ← landing page: overview of every item + index (the rest of the system links here, not into items)
+    backlog-core.md        ← to-build list, core / infrastructure domain (+ UI)
+    backlog-light.md       ← to-build list, light domain (drivers, effects, preview, sensors)
+    backlog-mixed.md       ← to-build list, items spanning both domains
   history/                 ← backward-looking: accumulated wisdom
     README.md              ← index: what's here + cross-repo trends + digest prompt
     decisions.md           ← actions, lessons, proven patterns
@@ -220,7 +222,7 @@ Do **not** repeat facts the `.h` already states: the controls list (the .h has `
 
 The `history/` folder is the distilled experience of years of building LED/light systems, from WLED, WLED-MM, StarLight, MoonLight, through projectMM. It contains proven patterns, memory tricks, control mechanisms, and hard-won lessons, studied under the [*Industry standards, our own code*](#principles) principle. Per-project credits live in the `history/` digests and the per-module "Prior art" sections.
 
-The `backlog/` folder is its forward-looking counterpart: `backlog.md` is the prioritised to-build list, design studies sit alongside it, and a spec for a not-yet-built module can live here as a plain draft `.md` until it ships (its final spec then goes to `moonmodules/` and the draft is deleted). Both `history/` and `backlog/` are exempt from the present-tense rule and agents don't read them automatically; only when planning new work. Neither folder only accumulates: per [*Mandatory subtraction*](#process-rules), both shrink as well — shipped backlog items and absorbed history entries are deleted, since the git commits are the permanent record and these folders are just the working narrative above it.
+The `backlog/` folder is its forward-looking counterpart: the to-build list is split by domain (`backlog-core.md` / `backlog-light.md` / `backlog-mixed.md`) with `README.md` as the landing page the rest of the docs link to, design studies sit alongside it, and a spec for a not-yet-built module can live here as a plain draft `.md` until it ships (its final spec then goes to `moonmodules/` and the draft is deleted). Both `history/` and `backlog/` are exempt from the present-tense rule and agents don't read them automatically; only when planning new work. Neither folder only accumulates: per [*Mandatory subtraction*](#process-rules), both shrink as well — shipped backlog items and absorbed history entries are deleted, since the git commits are the permanent record and these folders are just the working narrative above it.
 
 ## Code Style
 

@@ -62,10 +62,18 @@ def commits_since_last_stable() -> int:
     return int(out)
 
 
-def compute(channel: str) -> str:
+def compute(channel: str, tag: str = "") -> str:
     version = json.loads(LIBRARY_JSON.read_text(encoding="utf-8"))["version"]
     core = core_version(version)
     if channel == "stable":
+        # A vX.Y.Z-rcN tag is itself a precise prerelease semver — carry it through
+        # verbatim (minus the leading v) rather than collapsing to the core X.Y.Z, or
+        # the RC binary/manifest would lie about being the stable release. A plain
+        # vX.Y.Z (or no tag) yields the core.
+        if tag:
+            t = tag[1:] if tag.startswith("v") else tag
+            if "-" in t:  # has a prerelease identifier (rc, beta, …)
+                return t
         return core
     if channel == "latest":
         return f"{core}-dev.{commits_since_last_stable()}"
@@ -76,10 +84,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--channel", choices=["stable", "latest", "local"], default="local",
-        help="stable → core semver; latest → <core>-dev.<N>; local → library.json verbatim",
+        help="stable → core semver (or the tag's prerelease semver for an -rc tag); "
+             "latest → <core>-dev.<N>; local → library.json verbatim",
+    )
+    parser.add_argument(
+        "--tag", default="",
+        help="The release tag (e.g. v2.1.0-rc1). For a prerelease tag on the stable "
+             "channel, its semver is used verbatim instead of the core.",
     )
     args = parser.parse_args()
-    print(compute(args.channel))
+    print(compute(args.channel, args.tag))
     return 0
 
 

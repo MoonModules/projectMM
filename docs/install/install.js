@@ -136,6 +136,14 @@ document.addEventListener('DOMContentLoaded', () => {
       window.removeEventListener("beforeunload", unloadGuard);
       unloadGuard = null;
     }
+
+    // Only http(s) URLs are safe as a link href (same guard as
+    // myDevices.addProvisionedDevice) — a malformed value must never become a
+    // javascript:/data:/file: link.
+    function isHttpUrl(u) {
+      try { const p = new URL(u); return p.protocol === "http:" || p.protocol === "https:"; }
+      catch (_) { return false; }
+    }
     document.getElementById("done-close").addEventListener("click", closeModal);
     document.getElementById("error-close").addEventListener("click", closeModal);
 
@@ -492,6 +500,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // it can be applied later from MoonDeck on the LAN — else just close.
         if (board && applyDefaults) {
           showSection("done");
+          // No device address → not online; don't claim "Device is online!" (the
+          // default header set above).
+          document.getElementById("done-status").textContent = "Flashed";
           document.getElementById("done-url").removeAttribute("href");
           document.getElementById("done-url").textContent = "";
           document.getElementById("done-url-mdns").hidden = true;
@@ -507,14 +518,16 @@ document.addEventListener('DOMContentLoaded', () => {
       // Always show the IP link (guaranteed to work). When the boot serial also
       // reported the device's <deviceName>.local name, show it as a second link —
       // it survives a DHCP lease change but only resolves where mDNS works.
+      // Only assign href for http(s) URLs (same guard as myDevices.addProvisionedDevice),
+      // so a malformed boot-log value can't become a javascript:/data: link.
       const a = document.getElementById("done-url");
       a.textContent = url;
-      a.href = url;
+      if (isHttpUrl(url)) a.href = url; else a.removeAttribute("href");
       const aMdns = document.getElementById("done-url-mdns");
       if (mdns) {
         const mdnsUrl = `http://${mdns}/`;
         aMdns.textContent = mdnsUrl;
-        aMdns.href = mdnsUrl;
+        if (isHttpUrl(mdnsUrl)) aMdns.href = mdnsUrl; else aMdns.removeAttribute("href");
         aMdns.hidden = false;
       } else {
         aMdns.hidden = true;
@@ -874,7 +887,11 @@ document.addEventListener('DOMContentLoaded', () => {
           onProgress: handleProgress,
           uiWaitForPortRetry,
           onSuccess: () => {
+            disarmUnloadGuard();   // erase finished — drop the tab-close warning
             showSection("done");
+            // Reset any header left by a prior install in this session — erase is
+            // not "Device is online!".
+            document.getElementById("done-status").textContent = "Erase complete";
             const a = document.getElementById("done-url");
             a.removeAttribute("href");
             a.textContent = "Erase complete — flash a fresh firmware to use the device again.";

@@ -148,7 +148,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ steps.tag.outputs.tag }}" = "latest" ]; then CH=latest; else CH=stable; fi
-          V=$(python scripts/build/compute_version.py --channel "$CH")
+          # Pass the tag so an -rc tag yields its own prerelease semver (not the core).
+          V=$(python scripts/build/compute_version.py --channel "$CH" --tag "${{ steps.tag.outputs.tag }}")
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
       - name: Build firmware
@@ -305,7 +306,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ steps.tag.outputs.tag }}" = "latest" ]; then CH=latest; else CH=stable; fi
-          V=$(uv run python scripts/build/compute_version.py --channel "$CH")
+          # Pass the tag so an -rc tag yields its own prerelease semver (not the core).
+          V=$(uv run python scripts/build/compute_version.py --channel "$CH" --tag "${{ steps.tag.outputs.tag }}")
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
       - name: Generate ESP Web Tools manifests (release-asset URLs)
