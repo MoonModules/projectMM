@@ -8,9 +8,16 @@ filenames lie about the version they ship.
 Tag → version mapping: strip a leading 'v'. Both `v1.0.0` and `1.0.0` are
 accepted as the tag, but the in-tree version is the bare semver.
 
-The `latest` tag is a moving prerelease published on every merge to main,
-not a semver release — library.json keeps the last real release's version.
-The script accepts it and skips the equality check.
+Release ritual (develop-on-a-prerelease, the standard semver flow): between
+releases, library.json carries the NEXT version with a `-dev` prerelease suffix
+(e.g. `2.1.0-dev`), so a moving/`latest` build self-reports a clean prerelease
+semver. Cutting the stable release drops the suffix: tag `v2.1.0` releases what
+was `2.1.0-dev`. So the check compares the tag's semver to library.json's CORE
+version (the part before any `-prerelease` suffix) — `v2.1.0` ↔ `2.1.0-dev`
+passes (same core), while a wrong core like `v2.2.0` ↔ `2.1.0-dev` still fails.
+
+The `latest` tag is the moving prerelease channel published on every merge to
+main, not a semver release — the script accepts it and skips the equality check.
 
 Inputs:
   GITHUB_REF_NAME  — the tag, set by GitHub Actions on a `push: tags` event
@@ -59,11 +66,17 @@ def main() -> int:
         print(f"verify_version: 'version' missing from {LIBRARY_JSON}.")
         return 2
 
-    if tag_version != in_tree:
+    # Compare the CORE semver (drop any `-prerelease` / `+build` suffix from the
+    # in-tree version) so the release ritual works: cutting `v2.1.0` releases the
+    # in-development `2.1.0-dev`. A mismatched core (e.g. `v2.2.0` vs `2.1.0-dev`)
+    # still fails. The tag itself is a real release, so it carries no suffix.
+    in_tree_core = in_tree.split("-")[0].split("+")[0]
+    if tag_version != in_tree_core:
         print(
-            f"verify_version: tag '{tag}' (version {tag_version}) "
-            f"does not match library.json version '{in_tree}'.\n"
-            f"Bump library.json to {tag_version}, commit, retag, push."
+            f"verify_version: tag '{tag}' (version {tag_version}) does not match "
+            f"library.json core version '{in_tree_core}' (from '{in_tree}').\n"
+            f"To release, set library.json version to {tag_version} (drop the "
+            f"-dev suffix), commit, retag, push."
         )
         return 1
 

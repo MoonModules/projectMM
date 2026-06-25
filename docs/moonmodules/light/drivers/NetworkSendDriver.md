@@ -27,11 +27,11 @@ E1.31 framing facts an integrator needs: CID is stable per device (derived from 
 ## Interop notes
 
 - **Universe rule (both ends):** buffer offset = (universe − `universe_start`) × 510, and the sender emits from `universe_start` verbatim — no hidden 1-based adjustment for E1.31. Strict sACN gear reserves universe 0, so set `universe_start ≥ 1` on **both** ends when talking to it; the matching default of 0 on our own receiver keeps device↔device pairs aligned out of the box.
-- **Unicast or broadcast; not multicast.** The destination can be a single device (unicast) or the limited-broadcast address `255.255.255.255` (the default), which sprays the frame to every device on the LAN — the platform socket sets `SO_BROADCAST` so this works for all three protocols. The standard Art-Net convention is broadcast; a device↔device pair works out of the box with no IP typed. E1.31 multicast (group 239.255.x.x) is not implemented — the platform has no IGMP join; MoonLight ships without it too. See the backlog entry for the planned work.
+- **Unicast or broadcast; not multicast.** The destination can be a single device (unicast) or the limited-broadcast address `255.255.255.255` (the default), which sprays the frame to every device on the LAN — the platform socket sets `SO_BROADCAST` so this works for all three protocols. The standard Art-Net convention is broadcast; a device↔device pair works out of the box with no IP typed. E1.31 multicast (group 239.255.x.x) is not implemented — the platform has no IGMP join; MoonLight ships without it too.
 
 ## Synchronous send (blocks the render tick)
 
-The whole frame goes out inline in `loop()` — ~35 ms over Ethernet / ~90 ms over WiFi at 128×128 with ArtNet (DDP proportionally less). The dedicated send task that decouples the wire from the render tick is a backlog item gated on PSRAM ([backlog](../../../backlog/backlog.md)). FPS limiting plus the all-universes-in-one-burst shape is what receivers expect.
+The whole frame goes out inline in `loop()` — ~35 ms over Ethernet / ~90 ms over WiFi at 128×128 with ArtNet (DDP proportionally less). The dedicated send task that decouples the wire from the render tick is a backlog item gated on PSRAM ([backlog](../../../backlog/README.md)). FPS limiting plus the all-universes-in-one-burst shape is what receivers expect.
 
 ## Cross-domain wiring
 

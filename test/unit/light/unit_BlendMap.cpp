@@ -118,8 +118,9 @@ TEST_CASE("blendMap is identical for single-alloc and paged LUTs") {
 
 // An additive (overwrites=false) LUT folding two sources onto one physical light
 // adds and clamps at 255 (no overflow). overwrites=false is the opt-in for the
-// rare overlap case (future multi-layer compositing); the default copy path
-// would instead overwrite, so this pins the additive contract explicitly.
+// within-layer overlap case; the default copy path would instead overwrite, and a
+// full-opacity Overwrite op still routes through this additive accumulate, so this
+// pins the contract explicitly (the regression after the multi-layer rewrite).
 TEST_CASE("blendMap additive clamping (overwrites=false)") {
     mm::Buffer src, dst;
     src.allocate(1, 3);
@@ -197,4 +198,152 @@ TEST_CASE("blendMap overwrite path clears untouched cells (sparse mapping)") {
     // Unmapped cells (physical 1 and 3) were cleared, not left dirty.
     CHECK(dst.data()[3] == 0); CHECK(dst.data()[4] == 0); CHECK(dst.data()[5] == 0);
     CHECK(dst.data()[9] == 0); CHECK(dst.data()[10] == 0); CHECK(dst.data()[11] == 0);
+}
+
+// --- Multi-layer composition: BlendOp + opacity + clearFirst (the new params). ---
+
+// Build an identity LUT (1 logical → 1 physical) in place — MappingLUT owns a
+// heap buffer and is non-copyable, so it can't be returned by value.
+static void buildIdentityLut1(mm::MappingLUT& lut) {
+    lut.build(1, 1);
+    mm::nrOfLightsType m[] = {0};
+    lut.setMapping(0, m, 1);
+    lut.finalize();
+}
+
+// Alpha-over at half opacity: dst = src*α + dst*(255-α). With dst=200, src=100,
+// α=128 → 100*128 + 200*127 = 12800 + 25400 = 38200; /255 ≈ 150.
+TEST_CASE("blendMap alpha-over blends src over dst by opacity") {
+    mm::Buffer src, dst;
+    src.allocate(1, 3); dst.allocate(1, 3);
+    src.data()[0] = src.data()[1] = src.data()[2] = 100;
+    dst.data()[0] = dst.data()[1] = dst.data()[2] = 200;
+    mm::MappingLUT lut; buildIdentityLut1(lut);
+    // clearFirst=false: blend ONTO the existing dst (a layer above the bottom).
+    mm::blendMap(src, dst, lut, 3, mm::BlendOp::Alpha, /*opacity=*/128, /*clearFirst=*/false);
+    CHECK(dst.data()[0] == 149);  // div255(100*128 + 200*127) = div255(38200) = 149
+    CHECK(dst.data()[1] == 149);
+    CHECK(dst.data()[2] == 149);
+}
+
+// Alpha at full opacity collapses to overwrite (src replaces dst exactly).
+TEST_CASE("blendMap alpha at opacity 255 == overwrite") {
+    mm::Buffer src, dst;
+    src.allocate(1, 3); dst.allocate(1, 3);
+    src.data()[0] = 10; src.data()[1] = 20; src.data()[2] = 30;
+    dst.data()[0] = dst.data()[1] = dst.data()[2] = 99;
+    mm::MappingLUT lut; buildIdentityLut1(lut);
+    mm::blendMap(src, dst, lut, 3, mm::BlendOp::Alpha, 255, /*clearFirst=*/false);
+    CHECK(dst.data()[0] == 10); CHECK(dst.data()[1] == 20); CHECK(dst.data()[2] == 30);
+}
+
+// Alpha at opacity 0 is a no-op (dst unchanged) — the invisible-layer case.
+TEST_CASE("blendMap alpha at opacity 0 leaves dst unchanged") {
+    mm::Buffer src, dst;
+    src.allocate(1, 3); dst.allocate(1, 3);
+    src.data()[0] = src.data()[1] = src.data()[2] = 200;
+    dst.data()[0] = dst.data()[1] = dst.data()[2] = 77;
+    mm::MappingLUT lut; buildIdentityLut1(lut);
+    mm::blendMap(src, dst, lut, 3, mm::BlendOp::Alpha, 0, /*clearFirst=*/false);
+    CHECK(dst.data()[0] == 77); CHECK(dst.data()[1] == 77); CHECK(dst.data()[2] == 77);
+}
+
+// Additive with opacity scales the source before adding, then clamps. dst=100,
+// src=200, opacity=128 → add 200*128/255 ≈ 100 → 200.
+TEST_CASE("blendMap additive scales source by opacity then clamps") {
+    mm::Buffer src, dst;
+    src.allocate(1, 3); dst.allocate(1, 3);
+    src.data()[0] = src.data()[1] = src.data()[2] = 200;
+    dst.data()[0] = dst.data()[1] = dst.data()[2] = 100;
+    mm::MappingLUT lut; buildIdentityLut1(lut);
+    mm::blendMap(src, dst, lut, 3, mm::BlendOp::Additive, /*opacity=*/128, /*clearFirst=*/false);
+    CHECK(dst.data()[0] == 200);  // 100 + round(200*128/255)=100
+    CHECK(dst.data()[1] == 200);
+    CHECK(dst.data()[2] == 200);
+}
+
+// clearFirst=false preserves dst cells the source doesn't touch — the mechanic
+// that lets a top layer blend onto the bottom layer's already-composited frame.
+TEST_CASE("blendMap clearFirst=false accumulates onto existing frame") {
+    mm::Buffer src, dst;
+    src.allocate(2, 3); dst.allocate(2, 3);
+    // src lights only physical 0; physical 1 left to the previous (bottom) layer.
+    src.data()[0] = src.data()[1] = src.data()[2] = 50;
+    src.data()[3] = src.data()[4] = src.data()[5] = 0;
+    // dst holds a prior frame: physical 1 is green from the layer below.
+    dst.data()[0] = dst.data()[1] = dst.data()[2] = 0;
+    dst.data()[3] = 0; dst.data()[4] = 255; dst.data()[5] = 0;
+
+    mm::MappingLUT lut;
+    lut.build(2, 1);
+    mm::nrOfLightsType m0[] = {0}, m1[] = {1};
+    lut.setMapping(0, m0, 1); lut.setMapping(1, m1, 1);
+    lut.finalize();
+
+    mm::blendMap(src, dst, lut, 3, mm::BlendOp::Additive, 255, /*clearFirst=*/false);
+    // Physical 0 got the additive source; physical 1's prior green survives + its src is 0.
+    CHECK(dst.data()[0] == 50);
+    CHECK(dst.data()[4] == 255);  // bottom layer's green preserved (not cleared)
+}
+
+// --- No-LUT (dense grid, identity 1:1) blend paths. blendMap has a SEPARATE
+// implementation for a layer with no LUT (logical index == physical index, no
+// lookup) — the common dense-grid case that composites directly. These mirror
+// the LUT blend tests above but on the no-LUT branch (an empty MappingLUT, so
+// hasLUT()==false). This is the path that runs on a real grid layer; it was the
+// one that initially failed to composite, so each op is pinned here explicitly.
+
+// No-LUT alpha-over at half opacity: dst = div255(src*α + dst*(255-α)).
+// dst=200, src=100, α=128 → div255(100*128 + 200*127) = div255(38200) = 149.
+TEST_CASE("blendMap no-LUT alpha-over blends 1:1 by opacity") {
+    mm::Buffer src, dst;
+    src.allocate(2, 3); dst.allocate(2, 3);
+    for (size_t i = 0; i < src.bytes(); i++) { src.data()[i] = 100; dst.data()[i] = 200; }
+    mm::MappingLUT lut;   // no build/setMapping → hasLUT()==false (identity 1:1)
+    mm::blendMap(src, dst, lut, 3, mm::BlendOp::Alpha, /*opacity=*/128, /*clearFirst=*/false);
+    for (size_t i = 0; i < dst.bytes(); i++) CHECK(dst.data()[i] == 149);
+}
+
+// No-LUT alpha at full opacity collapses to a plain copy (overwrite).
+TEST_CASE("blendMap no-LUT alpha at opacity 255 == overwrite") {
+    mm::Buffer src, dst;
+    src.allocate(1, 3); dst.allocate(1, 3);
+    src.data()[0] = 10; src.data()[1] = 20; src.data()[2] = 30;
+    dst.data()[0] = dst.data()[1] = dst.data()[2] = 99;
+    mm::MappingLUT lut;
+    mm::blendMap(src, dst, lut, 3, mm::BlendOp::Alpha, 255, /*clearFirst=*/false);
+    CHECK(dst.data()[0] == 10); CHECK(dst.data()[1] == 20); CHECK(dst.data()[2] == 30);
+}
+
+// No-LUT alpha at opacity 0 is a no-op (the invisible top layer).
+TEST_CASE("blendMap no-LUT alpha at opacity 0 leaves dst unchanged") {
+    mm::Buffer src, dst;
+    src.allocate(1, 3); dst.allocate(1, 3);
+    src.data()[0] = src.data()[1] = src.data()[2] = 200;
+    dst.data()[0] = dst.data()[1] = dst.data()[2] = 77;
+    mm::MappingLUT lut;
+    mm::blendMap(src, dst, lut, 3, mm::BlendOp::Alpha, 0, /*clearFirst=*/false);
+    CHECK(dst.data()[0] == 77); CHECK(dst.data()[1] == 77); CHECK(dst.data()[2] == 77);
+}
+
+// No-LUT additive with opacity scales the source then clamps at 255.
+// dst=100, src=200, opacity=128 → 100 + div255(200*128)=100 → 200.
+TEST_CASE("blendMap no-LUT additive scales by opacity then clamps") {
+    mm::Buffer src, dst;
+    src.allocate(2, 3); dst.allocate(2, 3);
+    for (size_t i = 0; i < src.bytes(); i++) { src.data()[i] = 200; dst.data()[i] = 100; }
+    mm::MappingLUT lut;
+    mm::blendMap(src, dst, lut, 3, mm::BlendOp::Additive, /*opacity=*/128, /*clearFirst=*/false);
+    for (size_t i = 0; i < dst.bytes(); i++) CHECK(dst.data()[i] == 200);
+}
+
+// No-LUT additive at full opacity saturates: 200 + 100 = 300 → clamp 255.
+TEST_CASE("blendMap no-LUT additive clamps at 255") {
+    mm::Buffer src, dst;
+    src.allocate(1, 3); dst.allocate(1, 3);
+    src.data()[0] = src.data()[1] = src.data()[2] = 200;
+    dst.data()[0] = dst.data()[1] = dst.data()[2] = 100;
+    mm::MappingLUT lut;
+    mm::blendMap(src, dst, lut, 3, mm::BlendOp::Additive, 255, /*clearFirst=*/false);
+    CHECK(dst.data()[0] == 255); CHECK(dst.data()[1] == 255); CHECK(dst.data()[2] == 255);
 }

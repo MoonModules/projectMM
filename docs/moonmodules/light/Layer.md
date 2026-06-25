@@ -11,13 +11,9 @@ A `Layer` MoonModule (role `ModuleRole::Layer`, child of the [Layers](Layers.md)
 - **Effects** (ordered list) — write lights into buffer. No hard-coded max — dynamic list (heap-allocated, grown as needed).
 - **Modifiers** (ordered list) — transform LUT or light values. Same dynamic list approach.
 
-## start/end controls
+## blendMode / opacity controls
 
-Each Layer carries six `int16_t` controls — `startX`, `startY`, `startZ`, `endX`, `endY`, `endZ` — that select a region of the shared Layouts **expressed as percentages of the physical extent on each axis**. Defaults are `start = 0, end = 100` (the full layout). Percentages are resilient to physical layout changes: a `startX = 25` Layer stays at the same relative position when the panel resizes from 64×64 to 128×128, rather than ending up at the wrong absolute pixel.
-
-Negative values and values > 100 are legal: a future modifier could drag a Layer in or out of the visible area by shifting start/end past 0% or 100% (e.g. `startX = -50` means the Layer extends 50% off the left edge of the layout). `ControlType::Int16` is the wire type so negative values round-trip correctly through `/api/state`, `/api/types`, and persistence.
-
-Today (single-Layer pipeline) `rebuildLUT()` ignores the controls — the values are persisted state, not yet wired. They surface in the UI now so the surface stays stable when the composition follow-up activates them. **Rounding rule (when activated):** `start` percentages round toward the lower pixel (floor), `end` percentages round toward the higher pixel (ceiling). This guarantees a non-zero region on small panels (e.g. `start = 33, end = 66` on a 4-wide axis produces pixels 1..3 inclusive, not 1..2 or 2..2). Spec: [architecture.md § Layers and Layer](../../architecture.md#layers-and-layer).
+Two controls govern how this Layer composites onto the layers below it: `blendMode` (a select — `alpha` over, or `additive` sum-with-clamp) and `opacity` (`uint8`, 0 = invisible, 255 = full). They are **inert on the Layer** — the Layer never reads them; it just carries them so they travel through add / delete / reorder with no separate synchronised list. The [Drivers](Drivers.md) container reads each enabled Layer's two values plus the [Layers](Layers.md) container's child order and does the actual compositing (bottom layer overwrites, each layer above blends per its mode + opacity). The bottom (first-composited) Layer's `blendMode`/`opacity` are moot — nothing sits under it. The blend math itself lives in [BlendMap](BlendMap.md). Precedent for "value here, logic in Drivers": the per-X `Correction` data Drivers applies.
 
 ## Key operations
 
@@ -55,7 +51,7 @@ See [EffectBase § Dimensions and auto-extrusion](EffectBase.md#dimensions-and-a
 
 ## Status
 
-The Layer's status line (the `MoonModule` status slot) shows the **logical** box the effects render into — `"<w>×<h>×<d>"`, the dimensions a modifier and the start/end region carving reshape. This differs from the physical bounding box shown on the [Layouts](Layouts.md#status) container: a Mirror-XY modifier on a 128×128 physical layout renders into a 64×64 logical box (the half that gets folded), so the Layer reads `64×64×1` while Layouts reads `128×128×1`. The gap between the two is the modifier's effect, made visible.
+The Layer's status line (the `MoonModule` status slot) shows the **logical** box the effects render into — `"<w>×<h>×<d>"`, the dimensions its modifiers reshape. This differs from the physical bounding box shown on the [Layouts](Layouts.md#status) container: a Mirror-XY modifier on a 128×128 physical layout renders into a 64×64 logical box (the half that gets folded), so the Layer reads `64×64×1` while Layouts reads `128×128×1`. The gap between the two is the modifier's effect, made visible.
 
 The same slot carries memory-degradation warnings (`Severity::Warning`/`Error`) when a build can't fit: `"modifier LUT skipped — not enough memory"`, `"sparse LUT build failed — not enough memory"`, `"buffer reduced — not enough memory"`, `"buffer allocation failed — not enough memory"`. A warning wins over the neutral box line — when the Layer is degraded, that's what the user needs to see. Recomputed on every rebuild (`onBuildState`), not per tick.
 

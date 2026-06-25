@@ -5,6 +5,7 @@
 // default; entry-point is the WS init at the bottom — no ordering surprises.
 import { installPicker } from "/install-picker.js";
 import { preview } from "/preview3d.js";
+import { isNewer, parse } from "/semver.js";
 
 // Sections (top to bottom):
 //   1. State + storage
@@ -143,6 +144,7 @@ window.addEventListener("pageshow", (e) => {
 async function init() {
     applyTheme(theme);
     setupStatusBarButtons();
+    setupUpdateBadge();
     try {
         const resp = await fetch("/api/state");
         state = await resp.json();
@@ -567,6 +569,10 @@ function createCard(mod, depth) {
     // device fetches the binary via /api/firmware/url — no browser CORS in
     // the data path. See docs/architecture.md § Firmware vs board.
     if (mod.type === "FirmwareUpdateModule") {
+        // Opening the Firmware card forces a fresh update check (the badge otherwise refreshes
+        // only on the 1 h cache cadence) — so the badge agrees with the picker the user is about
+        // to use. Fire-and-forget; best-effort.
+        checkFirmwareUpdate(true);
         const ownFirmwareKey = (() => {
             // The `firmware` variant key is this module's own control now (moved here from
             // SystemModule), so read it straight off mod — no cross-module lookup.
@@ -985,7 +991,7 @@ function createControl(moduleName, moduleType, ctrl) {
         case "int16": {
             // ctrl.min/ctrl.max are always present (server sends them). Sentinel
             // values INT16_MIN (-32768) / INT16_MAX (32767) mean "unbounded" —
-            // fall back to the percentage range used by Layer start/end controls.
+            // fall back to a ±percentage range.
             const rawMin = Number(ctrl.min ?? -32768);
             const rawMax = Number(ctrl.max ?? 32767);
             const min = rawMin <= -32768 ? -100 : rawMin;
@@ -1112,11 +1118,30 @@ function createControl(moduleName, moduleType, ctrl) {
                 if (i === ctrl.value) o.selected = true;
                 sel.appendChild(o);
             });
-            sel.addEventListener("change", async () => {
+            // Protect the dropdown while the user has it open. A native <select>
+            // popup stays open for several frames (seconds, if deliberating) while
+            // a continuously-refreshed module keeps pushing state over the WS; an
+            // unguarded `sel.value = ctrl.value` patch during that window snaps the
+            // menu back to the old option and visibly closes it — the user never
+            // gets to pick. We mark the select "open" on pointerdown (fires BEFORE
+            // the popup opens, unlike focus, which some browsers delay or skip) and
+            // clear it on change/blur; updateModuleControls skips any select marked
+            // open. pointerdown also stamps the dragTs cooldown as a belt-and-braces
+            // fallback for the post-close frames.
+            sel.dataset.open = "false";
+            const markOpen = () => { sel.dataset.open = "true"; dragTs[key] = Date.now(); };
+            sel.addEventListener("pointerdown", markOpen);
+            sel.addEventListener("focus", markOpen);
+            sel.addEventListener("blur", () => { sel.dataset.open = "false"; });
+            sel.addEventListener("change", () => {
+                sel.dataset.open = "false";
                 dragTs[key] = Date.now();
-                await sendControl(moduleName, ctrl.name, parseInt(sel.value));
-                // Server may rebuild this module's controls (dynamic onBuildControls); refetch
-                setTimeout(refetchState, 200);
+                sendControl(moduleName, ctrl.name, parseInt(sel.value));
+                // No refetch/re-render here: blendMode/opacity-style selects don't
+                // change the control SET, and a control that does (a hidden-flag
+                // flip) is reconciled in place by syncVisibleControls on the next
+                // WS push — so the card (and its expanded state) is preserved.
+                // A full refetchState() rebuilt the DOM and collapsed the card.
             });
             row.appendChild(sel);
             appendResetButton(row, moduleName, ctrl, def, () => { sel.value = def; });
@@ -1552,7 +1577,14 @@ function allModules() {
 function syncVisibleControls(mod) {
     const card = document.querySelector(`.card[data-module="${cssEscape(mod.name)}"]`);
     if (!card) return false;
-    const host = card.querySelector(".card-controls-collapse") || card;
+    // The controls host is THIS card's own collapse wrapper — must be a DIRECT
+    // child (`:scope >`), not any descendant: a container card (e.g. Layers) nests
+    // its child cards (Layer) inside .card-children, and a plain
+    // `card.querySelector(".card-controls-collapse")` would reach down and match
+    // the CHILD's wrapper. That made Layers adopt Layer's control rows as its own,
+    // so both cards saw a control-set mismatch every WS frame and rebuilt each
+    // other's rows in a loop — tearing down (and closing) any open <select>.
+    const host = card.querySelector(":scope > .card-controls-collapse") || card;
 
     const wantNames = mod.controls.filter(c => !c.hidden).map(c => c.name);
     const haveRows = [...host.querySelectorAll(":scope > .control-row[data-key]")];
@@ -1652,7 +1684,14 @@ function updateModuleControls(mod) {
             }
             case "select": {
                 const sel = document.querySelector(`select[data-mid="${mid}"][data-key="${k}"]`);
-                if (sel && Number(sel.value) !== Number(ctrl.value)) sel.value = ctrl.value;
+                // Never overwrite a select the user currently has OPEN (popup
+                // showing) or focused. data-open is set on pointerdown/focus and
+                // cleared on change/blur — more reliable than document.activeElement,
+                // which is ambiguous while a native popup is up (the popup is a
+                // separate OS layer on macOS). The 1s dragTs cooldown is the
+                // additional fallback for the frames right after the popup closes.
+                if (sel && sel.dataset.open !== "true" && sel !== document.activeElement &&
+                    Number(sel.value) !== Number(ctrl.value)) sel.value = ctrl.value;
                 break;
             }
             case "display": {
@@ -2158,6 +2197,175 @@ function updateStatusBar() {
         if (crashed) rebootBtn.title = "Last boot: " + reasonCtrl.value + " (click to reboot)";
         else rebootBtn.title = "Reboot device";
     }
+
+    // Cache-first update check: instant from the localStorage cache, background-fetches only
+    // when stale (>1 h). Fire-and-forget — best-effort, never blocks the status-bar render.
+    checkFirmwareUpdate(false);
+}
+
+// ---------------------------------------------------------------------------
+// 8b. Firmware-update badge
+// ---------------------------------------------------------------------------
+// Browser-side "a newer firmware is out" check, modelled on ESP32-sveltekit's
+// UpdateIndicator (the upstream firmware lineage) — our own code. The device fetches
+// nothing; the browser compares the running version (FirmwareUpdateModule.version, pure
+// semver) against GitHub releases and, when newer AND a compatible .bin exists, shows the
+// status-bar badge. Two channels:
+//   - STABLE: a device compares against the newest stable release (the /latest endpoint
+//     excludes prereleases). Applies to every device.
+//   - DEV (latest): a device already on a prerelease build (-dev.<N>) ALSO compares against
+//     the moving `latest` release, so a stale latest build is nudged to the newest latest.
+//     The `latest` release's tag is "latest" (not a semver), so its version is read from the
+//     per-firmware manifest (manifest-<firmware>.json carries "version", e.g. 2.1.0-dev.7).
+// A stable update wins over a dev update. Cached in localStorage (1 h TTL) so it doesn't
+// slow page load; a fresh check is forced when the Firmware card opens. Best-effort: any
+// failure hides the badge, never throws.
+
+const RELEASES_API = "https://api.github.com/repos/MoonModules/projectMM/releases";
+const UPDATE_TTL_MS = 60 * 60 * 1000;                     // 1 h — best-effort, well under GitHub's rate limit
+const PICKER_RELEASE_KEY = "projectMM.picker.releaseTag"; // install-picker restores from this on init
+
+function safeLocalGet(key) { try { return localStorage.getItem(key); } catch (_) { return null; } }
+function safeLocalSet(key, v) { try { localStorage.setItem(key, v); } catch (_) { /* ignore */ } }
+
+// In-flight fetches keyed by cache slot. updateStatusBar() calls checkFirmwareUpdate(false)
+// every WS tick (1 Hz); on a cold cache they'd each start a duplicate releases/latest request
+// before the first writes the cache. Share the pending promise so concurrent callers reuse it.
+const inFlightFetches = {};
+
+// A cached JSON fetch: returns the parsed body, re-fetching only when the cache is older than
+// the TTL or `force` is set, and serving stale on a fetch failure. `key` is the cache slot.
+async function cachedJson(url, key, force) {
+    if (!force) {
+        const raw = safeLocalGet(key);
+        if (raw) {
+            try {
+                const obj = JSON.parse(raw);
+                if (Date.now() - obj.ts < UPDATE_TTL_MS) return obj.data;
+            } catch (_) { /* fall through to fetch */ }
+        }
+    }
+    // Coalesce concurrent fetches for the same slot onto one request.
+    if (inFlightFetches[key]) return inFlightFetches[key];
+    const p = (async () => {
+        try {
+            const res = await fetch(url, { headers: { accept: "application/json" } });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            safeLocalSet(key, JSON.stringify({ ts: Date.now(), data }));
+            return data;
+        } catch (e) {
+            // console.debug, not warn: an update check failing is routine and not
+            // actionable (the device may simply be offline, or GitHub rate-limited),
+            // so keep it out of the default console — debug is hidden unless the user
+            // opts into verbose. Both callers hit api.github.com, which sends
+            // Access-Control-Allow-Origin and so reads fine from the device origin;
+            // the failure path here is for the no-network / rate-limit case.
+            console.debug("[update] fetch failed:", url, e && e.message ? e.message : e);
+            const raw = safeLocalGet(key);                   // serve stale on failure
+            if (raw) {
+                try {
+                    const obj = JSON.parse(raw);
+                    // Refresh the timestamp so the per-tick check doesn't re-attempt a
+                    // failing fetch every second — back off until the next TTL window.
+                    safeLocalSet(key, JSON.stringify({ ts: Date.now(), data: obj.data }));
+                    return obj.data;
+                } catch (_) { /* none */ }
+            }
+            // No stale entry to serve: NEGATIVE-CACHE the failure (data:null) with a
+            // fresh timestamp so the TTL guard above suppresses the next attempt for
+            // the back-off window. Without this, every status-bar render (≈4×/s on
+            // each WS push) re-runs the failing fetch — an error storm in the console
+            // whenever the device is offline. A null cache hit returns "no update".
+            safeLocalSet(key, JSON.stringify({ ts: Date.now(), data: null }));
+            return null;
+        } finally {
+            delete inFlightFetches[key];                     // clear once settled, ok or not
+        }
+    })();
+    inFlightFetches[key] = p;
+    return p;
+}
+
+// Read the device's running version + firmware-variant key off the FirmwareUpdateModule.
+function deviceFirmwareInfo() {
+    if (!state || !state.modules) return null;
+    const fw = findModule("Firmware") || (state.modules.find(m => m.type === "FirmwareUpdateModule"));
+    if (!fw) return null;
+    const ctrls = fw.controls || [];
+    const version = (ctrls.find(c => c.name === "version") || {}).value;
+    const firmware = (ctrls.find(c => c.name === "firmware") || {}).value;
+    return version ? { version, firmware } : null;
+}
+
+// Light the badge for an available update. `tag` is the release the picker should pre-select
+// (a vX.Y.Z stable tag, or "latest"); `label` is what the badge shows.
+function showUpdateBadge(badge, tag, label) {
+    badge.textContent = `⬆ ${label}`;
+    badge.title = `Firmware update available: ${label} — open Firmware to install`;
+    badge.dataset.tag = tag;
+    badge.hidden = false;
+}
+
+// Is there a newer STABLE release than the device's version, with a compatible .bin?
+// Returns the stable tag (e.g. "v2.1.0") or null. /latest excludes prereleases.
+async function stableUpdate(dev, force) {
+    const rel = await cachedJson(`${RELEASES_API}/latest`, "projectMM.update.latest.v1", force);
+    if (!rel || !rel.tag_name) return null;
+    const assetNames = (rel.assets || []).map(a => a.name);
+    const hasBinary = !dev.firmware ||
+        assetNames.some(n => n === `firmware-${dev.firmware}-${rel.tag_name}.bin`);
+    return (isNewer(rel.tag_name, dev.version) && hasBinary) ? rel.tag_name : null;
+}
+
+// For a device already on a -dev build: is the moving `latest` release newer? Returns its
+// version string (e.g. "2.1.0-dev.7") or null. The latest release's tag is "latest"; its
+// version is published as the release `name` (release.yml), which the GitHub API exposes
+// CORS-readably — unlike the manifest-*.json asset, whose release-asset URL redirects to
+// release-assets.githubusercontent.com (no CORS header), so the device-hosted UI can't read it.
+// We also require the matching firmware .bin asset so the badge never points at a build the
+// device can't install.
+async function devUpdate(dev, force) {
+    if (!dev.firmware) return null;                          // can't match an asset without the key
+    const rel = await cachedJson(`${RELEASES_API}/tags/latest`, "projectMM.update.dev.v1", force);
+    const v = rel && rel.name;
+    if (!v) return null;
+    // Assets are versioned, not tagged: the `latest` release ships
+    // firmware-<fw>-v<version>.bin (release.yml stages PREFIX="firmware-...-v$V").
+    const hasBinary = (rel.assets || []).some(a => a.name === `firmware-${dev.firmware}-v${v}.bin`);
+    return (hasBinary && isNewer(v, dev.version)) ? v : null;
+}
+
+// Show/hide the badge. `force` bypasses the cache (used when the Firmware card opens).
+// Stable update takes precedence; a -dev device additionally checks the latest channel.
+async function checkFirmwareUpdate(force) {
+    const badge = document.getElementById("fw-update-badge");
+    if (!badge) return;
+    const dev = deviceFirmwareInfo();
+    if (!dev) { badge.hidden = true; return; }
+
+    const stableTag = await stableUpdate(dev, force);
+    if (stableTag) { showUpdateBadge(badge, stableTag, stableTag); return; }
+
+    // Only a prerelease (-dev…) build follows the moving latest channel; a stable device is
+    // not nudged toward an unreleased build.
+    const onPrerelease = (parse(dev.version)?.prerelease.length || 0) > 0;
+    if (onPrerelease) {
+        const devVer = await devUpdate(dev, force);
+        if (devVer) { showUpdateBadge(badge, "latest", `latest (${devVer})`); return; }
+    }
+    badge.hidden = true;
+}
+
+// Badge click → pre-select the new release in the picker (it restores from PICKER_RELEASE_KEY
+// on init) and open the Firmware card, so the user lands one click from Install.
+function setupUpdateBadge() {
+    const badge = document.getElementById("fw-update-badge");
+    if (!badge) return;
+    badge.addEventListener("click", () => {
+        if (badge.dataset.tag) safeLocalSet(PICKER_RELEASE_KEY, badge.dataset.tag);
+        selectModule("Firmware");
+    });
 }
 
 // ---------------------------------------------------------------------------

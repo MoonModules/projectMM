@@ -5,8 +5,8 @@
 #include <cstring>
 
 // The `firmware` control is always present and non-empty (either a real firmware key from
-// build_info.h or the fallback "unknown"). Moved here from SystemModule — the firmware card now
-// owns firmware identity (version/build/firmware) + the partition usage.
+// build_info.h or the fallback "unknown"). The firmware card owns firmware identity
+// (version/build/firmware) + the partition usage.
 TEST_CASE("FirmwareUpdateModule firmware control populated") {
     // The firmware control is wired in setup() from kFirmwareName (build_info.h).
     // Local desktop builds fall through to "unknown" because CMake doesn't
@@ -44,4 +44,35 @@ TEST_CASE("FirmwareUpdateModule firmware control populated") {
     }
     CHECK(hasVersion);
     CHECK(hasBuild);
+}
+
+// OTA phase is surfaced through the shared status slot (MoonModule::setStatus()),
+// not a control. publishStatus() runs in setup()/loop1s() and maps the platform
+// OTA status string to a severity: "idle" clears the banner, an "error: " prefix
+// is Severity::Error, anything else is neutral Severity::Status.
+TEST_CASE("FirmwareUpdateModule OTA status routes through the status slot") {
+    mm::FirmwareUpdateModule fw;
+
+    // Boot state: g_otaStatus is "idle" → no banner.
+    std::strncpy(mm::g_otaStatus, "idle", sizeof(mm::g_otaStatus));
+    fw.setup();
+    CHECK(fw.status() == nullptr);
+
+    // An in-flight phase shows as a neutral status banner.
+    std::strncpy(mm::g_otaStatus, "downloading", sizeof(mm::g_otaStatus));
+    fw.loop1s();
+    REQUIRE(fw.status() != nullptr);
+    CHECK(std::strcmp(fw.status(), "downloading") == 0);
+    CHECK(fw.severity() == mm::MoonModule::Severity::Status);
+
+    // A failure (platform prefixes every failure with "error: ") is an error banner.
+    std::strncpy(mm::g_otaStatus, "error: ota perform ESP_FAIL", sizeof(mm::g_otaStatus));
+    fw.loop1s();
+    REQUIRE(fw.status() != nullptr);
+    CHECK(fw.severity() == mm::MoonModule::Severity::Error);
+
+    // Returning to idle clears the banner again.
+    std::strncpy(mm::g_otaStatus, "idle", sizeof(mm::g_otaStatus));
+    fw.loop1s();
+    CHECK(fw.status() == nullptr);
 }

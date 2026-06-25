@@ -6,6 +6,7 @@
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/SphereLayout.h"
 #include "light/modifiers/MultiplyModifier.h"
+#include "light/modifiers/RegionModifier.h"
 
 // The driver/output buffer must hold ONLY the real lights, never the dense
 // bounding box. A sphere defines a 9x9x9 (=729) render grid but only 210 shell
@@ -178,4 +179,56 @@ TEST_CASE("Layer: high fan-out Multiply builds a full, in-range LUT (no overflow
     }
     CHECK(total == 16384);   // full physical coverage, not a collapsed/empty LUT
     CHECK(inRange);
+}
+
+// Region carving: a RegionModifier shrinks the Layer's LOGICAL box to the region
+// (so the effect renders only there), and the LUT maps each region cell to its
+// box cell at the start offset — every destination in range, none outside the
+// region. The driver buffer still holds all physical lights; cells outside the
+// region simply get no logical source (dark). Default 0/100 = full box (the
+// no-carve fast path) is covered by unit_RegionModifier; here we carve a quarter.
+TEST_CASE("Layer: RegionModifier carves the logical box to a sub-region") {
+    mm::GridLayout g;
+    g.width = 8; g.height = 8; g.depth = 1;   // 64 lights, dense
+    mm::Layouts group;
+    group.addChild(&g);
+    mm::Layer layer;
+    layer.setLayouts(&group);
+    layer.setChannelsPerLight(3);
+    mm::RegionModifier region;
+    region.startX = 0; region.endX = 50;      // left half  → pixels 0..3
+    region.startY = 0; region.endY = 50;      // top half   → pixels 0..3
+    layer.addChild(&region);
+    layer.onBuildControls();
+    layer.onBuildState();
+
+    // Logical box is the carved quarter (4×4), not the full 8×8 box.
+    CHECK(layer.width() == 4);
+    CHECK(layer.height() == 4);
+    CHECK(layer.lut().hasLUT());
+    CHECK(layer.lut().logicalCount() == 4 * 4);
+
+    // Physical driver buffer is unchanged — all 64 lights still exist; carving
+    // only restricts which of them the effect sources into.
+    CHECK(layer.physicalLightCount() == 64);
+
+    // Every destination is a real box light inside the carved quarter (x<4, y<4),
+    // there are exactly 16 of them (one per logical cell, no fan-out), and they are
+    // all DISTINCT — a 1:1 carve must reach 16 different physical lights, never
+    // collapse two logical cells onto one destination or leave a cell unreached.
+    std::size_t total = 0;
+    bool insideRegion = true;
+    bool seen[64] = {false};     // 8×8 box
+    bool duplicate = false;
+    for (mm::nrOfLightsType li = 0; li < layer.lut().logicalCount(); li++) {
+        layer.lut().forEachDestination(li, [&](mm::nrOfLightsType d) {
+            total++;
+            const mm::nrOfLightsType x = d % 8, y = d / 8;  // 8-wide box
+            if (x >= 4 || y >= 4) insideRegion = false;
+            if (d < 64) { if (seen[d]) duplicate = true; seen[d] = true; }
+        });
+    }
+    CHECK(total == 16);          // 4×4 region, 1:1, nothing outside
+    CHECK(insideRegion);
+    CHECK_FALSE(duplicate);      // 16 distinct physical lights — no cell collapses onto another
 }

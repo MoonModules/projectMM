@@ -48,9 +48,19 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Identity mapping (logical N → physical N) leaves every byte unchanged.
 - One logical light routed to multiple physical positions copies the colour to each (mirror-style mappings work).
 - A paged LUT (forced via the maxAllocBlock test cap) must produce a byte-identical dst to a single-alloc LUT with the same mapping. Paging is an allocation detail; blendMap output must not depend on it. This is the end-to-end pin for the no-PSRAM-fragmentation fix.
-- An additive (overwrites=false) LUT folding two sources onto one physical light adds and clamps at 255 (no overflow). overwrites=false is the opt-in for the rare overlap case (future multi-layer compositing); the default copy path would instead overwrite, so this pins the additive contract explicitly.
+- An additive (overwrites=false) LUT folding two sources onto one physical light adds and clamps at 255 (no overflow). overwrites=false is the opt-in for the within-layer overlap case; the default copy path would instead overwrite, and a full-opacity Overwrite op still routes through this additive accumulate, so this pins the contract explicitly (the regression after the multi-layer rewrite).
 - The default (overwrites=true) path plain-copies: two sources mapped to the same physical means the LAST writer wins, no addition. Pins the fast path.
 - Sparse overwrite mapping clears untouched physical cells. A sphere-style layout maps only a subset of the physical box to a source; the rest must end up black, not retain stale data from a previous frame. Pre-fills dst dirty and asserts unmapped cells are zeroed — fails if BlendMap's dst.clear() is removed (the regression target).
+- Alpha-over at half opacity: dst = src*α + dst*(255-α). With dst=200, src=100, α=128 → 100*128 + 200*127 = 12800 + 25400 = 38200; /255 ≈ 150.
+- Alpha at full opacity collapses to overwrite (src replaces dst exactly).
+- Alpha at opacity 0 is a no-op (dst unchanged) — the invisible-layer case.
+- Additive with opacity scales the source before adding, then clamps. dst=100, src=200, opacity=128 → add 200*128/255 ≈ 100 → 200.
+- clearFirst=false preserves dst cells the source doesn't touch — the mechanic that lets a top layer blend onto the bottom layer's already-composited frame.
+- No-LUT alpha-over at half opacity: dst = div255(src*α + dst*(255-α)). dst=200, src=100, α=128 → div255(100*128 + 200*127) = div255(38200) = 149.
+- No-LUT alpha at full opacity collapses to a plain copy (overwrite).
+- No-LUT alpha at opacity 0 is a no-op (the invisible top layer).
+- No-LUT additive with opacity scales the source then clamps at 255. dst=100, src=200, opacity=128 → 100 + div255(200*128)=100 → 200.
+- No-LUT additive at full opacity saturates: 200 + 100 = 300 → clamp 255.
 
 ## Buffer
 
@@ -110,6 +120,9 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - The core regression: a control bound with a non-zero value, overlaid with a JSON that does NOT contain its key, must keep its value — not snap to 0.
 - A present key still applies (the fix must not break the normal load path).
 - A present key whose value IS 0 must apply the 0 (don't confuse "present 0" with "absent"). Guards against an over-eager fix that skipped on value rather than key.
+- _a per-control validator accepts a valid value and rejects bad input_
+- Length boundary of the deviceModel validator (accepts 1..31). Uses a buffer wider than the validator's limit so the 32-char value reaches the validator intact (parseString truncates to bufSize-1, so the buffer must exceed 32 for the validator's own length check — not parse truncation — to be what rejects it). The scratch buffer in applyControlValue is sized to bufSize, so a long value isn't truncated before validation.
+- _a Text control with no validator accepts anything that fits_
 
 `test/unit/core/unit_Control_list.cpp`
 
@@ -178,7 +191,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Companion to the wiredByCode case above: when the JSON describes a different type at the position where a code-wired child lives, the position-replacement must NOT kill the code-wired child. Stop reconciliation at that index instead and let the next save re-write the file with the actual tree shape. When the saved JSON wants a different type at the position where a code-wired child lives, reconciliation stops at that index instead of destroying the wired child.
 - Round-trip persistence with children: write a Layer subtree that contains both controls and child modules with controls of their own, then read the file back as text and verify it parses as valid JSON. Regresses the missing-comma bug between each child's "N.type" field and that child's first control (e.g. "0.type":"X""0.foo":1 instead of "0.type":"X","0.foo":1). Saving a Layer with multiple children produces valid JSON — comma separators between child `N.type` and the child's first control field are present.
 - Singleton survives probe lifecycle: /api/types factory-creates a probe of every registered type (including FilesystemModule) to capture defaults, then deletes it. The probe's destructor must NOT clear the singleton — otherwise every save path (noteDirty, debounced loop1s, flushPending on reboot) silently no-ops for the rest of the device's life. The fix is to register the singleton in setScheduler(), not in the constructor. This test catches that singleton-clear regression. /api/types factory-creates a temporary FilesystemModule probe; its destruction must NOT clear the static singleton (otherwise every later save silently no-ops).
-- Regression: Int16 controls (GridLayout's width/height/depth, Layer's start/end) round-tripped through the filesystem load path were clamped to c.min/c.max, which default to 0,0 because ControlDescriptor.min/max are uint8_t and can't represent an int16 range. Every Int16 control loaded as 0 — so a 128×128 grid became 0×0×0 after restart and the whole pipeline allocated no buffers. Int16 controls (GridLayout width/height, Layer start/end) preserve their saved value across load — no zero-clamping from uint8 min/max bounds.
+- Int16 controls preserve their saved value across a filesystem load — the load path does not clamp them to `c.min`/`c.max` (which are `uint8_t` and so default to 0,0, a range that can't represent an int16). Without this a 128×128 grid would reload as 0×0×0 and the pipeline would allocate no buffers; the test pins the round-trip so an Int16 value survives unclamped.
 
 ## FireEffect
 
@@ -187,6 +200,12 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - On a 16×16 grid the heat buffer sizes to width × height bytes (one byte of heat per cell).
 - With sparking at max, the buffer contains non-zero pixels within 50 frames (sparks emerge and propagate).
 - Disabling the effect releases its heat buffer back (dynamicBytes drops to 0).
+
+## FirmwareUpdateModule
+
+`test/unit/core/unit_FirmwareUpdateModule.cpp`
+
+- The `firmware` control is always present and non-empty (either a real firmware key from build_info.h or the fallback "unknown"). The firmware card owns firmware identity (version/build/firmware) + the partition usage.
 
 ## GameOfLifeEffect
 
@@ -209,10 +228,21 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 *Also touches: Layouts.*
 
 - A 4×4×1 grid yields 16 lights iterated row-major: x sweeps fastest, then y, then z.
+- Serpentine reverses x on odd rows (boustrophedon), so the strip snakes back and forth: driver index advances linearly while the emitted x zigzags. Even rows L→R, odd rows R→L. The COORDINATE is always the true (x,y) — only the index→position order changes, which is what makes the mapping non-identity.
 - A 3D 2×2×2 grid yields 8 lights with z-plane separation (indices 0-3 at z=0, 4-7 at z=1).
 - A single-light grid (1×1×1) is a valid layout: one coordinate at (0,0,0).
 - Layouts with a single child delegates totalLightCount and forEachCoord to that child directly.
 - Two child layouts produce contiguous physical indices: the second layout's coords are offset by the first's lightCount.
+
+## HttpServerModule
+
+`test/unit/core/unit_HttpServerModule_apply.cpp`
+
+- _apply-core: applyAddModule adds a child, idempotent on the id_
+- _apply-core: applySetControl writes a value, rejects out-of-range / unknown_
+- _apply-core: applyClearChildren empties a container (replaceChildren)_
+- _apply-core: applyOp dispatches each op type and tolerates bad input_
+- A per-control validator (like SystemModule.deviceModel's printable-ASCII rule) is enforced THROUGH the apply-core — so the APPLY_OP `set` the installer pushes over serial is guarded exactly like an HTTP write, with no per-transport special-casing. This is the point of moving validation onto the control: one backend check, every path.
 
 ## ImprovFrame
 
@@ -232,6 +262,21 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - When the byte after MagicV isn't the version but happens to be 'I', the parser re-enters magic search at Magic1 — recovers a new frame that arrives right after a corrupted header.
 - Every defined ImprovFrameType (CurrentState, ErrorState, Rpc, RpcResponse) round-trips through builder + parser cleanly.
 - After FrameReady the parser returns to Magic0 and parses the next frame on the same instance without reset.
+
+## ImprovOpReassembler
+
+`test/unit/core/unit_ImprovOpReassembler.cpp`
+
+- _a single-frame op (seq 0, last 1) is Ready with the exact bytes_
+- _a multi-chunk op reassembles in order and NUL-terminates_
+- _a duplicate chunk is rejected and resets the buffer_
+- _an out-of-order chunk (skipped seq) is rejected_
+- _a non-zero opening seq (no fresh start) is rejected_
+- _overflow past the buffer (minus the NUL) is rejected, not truncated_
+- _exactly buffer-minus-one bytes fits (boundary)_
+- _seq 0 mid-stream abandons a partial op and starts fresh_
+- _an empty final chunk still completes (last with zero bytes)_
+- _reset() drops a partial op_
 
 ## JsonUtil
 
@@ -274,6 +319,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 `test/unit/light/unit_Layer_sparse_mapping.cpp`
 
 - Dense grid: every box cell is a light, so no LUT — the identity/memcpy fast path is preserved exactly (the grid short-circuit).
+- Serpentine grid: dense (every box cell is a light, so the count check alone would pick the identity fast path) but SHUFFLED (driver index i != box cell i). isNaturalOrder() measures that from the coords and routes it through the box->driver LUT instead. This is the lever for exercising the non-identity mapping path without a sparse layout or a modifier.
 - Sparse sphere: a LUT is built; its destinations are driver indices in [0, lightCount), and the render buffer stays the dense bounding box.
 - Sphere + Mirror: the modifier's box-coordinate destinations are translated into driver-index space; no destination escapes [0, lightCount).
 - REGRESSION: a high fan-out Multiply (8×8×4 = 256) on a 128×128 grid must build a NON-EMPTY LUT that covers every physical light. The maxDest estimate (logicalCount × maxMultiplier) is computed in 64-bit; before that fix it overflowed uint16 on no-PSRAM boards (256 × 256 = 65536 wraps to 0), sized the LUT to ~nothing, and blanked the display. Here we assert the LUT actually maps the full light set, in range — the symptom that black-screened the device.
@@ -302,6 +348,9 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 - A Layers container with one child Layer must produce the same output as that Layer used directly (no-op container).
 - With two child Layers, each one's loop() runs and writes its own buffer (the container iterates all enabled children).
+- Multi-layer composition: Drivers blends ≥2 enabled Layers into its own output buffer and hands THAT to drivers (not a single Layer's buffer). Bottom layer overwrites; top layer blends per its blendMode/opacity. This is the end-to-end pin for the composite loop in Drivers::loop.
+- Disabling the top layer drops cleanly to the single (bottom) layer — no crash, the driver now sees the bottom layer's content. Pins the robustness path.
+- Drivers' composition/output-buffer allocation contract (architecture.md § Adaptive allocation). The driver output buffer exists ONLY when the pipeline must blend into physical space; otherwise the lone layer's buffer is handed to drivers directly (zero-copy). dynamicBytes() reflects outputBuffer_.bytes(), so it's 0 ⇔ no buffer. Pins all three cases in one place: 1. one identity (no-LUT) layer  → NO output buffer (zero-copy) 2. two enabled layers           → output buffer (must composite) 3. one layer WITH a LUT         → output buffer (must map logical→physical)
 - activeLayer() returns the first enabled child, or the only child if all are disabled (so dimensions stay queryable during boot/toggle-off).
 - If the container holds only non-Layer children, activeLayer() returns nullptr (the role-guard skips, never miscasts).
 
@@ -566,9 +615,17 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - A sphere sends its SHELL lights (210), not the dense 9x9x9 box (729).
 - Per-frame 0x02 RGB count matches the coordinate-table count.
 - A small grid sends every light at its grid position (stride 1, exact).
-- A large layout is index-downsampled (stride > 1) so the payload fits the send-buffer cap — but at REAL positions, not a padded box.
+- A large layout is SPATIALLY downsampled (a regular per-axis lattice, not every-Nth-flat- index) so the payload fits the send-buffer cap without the diagonal moiré that linear stride produced on a grid whose width didn't divide the stride. The wire "stride" field carries the per-axis lattice/downscale factor (colour k still maps 1:1 to coord k).
+- A SPARSE layout under the cap must NOT be downsampled for its big BOUNDING BOX alone: the lattice bound is the layout's LIGHT count, not its box cell count, so a sphere whose shell fits the cap sends every light at stride 1 (a radius-8 sphere → ~812 shell lights, well under the 4096 display cap, in a 17³≈4913-cell box). (A genuinely huge sparse layout above the cap downsamples like any other — the cap is about points streamed, not box size.)
 - Default fps is the rate-limited preview stream rate.
+- Regression: a coordinate table dropped under backpressure must be RETRIED, and colour frames withheld until it lands — otherwise the device sends 0x02 frames the browser skips (count mismatch) and the preview freezes for the whole session. Drives loop() (where the coord-pending logic lives) with a broadcaster that drops every 0x03, then lets it through.
 - Regression: deleting the active Layer must not leave a driver holding a dangling layer_ pointer. Previously Drivers::passBufferToDrivers early-returned when the active Layer was null, leaving PreviewDriver's layer_ pointing at the freed Layer; the next onBuildState read layer_->layouts() on freed memory and crashed the device (LoadProhibited → boot loop, since the broken tree persists). Now passBufferToDrivers clears the drivers' layer_/sourceBuffer_ to null, a safe idle state. This drives the real path: Drivers bound to a Layers CONTAINER (self-healing), the Layer removed, then buildState re-resolves activeLayer()=null.
+- Coordinates are sent ONLY when the geometry changes or a new client connects — never per-frame and never on a timer (a periodic full-table rebuild would starve the tick). A new client (clientGeneration bump) re-sends immediately so a page refresh shows the preview at once. Driven through loop() with a frozen clock for determinism.
+- A full-res RGB frame is sent through the RESUMABLE buffered path (sendBufferedFrame), whose body is the DRIVER (consumer) buffer itself — no copy. For a dense identity grid that's the Layer's dense box buffer; for a sparse/mapped layout it's the LUT-mapped output buffer (the real lights), the same buffer the LED drivers consume — NOT the dense box.
+- Sparse layout: the buffered send streams the LUT-mapped DRIVER buffer (only the real lights, in driver order), exactly like the LED drivers — NOT the dense bounding box. So coordCount == the shell count and the frame is sent whole at full res through the resumable path.
+- Dense-grid CLOSED-FORM downsample, exact colour placement: a 200×1 strip pinned over a small cap strides in x only, so the kept lights are columns 0,s,2s,… The colour pass must read each from its dense buffer index (closed-form x for a 1-row grid) and pack them in the SAME order as the coord table — no forEachCoord. Painting a known colour at a kept column and finding it at the matching frame position pins the index math + the lattice order.
+- ADAPTIVE FRAME RATE: while a buffered send is still draining (a slow link), loop() must NOT start a new frame — it waits for bufferedSendIdle(). So the effective rate self-limits to the link.
+- USE-AFTER-FREE GUARD: a geometry rebuild (resize) frees+reallocs the producer buffer, so any in-flight buffered send (which holds a pointer into it) MUST be cancelled in onBuildState before the buffer goes away — else drainPreviewSend would read freed memory.
 
 ## RainbowEffect
 
@@ -698,7 +755,6 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - deviceName is the single network identity, so SystemModule keeps it a valid hostname. A live edit to an invalid value ("My Room!") is coerced on the next loop1s tick (mm::sanitizeHostname), the same path mDNS/AP/DHCP read — so they never see spaces.
 - An all-invalid name collapses to empty after sanitising; the MAC fallback then fills it, so deviceName is never empty (mDNS/AP/DHCP always have a name to register).
 - An already-valid name is left untouched (idempotent) — a normal user name survives.
-- The `firmware` control is always present and non-empty (either a real firmware key from build_info.h or the fallback "unknown").
 - The `bootReason` control is populated from platform::resetReason; on desktop it reports "OK".
 - SystemModule accepts user-added Peripheral children (sensors/actuators the user solders on); the role string drives the type-picker filter + add policy.
 - Regression: SystemModule overrides setup() and loop1s(); both must chain to MoonModule's base so a Peripheral child's setup()/loop1s() actually fire. Without the chain a sensor would never init or poll (the "children miss callbacks" trap from history/decisions.md). loop20ms() isn't overridden, so the base default already propagates it.

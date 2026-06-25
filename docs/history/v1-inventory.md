@@ -119,7 +119,7 @@ This is a throwaway reference document — not committed. Used to decide what to
 
 ### Detailed reverse-engineering (the v1 frontend at 1.4.0)
 
-The v1 `index.html` was fully reverse-engineered. The notes below capture mechanisms worth not rediscovering and, where v3 chose differently, why. The **forward-looking** UI gap analysis (what to still adopt) lives in [backlog/ui-deferred.md](../backlog/ui-deferred.md).
+The v1 `index.html` was fully reverse-engineered. The notes below capture mechanisms worth not rediscovering and, where v3 chose differently, why. The **forward-looking** UI gap analysis (what to still adopt) lives in the [backlog](../backlog/README.md) (UI chapter of backlog-core.md).
 
 **Engine-side data fields v1 exposed that v3 doesn't (yet):**
 - `setup_ok` (bool) + `health` (string) per module — drove a setup-dot colour and tooltip. v3 would add `bool setupOk()` + `const char* health()` to MoonModule when a real failure mode exists.

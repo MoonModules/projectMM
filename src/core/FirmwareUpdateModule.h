@@ -58,17 +58,19 @@ public:
         // first WS state push surfaces a coherent "idle" / 0 pair.
         std::strncpy(statusStr_, g_otaStatus, sizeof(statusStr_) - 1);
         statusStr_[sizeof(statusStr_) - 1] = '\0';
+        publishStatus();
         bytesRead_ = g_otaBytesRead;
         totalSnap_ = g_otaBytesTotal;
 
-        // Firmware identity (static for this build). version = semver + release channel when the
-        // pipeline burned one in ("1.0.0-rc2 (latest)"); kRelease is "" on local/dev builds, where
-        // we show the bare semver (build_info.h's MM_VERSION vs MM_RELEASE split).
-        if (kRelease[0] != 0) {
-            std::snprintf(versionStr_, sizeof(versionStr_), "%s (%s)", kVersion, kRelease);
-        } else {
-            std::snprintf(versionStr_, sizeof(versionStr_), "%s", kVersion);
-        }
+        // Firmware identity (static for this build). version is PURE SEMVER (kVersion from
+        // library.json): a clean "2.0.0" on a stable release, or a prerelease like "2.1.0-dev" on a
+        // moving/dev build (semver.org §9 — the prerelease suffix is how a not-yet-released build is
+        // expressed). The release channel is derivable from the version itself (a prerelease suffix
+        // means "not a stable release"), so it is NOT mixed into the string; kRelease stays the
+        // separate build-channel tag (which git tag this binary shipped under) without polluting the
+        // machine-comparable version. This keeps `version` a clean semver the UI's update check can
+        // compare against the newest GitHub release.
+        std::snprintf(versionStr_, sizeof(versionStr_), "%s", kVersion);
         std::snprintf(buildStr_, sizeof(buildStr_), "%s", kBuildDate);
         std::snprintf(firmwareStr_, sizeof(firmwareStr_), "%s", kFirmwareName);
     }
@@ -85,7 +87,11 @@ public:
             controls_.addProgress("firmwarePartition", firmwareSizeVal_, totalFlashVal_);
         }
 
-        controls_.addReadOnly("update_status", statusStr_, sizeof(statusStr_));
+        // OTA status goes through MoonModule::setStatus() (the per-module status
+        // slot every module shares), not a bespoke read-only control — same
+        // choice DevicesModule made. The error-prefixed states map to
+        // Severity::Error; everything else is neutral. See publishStatus().
+        //
         // Total is captured by value into the descriptor's `aux`; we re-bind
         // (via markDirty → HttpServerModule rebuildControls) when totalSnap_
         // changes. Initially 0; the UI shows "0KB / 0KB" until esp_https_ota
@@ -99,6 +105,7 @@ public:
         // read shows as a brief mid-update glimpse — visually harmless.
         std::strncpy(statusStr_, g_otaStatus, sizeof(statusStr_) - 1);
         statusStr_[sizeof(statusStr_) - 1] = '\0';
+        publishStatus();
         bytesRead_ = g_otaBytesRead;
         // Re-bind on total transition. Only fires once per OTA (and once on
         // any later OTA the user starts — we deliberately don't reset the
@@ -112,12 +119,28 @@ public:
         }
     }
 
+    // Point the shared status slot at our owned buffer, choosing the severity
+    // from the status text: the platform OTA task prefixes every failure with
+    // "error: " (see platform_esp32_ota.cpp), so that prefix is the Error gate.
+    // "idle" is the quiescent state and reads better as no banner than as an
+    // info banner, so it clears the slot. setStatus doesn't copy — statusStr_
+    // outlives every call, so the pointer stays valid.
+    void publishStatus() {
+        if (std::strcmp(statusStr_, "idle") == 0) {
+            clearStatus();
+        } else {
+            setStatus(statusStr_,
+                      std::strncmp(statusStr_, "error:", 6) == 0 ? Severity::Error
+                                                                 : Severity::Status);
+        }
+    }
+
 private:
     char     statusStr_[64] = "idle";
     uint32_t bytesRead_     = 0;
     uint32_t totalSnap_     = 0;
     // Firmware identity (static for this build) + the running app-partition usage.
-    char     versionStr_[32] = {};   // semver + " (channel)" — e.g. "1.0.0-rc2 (latest)"
+    char     versionStr_[32] = {};   // pure semver — e.g. "2.0.0" or "2.1.0-dev.7"
     char     buildStr_[24]   = {};
     char     firmwareStr_[24] = {};  // build variant name, e.g. "esp32s3-n16r8"
     uint32_t firmwareSizeVal_ = 0;   // bytes used in the app partition

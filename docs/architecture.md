@@ -342,7 +342,7 @@ Multiple layouts can live in one Layouts container. Each layout describes one li
 
 **Layers** (a MoonModule) is the top-level container for one or more layers. Each layer renders independently into its own buffer; the Drivers container composes those buffers downstream.
 
-**🚧 Multi-layer composition.** The container exists to compose more than one Layer's buffer into the shared output: alpha-blend and additive, in layer order. With a single layer wired (today's boot pipeline) Layers is a thin pass-through, but the design is the multi-layer case: each Layer renders into its own buffer, and the Drivers container's blend+map step composites them in order into the physical buffer (which is why that buffer is described as a *blend* buffer in [§ Memory strategy](#memory-strategy)). The single-layer path is the degenerate case of this, not a separate design.
+**Multi-layer composition.** The container composes more than one Layer's buffer into the shared output: each enabled Layer renders into its own buffer, and the Drivers container's blend+map step composites them in container order (bottom→top) into the physical buffer (which is why that buffer is a *blend* buffer in [§ Memory strategy](#memory-strategy)). Each Layer carries a `blendMode` (alpha-over or additive) and an `opacity` — inert parameters the Layer never acts on; Drivers reads them and the container child order, and blends bottom→top. The bottom layer clears + overwrites the output; each layer above blends onto the accumulated frame per its mode and opacity. With a single enabled Layer this is the degenerate case: a thin pass-through that hands the driver the Layer's buffer directly (no composite), byte-for-byte the single-layer pipeline. The blend math is integer-only per the hot-path rule (8-bit alpha-over `(src·α + dst·(255−α))/255`, additive sum-with-clamp); cost scales with the enabled-layer count.
 
 A **Layer** (a MoonModule, child of Layers) owns:
 
@@ -351,15 +351,15 @@ A **Layer** (a MoonModule, child of Layers) owns:
 - **Effects** (ordered list): write light values into the buffer.
 - **Modifiers** (ordered list): transform the LUT or light values.
 
-A layer can have **multiple effects**. Effects are not blended; they write to the buffer sequentially in their listed order, each overwriting or adding to the previous. That allows stacked patterns (a base-colour effect followed by a sparkle effect).
+A layer can have **multiple effects**. Each effect writes to the buffer sequentially in its listed order, overwriting or adding to the previous — so the effects stack (a base-colour effect followed by a sparkle effect).
 
-A layer applies its **first enabled modifier** during LUT build (`Layer::rebuildLUT`). Modifier *chaining* (applying several in sequence) is not implemented: only the first enabled modifier takes effect. Order matters for a chain (a multiply-then-checkerboard mask differs from checkerboard-then-multiply, just as mirror-then-rotate differs from rotate-then-mirror), which is why modifiers are reorderable in the UI even though only the first is applied today. Chaining is on the [backlog](backlog/backlog.md): static modifiers chain during LUT build, dynamic modifiers during rendering.
+A layer applies its **first enabled modifier** during LUT build (`Layer::rebuildLUT`). Modifiers are **reorderable** in the UI, and order is meaningful (a multiply-then-checkerboard mask differs from checkerboard-then-multiply, just as mirror-then-rotate differs from rotate-then-mirror). Applying several modifiers in sequence (chaining) is on the [backlog](backlog/README.md).
 
 Each layer references the shared Layouts. The layer builds its own LUT by iterating the Layouts container's coordinates and applying its static modifiers in order. Different layers in Layers can have different modifiers, producing different LUTs from the same Layouts.
 
 ## Effects
 
-Effects produce light colours. They write into the Layer's buffer, which represents a logical grid. The Layer determines the buffer's dimensions (width, height, depth) from the Layouts, its own start/end percentages within the physical layout, and its modifiers. Effects receive these logical dimensions and elapsed time (millis) as their rendering context. They compute light positions from the buffer index (e.g. `x = i % width`, `y = i / width`).
+Effects produce light colours. They write into the Layer's buffer, which represents a logical grid. The Layer determines the buffer's dimensions (width, height, depth) from the Layouts and its modifiers. Effects receive these logical dimensions and elapsed time (millis) as their rendering context. They compute light positions from the buffer index (e.g. `x = i % width`, `y = i / width`).
 
 Effects use elapsed time for animation, not frame count. Animation speed becomes frame-rate independent: an effect looks the same at 30 fps and 60 fps. This is also what makes the 🚧 cross-device clock sync work: a shared elapsed-time base means synced visuals across controllers (see [§ Multi-device sync](#multi-device-sync)).
 
@@ -462,7 +462,7 @@ Network input (ArtNet receive, WebSocket) is processed synchronously at a define
 The system checks available heap before each allocation and degrades gracefully when memory is insufficient. A minimum reserve (`HEAP_RESERVE = 32 KB`) is kept for stack, HTTP, WiFi, and overhead.
 
 - **Mapping LUT** is created only if all of: modifiers exist on the layer; layout is not a simple non-serpentine grid (where physical == logical); enough heap available after the reserve.
-- **Driver output buffer** (see [§ Drivers](#drivers) for what it's for) is created only when at least one layer has a mapping LUT actually allocated and enough heap is available.
+- **Driver output buffer** (see [§ Drivers](#drivers) for what it's for) is created only when the pipeline must write into physical space rather than hand a driver a layer's logical buffer directly — that is, when **two or more layers are enabled** (they must be composited into one buffer) **or** a layer has a **mapping LUT** actually allocated (logical≠physical) — and enough heap is available. A single enabled layer with no LUT needs no output buffer: drivers read its buffer directly (the zero-copy fast path).
 
 ### Degradation cascade
 
