@@ -172,12 +172,19 @@ public:
         // Layer::allocateBuffer uses). Sized from the active layer: every layer
         // composites into the same physical space, so its physicalLightCount() /
         // channelsPerLight() is the composite extent.
+        // Output selection keys off an *enabled* source layer, never the disabled
+        // fallback activeLayer() may return (which exists only so geometry stays
+        // queryable while every layer is toggled off). With no enabled layer there
+        // is nothing to emit, so no output buffer — drivers go idle (see
+        // passBufferToDrivers). A pinned setLayer() (layers_ null) is always treated
+        // as the live source.
+        Layer* const out = layers_ ? layers_->firstEnabledLayer() : layer_;
         const uint8_t enabled = layers_ ? layers_->enabledLayerCount() : (layer_ ? 1 : 0);
-        const bool needOutput = layer_ && (enabled > 1 || layer_->lut().hasLUT());
+        const bool needOutput = out && (enabled > 1 || out->lut().hasLUT());
         if (needOutput) {
-            if (!outputBuffer_.allocate(layer_->physicalLightCount(), layer_->channelsPerLight())) {
+            if (!outputBuffer_.allocate(out->physicalLightCount(), out->channelsPerLight())) {
                 std::printf("  DEGRADE  Drivers::outputBuffer_ allocate failed for %u lights\n",
-                            static_cast<unsigned>(layer_->physicalLightCount()));
+                            static_cast<unsigned>(out->physicalLightCount()));
                 outputBuffer_.free();   // leaves data_=nullptr, bytes()=0
             }
         } else {
@@ -207,10 +214,14 @@ public:
                 blendMap(L->buffer(), outputBuffer_, L->lut(), L->channelsPerLight(),
                          op, op_opacity, /*clearFirst=*/first);
             });
-        } else if (outputBuffer_.data() && layer_ && layer_->lut().hasLUT()) {
+        } else if (Layer* out = layers_ ? layers_->firstEnabledLayer() : layer_;
+                   outputBuffer_.data() && out && out->lut().hasLUT()) {
             // Single layer with a LUT (the only enabled one, or a pinned setLayer):
             // map its logical buffer into physical space. The original fast path.
-            blendMap(layer_->buffer(), outputBuffer_, layer_->lut(), layer_->channelsPerLight());
+            // `out` is the enabled source, never activeLayer()'s disabled fallback;
+            // the outputBuffer_.data() guard already excludes the all-disabled case
+            // (needOutput is false then), this keeps the source choice explicit.
+            blendMap(out->buffer(), outputBuffer_, out->lut(), out->channelsPerLight());
         }
         // (A lone enabled no-LUT layer skips the above — drivers read its logical
         // buffer directly, the zero-copy path set in passBufferToDrivers.)
@@ -238,14 +249,19 @@ private:
         // layers) or when the single layer needs a LUT map; otherwise the lone
         // no-LUT layer's buffer is handed directly (zero-copy fast path). Mirrors
         // the same decision loop() makes (outputBuffer_ is allocated iff this).
+        // The source is the first *enabled* layer, never the disabled fallback
+        // activeLayer() returns when all layers are off — with no enabled layer
+        // buf stays null and every driver idles (its last frame is not re-sent).
+        // A pinned setLayer() (layers_ null) is always the live source.
+        Layer* const out = layers_ ? layers_->firstEnabledLayer() : layer_;
         const bool composing = layers_ && layers_->enabledLayerCount() > 1;
-        Buffer* buf = layer_ ? ((composing || layer_->lut().hasLUT()) ? &outputBuffer_
-                                                                      : &layer_->buffer())
-                             : nullptr;
+        Buffer* buf = out ? ((composing || out->lut().hasLUT()) ? &outputBuffer_
+                                                               : &out->buffer())
+                          : nullptr;
         for (uint8_t i = 0; i < childCount(); i++) {
             auto* drv = static_cast<DriverBase*>(child(i));
             drv->setSourceBuffer(buf);
-            drv->setLayer(layer_);  // null when no active Layer; drivers must tolerate it
+            drv->setLayer(out);  // null when no enabled Layer; drivers must tolerate it
             drv->setCorrection(&correction_);  // physical drivers apply it; Preview ignores
         }
     }

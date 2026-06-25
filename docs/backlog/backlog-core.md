@@ -205,10 +205,6 @@ Sequencing rule (unchanged): each functionality lands a device-side control firs
 
 **Module variant + PSRAM within the classic-ESP32 family.** `getChipDescription()` and MoonLight's `ModuleIO.h` both report only the *core* family ("ESP32"), not the *module* (WROOM / WROVER / PICO) — so neither distinguishes whether a classic-ESP32 board has PSRAM. This matters for projectMM (whose large-LED story leans on PSRAM) in a way it doesn't for MoonLight: e.g. the **QuinLED Dig-Next-2 is built on an ESP32-PICO with 2 MB PSRAM**, but projectMM's `esp32` build has no `CONFIG_SPIRAM` (see the `#ifdef CONFIG_SPIRAM` gate in `platform_esp32.cpp::psramAlloc`), so it flashes and runs as a no-PSRAM device and hits the non-PSRAM fragmentation ceiling at large grids that the 2 MB would otherwise relieve. A PSRAM-enabled classic-ESP32 firmware variant (e.g. `esp32-psram`) would unlock it; `deviceModels.json` could then carry a `psram` hint per board to steer the picker — but only once that variant exists (no consumer today). `deviceModels.json` currently maps every classic board to the WiFi-only `esp32` variant, which is correct-but-unoptimised for PSRAM-bearing PICO boards.
 
-### Per-Layer region carving (backlog)
-
-Multi-layer composition has shipped — `Drivers::loop()` composites each enabled Layer's buffer into the shared output per its `blendMode` + `opacity` (see [Drivers.md](../moonmodules/light/Drivers.md), [BlendMap.md](../moonmodules/light/BlendMap.md)). The remaining piece is region carving: `Layer::startX/Y/Z` / `endX/Y/Z` (already persisted, currently no-op) become active in `rebuildLUT` so each Layer occupies a percentage region of the physical extent rather than the full box. (Distinct from per-layout coordinate offset below, which translates whole layouts; this clips a single Layer's reach.) A memory-aware allocator at `onBuildState` time could then decide how many Layers fit and degrade gracefully under tight heap.
-
 ### Per-layout coordinate offset for independent placement (backlog)
 
 `Layouts` stitches multiple child layouts into one physical light space, but only their *indices* are stitched (offset sequentially in `forEachCoord`) — their *coordinates* are not translated. Two layouts therefore overlap in the same coordinate box: two 64×64 grids both occupy x,y ∈ 0..63, so the Layer's dense bounding-box buffer is 64×64 (4096 voxels) even though the container reports 8192 lights, and the second layout's lights land on the first's positions. `scenario_Layouts_mutation` documents this (its steps assert pipeline liveness, not buffer-size arithmetic).
@@ -340,7 +336,7 @@ Forward-looking companion to the shipped UI spec, [moonmodules/core/ui.md](../mo
 These don't block the shipped baseline but should be answered before 1.0:
 
 - **Multi-layer UI** — [architecture.md](../architecture.md) plans for N layers blended into one Drivers. The current card layout shows one Layer. Likely needs a tab/accordion to switch layers, or a per-layer column.
-- **Modifier chain visualization** — show the modifier order visually (the `children[]` order is the apply order). Today they're a flat list.
+- **Modifier chain visualization** — show the modifier order visually. Today they're a flat list, and only the **first enabled** modifier actually applies (the `children[]` order is *not* yet an apply order — see [Composed modifiers](backlog-mixed.md#composed-modifiers--chain-the-whole-modifier-stack-not-just-the-first-planned-multi-commit)). This viz item only becomes meaningful *after* composed modifiers land; until then a chain UI would imply a stacking the engine doesn't do.
 - **Presets** — save/load named bundles of control values. Persistence already stores them; needs a UI surface.
 - **Canvas/node-graph view** — v2 attempted this. Powerful for complex setups but doubles the UI surface. A reasonable v3 follow-up gated on user demand.
 

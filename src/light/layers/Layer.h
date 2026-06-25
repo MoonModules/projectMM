@@ -18,34 +18,6 @@ public:
     ModuleRole role() const override { return ModuleRole::Layer; }
     const char* acceptsChildRoles() const override { return "effect,modifier"; }
 
-    // start/end carve a region of the shared Layouts into this Layer's buffer,
-    // expressed as **percentages of the physical extent on each axis**.
-    // `start = 0, end = 100` is the full layout — the defaults below — and is
-    // byte-identical to the pre-Layers pipeline. Percentages are resilient to
-    // physical layout changes: a `startX = 25` Layer stays at the same
-    // relative position when the panel resizes from 64×64 to 128×128, rather
-    // than ending up at the wrong absolute pixel.
-    //
-    // Negative values and values > 100 are legal: a future modifier could drag
-    // a Layer in or out of the visible area by shifting start/end past 0% or
-    // 100% (e.g. `startX = -50` means the Layer extends 50% off the left edge
-    // of the layout). ControlType::Int16 is the wire type so negative values
-    // round-trip correctly through /api/state, /api/types, and persistence.
-    // `lengthType` (int16_t) is reused so the type matches width/height/depth
-    // — the *semantics* (percent vs pixel) live in the field name and spec.
-    //
-    // Spec: docs/architecture.md § Layers and Layer.
-    // NOTE: start/end are not yet read in onBuildState/rebuildLUT — they don't
-    // affect the buffer size today, so Layer doesn't override controlChangeTriggersBuildState.
-    // When they become functional (carving a sub-region → different buffer size), add
-    // `bool controlChangeTriggersBuildState(const char*) const override { return true; }` so a
-    // start/end change triggers the pipeline rebuild.
-    lengthType startX = 0;
-    lengthType startY = 0;
-    lengthType startZ = 0;
-    lengthType endX = 100;
-    lengthType endY = 100;
-    lengthType endZ = 100;
 
     // Composition parameters — INERT on the Layer (it never reads them; a Layer
     // can't know its position in the stack or what's beneath it). The Drivers
@@ -58,14 +30,6 @@ public:
     uint8_t opacity = 255;     // 0 = invisible, 255 = full
 
     void onBuildControls() override {
-        // Names match the field names; the percent semantic lives in the spec
-        // (Layer.md § start/end controls) and is reflected in the comment above.
-        controls_.addInt16("startX", startX);
-        controls_.addInt16("startY", startY);
-        controls_.addInt16("startZ", startZ);
-        controls_.addInt16("endX",   endX);
-        controls_.addInt16("endY",   endY);
-        controls_.addInt16("endZ",   endZ);
         static constexpr const char* kBlendModeOptions[] = {"alpha", "additive"};
         controls_.addSelect("blendMode", blendMode, kBlendModeOptions, 2);
         controls_.addUint8("opacity", opacity, 0, 255);

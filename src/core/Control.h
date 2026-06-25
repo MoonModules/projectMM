@@ -81,9 +81,8 @@ enum class ControlType : uint8_t {
     Uint8,
     Uint16,
     Int16,      // signed 16-bit. For coordinate-style controls where negative
-                // values are legal — e.g. a Layer's start/end dragged out of the
-                // visible area by a future modifier. (The light domain's grid
-                // coordinate type is int16 for this reason.)
+                // values are legal. (The light domain's grid coordinate type is
+                // int16 for this reason.)
     Pin,        // a GPIO number (int8_t storage, -1 = unused/default). Distinct
                 // from Int16 so the UI renders a plain number input, not a slider:
                 // a GPIO has no meaningful range to drag, and pins span 0..~52

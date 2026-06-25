@@ -77,6 +77,20 @@ public:
         return static_cast<Layer*>(fallback);  // nullptr if no Layer children
     }
 
+    // The first *enabled* Layer, or nullptr when none is enabled. Distinct from
+    // activeLayer(), which falls back to a disabled registered Layer so geometry
+    // (width/height/depth) stays queryable while everything is toggled off. Output
+    // selection must use *this* one: handing a disabled layer's stale buffer to the
+    // drivers would keep emitting its last frame instead of going idle.
+    Layer* firstEnabledLayer() const {
+        for (uint8_t i = 0; i < childCount(); i++) {
+            MoonModule* c = child(i);
+            if (!c || c->role() != ModuleRole::Layer || !c->enabled()) continue;
+            return static_cast<Layer*>(c);
+        }
+        return nullptr;
+    }
+
     // Count of enabled Layer children — Drivers uses it to pick the single-layer
     // fast path (==1) vs the composite path (>1), and to know if anything renders.
     uint8_t enabledLayerCount() const {

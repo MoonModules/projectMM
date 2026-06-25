@@ -12,8 +12,9 @@ A thin status surface for OTA flashing. The flash itself is driven by `POST /api
 | `build` | read-only string | Build date/time (`MM_BUILD_DATE`). |
 | `firmware` | read-only string | Build-time firmware variant key from `src/core/build_info.h` (`MM_FIRMWARE_NAME`): `esp32`, `esp32-eth`, `esp32-16mb`, `esp32s3-n16r8`, … for the shipped firmware variants (the full list is the `FIRMWARES` dict in `build_esp32.py`); `desktop-macos-arm64` / `desktop-windows-x64` for packaged desktop binaries; `desktop-dev` for unpackaged local desktop builds. A device carrying the legacy `esp32-eth-wifi` key OTA-maps to `esp32`. Identifies which release asset matches the device — the same key appears in the firmware filenames published by `release.yml`. The compiled binary; the physical hardware it runs on is SystemModule's `deviceModel` control. `install-picker.js`'s `isCompatible()` reads this string. |
 | `firmwarePartition` | progress (used/total) | Running app image size / total firmware (app) partition size — how full the partition is. Named distinctly from the `firmware` string control so a `controls.find(c => c.name === "firmware")` caller resolves the string, not this progress value. |
-| `update_status` | read-only string | One of: `idle`, `starting`, `downloading`, `flashing`, `rebooting`, `error: <reason>`. |
 | `update_pct` | progress (bytes/total) | Live byte counters rendered as "X KB / Y KB"; `total` is 0 until `esp_https_ota_get_image_size` reports it just after the TLS handshake. The name is historical (it predates the percent→bytes migration); the wire shape is bytes. |
+
+The OTA flash phase (`idle`, `starting`, `downloading`, `flashing`, `rebooting`, `error: <reason>`) is not a control — it surfaces through the module's shared status slot (`MoonModule::setStatus()`), the same per-module banner every module uses (NetworkModule's IP line, DevicesModule's sweep count). An `error: ` prefix maps to `Severity::Error`; `idle` clears the banner; everything else is neutral `Severity::Status`.
 
 ## Wire contract
 
@@ -27,12 +28,12 @@ Request body:
 
 Response:
 
-- `202 Accepted` `{"ok":true}` — task spawned; UI polls `update_status` for progress.
+- `202 Accepted` `{"ok":true}` — task spawned; UI watches the module status slot + `update_pct` for progress.
 - `400` — missing URL, or URL doesn't start with `http://` / `https://`.
 - `500` — task failed to spawn (rare; out of memory).
 - `501` — platform doesn't support OTA (desktop returns this; `if constexpr (mm::platform::hasOta)`).
 
-The route returns immediately. Real progress streams via `update_status` + `update_pct` over the same WebSocket the UI uses for everything else.
+The route returns immediately. Real progress streams via the module status slot + `update_pct` over the same WebSocket the UI uses for everything else.
 
 ### Compatibility
 
@@ -58,7 +59,7 @@ The status buffer surfaces any failure with the prefix `error: ` followed by the
 - `error: ota finish <ESP-IDF error name>` — commit / boot-pointer-flip failure.
 - `error: task create failed` — `xTaskCreate` returned non-`pdPASS` (out of memory). No retry; reboot.
 
-After an error, `update_status` stays on the error message until the next `/api/firmware/url` POST clears it back to `"starting"`. `update_pct` is left at the last value.
+After an error, the status slot stays on the error message until the next `/api/firmware/url` POST clears it back to `"starting"`. `update_pct` is left at the last value.
 
 ## Prior art
 

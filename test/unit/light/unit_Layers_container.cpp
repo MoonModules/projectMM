@@ -296,6 +296,35 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         REQUIRE(cap.src_ != nullptr);
         CHECK(cap.src_ != &only.buffer());           // driver reads the mapped output, not the logical buffer
     }
+
+    // --- Case 4: the only layer is DISABLED → drivers idle, no stale buffer ---
+    // activeLayer() still surfaces the disabled layer (geometry stays queryable),
+    // but output selection must use the *enabled* source — with none, the driver's
+    // source buffer goes null so it emits nothing instead of re-sending the last
+    // frame off the disabled layer.
+    {
+        mm::Layouts layouts; mm::GridLayout grid;
+        grid.width = 8; grid.height = 8; grid.depth = 1;
+        layouts.addChild(&grid);
+        mm::Layers layers;
+        mm::Layer only; only.setChannelsPerLight(3);
+        mm::CheckerboardEffect eff; only.addChild(&eff);
+        // A LUT modifier so the pre-fix bug would route through the output path —
+        // proves the disabled gate, not just the no-LUT zero-copy branch.
+        mm::MultiplyModifier mirror; mirror.mirrorX = true; only.addChild(&mirror);
+        layers.addChild(&only);
+        layers.setLayouts(&layouts);
+        only.setEnabled(false);
+        mm::Drivers drivers; CaptureDriver cap; drivers.addChild(&cap);
+        drivers.setLayers(&layers);
+        layers.onBuildState(); drivers.onBuildState();
+
+        CHECK(layers.activeLayer() == &only);        // fallback for geometry
+        CHECK(layers.firstEnabledLayer() == nullptr);// no enabled source
+        CHECK(layers.enabledLayerCount() == 0);
+        CHECK(drivers.dynamicBytes() == 0);          // no output buffer allocated
+        CHECK(cap.src_ == nullptr);                  // driver idle — no stale frame
+    }
 }
 
 // activeLayer() returns the first enabled child, or the only child if all are disabled (so dimensions stay queryable during boot/toggle-off).
@@ -321,6 +350,27 @@ TEST_CASE("Layers::activeLayer returns first enabled child, or nullptr when empt
     twoChildren.addChild(&second);
     first.setEnabled(false);
     CHECK(twoChildren.activeLayer() == &second);
+}
+
+// firstEnabledLayer() is the output-selection counterpart to activeLayer(): it never
+// falls back to a disabled layer, so it returns nullptr exactly when nothing renders.
+TEST_CASE("Layers::firstEnabledLayer returns first enabled child, nullptr when all disabled") {
+    mm::Layers empty;
+    CHECK(empty.firstEnabledLayer() == nullptr);
+
+    mm::Layers layers;
+    mm::Layer first, second;
+    layers.addChild(&first);
+    layers.addChild(&second);
+    CHECK(layers.firstEnabledLayer() == &first);     // both enabled → first
+
+    first.setEnabled(false);
+    CHECK(layers.firstEnabledLayer() == &second);    // skips the disabled first
+    CHECK(layers.activeLayer() == &second);          // agrees while one stays enabled
+
+    second.setEnabled(false);
+    CHECK(layers.firstEnabledLayer() == nullptr);    // none enabled → nothing renders
+    CHECK(layers.activeLayer() == &first);           // but geometry fallback still resolves
 }
 
 // If the container holds only non-Layer children, activeLayer() returns nullptr (the role-guard skips, never miscasts).

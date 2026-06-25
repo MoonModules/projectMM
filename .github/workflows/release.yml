@@ -150,9 +150,14 @@ jobs:
         # this step and the release job's identical step can't disagree. Raw
         # `python` (not `uv run`): this job has no setup-uv (the ESP-IDF docker
         # action provides Python) and the script is stdlib-only.
+        # Tag passed via env (not inline ${{ }}) so it reaches the script as a
+        # plain shell variable, never spliced into the command text — no shell
+        # injection from a crafted tag/ref.
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-          V=$(python scripts/build/compute_version.py --tag "${{ steps.tag.outputs.tag }}")
+          V=$(python scripts/build/compute_version.py --tag "$TAG")
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
       - name: Build firmware
@@ -308,9 +313,13 @@ jobs:
       # setup-uv, so `uv run`).
       - name: Compute version
         id: ver
+        # Tag via env (not inline ${{ }}) to keep it out of the command text —
+        # no shell injection from a crafted tag/ref.
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-          V=$(uv run python scripts/build/compute_version.py --tag "${{ steps.tag.outputs.tag }}")
+          V=$(uv run python scripts/build/compute_version.py --tag "$TAG")
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
       - name: Generate ESP Web Tools manifests (release-asset URLs)
@@ -383,6 +392,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
+          # Release `name` is the computed semver (e.g. "2.1.0-dev.7"). The device-
+          # hosted UI's dev-channel update check reads it from the CORS-readable
+          # GitHub API (releases/tags/latest) — the manifest-*.json asset that also
+          # carries the version is fetched via a release-asset URL that redirects to
+          # release-assets.githubusercontent.com, which sends no CORS header, so the
+          # browser blocks that read from the device origin. The API exposes `name`
+          # cross-origin, so surfacing the version here is what makes the badge work.
+          name: ${{ steps.ver.outputs.version }}
           # latest and vX.Y.Z-rcN tags are prerelease — they sort below stable
           # on the Releases page and aren't picked up by tooling that asks for
           # "latest release". Stable vX.Y.Z tags publish normally.

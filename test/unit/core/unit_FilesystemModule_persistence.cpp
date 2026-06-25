@@ -9,6 +9,7 @@
 #include "light/effects/NoiseEffect.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/modifiers/MultiplyModifier.h"
+#include "light/modifiers/RegionModifier.h"
 #include "light/layers/Layer.h"
 #include "platform/platform.h"
 
@@ -364,7 +365,7 @@ TEST_CASE("FilesystemModule singleton survives probe construct+destruct") {
 // which default to 0,0 because ControlDescriptor.min/max are uint8_t and can't
 // represent an int16 range. Every Int16 control loaded as 0 — so a 128×128 grid
 // became 0×0×0 after restart and the whole pipeline allocated no buffers.
-// Int16 controls (GridLayout width/height, Layer start/end) preserve their saved value across load — no zero-clamping from uint8 min/max bounds.
+// Int16 controls (GridLayout width/height, RegionModifier start/end) preserve their saved value across load — no zero-clamping from uint8 min/max bounds.
 TEST_CASE("FilesystemModule Int16 controls round-trip preserves the saved value") {
     char tmpRoot[256];
     std::snprintf(tmpRoot, sizeof(tmpRoot), "/tmp/mm_int16_test_%u",
@@ -373,9 +374,10 @@ TEST_CASE("FilesystemModule Int16 controls round-trip preserves the saved value"
     std::filesystem::create_directories(std::string(tmpRoot) + "/.config");
     mm::platform::fsSetRoot(tmpRoot);
 
-    // Hand-write a Layer.json with non-zero Int16 values so the load path is
-    // exercised without needing a save-side step.
-    std::ofstream out(std::string(tmpRoot) + "/.config/Layer.json");
+    // Hand-write a RegionModifier.json with non-zero Int16 values (including
+    // negatives, which are legal on the wire) so the load path is exercised
+    // without needing a save-side step.
+    std::ofstream out(std::string(tmpRoot) + "/.config/RegionModifier.json");
     out << "{\"enabled\":true,\"startX\":42,\"startY\":-17,\"startZ\":0,"
         << "\"endX\":100,\"endY\":-100,\"endZ\":0}";
     out.close();
@@ -384,16 +386,16 @@ TEST_CASE("FilesystemModule Int16 controls round-trip preserves the saved value"
     auto* fs = new mm::FilesystemModule();
     fs->setTypeName("FilesystemModule");
     fs->setScheduler(&scheduler);
-    auto* layer = new mm::Layer();
-    layer->setTypeName("Layer");
+    auto* region = new mm::RegionModifier();
+    region->setTypeName("RegionModifier");
     scheduler.addModule(fs);
-    scheduler.addModule(layer);
+    scheduler.addModule(region);
     scheduler.setup();
 
-    CHECK(layer->startX == 42);
-    CHECK(layer->startY == -17);
-    CHECK(layer->endX == 100);
-    CHECK(layer->endY == -100);
+    CHECK(region->startX == 42);
+    CHECK(region->startY == -17);
+    CHECK(region->endX == 100);
+    CHECK(region->endY == -100);
 
     scheduler.teardown();
     std::filesystem::remove_all(tmpRoot);

@@ -58,6 +58,7 @@ public:
         // first WS state push surfaces a coherent "idle" / 0 pair.
         std::strncpy(statusStr_, g_otaStatus, sizeof(statusStr_) - 1);
         statusStr_[sizeof(statusStr_) - 1] = '\0';
+        publishStatus();
         bytesRead_ = g_otaBytesRead;
         totalSnap_ = g_otaBytesTotal;
 
@@ -86,7 +87,11 @@ public:
             controls_.addProgress("firmwarePartition", firmwareSizeVal_, totalFlashVal_);
         }
 
-        controls_.addReadOnly("update_status", statusStr_, sizeof(statusStr_));
+        // OTA status goes through MoonModule::setStatus() (the per-module status
+        // slot every module shares), not a bespoke read-only control — same
+        // choice DevicesModule made. The error-prefixed states map to
+        // Severity::Error; everything else is neutral. See publishStatus().
+        //
         // Total is captured by value into the descriptor's `aux`; we re-bind
         // (via markDirty → HttpServerModule rebuildControls) when totalSnap_
         // changes. Initially 0; the UI shows "0KB / 0KB" until esp_https_ota
@@ -100,6 +105,7 @@ public:
         // read shows as a brief mid-update glimpse — visually harmless.
         std::strncpy(statusStr_, g_otaStatus, sizeof(statusStr_) - 1);
         statusStr_[sizeof(statusStr_) - 1] = '\0';
+        publishStatus();
         bytesRead_ = g_otaBytesRead;
         // Re-bind on total transition. Only fires once per OTA (and once on
         // any later OTA the user starts — we deliberately don't reset the
@@ -110,6 +116,22 @@ public:
         if (g_otaBytesTotal != totalSnap_) {
             totalSnap_ = g_otaBytesTotal;
             rebuildControls();
+        }
+    }
+
+    // Point the shared status slot at our owned buffer, choosing the severity
+    // from the status text: the platform OTA task prefixes every failure with
+    // "error: " (see platform_esp32_ota.cpp), so that prefix is the Error gate.
+    // "idle" is the quiescent state and reads better as no banner than as an
+    // info banner, so it clears the slot. setStatus doesn't copy — statusStr_
+    // outlives every call, so the pointer stays valid.
+    void publishStatus() {
+        if (std::strcmp(statusStr_, "idle") == 0) {
+            clearStatus();
+        } else {
+            setStatus(statusStr_,
+                      std::strncmp(statusStr_, "error:", 6) == 0 ? Severity::Error
+                                                                 : Severity::Status);
         }
     }
 

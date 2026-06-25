@@ -27,6 +27,7 @@
 #include "light/modifiers/CheckerboardModifier.h"
 #include "light/modifiers/RandomMapModifier.h"
 #include "light/modifiers/RotateModifier.h"
+#include "light/modifiers/RegionModifier.h"
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
 // LED drivers are compiled in per chip, gated on the SOC peripheral the driver
@@ -105,6 +106,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers/CheckerboardModifier.md");
     mm::ModuleFactory::registerType<mm::RandomMapModifier>("RandomMapModifier", "light/modifiers/RandomMapModifier.md");
     mm::ModuleFactory::registerType<mm::RotateModifier>("RotateModifier", "light/modifiers/RotateModifier.md");
+    mm::ModuleFactory::registerType<mm::RegionModifier>("RegionModifier", "light/modifiers/RegionModifier.md");
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver", "light/drivers/NetworkSendDriver.md");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers/PreviewDriver.md");
     // Register only the LED drivers this chip's silicon can run (see the gated

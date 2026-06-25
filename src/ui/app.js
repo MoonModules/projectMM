@@ -991,7 +991,7 @@ function createControl(moduleName, moduleType, ctrl) {
         case "int16": {
             // ctrl.min/ctrl.max are always present (server sends them). Sentinel
             // values INT16_MIN (-32768) / INT16_MAX (32767) mean "unbounded" —
-            // fall back to the percentage range used by Layer start/end controls.
+            // fall back to a ±percentage range.
             const rawMin = Number(ctrl.min ?? -32768);
             const rawMax = Number(ctrl.max ?? 32767);
             const min = rawMin <= -32768 ? -100 : rawMin;
@@ -2222,7 +2222,6 @@ function updateStatusBar() {
 // failure hides the badge, never throws.
 
 const RELEASES_API = "https://api.github.com/repos/MoonModules/projectMM/releases";
-const RELEASE_DOWNLOAD = "https://github.com/MoonModules/projectMM/releases/download";
 const UPDATE_TTL_MS = 60 * 60 * 1000;                     // 1 h — best-effort, well under GitHub's rate limit
 const PICKER_RELEASE_KEY = "projectMM.picker.releaseTag"; // install-picker restores from this on init
 
@@ -2256,14 +2255,12 @@ async function cachedJson(url, key, force) {
             safeLocalSet(key, JSON.stringify({ ts: Date.now(), data }));
             return data;
         } catch (e) {
-            // console.debug, not warn: from the DEVICE-hosted UI this fetch is
-            // expected to fail regardless of connectivity. github.com 302-redirects
-            // the release asset to release-assets.githubusercontent.com, which sends
-            // no Access-Control-Allow-Origin, so the browser blocks the cross-origin
-            // read for origin http://<device>. (It succeeds only from the install
-            // site's allowed origin.) Routine and not actionable here, so keep it out
-            // of the default console — debug is hidden unless the user opts into
-            // verbose. The browser still prints its own un-suppressible CORS line.
+            // console.debug, not warn: an update check failing is routine and not
+            // actionable (the device may simply be offline, or GitHub rate-limited),
+            // so keep it out of the default console — debug is hidden unless the user
+            // opts into verbose. Both callers hit api.github.com, which sends
+            // Access-Control-Allow-Origin and so reads fine from the device origin;
+            // the failure path here is for the no-network / rate-limit case.
             console.debug("[update] fetch failed:", url, e && e.message ? e.message : e);
             const raw = safeLocalGet(key);                   // serve stale on failure
             if (raw) {
@@ -2278,9 +2275,8 @@ async function cachedJson(url, key, force) {
             // No stale entry to serve: NEGATIVE-CACHE the failure (data:null) with a
             // fresh timestamp so the TTL guard above suppresses the next attempt for
             // the back-off window. Without this, every status-bar render (≈4×/s on
-            // each WS push) re-ran this doomed fetch — a CORS-error storm in the
-            // console. A null cache hit returns "no update", same as the device UI
-            // can ever get for this cross-origin asset.
+            // each WS push) re-ran the failing fetch — an error storm in the console
+            // whenever the device is offline. A null cache hit returns "no update".
             safeLocalSet(key, JSON.stringify({ ts: Date.now(), data: null }));
             return null;
         } finally {
@@ -2323,16 +2319,21 @@ async function stableUpdate(dev, force) {
 }
 
 // For a device already on a -dev build: is the moving `latest` release newer? Returns its
-// version string (e.g. "2.1.0-dev.7") or null. The latest release's tag is "latest", so its
-// version comes from the per-firmware manifest it publishes.
+// version string (e.g. "2.1.0-dev.7") or null. The latest release's tag is "latest"; its
+// version is published as the release `name` (release.yml), which the GitHub API exposes
+// CORS-readably — unlike the manifest-*.json asset, whose release-asset URL redirects to
+// release-assets.githubusercontent.com (no CORS header), so the device-hosted UI can't read it.
+// We also require the matching firmware .bin asset so the badge never points at a build the
+// device can't install.
 async function devUpdate(dev, force) {
-    if (!dev.firmware) return null;                          // can't resolve a manifest without the key
-    const url = `${RELEASE_DOWNLOAD}/latest/manifest-${dev.firmware}.json`;
-    // Per-firmware cache slot: the manifest URL is firmware-specific, so one variant
-    // must not reuse another's cached latest manifest.
-    const manifest = await cachedJson(url, `projectMM.update.dev.${dev.firmware}.v1`, force);
-    const v = manifest && manifest.version;
-    return (v && isNewer(v, dev.version)) ? v : null;
+    if (!dev.firmware) return null;                          // can't match an asset without the key
+    const rel = await cachedJson(`${RELEASES_API}/tags/latest`, "projectMM.update.dev.v1", force);
+    const v = rel && rel.name;
+    if (!v) return null;
+    // Assets are versioned, not tagged: the `latest` release ships
+    // firmware-<fw>-v<version>.bin (release.yml stages PREFIX="firmware-...-v$V").
+    const hasBinary = (rel.assets || []).some(a => a.name === `firmware-${dev.firmware}-v${v}.bin`);
+    return (hasBinary && isNewer(v, dev.version)) ? v : null;
 }
 
 // Show/hide the badge. `force` bypasses the cache (used when the Firmware card opens).
