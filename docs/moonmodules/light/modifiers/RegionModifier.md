@@ -2,7 +2,7 @@
 
 Static modifier. Carves the layer down to a sub-rectangle of the physical bounding box: the effect renders only inside the region, everything outside is dark. The region is given as **percentages of the physical extent on each axis**, so it survives a physical resize — a `0..50` region stays the left half whether the panel is 64 or 128 wide. Default `0..100` on every axis is the full box (an identity carve).
 
-Region and Multiply are **independent and composable**: a layer can occupy a region *and*, within that region, be multiplied/mirrored into tiles. That stacking is [modifier chaining](../../../backlog/README.md) (Region then Multiply); until chaining lands a Layer applies only its first enabled modifier, so it uses *either* Region *or* another modifier at a time.
+A Layer applies only its **first enabled modifier**, so today a Layer uses *either* Region *or* another modifier (Multiply, …) at a time. Region and Multiply are independent, so stacking them (occupy a region *and* tile/mirror within it — Region then Multiply) is planned via [modifier chaining](../../../backlog/README.md).
 
 ## Controls
 

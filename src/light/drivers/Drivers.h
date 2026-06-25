@@ -261,7 +261,12 @@ private:
         for (uint8_t i = 0; i < childCount(); i++) {
             auto* drv = static_cast<DriverBase*>(child(i));
             drv->setSourceBuffer(buf);
-            drv->setLayer(out);  // null when no enabled Layer; drivers must tolerate it
+            // Geometry uses layer_ (activeLayer()'s fallback — valid even when every
+            // layer is disabled) so a PreviewDriver keeps its width/height/depth and
+            // coordinate table; buf above uses the enabled source only, so output
+            // still idles (no stale frame) when nothing is enabled. layer_ is null
+            // only when no Layer is registered at all (the documented idle state).
+            drv->setLayer(layer_);
             drv->setCorrection(&correction_);  // physical drivers apply it; Preview ignores
         }
     }

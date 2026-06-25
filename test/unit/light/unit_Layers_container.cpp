@@ -297,11 +297,12 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         CHECK(cap.src_ != &only.buffer());           // driver reads the mapped output, not the logical buffer
     }
 
-    // --- Case 4: the only layer is DISABLED → drivers idle, no stale buffer ---
-    // activeLayer() still surfaces the disabled layer (geometry stays queryable),
-    // but output selection must use the *enabled* source — with none, the driver's
-    // source buffer goes null so it emits nothing instead of re-sending the last
-    // frame off the disabled layer.
+    // --- Case 4: a live layer is DISABLED → drivers transition to idle, no stale buffer ---
+    // The real-world sequence: a frame is published with the layer enabled, then the
+    // user disables it and the pipeline rebuilds. activeLayer() still surfaces the
+    // (now disabled) layer so geometry stays queryable, but output selection must use
+    // the *enabled* source — with none, the driver's source buffer goes null so it
+    // emits nothing instead of re-sending the last frame off the disabled layer.
     {
         mm::Layouts layouts; mm::GridLayout grid;
         grid.width = 8; grid.height = 8; grid.depth = 1;
@@ -314,16 +315,23 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         mm::MultiplyModifier mirror; mirror.mirrorX = true; only.addChild(&mirror);
         layers.addChild(&only);
         layers.setLayouts(&layouts);
-        only.setEnabled(false);
         mm::Drivers drivers; CaptureDriver cap; drivers.addChild(&cap);
         drivers.setLayers(&layers);
-        layers.onBuildState(); drivers.onBuildState();
 
+        // Enabled first: the driver has a valid source buffer (a real frame).
+        layers.onBuildState(); drivers.onBuildState();
+        CHECK(layers.firstEnabledLayer() == &only);
+        CHECK(layers.enabledLayerCount() == 1);
+        REQUIRE(cap.src_ != nullptr);                // a frame is being published
+
+        // Now disable the only layer and rebuild — the driver must drop to idle.
+        only.setEnabled(false);
+        layers.onBuildState(); drivers.onBuildState();
         CHECK(layers.activeLayer() == &only);        // fallback for geometry
         CHECK(layers.firstEnabledLayer() == nullptr);// no enabled source
         CHECK(layers.enabledLayerCount() == 0);
         CHECK(drivers.dynamicBytes() == 0);          // no output buffer allocated
-        CHECK(cap.src_ == nullptr);                  // driver idle — no stale frame
+        CHECK(cap.src_ == nullptr);                  // driver idle — the prior frame is NOT re-sent
     }
 }
 

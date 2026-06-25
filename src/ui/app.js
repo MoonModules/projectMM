@@ -2275,7 +2275,7 @@ async function cachedJson(url, key, force) {
             // No stale entry to serve: NEGATIVE-CACHE the failure (data:null) with a
             // fresh timestamp so the TTL guard above suppresses the next attempt for
             // the back-off window. Without this, every status-bar render (≈4×/s on
-            // each WS push) re-ran the failing fetch — an error storm in the console
+            // each WS push) re-runs the failing fetch — an error storm in the console
             // whenever the device is offline. A null cache hit returns "no update".
             safeLocalSet(key, JSON.stringify({ ts: Date.now(), data: null }));
             return null;

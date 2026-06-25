@@ -22,6 +22,8 @@ Behaviour (product owner confirmed): **drop outside.** Lights outside the region
 
 ## Rounding rule (from the existing spec, Layer.md § start/end)
 
+> **Shipped differently:** during implementation the product owner chose a **half-open `[start, end)`** interval (end exclusive) so abutting regions tile exactly, instead of the inclusive rule sketched below. The authoritative rule is in `RegionModifier.h` / `RegionModifier.md`; the inclusive version here is the original intent, kept as the design record.
+
 Per axis, percentage → pixel:
 - `startPixel = floor(start% / 100 · W)`
 - `endPixel   = ceil (end%  / 100 · W)`, treated as an **inclusive** last pixel

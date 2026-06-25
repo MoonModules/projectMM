@@ -140,7 +140,7 @@ private:
     uint32_t bytesRead_     = 0;
     uint32_t totalSnap_     = 0;
     // Firmware identity (static for this build) + the running app-partition usage.
-    char     versionStr_[32] = {};   // semver + " (channel)" — e.g. "1.0.0-rc2 (latest)"
+    char     versionStr_[32] = {};   // pure semver — e.g. "2.0.0" or "2.1.0-dev.7"
     char     buildStr_[24]   = {};
     char     firmwareStr_[24] = {};  // build variant name, e.g. "esp32s3-n16r8"
     uint32_t firmwareSizeVal_ = 0;   // bytes used in the app partition

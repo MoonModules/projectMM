@@ -14,7 +14,7 @@ A thin status surface for OTA flashing. The flash itself is driven by `POST /api
 | `firmwarePartition` | progress (used/total) | Running app image size / total firmware (app) partition size — how full the partition is. Named distinctly from the `firmware` string control so a `controls.find(c => c.name === "firmware")` caller resolves the string, not this progress value. |
 | `update_pct` | progress (bytes/total) | Live byte counters rendered as "X KB / Y KB"; `total` is 0 until `esp_https_ota_get_image_size` reports it just after the TLS handshake. The name is historical (it predates the percent→bytes migration); the wire shape is bytes. |
 
-The OTA flash phase (`idle`, `starting`, `downloading`, `flashing`, `rebooting`, `error: <reason>`) is not a control — it surfaces through the module's shared status slot (`MoonModule::setStatus()`), the same per-module banner every module uses (NetworkModule's IP line, DevicesModule's sweep count). An `error: ` prefix maps to `Severity::Error`; `idle` clears the banner; everything else is neutral `Severity::Status`.
+The OTA flash phase (`idle`, `starting`, `downloading`, `flashing`, `rebooting`, `error: <reason>`) is not a control — it surfaces through the module's shared status slot (`MoonModule::setStatus()`), the same per-module banner every module uses (NetworkModule's IP line, DevicesModule's sweep count). An `error:` prefix maps to `Severity::Error`; `idle` clears the banner; everything else is neutral `Severity::Status`.
 
 ## Wire contract
 

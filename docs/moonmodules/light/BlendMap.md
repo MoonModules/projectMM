@@ -8,7 +8,7 @@ The combine math is integer-only (the hot-path per-light rule), with one tight s
 - **Additive**: `dst = clamp(dst + src·opacity)` — sum with saturation at 255, opacity scaling the source.
 - **Alpha** (over): `dst = (src·α + dst·(255−α)) / 255` — the textbook 8-bit alpha-over, division by 255 via the fast `(x + (x>>8) + 1) >> 8` reciprocal. Full opacity (255) collapses to a plain overwrite (no blend cost).
 
-A dense-grid layer has no LUT, so its buffer blends 1:1 (source index = physical index, no lookup); a layer with a LUT maps each logical light to its physical destination(s) first. Physical indices are bounds-checked so an out-of-range LUT entry can't overrun the buffer. The per-Layer `blendMode`/`opacity` controls that select the op live on [Layer](Layer.md#blendmode--opacity-controls); Drivers reads them and the layer stack order.
+A dense-grid layer has no LUT, so its buffer blends 1:1 (source index = physical index, no lookup); a layer with a LUT maps each logical light to its physical destination(s) first. Physical indices come from the LUT, which is built in-range from the shared Layouts, so they address the buffer in bounds by construction. The per-Layer `blendMode`/`opacity` controls that select the op live on [Layer](Layer.md#blendmode--opacity-controls); Drivers reads them and the layer stack order.
 
 ## Source
 

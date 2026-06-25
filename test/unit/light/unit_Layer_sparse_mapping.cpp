@@ -213,16 +213,22 @@ TEST_CASE("Layer: RegionModifier carves the logical box to a sub-region") {
     CHECK(layer.physicalLightCount() == 64);
 
     // Every destination is a real box light inside the carved quarter (x<4, y<4),
-    // and there are exactly 16 of them (one per logical cell, no fan-out).
+    // there are exactly 16 of them (one per logical cell, no fan-out), and they are
+    // all DISTINCT — a 1:1 carve must reach 16 different physical lights, never
+    // collapse two logical cells onto one destination or leave a cell unreached.
     std::size_t total = 0;
     bool insideRegion = true;
+    bool seen[64] = {false};     // 8×8 box
+    bool duplicate = false;
     for (mm::nrOfLightsType li = 0; li < layer.lut().logicalCount(); li++) {
         layer.lut().forEachDestination(li, [&](mm::nrOfLightsType d) {
             total++;
             const mm::nrOfLightsType x = d % 8, y = d / 8;  // 8-wide box
             if (x >= 4 || y >= 4) insideRegion = false;
+            if (d < 64) { if (seen[d]) duplicate = true; seen[d] = true; }
         });
     }
     CHECK(total == 16);          // 4×4 region, 1:1, nothing outside
     CHECK(insideRegion);
+    CHECK_FALSE(duplicate);      // 16 distinct physical lights — no cell collapses onto another
 }

@@ -250,6 +250,10 @@ Absolute tick at each step (the diff vs the prior row is that subsystem's cost):
 
 **Expected, and confirmed everywhere:** audio is a small fixed per-tick cost; idle discovery is free; output drivers are cheap at a capped 64-LED output (none dominates the render path). The modifier's +~190µs at 16² is the one notable per-frame add — explained below (it's the blend+map, and it *pays for itself* at large grids).
 
+**Multi-layer composition** (the `Drivers` composite loop): a single enabled Layer is the pass-through fast path (the driver reads the Layer's buffer directly — zero composite cost, the figures above). Each *additional* enabled Layer adds one `blendMap` pass over the physical buffer (integer alpha-over or additive, branch-resolved once per layer), so N enabled layers cost ≈ N × the per-layer write — linear in layer count, same shape as the per-effect sweep. The RegionModifier adds nothing unless present (no modifier = the identity fast path).
+
+**Branch re-verification (2026-06-25, multi-layer + RegionModifier):** the live perf scenarios (`scenario_perf_light` / `_full` / `_modifier_swap`) were re-run on all three boards on this branch's firmware. The per-effect and per-modifier numbers match the tables here within run-to-run variance — the new composite/RegionModifier code does not regress the single-layer pipeline (it's opt-in: a one-layer tree runs the same path as before).
+
 ### Effect compute — light vs heavy bracket, across grid sizes (render-only)
 
 Tick µs; FPS in parens for the 16K row:
