@@ -1118,11 +1118,30 @@ function createControl(moduleName, moduleType, ctrl) {
                 if (i === ctrl.value) o.selected = true;
                 sel.appendChild(o);
             });
-            sel.addEventListener("change", async () => {
+            // Protect the dropdown while the user has it open. A native <select>
+            // popup stays open for several frames (seconds, if deliberating) while
+            // a continuously-refreshed module keeps pushing state over the WS; an
+            // unguarded `sel.value = ctrl.value` patch during that window snaps the
+            // menu back to the old option and visibly closes it — the user never
+            // gets to pick. We mark the select "open" on pointerdown (fires BEFORE
+            // the popup opens, unlike focus, which some browsers delay or skip) and
+            // clear it on change/blur; updateModuleControls skips any select marked
+            // open. pointerdown also stamps the dragTs cooldown as a belt-and-braces
+            // fallback for the post-close frames.
+            sel.dataset.open = "false";
+            const markOpen = () => { sel.dataset.open = "true"; dragTs[key] = Date.now(); };
+            sel.addEventListener("pointerdown", markOpen);
+            sel.addEventListener("focus", markOpen);
+            sel.addEventListener("blur", () => { sel.dataset.open = "false"; });
+            sel.addEventListener("change", () => {
+                sel.dataset.open = "false";
                 dragTs[key] = Date.now();
-                await sendControl(moduleName, ctrl.name, parseInt(sel.value));
-                // Server may rebuild this module's controls (dynamic onBuildControls); refetch
-                setTimeout(refetchState, 200);
+                sendControl(moduleName, ctrl.name, parseInt(sel.value));
+                // No refetch/re-render here: blendMode/opacity-style selects don't
+                // change the control SET, and a control that does (a hidden-flag
+                // flip) is reconciled in place by syncVisibleControls on the next
+                // WS push — so the card (and its expanded state) is preserved.
+                // A full refetchState() rebuilt the DOM and collapsed the card.
             });
             row.appendChild(sel);
             appendResetButton(row, moduleName, ctrl, def, () => { sel.value = def; });
@@ -1558,7 +1577,14 @@ function allModules() {
 function syncVisibleControls(mod) {
     const card = document.querySelector(`.card[data-module="${cssEscape(mod.name)}"]`);
     if (!card) return false;
-    const host = card.querySelector(".card-controls-collapse") || card;
+    // The controls host is THIS card's own collapse wrapper — must be a DIRECT
+    // child (`:scope >`), not any descendant: a container card (e.g. Layers) nests
+    // its child cards (Layer) inside .card-children, and a plain
+    // `card.querySelector(".card-controls-collapse")` would reach down and match
+    // the CHILD's wrapper. That made Layers adopt Layer's control rows as its own,
+    // so both cards saw a control-set mismatch every WS frame and rebuilt each
+    // other's rows in a loop — tearing down (and closing) any open <select>.
+    const host = card.querySelector(":scope > .card-controls-collapse") || card;
 
     const wantNames = mod.controls.filter(c => !c.hidden).map(c => c.name);
     const haveRows = [...host.querySelectorAll(":scope > .control-row[data-key]")];
@@ -1658,7 +1684,14 @@ function updateModuleControls(mod) {
             }
             case "select": {
                 const sel = document.querySelector(`select[data-mid="${mid}"][data-key="${k}"]`);
-                if (sel && Number(sel.value) !== Number(ctrl.value)) sel.value = ctrl.value;
+                // Never overwrite a select the user currently has OPEN (popup
+                // showing) or focused. data-open is set on pointerdown/focus and
+                // cleared on change/blur — more reliable than document.activeElement,
+                // which is ambiguous while a native popup is up (the popup is a
+                // separate OS layer on macOS). The 1s dragTs cooldown is the
+                // additional fallback for the frames right after the popup closes.
+                if (sel && sel.dataset.open !== "true" && sel !== document.activeElement &&
+                    Number(sel.value) !== Number(ctrl.value)) sel.value = ctrl.value;
                 break;
             }
             case "display": {
@@ -2223,7 +2256,15 @@ async function cachedJson(url, key, force) {
             safeLocalSet(key, JSON.stringify({ ts: Date.now(), data }));
             return data;
         } catch (e) {
-            console.warn("[update] fetch failed:", url, e && e.message ? e.message : e);
+            // console.debug, not warn: from the DEVICE-hosted UI this fetch is
+            // expected to fail regardless of connectivity. github.com 302-redirects
+            // the release asset to release-assets.githubusercontent.com, which sends
+            // no Access-Control-Allow-Origin, so the browser blocks the cross-origin
+            // read for origin http://<device>. (It succeeds only from the install
+            // site's allowed origin.) Routine and not actionable here, so keep it out
+            // of the default console — debug is hidden unless the user opts into
+            // verbose. The browser still prints its own un-suppressible CORS line.
+            console.debug("[update] fetch failed:", url, e && e.message ? e.message : e);
             const raw = safeLocalGet(key);                   // serve stale on failure
             if (raw) {
                 try {
@@ -2234,6 +2275,13 @@ async function cachedJson(url, key, force) {
                     return obj.data;
                 } catch (_) { /* none */ }
             }
+            // No stale entry to serve: NEGATIVE-CACHE the failure (data:null) with a
+            // fresh timestamp so the TTL guard above suppresses the next attempt for
+            // the back-off window. Without this, every status-bar render (≈4×/s on
+            // each WS push) re-ran this doomed fetch — a CORS-error storm in the
+            // console. A null cache hit returns "no update", same as the device UI
+            // can ever get for this cross-origin asset.
+            safeLocalSet(key, JSON.stringify({ ts: Date.now(), data: null }));
             return null;
         } finally {
             delete inFlightFetches[key];                     // clear once settled, ok or not

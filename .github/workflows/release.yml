@@ -145,11 +145,14 @@ jobs:
       # Computed once here and reused by build + staging so all three agree.
       - name: Compute version
         id: ver
+        # The channel (latest vs stable) and the -rc handling both live in
+        # compute_version.py — pass only the tag, the helper derives the rest, so
+        # this step and the release job's identical step can't disagree. Raw
+        # `python` (not `uv run`): this job has no setup-uv (the ESP-IDF docker
+        # action provides Python) and the script is stdlib-only.
         run: |
           set -euo pipefail
-          if [ "${{ steps.tag.outputs.tag }}" = "latest" ]; then CH=latest; else CH=stable; fi
-          # Pass the tag so an -rc tag yields its own prerelease semver (not the core).
-          V=$(python scripts/build/compute_version.py --channel "$CH" --tag "${{ steps.tag.outputs.tag }}")
+          V=$(python scripts/build/compute_version.py --tag "${{ steps.tag.outputs.tag }}")
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
       - name: Build firmware
@@ -300,14 +303,14 @@ jobs:
           fi
 
       # Same computation as the build job's "Compute version" — the manifest's
-      # version must match the binary's MM_VERSION + the asset names.
+      # version must match the binary's MM_VERSION + the asset names. Channel +
+      # -rc handling live in compute_version.py; pass only the tag (this job has
+      # setup-uv, so `uv run`).
       - name: Compute version
         id: ver
         run: |
           set -euo pipefail
-          if [ "${{ steps.tag.outputs.tag }}" = "latest" ]; then CH=latest; else CH=stable; fi
-          # Pass the tag so an -rc tag yields its own prerelease semver (not the core).
-          V=$(uv run python scripts/build/compute_version.py --channel "$CH" --tag "${{ steps.tag.outputs.tag }}")
+          V=$(uv run python scripts/build/compute_version.py --tag "${{ steps.tag.outputs.tag }}")
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
       - name: Generate ESP Web Tools manifests (release-asset URLs)

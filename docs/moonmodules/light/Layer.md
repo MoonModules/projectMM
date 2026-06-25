@@ -17,7 +17,11 @@ Each Layer carries six `int16_t` controls — `startX`, `startY`, `startZ`, `end
 
 Negative values and values > 100 are legal: a future modifier could drag a Layer in or out of the visible area by shifting start/end past 0% or 100% (e.g. `startX = -50` means the Layer extends 50% off the left edge of the layout). `ControlType::Int16` is the wire type so negative values round-trip correctly through `/api/state`, `/api/types`, and persistence.
 
-Today (single-Layer pipeline) `rebuildLUT()` ignores the controls — the values are persisted state, not yet wired. They surface in the UI now so the surface stays stable when the composition follow-up activates them. **Rounding rule (when activated):** `start` percentages round toward the lower pixel (floor), `end` percentages round toward the higher pixel (ceiling). This guarantees a non-zero region on small panels (e.g. `start = 33, end = 66` on a 4-wide axis produces pixels 1..3 inclusive, not 1..2 or 2..2). Spec: [architecture.md § Layers and Layer](../../architecture.md#layers-and-layer).
+`rebuildLUT()` ignores these controls — the values are persisted state, not yet wired. They surface in the UI now so the surface stays stable when per-Layer region carving (a [backlog](../../backlog/README.md) item) activates them. **Rounding rule (when activated):** `start` percentages round toward the lower pixel (floor), `end` percentages round toward the higher pixel (ceiling). This guarantees a non-zero region on small panels (e.g. `start = 33, end = 66` on a 4-wide axis produces pixels 1..3 inclusive, not 1..2 or 2..2). Spec: [architecture.md § Layers and Layer](../../architecture.md#layers-and-layer).
+
+## blendMode / opacity controls
+
+Two controls govern how this Layer composites onto the layers below it: `blendMode` (a select — `alpha` over, or `additive` sum-with-clamp) and `opacity` (`uint8`, 0 = invisible, 255 = full). They are **inert on the Layer** — the Layer never reads them; it just carries them so they travel through add / delete / reorder with no separate synchronised list. The [Drivers](Drivers.md) container reads each enabled Layer's two values plus the [Layers](Layers.md) container's child order and does the actual compositing (bottom layer overwrites, each layer above blends per its mode + opacity). The bottom (first-composited) Layer's `blendMode`/`opacity` are moot — nothing sits under it. The blend math itself lives in [BlendMap](BlendMap.md). Precedent for "value here, logic in Drivers": the per-X `Correction` data Drivers applies.
 
 ## Key operations
 

@@ -9,12 +9,13 @@ namespace mm {
 
 // Top-level container for one or more `Layer` children. Each child Layer
 // renders into its own buffer using the shared `Layouts` instance for physical
-// topology. `Drivers` composes the resulting buffers (today's "first wins"
-// placeholder, alpha-blend / additive in the composition follow-up).
+// topology. `Drivers` composites the resulting buffers in container order
+// (bottom→top) per each Layer's blendMode + opacity.
 //
 // With one child Layer this is a thin pass-through: loop() runs the child
-// Layer's loop() in order; behaviour matches the previous single-Layer
-// pipeline byte-for-byte. The container itself owns no buffer.
+// Layer's loop() in order; behaviour matches the single-Layer pipeline
+// byte-for-byte (Drivers takes its single-layer fast path). The container
+// itself owns no buffer — the composite buffer lives in Drivers.
 class Layers : public MoonModule {
 public:
     const char* acceptsChildRoles() const override { return "layer"; }
@@ -60,9 +61,10 @@ public:
         }
     }
 
-    // Single-Layer placeholder until composition lands: hand `Drivers` the
-    // first enabled Layer to read for buffer + dimensions. Returns nullptr
-    // when no Layer is registered (drivers handle that gracefully today).
+    // The first enabled Layer — `Drivers` reads it for physical dimensions
+    // (every layer composites into the same physical space, so any one answers
+    // width/height/depth). Also the source for the single-layer fast path.
+    // Returns nullptr when no Layer is registered (drivers handle that gracefully).
     // Non-Layer children are skipped — same guard as setLayouts above.
     Layer* activeLayer() const {
         MoonModule* fallback = nullptr;
@@ -73,6 +75,31 @@ public:
             if (c->enabled()) return static_cast<Layer*>(c);
         }
         return static_cast<Layer*>(fallback);  // nullptr if no Layer children
+    }
+
+    // Count of enabled Layer children — Drivers uses it to pick the single-layer
+    // fast path (==1) vs the composite path (>1), and to know if anything renders.
+    uint8_t enabledLayerCount() const {
+        uint8_t n = 0;
+        for (uint8_t i = 0; i < childCount(); i++) {
+            MoonModule* c = child(i);
+            if (c && c->role() == ModuleRole::Layer && c->enabled()) n++;
+        }
+        return n;
+    }
+
+    // Walk enabled Layers in container (composition) order — the order Drivers
+    // blends them, bottom (first) to top (last). `cb(layer, isFirst)`: isFirst
+    // marks the bottom layer (clears the buffer; the rest blend onto it).
+    template <typename Fn>
+    void forEachEnabledLayer(Fn cb) const {
+        bool first = true;
+        for (uint8_t i = 0; i < childCount(); i++) {
+            MoonModule* c = child(i);
+            if (!c || c->role() != ModuleRole::Layer || !c->enabled()) continue;
+            cb(static_cast<Layer*>(c), first);
+            first = false;
+        }
     }
 
 private:

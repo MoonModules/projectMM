@@ -48,6 +48,15 @@ def test_local_is_verbatim(monkeypatch, tmp_path):
     assert cv.compute("local") == "2.1.0-dev"
 
 
+def test_channel_for_tag_centralizes_the_mapping():
+    # The release workflow passes only --tag; the channel derives from it here, so
+    # the build job and release job can't disagree.
+    assert cv.channel_for_tag("latest") == "latest"
+    assert cv.channel_for_tag("v2.1.0") == "stable"
+    assert cv.channel_for_tag("v2.1.0-rc1") == "stable"   # -rc handled inside compute(), still stable channel
+    assert cv.channel_for_tag("") == "stable"
+
+
 def test_stable_rc_tag_keeps_prerelease(monkeypatch, tmp_path):
     # An -rc tag is itself a precise prerelease semver — carried through verbatim
     # (minus the leading v), not collapsed to the core, so the RC binary doesn't

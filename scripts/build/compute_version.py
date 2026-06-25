@@ -22,9 +22,13 @@ The same string is burned into the binary (-DMM_VERSION), the release asset name
 (firmware-<F>-v<V>.bin), and the ESP Web Tools manifest, so all three agree.
 
 Usage:
-  compute_version.py --channel stable          # → core, e.g. 2.1.0
-  compute_version.py --channel latest          # → <core>-dev.<N>, e.g. 2.1.0-dev.6
-  compute_version.py                           # defaults to library.json verbatim (local)
+  compute_version.py --tag latest              # auto → latest → <core>-dev.<N>, e.g. 2.1.0-dev.6
+  compute_version.py --tag v2.1.0              # auto → stable → core, e.g. 2.1.0
+  compute_version.py --tag v2.1.0-rc1          # auto → stable → the RC semver, e.g. 2.1.0-rc1
+  compute_version.py --channel local           # library.json verbatim, e.g. 2.1.0-dev
+
+The release workflow passes only `--tag`; the channel is derived from it (the one
+place that mapping lives), so the build and release jobs can't disagree.
 """
 
 import argparse
@@ -62,6 +66,16 @@ def commits_since_last_stable() -> int:
     return int(out)
 
 
+def channel_for_tag(tag: str) -> str:
+    """Derive the build channel from the release tag — the single source of that mapping.
+
+    `latest` → the moving prerelease channel; any other tag (a `vX.Y.Z` / `vX.Y.Z-rcN`,
+    or empty) → stable (which handles an -rc suffix inside `compute`). Centralised here so
+    the workflow's two Compute-version steps can't disagree on the channel.
+    """
+    return "latest" if tag == "latest" else "stable"
+
+
 def compute(channel: str, tag: str = "") -> str:
     version = json.loads(LIBRARY_JSON.read_text(encoding="utf-8"))["version"]
     core = core_version(version)
@@ -83,17 +97,20 @@ def compute(channel: str, tag: str = "") -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--channel", choices=["stable", "latest", "local"], default="local",
-        help="stable → core semver (or the tag's prerelease semver for an -rc tag); "
+        "--channel", choices=["stable", "latest", "local", "auto"], default="auto",
+        help="auto (default) → derive from --tag (latest tag → latest, else stable); "
+             "stable → core semver (or the tag's prerelease semver for an -rc tag); "
              "latest → <core>-dev.<N>; local → library.json verbatim",
     )
     parser.add_argument(
         "--tag", default="",
-        help="The release tag (e.g. v2.1.0-rc1). For a prerelease tag on the stable "
-             "channel, its semver is used verbatim instead of the core.",
+        help="The release tag (e.g. latest, v2.1.0, v2.1.0-rc1). With --channel auto it "
+             "selects the channel; for a prerelease tag on the stable channel, its semver "
+             "is used verbatim instead of the core.",
     )
     args = parser.parse_args()
-    print(compute(args.channel, args.tag))
+    channel = channel_for_tag(args.tag) if args.channel == "auto" else args.channel
+    print(compute(channel, args.tag))
     return 0
 
 

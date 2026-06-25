@@ -4,6 +4,7 @@
 #include "light/layouts/Layouts.h"
 #include "light/effects/EffectBase.h"
 #include "light/layers/MappingLUT.h"
+#include "light/layers/BlendMap.h"   // BlendOp, for blendOp()
 #include "light/modifiers/ModifierBase.h"
 #include "platform/platform.h"
 
@@ -46,6 +47,16 @@ public:
     lengthType endY = 100;
     lengthType endZ = 100;
 
+    // Composition parameters — INERT on the Layer (it never reads them; a Layer
+    // can't know its position in the stack or what's beneath it). The Drivers
+    // container reads each enabled Layer's blendMode + opacity and composites the
+    // layers in container order into the physical buffer (see Drivers::loop). The
+    // value lives here so it travels with the Layer through add/delete/reorder —
+    // no separate, sync-prone blend list on Drivers. The bottom (first-composited)
+    // layer's blendMode is moot: it fills the cleared buffer regardless.
+    uint8_t blendMode = 0;     // index into kBlendModeOptions; 0 = alpha (over)
+    uint8_t opacity = 255;     // 0 = invisible, 255 = full
+
     void onBuildControls() override {
         // Names match the field names; the percent semantic lives in the spec
         // (Layer.md § start/end controls) and is reflected in the comment above.
@@ -55,9 +66,19 @@ public:
         controls_.addInt16("endX",   endX);
         controls_.addInt16("endY",   endY);
         controls_.addInt16("endZ",   endZ);
+        static constexpr const char* kBlendModeOptions[] = {"alpha", "additive"};
+        controls_.addSelect("blendMode", blendMode, kBlendModeOptions, 2);
+        controls_.addUint8("opacity", opacity, 0, 255);
         // Cascade to children (effects and modifiers) — preserves the default
         // base behaviour we just overrode.
         MoonModule::onBuildControls();
+    }
+
+    // How this Layer composites when stacked above another (read by Drivers).
+    // Maps the blendMode select index to the BlendMap op. Index order must match
+    // kBlendModeOptions above.
+    BlendOp blendOp() const {
+        return blendMode == 1 ? BlendOp::Additive : BlendOp::Alpha;
     }
 
     void setLayouts(Layouts* lg) { layouts_ = lg; }

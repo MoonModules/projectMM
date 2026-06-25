@@ -6,6 +6,8 @@
 #include "light/layouts/GridLayout.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/CheckerboardEffect.h"
+#include "light/modifiers/MultiplyModifier.h"
+#include "light/drivers/Drivers.h"
 #include "platform/platform.h"
 
 #include <cstring>
@@ -110,9 +112,10 @@ TEST_CASE("Layers with two Layers: each child Layer's loop runs and writes its b
     layersContainer.onBuildState();
     layersContainer.loop();
 
-    // Both child Layer buffers must be populated — composition isn't wired
-    // yet so we just verify each Layer's loop ran. (Checkerboard with default
-    // controls writes a checker pattern; Rainbow writes a hue gradient.)
+    // Both child Layer buffers must be populated — each Layer renders its own
+    // buffer here; the Drivers composite of those buffers is pinned by the
+    // "Drivers composites two enabled Layers" case below. (Checkerboard with
+    // default controls writes a checker pattern; Rainbow writes a hue gradient.)
     auto& bufA = layerA.buffer();
     auto& bufB = layerB.buffer();
     REQUIRE(bufA.bytes() == static_cast<size_t>(8 * 8 * 3));
@@ -123,6 +126,176 @@ TEST_CASE("Layers with two Layers: each child Layer's loop runs and writes its b
     for (size_t i = 0; i < bufB.bytes(); i++) if (bufB.data()[i] != 0) { bHasNonZero = true; break; }
     CHECK_MESSAGE(aHasNonZero, "Layer A (Rainbow) wrote no pixels");
     CHECK_MESSAGE(bHasNonZero, "Layer B (Checkerboard) wrote no pixels");
+}
+
+// A minimal driver that just records the source buffer it's handed each tick,
+// so a test can inspect the composited output without a real network/LED sink.
+class CaptureDriver : public mm::DriverBase {
+public:
+    void setSourceBuffer(mm::Buffer* buf) override { src_ = buf; }
+    mm::Buffer* src_ = nullptr;
+};
+
+// Multi-layer composition: Drivers blends ≥2 enabled Layers into its own output
+// buffer and hands THAT to drivers (not a single Layer's buffer). Bottom layer
+// overwrites; top layer blends per its blendMode/opacity. This is the end-to-end
+// pin for the composite loop in Drivers::loop.
+TEST_CASE("Drivers composites two enabled Layers into one output buffer") {
+    mm::Layouts layouts;
+    mm::GridLayout grid;
+    grid.width = 4; grid.height = 1; grid.depth = 1;   // 4 lights, dense (no LUT)
+    layouts.addChild(&grid);
+
+    mm::Layers layersContainer;
+    // Bottom layer: a checkerboard base.
+    mm::Layer bottom; bottom.setChannelsPerLight(3);
+    mm::CheckerboardEffect base; bottom.addChild(&base);
+    // Top layer: rainbow, additive at full opacity → bottom + top, clamped.
+    mm::Layer top; top.setChannelsPerLight(3);
+    mm::RainbowEffect over; top.addChild(&over);
+    top.blendMode = 1;   // additive
+    top.opacity = 255;
+
+    layersContainer.addChild(&bottom);
+    layersContainer.addChild(&top);
+    layersContainer.setLayouts(&layouts);
+
+    mm::Drivers drivers;
+    CaptureDriver cap;
+    drivers.addChild(&cap);
+    drivers.setLayers(&layersContainer);
+
+    layersContainer.onBuildState();
+    drivers.onBuildState();      // sizes + allocates the composite output buffer
+    layersContainer.loop();      // both layers render their own buffers
+    drivers.loop();              // composite into outputBuffer_, hand it to cap
+
+    REQUIRE(layersContainer.enabledLayerCount() == 2);
+    // The driver was handed the composite buffer (4 lights × 3ch), not a raw layer.
+    REQUIRE(cap.src_ != nullptr);
+    REQUIRE(cap.src_->bytes() == static_cast<size_t>(4 * 3));
+
+    // The composite must equal additive(bottom, top) per channel, clamped — i.e.
+    // for every byte, output >= bottom (top only adds) and output >= top's contribution.
+    auto& outBuf = *cap.src_;
+    auto& botBuf = bottom.buffer();
+    auto& topBuf = top.buffer();
+    REQUIRE(botBuf.bytes() == outBuf.bytes());
+    REQUIRE(topBuf.bytes() == outBuf.bytes());
+    bool sawSum = false;
+    for (size_t i = 0; i < outBuf.bytes(); i++) {
+        uint16_t expect = static_cast<uint16_t>(botBuf.data()[i]) + topBuf.data()[i];
+        if (expect > 255) expect = 255;
+        CHECK(outBuf.data()[i] == static_cast<uint8_t>(expect));
+        if (botBuf.data()[i] && topBuf.data()[i]) sawSum = true;
+    }
+    CHECK_MESSAGE(sawSum, "expected at least one light where both layers contribute (proves real compositing)");
+}
+
+// Disabling the top layer drops cleanly to the single (bottom) layer — no crash,
+// the driver now sees the bottom layer's content. Pins the robustness path.
+TEST_CASE("Drivers composition drops to single layer when one is disabled") {
+    mm::Layouts layouts;
+    mm::GridLayout grid;
+    grid.width = 4; grid.height = 1; grid.depth = 1;
+    layouts.addChild(&grid);
+
+    mm::Layers layersContainer;
+    mm::Layer bottom; bottom.setChannelsPerLight(3);
+    mm::CheckerboardEffect base; bottom.addChild(&base);
+    mm::Layer top; top.setChannelsPerLight(3);
+    mm::RainbowEffect over; top.addChild(&over);
+    layersContainer.addChild(&bottom);
+    layersContainer.addChild(&top);
+    layersContainer.setLayouts(&layouts);
+
+    mm::Drivers drivers;
+    CaptureDriver cap;
+    drivers.addChild(&cap);
+    drivers.setLayers(&layersContainer);
+
+    top.setEnabled(false);             // only the bottom layer remains
+    layersContainer.onBuildState();
+    drivers.onBuildState();
+    layersContainer.loop();
+    drivers.loop();
+
+    CHECK(layersContainer.enabledLayerCount() == 1);
+    REQUIRE(cap.src_ != nullptr);      // driver still has a valid buffer, no crash
+    REQUIRE(cap.src_->bytes() == static_cast<size_t>(4 * 3));
+}
+
+// Drivers' composition/output-buffer allocation contract (architecture.md §
+// Adaptive allocation). The driver output buffer exists ONLY when the pipeline
+// must blend into physical space; otherwise the lone layer's buffer is handed to
+// drivers directly (zero-copy). dynamicBytes() reflects outputBuffer_.bytes(), so
+// it's 0 ⇔ no buffer. Pins all three cases in one place:
+//   1. one identity (no-LUT) layer  → NO output buffer (zero-copy)
+//   2. two enabled layers           → output buffer (must composite)
+//   3. one layer WITH a LUT         → output buffer (must map logical→physical)
+TEST_CASE("Drivers allocates the output buffer only when compositing or mapping is needed") {
+    // --- Case 1: a single identity (dense-grid, no-LUT) layer → no output buffer ---
+    {
+        mm::Layouts layouts; mm::GridLayout grid;
+        grid.width = 8; grid.height = 8; grid.depth = 1;
+        layouts.addChild(&grid);
+        mm::Layers layers;
+        mm::Layer only; only.setChannelsPerLight(3);
+        mm::CheckerboardEffect eff; only.addChild(&eff);
+        layers.addChild(&only);
+        layers.setLayouts(&layouts);
+        mm::Drivers drivers; CaptureDriver cap; drivers.addChild(&cap);
+        drivers.setLayers(&layers);
+        layers.onBuildState(); drivers.onBuildState();
+
+        CHECK_FALSE(only.lut().hasLUT());            // dense grid → identity, no LUT
+        CHECK(layers.enabledLayerCount() == 1);
+        CHECK(drivers.dynamicBytes() == 0);          // NO output buffer allocated
+        REQUIRE(cap.src_ != nullptr);                // driver reads the layer buffer directly
+        CHECK(cap.src_ == &only.buffer());           // zero-copy: it's the layer's own buffer
+    }
+
+    // --- Case 2: two enabled layers → output buffer (must composite) ---
+    {
+        mm::Layouts layouts; mm::GridLayout grid;
+        grid.width = 8; grid.height = 8; grid.depth = 1;
+        layouts.addChild(&grid);
+        mm::Layers layers;
+        mm::Layer a; a.setChannelsPerLight(3); mm::CheckerboardEffect ea; a.addChild(&ea);
+        mm::Layer b; b.setChannelsPerLight(3); mm::RainbowEffect eb; b.addChild(&eb);
+        layers.addChild(&a); layers.addChild(&b);
+        layers.setLayouts(&layouts);
+        mm::Drivers drivers; CaptureDriver cap; drivers.addChild(&cap);
+        drivers.setLayers(&layers);
+        layers.onBuildState(); drivers.onBuildState();
+
+        CHECK(layers.enabledLayerCount() == 2);
+        CHECK(drivers.dynamicBytes() == static_cast<size_t>(8 * 8 * 3));  // output buffer allocated
+        REQUIRE(cap.src_ != nullptr);
+        CHECK(cap.src_ != &a.buffer());              // driver reads the composite, not a raw layer
+    }
+
+    // --- Case 3: a single layer WITH a LUT (a mirror modifier) → output buffer ---
+    {
+        mm::Layouts layouts; mm::GridLayout grid;
+        grid.width = 8; grid.height = 8; grid.depth = 1;
+        layouts.addChild(&grid);
+        mm::Layers layers;
+        mm::Layer only; only.setChannelsPerLight(3);
+        mm::CheckerboardEffect eff; only.addChild(&eff);
+        mm::MultiplyModifier mirror; mirror.mirrorX = true; only.addChild(&mirror);
+        layers.addChild(&only);
+        layers.setLayouts(&layouts);
+        mm::Drivers drivers; CaptureDriver cap; drivers.addChild(&cap);
+        drivers.setLayers(&layers);
+        layers.onBuildState(); drivers.onBuildState();
+
+        CHECK(only.lut().hasLUT());                  // mirror modifier → a real LUT
+        CHECK(layers.enabledLayerCount() == 1);
+        CHECK(drivers.dynamicBytes() > 0);           // output buffer allocated (map target)
+        REQUIRE(cap.src_ != nullptr);
+        CHECK(cap.src_ != &only.buffer());           // driver reads the mapped output, not the logical buffer
+    }
 }
 
 // activeLayer() returns the first enabled child, or the only child if all are disabled (so dimensions stay queryable during boot/toggle-off).

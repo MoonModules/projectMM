@@ -161,15 +161,20 @@ public:
         // was cleared and rebuilt via the API is picked up here (self-healing).
         // setLayer() pins a Layer directly and leaves layers_ null — skip then.
         if (layers_) layer_ = layers_->activeLayer();
-        // Output buffer needed if any layer has a LUT (currently single layer).
-        // Multi-layer: check all layers, allocate if at least one has a LUT.
-        // If allocation fails (no contiguous heap large enough — a real risk on
-        // ESP32 without PSRAM when the Layer pipeline has fragmented DRAM),
-        // outputBuffer_ stays with data_=nullptr. loop() must check that before
-        // calling blendMap, otherwise blendMap will dereference a null
-        // outputBuffer_.data() and panic with LoadProhibited. Same defensive
-        // pattern Layer::allocateBuffer uses for its pixel buffer.
-        if (layer_ && layer_->lut().hasLUT()) {
+        // The output (composition) buffer is needed when we must blend into a
+        // physical-space buffer rather than hand a driver a Layer's logical buffer
+        // directly: whenever ≥2 layers composite, OR a single layer has a LUT
+        // (logical≠physical). A lone no-LUT layer needs no output buffer (drivers
+        // read its buffer directly — the zero-copy fast path).
+        // If allocation fails (no contiguous heap — a real risk on no-PSRAM ESP32
+        // with fragmented DRAM), outputBuffer_ stays data_=nullptr; loop() checks
+        // that before blending (else a null deref panics — same defensive pattern
+        // Layer::allocateBuffer uses). Sized from the active layer: every layer
+        // composites into the same physical space, so its physicalLightCount() /
+        // channelsPerLight() is the composite extent.
+        const uint8_t enabled = layers_ ? layers_->enabledLayerCount() : (layer_ ? 1 : 0);
+        const bool needOutput = layer_ && (enabled > 1 || layer_->lut().hasLUT());
+        if (needOutput) {
             if (!outputBuffer_.allocate(layer_->physicalLightCount(), layer_->channelsPerLight())) {
                 std::printf("  DEGRADE  Drivers::outputBuffer_ allocate failed for %u lights\n",
                             static_cast<unsigned>(layer_->physicalLightCount()));
@@ -184,15 +189,35 @@ public:
     }
 
     void loop() override {
-        // outputBuffer_.data() can be null if onBuildState failed to claim
-        // a contiguous block (heap fragmentation). Skip the blend in that case
-        // — drivers run on raw Layer buffer or simply have nothing to send.
-        if (layer_ && layer_->lut().hasLUT() && outputBuffer_.data()) {
+        // Composite into outputBuffer_ when one is allocated (≥2 enabled layers,
+        // or a single layer with a LUT — see onBuildState). A null data_ means
+        // onBuildState couldn't claim a block (heap fragmentation): skip the blend;
+        // drivers then read the raw Layer buffer / send nothing.
+        if (outputBuffer_.data() && layers_ && layers_->enabledLayerCount() > 1) {
+            // Multi-layer composite: blend each enabled layer in container order.
+            // The first (bottom) layer clears + overwrites; each subsequent layer
+            // blends onto the accumulated frame per its own blendMode + opacity.
+            // blendMap resolves the op/opacity branch once per layer (a tight
+            // specialized loop each — no-LUT layers blend 1:1, LUT layers map),
+            // and a full-opacity additive/overwrite layer pays no alpha math, so
+            // cost scales with enabled-layer count only.
+            layers_->forEachEnabledLayer([&](Layer* L, bool first) {
+                BlendOp op = first ? BlendOp::Overwrite : L->blendOp();
+                uint8_t op_opacity = first ? 255 : L->opacity;
+                blendMap(L->buffer(), outputBuffer_, L->lut(), L->channelsPerLight(),
+                         op, op_opacity, /*clearFirst=*/first);
+            });
+        } else if (outputBuffer_.data() && layer_ && layer_->lut().hasLUT()) {
+            // Single layer with a LUT (the only enabled one, or a pinned setLayer):
+            // map its logical buffer into physical space. The original fast path.
             blendMap(layer_->buffer(), outputBuffer_, layer_->lut(), layer_->channelsPerLight());
         }
-        // Option A: parent work first (blendMap), then chain to base to tick
-        // children on the freshly-blended buffer. Per-child enabled gating and
-        // timing accumulation live in MoonModule::tickChildren.
+        // (A lone enabled no-LUT layer skips the above — drivers read its logical
+        // buffer directly, the zero-copy path set in passBufferToDrivers.)
+        //
+        // Option A: parent work first (blend), then chain to base to tick children
+        // on the freshly-composited buffer. Per-child enabled gating + timing live
+        // in MoonModule::tickChildren.
         MoonModule::loop();
     }
 
@@ -209,7 +234,13 @@ private:
         // dangling layer_ pointing at the freed Layer — PreviewDriver then read
         // layer_->layouts() on freed memory and crashed (LoadProhibited). A
         // driver with a null layer/buffer is a well-defined idle state.
-        Buffer* buf = layer_ ? (layer_->lut().hasLUT() ? &outputBuffer_ : &layer_->buffer())
+        // Drivers read the composed outputBuffer_ when we composite (≥2 enabled
+        // layers) or when the single layer needs a LUT map; otherwise the lone
+        // no-LUT layer's buffer is handed directly (zero-copy fast path). Mirrors
+        // the same decision loop() makes (outputBuffer_ is allocated iff this).
+        const bool composing = layers_ && layers_->enabledLayerCount() > 1;
+        Buffer* buf = layer_ ? ((composing || layer_->lut().hasLUT()) ? &outputBuffer_
+                                                                      : &layer_->buffer())
                              : nullptr;
         for (uint8_t i = 0; i < childCount(); i++) {
             auto* drv = static_cast<DriverBase*>(child(i));
