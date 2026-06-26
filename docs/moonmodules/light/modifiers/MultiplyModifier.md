@@ -20,13 +20,13 @@ The defaults (`multiply 2/2/1`, `mirror all on`) reproduce the canonical mirror-
 ## Effect on the pipeline
 
 - **Logical box shrinks by the multiplier**: `logW = physW / multiplyX` (etc.). 128×128 with multiply 2/2 → 64×64 logical (the effect renders a quarter of the lights). The effective multiplier clamps to the axis extent — `multiplyZ` on a depth-1 layout clamps to 1 (no-op), never blanking the layer.
-- **LUT produces 1:N mappings**: each logical light maps to `multiplyX·multiplyY·multiplyZ` physical positions (the tiles). There is **no fixed fan-out cap** — `Layer::rebuildLUT` sizes a per-light scratch buffer to the modifier's `maxMultiplier()` (heap, cold path), so the full fan-out is emitted, limited only by memory (an alloc failure degrades to the identity LUT).
+- **Fan-out is the fold**: each physical light folds (`pos % logicalSize`) onto its logical cell, so the `multiplyX·multiplyY·multiplyZ` physical lights of the tiles all land on one logical light — the 1:N mapping emerges from the build with no fan-out list and no cap (see [ModifierBase § Fan-out is free](../ModifierBase.md)).
 - **Tile vs fold**: with mirror **off** on an axis, tiles repeat (translate); with mirror **on**, odd-numbered tiles reflect within their tile (`size − 1 − pos`), so multiply 2 + mirror = a fold.
 - **Integer division**: a physical extent not divisible by the multiplier leaves uncovered cells at the high edge (they map to nothing) — the same edge behaviour the old mirror had on odd widths, without a shared centre line.
 
 ## Cross-domain wiring
 
-A Layer applies its first enabled modifier during `rebuildLUT` — modifier chaining (where order matters, e.g. multiply-then-checkerboard ≠ checkerboard-then-multiply) is not implemented; see [architecture.md § Modifiers](../../../architecture.md#modifiers). `mapToPhysical` emits physical box indices; the Layer translates them to driver indices and drops any that fall outside the real light set.
+A Layer folds all its enabled modifiers as a chain (order matters: multiply-then-checkerboard ≠ checkerboard-then-multiply). The fold contract is in [ModifierBase](../ModifierBase.md).
 
 ## Tests
 

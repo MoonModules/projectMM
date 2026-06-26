@@ -28,6 +28,9 @@
 #include "light/effects/GameOfLifeEffect.h"
 #include "light/modifiers/MultiplyModifier.h"
 #include "light/modifiers/CheckerboardModifier.h"
+#include "light/modifiers/RegionModifier.h"
+#include "light/modifiers/RotateModifier.h"
+#include "light/modifiers/RandomMapModifier.h"
 #include "light/drivers/Drivers.h"
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
@@ -191,6 +194,9 @@ static void registerScenarioTypes() {
     mm::ModuleFactory::registerType<mm::GameOfLifeEffect>("GameOfLifeEffect");
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier");
+    mm::ModuleFactory::registerType<mm::RegionModifier>("RegionModifier");
+    mm::ModuleFactory::registerType<mm::RotateModifier>("RotateModifier");
+    mm::ModuleFactory::registerType<mm::RandomMapModifier>("RandomMapModifier");
     mm::ModuleFactory::registerType<mm::Drivers>("Drivers");
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver");

@@ -37,6 +37,7 @@ add_executable(mm_tests
     unit/light/unit_NetworkSendDriver_no_alloc_in_loop.cpp
     unit/light/unit_NetworkSendDriver_packet.cpp
     unit/light/unit_BlendMap.cpp
+    unit/light/unit_Coord3D.cpp
     unit/light/unit_CheckerboardEffect.cpp
     unit/light/unit_SineEffect.cpp
     unit/light/unit_DistortionWavesEffect.cpp
@@ -49,6 +50,8 @@ add_executable(mm_tests
     unit/light/unit_WheelLayout.cpp
     unit/light/unit_Layer_extrude.cpp
     unit/light/unit_Layer_sparse_mapping.cpp
+    unit/light/unit_Layer_modifier_chain.cpp
+    unit/light/unit_Layer_live_modifier.cpp
     unit/light/unit_Layer_phase_animation.cpp
     unit/light/unit_Layer_zero_grid.cpp
     unit/light/unit_Layers_container.cpp

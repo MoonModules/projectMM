@@ -353,9 +353,9 @@ A **Layer** (a MoonModule, child of Layers) owns:
 
 A layer can have **multiple effects**. Each effect writes to the buffer sequentially in its listed order, overwriting or adding to the previous — so the effects stack (a base-colour effect followed by a sparkle effect).
 
-A layer applies its **first enabled modifier** during LUT build (`Layer::rebuildLUT`). Modifiers are **reorderable** in the UI, and order is meaningful (a multiply-then-checkerboard mask differs from checkerboard-then-multiply, just as mirror-then-rotate differs from rotate-then-mirror). Applying several modifiers in sequence (chaining) is on the [backlog](backlog/README.md).
+A layer applies **all its enabled modifiers as a chain** during the mapping build (`Layer::rebuildLUT`): each modifier is a coordinate fold, and they compose in child order (M₁∘M₂∘…). Modifiers are **reorderable** in the UI, and order is meaningful (a multiply-then-checkerboard mask differs from checkerboard-then-multiply, just as mirror-then-rotate differs from rotate-then-mirror). The fold contract (the three hooks, the physical→logical build, the live pass) is documented in [ModifierBase](moonmodules/light/ModifierBase.md).
 
-Each layer references the shared Layouts. The layer builds its own LUT by iterating the Layouts container's coordinates and applying its static modifiers in order. Different layers in Layers can have different modifiers, producing different LUTs from the same Layouts.
+Each layer references the shared Layouts. The layer builds its mapping by walking the Layouts container's **physical** coordinates and folding each through the static modifier chain to its logical cell — N physical lights folding onto one logical cell is the fan-out (a Multiply kaleidoscope), so the build never produces a fan-out overflow. Different layers in Layers can have different modifiers, producing different mappings from the same Layouts.
 
 ## Effects
 
@@ -522,7 +522,7 @@ The light domain plugs into the UI at three points: a fixed top-level tree (Layo
 
 ## What we leave undesigned
 
-Genuinely open questions, *not* the same as a 🚧 marker. A 🚧 item is a committed design that simply isn't coded yet (multi-layer composition, two-core handover, time sync); the items here are ones where the *design itself* isn't settled, deferred until a concrete need forces the decision:
+Genuinely open questions, *not* the same as a 🚧 marker. A 🚧 item is a committed design that simply isn't coded yet (two-core handover, clock sync, device-to-device light distribution); the items here are ones where the *design itself* isn't settled, deferred until a concrete need forces the decision:
 
 - **WiFi runtime disable**: today the eth-only build profile compiles WiFi out. Whether runtime gating should key off detected hardware presence, an explicit control, or a deviceModel-catalog field isn't decided; the eth-only build covers the need until one is.
 - **Mixing light types in one Layouts**: each layout child describes one light type (all LED strips, or all par lights). Whether a single Layouts container should hold mixed types (LED strips + par lights together), and how the channel layout would reconcile across them, isn't designed; one Layouts per light type is the current model.

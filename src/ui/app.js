@@ -2113,6 +2113,10 @@ function setupStatusBarButtons() {
         theme = (theme === "dark") ? "light" : "dark";
         localStorage.setItem(LS_THEME, theme);
         applyTheme(theme);
+        // Repaint the preview to the new theme's background — a live preview would
+        // pick it up on its next frame, but an idle one (no incoming frames) needs
+        // a nudge so the canvas doesn't keep the previous theme's clear colour.
+        preview.redraw();
     });
 
     // Hamburger: toggles the side nav. On wide screens it collapses/expands the
