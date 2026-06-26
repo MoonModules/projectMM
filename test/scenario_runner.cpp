@@ -21,6 +21,7 @@
 #include "light/effects/ParticlesEffect.h"
 #include "light/effects/GlowParticlesEffect.h"
 #include "light/effects/CheckerboardEffect.h"
+#include "light/moonlive/MoonLiveEffect.h"
 #include "light/effects/SpiralEffect.h"
 #include "light/effects/RingsEffect.h"
 #include "light/effects/RipplesEffect.h"
@@ -187,6 +188,7 @@ static void registerScenarioTypes() {
     mm::ModuleFactory::registerType<mm::ParticlesEffect>("ParticlesEffect");
     mm::ModuleFactory::registerType<mm::GlowParticlesEffect>("GlowParticlesEffect");
     mm::ModuleFactory::registerType<mm::CheckerboardEffect>("CheckerboardEffect");
+    mm::ModuleFactory::registerType<mm::MoonLiveEffect>("MoonLiveEffect");
     mm::ModuleFactory::registerType<mm::SpiralEffect>("SpiralEffect");
     mm::ModuleFactory::registerType<mm::RingsEffect>("RingsEffect");
     mm::ModuleFactory::registerType<mm::RipplesEffect>("RipplesEffect");

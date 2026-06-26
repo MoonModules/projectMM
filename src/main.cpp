@@ -13,6 +13,7 @@
 #include "light/effects/ParticlesEffect.h"
 #include "light/effects/GlowParticlesEffect.h"
 #include "light/effects/CheckerboardEffect.h"
+#include "light/moonlive/MoonLiveEffect.h"
 #include "light/effects/SpiralEffect.h"
 #include "light/effects/RingsEffect.h"
 #include "light/effects/RipplesEffect.h"
@@ -102,6 +103,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::AudioSpectrumEffect>("AudioSpectrumEffect", "light/effects/AudioSpectrumEffect.md");
     mm::ModuleFactory::registerType<mm::SineEffect>("SineEffect", "light/effects/SineEffect.md");
     mm::ModuleFactory::registerType<mm::DistortionWavesEffect>("DistortionWavesEffect", "light/effects/DistortionWavesEffect.md");
+    mm::ModuleFactory::registerType<mm::MoonLiveEffect>("MoonLiveEffect", "light/moonlive/MoonLiveEffect.md");
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier", "light/modifiers/MultiplyModifier.md");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers/CheckerboardModifier.md");
     mm::ModuleFactory::registerType<mm::RandomMapModifier>("RandomMapModifier", "light/modifiers/RandomMapModifier.md");

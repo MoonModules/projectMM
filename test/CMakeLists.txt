@@ -17,6 +17,8 @@ add_executable(mm_tests
     unit/core/unit_JsonUtil_parse.cpp
     unit/core/unit_MappingLUT.cpp
     unit/core/unit_ModuleFactory.cpp
+    unit/core/unit_moonlive_fill.cpp
+    unit/core/unit_moonlive_compiler.cpp
     unit/core/unit_MoonModule.cpp
     unit/core/unit_MoonModule_control_change_gate.cpp
     unit/core/unit_MoonModule_lifecycle.cpp
