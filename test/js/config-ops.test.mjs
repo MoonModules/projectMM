@@ -52,8 +52,9 @@ test("all clearChildren ops come before all add/set ops", () => {
     for (const entry of catalog) {
         const ops = planConfigOps(entry);
         if (!ops.some(o => o.op === "clearChildren")) continue;
-        const lastClear = lastIndex(ops, o => o.op === "clearChildren");
         const firstNonClear = firstIndex(ops, o => o.op !== "clearChildren");
+        if (firstNonClear === -1) continue;   // clears-only plan — nothing for them to precede
+        const lastClear = lastIndex(ops, o => o.op === "clearChildren");
         assert.ok(lastClear < firstNonClear,
             `entry "${entry.name}": a clearChildren runs after an add/set — clearing must be a ` +
             `pre-pass, or it would wipe a module the entry just added.`);

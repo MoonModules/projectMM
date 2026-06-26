@@ -52,6 +52,20 @@ TEST_CASE("MoonLive run on zero lights writes nothing (robust to empty)") {
     CHECK(buf[0] == 0xAB);                  // untouched
 }
 
+// The native routines write channels +0/+1/+2 per light, so a layer with fewer than 3
+// channels per light can't hold RGB — run() must leave it untouched, not overrun it.
+TEST_CASE("MoonLive run is a no-op on sub-RGB buffers (cpl 1 and 2)") {
+    moonlive::MoonLive engine;
+    REQUIRE(engine.compile(255, 255, 255));
+    for (uint8_t cpl : {uint8_t(1), uint8_t(2)}) {
+        std::vector<uint8_t> buf(8 * cpl, 0xAB);   // exact size — an RGB write WOULD overrun
+        engine.run(buf.data(), 8, cpl, 0);
+        for (auto v : buf) CHECK(v == 0xAB);       // every byte untouched, no out-of-bounds
+    }
+    // null buffer is also a safe no-op.
+    engine.run(nullptr, 8, 3, 0);
+}
+
 TEST_CASE("MoonLive recompile swaps the colour; free returns to !ok") {
     moonlive::MoonLive engine;
     REQUIRE(engine.compile(1, 1, 1));

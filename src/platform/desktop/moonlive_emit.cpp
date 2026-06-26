@@ -2,13 +2,12 @@
 
 #include <cstring>
 
-// MoonLive desktop backend (§3.2) — emits the Stage-1a fixed-colour fill as host machine
-// code (arm64 or x86-64, chosen at compile time). The desktop backend exists to (a) let a
-// unit test EXECUTE generated code in-process — proving allocExec → writeExec → call works
-// off-hardware — and (b) be the eventual home of the host codegen for the in-process script
-// tests. Hand-encoding the loop here is the same exercise the Xtensa backend does, so the
-// engine/binding API is exercised identically on both. (The ESP32/Xtensa backend is the one
-// the hardware run validates; this one keeps CI honest.)
+// MoonLive desktop backend (§3.2) — emits the fixed-colour fill as host machine code (arm64
+// or x86-64, chosen at compile time). The desktop backend lets a unit test EXECUTE generated
+// code in-process — proving allocExec → writeExec → call works off-hardware — and exercises
+// the engine/binding API the same way the device backends do. Hand-encoding the loop here is
+// the same exercise the Xtensa/RISC-V backends do; the on-device backends are validated by
+// the hardware run, this one keeps CI honest.
 //
 // The routine implements: void fill(uint8_t* buf, uint32_t nLights, uint8_t cpl)
 //   for (i=0; i<nLights; i++) { buf[i*cpl+0]=r; buf[i*cpl+1]=g; buf[i*cpl+2]=b; }
@@ -84,10 +83,13 @@ size_t emitAnimatedFill(uint8_t* out, size_t cap) {
     return sizeof(kArm64Anim);
 }
 
-#elif defined(__x86_64__)
+#elif defined(__x86_64__) && !defined(_WIN32)
 
-// x86-64 template (assembled from fill_x64.s, verified with clang/objdump). buf=rdi,
-// nLights=esi, cpl=dl. R/G/B are the immediate byte of each `movb` at offsets 0x11/0x17/0x1d.
+// x86-64 SysV ABI (Linux/macOS) — args in rdi/rsi/rdx. The Windows x64 ABI uses
+// rcx/rdx/r8/r9 instead, so this blob is wrong there; _WIN32 is excluded above and falls to
+// the #error until a Win64 template is added (no Windows desktop target ships today).
+// (assembled from fill_x64.s, verified with clang/objdump). buf=rdi, nLights=esi, cpl=dl.
+// R/G/B are the immediate byte of each `movb` at offsets 0x11/0x17/0x1d.
 static const uint8_t kX64[] = {
     0x85, 0xf6,                         // test  esi, esi
     0x74, 0x25,                         // je    .done (+0x25)
@@ -141,7 +143,7 @@ size_t emitAnimatedFill(uint8_t* out, size_t cap) {
 }
 
 #else
-#error "MoonLive desktop backend: unsupported host ISA (expected arm64 or x86-64)"
+#error "MoonLive desktop backend: unsupported host (expected arm64, or x86-64 SysV; Windows x64 needs its own ABI template)"
 #endif
 
 }  // namespace mm::moonlive

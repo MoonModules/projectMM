@@ -5,35 +5,38 @@
 #include "core/moonlive/moonlive_emit.h"
 
 // MoonLive — the live-script engine core (domain-neutral, §3.1/§3.9 of
-// livescripts-analysis-top-down.md). Stage 1a: no language yet — compile() asks the per-ISA
-// emitter for one fixed routine (fill every light a colour), places it in executable memory,
-// and run() calls it over a host-supplied buffer. The whole compiler (lexer → parser → IR →
-// codegen) grows in behind compile() over later stages; this is the load-bearing first slice
-// that proves emit → allocExec → call → write-the-buffer works on real Xtensa.
+// livescripts-analysis-top-down.md). compile() turns a program into native code — either a
+// source string (via MoonLiveCompiler) or a fixed routine direct from the emitter — places it
+// in executable memory, and run() calls it over a host-supplied buffer. The path is
+// emit → allocExec → call → write-the-buffer, running on Xtensa, RISC-V, and the desktop host.
 //
-// Neutral by construction: the engine includes only <cstdint>, the emitter seam, and the
-// platform seam — never EffectBase, Buffer, or any projectMM type. The binding
+// Neutral by construction: the engine includes only <cstdint>, the compiler/emitter seams, and
+// the platform seam — never EffectBase, Buffer, or any projectMM type. The binding
 // (src/light/moonlive/MoonLiveEffect.h) wraps it as a MoonModule.
 
 namespace mm::moonlive {
 
 class MoonLive {
 public:
+    MoonLive() = default;
     ~MoonLive() { free(); }
 
-    // Compile the (Stage-1a fixed) program for a colour: emit the routine, copy it into an
-    // exec block, ready it to call. Returns ok(). A failure (no exec memory, emit too big)
+    // Owns a heap-backed exec block (freed in the destructor), so copying would duplicate
+    // ownership and double-free. Non-copyable; each scripted module holds its own engine.
+    MoonLive(const MoonLive&) = delete;
+    MoonLive& operator=(const MoonLive&) = delete;
+
+    // Compile a fixed-colour program direct from the emitter: emit the routine, copy it into
+    // an exec block, ready it to call. Returns ok(). A failure (no exec memory, emit too big)
     // leaves the engine !ok() with an error() — the caller degrades, never crashes.
     bool compile(uint8_t r, uint8_t g, uint8_t b);
 
-    // Stage 2: compile SOURCE TEXT. The front-end (MoonLiveCompiler) lexes/parses the
-    // `fill(r,g,b);` statement and emits the same code compile(r,g,b) would. A parse error
-    // leaves the engine !ok() with error() pointing at the diagnostic — the script editor's
-    // failure path. This is the real compile path; the typed overloads above are the
-    // hand-driven Stage-1 spikes the source path now subsumes for the fill program.
+    // Compile SOURCE TEXT. The front-end (MoonLiveCompiler) lexes/parses the `fill(r,g,b);`
+    // statement and emits the same code compile(r,g,b) would. A parse error leaves the engine
+    // !ok() with error() pointing at the diagnostic — the script editor's failure path.
     bool compile(const char* source);
 
-    // Stage 1b: compile the animated routine (colour derived from the per-frame `t`).
+    // Compile the animated routine (colour derived from the per-frame `t`).
     bool compileAnimated();
 
     bool ok() const { return fn_ != nullptr || anim_ != nullptr; }
@@ -41,8 +44,12 @@ public:
 
     // The hot path: run the compiled routine over the host's buffer. `t` is the host's
     // elapsed() ms; a static routine ignores it, an animated one derives its colour from
-    // it. No-op if !ok(), so a failed compile renders nothing rather than calling null.
+    // it. No-op if !ok() (a failed compile renders nothing). The emitted routines write
+    // channels +0/+1/+2 per light, so a buffer that can't hold RGB — null, zero lights, or
+    // fewer than 3 channels per light — is left untouched rather than overrun (robust to any
+    // grid size / layout, the hard rule).
     void run(uint8_t* buf, uint32_t nLights, uint8_t cpl, uint32_t t) const {
+        if (!buf || nLights == 0 || cpl < 3) return;
         if (fn_) fn_(buf, nLights, cpl);
         else if (anim_) anim_(buf, nLights, cpl, t);
     }

@@ -1,0 +1,588 @@
+{
+  "name": "scenario_MoonLiveEffect_livescript",
+  "module": "MoonLiveEffect",
+  "mode": "mutate",
+  "also": [
+    "Layouts",
+    "GridLayout",
+    "Layers",
+    "Layer",
+    "Drivers",
+    "NetworkSendDriver"
+  ],
+  "description": "Exercise a scripted MoonLiveEffect as a wired MoonModule end-to-end — the integration layer the unit tests can't reach. The effect compiles its `source` text to native code on-device and renders it into the Layer buffer each tick. Prepares its own canvas: Layout(Grid 16x16) + Layer + MoonLiveEffect, measures the default compile, then edits `source` live (a new fill colour recompiles and keeps rendering), pushes a BROKEN script (the prior code keeps running, the parse error surfaces in status, no crash), recovers with a valid script, and finally removes + re-adds the effect (add/remove robustness in any order). A crash in the JIT/emit path, a failed recompile that wedges the tick, or a buffer overrun on an odd grid all show up as a failed measure. The compiler + emit golden bytes are pinned by unit_moonlive_compiler / unit_moonlive_fill; this is the live wired-module gate.",
+  "fixture": [
+    {
+      "name": "fix-layouts",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "fix-grid",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 16,
+        "height": 16
+      }
+    },
+    {
+      "name": "fix-layers",
+      "op": "add_module",
+      "id": "Layers",
+      "type": "Layers",
+      "props": {
+        "layouts": "Layouts"
+      }
+    },
+    {
+      "name": "fix-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "parent_id": "Layers",
+      "props": {
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "fix-drivers",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "layers": "Layers"
+      }
+    },
+    {
+      "name": "fix-artnet",
+      "op": "add_module",
+      "id": "ArtNet",
+      "type": "NetworkSendDriver",
+      "parent_id": "Drivers"
+    }
+  ],
+  "steps": [
+    {
+      "name": "add-moonlive",
+      "description": "Add a MoonLiveEffect to the Layer. Its default source `fill(0, 0, 255);` compiles on-device to native code; measure that the wired effect renders.",
+      "op": "add_module",
+      "id": "ML",
+      "type": "MoonLiveEffect",
+      "parent_id": "Layer",
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            393
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-26",
+            "2026-06-27"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            4013,
+            4013
+          ],
+          "free_heap": [
+            8541659,
+            8541659
+          ],
+          "max_alloc_block": [
+            106496,
+            106496
+          ],
+          "at": [
+            "2026-06-27",
+            "2026-06-27"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            11291,
+            11291
+          ],
+          "free_heap": [
+            34007695,
+            34007695
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-27",
+            "2026-06-27"
+          ]
+        }
+      }
+    },
+    {
+      "name": "edit-source-red",
+      "description": "Live-edit the script source to a new colour. A source edit triggers a recompile (controlChangeTriggersBuildState gates on `source`); the new native code swaps in and keeps rendering.",
+      "op": "set_control",
+      "id": "ML",
+      "key": "source",
+      "value": "fill(255, 0, 0);",
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            398
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-26",
+            "2026-06-27"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            4450,
+            4450
+          ],
+          "free_heap": [
+            8541007,
+            8541007
+          ],
+          "max_alloc_block": [
+            106496,
+            106496
+          ],
+          "at": [
+            "2026-06-27",
+            "2026-06-27"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            10167,
+            10167
+          ],
+          "free_heap": [
+            34010179,
+            34010179
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-27",
+            "2026-06-27"
+          ]
+        }
+      }
+    },
+    {
+      "name": "edit-source-broken",
+      "description": "Push a script that fails to parse. The compile fails, the engine reports the diagnostic in the module status and renders dark, but the device keeps running (robust, no reboot) — the script-editor failure path. The measure passes because the pipeline still ticks.",
+      "op": "set_control",
+      "id": "ML",
+      "key": "source",
+      "value": "fill(nope);",
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            267
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-26",
+            "2026-06-27"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            4366,
+            4366
+          ],
+          "free_heap": [
+            8540491,
+            8540491
+          ],
+          "max_alloc_block": [
+            106496,
+            106496
+          ],
+          "at": [
+            "2026-06-27",
+            "2026-06-27"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            10572,
+            10572
+          ],
+          "free_heap": [
+            34006131,
+            34006131
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-27",
+            "2026-06-27"
+          ]
+        }
+      }
+    },
+    {
+      "name": "edit-source-recover",
+      "description": "Push a valid script again. The engine recompiles cleanly and rendering resumes — a broken edit is fully recoverable.",
+      "op": "set_control",
+      "id": "ML",
+      "key": "source",
+      "value": "fill(0, 255, 0);",
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            414
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-26",
+            "2026-06-27"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            4040,
+            4040
+          ],
+          "free_heap": [
+            8540211,
+            8540211
+          ],
+          "max_alloc_block": [
+            102400,
+            102400
+          ],
+          "at": [
+            "2026-06-27",
+            "2026-06-27"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            10708,
+            10708
+          ],
+          "free_heap": [
+            34009331,
+            34009331
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-27",
+            "2026-06-27"
+          ]
+        }
+      }
+    },
+    {
+      "name": "shrink-grid-1x1",
+      "description": "Resize the canvas to 1x1 while the scripted effect renders — the smallest non-empty grid. The native fill loops over a single light; the run guards (non-null buffer, cpl>=3) keep it in-bounds. Pins the 'runs at every grid size' hard rule for the JIT'd routine.",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 1,
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            1
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-26",
+            "2026-06-27"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            1152,
+            1152
+          ],
+          "free_heap": [
+            8541371,
+            8541371
+          ],
+          "max_alloc_block": [
+            102400,
+            102400
+          ],
+          "at": [
+            "2026-06-27",
+            "2026-06-27"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            1160,
+            1160
+          ],
+          "free_heap": [
+            34012203,
+            34012203
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-27",
+            "2026-06-27"
+          ]
+        }
+      }
+    },
+    {
+      "name": "grow-grid-back",
+      "description": "Resize back to a wider grid; the effect keeps rendering across the live dimension change (the no-reboot reconfiguration contract applied to scripted code).",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "width",
+      "value": 16,
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            14
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-26",
+            "2026-06-27"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            7329,
+            7329
+          ],
+          "free_heap": [
+            8532499,
+            8532499
+          ],
+          "max_alloc_block": [
+            102400,
+            102400
+          ],
+          "at": [
+            "2026-06-27",
+            "2026-06-27"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            10310,
+            10310
+          ],
+          "free_heap": [
+            34005655,
+            34005655
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-27",
+            "2026-06-27"
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove-moonlive",
+      "description": "Remove the scripted effect. teardown frees the exec block; the Layer keeps rendering (now empty). Measures add/remove robustness.",
+      "op": "remove_module",
+      "id": "ML",
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            10
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-26",
+            "2026-06-27"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            7387,
+            7387
+          ],
+          "free_heap": [
+            8532839,
+            8532839
+          ],
+          "max_alloc_block": [
+            102400,
+            102400
+          ],
+          "at": [
+            "2026-06-27",
+            "2026-06-27"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            11336,
+            11336
+          ],
+          "free_heap": [
+            34006231,
+            34006231
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-27",
+            "2026-06-27"
+          ]
+        }
+      }
+    },
+    {
+      "name": "re-add-moonlive",
+      "description": "Re-add a MoonLiveEffect after removal — the exec memory is re-acquired fresh, no leak, no stale pointer. The scripted effect renders again.",
+      "op": "add_module",
+      "id": "ML2",
+      "type": "MoonLiveEffect",
+      "parent_id": "Layer",
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            16
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-26",
+            "2026-06-27"
+          ]
+        },
+        "esp32s3-n16r8": {
+          "tick_us": [
+            8255,
+            8255
+          ],
+          "free_heap": [
+            8532255,
+            8532255
+          ],
+          "max_alloc_block": [
+            102400,
+            102400
+          ],
+          "at": [
+            "2026-06-27",
+            "2026-06-27"
+          ]
+        },
+        "esp32p4-eth": {
+          "tick_us": [
+            10997,
+            10997
+          ],
+          "free_heap": [
+            34005655,
+            34005655
+          ],
+          "max_alloc_block": [
+            385024,
+            385024
+          ],
+          "at": [
+            "2026-06-27",
+            "2026-06-27"
+          ]
+        }
+      }
+    }
+  ]
+}

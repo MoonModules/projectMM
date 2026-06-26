@@ -9,11 +9,10 @@
 // IS a first-class EffectBase (role, controls, lifecycle, generic UI), and its loop()
 // delegates to a compiled MoonLive over this effect's own buffer.
 //
-// Stage 1a: no script source yet — the engine compiles one fixed routine (fill the layer
-// a colour) so the load-bearing path (emit → allocExec → call → write the buffer) is proven
-// end to end on real Xtensa. The `source` text control, the language, and script-declared
-// controls arrive in later stages; this is the smallest thing that lights an LED via native
-// code we generated.
+// The effect holds a `source` text control; onBuildState compiles it through the engine and
+// loop() runs the emitted native code over the buffer (emit → allocExec → call → write). A
+// source edit recompiles live; a parse error shows in the module status and the layer goes
+// dark — robust, no reboot.
 
 namespace mm {
 
@@ -22,10 +21,9 @@ public:
     const char* tags() const override { return "📝"; }   // scripted
     Dim dimensions() const override { return Dim::D2; }
 
-    // Stage 2: the effect carries its SCRIPT SOURCE as an editable, persisted text control.
-    // Editing it recompiles live (the script-editor loop), the same way any control edit
-    // reshapes a compiled module — no bespoke path. The default is the fill program the
-    // spike proves end to end.
+    // The effect carries its SCRIPT SOURCE as an editable, persisted text control. Editing it
+    // recompiles live (the script-editor loop), the same way any control edit reshapes a
+    // compiled module — no bespoke path. The default is a solid-blue fill program.
     void onBuildControls() override {
         controls_.addText("source", source_, sizeof(source_));
     }

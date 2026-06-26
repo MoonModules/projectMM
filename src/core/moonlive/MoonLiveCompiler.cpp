@@ -6,9 +6,9 @@ namespace mm::moonlive {
 namespace {
 
 // --- Lexer ---------------------------------------------------------------------------
-// The token kinds the Stage-2 grammar needs. A hand-written recursive-descent front-end
-// (the textbook embedded-script default) lexes on demand: the parser pulls one token at a
-// time. No token table is materialised — peek()/advance() walk the source directly.
+// The token kinds the grammar needs. A hand-written recursive-descent front-end (the textbook
+// embedded-script default) lexes on demand: the parser pulls one token at a time, and
+// advance() walks the source directly without building a token list.
 enum class Tok { Ident, Number, LParen, RParen, Comma, Semicolon, End, Error };
 
 struct Lexer {
@@ -62,8 +62,7 @@ struct Lexer {
 
 // --- AST + Parser --------------------------------------------------------------------
 // The only production: program := "fill" "(" number "," number "," number ")" ";" End.
-// The AST for it is just the three colour bytes — there is no node hierarchy at one
-// statement (a real tree arrives with the second statement type, concrete-first).
+// The AST for it is just the three colour bytes — a single statement needs no node hierarchy.
 struct Parsed {
     bool ok = false;
     const char* error = "";
@@ -116,13 +115,14 @@ Parsed parse(const char* source) {
 CompileResult compileSource(const char* source, uint8_t* out, size_t cap) {
     CompileResult r;
     if (!source) { r.error = "no source"; return r; }
+    if (!out || cap == 0) { r.error = "no code buffer"; return r; }   // never emit through a null/empty buffer
 
     Parsed p = parse(source);
     if (!p.ok) { r.error = p.error; r.errorCol = p.errorCol; return r; }
 
-    // Codegen: the parsed colour drives the SAME per-ISA emitter the hand-written 1a path
-    // uses — so a parsed `fill(0,0,255)` produces byte-for-byte the bytes emitFill(0,0,255)
-    // does (the golden-bytes equivalence the test asserts). No IR yet at one statement.
+    // Codegen: the parsed colour drives the SAME per-ISA emitter the typed compile path uses —
+    // so a parsed `fill(0,0,255)` produces byte-for-byte the bytes emitFill(0,0,255) does (the
+    // golden-bytes equivalence the test asserts).
     size_t len = emitFill(out, cap, p.r, p.g, p.b);
     if (len == 0) { r.error = "code buffer too small"; return r; }
     r.ok = true;

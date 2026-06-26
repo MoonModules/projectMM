@@ -4,10 +4,9 @@
 
 namespace mm::moonlive {
 
-// Generous fixed cap for the Stage-1 routines — a fill loop is a few dozen bytes on any
-// ISA; the emitter returns the real length and the unused tail is harmless. Sized once here
-// so the emitter never has to worry about growth (a real program-sized arena comes with the
-// language, later).
+// Fixed cap for an emitted routine — a fill loop is a few dozen bytes on any ISA; the emitter
+// returns the real length and the unused tail is harmless. Sized once here, word-aligned so
+// allocExec/writeExec's word-rounding never exceeds it.
 static constexpr size_t kCodeCap = 256;
 
 // Copy `len` already-emitted bytes into a fresh exec block. writeExec hides the ISA quirks

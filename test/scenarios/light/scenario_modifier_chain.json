@@ -130,7 +130,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            6,
+            5,
             7
           ],
           "free_heap": [
@@ -158,7 +158,7 @@
         "pc-macos": {
           "tick_us": [
             18,
-            20
+            22
           ],
           "free_heap": [
             0,
@@ -182,7 +182,27 @@
       "id": "ROT",
       "type": "RotateModifier",
       "parent_id": "Layer",
-      "measure": true
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            35,
+            39
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-26",
+            "2026-06-26"
+          ]
+        }
+      }
     }
   ]
 }

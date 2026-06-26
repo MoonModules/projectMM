@@ -157,7 +157,12 @@ void freeExec(void* ptr, size_t bytes) {
 
 void writeExec(void* dst, const void* src, size_t len) {
     if (!dst || !src || !len) return;
-#ifdef __APPLE__
+#if defined(_WIN32)
+    // Windows: the VirtualAlloc page is RWX; memcpy suffices, then FlushInstructionCache
+    // (MSVC has no __builtin___clear_cache).
+    std::memcpy(dst, src, len);
+    FlushInstructionCache(GetCurrentProcess(), dst, len);
+#elif defined(__APPLE__)
     // macOS arm64 W^X: flip this thread's MAP_JIT pages to writable, copy, flip back to
     // executable, then sync the I-cache (required on arm64 for freshly-written code).
     pthread_jit_write_protect_np(0);
@@ -165,8 +170,8 @@ void writeExec(void* dst, const void* src, size_t len) {
     pthread_jit_write_protect_np(1);
     __builtin___clear_cache(static_cast<char*>(dst), static_cast<char*>(dst) + len);
 #else
-    // Linux/Windows: the RWX page is plain memory; memcpy suffices. arm64 Linux still
-    // wants an I-cache sync; on x86-64 __builtin___clear_cache is a harmless no-op.
+    // Linux: the RWX page is plain memory; memcpy suffices. arm64 Linux still wants an
+    // I-cache sync; on x86-64 __builtin___clear_cache is a harmless no-op.
     std::memcpy(dst, src, len);
     __builtin___clear_cache(static_cast<char*>(dst), static_cast<char*>(dst) + len);
 #endif

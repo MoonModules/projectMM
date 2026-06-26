@@ -14,20 +14,29 @@
 // replaceChildren) BEFORE adding. The device's clearChildren preserves boot-wired children
 // (Preview, Improv), so a parent's apparatus survives and only swappable pipeline content
 // is replaced — the no-erase path then converges to the same tree an erase+flash produces.
+// A module the entry adds: a non-empty id, a parent to add it under, and a type. The clear
+// pre-pass and the add pass MUST agree on this (one helper, used by both) — otherwise a
+// malformed module could get a clearChildren on its parent without a matching add.
+function isAddable(m) {
+    return !!(m && typeof m === "object" &&
+              typeof m.id === "string" && m.id &&
+              typeof m.parent_id === "string" && m.parent_id &&
+              m.type);
+}
+
 export function planConfigOps(entry) {
     const ops = [];
     const modules = entry && Array.isArray(entry.modules) ? entry.modules : [];
 
     // Modules the entry adds fresh — no need to clear their children (a just-created
     // module has none), so a parent that is itself added is dropped from the clear-set.
-    const addedIds = new Set(
-        modules.filter(m => m && typeof m.id === "string" && m.id && m.parent_id && m.type).map(m => m.id));
+    const addedIds = new Set(modules.filter(isAddable).map(m => m.id));
 
     const clearParents = new Set();
     for (const m of modules) {
         if (!m || typeof m !== "object") continue;
         if (m.replaceChildren && typeof m.id === "string" && m.id) clearParents.add(m.id);
-        if (typeof m.parent_id === "string" && m.parent_id && m.type) clearParents.add(m.parent_id);
+        if (isAddable(m)) clearParents.add(m.parent_id);
     }
     for (const parent of clearParents) {
         if (addedIds.has(parent)) continue;   // freshly added → nothing to clear
@@ -36,7 +45,7 @@ export function planConfigOps(entry) {
 
     for (const m of modules) {
         if (!m || typeof m !== "object" || typeof m.id !== "string" || m.id === "") continue;
-        if (m.parent_id && m.type) ops.push({ op: "add", type: m.type, id: m.id, parent: m.parent_id });
+        if (isAddable(m)) ops.push({ op: "add", type: m.type, id: m.id, parent: m.parent_id });
         const controls = m.controls;
         if (controls && typeof controls === "object") {
             for (const [control, value] of Object.entries(controls)) {

@@ -107,14 +107,17 @@ void free(void* ptr) {
     heap_caps_free(ptr);
 }
 
-// Executable memory for MoonLive's emitted Xtensa code. MALLOC_CAP_EXEC forces an
-// allocation from IRAM (instruction-bus-fetchable). nullptr when IRAM is exhausted —
-// the caller degrades (the scripted module reports "no memory", runs dark), never
-// crashes. IRAM competes with WiFi/driver IRAM, so a failure here is expected on a
-// busy device and must be handled, not asserted.
+// Executable memory for MoonLive's emitted code (Xtensa or RISC-V). MALLOC_CAP_EXEC forces
+// an allocation from IRAM (instruction-bus-fetchable). nullptr when IRAM is exhausted — the
+// caller degrades (the scripted module reports "no memory", runs dark), never crashes. IRAM
+// competes with WiFi/driver IRAM, so a failure here is expected on a busy device and must be
+// handled, not asserted. The request is rounded up to a 4-byte word: writeExec's final
+// partial-word store and the esp_cache_msync length both round up to a word, so the block
+// must hold that whole word even when the caller's len isn't a multiple of 4.
 void* allocExec(size_t bytes) {
     if (bytes == 0) return nullptr;
-    return heap_caps_malloc(bytes, MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
+    size_t padded = (bytes + 3) & ~size_t(3);
+    return heap_caps_malloc(padded, MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
 }
 
 void freeExec(void* ptr, size_t /*bytes*/) {
@@ -144,10 +147,20 @@ void writeExec(void* dst, const void* src, size_t len) {
         }
         d[words] = w;
     }
-    // Sync the instruction cache so the core fetches the freshly-written code, not a
-    // stale line. INST type + INVALIDATE; UNALIGNED because the code block isn't
-    // cache-line sized. S3 has the I-cache that needs this; harmless if it doesn't.
-    esp_cache_msync(dst, (len + 3) & ~size_t(3),
+    // Make the freshly-written code visible to instruction fetch. The bytes went in via
+    // DATA-bus stores, so on a cache-backed exec region (the P4) they may still sit in the
+    // data cache — two steps are needed, in order:
+    //   1. write the data cache back to RAM (TYPE_DATA, C2M) so RAM holds the code, and
+    //   2. invalidate the instruction cache for the range so the core refetches it.
+    // A single TYPE_INST msync only does step 2 — on the P4 that refetches STALE RAM (the
+    // bytes never left the data cache) and the core decodes garbage → illegal instruction.
+    // On the S3, MALLOC_CAP_EXEC is directly-executable SRAM so this is belt-and-suspenders,
+    // but it is correct on both. UNALIGNED because the code block isn't cache-line sized.
+    const size_t paddedLen = (len + 3) & ~size_t(3);
+    esp_cache_msync(dst, paddedLen,
+                    ESP_CACHE_MSYNC_FLAG_TYPE_DATA | ESP_CACHE_MSYNC_FLAG_DIR_C2M |
+                    ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    esp_cache_msync(dst, paddedLen,
                     ESP_CACHE_MSYNC_FLAG_TYPE_INST | ESP_CACHE_MSYNC_FLAG_INVALIDATE |
                     ESP_CACHE_MSYNC_FLAG_UNALIGNED);
 }

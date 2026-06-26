@@ -4,16 +4,12 @@
 #include <cstddef>
 
 // MoonLive front-end (§3.2) — the platform-independent compiler: source text → tokens →
-// AST → native code (via the per-ISA emitter). Stage 2 is the smallest real slice: it
-// recognises ONE statement,
+// AST → native code (via the per-ISA emitter). It recognises one statement,
 //
 //     fill(<r>, <g>, <b>);
 //
 // three integer 0..255 args, and emits the SAME machine code the hand-written emitFill
-// produces (the golden-bytes equivalence is the no-language-leak proof). No expressions,
-// variables, or control flow yet — the lexer/parser/codegen shape is real, the grammar is
-// one rule. It grows rule by rule from here; the IR seam is introduced when a second
-// statement/type forces it (concrete-first).
+// produces (the golden-bytes equivalence is the no-language-leak proof).
 //
 // Neutral by construction: the compiler knows the LANGUAGE, never an ISA — codegen calls
 // the platform's emitFill, so a different backend changes nothing here.
