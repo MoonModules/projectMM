@@ -41,6 +41,10 @@ public:
         controls_.addUint8("speed", speed, 1, 255);
     }
 
+    // `speed` only changes how fast the angle advances; rotation is applied live in
+    // modifyLive, not baked into the mapping, so a speed edit needs no rebuild.
+    bool controlChangeTriggersBuildState(const char* /*controlName*/) const override { return false; }
+
     // Per-frame backward map: a destination logical cell `pos` is replaced by the
     // SOURCE cell it samples — the inverse rotation R(-θ) about the box centre.
     // `logical` is the box. Out-of-box sources stay out-of-box, so the Layer's live

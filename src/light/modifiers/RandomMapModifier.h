@@ -36,7 +36,9 @@ public:
         controls_.addUint8("bpm", bpm, 0, 60);
     }
 
-    // A remap leaves the logical box unchanged (no modifyLogicalSize override).
+    // `bpm` only changes future reshuffle timing — the current permutation is unchanged,
+    // and loop() reads bpm live each tick, so a bpm edit needs no rebuild.
+    bool controlChangeTriggersBuildState(const char* /*controlName*/) const override { return false; }
 
     // A remap leaves the box unchanged but needs it for the permutation — stash it.
     void modifyLogicalSize(Coord3D& size) override { box_ = size; }

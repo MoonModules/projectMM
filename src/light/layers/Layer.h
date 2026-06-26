@@ -97,6 +97,7 @@ public:
         physicalDepth_ = dctx.maxZ + 1;
 
         rebuildLUT();
+        ensureLiveScratch();   // size the live-pass snapshot here, on the cold path
 
         // Neutral status: the LOGICAL box the effects render into (width_×height_×
         // depth_) — this is what start/end region carving and modifiers reshape,
@@ -156,6 +157,20 @@ public:
         if (hasLive_) applyLivePass();
     }
 
+    // COLD path (called from onBuildState after rebuildLUT): (re)size the live-pass
+    // snapshot buffer to the current logical buffer, or free it when no modifier is live.
+    // Keeping the alloc here means applyLivePass() on the render path only memcpys —
+    // never allocates — and the scratch isn't held pinned once live modifiers are removed.
+    void ensureLiveScratch() {
+        const size_t bytes = hasLive_ ? buffer_.bytes() : 0;
+        if (bytes == liveScratchBytes_ && (bytes != 0) == (liveScratch_ != nullptr)) return;
+        if (liveScratch_) { platform::free(liveScratch_); liveScratch_ = nullptr; }
+        liveScratchBytes_ = 0;
+        if (bytes == 0) return;                       // no live modifier → no scratch held
+        liveScratch_ = static_cast<uint8_t*>(platform::alloc(bytes));
+        if (liveScratch_) liveScratchBytes_ = bytes;  // alloc-fail → applyLivePass no-ops, static frame shows
+    }
+
     // Per-frame backward gather for live (animated) modifiers. For each DESTINATION
     // logical cell, fold its coordinate through the enabled live modifiers to the SOURCE
     // cell it samples, and copy that source pixel in — so no destination is left torn
@@ -166,19 +181,10 @@ public:
     // modifiers participate (static ones are already baked into lut_).
     void applyLivePass() {
         uint8_t* buf = buffer_.data();
-        if (!buf) return;
+        if (!buf || !liveScratch_) return;   // scratch is sized on the cold path (ensureLiveScratch)
         const size_t cpl = channelsPerLight_;
         const size_t bytes = static_cast<size_t>(width_) * height_ * depth_ * cpl;
-        if (bytes == 0) return;
-        // Lazy snapshot buffer, (re)sized to the logical buffer. Allocated only here, so
-        // a static-only chain never pays for it. An alloc failure skips the live pass
-        // (the static frame still shows — degraded, not crashed).
-        if (liveScratchBytes_ != bytes) {
-            if (liveScratch_) platform::free(liveScratch_);
-            liveScratch_ = static_cast<uint8_t*>(platform::alloc(bytes));
-            liveScratchBytes_ = liveScratch_ ? bytes : 0;
-        }
-        if (!liveScratch_) return;
+        if (bytes == 0 || bytes > liveScratchBytes_) return;   // hot path NEVER allocates
         std::memcpy(liveScratch_, buf, bytes);   // snapshot the source frame
 
         const Coord3D logical{width_, height_, depth_};
@@ -261,36 +267,30 @@ public:
 
     bool lutSkipped() const { return lutSkipped_; }
 
-    // Max enabled static modifiers folded into one mapping. A deep stack is rare
-    // (a Region + a Multiply + maybe a mask); the cap bounds the per-light fold
-    // loop and the on-stack modifier array. Extra enabled modifiers past the cap
-    // are ignored (the chain still renders, just truncated) — robust, not a crash.
-    static constexpr uint8_t kMaxChain = 8;
-
     // Precondition: physicalWidth_/Height_/Depth_ must be set (call from onBuildState)
     void rebuildLUT() {
         lutSkipped_ = false;
         clearStatus();  // re-evaluated below if a degrade path is taken
 
-        // Collect the enabled STATIC modifiers in child order. A dynamic modifier
-        // (Rotate, hasModifyLive) does NOT fold into the static mapping — it remaps
-        // per frame in Layer::loop's live pass — so it's excluded here. The mapping
-        // built below is the composition of the static folds M₁∘…∘Mₙ.
-        ModifierBase* chain[kMaxChain];
-        uint8_t chainLen = 0;
+        // Fold the box through each enabled STATIC modifier in child order — no fixed
+        // chain array (Dynamic over fixed-size, architecture.md): the size pass here and
+        // the per-light fold below both iterate the Layer's own (dynamic, heap-grown)
+        // child list, filtering for enabled static modifiers inline, the way MoonLight's
+        // `for node : nodes` does. modifyLogicalSize mutates the running box AND lets the
+        // modifier stash its own output size (MoonLight's modifierSize cache), so in the
+        // per-light fold each modifier reads the box at ITS OWN stage from itself.
+        // A dynamic modifier (Rotate, hasModifyLive) is excluded — it remaps per frame in
+        // Layer::loop's live pass, not baked into the mapping.
+        uint8_t staticCount = 0;
         hasLive_ = false;
-        // Fold the box through each enabled static modifier in order. modifyLogicalSize
-        // mutates the running box AND lets the modifier stash its own output size (the
-        // way MoonLight's modifiers cache modifierSize) — so in the per-light fold each
-        // modifier reads the box at ITS OWN stage from itself, no per-stage array here.
         Coord3D box{physicalWidth_, physicalHeight_, physicalDepth_};
-        for (uint8_t i = 0; i < childCount() && chainLen < kMaxChain; i++) {
+        for (uint8_t i = 0; i < childCount(); i++) {
             if (child(i)->role() != ModuleRole::Modifier || !child(i)->enabled()) continue;
             auto* m = static_cast<ModifierBase*>(child(i));
             if (m->hasModifyLive()) { hasLive_ = true; continue; }   // dynamic: per-frame, not baked
             m->modifyLogicalSize(box);
             clampLogical(box);
-            chain[chainLen++] = m;
+            staticCount++;
         }
 
         // Final logical box = the running box after the last static modifier.
@@ -306,7 +306,7 @@ public:
         // Fast path — no static modifiers, dense grid in natural order: box cell i
         // IS driver light i, so the mapping is the identity memcpy. This is the FPS
         // floor for the common case; keep it before any allocation.
-        if (chainLen == 0 && dense && isNaturalOrder()) {
+        if (staticCount == 0 && dense && isNaturalOrder()) {
             lut_.setIdentity(boxCount);
             allocateBuffer(boxCount);
             return;
@@ -317,7 +317,7 @@ public:
         // N physical lights folding onto one logical cell IS the fan-out (Multiply),
         // so each physical light contributes at most ONE destination — maxDest is
         // exactly driverCount, no product, no overflow ceiling.
-        if (!buildFoldedLUT(chain, chainLen, logical, logicalCount, driverCount)) {
+        if (!buildFoldedLUT(logical, logicalCount, driverCount)) {
             // OOM in the fold build — degrade to identity (correct, not crash).
             lutSkipped_ = true;
             setStatus("modifier mapping skipped — not enough memory", Severity::Warning);
@@ -359,8 +359,7 @@ public:
     // setMapping in logical order. Two forEachCoord passes + a counts/dests scratch,
     // all on the cold rebuild path; the hot-path read (forEachDestination) is unchanged.
     // Returns false on OOM (caller degrades to identity).
-    bool buildFoldedLUT(ModifierBase* const* chain, uint8_t chainLen,
-                        const Coord3D& logical,
+    bool buildFoldedLUT(const Coord3D& logical,
                         nrOfLightsType logicalCount, nrOfLightsType driverCount) {
         if (logicalCount == 0 || driverCount == 0) { lut_.setIdentity(0); return true; }
 
@@ -379,23 +378,29 @@ public:
         for (nrOfLightsType i = 0; i <= logicalCount; i++) counts[i] = 0;
 
         // One callback does both passes. It folds the physical coord through the chain
-        // to a logical index (or kNoDriver if a modifier rejects it or it lands out of
-        // box — guarded, never trusted), then either counts it (pass A) or writes the
-        // driver index at the cell's cursor (pass B). Everything travels through the
-        // forEachCoord void* ctx, so the lambda captures nothing (it's a function ptr).
+        // (the Layer's own children — enabled static modifiers, in order, no array) to a
+        // logical index (or skips it if a modifier rejects it or it lands out of box —
+        // guarded, never trusted), then either counts it (pass A) or writes the driver
+        // index at the cell's cursor (pass B). Everything travels through the forEachCoord
+        // void* ctx, so the lambda captures nothing (it's a function ptr).
         struct FoldCtx {
-            ModifierBase* const* chain; uint8_t chainLen;
+            Layer* self;   // for the dynamic child list (the modifier chain)
             Coord3D logical; nrOfLightsType logicalCount;  // final box, for the flatten + guard
             nrOfLightsType* counts;   // pass A: per-cell count.  pass B: per-cell write cursor.
             nrOfLightsType* dests;    // pass B only.
             bool scatter;
-        } fctx{chain, chainLen, logical, logicalCount, counts, dests, /*scatter=*/false};
+        } fctx{this, logical, logicalCount, counts, dests, /*scatter=*/false};
 
         auto onCoord = [](void* c, nrOfLightsType driverIdx, lengthType x, lengthType y, lengthType z) {
             auto* f = static_cast<FoldCtx*>(c);
             Coord3D pos{x, y, z};
-            for (uint8_t i = 0; i < f->chainLen; i++)
-                if (!f->chain[i]->modifyLogical(pos)) return;   // rejected — no logical source
+            Layer* self = f->self;
+            for (uint8_t i = 0; i < self->childCount(); i++) {
+                if (self->child(i)->role() != ModuleRole::Modifier || !self->child(i)->enabled()) continue;
+                auto* m = static_cast<ModifierBase*>(self->child(i));
+                if (m->hasModifyLive()) continue;                 // dynamic: not in the static fold
+                if (!m->modifyLogical(pos)) return;               // rejected — no logical source
+            }
             if (pos.x < 0 || pos.x >= f->logical.x || pos.y < 0 || pos.y >= f->logical.y ||
                 pos.z < 0 || pos.z >= f->logical.z) return;                          // defensive
             const nrOfLightsType li =

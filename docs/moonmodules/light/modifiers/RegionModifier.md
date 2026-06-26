@@ -23,7 +23,7 @@ Half-open makes abutting windows **tile exactly**: a `0..50` and a `50..100` lay
 
 ### Off-screen windows (move, don't rescale)
 
-The window's **logical size is the full `start..end` span**, so the effect always renders at a fixed scale — moving `start` and `end` together slides the window without resizing it (like dragging an OS window). A physical light outside the window is dropped; window cells with no physical light under them (the off-screen part) stay dark. A window slid **entirely** off the box (e.g. `start=-100, end=0`) maps no lights — the layer goes dark, the way you move an effect completely out of view. This is what lets a future animation translate an effect across (and off) the panel without distorting it.
+The window's **logical size is the full `start..end` span**, so the effect always renders at a fixed scale — moving `start` and `end` together slides the window without resizing it (like dragging an OS window). A physical light outside the window is dropped; window cells with no physical light under them (the off-screen part) stay dark. A window slid **entirely** off the box (e.g. `start=-100, end=0`) maps no lights — the layer goes dark, the way you move an effect completely out of view. Because the span is fixed, sweeping `start`/`end` translates an effect across and off the panel without distorting it.
 
 ## Effect on the pipeline
 

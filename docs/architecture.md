@@ -400,12 +400,12 @@ See NoiseEffect / MetaballsEffect for the canonical pattern. Animation speed mus
 
 ## Modifiers
 
-A modifier (MoonModule) lives inside a layer alongside its effects. Modifiers expose a virtual interface: the Layer calls modifier methods without knowing the concrete type (no `dynamic_cast`).
+A modifier (MoonModule) lives inside a layer alongside its effects. Modifiers expose a virtual interface: the Layer calls modifier methods without knowing the concrete type (no `dynamic_cast`). A layer applies **all** its enabled modifiers as a chain, in child order — each a coordinate fold composed into one mapping (see [§ Layers and Layer](#layers-and-layer)).
 
-A modifier can:
+A modifier is a coordinate transform, applied in one of two ways (the fold contract is in [ModifierBase](moonmodules/light/ModifierBase.md)):
 
-- Transform the mapping LUT via `transformCoord()`: rebuilt on the cold path, zero render cost.
-- Transform light values via `transformLights()` on the hot path: per-light cost, enables dynamic animations like rotation.
+- **Static** (`modifyLogicalSize` + `modifyLogical`): folded into the mapping during the cold-path build, so it costs nothing per frame (Region crop, Multiply tile/mirror, a mask).
+- **Live** (`modifyLive`): a per-frame coordinate remap for animation (rotation), run only when an enabled modifier needs it — a static-only chain pays nothing.
 
 **Dimensionality** for modifiers defaults to `Dim::D3` (assumed to work in all three axes unless declared otherwise). Unlike for effects, this is purely advisory: the Layer doesn't extrude modifier output. It exists so the UI can render the 📏/🟦/🧊 chip on the card. **MultiplyModifier** is D3 (it has independent multiplyX/Y/Z + mirrorX/Y/Z toggles).
 
@@ -522,7 +522,7 @@ The light domain plugs into the UI at three points: a fixed top-level tree (Layo
 
 ## What we leave undesigned
 
-Genuinely open questions, *not* the same as a 🚧 marker. A 🚧 item is a committed design that simply isn't coded yet (two-core handover, clock sync, device-to-device light distribution); the items here are ones where the *design itself* isn't settled, deferred until a concrete need forces the decision:
+Genuinely open questions, *not* the same as a 🚧 marker. A 🚧 item has a settled, committed design (two-core handover, clock sync, device-to-device light distribution) — code is written toward it; the items here are ones where the *design itself* is still open, deferred until a concrete need forces the decision:
 
 - **WiFi runtime disable**: today the eth-only build profile compiles WiFi out. Whether runtime gating should key off detected hardware presence, an explicit control, or a deviceModel-catalog field isn't decided; the eth-only build covers the need until one is.
 - **Mixing light types in one Layouts**: each layout child describes one light type (all LED strips, or all par lights). Whether a single Layouts container should hold mixed types (LED strips + par lights together), and how the channel layout would reconcile across them, isn't designed; one Layouts per light type is the current model.

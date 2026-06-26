@@ -12,6 +12,7 @@
 #include "platform/platform.h"
 
 #include <vector>
+#include <utility>
 #include <cstring>
 
 // The live (per-frame) modifier seam: Layer::loop() applies a live modifier's
@@ -142,23 +143,32 @@ TEST_CASE("Layer coalesces rebuilds from two dynamic modifiers") {
     layouts.onBuildState();
     layer.onBuildState();
 
-    const std::size_t cells = static_cast<std::size_t>(layer.lut().logicalCount());
-    REQUIRE(cells == 64);
+    REQUIRE(layer.lut().logicalCount() == 64);
 
-    auto destCount = [&]() {
-        std::size_t n = 0;
-        for (mm::nrOfLightsType li = 0; li < layer.lut().logicalCount(); li++)
-            layer.lut().forEachDestination(li, [&](mm::nrOfLightsType) { n++; });
-        return n;
+    // Snapshot the full mapping: each logical cell's single destination (a permutation,
+    // so exactly one each). Asserts the composition is a bijection AND lets us compare
+    // before vs after to prove a beat actually changed it.
+    auto mapping = [&]() {
+        std::vector<mm::nrOfLightsType> dst(64, static_cast<mm::nrOfLightsType>(-1));
+        std::size_t total = 0;
+        for (mm::nrOfLightsType li = 0; li < 64; li++)
+            layer.lut().forEachDestination(li, [&](mm::nrOfLightsType d) { dst[li] = d; total++; });
+        // a permutation: 64 destinations, all distinct, each in range
+        std::vector<int> seen(64, 0);
+        for (auto d : dst) if (d < 64) seen[d]++;
+        bool bijection = (total == 64);
+        for (int s : seen) if (s != 1) bijection = false;
+        return std::make_pair(dst, bijection);
     };
-    const std::size_t before = destCount();
+
+    auto [before, beforeOk] = mapping();
+    CHECK(beforeOk);   // the composed two-permutation mapping is itself a bijection
 
     // Advance past a beat boundary in small ticks (both modifiers tick each frame).
     for (uint32_t t = 1000; t <= 2500; t += 50) { mm::platform::setTestNowMs(t); layer.loop(); }
     mm::platform::setTestNowMs(0);
 
-    // Two composed permutations remain a permutation of the 64 cells — every light
-    // still maps somewhere exactly once (no crash, no lost/duplicated destinations).
-    CHECK(destCount() == before);
-    CHECK(destCount() == 64);
+    auto [after, afterOk] = mapping();
+    CHECK(afterOk);            // still a valid bijection after the coalesced rebuild
+    CHECK(before != after);    // a beat actually reshuffled the composed mapping
 }

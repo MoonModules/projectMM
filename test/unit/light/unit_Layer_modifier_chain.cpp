@@ -91,12 +91,16 @@ TEST_CASE("Layer modifier order matters (A∘B ≠ B∘A)") {
     CHECK(a.layer.width() == 4);
     CHECK(b.layer.width() == 4);
 
-    // The mappings differ: collect each LUT's destination set per logical cell and
-    // compare. If order didn't matter they'd be identical.
+    // The mappings differ: fingerprint each LUT preserving the per-logical-cell
+    // grouping (a cell-boundary marker between cells), so two mappings that flatten to
+    // the same destination sequence but group differently still compare unequal.
     auto fingerprint = [](mm::Layer& L) {
         std::vector<mm::nrOfLightsType> fp;
-        for (mm::nrOfLightsType li = 0; li < L.lut().logicalCount(); li++)
+        const mm::nrOfLightsType kCellBoundary = static_cast<mm::nrOfLightsType>(-1);
+        for (mm::nrOfLightsType li = 0; li < L.lut().logicalCount(); li++) {
             L.lut().forEachDestination(li, [&](mm::nrOfLightsType d) { fp.push_back(d); });
+            fp.push_back(kCellBoundary);   // mark where each cell's run ends
+        }
         return fp;
     };
     CHECK(fingerprint(a.layer) != fingerprint(b.layer));

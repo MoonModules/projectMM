@@ -47,24 +47,34 @@ public:
         // Logical box is the incoming box divided by the EFFECTIVE multiplier
         // (clamped to the axis extent — see eff()). On a 2D grid (size.z=1) any
         // multiplyZ clamps to 1, so depth stays 1 and Z multiplication is a no-op
-        // — you can't tile an axis more times than it has pixels.
-        size.x /= eff(multiplyX, size.x);
-        size.y /= eff(multiplyY, size.y);
-        size.z /= eff(multiplyZ, size.z);
-        tile_ = size;   // stash the output tile size for the fold
+        // — you can't tile an axis more times than it has pixels. When the extent
+        // isn't divisible by the multiplier (e.g. 5 / 2 = 2), the tiles cover only
+        // `tile * mult` pixels; the leftover strip at the high edge is unmapped
+        // (covered_ records the covered extent so the fold can reject it).
+        const lengthType mX = eff(multiplyX, size.x), mY = eff(multiplyY, size.y), mZ = eff(multiplyZ, size.z);
+        size.x /= mX; size.y /= mY; size.z /= mZ;
+        tile_ = size;
+        covered_ = {static_cast<lengthType>(size.x * mX), static_cast<lengthType>(size.y * mY),
+                    static_cast<lengthType>(size.z * mZ)};
     }
 
     bool modifyLogical(Coord3D& pos) const override {
+        // A coord in the leftover edge strip (extent not divisible by the multiplier)
+        // has no tile — drop it, rather than wrap it and duplicate the edge.
+        if ((covered_.x > 0 && pos.x >= covered_.x) ||
+            (covered_.y > 0 && pos.y >= covered_.y) ||
+            (covered_.z > 0 && pos.z >= covered_.z)) return false;
         // Fold a coord into its tile: the tile index decides whether to reflect
         // (odd tile, mirror on), then wrap into the tile. Reads the stashed tile size.
         pos.x = foldAxis(pos.x, tile_.x, mirrorX);
         pos.y = foldAxis(pos.y, tile_.y, mirrorY);
         pos.z = foldAxis(pos.z, tile_.z, mirrorZ);
-        return true;   // multiply never rejects — every light has a tile
+        return true;
     }
 
 private:
-    Coord3D tile_;   // output tile size, stashed in modifyLogicalSize for the fold
+    Coord3D tile_;      // output tile size, stashed in modifyLogicalSize for the fold
+    Coord3D covered_;   // pixels the tiles actually cover (tile*mult); the leftover edge is dropped
 
     // Effective multiplier for an axis: the control value clamped to [1, extent].
     // ≥1 avoids divide-by-zero; ≤extent because tiling more times than the axis

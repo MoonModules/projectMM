@@ -5,7 +5,7 @@ straight from your web browser — no software to download, no command line. In 
 few minutes you'll have lights running and the device on your network, and the
 device's own web interface open in your browser ready to play with.
 
-This guide has two chapters. **Chapter 1** gets projectMM onto your board.
+This guide has two chapters. **Chapter 1** gets projectMM onto your device.
 **Chapter 2** is a tour of the interface you land in afterwards, so you know what
 every part does and where to start building your own light show.
 
@@ -32,26 +32,26 @@ Chrome or Edge, then plug your ESP32 into a USB port.
 
 Click **USB Port → Pick a port…**. Your browser shows a small list of connected
 devices — choose the one that appeared when you plugged in the ESP32. (Not sure
-which? Unplug, look at the list, plug back in — the new entry is your board.)
+which? Unplug, look at the list, plug back in — the new entry is your device.)
 
 ![Selecting the USB port](assets/gettingstarted/01-02-select-port.png)
 
 Once a port is chosen, the installer recognises the chip and tells you how many
-boards match it, so you know you're on the right track before you pick one.
+devices match it, so you know you're on the right track before you pick one.
 
 ![Port selected, chip detected](assets/gettingstarted/01-03-port-selected.png)
 
 ## 3. Pick your device
 
-Choose your board from the **Device** picker. Each card shows a picture, the
-chip, and what the board can do (LEDs, WiFi, a button, a microphone…); click
+Choose your device from the **Device** picker. Each card shows a picture, the
+chip, and what the device can do (LEDs, WiFi, a button, a microphone…); click
 **details** on any card to see exactly what it is and a link to its product page.
 
 ![Picking a device](assets/gettingstarted/01-04-pick-device.png)
 
 ![A device card with its details](assets/gettingstarted/01-05-device-details.png)
 
-The little coloured pills are the board's capabilities, and the colour tells you
+The little coloured pills are the device's capabilities, and the colour tells you
 how ready each one is:
 
 - 🟢 **Green** — set up and working the moment you install. This capability is
@@ -88,7 +88,7 @@ it takes under a minute.
 
 ## 5. Get it on your network
 
-What happens next depends on your board:
+What happens next depends on your device:
 
 - **WiFi:** enter your network name and password when prompted, then **Connect**.
   (Click **Skip** to set WiFi up later from the device itself.)
@@ -104,7 +104,7 @@ network. Click it.
 
 ![Device is online over WiFi](assets/gettingstarted/01-10-online-wifi.png)
 
-You'll see this same "Device is online!" box however your board connected — over
+You'll see this same "Device is online!" box however your device connected — over
 Ethernet, or when it rejoins a network it already knows:
 
 ![Online over Ethernet](assets/gettingstarted/01-11-online-ethernet.png)
@@ -174,10 +174,10 @@ The top of the list is your device's "about" section — read-outs and connectio
 settings. You rarely need to touch these, but they're the first place to look if
 something seems off.
 
-**System** — who this device is and how it's doing: its name, the board model,
+**System** — who this device is and how it's doing: its name, the device model,
 uptime, frame rate, and live memory / storage bars. You may also see an **Audio**
-module here — boards with a built-in mic come with it set up for you, and on any
-board you can add it yourself (it's how sound-reactive effects hear the music).
+module here — devices with a built-in mic come with it set up for you, and on any
+device you can add it yourself (it's how sound-reactive effects hear the music).
 Audio is just the first of many: any sensor or input — from hardware or over the
 network — lives here as its own module, and we're adding more all the time.
 
@@ -196,7 +196,7 @@ USB cable needed once it's on your network.
 
 **Network** — your connection: WiFi or Ethernet, signal strength, and the
 address others reach it at. The **Devices** section underneath finds other
-projectMM boards on the same network, so a roomful of them can discover each
+projectMM devices on the same network, so a roomful of them can discover each
 other.
 
 ![The Network module](assets/gettingstarted/02-07-UI-Network.png)
@@ -261,5 +261,5 @@ keep going.
 - **Build from source** or target Teensy / Raspberry Pi: [building.md](building.md).
 
 Stuck, or something didn't work? Open an
-[issue](https://github.com/MoonModules/projectMM/issues) — and tell us what board
+[issue](https://github.com/MoonModules/projectMM/issues) — and tell us what device
 you used and where it stopped.

@@ -21,6 +21,15 @@ static mm::Coord3D fold(mm::MultiplyModifier& m, mm::lengthType x, mm::lengthTyp
     return p;
 }
 
+// Fold a coord and report whether it's kept (false = rejected, no tile).
+static bool foldKeep(mm::MultiplyModifier& m, mm::lengthType x, mm::lengthType y, mm::lengthType z,
+                     mm::Coord3D box, mm::Coord3D& out) {
+    mm::Coord3D logical = box;
+    m.modifyLogicalSize(logical);
+    out = {x, y, z};
+    return m.modifyLogical(out);
+}
+
 static mm::Coord3D logicalSize(mm::MultiplyModifier& m, mm::Coord3D box) {
     m.modifyLogicalSize(box);
     return box;
@@ -104,4 +113,21 @@ TEST_CASE("MultiplyModifier clamps a multiplier above the axis extent") {
     m.multiplyX = 64; m.multiplyY = 1; m.multiplyZ = 1;
     m.mirrorX = false;
     CHECK(logicalSize(m, {16, 16, 1}) == mm::Coord3D{1, 16, 1});   // 16/16 = 1, not 16/64 = 0
+}
+
+// REGRESSION (🐇): a non-divisible extent leaves a leftover edge strip that the tiles
+// don't cover — those pixels must be DROPPED, not wrapped back into a tile (which would
+// duplicate the edge). 5-wide, multiply 2 → tile width 2, covers pixels 0..3; pixel 4 is
+// the leftover and has no tile.
+TEST_CASE("MultiplyModifier drops the leftover strip on a non-divisible extent") {
+    mm::MultiplyModifier m;
+    m.multiplyX = 2; m.multiplyY = 1; m.multiplyZ = 1;
+    m.mirrorX = false;
+    const mm::Coord3D box{5, 1, 1};
+    CHECK(logicalSize(m, box).x == 2);   // 5/2 = 2 tile width
+
+    mm::Coord3D p;
+    CHECK(foldKeep(m, 0, 0, 0, box, p));        // tile 0
+    CHECK(foldKeep(m, 3, 0, 0, box, p));        // tile 1, within the covered 0..3
+    CHECK_FALSE(foldKeep(m, 4, 0, 0, box, p));  // leftover edge — dropped, NOT folded to 0
 }

@@ -8,9 +8,7 @@ A **dynamic modifier** that rotates the 2D image around its centre, turning cont
 
 ## How it works
 
-The angle is a `uint8_t` (256 steps per turn). `modifyLive` is a **backward** map: for each destination cell it computes the **source** it samples, via the inverse rotation `R(-θ)` written as an explicit integer 2×2 matrix `[[c, s], [-s, c]]` applied to the centred coordinate. `c`/`s` come from the project's [`cos8`/`sin8`](../../core/Control.md) integer LUT (signed component `val − 128`, scaled by 128; the `>>7` divides back out), nearest-neighbour (no float). A source outside the box leaves that destination dark — the Layer's live pass clears it. Rotation is the canonical affine transform, which is why it's the matrix example; the non-affine modifiers (mask, tile) fold directly instead.
-
-2D only: the z axis passes through unchanged.
+`loop()` advances the angle on the `speed` timer; rotation is applied each frame in the Layer's live pass (`modifyLive`), not baked into the mapping — so a `speed` change is a cheap live edit, no rebuild. A source that rotates outside the box leaves that destination dark. 2D only: the z axis passes through. The integer 2×2-matrix backward map is in the header.
 
 ## Prior art
 
