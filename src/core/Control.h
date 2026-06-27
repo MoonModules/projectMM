@@ -89,6 +89,10 @@ enum class ControlType : uint8_t {
                 // across chips. Serializes/parses as a plain integer.
     Bool,
     Text,
+    TextArea,   // multi-line text — identical char-buffer storage and parse/persist
+                // path to Text; differs only in the UI type string so the front-end
+                // renders a resizable <textarea> instead of a single-line input
+                // (used for script source and other multi-line fields).
     Password,   // secret text — /api/state serializes it XOR-obfuscated +
                 // base64-encoded, not plaintext. Obfuscation only (the XOR key
                 // is shared with app.js), so it is trivially reversible.
@@ -243,6 +247,14 @@ public:
                  bool (*validate)(const char*) = nullptr) {
         grow();
         controls_[count_++] = {var, name, 0, ControlType::Text, 0, bufSize, false, false, validate};
+    }
+
+    // Like addText but the UI renders a resizable multi-line <textarea> (e.g. a
+    // script source). Same char-buffer storage and parse/persist behaviour as Text.
+    void addTextArea(const char* name, char* var, uint8_t bufSize = 16,
+                     bool (*validate)(const char*) = nullptr) {
+        grow();
+        controls_[count_++] = {var, name, 0, ControlType::TextArea, 0, bufSize, false, false, validate};
     }
 
     // Like addText but the value is a secret: the API serializes it

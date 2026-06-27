@@ -55,13 +55,21 @@ add_library(mm_core STATIC
     src/core/HttpServerModule.cpp
     src/core/FilesystemModule.cpp
     src/core/Scheduler.cpp
+    src/core/moonlive/MoonLive.cpp
+    src/core/moonlive/MoonLiveCompiler.cpp
 )
 target_include_directories(mm_core PUBLIC src/)
 target_link_libraries(mm_core PUBLIC mm_platform)
 # `add_dependencies(mm_core ui_embed)` is below, after the ui_embed target is defined.
 
-# Platform library (desktop)
-add_library(mm_platform src/platform/desktop/platform_desktop.cpp)
+# Platform library (desktop). moonlive_emit.cpp is the desktop MoonLive backend (host-ISA
+# codegen) — it lives here because emitted machine code is platform/ISA-specific.
+add_library(mm_platform
+    src/platform/desktop/platform_desktop.cpp
+    src/platform/desktop/moonlive_emit.cpp
+    src/platform/desktop/moonlive_asm_host.cpp
+    src/platform/desktop/moonlive_lower_host.cpp
+)
 target_include_directories(mm_platform PUBLIC src/ src/platform/desktop/)
 # Winsock for the desktop socket surface on Windows.
 target_link_libraries(mm_platform PUBLIC $<$<PLATFORM_ID:Windows>:ws2_32>)

@@ -34,6 +34,7 @@ Coding conventions live in [coding-standards.md](coding-standards.md); how to bu
   - [Effects](#effects)
     - [Dimensionality](#dimensionality)
     - [Robustness rules](#robustness-rules)
+  - [MoonLive: the live-script engine](#moonlive-the-live-script-engine)
   - [Modifiers](#modifiers)
   - [Mapping and blending](#mapping-and-blending)
   - [Drivers](#drivers)
@@ -210,6 +211,7 @@ Only abstract what you actually need. Currently:
 
 - **Time**: `millis()`, `micros()`. Monotonic, microsecond resolution. (`esp_timer` / `std::chrono`)
 - **Memory**: `alloc(size)`, `free(ptr)`. Prefers PSRAM on ESP32, falls back to regular heap. `freeHeap()`, `maxAllocBlock()` for diagnostics. (`heap_caps_malloc` / `std::malloc`)
+- **Executable memory**: `allocExec(size)` / `freeExec(ptr, size)` allocate memory the CPU can *fetch and execute* from, and `writeExec(dst, src, len)` copies emitted machine code into it safely. Used by the MoonLive live-script engine (below) to place the native code it compiles. All the W^X / instruction-cache quirks live behind these three functions: ESP32 IRAM via `MALLOC_CAP_EXEC` with 32-bit-aligned stores plus a cache sync so the core fetches fresh code; an `mmap` `PROT_EXEC` page on desktop (macOS-arm64 `MAP_JIT` + a write-protect toggle). (`heap_caps_malloc(MALLOC_CAP_EXEC)` / `mmap`)
 - **Networking**: `UdpSocket` for ArtNet send. `TcpConnection` / `TcpServer` for HTTP + WebSocket; `TcpConnection::writeSome` is a non-blocking partial write (returns bytes written, 0 = would-block) so a backpressured browser can't stall the render loop. (lwIP sockets / BSD sockets)
 - **Scheduling**: `yield()` (cooperative yield to OS/RTOS), `delayMs(ms)` (blocking sleep, off-path only), `delayUs(us)` (microsecond busy-wait, only for sub-millisecond hardware timing a driver owns — e.g. the WS2812 ≥300 µs inter-frame latch in `RmtLedDriver`; never for general pacing, which uses the non-blocking `millis()` gate), `reboot()`. (`vTaskDelay` / `esp_rom_delay_us` / `esp_restart` on ESP32; `std::this_thread::sleep_for` / `std::exit` on desktop)
 - **Platform config**: `platform_config.h` per platform: compile-time constants like `hasPsram` and `hasWiFi`. Each platform provides its own version; `types.h` includes it without `#ifdef`. Core code branches on these via `if constexpr` (e.g. NetworkModule drops its WiFi cascade when `hasWiFi` is false), so the dead branch is removed from the binary with no `#ifdef` outside `src/platform/`.
@@ -353,9 +355,9 @@ A **Layer** (a MoonModule, child of Layers) owns:
 
 A layer can have **multiple effects**. Each effect writes to the buffer sequentially in its listed order, overwriting or adding to the previous — so the effects stack (a base-colour effect followed by a sparkle effect).
 
-A layer applies its **first enabled modifier** during LUT build (`Layer::rebuildLUT`). Modifiers are **reorderable** in the UI, and order is meaningful (a multiply-then-checkerboard mask differs from checkerboard-then-multiply, just as mirror-then-rotate differs from rotate-then-mirror). Applying several modifiers in sequence (chaining) is on the [backlog](backlog/README.md).
+A layer applies **all its enabled modifiers as a chain** during the mapping build (`Layer::rebuildLUT`): each modifier is a coordinate fold, and they compose in child order (M₁∘M₂∘…). Modifiers are **reorderable** in the UI, and order is meaningful (a multiply-then-checkerboard mask differs from checkerboard-then-multiply, just as mirror-then-rotate differs from rotate-then-mirror). The fold contract (the three hooks, the physical→logical build, the live pass) is documented in [ModifierBase](moonmodules/light/ModifierBase.md).
 
-Each layer references the shared Layouts. The layer builds its own LUT by iterating the Layouts container's coordinates and applying its static modifiers in order. Different layers in Layers can have different modifiers, producing different LUTs from the same Layouts.
+Each layer references the shared Layouts. The layer builds its mapping by walking the Layouts container's **physical** coordinates and folding each through the static modifier chain to its logical cell — N physical lights folding onto one logical cell is the fan-out (a Multiply kaleidoscope), so the build never produces a fan-out overflow. Different layers in Layers can have different modifiers, producing different mappings from the same Layouts.
 
 ## Effects
 
@@ -398,14 +400,26 @@ See NoiseEffect / MetaballsEffect for the canonical pattern. Animation speed mus
 
 **An effect renders a pattern; it does not transform geometry.** When migrating or adding an effect, strip out anything that is really a *modifier* — mirroring, tiling, rotation, scrolling/offset, a kaleidoscope fold, masking, any remap of *where* pixels land — and add it as a separate [modifier](#modifiers) instead. WLED (and other sources we port from) routinely fold these into the effect's own loop (a "mirror" checkbox, a "2D" rotation, a built-in pinwheel), because WLED has no modifier concept; we do. Keeping them out of the effect is what lets any effect compose with any modifier (the same RotateModifier rotates Fire, Noise, or a network-received frame) instead of every effect re-implementing its own half-baked mirror. The test: an effect's `loop()` should only *write colours into the logical buffer for its own coordinates*; if it's reading or rewriting positions to move/fold/duplicate the image, that behaviour belongs in a modifier. (This is the light-domain face of *Complexity lives in core; domain modules stay simple* — geometry transforms are the modifier's job, shared once, not duplicated into every effect.)
 
+## MoonLive: the live-script engine
+
+MoonLive lets you author an effect (later: a layout, modifier, driver, or core rule) as **text** and run it on a running device, with no recompile-and-flash cycle. Its standout property is *how* it runs the script: not a bytecode interpreter, but a **native-codegen compiler** — source text is lexed, parsed, lowered to a typed IR, and assembled to real machine code that the render loop calls through a plain function pointer, so a scripted effect runs at near-hand-written speed in the hot path. This is the core construct; a scripted effect (`MoonLiveEffect`) is the thin binding that gives it the MoonModule lifecycle.
+
+The engine is a **domain-neutral core** with one narrow seam, structured as three tiers so adding a CPU is additive, never a rewrite:
+
+- **Front-end** (`src/core/moonlive/`, platform-independent): a recursive-descent lexer + parser over an expression grammar (every function argument is a literal or a nested call) that lowers each statement to a typed **IR** — a flat list of three-address ops over virtual registers. The IR is the seam: it knows *operations*, never an ISA and never a domain. It is compile-time only — consumed during lowering and discarded, so it costs nothing at run time; the CPU executes only the final native instructions.
+- **Host builtin table** (the domain seam): the core owns no function names. A *host* registers `{name → descriptor}` — `setRGB`/`fill`/`random16` for LEDs (`src/light/moonlive/`), something else for a display or sensor. A descriptor is either a `Call` (a generic call to a host C function pointer — a pure helper like `random16`) or an `Inline` op (a neutral opcode tag the backend emits inline — a buffer writer, no per-pixel call). This is the [ESPLiveScript / ARTI bound-function model](backlog/livescripts-analysis-top-down.md); it is what keeps the core LED-free while the hot path stays inline. The LED *names* and the "an element is 3 RGB bytes" meaning live only in the light-domain registration and the per-ISA lowering, never in core.
+- **Per-ISA backend** (`src/platform/`, behind the boundary): a tiny named-instruction MacroAssembler (the textbook V8 / LLVM / asmjit shape — append one instruction, back-patch label offsets) plus the IR→bytes lowering that drives it. Xtensa (classic ESP32 / S3), RISC-V (P4), and the host ISA (desktop arm64/x86-64) each are *a new backend file behind the unchanged IR* — the front-end and IR never branch on ISA. Emitted code goes into an `allocExec` block (see [§ Platform abstraction](#platform-abstraction)) and is called each tick.
+
+A recompile is the normal cold-path rebuild: editing the `source` control routes through the same `onBuildState()` sweep every control change uses, so a new script swaps in live (no reboot), and a parse error surfaces in the module status while the layer renders dark — robust to any input. The full design (the staged language ladder, the safety model, the performance budget, the memory-arena plan as the language grows) lives in [docs/backlog/livescripts-analysis-top-down.md](backlog/livescripts-analysis-top-down.md); the module contract is [docs/moonmodules/light/moonlive/MoonLiveEffect.md](moonmodules/light/moonlive/MoonLiveEffect.md).
+
 ## Modifiers
 
-A modifier (MoonModule) lives inside a layer alongside its effects. Modifiers expose a virtual interface: the Layer calls modifier methods without knowing the concrete type (no `dynamic_cast`).
+A modifier (MoonModule) lives inside a layer alongside its effects. Modifiers expose a virtual interface: the Layer calls modifier methods without knowing the concrete type (no `dynamic_cast`). A layer applies **all** its enabled modifiers as a chain, in child order — each a coordinate fold composed into one mapping (see [§ Layers and Layer](#layers-and-layer)).
 
-A modifier can:
+A modifier is a coordinate transform, applied in one of two ways (the fold contract is in [ModifierBase](moonmodules/light/ModifierBase.md)):
 
-- Transform the mapping LUT via `transformCoord()`: rebuilt on the cold path, zero render cost.
-- Transform light values via `transformLights()` on the hot path: per-light cost, enables dynamic animations like rotation.
+- **Static** (`modifyLogicalSize` + `modifyLogical`): folded into the mapping during the cold-path build, so it costs nothing per frame (Region crop, Multiply tile/mirror, a mask).
+- **Live** (`modifyLive`): a per-frame coordinate remap for animation (rotation), run only when an enabled modifier needs it — a static-only chain pays nothing.
 
 **Dimensionality** for modifiers defaults to `Dim::D3` (assumed to work in all three axes unless declared otherwise). Unlike for effects, this is purely advisory: the Layer doesn't extrude modifier output. It exists so the UI can render the 📏/🟦/🧊 chip on the card. **MultiplyModifier** is D3 (it has independent multiplyX/Y/Z + mirrorX/Y/Z toggles).
 
@@ -522,7 +536,7 @@ The light domain plugs into the UI at three points: a fixed top-level tree (Layo
 
 ## What we leave undesigned
 
-Genuinely open questions, *not* the same as a 🚧 marker. A 🚧 item is a committed design that simply isn't coded yet (multi-layer composition, two-core handover, time sync); the items here are ones where the *design itself* isn't settled, deferred until a concrete need forces the decision:
+Genuinely open questions, *not* the same as a 🚧 marker. A 🚧 item has a settled, committed design (two-core handover, clock sync, device-to-device light distribution) — code is written toward it; the items here are ones where the *design itself* is still open, deferred until a concrete need forces the decision:
 
 - **WiFi runtime disable**: today the eth-only build profile compiles WiFi out. Whether runtime gating should key off detected hardware presence, an explicit control, or a deviceModel-catalog field isn't decided; the eth-only build covers the need until one is.
 - **Mixing light types in one Layouts**: each layout child describes one light type (all LED strips, or all par lights). Whether a single Layouts container should hold mixed types (LED strips + par lights together), and how the channel layout would reconcile across them, isn't designed; one Layouts per light type is the current model.

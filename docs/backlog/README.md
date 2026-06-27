@@ -38,7 +38,7 @@ A map of everything in the three files, by theme.
 
 ### Mixed ([backlog-mixed.md](backlog-mixed.md))
 
-- MultiplyModifier mapping-LUT memory at large grids; composed modifiers (chain the whole stack, not just the first); intermittent ~0.5 s RMT LED pauses; NoiseEffect simplex cost on ESP32.
+- MultiplyModifier mapping-LUT memory at large grids; intermittent ~0.5 s RMT LED pauses; NoiseEffect simplex cost on ESP32.
 
 ## In-flight draft specs
 

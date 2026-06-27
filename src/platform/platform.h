@@ -21,6 +21,24 @@ void setTestNowMs(uint32_t ms);
 void* alloc(size_t bytes);
 void free(void* ptr);
 
+// Executable memory for JIT-emitted native code (MoonLive). Distinct from alloc()
+// because code must live in memory the CPU can FETCH from, not just read/write:
+// IRAM on ESP32 (MALLOC_CAP_EXEC), an mmap'd PROT_EXEC page on desktop. Returns
+// nullptr when exec memory is exhausted — the caller degrades (status, runs dark),
+// never crashes. freeExec takes the same size so a backend that needs it (munmap)
+// has it; ESP32 ignores the size.
+void* allocExec(size_t bytes);
+void  freeExec(void* ptr, size_t bytes);
+
+// Copy emitted code INTO an allocExec block, then make it executable. Separate from a
+// plain memcpy because ESP32 IRAM is fetch-only on the instruction bus and writable
+// only via 32-bit-aligned data-bus stores (a byte memcpy faults), and after writing,
+// the instruction cache must be synced so the core fetches the fresh bytes, not stale
+// cache. Both quirks live here, behind the platform line; the engine just hands over
+// (dst-from-allocExec, src-bytes, len). On desktop this is a plain memcpy. `len` need
+// not be a multiple of 4 — the ESP32 path pads the final partial word.
+void  writeExec(void* dst, const void* src, size_t len);
+
 void yield();
 void delayMs(uint32_t ms);  // blocking sleep; only use outside the hot path
 void delayUs(uint32_t us);  // blocking busy-wait for sub-ms protocol gaps (e.g.

@@ -21,6 +21,7 @@
 
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
+#include "esp_cache.h"        // esp_cache_msync — I-cache sync after writing MoonLive code to IRAM
 #include "esp_system.h"
 #include "esp_chip_info.h"
 #include "esp_mac.h"
@@ -104,6 +105,64 @@ void* alloc(size_t bytes) {
 
 void free(void* ptr) {
     heap_caps_free(ptr);
+}
+
+// Executable memory for MoonLive's emitted code (Xtensa or RISC-V). MALLOC_CAP_EXEC forces
+// an allocation from IRAM (instruction-bus-fetchable). nullptr when IRAM is exhausted — the
+// caller degrades (the scripted module reports "no memory", runs dark), never crashes. IRAM
+// competes with WiFi/driver IRAM, so a failure here is expected on a busy device and must be
+// handled, not asserted. The request is rounded up to a 4-byte word: writeExec's final
+// partial-word store and the esp_cache_msync length both round up to a word, so the block
+// must hold that whole word even when the caller's len isn't a multiple of 4.
+void* allocExec(size_t bytes) {
+    if (bytes == 0) return nullptr;
+    size_t padded = (bytes + 3) & ~size_t(3);
+    return heap_caps_malloc(padded, MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
+}
+
+void freeExec(void* ptr, size_t /*bytes*/) {
+    heap_caps_free(ptr);   // size is the desktop munmap's; IRAM free needs only the ptr
+}
+
+void writeExec(void* dst, const void* src, size_t len) {
+    if (!dst || !src || !len) return;
+    // IRAM is writable only by 32-bit-aligned WORD stores (a byte/halfword store to
+    // IRAM faults), so copy word-by-word, padding the final partial word with the
+    // bytes already there — never a sub-word store. allocExec returns 4-byte-aligned
+    // IRAM, so dst is aligned; src may not be, so read it bytewise into the word.
+    auto* d = static_cast<volatile uint32_t*>(dst);
+    auto* s = static_cast<const uint8_t*>(src);
+    size_t words = len / 4;
+    for (size_t i = 0; i < words; i++) {
+        uint32_t w = static_cast<uint32_t>(s[i*4]) | (static_cast<uint32_t>(s[i*4+1]) << 8) |
+                     (static_cast<uint32_t>(s[i*4+2]) << 16) | (static_cast<uint32_t>(s[i*4+3]) << 24);
+        d[i] = w;
+    }
+    size_t rem = len % 4;
+    if (rem) {
+        uint32_t w = d[words];                       // preserve the untouched high bytes
+        for (size_t b = 0; b < rem; b++) {
+            w &= ~(0xFFu << (b*8));
+            w |= static_cast<uint32_t>(s[words*4 + b]) << (b*8);
+        }
+        d[words] = w;
+    }
+    // Make the freshly-written code visible to instruction fetch. The bytes went in via
+    // DATA-bus stores, so on a cache-backed exec region (the P4) they may still sit in the
+    // data cache — two steps are needed, in order:
+    //   1. write the data cache back to RAM (TYPE_DATA, C2M) so RAM holds the code, and
+    //   2. invalidate the instruction cache for the range so the core refetches it.
+    // A single TYPE_INST msync only does step 2 — on the P4 that refetches STALE RAM (the
+    // bytes never left the data cache) and the core decodes garbage → illegal instruction.
+    // On the S3, MALLOC_CAP_EXEC is directly-executable SRAM so this is belt-and-suspenders,
+    // but it is correct on both. UNALIGNED because the code block isn't cache-line sized.
+    const size_t paddedLen = (len + 3) & ~size_t(3);
+    esp_cache_msync(dst, paddedLen,
+                    ESP_CACHE_MSYNC_FLAG_TYPE_DATA | ESP_CACHE_MSYNC_FLAG_DIR_C2M |
+                    ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    esp_cache_msync(dst, paddedLen,
+                    ESP_CACHE_MSYNC_FLAG_TYPE_INST | ESP_CACHE_MSYNC_FLAG_INVALIDATE |
+                    ESP_CACHE_MSYNC_FLAG_UNALIGNED);
 }
 
 void yield() {

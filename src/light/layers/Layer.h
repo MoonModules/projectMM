@@ -18,6 +18,8 @@ public:
     ModuleRole role() const override { return ModuleRole::Layer; }
     const char* acceptsChildRoles() const override { return "effect,modifier"; }
 
+    ~Layer() override { if (liveScratch_) platform::free(liveScratch_); }
+
 
     // Composition parameters — INERT on the Layer (it never reads them; a Layer
     // can't know its position in the stack or what's beneath it). The Drivers
@@ -95,6 +97,7 @@ public:
         physicalDepth_ = dctx.maxZ + 1;
 
         rebuildLUT();
+        ensureLiveScratch();   // size the live-pass snapshot here, on the cold path
 
         // Neutral status: the LOGICAL box the effects render into (width_×height_×
         // depth_) — this is what start/end region carving and modifiers reshape,
@@ -132,18 +135,80 @@ public:
             extrude(eff->dimensions());
             eff->addAccumUs(platform::micros() - start);
         }
-        // Tick the active modifier AFTER the effect pass, so the frame's buffer is
-        // fully written before it acts. Only the FIRST enabled modifier is ticked —
-        // that's the one rebuildLUT() actually applies (it uses the first enabled
-        // modifier too), so ticking a later one would let its loop() drive rebuilds
-        // that the LUT never reflects. A static modifier's loop() is empty (it shapes
-        // the LUT once, on a control change). A dynamic one (RandomMapModifier) may
-        // call our onBuildState() from here to rebuild the LUT on its timer — safe
-        // re-entrancy precisely because every effect write for this frame is done.
+        // Tick EVERY enabled modifier AFTER the effect pass (the frame's buffer is
+        // fully written before any modifier acts). A static modifier's loop() is empty;
+        // a beat-driven one (RandomMap) sets a rebuild flag we coalesce below; a live
+        // one (Rotate) advances its angle here and remaps in the live pass that follows.
+        bool rebuild = false;
         for (uint8_t i = 0; i < childCount(); i++) {
             if (child(i)->role() != ModuleRole::Modifier || !child(i)->enabled()) continue;
-            static_cast<ModifierBase*>(child(i))->loop();
-            break;  // align with rebuildLUT: only the first enabled modifier is active
+            auto* m = static_cast<ModifierBase*>(child(i));
+            m->loop();
+            rebuild |= m->consumeNeedsRebuild();
+        }
+        // One rebuild per frame even if several modifiers asked (no re-entrant rebuild
+        // from inside a modifier's loop()). onBuildState rebuilds the whole pipeline,
+        // which re-runs rebuildLUT() with the modifiers' fresh state.
+        if (rebuild) { onBuildState(); return; }
+
+        // Live pass: remap the logical buffer per frame for dynamic modifiers (Rotate).
+        // Skipped entirely when no modifier is live — a static-only chain pays nothing,
+        // the buffer goes straight to the driver scatter (the pay-for-what-you-use rule).
+        if (hasLive_) applyLivePass();
+    }
+
+    // COLD path (called from onBuildState after rebuildLUT): (re)size the live-pass
+    // snapshot buffer to the current logical buffer, or free it when no modifier is live.
+    // Keeping the alloc here means applyLivePass() on the render path only memcpys —
+    // never allocates — and the scratch isn't held pinned once live modifiers are removed.
+    void ensureLiveScratch() {
+        const size_t bytes = hasLive_ ? buffer_.bytes() : 0;
+        if (bytes == liveScratchBytes_ && (bytes != 0) == (liveScratch_ != nullptr)) return;
+        if (liveScratch_) { platform::free(liveScratch_); liveScratch_ = nullptr; }
+        liveScratchBytes_ = 0;
+        if (bytes == 0) return;                       // no live modifier → no scratch held
+        liveScratch_ = static_cast<uint8_t*>(platform::alloc(bytes));
+        if (liveScratch_) liveScratchBytes_ = bytes;  // alloc-fail → applyLivePass no-ops, static frame shows
+    }
+
+    // Per-frame backward gather for live (animated) modifiers. For each DESTINATION
+    // logical cell, fold its coordinate through the enabled live modifiers to the SOURCE
+    // cell it samples, and copy that source pixel in — so no destination is left torn
+    // (backward mapping, the textbook reason image warping samples backward). Reads from
+    // a snapshot (liveScratch_) so a source already overwritten this pass isn't re-read.
+    // Out-of-box sources leave the destination dark (cleared). Cold relative to the build
+    // but on the hot path — runs only because hasLive_ gated it, and only the live
+    // modifiers participate (static ones are already baked into lut_).
+    void applyLivePass() {
+        uint8_t* buf = buffer_.data();
+        if (!buf || !liveScratch_) return;   // scratch is sized on the cold path (ensureLiveScratch)
+        const size_t cpl = channelsPerLight_;
+        const size_t bytes = static_cast<size_t>(width_) * height_ * depth_ * cpl;
+        if (bytes == 0 || bytes > liveScratchBytes_) return;   // hot path NEVER allocates
+        std::memcpy(liveScratch_, buf, bytes);   // snapshot the source frame
+
+        const Coord3D logical{width_, height_, depth_};
+        for (lengthType z = 0; z < depth_; z++) {
+            for (lengthType y = 0; y < height_; y++) {
+                for (lengthType x = 0; x < width_; x++) {
+                    Coord3D src{x, y, z};
+                    for (uint8_t i = 0; i < childCount(); i++) {
+                        if (child(i)->role() != ModuleRole::Modifier || !child(i)->enabled()) continue;
+                        auto* m = static_cast<ModifierBase*>(child(i));
+                        if (m->hasModifyLive()) m->modifyLive(src, logical);
+                    }
+                    const size_t dstIdx = (static_cast<size_t>(z) * height_ * width_ +
+                                           static_cast<size_t>(y) * width_ + x) * cpl;
+                    if (src.x >= 0 && src.x < width_ && src.y >= 0 && src.y < height_ &&
+                        src.z >= 0 && src.z < depth_) {
+                        const size_t srcIdx = (static_cast<size_t>(src.z) * height_ * width_ +
+                                               static_cast<size_t>(src.y) * width_ + src.x) * cpl;
+                        std::memcpy(buf + dstIdx, liveScratch_ + srcIdx, cpl);
+                    } else {
+                        std::memset(buf + dstIdx, 0, cpl);   // source off-box → dark
+                    }
+                }
+            }
         }
     }
 
@@ -207,152 +272,60 @@ public:
         lutSkipped_ = false;
         clearStatus();  // re-evaluated below if a degrade path is taken
 
-        // Find first enabled modifier (if any)
-        ModifierBase* mod = nullptr;
+        // Fold the box through each enabled STATIC modifier in child order — no fixed
+        // chain array (Dynamic over fixed-size, architecture.md): the size pass here and
+        // the per-light fold below both iterate the Layer's own (dynamic, heap-grown)
+        // child list, filtering for enabled static modifiers inline, the way MoonLight's
+        // `for node : nodes` does. modifyLogicalSize mutates the running box AND lets the
+        // modifier stash its own output size (MoonLight's modifierSize cache), so in the
+        // per-light fold each modifier reads the box at ITS OWN stage from itself.
+        // A dynamic modifier (Rotate, hasModifyLive) is excluded — it remaps per frame in
+        // Layer::loop's live pass, not baked into the mapping.
+        uint8_t staticCount = 0;
+        hasLive_ = false;
+        Coord3D box{physicalWidth_, physicalHeight_, physicalDepth_};
         for (uint8_t i = 0; i < childCount(); i++) {
-            if (child(i)->role() == ModuleRole::Modifier && child(i)->enabled()) {
-                mod = static_cast<ModifierBase*>(child(i));
-                break;
-            }
+            if (child(i)->role() != ModuleRole::Modifier || !child(i)->enabled()) continue;
+            auto* m = static_cast<ModifierBase*>(child(i));
+            if (m->hasModifyLive()) { hasLive_ = true; continue; }   // dynamic: per-frame, not baked
+            m->modifyLogicalSize(box);
+            clampLogical(box);
+            staticCount++;
         }
 
-        // Box vs real-light count. The render grid is the layout's bounding box
-        // (physicalWidth_×Height_×Depth_); the DRIVER buffer holds only the real
-        // lights (Layouts::totalLightCount). For a dense GridLayout every box
-        // cell is a light → boxCount == driverCount and the LUT is identity (the
-        // fast memcpy path). For a sparse layout (sphere, ring) driverCount <
-        // boxCount: most box cells map to NO light, so we always build a LUT
-        // whose destinations are DRIVER indices [0..driverCount). This makes the
-        // driver/output buffer — what ArtNet, LEDs, and the preview consume —
-        // exactly the real lights, never the padded box.
-        nrOfLightsType boxCount = static_cast<nrOfLightsType>(physicalWidth_) * physicalHeight_ * physicalDepth_;
-        nrOfLightsType driverCount = physicalLightCount();   // == Layouts::totalLightCount()
-        const bool sparse = (driverCount != boxCount);
+        // Final logical box = the running box after the last static modifier.
+        Coord3D logical = box;
+        width_ = logical.x; height_ = logical.y; depth_ = logical.z;
 
-        if (!mod) {
-            // No modifier: logical == physical box. Effects render into the dense
-            // box buffer; the LUT extracts the real lights into the driver buffer.
-            width_ = physicalWidth_;
-            height_ = physicalHeight_;
-            depth_ = physicalDepth_;
-            if (!sparse && isNaturalOrder()) {
-                // Dense grid in natural order: box cell i IS driver light i. Identity (memcpy).
-                lut_.setIdentity(boxCount);
-                allocateBuffer(boxCount);
-                return;
-            }
-            // Sparse (some box cells have no light) OR dense-but-shuffled (a serpentine grid: same
-            // count, but driver index i ≠ box cell i) → build the box→driver LUT so the driver
-            // buffer is the real lights in driver order. logicalCount = boxCount, ≤1 dest per cell.
-            buildSparseIdentityLUT(boxCount, driverCount);
-            allocateBuffer(boxCount);   // layer (render) buffer stays the dense box
-            return;
-        }
+        const Coord3D phys{physicalWidth_, physicalHeight_, physicalDepth_};
+        const nrOfLightsType boxCount    = cellCount(phys);
+        const nrOfLightsType logicalCount = cellCount(logical);
+        const nrOfLightsType driverCount = physicalLightCount();   // == Layouts::totalLightCount()
+        const bool dense = (driverCount == boxCount);
 
-        // Apply first static modifier to compute logical dimensions
-        mod->logicalDimensions(physicalWidth_, physicalHeight_, physicalDepth_,
-                               width_, height_, depth_);
-
-        nrOfLightsType logicalCount = static_cast<nrOfLightsType>(width_) * height_ * depth_;
-
-        // Degrade target on OOM: a sparse layout degrades to the (cheaper)
-        // box→driver identity LUT so the driver buffer stays the real lights; a
-        // dense grid degrades to the plain identity/memcpy path as before.
-        auto degradeIdentity = [&]() {
-            width_ = physicalWidth_;
-            height_ = physicalHeight_;
-            depth_ = physicalDepth_;
-            if (sparse) { buildSparseIdentityLUT(boxCount, driverCount); }
-            else        { lut_.setIdentity(boxCount); }
+        // Fast path — no static modifiers, dense grid in natural order: box cell i
+        // IS driver light i, so the mapping is the identity memcpy. This is the FPS
+        // floor for the common case; keep it before any allocation.
+        if (staticCount == 0 && dense && isNaturalOrder()) {
+            lut_.setIdentity(boxCount);
             allocateBuffer(boxCount);
-        };
-
-        // maxDest in DRIVER-index terms. The modifier's multiplier bounds how
-        // many destinations a logical cell fans out to; clamp to 2× the real
-        // light count (was box count — driverCount is the true ceiling now).
-        // Compute in 64-bit: on a no-PSRAM board nrOfLightsType is uint16, and
-        // logicalCount × maxMultiplier (e.g. 256 × 256) overflows it — which
-        // wrapped maxDest to a tiny value, built a near-empty LUT, and blanked
-        // the display (the multiplyZ-on-2D black-screen bug). Clamp the ceiling
-        // before narrowing back to nrOfLightsType.
-        uint64_t maxDestWide = static_cast<uint64_t>(logicalCount) * mod->maxMultiplier();
-        const uint64_t ceiling = static_cast<uint64_t>(driverCount) * 2;
-        if (maxDestWide > ceiling) maxDestWide = ceiling;
-        nrOfLightsType maxDest = static_cast<nrOfLightsType>(maxDestWide);
-
-        // MappingLUT::build owns the allocation decision: it tries a single
-        // contiguous block, falls back to fixed-size pages when no single block
-        // fits but total heap allows it, and returns false only on genuine
-        // exhaustion (total free minus HEAP_RESERVE too small). So no
-        // single-block pre-check here — that pre-check is exactly what made a
-        // fragmented-but-not-exhausted heap (the 128×128 mirror case on
-        // no-PSRAM) degrade unnecessarily.
-        if (!lut_.build(logicalCount, maxDest)) {
-            std::printf("  DEGRADE  LUT skipped (need %u, free %u)\n",
-                        static_cast<unsigned>(MappingLUT::estimateBytes(logicalCount, maxDest)),
-                        static_cast<unsigned>(platform::freeHeap()));
-            lutSkipped_ = true;
-            setStatus("modifier LUT skipped — not enough memory", Severity::Warning);
-            degradeIdentity();
             return;
         }
 
-        // Box→driver translation: the modifier reasons in box geometry and emits
-        // box-cell indices; the driver buffer is indexed by real-light index. A
-        // box→driver map (driverIdx per box cell, or "none") translates the
-        // modifier's output into driver-index space. For a dense grid this map
-        // is identity; for a sparse layout it drops box cells that aren't lights
-        // (e.g. a mirror destination landing off the sphere shell). Built from
-        // Layouts::forEachCoord. nullptr → dense grid → no translation needed.
-        nrOfLightsType* boxToDriver = sparse ? buildBoxToDriver(boxCount) : nullptr;
-
-        // Per-light scratch buffer for the modifier's fan-out destinations. Sized
-        // to the modifier's maxMultiplier(), but clamped to boxCount: a logical
-        // light can't map to more positions than the physical box has cells, so
-        // that's the true ceiling. The clamp avoids a pathological over-alloc
-        // when maxMultiplier() saturates high (e.g. a 64×64×16 multiply reports
-        // 65535 but a small grid has far fewer cells). Heap-allocated on the cold
-        // path (like boxToDriver); an OOM here degrades to the identity LUT.
-        nrOfLightsType fanout = mod->maxMultiplier() > 0 ? mod->maxMultiplier() : 1;
-        if (fanout > boxCount && boxCount > 0) fanout = boxCount;
-        auto* physicals = static_cast<nrOfLightsType*>(
-            platform::alloc(static_cast<size_t>(fanout) * sizeof(nrOfLightsType)));
-        if (!physicals) {
-            if (boxToDriver) platform::free(boxToDriver);
-            lut_.free();
+        // General build — fold each PHYSICAL light through the static chain to its
+        // logical cell, accumulating the physical (driver) index onto that cell.
+        // N physical lights folding onto one logical cell IS the fan-out (Multiply),
+        // so each physical light contributes at most ONE destination — maxDest is
+        // exactly driverCount, no product, no overflow ceiling.
+        if (!buildFoldedLUT(logical, logicalCount, driverCount)) {
+            // OOM in the fold build — degrade to identity (correct, not crash).
             lutSkipped_ = true;
-            setStatus("modifier scratch alloc failed — not enough memory", Severity::Warning);
-            degradeIdentity();
+            setStatus("modifier mapping skipped — not enough memory", Severity::Warning);
+            width_ = physicalWidth_; height_ = physicalHeight_; depth_ = physicalDepth_;
+            lut_.setIdentity(boxCount);
+            allocateBuffer(boxCount);
             return;
         }
-        nrOfLightsType count;
-        nrOfLightsType logIdx = 0;
-
-        for (lengthType z = 0; z < depth_; z++) {
-            for (lengthType y = 0; y < height_; y++) {
-                for (lengthType x = 0; x < width_; x++) {
-                    count = 0;
-                    mod->mapToPhysical(x, y, z, physicalWidth_, physicalHeight_, physicalDepth_,
-                                       physicals, count, fanout);
-                    if (boxToDriver) {
-                        // Translate box indices → driver indices, dropping cells
-                        // that map to no real light (kNoDriver).
-                        nrOfLightsType kept = 0;
-                        for (nrOfLightsType i = 0; i < count; i++) {
-                            nrOfLightsType d = (physicals[i] < boxCount) ? boxToDriver[physicals[i]] : kNoDriver;
-                            if (d != kNoDriver) physicals[kept++] = d;
-                        }
-                        count = kept;
-                    }
-                    lut_.setMapping(logIdx, physicals, count);
-                    logIdx++;
-                }
-            }
-        }
-        platform::free(physicals);
-        if (boxToDriver) platform::free(boxToDriver);
-
-        lut_.finalize();
         allocateBuffer(logicalCount);
     }
 
@@ -361,10 +334,10 @@ public:
 
     // Does the layout emit lights in natural box order — driver index i == box cell i (x fastest,
     // then y, then z)? Measured, not declared: one allocation-free forEachCoord pass over the same
-    // coords the LUT build would walk, so there's a single source of truth (the coords) and no
+    // coords the build would walk, so there's a single source of truth (the coords) and no
     // per-layout hint to keep in sync. True → the dense memcpy fast path is valid; false → a
-    // reordered grid (serpentine) needs the box→driver LUT. Only meaningful for a dense layout
-    // (boxCount == driverCount); a sparse layout already routes to the LUT via the count check.
+    // reordered grid (serpentine) needs the folded LUT. Only meaningful for a dense layout
+    // (boxCount == driverCount); a sparse layout always routes to the folded build.
     bool isNaturalOrder() const {
         struct Ctx { lengthType w, h; bool ok; };
         Ctx ctx{physicalWidth_, physicalHeight_, true};
@@ -378,44 +351,121 @@ public:
         return ctx.ok;
     }
 
-    // Allocate + fill a box-cell → driver-index map from the layout's real
-    // lights (Layouts::forEachCoord emits (driverIdx, x, y, z) in driver order).
-    // Cells with no light hold kNoDriver. Caller owns the returned block
-    // (platform::free). Returns nullptr on OOM. Box index = z*W*H + y*W + x.
-    nrOfLightsType* buildBoxToDriver(nrOfLightsType boxCount) const {
-        auto* map = static_cast<nrOfLightsType*>(platform::alloc(static_cast<size_t>(boxCount) * sizeof(nrOfLightsType)));
-        if (!map) return nullptr;
-        for (nrOfLightsType i = 0; i < boxCount; i++) map[i] = kNoDriver;
-        struct Ctx { nrOfLightsType* map; lengthType w, h; nrOfLightsType box; };
-        Ctx ctx{map, physicalWidth_, physicalHeight_, boxCount};
-        layouts_->forEachCoord([](void* c, nrOfLightsType driverIdx, lengthType x, lengthType y, lengthType z) {
-            auto* k = static_cast<Ctx*>(c);
-            nrOfLightsType box = static_cast<nrOfLightsType>(z) * k->w * k->h
-                               + static_cast<nrOfLightsType>(y) * k->w + x;
-            if (box < k->box) k->map[box] = driverIdx;
-        }, &ctx);
-        return map;
-    }
+    // Build the mapping by folding PHYSICAL lights to LOGICAL cells (physical→logical).
+    // Our MappingLUT is a CSR keyed by logical index, and setMapping demands sequential
+    // in-order writes — but folding scatters onto arbitrary, repeated logical indices.
+    // So this is the textbook counting-sort CSR build: pass A counts destinations per
+    // logical cell, prefix-sum to offsets, pass B scatters, then replay through
+    // setMapping in logical order. Two forEachCoord passes + a counts/dests scratch,
+    // all on the cold rebuild path; the hot-path read (forEachDestination) is unchanged.
+    // Returns false on OOM (caller degrades to identity).
+    bool buildFoldedLUT(const Coord3D& logical,
+                        nrOfLightsType logicalCount, nrOfLightsType driverCount) {
+        if (logicalCount == 0 || driverCount == 0) { lut_.setIdentity(0); return true; }
 
-    // No-modifier sparse case: LUT maps each box cell → its driver index (≤1
-    // destination), so the driver buffer holds only the real lights. logicalCount
-    // = boxCount; built in box order so setMapping's sequential contract holds.
-    void buildSparseIdentityLUT(nrOfLightsType boxCount, nrOfLightsType driverCount) {
-        nrOfLightsType* boxToDriver = buildBoxToDriver(boxCount);
-        if (!boxToDriver || !lut_.build(boxCount, driverCount)) {
-            // OOM — fall back to dense identity (sends the box; correct-not-crash).
-            if (boxToDriver) platform::free(boxToDriver);
-            lutSkipped_ = true;
-            setStatus("sparse LUT build failed — not enough memory", Severity::Warning);
-            lut_.setIdentity(boxCount);
-            return;
+        // Scratch: per-logical-cell counts (then reused as the write cursor) and the
+        // scattered driver indices. Each physical light yields ≤1 destination, so the
+        // dests array is driverCount-sized — the tight, overflow-free ceiling.
+        auto* counts = static_cast<nrOfLightsType*>(
+            platform::alloc(static_cast<size_t>(logicalCount + 1) * sizeof(nrOfLightsType)));
+        auto* dests = static_cast<nrOfLightsType*>(
+            platform::alloc(static_cast<size_t>(driverCount) * sizeof(nrOfLightsType)));
+        if (!counts || !dests) {
+            if (counts) platform::free(counts);
+            if (dests) platform::free(dests);
+            return false;
         }
-        for (nrOfLightsType box = 0; box < boxCount; box++) {
-            nrOfLightsType d = boxToDriver[box];
-            lut_.setMapping(box, &d, d == kNoDriver ? 0 : 1);
+        for (nrOfLightsType i = 0; i <= logicalCount; i++) counts[i] = 0;
+
+        // One callback does both passes. It folds the physical coord through the chain
+        // (the Layer's own children — enabled static modifiers, in order, no array) to a
+        // logical index (or skips it if a modifier rejects it or it lands out of box —
+        // guarded, never trusted), then either counts it (pass A) or writes the driver
+        // index at the cell's cursor (pass B). Everything travels through the forEachCoord
+        // void* ctx, so the lambda captures nothing (it's a function ptr).
+        struct FoldCtx {
+            Layer* self;   // for the dynamic child list (the modifier chain)
+            Coord3D logical; nrOfLightsType logicalCount;  // final box, for the flatten + guard
+            nrOfLightsType* counts;   // pass A: per-cell count.  pass B: per-cell write cursor.
+            nrOfLightsType* dests;    // pass B only.
+            bool scatter;
+        } fctx{this, logical, logicalCount, counts, dests, /*scatter=*/false};
+
+        auto onCoord = [](void* c, nrOfLightsType driverIdx, lengthType x, lengthType y, lengthType z) {
+            auto* f = static_cast<FoldCtx*>(c);
+            Coord3D pos{x, y, z};
+            Layer* self = f->self;
+            for (uint8_t i = 0; i < self->childCount(); i++) {
+                if (self->child(i)->role() != ModuleRole::Modifier || !self->child(i)->enabled()) continue;
+                auto* m = static_cast<ModifierBase*>(self->child(i));
+                if (m->hasModifyLive()) continue;                 // dynamic: not in the static fold
+                if (!m->modifyLogical(pos)) return;               // rejected — no logical source
+            }
+            if (pos.x < 0 || pos.x >= f->logical.x || pos.y < 0 || pos.y >= f->logical.y ||
+                pos.z < 0 || pos.z >= f->logical.z) return;                          // defensive
+            const nrOfLightsType li =
+                static_cast<nrOfLightsType>(pos.z) * static_cast<nrOfLightsType>(f->logical.x) * static_cast<nrOfLightsType>(f->logical.y) +
+                static_cast<nrOfLightsType>(pos.y) * static_cast<nrOfLightsType>(f->logical.x) +
+                static_cast<nrOfLightsType>(pos.x);
+            if (li >= f->logicalCount) return;                                       // defensive
+            if (f->scatter) f->dests[f->counts[li]++] = driverIdx;  // pass B: write at the cursor
+            else            f->counts[li]++;                        // pass A: bump the count
+        };
+
+        // Pass A — count.
+        layouts_->forEachCoord(onCoord, &fctx);
+
+        // Prefix-sum counts → offsets (counts[li] becomes the start of cell li's run).
+        nrOfLightsType running = 0;
+        for (nrOfLightsType i = 0; i < logicalCount; i++) {
+            nrOfLightsType c = counts[i];
+            counts[i] = running;
+            running += c;
+        }
+        counts[logicalCount] = running;   // total destinations
+
+        // Pass B — scatter. counts[] is now the per-cell write cursor (offsets advance).
+        fctx.scatter = true;
+        layouts_->forEachCoord(onCoord, &fctx);
+
+        // Pass B advanced each cell's cursor to the END of its run, so counts[i] now
+        // holds the end offset of cell i — which equals the START offset of cell i+1.
+        // The run for cell i is therefore [counts[i-1], counts[i]) with counts[-1]=0,
+        // i.e. the `start` cursor below. dests[] is already laid out in this exact CSR
+        // order, so replaying it through setMapping in logical order is a straight copy.
+        if (!lut_.build(logicalCount, running)) {   // running == total destinations
+            platform::free(counts);
+            platform::free(dests);
+            return false;
+        }
+        nrOfLightsType start = 0;
+        for (nrOfLightsType i = 0; i < logicalCount; i++) {
+            nrOfLightsType end = counts[i];          // end of cell i's run
+            lut_.setMapping(i, &dests[start], static_cast<nrOfLightsType>(end - start));
+            start = end;
         }
         lut_.finalize();
-        platform::free(boxToDriver);
+        platform::free(counts);
+        platform::free(dests);
+        return true;
+    }
+
+    // Cells in a box (the flat light count). 0 on any 0-extent axis.
+    static nrOfLightsType cellCount(const Coord3D& box) {
+        return static_cast<nrOfLightsType>(box.x) * static_cast<nrOfLightsType>(box.y) *
+               static_cast<nrOfLightsType>(box.z);
+    }
+
+    // A modifier's modifyLogicalSize must not collapse an axis the physical box has:
+    // a 0-width logical box would blank the layer with no source for any effect. Clamp
+    // each axis to ≥1 where the physical box is non-empty (keep a genuinely 0 axis 0).
+    void clampLogical(Coord3D& logical) const {
+        if (physicalWidth_  > 0 && logical.x < 1) logical.x = 1;
+        if (physicalHeight_ > 0 && logical.y < 1) logical.y = 1;
+        if (physicalDepth_  > 0 && logical.z < 1) logical.z = 1;
+        if (logical.x < 0) logical.x = 0;
+        if (logical.y < 0) logical.y = 0;
+        if (logical.z < 0) logical.z = 0;
     }
 
 private:
@@ -432,6 +482,9 @@ private:
     lengthType depth_ = 0;
     uint32_t elapsed_ = 0;
     char statusBuf_[20] = {};  // "999×999×999" fits; owned (setStatus borrows the pointer)
+    bool     hasLive_ = false;          // any enabled modifier animates per frame (gates the live pass)
+    uint8_t* liveScratch_ = nullptr;    // snapshot for the live pass; allocated only when hasLive_
+    size_t   liveScratchBytes_ = 0;
 
     // Check if heap can afford an allocation (returns true if unlimited or enough budget)
     static bool canAllocate(size_t bytesNeeded) {

@@ -101,13 +101,12 @@ entry reads like a scenario's setup phase. The `deviceModel` identity is a unit 
 control applies.
 
 **`replaceChildren`** (optional, on a container unit like `Layer` / `Layouts` /
-`Drivers`): set it `true` to *replace* the container's boot-wired defaults instead of
-adding alongside them. The inject is otherwise add-only, and a `Layer` renders only
-its FIRST enabled effect/modifier — so a catalog entry that wants its own effect to
-show (the testbench above swaps the default `NoiseEffect` for `AudioSpectrumEffect` +
-`RandomMapModifier`) marks the container `replaceChildren`, which DELETEs the
-container's current children before the entry's children are added. Without it, the
-entry's effect would sit behind the boot default and never render.
+`Drivers`): the inject is add-only by default, so an entry's children land *alongside*
+the container's boot-wired defaults. Set `replaceChildren` `true` to DELETE the
+container's current children first, so the entry's children are the only ones — used
+when an entry wants its own effects to replace the defaults rather than stack with them
+(the testbench above swaps the default `NoiseEffect` for `AudioSpectrumEffect` +
+`RandomMapModifier`).
 
 **LED drivers are catalog-added, not boot-wired.** The only driver the firmware
 creates at boot is `Preview` (it needs the HTTP-server broadcaster the catalog

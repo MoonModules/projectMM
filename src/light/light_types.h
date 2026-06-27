@@ -21,6 +21,32 @@ namespace mm {
 // size optimisation (it stores nrOfLightsType indices, not coordinates).
 using lengthType = int16_t;
 
+// A 3D grid position / size. Modifiers fold one of these in place when building
+// the Layer's mapping (each modifier is a coordinate transform — Multiply does
+// `pos = pos % size`, a mirror folds an axis), so the per-axis `%` `/` `-` `+`
+// operators below let the fold read like the geometry it expresses rather than
+// three separate index lines. A struct, not a class: it's plain data on the cold
+// build path (the hot render path stays on flat nrOfLightsType indices, never
+// these). Operators are per-component (Hadamard), the convention for a grid/size
+// vector — `a % b` is `{a.x%b.x, a.y%b.y, a.z%b.z}`.
+struct Coord3D {
+    lengthType x = 0, y = 0, z = 0;
+
+    Coord3D operator+(const Coord3D& o) const { return {static_cast<lengthType>(x + o.x), static_cast<lengthType>(y + o.y), static_cast<lengthType>(z + o.z)}; }
+    Coord3D operator-(const Coord3D& o) const { return {static_cast<lengthType>(x - o.x), static_cast<lengthType>(y - o.y), static_cast<lengthType>(z - o.z)}; }
+    Coord3D operator*(const Coord3D& o) const { return {static_cast<lengthType>(x * o.x), static_cast<lengthType>(y * o.y), static_cast<lengthType>(z * o.z)}; }
+    // Per-axis %/÷ guard against a zero extent (a degenerate axis stays put / 0)
+    // so a modifier can fold without pre-checking every axis for size 1 or 0.
+    Coord3D operator%(const Coord3D& o) const { return {modAxis(x, o.x), modAxis(y, o.y), modAxis(z, o.z)}; }
+    Coord3D operator/(const Coord3D& o) const { return {divAxis(x, o.x), divAxis(y, o.y), divAxis(z, o.z)}; }
+    bool operator==(const Coord3D& o) const { return x == o.x && y == o.y && z == o.z; }
+    bool operator!=(const Coord3D& o) const { return !(*this == o); }
+
+private:
+    static lengthType modAxis(lengthType a, lengthType m) { return m > 0 ? static_cast<lengthType>(a % m) : a; }
+    static lengthType divAxis(lengthType a, lengthType d) { return d > 0 ? static_cast<lengthType>(a / d) : a; }
+};
+
 // Count of lights, and the index type MappingLUT stores. uint32_t with PSRAM
 // (10K+ lights, large installations), uint16_t without — the narrower index
 // keeps MappingLUT's CSR arrays half the size on no-PSRAM boards. Selected at

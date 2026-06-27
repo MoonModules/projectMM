@@ -218,6 +218,18 @@ The cheapest (Lines, Checkerboard, PlasmaPalette) clear ~100 FPS even at 16K; th
 
 **Free internal heap** holds ~8.54 MB at small grids and ~8.46–8.49 MB at 16K — the ~50–100 KB delta is just the grid-sized render buffer (the `model` array), and it returns to ~8.54 MB whenever the grid shrinks: **no leak, no fragmentation creep** across the sweep. Largest free internal block stays ~90–110 KB throughout. (Internal RAM is not the constraint on this PSRAM board; the Layer buffer is in PSRAM.)
 
+### MoonLive (scripted effect) — tick + memory
+
+A `MoonLiveEffect` compiles its `source` text to native Xtensa once on the cold path (`onBuildState`), then `run()` is a single function-pointer call each tick. Measured on the S3 at 16×16 (the bench grid the engine is exercised on; the per-tick cost is the native loop, not interpretation):
+
+| Script | Tick (µs) | Exec block (heap) |
+|--------|----:|----:|
+| `setRGB(5, 255, 0, 0)` (one pixel) | 26 | ~52 B |
+| `setRGB(random16(256), 0, 255, 0)` (one host call) | 29 | ~140 B |
+| `fill(0, 0, 255)` (loop over all lights) | 47 | ~68 B |
+
+The tick cost is native-code speed — a `setRGB` is a bounds-guard + three byte stores (~26 µs including the per-tick module overhead), `fill` adds the per-light loop. The **exec block scales with the program**, not a fixed cap: a one-liner is tens of bytes of machine code (`place()` allocates the emitted length, word-rounded), reported as the module's dynamic memory (`setDynamicBytes(codeLen())`) so it shows on the UI card. At rest the engine itself is ~48 B of members + that exec block; the compile path's transient buffers (staging, IR, assembler ≈ 4 KB) live on the cold-path stack and are freed on return — see [docs/backlog/livescripts-analysis-top-down.md § 3.7](backlog/livescripts-analysis-top-down.md) for how this scales as the language grows.
+
 ---
 
 ## Incremental cost analysis (`scenario_perf_light` / `scenario_perf_full`)

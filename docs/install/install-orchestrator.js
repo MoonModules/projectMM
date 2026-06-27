@@ -45,6 +45,7 @@ import {
     buildImprovFrame,
     encodeApplyOpFrames,
 } from "./improv-frame.js";
+import { planConfigOps } from "./config-ops.js";
 
 // ---------------------------------------------------------------------------
 // Manifest parser
@@ -174,11 +175,10 @@ async function pushDefaultsOverSerial(port, board, applyDefaults, trackProgress,
     return await sendConfigOverSerial(port, board, onLog);
 }
 
-// Push a device-model's whole catalog config to the device over serial. Walks the
-// SAME deviceModels.json entry the HTTP path used (replaceChildren pre-pass, then
-// per-module add + per-control set) but emits APPLY_OP ops instead of HTTP requests
-// — so the defaults apply during provisioning with no HTTP and no browser handoff.
-// Returns true if the entry was found + pushed, false if no catalog entry for `board`.
+// Push a device-model's whole catalog config to the device over serial. Walks the SAME
+// deviceModels.json entry the HTTP path used (see planConfigOps) but emits APPLY_OP ops
+// instead of HTTP requests — so the defaults apply during provisioning with no HTTP and
+// no browser handoff. Returns true if the entry was found + pushed, false if none.
 async function sendConfigOverSerial(port, board, onLog) {
     let entry;
     try {
@@ -191,25 +191,8 @@ async function sendConfigOverSerial(port, board, onLog) {
         return false;
     }
     if (!entry) return false;
-    const modules = Array.isArray(entry.modules) ? entry.modules : [];
-    // replaceChildren pre-pass: clear a container's boot defaults before its catalog
-    // children are added (so the entry's effects replace, not stack).
-    for (const m of modules) {
-        if (m && m.replaceChildren && typeof m.id === "string" && m.id) {
-            await sendApplyOpFrame(port, { op: "clearChildren", parent: m.id });
-        }
-    }
-    for (const m of modules) {
-        if (!m || typeof m !== "object" || typeof m.id !== "string" || m.id === "") continue;
-        if (m.parent_id && m.type) {
-            await sendApplyOpFrame(port, { op: "add", type: m.type, id: m.id, parent: m.parent_id });
-        }
-        const controls = m.controls;
-        if (controls && typeof controls === "object") {
-            for (const [control, value] of Object.entries(controls)) {
-                await sendApplyOpFrame(port, { op: "set", module: m.id, control, value });
-            }
-        }
+    for (const op of planConfigOps(entry)) {
+        await sendApplyOpFrame(port, op);
     }
     if (onLog) onLog(`[orchestrator] applied ${board} defaults over serial`);
     return true;

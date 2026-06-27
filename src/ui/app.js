@@ -47,7 +47,7 @@ const dragTs = {};               // per-control last-touched timestamp (ms)
 // read-only types (display/display-int/time/progress) and the composite `list`
 // are absent on purpose: they always reflect the latest push.
 const EDITABLE_CONTROL_TYPES = new Set(
-    ["uint8", "uint16", "int16", "pin", "bool", "text", "password", "select", "ipv4"]);
+    ["uint8", "uint16", "int16", "pin", "bool", "text", "textarea", "password", "select", "ipv4"]);
 const TIMING_MODES = ["fps", "ms"];
 
 // localStorage keys per ui.md
@@ -1076,6 +1076,27 @@ function createControl(moduleName, moduleType, ctrl) {
             row.appendChild(input);
             break;
         }
+        case "textarea": {
+            // Multi-line text (e.g. a script source). A resizable <textarea>; the
+            // value syncs and debounces exactly like a "text" control.
+            const input = document.createElement("textarea");
+            input.className = "control-textarea";
+            input.value = ctrl.value ?? "";
+            input.dataset.mid = moduleName;
+            input.dataset.key = ctrl.name;
+            input.rows = 1;            // default compact; CSS height + resize grip control size
+            input.spellcheck = false;
+            if (ctrl.readonly) {
+                input.readOnly = true;
+            } else {
+                input.addEventListener("input", () => {
+                    dragTs[key] = Date.now();
+                    debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, input.value));
+                });
+            }
+            row.appendChild(input);
+            break;
+        }
         case "password": {
             // ctrl.value arrives XOR-obfuscated + base64-encoded (see
             // HttpServerModule PASSWORD_XOR_KEY). Decode it so the input holds
@@ -1675,6 +1696,12 @@ function updateModuleControls(mod) {
                 if (input && input.value !== (ctrl.value ?? "")) input.value = ctrl.value ?? "";
                 break;
             }
+            case "textarea": {
+                const input = document.querySelector(`textarea[data-mid="${mid}"][data-key="${k}"]`);
+                // Don't clobber the box while the user is typing in it.
+                if (input && document.activeElement !== input && input.value !== (ctrl.value ?? "")) input.value = ctrl.value ?? "";
+                break;
+            }
             case "password": {
                 // The peek button flips the input to type="text", so match either.
                 const input = document.querySelector(`input[data-mid="${mid}"][data-key="${k}"]`);
@@ -1767,7 +1794,7 @@ function updateModuleControls(mod) {
 // drift between createControl and updateModuleControls.
 function controlValuesEqual(ctrl, def) {
     if (ctrl.type === "bool") return !!ctrl.value === !!def;
-    if (ctrl.type === "ipv4" || ctrl.type === "text" || ctrl.type === "password") {
+    if (ctrl.type === "ipv4" || ctrl.type === "text" || ctrl.type === "textarea" || ctrl.type === "password") {
         return String(ctrl.value ?? "") === String(def ?? "");
     }
     return Number(ctrl.value) === Number(def);
@@ -2113,6 +2140,10 @@ function setupStatusBarButtons() {
         theme = (theme === "dark") ? "light" : "dark";
         localStorage.setItem(LS_THEME, theme);
         applyTheme(theme);
+        // Repaint the preview to the new theme's background — a live preview would
+        // pick it up on its next frame, but an idle one (no incoming frames) needs
+        // a nudge so the canvas doesn't keep the previous theme's clear colour.
+        preview.redraw();
     });
 
     // Hamburger: toggles the side nav. On wide screens it collapses/expands the

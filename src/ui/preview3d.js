@@ -634,8 +634,11 @@ function drawVerts() {
     const mvp = buildMVP(ex, ey, ez, camTgtX, camTgtY, camTgtZ, canvas.width / Math.max(1, canvas.height));
 
     // alpha:false context — clear to page background colour so the canvas
-    // blends seamlessly in both light and dark themes.
-    const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg-0").trim();
+    // blends seamlessly in both light and dark themes. Read from <body>, not
+    // <html>: the theme override is `body[data-theme="light"]`, so --bg-0 is
+    // redefined on the body; getComputedStyle(documentElement) would only ever
+    // see the dark :root default and never the light override.
+    const bg = getComputedStyle(document.body).getPropertyValue("--bg-0").trim();
     const m = bg.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
     if (m) gl.clearColor(parseInt(m[1],16)/255, parseInt(m[2],16)/255, parseInt(m[3],16)/255, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -853,4 +856,8 @@ export const preview = {
     setupLayout: setupLayout,
     onBinaryMessage: renderPreviewBinary,
     resetCamera: resetCamera,
+    // Redraw the last frame with the current theme's background — call on a theme
+    // toggle so an idle preview (no live frames) repaints to the new --bg-0
+    // instead of keeping the previous theme's clear colour until the next frame.
+    redraw: redrawCached,
 };

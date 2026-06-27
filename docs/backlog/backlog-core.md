@@ -336,7 +336,7 @@ Forward-looking companion to the shipped UI spec, [moonmodules/core/ui.md](../mo
 These don't block the shipped baseline but should be answered before 1.0:
 
 - **Multi-layer UI** — [architecture.md](../architecture.md) plans for N layers blended into one Drivers. The current card layout shows one Layer. Likely needs a tab/accordion to switch layers, or a per-layer column.
-- **Modifier chain visualization** — show the modifier order visually. Today they're a flat list, and only the **first enabled** modifier actually applies (the `children[]` order is *not* yet an apply order — see [Composed modifiers](backlog-mixed.md#composed-modifiers--chain-the-whole-modifier-stack-not-just-the-first-planned-multi-commit)). This viz item only becomes meaningful *after* composed modifiers land; until then a chain UI would imply a stacking the engine doesn't do.
+- **Modifier chain visualization** — show the modifier order visually. They're a flat list today, but the `children[]` order **is** the apply order now (modifiers compose as a chain, M₁∘M₂∘…), so a visual that conveys the stacking (and that order matters) would help users reason about a multi-modifier layer.
 - **Presets** — save/load named bundles of control values. Persistence already stores them; needs a UI surface.
 - **Canvas/node-graph view** — v2 attempted this. Powerful for complex setups but doubles the UI surface. A reasonable v3 follow-up gated on user demand.
 

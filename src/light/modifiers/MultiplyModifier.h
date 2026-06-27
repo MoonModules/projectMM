@@ -6,13 +6,15 @@ namespace mm {
 
 // Tiles the logical image across the physical box `multiply` times per axis,
 // optionally mirroring alternate tiles. The logical box is the physical box
-// divided by the per-axis multiplier; each logical light fans out to one
-// physical position per tile. With a multiplier of 2 and mirror on, an axis
-// folds in half — the classic kaleidoscope mirror (this subsumes the old
-// MirrorModifier: mirror = multiply 2 + mirror true).
+// divided by the per-axis multiplier. Under the fold build the fan-out is free:
+// every physical light folds (`pos % logicalSize`) onto its logical cell, so the
+// N physical lights of N tiles all land on the same logical light — N:1 emerges,
+// no fan-out list. With multiply 2 + mirror on, an axis folds in half — the
+// classic kaleidoscope mirror (this subsumes a standalone Mirror: it's just
+// multiply 2 + mirror true).
 //
 // Prior art: MoonLight's Multiply modifier (M_MoonLight.h) — same tile+mirror
-// shape (`position % modifierSize`, odd tiles reflected). We expose per-axis
+// fold (`position % modifierSize`, odd tiles reflected). We expose per-axis
 // mirror bools (3) instead of MoonLight's single mirror flag, and per-axis
 // multipliers, so X/Y/Z can fold and tile independently.
 class MultiplyModifier : public ModifierBase {
@@ -30,32 +32,9 @@ public:
     bool mirrorY = true;
     bool mirrorZ = true;
 
-    // Upper bound on fan-out = product of the raw control multipliers. Computed
-    // without the grid extents (not known here), so it's an over-estimate when a
-    // multiplier exceeds its axis (the effective multiplier clamps to the extent
-    // in mapToPhysical). The Layer sizes its per-light scratch buffer to this, so
-    // over-estimating is safe (a few unused slots); under-estimating would
-    // truncate. No fixed cap — limited only by memory. e.g. 8×8 = 64.
-    nrOfLightsType maxMultiplier() const override {
-        const uint8_t cx = multiplyX ? multiplyX : 1;
-        const uint8_t cy = multiplyY ? multiplyY : 1;
-        const uint8_t cz = multiplyZ ? multiplyZ : 1;
-        // Compute in uint64 and saturate to the return type's max. The controls
-        // cap each axis at 64, so the product can reach 64³ = 262144 — which
-        // overflows nrOfLightsType (uint16 on no-PSRAM). A wrapped value here
-        // would defeat the uint64 maxDest math in Layer::rebuildLUT (it'd be fed
-        // an already-wrapped, possibly-0 multiplier → empty LUT → black display).
-        // The Layer clamps maxDest to driverCount×2 anyway, so saturating the
-        // upper bound only over-allocates the scratch buffer slightly.
-        const uint64_t product = static_cast<uint64_t>(cx) * cy * cz;
-        constexpr uint64_t kTypeMax = static_cast<nrOfLightsType>(-1);
-        return static_cast<nrOfLightsType>(product < kTypeMax ? product : kTypeMax);
-    }
-
     void onBuildControls() override {
-        // 1–64 tiles per axis. The fan-out (product) sizes the LUT scratch buffer
-        // dynamically, so the cap is generous, not a buffer constraint — more
-        // tiles than the grid has pixels just yields 1-pixel tiles.
+        // 1–64 tiles per axis. More tiles than the grid has pixels just yields
+        // 1-pixel tiles (the effective multiplier clamps to the axis extent).
         controls_.addUint8("multiplyX", multiplyX, 1, 64);
         controls_.addUint8("multiplyY", multiplyY, 1, 64);
         controls_.addUint8("multiplyZ", multiplyZ, 1, 64);
@@ -64,64 +43,56 @@ public:
         controls_.addBool("mirrorZ", mirrorZ);
     }
 
-    void logicalDimensions(lengthType physW, lengthType physH, lengthType physD,
-                           lengthType& logW, lengthType& logH, lengthType& logD) const override {
-        // Logical box is the physical box divided by the EFFECTIVE multiplier
-        // (clamped to the axis extent — see eff()). On a 2D grid (physD=1) any
-        // multiplyZ clamps to 1, so logD stays 1 and Z multiplication is a no-op
-        // — you can't tile an axis more times than it has pixels.
-        logW = physW / eff(multiplyX, physW);
-        logH = physH / eff(multiplyY, physH);
-        logD = physD / eff(multiplyZ, physD);
+    void modifyLogicalSize(Coord3D& size) override {
+        // Logical box is the incoming box divided by the EFFECTIVE multiplier
+        // (clamped to the axis extent — see eff()). On a 2D grid (size.z=1) any
+        // multiplyZ clamps to 1, so depth stays 1 and Z multiplication is a no-op
+        // — you can't tile an axis more times than it has pixels. When the extent
+        // isn't divisible by the multiplier (e.g. 5 / 2 = 2), the tiles cover only
+        // `tile * mult` pixels; the leftover strip at the high edge is unmapped
+        // (covered_ records the covered extent so the fold can reject it).
+        const lengthType mX = eff(multiplyX, size.x), mY = eff(multiplyY, size.y), mZ = eff(multiplyZ, size.z);
+        size.x /= mX; size.y /= mY; size.z /= mZ;
+        tile_ = size;
+        covered_ = {static_cast<lengthType>(size.x * mX), static_cast<lengthType>(size.y * mY),
+                    static_cast<lengthType>(size.z * mZ)};
     }
 
-    void mapToPhysical(lengthType lx, lengthType ly, lengthType lz,
-                       lengthType physW, lengthType physH, lengthType physD,
-                       nrOfLightsType* outPhysicals, nrOfLightsType& outCount,
-                       nrOfLightsType maxOut) const override {
-        outCount = 0;
-        const lengthType mX = eff(multiplyX, physW);
-        const lengthType mY = eff(multiplyY, physH);
-        const lengthType mZ = eff(multiplyZ, physD);
-        const lengthType tileW = physW / mX;
-        const lengthType tileH = physH / mY;
-        const lengthType tileD = physD / mZ;
-
-        // One physical position per tile on each axis. For a mirror-enabled axis,
-        // odd tiles reflect within their tile (MoonLight's `size-1-pos`).
-        for (lengthType tz = 0; tz < mZ; tz++) {
-            const lengthType pz = tileOrigin(tz, tileD) + axisOffset(lz, tileD, tz, mirrorZ);
-            for (lengthType ty = 0; ty < mY; ty++) {
-                const lengthType py = tileOrigin(ty, tileH) + axisOffset(ly, tileH, ty, mirrorY);
-                for (lengthType tx = 0; tx < mX; tx++) {
-                    if (outCount >= maxOut) return;
-                    const lengthType px = tileOrigin(tx, tileW) + axisOffset(lx, tileW, tx, mirrorX);
-                    outPhysicals[outCount++] =
-                        static_cast<nrOfLightsType>(pz) * static_cast<nrOfLightsType>(physW) * static_cast<nrOfLightsType>(physH) +
-                        static_cast<nrOfLightsType>(py) * static_cast<nrOfLightsType>(physW) +
-                        static_cast<nrOfLightsType>(px);
-                }
-            }
-        }
+    bool modifyLogical(Coord3D& pos) const override {
+        // A coord in the leftover edge strip (extent not divisible by the multiplier)
+        // has no tile — drop it, rather than wrap it and duplicate the edge.
+        if ((covered_.x > 0 && pos.x >= covered_.x) ||
+            (covered_.y > 0 && pos.y >= covered_.y) ||
+            (covered_.z > 0 && pos.z >= covered_.z)) return false;
+        // Fold a coord into its tile: the tile index decides whether to reflect
+        // (odd tile, mirror on), then wrap into the tile. Reads the stashed tile size.
+        pos.x = foldAxis(pos.x, tile_.x, mirrorX);
+        pos.y = foldAxis(pos.y, tile_.y, mirrorY);
+        pos.z = foldAxis(pos.z, tile_.z, mirrorZ);
+        return true;
     }
 
 private:
+    Coord3D tile_;      // output tile size, stashed in modifyLogicalSize for the fold
+    Coord3D covered_;   // pixels the tiles actually cover (tile*mult); the leftover edge is dropped
+
     // Effective multiplier for an axis: the control value clamped to [1, extent].
     // ≥1 avoids divide-by-zero; ≤extent because tiling more times than the axis
-    // has pixels is meaningless (and would blank the layer via logD=0). So a
-    // multiplyZ on a depth-1 (2D) layout clamps to 1 — no effect, as expected.
+    // has pixels is meaningless (and would blank the layer). So a multiplyZ on a
+    // depth-1 (2D) layout clamps to 1 — no effect, as expected.
     static lengthType eff(uint8_t mult, lengthType extent) {
         lengthType m = mult ? mult : 1;
         if (extent > 0 && m > extent) m = extent;
         return m;
     }
 
-    static lengthType tileOrigin(uint8_t tile, lengthType tileSize) {
-        return static_cast<lengthType>(tile) * tileSize;
-    }
-    // Offset within a tile: identity, or reflected for odd tiles when mirroring.
-    static lengthType axisOffset(lengthType l, lengthType tileSize, uint8_t tile, bool mirror) {
-        return (mirror && (tile & 1)) ? static_cast<lengthType>(tileSize - 1 - l) : l;
+    // Fold a physical coordinate `p` into a `logical`-sized tile, reflecting odd
+    // tiles when mirroring. logical==0 (degenerate axis) passes through unchanged.
+    static lengthType foldAxis(lengthType p, lengthType logical, bool mirror) {
+        if (logical <= 0) return p;
+        const lengthType tile   = static_cast<lengthType>(p / logical);
+        const lengthType within = static_cast<lengthType>(p % logical);
+        return (mirror && (tile & 1)) ? static_cast<lengthType>(logical - 1 - within) : within;
     }
 };
 

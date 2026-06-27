@@ -24,6 +24,10 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/mman.h>   // mmap/munmap for allocExec (executable pages)
+#ifdef __APPLE__
+#include <pthread.h>    // pthread_jit_write_protect_np — macOS arm64 W^X JIT toggle
+#endif
 #endif
 
 namespace mm::platform {
@@ -118,6 +122,59 @@ void* alloc(size_t bytes) {
 
 void free(void* ptr) {
     std::free(ptr);
+}
+
+// Executable memory for MoonLive's emitted code. macOS on Apple Silicon enforces W^X
+// (a page is writable OR executable, never both at once) and demands MAP_JIT for any
+// JIT page; the write happens later in writeExec, bracketed by a per-thread
+// write-protect toggle. Linux/Windows allow a plain RWX page. Returns nullptr on
+// failure so the caller degrades.
+void* allocExec(size_t bytes) {
+    if (bytes == 0) return nullptr;
+#ifdef _WIN32
+    void* p = VirtualAlloc(nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    return p;   // VirtualAlloc returns nullptr on failure
+#elif defined(__APPLE__)
+    void* p = ::mmap(nullptr, bytes, PROT_READ | PROT_WRITE | PROT_EXEC,
+                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
+    return p == MAP_FAILED ? nullptr : p;
+#else
+    void* p = ::mmap(nullptr, bytes, PROT_READ | PROT_WRITE | PROT_EXEC,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    return p == MAP_FAILED ? nullptr : p;
+#endif
+}
+
+void freeExec(void* ptr, size_t bytes) {
+    if (!ptr) return;
+#ifdef _WIN32
+    (void)bytes;
+    VirtualFree(ptr, 0, MEM_RELEASE);
+#else
+    ::munmap(ptr, bytes);
+#endif
+}
+
+void writeExec(void* dst, const void* src, size_t len) {
+    if (!dst || !src || !len) return;
+#if defined(_WIN32)
+    // Windows: the VirtualAlloc page is RWX; memcpy suffices, then FlushInstructionCache
+    // (MSVC has no __builtin___clear_cache).
+    std::memcpy(dst, src, len);
+    FlushInstructionCache(GetCurrentProcess(), dst, len);
+#elif defined(__APPLE__)
+    // macOS arm64 W^X: flip this thread's MAP_JIT pages to writable, copy, flip back to
+    // executable, then sync the I-cache (required on arm64 for freshly-written code).
+    pthread_jit_write_protect_np(0);
+    std::memcpy(dst, src, len);
+    pthread_jit_write_protect_np(1);
+    __builtin___clear_cache(static_cast<char*>(dst), static_cast<char*>(dst) + len);
+#else
+    // Linux: the RWX page is plain memory; memcpy suffices. arm64 Linux still wants an
+    // I-cache sync; on x86-64 __builtin___clear_cache is a harmless no-op.
+    std::memcpy(dst, src, len);
+    __builtin___clear_cache(static_cast<char*>(dst), static_cast<char*>(dst) + len);
+#endif
 }
 
 void yield() {

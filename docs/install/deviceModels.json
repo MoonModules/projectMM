@@ -570,6 +570,7 @@
       {
         "type": "GridLayout",
         "id": "Grid",
+        "parent_id": "Layouts",
         "controls": {
           "width": 8,
           "height": 8
@@ -578,7 +579,7 @@
       {
         "type": "Layer",
         "id": "Layer",
-        "replaceChildren": true
+        "parent_id": "Layers"
       },
       {
         "type": "AudioSpectrumEffect",
@@ -675,6 +676,7 @@
       {
         "type": "GridLayout",
         "id": "Grid",
+        "parent_id": "Layouts",
         "controls": {
           "width": 8,
           "height": 8
@@ -683,7 +685,7 @@
       {
         "type": "Layer",
         "id": "Layer",
-        "replaceChildren": true
+        "parent_id": "Layers"
       },
       {
         "type": "NetworkReceiveEffect",

@@ -295,6 +295,51 @@ Add NetworkSendDriver and run the bounded FPS measurement on the no-LUT path.
 - `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-05
 - `pc-windows`: observed 2026-06-07
 
+### scenario_modifier_chain
+
+`test/scenarios/light/scenario_modifier_chain.json` — Stack TWO modifiers on one Layer (Region then Multiply) and verify the chain composes live end-to-end — the capability the old single-modifier engine couldn't do. Prepares its own canvas: Layout(Grid 32x32) + Layer + NoiseEffect + Region(0..50) + Multiply(2x), measures the composite, then adds a third (Checkerboard mask) and measures again, then removes the middle modifier and measures — exercising add/remove on a multi-modifier chain. A broken fold (null buffer, wrong light count, crash on a disabled/removed stage) shows up as a failed measure. The fold composition + order semantics are pinned by unit_Layer_modifier_chain; this is the live end-to-end gate.
+
+**Mode**: `mutate` · **Also touches**: RegionModifier, MultiplyModifier, CheckerboardModifier, RotateModifier, NoiseEffect, Layouts, GridLayout, Drivers, NetworkSendDriver
+
+#### `add-mask` (add_module)  📏
+
+Add a third modifier (Checkerboard mask) on top of the chain — a 3-deep fold. Measure that the deeper chain still renders.
+
+**Setup** (preceding non-measured steps):
+- `region-then-multiply` (measure) — Two stacked modifiers: Region(top-left quarter) then Multiply(2x mirror) compose into one mapping. Measure the live composite.
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `pc-macos` | — / 142,857-200,000 | — / unlimited | — / unlimited |
+
+- `pc-macos`: observed 2026-06-26
+
+#### `remove-middle` (remove_module)  📏
+
+Remove the middle modifier (Multiply) — the chain re-folds with Region then Checkerboard, no stale state. Measure.
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `pc-macos` | — / 45,455-55,556 | — / unlimited | — / unlimited |
+
+- `pc-macos`: observed 2026-06-26
+
+#### `add-live-rotate` (add_module)  📏
+
+Add a DYNAMIC Rotate on top of the static chain — its modifyLive runs the per-frame remap pass over the composed buffer. Verifies a static chain + a live modifier coexist (the buffer is remapped each frame on top of the baked Region/Checkerboard mapping) without a crash or null buffer.
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `pc-macos` | — / 25,641-28,571 | — / unlimited | — / unlimited |
+
+- `pc-macos`: observed 2026-06-26
+
 ### scenario_modifier_swap
 
 `test/scenarios/light/scenario_modifier_swap.json` — Swap the Layer's modifier between Multiply and Checkerboard and verify the pipeline stays live across each replace. Prepares its own canvas (clear + rebuild) so it runs from any device state: one Layout(Grid 32x32) + one Layer + one effect + one modifier, then replace_module cycles the modifier MOD slot Multiply -> Checkerboard -> Multiply, measuring after each so a broken swap (null buffer / wrong light count) shows up. Exercises the modifier-replace path the UI's drag-replace uses.
@@ -319,10 +364,16 @@ Multiply modifier active — pipeline live, LUT folds the grid.
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 1,783-2,179 | — / 145KB | — / 108KB |
 | `esp32-eth` | — / 1,580-7,752 | — / 172KB-225KB | — / 76KB-108KB |
+| `esp32p4-eth` | — / 5,587-6,061 | — / 33243KB | — / 376KB |
+| `esp32s3-n16r8` | — / 1,773-2,571 | — / 8350KB | — / 92KB |
 | `pc-macos` | — / 50,000-166,667 | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-25
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
+- `esp32p4-eth`: observed 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-25
 - `pc-macos`: observed 2026-06-07 → 2026-06-21
 
 #### `checkerboard` (measure)  📏
@@ -336,10 +387,16 @@ Checkerboard modifier active — masks half the lights; pipeline stays live (dri
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 892-922 | — / 145KB | — / 108KB |
 | `esp32-eth` | — / 769-990 | — / 170KB-225KB | — / 76KB-108KB |
+| `esp32p4-eth` | — / 2,747-2,762 | — / 33242KB | — / 376KB |
+| `esp32s3-n16r8` | — / 924-943 | — / 8349KB | — / 92KB |
 | `pc-macos` | — / 15,873-58,824 | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-25
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
+- `esp32p4-eth`: observed 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-25
 - `pc-macos`: observed 2026-06-07 → 2026-06-25
 
 #### `multiply-2` (measure)  📏
@@ -353,10 +410,16 @@ Back to Multiply — replace round-trips cleanly, pipeline live again.
 
 | Board | FPS | heap | block |
 |---|---|---|---|
+| `esp32` | — / 2,079-2,208 | — / 145KB | — / 108KB |
 | `esp32-eth` | — / 1,587-2,278 | — / 169KB-225KB | — / 76KB-108KB |
+| `esp32p4-eth` | — / 6,329-6,410 | — / 33243KB | — / 376KB |
+| `esp32s3-n16r8` | — / 2,146-2,604 | — / 8349KB-8350KB | — / 92KB |
 | `pc-macos` | — / 45,455-166,667 | — / unlimited | — / unlimited |
 
+- `esp32`: observed 2026-06-25
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
+- `esp32p4-eth`: observed 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-25
 - `pc-macos`: observed 2026-06-07 → 2026-06-25
 
 ### scenario_perf_full
@@ -381,14 +444,14 @@ Bare minimum at 16²: Grid + Layer + Checkerboard, no output driver, audio/disco
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 7,752 | — / 134KB | — / 108KB |
-| `esp32p4-eth` | — / 14,925-17,241 | — / 33226KB-33244KB | — / 376KB |
-| `esp32s3-n16r8` | — / 5,376-9,009 | — / 8340KB-8346KB | — / 104KB-112KB |
+| `esp32` | — / 7,692-8,929 | — / 134KB-147KB | — / 108KB |
+| `esp32p4-eth` | — / 14,925-17,544 | — / 33226KB-33245KB | — / 376KB |
+| `esp32s3-n16r8` | — / 5,376-9,009 | — / 8340KB-8352KB | — / 92KB-112KB |
 | `pc-macos` | — / 1,000,000-— | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-26
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-25
 
 #### `measure-no-audio` (measure)  📏
@@ -400,14 +463,14 @@ Bare minimum at 16²: Grid + Layer + Checkerboard, no output driver, audio/disco
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 8,621 | — / 134KB | — / 108KB |
-| `esp32p4-eth` | — / 18,182-18,868 | — / 33228KB-33244KB | — / 376KB |
-| `esp32s3-n16r8` | — / 8,065-9,901 | — / 8338KB-8346KB | — / 104KB-112KB |
+| `esp32` | — / 8,621-9,901 | — / 134KB-147KB | — / 108KB |
+| `esp32p4-eth` | — / 18,182-18,868 | — / 33228KB-33245KB | — / 376KB |
+| `esp32s3-n16r8` | — / 8,065-9,901 | — / 8338KB-8352KB | — / 92KB-112KB |
 | `pc-macos` | — / 1,000,000-— | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-26
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-25
 
 #### `measure-quiet` (measure)  📏
@@ -421,14 +484,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 8,621 | — / 131KB | — / 108KB |
-| `esp32p4-eth` | — / 17,544-18,519 | — / 33226KB-33243KB | — / 376KB |
-| `esp32s3-n16r8` | — / 8,696-9,901 | — / 8337KB-8346KB | — / 100KB-112KB |
+| `esp32` | — / 7,246-9,901 | — / 131KB-146KB | — / 108KB |
+| `esp32p4-eth` | — / 17,544-18,519 | — / 33226KB-33245KB | — / 376KB |
+| `esp32s3-n16r8` | — / 7,752-9,901 | — / 8337KB-8352KB | — / 92KB-112KB |
 | `pc-macos` | — / 1,000,000-— | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-26
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-25
 
 #### `measure-modifier` (measure)  📏
@@ -440,14 +503,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 3,175 | — / 130KB | — / 108KB |
-| `esp32p4-eth` | — / 9,434-10,638 | — / 33224KB-33241KB | — / 376KB |
-| `esp32s3-n16r8` | — / 3,413-4,237 | — / 8336KB-8344KB | — / 104KB-112KB |
+| `esp32` | — / 2,786-3,610 | — / 130KB-145KB | — / 108KB |
+| `esp32p4-eth` | — / 8,772-10,638 | — / 33224KB-33243KB | — / 376KB |
+| `esp32s3-n16r8` | — / 3,413-4,237 | — / 8336KB-8350KB | — / 92KB-112KB |
 | `pc-macos` | — / 1,000,000-— | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-26
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-25
 
 #### `measure-preview` (measure)  📏
@@ -460,14 +523,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 8,696 | — / 123KB | — / 108KB |
-| `esp32p4-eth` | — / 15,873-17,857 | — / 33228KB-33243KB | — / 376KB |
-| `esp32s3-n16r8` | — / 8,065-9,434 | — / 8335KB-8346KB | — / 92KB-112KB |
+| `esp32` | — / 8,696-9,524 | — / 123KB-147KB | — / 108KB |
+| `esp32p4-eth` | — / 15,873-18,182 | — / 33228KB-33245KB | — / 376KB |
+| `esp32s3-n16r8` | — / 8,065-9,434 | — / 8335KB-8352KB | — / 92KB-112KB |
 | `pc-macos` | — / 200,000-— | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-25
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-25
 
 #### `measure-network` (measure)  📏
@@ -479,14 +542,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 7,194 | — / 131KB | — / 108KB |
-| `esp32p4-eth` | — / 14,493-17,544 | — / 33226KB-33240KB | — / 376KB |
-| `esp32s3-n16r8` | — / 7,092-8,065 | — / 8334KB-8344KB | — / 84KB-112KB |
+| `esp32` | — / 6,098-7,194 | — / 131KB-145KB | — / 108KB |
+| `esp32p4-eth` | — / 14,493-17,544 | — / 33226KB-33244KB | — / 376KB |
+| `esp32s3-n16r8` | — / 6,452-8,065 | — / 8334KB-8351KB | — / 84KB-112KB |
 | `pc-macos` | — / 1,000,000-— | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-26
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-26
 - `pc-macos`: observed 2026-06-17 → 2026-06-25
 
 #### `measure-rmt` (measure)  📏
@@ -499,14 +562,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 6,579 | — / 106KB | — / 84KB |
-| `esp32p4-eth` | — / 15,873-17,857 | — / 33200KB-33219KB | — / 376KB |
-| `esp32s3-n16r8` | — / 8,333-9,259 | — / 8307KB-8321KB | — / 84KB-112KB |
+| `esp32` | — / 6,579-9,174 | — / 106KB-122KB | — / 84KB-108KB |
+| `esp32p4-eth` | — / 15,873-17,857 | — / 33200KB-33221KB | — / 376KB |
+| `esp32s3-n16r8` | — / 7,194-9,346 | — / 8307KB-8328KB | — / 84KB-112KB |
 | `pc-macos` | — / 1,000,000-— | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-25
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-26
 - `pc-macos`: observed 2026-06-17 → 2026-06-25
 
 #### `measure-lcd` (measure)  📏
@@ -519,14 +582,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 8,403 | — / 126KB | — / 108KB |
-| `esp32p4-eth` | — / 16,129-17,857 | — / 33225KB-33243KB | — / 376KB |
-| `esp32s3-n16r8` | — / 7,042-9,259 | — / 8336KB-8345KB | — / 92KB-112KB |
+| `esp32` | — / 8,403-9,901 | — / 126KB-147KB | — / 108KB |
+| `esp32p4-eth` | — / 15,873-17,857 | — / 33225KB-33245KB | — / 376KB |
+| `esp32s3-n16r8` | — / 7,042-9,259 | — / 8333KB-8352KB | — / 88KB-112KB |
 | `pc-macos` | — / 1,000,000-— | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-25
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-24
 
 #### `measure-parlio` (measure)  📏
@@ -539,14 +602,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 8,475 | — / 135KB | — / 108KB |
-| `esp32p4-eth` | — / 15,873-17,857 | — / 33225KB-33243KB | — / 376KB |
-| `esp32s3-n16r8` | — / 7,692-9,434 | — / 8338KB-8346KB | — / 104KB-112KB |
+| `esp32` | — / 8,475-9,901 | — / 135KB-147KB | — / 108KB |
+| `esp32p4-eth` | — / 15,873-17,857 | — / 33225KB-33245KB | — / 376KB |
+| `esp32s3-n16r8` | — / 7,692-9,434 | — / 8338KB-8352KB | — / 92KB-112KB |
 | `pc-macos` | — / 1,000,000-— | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-25
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-24
 
 #### `measure-light-16` (measure)  📏
@@ -561,14 +624,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 6,711 | — / 134KB | — / 108KB |
-| `esp32p4-eth` | — / 15,385-18,868 | — / 33226KB-33243KB | — / 376KB |
-| `esp32s3-n16r8` | — / 8,403-9,901 | — / 8336KB-8346KB | — / 100KB-112KB |
+| `esp32` | — / 6,711-9,804 | — / 134KB-147KB | — / 108KB |
+| `esp32p4-eth` | — / 15,385-18,868 | — / 33226KB-33245KB | — / 376KB |
+| `esp32s3-n16r8` | — / 8,403-9,901 | — / 8336KB-8352KB | — / 92KB-112KB |
 | `pc-macos` | — / 1,000,000-— | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-25
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-24
 
 #### `measure-light-32` (measure)  📏
@@ -581,14 +644,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 2,801 | — / 134KB | — / 108KB |
-| `esp32p4-eth` | — / 7,246-7,519 | — / 33225KB-33241KB | — / 376KB |
-| `esp32s3-n16r8` | — / 3,049-3,597 | — / 8331KB-8343KB | — / 100KB-112KB |
+| `esp32` | — / 2,801-3,367 | — / 134KB-144KB | — / 108KB |
+| `esp32p4-eth` | — / 7,246-7,576 | — / 33225KB-33243KB | — / 376KB |
+| `esp32s3-n16r8` | — / 3,049-3,597 | — / 8331KB-8350KB | — / 92KB-112KB |
 | `pc-macos` | — / 333,333-1,000,000 | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-26
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-24
 
 #### `measure-light-64` (measure)  📏
@@ -601,14 +664,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 872 | — / 125KB | — / 108KB |
-| `esp32p4-eth` | — / 2,008-2,212 | — / 33218KB-33232KB | — / 376KB |
-| `esp32s3-n16r8` | — / 917-1,011 | — / 8312KB-8334KB | — / 88KB-112KB |
+| `esp32` | — / 870-928 | — / 125KB-135KB | — / 108KB |
+| `esp32p4-eth` | — / 2,008-2,232 | — / 33218KB-33234KB | — / 376KB |
+| `esp32s3-n16r8` | — / 894-1,011 | — / 8312KB-8341KB | — / 88KB-112KB |
 | `pc-macos` | — / 12,658-250,000 | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-26
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-24
 
 #### `measure-light-128` (measure)  📏
@@ -621,14 +684,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 229 | — / 89KB | — / 62KB |
-| `esp32p4-eth` | — / 515-573 | — / 33182KB-33196KB | — / 376KB |
-| `esp32s3-n16r8` | — / 126-134 | — / 8291KB-8298KB | — / 100KB-112KB |
+| `esp32` | — / 224-238 | — / 89KB-99KB | — / 62KB |
+| `esp32p4-eth` | — / 515-573 | — / 33182KB-33198KB | — / 376KB |
+| `esp32s3-n16r8` | — / 114-134 | — / 8291KB-8305KB | — / 92KB-112KB |
 | `pc-macos` | — / 5,348-62,500 | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-25
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-24
 
 #### `measure-heavy-16` (measure)  📏
@@ -642,14 +705,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 990 | — / 136KB | — / 108KB |
-| `esp32p4-eth` | — / 2,899-3,311 | — / 33229KB-33243KB | — / 376KB |
-| `esp32s3-n16r8` | — / 1,148-1,361 | — / 8342KB-8346KB | — / 108KB-112KB |
+| `esp32` | — / 990-1,224 | — / 136KB-147KB | — / 108KB |
+| `esp32p4-eth` | — / 2,865-3,367 | — / 33229KB-33245KB | — / 376KB |
+| `esp32s3-n16r8` | — / 1,100-1,361 | — / 8342KB-8352KB | — / 92KB-112KB |
 | `pc-macos` | — / 62,500-333,333 | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-25
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-26
 - `pc-macos`: observed 2026-06-17 → 2026-06-25
 
 #### `measure-heavy-32` (measure)  📏
@@ -662,14 +725,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 312 | — / 134KB | — / 108KB |
-| `esp32p4-eth` | — / 799-893 | — / 33227KB-33241KB | — / 376KB |
-| `esp32s3-n16r8` | — / 290-356 | — / 8339KB-8343KB | — / 108KB-112KB |
+| `esp32` | — / 306-314 | — / 134KB-144KB | — / 108KB |
+| `esp32p4-eth` | — / 799-898 | — / 33227KB-33243KB | — / 376KB |
+| `esp32s3-n16r8` | — / 290-356 | — / 8339KB-8350KB | — / 92KB-112KB |
 | `pc-macos` | — / 15,152-71,429 | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-26
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-25
 
 #### `measure-heavy-64` (measure)  📏
@@ -682,14 +745,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 73.8 | — / 125KB | — / 108KB |
-| `esp32p4-eth` | — / 196-229 | — / 33218KB-33232KB | — / 376KB |
-| `esp32s3-n16r8` | — / 87.9-90.3 | — / 8330KB-8334KB | — / 108KB-112KB |
+| `esp32` | — / 73.8-79.4 | — / 125KB-135KB | — / 108KB |
+| `esp32p4-eth` | — / 196-229 | — / 33218KB-33234KB | — / 376KB |
+| `esp32s3-n16r8` | — / 85.2-90.3 | — / 8330KB-8341KB | — / 92KB-112KB |
 | `pc-macos` | — / 2,924-16,129 | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-26
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-21
 
 #### `measure-heavy-128` (measure)  📏
@@ -702,14 +765,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 16.0 | — / 89KB | — / 62KB |
-| `esp32p4-eth` | — / 55.5-57.4 | — / 33182KB-33196KB | — / 376KB |
-| `esp32s3-n16r8` | — / 19.6-20.8 | — / 8293KB-8298KB | — / 104KB-112KB |
+| `esp32` | — / 16.0-19.0 | — / 89KB-99KB | — / 62KB |
+| `esp32p4-eth` | — / 53.7-57.4 | — / 33182KB-33198KB | — / 376KB |
+| `esp32s3-n16r8` | — / 19.2-20.8 | — / 8293KB-8305KB | — / 92KB-112KB |
 | `pc-macos` | — / 1,094-3,247 | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-25
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-25
 
 #### `measure-mod-16` (measure)  📏
@@ -723,14 +786,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 2,193 | — / 135KB | — / 108KB |
-| `esp32p4-eth` | — / 6,098-6,494 | — / 33224KB-33241KB | — / 376KB |
-| `esp32s3-n16r8` | — / 2,193-2,618 | — / 8340KB-8344KB | — / 108KB-112KB |
-| `pc-macos` | — / 333,333-1,000,000 | — / unlimited | — / unlimited |
+| `esp32` | — / 2,020-2,222 | — / 135KB-145KB | — / 108KB |
+| `esp32p4-eth` | — / 5,263-6,494 | — / 33224KB-33243KB | — / 376KB |
+| `esp32s3-n16r8` | — / 2,193-2,618 | — / 8340KB-8350KB | — / 92KB-112KB |
+| `pc-macos` | — / 250,000-1,000,000 | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-25
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-25
 
 #### `measure-mod-32` (measure)  📏
@@ -743,14 +806,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 553 | — / 130KB | — / 108KB |
-| `esp32p4-eth` | — / 1,631-1,876 | — / 33218KB-33235KB | — / 376KB |
-| `esp32s3-n16r8` | — / 600-710 | — / 8329KB-8337KB | — / 100KB-112KB |
-| `pc-macos` | — / 90,909-333,333 | — / unlimited | — / unlimited |
+| `esp32` | — / 547-586 | — / 130KB-140KB | — / 108KB |
+| `esp32p4-eth` | — / 1,631-1,876 | — / 33218KB-33237KB | — / 376KB |
+| `esp32s3-n16r8` | — / 600-710 | — / 8329KB-8344KB | — / 92KB-112KB |
+| `pc-macos` | — / 5,882-333,333 | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-26
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-26
 - `pc-macos`: observed 2026-06-17 → 2026-06-25
 
 #### `measure-mod-64` (measure)  📏
@@ -763,14 +826,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 144 | — / 111KB | — / 96KB |
-| `esp32p4-eth` | — / 438-486 | — / 33194KB-33208KB | — / 376KB |
-| `esp32s3-n16r8` | — / 153-162 | — / 8307KB-8311KB | — / 108KB-112KB |
+| `esp32` | — / 144-149 | — / 111KB-122KB | — / 96KB-100KB |
+| `esp32p4-eth` | — / 438-486 | — / 33194KB-33210KB | — / 376KB |
+| `esp32s3-n16r8` | — / 119-162 | — / 8307KB-8317KB | — / 92KB-112KB |
 | `pc-macos` | — / 23,256-71,429 | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-26
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-25
 
 #### `measure-mod-128` (measure)  📏
@@ -783,14 +846,14 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 35.1 | — / 36KB | — / 26KB |
-| `esp32p4-eth` | — / 98.2-102 | — / 33089KB-33103KB | — / 376KB |
-| `esp32s3-n16r8` | — / 29.5-35.6 | — / 8202KB-8205KB | — / 108KB-112KB |
-| `pc-macos` | — / 5,263-16,129 | — / unlimited | — / unlimited |
+| `esp32` | — / 29.8-35.1 | — / 36KB-47KB | — / 24KB-26KB |
+| `esp32p4-eth` | — / 86.3-102 | — / 33089KB-33105KB | — / 376KB |
+| `esp32s3-n16r8` | — / 16.8-35.6 | — / 8202KB-8212KB | — / 92KB-112KB |
+| `pc-macos` | — / 5,128-16,129 | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-25
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-25
 
 ### scenario_perf_light
@@ -817,14 +880,14 @@ Bare minimum: Grid(16²) + Layer + Checkerboard (light effect). No modifier, no 
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 6,173-8,772 | — / 125KB-131KB | — / 108KB |
-| `esp32p4-eth` | — / 13,699-18,519 | — / 33228KB-33244KB | — / 376KB |
-| `esp32s3-n16r8` | — / 6,711-8,850 | — / 8316KB-8339KB | — / 80KB-104KB |
+| `esp32` | — / 6,173-8,850 | — / 125KB-147KB | — / 108KB |
+| `esp32p4-eth` | — / 13,699-18,519 | — / 33228KB-33246KB | — / 376KB |
+| `esp32s3-n16r8` | — / 5,814-8,850 | — / 8316KB-8347KB | — / 80KB-104KB |
 | `pc-macos` | — / 1,000,000-— | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-25
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-24
 
 #### `measure-with-modifier` (measure)  📏
@@ -838,14 +901,14 @@ Cost of the modifier + LUT over the minimal pipeline. Heap delta vs measure-mini
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 3,077-3,289 | — / 131KB-135KB | — / 108KB |
-| `esp32p4-eth` | — / 9,615-10,204 | — / 33226KB-33242KB | — / 376KB |
-| `esp32s3-n16r8` | — / 3,922-4,032 | — / 8330KB-8335KB | — / 96KB-100KB |
+| `esp32` | — / 3,077-9,709 | — / 131KB-147KB | — / 108KB |
+| `esp32p4-eth` | — / 8,621-10,309 | — / 33226KB-33243KB | — / 376KB |
+| `esp32s3-n16r8` | — / 3,195-4,032 | — / 8330KB-8345KB | — / 92KB-100KB |
 | `pc-macos` | — / — | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-25
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17
 
 #### `measure-with-preview` (measure)  📏
@@ -856,14 +919,14 @@ PreviewDriver is the pre-wired apparatus — it survives clear_children and is a
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 3,247-3,289 | — / 132KB-133KB | — / 108KB |
-| `esp32p4-eth` | — / 10,526-10,753 | — / 33226KB-33241KB | — / 376KB |
-| `esp32s3-n16r8` | — / 4,115-4,202 | — / 8330KB-8334KB | — / 96KB-100KB |
+| `esp32` | — / 3,067-9,804 | — / 132KB-146KB | — / 108KB |
+| `esp32p4-eth` | — / 10,417-10,753 | — / 33226KB-33243KB | — / 376KB |
+| `esp32s3-n16r8` | — / 3,802-4,274 | — / 8330KB-8345KB | — / 84KB-100KB |
 | `pc-macos` | — / — | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-25
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17
 
 #### `measure-heavy-16` (measure)  📏
@@ -875,14 +938,14 @@ PreviewDriver is the pre-wired apparatus — it survives clear_children and is a
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 1,905-3,268 | — / 131KB | — / 108KB |
-| `esp32p4-eth` | — / 5,556-6,494 | — / 33224KB-33241KB | — / 376KB |
-| `esp32s3-n16r8` | — / 2,463-2,506 | — / 8332KB-8333KB | — / 88KB-100KB |
+| `esp32` | — / 1,142-3,268 | — / 131KB-146KB | — / 108KB |
+| `esp32p4-eth` | — / 5,556-6,494 | — / 33224KB-33243KB | — / 376KB |
+| `esp32s3-n16r8` | — / 2,299-2,506 | — / 8332KB-8342KB | — / 88KB-100KB |
 | `pc-macos` | — / 333,333-1,000,000 | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-25
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-25
 
 #### `measure-heavy-32` (measure)  📏
@@ -895,14 +958,14 @@ PreviewDriver is the pre-wired apparatus — it survives clear_children and is a
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 539-826 | — / 130KB | — / 108KB |
-| `esp32p4-eth` | — / 1,818-1,880 | — / 33221KB-33235KB | — / 376KB |
-| `esp32s3-n16r8` | — / 562-715 | — / 8330KB-8333KB | — / 100KB-104KB |
+| `esp32` | — / 265-826 | — / 130KB-144KB | — / 108KB |
+| `esp32p4-eth` | — / 1,603-1,880 | — / 33221KB-33237KB | — / 376KB |
+| `esp32s3-n16r8` | — / 562-715 | — / 8328KB-8333KB | — / 84KB-104KB |
 | `pc-macos` | — / 90,909-333,333 | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-22
+- `esp32`: observed 2026-06-17 → 2026-06-25
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
 - `pc-macos`: observed 2026-06-17 → 2026-06-25
 
 #### `measure-heavy-64` (measure)  📏
@@ -915,15 +978,15 @@ PreviewDriver is the pre-wired apparatus — it survives clear_children and is a
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `esp32` | — / 151-227 | — / 111KB | — / 88KB-96KB |
-| `esp32p4-eth` | — / 473-491 | — / 33195KB-33208KB | — / 376KB |
-| `esp32s3-n16r8` | — / 146-157 | — / 8305KB-8307KB | — / 96KB-108KB |
-| `pc-macos` | — / 22,727-71,429 | — / unlimited | — / unlimited |
+| `esp32` | — / 77.1-227 | — / 111KB-135KB | — / 88KB-108KB |
+| `esp32p4-eth` | — / 411-491 | — / 33195KB-33210KB | — / 376KB |
+| `esp32s3-n16r8` | — / 129-162 | — / 8302KB-8317KB | — / 92KB-108KB |
+| `pc-macos` | — / 20,000-71,429 | — / unlimited | — / unlimited |
 
-- `esp32`: observed 2026-06-17
-- `esp32p4-eth`: observed 2026-06-17 → 2026-06-22
-- `esp32s3-n16r8`: observed 2026-06-17
-- `pc-macos`: observed 2026-06-17 → 2026-06-25
+- `esp32`: observed 2026-06-17 → 2026-06-25
+- `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
+- `esp32s3-n16r8`: observed 2026-06-17 → 2026-06-25
+- `pc-macos`: observed 2026-06-17 → 2026-06-26
 
 ## Layers
 
@@ -955,7 +1018,7 @@ Add NetworkSendDriver and run the bounded FPS measurement over the two-layer com
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | — / 6,135-10,417 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 6,135-18,519 | — / unlimited | — / unlimited |
 
 - `pc-macos`: observed 2026-06-25
 
@@ -1051,6 +1114,142 @@ Pipeline renders with the single remaining grid, same as the baseline.
 - `esp32-eth`: observed 2026-06-08
 - `pc-macos`: observed 2026-06-05
 - `pc-windows`: observed 2026-06-07
+
+## MoonLiveEffect
+
+### scenario_MoonLiveEffect_livescript
+
+`test/scenarios/light/scenario_MoonLiveEffect_livescript.json` — Exercise a scripted MoonLiveEffect as a wired MoonModule end-to-end — the integration layer the unit tests can't reach. The effect compiles its `source` text to native code on-device and renders it into the Layer buffer each tick. Prepares its own canvas: Layout(Grid 16x16) + Layer + MoonLiveEffect, measures the default compile, then edits `source` live (a new fill colour recompiles and keeps rendering), pushes a BROKEN script (compile fails, the previous code is freed, the effect renders dark and the parse error surfaces in status, no crash), recovers with a valid script, and finally removes + re-adds the effect (add/remove robustness in any order). A crash in the JIT/emit path, a failed recompile that wedges the tick, or a buffer overrun on an odd grid all show up as a failed measure. The compiler + emit golden bytes are pinned by unit_moonlive_compiler / unit_moonlive_fill; this is the live wired-module gate.
+
+**Mode**: `mutate` · **Also touches**: Layouts, GridLayout, Layers, Layer, Drivers, NetworkSendDriver
+
+#### `add-moonlive` (add_module)  📏
+
+Add a MoonLiveEffect to the Layer. Its default source `fill(0, 0, 255);` compiles on-device to native code; measure that the wired effect renders.
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32p4-eth` | — / 88.6 | — / 33211KB | — / 376KB |
+| `esp32s3-n16r8` | — / 249 | — / 8341KB | — / 104KB |
+| `pc-macos` | — / 2,545-— | — / unlimited | — / unlimited |
+
+- `esp32p4-eth`: observed 2026-06-27
+- `esp32s3-n16r8`: observed 2026-06-27
+- `pc-macos`: observed 2026-06-26 → 2026-06-27
+
+#### `edit-source-red` (set_control)  📏
+
+Live-edit the script source to a new colour. A source edit triggers a recompile (controlChangeTriggersBuildState gates on `source`); the new native code swaps in and keeps rendering.
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32p4-eth` | — / 98.4 | — / 33213KB | — / 376KB |
+| `esp32s3-n16r8` | — / 225 | — / 8341KB | — / 104KB |
+| `pc-macos` | — / 2,513-— | — / unlimited | — / unlimited |
+
+- `esp32p4-eth`: observed 2026-06-27
+- `esp32s3-n16r8`: observed 2026-06-27
+- `pc-macos`: observed 2026-06-26 → 2026-06-27
+
+#### `edit-source-broken` (set_control)  📏
+
+Push a script that fails to parse. The compile fails, the engine reports the diagnostic in the module status and renders dark, but the device keeps running (robust, no reboot) — the script-editor failure path. The measure passes because the pipeline still ticks.
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32p4-eth` | — / 94.6 | — / 33209KB | — / 376KB |
+| `esp32s3-n16r8` | — / 229 | — / 8340KB | — / 104KB |
+| `pc-macos` | — / 3,745-— | — / unlimited | — / unlimited |
+
+- `esp32p4-eth`: observed 2026-06-27
+- `esp32s3-n16r8`: observed 2026-06-27
+- `pc-macos`: observed 2026-06-26 → 2026-06-27
+
+#### `edit-source-recover` (set_control)  📏
+
+Push a valid script again. The engine recompiles cleanly and rendering resumes — a broken edit is fully recoverable.
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32p4-eth` | — / 93.4 | — / 33212KB | — / 376KB |
+| `esp32s3-n16r8` | — / 248 | — / 8340KB | — / 100KB |
+| `pc-macos` | — / 2,415-— | — / unlimited | — / unlimited |
+
+- `esp32p4-eth`: observed 2026-06-27
+- `esp32s3-n16r8`: observed 2026-06-27
+- `pc-macos`: observed 2026-06-26 → 2026-06-27
+
+#### `shrink-grid-1x1` (set_control)  📏
+
+Resize the canvas to 1x1 while the scripted effect renders — the smallest non-empty grid. The native fill loops over a single light; the run guards (non-null buffer, cpl>=3) keep it in-bounds. Pins the 'runs at every grid size' hard rule for the JIT'd routine.
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32p4-eth` | — / 862 | — / 33215KB | — / 376KB |
+| `esp32s3-n16r8` | — / 868 | — / 8341KB | — / 100KB |
+| `pc-macos` | — / 1,000,000-— | — / unlimited | — / unlimited |
+
+- `esp32p4-eth`: observed 2026-06-27
+- `esp32s3-n16r8`: observed 2026-06-27
+- `pc-macos`: observed 2026-06-26 → 2026-06-27
+
+#### `grow-grid-back` (set_control)  📏
+
+Resize back to a wider grid; the effect keeps rendering across the live dimension change (the no-reboot reconfiguration contract applied to scripted code).
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32p4-eth` | — / 97.0 | — / 33209KB | — / 376KB |
+| `esp32s3-n16r8` | — / 136 | — / 8333KB | — / 100KB |
+| `pc-macos` | — / 71,429-— | — / unlimited | — / unlimited |
+
+- `esp32p4-eth`: observed 2026-06-27
+- `esp32s3-n16r8`: observed 2026-06-27
+- `pc-macos`: observed 2026-06-26 → 2026-06-27
+
+#### `remove-moonlive` (remove_module)  📏
+
+Remove the scripted effect. teardown frees the exec block; the Layer keeps rendering (now empty). Measures add/remove robustness.
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32p4-eth` | — / 88.2 | — / 33209KB | — / 376KB |
+| `esp32s3-n16r8` | — / 135 | — / 8333KB | — / 100KB |
+| `pc-macos` | — / 100,000-— | — / unlimited | — / unlimited |
+
+- `esp32p4-eth`: observed 2026-06-27
+- `esp32s3-n16r8`: observed 2026-06-27
+- `pc-macos`: observed 2026-06-26 → 2026-06-27
+
+#### `re-add-moonlive` (add_module)  📏
+
+Re-add a MoonLiveEffect after removal — the exec memory is re-acquired fresh, no leak, no stale pointer. The scripted effect renders again.
+
+**Performance** (contract / observed) — tick stored, FPS shown:
+
+| Board | FPS | heap | block |
+|---|---|---|---|
+| `esp32p4-eth` | — / 90.9 | — / 33209KB | — / 376KB |
+| `esp32s3-n16r8` | — / 121 | — / 8332KB | — / 100KB |
+| `pc-macos` | — / 62,500-— | — / unlimited | — / unlimited |
+
+- `esp32p4-eth`: observed 2026-06-27
+- `esp32s3-n16r8`: observed 2026-06-27
+- `pc-macos`: observed 2026-06-26 → 2026-06-27
 
 ## MoonModule
 

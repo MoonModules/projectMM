@@ -1,6 +1,6 @@
 #pragma once
 
-#include "light/layers/Layer.h"   // ModifierBase + Layer (we call layer->onBuildState() on a beat)
+#include "light/modifiers/ModifierBase.h"
 #include "platform/platform.h"     // alloc / free / millis
 
 #include <cstdint>
@@ -8,21 +8,21 @@
 namespace mm {
 
 // Randomly remaps every light to another light — a true 1:1 permutation (every light
-// goes somewhere, no gaps or duplicates) — and reshuffles on a `bpm` timer. The first
-// DYNAMIC modifier: a static modifier shapes the LUT once, this one re-shapes it on a
-// beat. The permutation rides the existing LUT (mapToPhysical emits one destination per
-// light, the same outCount=1 shape CheckerboardModifier uses); the only new machinery
-// is the bpm tick (loop()) that, on a beat boundary, reshuffles and asks the Layer to
-// rebuild its LUT — the same rebuild path a control change takes, scoped to one Layer.
+// goes somewhere, no gaps or duplicates) — and reshuffles on a `bpm` timer. A static
+// fold whose mapping changes on a beat: modifyLogical applies the permutation (the box
+// is unchanged, each light maps to exactly one other), and the bpm tick (loop()) bumps
+// the generation and rebuilds the Layer's mapping on a beat boundary — the same rebuild
+// path a control change takes, scoped to one Layer. (Not a per-frame modifyLive: a
+// permutation is a discrete reshuffle, not smooth motion, so a beat-gated rebuild is the
+// right cost, not a per-frame remap.)
 //
 // `bpm` = reshuffles per minute (0–60, default 6 → one scramble every ~10 s; 60 → one
-// per second, the cap — faster would be a strobe and a per-frame rebuild is too costly).
-// bpm 0 = frozen: keep the current permutation, never reshuffle (a fixed random remap).
+// per second, the cap). bpm 0 = frozen: keep the current permutation, never reshuffle.
 //
-// Cost: each beat re-runs the Layer's LUT rebuild on the render thread (a transient
-// one-frame hitch, like a device scan), bounded by bpm≤60. The permutation buffer is a
-// member sized to the light count, (re)allocated only on a grid resize — never per
-// frame. An alloc failure degrades to identity passthrough (no remap), like the LUT.
+// Cost: each beat re-runs the Layer's mapping rebuild on the render thread (a transient
+// one-frame hitch), bounded by bpm≤60. The permutation buffer is a member sized to the
+// box, (re)allocated only on a grid resize — never per frame. An alloc failure degrades
+// to identity passthrough.
 //
 // Sparse layouts: the permutation is over box indices, so a real light can map to a
 // non-light cell (dropped → dark). Acceptable for v1.
@@ -36,79 +36,70 @@ public:
         controls_.addUint8("bpm", bpm, 0, 60);
     }
 
-    // A remap doesn't resize the logical box — logical dims == physical dims (identity),
-    // like CheckerboardModifier. Each logical light maps to exactly one physical light.
-    void logicalDimensions(lengthType physW, lengthType physH, lengthType physD,
-                           lengthType& logW, lengthType& logH, lengthType& logD) const override {
-        logW = physW;
-        logH = physH;
-        logD = physD;
-    }
+    // `bpm` only changes future reshuffle timing — the current permutation is unchanged,
+    // and loop() reads bpm live each tick, so a bpm edit needs no rebuild.
+    bool controlChangeTriggersBuildState(const char* /*controlName*/) const override { return false; }
 
-    nrOfLightsType maxMultiplier() const override { return 1; }   // 1:1, never fans out
+    // A remap leaves the box unchanged but needs it for the permutation — stash it.
+    void modifyLogicalSize(Coord3D& size) override { box_ = size; }
 
-    // Emit the permuted destination for this light. mapToPhysical is called once per box
-    // during the Layer's LUT rebuild; the first call after a resize or a beat (generation
-    // bump) (re)builds the permutation, the rest just read it. const, so the permutation
-    // buffers are mutable.
-    void mapToPhysical(lengthType lx, lengthType ly, lengthType lz,
-                       lengthType physW, lengthType physH, lengthType physD,
-                       nrOfLightsType* outPhysicals, nrOfLightsType& outCount,
-                       nrOfLightsType maxOut) const override {
-        outCount = 0;
-        if (maxOut == 0) return;
-
+    // Apply the permutation: fold the coord to a box index, look up its permuted index,
+    // unflatten back to a coord. The first call after a resize/beat (re)builds the
+    // permutation, the rest read it. const, so the permutation buffers are mutable.
+    bool modifyLogical(Coord3D& pos) const override {
         const nrOfLightsType boxCount =
-            static_cast<nrOfLightsType>(physW) * static_cast<nrOfLightsType>(physH) *
-            static_cast<nrOfLightsType>(physD);
+            static_cast<nrOfLightsType>(box_.x) * static_cast<nrOfLightsType>(box_.y) *
+            static_cast<nrOfLightsType>(box_.z);
         ensurePermutation(boxCount);
 
+        const lengthType w = box_.x > 0 ? box_.x : 1;
+        const lengthType h = box_.y > 0 ? box_.y : 1;
         const nrOfLightsType idx =
-            static_cast<nrOfLightsType>(lz) * static_cast<nrOfLightsType>(physW) * static_cast<nrOfLightsType>(physH) +
-            static_cast<nrOfLightsType>(ly) * static_cast<nrOfLightsType>(physW) +
-            static_cast<nrOfLightsType>(lx);
+            static_cast<nrOfLightsType>(pos.z) * static_cast<nrOfLightsType>(w) * static_cast<nrOfLightsType>(h) +
+            static_cast<nrOfLightsType>(pos.y) * static_cast<nrOfLightsType>(w) +
+            static_cast<nrOfLightsType>(pos.x);
 
-        // If the permutation isn't available (alloc failed or empty grid), pass through
-        // unchanged — identity remap, never a crash or a dropped frame.
-        outPhysicals[0] = (perm_ && idx < permCount_) ? perm_[idx] : idx;
-        outCount = 1;
+        // Permuted index, or identity if the permutation is unavailable (OOM/empty).
+        const nrOfLightsType mapped = (perm_ && idx < permCount_) ? perm_[idx] : idx;
+        // Unflatten back to a coordinate in the box.
+        pos.x = static_cast<lengthType>(mapped % w);
+        pos.y = static_cast<lengthType>((mapped / w) % h);
+        pos.z = static_cast<lengthType>(mapped / (static_cast<nrOfLightsType>(w) * h));
+        return true;   // a permutation never rejects — every light maps somewhere
     }
 
     // Dynamic-modifier tick: accumulate the bpm timer; on each beat boundary bump the
-    // generation (so the next rebuild reshuffles) and trigger the Layer's LUT rebuild.
-    // bpm 0 freezes — no accumulation, no reshuffle (the permutation stays put).
-    // Overrides MoonModule::loop(); Layer::loop() invokes it per enabled modifier child.
+    // generation (so the next rebuild reshuffles) and trigger the Layer's rebuild.
+    // bpm 0 freezes. Layer::loop() invokes this per enabled modifier child; it sets a
+    // dirty flag the Layer coalesces into one rebuild (see Layer::loop()).
     void loop() override {
-        Layer* lyr = static_cast<Layer*>(parent());
-        if (!lyr) return;
-        const uint32_t now = lyr->elapsed();   // same clock the effects use this frame
+        const uint32_t now = platform::millis();
         if (lastElapsed_ == 0) lastElapsed_ = now;   // first tick: no dt jump
         const uint32_t dt = now - lastElapsed_;
         lastElapsed_ = now;
         if (bpm == 0) return;                   // frozen — keep the current permutation
         // Accumulate the raw (dt * bpm) product; divide only at the read site — the same
         // integer-accumulator trick the effects use so a sub-ms dt doesn't round to zero.
-        // One beat = 60000/bpm ms, i.e. phaseNum_ crossing a multiple of 60000.
         phaseNum_ += static_cast<uint64_t>(dt) * bpm;
         const uint64_t beat = phaseNum_ / 60000u;
         if (beat != lastBeat_) {
             lastBeat_ = beat;
-            reshuffle();          // ask the next rebuild to produce a fresh permutation
-            // The rebuild is what actually applies the reshuffle (re-runs mapToPhysical
-            // off the new generation); reshuffle() alone only bumps the counter, so
-            // without this the remap would never visibly change. This rebuild DOES
-            // alloc — but it is beat-gated (≤ once/sec at bpm 60, default every 10s),
-            // runs here AFTER the effect pass (not mid-render), and the permutation
-            // buffer is reused across beats (realloc only on a grid resize). That is
-            // the accepted, bounded cost — a transient one-frame hitch like a `scan`,
-            // not a per-tick hot-path alloc. (Removing it to "defer the rebuild" would
-            // break the feature: nothing else triggers the LUT rebuild on a beat.)
-            lyr->onBuildState();
+            reshuffle();              // bump the generation; the Layer's rebuild applies it
+            needsRebuild_ = true;     // Layer::loop() reads + clears this, one rebuild/frame
         }
     }
 
-    // Bump the generation so the next mapToPhysical pass reshuffles to a new permutation.
-    // loop() calls this on a beat; exposed so a test can drive a reshuffle without a Layer.
+    // True iff a beat asked for a fresh permutation since the last rebuild. The Layer
+    // polls this across its enabled modifiers and rebuilds once if any is set, so several
+    // dynamic modifiers ticking in one frame coalesce to a single rebuild.
+    bool consumeNeedsRebuild() override {
+        const bool r = needsRebuild_;
+        needsRebuild_ = false;
+        return r;
+    }
+
+    // Bump the generation so the next rebuild reshuffles. Exposed so a test can drive a
+    // reshuffle without a Layer.
     void reshuffle() { generation_++; }
 
 private:
@@ -158,6 +149,7 @@ private:
     }
 
     // Mutable: mapToPhysical is const but lazily (re)builds the permutation.
+    Coord3D box_;   // stashed in modifyLogicalSize (the box the permutation is over)
     mutable nrOfLightsType* perm_ = nullptr;
     mutable nrOfLightsType  permCount_ = 0;
     mutable uint32_t        rngState_ = 0xBADF00Du;
@@ -167,6 +159,7 @@ private:
     uint64_t phaseNum_ = 0;     // dt*bpm accumulator (numerator; one beat per 60000)
     uint64_t lastBeat_ = 0;
     uint32_t lastElapsed_ = 0;
+    bool     needsRebuild_ = false;   // set on a beat, consumed by Layer::loop (coalesced rebuild)
 };
 
 } // namespace mm

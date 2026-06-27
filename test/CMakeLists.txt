@@ -17,6 +17,9 @@ add_executable(mm_tests
     unit/core/unit_JsonUtil_parse.cpp
     unit/core/unit_MappingLUT.cpp
     unit/core/unit_ModuleFactory.cpp
+    unit/core/unit_moonlive_fill.cpp
+    unit/core/unit_moonlive_compiler.cpp
+    unit/core/unit_moonlive_ir.cpp
     unit/core/unit_MoonModule.cpp
     unit/core/unit_MoonModule_control_change_gate.cpp
     unit/core/unit_MoonModule_lifecycle.cpp
@@ -37,6 +40,7 @@ add_executable(mm_tests
     unit/light/unit_NetworkSendDriver_no_alloc_in_loop.cpp
     unit/light/unit_NetworkSendDriver_packet.cpp
     unit/light/unit_BlendMap.cpp
+    unit/light/unit_Coord3D.cpp
     unit/light/unit_CheckerboardEffect.cpp
     unit/light/unit_SineEffect.cpp
     unit/light/unit_DistortionWavesEffect.cpp
@@ -49,6 +53,8 @@ add_executable(mm_tests
     unit/light/unit_WheelLayout.cpp
     unit/light/unit_Layer_extrude.cpp
     unit/light/unit_Layer_sparse_mapping.cpp
+    unit/light/unit_Layer_modifier_chain.cpp
+    unit/light/unit_Layer_live_modifier.cpp
     unit/light/unit_Layer_phase_animation.cpp
     unit/light/unit_Layer_zero_grid.cpp
     unit/light/unit_Layers_container.cpp

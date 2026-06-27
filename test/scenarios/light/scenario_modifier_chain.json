@@ -1,0 +1,208 @@
+{
+  "name": "scenario_modifier_chain",
+  "module": "Layer",
+  "mode": "mutate",
+  "also": [
+    "RegionModifier",
+    "MultiplyModifier",
+    "CheckerboardModifier",
+    "RotateModifier",
+    "NoiseEffect",
+    "Layouts",
+    "GridLayout",
+    "Drivers",
+    "NetworkSendDriver"
+  ],
+  "description": "Stack TWO modifiers on one Layer (Region then Multiply) and verify the chain composes live end-to-end — the capability the old single-modifier engine couldn't do. Prepares its own canvas: Layout(Grid 32x32) + Layer + NoiseEffect + Region(0..50) + Multiply(2x), measures the composite, then adds a third (Checkerboard mask) and measures again, then removes the middle modifier and measures — exercising add/remove on a multi-modifier chain. A broken fold (null buffer, wrong light count, crash on a disabled/removed stage) shows up as a failed measure. The fold composition + order semantics are pinned by unit_Layer_modifier_chain; this is the live end-to-end gate.",
+  "fixture": [
+    {
+      "name": "fix-layouts",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "fix-grid",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 32,
+        "height": 32
+      }
+    },
+    {
+      "name": "fix-layers",
+      "op": "add_module",
+      "id": "Layers",
+      "type": "Layers",
+      "props": {
+        "layouts": "Layouts"
+      }
+    },
+    {
+      "name": "fix-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "parent_id": "Layers",
+      "props": {
+        "channelsPerLight": 3
+      }
+    },
+    {
+      "name": "fix-fx",
+      "op": "add_module",
+      "id": "FX",
+      "type": "NoiseEffect",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "fix-region",
+      "op": "add_module",
+      "id": "REGION",
+      "type": "RegionModifier",
+      "parent_id": "Layer",
+      "props": {
+        "endX": 50,
+        "endY": 50
+      }
+    },
+    {
+      "name": "fix-mult",
+      "op": "add_module",
+      "id": "MULT",
+      "type": "MultiplyModifier",
+      "parent_id": "Layer"
+    },
+    {
+      "name": "fix-drivers",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "layers": "Layers"
+      }
+    },
+    {
+      "name": "fix-artnet",
+      "op": "add_module",
+      "id": "ArtNet",
+      "type": "NetworkSendDriver",
+      "parent_id": "Drivers"
+    }
+  ],
+  "steps": [
+    {
+      "name": "region-then-multiply",
+      "description": "Two stacked modifiers: Region(top-left quarter) then Multiply(2x mirror) compose into one mapping. Measure the live composite.",
+      "op": "measure",
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            6,
+            37
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-26",
+            "2026-06-27"
+          ]
+        }
+      }
+    },
+    {
+      "name": "add-mask",
+      "description": "Add a third modifier (Checkerboard mask) on top of the chain — a 3-deep fold. Measure that the deeper chain still renders.",
+      "op": "add_module",
+      "id": "MASK",
+      "type": "CheckerboardModifier",
+      "parent_id": "Layer",
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            5,
+            31
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-26",
+            "2026-06-27"
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove-middle",
+      "description": "Remove the middle modifier (Multiply) — the chain re-folds with Region then Checkerboard, no stale state. Measure.",
+      "op": "remove_module",
+      "id": "MULT",
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            18,
+            105
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-26",
+            "2026-06-27"
+          ]
+        }
+      }
+    },
+    {
+      "name": "add-live-rotate",
+      "description": "Add a DYNAMIC Rotate on top of the static chain — its modifyLive runs the per-frame remap pass over the composed buffer. Verifies a static chain + a live modifier coexist (the buffer is remapped each frame on top of the baked Region/Checkerboard mapping) without a crash or null buffer.",
+      "op": "add_module",
+      "id": "ROT",
+      "type": "RotateModifier",
+      "parent_id": "Layer",
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            35,
+            185
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-26",
+            "2026-06-27"
+          ]
+        }
+      }
+    }
+  ]
+}

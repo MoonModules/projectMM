@@ -28,6 +28,7 @@ const char* controlTypeName(ControlType t) {
         case ControlType::Pin:         return "pin";
         case ControlType::Bool:        return "bool";
         case ControlType::Text:        return "text";
+        case ControlType::TextArea:    return "textarea";
         case ControlType::Password:    return "password";
         case ControlType::ReadOnly:    return "display";
         case ControlType::ReadOnlyInt: return "display-int";
@@ -86,9 +87,10 @@ void writeControlValue(JsonSink& sink, const ControlDescriptor& c) {
             sink.append(*static_cast<bool*>(c.ptr) ? "true" : "false");
             return;
         case ControlType::Text:
+        case ControlType::TextArea:
         case ControlType::Password:
         case ControlType::ReadOnly:
-            // All three are char-buffer-backed. Password is rendered as a
+            // All char-buffer-backed. Password is rendered as a
             // plain JSON string here; the HTTP API obfuscates separately
             // at the writeControls call site (persistence writes plaintext).
             // writeJsonString walks the source straight into the sink with
@@ -192,6 +194,7 @@ void writeControlMetadata(JsonSink& sink, const ControlDescriptor& c) {
         // Everything else: no extras.
         case ControlType::Bool:
         case ControlType::Text:
+        case ControlType::TextArea:
         case ControlType::Password:
         case ControlType::ReadOnly:
         case ControlType::IPv4:
@@ -262,8 +265,10 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
             *static_cast<bool*>(c.ptr) = mm::json::parseBool(json, key);
             return ApplyResult::Ok;
         case ControlType::Text:
+        case ControlType::TextArea:
         case ControlType::Password: {
-            // Password parses identically to Text — only serialization differs.
+            // TextArea and Password parse identically to Text — only the UI render
+            // (TextArea) or serialization (Password) differs.
             // c.max is the buffer size; parseString writes up to maxLen-1 then
             // NUL-terminates, so passing c.max gives "fill the buffer".
             uint8_t maxLen = static_cast<uint8_t>(c.max > 0 ? c.max : 16);
