@@ -6,7 +6,7 @@
 
 // MoonLive RISC-V backend (ESP32-P4) — lower a neutral IR program to RV32 bytes by driving the
 // RISC-V assembler. The device counterpart of the Xtensa/host lowerings: same IR + the same
-// WriteRGB/FillRGB inline ops; only the assembler differs. Host args: kArg0=buf, kArg1=nLights,
+// StoreElem/FillElems inline ops; only the assembler differs. Host args: kArg0=buf, kArg1=nLights,
 // kArg2=cpl, kArg3=t.
 
 #if defined(__riscv)
@@ -15,18 +15,10 @@ namespace mm::moonlive {
 
 namespace {
 Reg reg(VReg v) { return static_cast<Reg>(v); }
-
-// random16(n) → a value in [0,n). The same LCG as the other backends so a script behaves
-// identically on every target.
-extern "C" uint32_t mm_riscv_random16(uint32_t n) {
-    static uint32_t s = 0x2545F491u;
-    s = s * 1664525u + 1013904223u;
-    return n ? (s >> 16) % n : 0u;
-}
 }
 
 size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
-    // WriteRGB folds the address into the index vreg (no scratch); FillRGB needs two.
+    // StoreElem folds the address into the index vreg (no scratch); FillElems needs two.
     if (!out || cap == 0 || ir.vregsUsed + 2 > kRegCount) return 0;
     const Reg sCtr  = static_cast<Reg>(ir.vregsUsed);
     const Reg sAddr = static_cast<Reg>(ir.vregsUsed + 1);
@@ -40,18 +32,15 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
             case IrOp::Add:    a.addReg(reg(op.dst), reg(op.a), reg(op.b)); break;
             case IrOp::AddImm: a.addImm(reg(op.dst), reg(op.a), op.imm); break;
             case IrOp::Mul:    a.mulReg(reg(op.dst), reg(op.a), reg(op.b)); break;
-            case IrOp::Call: {
-                // Map the IR Call to the named built-in. (Only random16 today; the parser
-                // already resolved the name — the IR carries the host fn ptr, but on-device we
-                // re-resolve to this TU's copy so the address is valid in the flashed image.)
-                const void* fn = reinterpret_cast<const void*>(&mm_riscv_random16);
-                (void)op.callFn;
-                a.call(reg(op.dst), reg(op.a), fn);
+            case IrOp::Call:
+                // The IR carries the host's function pointer (the light TU's random16), valid in
+                // the single flashed image — call it directly, same as the other backends.
+                if (!op.callFn) return 0;
+                a.call(reg(op.dst), reg(op.a), reinterpret_cast<const void*>(op.callFn));
                 break;
-            }
             case IrOp::Inline:
                 switch (op.inlineOp) {
-                    case InlineOp::WriteRGB: {
+                    case InlineOp::StoreElem: {
                         Label skip = a.newLabel();
                         a.branchGeU(reg(op.a), reg(kArg1), skip);
                         a.mulReg(reg(op.a), reg(op.a), reg(kArg2));    // index = index*cpl
@@ -61,7 +50,7 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
                         a.bind(skip);
                         break;
                     }
-                    case InlineOp::FillRGB: {
+                    case InlineOp::FillElems: {
                         Label done = a.newLabel(), top = a.newLabel();
                         a.movImm(sCtr, 0);
                         a.branchIfZero(reg(kArg1), done);

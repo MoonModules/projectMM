@@ -2,7 +2,7 @@
 
 MoonLive is projectMM's **live-script engine** — author an effect as text and run it on a running device, compiled to native machine code so it executes at near-hand-written speed in the render hot path. The broader design lives in [livescripts-analysis-top-down.md](../../../backlog/livescripts-analysis-top-down.md) (a backlog design study); this page documents the module.
 
-A scripted effect carries its **script source** as an editable, persisted text control, and a front-end (lexer → parser → IR → per-ISA assembler) compiles it to native code on the next tick. The grammar is a function-call statement with **expression arguments** — any argument may be a literal or a nested call:
+A scripted effect carries its **script source** as an editable, persisted multi-line text control (a resizable `textarea` in the UI), and a front-end (lexer → parser → IR → per-ISA assembler) compiles it to native code on the next tick. The grammar is a function-call statement with **expression arguments** — any argument may be a literal or a nested call:
 
 ```
 setRGB(random16(256), 0, 0, 255);   // a random pixel, blue

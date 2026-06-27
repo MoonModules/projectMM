@@ -60,7 +60,21 @@ static uint32_t encBranch(uint8_t rs1, uint8_t rs2, uint8_t f3, int32_t off) {  
            (f3 << 12) | (((o >> 1) & 0xf) << 8) | (((o >> 11) & 1) << 7) | 0x63;
 }
 
-void RiscvAssembler::movImm(Reg d, int32_t imm) { emit32(encAddi(xr(d), 0, imm)); }     // li = addi rd,x0,imm
+void RiscvAssembler::movImm(Reg d, int32_t imm) {
+    // addi sign-extends a 12-bit immediate, so it alone covers only -2048..2047. For wider
+    // constants (a uint16 like 65535) materialise the full value with lui (high 20 bits) + addi
+    // (low 12), the hi/lo split — without this, larger Const values truncate. Single addi when
+    // the value fits, to keep the common small-constant case one instruction.
+    if (imm >= -2048 && imm <= 2047) {
+        emit32(encAddi(xr(d), 0, imm));                    // li = addi rd, x0, imm
+        return;
+    }
+    uint32_t v  = static_cast<uint32_t>(imm);
+    uint32_t hi = (v + 0x800) >> 12;                       // round for the sign-extended addi
+    int32_t  lo = static_cast<int32_t>(v) - static_cast<int32_t>(hi << 12);
+    emit32(encLui(xr(d), hi & 0xfffff));                   // lui rd, hi
+    emit32(encAddi(xr(d), xr(d), lo));                     // addi rd, rd, lo
+}
 void RiscvAssembler::movReg(Reg d, Reg a)       { emit32(encAddi(xr(d), xr(a), 0)); }   // mv = addi rd,ra,0
 void RiscvAssembler::addImm(Reg d, Reg a, int32_t imm) { emit32(encAddi(xr(d), xr(a), imm)); }
 void RiscvAssembler::addReg(Reg d, Reg a, Reg b) { emit32(encAdd(xr(d), xr(a), xr(b))); }

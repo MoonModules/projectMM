@@ -74,16 +74,25 @@ TEST_CASE("compileSource: out-of-range index is bounds-rejected at runtime") {
 
 TEST_CASE("compileSource rejects malformed programs with a diagnostic, never crashes") {
     uint8_t out[256];
+    // Each of these MUST fail — assert it, so an accidental successful compile is caught (not
+    // just "no crash"). Wrong arity, unknown name, unbalanced parens, trailing junk, empty.
     const char* bad[] = {
-        "", "setRGB(0,0,255);", "setRGB(0,0,0,0,0);", "fill(0,0);", "wibble(1);",
-        "setRGB(0, 0, 0", "fill(0,0,0)", "fill(0,0,0); extra", "random16(8);"  /* void use of a value-returning fn is allowed; trailing form */,
-        "setRGB(random8(8), 0, 0, 0);" /* unknown nested fn */,
+        "",                                  // empty
+        "setRGB(0,0,0,0,0);",                // too many args
+        "fill(0,0);",                        // too few args
+        "wibble(1);",                        // unknown function
+        "setRGB(0, 0, 0",                    // missing ')'  and ';'
+        "fill(0,0,0)",                       // missing ';'
+        "fill(0,0,0); extra",                // trailing junk
+        "setRGB(random8(8), 0, 0, 0);",      // unknown nested function
     };
     for (auto s : bad) {
         auto r = moonlive::compileSource(s, kTable, out, sizeof(out));
-        // most are errors; we only require no crash + a message when it fails
-        if (!r.ok) CHECK(std::strlen(r.error) > 0);
+        CHECK_FALSE(r.ok);                   // the parser contract: malformed → rejected
+        CHECK(std::strlen(r.error) > 0);     // …with a diagnostic
     }
+    // A value-returning function used as a void statement IS valid (result discarded).
+    CHECK(moonlive::compileSource("random16(8);", kTable, out, sizeof(out)).ok);
 }
 
 TEST_CASE("MoonLive.compile(source) on a bad script leaves the engine !ok with an error") {
@@ -126,7 +135,7 @@ TEST_CASE("core compiler has no built-in functions of its own (empty table → a
     }
     // A host can register an arbitrary name against the same neutral machinery.
     moonlive::BuiltinTable custom;
-    custom.add({"paint", 4, false, moonlive::BuiltinKind::Inline, nullptr, moonlive::InlineOp::WriteRGB});
+    custom.add({"paint", 4, false, moonlive::BuiltinKind::Inline, nullptr, moonlive::InlineOp::StoreElem});
     auto r = moonlive::compileSource("paint(2, 9, 8, 7);", custom, out, sizeof(out));
     CHECK(r.ok);                                 // a different name, same core path
 }

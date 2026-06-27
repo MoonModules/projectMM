@@ -6,7 +6,7 @@
 
 // MoonLive Xtensa backend — lower a neutral IR program to Xtensa machine bytes by driving the
 // Xtensa assembler. The device counterpart of moonlive_lower_host.cpp: same IR + the same
-// WriteRGB/FillRGB inline ops the host registered; only the assembler/ABI differ. Built under
+// StoreElem/FillElems inline ops the host registered; only the assembler/ABI differ. Built under
 // __XTENSA__ (classic ESP32 / S3). The host args arrive as kArg0=buf, kArg1=nLights, kArg2=cpl,
 // kArg3=t (the only LED-layout assumption, used to implement the inline ops).
 
@@ -19,11 +19,11 @@ Reg reg(VReg v) { return static_cast<Reg>(v); }
 }
 
 size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
-    // WriteRGB needs no scratch (it folds the address into the index vreg); FillRGB needs two
+    // StoreElem needs no scratch (it folds the address into the index vreg); FillElems needs two
     // (counter + per-channel addr) above the program's vregs. Reserve the max either uses.
     if (!out || cap == 0 || ir.vregsUsed + 2 > kRegCount) return 0;
-    const Reg sCtr  = static_cast<Reg>(ir.vregsUsed);       // FillRGB loop counter
-    const Reg sAddr = static_cast<Reg>(ir.vregsUsed + 1);   // FillRGB per-channel address
+    const Reg sCtr  = static_cast<Reg>(ir.vregsUsed);       // FillElems loop counter
+    const Reg sAddr = static_cast<Reg>(ir.vregsUsed + 1);   // FillElems per-channel address
 
     XtensaAssembler a;
     a.prologue();
@@ -37,11 +37,11 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
             case IrOp::Mul:    a.mulReg(reg(op.dst), reg(op.a), reg(op.b)); break;
             case IrOp::Call:
                 if (!op.callFn) return 0;
-                a.call(reg(op.dst), reg(op.a), op.callFn);
+                a.call(reg(op.dst), reg(op.a), reinterpret_cast<const void*>(op.callFn));
                 break;
             case IrOp::Inline:
                 switch (op.inlineOp) {
-                    case InlineOp::WriteRGB: {
+                    case InlineOp::StoreElem: {
                         // setRGB(index=a, r=b, g=c, b=d): bounds-guard, then fold the address
                         // INTO the index vreg (dead after) so no extra scratch is needed.
                         Label skip = a.newLabel();
@@ -53,7 +53,7 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
                         a.bind(skip);
                         break;
                     }
-                    case InlineOp::FillRGB: {
+                    case InlineOp::FillElems: {
                         // fill(r=a, g=b, b=c): for i in 0..nLights { addr=i*cpl; buf[addr+0..2]=r,g,b }.
                         // Two scratch: sCtr (i), sAddr (the per-light address).
                         Label done = a.newLabel(), top = a.newLabel();

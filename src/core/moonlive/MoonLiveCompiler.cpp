@@ -6,7 +6,7 @@ namespace mm::moonlive {
 
 namespace {
 
-// --- Lexer (unchanged shape) ---------------------------------------------------------
+// --- Lexer ---------------------------------------------------------------------------
 enum class Tok { Ident, Number, LParen, RParen, Comma, Semicolon, End, Error };
 
 struct Lexer {
@@ -76,9 +76,17 @@ struct Parser {
     // instead of the count growing without bound. The textbook tree-walk register stack.
     VReg alloc() {
         if (freeCount) return freeStack[--freeCount];
-        return (nextTemp < kMaxVRegs) ? nextTemp++ : VReg(kMaxVRegs - 1);
+        if (nextTemp < kMaxVRegs) return nextTemp++;
+        // Out of virtual registers — a statement deeper than the fixed file holds. Fail the
+        // compile rather than aliasing the last vreg (which would silently produce wrong IR).
+        fail("script too complex (out of registers)");
+        return kFirstTemp;
     }
     void freeTemp(VReg v) { if (v >= kFirstTemp && freeCount < kMaxVRegs) freeStack[freeCount++] = v; }
+
+    // Append an IR op, failing the compile if the program is full or names an out-of-budget
+    // vreg (IrProgram::push validates both). Centralises the check so no call site forgets it.
+    void emit(const IrInst& i) { if (!ir.push(i)) fail("script too large"); }
 
     bool expect(Tok t, const char* msg) {
         if (lex.kind != t) { fail(msg); return false; }
@@ -92,7 +100,7 @@ struct Parser {
         if (lex.kind == Tok::Number) {
             if (lex.number < 0 || lex.number > 65535) { fail("number out of range (0..65535)"); return 0; }
             VReg v = alloc();
-            ir.push({IrOp::Const, v, 0,0,0,0, static_cast<int32_t>(lex.number), nullptr, {}});
+            emit({IrOp::Const, v, 0,0,0,0, static_cast<int32_t>(lex.number), nullptr, {}});
             lex.advance();
             return v;
         }
@@ -130,6 +138,11 @@ struct Parser {
         if (n != fn->argc) { fail("wrong number of arguments"); return; }
         if (!expect(Tok::RParen, "expected ')'")) return;
 
+        // The IR Call op carries a single argument vreg, so a Call-kind builtin must be unary.
+        // (Today random16 is the only one.) Reject a multi-arg Call up front rather than silently
+        // dropping args[1..]; a future N-ary helper needs the IR Call contract widened first.
+        if (fn->kind == BuiltinKind::Call && fn->argc > 1) { fail("multi-argument calls are not supported"); return; }
+
         if (resultOut) {
             if (fn->kind != BuiltinKind::Call || !fn->returns) { fail("this function does not return a value"); return; }
             // The argument temps are consumed by the call; free them, then allocate the result
@@ -138,7 +151,7 @@ struct Parser {
             // safe even when result == arg.
             for (uint8_t i = 0; i < n; i++) freeTemp(args[i]);
             VReg r = alloc();
-            ir.push({IrOp::Call, r, args[0], 0,0,0, 0, fn->fn, {}});
+            emit({IrOp::Call, r, args[0], 0,0,0, 0, fn->fn, {}});
             *resultOut = r;
         } else {
             // A statement call. Call kinds with a result are also allowed as statements (result
@@ -146,12 +159,12 @@ struct Parser {
             if (fn->kind == BuiltinKind::Call) {
                 for (uint8_t i = 0; i < n; i++) freeTemp(args[i]);
                 VReg r = alloc();
-                ir.push({IrOp::Call, r, args[0], 0,0,0, 0, fn->fn, {}});
+                emit({IrOp::Call, r, args[0], 0,0,0, 0, fn->fn, {}});
                 freeTemp(r);
             } else {
                 // Inline op: hand the operand vregs to the backend via an Inline IR op. The
                 // operand mapping per inline op is the backend's contract (documented there).
-                ir.push({IrOp::Inline, 0, args[0], args[1], args[2], args[3], 0, nullptr, fn->inlineOp});
+                emit({IrOp::Inline, 0, args[0], args[1], args[2], args[3], 0, nullptr, fn->inlineOp});
                 for (uint8_t i = 0; i < n; i++) freeTemp(args[i]);
             }
         }

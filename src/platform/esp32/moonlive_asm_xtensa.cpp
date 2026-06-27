@@ -42,10 +42,26 @@ Label XtensaAssembler::newLabel() {
 }
 void XtensaAssembler::bind(Label l) { labelPos_[l] = static_cast<int32_t>(len_); }
 
-// movi aD, #imm  (wide form, byte immediate 0..255): bytes [ (d<<4)|2, 0xa0, imm ]
+// movi aD, #imm. The narrow byte form carries only 0..255, so a wider constant (a uint16 like
+// 65535) is built as hi8<<8 | lo8: movi aD,hi8 ; slli aD,aD,8 ; movi a13,lo8 ; add.n aD,aD,a13.
+// a13 is the assembler's reserved scratch (also kZero in branchIfZero); it holds no live vreg.
+// Single movi for the common 0..255 case. Without this, Const values >255 truncate to 8 bits.
 void XtensaAssembler::movImm(Reg d, int32_t imm) {
-    const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), 0xa0, uint8_t(imm & 0xff)};
-    emit(b, 3);
+    const uint32_t v = static_cast<uint32_t>(imm) & 0xffff;
+    const uint8_t dr = ar(d);
+    if (v <= 0xff) {
+        const uint8_t b[3] = {uint8_t((dr << 4) | 0x2), 0xa0, uint8_t(v)};
+        emit(b, 3);
+        return;
+    }
+    static constexpr uint8_t kTmp = 13;                                  // a13 (reserved scratch)
+    const uint8_t hi[3] = {uint8_t((dr << 4) | 0x2), 0xa0, uint8_t(v >> 8)};
+    emit(hi, 3);                                                         // movi aD, hi8
+    const uint8_t sl[3] = {0x80, uint8_t((dr << 4) | dr), 0x11};
+    emit(sl, 3);                                                         // slli aD, aD, 8
+    const uint8_t lo[3] = {uint8_t((kTmp << 4) | 0x2), 0xa0, uint8_t(v & 0xff)};
+    emit(lo, 3);                                                         // movi a13, lo8
+    emit2(uint16_t((dr << 12) | (dr << 8) | (kTmp << 4) | 0xa));         // add.n aD, aD, a13
 }
 // add.n aD, aA, aB : word (d<<12)|(a<<8)|(b<<4)|0xa
 void XtensaAssembler::addReg(Reg d, Reg a, Reg b) {

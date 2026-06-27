@@ -8,7 +8,7 @@
 // assembler. The IR is neutral; this file knows how each IR op becomes assembler calls. The
 // host arguments arrive in the lowest vregs (the light host assigns kArg0=buf, kArg1=nLights,
 // kArg2=cpl, kArg3=t — the only place this backend assumes the LED layout, and only to
-// implement the WriteRGB/FillRGB inline ops the host registered).
+// implement the StoreElem/FillElems inline ops the host registered).
 //
 // Vregs map 1:1 onto the assembler's Reg handles. The inline ops use a couple of scratch
 // registers ABOVE the program's high-water mark (the parser never allocates them), so they
@@ -38,11 +38,11 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
             case IrOp::Mul:    a.mulReg(reg(op.dst), reg(op.a), reg(op.b)); break;
             case IrOp::Call:
                 if (!op.callFn) return 0;
-                a.call(reg(op.dst), reg(op.a), op.callFn);
+                a.call(reg(op.dst), reg(op.a), reinterpret_cast<const void*>(op.callFn));
                 break;
             case IrOp::Inline:
                 switch (op.inlineOp) {
-                    case InlineOp::WriteRGB: {
+                    case InlineOp::StoreElem: {
                         // setRGB(index=a, r=b, g=c, b=d): bounds-guard, addr = index*cpl, store 3.
                         Label skip = a.newLabel();
                         a.cmp(reg(op.a), reg(kArg1));         // index vs nLights
@@ -54,7 +54,7 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
                         a.bind(skip);
                         break;
                     }
-                    case InlineOp::FillRGB: {
+                    case InlineOp::FillElems: {
                         // fill(r=a, g=b, b=c): for i in 0..nLights { buf[i*cpl+0..2] = r,g,b }.
                         // sOff = byte base of the current light; sAddr = sOff/+1/+2 per channel
                         // (a fresh copy each light so the +1/+2 never corrupt sOff); sOff += cpl.

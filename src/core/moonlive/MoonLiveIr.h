@@ -48,7 +48,7 @@ struct IrInst {
     VReg     dst = 0;
     VReg     a = 0, b = 0, c = 0, d = 0;   // source vregs (op-dependent)
     int32_t  imm = 0;                      // immediate (Const) / addr offset
-    const void* callFn = nullptr;          // Call: the host C function pointer
+    HostCallFn callFn = nullptr;           // Call: the host C function pointer (typed alias)
     InlineOp inlineOp{};                   // Inline: the neutral opcode tag
 };
 
@@ -60,6 +60,10 @@ struct IrProgram {
 
     bool push(const IrInst& i) {
         if (count >= kMaxIrOps) return false;
+        // Reject any op that names a vreg outside the fixed register budget — an invalid program
+        // is dropped at the seam rather than reaching a backend that would index past its map.
+        if (i.dst >= kMaxVRegs || i.a >= kMaxVRegs || i.b >= kMaxVRegs ||
+            i.c >= kMaxVRegs || i.d >= kMaxVRegs) return false;
         ops[count++] = i;
         if (i.dst + 1 > vregsUsed) vregsUsed = static_cast<VReg>(i.dst + 1);
         return true;

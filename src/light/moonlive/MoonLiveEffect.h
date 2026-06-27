@@ -26,7 +26,7 @@ public:
     // recompiles live (the script-editor loop), the same way any control edit reshapes a
     // compiled module — no bespoke path. The default is a solid-blue fill program.
     void onBuildControls() override {
-        controls_.addText("source", source_, sizeof(source_));
+        controls_.addTextArea("source", source_, sizeof(source_));
     }
 
     // A `source` edit must recompile — route it through the onBuildState rebuild sweep so a

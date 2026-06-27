@@ -43,19 +43,22 @@ body {
     color: var(--fg);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     font-size: 14px;
-    padding-top: 44px;  /* clear fixed status bar */
+    padding-top: 60px;  /* clear the floating status bar (8 top + 44 height + 8 gap) */
 }
 
 /* ============================================================
    Status bar (fixed top, 44px)
    ============================================================ */
 
+/* Status bar floats as a rounded panel inset from the window edges (the same
+   "card" look as the module cards), rather than a flush edge-to-edge bar. */
 #status-bar {
     position: fixed;
-    top: 0; left: 0; right: 0;
+    top: 8px; left: 8px; right: 8px;
     height: 44px;
     background: var(--bg-1);
-    border-bottom: 1px solid var(--border);
+    border: 1px solid var(--border);
+    border-radius: 8px;
     display: flex;
     align-items: center;
     padding: 0 12px;
@@ -150,12 +153,16 @@ body {
    it becomes a slide-in drawer the hamburger opens (see the @media block). */
 #nav {
     position: sticky;
-    top: 44px;
+    top: 60px;
     width: 200px;
     flex: 0 0 200px;
-    height: calc(100vh - 44px);
+    /* Floating rounded panel (matches the status bar / cards): inset on the left
+       with a gap below the floating status bar, rounded on all corners. */
+    margin: 0 8px 8px 8px;
+    height: calc(100vh - 68px);
     background: var(--bg-1);
-    border-right: 1px solid var(--border);
+    border: 1px solid var(--border);
+    border-radius: 8px;
     display: flex;
     flex-direction: column;
     overflow-y: auto;
@@ -620,7 +627,8 @@ body {
 .control-row input[type="text"],
 .control-row input[type="password"],
 .control-row input[type="number"]:not(.control-value-input),
-.control-row select {
+.control-row select,
+.control-row .control-textarea {
     flex: 1;
     background: var(--bg-0);
     border: 1px solid var(--border);
@@ -628,6 +636,27 @@ body {
     padding: 4px 8px;
     border-radius: 4px;
     font-size: 13px;
+}
+/* Multi-line text control (e.g. script source). Compact by default (one row); the
+   user drags the bottom-right grip down for more room. Monospace so code lines up.
+   The browser's native resize handle is faint, so we paint an explicit grip — two
+   diagonal lines in the bottom-right corner (a recognisable resize affordance) via
+   a layered linear-gradient background. */
+.control-row .control-textarea {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    resize: vertical;          /* draggable grip, vertical only */
+    min-height: 1.5em;
+    height: 1.9em;             /* default ~one row; resize/typing grows it */
+    line-height: 1.4;
+    width: 100%;
+    white-space: pre;          /* don't wrap long script lines */
+    overflow: auto;
+    /* A small solid corner triangle (no transparency) — a compact, prominent
+       resize affordance. */
+    background-image: linear-gradient(135deg, transparent 50%, var(--accent) 50%);
+    background-repeat: no-repeat;
+    background-position: bottom 1px right 1px;
+    background-size: 7px 7px;
 }
 .control-row input[type="checkbox"] {
     accent-color: var(--accent);
@@ -907,10 +936,15 @@ body {
        opens it. body.nav-open shows the drawer over a dimming overlay. */
     #nav {
         position: fixed;
-        top: 44px;
+        top: 60px;
         left: 0;
         bottom: 0;
         height: auto;
+        /* Drawer slides flush from the left edge — drop the floating-panel inset
+           and corner rounding the wide-screen rule applies. */
+        margin: 0;
+        border-radius: 0;
+        border-right: 1px solid var(--border);
         transform: translateX(-100%);
         transition: transform 0.2s ease;
         z-index: 90;
@@ -921,7 +955,7 @@ body {
     }
     #nav-overlay {
         position: fixed;
-        top: 44px;
+        top: 60px;
         left: 0; right: 0; bottom: 0;
         background: rgba(0, 0, 0, 0.5);
         z-index: 80;
