@@ -2,6 +2,7 @@
 
 #include "light/effects/EffectBase.h"
 #include "core/moonlive/MoonLive.h"
+#include "light/moonlive/MoonLiveBuiltins_light.h"
 #include <cstring>
 
 // MoonLiveEffect — a scripted effect rendered by the MoonLive engine (§3.3 of
@@ -41,7 +42,7 @@ public:
     // here and recompiles, so a new script swaps in live; a broken edit just shows its
     // diagnostic and the layer goes dark until it's fixed.
     void onBuildState() override {
-        if (engine_.compile(source_)) {
+        if (engine_.compile(source_, moonlive::lightBuiltins())) {
             clearStatus();
         } else {
             setStatus(engine_.error(), Severity::Error);
@@ -60,7 +61,7 @@ public:
 
 private:
     moonlive::MoonLive engine_;
-    char source_[64] = "fill(0, 0, 255);";   // default script — solid blue, from parsed source
+    char source_[128] = "fill(0, 0, 255);";   // default script — solid blue, from parsed source
 };
 
 }  // namespace mm

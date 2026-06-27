@@ -1,4 +1,5 @@
 #include "core/moonlive/moonlive_emit.h"
+#include "core/moonlive/MoonLiveIr.h"
 
 #include <cstring>
 
@@ -11,10 +12,9 @@
 //   void fill(uint8_t* buf, uint32_t nLights, uint8_t cpl[, uint32_t t])
 //   for (i=0; i<nLights; i++) { buf[i*cpl+0]=r; buf[i*cpl+1]=g; buf[i*cpl+2]=b; }
 //
-// ISA is chosen at compile time (__XTENSA__ / __riscv) — the SAME #if-by-arch shape the
-// desktop backend uses for arm64/x86-64. Adding the P4 (RISC-V) was exactly this: one new
-// branch here, with the engine, the front-end (lexer/parser/codegen), the binding, and the
-// platform seam ALL UNTOUCHED — the IR/backend-seam decoupling, demonstrated (Stage 0.5).
+// ISA is chosen at compile time (__XTENSA__ / __riscv) — the same #if-by-arch shape the
+// desktop backend uses for arm64/x86-64. Each ISA is one branch here; the engine, the
+// front-end (lexer/parser/codegen), the binding, and the platform seam are ISA-neutral.
 //
 // Every byte array below is the VERBATIM assembler output (xtensa-…-as / riscv32-…-as,
 // objcopy'd from .text), never hand-transcribed from a disassembly — a hand-grouped Xtensa
@@ -65,7 +65,7 @@ static const uint8_t kXtensaFill[] = {
 static constexpr size_t kR = 0x0b, kG = 0x0e, kB = 0x11;   // colour-immediate byte offsets
 
 size_t emitFill(uint8_t* out, size_t cap, uint8_t r, uint8_t g, uint8_t b) {
-    if (cap < sizeof(kXtensaFill)) return 0;
+    if (!out || cap < sizeof(kXtensaFill)) return 0;
     std::memcpy(out, kXtensaFill, sizeof(kXtensaFill));
     out[kR] = r;
     out[kG] = g;
@@ -94,7 +94,7 @@ static const uint8_t kXtensaAnim[] = {
 };
 
 size_t emitAnimatedFill(uint8_t* out, size_t cap) {
-    if (cap < sizeof(kXtensaAnim)) return 0;
+    if (!out || cap < sizeof(kXtensaAnim)) return 0;
     std::memcpy(out, kXtensaAnim, sizeof(kXtensaAnim));
     return sizeof(kXtensaAnim);
 }
@@ -129,7 +129,7 @@ static void putWord(uint8_t* p, uint32_t w) {        // little-endian store
 }
 
 size_t emitFill(uint8_t* out, size_t cap, uint8_t r, uint8_t g, uint8_t b) {
-    if (cap < sizeof(kRiscvFill)) return 0;
+    if (!out || cap < sizeof(kRiscvFill)) return 0;
     std::memcpy(out, kRiscvFill, sizeof(kRiscvFill));
     putWord(out + 12, kRvLiBaseR | (uint32_t(r) << 20));   // word 3
     putWord(out + 16, kRvLiBaseG | (uint32_t(g) << 20));   // word 4
@@ -148,7 +148,7 @@ static const uint8_t kRiscvAnim[] = {
 };
 
 size_t emitAnimatedFill(uint8_t* out, size_t cap) {
-    if (cap < sizeof(kRiscvAnim)) return 0;
+    if (!out || cap < sizeof(kRiscvAnim)) return 0;
     std::memcpy(out, kRiscvAnim, sizeof(kRiscvAnim));
     return sizeof(kRiscvAnim);
 }
@@ -156,5 +156,7 @@ size_t emitAnimatedFill(uint8_t* out, size_t cap) {
 #else
 #error "MoonLive ESP32 backend: unsupported ISA (expected Xtensa or RISC-V)"
 #endif
+
+// lowerToBytes lives per-ISA in moonlive_lower_xtensa.cpp / moonlive_lower_riscv.cpp.
 
 }  // namespace mm::moonlive

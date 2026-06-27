@@ -67,6 +67,8 @@ target_link_libraries(mm_core PUBLIC mm_platform)
 add_library(mm_platform
     src/platform/desktop/platform_desktop.cpp
     src/platform/desktop/moonlive_emit.cpp
+    src/platform/desktop/moonlive_asm_host.cpp
+    src/platform/desktop/moonlive_lower_host.cpp
 )
 target_include_directories(mm_platform PUBLIC src/ src/platform/desktop/)
 # Winsock for the desktop socket surface on Windows.

@@ -37,4 +37,12 @@ size_t emitFill(uint8_t* out, size_t cap, uint8_t r, uint8_t g, uint8_t b);
 // (the grid's red ramps over time). Same emit/exec/call path as emitFill, one extra arg.
 size_t emitAnimatedFill(uint8_t* out, size_t cap);
 
+struct IrProgram;   // src/core/moonlive/MoonLiveIr.h
+
+// Lower a typed IR program to machine code for this TU's ISA, via the per-ISA assembler.
+// This is the general codegen path the front-end uses; emitFill/emitAnimatedFill are the
+// hand-encoded references the assembler-built output is behaviorally checked against. Returns
+// the byte count, or 0 on overflow / cap too small (the caller degrades).
+size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap);
+
 }  // namespace mm::moonlive

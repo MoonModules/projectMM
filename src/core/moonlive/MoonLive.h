@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstddef>
 #include "core/moonlive/moonlive_emit.h"
+#include "core/moonlive/MoonLiveBuiltins.h"
 
 // MoonLive — the live-script engine core (domain-neutral, §3.1/§3.9 of
 // livescripts-analysis-top-down.md). compile() turns a program into native code — either a
@@ -31,10 +32,11 @@ public:
     // leaves the engine !ok() with an error() — the caller degrades, never crashes.
     bool compile(uint8_t r, uint8_t g, uint8_t b);
 
-    // Compile SOURCE TEXT. The front-end (MoonLiveCompiler) lexes/parses the `fill(r,g,b);`
-    // statement and emits the same code compile(r,g,b) would. A parse error leaves the engine
+    // Compile SOURCE TEXT, resolving function calls against `table` (the host's registered
+    // built-ins — see MoonLiveBuiltins.h). The front-end parses an expression-call statement
+    // and lowers it through the IR + per-ISA assembler. A parse/codegen error leaves the engine
     // !ok() with error() pointing at the diagnostic — the script editor's failure path.
-    bool compile(const char* source);
+    bool compile(const char* source, const BuiltinTable& table);
 
     // Compile the animated routine (colour derived from the per-frame `t`).
     bool compileAnimated();

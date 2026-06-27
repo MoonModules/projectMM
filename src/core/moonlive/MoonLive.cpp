@@ -4,10 +4,13 @@
 
 namespace mm::moonlive {
 
-// Fixed cap for an emitted routine — a fill loop is a few dozen bytes on any ISA; the emitter
-// returns the real length and the unused tail is harmless. Sized once here, word-aligned so
-// allocExec/writeExec's word-rounding never exceeds it.
-static constexpr size_t kCodeCap = 256;
+// Fixed cap for an emitted routine. Sized for the heaviest realistic single statement — a
+// setRGB with all four arguments a host call (4 × a full register-save call sequence, ~140
+// bytes each on RISC-V, the bulkiest ISA, plus the inline store). The emitter returns the real
+// length and the unused tail is harmless; exec memory is cheap, so we size for the worst case
+// rather than grow per script. Word-aligned so allocExec/writeExec's word-rounding never
+// exceeds it.
+static constexpr size_t kCodeCap = 768;
 
 // Copy `len` already-emitted bytes into a fresh exec block. writeExec hides the ISA quirks
 // (IRAM's 32-bit-store-only rule, the I-cache sync), so the engine stays target-agnostic.
@@ -34,9 +37,9 @@ bool MoonLive::compile(uint8_t r, uint8_t g, uint8_t b) {
     return true;
 }
 
-bool MoonLive::compile(const char* source) {
+bool MoonLive::compile(const char* source, const BuiltinTable& table) {
     uint8_t staging[kCodeCap];
-    CompileResult cr = compileSource(source, staging, kCodeCap);
+    CompileResult cr = compileSource(source, table, staging, kCodeCap);
     if (!cr.ok) { free(); error_ = cr.error; return false; }   // surface the parse diagnostic
     void* block = place(staging, cr.len);
     if (!block) return false;

@@ -41,7 +41,7 @@ static const uint32_t kArm64[] = {
 };
 
 size_t emitFill(uint8_t* out, size_t cap, uint8_t r, uint8_t g, uint8_t b) {
-    if (cap < sizeof(kArm64)) return 0;
+    if (!out || cap < sizeof(kArm64)) return 0;
     uint32_t code[sizeof(kArm64) / 4];
     std::memcpy(code, kArm64, sizeof(kArm64));
     // Patch the colour immediates: mov wN,#imm encodes imm at bits [20:5]; the base word
@@ -78,7 +78,7 @@ static const uint32_t kArm64Anim[] = {
 };
 
 size_t emitAnimatedFill(uint8_t* out, size_t cap) {
-    if (cap < sizeof(kArm64Anim)) return 0;
+    if (!out || cap < sizeof(kArm64Anim)) return 0;
     std::memcpy(out, kArm64Anim, sizeof(kArm64Anim));
     return sizeof(kArm64Anim);
 }
@@ -107,7 +107,7 @@ static const uint8_t kX64[] = {
 };
 
 size_t emitFill(uint8_t* out, size_t cap, uint8_t r, uint8_t g, uint8_t b) {
-    if (cap < sizeof(kX64)) return 0;
+    if (!out || cap < sizeof(kX64)) return 0;
     std::memcpy(out, kX64, sizeof(kX64));
     out[0x11] = r;
     out[0x17] = g;
@@ -137,7 +137,7 @@ static const uint8_t kX64Anim[] = {
 };
 
 size_t emitAnimatedFill(uint8_t* out, size_t cap) {
-    if (cap < sizeof(kX64Anim)) return 0;
+    if (!out || cap < sizeof(kX64Anim)) return 0;
     std::memcpy(out, kX64Anim, sizeof(kX64Anim));
     return sizeof(kX64Anim);
 }

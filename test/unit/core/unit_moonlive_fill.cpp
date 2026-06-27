@@ -28,6 +28,11 @@ TEST_CASE("MoonLive emitFill rejects a too-small buffer (degrades, no overrun)")
     CHECK(moonlive::emitFill(tiny, sizeof(tiny), 1, 2, 3) == 0);
 }
 
+TEST_CASE("MoonLive emitFill/emitAnimatedFill reject a null output buffer (no crash)") {
+    CHECK(moonlive::emitFill(nullptr, 256, 1, 2, 3) == 0);   // ample cap, null out → 0, not a deref
+    CHECK(moonlive::emitAnimatedFill(nullptr, 256) == 0);
+}
+
 TEST_CASE("MoonLive compiles and fills a buffer with the chosen colour") {
     moonlive::MoonLive engine;
     REQUIRE(engine.compile(/*r*/ 10, /*g*/ 20, /*b*/ 200));
