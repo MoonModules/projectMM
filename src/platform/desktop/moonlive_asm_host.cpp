@@ -131,10 +131,14 @@ void HostAssembler::patchBranches() {
     }
 }
 
-#elif defined(__x86_64__)
-#error "MoonLive host assembler: x86-64 backend not yet implemented (CI is arm64 for now)"
 #else
-#error "MoonLive host assembler: unsupported host ISA"
+
+// No host assembler on this ISA yet (x86-64 SysV and Windows x64 each need their own register
+// map + call ABI). The file compiles to nothing here; the matching `lowerToBytes` stub in
+// moonlive_lower_host.cpp returns 0, so MoonLive::compile fails cleanly and a scripted module
+// runs dark — the desktop binary still builds and runs everything else. arm64 (macOS CI + Apple
+// Silicon) is the implemented host today.
+
 #endif
 
 }  // namespace mm::moonlive

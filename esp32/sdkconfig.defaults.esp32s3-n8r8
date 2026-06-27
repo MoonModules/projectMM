@@ -12,3 +12,13 @@ CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 # PSRAM — same 8 MB octal as N16R8
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
+
+# MoonLive native codegen needs an executable heap (allocExec → MALLOC_CAP_EXEC IRAM).
+# MALLOC_CAP_EXEC is gated behind CONFIG_HEAP_HAS_EXEC_HEAP, which IDF disables whenever
+# memory protection (PMP/PMS W^X) is on — the same write-XOR-execute rule we handle on
+# macOS. A JIT fundamentally needs writable-then-executable memory, so disable memprot
+# (which enables the exec heap). This is the standard ESP32-JIT configuration (ESPLiveScript
+# runs the same way); the safety story for scripted code is the staged bounds/watchdog
+# checks, not the hardware W^X wall. (Same config as the N16R8 fragment.)
+CONFIG_ESP_SYSTEM_MEMPROT_FEATURE=n
+CONFIG_HEAP_HAS_EXEC_HEAP=y

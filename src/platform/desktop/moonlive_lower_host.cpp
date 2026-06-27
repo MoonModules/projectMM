@@ -16,6 +16,8 @@
 
 namespace mm::moonlive {
 
+#if defined(__aarch64__)   // the host assembler is implemented for arm64 only (see moonlive_asm_host.cpp)
+
 namespace {
 Reg reg(VReg v) { return static_cast<Reg>(v); }
 }
@@ -84,5 +86,11 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
     std::memcpy(out, a.bytes(), a.size());
     return a.size();
 }
+
+#else   // unsupported host ISA (e.g. Windows x64) — degrade: no codegen, compile fails cleanly.
+
+size_t lowerToBytes(const IrProgram&, uint8_t*, size_t) { return 0; }
+
+#endif
 
 }  // namespace mm::moonlive

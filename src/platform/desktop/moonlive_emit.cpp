@@ -143,7 +143,15 @@ size_t emitAnimatedFill(uint8_t* out, size_t cap) {
 }
 
 #else
-#error "MoonLive desktop backend: unsupported host (expected arm64, or x86-64 SysV; Windows x64 needs its own ABI template)"
+
+// Unsupported host ISA/ABI (e.g. Windows x64 — rcx/rdx/r8/r9 + shadow space, its own template
+// not written yet). Rather than break the build, MoonLive degrades: every emit returns 0, so
+// MoonLive::compile reports "emit failed" and the scripted module runs dark — the same clean
+// no-code path a too-large or unparseable script takes. The Windows desktop binary builds and
+// runs; scripted effects are simply unavailable there until a Win64 backend lands.
+size_t emitFill(uint8_t*, size_t, uint8_t, uint8_t, uint8_t) { return 0; }
+size_t emitAnimatedFill(uint8_t*, size_t) { return 0; }
+
 #endif
 
 }  // namespace mm::moonlive
