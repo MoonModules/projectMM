@@ -38,9 +38,16 @@ void XtensaAssembler::epilogue() { emit2(0xf01du); }     // retw.n
 
 Label XtensaAssembler::newLabel() {
     if (labelCount_ == 0) for (auto& p : labelPos_) p = -1;
+    if (labelCount_ >= kMaxLabels) { overflow_ = true; return 0; }   // same overflow signal as emit
     Label l = labelCount_++; labelPos_[l] = -1; return l;
 }
-void XtensaAssembler::bind(Label l) { labelPos_[l] = static_cast<int32_t>(len_); }
+void XtensaAssembler::bind(Label l) { if (l < kMaxLabels) labelPos_[l] = static_cast<int32_t>(len_); }
+
+// Record a pending branch fixup, guarding the fixed table (overflow_ rather than an OOB write).
+void XtensaAssembler::addFixup(size_t at, Label label) {
+    if (fixupCount_ >= kMaxFixups) { overflow_ = true; return; }
+    fixups_[fixupCount_++] = {at, label};
+}
 
 // movi aD, #imm. The narrow byte form carries only 0..255, so a wider constant (a uint16 like
 // 65535) is built as hi8<<8 | lo8: movi aD,hi8 ; slli aD,aD,8 ; movi a13,lo8 ; add.n aD,aD,a13.
@@ -98,19 +105,19 @@ void XtensaAssembler::branchIfZero(Reg a, Label l) {
     static constexpr uint8_t kZero = 13;   // a13
     const uint8_t mv[3] = {uint8_t((kZero << 4) | 0x2), 0xa0, 0x00};   // movi a13, 0
     emit(mv, 3);
-    fixups_[fixupCount_++] = {len_, l};
+    addFixup(len_, l);
     const uint8_t br[3] = {uint8_t((ar(a) << 4) | 0x7), uint8_t((0xb << 4) | kZero), 0x00};  // bgeu a13, a
     emit(br, 3);
 }
 // bgeu aA, aB, l  (skip if a >= b, unsigned)
 void XtensaAssembler::branchGeU(Reg a, Reg b, Label l) {
-    fixups_[fixupCount_++] = {len_, l};
+    addFixup(len_, l);
     const uint8_t bytes[3] = {uint8_t((ar(b) << 4) | 0x7), uint8_t((0xb << 4) | ar(a)), 0x00};
     emit(bytes, 3);
 }
 // bne aA, aB, l
 void XtensaAssembler::branchNe(Reg a, Reg b, Label l) {
-    fixups_[fixupCount_++] = {len_, l};
+    addFixup(len_, l);
     const uint8_t bytes[3] = {uint8_t((ar(b) << 4) | 0x7), uint8_t((0x9 << 4) | ar(a)), 0x00};
     emit(bytes, 3);
 }

@@ -23,11 +23,19 @@ static uint8_t mr(Reg r) { return kArm64Reg[r]; }
 
 Label HostAssembler::newLabel() {
     if (labelCount_ == 0) for (auto& p : labelPos_) p = -1;
+    if (labelCount_ >= kMaxLabels) { overflow_ = true; return 0; }   // same overflow signal as emit32
     Label l = labelCount_++;
     labelPos_[l] = -1;
     return l;
 }
-void HostAssembler::bind(Label l) { labelPos_[l] = static_cast<int32_t>(len_); }
+void HostAssembler::bind(Label l) { if (l < kMaxLabels) labelPos_[l] = static_cast<int32_t>(len_); }
+
+// Record a pending branch fixup, guarding the fixed table — a script with too many branches sets
+// overflow_ rather than writing past fixups_ (the same failure path as a full code buffer).
+void HostAssembler::addFixup(size_t at, Label label, uint8_t kind) {
+    if (fixupCount_ >= kMaxFixups) { overflow_ = true; return; }
+    fixups_[fixupCount_++] = {at, label, kind};
+}
 
 void HostAssembler::emit32(uint32_t w) {
     if (len_ + 4 > kCap) { overflow_ = true; return; }
@@ -64,12 +72,12 @@ void HostAssembler::cmp(Reg a, Reg b) {                    // cmp wA, wB  (subs 
     emit32(0x6b00001fu | (mr(b) << 16) | (mr(a) << 5));
 }
 void HostAssembler::branchIfZero(Reg a, Label l) {         // cbz wA, l  (offset patched)
-    fixups_[fixupCount_++] = {len_, l, 0};
+    addFixup(len_, l, 0);
     emit32(0x34000000u | mr(a));
 }
 void HostAssembler::branchIf(Cond c, Label l) {            // b.cond l  (offset patched)
     uint8_t cond = (c == Cond::Lo) ? 0x3 : 0x2;            // LO=cc(3), HS=cs(2)
-    fixups_[fixupCount_++] = {len_, l, static_cast<uint8_t>(1u | (cond << 4))};
+    addFixup(len_, l, static_cast<uint8_t>(1u | (cond << 4)));
     emit32(0x54000000u | cond);
 }
 void HostAssembler::call(Reg d, Reg a, const void* fn) {

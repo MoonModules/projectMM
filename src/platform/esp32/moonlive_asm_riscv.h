@@ -47,6 +47,7 @@ private:
     static constexpr uint8_t kMaxFixups = 32;
 
     void emit32(uint32_t w);
+    void addFixup(size_t at, Label label);   // enqueue a branch fixup (bounds-checked)
 
     uint8_t  buf_[kCap] = {};
     size_t   len_ = 0;

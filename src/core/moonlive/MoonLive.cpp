@@ -18,11 +18,15 @@ static constexpr size_t kCodeCap = 768;
 void* MoonLive::place(const uint8_t* staged, size_t len) {
     free();   // drop any prior compilation — (re)compile is a clean re-emit
     if (len == 0) { error_ = "emit failed"; return nullptr; }
-    void* block = platform::allocExec(kCodeCap);
+    // Allocate only what was emitted, word-rounded (writeExec stores 32-bit words on IRAM), not
+    // the worst-case kCodeCap — a fill is ~50 bytes, a four-call setRGB ~600. The staging buffer
+    // is sized for the worst case; the live exec block is sized for THIS program.
+    size_t cap = (len + 3) & ~size_t(3);
+    void* block = platform::allocExec(cap);
     if (!block) { error_ = "no executable memory"; return nullptr; }
     platform::writeExec(block, staged, len);
     code_ = block;
-    codeCap_ = kCodeCap;
+    codeCap_ = cap;
     codeLen_ = len;
     error_ = "";
     return block;

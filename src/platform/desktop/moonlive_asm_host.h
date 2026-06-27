@@ -68,6 +68,7 @@ private:
 
     void emit32(uint32_t w);             // append one 32-bit instruction (arm64) — or byte run (x64)
     void emitBytes(const uint8_t* p, size_t n);
+    void addFixup(size_t at, Label label, uint8_t kind);  // enqueue a branch fixup (bounds-checked)
 
     uint8_t  buf_[kCap] = {};
     size_t   len_ = 0;

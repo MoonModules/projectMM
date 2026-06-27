@@ -25,7 +25,7 @@ public:
     size_t size() const { return len_; }
     bool overflowed() const { return overflow_; }
 
-    void prologue();                     // entry a1, 32  (must be the first instruction)
+    void prologue();                     // entry a1, 48  (must be the first instruction)
     Label newLabel();
     void  bind(Label l);
 
@@ -49,6 +49,7 @@ private:
     void emit(const uint8_t* p, size_t n);
     void emit2(uint16_t w);              // narrow (16-bit) instruction
     void emit3(uint32_t w);              // wide (24-bit) instruction
+    void addFixup(size_t at, Label label);   // enqueue a branch fixup (bounds-checked)
 
     uint8_t  buf_[kCap] = {};
     size_t   len_ = 0;

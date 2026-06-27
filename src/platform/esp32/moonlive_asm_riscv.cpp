@@ -26,9 +26,16 @@ void RiscvAssembler::emit32(uint32_t w) {
 
 Label RiscvAssembler::newLabel() {
     if (labelCount_ == 0) for (auto& p : labelPos_) p = -1;
+    if (labelCount_ >= kMaxLabels) { overflow_ = true; return 0; }   // same overflow signal as emit32
     Label l = labelCount_++; labelPos_[l] = -1; return l;
 }
-void RiscvAssembler::bind(Label l) { labelPos_[l] = static_cast<int32_t>(len_); }
+void RiscvAssembler::bind(Label l) { if (l < kMaxLabels) labelPos_[l] = static_cast<int32_t>(len_); }
+
+// Record a pending branch fixup, guarding the fixed table (overflow_ rather than an OOB write).
+void RiscvAssembler::addFixup(size_t at, Label label) {
+    if (fixupCount_ >= kMaxFixups) { overflow_ = true; return; }
+    fixups_[fixupCount_++] = {at, label};
+}
 
 // --- I/R/S-type encoders (rd/rs1/rs2 are real x-register numbers) ---
 static uint32_t encAddi(uint8_t rd, uint8_t rs1, int32_t imm) {
@@ -85,15 +92,15 @@ void RiscvAssembler::store8(Reg base, Reg off, Reg val) {
     emit32(encSb(xr(val), kScratchAddr, 0));           // sb val, 0(t6)
 }
 void RiscvAssembler::branchIfZero(Reg a, Label l) {    // a == 0  ⇔  bgeu x0, a (unsigned 0 >= a)
-    fixups_[fixupCount_++] = {len_, l};
+    addFixup(len_, l);
     emit32(encBranch(0, xr(a), 7, 0));                 // bgeu x0, a, l  (patched)
 }
 void RiscvAssembler::branchGeU(Reg a, Reg b, Label l) {
-    fixups_[fixupCount_++] = {len_, l};
+    addFixup(len_, l);
     emit32(encBranch(xr(a), xr(b), 7, 0));             // bgeu a, b, l
 }
 void RiscvAssembler::branchNe(Reg a, Reg b, Label l) {
-    fixups_[fixupCount_++] = {len_, l};
+    addFixup(len_, l);
     emit32(encBranch(xr(a), xr(b), 1, 0));             // bne a, b, l
 }
 
