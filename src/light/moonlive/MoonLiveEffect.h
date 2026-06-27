@@ -47,9 +47,10 @@ public:
         } else {
             setStatus(engine_.error(), Severity::Error);
         }
-        // Report the emitted native code as the module's heap use (the exec block), so the UI
-        // card's "+ dynamic" reflects the JIT'd program — 0 when the compile failed and freed it.
-        setDynamicBytes(engine_.ok() ? engine_.codeLen() : 0);
+        // Report the exec block as the module's heap use (the actual allocated, word-rounded
+        // size — codeCap, not the raw emitted length), so the UI card's "+ dynamic" reflects the
+        // JIT'd program — 0 when the compile failed and freed it.
+        setDynamicBytes(engine_.ok() ? engine_.codeCap() : 0);
         EffectBase::onBuildState();
     }
 

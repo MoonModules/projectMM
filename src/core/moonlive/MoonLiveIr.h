@@ -29,16 +29,15 @@ enum : VReg { kArg0 = 0, kArg1 = 1, kArg2 = 2, kArg3 = 3, kFirstTemp = 4 };
 static constexpr uint8_t kMaxVRegs = 16;     // a statement uses a handful; no allocator yet
 static constexpr uint8_t kMaxIrOps = 64;     // a statement is a handful of ops; fixed, no heap
 
-// The op set — neutral. Three-address form: dst plus up to three source operands.
+// The op set — neutral. Three-address form: dst plus up to three source operands. (Counted
+// loops and bounds guards are not IR ops: the StoreElem/FillElems inline ops carry their own
+// loop + bounds-guard in the per-ISA lowering. They'll arrive here when a script statement needs
+// a general loop — added then, not speculatively now.)
 enum class IrOp : uint8_t {
     Const,     // dst = imm
     Add,       // dst = a + b
     AddImm,    // dst = a + imm
     Mul,       // dst = a * b
-    Loop,      // counted loop: counter=a, limit=b; body runs until LoopEnd
-    LoopEnd,   // end of the innermost Loop body
-    Bounds,    // guard: if a >= b, skip ops until BoundsEnd (the §4 out-of-range check)
-    BoundsEnd, // end of the innermost Bounds-guarded block
     Call,      // dst = (*callFn)(a) — call a host-registered function (callFn = the C fn ptr)
     Inline,    // a host-registered inline op (inlineOp tag); operands a/b/c/d (op-specific)
 };

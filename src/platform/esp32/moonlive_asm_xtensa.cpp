@@ -158,6 +158,7 @@ void XtensaAssembler::call(Reg d, Reg a, const void* fn) {
 void XtensaAssembler::patchBranches() {
     for (uint8_t i = 0; i < fixupCount_; i++) {
         const Fixup& f = fixups_[i];
+        if (labelPos_[f.label] < 0) continue;                                  // unbound label — leave as-is (overflow_ already failed the compile)
         int32_t off = labelPos_[f.label] - (static_cast<int32_t>(f.at) + 4);   // verified rule
         buf_[f.at + 2] = static_cast<uint8_t>(off & 0xff);                     // offset byte at +2
     }

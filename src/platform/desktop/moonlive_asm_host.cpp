@@ -123,6 +123,7 @@ void HostAssembler::patchBranches() {
     for (uint8_t i = 0; i < fixupCount_; i++) {
         const Fixup& f = fixups_[i];
         int32_t target = labelPos_[f.label];
+        if (target < 0) continue;                                     // unbound label — leave the branch as-is (overflow_ already failed the compile)
         int32_t rel = (target - static_cast<int32_t>(f.at)) >> 2;     // PC-relative, /4
         uint32_t w; std::memcpy(&w, buf_ + f.at, 4);
         w |= (uint32_t(rel) & 0x7ffff) << 5;                          // imm19 field (cbz & b.cond)

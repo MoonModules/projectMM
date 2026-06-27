@@ -139,6 +139,7 @@ void RiscvAssembler::ret() { emit32(0x00008067u); }    // ret = jalr x0, ra, 0
 void RiscvAssembler::patchBranches() {
     for (uint8_t i = 0; i < fixupCount_; i++) {
         const Fixup& f = fixups_[i];
+        if (labelPos_[f.label] < 0) continue;                  // unbound label — leave as-is (overflow_ already failed the compile)
         int32_t off = labelPos_[f.label] - static_cast<int32_t>(f.at);
         uint32_t w; std::memcpy(&w, buf_ + f.at, 4);
         // re-scatter the offset into the B-type immediate fields, keeping the rest.

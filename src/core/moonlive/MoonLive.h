@@ -61,6 +61,9 @@ public:
 
     // The emitted code length, for the golden-bytes test (0 until compiled).
     size_t codeLen() const { return codeLen_; }
+    // The allocated exec-block size (word-rounded codeLen) — the actual heap held, for memory
+    // accounting. 0 until compiled / after free().
+    size_t codeCap() const { return codeCap_; }
 
 private:
     // Shared post-emit step: copy `len` staged bytes into a fresh exec block. Returns the
