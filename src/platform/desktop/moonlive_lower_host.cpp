@@ -38,6 +38,7 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
             case IrOp::Add:    a.addReg(reg(op.dst), reg(op.a), reg(op.b)); break;
             case IrOp::AddImm: a.addImm(reg(op.dst), reg(op.a), op.imm); break;
             case IrOp::Mul:    a.mulReg(reg(op.dst), reg(op.a), reg(op.b)); break;
+            case IrOp::LoadCtrl: a.load8(reg(op.dst), reg(kArg4), op.imm); break;  // dst = ctrls[imm]
             case IrOp::Call:
                 if (!op.callFn) return 0;
                 a.call(reg(op.dst), reg(op.a), reinterpret_cast<const void*>(op.callFn));

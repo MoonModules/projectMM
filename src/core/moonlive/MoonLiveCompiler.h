@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstddef>
 #include "core/moonlive/MoonLiveBuiltins.h"
+#include "core/moonlive/MoonLiveIr.h"      // DeclaredControl, kMaxCtrls (surfaced on CompileResult)
 
 // MoonLive front-end (§3.2) — the platform-independent compiler: source text → tokens → AST →
 // IR → native code (via the per-ISA assembler). The grammar is a single statement that is a
@@ -26,6 +27,10 @@ struct CompileResult {
     const char* error = "";
     uint16_t    errorCol = 0;
     size_t      len = 0;
+    // Controls the script declared (`uint8_t speed = 50; // @control 0..99`). The binding reads
+    // this list and creates a real MoonModule control per entry, bound to the run-time arena slot.
+    DeclaredControl controls[kMaxCtrls];
+    uint8_t         controlCount = 0;
 };
 
 // Compile `source` to machine code in `out` (capacity `cap`), resolving calls against `table`.

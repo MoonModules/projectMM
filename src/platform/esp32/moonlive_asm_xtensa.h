@@ -35,6 +35,7 @@ public:
     void addReg(Reg d, Reg a, Reg b);    // add.n aD, aA, aB
     void mulReg(Reg d, Reg a, Reg b);    // mull aD, aA, aB
     void store8(Reg base, Reg off, Reg val);  // s8i via computed address (add then s8i,0)
+    void load8(Reg d, Reg base, int32_t imm); // l8ui aDst, aBase, #imm — a control read
     void branchIfZero(Reg a, Label l);   // beqz aA, l  (nLights==0 guard)
     void branchGeU(Reg a, Reg b, Label l);    // bgeu aA, aB, l  (Bounds: skip if a>=b)
     void branchNe(Reg a, Reg b, Label l);     // bne aA, aB, l   (loop test)

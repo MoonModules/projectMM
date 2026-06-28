@@ -164,3 +164,21 @@ TEST_CASE("input longer than the text buffer fails cleanly") {
     CHECK_FALSE(json::parse(huge.c_str(), doc));
     CHECK_FALSE(doc.valid());
 }
+
+// parseString must DECODE the JSON string escapes our own writer emits (JsonSink/writeJsonString)
+// — \" \\ \n \r \t \b \f — so reader and writer are symmetric. A multi-line value (a script with
+// `\n`) must arrive as a real newline, not a literal backslash-n.
+TEST_CASE("parseString decodes the standard JSON string escapes (symmetric with the writer)") {
+    char out[64];
+    json::parseString("{\"s\":\"a\\nb\\tc\"}", "s", out, sizeof(out));
+    CHECK(std::strcmp(out, "a\nb\tc") == 0);          // \n and \t decoded
+
+    json::parseString("{\"s\":\"q=\\\"x\\\" back=\\\\\"}", "s", out, sizeof(out));
+    CHECK(std::strcmp(out, "q=\"x\" back=\\") == 0);  // \" and \\ still work
+
+    // a multi-line script value (the MoonLive Stage-1 case)
+    json::parseString("{\"source\":\"uint8_t s = 1; // @control 0..9\\nsetRGB(s,0,0,255);\"}",
+                      "source", out, sizeof(out));
+    CHECK(std::strchr(out, '\n') != nullptr);          // real newline, so the // comment ends
+    CHECK(std::strstr(out, "setRGB") != nullptr);      // the statement survives on its own line
+}

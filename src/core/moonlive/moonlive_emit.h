@@ -24,6 +24,13 @@ using FillFn = void (*)(uint8_t* buf, uint32_t nLights, uint8_t cpl);
 // engine passes elapsed() through run().
 using AnimFn = void (*)(uint8_t* buf, uint32_t nLights, uint8_t cpl, uint32_t t);
 
+// The front-end-compiled routine takes a 5th arg: a pointer to the control-values arena (one
+// byte per declared control, kArg4). A script reads a control with LoadCtrl; the host updates an
+// arena byte when a slider moves and the next call reads it — live, no recompile. Code that
+// declares no control simply never reads the pointer (it may be nullptr then). This is the
+// signature compileSource()'d code is called through.
+using CtrlFn = void (*)(uint8_t* buf, uint32_t nLights, uint8_t cpl, uint32_t t, const uint8_t* ctrls);
+
 // Emit the fixed-colour fill routine's machine code into `out` (capacity `cap` bytes), for
 // the ISA this translation unit was compiled for, with the colour baked in. Returns the
 // number of bytes written, or 0 if `cap` is too small (the caller degrades). The emitted

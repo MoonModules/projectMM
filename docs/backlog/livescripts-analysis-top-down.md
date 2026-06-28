@@ -377,6 +377,8 @@ The first sequencing question is **depth-first** (build the whole engine on Xten
 
 The [MoonLight effects tutorial](https://moonmodules.org/MoonLight/moonlight/effects-tutorial/) is a ready-made *start-small-grow* curriculum (random pixel → control → trails → oscillators → 2D → 3D → audio → Cosmic Noise). Each rung is **one engine-capability spike** with a concrete acceptance bar. **RipplesEffect.h is the graduation test** (the hard real effect, after the 3D rung). Each step is a normal small commit; the multi-target part is sequenced per §9.1 — the *seam* is proven on a second ISA at Stage 0.5, but the *full* second backend (all stages) comes later, opportunistically.
 
+**Shipped so far:** Stages 0 + 0.5 (hello-world native on Xtensa, the seam proven on RISC-V *and* the desktop host — three full backends, ahead of the minimal-second-backend bar), plus the expression grammar and host-bound-function table, and **Stage 1 (Controls)** — `uint8_t speed = 50; // @control 0..99` surfaces a real uint8 control read live each tick from a per-script control-values arena (the §3.7 data arena), no recompile on a slider move; see [decisions.md](../history/decisions.md). Next is Stage 2 (buffer read-modify-write / trails).
+
 | Stage | Capability proven | Acceptance bar (the spike) |
 |---|---|---|
 | **0. Load-bearing spike (Xtensa)** | Front-end → IR → **Xtensa** backend → `allocExec` → call. The hello-world: `setRGB(random16(N), blue)`. | Runs live on an **ESP32-S3**, lights a random pixel each tick, inside the frame budget; a deliberately-bad script degrades via cheap safety, no crash. **If this can't hit native speed, fall back to WASM/WAMR — a backend swap behind the IR.** |

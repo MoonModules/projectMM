@@ -97,6 +97,11 @@ void XtensaAssembler::store8(Reg base, Reg off, Reg val) {
     const uint8_t b[3] = {uint8_t((ar(val) << 4) | 0x2), uint8_t(0x40 | kAddrScratch), 0x00};
     emit(b, 3);                                             // s8i aVal, a12, 0
 }
+// l8ui aDst, aBase, #imm (0..255) : bytes [ (dst<<4)|2, base, imm ] — zero-extended byte load.
+void XtensaAssembler::load8(Reg d, Reg base, int32_t imm) {
+    const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), ar(base), uint8_t(imm & 0xff)};
+    emit(b, 3);
+}
 
 // branchIfZero(a, l): synthesised as `movi a13,0; bgeu a13, a, l`. Unsigned 0 >= a is true
 // IFF a == 0, so this branches exactly when a is zero — using only the verified bgeu 8-bit

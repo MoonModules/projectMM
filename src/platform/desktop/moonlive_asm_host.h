@@ -50,6 +50,7 @@ public:
     void mulImm(Reg d, Reg a, int32_t imm);   // d = a * imm  (index scaling by a constant)
     void mulReg(Reg d, Reg a, Reg b);    // d = a * b   (index scaling by a runtime cpl)
     void store8(Reg base, Reg off, Reg val);  // byte store: base[off] = val (low 8 bits)
+    void load8(Reg d, Reg base, int32_t imm); // d = base[imm] (zero-extended byte) — control read
     void cmp(Reg a, Reg b);              // flags = a - b
     void branchIfZero(Reg a, Label l);   // if a == 0 goto l
     void branchIf(Cond c, Label l);      // if flags satisfy c goto l (after cmp)
