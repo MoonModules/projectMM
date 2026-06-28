@@ -28,6 +28,7 @@
 #include "esp_idf_version.h"
 #include "esp_partition.h"
 #include "esp_ota_ops.h"     // for esp_ota_get_running_partition (sysInfo)
+#include "esp_app_desc.h"    // for esp_app_get_description (sdkDate)
 #include "esp_image_format.h"
 #include "esp_flash.h"
 #include "esp_event.h"

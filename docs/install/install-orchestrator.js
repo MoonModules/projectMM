@@ -356,13 +356,13 @@ function chipFamily(chipName) {
     return s;                                // truly unrecognised — pass through so it's visible
 }
 
-// Hard-reset the chip after flashing by toggling DTR/RTS — the same pulse the old
-// `esploader.hardReset()` did internally. esptool-js 0.5.x moved hardReset off
-// ESPLoader into a `HardReset` reset-strategy class, so the method no longer exists
-// ("esploader.hardReset is not a function"). The transport's setDTR/setRTS are stable
-// across versions, so driving the reset directly is both correct and bump-proof.
-// Sequence (DTR=IO0, RTS=EN on the classic auto-reset circuit): pull EN low to reset,
-// release with IO0 high so the chip boots the app rather than the bootloader.
+// Hard-reset the chip after flashing by toggling DTR/RTS — the standard ESP32
+// auto-reset pulse. In our pinned esptool-js, hardReset lives on a `HardReset`
+// reset-strategy class, not on ESPLoader; the transport's setDTR/setRTS are stable
+// across versions, so driving the reset directly is both correct and bump-proof
+// (and avoids "esploader.hardReset is not a function"). Sequence (DTR=IO0, RTS=EN
+// on the classic auto-reset circuit): pull EN low to reset, release with IO0 high
+// so the chip boots the app rather than the bootloader.
 async function hardResetChip(transport) {
     await transport.setDTR(false);   // IO0 high (run, not download)
     await transport.setRTS(true);    // EN low — hold in reset

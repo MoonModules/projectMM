@@ -247,6 +247,10 @@ struct Parser {
         long def = lex.number;
         lex.advance();
         if (!expect(Tok::Semicolon, "expected ';' after the control declaration")) return;
+        // A malformed `// @control …` comment lexes to Tok::Error with a specific
+        // message (e.g. "malformed @control (expected min..max)"). Surface it here
+        // rather than letting it fall through to a generic later parse failure.
+        if (lex.kind == Tok::Error) { fail(lex.err); return; }
         // Optional range annotation; default 0..255 if absent.
         long lo = 0, hi = 255;
         if (lex.kind == Tok::ControlAnno) {

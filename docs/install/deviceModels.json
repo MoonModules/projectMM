@@ -903,7 +903,10 @@
       {
         "type": "RmtLedDriver",
         "id": "RmtLed",
-        "parent_id": "Drivers"
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "60"
+        }
       },
       {
         "type": "NetworkModule",

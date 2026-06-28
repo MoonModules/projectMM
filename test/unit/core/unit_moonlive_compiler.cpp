@@ -192,6 +192,8 @@ TEST_CASE("compileSource: malformed control declarations fail with a diagnostic,
         "uint8_t speed = 300; setRGB(0,0,0,0);",                     // default > 255
         "uint8_t speed = 50; // @control 99..0\nsetRGB(0,0,0,0);",   // reversed range
         "uint8_t speed = 50; // @control 0..10\nsetRGB(0,0,0,0);",   // default outside @control range
+        "uint8_t speed = 50; // @control 5\nsetRGB(0,0,0,0);",       // lexer-level malformed: no `..max` (Tok::Error surfaced, not a generic fall-through)
+        "uint8_t speed = 50; // @control 5..\nsetRGB(0,0,0,0);",     // lexer-level malformed: missing max
         "uint8_t random16 = 5; setRGB(0,0,0,0);",                    // name shadows a builtin
         "uint8_t speed = 50;",                                       // no statement
         "uint8_t = 50; setRGB(0,0,0,0);",                            // no name

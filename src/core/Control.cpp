@@ -281,10 +281,10 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
             // validator sees it; it's sized to the largest validated text/textarea buffer.
             if (c.validate) {
                 static constexpr size_t kScratch = 1024;   // ≥ any validated Text/TextArea/Password buffer
-                // A validated buffer wider than the scratch would truncate before the
-                // validator sees it (a silent partial write). Reject loudly instead —
-                // no validated control is that wide today, so this is a guard, not a
-                // limit; grow kScratch (the one home) if one legitimately needs to be.
+                // A buffer wider than the scratch is rejected, so a value is never
+                // truncated before the validator sees it (which would be a silent
+                // partial write). kScratch is the one place to grow if a validated
+                // control legitimately needs a larger buffer.
                 if (maxLen > kScratch) return ApplyResult::Malformed;
                 char scratch[kScratch];
                 mm::json::parseString(json, key, scratch, maxLen);

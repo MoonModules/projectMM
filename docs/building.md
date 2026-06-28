@@ -120,7 +120,7 @@ uv run scripts/run/monitor_esp32.py --port /dev/tty.usbserial-XXXX
 (cd ~/esp/esp-idf && ./install.sh esp32s31)   # one-time, adds the S31 RISC-V toolchain
 ```
 
-Flash the S31 over USB with the CLI (`flash_esp32.py --firmware esp32s31 --port <port>`), **not** the web installer: the browser flasher (`esptool-js`) has no S31 chip definition yet, so a browser flash fails — the CLI's `esptool.py` does support it. The web installer surfaces the same guidance if you try. (Tracked in [backlog](backlog/README.md) — drops out once esptool-js gains S31 support.)
+Flash the S31 over USB with the CLI (`flash_esp32.py --firmware esp32s31 --port <port>`), **not** the web installer: the browser flasher (`esptool-js`) has no S31 chip definition, so a browser flash fails — the CLI's `esptool.py` supports it. The web installer surfaces the same guidance if you try. (Status + the condition to enable web flashing: [backlog](backlog/README.md).)
 
 On Windows, the `--port` argument is a `COM*` name (e.g. `COM3`) instead of `/dev/tty.usbserial-XXXX`. MoonDeck's port picker enumerates `COM*` automatically.
 

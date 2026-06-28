@@ -579,6 +579,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // before browser flashing is safe; a version bump alone is not enough.
     const WEB_FLASH_UNSUPPORTED_CHIPS = new Set(["ESP32-S31"]);
 
+    // Map a firmware key to its chip family ("esp32s31" → "ESP32-S31", "esp32s3-n16r8"
+    // → "ESP32-S3", "esp32p4-eth" → "ESP32-P4", "esp32*" → "ESP32") — the same prefix
+    // vocabulary build_esp32's TARGET_TO_FAMILY uses. Used as the chip fallback when no
+    // board is picked (OTA / generic flash). "" for an unrecognised key.
+    function firmwareToChip(firmware) {
+      const m = String(firmware || "").match(/^esp32(s31|s3|s2|p4|c\d+|h\d+)/);
+      return m ? (m[1] === "s31" ? "ESP32-S31" : "ESP32-" + m[1].toUpperCase()) : (firmware ? "ESP32" : "");
+    }
+
     function handleError(stage, error) {
       disarmUnloadGuard();
       console.error("[install]", stage, error);
@@ -586,15 +595,26 @@ document.addEventListener('DOMContentLoaded', () => {
       // A connect-flash failure on a chip esptool-js can't identify reads as a
       // bare "Timeout". If the picked board is one of those chips, say so and
       // point at the CLI rather than leaving the user staring at a timeout.
-      const chip = installPicker.getSelectedBoardChip();
+      // Prefer the picked board's chip; fall back to the chip the flashing
+      // firmware name implies (e.g. "esp32s31" → "ESP32-S31") when no board was
+      // picked, so the guidance still fires on the OTA / generic-flash path.
+      const chip = installPicker.getSelectedBoardChip() || firmwareToChip(_flashingFirmware);
       const webUnsupported = stage === "connect-flash"
         && WEB_FLASH_UNSUPPORTED_CHIPS.has(chip);
       document.getElementById("error-message").textContent = webUnsupported
-        ? `Browser flashing isn't supported for ${chip} yet — the browser `
-          + `flasher (esptool-js) has no chip definition for it. Flash from the `
-          + `command line instead:\n\n`
-          + `  uv run scripts/build/flash_esp32.py --firmware esp32s31 --port <your-port>\n\n`
-          + `(The CLI uses esptool.py, which does support ${chip}.)`
+        ? `Browser flashing isn't supported for ${chip} yet — the browser flasher `
+          + `(esptool-js) has no chip definition for it. Flash with esptool.py instead `
+          + `(which does support ${chip}); no dev environment needed:\n\n`
+          + `1. Install esptool:   pipx install esptool   (or: pip install esptool)\n`
+          + `2. Download the 4 firmware-esp32s31-*.bin files from the release below.\n`
+          + `3. Flash (replace <your-port>, e.g. /dev/ttyUSB0 or COM3):\n\n`
+          + `   esptool --chip esp32s31 --port <your-port> --baud 460800 write-flash \\\n`
+          + `     0x2000  firmware-esp32s31-<ver>-bootloader.bin \\\n`
+          + `     0x8000  partition-table-16mb.bin \\\n`
+          + `     0xe000  shared-ota-data.bin \\\n`
+          + `     0x10000 firmware-esp32s31-<ver>.bin\n\n`
+          + `Then re-open this page to provision WiFi, or use the device's own UI. `
+          + `Once running, the device updates itself over-the-air — no esptool needed again.`
         : `Stage: ${stage}\n${error && error.message ? error.message : error}`;
     }
 
@@ -704,6 +724,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // closeModal for the button-disable side, and the closeMonitor
     // calls in onInstall / the Erase handler for the port-release side).
     const _monitor = { port: null, reader: null, closing: false };
+    let _flashingFirmware = null;   // the firmware key onInstall is flashing, for handleError's chip fallback
     const monitorBackdrop = document.getElementById("monitor-backdrop");
     const monitorOutput = document.getElementById("monitor-output");
     const monitorStatus = document.getElementById("monitor-status");
@@ -855,6 +876,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return await installer.detect({ port: pickedPort, onLog: appendLog });
       },
       onInstall: async (firmware, manifestUrl /*, binaryUrl */) => {
+        // Remember the firmware being flashed so handleError can fall back to it
+        // for the unsupported-chip guidance when no board was picked (the on-device
+        // OTA path, or a generic flash) — getSelectedBoardChip() is empty there.
+        _flashingFirmware = firmware;
         // If the monitor is open it holds the port — release it before
         // esptool tries to claim it. The reverse lock (monitor button
         // disabled for the install's duration) lives in openModal /

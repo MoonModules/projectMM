@@ -98,7 +98,7 @@ ParlioState* createState(const uint16_t* dataPins, uint8_t laneCount,
     cfg.trans_queue_depth = 1;                // single full-frame transfer
     cfg.max_transfer_size = bufferBytes;
     cfg.dma_burst_size = 64;
-    cfg.shift_edge = PARLIO_SHIFT_EDGE_POS;   // v6.1 renamed sample_edge → shift_edge
+    cfg.shift_edge = PARLIO_SHIFT_EDGE_POS;   // shift data on the clock's rising edge
     cfg.bit_pack_order = PARLIO_BIT_PACK_ORDER_MSB;
     if (parlio_new_tx_unit(&cfg, &st->unit) != ESP_OK) {
         destroyState(st);

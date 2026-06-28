@@ -144,9 +144,10 @@ FIRMWARES: dict[str, dict] = {
         "chip": "esp32s31",
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32s31"],
         "eth_only": False,
-        "description": "Espressif ESP32-S31 Function-CoreBoard-1 — WiFi 6 + on-chip "
-                       "1 Gbps Ethernet in one image (RISC-V, 16 MB flash, PSRAM). "
-                       "esp32s31 is a preview target on the v6.1 IDF line.",
+        "description": "Espressif ESP32-S31 Function-CoreBoard-1 — WiFi 6 LED control "
+                       "(RISC-V, 16 MB flash, PSRAM). The board's on-chip 1 Gbps Ethernet "
+                       "is wired in but not yet enabled (pin map pending). esp32s31 is a "
+                       "preview target on the v6.1 IDF line.",
         "ships": True,
     },
 }
