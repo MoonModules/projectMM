@@ -231,6 +231,7 @@ const char* chipModel() {
         case CHIP_ESP32:   return "ESP32";
         case CHIP_ESP32S2: return "ESP32-S2";
         case CHIP_ESP32S3: return "ESP32-S3";
+        case CHIP_ESP32S31: return "ESP32-S31";
         case CHIP_ESP32C3: return "ESP32-C3";
         case CHIP_ESP32P4: return "ESP32-P4";
         default:           return "ESP32-?";
@@ -261,6 +262,13 @@ static void netifIPv4(esp_netif_t* netif, uint8_t out[4]) {
 
 const char* sdkVersion() {
     return esp_get_idf_version();
+}
+
+const char* sdkDate() {
+    // The compile date the IDF baked into this image's app descriptor (e.g.
+    // "May 26 2026"). esp_app_get_description() returns a pointer into the
+    // running image header, valid for the program's lifetime.
+    return esp_app_get_description()->date;
 }
 
 const char* coprocessorWifi() {

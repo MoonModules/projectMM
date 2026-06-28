@@ -17,7 +17,7 @@
 // copies before handing them to the orchestrator.
 import { installPicker } from "./install-picker.js";
 import { myDevices }    from "./devices.js";
-import { installer }    from "./install-orchestrator.js";
+import { installer, ESPTOOL_JS_VERSION } from "./install-orchestrator.js";
 // Board catalog + chip detection — web-installer only, kept out of the
 // firmware-embedded install-picker.js and injected here via boardSupport.
 import * as boardSupport from "./install-picker-boards.js";
@@ -46,6 +46,15 @@ document.addEventListener('DOMContentLoaded', () => {
             chip.hidden = false;
         } catch (_) { /* silent: cosmetic-only */ }
     })();
+
+    // Show the pinned esptool-js version in the footer credit — so a flash failure
+    // can be tied to the exact flasher build (e.g. the 0.6.0 compressed-write
+    // regression). Sourced from the orchestrator's exported constant, the same
+    // place the import URL is pinned.
+    {
+        const el = document.getElementById("esptool-version");
+        if (el) el.textContent = ` v${ESPTOOL_JS_VERSION}`;
+    }
 
     // Map a GitHub release-asset URL to its Pages-hosted mirror.
     //   https://github.com/MoonModules/projectMM/releases/download/<TAG>/<file>
@@ -554,12 +563,39 @@ document.addEventListener('DOMContentLoaded', () => {
       myDevices.addProvisionedDevice(url, defaultsApplied ? board : "");
     }
 
+    // esptool-js (the browser flasher) has no chip definition for these targets
+    // yet, so a browser flash can't begin — the CLI (esptool.py, which does know
+    // them) is the working path. Drop a chip from this set once esptool-js ships
+    // support for it (then also bump the esptool-js pin in install-orchestrator.js).
+    //
+    // The S31 is doubly unsafe in the browser, not just unsupported: its chip
+    // magic (0xF01D2E07 / 15736195) COLLIDES with the classic ESP32's. esptool.py
+    // disambiguates them with secondary register detection (it sets the S31's
+    // USES_MAGIC_VALUE=False); esptool-js 0.6.0 has only the magic table, where
+    // that value maps to ESP32ROM. So even if the S31's ROM-bootloader sync ever
+    // succeeded, esptool-js would mis-identify the RISC-V S31 as a classic Xtensa
+    // ESP32 and try to flash it with the wrong stub + flash params — corruption,
+    // not a lucky success. esptool-js needs the S31 secondary-detection logic
+    // before browser flashing is safe; a version bump alone is not enough.
+    const WEB_FLASH_UNSUPPORTED_CHIPS = new Set(["ESP32-S31"]);
+
     function handleError(stage, error) {
       disarmUnloadGuard();
       console.error("[install]", stage, error);
       showSection("error");
-      document.getElementById("error-message").textContent =
-        `Stage: ${stage}\n${error && error.message ? error.message : error}`;
+      // A connect-flash failure on a chip esptool-js can't identify reads as a
+      // bare "Timeout". If the picked board is one of those chips, say so and
+      // point at the CLI rather than leaving the user staring at a timeout.
+      const chip = installPicker.getSelectedBoardChip();
+      const webUnsupported = stage === "connect-flash"
+        && WEB_FLASH_UNSUPPORTED_CHIPS.has(chip);
+      document.getElementById("error-message").textContent = webUnsupported
+        ? `Browser flashing isn't supported for ${chip} yet — the browser `
+          + `flasher (esptool-js) has no chip definition for it. Flash from the `
+          + `command line instead:\n\n`
+          + `  uv run scripts/build/flash_esp32.py --firmware esp32s31 --port <your-port>\n\n`
+          + `(The CLI uses esptool.py, which does support ${chip}.)`
+        : `Stage: ${stage}\n${error && error.message ? error.message : error}`;
     }
 
     // --- Pre-pick port -------------------------------------------------
@@ -793,11 +829,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- Picker wiring -------------------------------------------------
+    // Preview-only: preview_installer.py writes local-firmwares.json next to this
+    // page when it stages local ESP32 builds. It lets the picker offer a firmware
+    // that isn't in the published release's assets yet (a brand-new variant being
+    // tested before it ships). Absent in production (the deploy doesn't write it),
+    // so the fetch 404s and we pass null — the published assets drive the list.
+    const extraFirmwaresByTag = await fetch("./local-firmwares.json")
+      .then(r => r.ok ? r.json() : null).catch(() => null);
+
     const _pickerReady = installPicker.init({
       container: document.getElementById("picker-mount"),
       ownFirmwareKey: null,  // web installer flashes any firmware variant
       installRowExtras: document.getElementById("erase-row"),
       boardSupport,  // board catalog + chip detection (web-installer-only module)
+      extraFirmwaresByTag,
       // Gate Install on a picked USB port — the web installer requires the user
       // to choose the port in the dropdown before flashing. (notifyPortChanged()
       // below re-evaluates the button whenever pickedPort changes.)

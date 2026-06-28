@@ -264,6 +264,12 @@ const char* sdkVersion() {
 #endif
 }
 
+const char* sdkDate() {
+    // No IDF app descriptor on desktop; report the compiler's build date, the
+    // closest equivalent (mirrors sdkVersion() reporting the compiler).
+    return __DATE__;
+}
+
 const char* coprocessorWifi() {
     return "";   // desktop has no WiFi co-processor
 }

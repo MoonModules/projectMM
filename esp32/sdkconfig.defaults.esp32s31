@@ -1,0 +1,40 @@
+# Espressif ESP32-S31 Function-CoreBoard-1 — WiFi 6 + Ethernet, all in one image.
+#   Board: the Espressif ESP32-S31 Function-CoreBoard (RISC-V dual-core, Wi-Fi 6,
+#   BT 5.4, on-chip 1 Gbps EMAC, 16 MB flash, PSRAM).
+#
+# Layered onto sdkconfig.defaults by scripts/build/build_esp32.py.
+#
+# The RMII / PHY *pins* are NOT set here — they live in C (the per-target ethPins
+# struct in src/platform/esp32/platform_config.h, read by ethInit), so the pin map
+# stays in one place. This fragment enables the EMAC + flash / PSRAM / partition
+# layout + the exec heap; the same shape as the P4 (the other on-chip-EMAC,
+# RISC-V, PSRAM target).
+
+# Custom partition table — shared 16 MB layout (app0/app1 = 4 MB each, spiffs
+# ~7.9 MB). Chip-independent flash map; the same file every 16 MB target uses.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/ota_16mb.csv"
+
+# Flash size override (the CoreBoard ships 16 MB).
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# PSRAM — the S31 has a DMA-capable PSRAM with a dedicated LDO (SOC_SPIRAM_SUPPORTED,
+# SOC_PSRAM_HAS_DEDICATED_LDO). Enabled for the large buffers later rounds allocate;
+# not relied on at boot.
+CONFIG_SPIRAM=y
+
+# Ethernet — on-chip EMAC + RMII (SOC_EMAC_SUPPORTED, SOC_EMAC_SUPPORT_1000M). Pins
+# are runtime config (ethConfig_ in C), not sdkconfig. RMII is the EMAC's default
+# interface, so no CONFIG_ETH_PHY_INTERFACE_RMII (a non-existent symbol in IDF v6).
+CONFIG_ETH_USE_ESP32_EMAC=y
+CONFIG_ETH_DMA_BUFFER_SIZE=512
+CONFIG_ETH_DMA_RX_BUFFER_NUM=10
+CONFIG_ETH_DMA_TX_BUFFER_NUM=10
+
+# MoonLive native codegen needs an executable heap (allocExec → MALLOC_CAP_EXEC). Like the
+# S3 and P4, the S31 has hardware memory protection that IDF couples to disabling the exec
+# heap, so disable memprot to make MALLOC_CAP_EXEC available — the standard ESP32-JIT config.
+# Safety for scripted code is the staged bounds/watchdog checks, not the hardware W^X wall.
+# (Same rationale as sdkconfig.defaults.esp32p4-eth.)
+CONFIG_ESP_SYSTEM_MEMPROT_FEATURE=n
+CONFIG_HEAP_HAS_EXEC_HEAP=y

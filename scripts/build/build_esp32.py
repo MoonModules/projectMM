@@ -140,6 +140,15 @@ FIRMWARES: dict[str, dict] = {
         # release matrix. Buildable from the CLI. See backlog § ESP32-P4 round 3.
         "ships": False,
     },
+    "esp32s31": {
+        "chip": "esp32s31",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32s31"],
+        "eth_only": False,
+        "description": "Espressif ESP32-S31 Function-CoreBoard-1 — WiFi 6 + on-chip "
+                       "1 Gbps Ethernet in one image (RISC-V, 16 MB flash, PSRAM). "
+                       "esp32s31 is a preview target on the v6.1 IDF line.",
+        "ships": True,
+    },
 }
 
 # IDF target → chip-family label. ONE source for the family vocabulary, shared by:
@@ -151,10 +160,16 @@ FIRMWARES: dict[str, dict] = {
 # projectMM aims to support every ESP32-family chip, so new SoCs are added HERE
 # once (S2 / C3 / C6 / C5 / H2 / P4 variants) and every consumer follows.
 TARGET_TO_FAMILY = {
-    "esp32":   "ESP32",
-    "esp32s3": "ESP32-S3",
-    "esp32p4": "ESP32-P4",
+    "esp32":    "ESP32",
+    "esp32s3":  "ESP32-S3",
+    "esp32s31": "ESP32-S31",
+    "esp32p4":  "ESP32-P4",
 }
+
+# Chips IDF still marks "preview" — `idf.py set-target <chip>` refuses without an
+# explicit `--preview` flag ("you have to append '--preview' to use any preview
+# feature"). Drop a chip from this set once it graduates to a stable target.
+PREVIEW_TARGETS = {"esp32s31"}
 
 # Deprecated --profile values → firmware, kept one release for callers that
 # still pass --profile. Remove once external tooling has migrated.
@@ -502,7 +517,10 @@ def main():
     if not build_dir.exists():
         print(f"Setting target to {chip} (firmware: {firmware}, build dir: "
               f"{build_dir.relative_to(ROOT)})...")
-        r = subprocess.run(cmd + b_arg + extra + ["set-target", chip],
+        # A preview chip (esp32s31 today) needs `--preview` on idf.py itself,
+        # before the action, or set-target refuses it.
+        preview = ["--preview"] if chip in PREVIEW_TARGETS else []
+        r = subprocess.run(cmd + preview + b_arg + extra + ["set-target", chip],
                            cwd=ESP32_DIR, env=env)
         if r.returncode != 0:
             sys.exit(r.returncode)

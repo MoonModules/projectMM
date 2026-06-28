@@ -174,6 +174,15 @@ TEST_CASE("compileSource: a control declaration surfaces a DeclaredControl") {
     REQUIRE(r2.controlCount == 2);
     CHECK(r2.controls[0].max == 255); CHECK(r2.controls[0].offset == 0);   // a: no anno
     CHECK(r2.controls[1].min == 1); CHECK(r2.controls[1].max == 7); CHECK(r2.controls[1].def == 5); CHECK(r2.controls[1].offset == 1);
+
+    // `@control` matches as a whole word: a comment whose first word merely STARTS
+    // with "@control" (e.g. "@controlled") is a plain comment, not a malformed
+    // annotation — it's skipped, the declaration takes the default 0..255 range.
+    auto r3 = moonlive::compileSource(
+        "uint8_t speed = 9; // @controlled by the user\nsetRGB(speed, 0, 0, 0);", kTable, out, sizeof(out));
+    REQUIRE(r3.ok);
+    REQUIRE(r3.controlCount == 1);
+    CHECK(r3.controls[0].min == 0); CHECK(r3.controls[0].max == 255); CHECK(r3.controls[0].def == 9);
 }
 
 TEST_CASE("compileSource: malformed control declarations fail with a diagnostic, never crash") {

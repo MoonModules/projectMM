@@ -49,7 +49,10 @@ struct Lexer {
                 const char* lineStart = p;
                 p += 2;
                 while (*p == ' ' || *p == '\t') p++;
-                if (p[0] == '@' && std::strncmp(p, "@control", 8) == 0) {
+                // Match `@control` only as a whole word — require a non-identifier
+                // char after it, so a comment like `// @controlled …` is a plain
+                // comment, not a malformed annotation.
+                if (p[0] == '@' && std::strncmp(p, "@control", 8) == 0 && !isIdentCont(p[8])) {
                     tokBeg = lineStart;
                     p += 8;
                     while (*p == ' ' || *p == '\t') p++;

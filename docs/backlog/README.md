@@ -20,7 +20,7 @@ A map of everything in the three files, by theme.
 
 ### Core ([backlog-core.md](backlog-core.md))
 
-- **Distribution** — remaining platforms (Linux, Teensy, RPi), code-signing (macOS/Windows), live RMII Ethernet reconfigure, installer UX polish, P4 DHCP-hostname recheck; DevicesModule discovery growth (HTTP probe off the render task, more mDNS types + UDP, deterministic scan scenario).
+- **Distribution** — remaining platforms (Linux, Teensy, RPi), code-signing (macOS/Windows), live RMII Ethernet reconfigure, installer UX polish, P4 DHCP-hostname recheck, S31 web-flash (waiting on esptool-js); DevicesModule discovery growth (HTTP probe off the render task, more mDNS types + UDP, deterministic scan scenario).
 - **ESP32 performance & memory** — E1.31 multicast (IGMP), WiFi ArtNet perf matrix, async ArtNet send (PSRAM-only), network round-trip drop/reorder test, slow eth bring-up, non-PSRAM memory ceiling + boot-time buffer degradation, task core-pinning; ops: static IP on STA, mDNS toggle, MoonDeck doc-asset hardening, CI SHA-pinning.
 - **Architecture** — disable-releases-resources, cross-module pin-uniqueness check, Improv-child-of-NetworkModule, `std::span` platform API, Improv-as-REST follow-ups, **live scripting** (on-device authored effects/layouts/modifiers/drivers/sensor logic — design phase, see the bottom-up survey); composition/config: runtime board presets, per-layout coordinate offset.
 - **HTTP & OTA** — direct binary-upload OTA, HTTP file serving off the render tick.
