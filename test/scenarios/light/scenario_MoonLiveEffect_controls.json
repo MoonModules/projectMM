@@ -164,6 +164,35 @@
       }
     },
     {
+      "name": "edit-source-shrink-to-one-control",
+      "description": "Edit the source back to a single control. The control set shrinks 2 -> 1: `speed` stays bound (its live value kept), the removed `hue`'s value is dropped, and the value change path is exercised without an unexpected recompile crash.",
+      "op": "set_control",
+      "id": "ML",
+      "key": "source",
+      "value": "uint8_t speed = 7; // @control 0..15\nsetRGB(speed, 0, 0, 255);",
+      "measure": true,
+      "observed": {
+        "pc-macos": {
+          "tick_us": [
+            0,
+            0
+          ],
+          "free_heap": [
+            0,
+            0
+          ],
+          "max_alloc_block": [
+            0,
+            0
+          ],
+          "at": [
+            "2026-06-28",
+            "2026-06-28"
+          ]
+        }
+      }
+    },
+    {
       "name": "edit-source-broken",
       "description": "Push a broken script. Compile fails, the previous code is freed, the effect renders dark and the parse error surfaces in status — no crash.",
       "op": "set_control",
@@ -229,7 +258,7 @@
     },
     {
       "name": "re-add-control-effect",
-      "description": "Re-add a control effect — resources re-acquired clean (add/remove robustness in any order).",
+      "description": "Re-add a fresh effect after the remove — exec memory + control arena re-acquired clean (it renders its default fill on add). Control re-acquisition itself is proven by the add-control-script step at the top: a freshly-added effect compiling a control source surfaces + seeds its control; construct-mode set_control can't apply a dynamically-added scripted control as the final asserted render, so the gate here is the bare re-add's liveness.",
       "op": "add_module",
       "id": "ML2",
       "type": "MoonLiveEffect",

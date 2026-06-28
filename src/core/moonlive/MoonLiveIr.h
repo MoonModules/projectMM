@@ -63,13 +63,16 @@ enum class CtrlType : uint8_t { Uint8 };
 
 struct DeclaredControl {
     const char* name = nullptr;        // script-declared name (points into the source buffer)
+    uint8_t     min = 0, max = 255, def = 0;   // uint8 range/default (Stage 1 is uint8 controls)
     uint8_t     nameLen = 0;           // length (the source is not NUL-terminated per token)
     CtrlType    type = CtrlType::Uint8;
-    int32_t     min = 0, max = 255, def = 0;
     uint8_t     offset = 0;            // byte offset into the controls arena (declaration order)
 };
 
-static constexpr uint8_t kMaxCtrls = 8;   // a script declares a handful of controls; fixed, no heap
+static constexpr uint8_t kMaxCtrls = 8;          // a script declares a handful of controls; fixed, no heap
+static constexpr uint8_t kMaxControlName = 24;   // max control-name length (incl. NUL); the compiler
+                                                 // rejects longer names so the binding's name pool
+                                                 // can't truncate distinct names into a collision
 
 // A lowered program: a fixed list of ops plus the vreg high-water mark.
 struct IrProgram {

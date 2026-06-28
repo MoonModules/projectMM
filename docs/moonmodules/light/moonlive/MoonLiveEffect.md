@@ -27,7 +27,7 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
 
 ### Wire contract — control declaration
 
-The control names and ranges are not in the device JSON (they are parsed from `source`); the API integrator just sees the derived `uint8` controls in `/api/state` alongside `source`, and writes them like any control (`POST /api/control {module, control:<name>, value}`). The script's `\n` line breaks are standard JSON string escapes (decoded by the device — a multi-line `source` round-trips).
+The control names and ranges are **derived from `source`** (parsed from each `@control` declaration), then **surfaced in `/api/state`** — the device JSON view the integrator consumes — as regular `uint8` controls alongside `source`. So an integrator sees and writes them exactly like any other control (`POST /api/control {module, control:<name>, value}`); they're fully present in the device JSON, just authored in the script rather than fixed in the module. The script's `\n` line breaks are standard JSON string escapes the device decodes, so a multi-line `source` round-trips.
 
 ## Pieces
 

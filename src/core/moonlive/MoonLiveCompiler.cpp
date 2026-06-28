@@ -231,7 +231,11 @@ struct Parser {
     void parseDecl() {
         if (lex.kind != Tok::Ident) { fail("expected a control name after the type"); return; }
         const char* name = lex.identBeg; size_t nameLen = lex.identLen;
+        if (nameLen >= kMaxControlName) { fail("control name too long"); return; }   // no silent truncation downstream
         if (findControl(name, nameLen) >= 0) { fail("duplicate control name"); return; }
+        // A control name must not shadow a builtin: a declared `random16` would make `random16(…)`
+        // ambiguous (control read vs call). Reject it at the source so the resolution never collides.
+        if (table.find(name, nameLen)) { fail("control name shadows a built-in function"); return; }
         if (controlCount >= kMaxCtrls) { fail("too many controls"); return; }
         lex.advance();
         if (!expect(Tok::Assign, "expected '=' in a control declaration")) return;
@@ -247,9 +251,12 @@ struct Parser {
             if (lo < 0 || hi > 255 || lo > hi) { fail("@control range out of order or out of 0..255"); return; }
             lex.advance();
         }
-        controls[controlCount] = {name, static_cast<uint8_t>(nameLen), CtrlType::Uint8,
-                                  static_cast<int32_t>(lo), static_cast<int32_t>(hi),
-                                  static_cast<int32_t>(def), controlCount};
+        // The default must lie within the (possibly annotated) range — a slider can't start outside
+        // its own bounds.
+        if (def < lo || def > hi) { fail("control default is outside its @control range"); return; }
+        controls[controlCount] = {name, static_cast<uint8_t>(lo), static_cast<uint8_t>(hi),
+                                  static_cast<uint8_t>(def), static_cast<uint8_t>(nameLen),
+                                  CtrlType::Uint8, controlCount};
         controlCount++;
     }
 

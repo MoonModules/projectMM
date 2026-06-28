@@ -59,32 +59,40 @@ bool MoonLive::compile(const char* source, const BuiltinTable& table) {
     uint8_t staging[kCodeCap];
     CompileResult cr = compileSource(source, table, staging, kCodeCap);
     if (!cr.ok) { freeCode(); error_ = cr.error; return false; }   // surface the parse diagnostic
-    // Make the control arena hold the declared controls (grows only — keeps a stable address so
-    // the binding's control pointers survive the recompile), seeding new slots from their default.
+    // Allocate the control arena (fixed address) and seed new slots, BEFORE publishing the control
+    // set — ensureArena reads the previous controlCount_ to know which slots are new.
     if (!ensureArena(cr.controls, cr.controlCount)) { freeCode(); error_ = "no control memory"; return false; }
+    // Place the code. Only after it succeeds do we publish the new control set — a failed place()
+    // must not leave declaredControls() advertising controls for code that isn't running.
+    void* block = place(staging, cr.len);
+    if (!block) return false;                                      // controlCount_/controls_ unchanged
+    // Clamp any kept slot whose range shrank (e.g. @control 0..99 edited to 0..10) so a stale live
+    // value can't fall outside the new bounds before the native code reads it.
+    for (uint8_t i = 0; i < cr.controlCount && i < controlCount_; i++) {
+        uint8_t lo = static_cast<uint8_t>(cr.controls[i].min), hi = static_cast<uint8_t>(cr.controls[i].max);
+        if (ctrlArena_[i] < lo) ctrlArena_[i] = lo;
+        else if (ctrlArena_[i] > hi) ctrlArena_[i] = hi;
+    }
     controlCount_ = cr.controlCount;
     for (uint8_t i = 0; i < cr.controlCount; i++) controls_[i] = cr.controls[i];
-    void* block = place(staging, cr.len);
-    if (!block) return false;
     ctrl_ = reinterpret_cast<CtrlFn>(block);
     return true;
 }
 
-// Grow the control arena to hold `count` bytes (one per uint8 control). The arena only ever grows
-// its capacity and is never moved/shrunk, so a control pointer the binding bound to a slot stays
-// valid across recompiles. A NEW slot is seeded with its declared default; an EXISTING slot keeps
-// its live value (a source edit that keeps the control preserves the slider position). Returns
-// false on alloc failure.
+// Ensure the control arena exists and seed newly-declared slots. The arena is allocated ONCE at
+// full kMaxCtrls capacity and never reallocated, so its address — and every control pointer the
+// binding bound to a slot — is fixed for the engine's lifetime (the stable-slot contract
+// controlSlot() promises; a recompile that adds a control must not move a pointer the previous
+// onBuildControls already published). kMaxCtrls bytes is a handful; the up-front allocation is
+// cheaper than the move-and-rebind it avoids. A NEW slot (beyond the previous count) is seeded
+// from its declared default; an EXISTING slot keeps its live value (a source edit that keeps the
+// control preserves the slider position). Returns false on alloc failure.
 bool MoonLive::ensureArena(const DeclaredControl* decls, uint8_t count) {
-    if (count > ctrlArenaCap_) {
-        uint8_t* grown = static_cast<uint8_t*>(platform::alloc(count));
-        if (!grown) return false;
-        for (uint8_t i = 0; i < ctrlArenaCap_; i++) grown[i] = ctrlArena_[i];   // carry live values
-        if (ctrlArena_) platform::free(ctrlArena_);
-        ctrlArena_ = grown;
-        ctrlArenaCap_ = count;
+    if (!ctrlArena_) {
+        ctrlArena_ = static_cast<uint8_t*>(platform::alloc(kMaxCtrls));
+        if (!ctrlArena_) return false;
+        for (uint8_t i = 0; i < kMaxCtrls; i++) ctrlArena_[i] = 0;
     }
-    // Seed any slot that is newly declared (beyond the previous count) with its default.
     for (uint8_t i = controlCount_; i < count; i++) ctrlArena_[i] = static_cast<uint8_t>(decls[i].def);
     return true;
 }
@@ -102,7 +110,6 @@ void MoonLive::free() {
     freeCode();                       // exec block + fn pointers
     if (ctrlArena_) platform::free(ctrlArena_);   // full teardown also releases the control arena
     ctrlArena_ = nullptr;
-    ctrlArenaCap_ = 0;
     controlCount_ = 0;
 }
 

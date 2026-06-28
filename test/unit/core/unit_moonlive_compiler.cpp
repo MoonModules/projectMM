@@ -167,13 +167,13 @@ TEST_CASE("compileSource: a control declaration surfaces a DeclaredControl") {
     CHECK(c.min == 0); CHECK(c.max == 99); CHECK(c.def == 50); CHECK(c.offset == 0);
     CHECK(c.type == moonlive::CtrlType::Uint8);
 
-    // No annotation → default 0..255; two controls get sequential offsets.
+    // No annotation → default 0..255; two controls get sequential offsets (each default in range).
     auto r2 = moonlive::compileSource(
-        "uint8_t a = 10;\nuint8_t b = 20; // @control 1..7\nsetRGB(a, b, 0, 0);", kTable, out, sizeof(out));
+        "uint8_t a = 10;\nuint8_t b = 5; // @control 1..7\nsetRGB(a, b, 0, 0);", kTable, out, sizeof(out));
     REQUIRE(r2.ok);
     REQUIRE(r2.controlCount == 2);
     CHECK(r2.controls[0].max == 255); CHECK(r2.controls[0].offset == 0);   // a: no anno
-    CHECK(r2.controls[1].min == 1); CHECK(r2.controls[1].max == 7); CHECK(r2.controls[1].offset == 1);
+    CHECK(r2.controls[1].min == 1); CHECK(r2.controls[1].max == 7); CHECK(r2.controls[1].def == 5); CHECK(r2.controls[1].offset == 1);
 }
 
 TEST_CASE("compileSource: malformed control declarations fail with a diagnostic, never crash") {
@@ -182,6 +182,8 @@ TEST_CASE("compileSource: malformed control declarations fail with a diagnostic,
         "uint8_t speed 50; setRGB(0,0,0,0);",                        // missing '='
         "uint8_t speed = 300; setRGB(0,0,0,0);",                     // default > 255
         "uint8_t speed = 50; // @control 99..0\nsetRGB(0,0,0,0);",   // reversed range
+        "uint8_t speed = 50; // @control 0..10\nsetRGB(0,0,0,0);",   // default outside @control range
+        "uint8_t random16 = 5; setRGB(0,0,0,0);",                    // name shadows a builtin
         "uint8_t speed = 50;",                                       // no statement
         "uint8_t = 50; setRGB(0,0,0,0);",                            // no name
         "uint8_t s = 1; uint8_t s = 2; setRGB(0,0,0,0);",            // duplicate name

@@ -36,10 +36,16 @@ inline void parseString(const char* json, const char* key, char* out, size_t max
     if (!start) return;
     start += std::strlen(search);
     // Copy until the real closing quote, decoding the JSON string escapes our own writer emits
-    // (JsonSink::appendEscaped / writeJsonString): \" \\ \n \r \t \b \f. A bare strchr for '"'
-    // would stop at an escaped quote inside the value, and a multi-line value (a script with a
-    // `\n`) would arrive with a literal backslash-n unless \n is decoded — so reader and writer
-    // stay symmetric.
+    // (JsonSink::appendEscaped / writeJsonString): \" \\ \n \r \t \b \f and `\u00XX` for control
+    // bytes < 0x20. A bare strchr for '"' would stop at an escaped quote inside the value, and a
+    // multi-line value (a script with a `\n`) would arrive with a literal backslash-n unless \n is
+    // decoded — so reader and writer stay symmetric.
+    auto hexNibble = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
     size_t oi = 0;
     for (const char* p = start; *p && oi + 1 < maxLen; p++) {
         if (*p == '\\' && p[1]) {
@@ -50,6 +56,16 @@ inline void parseString(const char* json, const char* key, char* out, size_t max
                 case 't': out[oi++] = '\t'; break;
                 case 'b': out[oi++] = '\b'; break;
                 case 'f': out[oi++] = '\f'; break;
+                case 'u': {     // \uXXXX — decode the low byte (the writer only emits \u00XX)
+                    int h1 = p[1] ? hexNibble(p[1]) : -1, h2 = (p[1] && p[2]) ? hexNibble(p[2]) : -1;
+                    int h3 = (p[1] && p[2] && p[3]) ? hexNibble(p[3]) : -1;
+                    int h4 = (p[1] && p[2] && p[3] && p[4]) ? hexNibble(p[4]) : -1;
+                    if (h1 >= 0 && h2 >= 0 && h3 >= 0 && h4 >= 0) {
+                        out[oi++] = static_cast<char>((h3 << 4) | h4);   // low byte (high byte is 0x00)
+                        p += 4;
+                    } else { out[oi++] = 'u'; }   // malformed \u — copy literally, don't run off
+                    break;
+                }
                 default:  out[oi++] = *p;   break;   // \" \\ / and anything else: copy literally
             }
         } else if (*p == '"') {

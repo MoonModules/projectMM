@@ -243,7 +243,9 @@ public:
 
     // validate (optional): a per-control input check applied on every write path
     // (see ControlDescriptor::validate). nullptr accepts anything that fits the buffer.
-    void addText(const char* name, char* var, uint8_t bufSize = 16,
+    // bufSize is uint16_t so a large multi-line value (a script source, hundreds of bytes) isn't
+    // capped at 255; the descriptor's `max` (int32_t) carries it through the parse path.
+    void addText(const char* name, char* var, uint16_t bufSize = 16,
                  bool (*validate)(const char*) = nullptr) {
         grow();
         controls_[count_++] = {var, name, 0, ControlType::Text, 0, bufSize, false, false, validate};
@@ -251,7 +253,7 @@ public:
 
     // Like addText but the UI renders a resizable multi-line <textarea> (e.g. a
     // script source). Same char-buffer storage and parse/persist behaviour as Text.
-    void addTextArea(const char* name, char* var, uint8_t bufSize = 16,
+    void addTextArea(const char* name, char* var, uint16_t bufSize = 16,
                      bool (*validate)(const char*) = nullptr) {
         grow();
         controls_[count_++] = {var, name, 0, ControlType::TextArea, 0, bufSize, false, false, validate};

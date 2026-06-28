@@ -36,12 +36,12 @@ public:
             uint8_t* slot = engine_.controlSlot(decls[i].offset);
             if (!slot) continue;   // engine not compiled yet (first sweep) — controls appear after onBuildState
             // The declared name is a span into source_ (not NUL-terminated); copy it into a stable
-            // member pool so the control descriptor's borrowed name pointer stays valid.
-            uint8_t len = decls[i].nameLen < kMaxName - 1 ? decls[i].nameLen : kMaxName - 1;
-            std::memcpy(ctrlNames_[i], decls[i].name, len);
-            ctrlNames_[i][len] = '\0';
-            controls_.addUint8(ctrlNames_[i], *slot,
-                               static_cast<uint8_t>(decls[i].min), static_cast<uint8_t>(decls[i].max));
+            // member pool so the control descriptor's borrowed name pointer stays valid. The compiler
+            // rejects names ≥ kMaxControlName, so the full name always fits — no truncation, no
+            // distinct-names-collapsing-to-the-same-prefix collision.
+            std::memcpy(ctrlNames_[i], decls[i].name, decls[i].nameLen);
+            ctrlNames_[i][decls[i].nameLen] = '\0';
+            controls_.addUint8(ctrlNames_[i], *slot, decls[i].min, decls[i].max);
         }
     }
 
@@ -83,12 +83,15 @@ public:
     }
 
 private:
-    static constexpr uint8_t kMaxName = 16;   // longest scripted control name (NUL-terminated)
     moonlive::MoonLive engine_;
-    char source_[128] = "fill(0, 0, 255);";   // default script — solid blue, from parsed source
+    char source_[512] = "fill(0, 0, 255);";   // default script — solid blue. 512 fits a multi-line
+                                               // multi-control script (a decl per control + the
+                                               // statement); grow-on-demand is backlogged for the
+                                               // bigger Ripples-class scripts of later stages.
     // Stable NUL-terminated copies of the script-declared control names (the control descriptor
-    // borrows the pointer; the decl span into source_ is not NUL-terminated).
-    char ctrlNames_[moonlive::kMaxCtrls][kMaxName] = {};
+    // borrows the pointer; the decl span into source_ is not NUL-terminated). Sized to the
+    // compiler's name limit so a name always fits without truncation.
+    char ctrlNames_[moonlive::kMaxCtrls][moonlive::kMaxControlName] = {};
 };
 
 }  // namespace mm

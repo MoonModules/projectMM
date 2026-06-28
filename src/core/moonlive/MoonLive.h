@@ -72,8 +72,9 @@ public:
     // reads this to create real MoonModule controls bound to the arena slots.
     const DeclaredControl* declaredControls(uint8_t& count) const { count = controlCount_; return controls_; }
     // The backing byte for control `offset` in the live arena — the binding points a uint8 control
-    // reference here. nullptr if offset is out of range. Stable across a normal recompile (the
-    // arena only grows its capacity), so a bound control pointer survives a source edit.
+    // reference here. nullptr if offset is out of range. The arena is allocated once at full
+    // capacity (ensureArena) and never moves, so a bound control pointer stays valid for the
+    // engine's lifetime, across every recompile (the stable-slot contract).
     uint8_t* controlSlot(uint8_t offset) { return (ctrlArena_ && offset < controlCount_) ? &ctrlArena_[offset] : nullptr; }
 
 private:
@@ -100,8 +101,7 @@ private:
     CtrlFn  ctrl_ = nullptr;     // front-end-compiled routine (5-arg, reads the controls arena)
     const char* error_ = "";
 
-    uint8_t* ctrlArena_ = nullptr;   // live control-value bytes (platform::alloc, PSRAM-first)
-    uint8_t  ctrlArenaCap_ = 0;      // allocated capacity (grows only)
+    uint8_t* ctrlArena_ = nullptr;   // live control-value bytes (platform::alloc, kMaxCtrls, fixed)
     uint8_t  controlCount_ = 0;      // controls the current program declared
     DeclaredControl controls_[kMaxCtrls] = {};   // the declared-control metadata for the binding
 };

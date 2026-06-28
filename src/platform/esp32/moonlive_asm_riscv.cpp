@@ -11,9 +11,8 @@
 namespace mm::moonlive {
 
 // R0..R4 → a0..a4 (10..14, the host args: buf, nLights, cpl, t, ctrls — a4=kArg4 the controls
-// arena pointer). R5..R11 → t0,t1,t2,t3,t4,t5,a5 (caller-saved temps; a4 left the pool when it
-// became kArg4). t6(31) and a6(16) are reserved internal scratch (store8 address, call address
-// build), not in the pool.
+// arena pointer). R5..R11 → t0,t1,t2,t3,t4,t5,a5 (caller-saved temps). t6(31) and a6(16) are the
+// internal scratch (store8 address, call address build), not vregs.
 static const uint8_t kRvReg[kRegCount] = {10, 11, 12, 13, 14, 5, 6, 7, 28, 29, 30, 15};
 static uint8_t xr(Reg r) { return kRvReg[r]; }
 static constexpr uint8_t kScratchAddr = 31;   // t6 — store8 address temp

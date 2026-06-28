@@ -176,6 +176,14 @@ TEST_CASE("parseString decodes the standard JSON string escapes (symmetric with 
     json::parseString("{\"s\":\"q=\\\"x\\\" back=\\\\\"}", "s", out, sizeof(out));
     CHECK(std::strcmp(out, "q=\"x\" back=\\") == 0);  // \" and \\ still work
 
+    // \r \b \f — the remaining named escapes the writer emits
+    json::parseString("{\"s\":\"r\\rb\\bf\\f\"}", "s", out, sizeof(out));
+    CHECK(std::strcmp(out, "r\rb\bf\f") == 0);
+
+    // \u00XX — the writer emits this for control bytes < 0x20; the reader decodes the low byte
+    json::parseString("{\"s\":\"x\\u0001y\\u001f\"}", "s", out, sizeof(out));
+    CHECK(out[0] == 'x'); CHECK(out[1] == 0x01); CHECK(out[2] == 'y'); CHECK(out[3] == 0x1f);
+
     // a multi-line script value (the MoonLive Stage-1 case)
     json::parseString("{\"source\":\"uint8_t s = 1; // @control 0..9\\nsetRGB(s,0,0,255);\"}",
                       "source", out, sizeof(out));
