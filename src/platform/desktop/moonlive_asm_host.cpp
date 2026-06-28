@@ -12,13 +12,11 @@ namespace mm::moonlive {
 
 #if defined(__aarch64__)
 
-// arm64 register map: R0..R3 = the host-ABI arg registers x0..x3 (buf, nLights, cpl, t);
-// R4..R9 = caller-saved scratch x9..x14 (free across our leaf code). Index math uses the
-// 64-bit views (xN) for addresses, 32-bit (wN) for counters/colours — but the same register
-// number, so one map suffices.
-// R0..R3 = x0..x3 (the host-ABI args); R4..R13 = caller-saved scratch x9..x14 then x4..x7.
-// x15 is reserved for call()'s address/immediate scratch, so it's not in the pool.
-static const uint8_t kArm64Reg[kRegCount] = {0, 1, 2, 3, 9, 10, 11, 12, 13, 14, 4, 5, 6, 7};
+// arm64 register map: R0..R4 = the host-ABI arg registers x0..x4 (buf, nLights, cpl, t, ctrls —
+// the control-values arena pointer, kArg4). R5..R13 = caller-saved scratch x9..x14 then x5..x7.
+// Index math uses the 64-bit views (xN) for addresses, 32-bit (wN) for counters/colours — same
+// register number, so one map suffices. x15 is the call() address/immediate scratch (not a vreg).
+static const uint8_t kArm64Reg[kRegCount] = {0, 1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 5, 6, 7};
 static uint8_t mr(Reg r) { return kArm64Reg[r]; }
 
 Label HostAssembler::newLabel() {
@@ -67,6 +65,9 @@ void HostAssembler::mulReg(Reg d, Reg a, Reg b) {         // mul wD, wA, wB
 }
 void HostAssembler::store8(Reg base, Reg off, Reg val) {   // strb wVal, [xBase, xOff]
     emit32(0x38206800u | (mr(off) << 16) | (mr(base) << 5) | mr(val));
+}
+void HostAssembler::load8(Reg d, Reg base, int32_t imm) {  // ldrb wDst, [xBase, #imm12]
+    emit32(0x39400000u | ((uint32_t(imm) & 0xfff) << 10) | (mr(base) << 5) | mr(d));
 }
 void HostAssembler::cmp(Reg a, Reg b) {                    // cmp wA, wB  (subs wzr, wA, wB)
     emit32(0x6b00001fu | (mr(b) << 16) | (mr(a) << 5));

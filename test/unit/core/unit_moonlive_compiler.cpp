@@ -152,3 +152,56 @@ TEST_CASE("MoonLive recompiling swaps the program live (fill <-> setRGB)") {
     eng.run(buf.data(), 4, 3, 0);
     CHECK(buf[1*3+0] == 255); CHECK(buf[0] == 0);
 }
+
+// STAGE 1 CONTROLS — parse layer: a `uint8_t name = def; // @control min..max` declaration
+// surfaces a DeclaredControl, and a declared name used in a statement resolves to it.
+TEST_CASE("compileSource: a control declaration surfaces a DeclaredControl") {
+    uint8_t out[768];
+    auto r = moonlive::compileSource(
+        "uint8_t speed = 50; // @control 0..99\nsetRGB(speed, 0, 0, 255);", kTable, out, sizeof(out));
+    REQUIRE(r.ok);
+    REQUIRE(r.controlCount == 1);
+    const auto& c = r.controls[0];
+    CHECK(std::strncmp(c.name, "speed", c.nameLen) == 0);
+    CHECK(c.nameLen == 5);
+    CHECK(c.min == 0); CHECK(c.max == 99); CHECK(c.def == 50); CHECK(c.offset == 0);
+    CHECK(c.type == moonlive::CtrlType::Uint8);
+
+    // No annotation → default 0..255; two controls get sequential offsets (each default in range).
+    auto r2 = moonlive::compileSource(
+        "uint8_t a = 10;\nuint8_t b = 5; // @control 1..7\nsetRGB(a, b, 0, 0);", kTable, out, sizeof(out));
+    REQUIRE(r2.ok);
+    REQUIRE(r2.controlCount == 2);
+    CHECK(r2.controls[0].max == 255); CHECK(r2.controls[0].offset == 0);   // a: no anno
+    CHECK(r2.controls[1].min == 1); CHECK(r2.controls[1].max == 7); CHECK(r2.controls[1].def == 5); CHECK(r2.controls[1].offset == 1);
+
+    // `@control` matches as a whole word: a comment whose first word merely STARTS
+    // with "@control" (e.g. "@controlled") is a plain comment, not a malformed
+    // annotation — it's skipped, the declaration takes the default 0..255 range.
+    auto r3 = moonlive::compileSource(
+        "uint8_t speed = 9; // @controlled by the user\nsetRGB(speed, 0, 0, 0);", kTable, out, sizeof(out));
+    REQUIRE(r3.ok);
+    REQUIRE(r3.controlCount == 1);
+    CHECK(r3.controls[0].min == 0); CHECK(r3.controls[0].max == 255); CHECK(r3.controls[0].def == 9);
+}
+
+TEST_CASE("compileSource: malformed control declarations fail with a diagnostic, never crash") {
+    uint8_t out[768];
+    const char* bad[] = {
+        "uint8_t speed 50; setRGB(0,0,0,0);",                        // missing '='
+        "uint8_t speed = 300; setRGB(0,0,0,0);",                     // default > 255
+        "uint8_t speed = 50; // @control 99..0\nsetRGB(0,0,0,0);",   // reversed range
+        "uint8_t speed = 50; // @control 0..10\nsetRGB(0,0,0,0);",   // default outside @control range
+        "uint8_t speed = 50; // @control 5\nsetRGB(0,0,0,0);",       // lexer-level malformed: no `..max` (Tok::Error surfaced, not a generic fall-through)
+        "uint8_t speed = 50; // @control 5..\nsetRGB(0,0,0,0);",     // lexer-level malformed: missing max
+        "uint8_t random16 = 5; setRGB(0,0,0,0);",                    // name shadows a builtin
+        "uint8_t speed = 50;",                                       // no statement
+        "uint8_t = 50; setRGB(0,0,0,0);",                            // no name
+        "uint8_t s = 1; uint8_t s = 2; setRGB(0,0,0,0);",            // duplicate name
+    };
+    for (auto s : bad) {
+        auto r = moonlive::compileSource(s, kTable, out, sizeof(out));
+        CHECK_FALSE(r.ok);
+        CHECK(std::strlen(r.error) > 0);
+    }
+}

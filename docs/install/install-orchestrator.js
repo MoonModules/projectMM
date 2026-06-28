@@ -27,8 +27,24 @@
 // churn in either lib could silently break the flow (esptool-js' API has
 // shifted across minor versions; improv-wifi-serial-sdk's writePacketToStream
 // is private and could be renamed). Date the pins so future bumps are
-// intentional. Pinned 2026-06-03.
-import { ESPLoader, Transport } from "https://unpkg.com/esptool-js@0.4.7/bundle.js?module";
+// intentional, and surface the esptool-js version in the page footer so a
+// flash failure can be tied to the exact flasher build. The version constants
+// below MUST match the import URLs (a check script could pin this later).
+//
+// esptool-js is pinned 0.5.7 — the version ESP Web Tools (the flasher ESPHome
+// and WLED embed) ships. 0.6.0 (the newest) has a DETERMINISTIC compressed-flash
+// bug: a P4 web-flash aborts at the SAME block both times — "Failed to write
+// compressed data to flash after seq 38, status 201" — where 0.4.7, 0.5.7, and
+// the CLI (esptool.py) all flash the same P4 cleanly. Failing at a fixed seq (not
+// a random one) rules out a transient USB hiccup; it's a real 0.6.0 regression in
+// the deflate write path (cf. upstream esptool-js#245, per-block retry). 0.5.x
+// also moved hardReset off ESPLoader into a reset-strategy class — handled by
+// hardResetChip() below (transport DTR/RTS), version-agnostic, so 0.6.x would
+// reboot fine IF its flash worked. Re-test the flash + reset path on any bump;
+// 0.6.x is only viable once that deflate regression is fixed. Pinned 2026-06-28.
+export const ESPTOOL_JS_VERSION = "0.5.7";
+export const IMPROV_SDK_VERSION = "2.5.0";
+import { ESPLoader, Transport } from "https://unpkg.com/esptool-js@0.5.7/bundle.js?module";
 import { ImprovSerial } from "https://unpkg.com/improv-wifi-serial-sdk@2.5.0/dist/serial.js?module";
 
 // ---------------------------------------------------------------------------
@@ -302,15 +318,16 @@ function normalizeDeviceUrl(input) {
 }
 
 
-// Inline of esptool-js@0.4.7's ESPLoader.main, with attempts=2 instead of
-// the default 7. The default takes ~60 s to fail when the user picks a
-// non-ESP32 serial port (e.g. Bluetooth-Incoming-Port on macOS — opens
-// fine, just doesn't speak the ESP32 ROM bootloader protocol); 2 attempts
-// brings that to ~10 s while still allowing one retry for legitimately-
-// flaky USB-Serial bridges (the LOLIN D32's CH340 sometimes needs a
-// second go on the RTS/DTR pulse). The rest of the body is reproduced
-// verbatim from esptool-js's ESPLoader.main — when the SDK pin bumps,
-// re-verify the sequence still matches upstream.
+// connectAndDescribeChip mirrors esptool-js's ESPLoader.main, but calls the
+// public APIs directly (connect → getChipDescription → runStub → changeBaud)
+// rather than main() — so we pass attempts=2 instead of the default 7. The
+// default takes ~60 s to fail when the user picks a non-ESP32 serial port (e.g.
+// Bluetooth-Incoming-Port on macOS — opens fine, just doesn't speak the ESP32
+// ROM bootloader protocol); 2 attempts brings that to ~10 s while still allowing
+// one retry for legitimately-flaky USB-Serial bridges (the LOLIN D32's CH340
+// sometimes needs a second go on the RTS/DTR pulse). The connect()/runStub()/
+// changeBaud() signatures are identical across 0.4.7→0.6.0; when the pin bumps,
+// re-verify they still match upstream.
 // esptool's getChipDescription() reports the specific silicon (e.g.
 // "ESP32-D0WD-V3", "ESP32-S3 (QFN56) (revision v0.2)", "ESP32-C6 (revision v0.0)"),
 // but the picker compares against deviceModels.json's coarse `chip` FAMILY — the same
@@ -337,6 +354,21 @@ function chipFamily(chipName) {
     if (sub) return "ESP32-" + sub[1];
     if (/ESP32\b/.test(s)) return "ESP32";   // classic — no sub-family token
     return s;                                // truly unrecognised — pass through so it's visible
+}
+
+// Hard-reset the chip after flashing by toggling DTR/RTS — the standard ESP32
+// auto-reset pulse. In our pinned esptool-js, hardReset lives on a `HardReset`
+// reset-strategy class, not on ESPLoader; the transport's setDTR/setRTS are stable
+// across versions, so driving the reset directly is both correct and bump-proof
+// (and avoids "esploader.hardReset is not a function"). Sequence (DTR=IO0, RTS=EN
+// on the classic auto-reset circuit): pull EN low to reset, release with IO0 high
+// so the chip boots the app rather than the bootloader.
+async function hardResetChip(transport) {
+    await transport.setDTR(false);   // IO0 high (run, not download)
+    await transport.setRTS(true);    // EN low — hold in reset
+    await new Promise((r) => setTimeout(r, 100));
+    await transport.setDTR(false);
+    await transport.setRTS(false);   // EN high — release; chip boots the app
 }
 
 async function connectAndDescribeChip(esploader) {
@@ -675,8 +707,8 @@ export const installer = {
             });
 
             trackProgress("reboot");
-            // hard_reset toggles DTR/RTS to reset the chip after flash.
-            await esploader.hardReset();
+            // Toggle DTR/RTS to reset the chip after flash (see hardResetChip).
+            await hardResetChip(transport);
 
             // Hand the port from esptool-js to ImprovSerial. The device
             // hard-resets, the USB CDC endpoint re-enumerates, and the
@@ -1161,7 +1193,7 @@ export const installer = {
             await esploader.eraseFlash();
 
             trackProgress("reboot");
-            await esploader.hardReset();
+            await hardResetChip(transport);
 
             trackProgress("done");
             onSuccess();

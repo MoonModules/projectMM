@@ -30,12 +30,11 @@
 //   6. DOM construction + event wiring
 //
 // Tests: the pure helpers below — `isCompatible`, `parseFirmwaresFromAssets`,
-// `relativeTime` — are exercised ad-hoc from a DevTools console against the
-// real GitHub Releases response and against synthesised assets. The repo
-// has no JS unit-test harness (no jsdom, no node-based runner). The C++
-// frame parser at src/core/ImprovFrame.h + test/test_improv_frame.cpp is
-// the equivalent test for the only piece of this work that runs on the
-// device side.
+// `mergeFirmwares` — are exported (alongside `installPicker`) and unit-tested in
+// test/js/installer-firmware-merge.test.mjs (run: `node --test test/js`). They're
+// pure (data in, data out, no DOM), so the test imports and exercises the real
+// functions. The DOM-wiring half of this file isn't node-testable; its contracts
+// are pinned by the catalog/firmware check scripts + the scenario suite instead.
 
 // ---------------------------------------------------------------------------
 // 1. Constants + module state
@@ -195,6 +194,18 @@ function parseFirmwaresFromAssets(assets, tag) {
     // Only return firmwares that have BOTH a manifest and a binary — partial uploads
     // (mid-release-publish race) shouldn't appear in the dropdown.
     return Array.from(firmwares.values()).filter(f => f.manifestUrl && f.binaryUrl);
+}
+
+// Merge a release's published firmwares with locally-staged extras (preview only).
+// Same-named local entry wins (it overrides the published bin with the local build);
+// a local-only firmware (not yet in any release) is added. Returns a fresh array.
+function mergeFirmwares(published, extras) {
+    if (!extras || !extras.length) return published;
+    const byName = new Map(published.map(f => [f.firmware, f]));
+    for (const e of extras) {
+        if (e && e.firmware && e.manifestUrl && e.binaryUrl) byName.set(e.firmware, e);
+    }
+    return Array.from(byName.values());
 }
 
 // ---------------------------------------------------------------------------
@@ -569,7 +580,12 @@ function render(state) {
                 state.boardSupport.fillBoardOptions(boardEl, state.boards, "(any board)");
                 state.selectedBoard = "";
                 boardEl.value = "";
-                status = `Detect failed: ${e && e.message ? e.message : e}`;
+                // Detect is optional: the full catalog is still shown, so the user can
+                // pick their board and flash regardless. Say so — a bare "Detect
+                // failed" reads like a dead end. (A brand-new chip whose esptool-js /
+                // device chip DB predates it can't be auto-identified yet, but its
+                // firmware flashes fine once picked manually.)
+                status = `Detect failed: ${e && e.message ? e.message : e} — pick your board below and flash anyway`;
             }
             safeLocalSet(PREF_BOARD_KEY, state.selectedBoard || "");
             refreshFirmwareDropdown();
@@ -625,6 +641,11 @@ function render(state) {
 // Public entry point
 // ---------------------------------------------------------------------------
 
+// Pure helpers exported for unit testing (test/js/installer-firmware-merge.test.mjs).
+// They take data and return data — no DOM, no fetch — so a node test can exercise
+// the real functions rather than a re-implemented copy.
+export { parseFirmwaresFromAssets, mergeFirmwares };
+
 export const installPicker = {
     /**
      * Mount a picker into the given container.
@@ -668,7 +689,7 @@ export const installPicker = {
      */
     async init({ container, ownFirmwareKey, onInstall, onDetect = null,
                  enableBoardPicker = true, installRowExtras = null, hasPort = null,
-                 boardSupport = null }) {
+                 boardSupport = null, extraFirmwaresByTag = null }) {
         const state = makeState();
         state.container = container;
         state.ownFirmwareKey = ownFirmwareKey || null;
@@ -701,14 +722,20 @@ export const installPicker = {
                 `<span class="rp-status">Couldn't reach GitHub — refresh to retry.</span></div>`;
             return;
         }
-        // Normalise: enrich each release with its parsed firmwares list.
+        // Normalise: enrich each release with its parsed firmwares list, then
+        // merge in any locally-staged firmwares for that tag (preview only — the
+        // host injects extraFirmwaresByTag so a brand-new firmware that isn't in
+        // the published release's assets yet is still flashable from local bins;
+        // a local entry overrides a same-named published one).
         state.releases = data.map(r => ({
             tag_name: r.tag_name,
             name: r.name || r.tag_name,
             prerelease: !!r.prerelease,
             published_at: r.published_at || r.created_at,
             html_url: r.html_url,
-            firmwares: parseFirmwaresFromAssets(r.assets, r.tag_name),
+            firmwares: mergeFirmwares(
+                parseFirmwaresFromAssets(r.assets, r.tag_name),
+                extraFirmwaresByTag && extraFirmwaresByTag[r.tag_name]),
         }))
         // Drop releases with zero usable firmwares (no firmware-* / manifest-* assets).
         .filter(r => r.firmwares.length > 0);
@@ -741,6 +768,17 @@ export const installPicker = {
      */
     getSelectedBoard() {
         return _lastState ? (_lastState.selectedBoard || "") : "";
+    },
+
+    /**
+     * The picked board's chip family from deviceModels.json ("ESP32-S3",
+     * "ESP32-S31", …), or "" when no board is picked / not in the catalog. The
+     * host uses it to special-case chips the browser flasher can't handle.
+     */
+    getSelectedBoardChip() {
+        if (!_lastState || !_lastState.selectedBoard || !_lastState.boards) return "";
+        const entry = _lastState.boards.find(b => b.name === _lastState.selectedBoard);
+        return (entry && entry.chip) || "";
     },
 
     /**

@@ -17,14 +17,17 @@
 //
 // Virtual registers are plain indices v0..v(kMaxVRegs-1). A backend maps them to machine
 // registers. The named host arguments arrive in fixed vregs (kArg…) so the front-end refers to
-// them without knowing the ABI. They are named neutrally — kArg0..kArg3 — and a host assigns
-// meaning (for the light host: buf, nLights, cpl, t).
+// them without knowing the ABI. They are named neutrally — kArg0..kArg4 — and a host assigns
+// meaning (for the light host: buf, nLights, cpl, t, and a controls-values pointer).
 
 namespace mm::moonlive {
 
 using VReg = uint8_t;
 
-enum : VReg { kArg0 = 0, kArg1 = 1, kArg2 = 2, kArg3 = 3, kFirstTemp = 4 };
+// kArg4 is a per-instance data pointer the host passes at run time (for the light host: the
+// control-values arena). LoadCtrl reads a byte from it — a script control whose value the binding
+// updates live, without a recompile (the kArg3/t pattern, one slot over).
+enum : VReg { kArg0 = 0, kArg1 = 1, kArg2 = 2, kArg3 = 3, kArg4 = 4, kFirstTemp = 5 };
 
 static constexpr uint8_t kMaxVRegs = 16;     // a statement uses a handful; no allocator yet
 static constexpr uint8_t kMaxIrOps = 64;     // a statement is a handful of ops; fixed, no heap
@@ -40,6 +43,7 @@ enum class IrOp : uint8_t {
     Mul,       // dst = a * b
     Call,      // dst = (*callFn)(a) — call a host-registered function (callFn = the C fn ptr)
     Inline,    // a host-registered inline op (inlineOp tag); operands a/b/c/d (op-specific)
+    LoadCtrl,  // dst = ((const uint8_t*)kArg4)[imm] — read a control value byte at offset imm
 };
 
 struct IrInst {
@@ -50,6 +54,25 @@ struct IrInst {
     HostCallFn callFn = nullptr;           // Call: the host C function pointer (typed alias)
     InlineOp inlineOp{};                   // Inline: the neutral opcode tag
 };
+
+// A control a script declared (`uint8_t speed = 50; // @control 0..99`). Neutral: the core
+// knows {name, a neutral type, range, default, and the byte offset into the run-time controls
+// arena it lives at}. The light-domain binding turns this into a real MoonModule control bound to
+// the arena slot. `type` is a neutral kind — Uint8 only in Stage 1 — NOT a projectMM ControlType.
+enum class CtrlType : uint8_t { Uint8 };
+
+struct DeclaredControl {
+    const char* name = nullptr;        // script-declared name (points into the source buffer)
+    uint8_t     min = 0, max = 255, def = 0;   // uint8 range/default (Stage 1 is uint8 controls)
+    uint8_t     nameLen = 0;           // length (the source is not NUL-terminated per token)
+    CtrlType    type = CtrlType::Uint8;
+    uint8_t     offset = 0;            // byte offset into the controls arena (declaration order)
+};
+
+static constexpr uint8_t kMaxCtrls = 8;          // a script declares a handful of controls; fixed, no heap
+static constexpr uint8_t kMaxControlName = 24;   // max control-name length (incl. NUL); the compiler
+                                                 // rejects longer names so the binding's name pool
+                                                 // can't truncate distinct names into a collision
 
 // A lowered program: a fixed list of ops plus the vreg high-water mark.
 struct IrProgram {

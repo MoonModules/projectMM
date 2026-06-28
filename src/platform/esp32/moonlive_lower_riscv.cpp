@@ -32,6 +32,7 @@ size_t lowerToBytes(const IrProgram& ir, uint8_t* out, size_t cap) {
             case IrOp::Add:    a.addReg(reg(op.dst), reg(op.a), reg(op.b)); break;
             case IrOp::AddImm: a.addImm(reg(op.dst), reg(op.a), op.imm); break;
             case IrOp::Mul:    a.mulReg(reg(op.dst), reg(op.a), reg(op.b)); break;
+            case IrOp::LoadCtrl: a.load8(reg(op.dst), reg(kArg4), op.imm); break;  // dst = ctrls[imm] (a4 = kArg4)
             case IrOp::Call:
                 // The IR carries the host's function pointer (the light TU's random16), valid in
                 // the single flashed image — call it directly, same as the other backends.

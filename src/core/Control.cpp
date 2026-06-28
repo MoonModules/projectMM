@@ -270,17 +270,23 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
             // TextArea and Password parse identically to Text — only the UI render
             // (TextArea) or serialization (Password) differs.
             // c.max is the buffer size; parseString writes up to maxLen-1 then
-            // NUL-terminates, so passing c.max gives "fill the buffer".
-            uint8_t maxLen = static_cast<uint8_t>(c.max > 0 ? c.max : 16);
+            // NUL-terminates, so passing c.max gives "fill the buffer". uint16_t (not uint8_t) so
+            // a large textarea (a script source, hundreds of bytes) isn't truncated to 255.
+            size_t maxLen = static_cast<size_t>(c.max > 0 ? c.max : 16);
             // A per-control validator (if set) checks the incoming value before the
             // write, so a reject leaves the stored value untouched (no partial write).
             // Parse into a scratch buffer first, validate, then commit — this is the
-            // one backend home every write path shares (HTTP, APPLY_OP, persistence).
-            // scratch is sized to the control's full buffer (maxLen, which is c.max, an
-            // 8-bit bufSize ≤ 255) so a long-but-valid value isn't truncated before the
-            // validator sees it. 256 bytes covers any Text/Password buffer.
+            // one backend home every write path shares (HTTP, APPLY_OP, persistence). The scratch
+            // matches the buffer's full size so a long-but-valid value isn't truncated before the
+            // validator sees it; it's sized to the largest validated text/textarea buffer.
             if (c.validate) {
-                char scratch[256];
+                static constexpr size_t kScratch = 1024;   // ≥ any validated Text/TextArea/Password buffer
+                // A buffer wider than the scratch is rejected, so a value is never
+                // truncated before the validator sees it (which would be a silent
+                // partial write). kScratch is the one place to grow if a validated
+                // control legitimately needs a larger buffer.
+                if (maxLen > kScratch) return ApplyResult::Malformed;
+                char scratch[kScratch];
                 mm::json::parseString(json, key, scratch, maxLen);
                 if (!c.validate(scratch)) return ApplyResult::Malformed;
                 std::strncpy(static_cast<char*>(c.ptr), scratch, maxLen - 1);

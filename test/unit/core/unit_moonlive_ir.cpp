@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
+#include <algorithm>
 
 // MoonLive IR + assembler, exercised through the front-end + the light builtin table (the IR
 // builders are no longer hand-written — the parser builds the IR from source). The headline
@@ -104,4 +105,61 @@ TEST_CASE("MoonLive compiled setRGB writes one pixel; out-of-range is bounds-rej
     fn2(buf2.data(), 8, 3);
     for (auto v : buf2) CHECK(v == 0xAB);
     platform::freeExec(blk2, 256);
+}
+
+// STAGE 1 CONTROLS — codegen + live-read contract. A script control compiles to a LoadCtrl that
+// reads the run-time controls arena (the 5th arg); mutating the arena changes the output with NO
+// recompile — the live-edit guarantee, pinned at the codegen level. The `control + random16` case
+// pins the call() save-set interaction (kArg4 must survive a host call).
+namespace {
+using CtrlFn = void (*)(uint8_t*, uint32_t, uint8_t, uint32_t, const uint8_t*);
+int firstLit(const std::vector<uint8_t>& b) {
+    for (size_t i = 0; i + 2 < b.size(); i += 3) if (b[i] || b[i+1] || b[i+2]) return static_cast<int>(i / 3);
+    return -1;
+}
+}
+
+TEST_CASE("MoonLive control: a declared control reads the arena live (no recompile on value change)") {
+    uint8_t code[768];
+    auto r = moonlive::compileSource(
+        "uint8_t speed = 50; // @control 0..99\nsetRGB(speed, 0, 0, 255);", kT, code, sizeof(code));
+    REQUIRE(r.ok);
+    REQUIRE(r.controlCount == 1);
+    void* blk = platform::allocExec(r.len);
+    REQUIRE(blk != nullptr);
+    platform::writeExec(blk, code, r.len);
+    auto fn = reinterpret_cast<CtrlFn>(blk);
+
+    std::vector<uint8_t> buf(16 * 3, 0);
+    uint8_t arena[1];
+
+    arena[0] = 5;  std::fill(buf.begin(), buf.end(), 0); fn(buf.data(), 16, 3, 0, arena);
+    CHECK(firstLit(buf) == 5);                       // control value selects the pixel
+    arena[0] = 9;  std::fill(buf.begin(), buf.end(), 0); fn(buf.data(), 16, 3, 0, arena);
+    CHECK(firstLit(buf) == 9);                       // changed the arena byte only — NO recompile
+    arena[0] = 0;  std::fill(buf.begin(), buf.end(), 0); fn(buf.data(), 16, 3, 0, arena);
+    CHECK(firstLit(buf) == 0);
+    platform::freeExec(blk, r.len);
+}
+
+TEST_CASE("MoonLive control survives a host call (kArg4 live across random16)") {
+    // The control's index (arena[0]) must still be readable AFTER a random16 call clobbers the
+    // scratch pool — pins that the call() save-set protects kArg4 (the arena pointer).
+    uint8_t code[768];
+    auto r = moonlive::compileSource(
+        "uint8_t idx = 0; // @control 0..15\nsetRGB(idx, random16(256), 0, 255);", kT, code, sizeof(code));
+    REQUIRE(r.ok);
+    void* blk = platform::allocExec(r.len);
+    REQUIRE(blk != nullptr);
+    platform::writeExec(blk, code, r.len);
+    auto fn = reinterpret_cast<CtrlFn>(blk);
+
+    uint8_t arena[1] = {7};
+    std::vector<uint8_t> buf(16 * 3, 0);
+    fn(buf.data(), 16, 3, 0, arena);
+    // pixel 7 is lit (its blue channel is 255), and ONLY pixel 7 (the control index held across the call)
+    CHECK(buf[7*3 + 2] == 255);
+    int lit = 0; for (size_t i = 0; i + 2 < buf.size(); i += 3) if (buf[i] || buf[i+1] || buf[i+2]) lit++;
+    CHECK(lit == 1);
+    platform::freeExec(blk, r.len);
 }

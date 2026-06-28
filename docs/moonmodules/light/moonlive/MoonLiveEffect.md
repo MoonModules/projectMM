@@ -15,6 +15,19 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
 ## Controls
 
 - `source` — the script text (default `fill(0, 0, 255);` — solid blue). Editing it recompiles live: a valid script swaps in on the next tick; a failed compile frees the old code, shows the diagnostic in the module status, and renders dark until fixed (the script-editor loop, robust + no reboot).
+- **Scripted controls** — a script declares a tunable variable with a range annotation, and the engine surfaces it as a real `uint8` MoonModule control (slider + UI + persistence), bound to a live value the running native code reads each tick:
+
+  ```c
+  uint8_t speed = 50;   // @control 0..99      → a "speed" slider, default 50, range 0..99
+  uint8_t hue   = 128;  // @control 0..255
+  setRGB(speed, hue, 0, 255);
+  ```
+
+  Declaring the variable is what **creates** the control: `uint8_t <name> = <default>;` becomes a `<name>` slider (default `<default>`, range `0..255`). The trailing `// @control <min>..<max>` only **adjusts that control's range**; it's optional. A declared name used in a statement reads the control's **current** value. Editing a control's slider does **not** recompile — the value lands in the engine's control-values arena and the next render tick reads it (the live-edit guarantee, the *no-reboot* principle). Editing the `source` recompiles and re-derives the control set; a control kept across the edit keeps its slider value, a removed control's saved value drops. Stage 1 is `uint8` only.
+
+### Wire contract — control declaration
+
+The controls are **derived from `source`** (one per declared `uint8` control; the optional `@control` annotation only refines a control's range), then **surfaced in `/api/state`** — the device JSON view the integrator consumes — as regular `uint8` controls alongside `source`. So an integrator sees and writes them exactly like any other control — e.g. `POST /api/control` with `{"module": "ML", "control": "speed", "value": 80}`; they're fully present in the device JSON, just authored in the script rather than fixed in the module. The script's `\n` line breaks are standard JSON string escapes the device decodes, so a multi-line `source` round-trips.
 
 ## Pieces
 

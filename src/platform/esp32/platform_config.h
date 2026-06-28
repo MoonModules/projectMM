@@ -6,6 +6,15 @@
 
 #include <cstdint>
 
+// The RMT TX-channel count moved into the RMT HAL's low-level header when the RMT
+// HAL graduated into its own `esp_hal_rmt` component on the v6.1 line (it replaced
+// the public `SOC_RMT_TX_CANDIDATES_PER_GROUP` soc-cap). Included at file scope
+// (not inside the namespace) so the standard headers it pulls land in `::`, and
+// only on RMT-bearing builds.
+#ifdef CONFIG_SOC_RMT_SUPPORTED
+#include "hal/rmt_ll.h"
+#endif
+
 namespace mm::platform {
 
 #ifdef CONFIG_SPIRAM
@@ -36,13 +45,13 @@ constexpr bool isEsp32S3 = true;
 constexpr bool isEsp32S3 = false;
 #endif
 
-// RMT TX channels this chip offers (8 on classic ESP32, 4 on the S3 and P4,
-// straight from the IDF SOC capability config). Doubles as the RMT capability
-// flag: the RMT LED driver and its main.cpp registration guard on
-// `rmtTxChannels > 0` instead of a chip-family flag, so a new RMT-bearing
-// target works untouched.
+// RMT TX channels this chip offers (8 on classic ESP32, 4 on the S3 / P4 / S31,
+// straight from the IDF RMT HAL — `RMT_LL_TX_CANDIDATES_PER_INST`, included above).
+// Doubles as the RMT capability flag: the RMT LED driver and its main.cpp
+// registration guard on `rmtTxChannels > 0` instead of a chip-family flag, so a
+// new RMT-bearing target works untouched.
 #ifdef CONFIG_SOC_RMT_SUPPORTED
-constexpr uint8_t rmtTxChannels = CONFIG_SOC_RMT_TX_CANDIDATES_PER_GROUP;
+constexpr uint8_t rmtTxChannels = RMT_LL_TX_CANDIDATES_PER_INST;
 #else
 constexpr uint8_t rmtTxChannels = 0;
 #endif

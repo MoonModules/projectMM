@@ -238,6 +238,28 @@ def stage_local_builds(builds: list[Path]) -> list[str]:
     return staged
 
 
+def write_local_firmwares_json(staged: list[str]):
+    """Write local-firmwares.json so the picker offers locally-staged firmwares.
+
+    The picker's firmware dropdown is normally driven by the published release's
+    GitHub assets, so a brand-new variant (built locally, not yet in any release)
+    wouldn't appear even though its bins are staged. install.js fetches this file
+    and hands the picker an `extraFirmwaresByTag` override; the URLs are the same
+    `./releases/<tag>/...` paths the staged bins already live at, so Install
+    resolves them same-origin. Shape: { <tag>: [{firmware, manifestUrl, binaryUrl}] }.
+    """
+    by_tag = {LOCAL_TAG: [
+        {
+            "firmware": fw,
+            "manifestUrl": f"./releases/{LOCAL_TAG}/manifest-{fw}.json",
+            "binaryUrl": f"./releases/{LOCAL_TAG}/firmware-{fw}-v{LOCAL_VERSION}.bin",
+        }
+        for fw in staged
+    ]}
+    (STAGE_INSTALL / "local-firmwares.json").write_text(
+        json.dumps(by_tag, indent=2) + "\n", encoding="utf-8")
+
+
 def _port_in_use(port: int) -> bool:
     """True if something is already listening on `port` on this host. Used
     as a pre-flight before the staging step nukes STAGE_DIR — re-running
@@ -273,6 +295,7 @@ def main() -> int:
     if local_builds:
         firmwares = stage_local_builds(local_builds)
         if firmwares:
+            write_local_firmwares_json(firmwares)
             print(f"==> staged `{LOCAL_TAG}` release with firmwares: {', '.join(firmwares)}")
             print(f"    pick the `{LOCAL_TAG}` tag in the picker to flash a USB-connected ESP32")
         else:

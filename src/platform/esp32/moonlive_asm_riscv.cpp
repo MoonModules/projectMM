@@ -10,10 +10,10 @@
 
 namespace mm::moonlive {
 
-// R0..R3 → a0..a3 (10..13, the host args). R4..R11 → t0,t1,t2,t3,t4,t5,a4,a5 (caller-saved
-// temps). t6(31) and a6(16) are reserved internal scratch (store8 address, call address build),
-// not in the pool.
-static const uint8_t kRvReg[kRegCount] = {10, 11, 12, 13, 5, 6, 7, 28, 29, 30, 14, 15};
+// R0..R4 → a0..a4 (10..14, the host args: buf, nLights, cpl, t, ctrls — a4=kArg4 the controls
+// arena pointer). R5..R11 → t0,t1,t2,t3,t4,t5,a5 (caller-saved temps). t6(31) and a6(16) are the
+// internal scratch (store8 address, call address build), not vregs.
+static const uint8_t kRvReg[kRegCount] = {10, 11, 12, 13, 14, 5, 6, 7, 28, 29, 30, 15};
 static uint8_t xr(Reg r) { return kRvReg[r]; }
 static constexpr uint8_t kScratchAddr = 31;   // t6 — store8 address temp
 static constexpr uint8_t kScratchFn   = 16;   // a6 — call address build / result stash
@@ -90,6 +90,9 @@ void RiscvAssembler::mulReg(Reg d, Reg a, Reg b) { emit32(encMul(xr(d), xr(a), x
 void RiscvAssembler::store8(Reg base, Reg off, Reg val) {
     emit32(encAdd(kScratchAddr, xr(base), xr(off)));   // t6 = base + off
     emit32(encSb(xr(val), kScratchAddr, 0));           // sb val, 0(t6)
+}
+void RiscvAssembler::load8(Reg d, Reg base, int32_t imm) {   // lbu rDst, imm(rBase) — control read
+    emit32(((uint32_t(imm) & 0xfff) << 20) | (xr(base) << 15) | (4 << 12) | (xr(d) << 7) | 0x03);
 }
 void RiscvAssembler::branchIfZero(Reg a, Label l) {    // a == 0  ⇔  bgeu x0, a (unsigned 0 >= a)
     addFixup(len_, l);

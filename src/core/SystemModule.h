@@ -46,6 +46,7 @@ public:
         // on the next WebSocket push.
         std::snprintf(chipInfo_, sizeof(chipInfo_), "%s", platform::chipModel());
         std::snprintf(sdkInfo_, sizeof(sdkInfo_), "%s", platform::sdkVersion());
+        std::snprintf(sdkDateInfo_, sizeof(sdkDateInfo_), "%s", platform::sdkDate());
         // version / build / firmware (firmware identity) moved to FirmwareUpdateModule.
         std::snprintf(bootReasonStr_, sizeof(bootReasonStr_), "%s", platform::resetReason());
         if constexpr (platform::hasWifiCoprocessor) {
@@ -118,6 +119,7 @@ public:
         // Static info
         controls_.addReadOnly("chip", chipInfo_, sizeof(chipInfo_));
         controls_.addReadOnly("sdk", sdkInfo_, sizeof(sdkInfo_));
+        controls_.addReadOnly("sdkDate", sdkDateInfo_, sizeof(sdkDateInfo_));
         controls_.addReadOnly("bootReason", bootReasonStr_, sizeof(bootReasonStr_));
         // WiFi co-processor (P4 + on-board C6) firmware read-out. Gated at compile
         // time on hasWifiCoprocessor, so the whole control — and the snprintf/query
@@ -245,6 +247,7 @@ private:
     // Static (set in setup)
     char chipInfo_[16] = {};
     char sdkInfo_[24] = {};
+    char sdkDateInfo_[16] = {};   // IDF app-descriptor compile date, e.g. "May 26 2026"
     char bootReasonStr_[16] = {};
     char coprocStr_[24] = {};   // WiFi co-processor status, e.g. "C6 fw 2.12.9" / "not detected"
     uint32_t totalInternalVal_ = 0;

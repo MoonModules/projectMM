@@ -2,12 +2,17 @@
 #include "core/moonlive/moonlive_emit.h"
 #include "core/moonlive/MoonLiveIr.h"
 
+#include <cstring>   // std::strncmp (@control keyword match)
+
 namespace mm::moonlive {
 
 namespace {
 
 // --- Lexer ---------------------------------------------------------------------------
-enum class Tok { Ident, Number, LParen, RParen, Comma, Semicolon, End, Error };
+// `ControlAnno` is a captured `// @control min..max` comment (a control's UI range). A plain
+// `//` line comment is skipped like whitespace; only the @control form becomes a token, carrying
+// its min/max in annoMin/annoMax. `Assign` is `=` (a control declaration's initializer).
+enum class Tok { Ident, Number, Assign, LParen, RParen, Comma, Semicolon, ControlAnno, End, Error };
 
 struct Lexer {
     const char* p;
@@ -15,6 +20,7 @@ struct Lexer {
     long number = 0;
     const char* identBeg = nullptr;
     size_t identLen = 0;
+    long annoMin = 0, annoMax = 0;     // ControlAnno: the captured min..max
     const char* tokBeg = nullptr;
     const char* srcBeg;
     const char* err = "";
@@ -27,18 +33,51 @@ struct Lexer {
     static bool isIdentCont(char c) { return isIdentStart(c) || isDigit(c); }
     uint16_t col() const { return static_cast<uint16_t>((tokBeg - srcBeg) + 1); }
 
+    // Read a run of digits into v (capped); returns true if at least one digit was consumed.
+    bool readNumber(long& v) {
+        if (!isDigit(*p)) return false;
+        v = 0;
+        while (isDigit(*p)) { v = v * 10 + (*p - '0'); p++; if (v > 1000000) break; }
+        return true;
+    }
+
     void advance() {
-        while (isSpace(*p)) p++;
+        for (;;) {
+            while (isSpace(*p)) p++;
+            // Line comment: a plain `//…` is skipped; a `// @control min..max` is captured.
+            if (p[0] == '/' && p[1] == '/') {
+                const char* lineStart = p;
+                p += 2;
+                while (*p == ' ' || *p == '\t') p++;
+                // Match `@control` only as a whole word — require a non-identifier
+                // char after it, so a comment like `// @controlled …` is a plain
+                // comment, not a malformed annotation.
+                if (p[0] == '@' && std::strncmp(p, "@control", 8) == 0 && !isIdentCont(p[8])) {
+                    tokBeg = lineStart;
+                    p += 8;
+                    while (*p == ' ' || *p == '\t') p++;
+                    long lo = 0, hi = 0;
+                    if (!readNumber(lo) || !(p[0] == '.' && p[1] == '.')) { kind = Tok::Error; err = "malformed @control (expected min..max)"; return; }
+                    p += 2;
+                    if (!readNumber(hi)) { kind = Tok::Error; err = "malformed @control (expected max)"; return; }
+                    annoMin = lo; annoMax = hi; kind = Tok::ControlAnno; return;
+                }
+                // plain comment — skip to end of line and re-loop (treated as whitespace)
+                while (*p && *p != '\n') p++;
+                continue;
+            }
+            break;
+        }
         tokBeg = p;
         char c = *p;
         if (c == 0) { kind = Tok::End; return; }
+        if (c == '=') { p++; kind = Tok::Assign; return; }
         if (c == '(') { p++; kind = Tok::LParen; return; }
         if (c == ')') { p++; kind = Tok::RParen; return; }
         if (c == ',') { p++; kind = Tok::Comma; return; }
         if (c == ';') { p++; kind = Tok::Semicolon; return; }
         if (isDigit(c)) {
-            long v = 0;
-            while (isDigit(*p)) { v = v * 10 + (*p - '0'); p++; if (v > 1000000) break; }
+            long v = 0; readNumber(v);
             number = v; kind = Tok::Number; return;
         }
         if (isIdentStart(c)) {
@@ -63,11 +102,22 @@ struct Parser {
     VReg               nextTemp = kFirstTemp;   // high-water mark — also IrProgram.vregsUsed
     VReg               freeStack[kMaxVRegs] = {};   // recycled temps (LIFO), so a dead vreg is reused
     uint8_t            freeCount = 0;
+    DeclaredControl    controls[kMaxCtrls] = {};  // controls the script declared (decl lines)
+    uint8_t            controlCount = 0;
     const char*        error = "";
     uint16_t           errorCol = 0;
     bool               failed = false;
 
     void fail(const char* msg) { if (!failed) { failed = true; error = msg; errorCol = lex.col(); } }
+
+    // Find a declared control by name; returns its index or -1. Names point into the source buffer
+    // (token spans, not NUL-terminated), so compare by length + bytes.
+    int findControl(const char* name, size_t len) const {
+        for (uint8_t i = 0; i < controlCount; i++)
+            if (controls[i].nameLen == len && std::strncmp(controls[i].name, name, len) == 0)
+                return i;
+        return -1;
+    }
 
     // A stack temp allocator: alloc() hands out a recycled vreg if one is free, else a fresh one;
     // free() returns a temp to the pool once its value has been consumed. This is what keeps a
@@ -94,7 +144,9 @@ struct Parser {
         return true;
     }
 
-    // expr := number | call.  Returns the vreg holding the value (or 0 on failure).
+    // expr := number | ident | call.  Returns the vreg holding the value (or 0 on failure). A bare
+    // ident that names a declared control reads its live value (a LoadCtrl of its arena offset); an
+    // ident followed by `(` is a call.
     VReg parseExpr() {
         if (failed) return 0;
         if (lex.kind == Tok::Number) {
@@ -105,11 +157,18 @@ struct Parser {
             return v;
         }
         if (lex.kind == Tok::Ident) {
+            int ci = findControl(lex.identBeg, lex.identLen);
+            if (ci >= 0) {                                // a declared control read
+                VReg v = alloc();
+                emit({IrOp::LoadCtrl, v, 0,0,0,0, controls[ci].offset, nullptr, {}});
+                lex.advance();
+                return v;
+            }
             VReg out = 0;
-            parseCall(&out);   // a call used as an expression must return a value
+            parseCall(&out);   // otherwise a call used as an expression must return a value
             return out;
         }
-        fail("expected a number or a function call");
+        fail("expected a number, a control name, or a function call");
         return 0;
     }
 
@@ -170,15 +229,64 @@ struct Parser {
         }
     }
 
-    bool parseProgram() {
-        if (lex.kind != Tok::Ident) {
-            fail(lex.kind == Tok::End ? "empty program" : "expected a function call");
-            return false;
+    // A control declaration: `uint8_t ident = number ;` optionally followed by `// @control min..max`.
+    // The leading `uint8_t` keyword is already consumed by the caller. Records a DeclaredControl.
+    void parseDecl() {
+        if (lex.kind != Tok::Ident) { fail("expected a control name after the type"); return; }
+        const char* name = lex.identBeg; size_t nameLen = lex.identLen;
+        if (nameLen >= kMaxControlName) { fail("control name too long"); return; }   // no silent truncation downstream
+        if (findControl(name, nameLen) >= 0) { fail("duplicate control name"); return; }
+        // A control name must not shadow a builtin: a declared `random16` would make `random16(…)`
+        // ambiguous (control read vs call). Reject it at the source so the resolution never collides.
+        if (table.find(name, nameLen)) { fail("control name shadows a built-in function"); return; }
+        if (controlCount >= kMaxCtrls) { fail("too many controls"); return; }
+        lex.advance();
+        if (!expect(Tok::Assign, "expected '=' in a control declaration")) return;
+        if (lex.kind != Tok::Number) { fail("expected a default value (a number)"); return; }
+        if (lex.number < 0 || lex.number > 255) { fail("uint8_t default out of range (0..255)"); return; }
+        long def = lex.number;
+        lex.advance();
+        if (!expect(Tok::Semicolon, "expected ';' after the control declaration")) return;
+        // A malformed `// @control …` comment lexes to Tok::Error with a specific
+        // message (e.g. "malformed @control (expected min..max)"). Surface it here
+        // rather than letting it fall through to a generic later parse failure.
+        if (lex.kind == Tok::Error) { fail(lex.err); return; }
+        // Optional range annotation; default 0..255 if absent.
+        long lo = 0, hi = 255;
+        if (lex.kind == Tok::ControlAnno) {
+            lo = lex.annoMin; hi = lex.annoMax;
+            if (lo < 0 || hi > 255 || lo > hi) { fail("@control range out of order or out of 0..255"); return; }
+            lex.advance();
         }
-        parseCall(nullptr);                              // a statement
+        // The default must lie within the (possibly annotated) range — a slider can't start outside
+        // its own bounds.
+        if (def < lo || def > hi) { fail("control default is outside its @control range"); return; }
+        controls[controlCount] = {name, static_cast<uint8_t>(lo), static_cast<uint8_t>(hi),
+                                  static_cast<uint8_t>(def), static_cast<uint8_t>(nameLen),
+                                  CtrlType::Uint8, controlCount};
+        controlCount++;
+    }
+
+    // Is the current Ident the `uint8_t` type keyword (the only declared type in Stage 1)?
+    bool atTypeKeyword() const {
+        return lex.kind == Tok::Ident && lex.identLen == 7 && std::strncmp(lex.identBeg, "uint8_t", 7) == 0;
+    }
+
+    // program := { decl } { stmt }.  Declarations (control vars) come first, then one-or-more
+    // call statements. (Multi-statement now: a script has decl lines AND a statement line.)
+    bool parseProgram() {
+        while (!failed && atTypeKeyword()) { lex.advance(); parseDecl(); }
         if (failed) return false;
-        if (!expect(Tok::Semicolon, "expected ';'")) return false;
-        if (lex.kind != Tok::End) { fail("unexpected tokens after the statement"); return false; }
+        if (lex.kind == Tok::End) { fail("empty program (no statement)"); return false; }
+        bool any = false;
+        while (!failed && lex.kind != Tok::End) {
+            if (lex.kind != Tok::Ident) { fail("expected a function call"); return false; }
+            parseCall(nullptr);                          // a statement
+            if (failed) return false;
+            if (!expect(Tok::Semicolon, "expected ';'")) return false;
+            any = true;
+        }
+        if (!any) { fail("expected a statement"); return false; }
         return true;
     }
 };
@@ -199,6 +307,9 @@ CompileResult compileSource(const char* source, const BuiltinTable& table, uint8
     if (len == 0) { r.error = "codegen failed (unsupported on this target, or too large)"; return r; }
     r.ok = true;
     r.len = len;
+    // Surface the declared controls so the binding can create real MoonModule controls.
+    r.controlCount = parser.controlCount;
+    for (uint8_t i = 0; i < parser.controlCount; i++) r.controls[i] = parser.controls[i];
     return r;
 }
 

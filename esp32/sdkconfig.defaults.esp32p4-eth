@@ -19,6 +19,16 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/ota_16mb.csv"
 # Flash size override (P4-NANO ships 16 MB).
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 
+# Target the earlier P4 silicon (rev <3.0). The v6.1 IDF defaults the minimum P4
+# revision to v3.1 (ESP32P4_REV_MIN_301), which refuses to boot on the v0.x/v1.x
+# P4 chips already in the field (e.g. a v1.x P4-NANO) — the bootloader rejects the
+# chip at startup. IDF gates the sub-v3 revisions behind SELECTS_REV_LESS_V3
+# (rev <3.0 and >=3.0 are "huge hardware difference", so a binary targets one or
+# the other, not both); enable it, then pin the minimum to v0 to run on any
+# pre-v3 P4. Revisit if/when the field moves to v3.x P4 silicon.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_0=y
+
 # PSRAM (P4-NANO has 32 MB; the P4 uses a HEX/200 MHz PSRAM controller, not the
 # S3's octal mode). Round 1 makes no large allocations, so PSRAM is enabled for
 # later rounds but not relied on at boot.

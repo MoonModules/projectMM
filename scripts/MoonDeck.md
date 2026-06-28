@@ -241,7 +241,7 @@ Set up ESP-IDF Python environment.
 uv run scripts/build/setup_esp_idf.py
 ```
 
-Finds the ESP-IDF installation and runs `install.sh` to create the Python venv. Run once after installing ESP-IDF or after a Python version change.
+Finds the ESP-IDF installation and runs `install.sh` to create the Python venv. Run once after installing ESP-IDF or after a Python version change. When the installed checkout has drifted from the pinned commit (`PINNED_IDF_COMMIT`), it offers to check the pin out (a new dev converges on the validated IDF); `--no-checkout` keeps it warn-only for a dev migrating to a newer release. Building for the ESP32-S31 (a RISC-V preview target) needs its toolchain fetched once with `(cd ~/esp/esp-idf && ./install.sh esp32s31)` — the default install only pulls the classic-`esp32` toolchains.
 
 ### clean_esp32
 

@@ -17,8 +17,8 @@ namespace mm::moonlive {
 
 // Abstract register handle — an index the assembler maps to a real machine register. The IR's
 // virtual registers map onto these; the assembler owns the machine-register assignment so the
-// IR stays ISA-neutral. R0..R3 alias the host-ABI argument registers (buf, nLights, cpl, t);
-// R4+ are caller-saved scratch.
+// IR stays ISA-neutral. R0..R4 alias the host-ABI argument registers (buf, nLights, cpl, t, and
+// ctrls — the control-values arena pointer, kArg4, read by load8); R5+ are caller-saved scratch.
 enum Reg : uint8_t { R0 = 0, R1, R2, R3, R4, R5, R6, R7, R8, R9,
                      R10, R11, R12, R13, kRegCount };
 
@@ -50,6 +50,7 @@ public:
     void mulImm(Reg d, Reg a, int32_t imm);   // d = a * imm  (index scaling by a constant)
     void mulReg(Reg d, Reg a, Reg b);    // d = a * b   (index scaling by a runtime cpl)
     void store8(Reg base, Reg off, Reg val);  // byte store: base[off] = val (low 8 bits)
+    void load8(Reg d, Reg base, int32_t imm); // d = base[imm] (zero-extended byte) — control read
     void cmp(Reg a, Reg b);              // flags = a - b
     void branchIfZero(Reg a, Label l);   // if a == 0 goto l
     void branchIf(Cond c, Label l);      // if flags satisfy c goto l (after cmp)

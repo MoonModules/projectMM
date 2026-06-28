@@ -12,11 +12,25 @@ namespace mm::moonlive {
 // exceeds it.
 static constexpr size_t kCodeCap = 768;
 
+// Drop the prior compilation's CODE (the exec block + the typed fn pointers), but NOT the control
+// arena — the arena's address must survive a recompile so a control pointer the binding bound to
+// a slot stays valid (the arena only ever grows; see ensureArena). free() additionally releases
+// the arena (full teardown).
+void MoonLive::freeCode() {
+    if (code_) platform::freeExec(code_, codeCap_);
+    code_ = nullptr;
+    codeCap_ = 0;
+    codeLen_ = 0;
+    fn_ = nullptr;
+    anim_ = nullptr;
+    ctrl_ = nullptr;
+}
+
 // Copy `len` already-emitted bytes into a fresh exec block. writeExec hides the ISA quirks
 // (IRAM's 32-bit-store-only rule, the I-cache sync), so the engine stays target-agnostic.
 // Returns the block (ready to call) or nullptr on failure (error_ set, prior state freed).
 void* MoonLive::place(const uint8_t* staged, size_t len) {
-    free();   // drop any prior compilation — (re)compile is a clean re-emit
+    freeCode();   // drop any prior compilation's code — (re)compile is a clean re-emit (arena kept)
     if (len == 0) { error_ = "emit failed"; return nullptr; }
     // Allocate only what was emitted, word-rounded (writeExec stores 32-bit words on IRAM), not
     // the worst-case kCodeCap — a fill is ~50 bytes, a four-call setRGB ~600. The staging buffer
@@ -44,10 +58,42 @@ bool MoonLive::compile(uint8_t r, uint8_t g, uint8_t b) {
 bool MoonLive::compile(const char* source, const BuiltinTable& table) {
     uint8_t staging[kCodeCap];
     CompileResult cr = compileSource(source, table, staging, kCodeCap);
-    if (!cr.ok) { free(); error_ = cr.error; return false; }   // surface the parse diagnostic
+    if (!cr.ok) { freeCode(); error_ = cr.error; return false; }   // surface the parse diagnostic
+    // Allocate the control arena (fixed address) and seed new slots, BEFORE publishing the control
+    // set — ensureArena reads the previous controlCount_ to know which slots are new.
+    if (!ensureArena(cr.controls, cr.controlCount)) { freeCode(); error_ = "no control memory"; return false; }
+    // Place the code. Only after it succeeds do we publish the new control set — a failed place()
+    // must not leave declaredControls() advertising controls for code that isn't running.
     void* block = place(staging, cr.len);
-    if (!block) return false;
-    fn_ = reinterpret_cast<FillFn>(block);
+    if (!block) return false;                                      // controlCount_/controls_ unchanged
+    // Clamp any kept slot whose range shrank (e.g. @control 0..99 edited to 0..10) so a stale live
+    // value can't fall outside the new bounds before the native code reads it.
+    for (uint8_t i = 0; i < cr.controlCount && i < controlCount_; i++) {
+        uint8_t lo = static_cast<uint8_t>(cr.controls[i].min), hi = static_cast<uint8_t>(cr.controls[i].max);
+        if (ctrlArena_[i] < lo) ctrlArena_[i] = lo;
+        else if (ctrlArena_[i] > hi) ctrlArena_[i] = hi;
+    }
+    controlCount_ = cr.controlCount;
+    for (uint8_t i = 0; i < cr.controlCount; i++) controls_[i] = cr.controls[i];
+    ctrl_ = reinterpret_cast<CtrlFn>(block);
+    return true;
+}
+
+// Ensure the control arena exists and seed newly-declared slots. The arena is allocated ONCE at
+// full kMaxCtrls capacity and never reallocated, so its address — and every control pointer the
+// binding bound to a slot — is fixed for the engine's lifetime (the stable-slot contract
+// controlSlot() promises; a recompile that adds a control must not move a pointer the previous
+// onBuildControls already published). kMaxCtrls bytes is a handful; the up-front allocation is
+// cheaper than the move-and-rebind it avoids. A NEW slot (beyond the previous count) is seeded
+// from its declared default; an EXISTING slot keeps its live value (a source edit that keeps the
+// control preserves the slider position). Returns false on alloc failure.
+bool MoonLive::ensureArena(const DeclaredControl* decls, uint8_t count) {
+    if (!ctrlArena_) {
+        ctrlArena_ = static_cast<uint8_t*>(platform::alloc(kMaxCtrls));
+        if (!ctrlArena_) return false;
+        for (uint8_t i = 0; i < kMaxCtrls; i++) ctrlArena_[i] = 0;
+    }
+    for (uint8_t i = controlCount_; i < count; i++) ctrlArena_[i] = static_cast<uint8_t>(decls[i].def);
     return true;
 }
 
@@ -61,12 +107,10 @@ bool MoonLive::compileAnimated() {
 }
 
 void MoonLive::free() {
-    if (code_) platform::freeExec(code_, codeCap_);
-    code_ = nullptr;
-    codeCap_ = 0;
-    codeLen_ = 0;
-    fn_ = nullptr;
-    anim_ = nullptr;
+    freeCode();                       // exec block + fn pointers
+    if (ctrlArena_) platform::free(ctrlArena_);   // full teardown also releases the control arena
+    ctrlArena_ = nullptr;
+    controlCount_ = 0;
 }
 
 }  // namespace mm::moonlive

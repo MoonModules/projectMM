@@ -34,6 +34,7 @@ public:
     void addReg(Reg d, Reg a, Reg b);    // add rd, ra, rb
     void mulReg(Reg d, Reg a, Reg b);    // mul rd, ra, rb
     void store8(Reg base, Reg off, Reg val);  // add tmp,base,off ; sb val,0(tmp)
+    void load8(Reg d, Reg base, int32_t imm); // lbu rDst, imm(rBase) — a control read
     void branchIfZero(Reg a, Label l);   // beqz a, l  (bge x0, a... use bgeu against x0)
     void branchGeU(Reg a, Reg b, Label l);    // bgeu a, b, l
     void branchNe(Reg a, Reg b, Label l);     // bne a, b, l

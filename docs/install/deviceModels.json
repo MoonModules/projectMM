@@ -875,5 +875,44 @@
         }
       }
     ]
+  },
+  {
+    "name": "Espressif ESP32-S31 Function-CoreBoard-1",
+    "chip": "ESP32-S31",
+    "firmwares": [
+      "esp32s31"
+    ],
+    "image": "assets/boards/esp32-s31-function-coreboard-1.jpg",
+    "url": "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s31/esp32-s31-function-coreboard-1/user_guide.html",
+    "supported": [
+      "LEDs",
+      "WiFi"
+    ],
+    "planned": [
+      "Ethernet",
+      "Audio"
+    ],
+    "modules": [
+      {
+        "type": "System",
+        "id": "System",
+        "controls": {
+          "deviceModel": "Espressif ESP32-S31 Function-CoreBoard-1"
+        }
+      },
+      {
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "60"
+        }
+      },
+      {
+        "type": "NetworkModule",
+        "id": "Network",
+        "controls": {}
+      }
+    ]
   }
 ]
