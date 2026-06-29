@@ -164,17 +164,16 @@ int wifiTxPower();
 // Call after esp_wifi_start() — earlier calls are silently ignored by ESP-IDF.
 bool wifiSetTxPower(int8_t quarterDbm);
 
+// mDNS is advertise-only: `mdnsInit` brings the stack up and advertises this device as
+// `_http._tcp` (with an `mm=1` TXT) and `_wled._tcp` (with a `mac=` TXT), so the native
+// WLED app + Home Assistant discover it. Peer discovery is UDP presence (DevicesModule +
+// WledPacket) — the platform exposes advertise here, discovery lives in the module.
 bool mdnsInit(const char* deviceName);
-// Stop advertising (clears the hostname) but keep the mDNS stack up so browse
-// queries still work. mdnsShutdown() does the full mdns_free — call at teardown.
+// Stop advertising: remove both services and clear the hostname, keeping the stack up so
+// a later mdnsInit re-advertises without a full re-init (the mDNS toggle uses this).
 void mdnsStop();
+// Full mdns_free — call at teardown.
 void mdnsShutdown();
-
-// mDNS is ADVERTISE-ONLY (see mdnsInit below): a projectMM device announces `_http._tcp`
-// + `_wled._tcp` so the WLED native app / Home Assistant discover it. It does NOT query
-// mDNS to find peers — that's UDP presence discovery now (DevicesModule + WledPacket),
-// which a PTR query for a service we also host would destabilise (it exhausts the IDF
-// mDNS pool — see docs/history/decisions.md). No browse/query seam here.
 
 // Store the DHCP hostname (DHCP option 12) the next eth/wifi bring-up advertises.
 // Routers populate their client list from the DHCP request, not mDNS, so without

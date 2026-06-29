@@ -94,11 +94,13 @@ TEST_CASE("DevicesModule: a peer rename updates the existing row's name") {
     CHECK(std::strstr(row.c_str(), "MM-OldName") == nullptr);
 }
 
-// A projectMM device stays projectMM across re-sightings — never downgraded to WLED.
-TEST_CASE("DevicesModule: a projectMM device is not downgraded on a later sighting") {
+// A projectMM device stays projectMM even when a later plain-WLED packet arrives from the
+// same address — the type only RAISES toward projectMM, never downgrades. (A projectMM peer
+// could be seen via an unmarked packet too; that must not relabel it WLED.)
+TEST_CASE("DevicesModule: a projectMM device is not downgraded by a later WLED packet") {
     DevicesModule dev;
-    inject(dev, "MM-Peer", /*mm=*/true, 192, 168, 1, 90);
-    inject(dev, "MM-Peer", /*mm=*/true, 192, 168, 1, 90);   // seen again
+    inject(dev, "MM-Peer", /*mm=*/true,  192, 168, 1, 90);   // first: a projectMM-marked packet
+    inject(dev, "MM-Peer", /*mm=*/false, 192, 168, 1, 90);   // later: a plain WLED packet, same IP
     std::string row = rowFor(dev, "192.168.1.90");
     CHECK(std::strstr(row.c_str(), "\"type\":\"projectMM\"") != nullptr);
     CHECK(std::strstr(row.c_str(), "\"type\":\"WLED\"") == nullptr);

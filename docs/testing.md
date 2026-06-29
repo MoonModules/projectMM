@@ -11,7 +11,7 @@ Both are produced by `scripts/docs/generate_test_docs.py`; the source of truth i
 
 Three test categories, each with a clear purpose:
 
-- **Unit tests** (desktop, `test/unit/{core,light}/unit_*.cpp`) — exercise individual MoonModules in isolation with doctest. Each test file declares `// @module <Name>` so it's categorised under that module in the generated inventory. Run via `ctest` or `./build/test/mm_tests`. Verify a module's API, edge cases, and output independent of how it's wired into a pipeline.
+- **Unit tests** (desktop, `test/unit/{core,light}/unit_*.cpp`) — exercise individual MoonModules in isolation with doctest. Each test file declares `// @module <Name>` so it's categorised under that module in the generated inventory. Run via `ctest` or `./build/<host>/test/mm_tests` (`<host>` = `macos`/`linux`/`windows`, the per-host build dir). Verify a module's API, edge cases, and output independent of how it's wired into a pipeline.
 - **In-process scenarios** (desktop, `test/scenarios/{core,light}/scenario_*.json`) — exercise the system as an integrated pipeline. Each scenario is a declarative JSON file with a sequence of steps (`add_module`, `set_control`, `measure`) and optional performance bounds. The scenario runner (`test/scenario_runner.cpp`) replays the steps in-process and reports tick + heap per `measure` step. Same JSON files run against a live device through the HTTP API — that's the next tier.
 - **Live scenarios** — the same scenarios driven against a running device over REST. See [Live scenarios](#live-scenarios) below.
 

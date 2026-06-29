@@ -146,7 +146,11 @@ public:
         const bool online = local[0] || local[1] || local[2] || local[3];
         if (!online) return;   // no network yet — nothing to discover
 
-        if (!selfListed_) { upsertSelf(local); selfListed_ = true; }
+        // Re-register the self row every tick against the CURRENT local IP (idempotent —
+        // find-or-update). Doing it once would pin the first-seen address forever; a later
+        // DHCP renew / WiFi↔Eth switch changes our IP, and upsertSelf must follow it (and
+        // ageOut drops the row left at the old address). Cheap: a bounded findByIp + stamp.
+        upsertSelf(local);
         ensureListener();
 
         // Drain every presence packet received since the last tick (bounded — a busy LAN
@@ -225,7 +229,6 @@ private:
 
     Device  devices_[kMaxDevices];
     uint8_t deviceCount_ = 0;
-    bool    selfListed_ = false;
     const char* selfName_ = nullptr;   // this device's name (wired via setSelfName)
     char    statusBuf_[40] = "idle";
 
@@ -294,50 +297,64 @@ private:
         return 32;
     }
 
-    // Find-or-insert a device a plugin recognised; refresh type/name, mark seen. Our own
-    // _http._tcp+mm=1 announcement resolves to our own IP; mark that row self.
+    // Find-or-insert a device a plugin classified from a UDP presence packet; refresh
+    // type/name, mark seen. Our own presence packet (carrying the projectMM marker) resolves
+    // to our own source IP; mark that row self. Persistence is armed ONLY when a SAVED field
+    // (name/ip/type/self) actually changes — a mere re-sighting (lastSeenMs/cached) doesn't
+    // alter the serialized list, so it must not trigger a flash write every ~10 s broadcast.
     void upsertDevice(const uint8_t ip[4], const DiscoveredDevice& found) {
         uint8_t local[4] = {};
         localIp(local);
         const bool isSelf = ipEq(ip, local);
         Device* d = findByIp(ip);
+        bool persistChanged = false;
         if (!d) {
             if (deviceCount_ >= kMaxDevices) return;   // bounded; silently cap
             d = &devices_[deviceCount_++];
             std::memcpy(d->ip, ip, 4);
             d->type = found.type;          // first sighting — take the plugin's type
+            persistChanged = true;         // a new row changes the saved list
         }
-        // A projectMM device advertises BOTH _http._tcp (mm=1) AND _wled._tcp, so its
-        // _wled._tcp hit would otherwise relabel it WLED. projectMM is the stronger
-        // identity (the mm=1 TXT is definitive): never downgrade an established projectMM
-        // device. So only RAISE the type toward projectMM, never away from it.
+        // A projectMM device broadcasts a marked, WLED-VALID packet — without the marker
+        // check a peer would relabel WLED. projectMM is the stronger identity (the marker is
+        // definitive): never downgrade an established projectMM device, only RAISE toward it.
         const bool isMm = isSelf || found.type == DevType::ProjectMM;
-        if (isMm) d->type = DevType::ProjectMM;
-        else if (d->type != DevType::ProjectMM) d->type = found.type;  // refine a non-MM row
-        d->self = isSelf;
-        d->lastSeenMs = platform::millis();
-        d->cached = false;
-        // Update the display name from this hit when it's AUTHORITATIVE for the device's
-        // kind, so a device RENAME propagates live (a peer changing its deviceName shows
-        // its new name here on the next query — no re-query needed). Authority rule: an
-        // _http+mm=1 hit carries a projectMM device's real deviceName, so it always wins
-        // for a projectMM row; a _wled hit's hostname is authoritative for a WLED row.
-        // A _wled hit must NOT overwrite a projectMM device's deviceName (a projectMM
-        // peer also answers _wled with its host name) — that's the lower-authority case.
-        // Always fill an empty/placeholder name regardless of authority.
+        const DevType newType = isMm ? DevType::ProjectMM
+                              : (d->type != DevType::ProjectMM ? found.type : d->type);
+        if (d->type != newType) { d->type = newType; persistChanged = true; }
+        if (d->self != isSelf) { d->self = isSelf; persistChanged = true; }
+        d->lastSeenMs = platform::millis();    // transient — not persisted
+        d->cached = false;                     // transient — not persisted
+        // Update the display name when this packet is AUTHORITATIVE for the device's kind,
+        // so a peer RENAME propagates live (its next broadcast carries the new name). A
+        // projectMM-marked packet is authoritative for a projectMM row; a plain WLED packet
+        // for a WLED row — a WLED packet must NOT overwrite a projectMM device's name (a
+        // projectMM peer's packet without the marker is the lower-authority case). Always
+        // fill an empty/placeholder name regardless of authority.
         const bool authoritative =
-            (found.type == DevType::ProjectMM && d->type == DevType::ProjectMM) ||  // mm hit for an MM row
-            (found.type == DevType::Wled);                                          // a WLED hit for WLED
-        if (found.name[0] && (!d->name[0] || isIpPlaceholder(d->name, ip) || authoritative))
+            (found.type == DevType::ProjectMM && d->type == DevType::ProjectMM) ||
+            (found.type == DevType::Wled);
+        if (found.name[0] && (!d->name[0] || isIpPlaceholder(d->name, ip) || authoritative)
+            && std::strcmp(d->name, found.name) != 0) {
             std::snprintf(d->name, sizeof(d->name), "%s", found.name);
-        if (!d->name[0]) formatDottedQuad(d->name, ip);
-        sortByName();
-        refreshStatus();
+            persistChanged = true;
+        }
+        if (!d->name[0]) { formatDottedQuad(d->name, ip); persistChanged = true; }
+        if (persistChanged) {                  // only a saved-field change touches disk + sort
+            sortByName();
+            refreshStatus();
+        }
     }
 
     // Guarantee this device is listed (marked self). Self never ages out (restamped
     // "now" each tick it's online).
     void upsertSelf(const uint8_t ip[4]) {
+        // Demote any prior self row at a DIFFERENT address — our IP moved (DHCP / interface
+        // switch). It loses the self mark, so ageOut treats it as an ordinary peer and lets
+        // it expire, instead of staying immortal at the old address.
+        for (uint8_t i = 0; i < deviceCount_; i++)
+            if (devices_[i].self && !ipEq(devices_[i].ip, ip)) devices_[i].self = false;
+
         Device* d = findByIp(ip);
         if (!d) {
             if (deviceCount_ >= kMaxDevices) return;
@@ -381,12 +398,16 @@ private:
         uint8_t w = 0;
         for (uint8_t r = 0; r < deviceCount_; r++) {
             Device& d = devices_[r];
-            if (d.self || ipEq(d.ip, local)) d.lastSeenMs = now;   // self never goes stale
+            const bool isUs = ipEq(d.ip, local);
+            // The row at the CURRENT local IP is us — keep it fresh, never age it out. Guard
+            // on the ADDRESS, not the self flag: a stale self row at an old IP (after an IP
+            // change) is demoted by upsertSelf, so it falls through to the normal age-out.
+            if (isUs) d.lastSeenMs = now;
             // A cached (restored, never re-heard live) device is on a SHORT probation —
             // it's the fast-boot list, kept only long enough for a live packet to re-confirm
             // it; otherwise it's a ghost. A live-confirmed device gets the full 24 h.
             const uint32_t window = d.cached ? kCachedGraceMs : kStaleMs;
-            if (!d.self && (now - d.lastSeenMs) > window) continue;   // drop, stale
+            if (!isUs && (now - d.lastSeenMs) > window) continue;   // drop, stale
             if (w != r) devices_[w] = d;
             w++;
         }

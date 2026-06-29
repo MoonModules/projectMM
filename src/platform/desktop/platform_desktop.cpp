@@ -468,9 +468,10 @@ bool wifiSetTxPower(int8_t quarterDbm) { return quarterDbm == 0; }
 bool mdnsInit(const char* /*deviceName*/) { return false; }
 void mdnsStop() {}
 void mdnsShutdown() {}
-// No mDNS on desktop (advertise-only on device anyway). Discovery is UDP presence via
-// UdpSocket, which DOES work on desktop — so the discovery path is unit-testable on the
-// host with real loopback datagrams (DevicesModule::injectPacketForTest / a bound socket).
+// mDNS advertise is a device-only concern, so these are host stubs. Discovery is UDP
+// presence (DevicesModule + WledPacket) over UdpSocket, which runs on desktop too — so the
+// discovery path is unit-testable on the host with real loopback datagrams (a bound socket
+// or DevicesModule::injectPacketForTest).
 
 // OTA — no-op on desktop (no OTA partition). The /api/firmware/url route
 // guards with `if constexpr (mm::platform::hasOta)` and returns 501 here,
@@ -763,23 +764,15 @@ bool TcpConnection::write(const uint8_t* data, size_t len) {
 int TcpConnection::writeSome(const uint8_t* data, size_t len) {
     if (fd_ < 0) return -1;
     if (len == 0) return 0;
-    // The client socket is blocking (SO_RCVTIMEO drives recv's read timeout), so a plain
-    // ::send() would block when the kernel send buffer is full. Toggle non-blocking around the
-    // send to keep this truly non-blocking, then restore so recv's timeout semantics hold.
-    // Evaluate the would-block / EINTR status BEFORE make_blocking, since that ioctl/fcntl
-    // can clobber the error state.
-    make_nonblocking(fd_);
+    // The accept()ed socket is persistently non-blocking (set in TcpServer::accept), so a
+    // plain ::send() never blocks — no toggle needed. A full kernel send buffer surfaces as
+    // EWOULDBLOCK, which we report as 0 ("try later"); the caller advances its own offset.
     auto n = ::send(sock(fd_), reinterpret_cast<const char*>(data), static_cast<int>(len), 0);
-    bool wouldBlock = (n < 0) && sockWouldBlock();
-#ifndef _WIN32
-    bool interrupted = (n < 0) && (errno == EINTR);
-#endif
-    make_blocking(fd_);
     if (n > 0) return static_cast<int>(n);
     if (n == 0) return 0;
-    if (wouldBlock) return 0;               // buffer full — try later
+    if (sockWouldBlock()) return 0;         // buffer full — try later
 #ifndef _WIN32
-    if (interrupted) return 0;              // interrupted — try later
+    if (errno == EINTR) return 0;           // interrupted — try later
 #endif
     return -1;                              // real socket error
 }
@@ -835,19 +828,20 @@ TcpConnection TcpServer::accept() {
     SOCKET client = ::accept(sock(fd_), nullptr, nullptr);
     if (client == INVALID_SOCKET) return TcpConnection();
     int clientFd = static_cast<int>(client);
-    // Match POSIX: socket stays blocking, SO_RCVTIMEO gives recv a 2-second
-    // timeout. Windows SO_RCVTIMEO takes a DWORD millisecond count (not a
-    // timeval). writeSome() toggles non-blocking around its send call to
-    // emulate POSIX's MSG_DONTWAIT.
-    DWORD timeoutMs = 2000;
-    ::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO,
-                 reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
+    // NON-BLOCKING (see the POSIX branch below for the full rationale): a blocking recv on
+    // the single-loop server stalls the whole render loop. make_nonblocking → recv returns
+    // WSAEWOULDBLOCK → read() reports -1 ("nothing yet") immediately, never blocking.
+    make_nonblocking(clientFd);
 #else
     int clientFd = ::accept(fd_, nullptr, nullptr);
     if (clientFd < 0) return TcpConnection();
-    // Set read timeout (2 seconds) instead of non-blocking
-    struct timeval tv = {2, 0};
-    setsockopt(clientFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    // NON-BLOCKING client socket. The HTTP server is serviced from the single render loop,
+    // so a blocking recv()'s timeout (we used 2 s) froze the WHOLE loop whenever a request's
+    // bytes hadn't landed the instant accept() returned — UI to a crawl. Non-blocking makes
+    // read() return -1 ("nothing yet") immediately, so the loop never stalls; the request
+    // (which lands within ~1 ms on localhost/LAN) is read across a few rapid retries in
+    // handleConnection. recv returns EWOULDBLOCK → -1, matching read()'s contract.
+    make_nonblocking(clientFd);
 #endif
     return TcpConnection(clientFd);
 }

@@ -48,7 +48,7 @@ add_executable(mm_tests
     unit/light/unit_DistortionWavesEffect.cpp
     unit/light/unit_Correction.cpp
     unit/light/unit_Drivers_container.cpp
-    unit/light/unit_Drivers_firstLedRgb.cpp
+    unit/light/unit_Drivers_firstOutputRgb.cpp
     unit/light/unit_FireEffect.cpp
     unit/light/unit_GameOfLifeEffect.cpp
     unit/light/unit_GridLayout.cpp

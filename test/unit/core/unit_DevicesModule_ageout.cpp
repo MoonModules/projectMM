@@ -1,20 +1,20 @@
 // @module DevicesModule
 
-// Pins the timestamp-based age-out: a discovered device that stops being re-announced
-// over mDNS is dropped after kStaleMs, while a still-fresh device and the self entry
-// stay. Discovery is mDNS (each device re-announces; the listener re-queries each
-// service periodically), so freshness is a per-device lastSeenMs timestamp and the
-// drop is an "unheard too long" check. Virtual time (platform::setTestNowMs) drives it
-// deterministically, no network or wall clock.
+// Pins the timestamp-based age-out: a device whose UDP presence packets stop arriving is
+// dropped after its window (a cached/restored row has a short probation; a live-confirmed
+// one gets the full kStaleMs), while a still-fresh device and the self row stay. Each
+// presence packet stamps lastSeenMs, so the drop is an "unheard too long" check. Virtual
+// time (platform::setTestNowMs) drives it deterministically, no network or wall clock.
 //
 // The module's age-out runs in loop1s(); the test restores a cached list (the public
 // persistence entry point), advances virtual time, and ticks loop1s() to observe which
-// rows survive via listRowCount(). The mDNS listener loop1s() also polls is inert here
-// (no network / no mDNS on the host), so the only state change the test exercises is
-// age-out.
+// rows survive via listRowCount(). The UDP listener loop1s() drains is inert here (no live
+// packets on the host bind), and the self row is registered against the host's own IP — so
+// the state the test exercises is the age-out path.
 
 #include "doctest.h"
 #include "core/DevicesModule.h"
+#include "core/WledPacket.h"
 #include "core/JsonSink.h"
 #include "platform/platform.h"
 
@@ -90,11 +90,11 @@ TEST_CASE("DevicesModule: a live-confirmed device drops once past kStaleMs (24h)
     CHECK(aPresentAfter(1000, 25u * 60u * 60u * 1000u, /*reconfirmA=*/true) == false);  // 25h > 24h
 }
 
-// A projectMM device advertises BOTH _http._tcp (mm=1) and _wled._tcp, so the WLED
-// plugin would relabel it WLED on its _wled hit. Pin that projectMM wins: restore a
-// device as projectMM, then confirm the serialized type stays projectMM (the type
-// priority lives in upsertDevice, exercised through the public list).
-TEST_CASE("DevicesModule: a projectMM device is not downgraded to WLED") {
+// A projectMM peer also answers as a plain WLED (its presence packet without our marker),
+// so a later WLED-classified sighting must NOT relabel a restored projectMM row. This
+// drives the downgrade-prevention in upsertDevice through the public path: restore the row
+// as projectMM, inject a plain WLED packet from the same IP, confirm it stays projectMM.
+TEST_CASE("DevicesModule: a restored projectMM device is not downgraded by a WLED packet") {
     ClockGuard guard;
     platform::setTestNowMs(1);
     DevicesModule dev;
@@ -102,7 +102,14 @@ TEST_CASE("DevicesModule: a projectMM device is not downgraded to WLED") {
         "{\"devices\":[{\"name\":\"MM-Bench\",\"ip\":\"192.168.1.30\",\"type\":\"projectMM\"}]}";
     REQUIRE(dev.restoreList(cached, "devices"));
     REQUIRE(dev.listRowCount() == 1);
-    // Serialize and confirm it reads back as projectMM, not WLED.
+
+    // A later plain WLED presence packet (no projectMM marker) from the SAME address.
+    const uint8_t ip[4] = {192, 168, 1, 30};
+    uint8_t pkt[WledPacket::kSize];
+    WledPacket::build(pkt, ip, "MM-Bench", /*boardType=*/34, /*lightsOn=*/true);  // unmarked = WLED
+    dev.injectPacketForTest(pkt, sizeof(pkt), ip);
+
+    // Still projectMM — upsertDevice only RAISES toward projectMM, never downgrades.
     mm::JsonSink sink;
     dev.writeListRow(sink, 0);
     CHECK(std::strstr(sink.data(), "\"type\":\"projectMM\"") != nullptr);

@@ -998,11 +998,11 @@ bool wifiSetTxPower(int8_t quarterDbm) { return quarterDbm == 0; }
 #endif // MM_NO_WIFI
 
 // Bring the mDNS stack up (idempotent) and ADVERTISE this device as <deviceName>.local.
-// Advertising is gated by the user's mDNS toggle; the stack init is NOT — mdnsStop()
+// Advertising is gated by the user's mDNS toggle; the stack init stays — mdnsStop()
 // removes the services + hostname but keeps the stack up, so toggling mDNS back on
 // re-advertises without a full re-init. mdns_init is safe to call when already running
-// (returns an already-init error we treat as fine). Discovery does NOT use mDNS (it's UDP
-// presence — see DevicesModule); mDNS here is advertise-only.
+// (returns an already-init error we treat as fine). mDNS here is advertise-only; peer
+// discovery is UDP presence (see DevicesModule + WledPacket).
 static bool mdnsStackUp_ = false;
 
 static bool ensureMdnsStack() {
@@ -1069,19 +1069,25 @@ bool mdnsInit(const char* deviceName) {
     esp_err_t wledTxtErr = mdns_service_txt_item_set("_wled", "_tcp", "mac", macStr);
     ESP_LOGI(NET_TAG, "mDNS _wled._tcp TXT mac=%s set: %s", macStr, esp_err_to_name(wledTxtErr));
 
-    ESP_LOGI(NET_TAG, "mDNS started: %s.local (advertising _http._tcp:80 mm=1, _wled._tcp:80 mac=%s)",
-             deviceName, macStr);
+    // Summary reflects the ACTUAL per-step results (each logged above): _http._tcp is up
+    // (we returned early on its failure), the TXT / _wled additions are non-fatal so report
+    // ok/fail rather than claiming success unconditionally.
+    ESP_LOGI(NET_TAG, "mDNS started: %s.local (_http._tcp:80 mm=1:%s, _wled._tcp:80:%s mac=%s:%s)",
+             deviceName,
+             txtErr == ESP_OK ? "ok" : "fail",
+             wledErr == ESP_OK ? "ok" : "fail",
+             macStr,
+             wledTxtErr == ESP_OK ? "ok" : "fail");
     return true;
 }
 
 void mdnsStop() {
-    // Tearing the stack down would also kill browse. The toggle-off path wants to stop
-    // ADVERTISING, not lose discovery — so keep the stack but drop BOTH advertised
-    // services AND the hostname; full mdns_free only on teardown (where everything stops
-    // anyway). Symmetric with mdnsInit, which adds both _http._tcp and _wled._tcp: a
-    // network drop / interface switch (NetworkModule calls this on eth/WiFi drop + switch)
-    // must remove BOTH, or a stale _wled._tcp survives the churn and can confuse a later
-    // re-advertise. mdns_service_remove is a no-op (ESP_OK) if the service isn't present.
+    // Stop ADVERTISING but keep the stack up (a re-init then re-advertises cheaply); full
+    // mdns_free is teardown's job. Drop BOTH advertised services AND the hostname, matching
+    // mdnsInit which adds both _http._tcp and _wled._tcp: a network drop / interface switch
+    // (NetworkModule calls this on eth/WiFi drop + switch) must remove BOTH, or a stale
+    // _wled._tcp survives the churn and confuses a later re-advertise. mdns_service_remove
+    // is a no-op (ESP_OK) when the service isn't present.
     if (mdnsStackUp_) {
         esp_err_t httpRm = mdns_service_remove("_http", "_tcp");
         esp_err_t wledRm = mdns_service_remove("_wled", "_tcp");
@@ -1091,15 +1097,15 @@ void mdnsStop() {
     }
 }
 
-// Full stack teardown — only on module teardown, where browse stops too.
+// Full stack teardown (mdns_free) — only at module teardown.
 void mdnsShutdown() {
     if (mdnsStackUp_) { mdns_free(); mdnsStackUp_ = false; }
 }
 
-// --- mDNS service browse (synchronous, bounded) ---
-
-// mDNS is advertise-only (mdnsInit). There is no browse/query here: discovery uses UDP
-// presence (DevicesModule + WledPacket), because a PTR query for a service this device
+// mDNS is advertise-only (mdnsInit). Discovery is UDP presence (DevicesModule + WledPacket):
+// a projectMM device broadcasts and listens for the 44-byte presence packet on UDP 65506.
+// Keeping discovery off mDNS also keeps the advertise stable, because a PTR query for a
+// service this device
 // also hosts destabilises our own advertise — see docs/history/decisions.md.
 
 // UdpSocket

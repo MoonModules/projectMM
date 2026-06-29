@@ -145,7 +145,7 @@ public:
     // one. Domain-neutral seam (core declares it, the output-owning module overrides):
     // the WLED-compatibility shim uses it to tint the app's device card with the live
     // first-LED colour. Default: no output → false.
-    virtual bool firstLedRgb(uint8_t /*out*/[3]) const { return false; }
+    virtual bool firstOutputRgb(uint8_t /*out*/[3]) const { return false; }
 
     const char* name() const { return name_; }
     void setName(const char* n) {

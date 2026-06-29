@@ -46,7 +46,9 @@ struct WledPacket {
     // True if `data`/`len` is a valid WLED presence header (magic bytes + full length).
     // Defensive: any short or non-matching datagram returns false, never reads OOB.
     static bool isValid(const uint8_t* data, size_t len) {
-        return data && len >= kSize && data[0] == kToken && data[1] == kId;
+        // Exactly kSize: a presence packet is a fixed 44-byte header. A longer datagram on
+        // this port is something else (e.g. a WLED realtime/sync packet), not presence.
+        return data && len == kSize && data[0] == kToken && data[1] == kId;
     }
 
     // Extract the null-padded name (bytes 6..37) into `out` (NUL-terminated). Caller-sized

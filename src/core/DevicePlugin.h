@@ -20,11 +20,10 @@
 // exhausts the IDF mDNS pool — see docs/history/decisions.md). mDNS is
 // now advertise-only (so the WLED app + Home Assistant find us); discovery never queries.
 //
-// Built minimal-but-real now (the discovery half, two concrete plugins — projectMM and
-// WLED — proving the seam isn't shaped to one system). The control half (translate a "set
-// brightness" command into a system's protocol) is a reserved extension: when a consumer
-// exists, `command()` is added here and implemented per plugin — discovery + DevicesModule
-// iteration don't change. Concrete first, abstract later.
+// The seam covers the discovery half, with two concrete plugins (projectMM and WLED) that
+// prove it isn't shaped to one system. It is sized to also carry a control half (a per-plugin
+// `command()` that translates "set brightness" into a system's protocol) without reshaping —
+// that's why `DiscoveredDevice` stays plain and the iteration is generic.
 
 namespace mm {
 
@@ -53,8 +52,10 @@ public:
     // A short label for logs / the UI ("projectMM", "WLED"). Flash-literal lifetime.
     virtual const char* label() const = 0;
 
-    // The UDP port this plugin's ecosystem broadcasts presence on. DevicesModule binds one
-    // listener per distinct port and offers each datagram to the plugins claiming that port.
+    // The UDP port this plugin's ecosystem broadcasts presence on. The bundled plugins
+    // share one port (projectMM + WLED both use 65506), and DevicesModule enforces that
+    // invariant: it binds a single listener to the plugins' common discoveryPort() and
+    // offers every datagram to all of them.
     virtual uint16_t discoveryPort() const = 0;
 
     // Classify a received datagram (`data`/`len`) from `srcIp`. Returns true and fills

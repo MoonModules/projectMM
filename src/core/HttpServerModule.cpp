@@ -69,17 +69,24 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
     uint8_t buf[2048];
     int totalRead = 0;
 
-    // Read request (blocking with timeout on desktop, retries on ESP32)
-    for (int attempt = 0; attempt < 20 && totalRead < static_cast<int>(sizeof(buf) - 1); attempt++) {
+    // Read the request. read() is non-blocking (-1 = nothing pending yet), so the render
+    // loop is never stalled waiting for bytes (a blocking socket timeout used to freeze the
+    // whole loop). A just-accepted connection's request normally lands in the same read; if
+    // not, allow a SHORT bounded wait (≤ ~5 ms total) for it, then bail — an idle/half-open
+    // connection costs at most that, and the steady-state (nothing pending) costs ~0.
+    for (int empties = 0; totalRead < static_cast<int>(sizeof(buf) - 1);) {
         int n = conn.read(buf + totalRead, sizeof(buf) - 1 - totalRead);
         if (n > 0) {
             totalRead += n;
             buf[totalRead] = 0;
             if (std::strstr(reinterpret_cast<char*>(buf), "\r\n\r\n")) break;
+            empties = 0;                 // got data — reset the patience counter
         } else if (n == 0) {
-            return; // peer closed
-        } else {
-            break; // timeout or error
+            return;                      // peer closed
+        } else {                          // -1 = nothing pending yet
+            if (totalRead > 0) break;    // had a partial then nothing more — process it
+            if (++empties > 5) break;    // fresh conn, no bytes after ~5 ms — give up
+            platform::delayMs(1);
         }
     }
 
@@ -691,7 +698,7 @@ void HttpServerModule::writeWledStateBody(JsonSink& sink) {
     const uint8_t bri = driversBrightness();
     uint8_t rgb[3] = {0, 0, 0};
     bool haveLed = false;
-    if (MoonModule* d = findModuleByName("Drivers")) haveLed = d->firstLedRgb(rgb);
+    if (MoonModule* d = findModuleByName("Drivers")) haveLed = d->firstOutputRgb(rgb);
     if (!haveLed || (rgb[0] == 0 && rgb[1] == 0 && rgb[2] == 0)) {
         rgb[0] = 128; rgb[1] = 0; rgb[2] = 255;   // projectMM purple — the black/off default
     }
@@ -1334,24 +1341,40 @@ void HttpServerModule::pushWledStateToWebSockets() {
 void HttpServerModule::pollWledStateFromWebSockets() {
     for (auto& ws : wsClients_) {
         if (!ws.valid()) continue;
-        uint8_t f[256];
-        int n = ws.read(f, sizeof(f));
-        if (n < 6) continue;                       // <0 nothing pending; a masked text frame is ≥6 bytes
-        if ((f[0] & 0x0f) != 0x1) continue;        // opcode != text → ignore
-        if (!(f[1] & 0x80)) continue;              // client frames must be masked
-        size_t len = f[1] & 0x7f;
-        size_t pos = 2;
-        if (len == 126) { if (n < 8) continue; len = (size_t(f[2]) << 8) | f[3]; pos = 4; }
-        else if (len == 127) continue;             // >64 KB control message: not ours
-        if (pos + 4 + len > static_cast<size_t>(n)) continue;   // need mask key + full payload
-        const uint8_t* mask = f + pos;
-        char body[200];
-        if (len >= sizeof(body)) continue;
-        for (size_t i = 0; i < len; i++) body[i] = static_cast<char>(f[pos + 4 + i] ^ mask[i & 3]);
-        body[len] = 0;
-        // A WLED state-set carries on and/or bri at the top level (the app's State JSON).
-        if (mm::json::hasKey(body, "on") || mm::json::hasKey(body, "bri"))
-            applyWledState(body);
+        uint8_t f[512];
+        int n = ws.read(f, sizeof(f));             // non-blocking (read() returns -1 if nothing)
+        if (n < 6) continue;                       // a masked text frame is ≥6 bytes
+        // A fast slider drag can land MULTIPLE small {on,bri} frames in one read; walk every
+        // complete masked text frame in the chunk so none is dropped (apply each in order →
+        // the last value wins, matching the drag). The app's frames are tiny single-segment
+        // text frames, so partial-frame reassembly across reads isn't needed; a trailing
+        // partial frame is simply left for the next poll.
+        size_t off = 0;
+        const size_t total = static_cast<size_t>(n);
+        while (off + 6 <= total) {
+            const uint8_t* fr = f + off;
+            const uint8_t opcode = fr[0] & 0x0f;
+            const bool masked = fr[1] & 0x80;
+            size_t len = fr[1] & 0x7f;
+            size_t hdr = 2;
+            if (len == 126) {
+                if (off + 4 > total) break;
+                len = (size_t(fr[2]) << 8) | fr[3]; hdr = 4;
+            } else if (len == 127) {
+                break;                              // >64 KB control message: not ours, stop
+            }
+            const size_t frameLen = hdr + 4 + len;  // header + mask key + payload (client = masked)
+            if (!masked || off + frameLen > total) break;   // incomplete/unmasked — leave for later
+            if (opcode == 0x1 && len < 200) {       // a text frame small enough to be a state-set
+                const uint8_t* mask = fr + hdr;
+                char body[200];
+                for (size_t i = 0; i < len; i++) body[i] = static_cast<char>(fr[hdr + 4 + i] ^ mask[i & 3]);
+                body[len] = 0;
+                if (mm::json::hasKey(body, "on") || mm::json::hasKey(body, "bri"))
+                    applyWledState(body);
+            }
+            off += frameLen;
+        }
     }
 }
 
