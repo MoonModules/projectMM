@@ -59,7 +59,7 @@ line in place of `hsvToRgb`. Nothing else is coupled to either.
 - **MoonLight `E_MoonModules.h` GameOfLife** — the feature-rich origin
   (rulesets, palette colouring, blur, mutation, pentomino seeding, CRC stasis
   detection). We take the proven algorithm and re-seed idea, not the structure.
-  ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h),
+  ([source](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h),
   Ewoud Wijma 2022 / Brandon Butler 2024).
 - **projectMM v1 — GameOfLifeEffect**
   ([source](https://github.com/ewowi/projectMM-v1/blob/54b50bc/src/modules/effects/GameOfLifeEffect.h)) —

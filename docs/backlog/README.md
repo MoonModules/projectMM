@@ -20,8 +20,8 @@ A map of everything in the three files, by theme.
 
 ### Core ([backlog-core.md](backlog-core.md))
 
-- **Distribution** — remaining platforms (Linux, Teensy, RPi), code-signing (macOS/Windows), live RMII Ethernet reconfigure, installer UX polish, P4 DHCP-hostname recheck, S31 web-flash (waiting on esptool-js); DevicesModule discovery growth (HTTP probe off the render task, more mDNS types + UDP, deterministic scan scenario).
-- **ESP32 performance & memory** — E1.31 multicast (IGMP), WiFi ArtNet perf matrix, async ArtNet send (PSRAM-only), network round-trip drop/reorder test, slow eth bring-up, non-PSRAM memory ceiling + boot-time buffer degradation, task core-pinning; ops: static IP on STA, mDNS toggle, MoonDeck doc-asset hardening, CI SHA-pinning.
+- **Distribution** — remaining platforms (Linux, Teensy, RPi), code-signing (macOS/Windows), live RMII Ethernet reconfigure, installer UX polish, P4 DHCP-hostname recheck, S31 web-flash (waiting on esptool-js); DevicesModule interop growth (more plugins, the command half, live peer state).
+- **ESP32 performance & memory** — E1.31 multicast (IGMP), WiFi ArtNet perf matrix, async ArtNet send (PSRAM-only), network round-trip drop/reorder test, slow eth bring-up, non-PSRAM memory ceiling + boot-time buffer degradation, task core-pinning; ops: static IP on STA, MoonDeck doc-asset hardening, CI SHA-pinning.
 - **Architecture** — disable-releases-resources, cross-module pin-uniqueness check, Improv-child-of-NetworkModule, `std::span` platform API, Improv-as-REST follow-ups, **live scripting** (on-device authored effects/layouts/modifiers/drivers/sensor logic — design phase, see the bottom-up survey); composition/config: runtime board presets, per-layout coordinate offset.
 - **HTTP & OTA** — direct binary-upload OTA, HTTP file serving off the render tick.
 - **Testing** — additional coverage (UI load time, teardown memory, JS harness), live full-suite state leak.
@@ -52,3 +52,7 @@ One-off research documents that informed a future direction, kept for the reason
 - [leddriver-analysis-bottom-up.md](leddriver-analysis-bottom-up.md) — the companion landscape survey: catalogues the existing LED-driver libraries across ESP32, Teensy, Raspberry Pi, and PC, and recommends a path.
 - [livescripts-analysis-bottom-up.md](livescripts-analysis-bottom-up.md) — live scripting (run user-authored effects/layouts/modifiers/drivers/sensor logic on-device without a reflash), Stage-1 survey. Deep-reads the ESPLiveScript fork (hpwit's native-Xtensa JIT), surveys the field (ARTI-FX interpreter by ewowi, embedded VMs, WASM/WAMR), and records the product-owner direction.
 - [livescripts-analysis-top-down.md](livescripts-analysis-top-down.md) — the Stage-2 redesign: a native-codegen engine, Xtensa-first behind an IR seam (WASM/WAMR the per-target fallback), a C-subset language that ports an effect near-verbatim, the MoonModule binding, and a staged spike plan along the MoonLight effects-tutorial ladder.
+
+## Project transition
+
+- [rename-to-moonlight.md](rename-to-moonlight.md) — the phased plan to rename **projectMM → MoonLight** (and move the predecessor MoonLight to a personal repo). Now / coming-time / during-the-switch sequencing around the repo-name collision, the externally-visible references that gate the cutover (binary name, OTA URLs, mDNS identity), and a MoSCoW of the feature gaps that must close before the new name isn't a downgrade.

@@ -164,35 +164,16 @@ int wifiTxPower();
 // Call after esp_wifi_start() — earlier calls are silently ignored by ESP-IDF.
 bool wifiSetTxPower(int8_t quarterDbm);
 
+// mDNS is advertise-only: `mdnsInit` brings the stack up and advertises this device as
+// `_http._tcp` (with an `mm=1` TXT) and `_wled._tcp` (with a `mac=` TXT), so the native
+// WLED app + Home Assistant discover it. Peer discovery is UDP presence (DevicesModule +
+// WledPacket) — the platform exposes advertise here, discovery lives in the module.
 bool mdnsInit(const char* deviceName);
-// Stop advertising (clears the hostname) but keep the mDNS stack up so browse
-// queries still work. mdnsShutdown() does the full mdns_free — call at teardown.
+// Stop advertising: remove both services and clear the hostname, keeping the stack up so
+// a later mdnsInit re-advertises without a full re-init (the mDNS toggle uses this).
 void mdnsStop();
+// Full mdns_free — call at teardown.
 void mdnsShutdown();
-
-// mDNS service browse (discovery) — the standard, push-style way to find devices that
-// advertise a service (projectMM, WLED `_wled._tcp`, Home Assistant, ESPHome, …),
-// without an HTTP subnet sweep. ONE synchronous call per invocation — it queries, invokes
-// `cb` for each found host, frees everything, and returns. It blocks up to `timeoutMs`, so
-// the caller runs it on a slow cadence (DevicesModule on loop1s, one service type per tick
-// with a small timeout — NOT the render hot path), the standard mDNS-query pattern.
-// Deliberately not the async poll-a-handle API: holding the IDF search handle across ticks
-// raced the mDNS task's own expiry timer (it freed the search's queue mid-poll → a
-// null-queue assert that crashed on a UI refresh); a self-contained call holds no handle,
-// so that window can't exist. A found host is reported as a small POD — no IDF types leak
-// across the seam. Desktop: stub (no mDNS).
-struct MdnsHost {
-    uint8_t ip[4] = {};        // resolved IPv4 (0.0.0.0 if unresolved)
-    char    hostname[32] = {}; // instance/host name (e.g. "wled-desk"), "" if none
-    uint16_t port = 0;         // advertised SRV port
-    bool isProjectMM = false;  // the host's _http._tcp advertisement carries our TXT
-                               // marker (`mm=1`) — proves it's a projectMM device, not
-                               // just some web box on the same `_http._tcp` service.
-                               // Lets a browse classify a peer without an HTTP probe.
-};
-using MdnsHostCb = void(*)(const MdnsHost& host, void* user);
-bool mdnsBrowse(const char* service, const char* proto, uint32_t timeoutMs,
-                MdnsHostCb cb, void* user);
 
 // Store the DHCP hostname (DHCP option 12) the next eth/wifi bring-up advertises.
 // Routers populate their client list from the DHCP request, not mDNS, so without
@@ -222,20 +203,6 @@ void setHostname(const char* name);
 bool http_fetch_to_ota(const char* url,
                        char* statusBuf, size_t statusBufLen,
                        uint32_t* bytesReadOut, uint32_t* bytesTotalOut);
-
-// Short-timeout outbound HTTP GET for device discovery: fetch `url` into the
-// caller-owned `body` buffer (NUL-terminated, truncated to bodyLen-1), with a
-// per-request timeout. Returns the HTTP status code (e.g. 200), 0 on connect
-// timeout / no response / error. DevicesModule uses this to probe each host on
-// the LAN and identify it from the response (projectMM /api/state, WLED
-// /json/info, else generic). Synchronous and blocking up to `timeoutMs`. The scan
-// calls this from loop1s() (the render task), so it bounds the cost to ONE probe per
-// tick with a short timeout (~150 ms) and runs the sweep boot-once + on manual request
-// only — never continuously — so a blocked probe can't accumulate into LED flicker.
-// Moving the probe to its own task (the enabler for fast + periodic sweeping) is in the
-// backlog. Desktop: real implementation (libcurl-free, plain socket) so the scan works
-// on a PC instance too.
-int httpGet(const char* url, uint32_t timeoutMs, char* body, size_t bodyLen);
 
 // Improv WiFi provisioning over UART0.
 // ESP32 only; desktop stub returns false. Spawns a FreeRTOS task that installs
@@ -553,14 +520,36 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCou
 // All inert on targets without I2S, guarded by `if constexpr (platform::hasI2sMic)`.
 // ---------------------------------------------------------------------------
 
+// `CodecType` + `AudioCodecPins` are defined in platform_config.h (included above),
+// alongside the per-target `audioCodecType`/`audioCodecPins` defaults that use them.
+//
+// Configure the audio codec (record/mic path) over I2C, if the board has one.
+// Some boards put an analog mic behind an I2S audio codec (configured over I2C)
+// rather than a direct digital I2S MEMS mic; the codec must be brought up before
+// the I2S read. This is a no-op returning true on a board with a direct mic
+// (CodecType::None) or a target without a codec, so AudioModule always calls it and
+// the path stays uniform.
+// Returns true when there's nothing to do (CodecType::None / no codec on this
+// target) or the codec came up; false on an I2C/codec error (the module then
+// idles with a status error, same as a failed mic init). AudioModule calls this
+// *after* audioMicInit: the I2S channel must already be driving MCLK before the
+// codec is configured (the ES8311 won't answer I2C without MCLK running). The
+// codec then presents standard I2S the read picks up.
+bool audioCodecInit(CodecType type, const AudioCodecPins& pins, uint32_t sampleRate);
+
+void audioCodecDeinit();
+
 // Opaque handle to one configured I2S RX channel (standard/Philips mode).
 struct AudioMicHandle { void* impl = nullptr; };
 
 // Bring up an I2S RX channel reading the mic on the given pins at `sampleRate`
-// (24-bit data in a 32-bit slot, mono). Returns false on failure (bad pins,
-// no I2S, out of memory) — the module then idles with a status error.
+// (24-bit data in a 32-bit slot, mono). `mclkPin` drives the I2S master clock —
+// −1 for a self-clocked direct MEMS mic (INMP441), or the codec's MCLK pin when a
+// codec needs the clock to run (the ES8311 won't even answer I2C without it, so
+// AudioModule starts I2S *before* audioCodecInit on a codec board). Returns false
+// on failure (bad pins, no I2S, out of memory) — the module idles with a status error.
 bool audioMicInit(AudioMicHandle& h, uint16_t wsPin, uint16_t sdPin,
-                  uint16_t sckPin, uint32_t sampleRate);
+                  uint16_t sckPin, int16_t mclkPin, uint32_t sampleRate);
 
 // Read up to `maxSamples` 32-bit samples into `out`; returns the count read
 // (0 if none ready / not initialised). Non-blocking enough for the render tick.
@@ -573,5 +562,26 @@ void audioMicDeinit(AudioMicHandle& h);
 // on ESP32 (the FPU makes float faster than fixed-point); a naive O(n^2) DFT on
 // desktop — correct, only fast enough for the host tests' small n.
 void audioFft(const float* windowed, size_t n, float* outMag);
+
+// ---------------------------------------------------------------------------
+// I2C bus diagnostics — domain-neutral, not audio-specific. Probes a bus and
+// reports which 7-bit addresses ACK, the standard `i2cdetect` operation. Used
+// by the I2cScanModule diagnostic (src/core/I2cScanModule.h) to help bring up
+// any I2C peripheral (a codec, a sensor, an expander) — confirm wiring and read
+// off a device's address. Self-contained: opens a temporary master bus on the
+// given pins, scans, tears it down. The bus is transient, so it only conflicts
+// with a driver that *currently* holds the port (e.g. the ES8311 codec keeps
+// I2C_NUM_0 open while AudioModule is active) — that case is reported as
+// kI2cBusUnavailable, not silently as "0 devices". Internal pull-ups enabled.
+// ---------------------------------------------------------------------------
+
+// Sentinel: the bus couldn't be opened (already held by another driver, or no
+// I2C on this target) — distinct from a successful scan that found 0 devices.
+inline constexpr size_t kI2cBusUnavailable = static_cast<size_t>(-1);
+
+// Scan the I2C bus on (sda, scl); write the 7-bit addresses that ACK into
+// `out` (caller-sized, capacity `maxOut`) and return the count found (capped at
+// maxOut), or kI2cBusUnavailable if the bus couldn't be opened.
+size_t i2cScan(uint16_t sda, uint16_t scl, uint8_t* out, size_t maxOut);
 
 } // namespace mm::platform

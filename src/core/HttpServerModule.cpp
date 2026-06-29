@@ -14,6 +14,7 @@
 #include "core/Base64.h"
 #include "core/FilesystemModule.h"
 #include "core/FirmwareUpdateModule.h"
+#include "core/SystemModule.h"      // deviceName() for the WLED /json/info shim
 #include "platform/platform.h"
 #include "ui/ui_embedded.h"
 
@@ -51,6 +52,10 @@ void HttpServerModule::loop20ms() {
     // (architecture.md § Parallelism). Drain BEFORE accept so a connection burst can't starve an
     // active send. No-op when nothing is in flight.
     drainPreviewSend();
+    // Read any inbound WS frames: the native WLED app SETS state (its on/off + brightness
+    // slider) by SENDING a {on,bri} text frame over /ws, not by HTTP POST — so we must read
+    // the socket, not only push to it. Cheap (non-blocking, usually nothing pending).
+    pollWledStateFromWebSockets();
     // Accept one HTTP connection per tick.
     auto conn = server_.accept();
     if (conn.valid()) handleConnection(conn);
@@ -64,17 +69,24 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
     uint8_t buf[2048];
     int totalRead = 0;
 
-    // Read request (blocking with timeout on desktop, retries on ESP32)
-    for (int attempt = 0; attempt < 20 && totalRead < static_cast<int>(sizeof(buf) - 1); attempt++) {
+    // Read the request. read() is non-blocking (-1 = nothing pending yet), so the render
+    // loop is never stalled waiting for bytes (a blocking socket timeout used to freeze the
+    // whole loop). A just-accepted connection's request normally lands in the same read; if
+    // not, allow a SHORT bounded wait (≤ ~5 ms total) for it, then bail — an idle/half-open
+    // connection costs at most that, and the steady-state (nothing pending) costs ~0.
+    for (int empties = 0; totalRead < static_cast<int>(sizeof(buf) - 1);) {
         int n = conn.read(buf + totalRead, sizeof(buf) - 1 - totalRead);
         if (n > 0) {
             totalRead += n;
             buf[totalRead] = 0;
             if (std::strstr(reinterpret_cast<char*>(buf), "\r\n\r\n")) break;
+            empties = 0;                 // got data — reset the patience counter
         } else if (n == 0) {
-            return; // peer closed
-        } else {
-            break; // timeout or error
+            return;                      // peer closed
+        } else {                          // -1 = nothing pending yet
+            if (totalRead > 0) break;    // had a partial then nothing more — process it
+            if (++empties > 5) break;    // fresh conn, no bytes after ~5 ms — give up
+            platform::delayMs(1);
         }
     }
 
@@ -82,7 +94,12 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
     buf[totalRead] = 0;
     auto* req = reinterpret_cast<char*>(buf);
 
-    // If we have headers but body might still be arriving, read more
+    // If headers arrived but the body is still in flight, read the rest. read() is
+    // non-blocking (-1 = nothing pending yet), so the body can land a TCP segment after the
+    // headers — wait briefly between empty reads (the same bounded retry as the header
+    // phase) instead of breaking on the first -1, which would route a TRUNCATED body into
+    // the permissive JSON helpers (a silent partial control write). If the full declared
+    // body still hasn't arrived within the budget, reject with 400 rather than process it.
     auto* headerEnd = std::strstr(req, "\r\n\r\n");
     if (headerEnd) {
         auto* clh = std::strstr(req, "Content-Length:");
@@ -90,12 +107,20 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
             int contentLen = std::atoi(clh + 15);
             int headerSize = static_cast<int>(headerEnd + 4 - req);
             int bodyNeeded = headerSize + contentLen;
-            while (totalRead < bodyNeeded && totalRead < static_cast<int>(sizeof(buf) - 1)) {
+            if (bodyNeeded > static_cast<int>(sizeof(buf) - 1))
+                bodyNeeded = static_cast<int>(sizeof(buf) - 1);   // cap to buffer
+            for (int empties = 0; totalRead < bodyNeeded;) {
                 int n = conn.read(buf + totalRead, sizeof(buf) - 1 - totalRead);
-                if (n > 0) totalRead += n;
-                else break;
+                if (n > 0) { totalRead += n; empties = 0; }
+                else if (n == 0) break;                    // peer closed
+                else { if (++empties > 50) break; platform::delayMs(1); }  // ~50 ms for the body
             }
             buf[totalRead] = 0;
+            if (totalRead < bodyNeeded) {                  // body never fully arrived
+                sendResponse(conn, 400, "application/json",
+                             "{\"error\":\"incomplete request body\"}");
+                return;
+            }
         }
     }
 
@@ -136,6 +161,17 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         else if (std::strcmp(path, "/api/state") == 0) serveState(conn);
         else if (std::strcmp(path, "/api/system") == 0) serveSystem(conn);
         else if (std::strcmp(path, "/api/types") == 0) serveTypes(conn);
+        // WLED-compatibility shim: the native WLED apps (and Home Assistant's WLED
+        // integration) discover a device via mDNS `_wled._tcp` then VALIDATE it by
+        // GETting /json/info and checking it's WLED-shaped. Serving a minimal
+        // WLED-compatible info makes a projectMM device appear in those apps — and is a
+        // useful independent cross-check that our mDNS advertise resolves.
+        else if (std::strcmp(path, "/json/info") == 0) serveWledInfo(conn);
+        // WLED state + the combined state+info (`/json/si`) the app reads for its device
+        // card: on/off, brightness, and the segment's primary colour (which the app uses
+        // as the card tint). serveWledState reads live brightness from the Drivers module.
+        else if (std::strcmp(path, "/json/state") == 0) serveWledState(conn);
+        else if (std::strcmp(path, "/json/si") == 0) serveWledStateInfo(conn);
         else sendResponse(conn, 404, "text/plain", "Not found");
     } else if (std::strcmp(method, "POST") == 0) {
         // POST /api/modules/<name>/move with body {"to":N}.
@@ -177,6 +213,11 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
                 nameBuf[nameLen] = 0;
                 handleReplaceModule(conn, nameBuf, body);
             }
+        } else if (std::strcmp(path, "/json/state") == 0 && body) {
+            // WLED-compatibility: the native WLED app POSTs {on,bri,…} here to control the
+            // device. We map it onto the Drivers brightness control so the app's on/off +
+            // brightness slider drive the real output.
+            handleWledState(conn, body);
         } else if (std::strcmp(path, "/api/reboot") == 0) {
             handleReboot(conn);
         } else if (std::strcmp(path, "/api/firmware/url") == 0 && body) {
@@ -584,6 +625,160 @@ void HttpServerModule::serveSystem(platform::TcpConnection& conn) {
 
     sink.append("]}");
     sink.flush();
+}
+
+// WLED-compatibility `/json/info` — the subset of WLED's info object the native WLED
+// apps + Home Assistant validate when they probe a device they discovered via
+// `_wled._tcp`. The clients gate on a WLED-shaped identity: `brand:"WLED"`, a real
+// `vid` (build id; they reject 0), a WLED-major `ver`, and `leds.count`. We declare
+// `brand:"WLED"` because the apps key on it — the same thing WLED-MM (the MoonModules
+// WLED fork) does — while `product:"MoonModules"` says what this actually is. We speak
+// WLED's info shape to interoperate, not to impersonate. Built fresh against WLED's
+// public JSON, not copied. (Reference real WLED carries far more; this is the trimmed,
+// known-sufficient field set — see docs/moonmodules/core/HttpServerModule.md.)
+void HttpServerModule::serveWledInfo(platform::TcpConnection& conn) {
+    const char* header =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json\r\n"
+        "Connection: close\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "\r\n";
+    conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
+
+    // Identity: the deviceName (from SystemModule), the live IP, the MAC.
+    const char* name = "projectMM";
+    if (MoonModule* sys = findModuleByName("System")) {
+        const char* dn = static_cast<SystemModule*>(sys)->deviceName();
+        if (dn && dn[0]) name = dn;
+    }
+    uint8_t ip[4] = {};
+    platform::ethGetIPv4(ip);
+    if (!ip[0] && !ip[1] && !ip[2] && !ip[3]) platform::wifiStaGetIPv4(ip);
+    uint8_t mac[6] = {};
+    platform::getMacAddress(mac);
+
+    // Field set reverse-engineered from the WLED-Android app's `Info` Moshi model
+    // (model/wledapi/Info.kt): the ONLY non-nullable fields it requires are `name`, `leds`
+    // (object), and `wifi` (object) — a missing one fails the JSON parse and the device is
+    // silently dropped. `DeviceFirstContactService.kt` additionally rejects a device whose
+    // body `mac` is empty. Every other field in the model is nullable. So this is the
+    // minimal object the native app accepts: name + leds{} + wifi{} + a non-empty mac. The
+    // inner Leds/Wifi fields are themselves all nullable, so empty `{}` objects parse — we
+    // send a real `mac` and otherwise the smallest shapes that satisfy the parser. `brand`/
+    // `product` identify us as the MoonModules WLED-compatible product (interoperate, not
+    // impersonate). Confirmed on the bench: projectMM devices list in the WLED native app.
+    JsonSink sink(conn);
+    writeWledInfoBody(sink, name, mac);
+    sink.flush();
+}
+
+// The WLED info object, written into an open sink (no HTTP header). Shared by
+// /json/info and the `info` half of /json/si.
+void HttpServerModule::writeWledInfoBody(JsonSink& sink, const char* name, const uint8_t mac[6]) {
+    sink.appendf("{\"name\":");
+    sink.writeJsonString(name);   // writes its own surrounding quotes + escaping
+    // wifi: rssi/signal are nullable in the model, but sending them makes the app show a
+    // signal icon instead of a crossed-out one (cosmetic — the device lists either way).
+    sink.appendf(",\"mac\":\"%02x%02x%02x%02x%02x%02x\","
+                 "\"leds\":{\"count\":1},\"wifi\":{\"rssi\":-50,\"signal\":100},"
+                 "\"brand\":\"WLED\",\"product\":\"MoonModules\"}",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+// Current Drivers brightness (0–255), or 0 if Drivers isn't present. This is the global
+// output brightness the WLED app's slider maps to. Read generically through the control
+// list (by name + Uint8 type, via the stored pointer) so this core module needs no
+// light-domain include — the same domain-neutral reach applySetControl uses to write.
+uint8_t HttpServerModule::driversBrightness() {
+    MoonModule* d = findModuleByName("Drivers");
+    if (!d) return 0;
+    const ControlList& cl = d->controls();
+    for (uint8_t i = 0; i < cl.count(); i++) {
+        const ControlDescriptor& c = cl[i];
+        if (c.ptr && c.type == ControlType::Uint8 && std::strcmp(c.name, "brightness") == 0)
+            return *static_cast<const uint8_t*>(c.ptr);
+    }
+    return 0;
+}
+
+// The WLED state object, written into an open sink. `on` + `bri` mirror Drivers
+// brightness (off = brightness 0). `seg[0].col[0]` is the colour the WLED app tints the
+// device card with: we send the LIVE first-LED RGB from Drivers, so the card mirrors what
+// the device is actually showing — falling back to projectMM purple when the first LED is
+// black/off or there's no output (so a dark device still reads as a distinct projectMM,
+// not an indistinct black card).
+void HttpServerModule::writeWledStateBody(JsonSink& sink) {
+    const uint8_t bri = driversBrightness();
+    uint8_t rgb[3] = {0, 0, 0};
+    bool haveLed = false;
+    if (MoonModule* d = findModuleByName("Drivers")) haveLed = d->firstOutputRgb(rgb);
+    if (!haveLed || (rgb[0] == 0 && rgb[1] == 0 && rgb[2] == 0)) {
+        rgb[0] = 128; rgb[1] = 0; rgb[2] = 255;   // projectMM purple — the black/off default
+    }
+    sink.appendf("{\"on\":%s,\"bri\":%u,"
+                 "\"seg\":[{\"id\":0,\"col\":[[%u,%u,%u]]}]}",
+                 bri > 0 ? "true" : "false", bri, rgb[0], rgb[1], rgb[2]);
+}
+
+void HttpServerModule::serveWledState(platform::TcpConnection& conn) {
+    const char* header =
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+        "Connection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
+    conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
+    JsonSink sink(conn);
+    writeWledStateBody(sink);
+    sink.flush();
+}
+
+// /json/si — the combined {state, info} the WLED app reads in one call for its card.
+void HttpServerModule::serveWledStateInfo(platform::TcpConnection& conn) {
+    const char* header =
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+        "Connection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
+    conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
+
+    const char* name = "projectMM";
+    if (MoonModule* sys = findModuleByName("System")) {
+        const char* dn = static_cast<SystemModule*>(sys)->deviceName();
+        if (dn && dn[0]) name = dn;
+    }
+    uint8_t mac[6] = {};
+    platform::getMacAddress(mac);
+
+    JsonSink sink(conn);
+    sink.appendf("{\"state\":");
+    writeWledStateBody(sink);
+    sink.appendf(",\"info\":");
+    writeWledInfoBody(sink, name, mac);
+    sink.appendf("}");
+    sink.flush();
+}
+
+// Apply a WLED state-set body ({on?, bri?}) to the Drivers brightness control through the
+// shared apply-core (the same path /api/control and Improv APPLY_OP use). `on:false` → 0;
+// `on:true` with no `bri` → restore a visible default; `bri:N` → set N. Shared by the HTTP
+// POST /json/state handler and the inbound-WebSocket path (the app uses both channels).
+void HttpServerModule::applyWledState(const char* body) {
+    int bri = -1;
+    if (mm::json::hasKey(body, "bri")) bri = mm::json::parseInt(body, "bri");
+    if (mm::json::hasKey(body, "on")) {
+        const bool on = mm::json::parseBool(body, "on");
+        if (!on) bri = 0;
+        else if (bri < 0) bri = driversBrightness() > 0 ? -1 : 128;  // turn on → visible default
+    }
+    if (bri >= 0) {
+        if (bri > 255) bri = 255;
+        char valueJson[32];
+        std::snprintf(valueJson, sizeof(valueJson), "{\"value\":%d}", bri);
+        applySetControl("Drivers", "brightness", valueJson);
+    }
+}
+
+// POST /json/state — the WLED app's HTTP control channel (its system quick-tiles + Home
+// Assistant). Apply, then echo the resulting state (the app expects a State response).
+void HttpServerModule::handleWledState(platform::TcpConnection& conn, const char* body) {
+    applyWledState(body);
+    serveWledState(conn);
 }
 
 void HttpServerModule::writeModuleMetricsJson(JsonSink& sink, MoonModule* mod, bool& first) {
@@ -1110,6 +1305,88 @@ void HttpServerModule::pushStateToWebSockets() {
         if (!ws.valid()) continue;
         if (!sendWsTextFrame(ws, sink.data(), static_cast<int>(sink.size()))) {
             ws.close();
+        }
+    }
+
+    // Also push a WLED-shaped {state, info} frame. The native WLED app connects to this
+    // same /ws and reads live state (colour, brightness, on/off) from a DeviceStateInfo
+    // message — it has no /json/si GET. Our own UI ignores this frame (its JS keys on
+    // `modules`); the WLED app ignores our module frame (its Moshi keys on `state`/`info`).
+    // Two small frames, each consumer parses its own — no client needs to know about the
+    // other. This is what makes the device's card show the live colour + a working slider.
+    pushWledStateToWebSockets();
+}
+
+// Build and push the WLED {state, info} object to every WS client. Shares the same body
+// writers as /json/si.
+void HttpServerModule::pushWledStateToWebSockets() {
+    bool hasClients = false;
+    for (auto& ws : wsClients_) if (ws.valid()) { hasClients = true; break; }
+    if (!hasClients) return;
+
+    const char* name = "projectMM";
+    if (MoonModule* sys = findModuleByName("System")) {
+        const char* dn = static_cast<SystemModule*>(sys)->deviceName();
+        if (dn && dn[0]) name = dn;
+    }
+    uint8_t mac[6] = {};
+    platform::getMacAddress(mac);
+
+    JsonSink sink;
+    sink.appendf("{\"state\":");
+    writeWledStateBody(sink);
+    sink.appendf(",\"info\":");
+    writeWledInfoBody(sink, name, mac);
+    sink.appendf("}");
+
+    for (auto& ws : wsClients_) {
+        if (!ws.valid()) continue;
+        if (!sendWsTextFrame(ws, sink.data(), static_cast<int>(sink.size()))) ws.close();
+    }
+}
+
+// Read one pending WS frame per client and, if it's a WLED state-set ({on}/{bri}), apply
+// it to Drivers. The native WLED app's slider/toggle SEND state over /ws (sendState),
+// not via HTTP POST, so this is the inbound half of the control path. Client→server
+// frames are always MASKED (RFC 6455 §5.3): we unmask in place before parsing. Only the
+// small text frame we care about is handled; we ignore continuation/binary/control frames
+// (a ping/close is rare on this short-lived control socket and harmless to skip).
+void HttpServerModule::pollWledStateFromWebSockets() {
+    for (auto& ws : wsClients_) {
+        if (!ws.valid()) continue;
+        uint8_t f[512];
+        int n = ws.read(f, sizeof(f));             // non-blocking (read() returns -1 if nothing)
+        if (n < 6) continue;                       // a masked text frame is ≥6 bytes
+        // A fast slider drag can land MULTIPLE small {on,bri} frames in one read; walk every
+        // complete masked text frame in the chunk so none is dropped (apply each in order →
+        // the last value wins, matching the drag). The app's frames are tiny single-segment
+        // text frames, so partial-frame reassembly across reads isn't needed; a trailing
+        // partial frame is simply left for the next poll.
+        size_t off = 0;
+        const size_t total = static_cast<size_t>(n);
+        while (off + 6 <= total) {
+            const uint8_t* fr = f + off;
+            const uint8_t opcode = fr[0] & 0x0f;
+            const bool masked = fr[1] & 0x80;
+            size_t len = fr[1] & 0x7f;
+            size_t hdr = 2;
+            if (len == 126) {
+                if (off + 4 > total) break;
+                len = (size_t(fr[2]) << 8) | fr[3]; hdr = 4;
+            } else if (len == 127) {
+                break;                              // >64 KB control message: not ours, stop
+            }
+            const size_t frameLen = hdr + 4 + len;  // header + mask key + payload (client = masked)
+            if (!masked || off + frameLen > total) break;   // incomplete/unmasked — leave for later
+            if (opcode == 0x1 && len < 200) {       // a text frame small enough to be a state-set
+                const uint8_t* mask = fr + hdr;
+                char body[200];
+                for (size_t i = 0; i < len; i++) body[i] = static_cast<char>(fr[hdr + 4 + i] ^ mask[i & 3]);
+                body[len] = 0;
+                if (mm::json::hasKey(body, "on") || mm::json::hasKey(body, "bri"))
+                    applyWledState(body);
+            }
+            off += frameLen;
         }
     }
 }

@@ -5,8 +5,9 @@
 #include "core/JsonSink.h"
 #include "core/JsonUtil.h"         // recursive reader — restoreList parses the persisted array
 #include "core/Sort.h"             // mm::insertionSort — generic bounded sort (core); we supply the comparator
-#include "core/DeviceIdentify.h"   // DevType, classifyDevice, extractDeviceName (pure, unit-tested)
-#include "core/FilesystemModule.h" // FilesystemModule::noteDirty — persist on sweep / age-out change
+#include "core/DeviceIdentify.h"   // DevType, devTypeStr (the device-kind enum + its labels)
+#include "core/DevicePlugin.h"     // the interop plugin seam + the bundled plugins
+#include "core/FilesystemModule.h" // FilesystemModule::noteDirty — persist on list change
 #include "platform/platform.h"
 
 #include <cstdint>
@@ -15,20 +16,28 @@
 
 namespace mm {
 
-// Discovers other devices on the LAN, identifies what each is, and presents them
-// as a browsable list. Core + domain-neutral: it finds "a projectMM / a WLED / a
-// generic HTTP device", and light modules (Art-Net sync, future SuperSync) consume
-// the list rather than living here. Submodule of NetworkModule — discovery depends
-// on the network being up. See docs/moonmodules/core/DevicesModule.md.
+// Discovers other devices on the LAN by UDP presence broadcast and presents them as a
+// browsable list. Core + domain-neutral: it finds "a projectMM / a WLED device" and light
+// modules (Art-Net sync, future SuperSync, device groups) consume the list rather than
+// living here. Submodule of NetworkModule — discovery depends on the network being up.
+// See docs/moonmodules/core/DevicesModule.md.
 //
-// v1: a throttled subnet sweep (a few IPs per loop1s tick, never blocking the
-// render loop) HTTP-probes each host and classifies the response; results render
-// in the generic List control (this module is its ListSource). Read-only.
+// Discovery is PASSIVE UDP: each device BROADCASTS a small presence packet on a well-known
+// port (WLED + projectMM both use UDP 65506 with the 44-byte WLED-compatible header — see
+// WledPacket), and this module LISTENS (a bound UdpSocket per port its DevicePlugins claim,
+// drained non-blocking each tick). A plugin classifies each datagram into a `Device`.
+// projectMM also broadcasts its OWN presence on a slow cadence so peers discover it (and a
+// WLED app browsing 65506 can list it too). This replaces the former mDNS *query* path,
+// which destabilised our own mDNS advertise (a PTR query for a service we also host
+// exhausts the IDF mDNS pool — see docs/history/decisions.md). mDNS is now
+// advertise-ONLY (so the WLED native app + Home Assistant discover us); discovery never
+// queries. Fast (no subnet sweep), hot-path-safe (non-blocking recv), extensible (a new
+// ecosystem is one new plugin file). Reliable device-to-device *commands* ride REST;
+// latency-critical sync rides its own UDP — never this listener (lossy-OK presence only).
 class DevicesModule : public MoonModule, public ListSource {
 public:
-    // Wire this device's own name (deviceName) before setup so the self row in the
-    // list matches the status page / router / mDNS. Borrowed pointer — caller owns
-    // stable storage (e.g. SystemModule::deviceName()).
+    // Wire this device's own name (deviceName) before setup so the self row matches the
+    // status page / router / mDNS. Borrowed pointer — caller owns stable storage (SystemModule).
     void setSelfName(const char* name) { selfName_ = name; }
 
     // ListSource — rows are produced straight from devices_ (no copy, no alloc).
@@ -55,21 +64,16 @@ public:
         sink.writeJsonString(d.name[0] ? d.name : ip);
         sink.appendf(",\"ip\":\"%s\",\"url\":\"http://%s/\",\"type\":\"%s\"",
                      ip, ip, devTypeStr(d.type));
-        writeSpeaks(sink, d.speaks);
-        writeVia(sink, d.via);   // how it was found (mdns / scan / udp) — for the UI badge
         if (d.self) {
             sink.append(",\"self\":true");   // self is always "now" — no meaningful age
         } else if (d.cached) {
-            // Restored from persistence, not re-confirmed live this session — `ageSec`
+            // Restored from persistence, not re-heard live this session — `ageSec`
             // would be a fake "now" (the boot stamp), so emit `cached` instead. The UI
-            // shows "last seen: cached"; once a strategy re-sees it, cached clears and a
-            // real ageSec appears.
+            // shows "last seen: cached"; once a presence packet re-arrives, cached clears.
             sink.append(",\"cached\":true");
         } else {
-            // Seconds since this device was last seen by any strategy. Computed here
-            // (device-side) so the UI gets one finished number, not a raw boot-relative
-            // clock it would have to reconcile; the same `now - lastSeenMs` the age-out
-            // uses, in seconds. Snapshot at state-push time. Wrap-safe (unsigned).
+            // Seconds since the last presence sighting. Computed device-side so the UI gets
+            // one finished number; the same `now - lastSeenMs` age-out uses. Wrap-safe.
             uint32_t ageSec = (platform::millis() - d.lastSeenMs) / 1000u;
             sink.appendf(",\"ageSec\":%u", static_cast<unsigned>(ageSec));
         }
@@ -78,16 +82,12 @@ public:
 
     // ListSource restore (persistence load): parse the saved `devices` array with the
     // recursive mm::json reader and rebuild devices_, so the last-known list shows on
-    // boot before any scan. Tolerant of a malformed/over-large file (parse fails →
-    // false → empty list). Self is dropped (re-added live via upsertSelf with the
-    // current IP); missed=0 so a device that's truly gone ages out after the first
-    // live sweep.
+    // boot before any announcement arrives. Tolerant of a malformed/over-large file
+    // (parse fails → false → empty list). Self is dropped (re-added live via upsertSelf
+    // with the current IP). Tolerates an OLD persisted file with extra keys (e.g. the
+    // former `via`) — the keyed reader ignores them (robust to any input).
     bool restoreList(const char* json, const char* key) override {
         deviceCount_ = 0;
-        // Core does the parse / array-navigate / iterate / malformed-safety
-        // (forEachListElement); this body is just "fill one device from this object".
-        // Capture its result — we still need to sort before returning, so we can't
-        // `return` it inline (that skipped sortByName, leaving the cache unsorted).
         const bool ok = mm::json::forEachListElement(json, key,
             [&](const mm::json::JsonDoc& doc, const mm::json::JsonNode* el) {
                 if (deviceCount_ >= kMaxDevices) return;
@@ -105,466 +105,288 @@ public:
                        : (std::strcmp(typeStr, "WLED") == 0)      ? DevType::Wled
                                                                   : DevType::Generic;
                 d.self = false;
-                d.speaks = ProtoHttp;
-                d.via = 0;        // no live sighting yet — via fills in when a strategy re-sees it
-                d.cached = true;  // restored, not re-confirmed live → UI shows "cached", not a time
-                // Stamp "now" so the cached entry gets a full kStaleMs grace window to
-                // re-announce before age-out drops it (a still-alive but slow device).
+                d.cached = true;  // restored, not re-heard live → UI shows "cached", not a time
+                // Stamp "now" so the cached entry gets its kCachedGraceMs PROBATION window
+                // (not the full 24 h) to be re-confirmed by a live packet before age-out
+                // drops it. The persisted file has no real last-seen time — faking it as the
+                // full 24 h would let a long-gone device survive forever across reboots (the
+                // clock resets every boot). A live packet promotes it (clears `cached`, real
+                // 24 h window); silence within probation means it's a ghost — drop it.
                 d.lastSeenMs = platform::millis();
             });
-        sortByName();   // cached list shows alphabetically too, before the first sweep
+        sortByName();   // cached list shows alphabetically too, before the first sighting
         return ok;      // false on a malformed/missing file (list left empty)
     }
 
     void onBuildControls() override {
         MoonModule::onBuildControls();
-        // `scan` is a momentary ACTION (rescan now), not an on/off state — a Button,
-        // not a Bool toggle (a toggle next to the "scanning…" status reads as two
-        // unrelated states). onUpdate runs the rescan.
-        controls_.addButton("scan");
-        // No "status" control — sweep state goes through MoonModule::setStatus(), the
-        // standard status channel the UI renders generically (mod.status/severity).
-        // Sweep progress (host 0..254, plain count not KB). Always present: the WS
-        // state push patches values but not structure, so a show-only-while-scanning
-        // hide flag wouldn't update live. At rest the value is 0 (empty bar); pressing
-        // `scan` mid-sweep just restarts the sweep (harmless), so no need to gate it.
-        controls_.addProgress("progress", scanProgress_, 254, /*bytes=*/false);
         controls_.addList("devices", *this);   // this module is the ListSource
-    }
-
-    void onUpdate(const char* controlName) override {
-        if (std::strcmp(controlName, "scan") == 0) restartScan();
     }
 
     void setup() override {
         MoonModule::setup();
         // The last-known device list is restored automatically before setup() by the
-        // persistence overlay (the `devices` List control is persistable and
-        // round-trips as JSON — restoreList rebuilt devices_). So the UI shows it
-        // INSTANTLY on boot — no waiting for a fresh sweep (the win for slow-to-
-        // discover devices like a PC instance or generic host that mDNS can't find).
+        // persistence overlay (the `devices` List control round-trips as JSON). So the
+        // UI shows it INSTANTLY on boot — no waiting for an announcement to re-arrive.
         if (deviceCount_) {
             std::snprintf(statusBuf_, sizeof(statusBuf_), "%u device%s (cached)",
                           deviceCount_, deviceCount_ == 1 ? "" : "s");
         }
-        setStatus(statusBuf_);   // "idle", or the cached-count summary
-        // Don't scan here — the network isn't up yet (DHCP lands a few seconds after
-        // boot). loop1s() kicks the ONE boot sweep once a local IP appears.
+        setStatus(statusBuf_);
     }
 
-    // The sweep advances one IP per tick. It runs on the render task and each probe
-    // BLOCKS up to kProbeTimeoutMs on a dead host — a hot-path stall that would
-    // flicker the LEDs. So the sweep runs ONCE at boot (LEDs not yet critical) and
-    // otherwise only on an explicit `scan` press; there is NO periodic background
-    // scan. Moving the blocking probe to its own FreeRTOS task is the enabler for
-    // safe periodic scanning (and a UDP presence beacon) — see backlog.
+    // Every tick: ensure we're online, drain inbound presence packets through the plugins,
+    // broadcast our own presence on a slow cadence, and age out devices unheard for
+    // kStaleMs. The drain is non-blocking (recvFrom returns -1 when nothing pending), so it
+    // never stalls the tick — the hot-path-safe replacement for the old mDNS query.
     void loop1s() override {
         MoonModule::loop1s();
-        if (hostCursor_ >= 0) {
-            stepScan();
-        } else if (!sweptOnce_) {
-            // One-time boot sweep, started as soon as the network is up.
-            uint8_t local[4] = {};
-            localIp(local);
-            if (local[0] || local[1] || local[2] || local[3]) restartScan();
+        uint8_t local[4] = {};
+        localIp(local);
+        const bool online = local[0] || local[1] || local[2] || local[3];
+        if (!online) return;   // no network yet — nothing to discover
+
+        // Re-register the self row every tick against the CURRENT local IP (idempotent —
+        // find-or-update). Doing it once would pin the first-seen address forever; a later
+        // DHCP renew / WiFi↔Eth switch changes our IP, and upsertSelf must follow it (and
+        // ageOut drops the row left at the old address). Cheap: a bounded findByIp + stamp.
+        upsertSelf(local);
+        ensureListener();
+
+        // Drain every presence packet received since the last tick (bounded — a busy LAN
+        // sends a handful per interval), classifying each through the plugins.
+        uint8_t buf[64];
+        uint8_t srcIp[4];
+        for (int i = 0; i < kMaxDrainPerTick; i++) {
+            int n = listener_.recvFrom(buf, sizeof(buf), srcIp);
+            if (n <= 0) break;   // -1 = nothing pending; done for this tick
+            mergePacket(buf, static_cast<size_t>(n), srcIp);
         }
-        // mDNS browse runs EVERY tick, independent of the HTTP sweep: it's async and
-        // non-blocking (a cheap poll, no per-host timeout), so it's safe on loop1s
-        // where the blocking HTTP probe is not. It catches devices that advertise a
-        // service (WLED, projectMM, generic `_http._tcp`) as they come and go, without
-        // a subnet sweep — the standard, push-style discovery the architecture calls for.
-        stepMdns();
-        // Age out here, not at sweep-end: discovery now arrives on several cadences
-        // (a minutes-long HTTP sweep, a seconds-long mDNS lap, a future async UDP
-        // beacon), so freshness is a per-device timestamp and the drop is a simple
-        // "unseen too long" check every tick — independent of any one strategy's cycle.
-        ageOut();
+
+        // Broadcast our own presence every kBroadcastEverySec ticks so peers discover us.
+        if (++broadcastTick_ >= kBroadcastEverySec) {
+            broadcastTick_ = 0;
+            broadcastPresence(local);
+        }
+
+        ageOut(local);
     }
 
     ModuleRole role() const override { return ModuleRole::Generic; }
 
+    // Test seam: feed a synthetic presence datagram through the real classify→upsert
+    // pipeline, exactly as the live recvFrom loop does. The desktop unit/scenario tests
+    // drive the full discovery path (plugin claim, type priority, name/IP merge) with
+    // hand-built packets — no network needed. Not used in production.
+    void injectPacketForTest(const uint8_t* data, size_t len, const uint8_t srcIp[4]) {
+        mergePacket(data, len, srcIp);
+    }
+
 private:
-    // DevType / classifyDevice / extractDeviceName live in DeviceIdentify.h (pure +
-    // unit-tested). devTypeStr() there replaces the former local typeStr().
-
-    // Protocols a device is known to speak, as a bitmask. v1 discovery only proves
-    // HTTP (the scan probes it), so that's all that gets set today — but the field
-    // exists so additional discovery strategies (mDNS browse, UDP/ArtPoll/DDP/OSC,
-    // RTP-MIDI; see DevicesModule.md "Discovery is per-protocol") fill in more bits
-    // without reshaping the device record or the wire format. A consumer (Art-Net
-    // sync, fleet OTA) reads `speaks` to know how it can talk to a device.
-    enum Proto : uint8_t {
-        ProtoHttp   = 1 << 0,   // an HTTP API (REST) — the only one v1 discovers
-        ProtoArtnet = 1 << 1,   // Art-Net / sACN (future: ArtPoll discovery)
-        ProtoDdp    = 1 << 2,   // DDP (future)
-        // … mDNS-advertised services, OSC, RTP-MIDI, etc. as strategies are added.
-    };
-
-    // How a device was discovered, as a bitmask — a device can be found by more than
-    // one strategy at once (mDNS browse AND the HTTP sweep both see a projectMM peer),
-    // so this is OR-ed like `speaks`, not a single last-writer-wins value. The detail
-    // panel renders it so "what did mDNS find vs the scan" is visible. UDP (a future
-    // presence beacon) is the next bit; it arrives on its own async cadence, which is
-    // exactly why discovery freshness is a per-device timestamp, not a per-sweep
-    // counter (no single sweep boundary to hang a counter off — see lastSeenMs).
-    enum Via : uint8_t {
-        ViaScan = 1 << 0,   // answered the HTTP subnet sweep
-        ViaMdns = 1 << 1,   // advertised a browsed mDNS service
-        ViaUdp  = 1 << 2,   // announced via a UDP presence beacon (future)
-    };
-
     struct Device {
         uint8_t  ip[4] = {};
         char     name[24] = {};
         DevType  type = DevType::Generic;
-        uint8_t  speaks = 0;     // Proto bitmask — protocols this device is known to speak
-        uint8_t  via = 0;        // Via bitmask — which strategies have discovered it
         bool     self = false;
-        bool     cached = false; // restored from persistence, not yet re-seen LIVE this
-                                 // session (via is still empty, lastSeenMs is the boot
-                                 // stamp, not a real sighting). Cleared on the first live
-                                 // sighting; until then the UI shows "cached", not a time.
-        uint32_t lastSeenMs = 0; // platform::millis() at the most recent sighting (any
-                                 // strategy). Age-out drops a non-self device unseen for
-                                 // kStaleMs — strategy-agnostic, so HTTP/mDNS/UDP, each on
-                                 // its own cadence, all just stamp "now" when they see it.
+        bool     cached = false; // restored from persistence, not yet re-heard live this
+                                 // session. Cleared on the first live sighting.
+        uint32_t lastSeenMs = 0; // platform::millis() at the most recent mDNS sighting.
+                                 // Age-out drops a non-self device unheard for kStaleMs.
     };
 
-    // Append a `speaks` JSON array (e.g. ["http"]) for a device's protocol bitmask.
-    static void writeSpeaks(JsonSink& sink, uint8_t speaks) {
-        sink.append(",\"speaks\":[");
-        bool first = true;
-        auto emit = [&](uint8_t bit, const char* tag) {
-            if (!(speaks & bit)) return;
-            if (!first) sink.append(",");
-            sink.appendf("\"%s\"", tag);
-            first = false;
-        };
-        emit(ProtoHttp, "http");
-        emit(ProtoArtnet, "artnet");
-        emit(ProtoDdp, "ddp");
-        sink.append("]");
-    }
+    static constexpr uint8_t  kMaxDevices = 32;   // a LAN's worth; bounded, no heap
+    // Broadcast our presence every this-many loop1s ticks (≈ seconds). Slow + light, like
+    // WLED's ~30 s beacon; a new device appears within this window. A departed device
+    // clears within kStaleMs (sized to a few intervals so a present-but-quiet device isn't
+    // dropped between its broadcasts).
+    static constexpr uint32_t kBroadcastEverySec = 10;
+    // Keep a device listed for 24 h after its last sighting, then drop. The list is a
+    // durable "devices I've seen" history (persisted to flash, restored on boot), not just
+    // "live right now": a device that goes offline survives a reboot and lingers a full day,
+    // its freshness dot ageing green → yellow (>1 min) → red (>1 h) so the UI shows it
+    // fading before it finally purges. A still-present device re-broadcasts every ~10 s, so
+    // 24 h is never hit by a live peer.
+    static constexpr uint32_t kStaleMs = 24u * 60u * 60u * 1000u;
+    // Probation for a CACHED (restored-from-persistence, never-re-heard) device: keep it
+    // only this long for a live packet to re-confirm it, else drop it as a ghost. Short, so
+    // a stale persisted entry doesn't survive across reboots — the persisted file has no
+    // real last-seen time, so a cached device's clock is "boot", not "actually last seen".
+    static constexpr uint32_t kCachedGraceMs = 60u * 1000u;
+    static constexpr int      kMaxDrainPerTick = 16;   // cap packets processed per tick (bounded work)
 
-    // Append a `via` JSON array (e.g. ["scan","mdns"]) for a device's discovery bitmask
-    // — how the device was found, so the UI can show mDNS-found vs scan-found at a glance.
-    static void writeVia(JsonSink& sink, uint8_t via) {
-        sink.append(",\"via\":[");
-        bool first = true;
-        auto emit = [&](uint8_t bit, const char* tag) {
-            if (!(via & bit)) return;
-            if (!first) sink.append(",");
-            sink.appendf("\"%s\"", tag);
-            first = false;
-        };
-        emit(ViaScan, "scan");
-        emit(ViaMdns, "mdns");
-        emit(ViaUdp, "udp");
-        sink.append("]");
-    }
+    // The interop plugins. Order matters: MmPlugin is first, so a projectMM peer's
+    // marker-stamped packet is typed projectMM before WledPlugin would see it as a plain
+    // WLED. A new system (ESPHome, Tasmota, Hue) is added by writing one plugin and listing
+    // it here — no other change. const singletons, no per-device state.
+    MmPlugin   mmPlugin_;
+    WledPlugin wledPlugin_;
+    static constexpr uint8_t kPluginCount = 2;
+    const DevicePlugin* plugins_[kPluginCount] = { &mmPlugin_, &wledPlugin_ };
 
-    static constexpr uint8_t  kMaxDevices    = 32;  // a LAN's worth; bounded, no heap
-    // One IP per tick: a probe blocks up to kProbeTimeoutMs on a dead host, and
-    // loop1s must not stall the render loop. 1 IP/tick → a /24 sweep takes ~254 s
-    // worst case (all-dead subnet), but each tick blocks at most one timeout. The
-    // probe short-circuits after the FIRST GET times out (a dead host answers no
-    // URL), so a sparse subnet costs ~1×timeout per empty IP, not 3×.
-    static constexpr uint8_t  kProbesPerTick = 1;
-    // Short timeout: this GET blocks the scheduler thread (and thus one render tick) on a dead host,
-    // so it stays small to keep the boot sweep from stuttering animation during the ~4 min the /24
-    // takes. A live host on a LAN answers in a few ms; 30 ms covers a slow responder while keeping
-    // the worst-case per-tick stall to ~30 ms.
-    static constexpr uint32_t kProbeTimeoutMs = 30;
-    // Drop a non-self device unseen by ANY strategy for this long. 24 h is deliberately
-    // generous: mDNS re-confirms its devices every few-second browse lap (cheap), but an
-    // HTTP-scan-only device (a PC instance, a generic host) has no cheap recurring
-    // refresh — the sweep is boot-once + manual, not periodic — so a short timeout would
-    // wrongly drop a still-alive device and force a re-scan. A day-long window lets such
-    // a device persist on its single sighting while a genuinely-departed device still
-    // clears itself within a day. Each sighting (HTTP/mDNS/UDP) restamps lastSeenMs.
-    static constexpr uint32_t kStaleMs       = 24u * 60u * 60u * 1000u;  // 24 hours
+    platform::UdpSocket listener_;       // bound to the presence port; drained each tick
+    bool     listenerBound_ = false;
+    uint32_t broadcastTick_ = 0;         // counts loop1s ticks toward the next presence broadcast
+
     Device  devices_[kMaxDevices];
     uint8_t deviceCount_ = 0;
-    bool    sweptOnce_ = false;     // the one boot sweep has completed
-    const char* selfName_ = nullptr;  // this device's name (wired via setSelfName)
-    uint32_t scanProgress_ = 0;     // current host index 1..254 (0 = idle), for the Progress bar
+    const char* selfName_ = nullptr;   // this device's name (wired via setSelfName)
     char    statusBuf_[40] = "idle";
-    // Probe response buffer — a member, not a per-call stack local: /api/state's
-    // deviceName can sit past 512 B on a multi-module device, so this needs ~1 KB,
-    // too large for a stack frame in the scheduler task. One probe runs per tick, so
-    // a single reused buffer suffices (no concurrency). Part of the module's fixed
-    // footprint (~1 KB), allocated once.
-    char    probeBuf_[1024];
-
-    // Sweep cursor: hostLow_ walks 1..254 across the local /24. -1 = no scan running
-    // (no network yet, or sweep finished). The subnet's first three octets come from
-    // the local IP, captured at restartScan().
-    int16_t hostCursor_ = -1;
-    uint8_t subnet_[3] = {};   // first three octets of the /24 being swept
-
-    // True when a control or first-run kicks off a fresh full sweep. Captures the
-    // local IP (and so the subnet); marks every known device unseen-this-sweep.
-    void restartScan() {
-        uint8_t local[4] = {};
-        localIp(local);
-        if (local[0] == 0 && local[1] == 0 && local[2] == 0 && local[3] == 0) {
-            std::snprintf(statusBuf_, sizeof(statusBuf_), "no network");
-            setStatus(statusBuf_, Severity::Warning);
-            hostCursor_ = -1;
-            scanProgress_ = 0;   // back to idle — no stale bar left showing
-            return;
-        }
-        subnet_[0] = local[0]; subnet_[1] = local[1]; subnet_[2] = local[2];
-        hostCursor_ = 1;       // sweep .1 .. .254
-        scanProgress_ = 1;
-        std::snprintf(statusBuf_, sizeof(statusBuf_), "scanning %u.%u.%u.0/24",
-                      subnet_[0], subnet_[1], subnet_[2]);
-        setStatus(statusBuf_);
-        // Ensure self is in the list even before its own IP is probed.
-        upsertSelf(local);
-    }
-
-    // Probe up to kProbesPerTick hosts this tick; advance the cursor. When the sweep
-    // completes, age out devices not seen and go idle until the next restartScan.
-    void stepScan() {
-        if (hostCursor_ < 0) return;
-        uint8_t local[4] = {};
-        localIp(local);
-        for (uint8_t i = 0; i < kProbesPerTick && hostCursor_ <= 254; i++, hostCursor_++) {
-            uint8_t ip[4] = {subnet_[0], subnet_[1], subnet_[2],
-                             static_cast<uint8_t>(hostCursor_)};
-            // Don't probe our own IP: upsertSelf already gave it the right identity
-            // (projectMM, deviceName), and an HTTP request to ourselves mid-tick can
-            // race the server / loopback and misclassify us as generic. Just keep it
-            // fresh so age-out doesn't drop it.
-            if (ipEq(ip, local)) { if (Device* d = findByIp(ip)) { d->lastSeenMs = platform::millis(); d->cached = false; } continue; }
-            probe(ip);
-        }
-        // Advance the progress bar to the current cursor (1..254) so it tracks the sweep.
-        if (hostCursor_ <= 254) scanProgress_ = static_cast<uint32_t>(hostCursor_);
-        if (hostCursor_ > 254) {
-            // Sweep finished — reset the bar to 0 (idle), not left full at 254.
-            scanProgress_ = 0;
-            hostCursor_ = -1;
-            sweptOnce_ = true;
-            // Age-out is no longer tied to the sweep end (it runs every tick in loop1s,
-            // off the per-device timestamp); the sweep just reports its result + persists.
-            std::snprintf(statusBuf_, sizeof(statusBuf_), "%u device%s",
-                          deviceCount_, deviceCount_ == 1 ? "" : "s");
-            setStatus(statusBuf_);
-            // Persist the fresh set so the next boot shows it instantly. The `devices`
-            // List control is persistable — marking dirty arms the standard
-            // FilesystemModule debounce, which serializes the List as JSON.
-            markDirty();
-            FilesystemModule::noteDirty();
-        }
-    }
-
-
-    // mDNS service types browsed, in round-robin. `_http._tcp` catches projectMM (we
-    // advertise it via mdnsInit) and any generic web device; `_wled._tcp` is WLED's
-    // own service. The list is the discovery surface — add `_esphome._tcp`,
-    // `_home-assistant._tcp`, etc. here as classification for them lands (the hit's
-    // service type already maps to a DevType in mdnsTypeFor). No state reshuffle.
-    struct MdnsService { const char* service; const char* proto; DevType type; };
-    static constexpr MdnsService kMdnsServices[] = {
-        { "_http", "_tcp", DevType::Generic },   // projectMM + generic web devices
-        { "_wled", "_tcp", DevType::Wled    },
-    };
-    static constexpr uint8_t kMdnsServiceCount =
-        sizeof(kMdnsServices) / sizeof(kMdnsServices[0]);
-    // mdnsBrowse is SYNCHRONOUS and blocks up to the timeout (the IDF PTR query waits the window for
-    // responders, returning when it elapses or the result cap fills), on the loop1s tick thread, so
-    // the time is charged to the tick. The timeout stays short AND the browse runs only every
-    // kMdnsEveryTicks-th tick: one ~20 ms hiccup every ~15 s stays invisible for a discovery feature
-    // (peers come and go on a slower scale than that), and FPS is untouched in between. A peer that
-    // answers after the window is caught on a later pass — discovery is continuous (each browse
-    // cycles to the next service type). The synchronous call holds no handle, so it stays correct
-    // under a concurrent UI refresh.
-    static constexpr uint32_t kMdnsBrowseMs = 20;    // shorter blocking window → smaller render hiccup
-    static constexpr uint8_t kMdnsEveryTicks = 15;   // browse less often → the hiccup is rarer (~15 s)
-
-    uint8_t mdnsIndex_ = 0;        // which service in kMdnsServices is browsed
-    uint8_t mdnsTick_ = 0;         // throttle counter for the browse cadence
-
-    // Browse one service type on the throttled cadence: query it (blocking, bounded), merge
-    // hits via the static callback, advance to the next type. The cycle wraps kMdnsServices
-    // forever, so new advertisers are picked up on later passes.
-    void stepMdns() {
-        if (++mdnsTick_ < kMdnsEveryTicks) return;
-        mdnsTick_ = 0;
-        const MdnsService& s = kMdnsServices[mdnsIndex_];
-        platform::mdnsBrowse(s.service, s.proto, kMdnsBrowseMs, &DevicesModule::onMdnsHost, this);
-        advanceMdns();
-    }
-
-    void advanceMdns() { mdnsIndex_ = (mdnsIndex_ + 1) % kMdnsServiceCount; }
-
-    // platform::MdnsHostCb — a found host for the service type at mdnsIndex_. Trampoline
-    // to the instance; `user` is `this` (set in mdnsBrowsePoll above).
-    static void onMdnsHost(const platform::MdnsHost& host, void* user) {
-        static_cast<DevicesModule*>(user)->mergeMdnsHost(host);
-    }
-
-    void mergeMdnsHost(const platform::MdnsHost& host) {
-        if (host.ip[0] == 0 && host.ip[1] == 0 && host.ip[2] == 0 && host.ip[3] == 0)
-            return;   // unresolved — nothing to key on
-        // The browsed service type maps to a DevType (Generic for `_http`, Wled for
-        // `_wled`). A host on the GENERIC `_http` service carrying our `mm=1` TXT marker
-        // is a projectMM device — promote it, so an mDNS-only sighting classifies + names
-        // it without waiting for the HTTP scan. The promotion is gated on the base type
-        // being Generic: a definite service type (e.g. `_wled`) already says what the
-        // host is, so the marker must not override it (defensive — a real WLED won't
-        // carry `mm=1`, but a future service mustn't be silently relabelled projectMM).
-        const DevType baseType = kMdnsServices[mdnsIndex_].type;
-        DevType type = (host.isProjectMM && baseType == DevType::Generic)
-                       ? DevType::ProjectMM : baseType;
-        upsertMdns(host.ip, type, host.hostname);
-    }
 
     void localIp(uint8_t out[4]) const {
         platform::ethGetIPv4(out);
         if (!out[0] && !out[1] && !out[2] && !out[3]) platform::wifiStaGetIPv4(out);
     }
 
-    // HTTP-probe one IP and classify. Tries port 80 first (ESP32 devices, WLED,
-    // generic web UIs); if nothing answers there, tries port 8080 (a projectMM
-    // DESKTOP instance serves its API on 8080, not 80 — see main_desktop.cpp).
-    // A live :80 host stops after :80, so the extra :8080 attempt only costs a
-    // second timeout on otherwise-empty IPs, keeping the per-IP budget bounded.
-    void probe(const uint8_t ip[4]) {
-        if (probePort(ip, 80)) return;
-        probePort(ip, 8080);
+    // Offer a received presence datagram to each plugin; the first to classify it wins.
+    // (Order matters: MmPlugin is first, so a projectMM peer's marked packet is typed
+    // projectMM before WledPlugin would see it as a plain WLED.)
+    void mergePacket(const uint8_t* data, size_t len, const uint8_t srcIp[4]) {
+        if (!srcIp[0] && !srcIp[1] && !srcIp[2] && !srcIp[3]) return;  // no source
+        for (const DevicePlugin* p : plugins_) {
+            DiscoveredDevice found;
+            if (p->classifyPacket(data, len, srcIp, found)) { upsertDevice(srcIp, found); return; }
+        }
+        // No plugin claimed it — an unrecognised packet on a port we listen on; ignore.
     }
 
-    // Probe one ip:port. Returns true if a host answered (so the caller can stop).
-    bool probePort(const uint8_t ip[4], uint16_t port) {
-        char url[48], ipStr[16];
-        formatDottedQuad(ipStr, ip);
-
-        // First GET doubles as the liveness check: status 0 == no host answered
-        // (timeout / connection refused). The response goes in probeBuf_, a member
-        // (NOT a stack local): /api/state's deviceName can sit past 512 B on a
-        // multi-module device, so the buffer must be ~1 KB — too large for this
-        // call's stack frame in the scheduler task, so it lives in the module's
-        // fixed footprint and is reused each probe (one probe per tick).
-        std::snprintf(url, sizeof(url), "http://%s:%u/api/state", ipStr, port);
-        int status = platform::httpGet(url, kProbeTimeoutMs, probeBuf_, sizeof(probeBuf_));
-        if (status == 0) return false;   // nothing on this port
-        // Only a 200 body is real /api/state — a 404/500 error page that happens to
-        // contain "modules" must not be misread as a projectMM (the WLED branch below
-        // already gates on 200). A non-200 still means the host is ALIVE, so fall
-        // through to the WLED probe / generic classification.
-        if (status == 200) {
-            DevType t = classifyDevice(probeBuf_, nullptr);
-            if (t == DevType::ProjectMM) { upsert(ip, t, probeBuf_); return true; }
+    // Bind the discovery listener once the network is up. Idempotent — a no-op once bound.
+    // open() first (creates the fd AND enables SO_BROADCAST, which the presence broadcast
+    // needs); then bind() to the plugins' discovery port. The port comes from the plugins'
+    // discoveryPort() — the seam owns it, not a hardcoded constant — so adding a plugin on
+    // the same port is free. Today both plugins share one port (projectMM + WLED on 65506),
+    // so one socket receives + broadcasts; the assert pins that invariant. A future plugin
+    // on a DIFFERENT port is the trigger to grow this to one socket per distinct port (the
+    // shape is already a loop over plugins everywhere else).
+    void ensureListener() {
+        if (listenerBound_) return;
+        const uint16_t port = plugins_[0]->discoveryPort();
+        for (const DevicePlugin* p : plugins_)
+            if (p->discoveryPort() != port) return;   // divergent ports unsupported yet — see note
+        if (!listener_.open()) return;
+        if (listener_.bind(port)) {
+            listenerBound_ = true;
+        } else {
+            // bind failed (port busy this tick) — CLOSE the just-opened socket before
+            // returning, or each retry would open() a fresh fd and leak one per loop1s
+            // until the process runs out, slowing everything to a crawl.
+            listener_.close();
         }
-        DevType t = DevType::Generic;
-
-        // Not a projectMM — try the WLED info endpoint on this port.
-        std::snprintf(url, sizeof(url), "http://%s:%u/json/info", ipStr, port);
-        if (platform::httpGet(url, kProbeTimeoutMs, probeBuf_, sizeof(probeBuf_)) == 200) {
-            t = classifyDevice(nullptr, probeBuf_);
-            if (t == DevType::Wled) { upsert(ip, t, probeBuf_); return true; }
-        }
-        // Live host, not projectMM/WLED → generic HTTP device.
-        upsert(ip, DevType::Generic, nullptr);
-        return true;
     }
 
-    // Find-or-insert a device by IP; refresh its type/name and mark it seen.
-    void upsert(const uint8_t ip[4], DevType type, const char* body) {
+    // Broadcast our presence: a WLED-valid 44-byte packet (so WLED apps/devices browsing
+    // 65506 list us) stamped with the projectMM marker (so peer projectMM devices type us
+    // correctly). Discovery-only — carries no command, so a receiving WLED only lists us.
+    void broadcastPresence(const uint8_t ip[4]) {
+        uint8_t pkt[WledPacket::kSize];
+        const char* n = (selfName_ && selfName_[0]) ? selfName_ : "projectMM";
+        WledPacket::build(pkt, ip, n, boardTypeByte(), /*lightsOn=*/true);
+        WledPacket::stampMmMarker(pkt);
+        const uint8_t bcast[4] = {255, 255, 255, 255};
+        listener_.sendToAddr(bcast, WledPacket::kPort, pkt, sizeof(pkt));
+    }
+
+    // WLED's board-type byte (low 7 bits): 32=ESP32, 33=S2, 34=S3, 35=C3, 36=P4. Best-effort
+    // from the chip model string; an unknown chip falls back to 32 (plain ESP32) — purely
+    // informational in the packet (WLED shows an icon), never gates discovery.
+    static uint8_t boardTypeByte() {
+        const char* m = platform::chipModel();
+        if (std::strstr(m, "S3")) return 34;
+        if (std::strstr(m, "S2")) return 33;
+        if (std::strstr(m, "C3")) return 35;
+        if (std::strstr(m, "P4")) return 36;
+        return 32;
+    }
+
+    // Find-or-insert a device a plugin classified from a UDP presence packet; refresh
+    // type/name, mark seen. Our own presence packet (carrying the projectMM marker) resolves
+    // to our own source IP; mark that row self. Persistence is armed ONLY when a SAVED field
+    // (name/ip/type/self) actually changes — a mere re-sighting (lastSeenMs/cached) doesn't
+    // alter the serialized list, so it must not trigger a flash write every ~10 s broadcast.
+    void upsertDevice(const uint8_t ip[4], const DiscoveredDevice& found) {
         uint8_t local[4] = {};
         localIp(local);
         const bool isSelf = ipEq(ip, local);
         Device* d = findByIp(ip);
+        bool persistChanged = false;
         if (!d) {
             if (deviceCount_ >= kMaxDevices) return;   // bounded; silently cap
             d = &devices_[deviceCount_++];
             std::memcpy(d->ip, ip, 4);
+            d->type = found.type;          // first sighting — take the plugin's type
+            persistChanged = true;         // a new row changes the saved list
         }
-        d->type = type;
-        d->self = isSelf;
-        d->lastSeenMs = platform::millis();
-        d->cached = false;        // a live sighting — no longer just a cached entry
-        d->speaks |= ProtoHttp;   // found via the HTTP scan → it speaks HTTP
-        d->via |= ViaScan;        // discovered by the HTTP subnet sweep
-        extractDeviceName(type, body, d->name, sizeof(d->name));
-        if (!d->name[0]) formatDottedQuad(d->name, ip);   // fall back to the IP
-        sortByName();   // keep the list ordered AS devices arrive — not just at sweep end
+        // A projectMM device broadcasts a marked, WLED-VALID packet — without the marker
+        // check a peer would relabel WLED. projectMM is the stronger identity (the marker is
+        // definitive): never downgrade an established projectMM device, only RAISE toward it.
+        const bool isMm = isSelf || found.type == DevType::ProjectMM;
+        const DevType newType = isMm ? DevType::ProjectMM
+                              : (d->type != DevType::ProjectMM ? found.type : d->type);
+        if (d->type != newType) { d->type = newType; persistChanged = true; }
+        if (d->self != isSelf) { d->self = isSelf; persistChanged = true; }
+        d->lastSeenMs = platform::millis();    // transient — not persisted
+        d->cached = false;                     // transient — not persisted
+        // Update the display name when this packet is AUTHORITATIVE for the device's kind,
+        // so a peer RENAME propagates live (its next broadcast carries the new name). A
+        // projectMM-marked packet is authoritative for a projectMM row; a plain WLED packet
+        // for a WLED row — a WLED packet must NOT overwrite a projectMM device's name (a
+        // projectMM peer's packet without the marker is the lower-authority case). Always
+        // fill an empty/placeholder name regardless of authority.
+        const bool authoritative =
+            (found.type == DevType::ProjectMM && d->type == DevType::ProjectMM) ||
+            (found.type == DevType::Wled);
+        if (found.name[0] && (!d->name[0] || isIpPlaceholder(d->name, ip) || authoritative)
+            && std::strcmp(d->name, found.name) != 0) {
+            std::snprintf(d->name, sizeof(d->name), "%s", found.name);
+            persistChanged = true;
+        }
+        if (!d->name[0]) { formatDottedQuad(d->name, ip); persistChanged = true; }
+        if (persistChanged) {                  // only a saved-field change touches disk + sort
+            sortByName();
+            refreshStatus();
+        }
     }
 
-    // True when `name` is just the device's own IP as a dotted quad — i.e. a placeholder
-    // a sighting fell back to because no real name was known yet. A later sighting with a
-    // genuine name should overwrite it (see upsertMdns); a real name never matches its IP.
+    // Guarantee the self row exists at the current local IP (called every tick — idempotent).
+    // Self never ages out (the row at the current IP is restamped each tick). Re-sorts +
+    // refreshes status ONLY when the row actually changed (a fresh insert or an IP migration),
+    // not every tick — a no-op tick must not arm persistence (same rule as upsertDevice).
+    void upsertSelf(const uint8_t ip[4]) {
+        bool changed = false;
+        // Demote any prior self row at a DIFFERENT address — our IP moved (DHCP / interface
+        // switch). It loses the self mark, so ageOut treats it as an ordinary peer and lets
+        // it expire, instead of staying immortal at the old address.
+        for (uint8_t i = 0; i < deviceCount_; i++)
+            if (devices_[i].self && !ipEq(devices_[i].ip, ip)) { devices_[i].self = false; changed = true; }
+
+        Device* d = findByIp(ip);
+        if (!d) {
+            if (deviceCount_ >= kMaxDevices) return;
+            d = &devices_[deviceCount_++];
+            std::memcpy(d->ip, ip, 4);
+            changed = true;            // a new row changes the saved list
+        }
+        if (d->type != DevType::ProjectMM) { d->type = DevType::ProjectMM; changed = true; }
+        if (!d->self) { d->self = true; changed = true; }
+        d->cached = false;
+        d->lastSeenMs = platform::millis();   // transient — not persisted
+        if (!d->name[0]) {
+            const char* n = (selfName_ && selfName_[0]) ? selfName_ : "this device";
+            std::snprintf(d->name, sizeof(d->name), "%s", n);
+            changed = true;
+        }
+        if (changed) {                 // only a real self-row change re-sorts + arms persistence
+            sortByName();
+            refreshStatus();
+        }
+    }
+
+    // True when `name` is just the device's own IP — a placeholder a sighting fell back
+    // to before a real name was known. A later sighting with a genuine name overwrites it.
     static bool isIpPlaceholder(const char* name, const uint8_t ip[4]) {
         char ipStr[16];
         formatDottedQuad(ipStr, ip);
         return std::strcmp(name, ipStr) == 0;
     }
-
-    // Merge an mDNS browse hit. Like upsert() but the identity is weaker: mDNS proves
-    // the host advertises a service (so it speaks HTTP and is alive → missed=0), and
-    // for `_wled._tcp` the type is certain, but `_http._tcp` only says "some web
-    // device" — so a Generic hit must NOT downgrade a device the HTTP probe already
-    // identified as projectMM/WLED. We only raise the type (Generic → known), never
-    // lower it. The hostname becomes the display name only if we don't have a better
-    // one yet (the HTTP probe's deviceName wins when present). self is preserved.
-    void upsertMdns(const uint8_t ip[4], DevType type, const char* hostname) {
-        uint8_t local[4] = {};
-        localIp(local);
-        const bool isSelf = ipEq(ip, local);
-        Device* d = findByIp(ip);
-        if (!d) {
-            if (deviceCount_ >= kMaxDevices) return;
-            d = &devices_[deviceCount_++];
-            std::memcpy(d->ip, ip, 4);
-            d->type = type;            // first sighting — take the mDNS type as-is
-        } else if (type != DevType::Generic) {
-            d->type = type;            // a definite type (WLED) refines an existing row
-        }
-        d->self |= isSelf;
-        d->lastSeenMs = platform::millis();
-        d->cached = false;             // a live sighting — no longer just a cached entry
-        d->speaks |= ProtoHttp;        // advertised an HTTP service → speaks HTTP
-        d->via |= ViaMdns;             // discovered by the mDNS browse
-        // Take the mDNS name when we don't have a real one yet. "No real name" means
-        // either empty OR a dotted-quad IP placeholder a prior sighting fell back to —
-        // a genuine advertised name (the peer's deviceName) should replace that IP.
-        // A name from the HTTP probe (a real deviceName) still wins: it's not an IP, so
-        // the isIpPlaceholder check leaves it alone.
-        if (hostname && hostname[0] && (!d->name[0] || isIpPlaceholder(d->name, ip)))
-            std::snprintf(d->name, sizeof(d->name), "%s", hostname);
-        if (!d->name[0]) formatDottedQuad(d->name, ip);
-        sortByName();
-    }
-
-    // Guarantee this device is listed (marked self) even before its IP is swept.
-    void upsertSelf(const uint8_t ip[4]) {
-        Device* d = findByIp(ip);
-        if (!d) {
-            if (deviceCount_ >= kMaxDevices) return;
-            d = &devices_[deviceCount_++];
-            std::memcpy(d->ip, ip, 4);
-        }
-        // Refresh identity on BOTH paths: if this IP was first seen by a sweep/mDNS as
-        // generic, learning it's us must promote it to projectMM, not leave the stale
-        // type. We are a projectMM and we speak HTTP.
-        d->type = DevType::ProjectMM;
-        d->speaks |= ProtoHttp;
-        d->self = true;
-        d->cached = false;                    // self is live by definition, not cached
-        d->lastSeenMs = platform::millis();   // self is always "now" → never ages out
-        if (!d->name[0]) {
-            // Show our own name (deviceName, wired via setSelfName) so the self row
-            // matches the status page / router / mDNS. "this device" is the last
-            // resort when no name was wired — same robustness contract as the rest.
-            const char* n = (selfName_ && selfName_[0]) ? selfName_ : "this device";
-            std::snprintf(d->name, sizeof(d->name), "%s", n);
-        }
-        sortByName();   // keep the list ordered (self slots in by name like any device)
-    }
-
 
     Device* findByIp(const uint8_t ip[4]) {
         for (uint8_t i = 0; i < deviceCount_; i++)
@@ -576,37 +398,44 @@ private:
         return std::memcmp(a, b, 4) == 0;
     }
 
-    // Drop non-self devices unseen by ANY strategy for longer than kStaleMs (a
-    // powered-off / departed device). Runs every tick off the per-device timestamp,
-    // so it's independent of any one strategy's cadence (HTTP sweep, mDNS lap, future
-    // UDP beacon). Stable compaction — preserves the by-name order upsert maintains.
-    // self never ages out (its timestamp is restamped to "now" on every sweep step).
-    // `now - lastSeenMs` in unsigned arithmetic is wrap-safe: the millis() counter
-    // wraps every ~49 days, but the elapsed interval (< kStaleMs) stays well below
-    // 2^31, so the subtraction yields the true elapsed time across a wrap.
-    void ageOut() {
+    // Drop non-self devices unheard for longer than kStaleMs. Self is restamped here so
+    // it never ages out while online. Stable compaction — preserves by-name order.
+    // `now - lastSeenMs` unsigned is wrap-safe (elapsed stays < 2^31 across the millis wrap).
+    void ageOut(const uint8_t local[4]) {
         const uint32_t now = platform::millis();
         uint8_t w = 0;
         for (uint8_t r = 0; r < deviceCount_; r++) {
             Device& d = devices_[r];
-            if (!d.self && (now - d.lastSeenMs) > kStaleMs) continue;   // drop, stale
+            const bool isUs = ipEq(d.ip, local);
+            // The row at the CURRENT local IP is us — keep it fresh, never age it out. Guard
+            // on the ADDRESS, not the self flag: a stale self row at an old IP (after an IP
+            // change) is demoted by upsertSelf, so it falls through to the normal age-out.
+            if (isUs) d.lastSeenMs = now;
+            // A cached (restored, never re-heard live) device is on a SHORT probation —
+            // it's the fast-boot list, kept only long enough for a live packet to re-confirm
+            // it; otherwise it's a ghost. A live-confirmed device gets the full 24 h.
+            const uint32_t window = d.cached ? kCachedGraceMs : kStaleMs;
+            if (!isUs && (now - d.lastSeenMs) > window) continue;   // drop, stale
             if (w != r) devices_[w] = d;
             w++;
         }
         if (w == deviceCount_) return;   // nothing dropped — common case, no churn
         deviceCount_ = w;
+        refreshStatus();
+    }
+
+    void refreshStatus() {
         std::snprintf(statusBuf_, sizeof(statusBuf_), "%u device%s",
                       deviceCount_, deviceCount_ == 1 ? "" : "s");
         setStatus(statusBuf_);
-        // A drop changes the persisted set — save it so the cached list stays accurate.
+        // Persist the current set so the next boot shows it instantly. The `devices`
+        // List control is persistable — marking dirty arms the FilesystemModule debounce.
         markDirty();
         FilesystemModule::noteDirty();
     }
 
     // Order the list by device name (case-insensitive). Core's insertionSort does the
-    // work; we supply only the comparator — the domain stays a one-liner. Off the hot
-    // path (sweep-end / boot-load), bounded (<= kMaxDevices). The compare is inline
-    // (not strcasecmp/_stricmp, which differ across POSIX/Windows desktop).
+    // work; we supply only the comparator. Off the hot path, bounded (<= kMaxDevices).
     void sortByName() {
         mm::insertionSort(devices_, deviceCount_, [](const Device& a, const Device& b) {
             return ciLess(a.name, b.name);

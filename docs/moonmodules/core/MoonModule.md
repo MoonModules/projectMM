@@ -80,7 +80,7 @@ Conditional controls (e.g. fields only visible under a Select mode) are always b
 
 ## Prior art
 
-### MoonLight — Node ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonBase/Nodes.h))
+### MoonLight — Node ([source](https://github.com/ewowi/MoonLight/blob/main/src/MoonBase/Nodes.h))
 
 - Base ~29 bytes + vtable. Effects add only their control variables (uint8_t each).
 - No std::string members (uses `Char<N>` fixed-size strings).

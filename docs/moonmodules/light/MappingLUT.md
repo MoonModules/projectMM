@@ -42,7 +42,7 @@ Memory: `estimateBytes(logicalCount, maxDest)` returns the total allocation size
 
 ## Prior art
 
-### MoonLight — PhysMap ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/PhysMap.h))
+### MoonLight — PhysMap ([source](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/PhysMap.h))
 
 Memory-optimal union. 2 bytes (no-PSRAM) or 4 bytes (PSRAM). Map type stored IN each entry. `oneToOneMapping` and `allOneLight` fast path flags. `forEachLightIndex()` for 1:N iteration. projectMM renames `oneToOneMapping` → `setIdentity()` / `!hasLUT()` because "one-to-one" reads as covering all 1:1 mappings, but the table-free fast path applies only to the sequential identity case.
 

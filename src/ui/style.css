@@ -619,6 +619,9 @@ body {
 .list-detail-chip { padding: 0 6px; border-radius: 8px; background: color-mix(in srgb, var(--border) 45%, transparent); font-size: 11px; line-height: 16px; }
 /* Muted detail value (e.g. a cached device's "last seen: cached" — not a live sighting). */
 .list-detail-muted { color: var(--fg-muted); font-style: italic; }
+/* A URL detail value (e.g. a device's `url`) rendered as a link opening in a new tab. */
+.list-detail-link { color: var(--accent); text-decoration: underline; }
+.list-detail-link:hover { text-decoration: none; }
 
 .control-row input[type="range"] {
     flex: 1;

@@ -219,11 +219,27 @@ private:
             setStatus("mic: set wsPin / sdPin / sckPin", Severity::Status);
             return;
         }
+        // Bring up the I2S channel FIRST. On a codec board (an analog mic behind an
+        // I2S codec, e.g. the S31's ES8311) the I2S peripheral drives MCLK, and the
+        // codec won't even answer I2C until that clock runs — so I2S precedes the
+        // codec config. The MCLK pin comes from the per-target codec config
+        // (platform::audioCodecPins.mclk); −1 on a direct MEMS mic (self-clocked).
+        const int16_t mclkPin = platform::audioCodecType == platform::CodecType::None
+                              ? -1 : static_cast<int16_t>(platform::audioCodecPins.mclk);
         inited_ = platform::audioMicInit(mic_, static_cast<uint16_t>(wsPin),
                                          static_cast<uint16_t>(sdPin),
-                                         static_cast<uint16_t>(sckPin), sampleRate());
+                                         static_cast<uint16_t>(sckPin), mclkPin, sampleRate());
         if (!inited_) {
             setStatus(kInitFailMsg, Severity::Error);
+            return;
+        }
+        // Now configure the codec over I2C (MCLK is running). A no-op returning true
+        // on direct-mic boards, so the call is uniform. The codec then streams its ADC
+        // onto the I2S bus the read above drains.
+        if (!platform::audioCodecInit(platform::audioCodecType, platform::audioCodecPins,
+                                      sampleRate())) {
+            deinit();   // tear the I2S channel back down — we couldn't bring the codec up
+            setStatus("mic: codec init failed — check I2C wiring", Severity::Error);
             return;
         }
         dc_.reset();   // start the high-pass clean for the new stream
@@ -242,6 +258,7 @@ private:
     void deinit() {
         if constexpr (!platform::hasI2sMic) return;
         if (inited_) platform::audioMicDeinit(mic_);
+        platform::audioCodecDeinit();   // releases the codec + its I2C bus (no-op if none)
         inited_ = false;
         filled_ = 0;
         // Publish silence: latestFrame() hands frame_ to consumers whenever this is

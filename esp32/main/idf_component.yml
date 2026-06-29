@@ -37,6 +37,18 @@ dependencies:
   # only from platform_esp32_i2s.cpp's audioFft.
   espressif/esp-dsp:
     version: "^1.5.0"
+  # esp_codec_dev — Espressif's audio-codec driver library; we use its ES8311 part
+  # (es8311_codec_new) to configure the ESP32-S31 CoreBoard's onboard mic, which is
+  # an analog mic behind an ES8311 I2S codec (I2C addr 0x18) rather than a direct
+  # I2S MEMS mic. Referenced only from platform_esp32_es8311.cpp, behind the codec
+  # gate. The `rules` gate scopes it to the S31 — the only board with the codec —
+  # so other targets don't resolve a component they never compile (same pattern as
+  # ip101/w5500 above). A managed component outside mainline v6.0, like the P4
+  # esp_hosted exception (docs/building.md § ESP-IDF version).
+  espressif/esp_codec_dev:
+    version: "^1.3.0"
+    rules:
+      - if: "target == esp32s31"
   # esp_wifi_remote + esp_hosted — WiFi for the ESP32-P4 via the on-board ESP32-C6
   # co-processor over SDIO. The P4 has no native radio; these present the C6's
   # radio through the standard esp_wifi_* API (API-compatible, so the WiFi seam in

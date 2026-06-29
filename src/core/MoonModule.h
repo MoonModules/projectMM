@@ -141,6 +141,12 @@ public:
     // Don't add it pre-emptively; no module needs the distinction today.
     virtual void onBuildState() { for (uint8_t i = 0; i < childCount_; i++) children_[i]->onBuildState(); }
 
+    // Read this module's first output light as RGB into out[3], returning true if it has
+    // one. Domain-neutral seam (core declares it, the output-owning module overrides):
+    // the WLED-compatibility shim uses it to tint the app's device card with the live
+    // first-LED colour. Default: no output → false.
+    virtual bool firstOutputRgb(uint8_t /*out*/[3]) const { return false; }
+
     const char* name() const { return name_; }
     void setName(const char* n) {
         if (!n) { name_[0] = 0; return; }

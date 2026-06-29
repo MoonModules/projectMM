@@ -38,7 +38,7 @@ Live tier: `uv run scripts/scenario/run_network_live.py` ([MoonDeck.md § run_ne
 
 ## Prior art
 
-### MoonLight — D_NetworkIn ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Drivers/D_NetworkIn.h))
+### MoonLight — D_NetworkIn ([source](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Nodes/Drivers/D_NetworkIn.h))
 
 ArtNet/E1.31/DDP receive in one driver node (protocol selected by control; we autodetect by port instead).
 

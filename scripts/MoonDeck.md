@@ -41,7 +41,7 @@ Run the desktop test suite.
 uv run scripts/test/test_desktop.py
 ```
 
-Runs `./build/test/mm_tests -s` (doctest with all test cases shown).
+Runs `./build/<host>/test/mm_tests -s` (doctest with all test cases shown) — same per-host build dir as the desktop build above.
 
 ### run_desktop
 

@@ -23,7 +23,7 @@ The effect picks the 2D (`depth == 1`) or 3D path per `loop()`. The noise value 
 
 ## Prior art
 
-### MoonLight — E_MoonLight.h ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h))
+### MoonLight — E_MoonLight.h ([source](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h))
 
 Multiple noise effects (Noise2D, Noise3D variants). Uses FastLED noise functions. Time via `millis()`.
 

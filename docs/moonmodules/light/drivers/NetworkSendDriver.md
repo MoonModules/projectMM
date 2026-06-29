@@ -8,8 +8,8 @@ Streams the light buffer over UDP in one of three industry protocols, selected b
 
 - `protocol` (select: ArtNet / E1.31 / DDP, default ArtNet) — the wire protocol; the destination port follows it automatically (6454 / 5568 / 4048). Changing it re-targets the socket **live, no reboot** ([§ Live reconfiguration](../../../architecture.md#live-reconfiguration-every-change-applies-without-a-reboot)) — switch output protocol on a running device mid-show.
 - `ip` (IPv4, default 255.255.255.255) — destination address. The default is the limited-broadcast address, so a fresh sender reaches every receiver on the LAN with no IP to type; set a unicast address to target one device. Changing it re-binds live. E1.31 multicast is deliberately not implemented (see Interop below).
-- `universe_start` (uint16_t, default 0) — first universe for ArtNet and E1.31; DDP is byte-addressed and ignores it.
-- `light_count` (uint16_t, default 0 = the whole buffer) — how many lights this sink sends, from the start of the buffer. >0 sends only the first N, so one sink covers just its slice — e.g. drive some lights over LEDs and the rest over ArtNet, or run two senders for different ranges — and each frame packs and sends exactly the lights this sink owns. The slice begins at light 0.
+- `universe_start` (uint16_t, default 0) — first universe for ArtNet and E1.31; DDP is byte-addressed and ignores it. This is the *protocol* offset (which universe the slice maps onto), distinct from the buffer `start` below.
+- `start` / `count` — the shared source-buffer window (every driver has it; see [Drivers § Per-driver source window](../Drivers.md#per-driver-source-window-start--count)). This sink packs and sends exactly the lights `[start, start+count)` (count 0 = the whole buffer from `start`), so one sender covers just its slice — e.g. drive some lights over LEDs and the rest over ArtNet, or run two senders for different ranges.
 - `fps` (uint8_t, default 50, range 1-120) — frame rate limit. Without it the loop would re-send on every render tick; receivers expect a steady frame cadence.
 
 ## Chunking per protocol

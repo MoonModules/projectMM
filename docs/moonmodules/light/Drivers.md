@@ -29,9 +29,22 @@ The Drivers container owns the shared output-correction state and exposes two co
 
 The state lives on `Correction` (`src/light/drivers/Correction.h`): a brightness LUT, channel-order table, output channel count, derive-white flag. `Drivers::onUpdate` rebuilds it on a `brightness`/`lightPreset` change and hands each child a `const Correction*`. Every driver sees the same composited output; per-driver layer assignment (different drivers reading different layers) is a [backlog](../../backlog/README.md) item.
 
+## Per-driver source window (`start` / `count`)
+
+A **window-aware output driver** reads the shared source buffer and outputs a contiguous slice of it — its *window*. `DriverBase` provides two controls for this via an opt-in `addWindowControls()` helper, used by the output drivers (the LED drivers and the network sink). It is **not** forced on every `DriverBase` subclass — a driver that outputs the whole buffer (e.g. PreviewDriver, which renders the full logical buffer for the UI) simply doesn't call it and has no `start`/`count`:
+
+| Control | Type | Description |
+|---|---|---|
+| `start` | uint16 | First source-buffer light this driver outputs. Default `0`. |
+| `count` | uint16 | Number of lights to output from `start`. Default `0` = **to the end of the buffer**. The slice is `[start, start+count)`, clamped to the buffer (a `start` past the end yields an empty slice — the driver idles, no out-of-bounds read). |
+
+This makes light distribution **explicit and order-independent**: each driver names its own slice, so reordering drivers does not change which lights each outputs (it only changes tick order). It is the alternative to a "split the buffer by sibling order" model some controllers use — here the user (or catalog) says which slice goes where.
+
+The motivating case: an **onboard status LED** and a **main strip** as two driver instances on the same buffer — one with window `[0, 1)` (the single onboard LED on its own pin), the other with window `[1, …)` (the strip on its pin, starting one light in). Neither steals the other's lights. Within a driver's window, the LED drivers' `pins` / `ledsPerPin` distribute *that slice* across the pins; the network sink maps its slice onto `universe_start` (the protocol offset is separate from the buffer `start`).
+
 ## Prior art
 
-### MoonLight — PhysicalLayer ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h))
+### MoonLight — PhysicalLayer ([source](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h))
 
 Owns `channelsD` (display buffer). `compositeLayers()` maps virtualChannels → channelsD. Parallelism via semaphore: driver signals completion, compositor writes.
 

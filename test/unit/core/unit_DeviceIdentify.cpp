@@ -1,91 +1,88 @@
-// @module DevicesModule
+// @module DevicePlugin
+// @also DevicesModule
 
-// Pins the pure device-identification logic DevicesModule uses to classify a
-// discovered host and read its name from the HTTP probe body. Extracted into
-// DeviceIdentify.h precisely so it's testable without network I/O. These tests
-// guard the two bug-prone parts found on the bench:
-//   - classify: a projectMM /api/state ("modules"), a WLED /json/info ("WLED"),
-//     anything else generic — and a TRUNCATED projectMM body (deviceName past the
-//     buffer) must still classify as projectMM off the early "modules" marker.
-//   - extractDeviceName: projectMM's deviceName is a control OBJECT, so the parser
-//     must read the control's "value" ("Bench P4"), NOT the first quoted token
-//     after "deviceName" (which is the "text" TYPE field — the original bug).
-//   - any garbage / hostile body yields generic + empty name (robustness).
+// Pins the device-interop plugin classification: each plugin claims the UDP presence port
+// and turns a received datagram into a Device kind. Pure host logic — feed a synthetic
+// presence packet (the 44-byte WLED-compatible header), assert the classification, no
+// network. The plugins are the "second caller" that makes the seam testable.
 
 #include "doctest.h"
-#include "core/DeviceIdentify.h"
+#include "core/DevicePlugin.h"
+#include "core/WledPacket.h"
 
+#include <cstdint>
 #include <cstring>
 
-using mm::DevType;
-using mm::classifyDevice;
-using mm::extractDeviceName;
-using mm::devTypeStr;
+using namespace mm;
 
-TEST_CASE("classifyDevice: projectMM from /api/state modules array") {
-    const char* state = "{\"modules\":[{\"name\":\"System\"}]}";
-    CHECK(classifyDevice(state, nullptr) == DevType::ProjectMM);
+namespace {
+const uint8_t kSrcIp[4] = {192, 168, 1, 50};
+
+// Build a WLED-valid presence packet; `mm` stamps the projectMM marker (a projectMM peer).
+void packet(uint8_t out[WledPacket::kSize], const char* name, bool mm) {
+    WledPacket::build(out, kSrcIp, name, /*boardType=*/34, /*lightsOn=*/true);
+    if (mm) WledPacket::stampMmMarker(out);
+}
+}  // namespace
+
+TEST_CASE("MmPlugin claims a presence packet carrying the projectMM marker") {
+    MmPlugin p;
+    CHECK(p.discoveryPort() == WledPacket::kPort);
+
+    uint8_t pkt[WledPacket::kSize];
+    packet(pkt, "Bench-P4", /*mm=*/true);
+    DiscoveredDevice d;
+    REQUIRE(p.classifyPacket(pkt, sizeof(pkt), kSrcIp, d));
+    CHECK(d.type == DevType::ProjectMM);
+    CHECK(std::strcmp(d.name, "Bench-P4") == 0);
 }
 
-TEST_CASE("classifyDevice: WLED from /json/info brand") {
-    const char* info = "{\"ver\":\"0.14\",\"brand\":\"WLED\",\"name\":\"WLED-Desk\"}";
-    CHECK(classifyDevice(nullptr, info) == DevType::Wled);
+TEST_CASE("MmPlugin declines a plain WLED packet (no projectMM marker)") {
+    MmPlugin p;
+    uint8_t pkt[WledPacket::kSize];
+    packet(pkt, "wled-desk", /*mm=*/false);
+    DiscoveredDevice d;
+    CHECK_FALSE(p.classifyPacket(pkt, sizeof(pkt), kSrcIp, d));
 }
 
-TEST_CASE("classifyDevice: a live non-projectMM/non-WLED host is generic") {
-    CHECK(classifyDevice("<html>router</html>", nullptr) == DevType::Generic);
-    CHECK(classifyDevice(nullptr, "{\"some\":\"json\"}") == DevType::Generic);
-    CHECK(classifyDevice(nullptr, nullptr) == DevType::Generic);
+TEST_CASE("WledPlugin claims a plain WLED packet as WLED") {
+    WledPlugin p;
+    CHECK(p.discoveryPort() == WledPacket::kPort);
+
+    uint8_t pkt[WledPacket::kSize];
+    packet(pkt, "wled-desk", /*mm=*/false);
+    DiscoveredDevice d;
+    REQUIRE(p.classifyPacket(pkt, sizeof(pkt), kSrcIp, d));
+    CHECK(d.type == DevType::Wled);
+    CHECK(std::strcmp(d.name, "wled-desk") == 0);
 }
 
-TEST_CASE("classifyDevice: a truncated projectMM body still classifies (modules is early)") {
-    // The probe buffer can cut off before deviceName on a big device, but "modules"
-    // is the very first key — classification must not depend on the full body.
-    const char* truncated = "{\"modules\":[{\"name\":\"System\",\"type\":\"SystemModule\",\"contro";
-    CHECK(classifyDevice(truncated, nullptr) == DevType::ProjectMM);
+TEST_CASE("WledPlugin declines a projectMM-marked packet (that's a peer, not a WLED)") {
+    // A projectMM peer broadcasts a WLED-VALID packet, so without the marker check WledPlugin
+    // would mis-claim it. The marker keeps the projectMM/WLED kinds distinct.
+    WledPlugin p;
+    uint8_t pkt[WledPacket::kSize];
+    packet(pkt, "Bench-P4", /*mm=*/true);
+    DiscoveredDevice d;
+    CHECK_FALSE(p.classifyPacket(pkt, sizeof(pkt), kSrcIp, d));
 }
 
-TEST_CASE("extractDeviceName: projectMM reads the deviceName control's value, not the type") {
-    // The regression: deviceName is {"name":"deviceName","type":"text","value":"X"}.
-    // A naive "first string after deviceName" grabs "text"; we must get "Bench P4".
-    const char* state =
-        "{\"modules\":[{\"name\":\"System\",\"controls\":["
-        "{\"name\":\"deviceName\",\"type\":\"text\",\"value\":\"Bench P4\"},"
-        "{\"name\":\"uptime\",\"type\":\"display\",\"value\":\"0:01\"}]}]}";
-    char out[24] = {};
-    extractDeviceName(DevType::ProjectMM, state, out, sizeof(out));
-    CHECK(std::strcmp(out, "Bench P4") == 0);
+TEST_CASE("Plugins decline a short / garbage datagram, never read out of bounds") {
+    MmPlugin mmp;
+    WledPlugin wp;
+    DiscoveredDevice d;
+    const uint8_t garbage[8] = {1, 2, 3, 4, 5, 6, 7, 8};   // too short, wrong magic
+    CHECK_FALSE(mmp.classifyPacket(garbage, sizeof(garbage), kSrcIp, d));
+    CHECK_FALSE(wp.classifyPacket(garbage, sizeof(garbage), kSrcIp, d));
+    CHECK_FALSE(wp.classifyPacket(nullptr, 0, kSrcIp, d));
 }
 
-TEST_CASE("extractDeviceName: WLED reads the top-level name field") {
-    const char* info = "{\"brand\":\"WLED\",\"name\":\"WLED-Desk\",\"ver\":\"0.14\"}";
-    char out[24] = {};
-    extractDeviceName(DevType::Wled, info, out, sizeof(out));
-    CHECK(std::strcmp(out, "WLED-Desk") == 0);
-}
-
-TEST_CASE("extractDeviceName: generic / garbage / null bodies yield empty") {
-    char out[24] = {"sentinel"};
-    extractDeviceName(DevType::Generic, "{\"modules\":[]}", out, sizeof(out));
-    CHECK(out[0] == 0);                                  // generic has no name source
-    extractDeviceName(DevType::ProjectMM, "garbage{{{", out, sizeof(out));
-    CHECK(out[0] == 0);                                  // no deviceName → empty
-    extractDeviceName(DevType::ProjectMM, nullptr, out, sizeof(out));
-    CHECK(out[0] == 0);                                  // null body → empty, no crash
-}
-
-TEST_CASE("extractDeviceName: respects the output buffer size (no overflow)") {
-    const char* state =
-        "{\"modules\":[{\"controls\":[{\"name\":\"deviceName\",\"type\":\"text\","
-        "\"value\":\"A-very-long-device-name-well-past-the-buffer\"}]}]}";
-    char out[8] = {};
-    extractDeviceName(DevType::ProjectMM, state, out, sizeof(out));
-    CHECK(std::strlen(out) <= 7);                        // truncated, NUL-terminated
-    CHECK(std::strncmp(out, "A-very-", 7) == 0);
-}
-
-TEST_CASE("devTypeStr maps every type") {
-    CHECK(std::strcmp(devTypeStr(DevType::ProjectMM), "projectMM") == 0);
-    CHECK(std::strcmp(devTypeStr(DevType::Wled), "WLED") == 0);
-    CHECK(std::strcmp(devTypeStr(DevType::Generic), "generic") == 0);
+TEST_CASE("WledPlugin tolerates an empty name (the module supplies the IP fallback)") {
+    WledPlugin p;
+    uint8_t pkt[WledPacket::kSize];
+    packet(pkt, "", /*mm=*/false);
+    DiscoveredDevice d;
+    REQUIRE(p.classifyPacket(pkt, sizeof(pkt), kSrcIp, d));
+    CHECK(d.type == DevType::Wled);
+    CHECK(d.name[0] == '\0');
 }

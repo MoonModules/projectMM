@@ -96,6 +96,7 @@ public:
     // buffer from the same two text controls.
 
     void onBuildControls() override {
+        addWindowControls();   // start / count — the slice of the shared buffer this driver outputs
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
         controls_.addBool("loopbackTest", loopbackTest);
@@ -117,7 +118,8 @@ public:
     // channels (live, not reboot-to-apply), so the pipeline-wide onBuildState
     // sweep runs and parseConfig()/reinit() pick up the new lists.
     bool controlChangeTriggersBuildState(const char* name) const override {
-        return std::strcmp(name, "pins") == 0 || std::strcmp(name, "ledsPerPin") == 0;
+        return std::strcmp(name, "pins") == 0 || std::strcmp(name, "ledsPerPin") == 0
+            || isWindowControl(name);
     }
 
     // React to a control change (runs off the render loop, in the HTTP/API
@@ -201,8 +203,10 @@ public:
         // buffer: a strand config of e.g. 64 leds/pin on a 16K-light grid drives 64, so encoding
         // all 16384 would burn ~100× the work the output needs (the rest is never clocked out).
         // Bounded by the buffer too, in case config outruns the current frame.
-        const nrOfLightsType bufN = sourceBuffer_->count();
-        const nrOfLightsType n = txLightCount_ < bufN ? txLightCount_ : bufN;
+        // Encode within this driver's window only. winLen_ is the slice length;
+        // txLightCount_ (Σ pinCounts_) is what the pins clock out — n is the min,
+        // so a window smaller than the configured pin total never reads past it.
+        const nrOfLightsType n = txLightCount_ < winLen_ ? txLightCount_ : winLen_;
         const uint8_t outCh = correction_->outChannels;
         // Same defensive guard ArtNet uses: skip rather than overrun if the
         // symbol buffer is stale (e.g. correction swapped without a resize).
@@ -220,7 +224,8 @@ public:
         size_t s = 0;
         uint8_t wire[4];
         for (nrOfLightsType i = 0; i < n; i++) {
-            correction_->apply(src + i * srcCh, wire);
+            // Read the windowed light: this driver's slice starts at winStart_.
+            correction_->apply(src + (winStart_ + i) * srcCh, wire);
             encodeWs2812Symbols(wire, outCh, t0h, t1h, period, symbols_ + s);
             s += static_cast<size_t>(outCh) * 8;
         }
@@ -277,6 +282,8 @@ private:
     nrOfLightsType pinCounts_[kMaxPins] = {};  // lights per pin (slice lengths)
     size_t         pinOffsets_[kMaxPins] = {}; // slice start in symbols_, words
     nrOfLightsType txLightCount_ = 0;          // Σ pinCounts_ — lights actually transmitted/encoded
+    nrOfLightsType winStart_ = 0;              // first source-buffer light this driver reads (the window)
+    nrOfLightsType winLen_ = 0;                // window length (lights), clamped to the buffer
     uint8_t pinCount_ = 0;                     // 0 = idle (parse error / no pins)
     bool inited_ = false;                      // all-or-nothing across the pins
     uint32_t* symbols_ = nullptr;   // owned; one word per WS2812 data bit
@@ -321,8 +328,11 @@ private:
         uint8_t n = 0;
         const char* err = parsePinList(pins, pinList_, maxPinsForTarget(), n);
         if (!err) {
-            const nrOfLightsType total = sourceBuffer_ ? sourceBuffer_->count() : 0;
-            err = assignCounts(ledsPerPin, n, total, pinCounts_);
+            // Distribute over the driver's window slice, not the whole buffer, so
+            // ledsPerPin's "rest" only fills this driver's [start, start+count).
+            const nrOfLightsType bufN = sourceBuffer_ ? sourceBuffer_->count() : 0;
+            windowSlice(bufN, winStart_, winLen_);
+            err = assignCounts(ledsPerPin, n, winLen_, pinCounts_);
         }
         if (err) {
             setConfigErr(err);
@@ -347,7 +357,12 @@ private:
     // hot path. Grows only — keeps a big-enough existing allocation.
     void resizeSymbols() {
         if (!sourceBuffer_ || !correction_) return;
-        const nrOfLightsType n = sourceBuffer_->count();
+        // Size for this driver's window slice, not the whole source buffer — an
+        // onboard-LED slice of 1 reserves 1 light's worth of symbols, not the full
+        // grid's. Derive the window length directly (windowSlice is independent of
+        // the pin parse, so the buffer sizes correctly even before pins are set).
+        nrOfLightsType winStart, n;
+        windowSlice(sourceBuffer_->count(), winStart, n);
         const uint8_t ch = correction_->outChannels;
         if (n == 0 || ch == 0) return;
         const size_t need = symbolsFor(n, ch);

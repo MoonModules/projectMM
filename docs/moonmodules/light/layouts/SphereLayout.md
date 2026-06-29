@@ -18,7 +18,7 @@ A sphere is **not** 1:1 unshuffled — the shell points are sparse within the bo
 
 ## Prior art
 
-### MoonLight / projectMM v1–v2 — layout nodes ([MoonLight L_MoonLight.h](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h))
+### MoonLight / projectMM v1–v2 — layout nodes ([MoonLight L_MoonLight.h](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h))
 
 Prior projects expose layouts that call an `addLight(x, y, z)` per position; SphereLayout follows the same "a layout enumerates its light coordinates" shape, computing the shell analytically rather than from a stored list.
 

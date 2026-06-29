@@ -29,7 +29,7 @@ A Layer folds all its enabled modifiers as a chain (Checkerboard-then-Multiply d
 
 ## Prior art
 
-### MoonLight — M_MoonLight.h Checkerboard ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h))
+### MoonLight — M_MoonLight.h Checkerboard ([source](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h))
 
 MoonLight's Checkerboard drops lights by setting `position.x = UINT16_MAX` (a sentinel the layout pass skips), with `size`, `invert`, and a `group` flag. We express the drop as `modifyLogical` returning `false` (no sentinel needed) and start with `size` + `invert`; `group` is deferred.
 

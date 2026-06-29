@@ -56,10 +56,6 @@ inline int make_nonblocking(int fd) {
     u_long mode = 1;
     return ::ioctlsocket(sock(fd), FIONBIO, &mode);
 }
-inline int make_blocking(int fd) {
-    u_long mode = 0;
-    return ::ioctlsocket(sock(fd), FIONBIO, &mode);
-}
 #else
 inline int sock(int fd) { return fd; }
 inline int close_sock(int fd) { return ::close(fd); }
@@ -70,10 +66,6 @@ inline int open_sock(int domain, int type, int protocol) {
 inline int make_nonblocking(int fd) {
     int flags = ::fcntl(fd, F_GETFL, 0);
     return ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-}
-inline int make_blocking(int fd) {
-    int flags = ::fcntl(fd, F_GETFL, 0);
-    return ::fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
 }
 #endif
 #ifdef _WIN32
@@ -468,10 +460,10 @@ bool wifiSetTxPower(int8_t quarterDbm) { return quarterDbm == 0; }
 bool mdnsInit(const char* /*deviceName*/) { return false; }
 void mdnsStop() {}
 void mdnsShutdown() {}
-// No mDNS on desktop — browse is a no-op (no hosts found). A PC instance discovers peers
-// via the HTTP sweep instead (see DevicesModule).
-bool mdnsBrowse(const char* /*service*/, const char* /*proto*/, uint32_t /*timeoutMs*/,
-                MdnsHostCb /*cb*/, void* /*user*/) { return false; }
+// mDNS advertise is a device-only concern, so these are host stubs. Discovery is UDP
+// presence (DevicesModule + WledPacket) over UdpSocket, which runs on desktop too — so the
+// discovery path is unit-testable on the host with real loopback datagrams (a bound socket
+// or DevicesModule::injectPacketForTest).
 
 // OTA — no-op on desktop (no OTA partition). The /api/firmware/url route
 // guards with `if constexpr (mm::platform::hasOta)` and returns 501 here,
@@ -487,135 +479,6 @@ bool http_fetch_to_ota(const char* /*url*/,
     return false;
 }
 
-// Short-timeout outbound HTTP GET for device discovery (DevicesModule's scan).
-// Real implementation on desktop (a PC projectMM instance must scan its LAN too):
-// a plain blocking socket with a receive/send timeout — no TLS, no libcurl, LAN
-// HTTP only. Parses http://host[:port]/path, returns the HTTP status code (0 on
-// any failure) and fills `body` with the response body (NUL-terminated, truncated).
-int httpGet(const char* url, uint32_t timeoutMs, char* body, size_t bodyLen) {
-    if (body && bodyLen) body[0] = '\0';
-    if (!url) return 0;
-
-    // Parse "http://host[:port]/path". Only plain http:// (LAN devices).
-    constexpr const char* kPrefix = "http://";
-    const size_t prefixLen = std::strlen(kPrefix);
-    if (std::strncmp(url, kPrefix, prefixLen) != 0) return 0;
-    const char* hostStart = url + prefixLen;
-    const char* slash = std::strchr(hostStart, '/');
-    const char* path = slash ? slash : "/";
-    char host[64] = {};
-    uint16_t port = 80;
-    {
-        const char* hostEnd = slash ? slash : (hostStart + std::strlen(hostStart));
-        const char* colon = static_cast<const char*>(
-            std::memchr(hostStart, ':', static_cast<size_t>(hostEnd - hostStart)));
-        const char* nameEnd = colon ? colon : hostEnd;
-        size_t hlen = static_cast<size_t>(nameEnd - hostStart);
-        if (hlen == 0 || hlen >= sizeof(host)) return 0;
-        std::memcpy(host, hostStart, hlen);
-        host[hlen] = '\0';
-        if (colon) {
-            int p = std::atoi(colon + 1);
-            if (p > 0 && p <= 65535) port = static_cast<uint16_t>(p);
-        }
-    }
-
-    int fd = open_sock(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return 0;
-
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    // Discovery probes a numeric IP (the scan walks the subnet), so inet_pton is
-    // enough — no DNS resolution needed for the LAN sweep.
-    if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) { close_sock(fd); return 0; }
-
-    // NON-BLOCKING connect bounded by select() — this is the crux. SO_RCVTIMEO /
-    // SO_SNDTIMEO do NOT bound connect() (a POSIX gotcha): a blocking connect() to a
-    // dead/firewalled IP hangs for the OS default (~75 s on macOS), which would
-    // freeze the single-threaded desktop loop on the first unreachable host in the
-    // sweep. So: make the socket non-blocking, start the connect, select() on
-    // writability with our short timeout, and check SO_ERROR. Then restore blocking
-    // mode for the recv/send (those ARE bounded by SO_*TIMEO).
-    make_nonblocking(fd);
-    int crc = ::connect(sock(fd), reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-#ifdef _WIN32
-    const bool inProgress = (crc != 0) && (::WSAGetLastError() == WSAEWOULDBLOCK);
-#else
-    const bool inProgress = (crc != 0) && (errno == EINPROGRESS);
-#endif
-    if (crc != 0 && !inProgress) { close_sock(fd); return 0; }
-    if (inProgress) {
-        fd_set wset;
-        FD_ZERO(&wset);
-        FD_SET(sock(fd), &wset);
-        timeval ctv{};
-        ctv.tv_sec = static_cast<long>(timeoutMs / 1000);
-        ctv.tv_usec = static_cast<long>((timeoutMs % 1000) * 1000);
-        int sel = ::select(static_cast<int>(sock(fd)) + 1, nullptr, &wset, nullptr, &ctv);
-        if (sel <= 0) { close_sock(fd); return 0; }   // timeout (0) or error (<0)
-        int soErr = 0;
-        socklen_t errLen = sizeof(soErr);
-        ::getsockopt(sock(fd), SOL_SOCKET, SO_ERROR,
-                     reinterpret_cast<char*>(&soErr), &errLen);
-        if (soErr != 0) { close_sock(fd); return 0; }  // connect failed (refused/unreachable)
-    }
-    // Connected. Back to blocking, with recv/send bounded by SO_*TIMEO.
-    make_blocking(fd);
-#ifdef _WIN32
-    DWORD tv = timeoutMs;
-#else
-    timeval tv{};
-    tv.tv_sec = static_cast<long>(timeoutMs / 1000);
-    tv.tv_usec = static_cast<long>((timeoutMs % 1000) * 1000);
-#endif
-    ::setsockopt(sock(fd), SOL_SOCKET, SO_RCVTIMEO,
-                 reinterpret_cast<const char*>(&tv), sizeof(tv));
-    ::setsockopt(sock(fd), SOL_SOCKET, SO_SNDTIMEO,
-                 reinterpret_cast<const char*>(&tv), sizeof(tv));
-
-    char req[256];
-    int reqLen = std::snprintf(req, sizeof(req),
-        "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", path, host);
-    // snprintf returns the length it WOULD have written: >= sizeof(req) means the
-    // request was truncated (an over-long path/host). Reject rather than send a
-    // truncated header or read past the buffer with the inflated length.
-    if (reqLen <= 0 || static_cast<size_t>(reqLen) >= sizeof(req) ||
-        ::send(sock(fd), req, reqLen, 0) != reqLen) {
-        close_sock(fd);
-        return 0;
-    }
-
-    // Read the whole (small) response into a local buffer, then split headers/body.
-    char resp[2048];
-    int total = 0;
-    while (total < static_cast<int>(sizeof(resp)) - 1) {
-        int n = ::recv(sock(fd), resp + total, static_cast<int>(sizeof(resp)) - 1 - total, 0);
-        if (n <= 0) break;
-        total += n;
-    }
-    close_sock(fd);
-    resp[total] = '\0';
-    if (total == 0) return 0;
-
-    // Status line: "HTTP/1.x <code> ...". Parse the code.
-    int status = 0;
-    const char* sp = std::strchr(resp, ' ');
-    if (sp) status = std::atoi(sp + 1);
-
-    // Body starts after the blank line (CRLFCRLF).
-    if (body && bodyLen > 1) {
-        const char* bodyStart = std::strstr(resp, "\r\n\r\n");
-        if (bodyStart) {
-            bodyStart += 4;
-            size_t blen = std::strlen(bodyStart);
-            if (blen > bodyLen - 1) blen = bodyLen - 1;
-            std::memcpy(body, bodyStart, blen);
-            body[blen] = '\0';
-        }
-    }
-    return status;
-}
 
 // Improv WiFi — no USB-serial path on desktop. The module gates with
 // `if constexpr (mm::platform::hasImprov)` and never calls this on desktop;
@@ -764,23 +627,15 @@ bool TcpConnection::write(const uint8_t* data, size_t len) {
 int TcpConnection::writeSome(const uint8_t* data, size_t len) {
     if (fd_ < 0) return -1;
     if (len == 0) return 0;
-    // The client socket is blocking (SO_RCVTIMEO drives recv's read timeout), so a plain
-    // ::send() would block when the kernel send buffer is full. Toggle non-blocking around the
-    // send to keep this truly non-blocking, then restore so recv's timeout semantics hold.
-    // Evaluate the would-block / EINTR status BEFORE make_blocking, since that ioctl/fcntl
-    // can clobber the error state.
-    make_nonblocking(fd_);
+    // The accept()ed socket is persistently non-blocking (set in TcpServer::accept), so a
+    // plain ::send() never blocks — no toggle needed. A full kernel send buffer surfaces as
+    // EWOULDBLOCK, which we report as 0 ("try later"); the caller advances its own offset.
     auto n = ::send(sock(fd_), reinterpret_cast<const char*>(data), static_cast<int>(len), 0);
-    bool wouldBlock = (n < 0) && sockWouldBlock();
-#ifndef _WIN32
-    bool interrupted = (n < 0) && (errno == EINTR);
-#endif
-    make_blocking(fd_);
     if (n > 0) return static_cast<int>(n);
     if (n == 0) return 0;
-    if (wouldBlock) return 0;               // buffer full — try later
+    if (sockWouldBlock()) return 0;         // buffer full — try later
 #ifndef _WIN32
-    if (interrupted) return 0;              // interrupted — try later
+    if (errno == EINTR) return 0;           // interrupted — try later
 #endif
     return -1;                              // real socket error
 }
@@ -836,19 +691,20 @@ TcpConnection TcpServer::accept() {
     SOCKET client = ::accept(sock(fd_), nullptr, nullptr);
     if (client == INVALID_SOCKET) return TcpConnection();
     int clientFd = static_cast<int>(client);
-    // Match POSIX: socket stays blocking, SO_RCVTIMEO gives recv a 2-second
-    // timeout. Windows SO_RCVTIMEO takes a DWORD millisecond count (not a
-    // timeval). writeSome() toggles non-blocking around its send call to
-    // emulate POSIX's MSG_DONTWAIT.
-    DWORD timeoutMs = 2000;
-    ::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO,
-                 reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
+    // NON-BLOCKING (see the POSIX branch below for the full rationale): a blocking recv on
+    // the single-loop server stalls the whole render loop. make_nonblocking → recv returns
+    // WSAEWOULDBLOCK → read() reports -1 ("nothing yet") immediately, never blocking.
+    make_nonblocking(clientFd);
 #else
     int clientFd = ::accept(fd_, nullptr, nullptr);
     if (clientFd < 0) return TcpConnection();
-    // Set read timeout (2 seconds) instead of non-blocking
-    struct timeval tv = {2, 0};
-    setsockopt(clientFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    // NON-BLOCKING client socket. The HTTP server is serviced from the single render loop,
+    // so a blocking recv()'s timeout (we used 2 s) froze the WHOLE loop whenever a request's
+    // bytes hadn't landed the instant accept() returned — UI to a crawl. Non-blocking makes
+    // read() return -1 ("nothing yet") immediately, so the loop never stalls; the request
+    // (which lands within ~1 ms on localhost/LAN) is read across a few rapid retries in
+    // handleConnection. recv returns EWOULDBLOCK → -1, matching read()'s contract.
+    make_nonblocking(clientFd);
 #endif
     return TcpConnection(clientFd);
 }
@@ -930,10 +786,17 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*l
     return {};   // not supported off the P4
 }
 
+// Audio codec — desktop has no codec, so init is a no-op that succeeds (there's
+// nothing to bring up); the inert audioMicInit below is what keeps capture off.
+bool audioCodecInit(CodecType /*type*/, const AudioCodecPins& /*pins*/, uint32_t /*sampleRate*/) {
+    return true;
+}
+void audioCodecDeinit() {}
+
 // I2S microphone — no capture on desktop (hasI2sMic == false, AudioModule inert),
 // so init fails and read returns nothing.
 bool audioMicInit(AudioMicHandle& /*h*/, uint16_t /*wsPin*/, uint16_t /*sdPin*/,
-                  uint16_t /*sckPin*/, uint32_t /*sampleRate*/) {
+                  uint16_t /*sckPin*/, int16_t /*mclkPin*/, uint32_t /*sampleRate*/) {
     return false;
 }
 size_t audioMicRead(AudioMicHandle& /*h*/, int32_t* /*out*/, size_t /*maxSamples*/) {
@@ -957,6 +820,13 @@ void audioFft(const float* windowed, size_t n, float* outMag) {
         }
         outMag[k] = std::sqrt(re * re + im * im);
     }
+}
+
+// No I2C bus on the desktop host — report it as unavailable (the sentinel), the same as
+// an I2C-less ESP32 target, so the module shows "bus unavailable" rather than a misleading
+// "0 devices found" (which means "scanned a real bus, nothing ACKed").
+size_t i2cScan(uint16_t /*sda*/, uint16_t /*scl*/, uint8_t* /*out*/, size_t /*maxOut*/) {
+    return kI2cBusUnavailable;
 }
 
 } // namespace mm::platform

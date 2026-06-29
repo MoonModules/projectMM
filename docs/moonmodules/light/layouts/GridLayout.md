@@ -14,7 +14,7 @@ A plain grid (`serpentine` off) emits driver index `i` at box cell `i`, so the L
 
 ## Prior art
 
-### MoonLight — L_MoonLight.h Panel ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h))
+### MoonLight — L_MoonLight.h Panel ([source](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h))
 
 Panel layout with serpentine, multiple panel arrangements. Uses `addLight()` to define each position.
 

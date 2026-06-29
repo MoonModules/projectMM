@@ -20,7 +20,7 @@ Animation is driven by **elapsed millis**, not frame count. This ensures consist
 
 ## Prior art
 
-### MoonLight — Node + VirtualLayer ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonBase/Nodes.h), [source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h))
+### MoonLight — Node + VirtualLayer ([source](https://github.com/ewowi/MoonLight/blob/main/src/MoonBase/Nodes.h), [source](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h))
 
 - Effects access `layer->width()`, `layer->height()`, `layer->depth()` directly via the VirtualLayer pointer. No separate EffectBase.
 - Buffer access via `layer->virtualChannels` (raw byte array).

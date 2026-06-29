@@ -152,9 +152,19 @@ This is the current iteration of years of LED / light system development. Each p
 | **WLED** | Open-source LED firmware (user / contributor since 2021) | [Aircoookie/WLED](https://github.com/Aircoookie/WLED) |
 | **WLED-MoonModules** | WLED fork with advanced features | [MoonModules/WLED](https://github.com/MoonModules/WLED) |
 | **StarLight** | Standalone LED firmware | [ewowi/StarLight](https://github.com/ewowi/StarLight) |
-| **MoonLight** | Ground-up build: 60+ effects, memory-optimised mapping, 11 driver types | [MoonModules/MoonLight](https://github.com/MoonModules/MoonLight) |
+| **MoonLight** | Ground-up build: 60+ effects, memory-optimised mapping, 11 driver types | [ewowi/MoonLight](https://github.com/ewowi/MoonLight) |
 
 We built, maintained, and contributed to these projects, so projectMM is grounded in years of our own hands-on experience, not arms-length study. Their lessons and proven patterns are distilled in [`docs/history/`](docs/history/README.md), alongside monthly digests of friend projects (like FastLED and upstream WLED) we follow closely but don't own. From all of it we carry the ideas forward into our own implementation: we apply what we learned and write our own code rather than copying theirs; and when a specific project or person inspires something here, we credit them by name (in the history digests and each module's "Prior art" notes).
+
+## Credits
+
+Specific people whose work directly shaped parts of projectMM. We study their thinking with respect and write our own code against our architecture rather than tracing theirs — these credits name the prior art behind a feature:
+
+- **Frank ([softhack007](https://github.com/softhack007))** — main author of the WLED-MM audio-reactive usermod, the most-used open-source audio-reactive LED implementation. The ideas behind [AudioModule](docs/moonmodules/core/AudioModule.md) (including the adaptive noise-gate concept, analysed with his permission) descend from years of collaboration on WLED-SR / WLED-MM.
+- **[troyhacks](https://github.com/troyhacks/WLED)** — reworked the WLED-MM audio-reactive DSP to run on Espressif's [esp-dsp](https://github.com/espressif/esp-dsp) FFT (a low-latency, "stupid fast" alternative to ArduinoFFT); the same esp-dsp FFT choice [AudioModule](docs/moonmodules/core/AudioModule.md) makes. See its Prior art notes.
+- **[hpwit](https://github.com/hpwit) (Yves Bazin)** — the clockless I2S / RMT / Parlio LED-driver techniques and the [ESPLiveScript](https://github.com/hpwit/ESPLiveScript) live-script engine behind the LED drivers and MoonLive.
+- **Christophe Gagnier ([@Moustachauve](https://github.com/Moustachauve))** — author of the native [WLED-Android](https://github.com/Moustachauve/WLED-Android) app. Its source let us reverse-engineer exactly what the WLED app reads, so projectMM devices appear in (and are controllable from) the native WLED apps.
+- **The [Improv Wi-Fi](https://github.com/improv-wifi) project** — the open Improv serial provisioning standard ([sdk-cpp](https://github.com/improv-wifi/sdk-cpp) / [sdk-js](https://github.com/improv-wifi/sdk-js)) that the projectMM web installer uses to provision a freshly-flashed device over USB.
 
 ## Contributing
 

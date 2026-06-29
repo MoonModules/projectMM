@@ -67,6 +67,7 @@ public:
     int8_t   loopbackRxPin = -1;
 
     void onBuildControls() override {
+        addWindowControls();   // start / count — the slice of the shared buffer this driver outputs
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
         derived()->addBusControls();   // i80 adds clockPin/dcPin here; Parlio none
@@ -80,6 +81,7 @@ public:
 
     bool controlChangeTriggersBuildState(const char* name) const override {
         return std::strcmp(name, "pins") == 0 || std::strcmp(name, "ledsPerPin") == 0
+            || isWindowControl(name)
             || derived()->busControlTriggersBuild(name);   // clockPin/dcPin on i80
     }
 
@@ -143,7 +145,9 @@ public:
             for (uint8_t lane = 0; lane < laneCount_; lane++) {
                 if (row >= laneCounts_[lane]) continue;   // short strand: idle LOW
                 mask |= static_cast<uint8_t>(1u << lane);
-                correction_->apply(src + (laneStart_[lane] + row) * srcCh,
+                // winStart_ shifts this driver's whole slice; laneStart_ is the
+                // per-lane offset within it.
+                correction_->apply(src + (winStart_ + laneStart_[lane] + row) * srcCh,
                                    wire + lane * 4);
             }
             encodeWs2812LcdSlots(wire, mask, outCh, out);
@@ -179,6 +183,8 @@ protected:
     uint16_t laneList_[kMaxLanes] = {};
     nrOfLightsType laneCounts_[kMaxLanes] = {};
     nrOfLightsType laneStart_[kMaxLanes] = {};
+    nrOfLightsType winStart_ = 0;   // first source-buffer light this driver reads (the window)
+    nrOfLightsType winLen_ = 0;     // window length (lights), clamped to the buffer
     uint8_t laneCount_ = 0;
     nrOfLightsType maxLaneLights_ = 0;
     size_t frameBytes_ = 0;
@@ -222,8 +228,10 @@ protected:
             if (!err && n != kMaxLanes) err = "LCD bus needs exactly 8 pins";
         }
         if (!err) {
-            const nrOfLightsType total = sourceBuffer_ ? sourceBuffer_->count() : 0;
-            err = assignCounts(ledsPerPin, n, total, laneCounts_);
+            // Distribute over this driver's window slice, not the whole buffer.
+            const nrOfLightsType bufN = sourceBuffer_ ? sourceBuffer_->count() : 0;
+            windowSlice(bufN, winStart_, winLen_);
+            err = assignCounts(ledsPerPin, n, winLen_, laneCounts_);
         }
         if (err) {
             setConfigErr(err);

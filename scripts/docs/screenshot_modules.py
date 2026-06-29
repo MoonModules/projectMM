@@ -47,8 +47,8 @@ Prerequisites (one-time, machine-local — NOT in the repo or the venv):
        and repo transfers — if it's "missing" it was simply never installed here.
 
 Running server: the script captures against whatever is on --host (default
-:8080). Start ONE fresh server:  cmake --build build -j && ./build/projectMM
-(or via MoonDeck's PC tab). GOTCHA: a leftover binary on :8080 captures the WRONG
+:8080). Start ONE fresh server:  uv run scripts/build/build_desktop.py && ./build/<host>/projectMM
+(or via MoonDeck's PC tab — same per-host build dir, so they share the binary). GOTCHA: a leftover binary on :8080 captures the WRONG
 images silently — e.g. a `build/macos/projectMM` from a MoonDeck run still bound
 to the port serves the OLD code, so a renamed/changed effect screenshots as its
 previous version no matter how often you rebuild. The script now prints a STALE
@@ -359,9 +359,9 @@ def check_server_freshness(host: str) -> None:
               f"source registers: {', '.join(missing[:6])}"
               + (" …" if len(missing) > 6 else ""))
         print(f"      The running binary is older than the current source. Most likely a")
-        print(f"      second projectMM (e.g. build/macos/projectMM from MoonDeck) is still")
-        print(f"      on :8080. Fix:  pkill -f projectMM  then rebuild + run ONE server:")
-        print(f"        cmake --build build -j && ./build/projectMM")
+        print(f"      second projectMM (a stale build/<host>/projectMM) is still on :8080.")
+        print(f"      Fix:  pkill -f projectMM  then rebuild + run ONE server:")
+        print(f"        uv run scripts/build/build_desktop.py && ./build/<host>/projectMM")
 
 
 # ---------------------------------------------------------------------------

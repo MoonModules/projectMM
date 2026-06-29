@@ -5,6 +5,15 @@
 #include <cstdlib>
 #include <cstring>
 
+// The highest valid GPIO number, the default clamp for addPin's Pin controls.
+// The build injects the real per-chip value (-DMM_MAX_GPIO=CONFIG_SOC_GPIO_PIN_COUNT-1
+// from the IDF; see esp32/main/CMakeLists.txt). This fallback keeps Control.h core
+// and standalone-compilable (no platform include, no build flag required) — it's
+// the widest current ESP32-family ceiling, so it never *under*-clamps a real board.
+#ifndef MM_MAX_GPIO
+#define MM_MAX_GPIO 63
+#endif
+
 namespace mm {
 
 // Dotted-quad parser used by ControlType::IPv4 writes (HttpServerModule
@@ -229,9 +238,14 @@ public:
     // never exceeds ~54 on any ESP32-family chip, so int8 (−128..127) is ample and
     // smaller than int16. Renders as a plain number input, not a slider (see
     // ControlType::Pin): a GPIO has no meaningful range to drag. min/max are the
-    // valid-GPIO span (−1..52), used only as a server-side write-clamp guard; the
-    // UI keys rendering off the "pin" type string, not the range.
-    void addPin(const char* name, int8_t& var, int16_t min = -1, int16_t max = 52) {
+    // valid-GPIO span, used only as a server-side write-clamp guard; the UI keys
+    // rendering off the "pin" type string, not the range. The default max is the
+    // chip's real GPIO ceiling: MM_MAX_GPIO, which the build defines per-target from
+    // the IDF's CONFIG_SOC_GPIO_PIN_COUNT (61 on the S31, whose audio pins reach
+    // GPIO57) — derived, not hand-maintained. The fallback below keeps Control.h
+    // core/standalone (it compiles with no build flag); the real per-chip value is
+    // injected by CMake. Callers don't repeat it.
+    void addPin(const char* name, int8_t& var, int16_t min = -1, int16_t max = MM_MAX_GPIO) {
         grow();
         controls_[count_++] = {&var, name, 0, ControlType::Pin, min, max};
     }

@@ -179,6 +179,18 @@ private:
     // System metrics
     // -----------------------------------------------------------------------
     void serveSystem(platform::TcpConnection& conn);
+    // WLED-compatibility shim — see the /json/info route + the impl rationale. /json/info
+    // lists the device; /json/state + /json/si carry on/brightness/colour for the card;
+    // POST /json/state maps the app's toggle + slider onto Drivers brightness.
+    void serveWledInfo(platform::TcpConnection& conn);
+    void serveWledState(platform::TcpConnection& conn);
+    void serveWledStateInfo(platform::TcpConnection& conn);
+    void handleWledState(platform::TcpConnection& conn, const char* body);
+    void applyWledState(const char* body);          // {on,bri} → Drivers brightness (HTTP + WS)
+    void pollWledStateFromWebSockets();             // read app's slider/toggle sent over /ws
+    void writeWledInfoBody(JsonSink& sink, const char* name, const uint8_t mac[6]);
+    void writeWledStateBody(JsonSink& sink);
+    uint8_t driversBrightness();
     void writeModuleMetricsJson(JsonSink& sink, MoonModule* mod, bool& first);
 
     // -----------------------------------------------------------------------
@@ -201,6 +213,7 @@ private:
     // -----------------------------------------------------------------------
     void handleWebSocketUpgrade(platform::TcpConnection& conn, const char* req);
     void pushStateToWebSockets();
+    void pushWledStateToWebSockets();   // WLED-app {state,info} frame on /ws (see impl)
     static bool sendWsTextFrame(platform::TcpConnection& conn, const char* data, int len);
     // Write the whole span to one client via repeated non-blocking writeSome; close it + return
     // false if it can't all go (a stuck/too-slow client). The push primitive behind begin/push/end.

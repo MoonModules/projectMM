@@ -29,7 +29,7 @@ These operate on individual channel values, not on a struct. They live in core (
 
 ## Prior art
 
-### MoonLight — LightsHeader ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/LightsHeader.h))
+### MoonLight — LightsHeader ([source](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/LightsHeader.h))
 
 48-byte metadata struct: `channelsPerLight` (3-32), per-channel offsets for RGB, RGBW, RGBCCT, brightness, pan/tilt/zoom/rotate/gobo. One struct handles LEDs AND DMX fixtures. Sent to frontend for preview rendering.
 
