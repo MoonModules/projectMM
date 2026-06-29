@@ -185,6 +185,9 @@ struct MdnsHost {
     uint8_t ip[4] = {};        // resolved IPv4 (0.0.0.0 if unresolved)
     char    hostname[32] = {}; // instance/host name (e.g. "wled-desk"), "" if none
     uint16_t port = 0;         // advertised SRV port
+    char    service[16] = {};  // the matched service type, e.g. "_wled" — lets a
+                               // DevicePlugin claim the hit by service without the
+                               // module threading the query's service back to it.
     bool isProjectMM = false;  // the host's _http._tcp advertisement carries our TXT
                                // marker (`mm=1`) — proves it's a projectMM device, not
                                // just some web box on the same `_http._tcp` service.
@@ -193,6 +196,15 @@ struct MdnsHost {
 using MdnsHostCb = void(*)(const MdnsHost& host, void* user);
 bool mdnsBrowse(const char* service, const char* proto, uint32_t timeoutMs,
                 MdnsHostCb cb, void* user);
+
+// One mDNS service query for DevicesModule's discovery loop. Queries `service` with a
+// SHORT bounded window and invokes `cb` for each responder (full PTR→SRV→TXT→A
+// resolution — it returns ALL responders, unlike a one-shot async query that settles
+// on the fastest). Returns true (the single query completes in this call), so the
+// caller advances to the next service each tick. The caller drives ONE service per
+// loop1s tick — NOT the render hot path, so the ~120 ms query is invisible to FPS.
+// Desktop: a stub returning true (no mDNS on host; the caller just cycles services).
+bool mdnsListenPoll(const char* service, const char* proto, MdnsHostCb cb, void* user);
 
 // Store the DHCP hostname (DHCP option 12) the next eth/wifi bring-up advertises.
 // Routers populate their client list from the DHCP request, not mDNS, so without

@@ -473,6 +473,14 @@ void mdnsShutdown() {}
 bool mdnsBrowse(const char* /*service*/, const char* /*proto*/, uint32_t /*timeoutMs*/,
                 MdnsHostCb /*cb*/, void* /*user*/) { return false; }
 
+// No mDNS on the desktop host — the listener finds nothing (DevicesModule then
+// shows only its own self row + any persisted devices). Returns true ("query
+// complete") so the module's service cursor advances each tick rather than stalling
+// on a service that never finishes. The DevicePlugin classification is host-unit-
+// tested directly (feeding a synthetic MdnsHost), so it needs no live mDNS source.
+bool mdnsListenPoll(const char* /*service*/, const char* /*proto*/,
+                    MdnsHostCb /*cb*/, void* /*user*/) { return true; }
+
 // OTA — no-op on desktop (no OTA partition). The /api/firmware/url route
 // guards with `if constexpr (mm::platform::hasOta)` and returns 501 here,
 // so this stub exists for compile coverage only.

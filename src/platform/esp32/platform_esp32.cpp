@@ -1046,7 +1046,21 @@ bool mdnsInit(const char* deviceName) {
     esp_err_t txtErr = mdns_service_txt_item_set("_http", "_tcp", "mm", "1");
     if (txtErr != ESP_OK)
         ESP_LOGW(NET_TAG, "mDNS _http._tcp TXT mm=1 set failed: %s", esp_err_to_name(txtErr));
-    ESP_LOGI(NET_TAG, "mDNS started: %s.local (advertising _http._tcp:80, mm=1)", deviceName);
+
+    // Also advertise `_wled._tcp` — the service the native WLED apps (iOS / Android /
+    // Desktop, all one Flutter codebase) and Home Assistant browse for. This is how a
+    // projectMM device appears in the WLED ecosystem's UIs without speaking WLED's UDP
+    // protocol; the HTTP server on :80 answers their probes. Same add-or-rename branch
+    // as `_http._tcp` (a reconnect re-runs this). Non-fatal: a failure just means we
+    // don't show up in those apps, the rest of discovery still works.
+    esp_err_t wledErr = mdns_service_exists("_wled", "_tcp", nullptr)
+        ? mdns_service_instance_name_set("_wled", "_tcp", deviceName)
+        : mdns_service_add(deviceName, "_wled", "_tcp", 80, nullptr, 0);
+    if (wledErr != ESP_OK)
+        ESP_LOGW(NET_TAG, "mDNS _wled._tcp advertise failed: %s", esp_err_to_name(wledErr));
+
+    ESP_LOGI(NET_TAG, "mDNS started: %s.local (advertising _http._tcp:80 mm=1, _wled._tcp:80)",
+             deviceName);
     return true;
 }
 
@@ -1077,6 +1091,10 @@ void mdnsShutdown() {
 // construction. The cost is a bounded blocking call: DevicesModule calls this on loop1s
 // (not the render hot path) for ONE service type per tick with a small timeout, the
 // standard mDNS-query pattern (WLED/ESPHome do the same), so the tick budget is fine.
+// Map one IDF mdns_result_t into our MdnsHost POD (defined below; shared by the
+// blocking browse and the non-blocking listener).
+static void mdnsFillHost(const mdns_result_t* r, const char* service, MdnsHost& h);
+
 bool mdnsBrowse(const char* service, const char* proto, uint32_t timeoutMs,
                 MdnsHostCb cb, void* user) {
     // Browse needs only the mDNS stack, not advertising — bring it up regardless of the
@@ -1087,36 +1105,49 @@ bool mdnsBrowse(const char* service, const char* proto, uint32_t timeoutMs,
     if (mdns_query_ptr(service, proto, timeoutMs, 16, &results) != ESP_OK) return false;
     for (mdns_result_t* r = results; r && cb; r = r->next) {
         MdnsHost h{};
-        // A PTR/service browse gives the friendly service *instance* name in
-        // `instance_name` (what we advertise — the deviceName, e.g. "Bench-P4") and the
-        // lower-level host record in `hostname`. Prefer the instance name so a peer shows
-        // the device's name, not its `.local` host; fall back to hostname if absent.
-        const char* name = (r->instance_name && r->instance_name[0]) ? r->instance_name
-                          : (r->hostname ? r->hostname : nullptr);
-        if (name) std::snprintf(h.hostname, sizeof(h.hostname), "%s", name);
-        h.port = r->port;
-        // Scan the service's TXT records for our `mm=1` marker — a projectMM device tags
-        // its _http._tcp advertisement with it (see mdnsInit), so a peer browsing the
-        // generic _http._tcp service can classify us without an HTTP probe.
-        for (size_t i = 0; i < r->txt_count; i++) {
-            if (r->txt[i].key && std::strcmp(r->txt[i].key, "mm") == 0
-                && r->txt_value_len[i] == 1 && r->txt[i].value && r->txt[i].value[0] == '1') {
-                h.isProjectMM = true;
-                break;
-            }
-        }
-        // First IPv4 address in the result's addr list.
-        for (mdns_ip_addr_t* a = r->addr; a; a = a->next) {
-            if (a->addr.type == ESP_IPADDR_TYPE_V4) {
-                uint32_t v = a->addr.u_addr.ip4.addr;   // little-endian packed (octet i = byte i)
-                h.ip[0] = v & 0xff; h.ip[1] = (v >> 8) & 0xff;
-                h.ip[2] = (v >> 16) & 0xff; h.ip[3] = (v >> 24) & 0xff;
-                break;
-            }
-        }
+        mdnsFillHost(r, service, h);
         cb(h, user);
     }
     if (results) mdns_query_results_free(results);
+    return true;
+}
+
+// Map one IDF mdns_result_t into our MdnsHost POD (no IDF types leak across the
+// seam). Shared by the blocking browse above and the non-blocking listener below.
+static void mdnsFillHost(const mdns_result_t* r, const char* service, MdnsHost& h) {
+    const char* name = (r->instance_name && r->instance_name[0]) ? r->instance_name
+                      : (r->hostname ? r->hostname : nullptr);
+    if (name) std::snprintf(h.hostname, sizeof(h.hostname), "%s", name);
+    h.port = r->port;
+    if (service) std::snprintf(h.service, sizeof(h.service), "%s", service);
+    for (size_t i = 0; i < r->txt_count; i++) {
+        if (r->txt[i].key && std::strcmp(r->txt[i].key, "mm") == 0
+            && r->txt_value_len[i] == 1 && r->txt[i].value && r->txt[i].value[0] == '1') {
+            h.isProjectMM = true;
+            break;
+        }
+    }
+    for (mdns_ip_addr_t* a = r->addr; a; a = a->next) {
+        if (a->addr.type == ESP_IPADDR_TYPE_V4) {
+            uint32_t v = a->addr.u_addr.ip4.addr;   // little-endian packed (octet i = byte i)
+            h.ip[0] = v & 0xff; h.ip[1] = (v >> 8) & 0xff;
+            h.ip[2] = (v >> 16) & 0xff; h.ip[3] = (v >> 24) & 0xff;
+            break;
+        }
+    }
+}
+
+// One mDNS service query for DevicesModule's discovery loop — a thin wrapper over the
+// blocking mdnsBrowse with a SHORT (bounded) window, doing the full PTR→SRV→TXT→A
+// resolution. The blocking cost is fine off the render hot path; what matters is the
+// CALLER's CADENCE: this must be called slowly (one service every few seconds, not
+// every tick). Firing a query every tick exhausts the IDF mDNS task's internal pool
+// — it reports "Cannot allocate memory" with megabytes of heap free (its own fixed
+// buffers, not real OOM) and destabilises the device's networking until peers appear
+// to drop off the LAN. DevicesModule throttles to one query per kQueryEverySec ticks;
+// see the rate-limit lesson in docs/history/decisions.md.
+bool mdnsListenPoll(const char* service, const char* proto, MdnsHostCb cb, void* user) {
+    mdnsBrowse(service, proto, 120 /*ms — short, bounded*/, cb, user);
     return true;
 }
 

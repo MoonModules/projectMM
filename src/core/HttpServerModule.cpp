@@ -14,6 +14,8 @@
 #include "core/Base64.h"
 #include "core/FilesystemModule.h"
 #include "core/FirmwareUpdateModule.h"
+#include "core/SystemModule.h"      // deviceName() for the WLED /json/info shim
+#include "core/build_info.h"        // kVersion for the WLED /json/info shim
 #include "platform/platform.h"
 #include "ui/ui_embedded.h"
 
@@ -136,6 +138,12 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
         else if (std::strcmp(path, "/api/state") == 0) serveState(conn);
         else if (std::strcmp(path, "/api/system") == 0) serveSystem(conn);
         else if (std::strcmp(path, "/api/types") == 0) serveTypes(conn);
+        // WLED-compatibility shim: the native WLED apps (and Home Assistant's WLED
+        // integration) discover a device via mDNS `_wled._tcp` then VALIDATE it by
+        // GETting /json/info and checking it's WLED-shaped. Serving a minimal
+        // WLED-compatible info makes a projectMM device appear in those apps — and is a
+        // useful independent cross-check that our mDNS advertise resolves.
+        else if (std::strcmp(path, "/json/info") == 0) serveWledInfo(conn);
         else sendResponse(conn, 404, "text/plain", "Not found");
     } else if (std::strcmp(method, "POST") == 0) {
         // POST /api/modules/<name>/move with body {"to":N}.
@@ -583,6 +591,45 @@ void HttpServerModule::serveSystem(platform::TcpConnection& conn) {
     }
 
     sink.append("]}");
+    sink.flush();
+}
+
+// WLED-compatibility `/json/info` — a minimal subset of WLED's info object, enough for
+// the native WLED apps / Home Assistant to validate a device discovered via
+// `_wled._tcp` and list it. We are NOT WLED, but `brand:"projectMM"` + a real name/IP/
+// MAC + an LED count is what the clients key on. `product:"projectMM"` is honest about
+// what this actually is (a real WLED carries `brand:"WLED"`; we don't impersonate the
+// brand, we just speak its info shape). Built fresh against WLED's public JSON, not copied.
+void HttpServerModule::serveWledInfo(platform::TcpConnection& conn) {
+    const char* header =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json\r\n"
+        "Connection: close\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "\r\n";
+    conn.write(reinterpret_cast<const uint8_t*>(header), std::strlen(header));
+
+    // Identity: the deviceName (from SystemModule), the live IP, the MAC.
+    const char* name = "projectMM";
+    if (MoonModule* sys = findModuleByName("System")) {
+        const char* dn = static_cast<SystemModule*>(sys)->deviceName();
+        if (dn && dn[0]) name = dn;
+    }
+    uint8_t ip[4] = {};
+    platform::ethGetIPv4(ip);
+    if (!ip[0] && !ip[1] && !ip[2] && !ip[3]) platform::wifiStaGetIPv4(ip);
+    uint8_t mac[6] = {};
+    platform::getMacAddress(mac);
+
+    JsonSink sink(conn);
+    sink.appendf("{\"ver\":\"%s\",\"vid\":0,\"name\":", kVersion);
+    sink.writeJsonString(name);   // writes its own surrounding quotes + escaping
+    sink.appendf(",\"arch\":\"%s\",\"brand\":\"projectMM\",\"product\":\"projectMM\","
+                 "\"ip\":\"%u.%u.%u.%u\",\"mac\":\"%02x%02x%02x%02x%02x%02x\","
+                 "\"leds\":{\"count\":0,\"rgbw\":false},\"udpport\":21324,\"str\":false}",
+                 platform::chipModel(),
+                 ip[0], ip[1], ip[2], ip[3],
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     sink.flush();
 }
 

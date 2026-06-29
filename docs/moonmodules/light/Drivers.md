@@ -31,7 +31,7 @@ The state lives on `Correction` (`src/light/drivers/Correction.h`): a brightness
 
 ## Per-driver source window (`start` / `count`)
 
-Every driver reads the **same** shared source buffer and outputs a contiguous slice of it — its *window*. Two controls on `DriverBase`, shared by every driver child (the LED drivers, the network sink):
+A **window-aware output driver** reads the shared source buffer and outputs a contiguous slice of it — its *window*. `DriverBase` provides two controls for this via an opt-in `addWindowControls()` helper, used by the output drivers (the LED drivers and the network sink). It is **not** forced on every `DriverBase` subclass — a driver that outputs the whole buffer (e.g. PreviewDriver, which renders the full logical buffer for the UI) simply doesn't call it and has no `start`/`count`:
 
 | Control | Type | Description |
 |---|---|---|

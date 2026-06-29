@@ -85,8 +85,9 @@ TWAI (CAN) · RMT · Parlio · LCD_CAM i80 · on-chip EMAC · PSRAM. RISC-V dual
 
 The S31 catalog entry drives **LEDs** (RMT on GPIO60) and **Wi-Fi 6**, and wires an
 **[I2cScanModule](../moonmodules/core/I2cScanModule.md)** on the codec bus (SDA 51 / SCL 50) for
-I2C bring-up. The ES8311 audio path is implemented (codec seam + `AudioModule`); the codec is
-reachable on I2C, and validating the mic end-to-end depends on confirming MCLK at GPIO52 — so
-**Audio** sits in the entry's `planned` list until that lands. The remaining board capabilities
-(Ethernet, Bluetooth, SD, USB host, …) are in `planned` too; see the S31 entry in
-`docs/install/deviceModels.json`.
+I2C bring-up. The **[AudioModule](../moonmodules/core/AudioModule.md)** ES8311 path is implemented
+— the codec seam configures the ES8311 over I2C (codec reachable, ACK at 0x18) and AudioModule
+reads the I2S mic. End-to-end mic validation depends on confirming MCLK at GPIO52; the S31 entry
+keeps **Audio** under `planned` until that bench check passes, so the installer advertises only
+what's confirmed working. The other board capabilities (Ethernet, Bluetooth, SD, USB host, …)
+likewise live in the entry's `planned` list — see the S31 entry in `docs/install/deviceModels.json`.

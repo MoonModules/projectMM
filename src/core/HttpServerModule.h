@@ -179,6 +179,8 @@ private:
     // System metrics
     // -----------------------------------------------------------------------
     void serveSystem(platform::TcpConnection& conn);
+    // WLED-compatibility shim — see the /json/info route + the impl rationale.
+    void serveWledInfo(platform::TcpConnection& conn);
     void writeModuleMetricsJson(JsonSink& sink, MoonModule* mod, bool& first);
 
     // -----------------------------------------------------------------------

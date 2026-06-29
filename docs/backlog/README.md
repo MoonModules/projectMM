@@ -53,6 +53,10 @@ One-off research documents that informed a future direction, kept for the reason
 - [livescripts-analysis-bottom-up.md](livescripts-analysis-bottom-up.md) — live scripting (run user-authored effects/layouts/modifiers/drivers/sensor logic on-device without a reflash), Stage-1 survey. Deep-reads the ESPLiveScript fork (hpwit's native-Xtensa JIT), surveys the field (ARTI-FX interpreter by ewowi, embedded VMs, WASM/WAMR), and records the product-owner direction.
 - [livescripts-analysis-top-down.md](livescripts-analysis-top-down.md) — the Stage-2 redesign: a native-codegen engine, Xtensa-first behind an IR seam (WASM/WAMR the per-target fallback), a C-subset language that ports an effect near-verbatim, the MoonModule binding, and a staged spike plan along the MoonLight effects-tutorial ladder.
 
+## Investigations
+
+- [mdns-advertise-instability.md](mdns-advertise-instability.md) — open bench finding from the DevicesModule mDNS refactor: a projectMM device's own mDNS service advertisement doesn't propagate reliably to peers (one board solid, three not; WLED solid), so boards intermittently fail to discover each other. Records the symptom, what's ruled out, the leading hypotheses (self-query-vs-self-advertise interference; missing re-announce), and the next concrete steps. Also notes the WLED-friendly-name-needs-REST-fetch and the projectMM-shown-as-WLED symptoms.
+
 ## Project transition
 
 - [rename-to-moonlight.md](rename-to-moonlight.md) — the phased plan to rename **projectMM → MoonLight** (and move the predecessor MoonLight to a personal repo). Now / coming-time / during-the-switch sequencing around the repo-name collision, the externally-visible references that gate the cutover (binary name, OTA URLs, mDNS identity), and a MoSCoW of the feature gaps that must close before the new name isn't a downgrade.

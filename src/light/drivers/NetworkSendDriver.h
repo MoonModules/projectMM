@@ -51,6 +51,13 @@ public:
         controls_.addUint8("fps", fps, 1, 120);
     }
 
+    // A start/count change resizes the window this sink sends; route it through the
+    // onBuildState sweep so resizeCorrected() re-sizes corrected_ for the new slice —
+    // otherwise growing the window past the old corrected_ silently drops to passthrough.
+    bool controlChangeTriggersBuildState(const char* name) const override {
+        return isWindowControl(name);
+    }
+
     void setup() override {
         socket_.open();
         // E1.31 wants a stable per-device component id; derive it from the MAC

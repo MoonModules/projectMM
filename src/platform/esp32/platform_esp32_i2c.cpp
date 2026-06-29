@@ -67,7 +67,9 @@ size_t i2cScan(uint16_t sda, uint16_t scl, uint8_t* out, size_t maxOut) {
 
 namespace mm::platform {
 
-size_t i2cScan(uint16_t, uint16_t, uint8_t*, size_t) { return 0; }
+// No I2C peripheral on this target — report the bus as unavailable, distinct from a
+// successful scan that found nothing (the module shows "bus in use / unavailable").
+size_t i2cScan(uint16_t, uint16_t, uint8_t*, size_t) { return kI2cBusUnavailable; }
 
 }  // namespace mm::platform
 

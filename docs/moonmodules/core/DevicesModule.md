@@ -6,59 +6,57 @@ Submodule of [NetworkModule](NetworkModule.md) — discovery depends on the netw
 
 ## Controls
 
-- `scan` — a **button** (momentary action, [ControlType::Button](Control.md)): pressing it re-runs the subnet sweep now (`onUpdate` → `restartScan`). A button, not a toggle, because it's a one-shot action, not an on/off state.
-- `progress` — a progress bar of the sweep position (host 0..254, where 0 is idle/empty and 1..254 track the sweep). Always present (the WebSocket state push patches control *values* but not *structure*, so a hide-while-idle flag would not update live); at rest its value is 0 (empty bar).
+- `devices` — a [List control](Control.md) whose rows are the discovered devices; each row expands to a detail panel. This module is the list's `ListSource`, walking its own `devices_` array (no copy, no allocation). Read-only from the browser (discovery output flows device → `/api/state` → browser), but **persistable** (see Persistence).
 
-Sweep state ("idle", "scanning A.B.C.0/24", "N devices", "no network") is reported through the standard [MoonModule](MoonModule.md) `setStatus()` channel (rendered generically as the card's status line by HttpServerModule), not as a separate control.
-- `devices` — a [List control](Control.md) whose rows are the discovered devices; each row expands to a detail panel. This module is the list's `ListSource`, walking its own `devices_` array (no copy, no allocation).
+Discovery state ("idle", "N devices", "N devices (cached)") is reported through the standard [MoonModule](MoonModule.md) `setStatus()` channel (rendered generically as the card's status line), not as a separate control. There is no scan button — devices announce themselves; nothing is polled.
 
-## Discovery
+## Discovery (mDNS, passive)
 
-Two strategies run side by side and merge into the *same* `devices_` list:
+Discovery is the standard **mDNS-SD** pattern: each device **announces** a service on the LAN, and this module passively **listens**. No subnet sweep, no per-host probe — a device appears when it announces and ages out when it stops.
 
-**mDNS browse** is the push-style strategy and runs **every tick**. `stepMdns()` cycles round-robin through a small set of service types (`_http._tcp`, `_wled._tcp` today) using the non-blocking `platform::mdnsBrowseStart` / `mdnsBrowsePoll` / `mdnsBrowseStop` cycle: start one async PTR query, poll it (a 0 ms async check — never blocks the render loop), merge any resolved hosts via `upsertMdns`, then advance to the next service type. The service type maps to a `DevType` (`_wled._tcp` → WLED; `_http._tcp` → generic, refined later by the HTTP probe). Because it never blocks, it is the only strategy safe to run continuously, so it picks up advertisers (WLED, projectMM, anything advertising `_http._tcp`) as they come and go.
+- **Announce.** projectMM advertises `_http._tcp` with an `mm=1` TXT marker, and `_wled._tcp` (so it shows up in the native WLED apps + Home Assistant) — see `mdnsInit` in the platform layer.
+- **Listen (non-blocking).** Each `loop1s` tick calls `platform::mdnsListenPoll(service, proto, …)` for one service, rotating round-robin through the services the plugins claim. The platform owns a single in-flight async mDNS query and manages its handle entirely within the seam (start → poll with a 0 ms timeout → deliver results → restart), so the call **never blocks the tick** — the hot-path-safe replacement for the former blocking HTTP sweep and blocking mDNS browse.
 
-**Subnet sweep** is the fallback for hosts that don't advertise a useful service (a projectMM **desktop** instance, a generic web host). `restartScan()` captures the local IP (from `platform::ethGetIPv4` / `wifiStaGetIPv4`) and walks the local /24 (`subnet.1` .. `subnet.254`), one IP per `loop1s()` tick. The sweep runs **once at boot** (when the network first comes up) and otherwise only on a `scan` button press — there is **no periodic background sweep**. Reason: the probe is a *blocking* `httpGet` running on the render task, so each probe stalls the tick up to the probe timeout (~150 ms); a continuous background sweep would flicker the LEDs. At boot the LEDs aren't yet critical, so the one-shot sweep there is acceptable.
+### Plugins (the interop seam)
 
-Per host, `probe()` issues `platform::httpGet` (short timeout) and classifies the response:
+Foreign ecosystems hook in as **plugins**, not hardcoded branches — the adapter pattern (cf. `ListSource`, `ModuleFactory`). A [`DevicePlugin`](../../../src/core/DevicePlugin.h) declares the mDNS service it claims and turns a resolved hit (`platform::MdnsHost` — IP, hostname, service, the `mm=1` TXT flag) into a `Device` kind:
 
-| Probe | Match | Type |
-|-------|-------|------|
-| `GET /api/state` | **HTTP 200** and body contains `"modules"` | projectMM |
-| `GET /json/info` | **HTTP 200** and body contains `WLED` | WLED |
-| (any other live host) | answered (any status), not the above | generic |
-| no response on 80 or 8080 | — | not listed |
+| Plugin | Claims | Classifies as |
+|---|---|---|
+| `MmPlugin` | `_http._tcp` **with** the `mm=1` TXT | projectMM (a bare `_http._tcp` box without the marker is declined) |
+| `WledPlugin` | `_wled._tcp` | WLED |
 
-The status-200 gate matters: a 404/500 error page that happens to contain `"modules"` or `WLED` must not be misread as a real device. A non-200 response still proves the host is *alive*, so it falls through to the generic classification rather than being dropped.
+A new system is **one new plugin file** listed in the module — no core edit. Plugins are not all the same shape: a flat-device plugin (WLED, ESPHome) yields one device per hit; a future hub plugin (Hue) would expand one bridge hit into several controllable resources + carry auth — the seam keeps `DiscoveredDevice` plain so that extends without reshaping the flat case. The (reserved) command half (`command()`) translates a generic command into a system's protocol when a control consumer exists; *concrete first, abstract later*.
 
-Both ports 80 and 8080 are probed per host: ESP32 devices and WLED serve on 80, a projectMM **desktop** instance serves its API on 8080. A live host on 80 stops there; the 8080 attempt only adds a second timeout on otherwise-empty IPs.
+The plugin classification is pure and host-unit-tested (`unit_DeviceIdentify.cpp` feeds a synthetic `MdnsHost`), with no network.
 
-The display name comes from the probe body — projectMM's `deviceName` (`/api/state`), WLED's `name` (`/json/info`) — falling back to the dotted-quad IP. A foreign device's reply is parsed with a local, defensive string scan (`extractStringAfter`), not the project's own [JsonUtil](Control.md) key parser: any input is tolerated (a garbage body yields an empty name), per the robustness contract for network-sourced data.
+### Age-out
 
-### Discovery is per-protocol (HTTP is strategy one)
+Each sighting stamps the device's `lastSeenMs`; `ageOut()` runs every tick and drops a non-self device unheard for `kStaleMs` (60 s ≈ a few announce cycles). A **timestamp**, not a counter — "last seen at T" is true regardless of cadence. The self entry never ages out (restamped to "now" every tick it's online). Storage is a fixed `devices_[kMaxDevices]` array — bounded, no heap.
 
-HTTP and mDNS find web-UI / service-advertising devices, but the wider ecosystem this module will talk to is found and addressed over **other** protocols too: Art-Net / sACN nodes and DDP devices (UDP, no web UI), OSC, RTP-MIDI (mDNS `_apple-midi._udp`). Discovery is therefore structured as **probe strategies** that each contribute to the *same* device list. Two bitmasks on every `Device` keep this open without reshaping the record: `speaks` (which protocols a device talks — `ProtoHttp` today; `ProtoArtnet`, `ProtoDdp`, … as strategies are added) so a consumer (Art-Net sync, fleet OTA) knows *how* to reach it, and `via` (which strategies found it — `scan` / `mdns` / `udp`) so the UI shows the discovery source. A device found by both mDNS and the sweep OR-s both bits — it is the same device, surfaced twice. Adding an mDNS service type is one entry in `kMdnsServices` (Home Assistant `_home-assistant._tcp`, ESPHome `_esphome._tcp`, …); adding a non-HTTP strategy is a new probe plus the bits it sets — neither reshapes the record or the wire format.
+## Transport boundary (discovery vs commands)
 
-Each sighting (any strategy) stamps the device's `lastSeenMs`; `ageOut()` runs every tick and drops a non-self device unseen for `kStaleMs` (24 h). A **timestamp**, not a per-sweep miss-counter, because the strategies run on different cadences (a minutes-long HTTP sweep, a seconds-long mDNS lap, a future async UDP beacon) with no shared sweep boundary to count against; "last seen at T" is true regardless of which strategy saw it. The window is a full day on purpose: mDNS re-confirms its devices cheaply every browse lap, but an HTTP-scan-only device (a PC instance, a generic host) has no cheap recurring refresh — the sweep is boot-once + manual, not periodic — so a short timeout would wrongly drop a still-alive device and force a re-scan. A day lets such a device persist on its single sighting while a genuinely-departed device still clears within a day. The self entry never ages out (restamped to "now" every sweep step). Storage is a fixed `devices_[kMaxDevices]` array — bounded, no heap.
+Discovery is mDNS (above). It carries only lossy-OK presence — never device-to-device *commands*. Those split by need: must-arrive config (set brightness, presets, OTA) rides **REST** (`/api/control`, TCP-guaranteed); latency-critical lossy-OK traffic (time sync for synchronized effects, live pixels) rides **UDP** (NetworkSend/Receive). The full reasoning is in the design plan; the rule here is simply that this module does *discovery*, and consumers reach a found device over the right transport for the job.
 
 ## Persistence (instant boot list)
 
-The discovered list survives reboot: the `devices` [List control](Control.md) is persistable, so a completed sweep marks the module dirty and FilesystemModule saves the list as a JSON array; on boot the persistence overlay restores it (via `ListSource::restoreList`, which uses the recursive [JsonUtil](Control.md) reader's `forEachListElement` to walk the saved array) *before* the first sweep runs. So the UI shows the **last-known devices immediately** ("N devices (cached)") rather than waiting the minutes a fresh sweep takes — the real win for slow-to-find devices (a PC instance, a generic host) that aren't mDNS-discoverable. The self entry is not restored from the cache (its IP can change); `upsertSelf` re-adds it live with the current address.
+The discovered list survives reboot: the `devices` [List control](Control.md) is persistable, so a change marks the module dirty and FilesystemModule saves the list as a JSON array; on boot the persistence overlay restores it (via `ListSource::restoreList`, which uses the recursive [JsonUtil](Control.md) reader's `forEachListElement`) *before* the first announcement arrives. So the UI shows the **last-known devices immediately** ("N devices (cached)") rather than waiting for the first re-announcement. The self entry is not restored from the cache (its IP can change); `upsertSelf` re-adds it live with the current address. The restore tolerates an old persisted file carrying extra keys (e.g. the former `via`/`speaks`) — the keyed reader ignores them.
 
 ## Self
 
-This device always appears in the list (`upsertSelf`, marked `self:true`), so the card shows the whole network including the host. The UI marks the self row distinctly (an accent edge). The self entry is identified by comparing each probed IP to the local IP.
+This device always appears in the list (`upsertSelf`, marked `self:true`), so the card shows the whole network including the host. The UI marks the self row distinctly (an accent edge). The self entry is identified by comparing the announcing IP to the local IP.
 
 ## Wire shape
 
-The `devices` List serializes (via [Control](Control.md)'s `ControlType::List`) as a `value` array of row summaries — `{"name","ip","type",["self"]}` — with a parallel `detail` array carrying `url`, the `speaks` protocol array, the `via` discovery-source array, and `ageSec` (seconds since last seen, computed device-side as `now − lastSeenMs`; omitted on the self row, which is always current). A device restored from persistence but **not yet re-seen live** this session carries `cached:true` instead of `ageSec` (its `via` is empty and its timestamp is only the boot stamp, so a real "age" would be misleading) — the UI shows "last seen: cached" until a strategy re-confirms it, at which point `cached` clears and a real `ageSec` + `via` appear. The UI renders `ageSec` as a relative "last seen 2m ago". The List is read-only from the browser's side (discovery output flows device → `/api/state` → browser) but **persistable**: the saved array is parsed back on boot by `restoreList` to seed the instant cached list (see Persistence above).
+The `devices` List serializes (via [Control](Control.md)'s `ControlType::List`) as a `value` array of row summaries — `{"name","ip","type",["self"]}` — with a parallel `detail` array carrying `url` and `ageSec` (seconds since last heard, computed device-side as `now − lastSeenMs`; omitted on the self row, which is always current). A device restored from persistence but **not yet re-heard live** this session carries `cached:true` instead of `ageSec` — the UI shows "last seen: cached" until an announcement re-confirms it, at which point `cached` clears and a real `ageSec` appears. The UI renders `ageSec` as a relative "last seen 2m ago".
 
 ## Prior art
 
-- **MoonLight** uses UDP broadcast for device presence; DevicesModule takes the "devices find each other" idea but uses an IP-scan + REST-identify outer loop so non-broadcasting devices (a PC instance, Home Assistant, WLED) are found too.
-- **WLED** discovery / the WLED JSON API (`/json/info`, `brand:WLED`) — the WLED identify probe and name field come from here.
+- **mDNS-SD / DNS-SD (Bonjour, Avahi)** — the industry-standard service-discovery pattern this module uses: announce a service, browse for it. WLED, ESPHome, Home Assistant, Hue all speak it.
+- **WLED** — the `_wled._tcp` service it advertises (and that the native WLED iOS/Android/Desktop apps browse) is the interop target the `WledPlugin` + the `_wled._tcp` advertise serve.
+- **MoonLight** uses a UDP presence broadcast for device discovery; DevicesModule takes the "devices find each other" idea but uses the standard mDNS announce/listen instead of a bespoke UDP beacon (mDNS is what the whole ecosystem already speaks).
 - The web installer's `docs/install/devices.js` "Your devices" list is the prior art for the device record shape (name / url / type).
 
 ## Source
 
-[DevicesModule.h](../../../src/core/DevicesModule.h)
+[DevicesModule.h](../../../src/core/DevicesModule.h) · [DevicePlugin.h](../../../src/core/DevicePlugin.h)
