@@ -1,66 +1,88 @@
 // @module DevicePlugin
 // @also DevicesModule
 
-// Pins the device-interop plugin classification: each plugin claims one mDNS service
-// and turns a resolved hit into a Device kind. Pure host logic — feed a synthetic
-// MdnsHost (the POD the platform listener delivers), assert the classification, with
-// no network. The plugins are the "second caller" that makes the seam testable.
+// Pins the device-interop plugin classification: each plugin claims the UDP presence port
+// and turns a received datagram into a Device kind. Pure host logic — feed a synthetic
+// presence packet (the 44-byte WLED-compatible header), assert the classification, no
+// network. The plugins are the "second caller" that makes the seam testable.
 
 #include "doctest.h"
 #include "core/DevicePlugin.h"
-#include "platform/platform.h"
+#include "core/WledPacket.h"
 
-#include <cstdio>
+#include <cstdint>
 #include <cstring>
 
 using namespace mm;
 
 namespace {
-// Build a synthetic resolved mDNS hit.
-platform::MdnsHost host(const char* service, const char* name, bool isMM) {
-    platform::MdnsHost h{};
-    h.ip[0] = 192; h.ip[1] = 168; h.ip[2] = 1; h.ip[3] = 50;
-    std::snprintf(h.hostname, sizeof(h.hostname), "%s", name);
-    std::snprintf(h.service, sizeof(h.service), "%s", service);
-    h.isProjectMM = isMM;
-    return h;
+const uint8_t kSrcIp[4] = {192, 168, 1, 50};
+
+// Build a WLED-valid presence packet; `mm` stamps the projectMM marker (a projectMM peer).
+void packet(uint8_t out[WledPacket::kSize], const char* name, bool mm) {
+    WledPacket::build(out, kSrcIp, name, /*boardType=*/34, /*lightsOn=*/true);
+    if (mm) WledPacket::stampMmMarker(out);
 }
 }  // namespace
 
-TEST_CASE("MmPlugin claims an _http._tcp hit carrying the mm=1 TXT") {
+TEST_CASE("MmPlugin claims a presence packet carrying the projectMM marker") {
     MmPlugin p;
-    CHECK(std::strcmp(p.service(), "_http") == 0);
-    CHECK(std::strcmp(p.proto(), "_tcp") == 0);
+    CHECK(p.discoveryPort() == WledPacket::kPort);
 
+    uint8_t pkt[WledPacket::kSize];
+    packet(pkt, "Bench-P4", /*mm=*/true);
     DiscoveredDevice d;
-    REQUIRE(p.classify(host("_http", "Bench-P4", /*isMM=*/true), d));
+    REQUIRE(p.classifyPacket(pkt, sizeof(pkt), kSrcIp, d));
     CHECK(d.type == DevType::ProjectMM);
     CHECK(std::strcmp(d.name, "Bench-P4") == 0);
 }
 
-TEST_CASE("MmPlugin declines a generic _http._tcp box (no mm=1)") {
+TEST_CASE("MmPlugin declines a plain WLED packet (no projectMM marker)") {
     MmPlugin p;
+    uint8_t pkt[WledPacket::kSize];
+    packet(pkt, "wled-desk", /*mm=*/false);
     DiscoveredDevice d;
-    // A web device on the shared _http._tcp service without our marker is not us.
-    CHECK_FALSE(p.classify(host("_http", "some-printer", /*isMM=*/false), d));
+    CHECK_FALSE(p.classifyPacket(pkt, sizeof(pkt), kSrcIp, d));
 }
 
-TEST_CASE("WledPlugin claims a _wled._tcp hit as WLED") {
+TEST_CASE("WledPlugin claims a plain WLED packet as WLED") {
     WledPlugin p;
-    CHECK(std::strcmp(p.service(), "_wled") == 0);
+    CHECK(p.discoveryPort() == WledPacket::kPort);
 
+    uint8_t pkt[WledPacket::kSize];
+    packet(pkt, "wled-desk", /*mm=*/false);
     DiscoveredDevice d;
-    REQUIRE(p.classify(host("_wled", "wled-desk", /*isMM=*/false), d));
+    REQUIRE(p.classifyPacket(pkt, sizeof(pkt), kSrcIp, d));
     CHECK(d.type == DevType::Wled);
     CHECK(std::strcmp(d.name, "wled-desk") == 0);
 }
 
-TEST_CASE("Plugins tolerate an empty hostname (the module supplies the IP fallback)") {
-    // A hit with no resolved name still classifies by type; DevicesModule fills the
-    // display name from the IP, so an empty name here is acceptable, not a crash.
+TEST_CASE("WledPlugin declines a projectMM-marked packet (that's a peer, not a WLED)") {
+    // A projectMM peer broadcasts a WLED-VALID packet, so without the marker check WledPlugin
+    // would mis-claim it. The marker keeps the projectMM/WLED kinds distinct.
     WledPlugin p;
+    uint8_t pkt[WledPacket::kSize];
+    packet(pkt, "Bench-P4", /*mm=*/true);
     DiscoveredDevice d;
-    REQUIRE(p.classify(host("_wled", "", /*isMM=*/false), d));
+    CHECK_FALSE(p.classifyPacket(pkt, sizeof(pkt), kSrcIp, d));
+}
+
+TEST_CASE("Plugins decline a short / garbage datagram, never read out of bounds") {
+    MmPlugin mmp;
+    WledPlugin wp;
+    DiscoveredDevice d;
+    const uint8_t garbage[8] = {1, 2, 3, 4, 5, 6, 7, 8};   // too short, wrong magic
+    CHECK_FALSE(mmp.classifyPacket(garbage, sizeof(garbage), kSrcIp, d));
+    CHECK_FALSE(wp.classifyPacket(garbage, sizeof(garbage), kSrcIp, d));
+    CHECK_FALSE(wp.classifyPacket(nullptr, 0, kSrcIp, d));
+}
+
+TEST_CASE("WledPlugin tolerates an empty name (the module supplies the IP fallback)") {
+    WledPlugin p;
+    uint8_t pkt[WledPacket::kSize];
+    packet(pkt, "", /*mm=*/false);
+    DiscoveredDevice d;
+    REQUIRE(p.classifyPacket(pkt, sizeof(pkt), kSrcIp, d));
     CHECK(d.type == DevType::Wled);
     CHECK(d.name[0] == '\0');
 }

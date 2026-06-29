@@ -468,18 +468,9 @@ bool wifiSetTxPower(int8_t quarterDbm) { return quarterDbm == 0; }
 bool mdnsInit(const char* /*deviceName*/) { return false; }
 void mdnsStop() {}
 void mdnsShutdown() {}
-// No mDNS on desktop — browse is a no-op (no hosts found). A PC instance discovers peers
-// via the HTTP sweep instead (see DevicesModule).
-bool mdnsBrowse(const char* /*service*/, const char* /*proto*/, uint32_t /*timeoutMs*/,
-                MdnsHostCb /*cb*/, void* /*user*/) { return false; }
-
-// No mDNS on the desktop host — the listener finds nothing (DevicesModule then
-// shows only its own self row + any persisted devices). Returns true ("query
-// complete") so the module's service cursor advances each tick rather than stalling
-// on a service that never finishes. The DevicePlugin classification is host-unit-
-// tested directly (feeding a synthetic MdnsHost), so it needs no live mDNS source.
-bool mdnsListenPoll(const char* /*service*/, const char* /*proto*/,
-                    MdnsHostCb /*cb*/, void* /*user*/) { return true; }
+// No mDNS on desktop (advertise-only on device anyway). Discovery is UDP presence via
+// UdpSocket, which DOES work on desktop — so the discovery path is unit-testable on the
+// host with real loopback datagrams (DevicesModule::injectPacketForTest / a bound socket).
 
 // OTA — no-op on desktop (no OTA partition). The /api/firmware/url route
 // guards with `if constexpr (mm::platform::hasOta)` and returns 501 here,

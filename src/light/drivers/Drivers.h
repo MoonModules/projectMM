@@ -244,6 +244,22 @@ public:
         MoonModule::onBuildState();
     }
 
+    // First output light as RGB — the live colour of pixel 0, read from whichever buffer
+    // loop() is currently driving (the composited outputBuffer_ when allocated, else the
+    // first enabled layer's own buffer — the zero-copy single-layer path). The WLED shim
+    // tints the app's device card with this. RGB is the buffer's logical channel order
+    // (0,1,2); the per-strip wire reorder is applied later by the physical drivers, not here.
+    bool firstLedRgb(uint8_t out[3]) const override {
+        const Buffer* src = nullptr;
+        if (outputBuffer_.data()) src = &outputBuffer_;
+        else if (Layer* l = layers_ ? layers_->firstEnabledLayer() : layer_; l && l->buffer().data())
+            src = &l->buffer();
+        if (!src || src->count() == 0 || src->channelsPerLight() < 3) return false;
+        const uint8_t* p = src->data();
+        out[0] = p[0]; out[1] = p[1]; out[2] = p[2];
+        return true;
+    }
+
     void loop() override {
         // Composite into outputBuffer_ when one is allocated (≥2 enabled layers,
         // or a single layer with a LUT — see onBuildState). A null data_ means

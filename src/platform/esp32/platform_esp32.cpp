@@ -998,10 +998,11 @@ bool wifiSetTxPower(int8_t quarterDbm) { return quarterDbm == 0; }
 #endif // MM_NO_WIFI
 
 // Bring the mDNS stack up (idempotent) and ADVERTISE this device as <deviceName>.local.
-// Advertising is gated by the user's mDNS toggle; the stack init is NOT — browse needs
-// the stack regardless (see mdnsBrowseStart), so mdns_init stays even when the toggle is
-// off. mdns_init is safe to call when already running (returns an already-init error we
-// treat as fine).
+// Advertising is gated by the user's mDNS toggle; the stack init is NOT — mdnsStop()
+// removes the services + hostname but keeps the stack up, so toggling mDNS back on
+// re-advertises without a full re-init. mdns_init is safe to call when already running
+// (returns an already-init error we treat as fine). Discovery does NOT use mDNS (it's UDP
+// presence — see DevicesModule); mDNS here is advertise-only.
 static bool mdnsStackUp_ = false;
 
 static bool ensureMdnsStack() {
@@ -1018,60 +1019,75 @@ static bool ensureMdnsStack() {
 bool mdnsInit(const char* deviceName) {
     if (!ensureMdnsStack()) return false;
     esp_err_t err = mdns_hostname_set(deviceName);
+    ESP_LOGI(NET_TAG, "mDNS hostname set %s: %s", deviceName, esp_err_to_name(err));
     if (err != ESP_OK) {
         ESP_LOGE(NET_TAG, "mDNS hostname set failed: %s", esp_err_to_name(err));
         return false;
     }
-    // Advertise an `_http._tcp` service so other devices DISCOVER us by browsing the
-    // service type (not just by resolving our hostname) — the standard, push-style way
-    // a web device announces itself (WLED, ESPHome, Hue all advertise `_http._tcp`).
-    // This is what lets two projectMM devices find each other over mDNS with no subnet
-    // sweep. The instance name is the deviceName; the port is the HTTP server's (80).
-    // Branch on whether the service already exists (a reconnect re-runs this) rather
-    // than treating ANY mdns_service_add failure as "already there" — an add failure
-    // could be OOM/invalid-state, which must surface, not be silently logged as started.
-    esp_err_t svcErr = mdns_service_exists("_http", "_tcp", nullptr)
-        ? mdns_service_instance_name_set("_http", "_tcp", deviceName)
-        : mdns_service_add(deviceName, "_http", "_tcp", 80, nullptr, 0);
-    if (svcErr != ESP_OK) {
-        ESP_LOGE(NET_TAG, "mDNS _http._tcp advertise failed: %s", esp_err_to_name(svcErr));
-        return false;   // hostname is set, but advertising failed — report it
+
+    // FORCE A FRESH RE-ADVERTISE: remove any existing service record, then add it back.
+    // A reconnect / interface switch / live rename re-runs this; just renaming the
+    // instance (mdns_service_instance_name_set) does NOT reliably re-announce on the
+    // current netif/IP — a remove+add does, by driving the service back through the IDF
+    // probe→announce state machine on the active interface. The remove is a no-op
+    // (ESP_OK) when the service isn't present (first run), so this one path serves both
+    // first-advertise and re-advertise. Logged per step so a bench can compare boards.
+    const bool reAdvertise = mdns_service_exists("_http", "_tcp", nullptr);
+    mdns_service_remove("_http", "_tcp");
+    mdns_service_remove("_wled", "_tcp");
+
+    // `_http._tcp`: how other devices DISCOVER us by browsing the service type (the
+    // standard push-style announce — WLED/ESPHome/Hue all advertise `_http._tcp`). Fatal
+    // if it fails: discovery is the point. Instance name = deviceName, port = HTTP (80).
+    esp_err_t httpErr = mdns_service_add(deviceName, "_http", "_tcp", 80, nullptr, 0);
+    ESP_LOGI(NET_TAG, "mDNS _http._tcp add (%s): %s",
+             reAdvertise ? "re-advertise" : "fresh", esp_err_to_name(httpErr));
+    if (httpErr != ESP_OK) {
+        ESP_LOGE(NET_TAG, "mDNS _http._tcp advertise failed: %s", esp_err_to_name(httpErr));
+        return false;
     }
-    // Tag the service with a `mm=1` TXT record so a browsing projectMM peer can tell us
-    // apart from a generic `_http._tcp` web box (WLED/ESPHome/Hue all share that service)
-    // WITHOUT an HTTP probe — DevicesModule reads this to classify the peer as projectMM
-    // straight from the browse. Idempotent: set on both the add and reconnect paths. A
-    // TXT failure is non-fatal (advertising still works; the peer just falls back to the
-    // HTTP scan to classify us), so it's logged, not returned.
+    // `mm=1` TXT so a browsing projectMM peer tells us apart from a generic `_http._tcp`
+    // box without an HTTP probe — DevicesModule classifies us projectMM straight from the
+    // announcement. Non-fatal (advertising still works without it).
     esp_err_t txtErr = mdns_service_txt_item_set("_http", "_tcp", "mm", "1");
-    if (txtErr != ESP_OK)
-        ESP_LOGW(NET_TAG, "mDNS _http._tcp TXT mm=1 set failed: %s", esp_err_to_name(txtErr));
+    ESP_LOGI(NET_TAG, "mDNS _http._tcp TXT mm=1 set: %s", esp_err_to_name(txtErr));
 
-    // Also advertise `_wled._tcp` — the service the native WLED apps (iOS / Android /
-    // Desktop, all one Flutter codebase) and Home Assistant browse for. This is how a
-    // projectMM device appears in the WLED ecosystem's UIs without speaking WLED's UDP
-    // protocol; the HTTP server on :80 answers their probes. Same add-or-rename branch
-    // as `_http._tcp` (a reconnect re-runs this). Non-fatal: a failure just means we
-    // don't show up in those apps, the rest of discovery still works.
-    esp_err_t wledErr = mdns_service_exists("_wled", "_tcp", nullptr)
-        ? mdns_service_instance_name_set("_wled", "_tcp", deviceName)
-        : mdns_service_add(deviceName, "_wled", "_tcp", 80, nullptr, 0);
-    if (wledErr != ESP_OK)
-        ESP_LOGW(NET_TAG, "mDNS _wled._tcp advertise failed: %s", esp_err_to_name(wledErr));
+    // `_wled._tcp`: the service the native WLED apps + Home Assistant browse for — how a
+    // projectMM device appears in the WLED ecosystem without speaking WLED's UDP protocol
+    // (the HTTP server on :80 answers their /json/info probe). Non-fatal: a failure just
+    // means we don't show in those apps; the rest of discovery still works.
+    esp_err_t wledErr = mdns_service_add(deviceName, "_wled", "_tcp", 80, nullptr, 0);
+    ESP_LOGI(NET_TAG, "mDNS _wled._tcp add: %s", esp_err_to_name(wledErr));
+    // `mac=` TXT — a real WLED carries `mac=<12 hex>` on its _wled._tcp record, and the
+    // native apps key the discovered device on it (without it the record is discarded, so
+    // the device never lists). Lowercase hex, no separators, matching WLED's format.
+    uint8_t mac[6] = {};
+    esp_efuse_mac_get_default(mac);
+    char macStr[13];
+    std::snprintf(macStr, sizeof(macStr), "%02x%02x%02x%02x%02x%02x",
+                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    esp_err_t wledTxtErr = mdns_service_txt_item_set("_wled", "_tcp", "mac", macStr);
+    ESP_LOGI(NET_TAG, "mDNS _wled._tcp TXT mac=%s set: %s", macStr, esp_err_to_name(wledTxtErr));
 
-    ESP_LOGI(NET_TAG, "mDNS started: %s.local (advertising _http._tcp:80 mm=1, _wled._tcp:80)",
-             deviceName);
+    ESP_LOGI(NET_TAG, "mDNS started: %s.local (advertising _http._tcp:80 mm=1, _wled._tcp:80 mac=%s)",
+             deviceName, macStr);
     return true;
 }
 
 void mdnsStop() {
     // Tearing the stack down would also kill browse. The toggle-off path wants to stop
-    // ADVERTISING, not lose discovery — so keep the stack but drop both the advertised
-    // hostname AND the _http._tcp service record; full mdns_free only on teardown
-    // (where everything stops anyway). mdns_service_remove is a no-op if not added.
+    // ADVERTISING, not lose discovery — so keep the stack but drop BOTH advertised
+    // services AND the hostname; full mdns_free only on teardown (where everything stops
+    // anyway). Symmetric with mdnsInit, which adds both _http._tcp and _wled._tcp: a
+    // network drop / interface switch (NetworkModule calls this on eth/WiFi drop + switch)
+    // must remove BOTH, or a stale _wled._tcp survives the churn and can confuse a later
+    // re-advertise. mdns_service_remove is a no-op (ESP_OK) if the service isn't present.
     if (mdnsStackUp_) {
-        mdns_service_remove("_http", "_tcp");
+        esp_err_t httpRm = mdns_service_remove("_http", "_tcp");
+        esp_err_t wledRm = mdns_service_remove("_wled", "_tcp");
         mdns_hostname_set("");
+        ESP_LOGI(NET_TAG, "mDNS stopped advertising (_http remove: %s, _wled remove: %s)",
+                 esp_err_to_name(httpRm), esp_err_to_name(wledRm));
     }
 }
 
@@ -1082,74 +1098,9 @@ void mdnsShutdown() {
 
 // --- mDNS service browse (synchronous, bounded) ---
 
-// One synchronous PTR browse for `service`/`proto`, blocking up to `timeoutMs`, then it
-// frees everything it allocated before returning. Self-contained ON PURPOSE: the earlier
-// async API (mdns_query_async_new + poll-the-handle-across-ticks) raced the mDNS task's
-// own search-expiry timer — when a query's window lapsed, the component freed the search's
-// internal queue, and our next-tick poll asserted on it (xQueueSemaphoreTake on a null
-// queue, crashing on a UI refresh). Holding no handle across ticks closes that window by
-// construction. The cost is a bounded blocking call: DevicesModule calls this on loop1s
-// (not the render hot path) for ONE service type per tick with a small timeout, the
-// standard mDNS-query pattern (WLED/ESPHome do the same), so the tick budget is fine.
-// Map one IDF mdns_result_t into our MdnsHost POD (defined below; shared by the
-// blocking browse and the non-blocking listener).
-static void mdnsFillHost(const mdns_result_t* r, const char* service, MdnsHost& h);
-
-bool mdnsBrowse(const char* service, const char* proto, uint32_t timeoutMs,
-                MdnsHostCb cb, void* user) {
-    // Browse needs only the mDNS stack, not advertising — bring it up regardless of the
-    // advertise toggle (mdnsStop clears the hostname but keeps the stack), so a device
-    // that doesn't advertise can still discover others.
-    if (!ensureMdnsStack()) return false;
-    mdns_result_t* results = nullptr;
-    if (mdns_query_ptr(service, proto, timeoutMs, 16, &results) != ESP_OK) return false;
-    for (mdns_result_t* r = results; r && cb; r = r->next) {
-        MdnsHost h{};
-        mdnsFillHost(r, service, h);
-        cb(h, user);
-    }
-    if (results) mdns_query_results_free(results);
-    return true;
-}
-
-// Map one IDF mdns_result_t into our MdnsHost POD (no IDF types leak across the
-// seam). Shared by the blocking browse above and the non-blocking listener below.
-static void mdnsFillHost(const mdns_result_t* r, const char* service, MdnsHost& h) {
-    const char* name = (r->instance_name && r->instance_name[0]) ? r->instance_name
-                      : (r->hostname ? r->hostname : nullptr);
-    if (name) std::snprintf(h.hostname, sizeof(h.hostname), "%s", name);
-    h.port = r->port;
-    if (service) std::snprintf(h.service, sizeof(h.service), "%s", service);
-    for (size_t i = 0; i < r->txt_count; i++) {
-        if (r->txt[i].key && std::strcmp(r->txt[i].key, "mm") == 0
-            && r->txt_value_len[i] == 1 && r->txt[i].value && r->txt[i].value[0] == '1') {
-            h.isProjectMM = true;
-            break;
-        }
-    }
-    for (mdns_ip_addr_t* a = r->addr; a; a = a->next) {
-        if (a->addr.type == ESP_IPADDR_TYPE_V4) {
-            uint32_t v = a->addr.u_addr.ip4.addr;   // little-endian packed (octet i = byte i)
-            h.ip[0] = v & 0xff; h.ip[1] = (v >> 8) & 0xff;
-            h.ip[2] = (v >> 16) & 0xff; h.ip[3] = (v >> 24) & 0xff;
-            break;
-        }
-    }
-}
-
-// One mDNS service query for DevicesModule's discovery loop — a thin wrapper over the
-// blocking mdnsBrowse with a SHORT (bounded) window, doing the full PTR→SRV→TXT→A
-// resolution. The blocking cost is fine off the render hot path; what matters is the
-// CALLER's CADENCE: this must be called slowly (one service every few seconds, not
-// every tick). Firing a query every tick exhausts the IDF mDNS task's internal pool
-// — it reports "Cannot allocate memory" with megabytes of heap free (its own fixed
-// buffers, not real OOM) and destabilises the device's networking until peers appear
-// to drop off the LAN. DevicesModule throttles to one query per kQueryEverySec ticks;
-// see the rate-limit lesson in docs/history/decisions.md.
-bool mdnsListenPoll(const char* service, const char* proto, MdnsHostCb cb, void* user) {
-    mdnsBrowse(service, proto, 120 /*ms — short, bounded*/, cb, user);
-    return true;
-}
+// mDNS is advertise-only (mdnsInit). There is no browse/query here: discovery uses UDP
+// presence (DevicesModule + WledPacket), because a PTR query for a service this device
+// also hosts destabilises our own advertise — see docs/history/decisions.md.
 
 // UdpSocket
 

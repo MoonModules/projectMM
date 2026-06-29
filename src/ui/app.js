@@ -100,6 +100,11 @@ function connectWs() {
         }
         try {
             const data = JSON.parse(e.data);
+            // The same /ws also carries WLED-compatibility {state,info} frames for the
+            // native WLED app (see HttpServerModule's WLED shim). Those are not our
+            // module-state shape — ignore anything without a `modules` array, or it would
+            // clobber `state` and blank the module view until the next module frame.
+            if (!data || !Array.isArray(data.modules)) return;
             state = data;
             updateValues();
         } catch {
@@ -1386,6 +1391,17 @@ function fillListDetail(panel, detail) {
             vEl.textContent = relativeAge(Number(v));
             const ageClass = ageBucketClass(Number(v));   // tint to match the summary dot
             if (ageClass) vEl.classList.add(ageClass);
+        } else if (typeof v === "string" && /^https?:\/\//.test(v)) {
+            // A value that is an http(s) URL (e.g. a device's `url`) renders as a link that
+            // opens in a new tab — generic, any ListSource detail can surface one. rel
+            // guards the opened page from reaching back via window.opener.
+            const a = document.createElement("a");
+            a.href = v;
+            a.textContent = v;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.className = "list-detail-link";
+            vEl.appendChild(a);
         } else {
             vEl.textContent = String(v);
         }

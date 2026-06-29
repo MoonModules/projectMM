@@ -9,6 +9,8 @@ add_executable(mm_tests
     unit/core/unit_Control_list.cpp
     unit/core/unit_DeviceIdentify.cpp
     unit/core/unit_DevicesModule_ageout.cpp
+    unit/core/unit_DevicesModule_discovery.cpp
+    unit/core/unit_WledPacket.cpp
     unit/core/unit_FilesystemModule_persistence.cpp
     unit/core/unit_FirmwareUpdateModule.cpp
     unit/core/unit_HttpServerModule_apply.cpp
@@ -46,6 +48,7 @@ add_executable(mm_tests
     unit/light/unit_DistortionWavesEffect.cpp
     unit/light/unit_Correction.cpp
     unit/light/unit_Drivers_container.cpp
+    unit/light/unit_Drivers_firstLedRgb.cpp
     unit/light/unit_FireEffect.cpp
     unit/light/unit_GameOfLifeEffect.cpp
     unit/light/unit_GridLayout.cpp
