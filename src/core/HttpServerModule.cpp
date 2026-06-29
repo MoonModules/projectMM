@@ -94,7 +94,12 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
     buf[totalRead] = 0;
     auto* req = reinterpret_cast<char*>(buf);
 
-    // If we have headers but body might still be arriving, read more
+    // If headers arrived but the body is still in flight, read the rest. read() is
+    // non-blocking (-1 = nothing pending yet), so the body can land a TCP segment after the
+    // headers — wait briefly between empty reads (the same bounded retry as the header
+    // phase) instead of breaking on the first -1, which would route a TRUNCATED body into
+    // the permissive JSON helpers (a silent partial control write). If the full declared
+    // body still hasn't arrived within the budget, reject with 400 rather than process it.
     auto* headerEnd = std::strstr(req, "\r\n\r\n");
     if (headerEnd) {
         auto* clh = std::strstr(req, "Content-Length:");
@@ -102,12 +107,20 @@ void HttpServerModule::handleConnection(platform::TcpConnection& conn) {
             int contentLen = std::atoi(clh + 15);
             int headerSize = static_cast<int>(headerEnd + 4 - req);
             int bodyNeeded = headerSize + contentLen;
-            while (totalRead < bodyNeeded && totalRead < static_cast<int>(sizeof(buf) - 1)) {
+            if (bodyNeeded > static_cast<int>(sizeof(buf) - 1))
+                bodyNeeded = static_cast<int>(sizeof(buf) - 1);   // cap to buffer
+            for (int empties = 0; totalRead < bodyNeeded;) {
                 int n = conn.read(buf + totalRead, sizeof(buf) - 1 - totalRead);
-                if (n > 0) totalRead += n;
-                else break;
+                if (n > 0) { totalRead += n; empties = 0; }
+                else if (n == 0) break;                    // peer closed
+                else { if (++empties > 50) break; platform::delayMs(1); }  // ~50 ms for the body
             }
             buf[totalRead] = 0;
+            if (totalRead < bodyNeeded) {                  // body never fully arrived
+                sendResponse(conn, 400, "application/json",
+                             "{\"error\":\"incomplete request body\"}");
+                return;
+            }
         }
     }
 

@@ -346,30 +346,38 @@ private:
         }
     }
 
-    // Guarantee this device is listed (marked self). Self never ages out (restamped
-    // "now" each tick it's online).
+    // Guarantee the self row exists at the current local IP (called every tick — idempotent).
+    // Self never ages out (the row at the current IP is restamped each tick). Re-sorts +
+    // refreshes status ONLY when the row actually changed (a fresh insert or an IP migration),
+    // not every tick — a no-op tick must not arm persistence (same rule as upsertDevice).
     void upsertSelf(const uint8_t ip[4]) {
+        bool changed = false;
         // Demote any prior self row at a DIFFERENT address — our IP moved (DHCP / interface
         // switch). It loses the self mark, so ageOut treats it as an ordinary peer and lets
         // it expire, instead of staying immortal at the old address.
         for (uint8_t i = 0; i < deviceCount_; i++)
-            if (devices_[i].self && !ipEq(devices_[i].ip, ip)) devices_[i].self = false;
+            if (devices_[i].self && !ipEq(devices_[i].ip, ip)) { devices_[i].self = false; changed = true; }
 
         Device* d = findByIp(ip);
         if (!d) {
             if (deviceCount_ >= kMaxDevices) return;
             d = &devices_[deviceCount_++];
             std::memcpy(d->ip, ip, 4);
+            changed = true;            // a new row changes the saved list
         }
-        d->type = DevType::ProjectMM;
-        d->self = true;
+        if (d->type != DevType::ProjectMM) { d->type = DevType::ProjectMM; changed = true; }
+        if (!d->self) { d->self = true; changed = true; }
         d->cached = false;
-        d->lastSeenMs = platform::millis();
+        d->lastSeenMs = platform::millis();   // transient — not persisted
         if (!d->name[0]) {
             const char* n = (selfName_ && selfName_[0]) ? selfName_ : "this device";
             std::snprintf(d->name, sizeof(d->name), "%s", n);
+            changed = true;
         }
-        sortByName();
+        if (changed) {                 // only a real self-row change re-sorts + arms persistence
+            sortByName();
+            refreshStatus();
+        }
     }
 
     // True when `name` is just the device's own IP — a placeholder a sighting fell back

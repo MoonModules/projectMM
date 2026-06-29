@@ -16,7 +16,7 @@ Scan state ("N devices found", "set sda + scl pins first") reports through the s
 
 The probe is `platform::i2cScan(sda, scl, out, maxOut)` (declared in `src/platform/platform.h`). That seam is self-contained: it opens a **temporary** I2C master bus on the given pins, probes every 7-bit address (`0x01`–`0x77`), writes the ACKing addresses into the caller's buffer, and tears the bus down. Opening its own short-lived bus (rather than borrowing one) means the scan never conflicts with a bus another driver owns — e.g. the ES8311 codec on the ESP32-S31 holds its own bus in `platform_esp32_es8311.cpp`; the scan probes the same pins independently between codec operations.
 
-On a target without I2C the seam returns 0 (the inert stub), so the scan reports "0 devices found" rather than failing — same uniformity as the other platform seams.
+On a target without an I2C bus (the inert stub: an I2C-less ESP32, or desktop) the seam returns `kI2cBusUnavailable`, so the scan reports "bus unavailable" rather than a misleading "0 devices found" — the 0 is reserved for a real scan where nothing ACKed.
 
 ## Prior art
 

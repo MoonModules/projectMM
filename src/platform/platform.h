@@ -204,20 +204,6 @@ bool http_fetch_to_ota(const char* url,
                        char* statusBuf, size_t statusBufLen,
                        uint32_t* bytesReadOut, uint32_t* bytesTotalOut);
 
-// Short-timeout outbound HTTP GET for device discovery: fetch `url` into the
-// caller-owned `body` buffer (NUL-terminated, truncated to bodyLen-1), with a
-// per-request timeout. Returns the HTTP status code (e.g. 200), 0 on connect
-// timeout / no response / error. DevicesModule uses this to probe each host on
-// the LAN and identify it from the response (projectMM /api/state, WLED
-// /json/info, else generic). Synchronous and blocking up to `timeoutMs`. The scan
-// calls this from loop1s() (the render task), so it bounds the cost to ONE probe per
-// tick with a short timeout (~150 ms) and runs the sweep boot-once + on manual request
-// only — never continuously — so a blocked probe can't accumulate into LED flicker.
-// Moving the probe to its own task (the enabler for fast + periodic sweeping) is in the
-// backlog. Desktop: real implementation (libcurl-free, plain socket) so the scan works
-// on a PC instance too.
-int httpGet(const char* url, uint32_t timeoutMs, char* body, size_t bodyLen);
-
 // Improv WiFi provisioning over UART0.
 // ESP32 only; desktop stub returns false. Spawns a FreeRTOS task that installs
 // a UART driver on UART_NUM_0 (the same channel ESP-IDF logging writes to;

@@ -36,7 +36,7 @@ The plugin classification is pure and host-unit-tested (`unit_DeviceIdentify.cpp
 
 ### Age-out
 
-Each sighting stamps the device's `lastSeenMs`; `ageOut()` runs every tick and drops a non-self device unheard for `kStaleMs` (60 s ≈ a few broadcast intervals). A **timestamp**, not a counter. The self entry never ages out (restamped each tick it's online). Storage is a fixed `devices_[kMaxDevices]` array — bounded, no heap.
+Each sighting stamps the device's `lastSeenMs`; `ageOut()` runs every tick. A live-confirmed device is kept for `kStaleMs` (**24 h**) after its last presence packet, so the list is a durable "devices I've seen" history; a **cached** row (restored from persistence, not yet re-heard this session) gets only a short `kCachedGraceMs` (**60 s**) probation, so a long-gone persisted device can't survive forever across reboots — a live packet promotes it to the 24 h window. A **timestamp**, not a counter. The self row never ages out (it tracks the current local IP). Storage is a fixed `devices_[kMaxDevices]` array — bounded, no heap.
 
 ## Interop — projectMM shows up in WLED
 
@@ -70,7 +70,7 @@ The `devices` List serializes (via [Control](Control.md)'s `ControlType::List`) 
 
 - **mDNS-SD / DNS-SD (Bonjour, Avahi)** — the industry-standard service-discovery pattern this module uses: announce a service, browse for it. WLED, ESPHome, Home Assistant, Hue all speak it.
 - **WLED** — the `_wled._tcp` service it advertises (and that the native WLED iOS/Android/Desktop apps browse) is the interop target the `WledPlugin` + the `_wled._tcp` advertise serve.
-- **MoonLight** uses a UDP presence broadcast for device discovery; DevicesModule takes the "devices find each other" idea but uses the standard mDNS announce/listen instead of a bespoke UDP beacon (mDNS is what the whole ecosystem already speaks).
+- **MoonLight** ([`ModuleDevices.h`](https://github.com/ewowi/MoonLight/blob/main/src/MoonBase/Modules/ModuleDevices.h)) uses a UDP presence broadcast for device discovery; DevicesModule carries that idea forward — the 44-byte WLED-compatible packet on UDP 65506 (see [`WledPacket`](../../../src/core/WledPacket.h)), written fresh against our architecture. mDNS stays advertise-only, for the foreign apps that discover *us* over it (the WLED native app, Home Assistant).
 - The web installer's `docs/install/devices.js` "Your devices" list is the prior art for the device record shape (name / url / type).
 
 ## Source
