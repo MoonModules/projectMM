@@ -152,7 +152,7 @@ This is the current iteration of years of LED / light system development. Each p
 | **WLED** | Open-source LED firmware (user / contributor since 2021) | [Aircoookie/WLED](https://github.com/Aircoookie/WLED) |
 | **WLED-MoonModules** | WLED fork with advanced features | [MoonModules/WLED](https://github.com/MoonModules/WLED) |
 | **StarLight** | Standalone LED firmware | [ewowi/StarLight](https://github.com/ewowi/StarLight) |
-| **MoonLight** | Ground-up build: 60+ effects, memory-optimised mapping, 11 driver types | [MoonModules/MoonLight](https://github.com/MoonModules/MoonLight) |
+| **MoonLight** | Ground-up build: 60+ effects, memory-optimised mapping, 11 driver types | [ewowi/MoonLight](https://github.com/ewowi/MoonLight) |
 
 We built, maintained, and contributed to these projects, so projectMM is grounded in years of our own hands-on experience, not arms-length study. Their lessons and proven patterns are distilled in [`docs/history/`](docs/history/README.md), alongside monthly digests of friend projects (like FastLED and upstream WLED) we follow closely but don't own. From all of it we carry the ideas forward into our own implementation: we apply what we learned and write our own code rather than copying theirs; and when a specific project or person inspires something here, we credit them by name (in the history digests and each module's "Prior art" notes).
 

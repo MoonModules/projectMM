@@ -234,7 +234,11 @@ private:
     // when nothing is wired yet, or when the existing allocation already fits.
     void resizeCorrected() {
         if (!correction_ || !sourceBuffer_) return;
-        const nrOfLightsType n = sourceBuffer_->count();
+        // Size for the window slice this sender actually transmits, not the whole
+        // frame — a sink covering 64 of a 16K-light buffer reserves 64. The same
+        // windowSlice() the send loop uses, so the buffers stay in lock-step.
+        nrOfLightsType winStart, n;
+        windowSlice(sourceBuffer_->count(), winStart, n);
         const uint8_t ch = correction_->outChannels;
         if (n == 0 || ch == 0) return;
         if (corrected_.count() >= n && corrected_.channelsPerLight() >= ch) return;

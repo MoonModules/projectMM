@@ -49,7 +49,7 @@ Control values persist via [FilesystemModule](FilesystemModule.md), which overla
 
 ## Prior art
 
-### MoonLight — addControl ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonBase/Nodes.h#L80))
+### MoonLight — addControl ([source](https://github.com/ewowi/MoonLight/blob/main/src/MoonBase/Nodes.h#L80))
 
 Binds via `reinterpret_cast<uintptr_t>(&variable)`; UI types "slider"/"select"/"toggle"/"text"/"display".
 

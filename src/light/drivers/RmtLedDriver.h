@@ -357,7 +357,12 @@ private:
     // hot path. Grows only — keeps a big-enough existing allocation.
     void resizeSymbols() {
         if (!sourceBuffer_ || !correction_) return;
-        const nrOfLightsType n = sourceBuffer_->count();
+        // Size for this driver's window slice, not the whole source buffer — an
+        // onboard-LED slice of 1 reserves 1 light's worth of symbols, not the full
+        // grid's. Derive the window length directly (windowSlice is independent of
+        // the pin parse, so the buffer sizes correctly even before pins are set).
+        nrOfLightsType winStart, n;
+        windowSlice(sourceBuffer_->count(), winStart, n);
         const uint8_t ch = correction_->outChannels;
         if (n == 0 || ch == 0) return;
         const size_t need = symbolsFor(n, ch);

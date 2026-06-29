@@ -914,10 +914,10 @@
     "url": "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s31/esp32-s31-function-coreboard-1/user_guide.html",
     "supported": [
       "LEDs",
-      "WiFi",
-      "Audio"
+      "WiFi"
     ],
     "planned": [
+      "Audio",
       "Ethernet",
       "Bluetooth",
       "Thread/Zigbee",

@@ -83,6 +83,10 @@ On-chip EMAC → **YT8531** (Motorcomm) PHY (U8) → RJ45, **RGMII** with a 25 M
 Wi-Fi 6 · Bluetooth (no separate BLE soc-flag) · IEEE 802.15.4 (Thread/Zigbee) · USB-OTG · GPSPI ·
 TWAI (CAN) · RMT · Parlio · LCD_CAM i80 · on-chip EMAC · PSRAM. RISC-V dual-core.
 
-What projectMM drives on the S31 today: **LEDs** (RMT, GPIO60) + **Wi-Fi 6**. Ethernet, audio, and
-the rest are board capabilities not yet wired — see the S31 entry's `planned` list in
+The S31 catalog entry drives **LEDs** (RMT on GPIO60) and **Wi-Fi 6**, and wires an
+**[I2cScanModule](../moonmodules/core/I2cScanModule.md)** on the codec bus (SDA 51 / SCL 50) for
+I2C bring-up. The ES8311 audio path is implemented (codec seam + `AudioModule`); the codec is
+reachable on I2C, and validating the mic end-to-end depends on confirming MCLK at GPIO52 — so
+**Audio** sits in the entry's `planned` list until that lands. The remaining board capabilities
+(Ethernet, Bluetooth, SD, USB host, …) are in `planned` too; see the S31 entry in
 `docs/install/deviceModels.json`.

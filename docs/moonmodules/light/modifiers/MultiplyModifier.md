@@ -36,7 +36,7 @@ A Layer folds all its enabled modifiers as a chain (order matters: multiply-then
 
 ## Prior art
 
-### MoonLight — M_MoonLight.h Multiply ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h))
+### MoonLight — M_MoonLight.h Multiply ([source](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h))
 
 MoonLight's Multiply node tiles via `position % modifierSize` and reflects odd tiles when its `mirror` flag is set (`position = size − 1 − position`). We expose **per-axis** mirror bools and per-axis multipliers instead of MoonLight's single multiplier coord + single mirror flag, so X/Y/Z fold and tile independently. MoonLight keeps Mirror, Multiply, Transpose, and Kaleidoscope as separate nodes; we fold mirror into Multiply since mirror is just multiply-2-with-reflection.
 

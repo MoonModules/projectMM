@@ -44,7 +44,7 @@ The motivating case: an **onboard status LED** and a **main strip** as two drive
 
 ## Prior art
 
-### MoonLight — PhysicalLayer ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h))
+### MoonLight — PhysicalLayer ([source](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/PhysicalLayer.h))
 
 Owns `channelsD` (display buffer). `compositeLayers()` maps virtualChannels → channelsD. Parallelism via semaphore: driver signals completion, compositor writes.
 

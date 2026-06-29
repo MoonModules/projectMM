@@ -14,7 +14,7 @@ The container owns no buffer: each layer owns its own, and the Drivers container
 
 ## Prior art
 
-### MoonLight — VirtualLayer / PhysicalLayer ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight))
+### MoonLight — VirtualLayer / PhysicalLayer ([source](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight))
 
 MoonLight's `PhysicalLayer` runs N `VirtualLayer`s and composites their buffers into the display channel. Same idea, different shape: Drivers (not Layers) does the compositing here.
 

@@ -564,8 +564,10 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCou
 // the path stays uniform.
 // Returns true when there's nothing to do (CodecType::None / no codec on this
 // target) or the codec came up; false on an I2C/codec error (the module then
-// idles with a status error, same as a failed mic init). Called by AudioModule
-// before audioMicInit; the codec then presents standard I2S the read picks up.
+// idles with a status error, same as a failed mic init). AudioModule calls this
+// *after* audioMicInit: the I2S channel must already be driving MCLK before the
+// codec is configured (the ES8311 won't answer I2C without MCLK running). The
+// codec then presents standard I2S the read picks up.
 bool audioCodecInit(CodecType type, const AudioCodecPins& pins, uint32_t sampleRate);
 
 void audioCodecDeinit();
@@ -600,13 +602,19 @@ void audioFft(const float* windowed, size_t n, float* outMag);
 // by the I2cScanModule diagnostic (src/core/I2cScanModule.h) to help bring up
 // any I2C peripheral (a codec, a sensor, an expander) — confirm wiring and read
 // off a device's address. Self-contained: opens a temporary master bus on the
-// given pins, scans, tears it down (so it doesn't conflict with a bus another
-// driver owns). Internal pull-ups enabled (most breakouts also pull up).
+// given pins, scans, tears it down. The bus is transient, so it only conflicts
+// with a driver that *currently* holds the port (e.g. the ES8311 codec keeps
+// I2C_NUM_0 open while AudioModule is active) — that case is reported as
+// kI2cBusUnavailable, not silently as "0 devices". Internal pull-ups enabled.
 // ---------------------------------------------------------------------------
+
+// Sentinel: the bus couldn't be opened (already held by another driver, or no
+// I2C on this target) — distinct from a successful scan that found 0 devices.
+inline constexpr size_t kI2cBusUnavailable = static_cast<size_t>(-1);
 
 // Scan the I2C bus on (sda, scl); write the 7-bit addresses that ACK into
 // `out` (caller-sized, capacity `maxOut`) and return the count found (capped at
-// maxOut). Returns 0 on a bus-init failure or a target without I2C.
+// maxOut), or kI2cBusUnavailable if the bus couldn't be opened.
 size_t i2cScan(uint16_t sda, uint16_t scl, uint8_t* out, size_t maxOut);
 
 } // namespace mm::platform

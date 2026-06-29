@@ -61,7 +61,7 @@ Consider whether Layer itself can provide the rendering context (buffer, dims, e
 
 ## Prior art
 
-### MoonLight — VirtualLayer ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h))
+### MoonLight — VirtualLayer ([source](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h))
 
 - `startPct`/`endPct` as Coord3D percentages (0-100) of the total fixture.
 - `oneToOneMapping` flag for fast path.

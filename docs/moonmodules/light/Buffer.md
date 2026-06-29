@@ -16,7 +16,7 @@ Semaphores are expensive (~150 bytes on ESP32), so prefer lock-free patterns: an
 
 ## Prior art
 
-### MoonLight — VirtualLayer.virtualChannels ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h))
+### MoonLight — VirtualLayer.virtualChannels ([source](https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h))
 
 Raw `uint8_t*` buffer, sized by `channelsPerLight * nrOfLights`. Supports RGB, RGBW, and multi-channel DMX fixtures via LightsHeader offsets.
 

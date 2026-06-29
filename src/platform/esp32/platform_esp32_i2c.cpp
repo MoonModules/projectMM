@@ -40,10 +40,13 @@ size_t i2cScan(uint16_t sda, uint16_t scl, uint8_t* out, size_t maxOut) {
     busCfg.glitch_ignore_cnt = 7;
     busCfg.flags.enable_internal_pullup = true;
 
+    // A failure here is most often "port already in use" — another driver (the
+    // ES8311 codec on I2C_NUM_0) currently holds the bus. Report that distinctly
+    // so the UI shows "bus in use", not a misleading "0 devices found".
     i2c_master_bus_handle_t bus = nullptr;
     if (i2c_new_master_bus(&busCfg, &bus) != ESP_OK) {
-        ESP_LOGW(I2C_TAG, "i2c bus init failed (sda %u scl %u)", sda, scl);
-        return 0;
+        ESP_LOGW(I2C_TAG, "i2c bus unavailable (sda %u scl %u) — already in use?", sda, scl);
+        return kI2cBusUnavailable;
     }
 
     // Probe the 7-bit address range (0x01–0x77; 0x00 and 0x78+ are reserved).

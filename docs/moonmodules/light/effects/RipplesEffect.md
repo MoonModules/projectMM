@@ -15,7 +15,7 @@ Genuinely 3D (`Dim::D3`): it writes a height across the y-axis. On a flat 2D lay
 
 ## Prior art
 
-Ported from [MoonLight](https://github.com/MoonModules/MoonLight)'s Ripples (via projectMM-v1), studied and rewritten against this project's `EffectBase` — we read the approach and implemented our own, reusing `core/color.h`'s `hsvToRgb` rather than MoonLight's inlined HSV. The wavefront math (distance → phase → sine height, the `1.3·(255−interval)/128·√h` spacing and `millis/(100−speed)/6.4` time base) follows MoonLight's so the look matches.
+Ported from [MoonLight](https://github.com/ewowi/MoonLight)'s Ripples (via projectMM-v1), studied and rewritten against this project's `EffectBase` — we read the approach and implemented our own, reusing `core/color.h`'s `hsvToRgb` rather than MoonLight's inlined HSV. The wavefront math (distance → phase → sine height, the `1.3·(255−interval)/128·√h` spacing and `millis/(100−speed)/6.4` time base) follows MoonLight's so the look matches.
 
 Float trig (`sinf`/`sqrtf`) in the loop is consistent with the existing wave effects (Plasma, LavaLamp); the hot-path integer-math preference is for per-light colour work, not the handful of transcendental ops a wavefront needs.
 

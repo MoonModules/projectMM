@@ -66,6 +66,14 @@ private:
         const size_t n = platform::i2cScan(static_cast<uint16_t>(sda_),
                                            static_cast<uint16_t>(scl_),
                                            found, kMaxAddrs);
+        if (n == platform::kI2cBusUnavailable) {
+            // The bus is held by another driver (e.g. the ES8311 codec while
+            // AudioModule is active) — say so instead of a misleading "0 found".
+            resultStr_[0] = '\0';
+            setStatus("bus in use — free the I2C driver, then scan", Severity::Warning);
+            markDirty();
+            return;
+        }
         // Build the "0x18 0x3c …" result string, truncating cleanly if the buffer
         // fills (more devices than fit is unusual on one bus, but stay bounded).
         int pos = 0;
