@@ -930,10 +930,17 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*l
     return {};   // not supported off the P4
 }
 
+// Audio codec — desktop has no codec, so init is a no-op that succeeds (there's
+// nothing to bring up); the inert audioMicInit below is what keeps capture off.
+bool audioCodecInit(CodecType /*type*/, const AudioCodecPins& /*pins*/, uint32_t /*sampleRate*/) {
+    return true;
+}
+void audioCodecDeinit() {}
+
 // I2S microphone — no capture on desktop (hasI2sMic == false, AudioModule inert),
 // so init fails and read returns nothing.
 bool audioMicInit(AudioMicHandle& /*h*/, uint16_t /*wsPin*/, uint16_t /*sdPin*/,
-                  uint16_t /*sckPin*/, uint32_t /*sampleRate*/) {
+                  uint16_t /*sckPin*/, int16_t /*mclkPin*/, uint32_t /*sampleRate*/) {
     return false;
 }
 size_t audioMicRead(AudioMicHandle& /*h*/, int32_t* /*out*/, size_t /*maxSamples*/) {
@@ -957,6 +964,12 @@ void audioFft(const float* windowed, size_t n, float* outMag) {
         }
         outMag[k] = std::sqrt(re * re + im * im);
     }
+}
+
+// No I2C bus on the desktop host — the scan finds nothing (the I2cScanModule
+// then reports "0 devices", same as an unwired bus on hardware).
+size_t i2cScan(uint16_t /*sda*/, uint16_t /*scl*/, uint8_t* /*out*/, size_t /*maxOut*/) {
+    return 0;
 }
 
 } // namespace mm::platform

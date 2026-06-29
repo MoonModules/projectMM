@@ -552,6 +552,16 @@
       },
       {
         "type": "RmtLedDriver",
+        "id": "OnboardLed",
+        "parent_id": "Drivers",
+        "controls": {
+          "pins": "48",
+          "start": 0,
+          "count": 1
+        }
+      },
+      {
+        "type": "RmtLedDriver",
         "id": "RmtLed",
         "parent_id": "Drivers",
         "controls": {
@@ -823,6 +833,15 @@
           "ethClockGpio": 50,
           "ethClockExtIn": true
         }
+      },
+      {
+        "type": "I2cScanModule",
+        "id": "I2cScan",
+        "parent_id": "System",
+        "controls": {
+          "sda": 7,
+          "scl": 8
+        }
       }
     ]
   },
@@ -873,6 +892,15 @@
           "ethClockGpio": 50,
           "ethClockExtIn": true
         }
+      },
+      {
+        "type": "I2cScanModule",
+        "id": "I2cScan",
+        "parent_id": "System",
+        "controls": {
+          "sda": 7,
+          "scl": 8
+        }
       }
     ]
   },
@@ -886,11 +914,17 @@
     "url": "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s31/esp32-s31-function-coreboard-1/user_guide.html",
     "supported": [
       "LEDs",
-      "WiFi"
+      "WiFi",
+      "Audio"
     ],
     "planned": [
       "Ethernet",
-      "Audio"
+      "Bluetooth",
+      "Thread/Zigbee",
+      "SD card",
+      "USB host",
+      "Speaker",
+      "CAN"
     ],
     "modules": [
       {
@@ -912,6 +946,25 @@
         "type": "NetworkModule",
         "id": "Network",
         "controls": {}
+      },
+      {
+        "type": "AudioModule",
+        "id": "Audio",
+        "parent_id": "System",
+        "controls": {
+          "wsPin": 55,
+          "sdPin": 54,
+          "sckPin": 53
+        }
+      },
+      {
+        "type": "I2cScanModule",
+        "id": "I2cScan",
+        "parent_id": "System",
+        "controls": {
+          "sda": 51,
+          "scl": 50
+        }
       }
     ]
   }

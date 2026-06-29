@@ -234,6 +234,71 @@ TEST_CASE("RmtLedDriver re-slices when the source buffer changes") {
     CHECK(d.pinLightCount(1) == 100);
 }
 
+// --- source-buffer window (start / count) ------------------------------------
+//
+// Every driver reads the SAME shared buffer and outputs a contiguous slice
+// [start, start+count) of it (count 0 = to the end). Two drivers on disjoint
+// windows is how the onboard status LED (window [0,1)) coexists with the main
+// strip (window [1, N)) without either stealing the other's lights. The slice
+// arithmetic lives on DriverBase (windowSlice/setWindow), pinned here through
+// RmtLedDriver because it is the host-runnable concrete driver.
+
+TEST_CASE("RmtLedDriver window: ledsPerPin distributes over the window, not the whole buffer") {
+    mm::RmtLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    std::strcpy(d.pins, "18,17");
+    d.setWindow(/*start=*/10, /*count=*/40);   // this driver owns lights [10,50)
+    wire(d, src, corr, 100);                    // 100-light shared buffer
+
+    REQUIRE(d.pinCount() == 2);
+    // The even split is over the 40-light WINDOW, not the 100-light buffer.
+    CHECK(d.pinLightCount(0) == 20);
+    CHECK(d.pinLightCount(1) == 20);
+    CHECK(d.windowStart() == 10);
+}
+
+TEST_CASE("RmtLedDriver window: count 0 means the rest of the buffer from start") {
+    mm::RmtLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    std::strcpy(d.pins, "18");
+    d.setWindow(/*start=*/1, /*count=*/0);   // from light 1 to the end
+    wire(d, src, corr, 65);                   // onboard LED took light 0; 64 remain
+
+    REQUIRE(d.pinCount() == 1);
+    CHECK(d.pinLightCount(0) == 64);          // 65 - 1 = 64
+}
+
+TEST_CASE("RmtLedDriver window: a size-1 window at 0 is the onboard-LED case") {
+    // The pairing that drove this feature: one driver renders ONLY light 0 (an
+    // onboard status LED), a second renders the strip from light 1 on. Here we
+    // pin the first half — exactly one light, regardless of buffer size.
+    mm::RmtLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    std::strcpy(d.pins, "48");
+    d.setWindow(/*start=*/0, /*count=*/1);
+    wire(d, src, corr, 64);
+
+    REQUIRE(d.pinCount() == 1);
+    CHECK(d.pinLightCount(0) == 1);           // just the onboard LED
+}
+
+TEST_CASE("RmtLedDriver window: a start past the buffer end yields an empty slice") {
+    // Robust to any input: a window beyond the current buffer (e.g. the grid
+    // shrank) must clamp to zero lights, not read out of bounds.
+    mm::RmtLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    std::strcpy(d.pins, "18");
+    d.setWindow(/*start=*/200, /*count=*/10);
+    wire(d, src, corr, 64);
+
+    CHECK(d.pinLightCount(0) == 0);           // nothing to drive; loop() is a no-op
+    d.loop();                                 // must not crash / overrun
+}
+
 // --- loop() robustness -------------------------------------------------------
 //
 // loop()'s transmit-all/wait-all concurrency body is gated out on the desktop

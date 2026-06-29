@@ -58,6 +58,7 @@
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
 #include "core/AudioModule.h"
+#include "core/I2cScanModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/ImprovProvisioningModule.h"
 #include "core/DevicesModule.h"
@@ -126,6 +127,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::HttpServerModule>("HttpServerModule", "core/HttpServerModule.md");
     mm::ModuleFactory::registerType<mm::SystemModule>("SystemModule", "core/SystemModule.md");
     mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule", "core/AudioModule.md");
+    mm::ModuleFactory::registerType<mm::I2cScanModule>("I2cScanModule", "core/I2cScanModule.md");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/FirmwareUpdateModule.md");
     mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/ImprovProvisioningModule.md");
     mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/DevicesModule.md");

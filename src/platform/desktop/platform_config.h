@@ -27,6 +27,15 @@ constexpr uint8_t parlioLanes = 0;
 // band math runs end-to-end in host tests; only live capture is absent.
 constexpr bool hasI2sMic = false;
 
+// Audio-codec config type — desktop has no codec (audioCodecInit stubs to true),
+// but platform.h declares audioCodecInit(CodecType, const AudioCodecPins&, …) for
+// every platform, so the types must exist here too. Mirror the esp32 definitions;
+// desktop is always CodecType::None.
+enum class CodecType : uint8_t { None = 0, Es8311 = 1 };
+struct AudioCodecPins { uint16_t i2cSda; uint16_t i2cScl; uint16_t mclk; uint8_t i2cAddr; };
+constexpr CodecType audioCodecType = CodecType::None;
+constexpr AudioCodecPins audioCodecPins = { 0, 0, 0, 0 };
+
 // Desktop is not a target of the Ethernet-only firmware profile; it ships
 // WiFi stubs and exercises the hasWiFi==true code path for compile coverage.
 constexpr bool hasWiFi = true;

@@ -37,16 +37,17 @@ public:
     uint8_t ip[4] = {255, 255, 255, 255};
     uint8_t protocol = 0;        // index into kProtocolOptions
     uint16_t universeStart = 0;  // first universe (ArtNet/E1.31; DDP is byte-addressed)
-    uint16_t lightCount = 0;     // lights to send (0 = the whole buffer); >0 sends the FIRST N,
-                                 // so a sink can cover just its slice (e.g. some lights to LEDs,
-                                 // the rest to ArtNet) instead of every light.
     uint8_t fps = 50;
+    // The buffer slice this sink sends is the shared DriverBase window: start_ +
+    // count_ ("count" 0 = the whole buffer from start). `universe_start` is the
+    // separate *protocol* offset (which DMX universe the slice maps onto), not a
+    // buffer offset — the two are orthogonal.
 
     void onBuildControls() override {
         controls_.addSelect("protocol", protocol, kProtocolOptions, kProtocolCount);
         controls_.addIPv4("ip", ip);
         controls_.addUint16("universe_start", universeStart);
-        controls_.addUint16("light_count", lightCount);
+        addWindowControls();   // start / count — the slice of the shared buffer this sink sends
         controls_.addUint8("fps", fps, 1, 120);
     }
 
@@ -117,11 +118,11 @@ public:
         // earlier in-loop allocate had if the allocation itself failed.
         const uint8_t* data;
         size_t totalBytes;
-        // Send the first light_count lights (0 = the whole buffer), so this sink covers only its
-        // slice instead of every light — and so a frame isn't packed/sent for lights it doesn't own.
-        const nrOfLightsType bufLights = sourceBuffer_->count();
-        const nrOfLightsType nLights =
-            (lightCount > 0 && lightCount < bufLights) ? lightCount : bufLights;
+        // Send this sink's window slice [start, start+count) only (count 0 = the
+        // whole buffer from start), so it covers just its lights — and a frame
+        // isn't packed/sent for lights it doesn't own. winStart is the first light.
+        nrOfLightsType winStart, nLights;
+        windowSlice(sourceBuffer_->count(), winStart, nLights);
         // Three guards before applying correction: (a) correction wired,
         // (b) corrected_ has the row count we need, (c) corrected_'s
         // per-light stride is at least outChannels — otherwise dst + i *
@@ -140,15 +141,17 @@ public:
             const uint8_t srcCh = sourceBuffer_->channelsPerLight();
             uint8_t* dst = corrected_.data();
             for (nrOfLightsType i = 0; i < nLights; i++) {
-                correction_->apply(src + i * srcCh, dst + i * outCh);
+                // Read the windowed light (slice starts at winStart); pack densely.
+                correction_->apply(src + (winStart + i) * srcCh, dst + i * outCh);
             }
             data = dst;
             totalBytes = static_cast<size_t>(nLights) * outCh;
         } else {
-            // Passthrough (no correction): honour the same light_count cap as the corrected path,
-            // so a sliced sink doesn't fall back to sending the whole buffer.
-            data = sourceBuffer_->data();
-            totalBytes = static_cast<size_t>(nLights) * sourceBuffer_->channelsPerLight();
+            // Passthrough (no correction): honour the same window as the corrected
+            // path — point at the slice start so a sliced sink sends only its lights.
+            const uint8_t srcCh = sourceBuffer_->channelsPerLight();
+            data = sourceBuffer_->data() + static_cast<size_t>(winStart) * srcCh;
+            totalBytes = static_cast<size_t>(nLights) * srcCh;
         }
 
         // Send the whole frame in one burst — receivers expect a complete

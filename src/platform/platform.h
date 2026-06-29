@@ -553,14 +553,34 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCou
 // All inert on targets without I2S, guarded by `if constexpr (platform::hasI2sMic)`.
 // ---------------------------------------------------------------------------
 
+// `CodecType` + `AudioCodecPins` are defined in platform_config.h (included above),
+// alongside the per-target `audioCodecType`/`audioCodecPins` defaults that use them.
+//
+// Configure the audio codec (record/mic path) over I2C, if the board has one.
+// Some boards put an analog mic behind an I2S audio codec (configured over I2C)
+// rather than a direct digital I2S MEMS mic; the codec must be brought up before
+// the I2S read. This is a no-op returning true on a board with a direct mic
+// (CodecType::None) or a target without a codec, so AudioModule always calls it and
+// the path stays uniform.
+// Returns true when there's nothing to do (CodecType::None / no codec on this
+// target) or the codec came up; false on an I2C/codec error (the module then
+// idles with a status error, same as a failed mic init). Called by AudioModule
+// before audioMicInit; the codec then presents standard I2S the read picks up.
+bool audioCodecInit(CodecType type, const AudioCodecPins& pins, uint32_t sampleRate);
+
+void audioCodecDeinit();
+
 // Opaque handle to one configured I2S RX channel (standard/Philips mode).
 struct AudioMicHandle { void* impl = nullptr; };
 
 // Bring up an I2S RX channel reading the mic on the given pins at `sampleRate`
-// (24-bit data in a 32-bit slot, mono). Returns false on failure (bad pins,
-// no I2S, out of memory) — the module then idles with a status error.
+// (24-bit data in a 32-bit slot, mono). `mclkPin` drives the I2S master clock —
+// −1 for a self-clocked direct MEMS mic (INMP441), or the codec's MCLK pin when a
+// codec needs the clock to run (the ES8311 won't even answer I2C without it, so
+// AudioModule starts I2S *before* audioCodecInit on a codec board). Returns false
+// on failure (bad pins, no I2S, out of memory) — the module idles with a status error.
 bool audioMicInit(AudioMicHandle& h, uint16_t wsPin, uint16_t sdPin,
-                  uint16_t sckPin, uint32_t sampleRate);
+                  uint16_t sckPin, int16_t mclkPin, uint32_t sampleRate);
 
 // Read up to `maxSamples` 32-bit samples into `out`; returns the count read
 // (0 if none ready / not initialised). Non-blocking enough for the render tick.
@@ -573,5 +593,20 @@ void audioMicDeinit(AudioMicHandle& h);
 // on ESP32 (the FPU makes float faster than fixed-point); a naive O(n^2) DFT on
 // desktop — correct, only fast enough for the host tests' small n.
 void audioFft(const float* windowed, size_t n, float* outMag);
+
+// ---------------------------------------------------------------------------
+// I2C bus diagnostics — domain-neutral, not audio-specific. Probes a bus and
+// reports which 7-bit addresses ACK, the standard `i2cdetect` operation. Used
+// by the I2cScanModule diagnostic (src/core/I2cScanModule.h) to help bring up
+// any I2C peripheral (a codec, a sensor, an expander) — confirm wiring and read
+// off a device's address. Self-contained: opens a temporary master bus on the
+// given pins, scans, tears it down (so it doesn't conflict with a bus another
+// driver owns). Internal pull-ups enabled (most breakouts also pull up).
+// ---------------------------------------------------------------------------
+
+// Scan the I2C bus on (sda, scl); write the 7-bit addresses that ACK into
+// `out` (caller-sized, capacity `maxOut`) and return the count found (capped at
+// maxOut). Returns 0 on a bus-init failure or a target without I2C.
+size_t i2cScan(uint16_t sda, uint16_t scl, uint8_t* out, size_t maxOut);
 
 } // namespace mm::platform

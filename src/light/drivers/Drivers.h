@@ -25,6 +25,16 @@ public:
     // Drivers container hands it one Layer for dimensions regardless of how many
     // layers feed the output buffer.
     void setLayer(Layer* layer) { layer_ = layer; }
+
+    // The configured window (start light, count; count 0 = to end of buffer).
+    // Public for tests pinning the slice arithmetic; production reads via
+    // windowSlice(). See start_/count_ below.
+    uint16_t windowStart() const { return start_; }
+    uint16_t windowCount() const { return count_; }
+    // Set the window directly (the UI sets it via the start/count controls; this
+    // is for code-wiring a driver's slice and for tests). Takes effect on the next
+    // config parse / loop, like a control edit.
+    void setWindow(uint16_t start, uint16_t count) { start_ = start; count_ = count; }
     // The active Layer this driver reads dimensions from — null when no Layer is
     // wired (e.g. the last Layer was deleted). Drivers must tolerate null here.
     Layer* layer() const { return layer_; }
@@ -50,6 +60,45 @@ public:
 
 protected:
     Layer* layer_ = nullptr;
+
+    // --- Shared source-buffer window (start, count) ---------------------------
+    // Every driver reads the SAME shared source buffer (Drivers hands the one
+    // Buffer* to each child) and outputs a contiguous slice of it: lights
+    // [start_, start_+count_). This is how light distribution is made *explicit*
+    // and order-independent — a second driver on a different slice (e.g. an
+    // onboard status LED at index 0, the main strip from index 1) just sets its
+    // own window, rather than the buffer being split by driver order. `count_`==0
+    // means "the rest of the buffer from start_" (the common whole-buffer case).
+    // NetworkSendDriver's universe maps onto the same window; the LED drivers'
+    // pins/ledsPerPin distribute lights *within* the window.
+    uint16_t start_ = 0;
+    uint16_t count_ = 0;   // 0 = to end of buffer
+
+    // Add the two window controls — call from a driver's onBuildControls(). Kept
+    // a helper (not auto-added) so a driver opts in by calling it where its other
+    // controls go, keeping control *order* in the driver's hands.
+    void addWindowControls() {
+        controls_.addUint16("start", start_);
+        controls_.addUint16("count", count_);
+    }
+
+    // True if `name` is one of the window controls — a driver folds this into its
+    // controlChangeTriggersBuildState() so editing the slice re-runs its config.
+    static bool isWindowControl(const char* name) {
+        return std::strcmp(name, "start") == 0 || std::strcmp(name, "count") == 0;
+    }
+
+    // Resolve the window against a buffer of `bufN` lights: writes the clamped
+    // first light to `outStart` and the slice length to `outLen` (0 if the window
+    // starts past the end). The textbook [start, start+count) clamp — every
+    // driver calls this instead of reading from light 0.
+    void windowSlice(nrOfLightsType bufN, nrOfLightsType& outStart,
+                     nrOfLightsType& outLen) const {
+        outStart = start_ < bufN ? start_ : bufN;
+        const nrOfLightsType avail = static_cast<nrOfLightsType>(bufN - outStart);
+        outLen = (count_ == 0 || count_ > avail) ? avail
+                                                 : static_cast<nrOfLightsType>(count_);
+    }
 
     // --- Shared status-string lifecycle for the physical LED drivers (RMT / LCD /
     // Parlio). They report two kinds of transient status that must clear cleanly

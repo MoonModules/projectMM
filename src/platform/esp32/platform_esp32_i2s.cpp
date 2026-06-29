@@ -60,7 +60,7 @@ bool ensureFftInit() {
 }  // namespace
 
 bool audioMicInit(AudioMicHandle& h, uint16_t wsPin, uint16_t sdPin,
-                  uint16_t sckPin, uint32_t sampleRate) {
+                  uint16_t sckPin, int16_t mclkPin, uint32_t sampleRate) {
     auto* st = new (std::nothrow) MicState();
     if (!st) return false;
 
@@ -82,7 +82,9 @@ bool audioMicInit(AudioMicHandle& h, uint16_t wsPin, uint16_t sdPin,
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(sampleRate),
         .slot_cfg = slotCfg,
         .gpio_cfg = {
-            .mclk = I2S_GPIO_UNUSED,         // self-clocked, no master clock
+            // MCLK: unused for a self-clocked MEMS mic (INMP441); driven on the
+            // given pin for a codec that needs a master clock (the ES8311). −1 = none.
+            .mclk = mclkPin < 0 ? I2S_GPIO_UNUSED : static_cast<gpio_num_t>(mclkPin),
             .bclk = static_cast<gpio_num_t>(sckPin),
             .ws   = static_cast<gpio_num_t>(wsPin),
             .dout = I2S_GPIO_UNUSED,         // input only
@@ -157,7 +159,7 @@ void audioFft(const float* windowed, size_t n, float* outMag) {
 
 namespace mm::platform {
 
-bool audioMicInit(AudioMicHandle&, uint16_t, uint16_t, uint16_t, uint32_t) {
+bool audioMicInit(AudioMicHandle&, uint16_t, uint16_t, uint16_t, int16_t, uint32_t) {
     return false;
 }
 size_t audioMicRead(AudioMicHandle&, int32_t*, size_t) { return 0; }

@@ -98,6 +98,33 @@ constexpr bool hasI2sMic = true;
 constexpr bool hasI2sMic = false;
 #endif
 
+
+// Some boards put the mic behind an I2S audio codec configured over I2C (vs a
+// direct I2S MEMS mic). The codec type + its control pins are a fixed board
+// property, so they live here per-target (like ethConfigDefault), not as
+// AudioModule controls — the I2S data pins (ws/sd/sck) stay user controls.
+// `audioCodecInit` (platform.h) consumes these; CodecType is neutral so a second
+// codec is just another enum value + a backend branch.
+enum class CodecType : uint8_t { None = 0, Es8311 = 1 };
+struct AudioCodecPins {
+    uint16_t i2cSda;
+    uint16_t i2cScl;
+    uint16_t mclk;      // I2S master clock the codec needs (separate from BCLK/WS)
+    uint8_t  i2cAddr;   // codec I2C address (ES8311 default 0x18)
+};
+
+// Default None; the ESP32-S31 Function-CoreBoard has an ES8311 (addr 0x18, I2C
+// SDA on GPIO51 / SCL on GPIO50, MCLK on GPIO52 — bench-confirmed by I2C scan; the
+// schematic net labels read SDA/SCL the other way round. See
+// docs/reference/esp32-s31-coreboard.md.).
+#ifdef CONFIG_IDF_TARGET_ESP32S31
+constexpr CodecType audioCodecType = CodecType::Es8311;
+constexpr AudioCodecPins audioCodecPins = { /*sda*/ 51, /*scl*/ 50, /*mclk*/ 52, /*addr*/ 0x18 };
+#else
+constexpr CodecType audioCodecType = CodecType::None;
+constexpr AudioCodecPins audioCodecPins = { 0, 0, 0, 0 };
+#endif
+
 // WiFi is compiled out in the Ethernet-only build profile. ESP-IDF v6.x has no
 // CONFIG_ESP_WIFI_ENABLED switch, so the eth-only build instead drops the WiFi
 // components via EXCLUDE_COMPONENTS and defines MM_NO_WIFI (see esp32/main/CMakeLists.txt).

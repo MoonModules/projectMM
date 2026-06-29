@@ -22,6 +22,8 @@ idf_component_register(
         "../../src/platform/esp32/platform_esp32_lcd.cpp"
         "../../src/platform/esp32/platform_esp32_parlio.cpp"
         "../../src/platform/esp32/platform_esp32_i2s.cpp"
+        "../../src/platform/esp32/platform_esp32_i2c.cpp"
+        "../../src/platform/esp32/platform_esp32_es8311.cpp"
     INCLUDE_DIRS
         "../../src"
         "../../src/platform/esp32"
@@ -89,6 +91,16 @@ if(MM_ETH_ONLY)
 endif()
 if(MM_NO_ETH)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_NO_ETH)
+endif()
+
+# MM_MAX_GPIO — the highest valid GPIO for this chip, the default clamp for
+# Control.h's Pin controls. Derived from the IDF's own per-chip soc-cap
+# (CONFIG_SOC_GPIO_PIN_COUNT, exposed as a CMake var after `idf.py set-target`):
+# count-1 is the max index (62 on the S31 → 61). Injecting it here keeps Control.h
+# core (no platform/IDF include) while the value stays IDF-sourced, not hand-kept.
+if(CONFIG_SOC_GPIO_PIN_COUNT)
+    math(EXPR MM_MAX_GPIO "${CONFIG_SOC_GPIO_PIN_COUNT} - 1")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE MM_MAX_GPIO=${MM_MAX_GPIO})
 endif()
 
 # Embed UI files — regenerate on every build. ESP-IDF's bundled Python venv
