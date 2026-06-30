@@ -1,8 +1,8 @@
 # Game of Life Effect
 
-![GameOfLifeEffect controls](../../../assets/screenshots/GameOfLifeEffect.png)
+![GameOfLifeEffect controls](../../../assets/light/effects/GameOfLifeEffect.png)
 
-![GameOfLifeEffect preview](../../../assets/screenshots/GameOfLifeEffect.gif)
+![GameOfLifeEffect preview](../../../assets/light/effects/GameOfLifeEffect.gif)
 
 Conway's Game of Life (B3/S23) on the XY plane. A D2 effect: it simulates the
 z=0 plane and `Layer::extrude` fills z on 3D layers.

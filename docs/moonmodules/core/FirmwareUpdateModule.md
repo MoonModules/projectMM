@@ -1,6 +1,6 @@
 # FirmwareUpdateModule
 
-![FirmwareUpdateModule controls](../../assets/screenshots/FirmwareUpdateModule.png)
+![FirmwareUpdateModule controls](../../assets/core/FirmwareUpdateModule.png)
 
 A thin status surface for OTA flashing. The flash itself is driven by `POST /api/firmware/url` in HttpServerModule, which hands the URL to `platform::http_fetch_to_ota` (a task that downloads via `esp_https_ota` and writes the next OTA partition). The task and this module communicate through shared file-scope globals; the module polls them in `loop1s()` and the existing WebSocket state push surfaces the change at 1 Hz.
 

@@ -1,8 +1,8 @@
 # LinesEffect
 
-![LinesEffect controls](../../../assets/screenshots/LinesEffect.png)
+![LinesEffect controls](../../../assets/light/effects/LinesEffect.png)
 
-![LinesEffect preview](../../../assets/screenshots/LinesEffect.gif)
+![LinesEffect preview](../../../assets/light/effects/LinesEffect.gif)
 
 Sweeps one or more axis-aligned planes across the grid in sync at a given BPM. Each plane is a distinct colour: red (YZ, sweeps along X), green (XZ, sweeps along Y), blue (XY, sweeps along Z). Useful for verifying preview axis orientation — each colour names the axis it sweeps.
 

@@ -21,7 +21,7 @@ Below: the UI behaviours common to every card, described once, then one section 
 ## PC Tab
 
 
-![Moondeck Pc](../docs/assets/screenshots/moondeck_pc.png)
+![Moondeck Pc](../docs/assets/ui/moondeck_pc.png)
 
 ### build_desktop
 
@@ -57,9 +57,9 @@ While the app is running, MoonDeck shows the button as **Stop** (a 5-second poll
 
 ### preview_installer
 
-![Installer](../docs/assets/screenshots/installer.png)
-![Installer2](../docs/assets/screenshots/installer2.png)
-![Installer3](../docs/assets/screenshots/installer3.png)
+![Installer](../docs/assets/ui/installer.png)
+![Installer2](../docs/assets/ui/installer2.png)
+![Installer3](../docs/assets/ui/installer3.png)
 
 Locally preview the web installer page at <https://moonmodules.org/projectMM/install/> without tagging a release. Stages `docs/install/index.html` + `src/ui/install-picker.js` into `build/install-preview/` and serves them via Python's `http.server` on port 8000.
 
@@ -117,7 +117,7 @@ The MoonDeck button writes the file, prints a `MOONDECK_VIEW: /api/history-repor
 
 ### screenshot_modules
 
-Capture UI screenshots of every module that has controls and save them to `docs/assets/screenshots/`.
+Capture UI screenshots of every module that has controls and save them to `docs/assets/`.
 
 ```bash
 uv run scripts/docs/install_playwright.py    # one-time (or use Install Playwright button in MoonDeck)
@@ -152,16 +152,16 @@ uv run scripts/docs/update_module_docs.py            # update all
 uv run scripts/docs/update_module_docs.py --dry-run  # preview without writing
 ```
 
-For each `.md` file, if `docs/assets/screenshots/<TypeName>.png` exists and the file doesn't already contain a screenshot reference, inserts the image after the first heading. If a matching `<TypeName>.gif` also exists, inserts the GIF reference on the next line. Safe to re-run — skips files that already have all references.
+For each `.md` file, if `docs/assets/<type-folder>/<TypeName>.png` exists and the file doesn't already contain a screenshot reference, inserts the image after the first heading. If a matching `<TypeName>.gif` also exists, inserts the GIF reference on the next line. Safe to re-run — skips files that already have all references.
 
 Also inserts MoonDeck tab screenshots and the installer screenshot into `scripts/MoonDeck.md` and `README.md` at fixed anchor points (defined in the `EXTRA_SHOTS` list in the script).
 
-Reports unreferenced screenshots — any PNG or GIF in `docs/assets/screenshots/` not mentioned anywhere in `docs/` or `scripts/`.
+Reports unreferenced screenshots — any PNG or GIF in `docs/assets/` not mentioned anywhere in `docs/` or `scripts/`.
 
 ## Live Tab
 
 
-![Moondeck Live](../docs/assets/screenshots/moondeck_live.png)
+![Moondeck Live](../docs/assets/ui/moondeck_live.png)
 
 ### live_scenario
 
@@ -218,7 +218,7 @@ When the verdict is `CHOPPY`/`DEAD`, the *cause* (which close path fired on the 
 ## ESP32 Tab
 
 
-![Moondeck Esp32](../docs/assets/screenshots/moondeck_esp32.png)
+![Moondeck Esp32](../docs/assets/ui/moondeck_esp32.png)
 
 The tab is laid out top-to-bottom along the firmware workflow. Each dropdown sits between the script groups that consume it, so picking a dropdown is the natural prelude to the buttons below it.
 

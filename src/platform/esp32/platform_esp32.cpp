@@ -1120,17 +1120,37 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
     if (fd < 0) return 0;
     struct CloseGuard { int f; ~CloseGuard() { ::close(f); } } guard{fd};
 
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) return 0;
+
+    // Bound the CONNECT by timeoutMs: a blocking connect to an unreachable host hangs for the OS
+    // default — and this runs on the driver's loop1s (shared with the render loop), so it must
+    // not stall. Connect non-blocking, wait writable via select() up to timeoutMs, then restore
+    // blocking for the bounded send/recv (which use SO_*TIMEO below).
+    const int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    int cr = ::connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+    if (cr != 0 && errno != EINPROGRESS) return 0;   // immediate hard failure
+    if (cr != 0) {                                    // connect in progress — wait for writable
+        fd_set wf; FD_ZERO(&wf); FD_SET(fd, &wf);
+        timeval ctv{};
+        ctv.tv_sec = static_cast<time_t>(timeoutMs / 1000);
+        ctv.tv_usec = static_cast<suseconds_t>((timeoutMs % 1000) * 1000);
+        if (::select(fd + 1, nullptr, &wf, nullptr, &ctv) <= 0) return 0;   // timeout / error
+        int soerr = 0; socklen_t len = sizeof(soerr);
+        getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &len);
+        if (soerr != 0) return 0;                      // connect failed
+    }
+    fcntl(fd, F_SETFL, flags);                         // back to blocking
+
+    // Bound the request send + response recv with SO_RCVTIMEO/SO_SNDTIMEO.
     timeval tv{};
     tv.tv_sec = static_cast<time_t>(timeoutMs / 1000);
     tv.tv_usec = static_cast<suseconds_t>((timeoutMs % 1000) * 1000);
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) return 0;
-    if (::connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) return 0;
 
     char req[1024];
     const size_t blen = reqBody ? std::strlen(reqBody) : 0;
@@ -1143,7 +1163,13 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
               "%s %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n",
               method, path, host);
     if (n <= 0 || n >= static_cast<int>(sizeof(req))) return 0;
-    if (::send(fd, req, n, 0) != n) return 0;
+    // Send the whole request — a blocking send can return short under backpressure, so loop
+    // until all n bytes are out (retry on a positive partial, fail only on 0 / error).
+    for (int off = 0; off < n;) {
+        int w = ::send(fd, req + off, n - off, 0);
+        if (w > 0) off += w;
+        else return 0;
+    }
 
     // Read the response. When the caller wants the body, read into THEIR buffer (so they size it
     // — a Hue /lights body runs several KB) and shift the body to the front. When they don't

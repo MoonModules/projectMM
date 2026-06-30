@@ -6,15 +6,15 @@
 """Insert screenshot references into docs/moonmodules/**/*.md files.
 
 For each .md file, if a matching screenshot exists at
-docs/assets/screenshots/<TypeName>.png and the file doesn't already
+docs/assets/<type-folder>/<TypeName>.png and the file doesn't already
 contain a screenshot reference, insert one line after the first heading:
 
-    ![<TypeName> controls](../../../assets/screenshots/<TypeName>.png)
+    ![<TypeName> controls](../../../assets/<type-folder>/<TypeName>.png)
 
 The relative path is computed from the .md file's location so links
 work both on GitHub and in the MoonDeck /api/docs/ renderer.
 
-Also reports any screenshots (PNG or GIF) in docs/assets/screenshots/ that
+Also reports any screenshots (PNG or GIF) under docs/assets/ that
 are not referenced anywhere in docs/.
 
 Usage:
@@ -28,14 +28,24 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 DOCS_DIR = ROOT / "docs" / "moonmodules"
-SCREENSHOTS_DIR = ROOT / "docs" / "assets" / "screenshots"
+ASSETS = ROOT / "docs" / "assets"
+UI_DIR = ASSETS / "ui"   # tooling/installer/full-page shots (not per-module)
 
-SCREENSHOT_RE = re.compile(r'!\[.*?\]\(.*?assets/screenshots/.*?\)')
-GIF_RE        = re.compile(r'!\[.*?\]\(.*?assets/screenshots/.*?\.gif.*?\)')
+# A module's asset subfolder (domain/type), mirroring src — see folder-structure-proposal.md.
+def asset_dir_for(type_name: str):
+    if type_name.endswith("Effect"):   return ASSETS / "light" / "effects"
+    if type_name.endswith("Modifier"): return ASSETS / "light" / "modifiers"
+    if type_name.endswith("Layout"):   return ASSETS / "light" / "layouts"
+    if type_name.endswith("Driver"):   return ASSETS / "light" / "drivers"
+    if type_name in ("Layouts", "Layers", "Drivers"):  return ASSETS / "light"
+    return ASSETS / "core"
+
+SCREENSHOT_RE = re.compile(r'!\[.*?\]\(.*?assets/.*?\.(?:png|jpe?g)\)')
+GIF_RE        = re.compile(r'!\[.*?\]\(.*?assets/.*?\.gif.*?\)')
 
 # Extra screenshots with fixed placement in specific doc files.
 # Each entry: (filename, doc_rel_path, anchor_text)
-#   filename:     file in docs/assets/screenshots/
+#   filename:     file in docs/assets/ui/
 #   doc_rel_path: repo-relative path to the doc file
 #   anchor_text:  heading/line after which to insert (exact prefix match)
 EXTRA_SHOTS = [
@@ -74,7 +84,7 @@ def insert_extra_shot(doc_path: Path, filename: str, anchor: str,
 
     # Relative path from the doc file's directory to the screenshot.
     depth = len(doc_path.parent.relative_to(ROOT).parts)
-    rel = "../" * depth + f"docs/assets/screenshots/{filename}"
+    rel = "../" * depth + f"docs/assets/ui/{filename}"
     label = filename.replace(".png", "").replace("_", " ").title()
     img_line = f"\n![{label}]({rel})\n\n"
 
@@ -169,7 +179,7 @@ def main() -> int:
 
     # Fix spacing around image blocks: ensure one blank line after the last
     # image in a block, and collapse any triple+ blank lines to one blank.
-    img_line_re = re.compile(r'^!\[.*?\]\(.*?assets/screenshots/.*?\)\n', re.MULTILINE)
+    img_line_re = re.compile(r'^!\[.*?\]\(.*?assets/.*?\)\n', re.MULTILINE)
     for md_file in sorted(DOCS_DIR.rglob("*.md")):
         original = md_file.read_text(encoding="utf-8")
         lines = original.splitlines(keepends=True)
@@ -190,8 +200,8 @@ def main() -> int:
 
     for md_file in sorted(DOCS_DIR.rglob("*.md")):
         type_name = type_name_from_md(md_file)
-        png = SCREENSHOTS_DIR / f"{type_name}.png"
-        gif = SCREENSHOTS_DIR / f"{type_name}.gif"
+        png = asset_dir_for(type_name) / f"{type_name}.png"
+        gif = asset_dir_for(type_name) / f"{type_name}.gif"
 
         if not png.exists():
             skipped_no_screenshot.append(md_file.relative_to(ROOT))
@@ -209,7 +219,7 @@ def main() -> int:
     # --- Extra shots: insert MoonDeck tab + installer images into fixed doc files ---
     extra_updated = []
     for filename, doc_rel, anchor in EXTRA_SHOTS:
-        screenshot = SCREENSHOTS_DIR / filename
+        screenshot = UI_DIR / filename
         if not screenshot.exists():
             continue
         doc_path = ROOT / doc_rel
@@ -242,7 +252,7 @@ def main() -> int:
     all_docs_text += (ROOT / "README.md").read_text(encoding="utf-8")
 
     unreferenced = []
-    for f in sorted(SCREENSHOTS_DIR.glob("*")):
+    for f in sorted(ASSETS.rglob("*")):
         if f.suffix.lower() not in (".png", ".gif"):
             continue
         if f.name not in all_docs_text:

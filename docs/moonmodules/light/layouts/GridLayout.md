@@ -1,6 +1,6 @@
 # Grid Layout
 
-![GridLayout controls](../../../assets/screenshots/GridLayout.png)
+![GridLayout controls](../../../assets/light/layouts/GridLayout.png)
 
 Arranges lights in a 3D grid, row-major (x fastest, then y, then z). Full-density — every position maps to a light. Controls: `width`, `height`, `depth`, `serpentine`.
 

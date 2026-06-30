@@ -1,8 +1,8 @@
 # Ripples 3D Effect
 
-![RipplesEffect controls](../../../assets/screenshots/RipplesEffect.png)
+![RipplesEffect controls](../../../assets/light/effects/RipplesEffect.png)
 
-![RipplesEffect preview](../../../assets/screenshots/RipplesEffect.gif)
+![RipplesEffect preview](../../../assets/light/effects/RipplesEffect.gif)
 
 3D dancing sine-wave ripples — a reimplementation of MoonLight's Ripples. For each `(x, z)` column on the floor plane, the distance from the centre sets a wave phase, and one pixel per column is lit at the height `y = floor(h/2 · (1 + sin(dist / interval + time)))`. The lit surface ripples like water filling the volume, with the hue cycling over time and position.
 

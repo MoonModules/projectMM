@@ -1,6 +1,6 @@
 # Layers
 
-![Layers controls](../../assets/screenshots/Layers.png)
+![Layers controls](../../assets/core/Layers.png)
 
 Top-level container for one or more layers. Each layer renders independently into its own buffer; the Drivers container composes those buffers downstream.
 

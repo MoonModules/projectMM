@@ -1,8 +1,8 @@
 # Rings 2D Effect
 
-![RingsEffect controls](../../../assets/screenshots/RingsEffect.png)
+![RingsEffect controls](../../../assets/light/effects/RingsEffect.png)
 
-![RingsEffect preview](../../../assets/screenshots/RingsEffect.gif)
+![RingsEffect preview](../../../assets/light/effects/RingsEffect.gif)
 
 Expanding concentric rings from random centre points. Each ring grows outward and respawns once it has expanded past the visible area. Multiple rings overlap with additive blending.
 

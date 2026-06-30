@@ -20,11 +20,11 @@ This follows the project's [1D-runs-along-Y convention](../../architecture.md#di
 
 Per column `x`, the wave's phase is `t + x·skew`: `t` advances from `bpm` (an integer accumulator, so a sub-millisecond frame time isn't lost), and the `x·skew` term delays each column so the shape appears to move horizontally. The phase runs through the selected waveform to a y in `[0, height)`; that pixel is lit, and for the discontinuous shapes (sawtooth, square) a vertical segment joins it to the previous column so the line stays connected. The wave's colour cycles slowly over time.
 
-**Palette readiness:** the colour comes from a single `waveColor(index)` seam — today an `hsvToRgb` hue sweep. When palettes land, that one function becomes the palette lookup with no other change.
+The colour comes from a single `waveColor(index)` seam — an `hsvToRgb` hue sweep — so the wave's colouring lives in one place.
 
 ## Prior art
 
-[MoonLight](https://github.com/MoonModules/MoonLight)'s Wave effect (Ewoud Wijma). The *behaviour* is reproduced — the six waveform types, the per-column phase travel, the time-varying colour, the frame fade — written fresh against projectMM's `EffectBase` and integer primitives (the `sin8` LUT, `scale8`), with the colour routed through a palette-ready seam rather than MoonLight's `ColorFromPalette` (palettes aren't in projectMM yet).
+[MoonLight](https://github.com/MoonModules/MoonLight)'s Wave effect (Ewoud Wijma). The *behaviour* is reproduced — the six waveform types, the per-column phase travel, the time-varying colour, the frame fade — written fresh against projectMM's `EffectBase` and integer primitives (the `sin8` LUT, `scale8`); the colour is an `hsvToRgb` sweep through the `waveColor` seam.
 
 ## Source
 

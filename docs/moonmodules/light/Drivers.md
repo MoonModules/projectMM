@@ -1,6 +1,6 @@
 # Drivers
 
-![Drivers controls](../../assets/screenshots/Drivers.png)
+![Drivers controls](../../assets/light/drivers/Drivers.png)
 
 Top-level container for one or more drivers. The consumer side of the pipeline — owns the shared output buffer (when memory allows) and performs blend+map from every layer's buffer into it each frame.
 

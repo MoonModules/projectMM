@@ -1,8 +1,8 @@
 # Glow Particles 2D Effect
 
-![GlowParticlesEffect controls](../../../assets/screenshots/GlowParticlesEffect.png)
+![GlowParticlesEffect controls](../../../assets/light/effects/GlowParticlesEffect.png)
 
-![GlowParticlesEffect preview](../../../assets/screenshots/GlowParticlesEffect.gif)
+![GlowParticlesEffect preview](../../../assets/light/effects/GlowParticlesEffect.gif)
 
 Soft-glowing particles rendered as a metaball field. Particles move with independent velocities and bounce off the edges; the per-pixel field summation produces chaotic organic blobs — like `MetaballsEffect` with more freedom of movement.
 

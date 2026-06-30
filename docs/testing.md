@@ -389,7 +389,7 @@ uv run scripts/scenario/run_live_scenario.py --compare-baseline          # check
 
 MoonDeck's Live tab wraps the same workflow: the Network bar at the top selects the LAN, Discover/Refresh populates the device list, the Live Scenarios card runs the selected scenario against every checked device.
 
-![MoonDeck Live tab](assets/screenshots/moondeck_live.png)
+![MoonDeck Live tab](assets/ui/moondeck_live.png)
 
 All scenarios use relative FPS bounds (`min_pct`) so they pass on any device — desktop at 10K FPS or ESP32 at 17 FPS. Settle time is 3 seconds to let the pipeline stabilise after rebuilds.
 

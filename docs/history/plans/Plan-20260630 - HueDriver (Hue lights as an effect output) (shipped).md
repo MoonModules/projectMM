@@ -1,4 +1,4 @@
-# Plan — HueDriver: Philips Hue lights as a projectMM effect output
+# Plan — HueDriver: Philips Hue lights as a projectMM effect output (shipped)
 
 ## Context
 

@@ -56,6 +56,10 @@ inline int make_nonblocking(int fd) {
     u_long mode = 1;
     return ::ioctlsocket(sock(fd), FIONBIO, &mode);
 }
+inline int make_blocking(int fd) {
+    u_long mode = 0;
+    return ::ioctlsocket(sock(fd), FIONBIO, &mode);
+}
 #else
 inline int sock(int fd) { return fd; }
 inline int close_sock(int fd) { return ::close(fd); }
@@ -66,6 +70,10 @@ inline int open_sock(int domain, int type, int protocol) {
 inline int make_nonblocking(int fd) {
     int flags = ::fcntl(fd, F_GETFL, 0);
     return ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
+inline int make_blocking(int fd) {
+    int flags = ::fcntl(fd, F_GETFL, 0);
+    return ::fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
 }
 #endif
 #ifdef _WIN32
@@ -492,8 +500,39 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
     if (fd < 0) return 0;
     struct CloseGuard { int f; ~CloseGuard() { close_sock(f); } } guard{fd};
 
-    // Bound connect + recv with a timeout (same SO_RCVTIMEO/SO_SNDTIMEO shape the rest of the
-    // file uses); the socket stays blocking, so the bounded request is straightforward.
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) return 0;
+
+    // Bound the CONNECT by timeoutMs: a blocking connect to an unreachable host hangs for the OS
+    // default (tens of seconds) — and this runs on the driver's loop1s (shared with the render
+    // loop), so it must not stall. Connect non-blocking, wait writable via select() up to
+    // timeoutMs, then restore blocking for the bounded send/recv (which use SO_*TIMEO below).
+    if (make_nonblocking(fd) != 0) return 0;
+    int cr = ::connect(sock(fd), reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+    // A non-blocking connect that didn't complete immediately reports "in progress":
+    // EINPROGRESS on POSIX, WSAEWOULDBLOCK on Winsock. Anything else is a hard failure.
+#ifdef _WIN32
+    const bool inProgress = (cr != 0 && ::WSAGetLastError() == WSAEWOULDBLOCK);
+#else
+    const bool inProgress = (cr != 0 && errno == EINPROGRESS);
+#endif
+    if (cr != 0 && !inProgress) return 0;          // immediate hard failure
+    if (cr != 0) {                                 // connect in progress — wait for writable
+        fd_set wf; FD_ZERO(&wf); FD_SET(sock(fd), &wf);
+        timeval ctv{};
+        ctv.tv_sec = static_cast<time_t>(timeoutMs / 1000);
+        ctv.tv_usec = static_cast<suseconds_t>((timeoutMs % 1000) * 1000);
+        if (::select(static_cast<int>(sock(fd)) + 1, nullptr, &wf, nullptr, &ctv) <= 0) return 0;  // timeout / error
+        int soerr = 0; socklen_t len = sizeof(soerr);
+        ::getsockopt(sock(fd), SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&soerr), &len);
+        if (soerr != 0) return 0;                  // connect failed
+    }
+    if (make_blocking(fd) != 0) return 0;          // back to blocking for the bounded send/recv
+
+    // Bound the request send + response recv with SO_RCVTIMEO/SO_SNDTIMEO (the same shape the
+    // rest of the file uses).
 #ifdef _WIN32
     DWORD tv = timeoutMs;
     ::setsockopt(sock(fd), SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
@@ -505,11 +544,6 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
     ::setsockopt(sock(fd), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     ::setsockopt(sock(fd), SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 #endif
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) return 0;
-    if (::connect(sock(fd), reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) return 0;
 
     char req[1024];
     const size_t blen = reqBody ? std::strlen(reqBody) : 0;
@@ -522,7 +556,13 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
               "%s %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n",
               method, path, host);
     if (n <= 0 || n >= static_cast<int>(sizeof(req))) return 0;
-    if (::send(sock(fd), req, n, 0) != n) return 0;
+    // Send the whole request — a blocking send can return short under backpressure, so loop
+    // until all n bytes are out (retry on a positive partial, fail only on 0 / error).
+    for (int off = 0; off < n;) {
+        auto w = ::send(sock(fd), req + off, n - off, 0);
+        if (w > 0) off += static_cast<int>(w);
+        else return 0;
+    }
 
     // Read the response. When the caller wants the body, read into THEIR buffer (so they size it
     // — a Hue /lights body runs several KB) and shift the body to the front. When they don't

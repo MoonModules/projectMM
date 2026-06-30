@@ -1,6 +1,6 @@
 # FilesystemModule
 
-![FilesystemModule controls](../../assets/screenshots/FilesystemModule.png)
+![FilesystemModule controls](../../assets/core/FilesystemModule.png)
 
 Persists control values to flash so settings survive a reboot. Always loaded, runs first in the scheduler so its load hook fires before any other module's `setup()`.
 

@@ -54,12 +54,17 @@ public:
     // takes hue/sat), we use the RGB result.
     void setCorrection(const Correction* c) override { correction_ = c; }
 
-    // A control click. "pair" starts the link-button pairing poll.
+    // A control click. "pair" starts the link-button pairing poll. Changing the bridge IP or app
+    // key points the driver at a (possibly) different bridge, so the learned light list + push
+    // cache are stale — drop them and let loop1s re-fetch against the new config.
     void onUpdate(const char* controlName) override {
         if (controlName && std::strcmp(controlName, "pair") == 0) {
             pairTicksLeft_ = kPairWindowTicks;   // begin: poll the bridge for ~30 s on loop1s
             std::snprintf(statusBuf_, sizeof(statusBuf_), "pairing: press the bridge button");
             setStatus(statusBuf_);
+        } else if (controlName &&
+                   (std::strcmp(controlName, "bridgeIp") == 0 || std::strcmp(controlName, "appKey") == 0)) {
+            resetLightCache();   // re-fetch the light list for the new bridge/key
         }
         DriverBase::onUpdate(controlName);
     }
@@ -212,6 +217,15 @@ private:
             std::snprintf(statusBuf_, sizeof(statusBuf_), "pairing timed out");
             setStatus(statusBuf_);
         }
+    }
+
+    // Drop the learned light list + push cache so loop1s re-fetches (on a bridge/key change).
+    void resetLightCache() {
+        lightCount_ = 0;
+        colourCount_ = 0;
+        sawLights_ = false;
+        pushCursor_ = 0;
+        for (uint8_t i = 0; i < kMaxLights; i++) sent_[i] = false;
     }
 
     // --- Learn the bridge's light ids (window index → hue id, in id order).

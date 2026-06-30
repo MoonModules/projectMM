@@ -2,7 +2,7 @@
 
 Drives **Philips Hue lights as a projectMM output** — the bulbs are *pixels of an effect*, not entries in a device list. Make a small grid (e.g. 4×1×1), run any effect on it, add a HueDriver, and each colour bulb in the driver's window becomes one pixel: the effect's per-pixel colour is pushed to the bridge as hue/saturation/brightness. It is a [driver](../../core/architecture.md) like any other (a sibling of [NetworkSendDriver](NetworkSendDriver.md) / [RmtLedDriver](RmtLedDriver.md)) — it reads its slice of the shared buffer and sends it out, here over the Hue HTTP API instead of a wire protocol.
 
-![A HueDriver in the UI](../../../assets/screenshots/Hue%20driver.png)
+![A HueDriver in the UI](../../../assets/light/drivers/Hue%20driver.png)
 
 ## What makes Hue different (and why the driver is shaped this way)
 
@@ -15,7 +15,7 @@ Hue is an HTTP hub, not a strip, and these properties drive the design:
 - **It needs an app key** (a "username"): the user presses the bridge's physical link button once, then the device claims a key. The driver runs this as a short bounded poll across a few 1 Hz ticks — never blocking the loop waiting for the press.
 - **It's plain HTTP, no TLS.** The Hue v1 API answers over `http://<bridge>/api/...`, so there is no certificate handling on the device. Bench-confirmed against a BSB002 bridge (API 1.77).
 
-![An effect driving the Hue lights](../../../assets/screenshots/Hue%20friendly%20effect.png)
+![An effect driving the Hue lights](../../../assets/light/drivers/Hue%20friendly%20effect.png)
 
 ## Controls
 
@@ -28,7 +28,7 @@ Hue is an HTTP hub, not a strip, and these properties drive the design:
 
 Once paired, the driver also **lists the bridge in [DevicesModule](../../core/DevicesModule.md)** (alongside discovered WLED / projectMM peers), carrying its name and the colour-light count, refreshed on a slow cadence. It registers through `DevicesModule::active()` — the same static-accessor seam [AudioModule](../../core/AudioModule.md) uses for `latestFrame()`, so the light-domain driver reaches the core module without a structural dependency.
 
-![The Hue bridge listed in the Devices module](../../../assets/screenshots/Hue%20device%20disco.png)
+![The Hue bridge listed in the Devices module](../../../assets/core/Hue%20device%20disco.png)
 
 ## Wire contract (Hue v1 API, plain HTTP)
 

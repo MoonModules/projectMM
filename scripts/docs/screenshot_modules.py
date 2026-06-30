@@ -12,14 +12,13 @@ For effects and modifiers also captures a 3-second GIF of the preview canvas.
 Also captures MoonDeck tab screenshots and the web installer page, and
 inserts them into the appropriate docs files.
 
-Saves to:
-  docs/assets/screenshots/<TypeName>.png     — module card screenshot
-  docs/assets/screenshots/<TypeName>.gif     — preview animation (effects/modifiers)
-  docs/assets/screenshots/ui_overview.png    — projectMM full-page screenshot
-  docs/assets/screenshots/moondeck_pc.png    — MoonDeck PC tab
-  docs/assets/screenshots/moondeck_esp32.png — MoonDeck ESP32 tab
-  docs/assets/screenshots/moondeck_live.png  — MoonDeck Live tab
-  docs/assets/screenshots/installer.png      — web installer page
+Saves to (by domain/type, mirroring src — see docs/backlog/folder-structure-proposal.md):
+  docs/assets/light/effects/<TypeName>.png/.gif   — effect card + preview
+  docs/assets/light/{modifiers,layouts,drivers}/  — other light modules
+  docs/assets/core/<TypeName>.png                 — core modules
+  docs/assets/ui/ui_overview.png                  — projectMM full-page screenshot
+  docs/assets/ui/moondeck_{pc,esp32,live}.png     — MoonDeck tabs
+  docs/assets/ui/installer.png                    — web installer page
 
 Usage:
     # one effect, raw (no modifier), good preview size, with its GIF, overwriting:
@@ -71,7 +70,18 @@ import requests
 from playwright.sync_api import sync_playwright, Page
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-OUT_DIR = ROOT / "docs" / "assets" / "screenshots"
+ASSETS = ROOT / "docs" / "assets"
+UI_DIR = ASSETS / "ui"   # tooling / installer / full-page shots (not per-module)
+
+# Map a module to its asset subfolder (domain/type), mirroring src. Module screenshots live in
+# docs/assets/{core, light/{effects,modifiers,layouts,drivers}}/ — see folder-structure-proposal.
+def asset_dir_for(type_name: str) -> Path:
+    if type_name.endswith("Effect"):   return ASSETS / "light" / "effects"
+    if type_name.endswith("Modifier"): return ASSETS / "light" / "modifiers"
+    if type_name.endswith("Layout"):   return ASSETS / "light" / "layouts"
+    if type_name.endswith("Driver"):   return ASSETS / "light" / "drivers"
+    if type_name in ("Layouts", "Layers", "Drivers"):  return ASSETS / "light"
+    return ASSETS / "core"   # SystemModule, FilesystemModule, DevicesModule, … and the rest
 
 # ---------------------------------------------------------------------------
 # Module catalogue
@@ -125,7 +135,7 @@ CORE_MODULES = [
 # ---------------------------------------------------------------------------
 # Extra shots: MoonDeck tabs + web installer
 # Each entry: (filename, url, wait_selector, doc_files, anchor_text)
-#   filename:      saved as docs/assets/screenshots/<filename>
+#   filename:      saved as docs/assets/ui/<filename>
 #   url:           full URL to load
 #   wait_selector: CSS selector to wait for before screenshotting (or "")
 #   doc_files:     list of repo-relative paths to insert image into
@@ -701,7 +711,9 @@ def main() -> int:
         container_names = find_container_nav_names(args.host)
         core_names = find_core_module_names(args.host)
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    for _d in (UI_DIR, ASSETS/'core', ASSETS/'light', ASSETS/'light'/'effects',
+              ASSETS/'light'/'modifiers', ASSETS/'light'/'layouts', ASSETS/'light'/'drivers'):
+        _d.mkdir(parents=True, exist_ok=True)
 
     captured, gif_captured, skipped, failed = [], [], [], []
 
@@ -716,7 +728,7 @@ def main() -> int:
         try:
             # --- Full-page UI overview screenshot --- (needs projectMM)
             if not args.extras_only:
-                overview_path = OUT_DIR / "ui_overview.png"
+                overview_path = UI_DIR / "ui_overview.png"
                 filter_allows = (not filt or filt in "ui_overview")
                 if filter_allows:
                     if not overview_path.exists() or args.force:
@@ -742,7 +754,7 @@ def main() -> int:
             for filename, url, wait_sel, _doc_files, _anchor in EXTRA_SHOTS:
                 if filt and filt not in filename.lower():
                     continue
-                out_path = OUT_DIR / filename
+                out_path = UI_DIR / filename
                 if out_path.exists() and not args.force:
                     print(f"  skip {filename} (already captured)")
                     skipped.append((filename, "already exists"))
@@ -768,7 +780,7 @@ def main() -> int:
                 cname = container_names.get(container_type, "")
                 if not cname:
                     continue
-                out_path = OUT_DIR / f"{container_type}.png"
+                out_path = asset_dir_for(container_type) / f"{container_type}.png"
                 if out_path.exists() and not args.force:
                     print(f"  skip {container_type} (already captured)")
                     skipped.append((container_type, "already exists"))
@@ -790,7 +802,7 @@ def main() -> int:
                     print(f"  skip {type_name} (not in state — ESP32-only?)")
                     skipped.append((type_name, "not in state"))
                     continue
-                out_path = OUT_DIR / f"{type_name}.png"
+                out_path = asset_dir_for(type_name) / f"{type_name}.png"
                 if out_path.exists() and not args.force:
                     print(f"  skip {type_name} (already captured)")
                     skipped.append((type_name, "already exists"))
@@ -807,8 +819,8 @@ def main() -> int:
             for type_name, parent_type, extra_props, want_gif in MODULES:
                 if filt and filt not in type_name.lower():
                     continue
-                out_path = OUT_DIR / f"{type_name}.png"
-                gif_path = OUT_DIR / f"{type_name}.gif"
+                out_path = asset_dir_for(type_name) / f"{type_name}.png"
+                gif_path = asset_dir_for(type_name) / f"{type_name}.gif"
                 need_png = not out_path.exists() or args.force
                 need_gif = want_gif and args.gif and (not gif_path.exists() or args.force)
 
@@ -851,7 +863,7 @@ def main() -> int:
                         print("gif-failed ", end="", flush=True)
                         failed.append((type_name, "gif failed"))
 
-                print(f"→ {OUT_DIR.relative_to(ROOT)}/")
+                print(f"→ {asset_dir_for(type_name).relative_to(ROOT)}/")
                 delete_module(args.host, actual_name)
                 added_ids.remove(actual_name)
                 time.sleep(0.5)
@@ -911,7 +923,7 @@ def main() -> int:
         print("  Add module screenshots: uv run scripts/docs/update_module_docs.py")
         if "ui_overview" in captured:
             print("  Add UI overview to docs/architecture.md # Web UI section:")
-            print("  ![UI overview](assets/screenshots/ui_overview.png)")
+            print("  ![UI overview](assets/ui/ui_overview.png)")
 
     return 0 if not failed else 1
 

@@ -107,8 +107,11 @@ public:
                        : (std::strcmp(typeStr, "WLED") == 0)       ? DevType::Wled
                        : (std::strcmp(typeStr, "Hue bridge") == 0) ? DevType::Hue
                                                                    : DevType::Generic;
-                d.colourCount = static_cast<uint8_t>(
-                    mm::json::readInt(mm::json::member(doc, el, "colour")));   // 0 for non-bridge rows
+                // Clamp the persisted count to the valid range (0..127, the HueDriver's
+                // colourCount_ range) so a corrupt or hand-edited entry can't wrap into a bogus
+                // value when narrowed. 0 for non-bridge rows (the key is absent → readInt = 0).
+                const long colour = mm::json::readInt(mm::json::member(doc, el, "colour"));
+                d.colourCount = static_cast<uint8_t>(colour < 0 ? 0 : (colour > 127 ? 127 : colour));
                 d.self = false;
                 d.cached = true;  // restored, not re-heard live → UI shows "cached", not a time
                 // Stamp "now" so the cached entry gets its kCachedGraceMs PROBATION window

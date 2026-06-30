@@ -1,8 +1,8 @@
 # Rainbow 2D Effect
 
-![RainbowEffect controls](../../../assets/screenshots/RainbowEffect.png)
+![RainbowEffect controls](../../../assets/light/effects/RainbowEffect.png)
 
-![RainbowEffect preview](../../../assets/screenshots/RainbowEffect.gif)
+![RainbowEffect preview](../../../assets/light/effects/RainbowEffect.gif)
 
 Diagonal rainbow pattern across a 2D grid, animated over time. Good default/test effect — always produces visible, colorful output.
 

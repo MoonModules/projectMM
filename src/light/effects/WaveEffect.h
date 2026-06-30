@@ -13,7 +13,7 @@ namespace mm {
 // scrolls sideways over time, leaving a fading trail behind it. The classic "oscilloscope wave"
 // look. Prior art: MoonLight's Wave effect (Ewoud Wijma) — behaviour reproduced (the six waveform
 // types, the per-column phase travel, the time-varying colour, the frame fade), written fresh on
-// projectMM's EffectBase + integer primitives (sin8 LUT, scale8), no palette dependency yet.
+// projectMM's EffectBase + integer primitives (sin8 LUT, scale8); the colour is an hsvToRgb sweep.
 //
 // Axis convention: the waveform sets a y (its shape lives on HEIGHT); width is the travel axis.
 // So a 1-tall grid shows no wave — to drive a 1D output (a strip, a row of Hue lights) lay it out

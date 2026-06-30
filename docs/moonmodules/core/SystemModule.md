@@ -1,6 +1,6 @@
 # SystemModule
 
-![SystemModule controls](../../assets/screenshots/SystemModule.png)
+![SystemModule controls](../../assets/core/SystemModule.png)
 
 System-level diagnostics and device identity. Always loaded, always visible in the UI.
 

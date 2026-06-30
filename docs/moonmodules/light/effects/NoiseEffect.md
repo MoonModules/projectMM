@@ -1,8 +1,8 @@
 # Noise Effect
 
-![NoiseEffect controls](../../../assets/screenshots/NoiseEffect.png)
+![NoiseEffect controls](../../../assets/light/effects/NoiseEffect.png)
 
-![NoiseEffect preview](../../../assets/screenshots/NoiseEffect.gif)
+![NoiseEffect preview](../../../assets/light/effects/NoiseEffect.gif)
 
 Smooth animated noise. Samples a 2D field on flat (`depth == 1`) layouts and a true 3D field on volumetric (`depth > 1`) layouts, so a cube renders as a varied volume rather than stacked identical slices.
 

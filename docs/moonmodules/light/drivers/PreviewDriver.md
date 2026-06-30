@@ -1,6 +1,6 @@
 # Preview Driver
 
-![PreviewDriver controls](../../../assets/screenshots/PreviewDriver.png)
+![PreviewDriver controls](../../../assets/light/drivers/PreviewDriver.png)
 
 Streams a true-shape 3D preview to the web UI over WebSocket. The preview is a **point list** — only the real lights, at their real positions — not a dense grid. So a sphere, ring, or arbitrary fixture map shows in its true shape, and the per-frame data is just the lights that exist (much less than a padded bounding box).
 

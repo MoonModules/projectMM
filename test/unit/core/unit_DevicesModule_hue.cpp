@@ -9,6 +9,7 @@
 #include "core/DevicesModule.h"
 #include "core/JsonSink.h"
 
+#include <cstdio>
 #include <cstring>
 
 TEST_CASE("DevicesModule: a Hue bridge is listed with its colour count") {
@@ -48,4 +49,27 @@ TEST_CASE("DevicesModule: a persisted Hue bridge restores as a Hue row with its 
     dev.writeListRow(sink, 0);
     CHECK(std::strstr(sink.data(), "\"type\":\"Hue bridge\"") != nullptr);
     CHECK(std::strstr(sink.data(), "\"colour\":7") != nullptr);
+}
+
+TEST_CASE("DevicesModule: a corrupt persisted colour clamps to the valid range, row still restores") {
+    // A negative count and an over-127 count (corrupt / hand-edited file) must clamp to 0..127
+    // before narrowing to uint8_t — never wrap into a bogus value. The row otherwise restores.
+    struct Case { const char* colour; const char* want; };
+    const Case cases[] = {
+        {"-5",    "\"colour\":0"},     // negative → 0
+        {"99999", "\"colour\":127"},   // overflow → 127 (the HueDriver colourCount_ ceiling)
+    };
+    for (const auto& c : cases) {
+        mm::DevicesModule dev;
+        char saved[160];
+        std::snprintf(saved, sizeof(saved),
+            "{\"devices\":[{\"name\":\"Hue Ewoud\",\"ip\":\"192.168.1.143\",\"type\":\"Hue bridge\",\"colour\":%s}]}",
+            c.colour);
+        REQUIRE(dev.restoreList(saved, "devices"));
+        REQUIRE(dev.listRowCount() == 1);
+        mm::JsonSink sink;
+        dev.writeListRow(sink, 0);
+        CHECK(std::strstr(sink.data(), "\"type\":\"Hue bridge\"") != nullptr);
+        CHECK(std::strstr(sink.data(), c.want) != nullptr);
+    }
 }

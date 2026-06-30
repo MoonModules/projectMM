@@ -522,7 +522,7 @@ How lighting uses the core [multi-device runtime](#multi-device-runtime) (discov
 
 # Web UI
 
-![UI overview](assets/screenshots/ui_overview.png)
+![UI overview](assets/ui/ui_overview.png)
 
 The UI is a handful of hand-maintained files: `index.html`, `app.js`, `style.css`, plus two focused ES modules `app.js` imports (`preview3d.js` for the WebGL 3D preview, `install-picker.js` shared with the web installer). No frameworks, no build tools, no npm. Served directly by the embedded HTTP server.
 
@@ -535,6 +535,20 @@ The UI is **MoonModule-driven**. It contains no hard-coded knowledge of specific
 Adding a new MoonModule with controls needs **zero changes** to the UI files. This extends to the tree-mutation affordances: which modules accept children (and of what role) comes from each type's `acceptsChildRoles()`, and whether a module can be deleted/replaced comes from its `userEditable()`: both declared on the C++ side and reported in `/api/types` + `/api/state`. The UI hardcodes no list of "which types are containers" or "which roles are editable"; a new container type or a fixed child is a one-line C++ override.
 
 The light domain plugs into the UI at three points: a fixed top-level tree (Layouts / Layers / Drivers pinned in `main.cpp`, root reorder disabled while child reorder works via drag-and-drop), a binary WebSocket preview channel ([PreviewDriver](moonmodules/light/drivers/PreviewDriver.md): a `0x03` coordinate table sent once per LUT rebuild plus per-frame `0x02` RGB point lists, so sparse layouts preview at their real positions), and per-role emoji for the chip filter (the `ROLE_EMOJI` map in `app.js` is the single source of truth: `effect`, `driver`, …, `peripheral`). Full UI spec: [docs/moonmodules/core/ui.md](moonmodules/core/ui.md).
+
+#### Tag emoji legend
+
+A module's chips come from three sources, rendered identically on the card and the type picker: a **role** chip (UI-derived from `role`), a **dimensional** chip (UI-derived from `dim`), and the curated **`tags()`** string (a flash literal the module returns; the UI splits it into grapheme clusters, one chip each). Role and dim are *not* repeated in `tags()` — only the categories below are. The legend takes [MoonLight](https://github.com/MoonModules/MoonLight)'s set as the canonical basis:
+
+| Category | Emoji | Meaning |
+|---|---|---|
+| **Role** (UI-derived) | 🔥 effect · 💎 modifier · 📐 layout · 🔌 driver · ⚙️ peripheral | what kind of module (from `role`, via `ROLE_EMOJI`) |
+| **Dimensionality** (UI-derived) | 📏 1D · 🟦 2D · 🧊 3D | native axes (from `dim`) |
+| **Origin / library** (`tags()`) | 💫 MoonLight · 🌊 WLED · *(projectMM-native: none — the default)* | which library the module came from; the [migration](../backlog/moonlight-effect-inventory.md) files docs by this, the emoji filters by it |
+| **Creator** (`tags()`) | 🦅 a named contributor (credited at the introduction site) | individual authorship credit |
+| **Audio** (`tags()`) | 🔊 audio-reactive | reads `AudioModule::latestFrame()` |
+
+`tags()` carries **only** origin + creator + audio (+ any genuinely module-specific marker); a module can carry several (e.g. `💫🦅` = MoonLight origin, a named creator). Role and dim are added by the UI, so a module never duplicates them in its string. When migrating, set each module's `tags()` from this legend so the chip set is consistent across the library.
 
 ## What we leave undesigned
 

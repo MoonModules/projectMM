@@ -1,6 +1,6 @@
 # DevicesModule
 
-![DevicesModule controls](../../assets/screenshots/Devices%20module.png)
+![DevicesModule controls](../../assets/core/Devices%20module.png)
 
 A **core**, domain-neutral module that discovers other devices on the LAN, identifies what each is, and presents them as a browsable list. It focuses on *all* devices on the network (including this one, marked as self), not on the host's own state — so its card looks the same on every projectMM instance, ESP32 or PC. Light-domain modules consume the device list; the discovery machinery itself stays domain-neutral.
 
@@ -48,11 +48,11 @@ Because the presence broadcast and the mDNS advertise are WLED-shaped, a project
 
 **In WLED's own "Sync interfaces" instances list** — a real WLED lists every projectMM board it heard on UDP 65506. (The `undefined` columns are WLED-sync fields projectMM doesn't fill — the presence packet carries identity, not the full WLED sync state; listing is what we're after.)
 
-![projectMM devices in WLED's instances list](../../assets/screenshots/Wled%20discovers%20projectMM.png)
+![projectMM devices in WLED's instances list](../../assets/core/Wled%20discovers%20projectMM.png)
 
 **In the native WLED app** (iOS / Android) — discovered via the mDNS `_wled._tcp` advertise, validated via the `/json/info` shim, with live colour + a working brightness slider over the `/ws` WebSocket. See [HttpServerModule § WLED-compatibility shim](HttpServerModule.md#wled-compatibility-shim) for the wire contract (reverse-engineered from the [WLED-Android](https://github.com/Moustachauve/WLED-Android) client).
 
-![projectMM devices in the native WLED app](../../assets/screenshots/WLED%20Native%20discovers%20projectMM.jpeg)
+![projectMM devices in the native WLED app](../../assets/core/WLED%20Native%20discovers%20projectMM.jpeg)
 
 ## Transport boundary (discovery vs commands)
 

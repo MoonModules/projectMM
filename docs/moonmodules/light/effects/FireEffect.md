@@ -1,8 +1,8 @@
 # Fire 2D Effect
 
-![FireEffect controls](../../../assets/screenshots/FireEffect.png)
+![FireEffect controls](../../../assets/light/effects/FireEffect.png)
 
-![FireEffect preview](../../../assets/screenshots/FireEffect.gif)
+![FireEffect preview](../../../assets/light/effects/FireEffect.gif)
 
 Classic demoscene fire simulation on the XY plane. Maintains a `width x height` heat field; sparks spawn at the bottom row, drift upward with cooling, and are mapped to a black-red-yellow-white palette.
 

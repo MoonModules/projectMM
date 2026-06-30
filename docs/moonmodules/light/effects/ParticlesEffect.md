@@ -1,8 +1,8 @@
 # Particles 2D Effect
 
-![ParticlesEffect controls](../../../assets/screenshots/ParticlesEffect.png)
+![ParticlesEffect controls](../../../assets/light/effects/ParticlesEffect.png)
 
-![ParticlesEffect preview](../../../assets/screenshots/ParticlesEffect.gif)
+![ParticlesEffect preview](../../../assets/light/effects/ParticlesEffect.gif)
 
 A swarm of particles drifting on the XY plane with persistent trails. Each particle has fixed-point position, velocity, and hue. A private RGB trail buffer is faded each frame, particles are drawn on top, and the trail buffer is copied to the layer buffer (which the Layer clears every frame).
 

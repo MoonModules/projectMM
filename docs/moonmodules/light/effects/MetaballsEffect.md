@@ -1,8 +1,8 @@
 # Metaballs 2D Effect
 
-![MetaballsEffect controls](../../../assets/screenshots/MetaballsEffect.png)
+![MetaballsEffect controls](../../../assets/light/effects/MetaballsEffect.png)
 
-![MetaballsEffect preview](../../../assets/screenshots/MetaballsEffect.gif)
+![MetaballsEffect preview](../../../assets/light/effects/MetaballsEffect.gif)
 
 Four "blobs" moving on the XY plane via integer sin/cos, with a metaball field summation per pixel. Visually similar to a lava lamp — blobs fluidly merge and separate.
 

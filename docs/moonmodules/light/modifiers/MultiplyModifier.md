@@ -1,8 +1,8 @@
 # Multiply Modifier
 
-![MultiplyModifier controls](../../../assets/screenshots/MultiplyModifier.png)
+![MultiplyModifier controls](../../../assets/light/modifiers/MultiplyModifier.png)
 
-![MultiplyModifier preview](../../../assets/screenshots/MultiplyModifier.gif)
+![MultiplyModifier preview](../../../assets/light/modifiers/MultiplyModifier.gif)
 
 Static modifier. Tiles the logical image across the physical box `multiply` times per axis, optionally reflecting alternate tiles. With a multiplier of 2 and mirror enabled on an axis, that axis folds in half — the classic kaleidoscope mirror. Multiply subsumes the old MirrorModifier: a pure mirror is `multiply = 2, mirror = true` on the chosen axes.
 
