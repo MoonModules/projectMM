@@ -1,107 +1,212 @@
 #pragma once
 
-#include "light/layers/Layer.h"
-#include "light/Palette.h"        // colorFromPalette, blend
-#include "light/draw.h"           // draw::line — the perspective edges
+#include "light/effects/EffectBase.h"
+#include "light/layers/Layer.h"   // layer()->buffer()
+#include "light/Palette.h"        // colorFromPalette, blend, Palettes::active()
+#include "light/draw.h"           // draw::line (perspective edges + depth shorten), draw::fade
 #include "core/AudioModule.h"     // AudioModule::latestFrame()
-#include "core/AudioFrame.h"
+#include "core/AudioFrame.h"      // AudioFrame::bands[16]
+#include "core/math8.h"           // map8
 
-#include <cstring>
+#include <cmath>                  // lroundf (once-per-frame maxHeight, not per-light)
 
 namespace mm {
 
-// A 3D-perspective graphic equaliser: the 16 audio bands rise as bars on a 2D grid, drawn with a
-// faked depth — each bar has darker side edges and a top surface whose lines converge toward a
-// "projector" (vanishing point) that sweeps left and right across the display. Bands to the left
-// of the projector are drawn right-to-left, bands to the right left-to-right, so the perspective
-// always points away from the moving vanishing point.
+// GEQ 3D: a 3D-perspective graphic equaliser. The 16 audio bands rise as bars on a 2D grid, drawn
+// with faked depth. Each bar's side faces and top surface are drawn as lines that run FROM a bar
+// pixel TOWARD a sweeping "projector" vanishing point at (projector, horizon), each line shortened
+// by `depth` so it stops partway — that converging foreshortening is the defining look. The
+// projector sweeps left↔right; bands left of it are painted right-to-left, bands right of it
+// left-to-right, so the perspective always points away from the moving vanishing point. The bar
+// front faces are filled flat (frontFill), and an optional border outlines each bar.
 //
-// Prior art: MoonLight's GEQ3D (E_MoonModules, MoonModules) — the perspective-bar look + sweeping
-// projector reproduced, written fresh on EffectBase + draw::line + the audio frame. Reads
-// AudioModule::latestFrame(); silence → flat → dark, safe on any target. (The 'softHack'
-// anti-alias control is omitted — draw::line is crisp.)
+// Prior art: MoonLight's GEQ3D (E_MoonModules / MoonModules, TroyHacks), itself descended from the
+// WLED-MM "GEQ 3D" effect. The perspective-bar geometry, the projector split, the per-face
+// darkening, and the `depth` line-shorten are reproduced exactly here, written fresh on EffectBase
+// + the shared draw primitives. Reads AudioModule::latestFrame(); silence → flat → dark, safe on
+// any target and grid size. (MoonLight's `softHack` anti-alias toggle is dropped — draw::line is a
+// crisp Bresenham; the `soft` arg has no projectMM equivalent.)
 class GEQ3DEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🌙📊"; }  // MoonLight origin · MoonModules · audio
     Dim dimensions() const override { return Dim::D2; }
 
-    uint8_t speed       = 5;     // projector sweep rate (1..10; higher = faster)
-    uint8_t frontFill   = 128;   // brightness of the bar's front face (0..255)
-    uint8_t horizon     = 0;     // vanishing-point row offset toward the top
-    uint8_t perspective = 128;   // depth strength (how far the top lines reach toward the projector)
-    uint8_t numBands    = 16;    // bands shown (2..16); fewer = wider bars
-    bool    borders     = false; // outline each bar
+    uint8_t speed     = 2;     // projector sweep rate (1..10; higher = faster — throttle is 11-speed)
+    uint8_t frontFill = 228;   // bar front-face fill strength (0..255)
+    uint8_t horizon   = 0;     // vanishing-point Y row (0..rows-1); the projector sits at this row
+    uint8_t depth     = 176;   // perspective depth: how far the side/top lines reach toward the projector
+    uint8_t numBands  = 16;    // bands shown (2..16); fewer = wider bars
+    bool    borders   = true;  // outline each bar
 
     void onBuildControls() override {
         controls_.addUint8("speed", speed, 1, 10);
         controls_.addUint8("frontFill", frontFill, 0, 255);
+        // MoonLight's horizon range is 0..size.x-1 (set at runtime). The control descriptor here is a
+        // fixed 0..255 slider — the source's row index — and the value is clamped to the live row
+        // count in loop(). A width/height-relative descriptor range isn't expressible at build time.
         controls_.addUint8("horizon", horizon, 0, 255);
-        controls_.addUint8("perspective", perspective, 0, 255);
+        controls_.addUint8("depth", depth, 0, 255);
         controls_.addUint8("numBands", numBands, 2, 16);
         controls_.addBool("borders", borders);
     }
 
     void loop() override {
-        uint8_t* buf = buffer();
-        const lengthType w = width(), h = height(), d = depth();
-        const uint8_t cpl = channelsPerLight();
-        if (w == 0 || h == 0 || cpl < 3) return;
-        std::memset(buf, 0, static_cast<size_t>(w) * h * d * cpl);
+        if (numBands == 0) return;
 
-        Buffer& bufRef = layer()->buffer();
-        const Coord3D dims{w, h, d};
+        const int cols = width();
+        const int rows = height();
+        if (cols <= 0 || rows <= 0 || channelsPerLight() < 3) return;
+
+        Buffer& buf = layer()->buffer();
+        const Coord3D dims{static_cast<lengthType>(cols), static_cast<lengthType>(rows), depthDim()};
+
+        // Motion trail: dim the whole buffer each frame instead of clearing it (source:
+        // layer->fadeToBlackBy(16) per frame).
+        draw::fade(buf, 16);
+
+        // Advance the projector (vanishing point) along X; bounce at the edges. The throttle
+        // (11-speed) means a higher speed steps more often. projector_ is unsigned, so the ==0
+        // bounce is the lower edge (the uint wrap can't go negative).
+        if (counter_++ % static_cast<uint32_t>(11 - speed) == 0) projector_ += projector_dir_;
+        if (projector_ >= cols) projector_dir_ = -1;
+        if (projector_ == 0)    projector_dir_ = 1;
+
+        const int NUM_BANDS = numBands;
+        const int projector = projector_;
+        // horizon is a Y row used as the vanishing point's y; clamp the 0..255 control to the grid.
+        const int hzn = horizon < rows ? horizon : rows - 1;
+        const int split = imap(projector, 0, cols, 0, NUM_BANDS - 1);
+
         const AudioFrame* f = AudioModule::latestFrame();
 
-        // Sweep the projector (vanishing point) left/right; bounce at the edges. The throttle
-        // (11-speed) means a higher speed steps more often.
-        if (++counter_ >= static_cast<uint32_t>(11 - speed)) {
-            counter_ = 0;
-            int32_t np = static_cast<int32_t>(projector_) + projectorDir_;
-            if (np <= 0)         { np = 0;         projectorDir_ = 1; }
-            else if (np >= w - 1){ np = w - 1;     projectorDir_ = -1; }
-            projector_ = static_cast<lengthType>(np);
+        // Bar heights: map each band magnitude onto maxHeight (slightly reduced on small panels).
+        uint8_t heights[16] = {0};
+        const int maxHeight = lroundf(float(rows) * ((rows < 18) ? 0.75f : 0.85f));
+        for (int i = 0; i < NUM_BANDS; i++) {
+            int band = i;
+            if (NUM_BANDS < 16) band = imap(band, 0, NUM_BANDS, 0, 16);  // always use the full 16-band range
+            if (band > 15) band = 15;
+            heights[i] = map8(f->bands[band], 0, static_cast<uint8_t>(maxHeight));
         }
 
-        const uint8_t n = numBands < 2 ? 2 : (numBands > 16 ? 16 : numBands);
-        const lengthType barW = w > n ? static_cast<lengthType>(w / n) : 1;
-        const lengthType vy   = static_cast<lengthType>(horizon * (h - 1) / 255);   // vanishing row
+        const RGB black{0, 0, 0};
 
-        for (uint8_t b = 0; b < n; b++) {
-            const uint8_t band = static_cast<uint8_t>(static_cast<uint16_t>(b) * 16 / n);
-            const uint8_t mag = f->bands[band];
-            const lengthType barH = static_cast<lengthType>(static_cast<uint32_t>(mag) * (h - 1) * 85 / (255 * 100));
-            if (barH <= 0) continue;
+        // Right vertical faces + top — bands at/left of the split, painted LEFT to RIGHT.
+        for (int i = 0; i <= split; i++) {
+            const uint16_t colorIndex = imap(cols / NUM_BANDS * i, 0, cols, 0, 256);
+            const RGB ledColor = colorFromPalette(*Palettes::active(), static_cast<uint8_t>(colorIndex));
+            const int linex = i * (cols / NUM_BANDS);
 
-            const lengthType x0 = static_cast<lengthType>(b * barW);
-            const lengthType x1 = static_cast<lengthType>((b + 1) * barW - 1 < w ? (b + 1) * barW - 1 : w - 1);
-            const lengthType top = static_cast<lengthType>(h - 1 - barH);
-            const uint8_t hue = static_cast<uint8_t>(band * 16);
-            const RGB front = colorFromPalette(*Palettes::active(), hue, frontFill);
-            const RGB edge  = colorFromPalette(*Palettes::active(), hue, static_cast<uint8_t>(frontFill / 2));
+            if (heights[i] > 1) {
+                const RGB sideColor = blend(ledColor, black, static_cast<uint8_t>(255 - 32));
+                const int pPos = MAXi(0, linex + (cols / NUM_BANDS) - 1);
+                // Right side face: stacked perspective lines from the bar's right edge toward the projector.
+                for (int y = (i < NUM_BANDS - 1) ? heights[i + 1] : 0; y <= heights[i]; y++) {
+                    if (rows - y > 0)
+                        draw::line(buf, dims, {static_cast<lengthType>(pPos), static_cast<lengthType>(rows - y - 1), 0},
+                                   {static_cast<lengthType>(projector), static_cast<lengthType>(hzn), 0}, sideColor, depth);
+                }
 
-            // Front face: vertical lines from the floor up to the bar height.
-            for (lengthType x = x0; x <= x1; x++)
-                draw::line(bufRef, dims, {x, static_cast<lengthType>(h - 1), 0}, {x, top, 0}, front);
+                const RGB topColor = blend(ledColor, black, static_cast<uint8_t>(255 - 128));
+                // Top surface: skip when directly under the projector (handled as a special case below).
+                if (heights[i] < rows - hzn && (projector <= linex || projector >= pPos)) {
+                    if (rows - heights[i] > 1) {
+                        for (int x = linex; x <= pPos; x++)
+                            draw::line(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(rows - heights[i] - 2), 0},
+                                       {static_cast<lengthType>(projector), static_cast<lengthType>(hzn), 0}, topColor, depth);
+                    }
+                }
+            }
+        }
 
-            // Side edges (the depth illusion): the bar's left and right verticals, darker.
-            draw::line(bufRef, dims, {x0, static_cast<lengthType>(h - 1), 0}, {x0, top, 0}, edge);
-            draw::line(bufRef, dims, {x1, static_cast<lengthType>(h - 1), 0}, {x1, top, 0}, edge);
+        // Left vertical faces + top — bands right of the split, painted RIGHT to LEFT.
+        for (int i = NUM_BANDS - 1; i > split; i--) {
+            const uint16_t colorIndex = imap(cols / NUM_BANDS * i, 0, cols - 1, 0, 255);
+            const RGB ledColor = colorFromPalette(*Palettes::active(), static_cast<uint8_t>(colorIndex));
+            const int linex = i * (cols / NUM_BANDS);
+            const int pPos = MAXi(0, linex + (cols / NUM_BANDS) - 1);
 
-            // Top surface: a line from the bar's near top edge toward the projector vanishing point,
-            // pulled back by `depth`. The further the projector, the more the top "tilts".
-            const lengthType px = projector_;
-            const lengthType ty = static_cast<lengthType>(top - (top - vy) * perspective / 255);
-            draw::line(bufRef, dims, {x0, top, 0}, {px > x0 ? x1 : x0, ty, 0}, edge);
+            if (heights[i] > 1) {
+                const RGB sideColor = blend(ledColor, black, static_cast<uint8_t>(255 - 32));
+                // Left side face: stacked perspective lines from the bar's left edge toward the projector.
+                for (int y = (i > 0) ? heights[i - 1] : 0; y <= heights[i]; y++) {
+                    if (rows - y > 0)
+                        draw::line(buf, dims, {static_cast<lengthType>(linex), static_cast<lengthType>(rows - y - 1), 0},
+                                   {static_cast<lengthType>(projector), static_cast<lengthType>(hzn), 0}, sideColor, depth);
+                }
 
-            if (borders)
-                draw::line(bufRef, dims, {x0, top, 0}, {x1, top, 0}, front);
+                const RGB topColor = blend(ledColor, black, static_cast<uint8_t>(255 - 128));
+                if (heights[i] < rows - hzn && (projector <= linex || projector >= pPos)) {
+                    if (rows - heights[i] > 1) {
+                        for (int x = linex; x <= pPos; x++)
+                            draw::line(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(rows - heights[i] - 2), 0},
+                                       {static_cast<lengthType>(projector), static_cast<lengthType>(hzn), 0}, topColor, depth);
+                    }
+                }
+            }
+        }
+
+        // Projector special-case top + front fill + borders, all bands left to right.
+        for (int i = 0; i < NUM_BANDS; i++) {
+            const uint16_t colorIndex = imap(cols / NUM_BANDS * i, 0, cols - 1, 0, 255);
+            const RGB ledColor = colorFromPalette(*Palettes::active(), static_cast<uint8_t>(colorIndex));
+            const int linex = i * (cols / NUM_BANDS);
+            const int pPos  = linex + (cols / NUM_BANDS) - 1;
+            const int pPos1 = linex + (cols / NUM_BANDS);
+
+            // Special case: top perspective for the bar directly under the projector (skipped above).
+            if (projector >= linex && projector <= pPos) {
+                if ((heights[i] > 1) && (heights[i] < rows - hzn) && (rows - heights[i] > 1)) {
+                    const RGB topColor = blend(ledColor, black, static_cast<uint8_t>(255 - 128));
+                    for (int x = linex; x <= pPos; x++)
+                        draw::line(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(rows - heights[i] - 2), 0},
+                                   {static_cast<lengthType>(projector), static_cast<lengthType>(hzn), 0}, topColor, depth);
+                }
+            }
+
+            if ((heights[i] > 1) && (rows - heights[i] > 0)) {
+                RGB frontColor = blend(ledColor, black, static_cast<uint8_t>(255 - frontFill));
+                // Front fill: vertical lines across the bar face from the floor up to its height.
+                for (int x = linex; x < pPos1; x++)
+                    draw::line(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(rows - 1), 0},
+                               {static_cast<lengthType>(x), static_cast<lengthType>(rows - heights[i] - 1), 0}, frontColor);
+
+                if (!borders && heights[i] > rows - hzn) {
+                    // Match the side fill in blackout mode, then draw a top line to simulate hidden top fill.
+                    if (frontFill == 0) frontColor = blend(ledColor, black, static_cast<uint8_t>(255 - 32));
+                    draw::line(buf, dims, {static_cast<lengthType>(linex), static_cast<lengthType>(rows - heights[i] - 1), 0},
+                               {static_cast<lengthType>(linex + (cols / NUM_BANDS) - 1), static_cast<lengthType>(rows - heights[i] - 1), 0}, frontColor);
+                }
+
+                if (borders && (rows - heights[i] > 1)) {
+                    const lengthType bottom = static_cast<lengthType>(rows - 1);
+                    const lengthType topY   = static_cast<lengthType>(rows - heights[i] - 1);
+                    const lengthType topY2  = static_cast<lengthType>(rows - heights[i] - 2);
+                    const lengthType lx     = static_cast<lengthType>(linex);
+                    const lengthType rx     = static_cast<lengthType>(linex + (cols / NUM_BANDS) - 1);
+                    draw::line(buf, dims, {lx, bottom, 0}, {lx, topY, 0}, ledColor);   // left side line
+                    draw::line(buf, dims, {rx, bottom, 0}, {rx, topY, 0}, ledColor);   // right side line
+                    draw::line(buf, dims, {lx, topY2, 0}, {rx, topY2, 0}, ledColor);   // top line
+                    draw::line(buf, dims, {lx, bottom, 0}, {rx, bottom, 0}, ledColor); // bottom line
+                }
+            }
         }
     }
 
 private:
-    lengthType projector_ = 0;
-    int8_t     projectorDir_ = 1;
-    uint32_t   counter_ = 0;
+    // Standard integer map (MoonLight's ::map), used for the color index / split / band remaps.
+    static int imap(int x, int inLo, int inHi, int outLo, int outHi) {
+        const int den = inHi - inLo;
+        if (den == 0) return outLo;
+        return (x - inLo) * (outHi - outLo) / den + outLo;
+    }
+    static int MAXi(int a, int b) { return a > b ? a : b; }
+    // The member `depth` (control) hides the inherited grid-depth accessor name; qualify it.
+    lengthType depthDim() const { return EffectBase::depth() > 0 ? EffectBase::depth() : 1; }
+
+    uint16_t projector_ = 0;
+    int8_t   projector_dir_ = 1;
+    uint32_t counter_ = 0;
 };
 
 } // namespace mm

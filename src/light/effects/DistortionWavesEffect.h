@@ -2,7 +2,7 @@
 
 #include "light/layers/Layer.h"
 #include "light/Palette.h"   // colorFromPalette + active palette
-#include "core/math8.h"   // sin8 (+ color.h: hsvToRgb)
+#include "core/math8.h"   // sin8 (integer sine LUT)
 
 namespace mm {
 
@@ -14,7 +14,7 @@ namespace mm {
 // Integer-only: angles are uint8_t (256 = full turn), sin8() returns 0..255. The two
 // sines are averaged into a hue byte. WLED runs the vertical wave's time ~1.3× the
 // horizontal; we approximate 1.3 as (t*333)>>8 = t*1.301..., staying in integer math.
-// hsvToRgb(hue, 240, 255) keeps WLED's slightly-desaturated look.
+// The hue indexes the global active palette via colorFromPalette (WLED used an hsvToRgb sweep).
 //
 // Prior art: MoonLight E_WLED.h (the WLED port); projectMM v1/v2 DistortionWaves (those
 // used float sinf — this is the integer-sin8 equivalent).

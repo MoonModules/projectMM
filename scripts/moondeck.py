@@ -1655,10 +1655,11 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
                 # margin so the preview isn't flush against the cell edges.
                 style = (style + ";" if style else "") + "margin:4px 0"
                 return f'<img src="{src_}"{wattr} style="{style}">'
-            # No raw img/anchor → ordinary escaped+inline cell (the common case).
-            if "<img" not in c and "<a id=" not in c:
+            # No raw HTML → ordinary escaped+inline cell (the common case).
+            if "<img" not in c and "<a id=" not in c and "<br" not in c:
                 return render_inline(html_mod.escape(c))
-            # Protect our two tags, escape the rest, render markdown, then restore them.
+            # Protect the few tags the module-doc cells use (img preview, row anchor, <br> line
+            # breaks in a "card" cell), escape the rest, render markdown, then restore them.
             tokens = []
             def _stash(html: str) -> str:
                 tokens.append(html)
@@ -1667,6 +1668,7 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
                        r'(?:\s+style="(?P<style>[^"]*)")?[^>]*>',
                        lambda m: _stash(_img(m)), c)
             c = re.sub(r'<a id="([a-z0-9-]+)"></a>', lambda m: _stash(f'<a id="{m.group(1)}"></a>'), c)
+            c = re.sub(r'<br\s*/?>', lambda m: _stash("<br>"), c)
             out = render_inline(html_mod.escape(c))
             for i, html in enumerate(tokens):
                 out = out.replace(f"\x00{i}\x00", html)
@@ -1801,10 +1803,27 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
                 continue
             close_list_if_open()
 
+            stripped_check = raw_line.strip()
+
+            # A standalone <img …> line (the per-module doc pages put the preview gif on its own
+            # line above the description). Resolve a relative src to /api/doc-asset/ and keep the
+            # width, like the table-cell path does — the allowlist below doesn't cover <img>.
+            img_m = re.fullmatch(r'<img src="(?P<src>[^"]+)"(?:\s+width="(?P<w>\d+)")?[^>]*>', stripped_check)
+            if img_m:
+                src_ = img_m.group("src")
+                if not src_.startswith(("http://", "https://", "/")):
+                    abs_src = (md_path.parent / src_).resolve()
+                    try:
+                        src_ = f"/api/doc-asset/{abs_src.relative_to(ROOT.resolve())}"
+                    except ValueError:
+                        pass
+                wattr = f' width="{img_m.group("w")}"' if img_m.group("w") else ""
+                lines.append(f'<img src="{src_}"{wattr} style="margin:4px 0">')
+                continue
+
             # Pass-through for a fixed allowlist of structural HTML tags used
             # by history_report.py's combined graph+commits output. Narrowed
             # to known safe tags so arbitrary doc content can't inject scripts.
-            stripped_check = raw_line.strip()
             if (stripped_check.startswith("<")
                     and stripped_check.endswith(">")
                     and _allowed_html_re.match(stripped_check)):

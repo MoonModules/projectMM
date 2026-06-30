@@ -1836,8 +1836,24 @@ function updateModuleControls(mod) {
                 // which is ambiguous while a native popup is up (the popup is a
                 // separate OS layer on macOS). The 1s dragTs cooldown is the
                 // additional fallback for the frames right after the popup closes.
-                if (sel && sel.dataset.open !== "true" && sel !== document.activeElement &&
-                    Number(sel.value) !== Number(ctrl.value)) sel.value = ctrl.value;
+                if (sel && sel.dataset.open !== "true" && sel !== document.activeElement) {
+                    // Re-sync the OPTION list when it changed since render: some selects are
+                    // populated asynchronously (e.g. HueDriver learns its rooms/lights ~1-2s after
+                    // boot, growing this select from ["All"] to the full list). The value-only patch
+                    // below can't reveal new options, so rebuild them in place when they differ.
+                    const opts = ctrl.options || [];
+                    const cur = Array.from(sel.options).map(o => o.textContent);
+                    if (cur.length !== opts.length || opts.some((o, i) => o !== cur[i])) {
+                        sel.innerHTML = "";
+                        opts.forEach((opt, i) => {
+                            const o = document.createElement("option");
+                            o.value = i;
+                            o.textContent = opt;
+                            sel.appendChild(o);
+                        });
+                    }
+                    if (Number(sel.value) !== Number(ctrl.value)) sel.value = ctrl.value;
+                }
                 break;
             }
             case "palette": {

@@ -82,27 +82,46 @@ constexpr uint8_t qsub8(uint8_t a, uint8_t b) {
 // is the recognisable in-place-channel-scale spelling; one definition, two names.
 constexpr uint8_t nscale8(uint8_t val, uint8_t scale) { return scale8(val, scale); }
 
-// --- Timing / beat ----------------------------------------------------------
-// beat8: a 0..255 sawtooth that completes `bpm` cycles per minute, sampled at time `ms`.
-// One beat = 60000/bpm ms; map the position within the current beat onto 0..255.
-constexpr uint8_t beat8(uint8_t bpm, uint32_t ms) {
-    if (bpm == 0) return 0;
-    const uint32_t period = 60000u / bpm;
-    const uint32_t pos = period ? (ms % period) : 0;
-    return static_cast<uint8_t>((pos * 256u) / (period ? period : 1));
+// map8: rescale a 0..255 input onto the range [rangeStart, rangeEnd] (FastLED's map8). For
+// rangeEnd >= rangeStart it's rangeStart + scale8(in, rangeEnd-rangeStart). Used to turn an audio
+// band (0..255) into a bar height, a line length, etc.
+constexpr uint8_t map8(uint8_t in, uint8_t rangeStart, uint8_t rangeEnd) {
+    const uint8_t width = static_cast<uint8_t>(rangeEnd - rangeStart);
+    return static_cast<uint8_t>(rangeStart + scale8(in, width));
 }
 
-// beatsin8: a sine oscillating between `low` and `high` at `bpm`, sampled at `ms`. The
-// workhorse "smoothly move a value back and forth on the beat" primitive.
-constexpr uint8_t beatsin8(uint8_t bpm, uint32_t ms, uint8_t low = 0, uint8_t high = 255) {
-    const uint8_t s = sin8(beat8(bpm, ms));            // 0..255 sine
+// --- Timing / beat ----------------------------------------------------------
+// The time source is passed in (ms since boot, e.g. platform::millis()/elapsed()) so core stays
+// platform-agnostic. `timebase` shifts the phase origin: an effect that wants its oscillation to
+// start (or jump) at a chosen moment passes that moment as the timebase, so the beat is measured
+// from there. This matches FastLED's beat8(bpm, timebase) / beatsin8(bpm,low,high,timebase,phase).
+
+// beat8: a 0..255 sawtooth completing `bpm` cycles per minute, measured from `timebase`.
+constexpr uint8_t beat8(uint8_t bpm, uint32_t ms, uint32_t timebase = 0) {
+    if (bpm == 0) return 0;
+    const uint32_t period = 60000u / bpm;
+    if (period == 0) return 0;
+    const uint32_t pos = (ms - timebase) % period;
+    return static_cast<uint8_t>((pos * 256u) / period);
+}
+
+// beatsin8: a sine oscillating in [low,high] at `bpm`. `timebase` shifts the phase origin (in ms);
+// `phase` adds a fixed 0..255 offset to the beat (a constant lead/lag). FastLED's signature
+// (bpm, low, high, timebase, phase) — `ms` (the current time) is threaded as the first non-FastLED
+// arg so the function stays time-source-agnostic.
+constexpr uint8_t beatsin8(uint8_t bpm, uint32_t ms, uint8_t low = 0, uint8_t high = 255,
+                           uint32_t timebase = 0, uint8_t phase = 0) {
+    const uint8_t beat = static_cast<uint8_t>(beat8(bpm, ms, timebase) + phase);
+    const uint8_t s = sin8(beat);                      // 0..255 sine
     const uint8_t range = static_cast<uint8_t>(high - low);
     return static_cast<uint8_t>(low + scale8(s, range));
 }
 
 // beatsin16: 16-bit range version, for positions across a wide grid.
-constexpr uint16_t beatsin16(uint8_t bpm, uint32_t ms, uint16_t low = 0, uint16_t high = 65535) {
-    const uint8_t s = sin8(beat8(bpm, ms));            // 0..255 sine
+constexpr uint16_t beatsin16(uint8_t bpm, uint32_t ms, uint16_t low = 0, uint16_t high = 65535,
+                             uint32_t timebase = 0, uint8_t phase = 0) {
+    const uint8_t beat = static_cast<uint8_t>(beat8(bpm, ms, timebase) + phase);
+    const uint8_t s = sin8(beat);                      // 0..255 sine
     const uint16_t range = static_cast<uint16_t>(high - low);
     return static_cast<uint16_t>(low + ((static_cast<uint32_t>(s) * range) >> 8));
 }
@@ -120,6 +139,10 @@ public:
     // 0..bound-1 (bound>0): scale the 16-bit draw to avoid modulo bias on small bounds.
     constexpr uint8_t below(uint8_t bound) {
         return bound ? static_cast<uint8_t>((static_cast<uint32_t>(next16()) * bound) >> 16) : 0;
+    }
+    // min..max-1 (FastLED's random8(min,max)): an offset draw over the half-open range.
+    constexpr uint8_t below(uint8_t min, uint8_t max) {
+        return max > min ? static_cast<uint8_t>(min + below(static_cast<uint8_t>(max - min))) : min;
     }
 private:
     constexpr uint32_t advance() {

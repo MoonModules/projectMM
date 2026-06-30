@@ -9,6 +9,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 TEST_CASE("HueDriver: a coloured pixel becomes an on/bri/hue/sat state body") {
     mm::HueDriver hue;
@@ -62,6 +63,73 @@ TEST_CASE("HueDriver: parseLights keeps only colour-capable, reachable lights") 
     REQUIRE(hue.lightCountForTest() == 1);     // only id 5 qualifies
     CHECK(hue.hueIdForTest(0) == 5);
     CHECK(hue.colourCountForTest() == 1);
+}
+
+// Room + light selection filters which colour lights the driver actually drives. Both dropdowns
+// default to "All" (index 0): then every colour light is driven (unchanged behaviour). Selecting a
+// room narrows the driven set to that room's colour lights; selecting a light drives just that one.
+TEST_CASE("HueDriver: room/light selection filters the driven set") {
+    mm::HueDriver hue;
+    // Four colour+reachable lights, ids 1..4.
+    const char* lights =
+        "{\"1\":{\"state\":{\"hue\":1,\"reachable\":true},\"name\":\"Lamp A\"},"
+        "\"2\":{\"state\":{\"hue\":2,\"reachable\":true},\"name\":\"Lamp B\"},"
+        "\"3\":{\"state\":{\"hue\":3,\"reachable\":true},\"name\":\"Lamp C\"},"
+        "\"4\":{\"state\":{\"hue\":4,\"reachable\":true},\"name\":\"Lamp D\"}}";
+    hue.parseLightsForTest(lights);
+    REQUIRE(hue.lightCountForTest() == 4);
+
+    // Two rooms: "Living" = lights 1,2 ; "Office" = lights 3,4. (Plus a Zone that must be ignored.)
+    const char* groups =
+        "{\"1\":{\"name\":\"Living\",\"lights\":[\"1\",\"2\"],\"type\":\"Room\"},"
+        "\"2\":{\"name\":\"Office\",\"lights\":[\"3\",\"4\"],\"type\":\"Room\"},"
+        "\"3\":{\"name\":\"Whole house\",\"lights\":[\"1\",\"2\",\"3\",\"4\"],\"type\":\"Zone\"}}";
+    hue.parseGroupsForTest(groups);
+    CHECK(hue.roomCountForTest() == 2);          // the Zone is not a Room
+
+    // Default (room=All, light=All): all four driven.
+    CHECK(hue.drivenCountForTest() == 4);
+
+    // Select room "Living" (index 1): only its two lights (ids 1,2) are driven.
+    hue.setRoomForTest(1);
+    REQUIRE(hue.drivenCountForTest() == 2);
+    CHECK(hue.drivenIdForTest(0) == 1);
+    CHECK(hue.drivenIdForTest(1) == 2);
+
+    // Within "Living", select the 2nd light (index 2 → light id 2): just that one.
+    hue.setLightForTest(2);
+    REQUIRE(hue.drivenCountForTest() == 1);
+    CHECK(hue.drivenIdForTest(0) == 2);
+
+    // Back to room=All resets the breadth.
+    hue.setRoomForTest(0);
+    hue.setLightForTest(0);
+    CHECK(hue.drivenCountForTest() == 4);
+}
+
+// The single status line (folding what were the separate hueStatus / colourLights controls) shows
+// the light count as driven-of-total: "N-M lights" while filtered, the plain "M lights" when not.
+TEST_CASE("HueDriver: status reports the driven-of-total light count") {
+    mm::HueDriver hue;
+    std::strcpy(hue.appKey, "test-key");   // non-empty key → "paired" rather than "unpaired"
+    const char* lights =
+        "{\"1\":{\"state\":{\"hue\":1,\"reachable\":true},\"name\":\"Lamp A\"},"
+        "\"2\":{\"state\":{\"hue\":2,\"reachable\":true},\"name\":\"Lamp B\"},"
+        "\"3\":{\"state\":{\"hue\":3,\"reachable\":true},\"name\":\"Lamp C\"},"
+        "\"4\":{\"state\":{\"hue\":4,\"reachable\":true},\"name\":\"Lamp D\"}}";
+    hue.parseLightsForTest(lights);
+    const char* groups =
+        "{\"1\":{\"name\":\"Living\",\"lights\":[\"1\",\"2\"],\"type\":\"Room\"}}";
+    hue.parseGroupsForTest(groups);
+
+    // Unfiltered (room=All): the plain count.
+    hue.refreshStatusForTest();
+    CHECK(std::string(hue.status()) == "paired, 4 lights");
+
+    // Filtered to "Living" (2 of 4): the driven-of-total form.
+    hue.setRoomForTest(1);
+    hue.refreshStatusForTest();
+    CHECK(std::string(hue.status()) == "paired, 2-4 lights");
 }
 
 // fetchLights sizes its read buffer by growing while the body looks truncated. The signal is

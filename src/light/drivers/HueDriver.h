@@ -29,6 +29,16 @@ namespace mm {
 //  - It needs an app key: press the bridge's link button once, then POST /api to claim a key.
 //    Pairing is a short bounded poll across a few loop1s ticks (never blocking the loop).
 //
+// Room / light selection. Two dropdowns ("room", "light") let the user aim the effect at a
+// subset of the bridge's colour bulbs without touching the window controls. fetchGroups reads
+// GET /api/<key>/groups and keeps the bridge's Rooms (name + member light ids); fetchLights keeps
+// each colour light's name. Option index 0 is "All" in BOTH dropdowns, so the common "drive
+// everything" case never shifts index and persists as 0 for free (the Select stores its uint8
+// index). Picking a room narrows the light dropdown to that room's colour lights AND filters the
+// driven set to that room; picking a specific light drives just that one. The filter builds
+// drivenIdx_[] — the colour-light subset pushOneChangedLight actually walks — so room=All &
+// light=All leaves the original behaviour (drive every colour bulb) untouched.
+//
 // Plain HTTP, no TLS — the Hue v1 API allows it (bench-confirmed on a BSB002 bridge). Prior
 // art: the Hue v1 CLIP API (public docs); the effect-as-output mapping is projectMM's own.
 class HueDriver : public DriverBase {
@@ -40,9 +50,16 @@ public:
         controls_.addIPv4("bridgeIp", bridgeIp);
         controls_.addText("appKey", appKey, sizeof(appKey));   // persisted credential
         controls_.addButton("pair");                            // link-button pairing
+        // Room + light filter. Both default to index 0 = "All". The option arrays are rebuilt
+        // (in place, into stable member buffers) from the parsed bridge data; onBuildControls is
+        // re-run on every control change (HttpServerModule), so these reflect the current room_.
+        buildRoomOptions();
+        buildLightOptions();
+        controls_.addSelect("room", room_, roomOptions_, roomOptionCount_);
+        controls_.addSelect("light", light_, lightOptions_, lightOptionCount_);
         addWindowControls();                                    // start / count — its slice of the buffer
-        controls_.addReadOnly("hueStatus", statusBuf_, sizeof(statusBuf_));
-        controls_.addReadOnlyInt("colourLights", colourCount_, "lights"); // size a layout to this
+        // The generic "status" line (setStatus) carries the pairing state + driven-of-total light
+        // count — see refreshStatus(); no separate hueStatus / colourLights controls.
         refreshStatus();
     }
 
@@ -64,7 +81,19 @@ public:
             setStatus(statusBuf_);
         } else if (controlName &&
                    (std::strcmp(controlName, "bridgeIp") == 0 || std::strcmp(controlName, "appKey") == 0)) {
-            resetLightCache();   // re-fetch the light list for the new bridge/key
+            resetLightCache();   // re-fetch the light list + groups for the new bridge/key
+        } else if (controlName && std::strcmp(controlName, "room") == 0) {
+            // Room changed: the light dropdown's options now describe a different set, so the old
+            // light_ index may point past the new (shorter) list — clamp it back to "All". The
+            // option arrays themselves were already rebuilt by the rebuildControls() that ran just
+            // before this onUpdate (it re-ran onBuildControls() against the new room_). Recompute
+            // the driven subset and refresh the status line.
+            if (light_ >= lightOptionCount_) light_ = 0;
+            rebuildDriven();
+            refreshStatus();
+        } else if (controlName && std::strcmp(controlName, "light") == 0) {
+            rebuildDriven();     // a different single light (or back to room's all)
+            refreshStatus();     // the driven-of-total count changed → refresh the status line
         }
         DriverBase::onUpdate(controlName);
     }
@@ -90,12 +119,14 @@ public:
         if (pairTicksLeft_ > 0) { pollPairing(); DriverBase::loop1s(); return; }
         if (!appKey[0] || !haveBridge()) { DriverBase::loop1s(); return; }
         if (!sawLights_) { fetchLights(); DriverBase::loop1s(); return; }
+        if (!sawGroups_) { fetchGroups(); DriverBase::loop1s(); return; }
         if (++reportTick_ >= kReportEverySec) { reportTick_ = 0; reportBridge(); }
         DriverBase::loop1s();
     }
 
     void teardown() override {
         pairTicksLeft_ = 0;
+        freeNameBuffers();   // release the dropdown-name heap; a re-add re-fetches and re-allocs
         DriverBase::teardown();
     }
 
@@ -113,10 +144,25 @@ public:
     }
 
     // Test seam: parse a real /lights JSON body through fetchLights' colour-light extractor.
-    void parseLightsForTest(const char* json) { parseLights(json); }
+    void parseLightsForTest(const char* json) { parseLights(json); rebuildDriven(); }
     uint8_t lightCountForTest() const { return lightCount_; }    // kept colour+reachable lights
     uint16_t hueIdForTest(uint8_t i) const { return i < kMaxLights ? hueId_[i] : 0; }
     int8_t colourCountForTest() const { return colourCount_; }
+
+    // Test seam: parse a real /groups JSON body through fetchGroups' Room extractor. Call
+    // parseLightsForTest FIRST — room membership resolves against the known colour lights (hueId_),
+    // exactly as production order guarantees (fetchGroups runs only after fetchLights).
+    void parseGroupsForTest(const char* json) { parseGroups(json); rebuildDriven(); }
+    uint8_t roomCountForTest() const { return roomCount_; }      // kept Rooms (type=="Room")
+
+    // Test seams for the room→light filtering. setRoomForTest/setLightForTest mirror what a UI
+    // Select change does (write the index, then re-derive the driven subset); drivenCountForTest /
+    // drivenIdForTest report the filtered set pushOneChangedLight walks.
+    void setRoomForTest(uint8_t r) { room_ = r; if (light_ >= lightOptionCount_) light_ = 0; rebuildDriven(); refreshStatus(); }
+    void setLightForTest(uint8_t l) { light_ = l; rebuildDriven(); refreshStatus(); }
+    void refreshStatusForTest() { refreshStatus(); }
+    uint8_t drivenCountForTest() const { return drivenLightCount_; }
+    uint16_t drivenIdForTest(uint8_t i) const { return i < drivenLightCount_ ? hueId_[drivenIdx_[i]] : 0; }
 
     // Test seam for the RGB→HSV mapping (no bridge needed).
     static void rgbToHsvForTest(uint8_t r, uint8_t g, uint8_t b, uint16_t& h, uint8_t& s, uint8_t& v) {
@@ -128,6 +174,14 @@ public:
 
 private:
     static constexpr uint8_t kMaxLights = 32;        // a LAN's worth of Hue bulbs; bounded, no heap
+    static constexpr uint8_t kMaxRooms  = 16;        // bounded room count; option index 0 is "All"
+    static constexpr uint8_t kNameLen   = 24;        // per-light / per-room friendly-name buffer
+    // kMaxLights == 32 == the width of a uint32_t, so a Room's colour-light membership fits one
+    // bitmask (bit i ⇔ colour light hueId_[i]) — resolved at parse time, since fetchGroups runs
+    // after fetchLights (the sawGroups_ gate), so hueId_ is already populated. A bitmask is the
+    // textbook small-set membership (a bit test replaces a per-id scan), and 16×4 B = 64 B beats a
+    // 16×32 id-list's 1 KB inline. static_assert pins the width assumption.
+    static_assert(kMaxLights == 32, "Room membership bitmask (roomMask_) assumes 32 colour lights");
     // One PUT at most every kPutIntervalMs (a millis() gate in loop()). Each PUT opens a fresh
     // TCP connection (the bridge speaks Connection: close), so the rate is bounded by connection
     // CHURN, not just Hue's command budget: at ~7/s the TIME_WAIT sockets pile into the hundreds
@@ -160,6 +214,48 @@ private:
     uint8_t  lightCount_ = 0;                         // number of colour-capable lights
     int8_t   colourCount_ = 0;                        // same, as the read-only control / bridge field
     bool     sawLights_ = false;                      // fetchLights ran → the list is trustworthy
+    // Friendly names for the dropdowns. Heap, NOT inline: a fixed [kMaxLights][kNameLen] array
+    // would reserve 768 B whether the bridge has 4 lights or 32 (and cap at 32). Instead one
+    // contiguous block of (count × kNameLen) is allocated to the ACTUAL light/room count when the
+    // fetch runs, and freed in release()/teardown — so memory scales to the real bridge and
+    // sizeof(HueDriver) stays small (the lightsBuf_ stack-overflow lesson, applied to the names).
+    char*    lightNames_ = nullptr;                   // kMaxLights × kNameLen; lightNameAt(i) indexes it
+    char*    roomNames_  = nullptr;                   // kMaxRooms  × kNameLen
+    char* lightNameAt(uint8_t i) { return lightNames_ ? lightNames_ + static_cast<size_t>(i) * kNameLen : nullptr; }
+    char* roomNameAt(uint8_t i)  { return roomNames_  ? roomNames_  + static_cast<size_t>(i) * kNameLen : nullptr; }
+    // Allocate the two name blocks lazily on first parse (so an unconfigured driver pays nothing),
+    // and free them on teardown / cache reset (so a removed-then-readded bridge starts clean). The
+    // blocks are sized to the kMax bound, not the live count, because the parser fills them
+    // incrementally and the count isn't known until it finishes — keeping the names off the
+    // resident sizeof(HueDriver) is the win (the lightsBuf_ stack-probe lesson), not per-byte fit.
+    void ensureNameBuffers() {
+        if (!lightNames_) lightNames_ = static_cast<char*>(platform::alloc(static_cast<size_t>(kMaxLights) * kNameLen));
+        if (!roomNames_)  roomNames_  = static_cast<char*>(platform::alloc(static_cast<size_t>(kMaxRooms)  * kNameLen));
+    }
+    void freeNameBuffers() {
+        platform::free(lightNames_); lightNames_ = nullptr;
+        platform::free(roomNames_);  roomNames_  = nullptr;
+    }
+
+    // --- Rooms (GET /api/<key>/groups, type=="Room"): name + a colour-light membership bitmask.
+    uint32_t roomMask_[kMaxRooms] = {};               // bit i set ⇔ this Room references colour light hueId_[i]
+    uint8_t  roomCount_ = 0;                           // number of Rooms kept
+    bool     sawGroups_ = false;                      // fetchGroups ran → the room list is trustworthy
+
+    // --- Filter selection (Select indices, persisted as uint8) and the derived driven subset.
+    uint8_t  room_ = 0;                               // 0 = "All", else roomName_[room_-1]
+    uint8_t  light_ = 0;                              // 0 = "All", else the n-th light of the current option list
+    uint8_t  drivenIdx_[kMaxLights] = {};             // colour-light array-indices actually driven (after filter)
+    uint8_t  drivenLightCount_ = 0;                   // size of drivenIdx_ — what pushOneChangedLight walks
+
+    // --- Stable option pointer arrays for the two Selects. addSelect borrows the pointer; these
+    // live for the driver's lifetime and are refilled in place (pointing into the *Name_ buffers)
+    // by buildRoomOptions / buildLightOptions on every onBuildControls. "All" is always index 0.
+    const char* roomOptions_[kMaxRooms + 1] = {};
+    uint8_t     roomOptionCount_ = 1;
+    const char* lightOptions_[kMaxLights + 1] = {};
+    uint8_t     lightOptionCount_ = 1;
+
     uint8_t  pushCursor_ = 0;                         // round-robin position across the lights
     uint8_t  drivenCount_ = 0;                        // lights driven this pass (n); fade-time basis
     uint32_t lastPutMs_ = 0;                          // millis() of the last PUT — the loop() rate gate
@@ -184,14 +280,41 @@ private:
         return false;
     }
 
+    // Read a `"<key>":"<value>"` string from WITHIN a JSON object span [begin, end) — the
+    // span-bounded analogue of containsKey, used to grab one light's / one room's "name" without
+    // matching the first "name" elsewhere in the bridge's big response. Copies the raw value up to
+    // its closing quote (the bridge's names carry no escapes worth decoding) into out[cap], NUL-
+    // terminated; leaves out empty if the key isn't in the span.
+    static void parseStringIn(const char* begin, const char* end, const char* key, char* out, size_t cap) {
+        if (cap == 0) return;
+        out[0] = 0;
+        char search[24];
+        std::snprintf(search, sizeof(search), "\"%s\":\"", key);
+        const size_t sl = std::strlen(search);
+        for (const char* s = begin; s + sl <= end; s++) {
+            if (std::strncmp(s, search, sl) != 0) continue;
+            const char* v = s + sl;
+            size_t oi = 0;
+            for (; v < end && *v != '"' && oi + 1 < cap; v++) out[oi++] = *v;
+            out[oi] = 0;
+            return;
+        }
+    }
+
     void bridgeStr(char out[16]) const {
         std::snprintf(out, 16, "%u.%u.%u.%u", bridgeIp[0], bridgeIp[1], bridgeIp[2], bridgeIp[3]);
     }
 
+    // The single status line, folding what were three separate controls (status / hueStatus /
+    // colourLights). Shows the pairing state and the light count as driven-of-total: "paired,
+    // 3-4 lights" = the room/light filter narrowed 4 colour lights to 3 driven. When nothing is
+    // filtered (driven == total) it collapses to the plain count, "paired, 4 lights".
     void refreshStatus() {
         if (!appKey[0]) std::snprintf(statusBuf_, sizeof(statusBuf_), "unpaired");
-        else if (lightCount_) std::snprintf(statusBuf_, sizeof(statusBuf_), "paired, %u lights", lightCount_);
-        else std::snprintf(statusBuf_, sizeof(statusBuf_), "paired");
+        else if (!lightCount_) std::snprintf(statusBuf_, sizeof(statusBuf_), "paired");
+        else if (drivenLightCount_ < lightCount_)
+            std::snprintf(statusBuf_, sizeof(statusBuf_), "paired, %u-%u lights", drivenLightCount_, lightCount_);
+        else std::snprintf(statusBuf_, sizeof(statusBuf_), "paired, %u lights", lightCount_);
         setStatus(statusBuf_);
     }
 
@@ -227,13 +350,17 @@ private:
         }
     }
 
-    // Drop the learned light list + push cache so loop1s re-fetches (on a bridge/key change).
+    // Drop the learned light list + room list + push cache so loop1s re-fetches (bridge/key change).
     void resetLightCache() {
         lightCount_ = 0;
         colourCount_ = 0;
         sawLights_ = false;
+        roomCount_ = 0;
+        sawGroups_ = false;
         pushCursor_ = 0;
         for (uint8_t i = 0; i < kMaxLights; i++) sent_[i] = false;
+        freeNameBuffers();   // drop the old bridge's names; the re-fetch re-allocs for the new one
+        rebuildDriven();   // empty caches → empty driven set, until the re-fetch repopulates them
     }
 
     // A complete /lights response is a JSON object: its last non-whitespace char is '}'. A read cut
@@ -272,6 +399,7 @@ private:
             const bool truncated = !bodyLooksComplete(buf) && (cap < kLightsBufMax);
             if (!truncated) {
                 parseLights(buf);
+                rebuildControls();   // the light-dropdown options changed → re-bind for the UI
                 refreshStatus();
                 reportBridge();
                 platform::free(buf);
@@ -307,15 +435,22 @@ private:
     // recursive JSON reader's node arena, so this is a lightweight forward scan: spot each
     // top-level id key, then keep it iff its object span (up to the next id key) has both.
     void parseLights(const char* resp) {
+        ensureNameBuffers();
         lightCount_ = 0;
         const char* p = resp;
         int pendingId = 0;               // a light id seen, not yet committed (need its span first)
         const char* pendingStart = nullptr;
         auto commit = [&](const char* objEnd) {
-            if (pendingId > 0 && pendingStart && lightCount_ < kMaxLights
+            if (pendingId > 0 && pendingStart && lightCount_ < kMaxLights && lightNames_
                 && containsKey(pendingStart, objEnd, "\"hue\"")
                 && containsKey(pendingStart, objEnd, "\"reachable\":true")) {
-                hueId_[lightCount_++] = static_cast<uint16_t>(pendingId);
+                hueId_[lightCount_] = static_cast<uint16_t>(pendingId);
+                // Keep the friendly name for the dropdown — read the "name" string from this
+                // light's object span (bounded, NUL-terminated). Falls back to the id if absent.
+                char* name = lightNameAt(lightCount_);
+                parseStringIn(pendingStart, objEnd, "name", name, kNameLen);
+                if (!name[0]) std::snprintf(name, kNameLen, "%d", pendingId);
+                lightCount_++;
             }
         };
         while (true) {
@@ -334,6 +469,143 @@ private:
         commit(resp + std::strlen(resp));                   // the last light runs to the end
         sawLights_ = true;
         colourCount_ = static_cast<int8_t>(lightCount_ > 127 ? 127 : lightCount_);
+        rebuildDriven();   // the colour-light set changed → re-derive the filtered driven subset
+    }
+
+    // --- Learn the bridge's Rooms (GET /api/<key>/groups). Same dynamic grow-and-retry read as
+    // fetchLights — the /groups body grows with the room+zone count, so size the heap buffer up
+    // until the response parses whole. fetchGroups runs at 1 Hz, off the render loop, after
+    // fetchLights (gated by sawGroups_), so this alloc/refetch is never hot-path.
+    void fetchGroups() {
+        char host[16]; bridgeStr(host);
+        char path[80]; std::snprintf(path, sizeof(path), "/api/%s/groups", appKey);
+        for (size_t cap = kLightsBufInitial; cap <= kLightsBufMax; cap *= 2) {
+            char* buf = static_cast<char*>(platform::alloc(cap));
+            if (!buf) return;
+            const int st = platform::httpRequest("GET", host, 80, path, "", kSlowTimeoutMs, buf, cap);
+            if (st != 200) { platform::free(buf); return; }
+            const bool truncated = !bodyLooksComplete(buf) && (cap < kLightsBufMax);
+            if (!truncated) {
+                parseGroups(buf);
+                rebuildControls();   // the room dropdown options changed → re-bind for the UI
+                platform::free(buf);
+                return;
+            }
+            platform::free(buf);
+        }
+    }
+
+    // Extract the Rooms from a /groups JSON body: {"1":{"name":"Living","lights":["3","5"],
+    // "type":"Room",…},…}. Keep only type=="Room" (drop Zones, LightGroups, Entertainment); for
+    // each, store its name and the light ids its "lights" array references. Same lightweight
+    // forward scan as parseLights (the response exceeds the recursive reader's node arena): spot
+    // each top-level id key, then read the object span up to the next id key.
+    void parseGroups(const char* resp) {
+        ensureNameBuffers();
+        roomCount_ = 0;
+        const char* p = resp;
+        int pendingId = 0;
+        const char* pendingStart = nullptr;
+        auto commit = [&](const char* objEnd) {
+            if (pendingId > 0 && pendingStart && roomCount_ < kMaxRooms && roomNames_
+                && containsKey(pendingStart, objEnd, "\"type\":\"Room\"")) {
+                char* name = roomNameAt(roomCount_);
+                parseStringIn(pendingStart, objEnd, "name", name, kNameLen);
+                if (!name[0]) std::snprintf(name, kNameLen, "%d", pendingId);
+                roomMask_[roomCount_] = roomMaskFor(pendingStart, objEnd);
+                roomCount_++;
+            }
+        };
+        while (true) {
+            const char* q = std::strchr(p, '"');
+            if (!q) break;
+            int id = std::atoi(q + 1);
+            const char* close = std::strchr(q + 1, '"');
+            if (id > 0 && close && close[1] == ':') {
+                commit(q);                                  // the PREVIOUS group's object ends here
+                pendingId = id;
+                pendingStart = close + 1;
+            }
+            p = close ? close + 1 : q + 1;
+        }
+        commit(resp + std::strlen(resp));                   // the last group runs to the end
+        sawGroups_ = true;
+    }
+
+    // Resolve a Room's "lights":["3","5",…] array (within [begin, end)) to a colour-light
+    // membership bitmask: for each listed bridge id, set bit i if it equals a kept colour light
+    // hueId_[i]. Ids the Room lists that aren't colour-capable (a white bulb, a plug) simply don't
+    // match and are dropped. Scans from the "lights" key to the array's ']' so a later array
+    // (e.g. a Zone's "lights" in a wider scan) can't bleed in.
+    uint32_t roomMaskFor(const char* begin, const char* end) const {
+        const char* s = begin;
+        const size_t kl = std::strlen("\"lights\":[");
+        for (; s + kl <= end; s++) if (std::strncmp(s, "\"lights\":[", kl) == 0) { s += kl; break; }
+        uint32_t mask = 0;
+        for (const char* q = s; q < end && *q != ']'; ) {
+            if (*q == '"') {
+                const int id = std::atoi(q + 1);
+                for (uint8_t i = 0; i < lightCount_; i++)        // map the id to its colour-light bit
+                    if (hueId_[i] == id) { mask |= (1u << i); break; }
+                const char* c = std::strchr(q + 1, '"');         // skip to the value's closing quote
+                if (!c || c >= end) break;
+                q = c + 1;
+            } else q++;
+        }
+        return mask;
+    }
+
+    // The colour-light array-indices (into hueId_ / lightName_) that the CURRENT room selection
+    // exposes: room_==0 ("All") → every colour light, in order; else only the colour lights whose
+    // id appears in that Room's member list. Writes up to kMaxLights indices into `out`, returns
+    // the count. The single source of truth both the light-dropdown options and the driven set
+    // derive from, so the dropdown and the driven subset can never disagree.
+    uint8_t roomColourLights(uint8_t* out) const {
+        uint8_t n = 0;
+        if (room_ == 0 || room_ > roomCount_) {              // "All" (or a stale index) → every colour light
+            for (uint8_t i = 0; i < lightCount_; i++) out[n++] = i;
+            return n;
+        }
+        const uint32_t mask = roomMask_[room_ - 1];
+        for (uint8_t i = 0; i < lightCount_; i++)            // keep colour lights in this Room's bitmask
+            if (mask & (1u << i)) out[n++] = i;
+        return n;
+    }
+
+    // Rebuild the room dropdown options: {"All", room0, room1, …}, pointing into roomName_.
+    void buildRoomOptions() {
+        roomOptions_[0] = "All";
+        uint8_t n = 1;
+        for (uint8_t i = 0; i < roomCount_ && n <= kMaxRooms; i++) roomOptions_[n++] = roomNameAt(i);
+        roomOptionCount_ = n;
+    }
+
+    // Rebuild the light dropdown options: {"All", <names of the current room's colour lights>},
+    // pointing into lightName_. The option count tracks the current room, so the light index
+    // selects within that narrowed list (index 0 = "All", index k = the k-th listed light).
+    void buildLightOptions() {
+        lightOptions_[0] = "All";
+        uint8_t idx[kMaxLights];
+        const uint8_t m = roomColourLights(idx);
+        uint8_t n = 1;
+        for (uint8_t i = 0; i < m && n <= kMaxLights; i++) lightOptions_[n++] = lightNameAt(idx[i]);
+        lightOptionCount_ = n;
+    }
+
+    // Derive drivenIdx_ from the current room+light filter — the subset pushOneChangedLight walks.
+    //   room=All & light=All → every colour light (the original behaviour, unchanged).
+    //   room=X               → that room's colour lights.
+    //   light=Y              → just that one light (the Y-th of the current room's list).
+    void rebuildDriven() {
+        drivenLightCount_ = 0;
+        uint8_t idx[kMaxLights];
+        const uint8_t m = roomColourLights(idx);
+        if (light_ == 0 || light_ > m) {                     // "All" within the (possibly room-narrowed) set
+            for (uint8_t i = 0; i < m; i++) drivenIdx_[drivenLightCount_++] = idx[i];
+        } else {                                             // a single light: the (light_-1)-th listed one
+            drivenIdx_[drivenLightCount_++] = idx[light_ - 1];
+        }
+        if (pushCursor_ >= drivenLightCount_) pushCursor_ = 0;
     }
 
     // Push AT MOST ONE changed light per call (the loop() gate already limited the rate). The
@@ -347,12 +619,15 @@ private:
         const uint8_t cpl = sourceBuffer_->channelsPerLight();
         if (cpl < 3) return;
         const uint8_t* base = sourceBuffer_->data();
-        const uint8_t n = lightCount_ < winLen ? lightCount_ : static_cast<uint8_t>(winLen);
+        // Walk the FILTERED driven set (drivenIdx_), not every colour light: room=All & light=All
+        // makes it the full colour-light set (unchanged behaviour), a room/light pick narrows it.
+        const uint8_t n = drivenLightCount_ < winLen ? drivenLightCount_ : static_cast<uint8_t>(winLen);
         if (n == 0) return;
         drivenCount_ = n;   // the round-robin size — drives the Hue fade time (transitionDeciseconds)
 
         for (uint8_t step = 0; step < n; step++) {
-            const uint8_t i = (pushCursor_ + step) % n;
+            const uint8_t i = (pushCursor_ + step) % n;        // position within the driven window
+            const uint8_t li = drivenIdx_[i];                  // the colour-light array index it maps to
             const uint8_t* px = base + static_cast<size_t>(winStart + i) * cpl;
             // Apply the shared Correction (brightness LUT + channel order) so the global
             // brightness slider and a swapped colour order reach Hue too — same as the physical
@@ -360,16 +635,16 @@ private:
             uint8_t rgb[4] = { px[0], px[1], px[2], 0 };
             if (correction_) correction_->apply(px, rgb);
             char body[80];
-            if (diffAndFormat(i, rgb[0], rgb[1], rgb[2], body, sizeof(body))) {
+            if (diffAndFormat(li, rgb[0], rgb[1], rgb[2], body, sizeof(body))) {
                 char host[16]; bridgeStr(host);
                 char path[96];
-                std::snprintf(path, sizeof(path), "/api/%s/lights/%u/state", appKey, hueId_[i]);
+                std::snprintf(path, sizeof(path), "/api/%s/lights/%u/state", appKey, hueId_[li]);
                 const int st = platform::httpRequest("PUT", host, 80, path, body, kHttpTimeoutMs, nullptr, 0);
                 // Mark the light sent only on a successful PUT — on a failure/timeout it stays
                 // eligible so the next lap retries it instead of skipping it as "already sent".
                 if (st == 200) {
-                    lastRgb_[i][0] = rgb[0]; lastRgb_[i][1] = rgb[1]; lastRgb_[i][2] = rgb[2];
-                    sent_[i] = true;
+                    lastRgb_[li][0] = rgb[0]; lastRgb_[li][1] = rgb[1]; lastRgb_[li][2] = rgb[2];
+                    sent_[li] = true;
                 }
                 pushCursor_ = static_cast<uint8_t>((i + 1) % n);   // resume after this one next time
                 return;                                            // ONE PUT attempt — done

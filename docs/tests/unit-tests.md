@@ -220,6 +220,15 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - The `firmware` control is always present and non-empty (either a real firmware key from build_info.h or the fallback "unknown"). The firmware card owns firmware identity (version/build/firmware) + the partition usage.
 - OTA phase is surfaced through the shared status slot (MoonModule::setStatus()), not a control. publishStatus() runs in setup()/loop1s() and maps the platform OTA status string to a severity: "idle" clears the banner, an "error: " prefix is Severity::Error, anything else is neutral Severity::Status.
 
+## GameOfLifeEffect
+
+`test/unit/light/unit_GameOfLifeEffect.cpp`
+
+- The B#/S# parser turns a rule string into birth/survive neighbour sets. Conway = B3/S23.
+- A 2×2 block is a Conway still life: every live cell has 3 neighbours (survives), and the surrounding dead cells never have exactly 3 (no births). It must be identical after a step.
+- A horizontal 3-cell blinker oscillates to vertical after one step (period-2 oscillator). This is the canonical "the rules actually run" check: birth on 3, death of the ends (1 neighbour each).
+- A lone cell (0 neighbours) dies — the dead-by-isolation rule, and a sanity check that an empty grid stays empty (no spontaneous births at count 0 under Conway).
+
 ## GridLayout
 
 `test/unit/light/unit_GridLayout.cpp`
@@ -251,6 +260,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - _HueDriver: RGB→HSV maps the primaries to the right Hue wheel positions_
 - _HueDriver: unchanged colour is not resent, a changed one is_
 - _HueDriver: parseLights keeps only colour-capable, reachable lights_
+- fetchLights sizes its read buffer by growing while the body looks truncated. The signal is "does the body end in '}'": a too-small buffer cuts the JSON mid-content. (Regression: an earlier check tested strlen==cap-1, which never fires because httpRequest strips headers first, so a >2 KB bridge response was parsed truncated and lights silently disappeared.)
 
 ## ImprovFrame
 
@@ -335,7 +345,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 *Also touches: MetaballsEffect, SpiralEffect, LavaLampEffect, SpiralEffect.*
 
 - Metaballs visibly changes over 100ms even when per-tick dt is sub-millisecond (no phase-accumulator truncation).
-- Checkerboard advances at desktop speed (cells flip across 100ms).
+- SpiralEffect advances at desktop speed (the spiral rotates across 100ms).
 - LavaLamp animates across 100ms (blobs move).
 - Spiral animates across 100ms (rotation visible).
 - Replace path: swap one effect for another mid-flight (same shape as HttpServerModule::handleReplaceModule) and confirm the new effect animates. Replacing one effect with another mid-tick (HttpServerModule's swap path) leaves the new effect animating, not frozen.
@@ -350,7 +360,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Region carving: a RegionModifier shrinks the Layer's LOGICAL box to the region (so the effect renders only there), and the LUT maps each region cell to its box cell at the start offset — every destination in range, none outside the region. The driver buffer still holds all physical lights; cells outside the region simply get no logical source (dark). Default 0/100 = full box (the no-carve fast path) is covered by unit_RegionModifier; here we carve a quarter.
 
 `test/unit/light/unit_Layer_zero_grid.cpp`
-*Also touches: RainbowEffect, NoiseEffect, PlasmaEffect, SpiralEffect, MetaballsEffect, RingsEffect, RipplesEffect, LavaLampEffect, FireEffect, ParticlesEffect.*
+*Also touches: RainbowEffect, NoiseEffect, PlasmaEffect, SpiralEffect, MetaballsEffect, RingsEffect, RipplesEffect, LavaLampEffect, FireEffect, ParticlesEffect, GameOfLifeEffect, GEQ3DEffect, PaintBrushEffect.*
 
 - Rainbow on 0,0,0 grid: no crash.
 - Noise on 0,0,0 grid: no crash.
@@ -362,6 +372,9 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - LavaLamp on 0,0,0 grid: no crash.
 - Fire on 0,0,0 grid: no heat buffer allocated, no crash.
 - Particles on 0,0,0 grid: no trail buffer allocated, no crash.
+- GameOfLife on 0,0,0 grid: no heap alloc for 0 cells, no crash.
+- GEQ3D / PaintBrush on 0,0,0 grid: audio effects, no crash with no buffer.
+- _PaintBrushEffect on 0,0,0 grid_
 
 ## Layers
 
@@ -900,6 +913,24 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - _WledPacket::isValid rejects short / wrong-magic / null input_
 - _WledPacket::readName truncates a long name to the buffer, never overruns_
 
+## crc
+
+`test/unit/core/unit_crc.cpp`
+
+- CRC-16/CCITT-FALSE has a well-known check value: "123456789" → 0x29B1. Pinning it proves the polynomial/init/reflection match the standard variant (so a fingerprint computed here matches any other CCITT-FALSE implementation).
+- A change-detector: different content → (almost always) different CRC; identical content → same.
+- Empty span returns the init value (no bytes processed).
+
+## draw
+
+`test/unit/light/unit_draw.cpp`
+
+- drawPixel writes inside the grid and silently clips outside it (no out-of-bounds write).
+- A 1D line (a row): every pixel from a.x to b.x inclusive is lit.
+- A 2D diagonal: endpoints are lit and the line is contiguous (one pixel per step on the main diagonal of a square).
+- A 3D line: drives all three axes, endpoints lit, no out-of-bounds on a small cube.
+- A line running off the grid clips: it draws the on-grid part and stops, no crash.
+
 ## light_types
 
 `test/unit/light/unit_Coord3D.cpp`
@@ -908,6 +939,27 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - _Coord3D modulo and divide fold per axis_
 - _Coord3D % and / guard a zero or degenerate axis_
 - _Coord3D equality_
+
+## math8
+
+`test/unit/core/unit_math8.cpp`
+
+- sin8: a 256-entry sine LUT centred on 128, peaking near 255 and 0 a quarter and three-quarters of the way round. cos8 is sin8 shifted a quarter turn.
+- triwave8: linear up 0→255 then down 255→0, peaking at the midpoint.
+- qadd8/qsub8 clamp at the 0..255 ends instead of wrapping.
+- nscale8 is the recognisable spelling of scale8 (n/256 channel scale), so nscale8(x,255)==x.
+- beat8: a sawtooth completing `bpm` cycles per minute. At t=0 it's 0; halfway through a beat ~128.
+- beatsin8: a sine oscillating in [low,high] at bpm. Stays in range across the cycle and actually moves (not stuck at one value).
+- Random8: a seeded PRNG — same seed gives the same sequence (determinism), and below(n) stays under n. Two different seeds diverge.
+- atan2_8 / dist8: the geometry helpers moved here from color.h still behave.
+
+## noise
+
+`test/unit/core/unit_noise.cpp`
+
+- Determinism: the same coordinate always gives the same value (a pure function of position), so a field is reproducible frame to frame and across the 1D/2D/3D entry points at z/y = 0.
+- Smoothness: neighbouring positions WITHIN a cell (sub-256 steps) differ only a little — that's what makes it value noise rather than a raw hash (which would jump randomly every step).
+- Range: output is a full byte; over a swept field it uses a wide span (not stuck near one value).
 
 ## platform
 

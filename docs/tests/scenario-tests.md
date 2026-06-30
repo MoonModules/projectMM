@@ -768,7 +768,7 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 | `esp32` | — / 16.0-19.0 | — / 89KB-99KB | — / 62KB |
 | `esp32p4-eth` | — / 53.7-57.4 | — / 33182KB-33198KB | — / 376KB |
 | `esp32s3-n16r8` | — / 19.2-20.8 | — / 8293KB-8305KB | — / 92KB-112KB |
-| `pc-macos` | — / 915-3,521 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 915-3,676 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17 → 2026-06-25
 - `esp32p4-eth`: observed 2026-06-17 → 2026-06-25

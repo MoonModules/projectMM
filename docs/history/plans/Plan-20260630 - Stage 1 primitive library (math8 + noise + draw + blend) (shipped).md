@@ -8,7 +8,7 @@ The remaining foundation of [MoonLight migration Stage 1](./Plan-20260630%20-%20
 
 **Core (`src/core/`)** — domain-neutral integer math:
 - **`color.h`** (slimmed) — keeps `RGB`, `hsvToRgb`, `scale8` (the color surface). `sin8`/`cos8`/`atan2_8`/`dist8` MOVE OUT (they're trig/geometry, not color).
-- **`math8.h`** (new) — the `lib8tion` surface: `sin8`/`cos8`/`triwave8` (moved from color.h), `beatsin8`/`beatsin16`/`beat8` (timing, on `sin8`+`elapsed()`), `qadd8`/`qsub8`/`nscale8`, `random8`/`random16` (small seedable PRNG, not `std::rand`), `atan2_8`/`dist8` (moved from color.h).
+- **`math8.h`** (new) — the `lib8tion` surface: `sin8`/`cos8`/`triwave8` (moved from color.h), `beatsin8`/`beatsin16`/`beat8` (timing, on `sin8`+`elapsed()`), `qadd8`/`qsub8`/`nscale8`, `map8`, a small seedable PRNG — the **`Random8` class** (`next8()`/`next16()`/`below(n)`/`below(min,max)`, not free `random8`/`random16` functions, so each effect owns an independent reproducible stream), `atan2_8`/`dist8` (moved from color.h). *(As shipped, `beatsin8` is the FastLED 5-arg form `(bpm, ms, low, high, timebase, phase)`.)*
 - **`noise.h`** (new) — `inoise8` 1D/2D/3D (promotes + generalises `NoiseEffect`'s existing hash into the textbook value/Perlin noise; the effect then calls it).
 
 **Light (`src/light/`)** — operates on the light `Buffer`/`Coord3D`:
