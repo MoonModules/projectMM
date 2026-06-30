@@ -1,6 +1,7 @@
 #pragma once
 
 #include "light/layers/Layer.h"
+#include "light/Palette.h"   // colorFromPalette + active palette
 #include "core/color.h"
 
 namespace mm {
@@ -18,8 +19,10 @@ public:
 
     static constexpr uint8_t MAX_RIPPLES = 8;
 
-    uint8_t count = 4;
-    uint8_t speed = 60;
+    // Calm defaults: a couple of slow rings read as clean expanding circles; more/faster reads as
+    // chaos. Raise count/speed in the UI for a busier field.
+    uint8_t count = 2;
+    uint8_t speed = 30;
     uint8_t thickness = 3;
     uint8_t hue_shift = 0;
 
@@ -81,7 +84,7 @@ public:
                         // Older ripples (large radius) fade out.
                         uint8_t age_fade = static_cast<uint8_t>(255 - ((radius_[i] * 255u) / maxR));
                         uint8_t intensity = scale8(falloff, age_fade);
-                        RGB c = hsvToRgb(static_cast<uint8_t>(hue_[i] + hue_shift), 240, intensity);
+                        RGB c = colorFromPalette(*Palettes::active(), static_cast<uint8_t>(hue_[i] + hue_shift), intensity);
                         r_acc = static_cast<uint16_t>(r_acc + c.r);
                         g_acc = static_cast<uint16_t>(g_acc + c.g);
                         b_acc = static_cast<uint16_t>(b_acc + c.b);

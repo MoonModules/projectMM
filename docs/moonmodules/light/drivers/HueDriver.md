@@ -1,6 +1,6 @@
 # HueDriver
 
-Drives **Philips Hue lights as a projectMM output** — the bulbs are *pixels of an effect*, not entries in a device list. Make a small grid (e.g. 4×1×1), run any effect on it, add a HueDriver, and each colour bulb in the driver's window becomes one pixel: the effect's per-pixel colour is pushed to the bridge as hue/saturation/brightness. It is a [driver](../../core/architecture.md) like any other (a sibling of [NetworkSendDriver](NetworkSendDriver.md) / [RmtLedDriver](RmtLedDriver.md)) — it reads its slice of the shared buffer and sends it out, here over the Hue HTTP API instead of a wire protocol.
+Drives **Philips Hue lights as a projectMM output** — the bulbs are *pixels of an effect*, not entries in a device list. Make a small grid (e.g. 4×1×1), run any effect on it, add a HueDriver, and each colour bulb in the driver's window becomes one pixel: the effect's per-pixel colour is pushed to the bridge as hue/saturation/brightness. It is a [driver](../../../architecture.md) like any other (a sibling of [NetworkSendDriver](NetworkSendDriver.md) / [RmtLedDriver](RmtLedDriver.md)) — it reads its slice of the shared buffer and sends it out, here over the Hue HTTP API instead of a wire protocol.
 
 ![A HueDriver in the UI](../../../assets/light/drivers/Hue%20driver.png)
 

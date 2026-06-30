@@ -1,5 +1,5 @@
 // @module Layer
-// @also RainbowEffect, NoiseEffect, PlasmaEffect, CheckerboardEffect, FireEffect, ParticlesEffect
+// @also RainbowEffect, NoiseEffect, PlasmaEffect, SpiralEffect, FireEffect, ParticlesEffect
 
 #include "doctest.h"
 #include "light/layers/Layer.h"
@@ -7,7 +7,7 @@
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/NoiseEffect.h"
 #include "light/effects/PlasmaEffect.h"
-#include "light/effects/CheckerboardEffect.h"
+#include "light/effects/SpiralEffect.h"
 #include "light/effects/FireEffect.h"
 #include "light/effects/ParticlesEffect.h"
 
@@ -256,9 +256,9 @@ static void check_d2_on_3d(const char* tag) {
     }
 }
 
-// CheckerboardEffect (D2) on a 3D layer: extrude copies z=0 to every z>0 (stateless D2 contract).
+// SpiralEffect (D2) on a 3D layer: extrude copies z=0 to every z>0 (stateless D2 contract).
 TEST_CASE("D2 effect on 3D layer: Checkerboard extruded across z") {
-    check_d2_on_3d<mm::CheckerboardEffect>("CheckerboardEffect on 3D layer");
+    check_d2_on_3d<mm::SpiralEffect>("SpiralEffect on 3D layer");
 }
 
 // FireEffect (D2, stateful — heat buffer sized to w×h) extrudes cleanly across z on a 3D layer.

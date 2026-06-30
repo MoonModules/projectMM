@@ -82,12 +82,17 @@ public:
             }
         }
 
-        // 3. Random sparks at the bottom row
-        if (h > 0) {
+        // 3. Random sparks at the bottom row. Scale the number of spark attempts with width so a
+        //    wide grid lights up across its whole base instead of leaving most columns cold — a
+        //    fixed 4 sparks fills a 16-wide grid but barely speckles a 256-wide one. One attempt
+        //    per ~4 columns (min 4) keeps the bottom row evenly seeded at any width.
+        if (h > 0 && w > 0) {
             lengthType bottomRow = static_cast<lengthType>(h - 1);
-            for (uint8_t i = 0; i < 4; i++) {
+            lengthType sparks = w / 4;
+            if (sparks < 4) sparks = 4;
+            for (lengthType i = 0; i < sparks; i++) {
                 if (rand8() < sparking) {
-                    uint8_t sx = static_cast<uint8_t>((static_cast<uint16_t>(rand8()) * w) >> 8);
+                    lengthType sx = static_cast<lengthType>((static_cast<uint32_t>(rand8()) * w) >> 8);
                     uint8_t add = static_cast<uint8_t>(160 + (rand8() & 0x5F));
                     uint16_t newHeat = static_cast<uint16_t>(heat_[bottomRow * w + sx]) + add;
                     heat_[bottomRow * w + sx] = newHeat > 255 ? 255 : static_cast<uint8_t>(newHeat);

@@ -1,7 +1,8 @@
 #pragma once
 
 #include "light/layers/Layer.h"
-#include "core/color.h"        // sin8 (integer sine LUT), scale8, hsvToRgb
+#include "light/Palette.h"     // colorFromPalette + the global active palette
+#include "core/color.h"        // sin8 (integer sine LUT), scale8
 #include "platform/platform.h" // alloc — the fade trail buffer
 
 #include <cstring>
@@ -13,7 +14,7 @@ namespace mm {
 // scrolls sideways over time, leaving a fading trail behind it. The classic "oscilloscope wave"
 // look. Prior art: MoonLight's Wave effect (Ewoud Wijma) — behaviour reproduced (the six waveform
 // types, the per-column phase travel, the time-varying colour, the frame fade), written fresh on
-// projectMM's EffectBase + integer primitives (sin8 LUT, scale8); the colour is an hsvToRgb sweep.
+// projectMM's EffectBase + integer primitives (sin8 LUT, scale8); the colour is a global-palette lookup.
 //
 // Axis convention: the waveform sets a y (its shape lives on HEIGHT); width is the travel axis.
 // So a 1-tall grid shows no wave — to drive a 1D output (a strip, a row of Hue lights) lay it out
@@ -75,12 +76,15 @@ public:
         // 1. Fade the trail (scale8 toward black) — a smaller `fade` = shorter tail.
         for (size_t i = 0; i < trailBytes_; i++) trail_[i] = scale8(trail_[i], fade);
 
-        // 2. Advance the travel phase from bpm (integer accumulator so a sub-ms dt isn't lost).
+        // 2. Advance the travel phase from bpm. First tick: seed lastElapsed_ to now so the wave
+        //    starts from phase 0 instead of jumping by the whole device uptime (lastElapsed_ is 0
+        //    until the first loop). Afterwards advance by the real per-tick delta.
         const uint32_t now = elapsed();
+        if (!started_) { lastElapsed_ = now; started_ = true; }
         phase_ += static_cast<uint64_t>(now - lastElapsed_) * bpm;
         lastElapsed_ = now;
         const uint8_t t = static_cast<uint8_t>((phase_ * 256) / 60000);    // uint8 angle (256 = full turn)
-        // Colour cycles slowly over time (a palette substitute until palettes land — see waveColor).
+        // Colour cycles slowly over time: now/50 indexes the active palette via waveColor.
         const uint8_t colorIndex = static_cast<uint8_t>(now / 50);
 
         // 3. Plot the wave point per column, joining discontinuous shapes to the previous column.
@@ -117,10 +121,11 @@ private:
     size_t   trailBytes_ = 0;
     uint64_t phase_ = 0;
     uint32_t lastElapsed_ = 0;
+    bool     started_ = false;   // first-tick guard: seed lastElapsed_ before the first delta
 
-    // The colour for the wave this frame. ONE place: today a hue sweep via hsvToRgb; when palettes
-    // land this becomes the palette lookup (ColorFromPalette(palette, index)) with no other change.
-    static RGB waveColor(uint8_t index) { return hsvToRgb(index, 255, 255); }
+    // The colour for the wave this frame — one place: a lookup into the global active palette,
+    // so the wave recolours when the palette changes.
+    static RGB waveColor(uint8_t index) { return colorFromPalette(*Palettes::active(), index); }
 
     // Map a phase (uint8 angle) to a y in [0, h) for the selected waveform. Integer-only.
     lengthType waveY(uint8_t phase, lengthType h) const { return waveY(type, phase, h); }

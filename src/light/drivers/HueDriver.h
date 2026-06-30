@@ -205,7 +205,8 @@ private:
             if (key[0]) {
                 std::snprintf(appKey, sizeof(appKey), "%s", key);
                 pairTicksLeft_ = 0;
-                lightCount_ = 0;                  // re-fetch the light list with the new key
+                resetLightCache();                // clear the light list + the per-light push cache
+                                                  // (sent_/lastRgb_) so the new session re-sends all
                 refreshStatus();
                 markDirty();                      // persist the new app key
                 FilesystemModule::noteDirty();

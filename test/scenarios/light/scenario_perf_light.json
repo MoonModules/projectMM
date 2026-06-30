@@ -7,11 +7,11 @@
     "GridLayout",
     "Drivers",
     "PreviewDriver",
-    "CheckerboardEffect",
+    "SpiralEffect",
     "NoiseEffect",
     "MultiplyModifier"
   ],
-  "description": "Fast incremental performance check: start from the bare minimum render pipeline and add one thing at a time, measuring the tick/heap delta each step, so a regression shows up as a per-step jump. The LIGHT companion to scenario_perf_full — it stays small (≤64²) and driver-free so it runs in seconds. Mutate mode + canvas-preparing: the steps clear_children whatever Layouts/Layers/Drivers the device already had (the pre-wired apparatus like PreviewDriver/Board survives — clear_children only drops user-editable children) and rebuild a known tree, so it runs from any starting state and always measures the same minimal pipeline. Order: (1) minimal = Grid(16²)+Layer+a LIGHT effect (Checkerboard, the cheapest), no modifier/driver/audio/discovery; (2) +MultiplyModifier (adds the mapping LUT — the heavy memory path); (3) +PreviewDriver; (4) swap to a HEAVY effect (Noise) to bracket the compute range; (5) grid 16²→32²→64² to show the size scaling. Full 128²/16K sweep, real LED/network drivers, audio+discovery cost: see scenario_perf_full.",
+  "description": "Fast incremental performance check: start from the bare minimum render pipeline and add one thing at a time, measuring the tick/heap delta each step, so a regression shows up as a per-step jump. The LIGHT companion to scenario_perf_full — it stays small (≤64²) and driver-free so it runs in seconds. Mutate mode + canvas-preparing: the steps clear_children whatever Layouts/Layers/Drivers the device already had (the pre-wired apparatus like PreviewDriver/Board survives — clear_children only drops user-editable children) and rebuild a known tree, so it runs from any starting state and always measures the same minimal pipeline. Order: (1) minimal = Grid(16²)+Layer+a LIGHT effect (Spiral, a light effect), no modifier/driver/audio/discovery; (2) +MultiplyModifier (adds the mapping LUT — the heavy memory path); (3) +PreviewDriver; (4) swap to a HEAVY effect (Noise) to bracket the compute range; (5) grid 16²→32²→64² to show the size scaling. Full 128²/16K sweep, real LED/network drivers, audio+discovery cost: see scenario_perf_full.",
   "fixture": [
     {
       "name": "fix-layouts",
@@ -90,19 +90,19 @@
       "name": "build-fx",
       "op": "add_module",
       "id": "FX",
-      "type": "CheckerboardEffect",
+      "type": "SpiralEffect",
       "parent_id": "Layer"
     },
     {
       "name": "measure-minimal",
-      "description": "Bare minimum: Grid(16²) + Layer + Checkerboard (light effect). No modifier, no driver. The render floor everything else is measured against.",
+      "description": "Bare minimum: Grid(16²) + Layer + Spiral (light effect). No modifier, no driver. The render floor everything else is measured against.",
       "op": "measure",
       "measure": true,
       "observed": {
         "pc-macos": {
           "tick_us": [
             0,
-            1
+            5
           ],
           "free_heap": [
             0,
@@ -114,7 +114,7 @@
           ],
           "at": [
             "2026-06-17",
-            "2026-06-24"
+            "2026-06-30"
           ]
         },
         "esp32s3-n16r8": {
@@ -190,7 +190,7 @@
         "pc-macos": {
           "tick_us": [
             0,
-            0
+            1
           ],
           "free_heap": [
             0,
@@ -202,7 +202,7 @@
           ],
           "at": [
             "2026-06-17",
-            "2026-06-17"
+            "2026-06-30"
           ]
         },
         "esp32s3-n16r8": {
@@ -270,7 +270,7 @@
         "pc-macos": {
           "tick_us": [
             0,
-            0
+            1
           ],
           "free_heap": [
             0,
@@ -282,7 +282,7 @@
           ],
           "at": [
             "2026-06-17",
-            "2026-06-17"
+            "2026-06-30"
           ]
         },
         "esp32s3-n16r8": {
@@ -450,7 +450,7 @@
         "pc-macos": {
           "tick_us": [
             3,
-            11
+            13
           ],
           "free_heap": [
             0,
@@ -462,7 +462,7 @@
           ],
           "at": [
             "2026-06-17",
-            "2026-06-25"
+            "2026-06-30"
           ]
         },
         "esp32s3-n16r8": {
@@ -543,7 +543,7 @@
         "pc-macos": {
           "tick_us": [
             14,
-            50
+            70
           ],
           "free_heap": [
             0,
@@ -555,7 +555,7 @@
           ],
           "at": [
             "2026-06-17",
-            "2026-06-26"
+            "2026-06-30"
           ]
         },
         "esp32s3-n16r8": {

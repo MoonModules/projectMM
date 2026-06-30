@@ -33,6 +33,7 @@ const char* controlTypeName(ControlType t) {
         case ControlType::ReadOnly:    return "display";
         case ControlType::ReadOnlyInt: return "display-int";
         case ControlType::Select:      return "select";
+        case ControlType::Palette:     return "palette";
         case ControlType::Progress:    return "progress";
         case ControlType::IPv4:        return "ipv4";
         case ControlType::List:        return "list";
@@ -102,8 +103,9 @@ void writeControlValue(JsonSink& sink, const ControlDescriptor& c) {
             sink.appendf("%d", *static_cast<int8_t*>(c.ptr));
             return;
         case ControlType::Select:
-            // The selected index — the option strings go in the metadata
-            // block (writeControlMetadata) where the UI also wants them.
+        case ControlType::Palette:
+            // The selected index — the option strings / swatch colours go in the
+            // metadata block (writeControlMetadata) where the UI also wants them.
             sink.appendf("%u", *static_cast<uint8_t*>(c.ptr));
             return;
         case ControlType::Progress:
@@ -166,6 +168,14 @@ void writeControlMetadata(JsonSink& sink, const ControlDescriptor& c) {
             for (uint8_t o = 0; o < c.max; o++) {
                 sink.appendf("%s\"%s\"", o > 0 ? "," : "", options[o]);
             }
+            sink.append("]");
+            return;
+        }
+        case ControlType::Palette: {
+            // The light domain supplies the option objects ({name, colors}) via the function
+            // pointer in `aux` — core stays palette-agnostic. Falls back to an empty array.
+            sink.append(",\"options\":[");
+            if (c.aux) reinterpret_cast<PaletteOptionsFn>(c.aux)(sink);
             sink.append("]");
             return;
         }
@@ -296,7 +306,8 @@ ApplyResult applyControlValue(const ControlDescriptor& c,
             mm::json::parseString(json, key, static_cast<char*>(c.ptr), maxLen);
             return ApplyResult::Ok;
         }
-        case ControlType::Select: {
+        case ControlType::Select:
+        case ControlType::Palette: {
             int v = mm::json::parseInt(json, key);
             const int hi = c.max > 0 ? c.max - 1 : 0;
             if (policy == ApplyPolicy::Strict && (v < 0 || v > hi)) {

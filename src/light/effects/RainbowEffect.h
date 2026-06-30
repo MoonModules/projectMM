@@ -1,6 +1,7 @@
 #pragma once
 
 #include "light/layers/Layer.h"
+#include "light/Palette.h"   // colorFromPalette + the global active palette
 #include "core/color.h"
 
 namespace mm {
@@ -38,7 +39,7 @@ public:
                     (static_cast<uint32_t>(x + y) * 256 / (w + h)) + phase
                 );
 
-                RGB c = hsvToRgb(hue, 255, 255);
+                RGB c = colorFromPalette(*Palettes::active(), hue);
                 size_t offset = (static_cast<size_t>(y) * w + x) * cpl;
                 if (cpl >= 1) buf[offset + 0] = c.r;
                 if (cpl >= 2) buf[offset + 1] = c.g;

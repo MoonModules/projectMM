@@ -1,13 +1,10 @@
-// @module CheckerboardEffect
-// @also SpiralEffect, PlasmaPaletteEffect, RingsEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect
+// @module SpiralEffect
+// @also RingsEffect, RipplesEffect, LavaLampEffect
 
 #include "doctest.h"
-#include "light/effects/CheckerboardEffect.h"
 #include "light/effects/SpiralEffect.h"
-#include "light/effects/PlasmaPaletteEffect.h"
 #include "light/effects/RingsEffect.h"
 #include "light/effects/RipplesEffect.h"
-#include "light/effects/GlowParticlesEffect.h"
 #include "light/effects/LavaLampEffect.h"
 #include "light/layouts/GridLayout.h"
 #include "platform/platform.h"
@@ -78,33 +75,8 @@ struct Ctx {
         CHECK(ctx.cornersDiffer()); \
     }
 
-// Checkerboard paints at least one non-zero byte on a 16×16 grid (effect actually renders).
-TEST_CASE("CheckerboardEffect writes non-zero RGB") {
-    Ctx ctx(16, 16);
-    mm::CheckerboardEffect effect;
-    ctx.layer.addChild(&effect);
-    ctx.layer.onBuildState();
-    ctx.layer.loop();
-    CHECK(ctx.hasNonZero());
-}
-
-// With cell_size=4, adjacent cells render different colours (the checker pattern is real, not uniform).
-TEST_CASE("CheckerboardEffect spatial variation") {
-    Ctx ctx(32, 32);
-    mm::CheckerboardEffect effect;
-    effect.cell_size = 4;
-    ctx.layer.addChild(&effect);
-    ctx.layer.onBuildState();
-    ctx.layer.loop();
-    auto* data = ctx.layer.buffer().data();
-    CHECK(data[0] != data[4 * 3]);
-}
 // SpiralEffect renders non-zero pixels and shows spatial variation (corners differ).
 STATELESS_EFFECT_TEST(SpiralEffect)
-// PlasmaPaletteEffect renders non-zero pixels and shows spatial variation.
-STATELESS_EFFECT_TEST(PlasmaPaletteEffect)
-// GlowParticlesEffect renders non-zero pixels and shows spatial variation.
-STATELESS_EFFECT_TEST(GlowParticlesEffect)
 
 // LavaLampEffect has localised blob features that can land on identical corner
 // palette indices at some t values (corner-pair check is too strict). Scan the

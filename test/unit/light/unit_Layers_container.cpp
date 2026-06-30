@@ -5,7 +5,7 @@
 #include "light/layers/Layers.h"
 #include "light/layouts/GridLayout.h"
 #include "light/effects/RainbowEffect.h"
-#include "light/effects/CheckerboardEffect.h"
+#include "light/effects/SpiralEffect.h"
 #include "light/modifiers/MultiplyModifier.h"
 #include "light/drivers/Drivers.h"
 #include "platform/platform.h"
@@ -103,7 +103,7 @@ TEST_CASE("Layers with two Layers: each child Layer's loop runs and writes its b
 
     mm::Layer layerB;
     layerB.setChannelsPerLight(3);
-    mm::CheckerboardEffect effectB;
+    mm::SpiralEffect effectB;
     layerB.addChild(&effectB);
 
     layersContainer.addChild(&layerA);
@@ -149,7 +149,7 @@ TEST_CASE("Drivers composites two enabled Layers into one output buffer") {
     mm::Layers layersContainer;
     // Bottom layer: a checkerboard base.
     mm::Layer bottom; bottom.setChannelsPerLight(3);
-    mm::CheckerboardEffect base; bottom.addChild(&base);
+    mm::SpiralEffect base; bottom.addChild(&base);
     // Top layer: rainbow, additive at full opacity → bottom + top, clamped.
     mm::Layer top; top.setChannelsPerLight(3);
     mm::RainbowEffect over; top.addChild(&over);
@@ -202,7 +202,7 @@ TEST_CASE("Drivers composition drops to single layer when one is disabled") {
 
     mm::Layers layersContainer;
     mm::Layer bottom; bottom.setChannelsPerLight(3);
-    mm::CheckerboardEffect base; bottom.addChild(&base);
+    mm::SpiralEffect base; bottom.addChild(&base);
     mm::Layer top; top.setChannelsPerLight(3);
     mm::RainbowEffect over; top.addChild(&over);
     layersContainer.addChild(&bottom);
@@ -241,7 +241,7 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         layouts.addChild(&grid);
         mm::Layers layers;
         mm::Layer only; only.setChannelsPerLight(3);
-        mm::CheckerboardEffect eff; only.addChild(&eff);
+        mm::SpiralEffect eff; only.addChild(&eff);
         layers.addChild(&only);
         layers.setLayouts(&layouts);
         mm::Drivers drivers; CaptureDriver cap; drivers.addChild(&cap);
@@ -261,7 +261,7 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         grid.width = 8; grid.height = 8; grid.depth = 1;
         layouts.addChild(&grid);
         mm::Layers layers;
-        mm::Layer a; a.setChannelsPerLight(3); mm::CheckerboardEffect ea; a.addChild(&ea);
+        mm::Layer a; a.setChannelsPerLight(3); mm::SpiralEffect ea; a.addChild(&ea);
         mm::Layer b; b.setChannelsPerLight(3); mm::RainbowEffect eb; b.addChild(&eb);
         layers.addChild(&a); layers.addChild(&b);
         layers.setLayouts(&layouts);
@@ -282,7 +282,7 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         layouts.addChild(&grid);
         mm::Layers layers;
         mm::Layer only; only.setChannelsPerLight(3);
-        mm::CheckerboardEffect eff; only.addChild(&eff);
+        mm::SpiralEffect eff; only.addChild(&eff);
         mm::MultiplyModifier mirror; mirror.mirrorX = true; only.addChild(&mirror);
         layers.addChild(&only);
         layers.setLayouts(&layouts);
@@ -309,7 +309,7 @@ TEST_CASE("Drivers allocates the output buffer only when compositing or mapping 
         layouts.addChild(&grid);
         mm::Layers layers;
         mm::Layer only; only.setChannelsPerLight(3);
-        mm::CheckerboardEffect eff; only.addChild(&eff);
+        mm::SpiralEffect eff; only.addChild(&eff);
         // A LUT modifier so the pre-fix bug would route through the output path —
         // proves the disabled gate, not just the no-LUT zero-copy branch.
         mm::MultiplyModifier mirror; mirror.mirrorX = true; only.addChild(&mirror);

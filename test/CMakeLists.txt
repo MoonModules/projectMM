@@ -44,16 +44,16 @@ add_executable(mm_tests
     unit/light/unit_NetworkSendDriver_packet.cpp
     unit/light/unit_BlendMap.cpp
     unit/light/unit_Coord3D.cpp
-    unit/light/unit_CheckerboardEffect.cpp
+    unit/light/unit_effects_render.cpp
     unit/light/unit_SineEffect.cpp
     unit/light/unit_DistortionWavesEffect.cpp
     unit/light/unit_Correction.cpp
     unit/light/unit_Drivers_container.cpp
     unit/light/unit_Drivers_firstOutputRgb.cpp
     unit/light/unit_HueDriver.cpp
+    unit/light/unit_Palette.cpp
     unit/light/unit_WaveEffect.cpp
     unit/light/unit_FireEffect.cpp
-    unit/light/unit_GameOfLifeEffect.cpp
     unit/light/unit_GridLayout.cpp
     unit/light/unit_SphereLayout.cpp
     unit/light/unit_WheelLayout.cpp

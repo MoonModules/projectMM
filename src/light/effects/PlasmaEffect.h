@@ -1,6 +1,7 @@
 #pragma once
 
 #include "light/layers/Layer.h"
+#include "light/Palette.h"   // colorFromPalette + active palette
 #include "core/color.h"
 
 namespace mm {
@@ -11,8 +12,11 @@ public:
     Dim dimensions() const override { return Dim::D3; }
 
     uint8_t bpm = 30;
-    uint8_t scale_x = 16;
-    uint8_t scale_y = 16;
+    // Larger scale = smaller per-pixel step (256/scale) = lower spatial frequency = bigger, calmer
+    // rolling blobs. The default is high so plasma reads as large blobs, not fine noise; lower it
+    // in the UI for a busier field.
+    uint8_t scale_x = 48;
+    uint8_t scale_y = 48;
     uint8_t hue_shift = 0;
 
     void onBuildControls() override {
@@ -73,7 +77,7 @@ public:
                         ? static_cast<uint8_t>(
                               (static_cast<uint16_t>(s1 + s2_y + s3 + s4 + s5_z) / 5) + hue_shift)
                         : static_cast<uint8_t>(((s1 + s2_y + s3 + s4) >> 2) + hue_shift);
-                    RGB c = hsvToRgb(hue, 255, 255);
+                    RGB c = colorFromPalette(*Palettes::active(), hue);
 
                     if (cpl >= 1) row[0] = c.r;
                     if (cpl >= 2) row[1] = c.g;

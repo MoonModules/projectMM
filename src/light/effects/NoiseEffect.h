@@ -1,6 +1,7 @@
 #pragma once
 
 #include "light/layers/Layer.h"
+#include "light/Palette.h"   // colorFromPalette + active palette
 #include "core/color.h"
 
 namespace mm {
@@ -45,7 +46,7 @@ public:
             lengthType z = static_cast<lengthType>(i / wh);
 
             uint8_t n = (d > 1) ? noise3d(x, y, z, t) : noise2d(x, y, t);
-            RGB c = hsvToRgb(n, 200, 255);
+            RGB c = colorFromPalette(*Palettes::active(), n);
 
             size_t offset = static_cast<size_t>(i) * cpl;
             if (cpl >= 1) buf[offset + 0] = c.r;

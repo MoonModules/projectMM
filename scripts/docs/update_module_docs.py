@@ -33,11 +33,16 @@ UI_DIR = ASSETS / "ui"   # tooling/installer/full-page shots (not per-module)
 
 # A module's asset subfolder (domain/type), mirroring src — see folder-structure-proposal.md.
 def asset_dir_for(type_name: str):
-    if type_name.endswith("Effect"):   return ASSETS / "light" / "effects"
-    if type_name.endswith("Modifier"): return ASSETS / "light" / "modifiers"
-    if type_name.endswith("Layout"):   return ASSETS / "light" / "layouts"
-    if type_name.endswith("Driver"):   return ASSETS / "light" / "drivers"
-    if type_name in ("Layouts", "Layers", "Drivers"):  return ASSETS / "light"
+    if type_name.endswith("Effect"):
+        return ASSETS / "light" / "effects"
+    if type_name.endswith("Modifier"):
+        return ASSETS / "light" / "modifiers"
+    if type_name.endswith("Layout"):
+        return ASSETS / "light" / "layouts"
+    if type_name.endswith("Driver"):
+        return ASSETS / "light" / "drivers"
+    if type_name in ("Layouts", "Layers", "Drivers"):
+        return ASSETS / "light"
     return ASSETS / "core"
 
 SCREENSHOT_RE = re.compile(r'!\[.*?\]\(.*?assets/.*?\.(?:png|jpe?g)\)')

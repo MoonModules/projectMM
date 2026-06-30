@@ -1,6 +1,7 @@
 #pragma once
 
 #include "light/layers/Layer.h"
+#include "light/Palette.h"   // colorFromPalette + active palette
 #include "core/color.h"
 
 namespace mm {
@@ -48,7 +49,7 @@ public:
                 uint8_t dist = dist8(dx, dy);
                 uint8_t hue = static_cast<uint8_t>(
                     angle + static_cast<uint8_t>(dist * twist) - t + hue_shift);
-                RGB c = hsvToRgb(hue, 255, 255);
+                RGB c = colorFromPalette(*Palettes::active(), hue);
 
                 if (cpl >= 1) row[0] = c.r;
                 if (cpl >= 2) row[1] = c.g;

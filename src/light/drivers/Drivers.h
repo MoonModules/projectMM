@@ -6,6 +6,7 @@
 #include "light/layers/Layers.h"
 #include "light/layers/BlendMap.h"
 #include "light/drivers/Correction.h"
+#include "light/Palette.h"   // the global active palette + its select control
 #include "platform/platform.h"
 
 #include <cstring>  // std::strcmp in onUpdate
@@ -159,6 +160,7 @@ public:
     // PreviewDriver reads the RGB source buffer directly, so the simulator is
     // unaffected. RGB-ordered outputs (some ArtNet/network sinks) flip it back.
     uint8_t lightPreset = 2;  // index into kLightPresetOptions; 2 = GRB
+    uint8_t palette = 0;      // index into mm::palettes::kNames; the global active palette effects read
 
     // Two ways to wire the source Layer:
     //  - setLayers(Layers*): bind the container; layer_ is re-resolved from
@@ -179,6 +181,7 @@ public:
     void onBuildControls() override {
         controls_.addUint8("brightness", brightness, 0, 255);
         controls_.addSelect("lightPreset", lightPreset, kLightPresetOptions, kLightPresetCount);
+        controls_.addPalette("palette", palette, mm::paletteOptions, mm::palettes::kCount);
         MoonModule::onBuildControls();  // cascade to driver children
     }
 
@@ -186,6 +189,10 @@ public:
     // pipeline realloc. This is what keeps the brightness slider fluent: controlChangeTriggersBuildState
     // stays false for Drivers, so handleSetControl skips scheduler_->buildState().
     void onUpdate(const char* controlName) override {
+        if (std::strcmp(controlName, "palette") == 0) {
+            Palettes::setActive(palette);   // rebuild the active 16-entry lookup (cheap, off the hot path)
+            return;
+        }
         if (std::strcmp(controlName, "brightness") == 0 ||
             std::strcmp(controlName, "lightPreset") == 0) {
             correction_.rebuild(brightness, static_cast<LightPreset>(lightPreset));
@@ -201,6 +208,7 @@ public:
 
     void setup() override {
         correction_.rebuild(brightness, static_cast<LightPreset>(lightPreset));
+        Palettes::setActive(palette);   // seed the global active palette from the persisted index
         MoonModule::setup();
         passBufferToDrivers();
     }

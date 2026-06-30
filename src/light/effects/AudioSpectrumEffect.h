@@ -1,6 +1,7 @@
 #pragma once
 
 #include "light/layers/Layer.h"
+#include "light/Palette.h"      // colorFromPalette + the global active palette
 #include "core/color.h"        // hsvToRgb, RGB
 #include "core/AudioModule.h"    // AudioModule::latestFrame()
 
@@ -101,7 +102,7 @@ public:
                     // Per-band: the column's hue at full brightness (a strip dims
                     // its single row by magnitude instead).
                     const uint8_t v = (h == 1) ? mag : 255;
-                    const RGB c = hsvToRgb(bandHue, 255, v);
+                    const RGB c = colorFromPalette(*Palettes::active(), bandHue, v);
                     r = c.r; g = c.g; b = c.b;
                 } else {
                     // Height gradient: green at the base → red at the top. The

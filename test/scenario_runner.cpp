@@ -15,18 +15,14 @@
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/NoiseEffect.h"
 #include "light/effects/PlasmaEffect.h"
-#include "light/effects/PlasmaPaletteEffect.h"
 #include "light/effects/MetaballsEffect.h"
 #include "light/effects/FireEffect.h"
 #include "light/effects/ParticlesEffect.h"
-#include "light/effects/GlowParticlesEffect.h"
-#include "light/effects/CheckerboardEffect.h"
 #include "light/moonlive/MoonLiveEffect.h"
 #include "light/effects/SpiralEffect.h"
 #include "light/effects/RingsEffect.h"
 #include "light/effects/RipplesEffect.h"
 #include "light/effects/LavaLampEffect.h"
-#include "light/effects/GameOfLifeEffect.h"
 #include "light/modifiers/MultiplyModifier.h"
 #include "light/modifiers/CheckerboardModifier.h"
 #include "light/modifiers/RegionModifier.h"
@@ -182,18 +178,14 @@ static void registerScenarioTypes() {
     mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
     mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect");
     mm::ModuleFactory::registerType<mm::PlasmaEffect>("PlasmaEffect");
-    mm::ModuleFactory::registerType<mm::PlasmaPaletteEffect>("PlasmaPaletteEffect");
     mm::ModuleFactory::registerType<mm::MetaballsEffect>("MetaballsEffect");
     mm::ModuleFactory::registerType<mm::FireEffect>("FireEffect");
     mm::ModuleFactory::registerType<mm::ParticlesEffect>("ParticlesEffect");
-    mm::ModuleFactory::registerType<mm::GlowParticlesEffect>("GlowParticlesEffect");
-    mm::ModuleFactory::registerType<mm::CheckerboardEffect>("CheckerboardEffect");
     mm::ModuleFactory::registerType<mm::MoonLiveEffect>("MoonLiveEffect");
     mm::ModuleFactory::registerType<mm::SpiralEffect>("SpiralEffect");
     mm::ModuleFactory::registerType<mm::RingsEffect>("RingsEffect");
     mm::ModuleFactory::registerType<mm::RipplesEffect>("RipplesEffect");
     mm::ModuleFactory::registerType<mm::LavaLampEffect>("LavaLampEffect");
-    mm::ModuleFactory::registerType<mm::GameOfLifeEffect>("GameOfLifeEffect");
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier");
     mm::ModuleFactory::registerType<mm::RegionModifier>("RegionModifier");

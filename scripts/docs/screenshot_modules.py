@@ -76,11 +76,16 @@ UI_DIR = ASSETS / "ui"   # tooling / installer / full-page shots (not per-module
 # Map a module to its asset subfolder (domain/type), mirroring src. Module screenshots live in
 # docs/assets/{core, light/{effects,modifiers,layouts,drivers}}/ — see folder-structure-proposal.
 def asset_dir_for(type_name: str) -> Path:
-    if type_name.endswith("Effect"):   return ASSETS / "light" / "effects"
-    if type_name.endswith("Modifier"): return ASSETS / "light" / "modifiers"
-    if type_name.endswith("Layout"):   return ASSETS / "light" / "layouts"
-    if type_name.endswith("Driver"):   return ASSETS / "light" / "drivers"
-    if type_name in ("Layouts", "Layers", "Drivers"):  return ASSETS / "light"
+    if type_name.endswith("Effect"):
+        return ASSETS / "light" / "effects"
+    if type_name.endswith("Modifier"):
+        return ASSETS / "light" / "modifiers"
+    if type_name.endswith("Layout"):
+        return ASSETS / "light" / "layouts"
+    if type_name.endswith("Driver"):
+        return ASSETS / "light" / "drivers"
+    if type_name in ("Layouts", "Layers", "Drivers"):
+        return ASSETS / "light"
     return ASSETS / "core"   # SystemModule, FilesystemModule, DevicesModule, … and the rest
 
 # ---------------------------------------------------------------------------

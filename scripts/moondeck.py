@@ -1633,6 +1633,42 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
             s = re.sub(r'(?<!\w)_([^_]+)_(?!\w)', r'<em>\1</em>', s)
             return s
 
+        def _render_cell(c: str) -> str:
+            """Render one table cell. The compact module pages (effects/modifiers/layouts)
+            use raw <img src=… width=…> previews and <a id=…></a> row anchors inside cells —
+            two tags GitHub/VS Code honor but the default escape path would turn to literal
+            text. Pass those two through (resolving an <img> src to /api/doc-asset/ like the
+            markdown-image path does); escape + inline-render the rest."""
+            def _img(m):
+                src_ = m.group("src"); width = m.group("w"); style = m.group("style")
+                if not src_.startswith(("http://", "https://", "/")):
+                    abs_src = (md_path.parent / src_).resolve()
+                    try:
+                        src_ = str(abs_src.relative_to(ROOT.resolve()))
+                    except ValueError:
+                        pass
+                    src_ = f"/api/doc-asset/{src_}"
+                wattr = f' width="{width}"' if width else ""
+                # Preserve an author-set width style (the cross-renderer size lever) and append our
+                # margin so the preview isn't flush against the cell edges.
+                style = (style + ";" if style else "") + "margin:4px 0"
+                return f'<img src="{src_}"{wattr} style="{style}">'
+            # No raw img/anchor → ordinary escaped+inline cell (the common case).
+            if "<img" not in c and "<a id=" not in c:
+                return render_inline(html_mod.escape(c))
+            # Protect our two tags, escape the rest, render markdown, then restore them.
+            tokens = []
+            def _stash(html: str) -> str:
+                tokens.append(html); return f"\x00{len(tokens)-1}\x00"
+            c = re.sub(r'<img src="(?P<src>[^"]+)"(?:\s+width="(?P<w>\d+)")?'
+                       r'(?:\s+style="(?P<style>[^"]*)")?[^>]*>',
+                       lambda m: _stash(_img(m)), c)
+            c = re.sub(r'<a id="([a-z0-9-]+)"></a>', lambda m: _stash(f'<a id="{m.group(1)}"></a>'), c)
+            out = render_inline(html_mod.escape(c))
+            for i, html in enumerate(tokens):
+                out = out.replace(f"\x00{i}\x00", html)
+            return out
+
         def close_list_if_open():
             nonlocal in_list
             if in_list:
@@ -1706,7 +1742,7 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
                 # CSS handle the first-row styling.
                 cell_tag = "td"
                 cell_html = "".join(
-                    f"<{cell_tag}>{render_inline(html_mod.escape(c))}</{cell_tag}>"
+                    f"<{cell_tag}>{_render_cell(c)}</{cell_tag}>"
                     for c in cells
                 )
                 lines.append(f"<tr>{cell_html}</tr>")

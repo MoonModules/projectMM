@@ -1,6 +1,7 @@
 #pragma once
 
 #include "light/layers/Layer.h"
+#include "light/Palette.h"   // colorFromPalette + active palette
 #include "core/color.h"   // sin8, hsvToRgb
 
 namespace mm {
@@ -55,7 +56,7 @@ public:
                 // Average the two sines (each 0..255) → a hue byte. The interference of
                 // the two frequencies + the 1.3× time skew is what makes the pattern move.
                 const uint8_t hue = static_cast<uint8_t>((static_cast<uint16_t>(sx) + sy) >> 1);
-                const RGB c = hsvToRgb(hue, 240, 255);
+                const RGB c = colorFromPalette(*Palettes::active(), hue);
                 if (cpl >= 1) row[0] = c.r;
                 if (cpl >= 2) row[1] = c.g;
                 if (cpl >= 3) row[2] = c.b;

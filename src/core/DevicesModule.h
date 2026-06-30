@@ -158,8 +158,12 @@ public:
         if (!d->name[0]) { formatDottedQuad(d->name, ip); persistChanged = true; }
         if (d->colourCount != colour) { d->colourCount = colour; persistChanged = true; }
         d->lastSeenMs = platform::millis();   // transient — keeps the bridge from ageing out
+        // A cached row coming (back) online is a status change even with no persisted field edit —
+        // refresh on that transition too, else a re-announced bridge stays greyed-out in the UI.
+        const bool wasCached = d->cached;
         d->cached = false;
-        if (persistChanged) { sortByName(); refreshStatus(); }
+        if (persistChanged) sortByName();              // re-sort only on a real persisted change
+        if (persistChanged || wasCached) refreshStatus();
     }
 
     void setup() override {

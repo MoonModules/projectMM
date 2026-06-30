@@ -21,7 +21,7 @@ This drops every drawback of library-as-folder (fuzzy-origin filing, two-places-
 
 ### The target tree
 
-```
+```text
 src/light/
   effects/    EffectBase.h, Rainbow.h, Wave.h, DistortionWaves.h, …   (flat per type)
   modifiers/  ModifierBase.h, Multiply.h, Rotate.h, …
@@ -36,7 +36,7 @@ Identical shape for `docs/assets/` and `test/` (below). `src/` itself is **uncha
 
 Per-module `.md` would be ~65 files post-migration (explosion); one all-effects file would be ~2100 lines (MoonLight's mistake). The middle ground: **one page per library**, each effect a **compact table row**.
 
-```
+```text
 docs/moonmodules/light/
   effects_moonlight.md     ← ~30 effects, one row each (~120-150 lines)
   effects_wled.md          ← ~20
@@ -53,7 +53,7 @@ docs/moonmodules/core/     ← unchanged: per-module .md (stable count, no explo
 
 The consistency win that's independent of library — make `test/` and `assets/` match src's existing `domain/type` shape:
 
-```
+```text
 docs/assets/
   core/      DevicesModule.png, Drivers.png, …
   light/

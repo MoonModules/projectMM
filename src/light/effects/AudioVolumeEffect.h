@@ -1,6 +1,7 @@
 #pragma once
 
 #include "light/layers/Layer.h"
+#include "light/Palette.h"      // colorFromPalette + the global active palette
 #include "core/AudioModule.h"   // AudioModule::latestFrame()
 
 namespace mm {
@@ -33,12 +34,12 @@ public:
         const uint16_t v = static_cast<uint16_t>(
             (level > 255 ? 255 : level) * brightness / 255);
 
-        // A simple level-driven colour ramp: green (quiet) → red (loud), with v
-        // setting overall intensity. Fill every light identically — a VU meter on
-        // the whole surface; modifiers/layouts give it shape.
-        const uint8_t r = static_cast<uint8_t>(v);
-        const uint8_t g = static_cast<uint8_t>(v > 128 ? (255 - v) * 2 : 255 * v / 128);
-        const uint8_t b = 0;
+        // Level drives BOTH the palette index and the brightness: quiet maps to the palette's
+        // start, loud to its end, dimmed by v. Fill every light identically — a VU meter on the
+        // whole surface; modifiers/layouts give it shape.
+        const uint8_t lvl = static_cast<uint8_t>(level > 255 ? 255 : level);
+        const RGB c = colorFromPalette(*Palettes::active(), lvl, static_cast<uint8_t>(v));
+        const uint8_t r = c.r, g = c.g, b = c.b;
 
         // Write logical RGB only: channel order and any RGBW white are the
         // driver's Correction (W = min(r,g,b)), like every other effect. Effect

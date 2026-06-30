@@ -12,10 +12,10 @@
     "LcdLedDriver",
     "ParlioLedDriver",
     "MultiplyModifier",
-    "CheckerboardEffect",
+    "SpiralEffect",
     "NoiseEffect"
   ],
-  "description": "Comprehensive incremental performance check (the SLOW, on-device companion to scenario_perf_light). Mutate mode + canvas-preparing: clear_children whatever the device already had (pre-wired apparatus like PreviewDriver/Board survives — clear_children only drops user-editable children), rebuild a known minimal tree, then add one subsystem at a time — audio, device discovery, a modifier, then EVERY output driver this board has (each optional + capped to 64 output LEDs so its per-frame cost is comparable, not its transmit-all-16K time), then a network driver — measuring the tick/heap delta after each so each subsystem's cost is isolated. Then sweep the grid 16²→32²→64²→128² (16K) for both a LIGHT effect (Checkerboard) and a HEAVY one (Noise) to bracket the compute range across sizes. LED drivers are platform-gated (RMT on classic/S3, LCD on S3, Parlio on P4; none on desktop) so each driver step is optional:true and skipped where absent — the all-drivers comparison is assembled across boards (S3 gives RMT vs LCD, P4 gives RMT vs Parlio). Subsumes the old scenario_Layer_buildup (incremental module cost), scenario_GridLayout_grid_sizes (grid sweep), and scenario_AllEffects_grid_sizes (per-effect size sweep, here reduced to a light/heavy bracket). Runs minutes on a device; not a per-commit gate.",
+  "description": "Comprehensive incremental performance check (the SLOW, on-device companion to scenario_perf_light). Mutate mode + canvas-preparing: clear_children whatever the device already had (pre-wired apparatus like PreviewDriver/Board survives — clear_children only drops user-editable children), rebuild a known minimal tree, then add one subsystem at a time — audio, device discovery, a modifier, then EVERY output driver this board has (each optional + capped to 64 output LEDs so its per-frame cost is comparable, not its transmit-all-16K time), then a network driver — measuring the tick/heap delta after each so each subsystem's cost is isolated. Then sweep the grid 16²→32²→64²→128² (16K) for both a LIGHT effect (Spiral) and a HEAVY one (Noise) to bracket the compute range across sizes. LED drivers are platform-gated (RMT on classic/S3, LCD on S3, Parlio on P4; none on desktop) so each driver step is optional:true and skipped where absent — the all-drivers comparison is assembled across boards (S3 gives RMT vs LCD, P4 gives RMT vs Parlio). Subsumes the old scenario_Layer_buildup (incremental module cost), scenario_GridLayout_grid_sizes (grid sweep), and scenario_AllEffects_grid_sizes (per-effect size sweep, here reduced to a light/heavy bracket). Runs minutes on a device; not a per-commit gate.",
   "fixture": [
     {
       "name": "fix-layouts",
@@ -75,19 +75,19 @@
       "name": "build-fx",
       "op": "add_module",
       "id": "FX",
-      "type": "CheckerboardEffect",
+      "type": "SpiralEffect",
       "parent_id": "Layer"
     },
     {
       "name": "measure-minimal",
-      "description": "Bare minimum at 16²: Grid + Layer + Checkerboard, no output driver, audio/discovery still on as the device ships. The floor for the subsystem-cost diffs below.",
+      "description": "Bare minimum at 16²: Grid + Layer + Spiral, no output driver, audio/discovery still on as the device ships. The floor for the subsystem-cost diffs below.",
       "op": "measure",
       "measure": true,
       "observed": {
         "pc-macos": {
           "tick_us": [
             0,
-            2
+            5
           ],
           "free_heap": [
             0,
@@ -99,7 +99,7 @@
           ],
           "at": [
             "2026-06-17",
-            "2026-06-27"
+            "2026-06-30"
           ]
         },
         "esp32s3-n16r8": {
@@ -176,7 +176,7 @@
         "pc-macos": {
           "tick_us": [
             0,
-            2
+            6
           ],
           "free_heap": [
             0,
@@ -188,7 +188,7 @@
           ],
           "at": [
             "2026-06-17",
-            "2026-06-27"
+            "2026-06-30"
           ]
         },
         "esp32s3-n16r8": {
@@ -265,7 +265,7 @@
         "pc-macos": {
           "tick_us": [
             0,
-            2
+            5
           ],
           "free_heap": [
             0,
@@ -277,7 +277,7 @@
           ],
           "at": [
             "2026-06-17",
-            "2026-06-27"
+            "2026-06-30"
           ]
         },
         "esp32s3-n16r8": {
@@ -533,7 +533,7 @@
         "pc-macos": {
           "tick_us": [
             0,
-            2
+            5
           ],
           "free_heap": [
             0,
@@ -545,7 +545,7 @@
           ],
           "at": [
             "2026-06-17",
-            "2026-06-27"
+            "2026-06-30"
           ]
         },
         "esp32s3-n16r8": {
@@ -631,7 +631,7 @@
         "pc-macos": {
           "tick_us": [
             0,
-            2
+            5
           ],
           "free_heap": [
             0,
@@ -643,7 +643,7 @@
           ],
           "at": [
             "2026-06-17",
-            "2026-06-27"
+            "2026-06-30"
           ]
         },
         "esp32s3-n16r8": {
@@ -730,7 +730,7 @@
         "pc-macos": {
           "tick_us": [
             0,
-            2
+            5
           ],
           "free_heap": [
             0,
@@ -742,7 +742,7 @@
           ],
           "at": [
             "2026-06-17",
-            "2026-06-27"
+            "2026-06-30"
           ]
         },
         "esp32s3-n16r8": {
@@ -829,7 +829,7 @@
         "pc-macos": {
           "tick_us": [
             0,
-            2
+            5
           ],
           "free_heap": [
             0,
@@ -841,7 +841,7 @@
           ],
           "at": [
             "2026-06-17",
-            "2026-06-27"
+            "2026-06-30"
           ]
         },
         "esp32s3-n16r8": {
@@ -917,7 +917,7 @@
     },
     {
       "name": "light-16-w",
-      "description": "Grid sweep, LIGHT effect (Checkerboard is already FX).",
+      "description": "Grid sweep, LIGHT effect (Spiral is already FX).",
       "op": "set_control",
       "id": "Grid",
       "key": "width",
@@ -938,7 +938,7 @@
         "pc-macos": {
           "tick_us": [
             0,
-            2
+            5
           ],
           "free_heap": [
             0,
@@ -950,7 +950,7 @@
           ],
           "at": [
             "2026-06-17",
-            "2026-06-27"
+            "2026-06-30"
           ]
         },
         "esp32s3-n16r8": {
@@ -1031,7 +1031,7 @@
         "pc-macos": {
           "tick_us": [
             1,
-            6
+            18
           ],
           "free_heap": [
             0,
@@ -1043,7 +1043,7 @@
           ],
           "at": [
             "2026-06-17",
-            "2026-06-27"
+            "2026-06-30"
           ]
         },
         "esp32s3-n16r8": {
@@ -1217,7 +1217,7 @@
         "pc-macos": {
           "tick_us": [
             16,
-            187
+            286
           ],
           "free_heap": [
             0,
@@ -1229,7 +1229,7 @@
           ],
           "at": [
             "2026-06-17",
-            "2026-06-24"
+            "2026-06-30"
           ]
         },
         "esp32s3-n16r8": {
@@ -1596,7 +1596,7 @@
       "observed": {
         "pc-macos": {
           "tick_us": [
-            298,
+            280,
             1093
           ],
           "free_heap": [
@@ -1902,7 +1902,7 @@
         "pc-macos": {
           "tick_us": [
             14,
-            43
+            48
           ],
           "free_heap": [
             0,
@@ -1914,7 +1914,7 @@
           ],
           "at": [
             "2026-06-17",
-            "2026-06-25"
+            "2026-06-30"
           ]
         },
         "esp32": {

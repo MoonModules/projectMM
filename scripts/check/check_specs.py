@@ -50,11 +50,37 @@ def find_moonmodules():
             modules.append(h_file)
     return modules
 
+# Effects, modifiers, and the leaf layouts (Grid/Sphere/Wheel) document themselves as one
+# compact-row page per type rather than a file per module (docs consolidation — see the
+# folder-structure decision). A module of one of these types is documented on its shared page;
+# every other module keeps a per-module page named for the type. Keyed by type-name suffix so a
+# new effect/modifier/layout is folded in automatically. (Layouts/Layers/Drivers are CONTAINERS,
+# not leaf layouts — they keep their own per-module page, so they are excluded below.)
+CONSOLIDATED_PAGES = {
+    "Effect": SPECS / "light" / "effects" / "effects.md",
+    "Modifier": SPECS / "light" / "modifiers" / "modifiers.md",
+    "Layout": SPECS / "light" / "layouts" / "layouts.md",
+}
+
+
 def find_spec(module_path):
-    """Find the matching spec .md file for a source .h file."""
+    """Find the matching spec .md for a source .h.
+
+    A module whose type name ends in Effect/Modifier/Layout is documented on the shared
+    per-type page (its row must carry every control name — checked by check_spec_freshness).
+    Everything else uses the per-module page (stem match), as before.
+    """
     name = module_path.stem  # e.g. "NoiseEffect"
 
-    # Search all spec directories
+    # MoonLive is a live-script module under light/moonlive/, not a normal effect — it keeps its
+    # own page despite the *Effect suffix. Only the per-type folders consolidate.
+    in_moonlive = "moonlive" in module_path.parts
+    if not in_moonlive:
+        for suffix, page in CONSOLIDATED_PAGES.items():
+            if name.endswith(suffix):
+                return page if page.exists() else None
+
+    # Per-module page: match by filename stem anywhere under docs/moonmodules/.
     for md in SPECS.rglob("*.md"):
         if md.stem == name:
             return md

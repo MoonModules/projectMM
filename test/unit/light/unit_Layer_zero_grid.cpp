@@ -1,5 +1,5 @@
 // @module Layer
-// @also RainbowEffect, NoiseEffect, PlasmaEffect, CheckerboardEffect, SpiralEffect, MetaballsEffect, PlasmaPaletteEffect, RingsEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect, FireEffect, ParticlesEffect
+// @also RainbowEffect, NoiseEffect, PlasmaEffect, SpiralEffect, MetaballsEffect, RingsEffect, RipplesEffect, LavaLampEffect, FireEffect, ParticlesEffect
 
 #include "doctest.h"
 #include "light/layers/Layer.h"
@@ -8,13 +8,10 @@
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/NoiseEffect.h"
 #include "light/effects/PlasmaEffect.h"
-#include "light/effects/CheckerboardEffect.h"
 #include "light/effects/SpiralEffect.h"
 #include "light/effects/MetaballsEffect.h"
-#include "light/effects/PlasmaPaletteEffect.h"
 #include "light/effects/RingsEffect.h"
 #include "light/effects/RipplesEffect.h"
-#include "light/effects/GlowParticlesEffect.h"
 #include "light/effects/LavaLampEffect.h"
 #include "light/effects/FireEffect.h"
 #include "light/effects/ParticlesEffect.h"
@@ -55,20 +52,14 @@ TEST_CASE("RainbowEffect on 0,0,0 grid")     { run_with_empty_layout<mm::Rainbow
 TEST_CASE("NoiseEffect on 0,0,0 grid")       { run_with_empty_layout<mm::NoiseEffect>(); }
 // Plasma on 0,0,0 grid: no crash.
 TEST_CASE("PlasmaEffect on 0,0,0 grid")      { run_with_empty_layout<mm::PlasmaEffect>(); }
-// Checkerboard on 0,0,0 grid: no crash.
-TEST_CASE("CheckerboardEffect on 0,0,0 grid"){ run_with_empty_layout<mm::CheckerboardEffect>(); }
 // Spiral on 0,0,0 grid: no crash.
 TEST_CASE("SpiralEffect on 0,0,0 grid")      { run_with_empty_layout<mm::SpiralEffect>(); }
 // Metaballs on 0,0,0 grid: no crash.
 TEST_CASE("MetaballsEffect on 0,0,0 grid")   { run_with_empty_layout<mm::MetaballsEffect>(); }
-// PlasmaPalette on 0,0,0 grid: no crash.
-TEST_CASE("PlasmaPaletteEffect on 0,0,0 grid"){run_with_empty_layout<mm::PlasmaPaletteEffect>(); }
 // Rings on 0,0,0 grid: no crash.
 TEST_CASE("RingsEffect on 0,0,0 grid")       { run_with_empty_layout<mm::RingsEffect>(); }
 // Ripples on 0,0,0 grid: no crash.
 TEST_CASE("RipplesEffect on 0,0,0 grid")     { run_with_empty_layout<mm::RipplesEffect>(); }
-// GlowParticles on 0,0,0 grid: no crash.
-TEST_CASE("GlowParticlesEffect on 0,0,0 grid"){run_with_empty_layout<mm::GlowParticlesEffect>(); }
 // LavaLamp on 0,0,0 grid: no crash.
 TEST_CASE("LavaLampEffect on 0,0,0 grid")    { run_with_empty_layout<mm::LavaLampEffect>(); }
 // Fire on 0,0,0 grid: no heat buffer allocated, no crash.

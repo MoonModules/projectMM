@@ -126,15 +126,25 @@ enum class ControlType : uint8_t {
                 // "control holds a void* into module-owned data" shape every addX()
                 // uses, one level up. (Data-over-objects: no per-row object graph,
                 // no allocation on rebuild — see docs/architecture.md hot-path.)
-    Button      // a momentary action, not a stored value. The UI renders a button;
+    Button,     // a momentary action, not a stored value. The UI renders a button;
                 // a click POSTs a value and the module's onUpdate() runs the action.
                 // No backing storage (ptr unused) and non-persistable — distinct
                 // from Bool, which is an on/off STATE that renders as a toggle and a
                 // toggle is the wrong affordance for "do this now" (e.g. rescan).
+    Palette     // a colour-palette dropdown (ptr → uint8_t index). Like Select, but
+                // each option carries its gradient *colours* (16 hex stops) so the UI
+                // renders a gradient swatch per option, not just a name. The light
+                // domain supplies the names + swatches via the Palette type; the wire
+                // shape (options:[{name,colors}]) is serialized in writeControlMetadata.
 };
 
 // Forward-declared (defined below the enum) so the descriptor can hold a pointer.
 class JsonSink;
+
+// A ControlType::Palette control's options come from the light domain (it owns the palette set
+// and the swatch colours). The descriptor's `aux` holds a pointer to this function; core calls it
+// to emit the `"options":[{"name":…,"colors":…}, …]` array — core stays palette-agnostic.
+using PaletteOptionsFn = void (*)(JsonSink& sink);
 
 // Backing for a ControlType::List control. The module that owns the data (e.g.
 // DevicesModule over its device array) implements this; the control descriptor's
@@ -292,6 +302,13 @@ public:
         grow();
         controls_[count_++] = {&var, name, reinterpret_cast<uintptr_t>(unit),
                                ControlType::ReadOnlyInt, 0, 0};
+    }
+
+    // A colour-palette dropdown: like a Select (ptr → uint8_t index, max = optionCount), but the
+    // options carry swatch colours. `optionsFn` (light-domain) emits the {name,colors} objects.
+    void addPalette(const char* name, uint8_t& var, PaletteOptionsFn optionsFn, uint8_t optionCount) {
+        grow();
+        controls_[count_++] = {&var, name, reinterpret_cast<uintptr_t>(optionsFn), ControlType::Palette, 0, optionCount};
     }
 
     void addSelect(const char* name, uint8_t& var, const char* const* options, uint8_t optionCount) {

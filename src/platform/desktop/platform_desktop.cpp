@@ -496,6 +496,16 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
     if (body && bodyLen) body[0] = '\0';
     if (!method || !host || !path) return 0;
 
+    // One absolute deadline for the whole request: connect, send, and recv each consume from the
+    // same budget rather than each getting a fresh timeoutMs (which let the total reach ~3×
+    // timeoutMs). `remainingMs()` is the time left before the deadline, floored at 1ms so a phase
+    // never gets a 0 timeout (which means "block forever" for SO_*TIMEO).
+    const uint32_t deadline = millis() + timeoutMs;
+    auto remainingMs = [&]() -> uint32_t {
+        const uint32_t now = millis();
+        return now >= deadline ? 1u : (deadline - now);
+    };
+
     int fd = open_sock(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return 0;
     struct CloseGuard { int f; ~CloseGuard() { close_sock(f); } } guard{fd};
@@ -521,9 +531,10 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
     if (cr != 0 && !inProgress) return 0;          // immediate hard failure
     if (cr != 0) {                                 // connect in progress — wait for writable
         fd_set wf; FD_ZERO(&wf); FD_SET(sock(fd), &wf);
+        const uint32_t cms = remainingMs();
         timeval ctv{};
-        ctv.tv_sec = static_cast<time_t>(timeoutMs / 1000);
-        ctv.tv_usec = static_cast<suseconds_t>((timeoutMs % 1000) * 1000);
+        ctv.tv_sec = static_cast<time_t>(cms / 1000);
+        ctv.tv_usec = static_cast<suseconds_t>((cms % 1000) * 1000);
         if (::select(static_cast<int>(sock(fd)) + 1, nullptr, &wf, nullptr, &ctv) <= 0) return 0;  // timeout / error
         int soerr = 0; socklen_t len = sizeof(soerr);
         ::getsockopt(sock(fd), SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&soerr), &len);
@@ -531,16 +542,18 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
     }
     if (make_blocking(fd) != 0) return 0;          // back to blocking for the bounded send/recv
 
-    // Bound the request send + response recv with SO_RCVTIMEO/SO_SNDTIMEO (the same shape the
-    // rest of the file uses).
+    // Bound the request send + response recv with SO_RCVTIMEO/SO_SNDTIMEO, using the time LEFT on
+    // the shared deadline (not a fresh timeoutMs) so connect + send + recv together stay within the
+    // caller's budget.
+    const uint32_t sms = remainingMs();
 #ifdef _WIN32
-    DWORD tv = timeoutMs;
+    DWORD tv = sms;
     ::setsockopt(sock(fd), SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
     ::setsockopt(sock(fd), SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
 #else
     timeval tv{};
-    tv.tv_sec = static_cast<time_t>(timeoutMs / 1000);
-    tv.tv_usec = static_cast<suseconds_t>((timeoutMs % 1000) * 1000);
+    tv.tv_sec = static_cast<time_t>(sms / 1000);
+    tv.tv_usec = static_cast<suseconds_t>((sms % 1000) * 1000);
     ::setsockopt(sock(fd), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     ::setsockopt(sock(fd), SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 #endif
