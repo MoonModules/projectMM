@@ -5,6 +5,9 @@ add_executable(mm_tests
     # core/
     unit/core/unit_Buffer.cpp
     unit/core/unit_Color.cpp
+    unit/core/unit_math8.cpp
+    unit/core/unit_noise.cpp
+    unit/core/unit_crc.cpp
     unit/core/unit_Control_apply_absent_key.cpp
     unit/core/unit_Control_list.cpp
     unit/core/unit_DeviceIdentify.cpp
@@ -43,6 +46,8 @@ add_executable(mm_tests
     unit/light/unit_NetworkSendDriver_no_alloc_in_loop.cpp
     unit/light/unit_NetworkSendDriver_packet.cpp
     unit/light/unit_BlendMap.cpp
+    unit/light/unit_draw.cpp
+    unit/light/unit_GameOfLifeEffect.cpp
     unit/light/unit_Coord3D.cpp
     unit/light/unit_effects_render.cpp
     unit/light/unit_SineEffect.cpp

@@ -257,7 +257,7 @@ static void check_d2_on_3d(const char* tag) {
 }
 
 // SpiralEffect (D2) on a 3D layer: extrude copies z=0 to every z>0 (stateless D2 contract).
-TEST_CASE("D2 effect on 3D layer: Checkerboard extruded across z") {
+TEST_CASE("D2 effect on 3D layer: Spiral extruded across z") {
     check_d2_on_3d<mm::SpiralEffect>("SpiralEffect on 3D layer");
 }
 

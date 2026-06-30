@@ -63,3 +63,17 @@ TEST_CASE("HueDriver: parseLights keeps only colour-capable, reachable lights") 
     CHECK(hue.hueIdForTest(0) == 5);
     CHECK(hue.colourCountForTest() == 1);
 }
+
+// fetchLights sizes its read buffer by growing while the body looks truncated. The signal is
+// "does the body end in '}'": a too-small buffer cuts the JSON mid-content. (Regression: an
+// earlier check tested strlen==cap-1, which never fires because httpRequest strips headers first,
+// so a >2 KB bridge response was parsed truncated and lights silently disappeared.)
+TEST_CASE("HueDriver: bodyLooksComplete is the truncation signal for the grow-and-retry fetch") {
+    // Complete: a whole /lights object, with and without trailing whitespace.
+    CHECK(mm::HueDriver::bodyLooksCompleteForTest("{\"5\":{\"state\":{\"hue\":1}}}"));
+    CHECK(mm::HueDriver::bodyLooksCompleteForTest("{\"5\":{}}\r\n  "));
+    // Truncated: cut mid-object (the symptom of a too-small buffer) → grow.
+    CHECK_FALSE(mm::HueDriver::bodyLooksCompleteForTest("{\"5\":{\"state\":{\"hue\":85"));
+    CHECK_FALSE(mm::HueDriver::bodyLooksCompleteForTest(""));
+    CHECK_FALSE(mm::HueDriver::bodyLooksCompleteForTest("   \n"));
+}

@@ -1,5 +1,5 @@
 // @module Layer
-// @also RainbowEffect, NoiseEffect, PlasmaEffect, SpiralEffect, MetaballsEffect, RingsEffect, RipplesEffect, LavaLampEffect, FireEffect, ParticlesEffect
+// @also RainbowEffect, NoiseEffect, PlasmaEffect, SpiralEffect, MetaballsEffect, RingsEffect, RipplesEffect, LavaLampEffect, FireEffect, ParticlesEffect, GameOfLifeEffect, GEQ3DEffect, PaintBrushEffect
 
 #include "doctest.h"
 #include "light/layers/Layer.h"
@@ -15,6 +15,9 @@
 #include "light/effects/LavaLampEffect.h"
 #include "light/effects/FireEffect.h"
 #include "light/effects/ParticlesEffect.h"
+#include "light/effects/GameOfLifeEffect.h"
+#include "light/effects/GEQ3DEffect.h"
+#include "light/effects/PaintBrushEffect.h"
 
 // Pin the "Effects must work at every grid size" rule. A 0-light layout is a
 // real configuration — a modifier can shrink the logical grid to 0,0,0 or
@@ -66,3 +69,8 @@ TEST_CASE("LavaLampEffect on 0,0,0 grid")    { run_with_empty_layout<mm::LavaLam
 TEST_CASE("FireEffect on 0,0,0 grid")        { run_with_empty_layout<mm::FireEffect>(); }
 // Particles on 0,0,0 grid: no trail buffer allocated, no crash.
 TEST_CASE("ParticlesEffect on 0,0,0 grid")   { run_with_empty_layout<mm::ParticlesEffect>(); }
+// GameOfLife on 0,0,0 grid: no heap alloc for 0 cells, no crash.
+TEST_CASE("GameOfLifeEffect on 0,0,0 grid")  { run_with_empty_layout<mm::GameOfLifeEffect>(); }
+// GEQ3D / PaintBrush on 0,0,0 grid: audio effects, no crash with no buffer.
+TEST_CASE("GEQ3DEffect on 0,0,0 grid")       { run_with_empty_layout<mm::GEQ3DEffect>(); }
+TEST_CASE("PaintBrushEffect on 0,0,0 grid")  { run_with_empty_layout<mm::PaintBrushEffect>(); }

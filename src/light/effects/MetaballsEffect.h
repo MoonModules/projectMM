@@ -3,6 +3,7 @@
 #include "light/layers/Layer.h"
 #include "light/Palette.h"   // colorFromPalette + active palette
 #include "core/color.h"
+#include "core/math8.h"   // sin8/cos8/dist8/atan2_8
 
 namespace mm {
 

@@ -1265,6 +1265,15 @@ function createControl(moduleName, moduleType, ctrl) {
 
             wrap.append(trigger, list);
             row.appendChild(wrap);
+            // Reset to the default palette like every other persisted control: re-paint the trigger
+            // and the selected row to `def` (sendControl is handled by appendResetButton).
+            appendResetButton(row, moduleName, ctrl, def, () => {
+                wrap.dataset.value = def;
+                paintTrigger(def);
+                list.querySelectorAll(".selected").forEach(x => x.classList.remove("selected"));
+                const r = list.querySelector(`.palette-item[data-idx="${def}"]`);
+                if (r) r.classList.add("selected");
+            });
             break;
         }
         case "display": {

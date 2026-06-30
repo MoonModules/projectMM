@@ -21,6 +21,9 @@
 #include "light/effects/AudioSpectrumEffect.h"
 #include "light/effects/SineEffect.h"
 #include "light/effects/DistortionWavesEffect.h"
+#include "light/effects/GameOfLifeEffect.h"
+#include "light/effects/GEQ3DEffect.h"
+#include "light/effects/PaintBrushEffect.h"
 #include "light/modifiers/MultiplyModifier.h"
 #include "light/modifiers/CheckerboardModifier.h"
 #include "light/modifiers/RandomMapModifier.h"
@@ -101,6 +104,9 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::AudioSpectrumEffect>("AudioSpectrumEffect", "light/effects/effects.md#audiospectrum");
     mm::ModuleFactory::registerType<mm::SineEffect>("SineEffect", "light/effects/effects.md#sine");
     mm::ModuleFactory::registerType<mm::DistortionWavesEffect>("DistortionWavesEffect", "light/effects/effects.md#distortionwaves");
+    mm::ModuleFactory::registerType<mm::GameOfLifeEffect>("GameOfLifeEffect", "light/effects/effects.md#gameoflife");
+    mm::ModuleFactory::registerType<mm::GEQ3DEffect>("GEQ3DEffect", "light/effects/effects.md#geq3d");
+    mm::ModuleFactory::registerType<mm::PaintBrushEffect>("PaintBrushEffect", "light/effects/effects.md#paintbrush");
     mm::ModuleFactory::registerType<mm::MoonLiveEffect>("MoonLiveEffect", "light/moonlive/MoonLiveEffect.md");
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier", "light/modifiers/modifiers.md#multiply");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers/modifiers.md#checkerboard");

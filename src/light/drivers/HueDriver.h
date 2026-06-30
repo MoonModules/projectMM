@@ -89,7 +89,7 @@ public:
     void loop1s() override {
         if (pairTicksLeft_ > 0) { pollPairing(); DriverBase::loop1s(); return; }
         if (!appKey[0] || !haveBridge()) { DriverBase::loop1s(); return; }
-        if (lightCount_ == 0) { fetchLights(); DriverBase::loop1s(); return; }
+        if (!sawLights_) { fetchLights(); DriverBase::loop1s(); return; }
         if (++reportTick_ >= kReportEverySec) { reportTick_ = 0; reportBridge(); }
         DriverBase::loop1s();
     }
@@ -122,6 +122,9 @@ public:
     static void rgbToHsvForTest(uint8_t r, uint8_t g, uint8_t b, uint16_t& h, uint8_t& s, uint8_t& v) {
         rgbToHsv(r, g, b, h, s, v);
     }
+
+    // Test seam: the truncation signal fetchLights grows against (a complete /lights body ends '}').
+    static bool bodyLooksCompleteForTest(const char* body) { return bodyLooksComplete(body); }
 
 private:
     static constexpr uint8_t kMaxLights = 32;        // a LAN's worth of Hue bulbs; bounded, no heap
@@ -158,13 +161,17 @@ private:
     int8_t   colourCount_ = 0;                        // same, as the read-only control / bridge field
     bool     sawLights_ = false;                      // fetchLights ran → the list is trustworthy
     uint8_t  pushCursor_ = 0;                         // round-robin position across the lights
+    uint8_t  drivenCount_ = 0;                        // lights driven this pass (n); fade-time basis
     uint32_t lastPutMs_ = 0;                          // millis() of the last PUT — the loop() rate gate
     int      pairTicksLeft_ = 0;
     uint16_t reportTick_ = 0;                        // counts loop1s ticks toward kReportEverySec
     char     statusBuf_[40] = "unpaired";
-    // Off-hot-path scratch for the /lights GET response (a full home is ~8 KB). A member, not a
-    // loop1s stack frame — read once per fetchLights, not per render tick.
-    char     lightsBuf_[8192] = {};
+    // /lights read buffer is sized dynamically in fetchLights (grow-and-retry): a small first try
+    // covers a typical home; it doubles up to the cap only when a bigger bridge's response fills it.
+    // 16 KB caps the worst case (kMaxLights=32 × ~512 B/light). Heap-allocated per fetch, never an
+    // inline member (an 8 KB member would overflow the main-task stack in registerType's probe).
+    static constexpr size_t kLightsBufInitial = 2048;
+    static constexpr size_t kLightsBufMax     = 16384;
 
     bool haveBridge() const { return bridgeIp[0] || bridgeIp[1] || bridgeIp[2] || bridgeIp[3]; }
 
@@ -229,19 +236,49 @@ private:
         for (uint8_t i = 0; i < kMaxLights; i++) sent_[i] = false;
     }
 
+    // A complete /lights response is a JSON object: its last non-whitespace char is '}'. A read cut
+    // short by a too-small buffer ends mid-content, so this is the truncation signal fetchLights
+    // grows against. (Not a full JSON validator — the bridge's well-formed body is the contract;
+    // this only distinguishes "whole" from "cut off".)
+    static bool bodyLooksComplete(const char* body) {
+        size_t len = std::strlen(body);
+        while (len > 0 && (body[len - 1] == '\n' || body[len - 1] == '\r'
+                           || body[len - 1] == ' ' || body[len - 1] == '\t')) len--;
+        return len > 0 && body[len - 1] == '}';
+    }
+
     // --- Learn the bridge's light ids (window index → hue id, in id order).
     void fetchLights() {
         char host[16]; bridgeStr(host);
         char path[80]; std::snprintf(path, sizeof(path), "/api/%s/lights", appKey);
-        // The /lights body for a real bridge runs several KB (a full home is ~8 KB for ~10
-        // lights) — too big for a loop1s stack frame, so the read buffer is a driver member
-        // (allocated once with the object, off the hot path). httpRequest reads straight into it.
-        int st = platform::httpRequest("GET", host, 80, path, "", kSlowTimeoutMs,
-                                       lightsBuf_, sizeof(lightsBuf_));
-        if (st != 200) return;
-        parseLights(lightsBuf_);
-        refreshStatus();
-        reportBridge();
+        // The /lights body grows with the bridge's light count (~300-800 bytes/light of metadata),
+        // so its size is unknown up front. Size the read buffer DYNAMICALLY: start small and, if the
+        // response came back filling the buffer (httpRequest truncates to its capacity, which would
+        // silently drop trailing lights from parseLights' linear scan), double and refetch until it
+        // fits or we hit the cap. A typical home (a few lights) fits the first try; only a large
+        // bridge grows. The buffer lives on the heap (PSRAM when present) for the fetch and is freed
+        // after — fetchLights runs at 1 Hz, off the render loop, so the alloc/refetch isn't hot-path.
+        // It is NOT an inline member: an 8 KB member would make sizeof(HueDriver) overflow the
+        // main-task stack when registerType<HueDriver> constructs a throwaway probe.
+        for (size_t cap = kLightsBufInitial; cap <= kLightsBufMax; cap *= 2) {
+            char* buf = static_cast<char*>(platform::alloc(cap));
+            if (!buf) return;
+            const int st = platform::httpRequest("GET", host, 80, path, "", kSlowTimeoutMs, buf, cap);
+            if (st != 200) { platform::free(buf); return; }
+            // Detect a truncated read by the body's SHAPE, not its length: httpRequest strips the
+            // HTTP headers in place, so strlen(body) is body-only and never reaches cap-1 even when
+            // the raw read filled the buffer. So grow + retry while the body looks incomplete, until
+            // it parses whole or we hit the cap (then parse best-effort).
+            const bool truncated = !bodyLooksComplete(buf) && (cap < kLightsBufMax);
+            if (!truncated) {
+                parseLights(buf);
+                refreshStatus();
+                reportBridge();
+                platform::free(buf);
+                return;
+            }
+            platform::free(buf);
+        }
     }
 
     // List the bridge in DevicesModule (so it shows alongside discovered WLED/projectMM peers,
@@ -312,6 +349,7 @@ private:
         const uint8_t* base = sourceBuffer_->data();
         const uint8_t n = lightCount_ < winLen ? lightCount_ : static_cast<uint8_t>(winLen);
         if (n == 0) return;
+        drivenCount_ = n;   // the round-robin size — drives the Hue fade time (transitionDeciseconds)
 
         for (uint8_t step = 0; step < n; step++) {
             const uint8_t i = (pushCursor_ + step) % n;
@@ -326,11 +364,15 @@ private:
                 char host[16]; bridgeStr(host);
                 char path[96];
                 std::snprintf(path, sizeof(path), "/api/%s/lights/%u/state", appKey, hueId_[i]);
-                platform::httpRequest("PUT", host, 80, path, body, kHttpTimeoutMs, nullptr, 0);
-                lastRgb_[i][0] = rgb[0]; lastRgb_[i][1] = rgb[1]; lastRgb_[i][2] = rgb[2];
-                sent_[i] = true;
+                const int st = platform::httpRequest("PUT", host, 80, path, body, kHttpTimeoutMs, nullptr, 0);
+                // Mark the light sent only on a successful PUT — on a failure/timeout it stays
+                // eligible so the next lap retries it instead of skipping it as "already sent".
+                if (st == 200) {
+                    lastRgb_[i][0] = rgb[0]; lastRgb_[i][1] = rgb[1]; lastRgb_[i][2] = rgb[2];
+                    sent_[i] = true;
+                }
                 pushCursor_ = static_cast<uint8_t>((i + 1) % n);   // resume after this one next time
-                return;                                            // ONE PUT — done
+                return;                                            // ONE PUT attempt — done
             }
         }
         // No light changed this lap — nothing to send. Cursor stays put.
@@ -365,7 +407,11 @@ private:
     // deciseconds and clamp to ≥1 (0 = snap) so the fade lasts about until the next update —
     // continuous glide, no visible steps.
     uint8_t transitionDeciseconds() const {
-        const uint32_t intervalMs = static_cast<uint32_t>(lightCount_ ? lightCount_ : 1) * kPutIntervalMs;
+        // Use the count actually driven this pass (n = min(lightCount_, window)), not the full
+        // discovered lightCount_ — a partial window refreshes each of its lights sooner, so a
+        // lightCount_-based fade would overshoot and lag. drivenCount_ is set by pushOneChangedLight.
+        const uint8_t driven = drivenCount_ ? drivenCount_ : (lightCount_ ? lightCount_ : 1);
+        const uint32_t intervalMs = static_cast<uint32_t>(driven) * kPutIntervalMs;
         const uint32_t ds = intervalMs / 100;
         return static_cast<uint8_t>(ds < 1 ? 1 : (ds > 30 ? 30 : ds));
     }

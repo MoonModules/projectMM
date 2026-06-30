@@ -2,7 +2,8 @@
 
 #include "light/layers/Layer.h"
 #include "light/Palette.h"     // colorFromPalette + the global active palette
-#include "core/color.h"        // sin8 (integer sine LUT), scale8
+#include "core/math8.h"        // sin8 (integer sine LUT)
+#include "core/color.h"        // scale8
 #include "platform/platform.h" // alloc — the fade trail buffer
 
 #include <cstring>

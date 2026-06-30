@@ -35,6 +35,9 @@
 #include "core/AudioModule.h"
 #include "light/effects/AudioVolumeEffect.h"
 #include "light/effects/AudioSpectrumEffect.h"
+#include "light/effects/GameOfLifeEffect.h"
+#include "light/effects/GEQ3DEffect.h"
+#include "light/effects/PaintBrushEffect.h"
 #include "platform/platform.h"
 
 #include <cstdint>
@@ -198,6 +201,9 @@ static void registerScenarioTypes() {
     mm::ModuleFactory::registerType<mm::AudioModule>("AudioModule");
     mm::ModuleFactory::registerType<mm::AudioVolumeEffect>("AudioVolumeEffect");
     mm::ModuleFactory::registerType<mm::AudioSpectrumEffect>("AudioSpectrumEffect");
+    mm::ModuleFactory::registerType<mm::GameOfLifeEffect>("GameOfLifeEffect");
+    mm::ModuleFactory::registerType<mm::GEQ3DEffect>("GEQ3DEffect");
+    mm::ModuleFactory::registerType<mm::PaintBrushEffect>("PaintBrushEffect");
     done = true;
 }
 

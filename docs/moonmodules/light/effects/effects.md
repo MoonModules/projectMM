@@ -19,6 +19,14 @@ Columns: **Name** (with its `tags()` emoji — see the [tag emoji legend](../../
 | <a id="ripples"></a>**Ripples** 💫🟦🦅 | <img src="../../../assets/light/effects/RipplesEffect.gif" width="300"> | 3D | Distance-from-centre sets a per-column wave phase; the lit surface ripples like water. | `speed`, `interval` | [tests](../../../tests/unit-tests.md#spiraleffect) |
 | <a id="lines"></a>**Lines** 💫 | <img src="../../../assets/light/effects/LinesEffect.gif" width="300"> | — | Sweeps axis-aligned planes in sync; red/green/blue name the X/Y/Z axis — a preview-orientation test pattern. | `speed`, `axis` | — |
 
+## MoonModules effects
+
+| Name | Preview | Dim | Description | Controls | Tests |
+|---|---|---|---|---|---|
+| <a id="gameoflife"></a>**GameOfLife** 💫🌙 | — | 2D/3D | Conway's cellular automaton generalised to 2D/3D: selectable rulesets (+ custom `B#/S#`), palette-coloured cells, a dead-cell blur trail, toroidal `wrap`, and self-respawn (R-pentomino) when the board goes static. | `ruleset`, `customRule`, `speed`, `density`, `mutation`, `wrap`, `colorByAge`, `infinite`, `blur` | [tests](../../../tests/unit-tests.md#gameoflifeeffect) |
+| <a id="geq3d"></a>**GEQ3D** 💫🌙📊 | — | 2D | A 3D-perspective graphic equaliser: audio bands rise as bars with faked depth, their top lines converging toward a "projector" vanishing point that sweeps left↔right. | `speed`, `frontFill`, `horizon`, `perspective`, `numBands`, `borders` | [tests](../../../tests/unit-tests.md#geq3deffect) |
+| <a id="paintbrush"></a>**PaintBrush** 💫🌙📊 | — | 3D | Audio-reactive brush strokes: lines whose 3D endpoints oscillate on the beat (`beatsin8`), each line's length driven by a band's magnitude, over a softly-fading field. | `oscillator`, `numLines`, `fadeRate`, `minLength`, `colorChaos`, `phaseChaos` | [tests](../../../tests/unit-tests.md#paintbrusheffect) |
+
 ## WLED effects
 
 | Name | Preview | Dim | Description | Controls | Tests |
@@ -49,11 +57,14 @@ Columns: **Name** (with its `tags()` emoji — see the [tag emoji legend](../../
 - [AudioVolumeEffect.h](../../../../src/light/effects/AudioVolumeEffect.h)
 - [DistortionWavesEffect.h](../../../../src/light/effects/DistortionWavesEffect.h)
 - [FireEffect.h](../../../../src/light/effects/FireEffect.h)
+- [GEQ3DEffect.h](../../../../src/light/effects/GEQ3DEffect.h)
+- [GameOfLifeEffect.h](../../../../src/light/effects/GameOfLifeEffect.h)
 - [LavaLampEffect.h](../../../../src/light/effects/LavaLampEffect.h)
 - [LinesEffect.h](../../../../src/light/effects/LinesEffect.h)
 - [MetaballsEffect.h](../../../../src/light/effects/MetaballsEffect.h)
 - [NetworkReceiveEffect.h](../../../../src/light/effects/NetworkReceiveEffect.h)
 - [NoiseEffect.h](../../../../src/light/effects/NoiseEffect.h)
+- [PaintBrushEffect.h](../../../../src/light/effects/PaintBrushEffect.h)
 - [ParticlesEffect.h](../../../../src/light/effects/ParticlesEffect.h)
 - [PlasmaEffect.h](../../../../src/light/effects/PlasmaEffect.h)
 - [RainbowEffect.h](../../../../src/light/effects/RainbowEffect.h)

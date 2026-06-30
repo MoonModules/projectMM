@@ -92,7 +92,10 @@ public:
             if (sparks < 4) sparks = 4;
             for (lengthType i = 0; i < sparks; i++) {
                 if (rand8() < sparking) {
-                    lengthType sx = static_cast<lengthType>((static_cast<uint32_t>(rand8()) * w) >> 8);
+                    // 16-bit random scaled by width: a single rand8 (8-bit) maps to only 256
+                    // buckets, leaving columns >256 unreachable on a wide grid (width goes to 512).
+                    const uint16_t r16 = static_cast<uint16_t>((rand8() << 8) | rand8());
+                    lengthType sx = static_cast<lengthType>((static_cast<uint32_t>(r16) * w) >> 16);
                     uint8_t add = static_cast<uint8_t>(160 + (rand8() & 0x5F));
                     uint16_t newHeat = static_cast<uint16_t>(heat_[bottomRow * w + sx]) + add;
                     heat_[bottomRow * w + sx] = newHeat > 255 ? 255 : static_cast<uint8_t>(newHeat);

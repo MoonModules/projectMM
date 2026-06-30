@@ -3,7 +3,7 @@
 #include <cstdint>
 #include "light/layouts/Layouts.h"
 #include "light/light_types.h"   // lengthType, nrOfLightsType
-#include "core/color.h"          // sin8, cos8 — integer trig LUT
+#include "core/math8.h"          // sin8, cos8 — integer trig LUT
 
 namespace mm {
 

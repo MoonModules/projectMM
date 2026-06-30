@@ -66,7 +66,15 @@ Stage-2 exit: the library pages render with gifs, `check_specs.py` green on the 
 
 ### Stage 3+ — Effect migration in batches
 
-With foundations + doc model in place, migrate MoonLight effects in **themed batches**, each a stage/commit: study behaviour → write fresh on our primitives → unit + scenario test → add to `effects.md` + gif. Batching keeps each commit reviewable. Proposed batch order (by dependency/complexity, refine per batch):
+With foundations + doc model in place, migrate MoonLight effects in **themed batches**, each a stage/commit: study behaviour → write fresh on our primitives → unit + scenario test → add to `effects.md` + gif. Batching keeps each commit reviewable.
+
+**Scope: ALL effects across MoonLight's `Nodes/Effects/E_*.h` files**, not a cherry-picked subset — the [breadth-parity gate](../../backlog/rename-to-moonlight.md) needs the full set. The source files (each an effect library, mapped to our origin sections + future per-library doc pages):
+- **`E_MoonModules.h`** (MoonModules-authored, 3): **GameOfLife** (Conway, 2D/3D, rulesets/wrap/colour-aging/infinite-mode), **GEQ3D** ♫ (perspective 3D equalizer bars), **PaintBrush** ♫ (frequency-modulated animated lines, chaos/softness). — verified 2026-06-30 from source.
+- **`E_MoonLight.h`** (MoonLight-original geometric set).
+- **`E_WLED.h`** (WLED ports/enhancements).
+- moving-head / DMX effect files → Stage 5.
+
+The batch order below is by dependency/complexity (refine per batch), and **cuts ACROSS the source files** (an audio-reactive batch pulls GEQ3D+PaintBrush from E_MoonModules and the GEQ/Blurz family from E_WLED together) rather than migrating one file at a time — themed batches keep each commit coherent:
 
 - **3a — simple 2D/3D non-audio** (the `E_MoonLight` / `E_WLED` geometric ones: lines, scrolling, lissajous, distortion, starfield…).
 - **3b — palette-heavy** (now that palettes exist: the gradient/noise/plasma family not yet ported).

@@ -2,7 +2,7 @@
 
 #include "light/layers/Layer.h"
 #include "light/Palette.h"   // colorFromPalette + active palette
-#include "core/color.h"   // sin8, hsvToRgb
+#include "core/math8.h"   // sin8 (+ color.h: hsvToRgb)
 
 namespace mm {
 

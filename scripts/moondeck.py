@@ -1640,7 +1640,9 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
             text. Pass those two through (resolving an <img> src to /api/doc-asset/ like the
             markdown-image path does); escape + inline-render the rest."""
             def _img(m):
-                src_ = m.group("src"); width = m.group("w"); style = m.group("style")
+                src_ = m.group("src")
+                width = m.group("w")
+                style = m.group("style")
                 if not src_.startswith(("http://", "https://", "/")):
                     abs_src = (md_path.parent / src_).resolve()
                     try:
@@ -1659,7 +1661,8 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
             # Protect our two tags, escape the rest, render markdown, then restore them.
             tokens = []
             def _stash(html: str) -> str:
-                tokens.append(html); return f"\x00{len(tokens)-1}\x00"
+                tokens.append(html)
+                return f"\x00{len(tokens)-1}\x00"
             c = re.sub(r'<img src="(?P<src>[^"]+)"(?:\s+width="(?P<w>\d+)")?'
                        r'(?:\s+style="(?P<style>[^"]*)")?[^>]*>',
                        lambda m: _stash(_img(m)), c)

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "light/layers/Layer.h"
-#include "core/color.h"   // sin8 — integer sine LUT
+#include "core/math8.h"   // sin8 — integer sine LUT
 
 namespace mm {
 

@@ -71,7 +71,7 @@ TEST_CASE("MetaballsEffect animates over a 100ms gap (desktop dt ≈ 0..1ms)") {
     CHECK(animates_over_ms<mm::MetaballsEffect>(100));
 }
 
-// Checkerboard advances at desktop speed (cells flip across 100ms).
+// SpiralEffect advances at desktop speed (the spiral rotates across 100ms).
 TEST_CASE("SpiralEffect animates over a 100ms gap") {
     CHECK(animates_over_ms<mm::SpiralEffect>(100));
 }

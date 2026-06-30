@@ -37,6 +37,9 @@ struct Palette {
 private:
     // The colour at `pos` (0..255) on the gradient: find the bracketing stops and lerp.
     static RGB sampleGradient(const uint8_t* stops, size_t nStops, uint8_t pos) {
+        // Before the first stop (a gradient whose first stop sits above 0): clamp to it, so the
+        // `pos - p0` below can't underflow.
+        if (pos <= stops[0]) return {stops[1], stops[2], stops[3]};
         // Walk to the last stop whose position <= pos.
         size_t s = 0;
         while (s + 1 < nStops && stops[(s + 1) * 4] <= pos) s++;
@@ -62,8 +65,8 @@ public:
 
 // The per-light lookup: `index` is a 0..255 wheel position (wraps), mapped across the 16 entries;
 // blend the two bracketing entries, then scale by `brightness`. Hot-path-cheap (two scale8 + a
-// blend). This is the seam effects call; a future MoonLivePalette substitutes a scripted variant
-// behind the same signature.
+// blend). This is the single seam every palette-driven effect calls, so the palette source is
+// swappable behind one signature without touching effects.
 inline RGB colorFromPalette(const Palette& p, uint8_t index, uint8_t brightness = 255) {
     // Position across 16 entries: the high nibble selects the entry, the low byte the blend.
     const uint8_t hi = static_cast<uint8_t>(index >> 4);                 // 0..15 — bracket start
@@ -77,6 +80,19 @@ inline RGB colorFromPalette(const Palette& p, uint8_t index, uint8_t brightness 
         c.b = scale8(c.b, brightness);
     }
     return c;
+}
+
+// Cross-fade two colours: `amt`/255 of the way from `a` to `b` (amt 0 = a, 255 = b). The textbook
+// RGB lerp, the staple for compositing/transitions. Prior art: FastLED's blend (colorutils).
+inline RGB blend(RGB a, RGB b, uint8_t amt) { return Palette::lerpRGB(a, b, amt); }
+
+// Dim a colour toward black by `amt`/255 (amt 0 = unchanged, 255 = black) — the per-frame fade
+// that gives effects a decaying trail. Prior art: FastLED's fadeToBlackBy.
+inline void fadeToBlackBy(RGB& c, uint8_t amt) {
+    const uint8_t keep = static_cast<uint8_t>(255 - amt);
+    c.r = scale8(c.r, keep);
+    c.g = scale8(c.g, keep);
+    c.b = scale8(c.b, keep);
 }
 
 // --- Built-in palettes -------------------------------------------------------------------------

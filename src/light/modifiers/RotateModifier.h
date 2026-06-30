@@ -1,7 +1,7 @@
 #pragma once
 
 #include "light/modifiers/ModifierBase.h"
-#include "core/color.h"           // sin8, cos8 — integer trig
+#include "core/math8.h"           // sin8, cos8 — integer trig
 
 #include <cstdint>
 

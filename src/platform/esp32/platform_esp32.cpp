@@ -1116,14 +1116,16 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
     if (body && bodyLen) body[0] = '\0';
     if (!method || !host || !path) return 0;
 
-    // One absolute deadline for the whole request: connect, send, and recv each consume from the
-    // same budget rather than each getting a fresh timeoutMs (which let the total reach ~3×
-    // timeoutMs). `remainingMs()` is the time left before the deadline, floored at 1ms so a phase
-    // never gets a 0 timeout (which means "block forever" for SO_*TIMEO).
-    const uint32_t deadline = millis() + timeoutMs;
+    // One shared budget for the whole request: connect, send, and recv each consume from the same
+    // timeoutMs rather than each getting a fresh one (which let the total reach ~3× timeoutMs).
+    // `remainingMs()` is the time left, floored at 1ms so a phase never gets a 0 timeout (which
+    // means "block forever" for SO_*TIMEO). Tracked as elapsed-since-start (now - start), which is
+    // unsigned-wrap-safe across the 32-bit millis() rollover; an absolute `start + timeoutMs`
+    // deadline compared with `now >=` would mis-fire when only one side has wrapped.
+    const uint32_t start = millis();
     auto remainingMs = [&]() -> uint32_t {
-        const uint32_t now = millis();
-        return now >= deadline ? 1u : (deadline - now);
+        const uint32_t elapsed = millis() - start;
+        return elapsed >= timeoutMs ? 1u : (timeoutMs - elapsed);
     };
 
     int fd = ::socket(AF_INET, SOCK_STREAM, 0);
