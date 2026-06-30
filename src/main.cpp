@@ -5,6 +5,7 @@
 #include "light/layouts/WheelLayout.h"
 #include "light/effects/LinesEffect.h"
 #include "light/effects/RainbowEffect.h"
+#include "light/effects/WaveEffect.h"
 #include "light/effects/NoiseEffect.h"
 #include "light/effects/PlasmaEffect.h"
 #include "light/effects/PlasmaPaletteEffect.h"
@@ -29,6 +30,7 @@
 #include "light/modifiers/RandomMapModifier.h"
 #include "light/modifiers/RotateModifier.h"
 #include "light/modifiers/RegionModifier.h"
+#include "light/drivers/HueDriver.h"
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
 // LED drivers are compiled in per chip, gated on the SOC peripheral the driver
@@ -86,6 +88,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::WheelLayout>("WheelLayout", "light/layouts/WheelLayout.md");
     mm::ModuleFactory::registerType<mm::LinesEffect>("LinesEffect", "light/effects/LinesEffect.md");
     mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect", "light/effects/RainbowEffect.md");
+    mm::ModuleFactory::registerType<mm::WaveEffect>("WaveEffect", "light/effects/WaveEffect.md");
     mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect", "light/effects/NoiseEffect.md");
     mm::ModuleFactory::registerType<mm::PlasmaEffect>("PlasmaEffect", "light/effects/PlasmaEffect.md");
     mm::ModuleFactory::registerType<mm::PlasmaPaletteEffect>("PlasmaPaletteEffect", "light/effects/PlasmaPaletteEffect.md");
@@ -110,6 +113,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::RandomMapModifier>("RandomMapModifier", "light/modifiers/RandomMapModifier.md");
     mm::ModuleFactory::registerType<mm::RotateModifier>("RotateModifier", "light/modifiers/RotateModifier.md");
     mm::ModuleFactory::registerType<mm::RegionModifier>("RegionModifier", "light/modifiers/RegionModifier.md");
+    mm::ModuleFactory::registerType<mm::HueDriver>("HueDriver", "light/drivers/HueDriver.md");
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver", "light/drivers/NetworkSendDriver.md");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers/PreviewDriver.md");
     // Register only the LED drivers this chip's silicon can run (see the gated

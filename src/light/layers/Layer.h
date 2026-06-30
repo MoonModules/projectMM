@@ -130,7 +130,7 @@ public:
             eff->loop();
             // Extrude a lower-dimensional effect across the unused axes so a D1
             // or D2 effect "just works" on a higher-dimensional grid. The effect
-            // only writes its own slice (D1 → row y=0,z=0; D2 → slice z=0); the
+            // only writes its own slice (D1 → column x=0,z=0; D2 → slice z=0); the
             // framework duplicates that across the rest of the buffer.
             extrude(eff->dimensions());
             eff->addAccumUs(platform::micros() - start);
@@ -228,14 +228,21 @@ public:
         const size_t rowBytes = static_cast<size_t>(width_) * cpl;
         const size_t sliceBytes = rowBytes * height_;
 
-        // D1: the effect wrote row (y=0, z=0). Duplicate it across all y in z=0.
-        if (effectDim == Dim::D1 && height_ > 1) {
-            for (lengthType y = 1; y < height_; y++) {
-                std::memcpy(buf + y * rowBytes, buf, rowBytes);
+        // 1D runs along Y: a D1 effect wrote the (x=0) column down y in z=0. Duplicate that column
+        // across all x > 0, so a 1D effect expands into 2D by *adding columns to the right* — the
+        // 1D output is literally the first column of its 2D form (see architecture.md §
+        // Dimensionality). cpl bytes per pixel copied from the x=0 pixel of each row.
+        if (effectDim == Dim::D1 && width_ > 1) {
+            for (lengthType y = 0; y < height_; y++) {
+                const uint8_t* src = buf + static_cast<size_t>(y) * rowBytes;   // the x=0 pixel
+                for (lengthType x = 1; x < width_; x++) {
+                    std::memcpy(buf + static_cast<size_t>(y) * rowBytes + static_cast<size_t>(x) * cpl,
+                                src, cpl);
+                }
             }
         }
-        // D1 and D2: at this point z=0 holds a complete (possibly extruded) slice.
-        // Duplicate it across all z > 0.
+        // D1 and D2: z=0 now holds a complete (possibly extruded) slice — the (x,y) front face.
+        // Duplicate it across all z > 0, so a 2D effect expands into 3D by adding depth slices.
         if (depth_ > 1) {
             for (lengthType z = 1; z < depth_; z++) {
                 std::memcpy(buf + z * sliceBytes, buf, sliceBytes);

@@ -479,6 +479,77 @@ bool http_fetch_to_ota(const char* /*url*/,
     return false;
 }
 
+// Outbound HTTP request (plain HTTP, LAN, no TLS) — see platform.h. Blocking, bounded by a
+// receive/send timeout. Builds the request into a stack buffer, connects, sends, reads the
+// response, and returns the status code + the body (after the \r\n\r\n). Used by HueDriver
+// off the render path.
+int httpRequest(const char* method, const char* host, uint16_t port, const char* path,
+                const char* reqBody, uint32_t timeoutMs, char* body, size_t bodyLen) {
+    if (body && bodyLen) body[0] = '\0';
+    if (!method || !host || !path) return 0;
+
+    int fd = open_sock(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return 0;
+    struct CloseGuard { int f; ~CloseGuard() { close_sock(f); } } guard{fd};
+
+    // Bound connect + recv with a timeout (same SO_RCVTIMEO/SO_SNDTIMEO shape the rest of the
+    // file uses); the socket stays blocking, so the bounded request is straightforward.
+#ifdef _WIN32
+    DWORD tv = timeoutMs;
+    ::setsockopt(sock(fd), SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
+    ::setsockopt(sock(fd), SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
+#else
+    timeval tv{};
+    tv.tv_sec = static_cast<time_t>(timeoutMs / 1000);
+    tv.tv_usec = static_cast<suseconds_t>((timeoutMs % 1000) * 1000);
+    ::setsockopt(sock(fd), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    ::setsockopt(sock(fd), SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) return 0;
+    if (::connect(sock(fd), reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) return 0;
+
+    char req[1024];
+    const size_t blen = reqBody ? std::strlen(reqBody) : 0;
+    int n = blen
+        ? std::snprintf(req, sizeof(req),
+              "%s %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n"
+              "Content-Type: application/json\r\nContent-Length: %zu\r\n\r\n%s",
+              method, path, host, blen, reqBody)
+        : std::snprintf(req, sizeof(req),
+              "%s %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n",
+              method, path, host);
+    if (n <= 0 || n >= static_cast<int>(sizeof(req))) return 0;
+    if (::send(sock(fd), req, n, 0) != n) return 0;
+
+    // Read the response. When the caller wants the body, read into THEIR buffer (so they size it
+    // — a Hue /lights body runs several KB) and shift the body to the front. When they don't
+    // (body==null, e.g. a fire-and-forget PUT), read into a small local scratch just far enough
+    // to get the status line — the request still executes. The status line + headers sit at the
+    // front of whatever we read.
+    char scratch[256];
+    char* buf = body ? body : scratch;
+    const size_t cap = body ? bodyLen : sizeof(scratch);
+    if (cap < 16) return 0;
+    int total = 0;
+    while (total < static_cast<int>(cap - 1)) {
+        auto r = ::recv(sock(fd), buf + total, cap - 1 - total, 0);
+        if (r > 0) total += static_cast<int>(r);
+        else break;   // closed or timeout
+    }
+    buf[total] = '\0';
+    if (total < 12 || std::strncmp(buf, "HTTP/1.", 7) != 0) { if (body) body[0] = '\0'; return 0; }
+    int status = std::atoi(buf + 9);   // "HTTP/1.1 NNN ..."
+    if (body) {
+        char* b = std::strstr(body, "\r\n\r\n");
+        if (b) std::memmove(body, b + 4, std::strlen(b + 4) + 1);   // drop headers, keep just the body
+        else body[0] = '\0';
+    }
+    return status;
+}
+
 
 // Improv WiFi — no USB-serial path on desktop. The module gates with
 // `if constexpr (mm::platform::hasImprov)` and never calls this on desktop;

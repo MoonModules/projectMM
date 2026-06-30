@@ -34,6 +34,10 @@ Foreign ecosystems hook in as **plugins**, not hardcoded branches — the adapte
 
 The plugin classification is pure and host-unit-tested (`unit_DeviceIdentify.cpp` feeds synthetic packets, incl. short/garbage → declined), with no network. The full pipeline is tested via `injectPacketForTest` (`unit_DevicesModule_discovery.cpp`) — and because `UdpSocket` works on desktop, the discovery path is host-testable with real datagrams, not just stubs.
 
+### Out-of-band devices (Hue bridge)
+
+A device not discovered by UDP presence — a Philips Hue bridge, found over HTTP by a [HueDriver](../light/drivers/HueDriver.md) — registers itself through `upsertHueBridge(ip, name, colourCount)`, reached via `active()` (the boot-instance static accessor, the `AudioModule::latestFrame()` seam shape). The bridge then lists like any device, with a `colour` field (its colour-light count, for sizing a layout). This keeps the module domain-neutral: the Hue HTTP/pairing lives entirely in the light-domain driver; the core only stores the resulting row. (`unit_DevicesModule_hue.cpp` pins the row + its persistence round trip.)
+
 ### Age-out
 
 Each sighting stamps the device's `lastSeenMs`; `ageOut()` runs every tick. A live-confirmed device is kept for `kStaleMs` (**24 h**) after its last presence packet, so the list is a durable "devices I've seen" history; a **cached** row (restored from persistence, not yet re-heard this session) gets only a short `kCachedGraceMs` (**60 s**) probation, so a long-gone persisted device can't survive forever across reboots — a live packet promotes it to the 24 h window. A **timestamp**, not a counter. The self row never ages out (it tracks the current local IP). Storage is a fixed `devices_[kMaxDevices]` array — bounded, no heap.

@@ -204,6 +204,16 @@ bool http_fetch_to_ota(const char* url,
                        char* statusBuf, size_t statusBufLen,
                        uint32_t* bytesReadOut, uint32_t* bytesTotalOut);
 
+// Synchronous outbound HTTP request to a LAN host — plain HTTP, no TLS (the Philips Hue v1
+// API, which HueDriver drives, allows it). Connects to `host:port`, sends `method path`
+// with `reqBody` (NUL-terminated; "" for none — a Content-Length + JSON content-type are
+// added when non-empty), and copies the RESPONSE BODY into `body` (NUL-terminated, truncated
+// to bodyLen-1). Returns the HTTP status code, or 0 on connect/timeout/error. Blocks up to
+// `timeoutMs`. Caller runs this OFF the render hot path (HueDriver on loop1s, like the OTA
+// fetch / the old mDNS browse). Built on raw sockets, same primitives as the HTTP server.
+int httpRequest(const char* method, const char* host, uint16_t port, const char* path,
+                const char* reqBody, uint32_t timeoutMs, char* body, size_t bodyLen);
+
 // Improv WiFi provisioning over UART0.
 // ESP32 only; desktop stub returns false. Spawns a FreeRTOS task that installs
 // a UART driver on UART_NUM_0 (the same channel ESP-IDF logging writes to;

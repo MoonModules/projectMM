@@ -373,13 +373,15 @@ Effects know nothing about hardware, protocols, physical LED layout, or mapping.
 
 Every effect declares its native dimensionality through `EffectBase::dimensions()`, returning `Dim::D1`, `Dim::D2`, or `Dim::D3` (default: "I iterate every axis the layer gives me"). The Layer uses this to **extrude** lower-dimensional output across the unused axes after each effect's `loop()`:
 
-- **D1**: the effect writes only the row at `(y=0, z=0)`. Layer copies that row across every other y in z=0, then copies z=0 across every z.
-- **D2**: the effect writes only the z=0 slice. Layer copies z=0 across every z.
+- **D1**: the effect writes only the column at `(x=0, z=0)` — **1D runs along Y**. Layer copies that column across every other x in z=0, then copies z=0 across every z.
+- **D2**: the effect writes only the z=0 slice (the front `(x, y)` face). Layer copies z=0 across every z.
 - **D3**: the effect writes every axis itself. Extrude is a one-comparison no-op.
 
-D1/D2 are **opt-in promises**: declaring them tells the framework it can fill the missing axes, saving the per-effect work of iterating z (or y and z). Effects that don't make that promise stay at the D3 default and iterate the whole buffer.
+D1/D2 are **opt-in promises**: declaring them tells the framework it can fill the missing axes, saving the per-effect work of iterating z (or x and z). Effects that don't make that promise stay at the D3 default and iterate the whole buffer.
 
-Hot-path cost: extrude pays one comparison and returns for the D3 case. For D1/D2 on a layer whose unused axes are size 1 (a D2 effect on a 2D layer, a D1 effect on a 1D layer) the inner loops are guarded by `depth_ > 1` / `height_ > 1` and never run. Real `memcpy` work happens only for a D1 or D2 effect on a layer with more dimensions than the effect writes: exactly the case where you wanted the framework to do the duplication.
+**Why 1D runs along Y, and the unified expand rule.** A lower-D effect occupies the *low* axes and the framework expands it across the *next* axis: **1D → 2D adds columns across X** (the 1D output is the first column, duplicated rightward); **2D → 3D adds slices across Z** (the 2D front face, duplicated in depth). 1D-along-Y is the deliberate choice (shared with MoonLight): it makes a 1D effect the natural **first column** of its 2D form — write the effect once down Y, and expanding to a panel is just "repeat the column," same math, no special-casing. (The alternative, 1D-along-X, would make 1D a *row* that expands *downward* — a less natural fit, since a strip is a column and a 2D effect's columns are what you tile.) Concretely: **a one-dimensional physical output — a single strip, or a row of [Hue lights](moonmodules/light/drivers/HueDriver.md) — is laid out as a `1 × N` vertical column (width 1, height N), not `N × 1`.** An effect that draws a shape on Y (e.g. a waveform) then renders correctly on it; an `N × 1` layout would collapse that shape to a flat line.
+
+Hot-path cost: extrude pays one comparison and returns for the D3 case. For D1/D2 on a layer whose unused axes are size 1 (a D2 effect on a 2D layer, a D1 effect on a 1D `1 × N` layer) the inner loops are guarded by `depth_ > 1` / `width_ > 1` and never run. Real `memcpy` work happens only for a D1 or D2 effect on a layer with more dimensions than the effect writes: exactly the case where you wanted the framework to do the duplication.
 
 Each effect's `dimensions()` is a claim about which axes its loop iterates, not which axes its math could in principle vary along. A "D2 fire" can in future be promoted to D3 by adding z-aware heat propagation; until then declaring it D2 honestly describes what the loop does today.
 
