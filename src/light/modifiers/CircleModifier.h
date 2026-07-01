@@ -24,6 +24,7 @@ namespace mm {
 // 💎; the 💫 here marks the MoonLight origin per projectMM convention. Written
 // fresh against our ModifierBase fold interface (modifyLogicalSize / modifyLogical)
 // rather than MoonLight's modifySize / modifyPosition Node API.
+// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h
 class CircleModifier : public ModifierBase {
 public:
     const char* tags() const override { return "💫"; } // MoonLight origin

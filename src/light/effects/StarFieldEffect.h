@@ -30,6 +30,7 @@ namespace mm {
 // speed/blur/numStars/usePalette controls are reproduced exactly here, written fresh on EffectBase
 // + the shared draw/palette primitives. The star table lives on the heap (platform::alloc), sized
 // to the control maximum, rather than as a large inline member.
+// Author: @Brandon502 (MoonLight), inspired by Daniel Shiffman / Coding Train — https://www.youtube.com/watch?v=17WoOqgXsRM , https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 class StarFieldEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin

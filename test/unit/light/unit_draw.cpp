@@ -88,7 +88,7 @@ TEST_CASE("draw: a line partly off the grid clips cleanly") {
 // The `shorten` parameter pulls the far endpoint back toward `a` by shorten/255 (with WLEDMM *2
 // rounding), so an effect can sweep a partial segment. For a→b = (0,0)→(8,0): shorten 255 draws the
 // whole line (tip at 8), 128 ≈ half (tip at (16*128/255+1)/2 = 4), 1 = just the start pixel (tip 0),
-// 0 = nothing. This pins the rounding of the shorten branch, previously untested.
+// 0 = nothing. This pins the rounding of the shorten branch.
 TEST_CASE("draw: line shorten pulls the far endpoint back toward the start") {
     Coord3D dims{9, 1, 1};
     auto litUpTo = [&](uint8_t shorten) {
@@ -187,9 +187,9 @@ TEST_CASE("draw: blur spreads in 2D and 3D and is safe at degenerate sizes") {
 }
 
 // A glyph blits in the correct orientation — neither X-mirrored (a 'b' as a 'd') nor Y-flipped.
-// 'L' is the ideal probe: its vertical bar must be on the LEFT and its foot on the BOTTOM row. A
-// regression here (reading the wrong column bit or the wrong row direction) is what made the DemoReel
-// name overlay render each letter mirrored on the display.
+// 'L' is the ideal probe: its vertical bar must be on the LEFT and its foot on the BOTTOM row. This
+// guards the column-bit and row-direction reads, so the DemoReel name overlay renders each letter
+// upright and un-mirrored.
 TEST_CASE("draw: glyph renders upright and un-mirrored (the 'L' probe)") {
     Buffer buf;
     const auto& f = fonts::kFont6x8;                 // 6x8: 'L' bar at col 1, foot on row 6

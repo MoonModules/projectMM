@@ -6,6 +6,7 @@
 
 namespace mm {
 
+// Author: FastLED rainbow (Mark Kriegsman) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_FastLED.h
 class RainbowEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin

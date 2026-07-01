@@ -25,6 +25,7 @@ namespace mm {
 // noise-effect lineage (FastLED inoise8 — Perlin/value noise, Mark Kriegsman / Ken Perlin). The
 // per-pixel coordinate-scale + time-on-Z animation and the direct palette indexing are reproduced
 // exactly here, written fresh on EffectBase + the shared draw / noise primitives.
+// Author: WLED (Noise 2D) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 class Noise2DEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🌙🐙"; }  // MoonLight origin · MoonModules · 2D

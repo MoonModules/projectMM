@@ -22,6 +22,7 @@ namespace mm {
 // fresh against our fold interface: modifySize()/modifyPosition() become
 // modifyLogicalSize()/modifyLogical(), and the box is stashed for the const fold
 // via the `modifierSize` pattern the base class documents.
+// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h
 class MirrorModifier : public ModifierBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin

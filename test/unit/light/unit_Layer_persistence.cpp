@@ -125,3 +125,22 @@ TEST_CASE("Layer: collected fade resets after it is consumed") {
     s.layer.loop();                              // frame 2: NO fade pending → value must hold, not decay again
     CHECK(s.layer.buffer().data()[0] == after1); // stable: the collected amount did not linger
 }
+
+TEST_CASE("Layer: onBuildState clears the buffer (a rebuild wipes stale pixels)") {
+    Scene s(4, 4);
+    WriteOnceEffect once;
+    s.layer.addChild(&once);
+    s.layer.onBuildState();
+
+    s.layer.loop();                              // writes red at (0,0)
+    CHECK(s.layer.buffer().data()[0] == 255);
+
+    // A rebuild (config change / resize) clears the buffer — persistence holds between frames but NOT
+    // across a rebuild, so a stale lit pixel must not survive it (else a reconfigure leaves ghosts).
+    s.layer.onBuildState();
+    const mm::Buffer& b = s.layer.buffer();
+    bool allBlack = true;
+    for (size_t i = 0; i < b.bytes(); i++)
+        if (b.data()[i] != 0) { allBlack = false; break; }
+    CHECK(allBlack);
+}

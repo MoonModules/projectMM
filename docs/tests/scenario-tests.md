@@ -259,10 +259,10 @@ Add NetworkSendDriver and run the bounded FPS measurement (expected to stay at >
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | ≥ 20,000 / 4,608-— | unlimited / unlimited | — / unlimited |
+| `pc-macos` | ≥ 20,000 / 4,115-— | unlimited / unlimited | — / unlimited |
 | `pc-windows` | — / 7,874-8,475 | — / unlimited | — / unlimited |
 
-- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-06-30
+- `pc-macos`: contract set 2026-06-02 "initial contract" · observed 2026-06-02 → 2026-07-01
 - `pc-windows`: observed 2026-06-07
 
 ### scenario_Layer_memory_1to1
@@ -447,7 +447,7 @@ Bare minimum at 16²: Grid + Layer + Spiral, no output driver, audio/discovery s
 | `esp32` | — / 7,692-8,929 | — / 134KB-147KB | — / 108KB |
 | `esp32p4-eth` | — / 14,925-17,544 | — / 33226KB-33245KB | — / 376KB |
 | `esp32s3-n16r8` | — / 5,376-9,009 | — / 8340KB-8352KB | — / 92KB-112KB |
-| `pc-macos` | — / 142,857-— | — / unlimited | — / unlimited |
+| `pc-macos` | — / 83,333-— | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17 → 2026-06-26
 - `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
@@ -466,7 +466,7 @@ Bare minimum at 16²: Grid + Layer + Spiral, no output driver, audio/discovery s
 | `esp32` | — / 8,621-9,901 | — / 134KB-147KB | — / 108KB |
 | `esp32p4-eth` | — / 18,182-18,868 | — / 33228KB-33245KB | — / 376KB |
 | `esp32s3-n16r8` | — / 8,065-9,901 | — / 8338KB-8352KB | — / 92KB-112KB |
-| `pc-macos` | — / 142,857-— | — / unlimited | — / unlimited |
+| `pc-macos` | — / 125,000-— | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17 → 2026-06-26
 - `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
@@ -526,7 +526,7 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 | `esp32` | — / 8,696-9,524 | — / 123KB-147KB | — / 108KB |
 | `esp32p4-eth` | — / 15,873-18,182 | — / 33228KB-33245KB | — / 376KB |
 | `esp32s3-n16r8` | — / 8,065-9,434 | — / 8335KB-8352KB | — / 92KB-112KB |
-| `pc-macos` | — / 142,857-— | — / unlimited | — / unlimited |
+| `pc-macos` | — / 83,333-— | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17 → 2026-06-25
 - `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
@@ -565,7 +565,7 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 | `esp32` | — / 6,579-9,174 | — / 106KB-122KB | — / 84KB-108KB |
 | `esp32p4-eth` | — / 15,873-17,857 | — / 33200KB-33221KB | — / 376KB |
 | `esp32s3-n16r8` | — / 7,194-9,346 | — / 8307KB-8328KB | — / 84KB-112KB |
-| `pc-macos` | — / 111,111-— | — / unlimited | — / unlimited |
+| `pc-macos` | — / 32,258-— | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17 → 2026-06-25
 - `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
@@ -585,7 +585,7 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 | `esp32` | — / 8,403-9,901 | — / 126KB-147KB | — / 108KB |
 | `esp32p4-eth` | — / 15,873-17,857 | — / 33225KB-33245KB | — / 376KB |
 | `esp32s3-n16r8` | — / 7,042-9,259 | — / 8333KB-8352KB | — / 88KB-112KB |
-| `pc-macos` | — / 83,333-— | — / unlimited | — / unlimited |
+| `pc-macos` | — / 76,923-— | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17 → 2026-06-25
 - `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
@@ -605,7 +605,7 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 | `esp32` | — / 8,475-9,901 | — / 135KB-147KB | — / 108KB |
 | `esp32p4-eth` | — / 15,873-17,857 | — / 33225KB-33245KB | — / 376KB |
 | `esp32s3-n16r8` | — / 7,692-9,434 | — / 8338KB-8352KB | — / 92KB-112KB |
-| `pc-macos` | — / 111,111-— | — / unlimited | — / unlimited |
+| `pc-macos` | — / 90,909-— | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17 → 2026-06-25
 - `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
@@ -627,7 +627,7 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 | `esp32` | — / 6,711-9,804 | — / 134KB-147KB | — / 108KB |
 | `esp32p4-eth` | — / 15,385-18,868 | — / 33226KB-33245KB | — / 376KB |
 | `esp32s3-n16r8` | — / 8,403-9,901 | — / 8336KB-8352KB | — / 92KB-112KB |
-| `pc-macos` | — / 111,111-— | — / unlimited | — / unlimited |
+| `pc-macos` | — / 100,000-— | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17 → 2026-06-25
 - `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
@@ -961,7 +961,7 @@ PreviewDriver is the pre-wired apparatus — it survives clear_children and is a
 | `esp32` | — / 265-826 | — / 130KB-144KB | — / 108KB |
 | `esp32p4-eth` | — / 1,603-1,880 | — / 33221KB-33237KB | — / 376KB |
 | `esp32s3-n16r8` | — / 562-715 | — / 8328KB-8333KB | — / 84KB-104KB |
-| `pc-macos` | — / 55,556-333,333 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 26,316-333,333 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17 → 2026-06-25
 - `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
@@ -981,7 +981,7 @@ PreviewDriver is the pre-wired apparatus — it survives clear_children and is a
 | `esp32` | — / 77.1-227 | — / 111KB-135KB | — / 88KB-108KB |
 | `esp32p4-eth` | — / 411-491 | — / 33195KB-33210KB | — / 376KB |
 | `esp32s3-n16r8` | — / 129-162 | — / 8302KB-8317KB | — / 92KB-108KB |
-| `pc-macos` | — / 13,514-71,429 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 11,111-71,429 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17 → 2026-06-25
 - `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
@@ -1018,7 +1018,7 @@ Add NetworkSendDriver and run the bounded FPS measurement over the two-layer com
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | — / 1,361-19,231 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 1,149-19,231 | — / unlimited | — / unlimited |
 
 - `pc-macos`: observed 2026-06-25 → 2026-07-01
 
@@ -1218,7 +1218,7 @@ Re-add a fresh effect after the remove — exec memory + control arena re-acquir
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | — / 1,000,000-— | — / unlimited | — / unlimited |
+| `pc-macos` | — / 500,000-— | — / unlimited | — / unlimited |
 
 - `pc-macos`: observed 2026-06-28 → 2026-07-01
 

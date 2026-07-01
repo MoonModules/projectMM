@@ -23,10 +23,11 @@ namespace mm {
 //   - default:     the dot jumps to a random position each frame (WLED's classic Blurz).
 // fadeRate dims the trail each frame; blur is the box-blur strength applied after the dot is drawn.
 //
-// Prior art: WLED's "Blurz" audio effect (Andrew Tuline / WLED SR), carried into MoonLight. The
-// per-band colour cursor, the frequency→position map, and the fade-then-blur pipeline are reproduced
-// here, written fresh on EffectBase + the shared draw primitives. Reads AudioModule::latestFrame();
-// silence → bands all 0 → the strip fades to black, safe on any target and grid size.
+// Prior art: WLED's "Blurz" audio effect, carried into MoonLight. The per-band colour cursor, the
+// frequency→position map, and the fade-then-blur pipeline are reproduced here, written fresh on
+// EffectBase + the shared draw primitives. Reads AudioModule::latestFrame(); silence → bands all 0 →
+// the strip fades to black, safe on any target and grid size.
+// Author: Andrew Tuline (WLED-SR), with enhancements by @softhack007 — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 //
 // 1D in spirit (a strip of `nrOfLights` pixels) but declared D2 so it spans a 2D panel as a flat run
 // along the buffer's pixel index; the dot and blur work over the whole pixel count either way.
@@ -35,9 +36,9 @@ public:
     const char* tags() const override { return "🐙📊"; }  // WLED-lineage · audio
     Dim dimensions() const override { return Dim::D2; }
 
-    // MoonLight/WLED defaults (fadeRate 48, blur 127). fadeRate 48 (not 16) fades the trail faster so
-    // each dot stays distinct and punchy instead of lingering into a muddy wash — the low value was a
-    // drift from the source that made Blurz read as a faint smear.
+    // MoonLight/WLED defaults (fadeRate 48, blur 127). fadeRate 48 fades the trail fast enough that
+    // each dot stays distinct and punchy rather than smearing into a wash; blur 127 spreads each dot
+    // into a soft halo.
     uint8_t fadeRate   = 48;     // per-frame fade-to-black strength (1..255)
     uint8_t blur       = 127;    // box-blur strength applied after drawing the dot (1..255)
     bool    freqMap    = false;  // position the dot by dominant frequency instead of scanning/random
@@ -126,9 +127,10 @@ public:
 
         // Dot RADIUS scales with the fixture so the blob reads the same size on a 16×16 and a 128×128
         // panel (WLED draws a single pixel, which vanishes on a big grid — this is the projectMM
-        // improvement). r = min(w,h)/32: 0 on a ≤32 grid (one pixel, the WLED look), 4 on a 128 grid
-        // (a 9×9 core). Drawn as a small filled square, then blurred into a soft glowing blob.
-        const int r = (cols < rows ? cols : rows) / 32;
+        // improvement). r = 0 on a grid up to 32 (one pixel, the WLED look), then min(w,h)/32 above
+        // that (4 on a 128 grid, a 9×9 core). Drawn as a small filled square, blurred into a soft blob.
+        const int minDim = cols < rows ? cols : rows;
+        const int r = minDim > 32 ? minDim / 32 : 0;   // ≤32 → one pixel (WLED look); larger → scaled blob
         for (int oy = -r; oy <= r; oy++)
             for (int ox = -r; ox <= r; ox++)
                 draw::pixel(buf, dims, {static_cast<lengthType>(dx + ox), static_cast<lengthType>(dy + oy), 0}, c);

@@ -23,6 +23,7 @@ namespace mm {
 // the Panel usage site is), so the iteration is reconstructed from that usage plus
 // the control labels/defaults; the reconstructed logic is marked // RECONSTRUCTED
 // and cross-checks against GridLayout's serpentine on the defaults.
+// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
 class PanelLayout : public LayoutBase {
 public:
     // Geometry (verbatim MoonLight defaults): a 16×16 panel.

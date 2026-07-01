@@ -145,8 +145,9 @@ inline void fade(Buffer& buf, uint8_t amt) {
 
 // Box blur, working 1D→3D against the flat Buffer — one unified primitive, not a blur1d/blur2d/blur3d
 // trio (the *common patterns first* / "primitives are 3D-aware" rule, same as draw::line). It runs a
-// separable seep pass along each axis whose extent is >1: a 1D layer blurs along x; 2D along x then
-// y; 3D along x, y, z. `amt` (0 = none, 255 = max) is split keep=255-amt / seep=amt>>1 per pixel.
+// separable seep pass along each axis whose extent is >1: a 1×N 1D layer blurs along y (its only
+// axis with extent>1); 2D along x then y; 3D along x, y, z. `amt` (0 = none, 255 = max) is split
+// keep=255-amt / seep=amt>>1 per pixel.
 //
 // Algorithm: the canonical FastLED blur1d single-forward-pass with carryover — each pixel keeps
 // `keep` of itself, seeps `seep` forward to the next pixel and `seep` back to the previous one, so

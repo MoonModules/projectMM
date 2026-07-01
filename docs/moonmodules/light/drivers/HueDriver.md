@@ -1,6 +1,6 @@
 # HueDriver
 
-Drives **Philips Hue lights as a projectMM output** — the bulbs are *pixels of an effect*, not entries in a device list. Make a small grid (e.g. 4×1×1), run any effect on it, add a HueDriver, and each colour bulb in the driver's window becomes one pixel: the effect's per-pixel colour is pushed to the bridge as hue/saturation/brightness. It is a [driver](../../../architecture.md) like any other (a sibling of [NetworkSendDriver](NetworkSendDriver.md) / [RmtLedDriver](RmtLedDriver.md)) — it reads its slice of the shared buffer and sends it out, here over the Hue HTTP API instead of a wire protocol.
+Overview and controls: [drivers.md § HueDriver](drivers.md#hue). This page carries the reference detail a control list can't — what makes Hue different (rate limit, bridge-smoothed transitions, pairing), the Hue v1 HTTP wire contract, and the Devices-module listing.
 
 ![A HueDriver in the UI](../../../assets/light/drivers/Hue%20driver.png)
 
@@ -16,19 +16,6 @@ Hue is an HTTP hub, not a strip, and these properties drive the design:
 - **It's plain HTTP, no TLS.** The Hue v1 API answers over `http://<bridge>/api/...`, so there is no certificate handling on the device. Bench-confirmed against a BSB002 bridge (API 1.77).
 
 ![An effect driving the Hue lights](../../../assets/light/drivers/Hue%20friendly%20effect.png)
-
-## Controls
-
-- `bridgeIp` — the Hue bridge's LAN IPv4 (the [Control](../../core/Control.md) IPv4 type). Find it via the bridge's app, the router, or `https://discovery.meethue.com`.
-- `appKey` — the Hue app key (username). Filled automatically by `pair`, persisted as the driver's credential; can also be pasted if you already have one.
-- `pair` — a **button**: press it, then press the bridge's link button within ~30 s. The driver POSTs to the bridge until the press is registered, stores the returned key into `appKey`, and learns the bridge's light list.
-- `room` / `light` — two **dropdowns** that narrow *which* colour lights the driver drives. Both default to `All`. Pick a `room` (extracted from the bridge's `/groups`, `type == "Room"`) to drive only that room's colour lights; the `light` dropdown then lists just that room's lights, so picking one drives a single bulb. `room = All, light = All` drives every colour light (the default). The dropdowns store the selected **index** (Hue's room/light *order* — stable on a settled bridge; `All` is always index 0 so the common case never shifts); the option *names* are regenerated from the bridge each time the page reads `/api/state`, they are not persisted.
-- `start` / `count` — the window of the shared buffer this driver drives ([the standard driver window](NetworkSendDriver.md); `count` 0 = to the end of the buffer). Window index *i* maps to the *i*-th **driven** light — i.e. the *i*-th light of the current `room`/`light` filter, not the raw bridge list.
-The module's generic **status** line carries the driver state: `unpaired`, `pairing: press the bridge button`, `pairing timed out`, or — once paired — `paired, M lights` (M = colour-capable, reachable lights on the bridge), shown as `paired, N-M lights` when the `room`/`light` filter narrows the driven set to N of M. Size a grid layout (N×1×1) to the driven count to map every driven bulb to a pixel.
-
-Once paired, the driver also **lists the bridge in [DevicesModule](../../core/DevicesModule.md)** (alongside discovered WLED / projectMM peers), carrying its name and the colour-light count, refreshed on a slow cadence. It registers through `DevicesModule::active()` — the same static-accessor seam [AudioModule](../../core/AudioModule.md) uses for `latestFrame()`, so the light-domain driver reaches the core module without a structural dependency.
-
-![The Hue bridge listed in the Devices module](../../../assets/core/Hue%20device%20disco.png)
 
 ## Wire contract (Hue v1 API, plain HTTP)
 

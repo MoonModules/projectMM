@@ -25,6 +25,7 @@ namespace mm {
 // are carried; extended here to multi-line static-by-default text with a scroll toggle, written fresh
 // on projectMM's EffectBase + the shared draw/font primitives. (MoonLight's IP/FPS/uptime presets are
 // a separate follow-up — see backlog — kept out so a light effect doesn't reach into system state.)
+// Author: projectMM original, on MoonLight's Scrolling Text — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 class TextEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }   // MoonLight origin

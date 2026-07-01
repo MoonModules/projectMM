@@ -30,6 +30,7 @@ namespace mm {
 // runs it with a no-op callback to tally, forEachCoord() runs it to emit, so the
 // count and the emitted set can never disagree (the RingLayout/SphereLayout
 // pattern). Integer math throughout; this is the cold build path.
+// Author: projectMM / custom fixture
 class TorontoBarGourdsLayout : public LayoutBase {
 public:
     // Mode 0 only: how many stacked lights one gourd contributes. MoonLight

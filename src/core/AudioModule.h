@@ -154,6 +154,7 @@ public:
         // would otherwise leave the seat empty (effects go silent). A running module re-claiming an
         // empty seat here keeps latestFrame() pointing at a live frame for ANY add/remove order — the
         // survivor takes over on its next tick (robustness).
+        //
         if (active_ == nullptr) active_ = this;
 
         // Simulated audio (see the `simulate` control): 0=off, 1=music-on-silence, 2=sweep-on-silence,

@@ -21,6 +21,7 @@ namespace mm {
 // draw::line, draw::fade, the audio frame). Reads AudioModule::latestFrame(); silence → no lines →
 // fades to dark, safe on any target and any grid size. The 'soft' anti-alias control is omitted
 // (the one approved omission — draw::line is crisp, projectMM has no Xiaolin-Wu line yet).
+// Author: @TroyHacks (WLED MoonModules, GPLv3) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h
 class PaintBrushEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🌙📊"; }  // MoonLight origin · MoonModules · audio

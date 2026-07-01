@@ -54,12 +54,14 @@ def find_moonmodules():
 # compact-row page per type rather than a file per module (docs consolidation — see the
 # folder-structure decision). A module of one of these types is documented on its shared page;
 # every other module keeps a per-module page named for the type. Keyed by type-name suffix so a
-# new effect/modifier/layout is folded in automatically. (Layouts/Layers/Drivers are CONTAINERS,
-# not leaf layouts — they keep their own per-module page, so they are excluded below.)
+# new effect/modifier/layout/driver is folded in automatically. (Layouts/Layers/Drivers are
+# CONTAINERS, not leaf modules — "Drivers" does not end in "Driver", so the container keeps its own
+# per-module page; the CRTP base ParallelLedDriver is skipped in discover_modules as a template.)
 CONSOLIDATED_PAGES = {
     "Effect": SPECS / "light" / "effects" / "effects.md",
     "Modifier": SPECS / "light" / "modifiers" / "modifiers.md",
     "Layout": SPECS / "light" / "layouts" / "layouts.md",
+    "Driver": SPECS / "light" / "drivers" / "drivers.md",
 }
 
 

@@ -26,6 +26,7 @@ namespace mm {
 // colorFromPalette()'s 0..255 wheel index, so the 256 wheel positions sampled below reproduce
 // MoonLight's per-entry scan one-for-one. The optional white channel is written only when the layer
 // carries a 4th channel (channelsPerLight() >= 4); on RGB layers the white member is ignored.
+// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 class SolidEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }   // MoonLight origin

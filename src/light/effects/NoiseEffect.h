@@ -6,6 +6,7 @@
 
 namespace mm {
 
+// Author: FastLED inoise field (Mark Kriegsman)
 class NoiseEffect : public EffectBase {
 public:
     const char* tags() const override { return "⚡️"; }  // FastLED-style noise

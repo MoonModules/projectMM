@@ -25,6 +25,7 @@ namespace mm {
 // appears to move horizontally; `t` advances with bpm so it animates. The phase maps through the
 // selected waveform to a y in [0, height); that pixel is lit, and for the discontinuous shapes
 // (sawtooth, square) a vertical segment connects to the previous column so the line stays joined.
+// Author: Ewoud Wijma (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 class WaveEffect : public EffectBase {
 public:
     const char* tags() const override { return "🌊"; }

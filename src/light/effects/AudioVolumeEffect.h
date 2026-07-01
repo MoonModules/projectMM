@@ -11,6 +11,7 @@ namespace mm {
 // single brightness, a colour shifting from calm to hot as it rises. Reads the
 // live frame from AudioModule::latestFrame(); with no mic (or silence) the frame is
 // zero and the grid stays dark, so the effect is safe on any target.
+// Author: projectMM original (VU-meter)
 class AudioVolumeEffect : public EffectBase {
 public:
     const char* tags() const override { return "🔊"; }

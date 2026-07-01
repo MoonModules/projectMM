@@ -1,6 +1,6 @@
 # LCD LED Driver
 
-Parallel [WS2812B](https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf) output on the **ESP32-S3** over the [LCD_CAM](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/lcd/index.html) peripheral: up to **8 strands clock out simultaneously**, one GPIO per strand, all fed by a single autonomous DMA transfer. The S3's scale path — where the [RMT driver](RmtLedDriver.md) tops out at 4 channels on the S3, this drives 8 lanes for the wall time of one. Reads the Drivers container's buffer, applies the shared [Correction](Correction.md) per light, and bit-transposes corrected bytes across the lanes.
+Overview and controls: [drivers.md § LCD LED](drivers.md#lcdled). This page carries the reference detail a control list can't — 3-slot-per-bit wire contract, buffer slicing, DMA memory sizing, and cross-domain wiring.
 
 ## Wire contract — 3 slots per bit
 
@@ -11,16 +11,6 @@ Because the whole frame is pre-encoded into one DMA buffer off the hot path and 
 ## Buffer slicing across pins
 
 Identical semantics to the [RMT driver](RmtLedDriver.md#buffer-slicing-across-pins): consecutive slices of the source buffer in `pins` order, sizes from `ledsPerPin`, even-split remainder. The parsers are shared (`PinList.h`).
-
-## Controls
-
-- `pins` (text, default empty) — comma-separated data GPIOs, one lane each, **exactly 8** (the i80 peripheral configures every data line of the bus width and rejects partial sets, so all 8 GPIOs are claimed even when fewer strands are wired). Empty by default (the strand is user-soldered, so no pin is assumed — the driver idles until set); a known-good ESP32-S3 N16R8 Dev set is `1,2,4,5,6,7,8,9`, which clears the octal-PSRAM pins (26–37), USB (19/20) and strapping pins. Changing it re-creates the i80 bus **live, no reboot** ([§ Live reconfiguration](../../../architecture.md#live-reconfiguration-every-change-applies-without-a-reboot)).
-- `ledsPerPin` (text, default empty) — lights per lane, matched by position; empty = even split. To drive fewer than 8 strands, give the unused lanes `0` (or list only the used lanes' counts summing to the grid size — the remainder lanes get 0 and idle LOW).
-- `clockPin` (pin, default 10) — the i80 bus WR line. The peripheral *requires* it on a real GPIO (the IDF i80 bus rejects `wr_gpio_num < 0`); WS2812 strands ignore the waveform. Peripheral-fixed (not user-strand wiring), so it keeps a sensible overridable default — point it at any otherwise-free GPIO if 10 is taken.
-- `dcPin` (pin, default 11) — the i80 data/command line, same story: required by the peripheral (`dc_gpio_num < 0` is rejected), unused by the LEDs, overridable default.
-- `loopbackTest` (bool) — one-shot signal self-test: jumper the **first** pin in `pins` to `loopbackRxPin`, tick the box; the driver transmits its **real frame** (full size, real DMA chain, repeated back to back like the render loop) with a known pattern in every row, captures the whole frame back with an RMT RX channel (the increment-1 rig reused — RMT receive is transmitter-agnostic) and verifies every bit. Result lands in the status field; on failure it names the first corrupted light.
-- `loopbackTxPin` (pin, default unset / −1) — optional **TX override** for the self-test: the loopback drives only lane 0 with the test pattern, so when this is set it transmits on this pin in place of lane 0 (`pins[0]`), the other 7 lanes unchanged — letting the test run on a dedicated jumper without re-typing `pins`. Falls back to lane 0 when unset. Test-only — normal output uses `pins`. Shown only while `loopbackTest` is on.
-- `loopbackRxPin` (pin, default unset / −1) — the RX pin for the self-test; set it when you wire the jumper (the bench used 12). Shown only while `loopbackTest` is on.
 
 ## Memory
 

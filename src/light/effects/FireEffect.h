@@ -9,6 +9,7 @@
 
 namespace mm {
 
+// Author: Mark Kriegsman's Fire2012 (FastLED); MoonLight adapts MatrixFireFast by toggledbits — https://github.com/toggledbits/MatrixFireFast
 class FireEffect : public EffectBase {
 public:
     const char* tags() const override { return "⚡️🦅"; }  // FastLED origin (Fire2012-style) · David Jupijn / Rising Step

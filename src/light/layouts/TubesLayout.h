@@ -18,6 +18,7 @@ namespace mm {
 // composes SingleColumnLayout per tube. projectMM emits coordinates only; the
 // driver owns pin assignment, so MoonLight's per-column nextPin() plumbing is
 // dropped.
+// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
 class TubesLayout : public LayoutBase {
 public:
     // Defaults verbatim from MoonLight (nrOfTubes 4, ledsPerTube 54,

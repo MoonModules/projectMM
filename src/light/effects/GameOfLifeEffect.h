@@ -27,6 +27,7 @@ namespace mm {
 // background blur, 3-CRC stasis, R-pentomino respawn, settle pause), written fresh on projectMM's
 // EffectBase + shared primitives (Random8, colorFromPalette, draw::, crc16). Conway's Game of Life
 // (John Conway, 1970) is the underlying automaton.
+// Author: Ewoud Wijma (2022), modifications by Brandon Butler / @Brandon502 / wildcats08 — https://natureofcode.com/book/chapter-7-cellular-automata/ , https://github.com/DougHaber/nlife-color , https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h
 class GameOfLifeEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🌙"; }  // MoonLight origin · MoonModules

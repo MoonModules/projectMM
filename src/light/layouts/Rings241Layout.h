@@ -29,6 +29,7 @@ namespace mm {
 // (cos/sin = 0) to the wrong side of the (int) truncation, differing from
 // MoonLight by one unit. The faithful path is MoonLight's own: form the angle in
 // double → narrow to float → float trig → float radius.
+// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
 class Rings241Layout : public LayoutBase {
 public:
     // Spacing multiplier — scales both the ring radii and the shared centre.

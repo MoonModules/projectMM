@@ -23,6 +23,7 @@ namespace mm {
 // sinf/cosf and the float→integer truncation on each coordinate are kept as-is.
 // MoonLight's per-strip pin plumbing (nextPin) is dropped: a projectMM layout
 // emits coordinates only; the driver owns wiring.
+// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
 class SpiralLayout : public LayoutBase {
 public:
     lengthType ledCount = 640;      // total lights along the spiral

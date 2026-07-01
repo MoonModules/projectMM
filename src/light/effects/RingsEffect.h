@@ -12,6 +12,7 @@ namespace mm {
 // position once it leaves the visible area. Multiple rings overlap.
 // (Renamed from RipplesEffect: the Ripples name now holds the MoonLight
 // sine-wave water-surface port; this concentric-rings effect is Rings.)
+// Author: projectMM original (concentric rings)
 class RingsEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🦅"; }  // MoonLight origin · David Jupijn / Rising Step

@@ -8,6 +8,7 @@
 
 namespace mm {
 
+// Author: WildCats08 / @Brandon502 (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 class ParticlesEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🦅"; }  // MoonLight origin · David Jupijn / Rising Step

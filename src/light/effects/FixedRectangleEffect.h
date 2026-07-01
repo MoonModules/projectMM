@@ -22,6 +22,7 @@ namespace mm {
 // origin+extent clamping, the alternate-toggle rule (flip per-cell when height<width, flip
 // per-row when height>width), and the white-vs-colour chequerboard are reproduced exactly,
 // written fresh on EffectBase + the shared draw primitives.
+// Author: limpkin (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 class FixedRectangleEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin

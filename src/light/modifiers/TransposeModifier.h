@@ -16,6 +16,7 @@ namespace mm {
 // reads the box AFTER the swaps (MoonLight's modifyPosition reads the transposed
 // `layer->size`), reproduced here by inverting against the stashed box. Written
 // fresh against our fold interface.
+// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h
 class TransposeModifier : public ModifierBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin

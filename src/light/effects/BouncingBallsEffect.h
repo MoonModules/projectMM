@@ -25,6 +25,7 @@ namespace mm {
 // kick, and the palette-index spacing are reproduced exactly here, written fresh on EffectBase + the
 // shared draw primitives. Per-column ball state lives on the heap (sized to width()×maxNumBalls),
 // allocated in onBuildState and freed in teardown — never a large inline member.
+// Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 class BouncingBallsEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🐙"; }  // MoonLight origin · 2D

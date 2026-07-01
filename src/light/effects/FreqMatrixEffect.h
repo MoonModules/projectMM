@@ -32,6 +32,7 @@ namespace mm {
 // map(peakHz, lower, upper, 0, 255) hue index are reproduced here, written fresh on EffectBase + the
 // shared draw/palette primitives. Reads AudioModule::latestFrame() (null-safe via the static silence
 // frame); safe on any target and grid size.
+// Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 //
 // Fidelity-scale note: WLED's volume threshold is `volumeSmth > 0.25` on a 0..~1 normalised volume,
 // and its brightness divisor is 256.0 on that same 0..1 scale. projectMM's AudioFrame::level is a

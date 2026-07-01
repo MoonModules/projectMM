@@ -23,6 +23,7 @@ namespace mm {
 // per the Stage-4 modifier conventions. Pins/wiring plumbing is dropped; this
 // emits coordinates only. Float math (atan2/hypot/sqrt) runs on the build path
 // (modifyLogical is called at rebuild, not in the hot render loop).
+// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h
 class PinwheelModifier : public ModifierBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin

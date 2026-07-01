@@ -18,6 +18,7 @@ namespace mm {
 //
 // Prior art: MoonLight E_WLED.h (the WLED port); projectMM v1/v2 DistortionWaves (those
 // used float sinf — this is the integer-sin8 equivalent).
+// Author: ldirko & blazoncek (WLED port) — https://editor.soulmatelights.com/gallery/1089-distorsion-waves , https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 class DistortionWavesEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight / WLED origin

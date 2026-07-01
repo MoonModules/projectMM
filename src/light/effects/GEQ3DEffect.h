@@ -26,6 +26,7 @@ namespace mm {
 // + the shared draw primitives. Reads AudioModule::latestFrame(); silence → flat → dark, safe on
 // any target and grid size. (MoonLight's `softHack` anti-alias toggle is dropped — draw::line is a
 // crisp Bresenham; the `soft` arg has no projectMM equivalent.)
+// Author: @TroyHacks (MoonModules, GPLv3) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonModules.h
 class GEQ3DEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🌙📊"; }  // MoonLight origin · MoonModules · audio

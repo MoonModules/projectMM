@@ -30,6 +30,7 @@ namespace mm {
 // AudioModule::latestFrame(); silence → bars flat → peaks fall away → dark, safe on any target and grid
 // size. The per-column peak-fall state lives on the heap (sized to width()), allocated in onBuildState
 // and freed in teardown — never a large inline member.
+// Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 class GEQEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🐙📊"; }  // MoonLight origin · 2D · audio

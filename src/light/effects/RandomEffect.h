@@ -19,6 +19,7 @@ namespace mm {
 // per frame — written fresh on EffectBase + the shared draw/Palette primitives. The light is
 // chosen by a flat light index across all nrOfLights (the engine's native ordering, the direct
 // equivalent of MoonLight's index-based setRGB), so it can land anywhere in a 1D/2D/3D layer.
+// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 class RandomEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin

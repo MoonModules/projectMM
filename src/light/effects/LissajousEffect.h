@@ -24,6 +24,7 @@ namespace mm {
 // effect (Andrew Tuline / WLED). The oscillator phase math, the sin8/cos8 split, the
 // 2·locn → 2·(size−1) remap, and the elapsed()/100 + i palette walk are reproduced exactly here,
 // written fresh on EffectBase + the shared draw primitives.
+// Author: Andrew Tuline (WLED-SR) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 class LissajousEffect : public EffectBase {
 public:
     const char* tags() const override { return "🐙"; }  // WLED-lineage

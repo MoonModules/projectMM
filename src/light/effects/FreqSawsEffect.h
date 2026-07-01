@@ -37,6 +37,7 @@ namespace mm {
 // and the per-band phase bookkeeping are reproduced exactly here, written fresh on projectMM's
 // EffectBase + the shared draw / palette / beat8 primitives. Reads AudioModule::latestFrame();
 // silence → every band decays → flat → dark, safe on any target and grid size.
+// Author: @TroyHacks (MoonLight / WLED MoonModules) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 class FreqSawsEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫📊"; }  // MoonLight origin · audio

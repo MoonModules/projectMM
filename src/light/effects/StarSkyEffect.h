@@ -23,6 +23,7 @@ namespace mm {
 // reproduced here, written fresh on projectMM's EffectBase + shared primitives (Random8,
 // colorFromPalette, draw::). The per-star arrays live on the heap (platform::alloc), never as inline
 // members, so sizeof(StarSkyEffect) stays tiny.
+// Author: limpkin (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 class StarSkyEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin

@@ -21,6 +21,7 @@ namespace mm {
 //
 // Prior art: MoonLight ring/spoke layouts (L_MoonLight.h); projectMM v2 WheelLayoutModule
 // (those used double cos/sin/round — this is the integer-LUT equivalent).
+// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
 class WheelLayout : public LayoutBase {
 public:
     uint16_t spokes = 8;         // number of spokes, 2..64

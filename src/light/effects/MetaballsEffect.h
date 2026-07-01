@@ -7,6 +7,7 @@
 
 namespace mm {
 
+// Author: projectMM original (metaballs)
 class MetaballsEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🦅"; }  // MoonLight origin · David Jupijn / Rising Step

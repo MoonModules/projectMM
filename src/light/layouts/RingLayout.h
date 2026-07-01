@@ -23,6 +23,7 @@ namespace mm {
 //
 // Float trig runs on the cold build path (forEachCoord / lightCount, called from a
 // rebuild), never the hot render loop, so it's allowed here.
+// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
 class RingLayout : public LayoutBase {
 public:
     // MoonLight defaults and ranges, preserved verbatim.

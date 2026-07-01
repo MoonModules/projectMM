@@ -1639,11 +1639,19 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
             two tags GitHub/VS Code honor but the default escape path would turn to literal
             text. Pass those two through (resolving an <img> src to /api/doc-asset/ like the
             markdown-image path does); escape + inline-render the rest."""
-            def _img(m):
-                src_ = m.group("src")
-                width = m.group("w")
-                style = m.group("style")
-                alt_ = m.group("alt")
+            def _img_attrs(tag: str) -> dict:
+                """Pull src/width/alt/style from an <img …> tag regardless of attribute ORDER — each
+                is matched by its own name="value" search, so an author may write them in any sequence
+                (the previous fixed src→width→alt→style regex silently dropped out-of-order attrs)."""
+                def attr(name):
+                    m = re.search(rf'\b{name}="([^"]*)"', tag)
+                    return m.group(1) if m else None
+                return {k: attr(k) for k in ("src", "width", "alt", "style")}
+            def _img(a):
+                src_ = a.get("src") or ""
+                width = a.get("width")
+                style = a.get("style")
+                alt_ = a.get("alt")
                 if not src_.startswith(("http://", "https://", "/")):
                     abs_src = (md_path.parent / src_).resolve()
                     try:
@@ -1668,12 +1676,8 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
             def _stash(html: str) -> str:
                 tokens.append(html)
                 return f"\x00{len(tokens)-1}\x00"
-            # Our doc <img> tags are written src → width → alt → (style/title); capture each optional
-            # attribute in that order and let [^>]*> mop up any trailing ones (e.g. title=).
-            c = re.sub(r'<img src="(?P<src>[^"]+)"(?:\s+width="(?P<w>\d+)")?'
-                       r'(?:\s+alt="(?P<alt>[^"]*)")?'
-                       r'(?:\s+style="(?P<style>[^"]*)")?[^>]*>',
-                       lambda m: _stash(_img(m)), c)
+            # Match the <img …> envelope, then extract attributes by name (order-independent).
+            c = re.sub(r'<img\b[^>]*>', lambda m: _stash(_img(_img_attrs(m.group(0)))), c)
             c = re.sub(r'<a id="([a-z0-9-]+)"></a>', lambda m: _stash(f'<a id="{m.group(1)}"></a>'), c)
             c = re.sub(r'<br\s*/?>', lambda _: _stash("<br>"), c)
             out = render_inline(html_mod.escape(c))
@@ -1815,20 +1819,24 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
             # A standalone <img …> line (the per-module doc pages put the preview gif on its own
             # line above the description). Resolve a relative src to /api/doc-asset/ and keep the
             # width, like the table-cell path does — the allowlist below doesn't cover <img>.
-            img_m = re.fullmatch(
-                r'<img src="(?P<src>[^"]+)"(?:\s+width="(?P<w>\d+)")?(?:\s+alt="(?P<alt>[^"]*)")?[^>]*>',
-                stripped_check)
-            if img_m:
-                src_ = img_m.group("src")
+            if re.fullmatch(r'<img\b[^>]*>', stripped_check):
+                # Extract each attribute by name, order-independent (an author may write src/alt/width
+                # in any sequence — a fixed-order regex would silently drop the out-of-order ones).
+                def _attr(name):
+                    m = re.search(rf'\b{name}="([^"]*)"', stripped_check)
+                    return m.group(1) if m else None
+                src_ = _attr("src") or ""
                 if not src_.startswith(("http://", "https://", "/")):
                     abs_src = (md_path.parent / src_).resolve()
                     try:
                         src_ = f"/api/doc-asset/{abs_src.relative_to(ROOT.resolve())}"
                     except ValueError:
                         pass
-                wattr = f' width="{img_m.group("w")}"' if img_m.group("w") else ""
+                w_ = _attr("width")
+                wattr = f' width="{w_}"' if w_ else ""
                 # Preserve alt (accessibility text) like _render_cell does, verbatim like src/width.
-                aattr = f' alt="{img_m.group("alt")}"' if img_m.group("alt") is not None else ""
+                alt_ = _attr("alt")
+                aattr = f' alt="{alt_}"' if alt_ is not None else ""
                 lines.append(f'<img src="{src_}"{wattr}{aattr} style="margin:4px 0">')
                 continue
 

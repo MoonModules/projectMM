@@ -25,6 +25,7 @@ namespace mm {
 // written fresh on EffectBase + the shared draw / palette / math8 primitives. Our beatsin16
 // takes the current time (elapsed()) as its second argument, matching the lib8tion shape
 // (bpm, timebase) with the time source threaded in at the domain edge.
+// Author: MONSOONO / @Flavourdynamics (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 class PraxisEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin
@@ -73,7 +74,9 @@ public:
         const uint16_t micro = beatsin16(microMutatorFreq, now,
                                          microMutatorMin, microMutatorMax);
 
-        const uint32_t huebase = now * speed / 320;   // speed 8 == MoonLight's now/40; lower = calmer
+        // 64-bit before the multiply: now (millis) · speed overflows uint32 after a few hours' uptime,
+        // which would make the hue jump. speed 8 == MoonLight's now/40; lower = calmer.
+        const uint32_t huebase = static_cast<uint32_t>(static_cast<uint64_t>(now) * speed / 320);
         const int64_t  microDiv = static_cast<int64_t>(micro) + 1;  // micro+1, guards a divide-by-zero
 
         // hue = huebase + (x + y·macro·x) / (micro+1), truncated to the 0..255 palette wheel index.

@@ -38,7 +38,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - _AudioModule: a fresh, unconfigured module is idle (pins default unset)_
 - _AudioModule: setup/teardown is repeatable with no residual state_
 - _AudioModule: teardown clears the active mic (latestFrame falls back to silence)_
-- _AudioModule: last setup() wins, any add/remove order stays coherent_
+- _AudioModule: two mics — first wins, survivor re-elects, any order stays coherent_
 
 ## BlendMap
 
@@ -726,7 +726,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 `test/unit/light/unit_RainbowEffect.cpp`
 
 - A single frame on a 4×4 grid leaves the buffer non-zero (rainbow always paints somewhere).
-- Pixel (0,0) is at full saturation and value (one channel exactly 255) — confirms hsvToRgb wiring.
+- Pixel (0,0) carries a lit palette colour — confirms the effect writes a real RGB there.
 - Distant pixels carry different hues (the rainbow gradient is spatial, not uniform).
 
 ## RandomMapModifier
@@ -900,6 +900,16 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - A multi-line string wraps: the second line renders on a lower row (font-height down), so a two-line string lights pixels below the first font's height. Uses the 4x6 font (height 6).
 - Scroll mode advances the text over time and never crashes; on a degenerate grid it's a safe no-op.
 
+## Uncategorized
+
+`test/unit/light/unit_Layer_persistence.cpp`
+
+- _Layer: buffer persists across frames (no per-frame clear)_
+- _Layer: fadeToBlackBy decays the persisted buffer once per frame_
+- _Layer: multiple fade requests combine with MIN (gentlest wins, longest trail)_
+- _Layer: collected fade resets after it is consumed_
+- _Layer: onBuildState clears the buffer (a rebuild wipes stale pixels)_
+
 ## WaveEffect
 
 `test/unit/light/unit_WaveEffect.cpp`
@@ -947,10 +957,10 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - A 2D diagonal: endpoints are lit and the line is contiguous (one pixel per step on the main diagonal of a square).
 - A 3D line: drives all three axes, endpoints lit, no out-of-bounds on a small cube.
 - A line running off the grid clips: it draws the on-grid part and stops, no crash.
-- The `shorten` parameter pulls the far endpoint back toward `a` by shorten/255 (with WLEDMM *2 rounding), so an effect can sweep a partial segment. For a→b = (0,0)→(8,0): shorten 255 draws the whole line (tip at 8), 128 ≈ half (tip at (16*128/255+1)/2 = 4), 1 = just the start pixel (tip 0), 0 = nothing. This pins the rounding of the shorten branch, previously untested.
+- The `shorten` parameter pulls the far endpoint back toward `a` by shorten/255 (with WLEDMM *2 rounding), so an effect can sweep a partial segment. For a→b = (0,0)→(8,0): shorten 255 draws the whole line (tip at 8), 128 ≈ half (tip at (16*128/255+1)/2 = 4), 1 = just the start pixel (tip 0), 0 = nothing. This pins the rounding of the shorten branch.
 - draw::blur on a 1D row matches the canonical carryover-seep reference byte-for-byte (same behaviour as FastLED blur1d / MoonLight blurRows), and is symmetric around a centred bright pixel.
 - blur runs separably on every axis with extent>1: a 2D blur spreads a centre pixel to all four orthogonal neighbours; a 3D blur reaches the z neighbours too. And it never writes out of bounds.
-- A glyph blits in the correct orientation — neither X-mirrored (a 'b' as a 'd') nor Y-flipped. 'L' is the ideal probe: its vertical bar must be on the LEFT and its foot on the BOTTOM row. A regression here (reading the wrong column bit or the wrong row direction) is what made the DemoReel name overlay render each letter mirrored on the display.
+- A glyph blits in the correct orientation — neither X-mirrored (a 'b' as a 'd') nor Y-flipped. 'L' is the ideal probe: its vertical bar must be on the LEFT and its foot on the BOTTOM row. This guards the column-bit and row-direction reads, so the DemoReel name overlay renders each letter upright and un-mirrored.
 
 ## light_types
 

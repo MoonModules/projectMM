@@ -14,6 +14,7 @@
 
 namespace mm {
 
+// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
 class SingleColumnLayout : public LayoutBase {
 public:
     // Geometry controls mirror MoonLight's defaults and ranges 1:1.

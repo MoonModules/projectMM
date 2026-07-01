@@ -54,6 +54,10 @@ TEST_CASE("RainbowEffect pixel 0,0 produces valid RGB") {
     layer.addChild(&rainbow);
 
     layer.onBuildState();
+    // Pin a known-colourful palette (Rainbow=0, generated at full saturation/value so no entry is
+    // black) — Palettes::active() is a process-wide static any prior test can mutate, so this makes
+    // the non-black assertion order-independent.
+    mm::Palettes::setActive(0);
     layer.loop();
 
     auto* data = layer.buffer().data();

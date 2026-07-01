@@ -27,6 +27,7 @@ namespace mm {
 //
 // Prior art: FastLED's DemoReel100 sketch (Mark Kriegsman) — the canonical "rotate through a list of
 // patterns on a timer" demo; the registry-driven, self-skipping variant is ours.
+// Author: projectMM original, on Mark Kriegsman's FastLED DemoReel100 pattern — https://github.com/FastLED/FastLED/blob/master/examples/DemoReel100/DemoReel100.ino
 class DemoReelEffect : public EffectBase {
 public:
     const char* tags() const override { return "🎬"; }   // demo reel
