@@ -130,6 +130,12 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Brightness scaling runs before white derivation so W = min of the *scaled* RGB values.
 - rebuild() can switch the output channel count between RGB (3) and RGBW (4) on the fly.
 
+## DemoReelEffect
+
+`test/unit/light/unit_DemoReelEffect.cpp`
+
+- The reel enumerates the effect registry, hosts one effect at a time, renders it, and advances through the whole list without crashing — the create/teardown/delete churn every tick is the robustness path this pins. Registering two real effects + the reel gives it something to cycle.
+
 ## DevicePlugin
 
 `test/unit/core/unit_DeviceIdentify.cpp`
@@ -226,16 +232,9 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 - The B#/S# parser turns a rule string into birth/survive neighbour sets. Conway = B3/S23.
 - A 2×2 block is a Conway still life: every live cell has 3 neighbours (survives), and the surrounding dead cells never have exactly 3 (no births). It must be identical after a step.
+- Regression: a 3D grid gives a cell up to 26 neighbours (3×3×3 minus self), but the B/S rule tables are sized 9 (single-digit Conway notation, 0..8). A dense 3D neighbourhood must not read those tables out of bounds — a count ≥9 is in no single-digit ruleset, so the cell dies / stays dead. This fills a 3×3×3 cube (the centre has all 26 neighbours alive) and just steps: the test passing under ASan/bounds-checking is the OOB-read pin; behaviourally the over-crowded centre dies (26 ∉ S) and the dense interior doesn't survive.
 - A horizontal 3-cell blinker oscillates to vertical after one step (period-2 oscillator). This is the canonical "the rules actually run" check: birth on 3, death of the ends (1 neighbour each).
 - A lone cell (0 neighbours) dies — the dead-by-isolation rule, and a sanity check that an empty grid stays empty (no spontaneous births at count 0 under Conway).
-
-## DemoReelEffect
-
-`test/unit/light/unit_DemoReelEffect.cpp`
-
-- The reel enumerates the effect registry, hosts one effect at a time, and renders it into a real Layer — one tick leaves non-zero buffer bytes.
-- It never hosts itself (skips its own registry entry), so there's no infinite self-instantiation.
-- Advancing through more than a full lap create/build/teardown/deletes a real effect against the live grid each step, and every hosted effect renders without a crash — the robustness path for the dynamic child swap.
 
 ## GridLayout
 
@@ -268,6 +267,8 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - _HueDriver: RGB→HSV maps the primaries to the right Hue wheel positions_
 - _HueDriver: unchanged colour is not resent, a changed one is_
 - _HueDriver: parseLights keeps only colour-capable, reachable lights_
+- Room + light selection filters which colour lights the driver actually drives. Both dropdowns default to "All" (index 0): then every colour light is driven (unchanged behaviour). Selecting a room narrows the driven set to that room's colour lights; selecting a light drives just that one.
+- The single status line (folding what were the separate hueStatus / colourLights controls) shows the light count as driven-of-total: "N-M lights" while filtered, the plain "M lights" when not.
 - fetchLights sizes its read buffer by growing while the body looks truncated. The signal is "does the body end in '}'": a too-small buffer cuts the JSON mid-content. (Regression: an earlier check tested strlen==cap-1, which never fires because httpRequest strips headers first, so a >2 KB bridge response was parsed truncated and lights silently disappeared.)
 
 ## ImprovFrame
@@ -933,11 +934,13 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 `test/unit/light/unit_draw.cpp`
 
-- `mm::draw::pixel()` writes inside the grid and silently clips outside it (no out-of-bounds write).
+- mm::draw::pixel() writes inside the grid and silently clips outside it (no out-of-bounds write).
 - A 1D line (a row): every pixel from a.x to b.x inclusive is lit.
 - A 2D diagonal: endpoints are lit and the line is contiguous (one pixel per step on the main diagonal of a square).
 - A 3D line: drives all three axes, endpoints lit, no out-of-bounds on a small cube.
 - A line running off the grid clips: it draws the on-grid part and stops, no crash.
+- draw::blur on a 1D row matches the canonical carryover-seep reference byte-for-byte (same behaviour as FastLED blur1d / MoonLight blurRows), and is symmetric around a centred bright pixel.
+- blur runs separably on every axis with extent>1: a 2D blur spreads a centre pixel to all four orthogonal neighbours; a 3D blur reaches the z neighbours too. And it never writes out of bounds.
 
 ## light_types
 
@@ -960,6 +963,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - beatsin8: a sine oscillating in [low,high] at bpm. Stays in range across the cycle and actually moves (not stuck at one value).
 - Random8: a seeded PRNG — same seed gives the same sequence (determinism), and below(n) stays under n. Two different seeds diverge.
 - atan2_8 / dist8: the geometry helpers moved here from color.h still behave.
+- map8 rescales 0..255 onto [lo,hi] inclusively — the top of the input must REACH hi (FastLED's map8 == map(in,0,255,lo,hi)). Regression: an earlier scale8-based form left hi unreachable, so a one-step span (a bar height of 1) collapsed to 0 — the bug GEQ3D's height mapping hit.
 
 ## noise
 

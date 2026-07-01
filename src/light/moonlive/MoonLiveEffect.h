@@ -84,7 +84,11 @@ public:
 
 private:
     moonlive::MoonLive engine_;
-    char source_[512] = "fill(0, 0, 255);";   // default script — solid blue. 512 fits a multi-line
+    // Default script — random pixels: each tick lights one random light in a random RGB colour.
+    // A live, always-visible starting example (and a good demo-reel slot). The index random16(65535)
+    // is bounds-guarded to the actual light count, so it's grid-size-agnostic and safe on 0×0.
+    char source_[512] = "setRGB(random16(65535), random16(256), random16(256), random16(256));";
+                                               // 512 fits a multi-line
                                                // multi-control script (a decl per control + the
                                                // statement); grow-on-demand is backlogged for the
                                                // bigger Ripples-class scripts of later stages.

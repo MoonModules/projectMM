@@ -4,6 +4,9 @@
 #include "light/layers/Layer.h"      // layer() — the child renders into the same Layer buffer
 #include "core/ModuleFactory.h"      // enumerate + create the effects to cycle through
 #include "core/math8.h"              // Random8 — the shuffle pick
+#include "light/Palette.h"           // Palettes::setActive — random palette per cycle
+#include "light/draw.h"              // draw::text — the effect-name overlay
+#include "light/fonts.h"             // fonts::kFont4x6 — the overlay font
 
 #include <cstring>                   // strcmp
 
@@ -32,12 +35,16 @@ public:
     // when we run its loop() through the same path.
     Dim dimensions() const override { return Dim::D3; }
 
-    uint8_t interval = 8;      // seconds each effect plays before advancing
-    bool    shuffle  = false;  // random next-effect pick instead of registry order
+    uint8_t interval      = 8;      // seconds each effect plays before advancing
+    bool    shuffle       = false;  // random next-effect pick instead of registry order
+    bool    randomPalette = true;   // pick a random palette on each cycle (showcases the palette set)
+    bool    showName      = true;   // overlay the playing effect's name (the reel as a showcase tool)
 
     void onBuildControls() override {
         controls_.addUint8("interval", interval, 1, 120);
         controls_.addBool("shuffle", shuffle);
+        controls_.addBool("randomPalette", randomPalette);
+        controls_.addBool("showName", showName);
     }
 
     // Build the eligible-effect list (all Effect-role types except this one) and start the first.
@@ -60,6 +67,17 @@ public:
         }
 
         current_->loop();   // render the hosted effect into our Layer's buffer this tick
+
+        // Overlay the playing effect's name (the reel as a showcase tool). Drawn on top of the
+        // hosted output in the compact 4x6 font at the TOP-left — overwriting a few pixels is fine
+        // (the reel owns the whole frame). Uses metadata the reel already has (current_->name()), so
+        // no system/pipeline reach-in. draw::text clips to the grid, so a tiny grid just shows what
+        // fits (or nothing).
+        if (showName && current_) {
+            Buffer& buf = layer()->buffer();
+            const Coord3D dims{width(), height(), depthDim()};
+            draw::text(buf, dims, fonts::kFont4x6, current_->name(), 0, 0, {255, 255, 255});
+        }
     }
 
     void teardown() override {
@@ -105,6 +123,11 @@ private:
         } else {
             next = static_cast<uint8_t>((cursor_ + 1) % eligibleCount_);
         }
+        // Showcase the palette set: pick a fresh random palette on each cycle. This overrides the
+        // global Drivers palette while the reel runs; the next Drivers rebuild restores the user's
+        // choice when the reel is removed (intended — the reel takes over the display). Only on a
+        // real cycle advance, not on rebuild (swapTo is also called from onBuildState).
+        if (randomPalette && palettes::kCount > 0) Palettes::setActive(rng_.below(palettes::kCount));
         swapTo(next);
     }
 
@@ -135,6 +158,8 @@ private:
         delete current_;              // teardown-then-delete, the Scheduler's ownership pattern
         current_ = nullptr;
     }
+
+    lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
 
     void refreshStatus() {
         // Show which effect is playing (its display name), e.g. "playing: Plasma (3/19)".

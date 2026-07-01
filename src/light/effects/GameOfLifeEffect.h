@@ -329,7 +329,7 @@ private:
         // R-pentomino offsets; pattern[0][1] becomes 3 for the glider variant.
         uint8_t pattern[5][2] = {{1, 0}, {0, 1}, {1, 1}, {2, 1}, {2, 2}};
         if (!rng_.below(5)) pattern[0][1] = 3;
-        const uint8_t colorIndex = rng_.next8();
+        const uint8_t colorIndex = rng_.below(1, 255);   // 1..254, never 0 (0 = dead marker)
         const RGB color = colorFromPalette(*Palettes::active(), colorIndex);
 
         // random8(1, size-N) needs size>N; guard tiny grids (degenerate axes collapse to 0).
@@ -403,8 +403,11 @@ private:
                                     neighbors++;
                                     if (cellValue || colorByAge) continue;  // colour not needed
                                     if (colors_[nIndex] == 0) continue;      // dead-marker colour
-                                    nColors[colorCount % 9] = colors_[nIndex];
-                                    colorCount++;
+                                    // Cap collected colours at nColors' size 9: 3D's 26-neighbour
+                                    // count can exceed 9, and the random pick below indexes with
+                                    // rng_.below(colorCount), so an uncapped colorCount would read
+                                    // out of bounds. Nine samples are plenty for the inheritance pick.
+                                    if (colorCount < 9) nColors[colorCount++] = colors_[nIndex];
                                 }
                             }
 
@@ -420,10 +423,12 @@ private:
                         setBit(future_, cIndex, false);
                         if (!testMode && buf) draw::blendPixel(*buf, dims, p, bg, frameBlur);
                     } else if (!cellValue && born) {
-                        // Reproduction: inherit a living neighbour's colour, mutate sometimes.
+                        // Reproduction: inherit a living neighbour's colour, mutate sometimes. Both
+                        // fallbacks use rng_.below(1, 255) (1..254) so a live cell never gets 0, the
+                        // dead-cell marker (matches startNewGame's fill colour).
                         setBit(future_, cIndex, true);
-                        uint8_t colorIndex = (colorCount > 0) ? nColors[rng_.below(colorCount)] : rng_.next8();
-                        if (rng_.below(100) < mutation) colorIndex = rng_.next8();
+                        uint8_t colorIndex = (colorCount > 0) ? nColors[rng_.below(colorCount)] : rng_.below(1, 255);
+                        if (rng_.below(100) < mutation) colorIndex = rng_.below(1, 255);
                         colors_[cIndex] = colorIndex;
                         if (!testMode && buf) draw::pixel(*buf, dims, p, liveColor(colorIndex));
                     } else {

@@ -62,23 +62,30 @@ public:
         // bass term added to every oscillator bpm (MoonLight's bands[0]/NUM_GEQ_CHANNELS).
         const uint8_t base = static_cast<uint8_t>(f->bands[0] / kBands);
 
+        // The loop visits i in [0, numLines), so the map input-high is numLines-1 — otherwise the
+        // top band/hue (the value produced at i == numLines) is never reached (off-by-one).
+        const int lineHi = numLines - 1;
+
         for (size_t i = 0; i < numLines; i++) {
             const uint8_t bin = static_cast<uint8_t>(
-                map(static_cast<int>(i), 0, numLines, 0, kBands - 1));
+                map(static_cast<int>(i), 0, lineHi, 0, kBands - 1));
             const uint8_t band = f->bands[bin];
 
             // Six endpoints: each axis pair oscillates at a multiple of oscillatorOffset (+ a bass
-            // term), timebased on the band magnitude, phase-jittered by aux1Chaos.
-            const uint8_t x1 = beatsin8(static_cast<uint8_t>(oscillatorOffset * 1 + base), ms, 0, static_cast<uint8_t>(cols - 1), band, aux1Chaos);
-            const uint8_t x2 = beatsin8(static_cast<uint8_t>(oscillatorOffset * 2 + base), ms, 0, static_cast<uint8_t>(cols - 1), band, aux1Chaos);
-            const uint8_t y1 = beatsin8(static_cast<uint8_t>(oscillatorOffset * 3 + base), ms, 0, static_cast<uint8_t>(rows - 1), band, aux1Chaos);
-            const uint8_t y2 = beatsin8(static_cast<uint8_t>(oscillatorOffset * 4 + base), ms, 0, static_cast<uint8_t>(rows - 1), band, aux1Chaos);
+            // term), timebased on the band magnitude, phase-jittered by aux1Chaos. beatsin8's range
+            // args are uint8 (0..255), so the oscillator is generated full-range and then scaled to
+            // the grid extent with map() — passing (cols-1)/(rows-1)/(depth-1) directly would
+            // truncate to 8 bits and collapse the strokes into a corner on grids wider than 256.
+            const lengthType x1 = osc(static_cast<uint8_t>(oscillatorOffset * 1 + base), ms, band, cols);
+            const lengthType x2 = osc(static_cast<uint8_t>(oscillatorOffset * 2 + base), ms, band, cols);
+            const lengthType y1 = osc(static_cast<uint8_t>(oscillatorOffset * 3 + base), ms, band, rows);
+            const lengthType y2 = osc(static_cast<uint8_t>(oscillatorOffset * 4 + base), ms, band, rows);
 
-            uint8_t z1 = 0, z2 = 0;
+            lengthType z1 = 0, z2 = 0;
             int length;
             if (depth > 1) {
-                z1 = beatsin8(static_cast<uint8_t>(oscillatorOffset * 5 + base), ms, 0, static_cast<uint8_t>(depth - 1), band, aux1Chaos);
-                z2 = beatsin8(static_cast<uint8_t>(oscillatorOffset * 6 + base), ms, 0, static_cast<uint8_t>(depth - 1), band, aux1Chaos);
+                z1 = osc(static_cast<uint8_t>(oscillatorOffset * 5 + base), ms, band, depth);
+                z2 = osc(static_cast<uint8_t>(oscillatorOffset * 6 + base), ms, band, depth);
                 length = isqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1) + (z2 - z1) * (z2 - z1));
             } else {
                 length = isqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
@@ -86,12 +93,14 @@ public:
 
             // The Euclidean span scaled by the band magnitude becomes the shorten amount: louder
             // bands draw a longer fraction of the line, so the strokes curve as the length pulses.
-            length = map8(band, 0, static_cast<uint8_t>(length));
+            // shorten is a 0..255 fraction, so clamp before the uint8 cast — on a >256 grid the raw
+            // span can exceed 255 and would otherwise wrap.
+            length = map8(band, 0, static_cast<uint8_t>(length > 255 ? 255 : length));
 
             if (length > MAX(1, minLength)) {
                 const uint8_t index = color_chaos
                     ? static_cast<uint8_t>(i * 255 / numLines + (aux0Hue & 0xFF))
-                    : static_cast<uint8_t>(map(static_cast<int>(i), 0, numLines, 0, 255));
+                    : static_cast<uint8_t>(map(static_cast<int>(i), 0, lineHi, 0, 255));
                 const RGB color = colorFromPalette(*Palettes::active(), index, 255);
                 draw::line(buf, dims, {x1, y1, z1}, {x2, y2, z2}, color, static_cast<uint8_t>(length));
             }
@@ -106,6 +115,13 @@ private:
     uint16_t aux0Hue = 0;    // running hue, incremented each frame
     uint8_t  aux1Chaos = 0;  // per-frame phase jitter (0 unless phase_chaos)
     Random8  rng_{0xB17EB00Bu};
+
+    // One endpoint on an axis of extent `len`: an 8-bit sine (0..255) scaled to [0, len-1] so grids
+    // wider than 256 keep their full sweep (beatsin8's range params are only 8-bit). len==0 → 0.
+    lengthType osc(uint8_t bpm, uint32_t ms, uint8_t timebase, lengthType len) const {
+        const uint8_t s = beatsin8(bpm, ms, 0, 255, timebase, aux1Chaos);
+        return static_cast<lengthType>(map(s, 0, 255, 0, len > 0 ? len - 1 : 0));
+    }
 
     // FastLED-style MAX/map kept local so the loop reads like the MoonLight source.
     static constexpr int MAX(int a, int b) { return a > b ? a : b; }

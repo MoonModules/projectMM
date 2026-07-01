@@ -1643,6 +1643,7 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
                 src_ = m.group("src")
                 width = m.group("w")
                 style = m.group("style")
+                alt_ = m.group("alt")
                 if not src_.startswith(("http://", "https://", "/")):
                     abs_src = (md_path.parent / src_).resolve()
                     try:
@@ -1651,10 +1652,13 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
                         pass
                     src_ = f"/api/doc-asset/{src_}"
                 wattr = f' width="{width}"' if width else ""
+                # Preserve the author's alt text (accessibility + markdownlint) — the raw-<img> path
+                # dropped it before; keep it consistent with the markdown-image path above.
+                altattr = f' alt="{html_mod.escape(alt_)}"' if alt_ else ""
                 # Preserve an author-set width style (the cross-renderer size lever) and append our
                 # margin so the preview isn't flush against the cell edges.
                 style = (style + ";" if style else "") + "margin:4px 0"
-                return f'<img src="{src_}"{wattr} style="{style}">'
+                return f'<img src="{src_}"{wattr}{altattr} style="{style}">'
             # No raw HTML → ordinary escaped+inline cell (the common case).
             if "<img" not in c and "<a id=" not in c and "<br" not in c:
                 return render_inline(html_mod.escape(c))
@@ -1664,7 +1668,10 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
             def _stash(html: str) -> str:
                 tokens.append(html)
                 return f"\x00{len(tokens)-1}\x00"
+            # Our doc <img> tags are written src → width → alt → (style/title); capture each optional
+            # attribute in that order and let [^>]*> mop up any trailing ones (e.g. title=).
             c = re.sub(r'<img src="(?P<src>[^"]+)"(?:\s+width="(?P<w>\d+)")?'
+                       r'(?:\s+alt="(?P<alt>[^"]*)")?'
                        r'(?:\s+style="(?P<style>[^"]*)")?[^>]*>',
                        lambda m: _stash(_img(m)), c)
             c = re.sub(r'<a id="([a-z0-9-]+)"></a>', lambda m: _stash(f'<a id="{m.group(1)}"></a>'), c)

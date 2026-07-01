@@ -5,6 +5,7 @@
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/NoiseEffect.h"
 #include "light/layouts/GridLayout.h"
+#include "light/draw.h"                // draw::fill — clear the buffer between hosted renders
 
 #include <cstring>
 
@@ -55,16 +56,22 @@ TEST_CASE("DemoReelEffect cycles registered effects and renders each") {
     CHECK(s.anyNonZero());
 
     // Advance through a full lap plus extra — every swap is a create → build → teardown → delete of
-    // a real effect against the live grid. None of it may crash, and each hosted effect renders.
+    // a real effect against the live grid. None of it may crash. The buffer is cleared before each
+    // render so a per-host render check measures THIS host's output (not pixels left by the prior
+    // one); effects that legitimately draw nothing in a single frame (e.g. an audio effect with no
+    // audio, a still-fading start) are counted over the run rather than asserted every frame.
     const uint8_t n = reel.eligibleCountForTest();
+    int rendered = 0;
     for (int step = 0; step < n * 2 + 3; step++) {
         reel.advanceForTest();
         const char* cur = reel.currentTypeForTest();
         REQUIRE(cur != nullptr);
         CHECK(std::strcmp(cur, "DemoReelEffect") != 0);
-        s.layer.loop();               // render the newly-hosted effect — must not crash
+        draw::fill(s.layer.buffer(), {0, 0, 0});   // clear so the count measures THIS host's output
+        s.layer.loop();                            // render the newly-hosted effect — must not crash
+        if (s.anyNonZero()) rendered++;
     }
-    CHECK(s.anyNonZero());
+    CHECK(rendered > 0);   // over the run, hosted effects render into the freshly-cleared buffer
 
     reel.teardown();                   // frees the last hosted child cleanly (no leak/double-free)
 }

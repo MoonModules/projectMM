@@ -3,6 +3,18 @@
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/SphereLayout.h"
 #include "light/layouts/WheelLayout.h"
+#include "light/layouts/SingleRowLayout.h"
+#include "light/layouts/SingleColumnLayout.h"
+#include "light/layouts/PanelLayout.h"
+#include "light/layouts/CubeLayout.h"
+#include "light/layouts/TubesLayout.h"
+#include "light/layouts/RingLayout.h"
+#include "light/layouts/Rings241Layout.h"
+#include "light/layouts/SpiralLayout.h"
+#include "light/layouts/PanelsLayout.h"
+#include "light/layouts/HumanSizedCubeLayout.h"
+#include "light/layouts/TorontoBarGourdsLayout.h"
+#include "light/layouts/CarLightsLayout.h"
 #include "light/effects/LinesEffect.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/WaveEffect.h"
@@ -36,8 +48,7 @@
 #include "light/effects/Noise2DEffect.h"
 #include "light/effects/BouncingBallsEffect.h"
 #include "light/effects/TetrixEffect.h"
-#include "light/effects/PacManEffect.h"
-#include "light/effects/AntEffect.h"
+#include "light/effects/TextEffect.h"
 #include "light/effects/FreqSawsEffect.h"
 #include "light/effects/BlurzEffect.h"
 #include "light/effects/FreqMatrixEffect.h"
@@ -49,6 +60,12 @@
 #include "light/modifiers/RandomMapModifier.h"
 #include "light/modifiers/RotateModifier.h"
 #include "light/modifiers/RegionModifier.h"
+#include "light/modifiers/MirrorModifier.h"
+#include "light/modifiers/TransposeModifier.h"
+#include "light/modifiers/CircleModifier.h"
+#include "light/modifiers/BlockModifier.h"
+#include "light/modifiers/PinwheelModifier.h"
+#include "light/modifiers/RippleXZModifier.h"
 #include "light/drivers/HueDriver.h"
 #include "light/drivers/NetworkSendDriver.h"
 #include "light/drivers/PreviewDriver.h"
@@ -104,12 +121,24 @@ static void registerModuleTypes() {
     // Concrete modules. registerType<T> captures the type's dimensions() via
     // if-constexpr when present — EffectBase and ModifierBase both expose one,
     // so the UI's 📏/🟦/🧊 chip lights up without any per-domain wrapper.
+    // Layouts — alphabetical by display name.
+    mm::ModuleFactory::registerType<mm::CarLightsLayout>("CarLightsLayout", "light/layouts/layouts.md#carlights");
+    mm::ModuleFactory::registerType<mm::CubeLayout>("CubeLayout", "light/layouts/layouts.md#cube");
+    mm::ModuleFactory::registerType<mm::HumanSizedCubeLayout>("HumanSizedCubeLayout", "light/layouts/layouts.md#humansizedcube");
+    mm::ModuleFactory::registerType<mm::PanelsLayout>("PanelsLayout", "light/layouts/layouts.md#panels");
+    mm::ModuleFactory::registerType<mm::TorontoBarGourdsLayout>("TorontoBarGourdsLayout", "light/layouts/layouts.md#torontobargourds");
     mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout", "light/layouts/layouts.md#grid");
+    mm::ModuleFactory::registerType<mm::PanelLayout>("PanelLayout", "light/layouts/layouts.md#panel");
+    mm::ModuleFactory::registerType<mm::RingLayout>("RingLayout", "light/layouts/layouts.md#ring");
+    mm::ModuleFactory::registerType<mm::Rings241Layout>("Rings241Layout", "light/layouts/layouts.md#rings241");
+    mm::ModuleFactory::registerType<mm::SingleColumnLayout>("SingleColumnLayout", "light/layouts/layouts.md#singlecolumn");
+    mm::ModuleFactory::registerType<mm::SingleRowLayout>("SingleRowLayout", "light/layouts/layouts.md#singlerow");
     mm::ModuleFactory::registerType<mm::SphereLayout>("SphereLayout", "light/layouts/layouts.md#sphere");
+    mm::ModuleFactory::registerType<mm::SpiralLayout>("SpiralLayout", "light/layouts/layouts.md#spiral");
+    mm::ModuleFactory::registerType<mm::TubesLayout>("TubesLayout", "light/layouts/layouts.md#tubes");
     mm::ModuleFactory::registerType<mm::WheelLayout>("WheelLayout", "light/layouts/layouts.md#wheel");
     // Effects — registered alphabetically by display name (the picker + docs also sort
     // alphabetically; keeping this list sorted makes the three orders agree at a glance).
-    mm::ModuleFactory::registerType<mm::AntEffect>("AntEffect", "light/effects/effects.md#ant");
     mm::ModuleFactory::registerType<mm::AudioSpectrumEffect>("AudioSpectrumEffect", "light/effects/effects.md#audiospectrum");
     mm::ModuleFactory::registerType<mm::AudioVolumeEffect>("AudioVolumeEffect", "light/effects/effects.md#audiovolume");
     mm::ModuleFactory::registerType<mm::BlurzEffect>("BlurzEffect", "light/effects/effects.md#blurz");
@@ -132,7 +161,6 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect", "light/effects/effects.md#noise");
     mm::ModuleFactory::registerType<mm::Noise2DEffect>("Noise2DEffect", "light/effects/effects.md#noise2d");
     mm::ModuleFactory::registerType<mm::NoiseMeterEffect>("NoiseMeterEffect", "light/effects/effects.md#noisemeter");
-    mm::ModuleFactory::registerType<mm::PacManEffect>("PacManEffect", "light/effects/effects.md#pacman");
     mm::ModuleFactory::registerType<mm::PaintBrushEffect>("PaintBrushEffect", "light/effects/effects.md#paintbrush");
     mm::ModuleFactory::registerType<mm::ParticlesEffect>("ParticlesEffect", "light/effects/effects.md#particles");
     mm::ModuleFactory::registerType<mm::PlasmaEffect>("PlasmaEffect", "light/effects/effects.md#plasma");
@@ -149,13 +177,20 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::StarFieldEffect>("StarFieldEffect", "light/effects/effects.md#starfield");
     mm::ModuleFactory::registerType<mm::StarSkyEffect>("StarSkyEffect", "light/effects/effects.md#starsky");
     mm::ModuleFactory::registerType<mm::TetrixEffect>("TetrixEffect", "light/effects/effects.md#tetrix");
+    mm::ModuleFactory::registerType<mm::TextEffect>("TextEffect", "light/effects/effects.md#text");
     mm::ModuleFactory::registerType<mm::WaveEffect>("WaveEffect", "light/effects/effects.md#wave");
     // Modifiers — alphabetical by display name.
+    mm::ModuleFactory::registerType<mm::BlockModifier>("BlockModifier", "light/modifiers/modifiers.md#block");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers/modifiers.md#checkerboard");
+    mm::ModuleFactory::registerType<mm::CircleModifier>("CircleModifier", "light/modifiers/modifiers.md#circle");
+    mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier", "light/modifiers/modifiers.md#mirror");
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier", "light/modifiers/modifiers.md#multiply");
+    mm::ModuleFactory::registerType<mm::PinwheelModifier>("PinwheelModifier", "light/modifiers/modifiers.md#pinwheel");
     mm::ModuleFactory::registerType<mm::RandomMapModifier>("RandomMapModifier", "light/modifiers/modifiers.md#randommap");
     mm::ModuleFactory::registerType<mm::RegionModifier>("RegionModifier", "light/modifiers/modifiers.md#region");
+    mm::ModuleFactory::registerType<mm::RippleXZModifier>("RippleXZModifier", "light/modifiers/modifiers.md#ripplexz");
     mm::ModuleFactory::registerType<mm::RotateModifier>("RotateModifier", "light/modifiers/modifiers.md#rotate");
+    mm::ModuleFactory::registerType<mm::TransposeModifier>("TransposeModifier", "light/modifiers/modifiers.md#transpose");
     mm::ModuleFactory::registerType<mm::HueDriver>("HueDriver", "light/drivers/HueDriver.md");
     mm::ModuleFactory::registerType<mm::NetworkSendDriver>("NetworkSendDriver", "light/drivers/NetworkSendDriver.md");
     mm::ModuleFactory::registerType<mm::PreviewDriver>("PreviewDriver", "light/drivers/PreviewDriver.md");

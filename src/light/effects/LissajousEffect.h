@@ -64,9 +64,11 @@ public:
             const uint8_t sy = cos8(static_cast<uint8_t>(halfPhase + i * 2));
 
             // Map the 0..255 oscillator value onto the grid: MoonLight's
-            // (map(2·s, 0, 511, 0, 2·(size−1)) + 1) / 2, with a 1 when the axis is too small.
-            const int lx = (w < 2) ? 1 : (((2 * sx) * (2 * (w - 1))) / 511 + 1) / 2;
-            const int ly = (h < 2) ? 1 : (((2 * sy) * (2 * (h - 1))) / 511 + 1) / 2;
+            // (map(2·s, 0, 511, 0, 2·(size−1)) + 1) / 2. When an axis has only one cell the only
+            // valid index is 0 (MoonLight's fallback of 1 assumes a 1-based extent and clips on our
+            // 0-indexed grid), so a size-1 axis maps to coordinate 0.
+            const int lx = (w < 2) ? 0 : (((2 * sx) * (2 * (w - 1))) / 511 + 1) / 2;
+            const int ly = (h < 2) ? 0 : (((2 * sy) * (2 * (h - 1))) / 511 + 1) / 2;
 
             const uint8_t colorIndex = static_cast<uint8_t>(ms / 100 + i);
             draw::pixel(buf, dims, {static_cast<lengthType>(lx), static_cast<lengthType>(ly), 0},

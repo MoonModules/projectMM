@@ -37,7 +37,7 @@ public:
 
     uint8_t speed      = 20;     // advance rate (0..30); 0 = paused. Throttle is 1000/speed ms.
     uint8_t numStars   = 16;     // active stars (1..255)
-    uint8_t blur       = 128;    // per-frame fade-to-black amount (0..255); higher = longer streaks
+    uint8_t blur       = 128;    // per-frame fade-to-black amount (0..255); higher = stronger fade = shorter streaks (draw::fade keep = 255-blur, matching MoonLight's fadeToBlackBy(blur))
     bool    usePalette = false;  // colour stars from the palette instead of greyscale
 
     void onBuildControls() override {

@@ -14,8 +14,9 @@ namespace mm {
 // alignment / region paint. When `alternateWhite` is on, the box is rendered as a chequerboard
 // of white and the RGB colour: a per-cell toggle flips along the box's dominant axis (it flips
 // every cell when the box is wider than tall, and once per row when it is taller than wide), so
-// the white/colour pattern follows the box's longer side. The 4th (white) channel is written
-// only on RGBW grids.
+// the white/colour pattern follows the box's longer side. On RGBW grids the 4th (white) channel
+// carries `white` on the white tiles and is cleared to 0 on the coloured tiles, so a coloured
+// cell never picks up the white LED and no stale W lingers from a prior frame.
 //
 // Prior art: MoonLight's FixedRectangle (E_MoonModules / MoonModules). The defaults, the
 // origin+extent clamping, the alternate-toggle rule (flip per-cell when height<width, flip
@@ -82,14 +83,19 @@ public:
         for (int z = rectZ; z < zEnd; z++) {
             for (int y = rectY; y < yEnd; y++) {
                 for (int x = rectX; x < xEnd; x++) {
+                    // One chequerboard decision drives both the RGB colour and the W channel:
+                    // a white tile paints white RGB + W=white; a coloured tile paints rgb + W=0.
+                    const bool isWhiteTile = alternateWhite && alternate;
+                    const Coord3D p{static_cast<lengthType>(x), static_cast<lengthType>(y), static_cast<lengthType>(z)};
                     if (anyColor) {
-                        const RGB c = (alternateWhite && alternate) ? RGB{255, 255, 255} : rgb;
-                        draw::pixel(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(y), static_cast<lengthType>(z)}, c);
+                        draw::pixel(buf, dims, p, isWhiteTile ? RGB{255, 255, 255} : rgb);
                     }
-                    // White channel: only on RGBW grids (4th channel). draw::pixel writes RGB only.
-                    if (white > 0 && cpl >= 4) {
-                        const size_t off = draw::offsetOf(buf, dims, {static_cast<lengthType>(x), static_cast<lengthType>(y), static_cast<lengthType>(z)});
-                        if (off + 3 < buf.bytes()) buf.data()[off + 3] = white;
+                    // White channel (4th) only on RGBW grids. Follow the chequerboard branch: the
+                    // white tile carries `white`, a coloured tile clears W so it never tints the
+                    // colour and no stale W persists in the RGBW buffer. draw::pixel writes RGB only.
+                    if (cpl >= 4) {
+                        const size_t off = draw::offsetOf(buf, dims, p);
+                        if (off + 3 < buf.bytes()) buf.data()[off + 3] = isWhiteTile ? white : 0;
                     }
                     // Box wider than tall: flip the white/colour toggle every cell along X.
                     if (rectH < rectW) alternate = !alternate;

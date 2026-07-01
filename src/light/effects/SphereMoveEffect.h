@@ -22,10 +22,10 @@ namespace mm {
 //
 // Prior art: MoonLight's SphereMove (E_MoonModules / MoonModules). The origin oscillator math
 // (millis()/(100-speed)/6.4, the sin/cos origin path), the diameter = 2 + sin(ti/3) breathing,
-// the one-unit shell test, and the millis()/50 + random8(64) palette index are reproduced exactly,
-// written fresh on EffectBase + the shared draw primitives. MoonLight does the first divide
-// (millis()/(100-speed)) as integer division, then /6.4 as float — reproduced here so time_interval
-// matches bit-for-bit, not all-float.
+// the one-unit shell test, and the millis()/50 + random8(64) palette index are reproduced.
+// time_interval is computed in full float (ms and 100-speed as float through the whole
+// expression) so the origin sweep and diameter breathing integrate continuously rather than in
+// quantised integer-time steps — a smooth sweep at every speed.
 class SphereMoveEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🧊"; }  // MoonLight origin · 3D-native
@@ -51,11 +51,11 @@ public:
 
         const uint32_t ms = elapsed();
 
-        // Origin oscillator. MoonLight: millis()/(100-speed)/6.4, where the FIRST divide is integer
-        // (millis() and speed are integers) and only /6.4 is float — reproduced exactly. The divisor
-        // 100-speed (speed clamped 0..99 → divisor 1..100, never 0) and the (256-128)/20.0 == 6.4
-        // factor are MoonLight's exact constants.
-        const float time_interval = static_cast<float>(ms / static_cast<uint32_t>(100 - speed)) / 6.4f;
+        // Origin oscillator: time_interval = ms / (100-speed) / 6.4, all-float so time advances
+        // continuously (integer-dividing ms/(100-speed) first would truncate the sub-step time and
+        // quantise the sweep). The divisor 100-speed (speed clamped 0..99 → divisor 1..100, never 0)
+        // and the (256-128)/20.0 == 6.4 factor are MoonLight's exact constants.
+        const float time_interval = static_cast<float>(ms) / static_cast<float>(100 - speed) / 6.4f;
 
         const float ox = w / 2.0f * (1.0f + sinf(time_interval));
         const float oy = h / 2.0f * (1.0f + cosf(time_interval));

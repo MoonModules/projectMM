@@ -89,7 +89,8 @@ public:
                             static_cast<uint8_t>(green * brightness / 255),
                             static_cast<uint8_t>(blue  * brightness / 255)};
                 draw::fill(buf, c);
-                if (white > 0 && cpl >= 4) writeWhite(buf, nLights, cpl, white);
+                // Write W every frame (white may be 0) so a stale W from a prior frame/effect is cleared.
+                if (cpl >= 4) writeWhite(buf, nLights, cpl, white);
                 break;
             }
             case 1: {  // Palette spread across the lights: light i → wheel index map(i,0,nLights,0,256).
@@ -102,6 +103,8 @@ public:
                     if (off + 3 > bytes) break;
                     data[off + 0] = c.r; data[off + 1] = c.g; data[off + 2] = c.b;
                 }
+                // Palette modes carry no white source: clear W so an RGBW buffer doesn't keep stale white.
+                if (cpl >= 4) writeWhite(buf, nLights, cpl, 0);
                 break;
             }
             case 2: {  // RMS average of the (non-black) palette colours, filled solid (no brightness — source).
@@ -122,6 +125,7 @@ public:
                     avg.b = static_cast<uint8_t>(sqrtf(static_cast<float>(sumB) / n));
                 }
                 draw::fill(buf, avg);
+                if (cpl >= 4) writeWhite(buf, nLights, cpl, 0);   // no white source: clear stale W
                 break;
             }
             default: {  // 3 rows / 4 cols: band the (filtered, optionally shuffled) palette along an axis.
@@ -169,6 +173,8 @@ public:
                         }
                     }
                 }
+                // Band modes carry no white source: clear W so an RGBW buffer doesn't keep stale white.
+                if (cpl >= 4) writeWhite(buf, nLights, cpl, 0);
                 break;
             }
         }
@@ -181,7 +187,8 @@ private:
         if (validIndices_) { platform::free(validIndices_); validIndices_ = nullptr; }
     }
 
-    // Write the white channel (4th) on every light. RGB stays as already filled.
+    // Write the white channel (4th) on every light. RGB stays as already filled. `w` may be 0 to
+    // clear a stale white the palette modes never overwrite (draw::pixel/draw::fill touch RGB only).
     static void writeWhite(Buffer& buf, nrOfLightsType n, uint8_t cpl, uint8_t w) {
         uint8_t* data = buf.data();
         const size_t bytes = buf.bytes();

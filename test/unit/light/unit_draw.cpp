@@ -16,7 +16,7 @@ RGB at(Buffer& b, Coord3D dims, lengthType x, lengthType y, lengthType z) {
 bool isBlack(RGB c) { return c.r == 0 && c.g == 0 && c.b == 0; }
 }  // namespace
 
-// drawPixel writes inside the grid and silently clips outside it (no out-of-bounds write).
+// mm::draw::pixel() writes inside the grid and silently clips outside it (no out-of-bounds write).
 TEST_CASE("draw: pixel writes in-bounds and clips out-of-bounds") {
     Buffer buf;
     Coord3D dims{4, 4, 1};
@@ -83,6 +83,27 @@ TEST_CASE("draw: a line partly off the grid clips cleanly") {
     CHECK_FALSE(isBlack(at(buf, dims, 2, 2, 0)));   // on-grid start lit
     CHECK_FALSE(isBlack(at(buf, dims, 3, 2, 0)));   // last on-grid cell lit
     // (cells x>=4 don't exist; the test passing without a crash proves the clip)
+}
+
+// The `shorten` parameter pulls the far endpoint back toward `a` by shorten/255 (with WLEDMM *2
+// rounding), so an effect can sweep a partial segment. For a→b = (0,0)→(8,0): shorten 255 draws the
+// whole line (tip at 8), 128 ≈ half (tip at (16*128/255+1)/2 = 4), 1 = just the start pixel (tip 0),
+// 0 = nothing. This pins the rounding of the shorten branch, previously untested.
+TEST_CASE("draw: line shorten pulls the far endpoint back toward the start") {
+    Coord3D dims{9, 1, 1};
+    auto litUpTo = [&](uint8_t shorten) {
+        Buffer buf; REQUIRE(buf.allocate(9, 3));
+        draw::line(buf, dims, {0, 0, 0}, {8, 0, 0}, {0, 0, 255}, shorten);
+        int last = -1;
+        for (lengthType x = 0; x < 9; x++) if (!isBlack(at(buf, dims, x, 0, 0))) last = x;
+        return last;   // highest lit x, or -1 if nothing drawn
+    };
+    CHECK(litUpTo(255) == 8);   // full line reaches the far endpoint
+    CHECK(litUpTo(128) == 4);   // ~half: tip pulled back to x=4
+    CHECK(litUpTo(1)   == 0);   // only the start pixel
+    CHECK(litUpTo(0)   == -1);  // shorten 0 draws nothing
+    // Monotonic: a larger shorten never draws a shorter segment.
+    CHECK(litUpTo(200) >= litUpTo(100));
 }
 
 namespace {
@@ -163,4 +184,36 @@ TEST_CASE("draw: blur spreads in 2D and 3D and is safe at degenerate sizes") {
         draw::blur(buf, dims, 0);                       // amt 0 returns immediately
         CHECK(at(buf, dims, 0, 0, 0).r == 200);
     }
+}
+
+// A glyph blits in the correct orientation — neither X-mirrored (a 'b' as a 'd') nor Y-flipped.
+// 'L' is the ideal probe: its vertical bar must be on the LEFT and its foot on the BOTTOM row. A
+// regression here (reading the wrong column bit or the wrong row direction) is what made the DemoReel
+// name overlay render each letter mirrored on the display.
+TEST_CASE("draw: glyph renders upright and un-mirrored (the 'L' probe)") {
+    Buffer buf;
+    const auto& f = fonts::kFont6x8;                 // 6x8: 'L' bar at col 1, foot on row 6
+    Coord3D dims{static_cast<lengthType>(f.width), static_cast<lengthType>(f.height), 1};
+    REQUIRE(buf.allocate(f.width * f.height, 3));
+    draw::glyph(buf, dims, f, 'L', 0, 0, {255, 255, 255});
+
+    // The vertical bar is on the LEFT (column 1 lit down the height), not mirrored to the right.
+    int litLeft = 0, litRight = 0;
+    for (lengthType y = 0; y < f.height; y++) {
+        if (!isBlack(at(buf, dims, 1, y, 0))) litLeft++;                       // left bar column
+        if (!isBlack(at(buf, dims, static_cast<lengthType>(f.width - 1), y, 0))) litRight++;  // right edge
+    }
+    CHECK(litLeft >= 6);    // the bar runs down most of the glyph on the left
+    CHECK(litRight <= 1);   // the right edge only carries the foot's last pixel (not a mirrored bar)
+
+    // The foot is on the BOTTOM row (highest y), and the top row is just the bar (not the foot).
+    int bottomLit = 0;
+    for (lengthType x = 0; x < f.width; x++)
+        if (!isBlack(at(buf, dims, x, static_cast<lengthType>(f.height - 2), 0))) bottomLit++;  // row 6 (row 7 is blank)
+    CHECK(bottomLit >= 4);  // the foot spans several columns near the bottom
+    // The top row has only the single bar pixel, not the foot — so top != bottom (Y not flipped).
+    int topLit = 0;
+    for (lengthType x = 0; x < f.width; x++)
+        if (!isBlack(at(buf, dims, x, 0, 0))) topLit++;
+    CHECK(topLit == 1);     // just the bar at the top
 }

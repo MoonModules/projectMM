@@ -76,6 +76,14 @@ Study the proven audio pipeline in MoonLight / WLED-MM (FFT band layout, AGC, be
 
 ## Effects and preview
 
+### DemoReel: extrude hosted lower-D effects (pending)
+
+DemoReel hosts one effect at a time and drives its `loop()` directly. A hosted **D1/D2** effect only writes its own slice (D1 → the x=0 column; D2 → the z=0 plane), and — unlike a normal Layer child — it does NOT get `Layer::extrude()` applied, so on a 2D/3D grid its output stays on one column/slice instead of spreading. A first fix (call `layer()->extrude(child->dimensions())` after the child's `loop()`, mirroring `Layer::loop`) **crashed the test suite with a heap/vtable smash** — `Layer::extrude` copies within `buffer_` using the Layer's `width_/height_/depth_`, and something in the reel's host path leaves those out of sync with the allocated buffer (root-cause not yet pinned). Redo it carefully: verify the Layer's dims match its buffer at the extrude call, add a bounds guard in `extrude` (or a reel-local extrude that reads the child's real dims/buffer), and pin it with a DemoReel test that hosts a D1 and a D2 effect on a 3D grid and checks the spread. Until then the reel renders D1/D2 hosts on a single slice (visible but not full-grid) — acceptable, not a crash.
+
+### A real 2D/3D PacMan (pending)
+
+The migrated 1D PacMan and 1D Ant effects were removed — a chase rendered on a single strip reads as a blob of moving dots, not a game, so they weren't worth keeping. A proper **2D (or 3D) PacMan** — an actual maze, Pac-Man and ghosts navigating it, power dots, the blue-ghost flee state — would be a genuinely fun signature effect. Build it fresh as a grid game (not a strip port); the WLED/MoonLight 1D versions are reference for the state machine only, not the rendering.
+
 ### Add real z-axis variation to 2D effects (pending)
 
 Only **NoiseEffect**, **PlasmaEffect** and **RipplesEffect** have z-aware math. The other honest-D2 effects use `Layer::extrude` to duplicate the z=0 plane, so every z-slice is identical on 3D layers. Candidates for genuine D3 promotion: Metaballs/GlowParticles (add z to blob coordinates), Plasma palette/Spiral (add z-driven phase term), Fire (z-drift heat grid), Rings/LavaLamp/Checkerboard/Particles (add z to each element). Prioritise after seeing real 3D installations; each promoted effect also needs its `dynamicBytes` budget for the full 3D buffer.

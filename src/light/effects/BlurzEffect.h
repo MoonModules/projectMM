@@ -85,10 +85,10 @@ public:
         // Decide where the dot lands this frame.
         int segLoc;
         if (freqMap && f->peakHz > 0) {
-            // Map the dominant frequency to a position. WLED uses a log10 placement between ~1.78
-            // (10^1.78 ≈ 60 Hz, just under the 80 Hz floor) and MAX_FREQ_LOG10 = log10(11025) ≈ 4.0424.
-            // RECONSTRUCTED: the BlurzEffect source in the fetch is incomplete; this freqMap placement
-            // is the documented WLED-SR mapping (round((log10(majorPeak) - 1.78) * maxLen / (MAX_FREQ_LOG10 - 1.78))).
+            // Map the dominant frequency f->peakHz to a position along the strip on a log10 scale,
+            // so pitch drives the dot: kLoLog10 (10^1.78 ≈ 60 Hz, just under the 80 Hz mic floor)
+            // maps to index 0 and kMaxFreqLog10 (log10(11025) ≈ 4.0424) maps to index maxLen. The
+            // dot walks from one end to the other as the dominant frequency rises through the band.
             constexpr float kMaxFreqLog10 = 4.0424f;   // log10(11025)
             constexpr float kLoLog10      = 1.78f;     // ~60 Hz, just below the 80 Hz mic floor
             const float lp = log10f(static_cast<float>(f->peakHz));
@@ -96,8 +96,8 @@ public:
                 roundf((lp - kLoLog10) * static_cast<float>(maxLen) / (kMaxFreqLog10 - kLoLog10)));
             segLoc = freqLocn;
         } else if (geqScanner) {
-            // RECONSTRUCTED: a steady sweep across the strip (one pixel per frame, wrapping). The doc
-            // describes a scanning cursor for geqScanner; this is the textbook scanning-position form.
+            // geqScanner sweeps the dot steadily across the strip, one pixel per frame, wrapping at
+            // maxLen — a scanning cursor independent of the audio content's position.
             segLoc = scanPos_;
             scanPos_ = static_cast<int>((scanPos_ + 1) % maxLen);
         } else {

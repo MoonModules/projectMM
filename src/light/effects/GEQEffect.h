@@ -54,13 +54,14 @@ public:
     // One peak tracker per column: previousBarHeight[width]. WLED stores this in the segment's data
     // block, sized to the column count and zero-initialised; matched here with a heap allocation that
     // re-sizes only when the column count changes, zeroed on (re)build so a grid/control change starts
-    // every peak at the floor.
+    // every peak at the floor. Entries are lengthType (the row-count type) so a panel taller than 255
+    // rows doesn't truncate the remembered peak height.
     void onBuildState() override {
         const size_t cols = static_cast<size_t>(width() > 0 ? width() : 0);
         if (enabled() && cols > 0) {
             if (cols != peakCount_) {
                 releasePeaks();
-                peaks_ = static_cast<uint8_t*>(platform::alloc(cols * sizeof(uint8_t)));
+                peaks_ = static_cast<lengthType*>(platform::alloc(cols * sizeof(lengthType)));
                 if (peaks_) peakCount_ = cols;
             }
             if (peaks_) for (size_t i = 0; i < peakCount_; i++) peaks_[i] = 0;  // zero-init, like WLED
@@ -68,7 +69,7 @@ public:
             releasePeaks();
         }
         rippleCounter_ = 0;
-        setDynamicBytes(peakCount_ * sizeof(uint8_t));
+        setDynamicBytes(peakCount_ * sizeof(lengthType));
         MoonModule::onBuildState();
     }
 
@@ -131,9 +132,9 @@ public:
             // Per-column peak: rise instantly to a new high, otherwise fall slowly. peaks_[x] is the
             // row count (0..rows) the dot currently sits at, measured from the floor.
             if (barHeight > peaks_[x]) {
-                peaks_[x] = static_cast<uint8_t>(barHeight);
+                peaks_[x] = static_cast<lengthType>(barHeight);
             } else if (fallThisFrame && peaks_[x] > 0) {
-                peaks_[x] = static_cast<uint8_t>(peaks_[x] - 1);   // RECONSTRUCTED: WLED's peak decays one row per ripple tick
+                peaks_[x] = static_cast<lengthType>(peaks_[x] - 1);   // RECONSTRUCTED: WLED's peak decays one row per ripple tick
             }
 
             // Fill the bar from the floor (row rows-1) up to barHeight rows.
@@ -182,7 +183,7 @@ private:
         peakCount_ = 0;
     }
 
-    uint8_t* peaks_ = nullptr;     // previousBarHeight[width]: per-column peak-dot row (0..rows from floor)
+    lengthType* peaks_ = nullptr;  // previousBarHeight[width]: per-column peak-dot row (0..rows from floor)
     size_t   peakCount_ = 0;       // number of peak entries allocated (== width)
     uint8_t  rippleCounter_ = 0;   // counts frames toward the next peak-fall step (gated by `ripple`)
 };

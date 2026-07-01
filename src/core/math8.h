@@ -82,12 +82,15 @@ constexpr uint8_t qsub8(uint8_t a, uint8_t b) {
 // is the recognisable in-place-channel-scale spelling; one definition, two names.
 constexpr uint8_t nscale8(uint8_t val, uint8_t scale) { return scale8(val, scale); }
 
-// map8: rescale a 0..255 input onto the range [rangeStart, rangeEnd] (FastLED's map8). For
-// rangeEnd >= rangeStart it's rangeStart + scale8(in, rangeEnd-rangeStart). Used to turn an audio
-// band (0..255) into a bar height, a line length, etc.
+// map8: rescale a 0..255 input onto the range [rangeStart, rangeEnd]. FastLED documents this as
+// map8(in, lo, hi) == map(in, 0, 255, lo, hi), i.e. the input top (255) reaches `hi` exactly. The
+// earlier `lo + scale8(in, hi-lo)` form used scale8's /256, which made `hi` unreachable and
+// collapsed a one-step span (a bar height of 1 could never be reached) — the bug this fixes. Div by
+// 255 (not >>8) so in=255 lands on hi; span held in uint16 so hi=255,lo=0 doesn't wrap.
+// Used to turn an audio band (0..255) into a bar height, a line length, etc.
 constexpr uint8_t map8(uint8_t in, uint8_t rangeStart, uint8_t rangeEnd) {
-    const uint8_t width = static_cast<uint8_t>(rangeEnd - rangeStart);
-    return static_cast<uint8_t>(rangeStart + scale8(in, width));
+    const uint16_t span = static_cast<uint16_t>(rangeEnd - rangeStart);
+    return static_cast<uint8_t>(rangeStart + (static_cast<uint16_t>(in) * span) / 255u);
 }
 
 // --- Timing / beat ----------------------------------------------------------

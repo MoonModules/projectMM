@@ -50,7 +50,7 @@ public:
         if (wanted != nbStars_ || count != lightCount_) {
             release();
             if (wanted > 0) {
-                indexes_    = static_cast<uint16_t*>(platform::alloc(wanted * sizeof(uint16_t)));
+                indexes_    = static_cast<nrOfLightsType*>(platform::alloc(wanted * sizeof(nrOfLightsType)));
                 fadeDir_    = static_cast<uint8_t*>(platform::alloc(wanted));
                 brightness_ = static_cast<uint8_t*>(platform::alloc(wanted));
                 colors_     = static_cast<uint8_t*>(platform::alloc(wanted));
@@ -63,7 +63,7 @@ public:
                 }
             }
         }
-        setDynamicBytes(nbStars_ ? nbStars_ * (sizeof(uint16_t) + 3) : 0);
+        setDynamicBytes(nbStars_ ? nbStars_ * (sizeof(nrOfLightsType) + 3) : 0);
     }
 
     void teardown() override { release(); setDynamicBytes(0); }
@@ -82,7 +82,7 @@ public:
         draw::fade(buf, 50);
 
         for (size_t i = 0; i < nbStars_; i++) {
-            const uint16_t index = indexes_[i];
+            const nrOfLightsType index = indexes_[i];
             // Decode the linear index back to a grid cell (index < nrOfLights → always in bounds).
             const lengthType x = static_cast<lengthType>(index % w);
             const lengthType y = static_cast<lengthType>((index / w) % h);
@@ -110,7 +110,7 @@ public:
                 brightness_[i] = b > speed ? static_cast<uint8_t>(b - speed) : 0;
                 draw::pixel(buf, dims, p, color);
                 if (brightness_[i] == 0) {
-                    indexes_[i] = static_cast<uint16_t>(rng_.next16() % count);
+                    indexes_[i] = randomIndex(count);
                     fadeDir_[i] = 1;
                 }
                 if (rng_.next8() < 10) fadeDir_[i] = 1;
@@ -119,7 +119,7 @@ public:
     }
 
 private:
-    uint16_t* indexes_    = nullptr;  // linear cell index per star (< nrOfLights)
+    nrOfLightsType* indexes_    = nullptr;  // linear cell index per star (< nrOfLights)
     uint8_t*  fadeDir_    = nullptr;  // 0 = fading down, 1 = fading up
     uint8_t*  brightness_ = nullptr;  // current 0..255 brightness per star
     uint8_t*  colors_     = nullptr;  // per-star palette index (used only when usePalette)
@@ -128,6 +128,20 @@ private:
     Random8   rng_{0x57A55C1Eu};
 
     lengthType depthDim() const { return depth() > 0 ? depth() : 1; }
+
+    // A uniform cell pick over 0..count-1. nrOfLightsType is uint32_t on PSRAM builds (>65535 lights),
+    // so a single next16() draw can't reach the top of a large grid — compose a full-width draw from
+    // two 16-bit draws when the index type is wider than 16 bits, then take it modulo count. On the
+    // no-PSRAM (uint16_t) build this collapses to the plain next16() pick.
+    nrOfLightsType randomIndex(nrOfLightsType count) {
+        if (count == 0) return 0;
+        if constexpr (sizeof(nrOfLightsType) > sizeof(uint16_t)) {
+            const uint32_t draw = (static_cast<uint32_t>(rng_.next16()) << 16) | rng_.next16();
+            return static_cast<nrOfLightsType>(draw % count);
+        } else {
+            return static_cast<nrOfLightsType>(rng_.next16() % count);
+        }
+    }
 
     void release() {
         if (indexes_)    { platform::free(indexes_);    indexes_    = nullptr; }
@@ -140,7 +154,7 @@ private:
     // Seed every star: random cell, random fade direction, random mid brightness, random colour.
     void initStars(nrOfLightsType count) {
         for (size_t i = 0; i < nbStars_; i++) {
-            indexes_[i]    = static_cast<uint16_t>(rng_.next16() % count);
+            indexes_[i]    = randomIndex(count);
             fadeDir_[i]    = rng_.below(2);          // 0 or 1   (random8(2))
             brightness_[i] = rng_.below(1, 254);     // 1..253   (random8(1,254))
             colors_[i]     = rng_.next8();

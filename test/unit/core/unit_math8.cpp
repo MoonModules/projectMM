@@ -85,3 +85,16 @@ TEST_CASE("math8: atan2_8 and dist8 cover the basics") {
     CHECK(dist8(-10, 0) == 10);            // sign-independent
     CHECK(dist8(10, 10) > 10);             // diagonal longer than one axis
 }
+
+// map8 rescales 0..255 onto [lo,hi] inclusively — the top of the input must REACH hi (FastLED's
+// map8 == map(in,0,255,lo,hi)). Regression: an earlier scale8-based form left hi unreachable, so a
+// one-step span (a bar height of 1) collapsed to 0 — the bug GEQ3D's height mapping hit.
+TEST_CASE("math8: map8 reaches both range ends, including one-step spans") {
+    CHECK(map8(0, 0, 255) == 0);           // input floor → range floor
+    CHECK(map8(255, 0, 255) == 255);       // input top → range top (no wrap on the 256-span)
+    CHECK(map8(0, 10, 20) == 10);
+    CHECK(map8(255, 10, 20) == 20);        // reaches hi exactly
+    CHECK(map8(255, 0, 1) == 1);           // a one-step span: height 1 IS reachable (was 0)
+    CHECK(map8(0, 0, 1) == 0);
+    CHECK(map8(128, 0, 8) >= 4);           // mid input lands mid range (bar half-height)
+}

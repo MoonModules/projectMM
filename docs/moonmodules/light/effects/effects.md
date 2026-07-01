@@ -1,8 +1,10 @@
 # Effects
 
-Every effect, one block each: its preview, what it does, and what each control means — together. An effect writes per-pixel colour into its [Layer](../Layer.md)'s buffer each tick; [modifiers](../modifiers/modifiers.md) reshape the result and a [driver](../drivers/) sends it out. Effects that name an index colour read the global palette (the `palette` control on [Drivers](../Drivers.md)) via `colorFromPalette`. Each block's emoji are its `tags()` (origin/creator/audio — see the [tag emoji legend](../../../architecture.md#tag-emoji-legend)); **Dim** is its native axes ([Layer](../Layer.md) extrudes a lower-dim effect onto a bigger grid). Effects are grouped into sections by origin, and each block carries that effect's preview, behaviour, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../../backlog/folder-structure-proposal.md).)
+Every effect, one block each: its preview, what it does, and what each control means — together. An effect writes per-pixel colour into its [Layer](../Layer.md)'s buffer each tick; [modifiers](../modifiers/modifiers.md) reshape the result and a [driver](../drivers/PreviewDriver.md) sends it out. Effects that name an index colour read the global palette (the `palette` control on [Drivers](../Drivers.md)) via `colorFromPalette`. Each block's emoji are its `tags()` (origin/creator/audio — see the [tag emoji legend](../../../architecture.md#tag-emoji-legend)); **Dim** is its native axes ([Layer](../Layer.md) extrudes a lower-dim effect onto a bigger grid). Effects are grouped into sections by origin, and each block carries that effect's preview, behaviour, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../../backlog/folder-structure-proposal.md).)
 
 **Jump to:** [MoonLight](#moonlight-effects) · [MoonModules](#moonmodules-effects) · [WLED](#wled-effects) · [FastLED](#fastled-effects) · [projectMM-native](#projectmm-native-effects)
+
+> Some WLED-origin effects show a preview gif from [WLED-Utils](https://github.com/scottrbailey/WLED-Utils) by scottrbailey (the canonical WLED effect gif set, cross-linked with credit) as an interim illustration — these show WLED's rendering and are replaced with our own capture once the effect is bench-verified. Effects with a local `../../../assets/…` gif already show our own output.
 
 ## MoonLight effects
 
@@ -243,6 +245,8 @@ A perspective starfield: stars approach the viewer from a vanishing point, brigh
 
 ### StarSky 💫 · 3D
 
+<img src="../../../assets/light/effects/StarSkyEffect.gif" width="300" alt="StarSky effect preview">
+
 Twinkling stars at random light positions, each fading in and out independently over a dark background.
 
 - `speed` — fade rate per frame (how fast each star brightens/dims).
@@ -251,22 +255,21 @@ Twinkling stars at random light positions, each fading in and out independently 
 
 [Tests](../../../tests/unit-tests.md#starskyeffect)
 
+<a id="text"></a>
+
+### Text 💫 · 2D
+
+Renders a multi-line string in a bitmap font. Static by default (laid out top-left, each newline dropping one font-height, clipped where it runs off the grid); turn on `scroll` to march the whole block leftwards as a wrapping marquee. Text colour comes from the active palette.
+
+- `text` — the string to show; a **multi-line text area** (each line renders on its own row).
+- `scroll` — off (default) = static; on = horizontal marquee.
+- `font` — glyph size (`4x6` compact, `6x8` larger).
+- `speed` — marquee speed (only used when `scroll` is on).
+- `hue` — palette index for the text colour.
+
+[Tests](../../../tests/unit-tests.md#texteffect)
+
 ## MoonModules effects
-
-<a id="ant"></a>
-
-### Ant 💫🌙 · 1D
-
-Ants walking a 1D strip with elastic collisions; optionally they gather food (carrying a coloured pixel back) and either pass through or bounce off each other.
-
-- `antSpeed` — how fast the ants move.
-- `nrOfAnts` — ant count (scaled by strip length).
-- `antSize` — pixels per ant.
-- `blur` — spatial blur applied to the strip.
-- `gatherFood` — ants pick up and carry food to the ends.
-- `passBy` — ants pass through each other instead of colliding.
-
-[Tests](../../../tests/unit-tests.md#anteffect)
 
 <a id="gameoflife"></a>
 
@@ -291,6 +294,8 @@ Conway's cellular automaton generalised to 2D/3D: selectable rulesets (+ custom 
 <a id="geq"></a>
 
 ### GEQ 💫🐙📊 · 2D
+
+<img src="https://raw.githubusercontent.com/scottrbailey/WLED-Utils/master/gifs/FX_139.gif" width="300" alt="GEQ effect preview" title="WLED effect preview — WLED-Utils by scottrbailey"> <!-- preview: WLED-Utils (scottrbailey), WLED FX 139; replace with our own capture once bench-verified -->
 
 A flat graphic equaliser: the 16 audio bands rise as vertical bars from the bottom, with optional smoothing between bars, per-bar palette colouring, and falling peak markers.
 
@@ -327,23 +332,6 @@ A smoothly drifting value-noise field: each pixel samples 3D noise (grid positio
 
 [Tests](../../../tests/unit-tests.md#noise2deffect)
 
-<a id="pacman"></a>
-
-### PacMan 💫🌙 · 1D
-
-A 1D Pac-Man chase: Pac-Man eats power dots along the strip, ghosts turn blue and flee when a power dot is eaten, blinking as the effect resets.
-
-- `speed` — movement speed.
-- `#powerdots` — number of power dots placed along the strip.
-- `blinkDistance` — how close to the start ghosts begin blinking back to normal.
-- `blur` — spatial blur applied to the strip.
-- `#ghosts` — number of ghosts (2–8).
-- `dots` — draw the trail of white dots ahead of Pac-Man.
-- `smear` — keep a motion smear instead of clearing each frame.
-- `compact` — denser dot spacing.
-
-[Tests](../../../tests/unit-tests.md#pacmaneffect)
-
 <a id="paintbrush"></a>
 
 ### PaintBrush 💫🌙📊 · 3D
@@ -377,6 +365,8 @@ Falling Tetris-style blocks: each column drops a brick that lands on the growing
 
 ### Blurz 🐙📊 · 2D
 
+<img src="https://raw.githubusercontent.com/scottrbailey/WLED-Utils/master/gifs/FX_163.gif" width="300" alt="Blurz effect preview" title="WLED effect preview — WLED-Utils by scottrbailey"> <!-- preview: WLED-Utils (scottrbailey), WLED FX 163; replace with our own capture once bench-verified -->
+
 Audio-reactive blurred dots: one frequency band per frame lights a dot whose position maps to that band (or to the major-peak frequency), then the whole frame is blurred for soft trails.
 
 - `fadeRate` — background decay per frame.
@@ -390,6 +380,8 @@ Audio-reactive blurred dots: one frequency band per frame lights a dot whose pos
 
 ### BouncingBalls 🐙 · 2D
 
+<img src="https://raw.githubusercontent.com/scottrbailey/WLED-Utils/master/gifs/FX_091.gif" width="300" alt="BouncingBalls effect preview" title="WLED effect preview — WLED-Utils by scottrbailey"> <!-- preview: WLED-Utils (scottrbailey), WLED FX 91; replace with our own capture once bench-verified -->
+
 A row of balls per column bounce under gravity, each losing energy on impact and relaunching when it stops, palette-coloured by ball index over a fading background.
 
 - `grav` — gravity strength (higher = faster fall, snappier bounce).
@@ -400,6 +392,8 @@ A row of balls per column bounce under gravity, each losing energy on impact and
 <a id="freqmatrix"></a>
 
 ### FreqMatrix 🐙📊 · 1D
+
+<img src="https://raw.githubusercontent.com/scottrbailey/WLED-Utils/master/gifs/FX_138.gif" width="300" alt="FreqMatrix effect preview" title="WLED effect preview — WLED-Utils by scottrbailey"> <!-- preview: WLED-Utils (scottrbailey), WLED FX 138; replace with our own capture once bench-verified -->
 
 A 1D scrolling frequency display: each frame shifts the strip and injects a new pixel at one end whose hue comes from the dominant frequency and whose brightness from the volume.
 
@@ -415,6 +409,8 @@ A 1D scrolling frequency display: each frame shifts the strip and injects a new 
 
 ### Lissajous 🐙 · 2D
 
+<img src="https://raw.githubusercontent.com/scottrbailey/WLED-Utils/master/gifs/FX_176.gif" width="300" alt="Lissajous effect preview" title="WLED effect preview — WLED-Utils by scottrbailey"> <!-- preview: WLED-Utils (scottrbailey), WLED FX 176; replace with our own capture once bench-verified -->
+
 A Lissajous curve traced across the grid from two phase-shifted `sin8`/`cos8` sweeps, palette-coloured along its length, with a fading trail.
 
 - `xFrequency` — the x-axis sweep frequency (sets the curve's lobe count).
@@ -426,6 +422,8 @@ A Lissajous curve traced across the grid from two phase-shifted `sin8`/`cos8` sw
 <a id="noisemeter"></a>
 
 ### NoiseMeter 🐙📊 · 3D
+
+<img src="https://raw.githubusercontent.com/scottrbailey/WLED-Utils/master/gifs/FX_136.gif" width="300" alt="NoiseMeter effect preview" title="WLED effect preview — WLED-Utils by scottrbailey"> <!-- preview: WLED-Utils (scottrbailey), WLED FX 136; replace with our own capture once bench-verified -->
 
 An audio VU meter rendered as a noise bar: the volume sets how many rows light from the bottom, each row coloured by drifting Perlin noise, filling the full width and depth.
 
@@ -501,10 +499,12 @@ A whole-grid VU meter: every light pulses with the mic level, colour indexing th
 
 ### DemoReel 🎬 · 3D
 
-A demo reel: plays every other registered effect in turn, auto-advancing on a timer, so one Layer cycles the whole library hands-free. It hosts a single live effect at a time (created from the effect registry, rendered into this Layer) and swaps to the next when the interval elapses — new effects are picked up automatically. The `status` line shows which effect is playing (e.g. `playing: Plasma (3/20)`). It never hosts itself, and it plays effects in sequence rather than compositing them (layering is the [Layer](../Layer.md) stack's job).
+A demo reel: plays every other registered effect in turn, auto-advancing on a timer, so one Layer cycles the whole library hands-free — the showcase/test tool for everything. It hosts a single live effect at a time (created from the effect registry, rendered into this Layer) and swaps to the next when the interval elapses — new effects are picked up automatically. It can also pick a fresh palette each cycle and overlay the playing effect's name. The `status` line shows which effect is playing (e.g. `playing: Plasma (3/20)`). It never hosts itself, and it plays effects in sequence rather than compositing them (layering is the [Layer](../Layer.md) stack's job).
 
 - `interval` — seconds each effect plays before advancing (1–120).
 - `shuffle` — jump to a random next effect instead of registry order.
+- `randomPalette` — pick a random palette on each cycle (showcases the palette set); default on.
+- `showName` — overlay the playing effect's name in a small font; default on.
 
 [Tests](../../../tests/unit-tests.md#demoreeleffect)
 

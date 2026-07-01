@@ -200,7 +200,12 @@ private:
         // it sits nearest. (MoonLight's drawCube, with the isMapped()-skip and sizeX++/etc dropped.)
         void drawCube(Buffer& buf, Coord3D dims, lengthType sx, lengthType sy, lengthType sz) const {
             const int sizeX = MAXi(sx - 1, 1), sizeY = MAXi(sy - 1, 1), sizeZ = MAXi(sz - 1, 1);
-            const float scaleX = (SIZE + 1.0f) / sizeX, scaleY = (SIZE + 1.0f) / sizeY, scaleZ = (SIZE + 1.0f) / sizeZ;
+            // Integer form of round(coord * (SIZE+1) / size): for non-negative operands round(a/b) is
+            // (2a + b) / (2b), which reproduces round(coord*scale) exactly at these magnitudes — no
+            // per-voxel float multiply or round() in the hot loop. num = 2·(SIZE+1) is the shared
+            // numerator factor; denX/Y/Z = 2·size are the doubled per-axis denominators.
+            const int num = 2 * (SIZE + 1);
+            const int denX = 2 * sizeX, denY = 2 * sizeY, denZ = 2 * sizeZ;
             const int halfX = sizeX / 2, halfY = sizeY / 2, halfZ = sizeZ / 2;
 
             // Red, DarkOrange, Blue, Green, Yellow, White.
@@ -211,9 +216,9 @@ private:
                 for (int y = 0; y < sy; y++)
                     for (int z = 0; z < sz; z++) {
                         const Coord3D led{static_cast<lengthType>(x), static_cast<lengthType>(y), static_cast<lengthType>(z)};
-                        const int nX = constrainI(roundI(x * scaleX) - 1, 0, SIZE - 1);
-                        const int nY = constrainI(roundI(y * scaleY) - 1, 0, SIZE - 1);
-                        const int nZ = constrainI(roundI(z * scaleZ) - 1, 0, SIZE - 1);
+                        const int nX = constrainI((x * num + sizeX) / denX - 1, 0, SIZE - 1);
+                        const int nY = constrainI((y * num + sizeY) / denY - 1, 0, SIZE - 1);
+                        const int nZ = constrainI((z * num + sizeZ) / denZ - 1, 0, SIZE - 1);
                         const int distX = MINi(x, sizeX - x), distY = MINi(y, sizeY - y), distZ = MINi(z, sizeZ - z);
                         const int dist = MINi(distX, MINi(distY, distZ));
 
@@ -277,10 +282,9 @@ private:
         cube_.drawCube(buf, dims, w, h, d);
     }
 
-    // Inline integer helpers (MoonLight's MIN/MAX/round/constrain).
+    // Inline integer helpers (MoonLight's MIN/MAX/constrain).
     static int MINi(int a, int b) { return a < b ? a : b; }
     static int MAXi(int a, int b) { return a > b ? a : b; }
-    static int roundI(float v) { return static_cast<int>(v < 0 ? v - 0.5f : v + 0.5f); }
     static int constrainI(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
     static constexpr int kMaxMoves = 100;   // moveList capacity (cubeSize*10 + 0..19 ≤ 99 for size ≤ 8)

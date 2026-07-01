@@ -5,6 +5,7 @@
 #include "core/color.h"          // RGB, scale8
 #include "core/math8.h"          // qadd8 — saturating add for blur's seep accumulation
 #include "light/Palette.h"       // blend(RGB,RGB,amt) — for blendPixel
+#include "light/fonts.h"         // fonts::Font — bitmap glyph tables for draw::text
 
 // Geometry draw primitives for effects/modifiers: set a pixel, draw a line — bounds-clipped,
 // integer-only, working 1D→3D against the flat light Buffer. The "core absorbs the hard part"
@@ -204,6 +205,40 @@ inline void fill(Buffer& buf, RGB c) {
         if (cpl >= 2) d[off + 1] = c.g;
         if (cpl >= 3) d[off + 2] = c.b;
     }
+}
+
+// Blit one glyph of `font` at grid position (x, y). Each of the font's `height` rows is one byte;
+// bit set → pixel on, columns MSB-first across the glyph's `width` (bit (7) is the left column, down
+// to bit (8-width)). Only printable ASCII 32..126 is drawn; anything else is skipped (a gap). Pixels
+// are clipped to the grid (draw::pixel). Prior art: the WLED/MoonLight console-font blitter shape.
+inline void glyph(Buffer& buf, Coord3D dims, const fonts::Font& font, char ch, lengthType x, lengthType y, RGB c) {
+    if (ch < 32 || ch > 126) return;
+    const uint8_t idx = static_cast<uint8_t>(ch - 32);
+    const uint8_t* rows = font.rows + static_cast<size_t>(idx) * font.height;
+    for (uint8_t ry = 0; ry < font.height; ry++) {
+        const uint8_t bits = rows[ry];
+        // Columns are MSB-first: the LEFTMOST glyph column (rx=0) is bit 7, the next bit 6, … so
+        // read column rx from bit (7 - rx). (Reading (rx + 8-width) instead mirrors each glyph
+        // left-to-right — a 'b' renders as a 'd'.)
+        for (uint8_t rx = 0; rx < font.width; rx++)
+            if ((bits >> (7 - rx)) & 0x01)
+                pixel(buf, dims, {static_cast<lengthType>(x + rx), static_cast<lengthType>(y + ry), 0}, c);
+    }
+}
+
+// Draw a NUL-terminated string starting at (x, y), advancing `font.width` per character. `\n` starts
+// a new line one `font.height` down and resets x to the start column (multi-line layout). Off-grid
+// glyphs clip. Returns the total pixel width drawn on the first line (for scroll bookkeeping).
+inline lengthType text(Buffer& buf, Coord3D dims, const fonts::Font& font, const char* str,
+                       lengthType x, lengthType y, RGB c) {
+    if (!str) return 0;
+    lengthType cx = x, cy = y;
+    for (const char* p = str; *p; p++) {
+        if (*p == '\n') { cx = x; cy = static_cast<lengthType>(cy + font.height); continue; }
+        glyph(buf, dims, font, *p, cx, cy, c);
+        cx = static_cast<lengthType>(cx + font.width);
+    }
+    return static_cast<lengthType>(cx - x);
 }
 
 }  // namespace draw

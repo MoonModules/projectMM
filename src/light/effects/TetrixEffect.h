@@ -144,8 +144,11 @@ public:
             } else {
                 // step > 2: the column is full and waiting to blank. While the delay is in the
                 // future, fade the whole column toward black; once it elapses, reset the column.
+                // The compare is the wrap-safe signed-difference form ((int32_t)(step - now) > 0)
+                // rather than raw `step > now`, so it stays correct across the 32-bit millis()
+                // wrap (~49 days) — the modular difference fits a signed range for the 2 s delay.
                 d.brick = 0;
-                if (d.step > now) {
+                if (static_cast<int32_t>(d.step - now) > 0) {
                     for (lengthType i = 0; i < h; i++)
                         draw::blendPixel(buf, dims, {static_cast<lengthType>(x), i, 0}, black, 25);
                 } else {

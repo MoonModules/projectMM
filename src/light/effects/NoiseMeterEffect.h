@@ -84,10 +84,8 @@ public:
                                             static_cast<lengthType>(z)}, col);
         }
 
-        // Scroll the noise field each frame. RECONSTRUCTED — the provided source notes only "aux0 +=
-        // something each frame". These two slow, slightly-detuned oscillators (so the field weaves
-        // rather than scrolling at a constant rate) match WLED's mode_noisemeter(), but were not in the
-        // source text handed over: PO to cross-check the bpm/range pair against the actual WLED source.
+        // Scroll the noise field each frame. aux0 and aux1 are advanced by two slow, slightly-detuned
+        // oscillators (bpm 5 and 4) so the noise field weaves rather than scrolling at a constant rate.
         aux0_ += beatsin8(5, elapsed(), 0, 10);
         aux1_ += beatsin8(4, elapsed(), 0, 10);
     }
