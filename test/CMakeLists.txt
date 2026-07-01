@@ -81,6 +81,7 @@ add_executable(mm_tests
     unit/light/unit_RandomMapModifier.cpp
     unit/light/unit_RotateModifier.cpp
     unit/light/unit_RegionModifier.cpp
+    unit/light/unit_PinwheelModifier.cpp
     unit/light/unit_NoiseEffect.cpp
     unit/light/unit_ParticlesEffect.cpp
     unit/light/unit_PlasmaEffect.cpp

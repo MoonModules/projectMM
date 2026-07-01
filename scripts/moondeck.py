@@ -1819,7 +1819,7 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
             # A standalone <img …> line (the per-module doc pages put the preview gif on its own
             # line above the description). Resolve a relative src to /api/doc-asset/ and keep the
             # width, like the table-cell path does — the allowlist below doesn't cover <img>.
-            if re.fullmatch(r'<img\b[^>]*>', stripped_check):
+            if re.fullmatch(r'<img\b[^>]*>(?:\s*<!--.*-->)?', stripped_check):
                 # Extract each attribute by name, order-independent (an author may write src/alt/width
                 # in any sequence — a fixed-order regex would silently drop the out-of-order ones).
                 def _attr(name):

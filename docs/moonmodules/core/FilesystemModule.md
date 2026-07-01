@@ -50,6 +50,8 @@ A subtree's dirty flag is cleared only after its write succeeds; a failed write 
 
 The `lastSaved` read-only control shows how long ago the last write happened (`"never"`, `"5s ago"`, `"3m ago"`), refreshed each `loop1s()`.
 
+The `filesystem` progress control shows the config-partition usage (bytes used / total), refreshed each `loop1s()` from `platform::filesystemUsed()` / `filesystemTotal()`. It is bound only when the platform reports a real partition (a chip without a data partition, or desktop, reports 0 and the bar is omitted). This bar lives here, on the module that owns the filesystem — not on SystemModule.
+
 ## Conditional visibility (`hidden` flag)
 
 Modules with conditional controls (e.g. NetworkModule's static-IP fields under `addressing=Static`) bind their full control set unconditionally and toggle a `hidden` flag per descriptor:

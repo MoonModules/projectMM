@@ -557,7 +557,7 @@ A module's chips come from three sources, rendered identically on the card and t
 |---|---|---|
 | **Role** (UI-derived) | 🔥 effect · 💎 modifier · 🚥 layout · ☸️ driver · 🛰️ peripheral · 🥞 layer · ⚙️ generic | what kind of module (from `role`, via `ROLE_EMOJI`) |
 | **Dimensionality** (UI-derived) | 📏 1D · 🟦 2D · 🧊 3D | native axes (from `dim`) |
-| **Origin / library** (`tags()`) | 💫 MoonLight · 🐙 WLED · ⚡️ FastLED · *(projectMM-native: none — the default)* | which library the module came from; the [migration](../backlog/moonlight-effect-inventory.md) files docs by this, the emoji filters by it |
+| **Origin / library** (`tags()`) | 💫 MoonLight · 🐙 WLED · ⚡️ FastLED · *(projectMM-native is the default origin — an origin emoji marks a module that came from elsewhere)* | which library the module came from; the [migration](../backlog/moonlight-effect-inventory.md) files docs by this, the emoji filters by it |
 | **Creator** (`tags()`) | 🦅 a named contributor (credited at the introduction site) | individual authorship credit |
 | **Audio** (`tags()`) | 🔊 audio-reactive | reads `AudioModule::latestFrame()` |
 

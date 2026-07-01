@@ -39,7 +39,10 @@ public:
     }
 
     nrOfLightsType lightCount() const override {
-        // Multiply in uint32_t to detect overflow before casting (GridLayout pattern).
+        // A restored/persisted value can be negative (the controls are signed int16); a negative
+        // dimension emits no coordinates in forEachCoord(), so report 0 here to match rather than
+        // casting to uint32_t and wrapping to a huge count. Multiply in uint32_t to detect overflow.
+        if (nrOfTubes <= 0 || ledsPerTube <= 0) return 0;
         uint32_t n = static_cast<uint32_t>(nrOfTubes) * static_cast<uint32_t>(ledsPerTube);
         constexpr uint32_t kMax = std::numeric_limits<nrOfLightsType>::max();
         return static_cast<nrOfLightsType>(n > kMax ? kMax : n);

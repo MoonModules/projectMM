@@ -83,6 +83,8 @@ private:
     uint32_t lastDirtyMs_ = 0;
     uint32_t lastSaveMs_ = 0;
     char lastSaveStr_[24] = "never";  // "lastSaved" read-only control value
+    uint32_t fsUsedVal_ = 0;          // "filesystem" progress: bytes used, refreshed in loop1s
+    uint32_t totalFsVal_ = 0;         // "filesystem" progress: partition total, read once in onBuildControls
     // Shared load/save buffer — load runs once at boot (phase 2), save runs in loop1s after
     // the 2s debounce. Mutually exclusive, so one buffer is enough. Kept off the task stack
     // since 2KB plus recursive applyNode/writeNode frames is uncomfortably close to the ESP32

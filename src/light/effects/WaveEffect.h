@@ -50,14 +50,20 @@ public:
     // The trail is a persistent z=0-plane buffer (w·h·cpl): each frame is faded down, then the new
     // wave drawn on top, so the moving point leaves a tail. Sized off the hot path (cf. Particles).
     void onBuildState() override {
+        const lengthType w = width(), h = height();
         const uint8_t cpl = channelsPerLight();
-        const size_t needed = static_cast<size_t>(width()) * height() * cpl;
+        const size_t needed = static_cast<size_t>(w) * h * cpl;
         if (enabled() && needed > 0) {
             if (needed != trailBytes_) {
                 releaseTrail();
                 trail_ = static_cast<uint8_t*>(platform::alloc(needed));
                 if (trail_) { std::memset(trail_, 0, needed); trailBytes_ = needed; }
+            } else if (w != trailW_ || h != trailH_ || cpl != trailCpl_) {
+                // Same byte count but different geometry (e.g. 8×16 → 16×8): the trail bytes are laid
+                // out for the old w/h, so reusing them smears stale pixels. Clear rather than realloc.
+                std::memset(trail_, 0, trailBytes_);
             }
+            trailW_ = w; trailH_ = h; trailCpl_ = cpl;
         } else {
             releaseTrail();
         }
@@ -121,6 +127,8 @@ private:
 
     uint8_t* trail_ = nullptr;
     size_t   trailBytes_ = 0;
+    lengthType trailW_ = 0, trailH_ = 0;   // geometry the trail bytes are laid out for (clear on change)
+    uint8_t  trailCpl_ = 0;
     uint64_t phase_ = 0;
     uint32_t lastElapsed_ = 0;
     bool     started_ = false;   // first-tick guard: seed lastElapsed_ before the first delta

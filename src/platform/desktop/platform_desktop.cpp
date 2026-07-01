@@ -264,12 +264,6 @@ const char* sdkVersion() {
 #endif
 }
 
-const char* sdkDate() {
-    // Desktop reports the compiler build date, mirroring sdkVersion() (which
-    // reports the compiler).
-    return __DATE__;
-}
-
 const char* coprocessorWifi() {
     return "";   // desktop has no WiFi co-processor
 }

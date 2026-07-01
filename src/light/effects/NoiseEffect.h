@@ -29,13 +29,15 @@ public:
         nrOfLightsType count = nrOfLights();
         nrOfLightsType wh = static_cast<nrOfLightsType>(w) * h;
 
-        // Accumulate phase incrementally — changing BPM doesn't cause a jump.
-        // Factor 32 tuned so 60 BPM at 128-wide gives smooth motion.
+        // Accumulate phase incrementally — changing BPM doesn't cause a jump. phase_ holds the RAW
+        // numerator (dt·bpm·w·64) and the /60000 divide runs only at the sampling point below; dividing
+        // per tick would truncate sub-unit progress to zero on a fast board (short dt) or small grid,
+        // stalling the field. Factor 64 tuned so 60 BPM at 128-wide gives smooth motion.
         uint32_t now = elapsed();
         uint32_t dt = now - lastElapsed_;
         lastElapsed_ = now;
-        phase_ += static_cast<uint64_t>(dt) * bpm * w * 64 / 60000;
-        uint32_t t = static_cast<uint32_t>(phase_);
+        phase_ += static_cast<uint64_t>(dt) * bpm * w * 64;
+        uint32_t t = static_cast<uint32_t>(phase_ / 60000);
 
         // Buffer layout is (z * h * w + y * w + x). For a 2D grid (d == 1) z
         // is always 0 and we sample 2D noise — no perf cost vs. the old 2D-only

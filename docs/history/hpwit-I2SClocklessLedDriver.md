@@ -6,6 +6,12 @@ The library: Yves Bazin's (hpwit) clockless-LED driver that clocks WS2812-class 
 
 > **Authorship note.** Most of the activity in this window is projectMM's own — `ewowi` authored ~53 of the in-window commits, with the rest from the maintainer (Yves Bazin / hpwit) and a couple of others. The IDF 5.5 / arduino-less ESP-IDF / RGBCCT / >65K-LED work below is largely projectMM upstreaming its driver needs into hpwit's library, then tracking the result here.
 
+## June 2026
+
+No user-facing activity: no commits merged to `main` (latest activity is April 6, 2026) and no notable issues.
+
+_Auditability: commits on `main` author-dated 2026-06-01..2026-06-30 = 0 (0 merged); issues created/closed/updated in June 2026 = 0. No versioned release published in June (latest tag `1.4`, 2026-04-06)._
+
 ## April 2026
 
 *~17 commits on `main`, 2026-04-01 … 2026-04-30.*

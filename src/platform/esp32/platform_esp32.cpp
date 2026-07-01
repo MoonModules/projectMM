@@ -28,7 +28,6 @@
 #include "esp_idf_version.h"
 #include "esp_partition.h"
 #include "esp_ota_ops.h"     // for esp_ota_get_running_partition (sysInfo)
-#include "esp_app_desc.h"    // for esp_app_get_description (sdkDate)
 #include "esp_image_format.h"
 #include "esp_flash.h"
 #include "esp_event.h"
@@ -263,13 +262,6 @@ static void netifIPv4(esp_netif_t* netif, uint8_t out[4]) {
 
 const char* sdkVersion() {
     return esp_get_idf_version();
-}
-
-const char* sdkDate() {
-    // The compile date the IDF baked into this image's app descriptor (e.g.
-    // "May 26 2026"). esp_app_get_description() returns a pointer into the
-    // running image header, valid for the program's lifetime.
-    return esp_app_get_description()->date;
 }
 
 const char* coprocessorWifi() {

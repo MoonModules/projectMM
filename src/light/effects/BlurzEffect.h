@@ -25,8 +25,8 @@ namespace mm {
 //
 // Prior art: WLED's "Blurz" audio effect, carried into MoonLight. The per-band colour cursor, the
 // frequency→position map, and the fade-then-blur pipeline are reproduced here, written fresh on
-// EffectBase + the shared draw primitives. Reads AudioModule::latestFrame(); silence → bands all 0 →
-// the strip fades to black, safe on any target and grid size.
+// EffectBase + the shared draw primitives. Reads AudioModule::latestFrame(); with simulation off or no
+// publisher the bands read 0 → the strip fades to black, safe on any target and grid size.
 // Author: Andrew Tuline (WLED-SR), with enhancements by @softhack007 — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 //
 // 1D in spirit (a strip of `nrOfLights` pixels) but declared D2 so it spans a 2D panel as a flat run

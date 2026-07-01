@@ -80,7 +80,9 @@ def find_spec(module_path):
     if not in_moonlive:
         for suffix, page in CONSOLIDATED_PAGES.items():
             if name.endswith(suffix):
-                return page if page.exists() else None
+                if page.exists():
+                    return page
+                break  # consolidated page missing — fall through to the per-module stem search
 
     # Per-module page: match by filename stem anywhere under docs/moonmodules/.
     for md in SPECS.rglob("*.md"):

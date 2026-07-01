@@ -105,8 +105,8 @@ public:
 
         // 4. Render heat to RGB through the active palette: the heat value (0 = cold, 255 = hottest)
         //    is the palette index, so the flame takes the palette's low→high gradient. The Lava
-        //    palette (black→red→orange→yellow→white) gives the classic fire look and is the intended
-        //    default; any palette works (an Ocean/Forest palette makes a blue/green "fire").
+        //    palette (black→red→orange→yellow→white) gives the classic fire look; any palette works
+        //    (an Ocean/Forest palette makes a blue/green "fire").
         //    A completely cold cell (heat 0) always stays black — the "sky" above the flame — rather
         //    than taking the palette's index-0 colour (Lava's is black, but Ocean's is blue, which
         //    would tint the whole background). Only a warm cell is coloured.

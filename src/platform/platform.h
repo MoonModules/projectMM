@@ -68,9 +68,6 @@ constexpr size_t HEAP_RESERVE = 32768;
 void getMacAddress(uint8_t mac[6]);
 const char* chipModel();
 const char* sdkVersion();
-// The date this firmware image was built, from the IDF app descriptor (the
-// compile date baked into every binary). Desktop returns the compiler `__DATE__`.
-const char* sdkDate();
 
 // WiFi co-processor status, for boards whose radio lives on a separate chip (the
 // ESP32-P4 + on-board ESP32-C6 over esp_hosted). Returns a short status string:

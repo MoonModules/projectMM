@@ -107,11 +107,16 @@ public:
 
         if (reverse) value = petals - value - 1;  // Reverse movement
 
-        pos.x = static_cast<lengthType>(value);
-        pos.y = 0;
-        // 2D+ branch (see modifyLogicalSize): the radius becomes the along-petal y.
+        // Route the petal index onto the axis modifyLogicalSize() reshaped to:
+        //  - 2D+ box is {petals, radius+1, 1} → petal on x, the radius along y.
+        //  - 1D  box is {1, petals, 1} → petal on y (x extent is 1, so a petal on x >= 1 would be
+        //    dropped by the layer's logical-bound check, collapsing the pinwheel to a single petal).
         if (modifierSize_.y > 1) {
+            pos.x = static_cast<lengthType>(value);
             pos.y = static_cast<lengthType>(std::sqrt(static_cast<float>(dx * dx + dy * dy)));
+        } else {
+            pos.x = 0;
+            pos.y = static_cast<lengthType>(value);
         }
         pos.z = 0;
         return true;

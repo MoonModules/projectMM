@@ -36,10 +36,22 @@ void FilesystemModule::setup() {
 
 void FilesystemModule::onBuildControls() {
     controls_.addReadOnly("lastSaved", lastSaveStr_, sizeof(lastSaveStr_));
+    // Filesystem-partition usage bar (bytes used / total). Lives here — on the module that owns the
+    // filesystem — not on SystemModule. Read the total once; loop1s refreshes the used value. Bound
+    // only when the platform reports a real partition (desktop / a chip without a data partition
+    // reports 0, so the bar is omitted rather than showing 0/0).
+    totalFsVal_ = static_cast<uint32_t>(platform::filesystemTotal());
+    fsUsedVal_ = static_cast<uint32_t>(platform::filesystemUsed());
+    if (totalFsVal_ > 0) {
+        controls_.addProgress("filesystem", fsUsedVal_, totalFsVal_);
+    }
     MoonModule::onBuildControls();
 }
 
 void FilesystemModule::loop1s() {
+    // Refresh the usage bar first — cheap, and it should track saves even before the mount/scheduler
+    // guards below (the total is fixed; only the used value moves as files are written).
+    if (totalFsVal_ > 0) fsUsedVal_ = static_cast<uint32_t>(platform::filesystemUsed());
     if (!mounted_ || !scheduler_) return;
     updateLastSavedStr();
     if (!dirtyPending_) return;
