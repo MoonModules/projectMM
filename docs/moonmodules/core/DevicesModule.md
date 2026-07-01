@@ -1,6 +1,6 @@
 # DevicesModule
 
-![DevicesModule controls](../../assets/screenshots/Devices%20module.png)
+![DevicesModule controls](../../assets/core/Devices%20module.png)
 
 A **core**, domain-neutral module that discovers other devices on the LAN, identifies what each is, and presents them as a browsable list. It focuses on *all* devices on the network (including this one, marked as self), not on the host's own state — so its card looks the same on every projectMM instance, ESP32 or PC. Light-domain modules consume the device list; the discovery machinery itself stays domain-neutral.
 
@@ -34,6 +34,10 @@ Foreign ecosystems hook in as **plugins**, not hardcoded branches — the adapte
 
 The plugin classification is pure and host-unit-tested (`unit_DeviceIdentify.cpp` feeds synthetic packets, incl. short/garbage → declined), with no network. The full pipeline is tested via `injectPacketForTest` (`unit_DevicesModule_discovery.cpp`) — and because `UdpSocket` works on desktop, the discovery path is host-testable with real datagrams, not just stubs.
 
+### Out-of-band devices (Hue bridge)
+
+A device not discovered by UDP presence — a Philips Hue bridge, found over HTTP by a [HueDriver](../light/drivers/HueDriver.md) — registers itself through `upsertHueBridge(ip, name, colourCount)`, reached via `active()` (the boot-instance static accessor, the `AudioModule::latestFrame()` seam shape). The bridge then lists like any device, with a `colour` field (its colour-light count, for sizing a layout). This keeps the module domain-neutral: the Hue HTTP/pairing lives entirely in the light-domain driver; the core only stores the resulting row. (`unit_DevicesModule_hue.cpp` pins the row + its persistence round trip.)
+
 ### Age-out
 
 Each sighting stamps the device's `lastSeenMs`; `ageOut()` runs every tick. A live-confirmed device is kept for `kStaleMs` (**24 h**) after its last presence packet, so the list is a durable "devices I've seen" history; a **cached** row (restored from persistence, not yet re-heard this session) gets only a short `kCachedGraceMs` (**60 s**) probation, so a long-gone persisted device can't survive forever across reboots — a live packet promotes it to the 24 h window. A **timestamp**, not a counter. The self row never ages out (it tracks the current local IP). Storage is a fixed `devices_[kMaxDevices]` array — bounded, no heap.
@@ -44,11 +48,11 @@ Because the presence broadcast and the mDNS advertise are WLED-shaped, a project
 
 **In WLED's own "Sync interfaces" instances list** — a real WLED lists every projectMM board it heard on UDP 65506. (The `undefined` columns are WLED-sync fields projectMM doesn't fill — the presence packet carries identity, not the full WLED sync state; listing is what we're after.)
 
-![projectMM devices in WLED's instances list](../../assets/screenshots/Wled%20discovers%20projectMM.png)
+![projectMM devices in WLED's instances list](../../assets/core/Wled%20discovers%20projectMM.png)
 
 **In the native WLED app** (iOS / Android) — discovered via the mDNS `_wled._tcp` advertise, validated via the `/json/info` shim, with live colour + a working brightness slider over the `/ws` WebSocket. See [HttpServerModule § WLED-compatibility shim](HttpServerModule.md#wled-compatibility-shim) for the wire contract (reverse-engineered from the [WLED-Android](https://github.com/Moustachauve/WLED-Android) client).
 
-![projectMM devices in the native WLED app](../../assets/screenshots/WLED%20Native%20discovers%20projectMM.jpeg)
+![projectMM devices in the native WLED app](../../assets/core/WLED%20Native%20discovers%20projectMM.jpeg)
 
 ## Transport boundary (discovery vs commands)
 

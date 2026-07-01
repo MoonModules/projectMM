@@ -59,7 +59,7 @@ uv run scripts/test/test_desktop.py          # unit tests
 
 Or use MoonDeck's PC tab for the same operations with a status dot per card. The desktop run detaches and outlives the launching script — the same model as flashing an ESP32, where the device runs independently afterwards.
 
-![MoonDeck PC tab](assets/screenshots/moondeck_pc.png)
+![MoonDeck PC tab](assets/ui/moondeck_pc.png)
 
 Each host writes into its own build dir: `build/macos/`, `build/linux/`, `build/windows/`. The per-host layout mirrors the ESP32 side's `build/esp32-<board>/` shape — one directory per target, no cross-target clobbering on a multi-host dev machine.
 
@@ -126,7 +126,7 @@ On Windows, the `--port` argument is a `COM*` name (e.g. `COM3`) instead of `/de
 
 The ESP32 tab in MoonDeck wraps the same steps as cards (Setup → Firmware → Build → Port → Flash → Run). The Network bar at the top is the same one shown on the Live tab — it remembers which serial port and WiFi credentials belong to the current LAN, so moving the laptop between networks doesn't require re-picking.
 
-![MoonDeck ESP32 tab](assets/screenshots/moondeck_esp32.png)
+![MoonDeck ESP32 tab](assets/ui/moondeck_esp32.png)
 
 ### ESP-IDF version
 

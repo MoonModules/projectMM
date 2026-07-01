@@ -38,7 +38,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - _AudioModule: a fresh, unconfigured module is idle (pins default unset)_
 - _AudioModule: setup/teardown is repeatable with no residual state_
 - _AudioModule: teardown clears the active mic (latestFrame falls back to silence)_
-- _AudioModule: last setup() wins, any add/remove order stays coherent_
+- _AudioModule: two mics — first wins, survivor re-elects, any order stays coherent_
 
 ## BlendMap
 
@@ -73,29 +73,14 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Calling free() twice is harmless; pointer and count remain zeroed.
 - allocate() refuses zero-count or zero-channels (returns false, no allocation, buffer left empty so a caller that ignores the bool doesn't get a partial state).
 
-## CheckerboardEffect
-
-`test/unit/light/unit_CheckerboardEffect.cpp`
-*Also touches: SpiralEffect, PlasmaPaletteEffect, RingsEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect.*
-
-- Checkerboard paints at least one non-zero byte on a 16×16 grid (effect actually renders).
-- With cell_size=4, adjacent cells render different colours (the checker pattern is real, not uniform).
-- LavaLampEffect has localised blob features that can land on identical corner palette indices at some t values (corner-pair check is too strict). Scan the whole buffer for any two distinct pixels instead — same approach as RingsEffect below. LavaLamp paints at least one non-zero byte (effect actually renders).
-- Across 10 frames at bpm=60, at least one frame shows two distinct colours somewhere in the buffer (blobs move and the field varies).
-- RingsEffect has localised features (thin rings); corner-pair check is too strict, so we scan for any two distinct pixels instead. Rings paints at least one non-zero byte (effect actually renders).
-- At least two distinct pixels exist somewhere in the buffer (rings are localised, so corner-pair would be too strict).
-- RipplesEffect (MoonLight sine-wave water surface) lights one pixel per column at a sine-driven height. On a flat 2D layer it still paints a visible wavefront — assert it renders something and varies across the surface.
-- Ripples lights one pixel per column at a sine-driven height, so the surface holds at least two distinct colours (wavefront vs background) — scan the whole buffer, corner-pair would be too strict.
-
 ## CheckerboardModifier
 
 `test/unit/light/unit_CheckerboardModifier.cpp`
 
-- Identity dimensions — a mask doesn't resize the logical box.
-- size=1: every cell is its own square; parity = (x+y+z)&1. Default (invert false) keeps even-parity cells, drops odd-parity.
-- invert flips which parity passes — the cell that was dropped now passes and vice versa.
-- size>1 groups cells into squares: with size=2, the 2×2 block at the origin is all one square (parity of 0/2=0), so all four pass; the next block over drops.
-- Never fans out — at most one destination.
+- A mask leaves the logical box unchanged.
+- size=1: every cell is its own square; parity = (x+y+z)&1. Default (invert false) keeps even-parity cells, drops odd-parity. Passing cells keep their coord.
+- invert flips which parity passes.
+- size>1 groups cells into squares: with size=2, the 2×2 block at the origin is all one square (parity 0), so all four pass; the next block over drops.
 
 ## Color
 
@@ -145,25 +130,51 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Brightness scaling runs before white derivation so W = min of the *scaled* RGB values.
 - rebuild() can switch the output channel count between RGB (3) and RGBW (4) on the fly.
 
-## DevicesModule
+## DemoReelEffect
+
+`test/unit/light/unit_DemoReelEffect.cpp`
+
+- The reel enumerates the effect registry, hosts one effect at a time, renders it, and advances through the whole list without crashing — the create/teardown/delete churn every tick is the robustness path this pins. Registering two real effects + the reel gives it something to cycle.
+
+## DevicePlugin
 
 `test/unit/core/unit_DeviceIdentify.cpp`
+*Also touches: DevicesModule.*
 
-- _classifyDevice: projectMM from /api/state modules array_
-- _classifyDevice: WLED from /json/info brand_
-- _classifyDevice: a live non-projectMM/non-WLED host is generic_
-- _classifyDevice: a truncated projectMM body still classifies (modules is early)_
-- _extractDeviceName: projectMM reads the deviceName control's value, not the type_
-- _extractDeviceName: WLED reads the top-level name field_
-- _extractDeviceName: generic / garbage / null bodies yield empty_
-- _extractDeviceName: respects the output buffer size (no overflow)_
-- _devTypeStr maps every type_
+- _MmPlugin claims a presence packet carrying the projectMM marker_
+- _MmPlugin declines a plain WLED packet (no projectMM marker)_
+- _WledPlugin claims a plain WLED packet as WLED_
+- _WledPlugin declines a projectMM-marked packet (that's a peer, not a WLED)_
+- _Plugins decline a short / garbage datagram, never read out of bounds_
+- _WledPlugin tolerates an empty name (the module supplies the IP fallback)_
+
+## DevicesModule
 
 `test/unit/core/unit_DevicesModule_ageout.cpp`
 
-- _DevicesModule: a still-fresh device survives just under kStaleMs (24h)_
-- _DevicesModule: a device drops once past kStaleMs (24h)_
+- A cached (restored-but-never-re-heard) device is on a short probation, NOT the full 24 h — else a long-gone persisted device would survive forever across reboots (its clock resets to "boot" each restore). It drops once past kCachedGraceMs.
+- _DevicesModule: a cached device drops once past the probation window_
+- A live-confirmed device (a presence packet cleared its `cached` flag) gets the full 24 h.
+- _DevicesModule: a live-confirmed device drops once past kStaleMs (24h)_
+- A projectMM peer also answers as a plain WLED (its presence packet without our marker), so a later WLED-classified sighting must NOT relabel a restored projectMM row. This drives the downgrade-prevention in upsertDevice through the public path: restore the row as projectMM, inject a plain WLED packet from the same IP, confirm it stays projectMM.
 - _DevicesModule: restore tolerates an empty / malformed cache_
+
+`test/unit/core/unit_DevicesModule_discovery.cpp`
+*Also touches: DevicePlugin.*
+
+- _DevicesModule: a plain WLED packet lists a WLED device with its name_
+- _DevicesModule: a projectMM-marked packet lists a projectMM device_
+- _DevicesModule: a short / garbage datagram is ignored, never listed_
+- The P4-bench bug: two DIFFERENT devices (a WLED and a projectMM peer) must each keep their OWN name + type — no cross-contamination between packets.
+- A peer RENAME must propagate: a later packet from the same IP with a new name updates the row in place — the live-update requirement (the name rides the presence packet).
+- A projectMM device stays projectMM even when a later plain-WLED packet arrives from the same address — the type only RAISES toward projectMM, never downgrades. (A projectMM peer could be seen via an unmarked packet too; that must not relabel it WLED.)
+
+`test/unit/core/unit_DevicesModule_hue.cpp`
+
+- _DevicesModule: a Hue bridge is listed with its colour count_
+- _DevicesModule: upsertHueBridge is idempotent, updates count in place_
+- _DevicesModule: a persisted Hue bridge restores as a Hue row with its count_
+- _DevicesModule: a corrupt persisted colour clamps to the valid range, row still restores_
 
 ## DistortionWavesEffect
 
@@ -180,6 +191,13 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 - Disabled child drivers don't tick: toggling `enabled` flips whether that driver's loop() runs.
 
+`test/unit/light/unit_Drivers_firstOutputRgb.cpp`
+
+- _Drivers::firstOutputRgb reads pixel 0 of the driven buffer_
+- _Drivers::firstOutputRgb reports black pixel 0 as-is (caller substitutes the default)_
+- _Drivers::firstOutputRgb returns false when there is no driven buffer_
+- _MoonModule::firstOutputRgb defaults to false (no output module)_
+
 ## FilesystemModule
 
 `test/unit/core/unit_FilesystemModule_persistence.cpp`
@@ -191,7 +209,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Companion to the wiredByCode case above: when the JSON describes a different type at the position where a code-wired child lives, the position-replacement must NOT kill the code-wired child. Stop reconciliation at that index instead and let the next save re-write the file with the actual tree shape. When the saved JSON wants a different type at the position where a code-wired child lives, reconciliation stops at that index instead of destroying the wired child.
 - Round-trip persistence with children: write a Layer subtree that contains both controls and child modules with controls of their own, then read the file back as text and verify it parses as valid JSON. Regresses the missing-comma bug between each child's "N.type" field and that child's first control (e.g. "0.type":"X""0.foo":1 instead of "0.type":"X","0.foo":1). Saving a Layer with multiple children produces valid JSON — comma separators between child `N.type` and the child's first control field are present.
 - Singleton survives probe lifecycle: /api/types factory-creates a probe of every registered type (including FilesystemModule) to capture defaults, then deletes it. The probe's destructor must NOT clear the singleton — otherwise every save path (noteDirty, debounced loop1s, flushPending on reboot) silently no-ops for the rest of the device's life. The fix is to register the singleton in setScheduler(), not in the constructor. This test catches that singleton-clear regression. /api/types factory-creates a temporary FilesystemModule probe; its destruction must NOT clear the static singleton (otherwise every later save silently no-ops).
-- Int16 controls preserve their saved value across a filesystem load — the load path does not clamp them to `c.min`/`c.max` (which are `uint8_t` and so default to 0,0, a range that can't represent an int16). Without this a 128×128 grid would reload as 0×0×0 and the pipeline would allocate no buffers; the test pins the round-trip so an Int16 value survives unclamped.
+- Regression: Int16 controls (GridLayout's width/height/depth, Layer's start/end) round-tripped through the filesystem load path were clamped to c.min/c.max, which default to 0,0 because ControlDescriptor.min/max are uint8_t and can't represent an int16 range. Every Int16 control loaded as 0 — so a 128×128 grid became 0×0×0 after restart and the whole pipeline allocated no buffers. Int16 controls (GridLayout width/height, RegionModifier start/end) preserve their saved value across load — no zero-clamping from uint8 min/max bounds.
 
 ## FireEffect
 
@@ -206,21 +224,17 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 `test/unit/core/unit_FirmwareUpdateModule.cpp`
 
 - The `firmware` control is always present and non-empty (either a real firmware key from build_info.h or the fallback "unknown"). The firmware card owns firmware identity (version/build/firmware) + the partition usage.
+- OTA phase is surfaced through the shared status slot (MoonModule::setStatus()), not a control. publishStatus() runs in setup()/loop1s() and maps the platform OTA status string to a severity: "idle" clears the banner, an "error: " prefix is Severity::Error, anything else is neutral Severity::Status.
 
 ## GameOfLifeEffect
 
 `test/unit/light/unit_GameOfLifeEffect.cpp`
 
-- Two cell grids of width × height bytes each.
-- Disabling releases both grids (dynamicBytes drops to 0) via the parent lifecycle.
-- A blinker (horizontal 3-in-a-row) oscillates with period 2 under B3/S23: it becomes a vertical 3-in-a-row, then back. Pins both birth (B3) and survival (S23) on a known pattern.
-- A 2×2 block is a still-life: every live cell has 3 neighbours (S3), no dead cell has exactly 3 (no B3), so stepOnce leaves it unchanged.
-- A lone cell dies (underpopulation: 0 neighbours, not S2/S3) → extinction.
-- Wraparound: a blinker on the right edge stays a valid 3-cell pattern because neighbours wrap, rather than losing cells to a hard edge.
-- Reallocation on dimension change: grids resize, byte count tracks new w×h.
-- Must not crash on a zero-size grid (no allocation, loop is a no-op).
-- bpm time-gates the generation rate: a low bpm advances fewer generations per unit time than a high bpm over the same elapsed window. Drives time via the desktop millis() test seam (Layer reads platform::millis in loop()).
-- Regression: the Layer clears the buffer before every effect frame, so the grid must be re-painted on EVERY frame, not just on the (rarer) beats where a generation advances. A bpm gate that skipped the paint left non-step frames black — visible as "a flash now and then" at low bpm. Drive several frames at a slow bpm (most are non-step) and require the buffer stays lit on all of them.
+- The B#/S# parser turns a rule string into birth/survive neighbour sets. Conway = B3/S23.
+- A 2×2 block is a Conway still life: every live cell has 3 neighbours (survives), and the surrounding dead cells never have exactly 3 (no births). It must be identical after a step.
+- Regression: a 3D grid gives a cell up to 26 neighbours (3×3×3 minus self), but the B/S rule tables are sized 9 (single-digit Conway notation, 0..8). A dense 3D neighbourhood must not read those tables out of bounds — a count ≥9 is in no single-digit ruleset, so the cell dies / stays dead. This fills a 3×3×3 cube (the centre has all 26 neighbours alive) and just steps: the test passing under ASan/bounds-checking is the OOB-read pin; behaviourally the over-crowded centre dies (26 ∉ S) and the dense interior doesn't survive.
+- A horizontal 3-cell blinker oscillates to vertical after one step (period-2 oscillator). This is the canonical "the rules actually run" check: birth on 3, death of the ends (1 neighbour each).
+- A lone cell (0 neighbours) dies — the dead-by-isolation rule, and a sanity check that an empty grid stays empty (no spontaneous births at count 0 under Conway).
 
 ## GridLayout
 
@@ -243,6 +257,19 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - _apply-core: applyClearChildren empties a container (replaceChildren)_
 - _apply-core: applyOp dispatches each op type and tolerates bad input_
 - A per-control validator (like SystemModule.deviceModel's printable-ASCII rule) is enforced THROUGH the apply-core — so the APPLY_OP `set` the installer pushes over serial is guarded exactly like an HTTP write, with no per-transport special-casing. This is the point of moving validation onto the control: one backend check, every path.
+
+## HueDriver
+
+`test/unit/light/unit_HueDriver.cpp`
+
+- _HueDriver: a coloured pixel becomes an on/bri/hue/sat state body_
+- _HueDriver: a black pixel becomes on:false_
+- _HueDriver: RGB→HSV maps the primaries to the right Hue wheel positions_
+- _HueDriver: unchanged colour is not resent, a changed one is_
+- _HueDriver: parseLights keeps only colour-capable, reachable lights_
+- Room + light selection filters which colour lights the driver actually drives. Both dropdowns default to "All" (index 0): then every colour light is driven (unchanged behaviour). Selecting a room narrows the driven set to that room's colour lights; selecting a light drives just that one.
+- The single status line (folding what were the separate hueStatus / colourLights controls) shows the light count as driven-of-total: "N-M lights" while filtered, the plain "M lights" when not.
+- fetchLights sizes its read buffer by growing while the body looks truncated. The signal is "does the body end in '}'": a too-small buffer cuts the JSON mid-content. (Regression: an earlier check tested strlen==cap-1, which never fires because httpRequest strips headers first, so a >2 KB bridge response was parsed truncated and lights silently disappeared.)
 
 ## ImprovFrame
 
@@ -291,27 +318,43 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - _overflow safety: too many nodes fails cleanly_
 - _overflow safety: nesting deeper than kMaxDepth fails cleanly_
 - _input longer than the text buffer fails cleanly_
+- parseString must DECODE the JSON string escapes our own writer emits (JsonSink/writeJsonString) — \" \\ \n \r \t \b \f — so reader and writer are symmetric. A multi-line value (a script with `\n`) must arrive as a real newline, not a literal backslash-n.
 
 ## Layer
 
 `test/unit/light/unit_Layer_extrude.cpp`
-*Also touches: RainbowEffect, NoiseEffect, PlasmaEffect, CheckerboardEffect, FireEffect, ParticlesEffect.*
+*Also touches: RainbowEffect, NoiseEffect, PlasmaEffect, SpiralEffect, FireEffect, ParticlesEffect.*
 
 - A D2 effect (Rainbow) on a 3D layer writes z=0 once; Layer::extrude copies that slice across every z>0 — slices are byte-identical.
-- A D1 effect writes row y=0,z=0; extrude duplicates that row across every y and every z-slice.
+- A D1 effect writes the x=0 column; extrude duplicates it across every x and every z-slice.
 - NoiseEffect declared D3 still produces a valid image on a depth=1 layer (it honours the runtime depth instead of hardcoding z).
 - PlasmaEffect (D3) on a 2D layer same contract: valid 2D image, no buffer overrun.
 - NoiseEffect (D3) on a 1D layer (height=depth=1) writes a valid strip and never overflows.
 - PlasmaEffect (D3) on a 1D layer same contract: valid 1D strip, no overflow.
-- CheckerboardEffect (D2) on a 3D layer: extrude copies z=0 to every z>0 (stateless D2 contract).
+- SpiralEffect (D2) on a 3D layer: extrude copies z=0 to every z>0 (stateless D2 contract).
 - FireEffect (D2, stateful — heat buffer sized to w×h) extrudes cleanly across z on a 3D layer.
 - ParticlesEffect (D2, stateful — trail sized to w×h×cpl) extrudes cleanly across z on a 3D layer.
 
+`test/unit/light/unit_Layer_live_modifier.cpp`
+*Also touches: RotateModifier, ModifierBase.*
+
+- With a Rotate present, the live pass rotates the gradient each frame as the angle advances — so two frames at different times differ. A static GradientEffect alone would produce identical frames, so any difference is the live remap.
+- PAY-FOR-WHAT-YOU-USE: a Layer with no live modifier must NOT run the live pass — the static gradient is byte-identical across frames regardless of the clock.
+- A DISABLED Rotate must not run the live pass either (the gate keys off ENABLED live modifiers). Same static gradient → identical frames.
+- COALESCED REBUILD: two beat-driven modifiers (RandomMap) on one Layer both ask for a rebuild on a beat; Layer::loop() must rebuild ONCE (not re-enter onBuildState per modifier) and the Layer must stay valid — the composed mapping changes, no crash.
+
+`test/unit/light/unit_Layer_modifier_chain.cpp`
+*Also touches: ModifierBase.*
+
+- Region (left half) THEN Multiply (2× mirror): the logical box folds twice. On a 16-wide axis: Region 0..50 → 8, then Multiply 2 → 4. Both modifiers apply — the second is no longer dead weight.
+- Order matters: Region-then-Multiply differs from Multiply-then-Region. Region's percentage applies to whatever box it sees, so the composed logical size differs.
+- A DISABLED middle modifier is skipped — the chain folds only the enabled ones.
+
 `test/unit/light/unit_Layer_phase_animation.cpp`
-*Also touches: MetaballsEffect, CheckerboardEffect, LavaLampEffect, SpiralEffect.*
+*Also touches: MetaballsEffect, SpiralEffect, LavaLampEffect, SpiralEffect.*
 
 - Metaballs visibly changes over 100ms even when per-tick dt is sub-millisecond (no phase-accumulator truncation).
-- Checkerboard advances at desktop speed (cells flip across 100ms).
+- SpiralEffect advances at desktop speed (the spiral rotates across 100ms).
 - LavaLamp animates across 100ms (blobs move).
 - Spiral animates across 100ms (rotation visible).
 - Replace path: swap one effect for another mid-flight (same shape as HttpServerModule::handleReplaceModule) and confirm the new effect animates. Replacing one effect with another mid-tick (HttpServerModule's swap path) leaves the new effect animating, not frozen.
@@ -323,23 +366,24 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Sparse sphere: a LUT is built; its destinations are driver indices in [0, lightCount), and the render buffer stays the dense bounding box.
 - Sphere + Mirror: the modifier's box-coordinate destinations are translated into driver-index space; no destination escapes [0, lightCount).
 - REGRESSION: a high fan-out Multiply (8×8×4 = 256) on a 128×128 grid must build a NON-EMPTY LUT that covers every physical light. The maxDest estimate (logicalCount × maxMultiplier) is computed in 64-bit; before that fix it overflowed uint16 on no-PSRAM boards (256 × 256 = 65536 wraps to 0), sized the LUT to ~nothing, and blanked the display. Here we assert the LUT actually maps the full light set, in range — the symptom that black-screened the device.
+- Region carving: a RegionModifier shrinks the Layer's LOGICAL box to the region (so the effect renders only there), and the LUT maps each region cell to its box cell at the start offset — every destination in range, none outside the region. The driver buffer still holds all physical lights; cells outside the region simply get no logical source (dark). Default 0/100 = full box (the no-carve fast path) is covered by unit_RegionModifier; here we carve a quarter.
 
 `test/unit/light/unit_Layer_zero_grid.cpp`
-*Also touches: RainbowEffect, NoiseEffect, PlasmaEffect, CheckerboardEffect, SpiralEffect, MetaballsEffect, PlasmaPaletteEffect, RingsEffect, RipplesEffect, GlowParticlesEffect, LavaLampEffect, FireEffect, ParticlesEffect.*
+*Also touches: RainbowEffect, NoiseEffect, PlasmaEffect, SpiralEffect, MetaballsEffect, RingsEffect, RipplesEffect, LavaLampEffect, FireEffect, ParticlesEffect, GameOfLifeEffect, GEQ3DEffect, PaintBrushEffect.*
 
 - Rainbow on 0,0,0 grid: no crash.
 - Noise on 0,0,0 grid: no crash.
 - Plasma on 0,0,0 grid: no crash.
-- Checkerboard on 0,0,0 grid: no crash.
 - Spiral on 0,0,0 grid: no crash.
 - Metaballs on 0,0,0 grid: no crash.
-- PlasmaPalette on 0,0,0 grid: no crash.
 - Rings on 0,0,0 grid: no crash.
 - Ripples on 0,0,0 grid: no crash.
-- GlowParticles on 0,0,0 grid: no crash.
 - LavaLamp on 0,0,0 grid: no crash.
 - Fire on 0,0,0 grid: no heat buffer allocated, no crash.
 - Particles on 0,0,0 grid: no trail buffer allocated, no crash.
+- GameOfLife on 0,0,0 grid: no heap alloc for 0 cells, no crash.
+- GEQ3D / PaintBrush on 0,0,0 grid: audio effects, no crash with no buffer.
+- _PaintBrushEffect on 0,0,0 grid_
 
 ## Layers
 
@@ -352,6 +396,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Disabling the top layer drops cleanly to the single (bottom) layer — no crash, the driver now sees the bottom layer's content. Pins the robustness path.
 - Drivers' composition/output-buffer allocation contract (architecture.md § Adaptive allocation). The driver output buffer exists ONLY when the pipeline must blend into physical space; otherwise the lone layer's buffer is handed to drivers directly (zero-copy). dynamicBytes() reflects outputBuffer_.bytes(), so it's 0 ⇔ no buffer. Pins all three cases in one place: 1. one identity (no-LUT) layer  → NO output buffer (zero-copy) 2. two enabled layers           → output buffer (must composite) 3. one layer WITH a LUT         → output buffer (must map logical→physical)
 - activeLayer() returns the first enabled child, or the only child if all are disabled (so dimensions stay queryable during boot/toggle-off).
+- firstEnabledLayer() is the output-selection counterpart to activeLayer(): it never falls back to a disabled layer, so it returns nullptr exactly when nothing renders.
 - If the container holds only non-Layer children, activeLayer() returns nullptr (the role-guard skips, never miscasts).
 
 ## Layouts
@@ -427,6 +472,47 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - typeName/typeRole with an out-of-range index returns nullptr / Generic safely (never UB).
 - The factory grows its registry capacity dynamically — registering 10+ extra types past the initial size still works and every name stays discoverable.
 
+## MoonLive
+
+`test/unit/core/unit_moonlive_compiler.cpp`
+
+- _compileSource: fill(r,g,b) fills every light_
+- _compileSource: setRGB(index, r,g,b) writes one pixel_
+- REMARK #1: every argument is an expression — random16 in ANY slot.
+- REMARK #2: a literal / random16 bound may be a uint16 (0..65535), not capped at 255.
+- _compileSource: out-of-range index is bounds-rejected at runtime_
+- _compileSource rejects malformed programs with a diagnostic, never crashes_
+- _MoonLive.compile(source) on a bad script leaves the engine !ok with an error_
+- VREG REUSE: a chain of calls must fit the small device register file. Each argument temp dies once its call consumes it and is recycled, so peak register pressure stays low no matter how many calls a statement nests — setRGB with all four arguments a random16 still compiles.
+- DOMAIN-NEUTRAL: the core compiler owns no function names. With an EMPTY table it knows nothing — `setRGB`/`fill`/`random16` are all "unknown function". The LED vocabulary lives only in the host's table; a different host registers different names. (Remark #3.)
+- _MoonLive recompiling swaps the program live (fill <-> setRGB)_
+- STAGE 1 CONTROLS — parse layer: a `uint8_t name = def; // @control min..max` declaration surfaces a DeclaredControl, and a declared name used in a statement resolves to it.
+- _compileSource: malformed control declarations fail with a diagnostic, never crash_
+
+`test/unit/core/unit_moonlive_fill.cpp`
+
+- _MoonLive emitFill produces a non-empty routine_
+- _MoonLive emitFill rejects a too-small buffer (degrades, no overrun)_
+- _MoonLive emitFill/emitAnimatedFill reject a null output buffer (no crash)_
+- _MoonLive compiles and fills a buffer with the chosen colour_
+- _MoonLive run on zero lights writes nothing (robust to empty)_
+- The native routines write channels +0/+1/+2 per light, so a layer with fewer than 3 channels per light can't hold RGB — run() must leave it untouched, not overrun it.
+- _MoonLive recompile swaps the colour; free returns to !ok_
+- _MoonLive animated fill derives colour from the per-frame t_
+- _platform allocExec returns usable executable memory, freeExec releases it_
+- _MoonLive controls: declaredControls + controlSlot seeded from the default_
+- _MoonLive controls: arena address is STABLE across a recompile and the slot value survives_
+- _MoonLive controls: free() releases the arena (no stale slot after teardown)_
+
+`test/unit/core/unit_moonlive_ir.cpp`
+
+- _MoonLive compiled fill is BEHAVIORALLY identical to the hand-encoded emitFill (golden)_
+- _MoonLive compiled fill is robust: zero lights writes nothing_
+- _MoonLive compileSource degrades on a too-small code buffer_
+- _MoonLive compiled setRGB writes one pixel; out-of-range is bounds-rejected_
+- _MoonLive control: a declared control reads the arena live (no recompile on value change)_
+- _MoonLive control survives a host call (kArg4 live across random16)_
+
 ## MoonModule
 
 `test/unit/core/unit_MoonModule.cpp`
@@ -481,19 +567,16 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 `test/unit/light/unit_MultiplyModifier.cpp`
 
-- Reports D3 — handles all three axes. Pins the ModifierBase default too.
-- Defaults (multiply 2/2/1, mirror true/true/false) reproduce the canonical mirror-XY pipeline: a 128×128 physical grid → 64×64 logical (each axis folds).
-- multiplyZ tiles the Z axis too: 128×128×4 with multiply 2/2/2 → 64×64×2.
-- PURE-FOLD EQUIVALENCE: with the defaults (mult 2, mirror XY), the corner logical pixel (0,0) fans out to all four physical corners — byte-identical to the old MirrorModifier corner test. This is the canonical-pipeline guarantee.
-- PURE-FOLD EQUIVALENCE: an interior pixel folds to the same two columns the old mirrorX-only produced — original + horizontal reflection.
-- No multiplication on any axis (all multipliers 1) → identity pass-through.
-- Tiling WITHOUT mirror repeats (does not reflect) — multiply 2 on X, mirror off: logical x=0 lands at physical x=0 (tile 0) and x=64 (tile 1, identity offset), NOT x=127. This is the difference from a fold.
-- multiplyZ on a 2D (depth-1) layout is a no-op: the effective multiplier clamps to the axis extent (1), so logD stays 1 and the layer isn't blanked. Before the clamp, multiplyZ=4 made logD = 1/4 = 0 → empty layer.
-- A multiplier larger than the axis extent clamps to the extent (can't tile more times than there are pixels).
-- maxMultiplier is the product of the raw controls (the fan-out upper bound).
-- REGRESSION: maxMultiplier() must NOT wrap when all axes are maxed. The product 64×64×16 = 65536 overflows nrOfLightsType (uint16 on no-PSRAM) and would wrap to 0 — feeding the uint64 maxDest math in Layer::rebuildLUT an already-wrapped (possibly 0) multiplier → empty LUT → black display. It must saturate to the type max instead. (Single-axis tests above stay under the wrap; this one crosses it.) On uint32 (PSRAM) the product fits and isn't saturated — assert only the non-wrap, non-zero invariant that holds on both widths.
-- REGRESSION: an 8×8 multiply must emit all 64 tile positions, not be truncated to 8. The Layer's scratch buffer is sized to ModifierBase::kMaxFanout (64); a smaller buffer (the original physicals[8]) silently dropped 56 of the 64 tiles, so a 128×128 grid showed only 8 tiles instead of the full 8×8 = 64.
-- Fan-out never exceeds maxOut even if asked for more than the buffer holds.
+- _MultiplyModifier advertises D3 dimensions_
+- Defaults (multiply 2/2/1) → a 128×128 physical grid folds to a 64×64 logical box.
+- _MultiplyModifier logical size on Z_
+- FAN-OUT (fold direction): with the defaults (mult 2, mirror XY), all four physical CORNERS fold onto the single logical pixel (0,0) — the inverse of the old "logical (0,0) → 4 physical corners". This is the kaleidoscope fold made concrete.
+- mirrorX only: two physical columns fold to the same logical column (original + its horizontal reflection). The logical box is 64 wide.
+- All multipliers 1 → identity: the box is unchanged and every coord folds to itself.
+- Tiling WITHOUT mirror repeats (does not reflect): physical x=64 (tile 1) folds to logical x=0, same as physical x=0 — both tiles map identically, no reflection.
+- multiplyZ on a 2D (depth-1) layout is a no-op: the effective multiplier clamps to the axis extent (1), so depth stays 1 and the layer isn't blanked.
+- A multiplier larger than the axis extent clamps to the extent.
+- REGRESSION (🐇): a non-divisible extent leaves a leftover edge strip that the tiles don't cover — those pixels must be DROPPED, not wrapped back into a tile (which would duplicate the edge). 5-wide, multiply 2 → tile width 2, covers pixels 0..3; pixel 4 is the leftover and has no tile.
 
 ## NetworkModule
 
@@ -573,6 +656,17 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - With depth > 1, adjacent and distant z-slices each render differently (3D noise, not a stack of identical 2D slices).
 - Same z-slice variation requirement holds for Plasma — each depth plane renders differently.
 
+## Palette
+
+`test/unit/light/unit_Palette.cpp`
+
+- _Palette: gradient endpoints land on the first/last stop colours_
+- _Palette: a mid-gradient sample interpolates between stops_
+- _Palette: colorFromPalette index 0 reads entry 0; brightness scales_
+- _Palette: the index wraps at 255→0 (no out-of-range read)_
+- _Palette: a degenerate (empty) gradient is all black, never out-of-bounds_
+- _Palettes::active swaps the global palette on setActive_
+
 ## ParlioLedDriver
 
 `test/unit/light/unit_ParlioLedDriver.cpp`
@@ -632,7 +726,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 `test/unit/light/unit_RainbowEffect.cpp`
 
 - A single frame on a 4×4 grid leaves the buffer non-zero (rainbow always paints somewhere).
-- Pixel (0,0) is at full saturation and value (one channel exactly 255) — confirms hsvToRgb wiring.
+- Pixel (0,0) carries a lit palette colour — confirms the effect writes a real RGB there.
 - Distant pixels carry different hues (the rainbow gradient is spatial, not uniform).
 
 ## RandomMapModifier
@@ -640,15 +734,29 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 `test/unit/light/unit_RandomMapModifier.cpp`
 *Also touches: Layer.*
 
-- A remap doesn't resize the logical box.
-- _RandomMapModifier maxMultiplier is 1_
-- The core property: the mapping is a true bijection over [0, w*h*d) — every destination index appears exactly once (no gaps, no duplicates).
-- A fresh modifier with the same generation produces the same permutation (deterministic seed → reproducible, which is what makes it testable).
-- Reshuffling (a beat) changes the mapping, and the result is still a bijection.
-- Robustness: an empty (0×0×0) grid must not crash — maxOut 0 yields no destination.
-- A resize (different box count) rebuilds the permutation to the new size, still a bijection.
+- A remap leaves the logical box unchanged.
+- The core property: a true bijection over [0, w*h*d) — every destination index appears exactly once (no gaps, no duplicates).
+- Deterministic seed → reproducible permutation (what makes it testable).
+- Reshuffling (a beat) changes the mapping, still a bijection.
+- Robustness: an empty (0×0×0) box must not crash — it folds to a no-op.
+- A resize (different box count) rebuilds the permutation to the new size.
 - _RandomMapModifier loop() reshuffles on a beat (bpm 60 ≈ 1/s)_
 - _RandomMapModifier loop() with bpm 0 never reshuffles (frozen)_
+
+## RegionModifier
+
+`test/unit/light/unit_RegionModifier.cpp`
+
+- Default region (0/100 on every axis) is the full box: identity size, no rejection.
+- Half of an axis, half-open: end=50 on 128 → region width 64, not 65.
+- Two abutting regions tile a 128-wide axis with no overlap and no gap.
+- A physical coord inside the region folds to region-local (subtract the start pixel); a coord outside is rejected.
+- Rounding rule on a small panel: start floors, end ceils to an exclusive pixel. start 33 / end 66 on a 4-wide axis → floor(1.32)=1 .. ceil(2.64)=3 → pixels 1,2.
+- A region that rounds to nothing still gets a 1-pixel floor.
+- OFF-SCREEN: a window slid half off the left edge keeps its FULL size (the effect renders at a fixed scale); only the visible half maps to physical lights. startX=-50 on 64 → window [−32, 32), span 64. Physical x 0..31 land at window-local 32..63 (the right half of the window — the visible part); the left half of the window (0..31) has no physical light, so it's dark. The effect isn't rescaled.
+- A window entirely off the box maps NO lights — the layer goes dark on that axis, which is how an effect is moved completely out of view. The box still has a valid size (the effect renders), nothing just reaches the screen.
+- A window stretched WIDER than the box (start<0 and end>100) renders the full span; the box shows the middle slice. startX=-50,endX=150 on 64 → window [−32, 96), span 128.
+- Degenerate axes don't crash: a 1-wide axis stays 1, a 0-extent axis yields 0.
 
 ## RmtLedDriver
 
@@ -685,6 +793,10 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - _RmtLedDriver idles with a status error on a bad pin list_
 - _RmtLedDriver with the empty default pins idles cleanly (no pin assumed)_
 - _RmtLedDriver re-slices when the source buffer changes_
+- _RmtLedDriver window: ledsPerPin distributes over the window, not the whole buffer_
+- _RmtLedDriver window: count 0 means the rest of the buffer from start_
+- _RmtLedDriver window: a size-1 window at 0 is the onboard-LED case_
+- _RmtLedDriver window: a start past the buffer end yields an empty slice_
 - loop() is a safe no-op across single-pin, multi-pin and zero-grid configs.
 
 `test/unit/light/unit_RmtLedEncoder.cpp`
@@ -699,11 +811,10 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 `test/unit/light/unit_RotateModifier.cpp`
 
-- _RotateModifier logicalDimensions are identity_
-- _RotateModifier maxMultiplier is 1_
-- At the initial angle (0) the rotation is identity — every light maps to itself.
-- Every emitted destination is in range (no out-of-bounds index), and the count is always 0 or 1 (a remap never fans out).
-- _RotateModifier tolerates an empty grid_
+- _RotateModifier advertises a live (per-frame) modifier_
+- At the initial angle (0) the rotation matrix is the identity — every cell samples itself.
+- z passes through (2D rotation) — a 3D coord's z is untouched.
+- An empty box doesn't divide-by-zero or wrap: the remap is a no-op-ish transform that the Layer's live pass then treats as out-of-box (dark), never a crash.
 
 ## Scheduler
 
@@ -746,6 +857,18 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - Physical indices are sequential 0..N-1 over the emitted shell points (no gaps from the unindexed lattice voids), so the buffer maps 1:1 to emitted lights.
 - Default radius is a sensible small sphere (not 0, not huge).
 
+## SpiralEffect
+
+`test/unit/light/unit_effects_render.cpp`
+*Also touches: RingsEffect, RipplesEffect, LavaLampEffect.*
+
+- LavaLampEffect has localised blob features that can land on identical corner palette indices at some t values (corner-pair check is too strict). Scan the whole buffer for any two distinct pixels instead — same approach as RingsEffect below. LavaLamp paints at least one non-zero byte (effect actually renders).
+- Across 10 frames at bpm=60, at least one frame shows two distinct colours somewhere in the buffer (blobs move and the field varies).
+- RingsEffect has localised features (thin rings); corner-pair check is too strict, so we scan for any two distinct pixels instead. Rings paints at least one non-zero byte (effect actually renders).
+- At least two distinct pixels exist somewhere in the buffer (rings are localised, so corner-pair would be too strict).
+- RipplesEffect (MoonLight sine-wave water surface) lights one pixel per column at a sine-driven height. On a flat 2D layer it still paints a visible wavefront — assert it renders something and varies across the surface.
+- Ripples lights one pixel per column at a sine-driven height, so the surface holds at least two distinct colours (wavefront vs background) — scan the whole buffer, corner-pair would be too strict.
+
 ## SystemModule
 
 `test/unit/core/unit_SystemModule.cpp`
@@ -769,6 +892,35 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - _sanitizeHostname trims leading and trailing dashes / invalid runs_
 - _sanitizeHostname yields empty for all-invalid input (caller falls back)_
 
+## TextEffect
+
+`test/unit/light/unit_TextEffect.cpp`
+
+- Static text renders glyph pixels top-left. On a grid tall/wide enough for one line of the 6x8 font, a non-empty string lights some pixels; an empty string lights none.
+- A multi-line string wraps: the second line renders on a lower row (font-height down), so a two-line string lights pixels below the first font's height. Uses the 4x6 font (height 6).
+- Scroll mode advances the text over time and never crashes; on a degenerate grid it's a safe no-op.
+
+## Uncategorized
+
+`test/unit/light/unit_Layer_persistence.cpp`
+
+- _Layer: buffer persists across frames (no per-frame clear)_
+- _Layer: fadeToBlackBy decays the persisted buffer once per frame_
+- _Layer: multiple fade requests combine with MIN (gentlest wins, longest trail)_
+- _Layer: collected fade resets after it is consumed_
+- _Layer: onBuildState clears the buffer (a rebuild wipes stale pixels)_
+
+## WaveEffect
+
+`test/unit/light/unit_WaveEffect.cpp`
+
+- _WaveEffect: sawtooth ramps 0→top across the phase_
+- _WaveEffect: triangle peaks in the middle and returns_
+- _WaveEffect: sine sits mid at the zero crossings_
+- _WaveEffect: square is low then high_
+- _WaveEffect: every type stays within the grid bounds_
+- _WaveEffect: a zero-height grid never reads out of bounds_
+
 ## WheelLayout
 
 `test/unit/light/unit_WheelLayout.cpp`
@@ -777,6 +929,69 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - _WheelLayout indices are dense [0, count)_
 - _WheelLayout coordinates are non-negative (centre-shifted into address space)_
 - _WheelLayout different spoke counts give different layouts_
+
+## WledPacket
+
+`test/unit/core/unit_WledPacket.cpp`
+
+- _WledPacket::build produces a valid WLED header (token/id/size)_
+- _WledPacket::readName round-trips the device name_
+- _WledPacket marker is set only when stamped, and stays WLED-valid_
+- _WledPacket::isValid rejects short / wrong-magic / null input_
+- _WledPacket::readName truncates a long name to the buffer, never overruns_
+
+## crc
+
+`test/unit/core/unit_crc.cpp`
+
+- CRC-16/CCITT-FALSE has a well-known check value: "123456789" → 0x29B1. Pinning it proves the polynomial/init/reflection match the standard variant (so a fingerprint computed here matches any other CCITT-FALSE implementation).
+- A change-detector: different content → (almost always) different CRC; identical content → same.
+- Empty span returns the init value (no bytes processed).
+
+## draw
+
+`test/unit/light/unit_draw.cpp`
+
+- mm::draw::pixel() writes inside the grid and silently clips outside it (no out-of-bounds write).
+- A 1D line (a row): every pixel from a.x to b.x inclusive is lit.
+- A 2D diagonal: endpoints are lit and the line is contiguous (one pixel per step on the main diagonal of a square).
+- A 3D line: drives all three axes, endpoints lit, no out-of-bounds on a small cube.
+- A line running off the grid clips: it draws the on-grid part and stops, no crash.
+- The `shorten` parameter pulls the far endpoint back toward `a` by shorten/255 (with WLEDMM *2 rounding), so an effect can sweep a partial segment. For a→b = (0,0)→(8,0): shorten 255 draws the whole line (tip at 8), 128 ≈ half (tip at (16*128/255+1)/2 = 4), 1 = just the start pixel (tip 0), 0 = nothing. This pins the rounding of the shorten branch.
+- draw::blur on a 1D row matches the canonical carryover-seep reference byte-for-byte (same behaviour as FastLED blur1d / MoonLight blurRows), and is symmetric around a centred bright pixel.
+- blur runs separably on every axis with extent>1: a 2D blur spreads a centre pixel to all four orthogonal neighbours; a 3D blur reaches the z neighbours too. And it never writes out of bounds.
+- A glyph blits in the correct orientation — neither X-mirrored (a 'b' as a 'd') nor Y-flipped. 'L' is the ideal probe: its vertical bar must be on the LEFT and its foot on the BOTTOM row. This guards the column-bit and row-direction reads, so the DemoReel name overlay renders each letter upright and un-mirrored.
+
+## light_types
+
+`test/unit/light/unit_Coord3D.cpp`
+
+- _Coord3D arithmetic is per-axis_
+- _Coord3D modulo and divide fold per axis_
+- _Coord3D % and / guard a zero or degenerate axis_
+- _Coord3D equality_
+
+## math8
+
+`test/unit/core/unit_math8.cpp`
+
+- sin8: a 256-entry sine LUT centred on 128, peaking near 255 and 0 a quarter and three-quarters of the way round. cos8 is sin8 shifted a quarter turn.
+- triwave8: linear up 0→255 then down 255→0, peaking at the midpoint.
+- qadd8/qsub8 clamp at the 0..255 ends instead of wrapping.
+- nscale8 is the recognisable spelling of scale8 (n/256 channel scale), so nscale8(x,255)==x.
+- beat8: a sawtooth completing `bpm` cycles per minute. At t=0 it's 0; halfway through a beat ~128.
+- beatsin8: a sine oscillating in [low,high] at bpm. Stays in range across the cycle and actually moves (not stuck at one value).
+- Random8: a seeded PRNG — same seed gives the same sequence (determinism), and below(n) stays under n. Two different seeds diverge.
+- atan2_8 / dist8: the geometry helpers moved here from color.h still behave.
+- map8 rescales 0..255 onto [lo,hi] inclusively — the top of the input must REACH hi (FastLED's map8 == map(in,0,255,lo,hi)). Regression: an earlier scale8-based form left hi unreachable, so a one-step span (a bar height of 1) collapsed to 0 — the bug GEQ3D's height mapping hit.
+
+## noise
+
+`test/unit/core/unit_noise.cpp`
+
+- Determinism: the same coordinate always gives the same value (a pure function of position), so a field is reproducible frame to frame and across the 1D/2D/3D entry points at z/y = 0.
+- Smoothness: neighbouring positions WITHIN a cell (sub-256 steps) differ only a little — that's what makes it value noise rather than a raw hash (which would jump randomly every step).
+- Range: output is a full byte; over a swept field it uses a wide span (not stuck near one value).
 
 ## platform
 

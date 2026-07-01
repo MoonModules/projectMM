@@ -13,6 +13,7 @@ namespace mm {
 // (main.cpp / main_desktop.cpp) to size the boot grid.
 constexpr lengthType defaultGridSize = 16;
 
+// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
 class GridLayout : public LayoutBase {
 public:
     lengthType width = defaultGridSize;

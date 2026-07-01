@@ -4,6 +4,8 @@ projectMM's per-step **performance contracts** live in the scenario JSONs — ea
 
 This document holds what scenarios can't carry: structural sizes (`sizeof`), build-variant deltas, and the WiFi/Ethernet physics that explain *why* a contract comes out where it does.
 
+**Render-loop model.** The Layer's buffer **persists** frame-to-frame — `Layer::loop()` does not clear it (the FastLED/WLED/MoonLight convention; see [architecture.md § Buffer persistence](architecture.md#buffer-persistence--the-layer-does-not-clear-each-frame)). This removed the per-frame full-buffer `memset` that a clear-every-frame model pays, and replaced N per-effect `draw::fade` passes with a single **collected fade** (`Layer::fadeToBlackBy` MINs the requested amounts and applies one buffer pass per frame) — so a layer with several fading effects now pays one fade pass, not N. Net hot-path effect on the tick numbers below is small (the clear/fade are one linear pass over the buffer, dwarfed by per-light effect compute and the output driver), but the *model* is what the scenario `observed` blocks were re-measured against on this cycle.
+
 ---
 
 ## Desktop (64-bit)

@@ -1,7 +1,8 @@
 #pragma once
 
 #include "light/layers/Layer.h"
-#include "core/color.h"   // sin8, hsvToRgb
+#include "light/Palette.h"   // colorFromPalette + active palette
+#include "core/math8.h"   // sin8 (integer sine LUT)
 
 namespace mm {
 
@@ -13,10 +14,11 @@ namespace mm {
 // Integer-only: angles are uint8_t (256 = full turn), sin8() returns 0..255. The two
 // sines are averaged into a hue byte. WLED runs the vertical wave's time ~1.3× the
 // horizontal; we approximate 1.3 as (t*333)>>8 = t*1.301..., staying in integer math.
-// hsvToRgb(hue, 240, 255) keeps WLED's slightly-desaturated look.
+// The hue indexes the global active palette via colorFromPalette (WLED used an hsvToRgb sweep).
 //
 // Prior art: MoonLight E_WLED.h (the WLED port); projectMM v1/v2 DistortionWaves (those
 // used float sinf — this is the integer-sin8 equivalent).
+// Author: ldirko & blazoncek (WLED port) — https://editor.soulmatelights.com/gallery/1089-distorsion-waves , https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
 class DistortionWavesEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight / WLED origin
@@ -45,7 +47,11 @@ public:
         // high byte as the time phase (uint8 angle), same accumulator idiom as elsewhere.
         if (speed) phase_ += static_cast<uint64_t>(dt) * speed;
         const uint8_t t = static_cast<uint8_t>((phase_ * 256) / 60000);
-        const uint8_t ty = static_cast<uint8_t>((static_cast<uint16_t>(t) * 333) >> 8);  // ~1.3·t
+        // ty is the y-axis time phase, running ~1.3× t. Deriving it from the raw phase_ accumulator
+        // (not from the already-wrapped uint8 t) keeps it CONTINUOUS: computing ty as (t*333)>>8 made
+        // ty jump by ~76 every time t wrapped 255→0 (~once a second), because 1.3 isn't an integer
+        // multiple of 256 — a visible shift. From phase_ the wrap is seamless (both are smooth uint8s).
+        const uint8_t ty = static_cast<uint8_t>((phase_ * 333) / 60000);   // ~1.3·t, continuous across wraps
 
         for (lengthType y = 0; y < h; y++) {
             const uint8_t sy = sin8(static_cast<uint8_t>(static_cast<uint8_t>(y) * freq_y + ty));
@@ -55,7 +61,7 @@ public:
                 // Average the two sines (each 0..255) → a hue byte. The interference of
                 // the two frequencies + the 1.3× time skew is what makes the pattern move.
                 const uint8_t hue = static_cast<uint8_t>((static_cast<uint16_t>(sx) + sy) >> 1);
-                const RGB c = hsvToRgb(hue, 240, 255);
+                const RGB c = colorFromPalette(*Palettes::active(), hue);
                 if (cpl >= 1) row[0] = c.r;
                 if (cpl >= 2) row[1] = c.g;
                 if (cpl >= 3) row[2] = c.b;

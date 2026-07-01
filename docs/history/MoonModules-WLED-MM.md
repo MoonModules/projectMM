@@ -2,6 +2,24 @@
 
 What landed on [WLED-MM](https://github.com/MoonModules/WLED-MM)'s `mdev` (default) branch, month by month. External-context reference — a factual log of a friend repo's releases, not projectMM's own history or roadmap. Newest month on top. The reusable prompt that generates these lives in [README.md](README.md). Months are split at versioned-release boundaries (the rolling `nightly` tag is not a release).
 
+## June 2026
+
+*Summarised from 38 commits on `mdev`, 2026-06-01 … 2026-06-25 (no versioned release cut this month, so the month is not split; the `nightly` prerelease is not a release).*
+
+**New**
+- Waveshare ESP32-S3 Matrix Driver board profile added.
+- Audio-reactive is now an out-of-tree usermod (pulled in as a dependency) rather than baked into the tree — no user-facing change to how it works, but a cleaner build.
+
+**Fixed**
+- Output settings no longer revert to defaults after a reboot (regression in 14.7.2 nightly, reported on ESP32-D0WDQ5 and ESP32-S3; issue #367).
+- LEDs no longer flicker on startup and during GIF playback.
+- Custom palettes reload immediately after you upload a palette file (previously needed a manual refresh; relates to long-standing issue #105).
+- Fixed `esp32dev_compat` firmware build failing (issue #371) and a broken `-D WLEDMM` build flag.
+- ArtiFX (ARTI effect engine) robustness: call-stack bounds checks, safer string/lexer handling, and fixes for glitches seen only in speed-optimised builds (relates to issue #295); ARTI status now shown in the Info panel.
+- Upstream compatibility: accepts `I2CSDAPIN`/`I2CSCLPIN` as alternatives to the older I2C pin defines; fixed the arduinoFFT dependency; brown-out restart info now checked on both cores.
+
+*Auditability: 38 commits on `mdev`, author-date 2026-06-01..2026-06-30 (range 84669c3 … 70fe1b8; several are CHANGELOG/version-bump/CodeRabbit-config/internal-refactor commits, omitted as not user-facing). Issues checked: created 2026-06-01..2026-06-30 and closed 2026-06-01..2026-06-30 — 4 relevant surfaced (#367, #371 fixed this month; #105, #295 long-standing, closed/addressed this month).*
+
 ## May 2026
 
 *Summarised from 34 first-parent commits on `mdev`, 2026-05-01 … 2026-05-30.*

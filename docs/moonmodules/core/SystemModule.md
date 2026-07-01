@@ -1,6 +1,6 @@
 # SystemModule
 
-![SystemModule controls](../../assets/screenshots/SystemModule.png)
+![SystemModule controls](../../assets/core/SystemModule.png)
 
 System-level diagnostics and device identity. Always loaded, always visible in the UI.
 
@@ -21,11 +21,9 @@ System-level diagnostics and device identity. Always loaded, always visible in t
 **Static (set at boot):**
 - `chip` (read-only) — chip model (ESP32, ESP32-S3, etc.)
 - `sdk` (read-only) — ESP-IDF version string (or compiler on desktop)
-- `sdkDate` (read-only) — the date this firmware image was built, from the IDF app descriptor (e.g. `May 26 2026`); the compiler `__DATE__` on desktop
 - `wifiCoproc` (read-only) — WiFi co-processor firmware status, shown only on boards whose radio is a separate chip (the ESP32-P4 with its on-board [ESP32-C6](https://www.espressif.com/en/products/socs/esp32-c6) over [esp_hosted](https://github.com/espressif/esp-hosted-mcu)). Reports the detected slave firmware version (`C6 fw 2.12.9`) when the link is up, or `not detected` when the C6 never completes its handshake / reports 0.0.0, which is the signature of absent or incompatible C6 slave firmware. Absent on native-radio targets (the platform returns an empty string and the control is not added).
 - `flash` (read-only) — total flash chip size
 - `psram` (read-only, progress) — used / total PSRAM (only if present)
-- `filesystem` (read-only, progress) — used / total filesystem
 - `bootReason` (read-only) — human-readable reset reason from `platform::resetReason()` (e.g. `POWERON`, `SW`, `PANIC`, `INT_WDT`, `TASK_WDT`, `BROWNOUT`, `DEEPSLEEP`). Desktop always reports `OK`. The UI flags the reboot button with a red border (`data-crashed="true"`) when the value is one of PANIC / INT_WDT / TASK_WDT / BROWNOUT, indicating the prior boot ended unexpectedly.
 
 On desktop these show "desktop" / "N/A" for hardware-specific fields.

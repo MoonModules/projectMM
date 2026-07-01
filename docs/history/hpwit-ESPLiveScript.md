@@ -6,6 +6,12 @@ The library: Yves Bazin's (hpwit) C-like compiler/interpreter for the ESP32 — 
 
 **Branch note:** `main` is quiet (last touched June 2025), but this repo develops on a long series of **version branches** (`v2`…`v4.3`, plus `vjson`/`vjson2`/`vdrop`/`memory*`), and that's where the recent work is. The activity below is read across those branches, not just `main`.
 
+## June 2026
+
+No user-facing activity: no commits on `main` **or any of the ~30 version branches** (v2.x/v3.x, dev, mem*) in June 2026, and no notable issues. (Latest commit on `main` predates the window — June 2025.)
+
+_Checked: commits author-dated 2026-06-01..2026-06-30 on `main` and every version branch (`v2`…`v3.3`, `dev`, `mem2`…`mem4`, `memory`) — 0 on each; issues created / closed / updated 2026-06-01..2026-06-30 (0 each); PRs created in-window (0); no versioned release published in June 2026._
+
 ## February 2026
 
 *Latest in-window activity, on the `vjson2` branch.*

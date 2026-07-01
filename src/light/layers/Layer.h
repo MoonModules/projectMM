@@ -6,6 +6,7 @@
 #include "light/layers/MappingLUT.h"
 #include "light/layers/BlendMap.h"   // BlendOp, for blendOp()
 #include "light/modifiers/ModifierBase.h"
+#include "light/draw.h"              // draw::fade — the once-per-frame collected fade (fadeToBlackBy)
 #include "platform/platform.h"
 
 #include <cstdio>
@@ -97,6 +98,12 @@ public:
         physicalDepth_ = dctx.maxZ + 1;
 
         rebuildLUT();
+        // Start from a clean frame on every (re)build: adding, replacing, or reconfiguring an effect
+        // rebuilds the Layer, and the buffer no longer clears per frame (it persists for trails/scroll)
+        // — so without this a freshly added effect would inherit the previous effect's last frame. One
+        // clear here (cold path, not per frame) means a new effect starts black; then persistence takes
+        // over frame to frame.
+        buffer_.clear();
         ensureLiveScratch();   // size the live-pass snapshot here, on the cold path
 
         // Neutral status: the LOGICAL box the effects render into (width_×height_×
@@ -121,7 +128,18 @@ public:
         // We still gate per-effect-child explicitly because Layer iterates its own
         // children rather than going through the Scheduler.
         elapsed_ = platform::millis();
-        buffer_.clear();
+        // The buffer PERSISTS frame-to-frame — the Layer does NOT clear it. This is the FastLED /
+        // WLED / MoonLight convention: the buffer holds the previous frame so an effect can fade it
+        // for trails (fadeToBlackBy, a "tail" control) or read prior pixels (draw::get, Game-of-Life,
+        // a scroll). Each effect owns its background: a full-grid effect overwrites every pixel, a
+        // trail effect fades then paints, a sparse effect that wants a clean frame calls draw::fill
+        // itself. An auto-clear here would make trails and read-prior effects impossible.
+        //
+        // Consume the collected fade ONCE per frame, before the effects run — the MoonLight model
+        // (VirtualLayer): effects call layer()->fadeToBlackBy(amt) which MINs into fadeBy_, so N
+        // fading effects on one layer cost ONE buffer pass (the gentlest amount wins, preserving the
+        // most light / longest trail) instead of each effect fading the whole shared buffer itself.
+        if (fadeBy_ > 0) { draw::fade(buffer_, fadeBy_); fadeBy_ = 0; }
         for (uint8_t i = 0; i < childCount(); i++) {
             if (child(i)->role() != ModuleRole::Effect) continue;
             if (!child(i)->enabled()) continue;
@@ -130,7 +148,7 @@ public:
             eff->loop();
             // Extrude a lower-dimensional effect across the unused axes so a D1
             // or D2 effect "just works" on a higher-dimensional grid. The effect
-            // only writes its own slice (D1 → row y=0,z=0; D2 → slice z=0); the
+            // only writes its own slice (D1 → column x=0,z=0; D2 → slice z=0); the
             // framework duplicates that across the rest of the buffer.
             extrude(eff->dimensions());
             eff->addAccumUs(platform::micros() - start);
@@ -228,14 +246,21 @@ public:
         const size_t rowBytes = static_cast<size_t>(width_) * cpl;
         const size_t sliceBytes = rowBytes * height_;
 
-        // D1: the effect wrote row (y=0, z=0). Duplicate it across all y in z=0.
-        if (effectDim == Dim::D1 && height_ > 1) {
-            for (lengthType y = 1; y < height_; y++) {
-                std::memcpy(buf + y * rowBytes, buf, rowBytes);
+        // 1D runs along Y: a D1 effect wrote the (x=0) column down y in z=0. Duplicate that column
+        // across all x > 0, so a 1D effect expands into 2D by *adding columns to the right* — the
+        // 1D output is literally the first column of its 2D form (see architecture.md §
+        // Dimensionality). cpl bytes per pixel copied from the x=0 pixel of each row.
+        if (effectDim == Dim::D1 && width_ > 1) {
+            for (lengthType y = 0; y < height_; y++) {
+                const uint8_t* src = buf + static_cast<size_t>(y) * rowBytes;   // the x=0 pixel
+                for (lengthType x = 1; x < width_; x++) {
+                    std::memcpy(buf + static_cast<size_t>(y) * rowBytes + static_cast<size_t>(x) * cpl,
+                                src, cpl);
+                }
             }
         }
-        // D1 and D2: at this point z=0 holds a complete (possibly extruded) slice.
-        // Duplicate it across all z > 0.
+        // D1 and D2: z=0 now holds a complete (possibly extruded) slice — the (x,y) front face.
+        // Duplicate it across all z > 0, so a 2D effect expands into 3D by adding depth slices.
         if (depth_ > 1) {
             for (lengthType z = 1; z < depth_; z++) {
                 std::memcpy(buf + z * sliceBytes, buf, sliceBytes);
@@ -253,6 +278,13 @@ public:
     lengthType depth() const { return depth_; }
     uint8_t channelsPerLight() const { return channelsPerLight_; }
     uint32_t elapsed() const { return elapsed_; }
+
+    // Request a per-frame fade-to-black of amt/255 (a trail/tail). Effects call this instead of fading
+    // the buffer themselves: the Layer collects the amount (MIN across all fading effects — the
+    // gentlest fade wins, so the longest requested trail is honoured) and applies ONE buffer pass at
+    // the start of the next frame, then resets. MoonLight's VirtualLayer::fadeToBlackBy model — N
+    // fading effects on one layer cost one pass, not N, and never fade each other's fresh pixels.
+    void fadeToBlackBy(uint8_t amt) { fadeBy_ = fadeBy_ ? (amt < fadeBy_ ? amt : fadeBy_) : amt; }
 
     nrOfLightsType physicalLightCount() const {
         return layouts_ ? layouts_->totalLightCount() : 0;
@@ -481,6 +513,7 @@ private:
     lengthType height_ = 0;
     lengthType depth_ = 0;
     uint32_t elapsed_ = 0;
+    uint8_t  fadeBy_ = 0;   // per-frame fade collected from effects (MIN), consumed once at frame start
     char statusBuf_[20] = {};  // "999×999×999" fits; owned (setStatus borrows the pointer)
     bool     hasLive_ = false;          // any enabled modifier animates per frame (gates the live pass)
     uint8_t* liveScratch_ = nullptr;    // snapshot for the live pass; allocated only when hasLive_

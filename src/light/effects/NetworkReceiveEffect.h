@@ -37,6 +37,7 @@ namespace mm {
 // Prior art: MoonLight's D_NetworkIn (single node, three protocols), WLED's
 // realtime UDP input (multi-port + per-packet validation, ArtPollReply), and
 // projectMM v1's ArtNetInModule.
+// Author: projectMM original (E1.31 / Art-Net receive)
 class NetworkReceiveEffect : public EffectBase {
 public:
     const char* tags() const override { return "📡🌙"; }  // network input · MoonLight / v1 lineage

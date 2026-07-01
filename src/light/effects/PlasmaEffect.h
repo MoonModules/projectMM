@@ -1,18 +1,24 @@
 #pragma once
 
 #include "light/layers/Layer.h"
+#include "light/Palette.h"   // colorFromPalette + active palette
 #include "core/color.h"
+#include "core/math8.h"   // sin8/cos8/dist8/atan2_8
 
 namespace mm {
 
+// Author: classic plasma, FastLED / WLED lineage
 class PlasmaEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🦅"; }  // MoonLight origin · David Jupijn / Rising Step
     Dim dimensions() const override { return Dim::D3; }
 
     uint8_t bpm = 30;
-    uint8_t scale_x = 16;
-    uint8_t scale_y = 16;
+    // Larger scale = smaller per-pixel step (256/scale) = lower spatial frequency = bigger, calmer
+    // rolling blobs. The default is high so plasma reads as large blobs, not fine noise; lower it
+    // in the UI for a busier field.
+    uint8_t scale_x = 48;
+    uint8_t scale_y = 48;
     uint8_t hue_shift = 0;
 
     void onBuildControls() override {
@@ -32,16 +38,21 @@ public:
         uint32_t now = elapsed();
         uint32_t dt = now - lastElapsed_;
         lastElapsed_ = now;
-        phase_ += static_cast<uint64_t>(dt) * bpm * static_cast<uint64_t>(w) * 64 / 60000;
+        // Phase advances purely with time and bpm — NOT with grid width, so the speed is the same on
+        // every fixture. phase_ accumulates the RAW numerator (dt·bpm·256) and the /60000 divide runs
+        // only at the sampling point below — dividing per tick would truncate the sub-unit progress to
+        // zero on a fast board (short dt), stalling the animation. 256 phase units = one beat's wrap.
+        phase_ += static_cast<uint64_t>(dt) * bpm * 256;
+        const uint32_t phase = static_cast<uint32_t>(phase_ / 60000);
 
         uint8_t step_x = static_cast<uint8_t>(256 / scale_x);
         uint8_t step_y = static_cast<uint8_t>(256 / scale_y);
         // z reuses scale_y for spatial frequency — keeps the control surface
         // simple while still varying the field along the third axis.
         uint8_t step_z = step_y;
-        uint8_t t1 = static_cast<uint8_t>(phase_);
-        uint8_t t2 = static_cast<uint8_t>(phase_ * 2);
-        uint8_t t3 = static_cast<uint8_t>(phase_ * 3);
+        uint8_t t1 = static_cast<uint8_t>(phase);
+        uint8_t t2 = static_cast<uint8_t>(phase * 2);
+        uint8_t t3 = static_cast<uint8_t>(phase * 3);
 
         // For d == 1 take the original 4-sine path unchanged — bit-for-bit
         // identical to the previous 2D-only output. For d > 1 add a 5th sine
@@ -73,7 +84,7 @@ public:
                         ? static_cast<uint8_t>(
                               (static_cast<uint16_t>(s1 + s2_y + s3 + s4 + s5_z) / 5) + hue_shift)
                         : static_cast<uint8_t>(((s1 + s2_y + s3 + s4) >> 2) + hue_shift);
-                    RGB c = hsvToRgb(hue, 255, 255);
+                    RGB c = colorFromPalette(*Palettes::active(), hue);
 
                     if (cpl >= 1) row[0] = c.r;
                     if (cpl >= 2) row[1] = c.g;

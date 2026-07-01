@@ -1,6 +1,8 @@
 # RMT LED Driver
 
-Output driver for WS2812B-class addressable LEDs over the ESP32 **[RMT (Remote Control Transceiver)](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/rmt.html)** peripheral — one or more strands, one GPIO and one RMT TX channel per strand. Reads the Drivers container's buffer, applies the shared [Correction](Correction.md) (brightness / channel order / RGBW white) per light, and emits the WS2812 1-wire signal. Runs on any chip whose RMT peripheral has TX channels: classic ESP32 (8 channels), ESP32-S3 (4 channels), and ESP32-P4 (4 channels, DMA-backed). On desktop the RMT platform seam is a no-op and the driver is inert.
+Overview and controls: [drivers.md § RMT LED](drivers.md#rmtled). This page carries the reference detail a control list can't — the WS2812B wire contract, buffer slicing, the on-device loopback self-test, and the LED-flicker troubleshooting playbook.
+
+Output driver for WS2812B-class addressable LEDs over the ESP32 **[RMT (Remote Control Transceiver)](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/rmt.html)** peripheral — one GPIO and one RMT TX channel per strand. Reads the [Drivers](../Drivers.md) buffer, applies the shared [output correction](../Drivers.md#output-correction) per light, and emits the WS2812 1-wire signal.
 
 ## Wire contract — [WS2812B](https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf)
 
@@ -20,15 +22,6 @@ The source buffer is split into **consecutive slices**, one per pin, in list ord
 ## Concurrent show (blocks the render tick for the longest strand)
 
 `loop()` encodes the whole frame once, then starts every pin's transmission (`platform::rmtWs2812Transmit`) before waiting on each (`platform::rmtWs2812Wait`) — the RMT channels clock out concurrently, so the render tick is charged roughly the **longest** strand, not the sum (~3 ms per 100 pixels on the longest slice), plus one shared reset gap. The transmission runs synchronously on the render task, so a large strand or a WiFi-interrupt-sensitive install can show timing artifacts.
-
-## Controls
-
-- `pins` (text, default empty) — comma-separated data / TX GPIO list, e.g. `18,17,16`. Empty by default (the strand is user-soldered, so no pin is assumed — the driver idles until set; the bench used `18`). One RMT TX channel per pin: up to 8 on classic ESP32, 4 on the S3 and P4 (exceeding the chip's limit, a bad token, or a duplicate pin puts an error in the status field and the driver idles). Changing it re-initialises the channels **live, no reboot** ([§ Live reconfiguration](../../../architecture.md#live-reconfiguration-every-change-applies-without-a-reboot)) — edit pins, counts, or colour order on a running device and the next frame uses them. The loopback self-test transmits on the **first** pin in the list.
-- `ledsPerPin` (text, default empty) — comma-separated lights-per-pin, e.g. `100,100,50`, matched to `pins` by position. It may be empty or shorter than `pins` (the unassigned remainder splits evenly across the leftover pins); see Buffer slicing above.
-- `loopbackTxPin` (pin, default unset / −1) — optional **TX override** for the self-test: when set, the loopback transmits on this pin instead of the first pin in `pins`, so the test can run on a dedicated jumper without re-typing the operational `pins`. Falls back to `pins[0]` when unset. Test-only — normal output always uses `pins`. Shown only while `loopbackTest` is on.
-- `loopbackRxPin` (pin, default unset / −1) — the RX pin for the loopback self-test; set it when you wire the jumper (the bench used 5). Jumper it to the TX pin (`loopbackTxPin` if set, else the **first** pin in `pins`) to run the test. Shown only while `loopbackTest` is on.
-- `loopbackTest` (bool) — a persistent on/off mode for the RMT TX→RX loopback self-test (see Self-test below). While it is on, the test re-runs whenever a relevant control changes (`pins`, `loopbackTxPin`, `loopbackRxPin`, `loopbackFrame`), so the pins can be set in any order and the result always reflects the current wiring; the verdict lands in the module's status field. Turning it off clears the verdict.
-- `loopbackFrame` (bool) — whole-frame variant of the self-test, shown only while `loopbackTest` is on. Instead of a 24-bit burst it transmits a real frame (the first pin's slice, or 64 lights) back to back and bit-verifies the entire capture. This is what catches frame-rate corruption and RF interference on the data line — a 24-bit burst can pass through a wire that mangles a sustained frame. On failure the status names the first corrupted bit and light.
 
 ## Cross-domain wiring
 

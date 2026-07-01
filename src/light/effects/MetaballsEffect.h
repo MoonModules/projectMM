@@ -1,10 +1,13 @@
 #pragma once
 
 #include "light/layers/Layer.h"
+#include "light/Palette.h"   // colorFromPalette + active palette
 #include "core/color.h"
+#include "core/math8.h"   // sin8/cos8/dist8/atan2_8
 
 namespace mm {
 
+// Author: projectMM original (metaballs)
 class MetaballsEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🦅"; }  // MoonLight origin · David Jupijn / Rising Step
@@ -13,13 +16,15 @@ public:
 
     uint8_t bpm = 30;
     uint8_t radius = 28;
+    uint8_t count = 4;   // number of balls (1..MAX_BALLS); each follows its own sine path
     uint8_t hue_shift = 0;
 
-    static constexpr uint8_t NUM_BALLS = 4;
+    static constexpr uint8_t MAX_BALLS = 8;
 
     void onBuildControls() override {
         controls_.addUint8("bpm", bpm, 1, 255);
         controls_.addUint8("radius", radius, 4, 255);
+        controls_.addUint8("count", count, 1, MAX_BALLS);
         controls_.addUint8("hue_shift", hue_shift, 0, 255);
     }
 
@@ -40,12 +45,13 @@ public:
         phase_num_ += static_cast<uint64_t>(dt) * bpm;
         uint8_t t = static_cast<uint8_t>((phase_num_ * 256) / 60000);
 
-        int16_t bx[NUM_BALLS];
-        int16_t by[NUM_BALLS];
-        static constexpr uint8_t SPEED_MUL[NUM_BALLS]  = { 1, 2, 3, 1 };
-        static constexpr uint8_t PHASE_X[NUM_BALLS]    = { 0, 30, 60, 120 };
-        static constexpr uint8_t PHASE_Y[NUM_BALLS]    = { 64, 94, 124, 184 };
-        for (uint8_t b = 0; b < NUM_BALLS; b++) {
+        const uint8_t n = count < MAX_BALLS ? count : MAX_BALLS;
+        int16_t bx[MAX_BALLS];
+        int16_t by[MAX_BALLS];
+        static constexpr uint8_t SPEED_MUL[MAX_BALLS]  = { 1, 2, 3, 1, 2, 3, 1, 2 };
+        static constexpr uint8_t PHASE_X[MAX_BALLS]    = { 0, 30, 60, 120, 160, 200, 90, 220 };
+        static constexpr uint8_t PHASE_Y[MAX_BALLS]    = { 64, 94, 124, 184, 16, 210, 150, 40 };
+        for (uint8_t b = 0; b < n; b++) {
             uint8_t tb = static_cast<uint8_t>(t * SPEED_MUL[b]);
             bx[b] = static_cast<int16_t>((sin8(static_cast<uint8_t>(tb + PHASE_X[b])) * w) >> 8);
             by[b] = static_cast<int16_t>((sin8(static_cast<uint8_t>(tb + PHASE_Y[b])) * h) >> 8);
@@ -58,7 +64,7 @@ public:
             uint8_t* row = buf + static_cast<size_t>(y) * w * cpl;
             for (lengthType x = 0; x < w; x++) {
                 uint32_t field = 0;
-                for (uint8_t b = 0; b < NUM_BALLS; b++) {
+                for (uint8_t b = 0; b < n; b++) {
                     int32_t dx = static_cast<int32_t>(x) - bx[b];
                     int32_t dy = static_cast<int32_t>(y) - by[b];
                     int32_t d2 = dx * dx + dy * dy + 1;
@@ -66,7 +72,7 @@ public:
                 }
                 uint8_t bright = field > 255 ? 255 : static_cast<uint8_t>(field);
                 uint8_t hue = static_cast<uint8_t>((field >> 1) + hue_shift);
-                RGB c = hsvToRgb(hue, 240, bright);
+                RGB c = colorFromPalette(*Palettes::active(), hue, bright);
 
                 if (cpl >= 1) row[0] = c.r;
                 if (cpl >= 2) row[1] = c.g;

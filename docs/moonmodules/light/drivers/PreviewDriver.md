@@ -1,12 +1,8 @@
 # Preview Driver
 
-![PreviewDriver controls](../../../assets/screenshots/PreviewDriver.png)
+Overview and controls: [drivers.md § Preview](drivers.md#preview). This page carries the reference detail a control list can't — the binary WebSocket protocol (coordinate table + per-frame channels), sparse-layout handling, and the large-layout spatial downsample.
 
-Streams a true-shape 3D preview to the web UI over WebSocket. The preview is a **point list** — only the real lights, at their real positions — not a dense grid. So a sphere, ring, or arbitrary fixture map shows in its true shape, and the per-frame data is just the lights that exist (much less than a padded bounding box).
-
-## Controls
-
-- `fps` (uint8_t, default 24, range 1-60) — preview stream rate (independent of the render loop)
+![PreviewDriver controls](../../../assets/light/drivers/PreviewDriver.png)
 
 ## Protocol
 

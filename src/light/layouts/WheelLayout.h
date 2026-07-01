@@ -3,7 +3,7 @@
 #include <cstdint>
 #include "light/layouts/Layouts.h"
 #include "light/light_types.h"   // lengthType, nrOfLightsType
-#include "core/color.h"          // sin8, cos8 — integer trig LUT
+#include "core/math8.h"          // sin8, cos8 — integer trig LUT
 
 namespace mm {
 
@@ -21,6 +21,7 @@ namespace mm {
 //
 // Prior art: MoonLight ring/spoke layouts (L_MoonLight.h); projectMM v2 WheelLayoutModule
 // (those used double cos/sin/round — this is the integer-LUT equivalent).
+// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h
 class WheelLayout : public LayoutBase {
 public:
     uint16_t spokes = 8;         // number of spokes, 2..64

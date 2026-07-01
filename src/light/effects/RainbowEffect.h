@@ -1,10 +1,12 @@
 #pragma once
 
 #include "light/layers/Layer.h"
+#include "light/Palette.h"   // colorFromPalette + the global active palette
 #include "core/color.h"
 
 namespace mm {
 
+// Author: FastLED rainbow (Mark Kriegsman) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_FastLED.h
 class RainbowEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫"; }  // MoonLight origin
@@ -12,7 +14,7 @@ public:
     // 3D layouts. Opt-in to that promise so the framework doesn't iterate z.
     Dim dimensions() const override { return Dim::D2; }
 
-    uint8_t speed = 60; // BPM
+    uint8_t speed = 20; // BPM — one full hue cycle every 3 s; 60 (a whole rainbow per second) reads too fast
 
     void onBuildControls() override {
         controls_.addUint8("speed", speed, 1, 255);
@@ -38,7 +40,7 @@ public:
                     (static_cast<uint32_t>(x + y) * 256 / (w + h)) + phase
                 );
 
-                RGB c = hsvToRgb(hue, 255, 255);
+                RGB c = colorFromPalette(*Palettes::active(), hue);
                 size_t offset = (static_cast<size_t>(y) * w + x) * cpl;
                 if (cpl >= 1) buf[offset + 0] = c.r;
                 if (cpl >= 2) buf[offset + 1] = c.g;

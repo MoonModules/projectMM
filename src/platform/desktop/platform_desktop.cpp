@@ -56,6 +56,10 @@ inline int make_nonblocking(int fd) {
     u_long mode = 1;
     return ::ioctlsocket(sock(fd), FIONBIO, &mode);
 }
+inline int make_blocking(int fd) {
+    u_long mode = 0;
+    return ::ioctlsocket(sock(fd), FIONBIO, &mode);
+}
 #else
 inline int sock(int fd) { return fd; }
 inline int close_sock(int fd) { return ::close(fd); }
@@ -66,6 +70,10 @@ inline int open_sock(int domain, int type, int protocol) {
 inline int make_nonblocking(int fd) {
     int flags = ::fcntl(fd, F_GETFL, 0);
     return ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
+inline int make_blocking(int fd) {
+    int flags = ::fcntl(fd, F_GETFL, 0);
+    return ::fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
 }
 #endif
 #ifdef _WIN32
@@ -254,12 +262,6 @@ const char* sdkVersion() {
 #else
     return "unknown";
 #endif
-}
-
-const char* sdkDate() {
-    // Desktop reports the compiler build date, mirroring sdkVersion() (which
-    // reports the compiler).
-    return __DATE__;
 }
 
 const char* coprocessorWifi() {
@@ -477,6 +479,124 @@ bool http_fetch_to_ota(const char* /*url*/,
     if (bytesReadOut) *bytesReadOut = 0;
     if (bytesTotalOut) *bytesTotalOut = 0;
     return false;
+}
+
+// Outbound HTTP request (plain HTTP, LAN, no TLS) — see platform.h. Blocking, bounded by a
+// receive/send timeout. Builds the request into a stack buffer, connects, sends, reads the
+// response, and returns the status code + the body (after the \r\n\r\n). Used by HueDriver
+// off the render path.
+int httpRequest(const char* method, const char* host, uint16_t port, const char* path,
+                const char* reqBody, uint32_t timeoutMs, char* body, size_t bodyLen) {
+    if (body && bodyLen) body[0] = '\0';
+    if (!method || !host || !path) return 0;
+
+    // One shared budget for the whole request: connect, send, and recv each consume from the same
+    // timeoutMs rather than each getting a fresh one (which let the total reach ~3× timeoutMs).
+    // `remainingMs()` is the time left, floored at 1ms so a phase never gets a 0 timeout (which
+    // means "block forever" for SO_*TIMEO). Tracked as elapsed-since-start (now - start), which is
+    // unsigned-wrap-safe across the 32-bit millis() rollover; an absolute `start + timeoutMs`
+    // deadline compared with `now >=` would mis-fire when only one side has wrapped.
+    const uint32_t start = millis();
+    auto remainingMs = [&]() -> uint32_t {
+        const uint32_t elapsed = millis() - start;
+        return elapsed >= timeoutMs ? 1u : (timeoutMs - elapsed);
+    };
+
+    int fd = open_sock(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return 0;
+    struct CloseGuard { int f; ~CloseGuard() { close_sock(f); } } guard{fd};
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) return 0;
+
+    // Bound the CONNECT by timeoutMs: a blocking connect to an unreachable host hangs for the OS
+    // default (tens of seconds) — and this runs on the driver's loop1s (shared with the render
+    // loop), so it must not stall. Connect non-blocking, wait writable via select() up to
+    // timeoutMs, then restore blocking for the bounded send/recv (which use SO_*TIMEO below).
+    if (make_nonblocking(fd) != 0) return 0;
+    int cr = ::connect(sock(fd), reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+    // A non-blocking connect that didn't complete immediately reports "in progress":
+    // EINPROGRESS on POSIX, WSAEWOULDBLOCK on Winsock. Anything else is a hard failure.
+#ifdef _WIN32
+    const bool inProgress = (cr != 0 && ::WSAGetLastError() == WSAEWOULDBLOCK);
+#else
+    const bool inProgress = (cr != 0 && errno == EINPROGRESS);
+#endif
+    if (cr != 0 && !inProgress) return 0;          // immediate hard failure
+    if (cr != 0) {                                 // connect in progress — wait for writable
+        fd_set wf; FD_ZERO(&wf); FD_SET(sock(fd), &wf);
+        const uint32_t cms = remainingMs();
+        timeval ctv{};
+        ctv.tv_sec = static_cast<time_t>(cms / 1000);
+        ctv.tv_usec = static_cast<suseconds_t>((cms % 1000) * 1000);
+        if (::select(static_cast<int>(sock(fd)) + 1, nullptr, &wf, nullptr, &ctv) <= 0) return 0;  // timeout / error
+        int soerr = 0; socklen_t len = sizeof(soerr);
+        ::getsockopt(sock(fd), SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&soerr), &len);
+        if (soerr != 0) return 0;                  // connect failed
+    }
+    if (make_blocking(fd) != 0) return 0;          // back to blocking for the bounded send/recv
+
+    // Bound the request send + response recv with SO_RCVTIMEO/SO_SNDTIMEO, using the time LEFT on
+    // the shared deadline (not a fresh timeoutMs) so connect + send + recv together stay within the
+    // caller's budget.
+    const uint32_t sms = remainingMs();
+#ifdef _WIN32
+    DWORD tv = sms;
+    ::setsockopt(sock(fd), SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
+    ::setsockopt(sock(fd), SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
+#else
+    timeval tv{};
+    tv.tv_sec = static_cast<time_t>(sms / 1000);
+    tv.tv_usec = static_cast<suseconds_t>((sms % 1000) * 1000);
+    ::setsockopt(sock(fd), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    ::setsockopt(sock(fd), SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
+
+    char req[1024];
+    const size_t blen = reqBody ? std::strlen(reqBody) : 0;
+    int n = blen
+        ? std::snprintf(req, sizeof(req),
+              "%s %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n"
+              "Content-Type: application/json\r\nContent-Length: %zu\r\n\r\n%s",
+              method, path, host, blen, reqBody)
+        : std::snprintf(req, sizeof(req),
+              "%s %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n",
+              method, path, host);
+    if (n <= 0 || n >= static_cast<int>(sizeof(req))) return 0;
+    // Send the whole request — a blocking send can return short under backpressure, so loop
+    // until all n bytes are out (retry on a positive partial, fail only on 0 / error).
+    for (int off = 0; off < n;) {
+        auto w = ::send(sock(fd), req + off, n - off, 0);
+        if (w > 0) off += static_cast<int>(w);
+        else return 0;
+    }
+
+    // Read the response. When the caller wants the body, read into THEIR buffer (so they size it
+    // — a Hue /lights body runs several KB) and shift the body to the front. When they don't
+    // (body==null, e.g. a fire-and-forget PUT), read into a small local scratch just far enough
+    // to get the status line — the request still executes. The status line + headers sit at the
+    // front of whatever we read.
+    char scratch[256];
+    char* buf = body ? body : scratch;
+    const size_t cap = body ? bodyLen : sizeof(scratch);
+    if (cap < 16) return 0;
+    int total = 0;
+    while (total < static_cast<int>(cap - 1)) {
+        auto r = ::recv(sock(fd), buf + total, cap - 1 - total, 0);
+        if (r > 0) total += static_cast<int>(r);
+        else break;   // closed or timeout
+    }
+    buf[total] = '\0';
+    if (total < 12 || std::strncmp(buf, "HTTP/1.", 7) != 0) { if (body) body[0] = '\0'; return 0; }
+    int status = std::atoi(buf + 9);   // "HTTP/1.1 NNN ..."
+    if (body) {
+        char* b = std::strstr(body, "\r\n\r\n");
+        if (b) std::memmove(body, b + 4, std::strlen(b + 4) + 1);   // drop headers, keep just the body
+        else body[0] = '\0';
+    }
+    return status;
 }
 
 

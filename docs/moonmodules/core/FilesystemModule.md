@@ -1,6 +1,6 @@
 # FilesystemModule
 
-![FilesystemModule controls](../../assets/screenshots/FilesystemModule.png)
+![FilesystemModule controls](../../assets/core/FilesystemModule.png)
 
 Persists control values to flash so settings survive a reboot. Always loaded, runs first in the scheduler so its load hook fires before any other module's `setup()`.
 
@@ -49,6 +49,8 @@ HttpServerModule calls `target->markDirty()` and `FilesystemModule::noteDirty()`
 A subtree's dirty flag is cleared only after its write succeeds; a failed write leaves it set so `loop1s()` retries. Losing power before the debounce expires loses the in-flight change — the cost of debouncing for fewer flash writes. `FilesystemModule::flushPending()` forces all dirty subtrees through synchronously; `POST /api/reboot` calls it so an add-then-reboot doesn't lose the change.
 
 The `lastSaved` read-only control shows how long ago the last write happened (`"never"`, `"5s ago"`, `"3m ago"`), refreshed each `loop1s()`.
+
+The `filesystem` progress control shows the config-partition usage (bytes used / total), refreshed each `loop1s()` from `platform::filesystemUsed()` / `filesystemTotal()`. It is bound only when the platform reports a real partition (a chip without a data partition, or desktop, reports 0 and the bar is omitted). This bar lives here, on the module that owns the filesystem — not on SystemModule.
 
 ## Conditional visibility (`hidden` flag)
 

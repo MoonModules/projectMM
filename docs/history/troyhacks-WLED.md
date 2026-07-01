@@ -6,6 +6,12 @@ This is a personal fork of [MoonModules/WLED-MM](https://github.com/MoonModules/
 
 **Branch note — the experiments live off `mdev`.** troyhacks branches heavily: `mdev` is the merge/alignment stream, but the distinctive work happens in named experimental branches (HDMI output, ESP32-P4, W5500 Ethernet, hardware-panel ports, voice control, a pure-IDFv5 port, a new settings subsystem). Those are *experiments*, not necessarily destined for `mdev`, so each month below carries a separate **Experimental branches** line for what moved on them — the frontier of what this fork is probing.
 
+## June 2026
+
+No user-facing activity: no commits were merged to `mdev` in June 2026 (the branch's most recent commit is dated 2026-05-20), and no versioned release was published. The repository's issue tracker is disabled, so no issues were opened or closed.
+
+_Checked: merged commits on `mdev` for author-date 2026-06-01..2026-06-30 (0 commits); releases published in June 2026 (none); issue search `repo:troyhacks/WLED is:issue created:2026-06-01..2026-06-30` and `closed:2026-06-01..2026-06-30` (0 results — issues disabled on this fork)._
+
 ## May 2026
 
 *~18 commits on `mdev`, 2026-05-01 … 2026-05-31.*

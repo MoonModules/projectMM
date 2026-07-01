@@ -259,7 +259,7 @@ The defining line is the **data relationship, not the connector**: *does the mod
 
 Peripherals are **user-add/deletable children of SystemModule**: the firmware is identical whether or not the hardware is wired, so the user adds the module when they solder a gyro on and removes it later, reusing the generic child add/replace/delete + persistence machinery (SystemModule declares `acceptsChildRoles("peripheral")`). Direction is per-module, not a role: a peripheral may read (gyro), write (relay), or both, so one `Peripheral` role spans the category. Each is a header-only or `.h`+`.cpp` core module under `src/core/`, reaches hardware only through a domain-neutral platform primitive (`platform::i2c*`, `platform::audioMic*`, …), and gets a spec in `docs/moonmodules/core/` (enforced by `check_specs.py`). Most poll in `loop20ms`/`loop1s`; the exception is a peripheral whose data an effect consumes *every frame*: [AudioModule](moonmodules/core/AudioModule.md) reads + analyses its I²S microphone in `loop()` because the audio effects react per render tick, and its per-tick cost (one FFT) is part of the render budget. Automatic bus-probe detection is out of scope; the manual path is the foundation.
 
-**An effect reads a peripheral's data** via the shared-struct pull pattern from [§ Data exchange](#data-exchange-between-modules), no new mechanism: the peripheral owns a small POD struct overwritten in place each poll/tick, and the consuming effect holds a `const` pointer to it. The first concrete case is audio: AudioModule produces an `AudioFrame` (level + 16-band spectrum + peak) that [AudioVolumeEffect](moonmodules/light/effects/AudioVolumeEffect.md) and [AudioSpectrumEffect](moonmodules/light/effects/AudioSpectrumEffect.md) consume. It reaches the frame through a static `AudioModule::latestFrame()` rather than a boot-time setter, a small variation on the pattern, because an audio effect can be added through the UI *after* boot and must still find the one live mic (a setter only wired the boot instance). The active mic registers itself in `setup()` and clears the pointer in `teardown()`, so add/remove in any order returns either the live frame or a static silent one, never null. A peripheral that only *displays* its readings (the gyro today) skips the consumer side entirely.
+**An effect reads a peripheral's data** via the shared-struct pull pattern from [§ Data exchange](#data-exchange-between-modules), no new mechanism: the peripheral owns a small POD struct overwritten in place each poll/tick, and the consuming effect holds a `const` pointer to it. The first concrete case is audio: AudioModule produces an `AudioFrame` (level + 16-band spectrum + peak) that [AudioVolumeEffect](moonmodules/light/effects/effects.md) and [AudioSpectrumEffect](moonmodules/light/effects/effects.md) consume. It reaches the frame through a static `AudioModule::latestFrame()` rather than a boot-time setter, a small variation on the pattern, because an audio effect can be added through the UI *after* boot and must still find the one live mic (a setter only wired the boot instance). The active mic registers itself in `setup()` and clears the pointer in `teardown()`, so add/remove in any order returns either the live frame or a static silent one, never null. A peripheral that only *displays* its readings (the gyro today) skips the consumer side entirely.
 
 ## Multi-device runtime
 
@@ -369,17 +369,32 @@ Effects know nothing about hardware, protocols, physical LED layout, or mapping.
 
 **Speed convention.** Effects with a speed control use BPM (beats per minute). `uint8_t`, default 60 (= 1 beat per second). Human-readable, musically meaningful, DMX-compatible. The effect converts BPM to animation rate internally using elapsed millis.
 
+### Buffer persistence — the layer does not clear each frame
+
+The Layer's buffer **persists** frame to frame: `Layer::loop()` does not clear it before running effects. The buffer holds the previous frame until an effect overwrites or fades it, and is zeroed **once** on allocation/resize. (This is the standard LED-animation model — FastLED, WLED, and MoonLight all persist their frame buffer rather than auto-clear.) Persistence holds **between frames, not across rebuilds**: `Layer::onBuildState()` clears the buffer once after `rebuildLUT()`, so adding, replacing, or reconfiguring an effect (or a resize) starts from black, then persistence takes over frame to frame again. Each effect owns its own background:
+
+- A **full-grid** effect (Plasma, Rainbow, Fire, Noise) writes every pixel each frame — the previous frame is simply overwritten.
+- A **trail** effect calls `layer()->fadeToBlackBy(amt)` to decay the previous frame before painting its new pixels — a comet leaves a fading tail because the old pixels are still there to fade.
+- A **read-prior** effect (a scroll like FreqMatrix, Game-of-Life, a blur) reads last frame's pixels via `draw::get` / `draw::blur` and acts on them — the persistence *is* its state.
+- A **sparse** effect that wants a clean frame calls `draw::fill(buf, {0,0,0})` itself (e.g. RubiksCube, whose draw touches only surface voxels).
+
+There is deliberately **no per-effect "persistence" flag**: persistence is universal, so a flag would change no framework behaviour (unlike `dimensions()`, which drives extrude). Multiple effects on one layer *interact* through the shared persistent buffer — that is a feature.
+
+**Collected fade (`Layer::fadeToBlackBy`).** Fade is a Layer operation, not a per-effect buffer pass (MoonLight's `VirtualLayer::fadeToBlackBy`). Effects register a fade amount; the Layer keeps the **MIN** across all requesting effects (the gentlest fade wins, so the longest requested trail is honoured) and applies **one** whole-buffer pass at the start of the next frame, then resets the collected amount. So N fading effects on one layer cost a single pass, not N, and one effect's fade never darkens another's just-painted pixels mid-frame. An auto-clear would make trails and read-prior effects impossible without a shadow buffer; this model gets them for free.
+
 ### Dimensionality
 
 Every effect declares its native dimensionality through `EffectBase::dimensions()`, returning `Dim::D1`, `Dim::D2`, or `Dim::D3` (default: "I iterate every axis the layer gives me"). The Layer uses this to **extrude** lower-dimensional output across the unused axes after each effect's `loop()`:
 
-- **D1**: the effect writes only the row at `(y=0, z=0)`. Layer copies that row across every other y in z=0, then copies z=0 across every z.
-- **D2**: the effect writes only the z=0 slice. Layer copies z=0 across every z.
+- **D1**: the effect writes only the column at `(x=0, z=0)` — **1D runs along Y**. Layer copies that column across every other x in z=0, then copies z=0 across every z.
+- **D2**: the effect writes only the z=0 slice (the front `(x, y)` face). Layer copies z=0 across every z.
 - **D3**: the effect writes every axis itself. Extrude is a one-comparison no-op.
 
-D1/D2 are **opt-in promises**: declaring them tells the framework it can fill the missing axes, saving the per-effect work of iterating z (or y and z). Effects that don't make that promise stay at the D3 default and iterate the whole buffer.
+D1/D2 are **opt-in promises**: declaring them tells the framework it can fill the missing axes, saving the per-effect work of iterating z (or x and z). Effects that don't make that promise stay at the D3 default and iterate the whole buffer.
 
-Hot-path cost: extrude pays one comparison and returns for the D3 case. For D1/D2 on a layer whose unused axes are size 1 (a D2 effect on a 2D layer, a D1 effect on a 1D layer) the inner loops are guarded by `depth_ > 1` / `height_ > 1` and never run. Real `memcpy` work happens only for a D1 or D2 effect on a layer with more dimensions than the effect writes: exactly the case where you wanted the framework to do the duplication.
+**Why 1D runs along Y, and the unified expand rule.** A lower-D effect occupies the *low* axes and the framework expands it across the *next* axis: **1D → 2D adds columns across X** (the 1D output is the first column, duplicated rightward); **2D → 3D adds slices across Z** (the 2D front face, duplicated in depth). 1D-along-Y is the deliberate choice (shared with MoonLight): it makes a 1D effect the natural **first column** of its 2D form — write the effect once down Y, and expanding to a panel is just "repeat the column," same math, no special-casing. (The alternative, 1D-along-X, would make 1D a *row* that expands *downward* — a less natural fit, since a strip is a column and a 2D effect's columns are what you tile.) Concretely: a 1D effect draws its shape down Y, so it renders correctly on a layer whose single populated axis is Y (a `1 × N` grid, width 1, height N); on an `N × 1` grid the extrude would run the wrong way and collapse the shape to a flat line. How a physical output (a strip, a row of [Hue lights](moonmodules/light/drivers/HueDriver.md)) maps to a `1 × N` grid is a layout concern — see the layout docs.
+
+Hot-path cost: extrude pays one comparison and returns for the D3 case. For D1/D2 on a layer whose unused axes are size 1 (a D2 effect on a 2D layer, a D1 effect on a 1D `1 × N` layer) the inner loops are guarded by `depth_ > 1` / `width_ > 1` and never run. Real `memcpy` work happens only for a D1 or D2 effect on a layer with more dimensions than the effect writes: exactly the case where you wanted the framework to do the duplication.
 
 Each effect's `dimensions()` is a claim about which axes its loop iterates, not which axes its math could in principle vary along. A "D2 fire" can in future be promoted to D3 by adding z-aware heat propagation; until then declaring it D2 honestly describes what the loop does today.
 
@@ -520,7 +535,7 @@ How lighting uses the core [multi-device runtime](#multi-device-runtime) (discov
 
 # Web UI
 
-![UI overview](assets/screenshots/ui_overview.png)
+![UI overview](assets/ui/ui_overview.png)
 
 The UI is a handful of hand-maintained files: `index.html`, `app.js`, `style.css`, plus two focused ES modules `app.js` imports (`preview3d.js` for the WebGL 3D preview, `install-picker.js` shared with the web installer). No frameworks, no build tools, no npm. Served directly by the embedded HTTP server.
 
@@ -533,6 +548,20 @@ The UI is **MoonModule-driven**. It contains no hard-coded knowledge of specific
 Adding a new MoonModule with controls needs **zero changes** to the UI files. This extends to the tree-mutation affordances: which modules accept children (and of what role) comes from each type's `acceptsChildRoles()`, and whether a module can be deleted/replaced comes from its `userEditable()`: both declared on the C++ side and reported in `/api/types` + `/api/state`. The UI hardcodes no list of "which types are containers" or "which roles are editable"; a new container type or a fixed child is a one-line C++ override.
 
 The light domain plugs into the UI at three points: a fixed top-level tree (Layouts / Layers / Drivers pinned in `main.cpp`, root reorder disabled while child reorder works via drag-and-drop), a binary WebSocket preview channel ([PreviewDriver](moonmodules/light/drivers/PreviewDriver.md): a `0x03` coordinate table sent once per LUT rebuild plus per-frame `0x02` RGB point lists, so sparse layouts preview at their real positions), and per-role emoji for the chip filter (the `ROLE_EMOJI` map in `app.js` is the single source of truth: `effect`, `driver`, …, `peripheral`). Full UI spec: [docs/moonmodules/core/ui.md](moonmodules/core/ui.md).
+
+## Tag emoji legend
+
+A module's chips come from three sources, rendered identically on the card and the type picker: a **role** chip (UI-derived from `role`), a **dimensional** chip (UI-derived from `dim`), and the curated **`tags()`** string (a flash literal the module returns; the UI splits it into grapheme clusters, one chip each). Role and dim are *not* repeated in `tags()` — only the categories below are. The `ROLE_EMOJI` / `DIM_EMOJI` maps in `app.js` are the single source of truth for the UI-derived chips; the legend takes [MoonLight](https://github.com/MoonModules/MoonLight)'s set as the canonical basis:
+
+| Category | Emoji | Meaning |
+|---|---|---|
+| **Role** (UI-derived) | 🔥 effect · 💎 modifier · 🚥 layout · ☸️ driver · 🛰️ peripheral · 🥞 layer · ⚙️ generic | what kind of module (from `role`, via `ROLE_EMOJI`) |
+| **Dimensionality** (UI-derived) | 📏 1D · 🟦 2D · 🧊 3D | native axes (from `dim`) |
+| **Origin / library** (`tags()`) | 💫 MoonLight · 🐙 WLED · ⚡️ FastLED · *(projectMM-native is the default origin — an origin emoji marks a module that came from elsewhere)* | which library the module came from; the [migration](../backlog/moonlight-effect-inventory.md) files docs by this, the emoji filters by it |
+| **Creator** (`tags()`) | 🦅 a named contributor (credited at the introduction site) | individual authorship credit |
+| **Audio** (`tags()`) | 🔊 audio-reactive | reads `AudioModule::latestFrame()` |
+
+`tags()` carries **only** origin + creator + audio (+ any genuinely module-specific marker); a module can carry several (e.g. `💫🦅` = MoonLight origin, a named creator). Role and dim are added by the UI, so a module never duplicates them in its string. When migrating, set each module's `tags()` from this legend so the chip set is consistent across the library.
 
 ## What we leave undesigned
 

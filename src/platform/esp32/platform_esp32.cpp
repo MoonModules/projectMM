@@ -28,7 +28,6 @@
 #include "esp_idf_version.h"
 #include "esp_partition.h"
 #include "esp_ota_ops.h"     // for esp_ota_get_running_partition (sysInfo)
-#include "esp_app_desc.h"    // for esp_app_get_description (sdkDate)
 #include "esp_image_format.h"
 #include "esp_flash.h"
 #include "esp_event.h"
@@ -263,13 +262,6 @@ static void netifIPv4(esp_netif_t* netif, uint8_t out[4]) {
 
 const char* sdkVersion() {
     return esp_get_idf_version();
-}
-
-const char* sdkDate() {
-    // The compile date the IDF baked into this image's app descriptor (e.g.
-    // "May 26 2026"). esp_app_get_description() returns a pointer into the
-    // running image header, valid for the program's lifetime.
-    return esp_app_get_description()->date;
 }
 
 const char* coprocessorWifi() {
@@ -1107,6 +1099,110 @@ void mdnsShutdown() {
 // Keeping discovery off mDNS also keeps the advertise stable, because a PTR query for a
 // service this device
 // also hosts destabilises our own advertise — see docs/history/decisions.md.
+
+// Outbound HTTP request (plain HTTP, LAN, no TLS) — see platform.h. A bounded blocking lwIP
+// socket call; the caller (HueDriver) runs it off the render path on loop1s. Mirrors the
+// desktop impl: build request → connect → send → read response → return status + body.
+int httpRequest(const char* method, const char* host, uint16_t port, const char* path,
+                const char* reqBody, uint32_t timeoutMs, char* body, size_t bodyLen) {
+    if (body && bodyLen) body[0] = '\0';
+    if (!method || !host || !path) return 0;
+
+    // One shared budget for the whole request: connect, send, and recv each consume from the same
+    // timeoutMs rather than each getting a fresh one (which let the total reach ~3× timeoutMs).
+    // `remainingMs()` is the time left, floored at 1ms so a phase never gets a 0 timeout (which
+    // means "block forever" for SO_*TIMEO). Tracked as elapsed-since-start (now - start), which is
+    // unsigned-wrap-safe across the 32-bit millis() rollover; an absolute `start + timeoutMs`
+    // deadline compared with `now >=` would mis-fire when only one side has wrapped.
+    const uint32_t start = millis();
+    auto remainingMs = [&]() -> uint32_t {
+        const uint32_t elapsed = millis() - start;
+        return elapsed >= timeoutMs ? 1u : (timeoutMs - elapsed);
+    };
+
+    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return 0;
+    struct CloseGuard { int f; ~CloseGuard() { ::close(f); } } guard{fd};
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) return 0;
+
+    // Bound the CONNECT by timeoutMs: a blocking connect to an unreachable host hangs for the OS
+    // default — and this runs on the driver's loop1s (shared with the render loop), so it must
+    // not stall. Connect non-blocking, wait writable via select() up to timeoutMs, then restore
+    // blocking for the bounded send/recv (which use SO_*TIMEO below).
+    const int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    int cr = ::connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+    if (cr != 0 && errno != EINPROGRESS) return 0;   // immediate hard failure
+    if (cr != 0) {                                    // connect in progress — wait for writable
+        fd_set wf; FD_ZERO(&wf); FD_SET(fd, &wf);
+        const uint32_t cms = remainingMs();
+        timeval ctv{};
+        ctv.tv_sec = static_cast<time_t>(cms / 1000);
+        ctv.tv_usec = static_cast<suseconds_t>((cms % 1000) * 1000);
+        if (::select(fd + 1, nullptr, &wf, nullptr, &ctv) <= 0) return 0;   // timeout / error
+        int soerr = 0; socklen_t len = sizeof(soerr);
+        getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &len);
+        if (soerr != 0) return 0;                      // connect failed
+    }
+    fcntl(fd, F_SETFL, flags);                         // back to blocking
+
+    // Bound the request send + response recv with SO_RCVTIMEO/SO_SNDTIMEO, using the time LEFT on
+    // the shared deadline (not a fresh timeoutMs) so connect + send + recv together stay within the
+    // caller's budget.
+    const uint32_t sms = remainingMs();
+    timeval tv{};
+    tv.tv_sec = static_cast<time_t>(sms / 1000);
+    tv.tv_usec = static_cast<suseconds_t>((sms % 1000) * 1000);
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+    char req[1024];
+    const size_t blen = reqBody ? std::strlen(reqBody) : 0;
+    int n = blen
+        ? std::snprintf(req, sizeof(req),
+              "%s %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n"
+              "Content-Type: application/json\r\nContent-Length: %zu\r\n\r\n%s",
+              method, path, host, blen, reqBody)
+        : std::snprintf(req, sizeof(req),
+              "%s %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n",
+              method, path, host);
+    if (n <= 0 || n >= static_cast<int>(sizeof(req))) return 0;
+    // Send the whole request — a blocking send can return short under backpressure, so loop
+    // until all n bytes are out (retry on a positive partial, fail only on 0 / error).
+    for (int off = 0; off < n;) {
+        int w = ::send(fd, req + off, n - off, 0);
+        if (w > 0) off += w;
+        else return 0;
+    }
+
+    // Read the response. When the caller wants the body, read into THEIR buffer (so they size it
+    // — a Hue /lights body runs several KB) and shift the body to the front. When they don't
+    // (body==null, e.g. a fire-and-forget PUT), read into a small local scratch just far enough
+    // to get the status line — the request still executes.
+    char scratch[256];
+    char* buf = body ? body : scratch;
+    const size_t cap = body ? bodyLen : sizeof(scratch);
+    if (cap < 16) return 0;
+    int total = 0;
+    while (total < static_cast<int>(cap - 1)) {
+        int r = ::recv(fd, buf + total, cap - 1 - total, 0);
+        if (r > 0) total += r;
+        else break;   // closed or timeout
+    }
+    buf[total] = '\0';
+    if (total < 12 || std::strncmp(buf, "HTTP/1.", 7) != 0) { if (body) body[0] = '\0'; return 0; }
+    int status = std::atoi(buf + 9);   // "HTTP/1.1 NNN ..."
+    if (body) {
+        char* b = std::strstr(body, "\r\n\r\n");
+        if (b) std::memmove(body, b + 4, std::strlen(b + 4) + 1);   // drop headers, keep just the body
+        else body[0] = '\0';
+    }
+    return status;
+}
 
 // UdpSocket
 

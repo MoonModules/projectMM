@@ -2,7 +2,7 @@
 
 Drive large LED installations and DMX lighting from ESP32, Teensy, Raspberry Pi, Windows, macOS or Linux desktop. One source tree, multiple targets.
 
-![Web UI](docs/assets/screenshots/ui_theme.gif)
+![Web UI](docs/assets/ui/ui_theme.gif)
 
 👉 **Try it now:** flash an ESP32 straight from your browser → <https://moonmodules.org/projectMM/install/> — step-by-step in the [Getting started guide](docs/gettingstarted.md).
 
@@ -90,7 +90,7 @@ The numbers above are observations. The **contracts** projectMM commits to, what
 
 **ESP32: flash from your browser.** Open the [web installer](https://moonmodules.org/projectMM/install/) in Chrome or Edge; it walks you through release, device and firmware selection, flashing, and network setup. The installer lists stable releases and a `latest` build (published automatically on every merge to main) carrying the newest unreleased changes.
 
-![Installer](docs/assets/screenshots/installer.png)
+![Installer](docs/assets/ui/installer.png)
 
 **Desktop: download and run.** Grab the build for your OS from the [releases page](https://github.com/MoonModules/projectMM/releases):
 
@@ -113,7 +113,7 @@ uv run scripts/moondeck.py
 
 Open `http://localhost:8420`: PC tab to build / run / test, ESP32 tab to flash, Live tab to discover devices. Full per-command reference: [scripts/MoonDeck.md](scripts/MoonDeck.md).
 
-![Moondeck Pc](docs/assets/screenshots/moondeck_pc.png)
+![Moondeck Pc](docs/assets/ui/moondeck_pc.png)
 
 ## Documentation
 
@@ -165,6 +165,7 @@ Specific people whose work directly shaped parts of projectMM. We study their th
 - **[hpwit](https://github.com/hpwit) (Yves Bazin)** — the clockless I2S / RMT / Parlio LED-driver techniques and the [ESPLiveScript](https://github.com/hpwit/ESPLiveScript) live-script engine behind the LED drivers and MoonLive.
 - **Christophe Gagnier ([@Moustachauve](https://github.com/Moustachauve))** — author of the native [WLED-Android](https://github.com/Moustachauve/WLED-Android) app. Its source let us reverse-engineer exactly what the WLED app reads, so projectMM devices appear in (and are controllable from) the native WLED apps.
 - **The [Improv Wi-Fi](https://github.com/improv-wifi) project** — the open Improv serial provisioning standard ([sdk-cpp](https://github.com/improv-wifi/sdk-cpp) / [sdk-js](https://github.com/improv-wifi/sdk-js)) that the projectMM web installer uses to provision a freshly-flashed device over USB.
+- **[FastLED](https://github.com/FastLED/FastLED)** — the canonical LED-effects library whose conventions the LED-effect world shares. projectMM links no part of FastLED, but it carries forward FastLED's recognisable *names and models* for the colour/animation primitives — `scale8`, `sin8`, the gradient-palette model (`CRGBPalette16` / `colorFromPalette`), the `beatsin8` / `inoise8` / `qadd8` family — so a contributor recognises them on sight. The implementations are projectMM's own, integer-only and hot-path-tuned for our render loop; FastLED is the prior art behind the convention, credited here and in each primitive's notes.
 
 ## Contributing
 

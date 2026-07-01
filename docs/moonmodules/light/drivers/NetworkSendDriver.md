@@ -1,16 +1,8 @@
 # Network Send Driver
 
-![NetworkSendDriver controls](../../../assets/screenshots/NetworkSendDriver.png)
+Overview and controls: [drivers.md § Network Send](drivers.md#networksend). This page carries the reference detail a control list can't — the per-protocol chunking table, E1.31/Art-Net interop notes, the synchronous-send caveat, and the packet-layout headers.
 
-Streams the light buffer over UDP in one of three industry protocols, selected by a control: **[Art-Net](https://art-net.org.uk/downloads/art-net.pdf)**, **[E1.31 / sACN](https://tsp.esta.org/tsp/documents/docs/ANSI_E1-31-2018.pdf)** (the ANSI E1.31 streaming-ACN standard), or **[DDP](http://www.3waylabs.com/ddp/)** (Distributed Display Protocol). Reads the Drivers container's buffer, applies the shared [Correction](Correction.md) (brightness / channel order / RGBW white) per light, chunks the corrected bytes per the selected protocol, and sends the whole frame as one burst at the configured rate. The single-node-multiple-protocols shape follows MoonLight's D_NetworkOut (architecture studied, not copied). Compatible with industry receivers — pixel controllers (Falcon, Advatek), xLights, LedFx, and ArtNet-controllable software.
-
-## Controls
-
-- `protocol` (select: ArtNet / E1.31 / DDP, default ArtNet) — the wire protocol; the destination port follows it automatically (6454 / 5568 / 4048). Changing it re-targets the socket **live, no reboot** ([§ Live reconfiguration](../../../architecture.md#live-reconfiguration-every-change-applies-without-a-reboot)) — switch output protocol on a running device mid-show.
-- `ip` (IPv4, default 255.255.255.255) — destination address. The default is the limited-broadcast address, so a fresh sender reaches every receiver on the LAN with no IP to type; set a unicast address to target one device. Changing it re-binds live. E1.31 multicast is deliberately not implemented (see Interop below).
-- `universe_start` (uint16_t, default 0) — first universe for ArtNet and E1.31; DDP is byte-addressed and ignores it. This is the *protocol* offset (which universe the slice maps onto), distinct from the buffer `start` below.
-- `start` / `count` — the shared source-buffer window (every driver has it; see [Drivers § Per-driver source window](../Drivers.md#per-driver-source-window-start--count)). This sink packs and sends exactly the lights `[start, start+count)` (count 0 = the whole buffer from `start`), so one sender covers just its slice — e.g. drive some lights over LEDs and the rest over ArtNet, or run two senders for different ranges.
-- `fps` (uint8_t, default 50, range 1-120) — frame rate limit. Without it the loop would re-send on every render tick; receivers expect a steady frame cadence.
+![NetworkSendDriver controls](../../../assets/light/drivers/NetworkSendDriver.png)
 
 ## Chunking per protocol
 

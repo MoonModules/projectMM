@@ -1,7 +1,9 @@
 #pragma once
 
 #include "light/layers/Layer.h"
+#include "light/Palette.h"   // colorFromPalette + active palette
 #include "core/color.h"
+#include "core/math8.h"   // sin8/cos8/dist8/atan2_8
 
 namespace mm {
 
@@ -10,6 +12,7 @@ namespace mm {
 // position once it leaves the visible area. Multiple rings overlap.
 // (Renamed from RipplesEffect: the Ripples name now holds the MoonLight
 // sine-wave water-surface port; this concentric-rings effect is Rings.)
+// Author: projectMM original (concentric rings)
 class RingsEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🦅"; }  // MoonLight origin · David Jupijn / Rising Step
@@ -18,8 +21,10 @@ public:
 
     static constexpr uint8_t MAX_RIPPLES = 8;
 
-    uint8_t count = 4;
-    uint8_t speed = 60;
+    // Calm defaults: a couple of slow rings read as clean expanding circles; more/faster reads as
+    // chaos. Raise count/speed in the UI for a busier field.
+    uint8_t count = 2;
+    uint8_t speed = 30;
     uint8_t thickness = 3;
     uint8_t hue_shift = 0;
 
@@ -81,7 +86,7 @@ public:
                         // Older ripples (large radius) fade out.
                         uint8_t age_fade = static_cast<uint8_t>(255 - ((radius_[i] * 255u) / maxR));
                         uint8_t intensity = scale8(falloff, age_fade);
-                        RGB c = hsvToRgb(static_cast<uint8_t>(hue_[i] + hue_shift), 240, intensity);
+                        RGB c = colorFromPalette(*Palettes::active(), static_cast<uint8_t>(hue_[i] + hue_shift), intensity);
                         r_acc = static_cast<uint16_t>(r_acc + c.r);
                         g_acc = static_cast<uint16_t>(g_acc + c.g);
                         b_acc = static_cast<uint16_t>(b_acc + c.b);
@@ -102,12 +107,8 @@ private:
     uint8_t hue_[MAX_RIPPLES] = {};
     bool initialized_ = false;
     uint32_t lastElapsed_ = 0;
-    uint32_t rngState_ = 0xC0DECAFEu;
-
-    uint8_t rand8() {
-        rngState_ = rngState_ * 1103515245u + 12345u;
-        return static_cast<uint8_t>((rngState_ >> 16) & 0xFF);
-    }
+    Random8 rng_{0xC0DECAFEu};   // the shared PRNG; rand8() adapts it to the call shape below
+    uint8_t rand8() { return rng_.next8(); }
 
     void spawn(uint8_t i, lengthType w, lengthType h) {
         cx_[i] = static_cast<lengthType>((static_cast<uint16_t>(rand8()) * w) >> 8);

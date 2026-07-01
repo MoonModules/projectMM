@@ -47,7 +47,7 @@ const dragTs = {};               // per-control last-touched timestamp (ms)
 // read-only types (display/display-int/time/progress) and the composite `list`
 // are absent on purpose: they always reflect the latest push.
 const EDITABLE_CONTROL_TYPES = new Set(
-    ["uint8", "uint16", "int16", "pin", "bool", "text", "textarea", "password", "select", "ipv4"]);
+    ["uint8", "uint16", "int16", "pin", "bool", "text", "textarea", "password", "select", "palette", "ipv4"]);
 const TIMING_MODES = ["fps", "ms"];
 
 // localStorage keys per ui.md
@@ -1173,6 +1173,109 @@ function createControl(moduleName, moduleType, ctrl) {
             appendResetButton(row, moduleName, ctrl, def, () => { sel.value = def; });
             break;
         }
+        case "palette": {
+            // A colour-palette dropdown where EVERY option shows its own gradient — so the colours
+            // are visible before selecting, not just after. A native <select> can't do this
+            // (browsers ignore a gradient background on <option>, and the macOS popup is OS-drawn),
+            // so this is a custom dropdown: a trigger button (selected swatch + name + caret) that
+            // toggles a list of styled rows, each a gradient swatch + name. The value still rides as
+            // the option index. Prior art: MoonLight's palette control (same native-select limit).
+            const opts = ctrl.options || [];
+            const gradientFor = (i) => {
+                const cols = (opts[i] || {}).colors || "";
+                const stops = cols.split(/\s+/).filter(Boolean).map(h => "#" + h);
+                return stops.length ? `linear-gradient(to right, ${stops.join(",")})` : "none";
+            };
+            const wrap = document.createElement("div");
+            wrap.className = "palette-control";
+            wrap.dataset.mid = moduleName;
+            wrap.dataset.key = ctrl.name;
+            wrap.dataset.value = ctrl.value;
+
+            // Trigger: shows the currently-selected palette (swatch + name) and opens the list.
+            const trigger = document.createElement("button");
+            trigger.type = "button";
+            trigger.className = "palette-trigger";
+            const triSwatch = document.createElement("span");
+            triSwatch.className = "palette-swatch";
+            const triName = document.createElement("span");
+            triName.className = "palette-name";
+            const caret = document.createElement("span");
+            caret.className = "palette-caret";
+            caret.textContent = "▾";
+            const paintTrigger = (i) => {
+                triSwatch.style.background = gradientFor(i);
+                triName.textContent = (opts[i] || {}).name || String(i);
+            };
+            paintTrigger(ctrl.value);
+            trigger.append(triSwatch, triName, caret);
+
+            // The list of gradient rows, hidden until the trigger is clicked.
+            const list = document.createElement("div");
+            list.className = "palette-list";
+            list.hidden = true;
+            opts.forEach((opt, i) => {
+                const item = document.createElement("button");
+                item.type = "button";
+                item.className = "palette-item" + (i === ctrl.value ? " selected" : "");
+                item.dataset.idx = i;
+                const sw = document.createElement("span");
+                sw.className = "palette-swatch";
+                sw.style.background = gradientFor(i);
+                const nm = document.createElement("span");
+                nm.className = "palette-name";
+                nm.textContent = opt.name || String(i);
+                item.append(sw, nm);
+                item.addEventListener("click", () => {
+                    wrap.dataset.value = i;
+                    paintTrigger(i);
+                    list.querySelectorAll(".selected").forEach(x => x.classList.remove("selected"));
+                    item.classList.add("selected");
+                    closeList();
+                    dragTs[key] = Date.now();
+                    sendControl(moduleName, ctrl.name, i);
+                });
+                list.appendChild(item);
+            });
+
+            // Open/close, dismissing on outside-click or Escape (the type-picker pattern).
+            let onDocClick = null;
+            const onKey = (e) => { if (e.key === "Escape") closeList(); };
+            const closeList = () => {
+                list.hidden = true;
+                wrap.dataset.open = "false";
+                if (onDocClick) {
+                    document.removeEventListener("pointerdown", onDocClick);
+                    document.removeEventListener("keydown", onKey);
+                    onDocClick = null;
+                }
+            };
+            const openList = () => {
+                list.hidden = false;
+                wrap.dataset.open = "true";
+                dragTs[key] = Date.now();
+                // Bring the selected row into view (a long palette list may overflow the popup).
+                const sel = list.querySelector(".palette-item.selected");
+                if (sel) sel.scrollIntoView({ block: "nearest" });
+                onDocClick = (e) => { if (!wrap.contains(e.target)) closeList(); };
+                document.addEventListener("pointerdown", onDocClick);
+                document.addEventListener("keydown", onKey);
+            };
+            trigger.addEventListener("click", () => { list.hidden ? openList() : closeList(); });
+
+            wrap.append(trigger, list);
+            row.appendChild(wrap);
+            // Reset to the default palette like every other persisted control: re-paint the trigger
+            // and the selected row to `def` (sendControl is handled by appendResetButton).
+            appendResetButton(row, moduleName, ctrl, def, () => {
+                wrap.dataset.value = def;
+                paintTrigger(def);
+                list.querySelectorAll(".selected").forEach(x => x.classList.remove("selected"));
+                const r = list.querySelector(`.palette-item[data-idx="${def}"]`);
+                if (r) r.classList.add("selected");
+            });
+            break;
+        }
         case "display": {
             // Read-only string. Updates via WS push.
             const span = document.createElement("span");
@@ -1733,8 +1836,43 @@ function updateModuleControls(mod) {
                 // which is ambiguous while a native popup is up (the popup is a
                 // separate OS layer on macOS). The 1s dragTs cooldown is the
                 // additional fallback for the frames right after the popup closes.
-                if (sel && sel.dataset.open !== "true" && sel !== document.activeElement &&
-                    Number(sel.value) !== Number(ctrl.value)) sel.value = ctrl.value;
+                if (sel && sel.dataset.open !== "true" && sel !== document.activeElement) {
+                    // Re-sync the OPTION list when it changed since render: some selects are
+                    // populated asynchronously (e.g. HueDriver learns its rooms/lights ~1-2s after
+                    // boot, growing this select from ["All"] to the full list). The value-only patch
+                    // below can't reveal new options, so rebuild them in place when they differ.
+                    const opts = ctrl.options || [];
+                    const cur = Array.from(sel.options).map(o => o.textContent);
+                    if (cur.length !== opts.length || opts.some((o, i) => o !== cur[i])) {
+                        sel.innerHTML = "";
+                        opts.forEach((opt, i) => {
+                            const o = document.createElement("option");
+                            o.value = i;
+                            o.textContent = opt;
+                            sel.appendChild(o);
+                        });
+                    }
+                    if (Number(sel.value) !== Number(ctrl.value)) sel.value = ctrl.value;
+                }
+                break;
+            }
+            case "palette": {
+                // Custom dropdown: patch the trigger (swatch + name) and the selected row, but not
+                // while the user has the list open (data-open === "true").
+                const wrap = document.querySelector(`.palette-control[data-mid="${mid}"][data-key="${k}"]`);
+                if (wrap && wrap.dataset.open !== "true" && Number(wrap.dataset.value) !== Number(ctrl.value)) {
+                    wrap.dataset.value = ctrl.value;
+                    const cols = ((ctrl.options || [])[ctrl.value] || {}).colors || "";
+                    const stops = cols.split(/\s+/).filter(Boolean).map(h => "#" + h);
+                    const grad = stops.length ? `linear-gradient(to right, ${stops.join(",")})` : "none";
+                    const triSwatch = wrap.querySelector(".palette-trigger .palette-swatch");
+                    if (triSwatch) triSwatch.style.background = grad;
+                    const triName = wrap.querySelector(".palette-trigger .palette-name");
+                    if (triName) triName.textContent = ((ctrl.options || [])[ctrl.value] || {}).name || String(ctrl.value);
+                    wrap.querySelectorAll(".palette-item.selected").forEach(x => x.classList.remove("selected"));
+                    const row = wrap.querySelector(`.palette-item[data-idx="${ctrl.value}"]`);
+                    if (row) row.classList.add("selected");
+                }
                 break;
             }
             case "display": {
@@ -1893,11 +2031,13 @@ function openTypePicker(parentMod, anchorEl) {
     });
 }
 
-// Replace mode: filter to the target module's own role (effect ↔ effect).
+// Replace mode: filter to the target module's own role (effect ↔ effect), and
+// pre-select the module's CURRENT type so the cursor lands on it (not the first row).
 function openReplacePicker(targetMod, anchorEl) {
     openPicker(anchorEl, {
         roles: [targetMod.role],
         actionLabel: "replace",
+        currentType: targetMod.type,
         commit: (type) => replaceModule(targetMod.name, type)
     });
 }
@@ -1906,7 +2046,11 @@ function openPicker(anchorEl, opts) {
     // Close any existing picker
     document.querySelectorAll(".type-picker").forEach(p => p.remove());
 
-    const filtered = availableTypes.filter(t => opts.roles.includes(t.role));
+    // Alphabetical by display name so the picker list is scannable regardless of registration
+    // order (localeCompare — case-insensitive, locale-aware).
+    const filtered = availableTypes
+        .filter(t => opts.roles.includes(t.role))
+        .sort((a, b) => (a.displayName || a.name).localeCompare(b.displayName || b.name));
 
     const picker = document.createElement("div");
     picker.className = "type-picker";
@@ -1983,9 +2127,13 @@ function openPicker(anchorEl, opts) {
     function refresh() {
         const matches = currentMatches();
         list.innerHTML = "";
+        // Highlight the module's current type if it's in the list (replace mode lands the cursor
+        // on what's already there); otherwise the first row.
+        let selIdx = opts.currentType ? matches.findIndex(t => t.name === opts.currentType) : -1;
+        if (selIdx < 0) selIdx = 0;
         matches.forEach((t, i) => {
             const item = document.createElement("div");
-            item.className = "type-picker-item" + (i === 0 ? " selected" : "");
+            item.className = "type-picker-item" + (i === selIdx ? " selected" : "");
             const emoji = document.createElement("span");
             emoji.className = "type-picker-item-emoji";
             emoji.textContent = emojiTagsFor(t).join("");
@@ -2010,8 +2158,11 @@ function openPicker(anchorEl, opts) {
             });
             list.appendChild(item);
         });
-        selectedType = matches.length > 0 ? matches[0].name : null;
+        selectedType = matches.length > 0 ? matches[selIdx].name : null;
         createBtn.disabled = !selectedType;
+        // Scroll the pre-selected row into view (it may be below the fold for a long list).
+        const selEl = list.querySelector(".type-picker-item.selected");
+        if (selEl) selEl.scrollIntoView({ block: "nearest" });
     }
 
     search.addEventListener("input", refresh);

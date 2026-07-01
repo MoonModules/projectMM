@@ -4,6 +4,33 @@ What landed on [wled/WLED](https://github.com/wled/WLED)'s `main` branch, month 
 
 Months are **not** split at release dates: upstream WLED cuts releases from separate release branches (`0_15`, `16_x`), so the version tags aren't on `main` — `main` is the development trunk that feeds future releases. Each month notes which release shipped, as context.
 
+## June 2026
+
+Post-16.0 stabilisation month: no new version tag (v16.0.0 shipped 2026-05-03 off a release branch, so the month is not split), just a steady stream of bugfixes and small additions landing on `main`.
+
+**New**
+- HUB75 matrix panels: added a "Seengreat" pinout, plus fixes for 4-scan and chained-panel setups.
+- Renamed the "CW" LED type to "CCT" for clarity when configuring CCT white strips.
+- V5-C6 boards are now covered by the V5 build.
+
+**Fixed**
+- "Rainbow" and other color-wheel effects no longer mis-drive the white channel on RGBW strips.
+- Restored the pre-16.0 look of several effects that had changed appearance after the 16.0 upgrade (also fixes the DJ Light intensity regression).
+- HUB75: restored missing pixel trails on some 2D effects (Black Hole, Lissajous, Spaceships).
+- Fixed a crash when creating a 2D setup larger than the actual number of LEDs.
+- Fixed LED glitches on long strips with ESP32-C3.
+- Nightlight: brightness now applies correctly, including small transition steps, and no longer resets when set to max brightness.
+- Color no longer jumps when you change it mid-transition; gamma is now applied correctly during realtime/live-data override.
+- Improved boot behaviour for boot presets, and "Reset segments" now respects "Make a segment for each output".
+- Fixed a ledmap parser reading past the end of the map, an analog-button reading fix, and a pixel-buffer refresh after changing matrix dimensions.
+- Better brownout detection and extended error codes aligned with WLED-MM.
+
+**Watching**
+- Discussion opened on switching from plain gamma to an sRGB transfer function for better low-brightness accuracy (#5707), and on improving the Nodes/Instances page (#5711) — no shipped outcome yet.
+- Several v16.0 field reports still open: multi-controller sync losing colour (#5705), UDP sync failing in AP mode (#5709), and OTA-update trouble on some boards (#5682, #5702).
+
+_Auditability: 43 commits on `main` with author-date 2026-06-01..2026-06-30 (`repos/wled/WLED/commits?sha=main`, first-line view; a few older-dated cherry-picks appear in-range and were excluded as non-June). Issues via `search/issues` for repo:wled/WLED created:2026-06-01..2026-06-30 (18 opened) and closed:2026-06-01..2026-06-30 (25 closed); only user-facing ones surfaced. No versioned release published in June (v16.0.0 was 2026-05-03), so no month split._
+
 ## May 2026
 
 *Summarised from 72 first-parent commits on `main`, 2026-05-01 … 2026-05-31. (Trunk after the **v16.0.0** release on May 3; v16 is codenamed "Kagayaki".)*

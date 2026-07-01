@@ -1,6 +1,7 @@
 #pragma once
 
 #include "light/layers/Layer.h"
+#include "light/Palette.h"      // colorFromPalette + the global active palette
 #include "core/AudioModule.h"   // AudioModule::latestFrame()
 
 namespace mm {
@@ -10,6 +11,7 @@ namespace mm {
 // single brightness, a colour shifting from calm to hot as it rises. Reads the
 // live frame from AudioModule::latestFrame(); with no mic (or silence) the frame is
 // zero and the grid stays dark, so the effect is safe on any target.
+// Author: projectMM original (VU-meter)
 class AudioVolumeEffect : public EffectBase {
 public:
     const char* tags() const override { return "🔊"; }
@@ -28,17 +30,19 @@ public:
         const uint8_t cpl = channelsPerLight();
         const size_t total = static_cast<size_t>(w) * h * d * cpl;
 
-        // level is ~0..255; scale to the brightness ceiling.
-        const uint16_t level = AudioModule::latestFrame()->level;
+        // level is ~0..255; scale to the brightness ceiling. Uses the SMOOTHED level so the whole
+        // surface glows/breathes with the music instead of jittering per audio block (the calm VU
+        // look, the same choice as AudioSpectrum's VU bar).
+        const uint16_t level = AudioModule::latestFrame()->levelSmoothed;
         const uint16_t v = static_cast<uint16_t>(
             (level > 255 ? 255 : level) * brightness / 255);
 
-        // A simple level-driven colour ramp: green (quiet) → red (loud), with v
-        // setting overall intensity. Fill every light identically — a VU meter on
-        // the whole surface; modifiers/layouts give it shape.
-        const uint8_t r = static_cast<uint8_t>(v);
-        const uint8_t g = static_cast<uint8_t>(v > 128 ? (255 - v) * 2 : 255 * v / 128);
-        const uint8_t b = 0;
+        // Level drives BOTH the palette index and the brightness: quiet maps to the palette's
+        // start, loud to its end, dimmed by v. Fill every light identically — a VU meter on the
+        // whole surface; modifiers/layouts give it shape.
+        const uint8_t lvl = static_cast<uint8_t>(level > 255 ? 255 : level);
+        const RGB c = colorFromPalette(*Palettes::active(), lvl, static_cast<uint8_t>(v));
+        const uint8_t r = c.r, g = c.g, b = c.b;
 
         // Write logical RGB only: channel order and any RGBW white are the
         // driver's Correction (W = min(r,g,b)), like every other effect. Effect

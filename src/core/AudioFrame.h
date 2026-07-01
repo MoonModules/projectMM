@@ -16,11 +16,18 @@ namespace mm {
 // math straight off them (the hot-path rule); the float FFT magnitudes never
 // leave the module.
 struct AudioFrame {
-    uint16_t level = 0;        // overall sound level (RMS), 0..255-ish — the VU value
-    uint16_t peakHz = 0;       // dominant frequency this frame, in Hz (0 = none)
-    uint16_t peakMag = 0;      // magnitude of that peak (gates the peakHz update)
-    uint8_t  bands[16] = {};   // 16 log-spaced frequency-band magnitudes, 0..255
-                               // (bass = bands[0], treble = bands[15])
+    uint16_t level = 0;         // RAW overall sound level (RMS), 0..255-ish — the instantaneous VU
+                                // value, recomputed each audio block with NO smoothing. Snaps to a
+                                // transient (a drum hit spikes immediately) — use this for punchy,
+                                // beat-reactive effects. (WLED calls this `volumeRaw`.)
+    uint16_t levelSmoothed = 0; // SMOOTHED level: an exponential moving average of `level`, so it
+                                // lags and rounds off sudden changes and "breathes" with the music
+                                // instead of twitching. Use this for calm/glowing effects that
+                                // should swell, not flash. (WLED calls this `volume`/`volumeSmth`.)
+    uint16_t peakHz = 0;        // dominant frequency this frame, in Hz (0 = none)
+    uint16_t peakMag = 0;       // magnitude of that peak (gates the peakHz update)
+    uint8_t  bands[16] = {};    // 16 log-spaced frequency-band magnitudes, 0..255
+                                // (bass = bands[0], treble = bands[15])
 };
 
 } // namespace mm

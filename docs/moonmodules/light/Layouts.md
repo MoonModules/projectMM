@@ -1,6 +1,6 @@
 # Layouts
 
-![Layouts controls](../../assets/screenshots/Layouts.png)
+![Layouts controls](../../assets/core/Layouts.png)
 
 Top-level container for one or more layouts. Shared by every layer in the Layers container — defines the physical light topology of the installation.
 

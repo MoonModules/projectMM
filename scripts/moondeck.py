@@ -1534,7 +1534,11 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
         The renderer resolves relative image src values to ROOT-relative paths
         before building the URL, so this handler only needs a simple join."""
         import mimetypes
-        rel = self.path[len("/api/doc-asset/"):]
+        from urllib.parse import unquote
+        # URL-decode the path: a doc image with a space in its name is written `Hue%20driver.png` in
+        # the markdown, so the request path carries `%20`; without decoding, the file lookup would seek
+        # a literal "%20" in the name and 404.
+        rel = unquote(self.path[len("/api/doc-asset/"):])
         # Resolve against ROOT and ensure no escape.
         try:
             asset_path = (ROOT / rel).resolve()
@@ -1633,6 +1637,58 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
             s = re.sub(r'(?<!\w)_([^_]+)_(?!\w)', r'<em>\1</em>', s)
             return s
 
+        def _render_cell(c: str) -> str:
+            """Render one table cell. The compact module pages (effects/modifiers/layouts)
+            use raw <img src=… width=…> previews and <a id=…></a> row anchors inside cells —
+            two tags GitHub/VS Code honor but the default escape path would turn to literal
+            text. Pass those two through (resolving an <img> src to /api/doc-asset/ like the
+            markdown-image path does); escape + inline-render the rest."""
+            def _img_attrs(tag: str) -> dict:
+                """Pull src/width/alt/style from an <img …> tag regardless of attribute ORDER — each
+                is matched by its own name="value" search, so an author may write them in any sequence
+                (the previous fixed src→width→alt→style regex silently dropped out-of-order attrs)."""
+                def attr(name):
+                    m = re.search(rf'\b{name}="([^"]*)"', tag)
+                    return m.group(1) if m else None
+                return {k: attr(k) for k in ("src", "width", "alt", "style")}
+            def _img(a):
+                src_ = a.get("src") or ""
+                width = a.get("width")
+                style = a.get("style")
+                alt_ = a.get("alt")
+                if not src_.startswith(("http://", "https://", "/")):
+                    abs_src = (md_path.parent / src_).resolve()
+                    try:
+                        src_ = str(abs_src.relative_to(ROOT.resolve()))
+                    except ValueError:
+                        pass
+                    src_ = f"/api/doc-asset/{src_}"
+                # Escape every attribute value that reaches the HTML — src/width/style as well as alt —
+                # so a doc-page value with a quote or angle bracket can't break the tag or inject markup.
+                wattr = f' width="{html_mod.escape(width)}"' if width else ""
+                altattr = f' alt="{html_mod.escape(alt_)}"' if alt_ else ""
+                # Preserve an author-set width style (the cross-renderer size lever) and append our
+                # margin so the preview isn't flush against the cell edges.
+                style = (style + ";" if style else "") + "margin:4px 0"
+                return f'<img src="{html_mod.escape(src_)}"{wattr}{altattr} style="{html_mod.escape(style)}">'
+            # No raw HTML → ordinary escaped+inline cell (the common case).
+            if "<img" not in c and "<a id=" not in c and "<br" not in c:
+                return render_inline(html_mod.escape(c))
+            # Protect the few tags the module-doc cells use (img preview, row anchor, <br> line
+            # breaks in a "card" cell), escape the rest, render markdown, then restore them.
+            tokens = []
+            def _stash(html: str) -> str:
+                tokens.append(html)
+                return f"\x00{len(tokens)-1}\x00"
+            # Match the <img …> envelope, then extract attributes by name (order-independent).
+            c = re.sub(r'<img\b[^>]*>', lambda m: _stash(_img(_img_attrs(m.group(0)))), c)
+            c = re.sub(r'<a id="([a-z0-9-]+)"></a>', lambda m: _stash(f'<a id="{m.group(1)}"></a>'), c)
+            c = re.sub(r'<br\s*/?>', lambda _: _stash("<br>"), c)
+            out = render_inline(html_mod.escape(c))
+            for i, html in enumerate(tokens):
+                out = out.replace(f"\x00{i}\x00", html)
+            return out
+
         def close_list_if_open():
             nonlocal in_list
             if in_list:
@@ -1706,7 +1762,7 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
                 # CSS handle the first-row styling.
                 cell_tag = "td"
                 cell_html = "".join(
-                    f"<{cell_tag}>{render_inline(html_mod.escape(c))}</{cell_tag}>"
+                    f"<{cell_tag}>{_render_cell(c)}</{cell_tag}>"
                     for c in cells
                 )
                 lines.append(f"<tr>{cell_html}</tr>")
@@ -1762,10 +1818,36 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
                 continue
             close_list_if_open()
 
+            stripped_check = raw_line.strip()
+
+            # A standalone <img …> line (the per-module doc pages put the preview gif on its own
+            # line above the description). Resolve a relative src to /api/doc-asset/ and keep the
+            # width, like the table-cell path does — the allowlist below doesn't cover <img>.
+            if re.fullmatch(r'<img\b[^>]*>(?:\s*<!--.*-->)?', stripped_check):
+                # Extract each attribute by name, order-independent (an author may write src/alt/width
+                # in any sequence — a fixed-order regex would silently drop the out-of-order ones).
+                def _attr(name):
+                    m = re.search(rf'\b{name}="([^"]*)"', stripped_check)
+                    return m.group(1) if m else None
+                src_ = _attr("src") or ""
+                if not src_.startswith(("http://", "https://", "/")):
+                    abs_src = (md_path.parent / src_).resolve()
+                    try:
+                        src_ = f"/api/doc-asset/{abs_src.relative_to(ROOT.resolve())}"
+                    except ValueError:
+                        pass
+                w_ = _attr("width")
+                # Escape every attribute value before it reaches the HTML (like _render_cell._img does)
+                # so a doc-page src/width/alt with a quote or bracket can't break the tag or inject markup.
+                wattr = f' width="{html_mod.escape(w_)}"' if w_ else ""
+                alt_ = _attr("alt")
+                aattr = f' alt="{html_mod.escape(alt_)}"' if alt_ is not None else ""
+                lines.append(f'<img src="{html_mod.escape(src_)}"{wattr}{aattr} style="margin:4px 0">')
+                continue
+
             # Pass-through for a fixed allowlist of structural HTML tags used
             # by history_report.py's combined graph+commits output. Narrowed
             # to known safe tags so arbitrary doc content can't inject scripts.
-            stripped_check = raw_line.strip()
             if (stripped_check.startswith("<")
                     and stripped_check.endswith(">")
                     and _allowed_html_re.match(stripped_check)):

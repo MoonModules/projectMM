@@ -46,8 +46,8 @@ public:
         // on the next WebSocket push.
         std::snprintf(chipInfo_, sizeof(chipInfo_), "%s", platform::chipModel());
         std::snprintf(sdkInfo_, sizeof(sdkInfo_), "%s", platform::sdkVersion());
-        std::snprintf(sdkDateInfo_, sizeof(sdkDateInfo_), "%s", platform::sdkDate());
-        // version / build / firmware (firmware identity) moved to FirmwareUpdateModule.
+        // version / build / firmware (firmware identity, incl. the build date) moved to
+        // FirmwareUpdateModule — SystemModule keeps only the IDF version string (`sdk`).
         std::snprintf(bootReasonStr_, sizeof(bootReasonStr_), "%s", platform::resetReason());
         if constexpr (platform::hasWifiCoprocessor) {
             std::snprintf(coprocStr_, sizeof(coprocStr_), "%s", platform::coprocessorWifi());
@@ -70,7 +70,6 @@ public:
         totalInternalVal_ = static_cast<uint32_t>(platform::totalInternalHeap());
         totalHeapVal_ = static_cast<uint32_t>(platform::totalHeap());
         chipFlashVal_ = static_cast<uint32_t>(platform::flashChipSize());
-        totalFsVal_ = static_cast<uint32_t>(platform::filesystemTotal());
 
         // Device name on top
         controls_.addText("deviceName", deviceName_, sizeof(deviceName_));
@@ -107,19 +106,16 @@ public:
         }
         controls_.addReadOnly("maxBlock", maxBlockStr_, sizeof(maxBlockStr_));
 
-        // Flash/filesystem. (version / build / firmware / firmwarePartition moved to
-        // FirmwareUpdateModule — the firmware card owns firmware identity + partition usage.)
+        // Flash. (version / build / firmware / firmwarePartition moved to FirmwareUpdateModule — the
+        // firmware card owns firmware identity + partition usage; the filesystem-usage bar moved to
+        // FilesystemModule — the module that owns the filesystem.)
         if (chipFlashVal_ > 0) {
             controls_.addReadOnly("flash", flashStr_, sizeof(flashStr_));
-        }
-        if (totalFsVal_ > 0) {
-            controls_.addProgress("filesystem", fsUsedVal_, totalFsVal_);
         }
 
         // Static info
         controls_.addReadOnly("chip", chipInfo_, sizeof(chipInfo_));
         controls_.addReadOnly("sdk", sdkInfo_, sizeof(sdkInfo_));
-        controls_.addReadOnly("sdkDate", sdkDateInfo_, sizeof(sdkDateInfo_));
         controls_.addReadOnly("bootReason", bootReasonStr_, sizeof(bootReasonStr_));
         // WiFi co-processor (P4 + on-board C6) firmware read-out. Gated at compile
         // time on hasWifiCoprocessor, so the whole control — and the snprintf/query
@@ -175,8 +171,6 @@ public:
         uint32_t freePsram = freeTotal > freeInternal ? freeTotal - freeInternal : 0;
         uint32_t totalPsram = totalHeapVal_ > totalInternalVal_ ? totalHeapVal_ - totalInternalVal_ : 0;
         psramUsedVal_ = totalPsram > freePsram ? totalPsram - freePsram : 0;
-
-        fsUsedVal_ = static_cast<uint32_t>(platform::filesystemUsed());
 
         // maxInternalAllocBlock — NOT maxAllocBlock. The internal-RAM block
         // is the scarce-resource KPI; the all-memory variant reports ~8 MB
@@ -242,19 +236,16 @@ private:
     char maxBlockStr_[12] = {};
     uint32_t heapUsedVal_ = 0;
     uint32_t psramUsedVal_ = 0;
-    uint32_t fsUsedVal_ = 0;
 
     // Static (set in setup)
     char chipInfo_[16] = {};
     char sdkInfo_[24] = {};
-    char sdkDateInfo_[16] = {};   // IDF app-descriptor compile date, e.g. "May 26 2026"
     char bootReasonStr_[16] = {};
     char coprocStr_[24] = {};   // WiFi co-processor status, e.g. "C6 fw 2.12.9" / "not detected"
     uint32_t totalInternalVal_ = 0;
     uint32_t totalHeapVal_ = 0;
     char flashStr_[12] = {};
     uint32_t chipFlashVal_ = 0;     // total chip flash
-    uint32_t totalFsVal_ = 0;
 };
 
 } // namespace mm

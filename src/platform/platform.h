@@ -68,9 +68,6 @@ constexpr size_t HEAP_RESERVE = 32768;
 void getMacAddress(uint8_t mac[6]);
 const char* chipModel();
 const char* sdkVersion();
-// The date this firmware image was built, from the IDF app descriptor (the
-// compile date baked into every binary). Desktop returns the compiler `__DATE__`.
-const char* sdkDate();
 
 // WiFi co-processor status, for boards whose radio lives on a separate chip (the
 // ESP32-P4 + on-board ESP32-C6 over esp_hosted). Returns a short status string:
@@ -203,6 +200,16 @@ void setHostname(const char* name);
 bool http_fetch_to_ota(const char* url,
                        char* statusBuf, size_t statusBufLen,
                        uint32_t* bytesReadOut, uint32_t* bytesTotalOut);
+
+// Synchronous outbound HTTP request to a LAN host — plain HTTP, no TLS (the Philips Hue v1
+// API, which HueDriver drives, allows it). Connects to `host:port`, sends `method path`
+// with `reqBody` (NUL-terminated; "" for none — a Content-Length + JSON content-type are
+// added when non-empty), and copies the RESPONSE BODY into `body` (NUL-terminated, truncated
+// to bodyLen-1). Returns the HTTP status code, or 0 on connect/timeout/error. Blocks up to
+// `timeoutMs`. Caller runs this OFF the render hot path (HueDriver on loop1s, like the OTA
+// fetch / the old mDNS browse). Built on raw sockets, same primitives as the HTTP server.
+int httpRequest(const char* method, const char* host, uint16_t port, const char* path,
+                const char* reqBody, uint32_t timeoutMs, char* body, size_t bodyLen);
 
 // Improv WiFi provisioning over UART0.
 // ESP32 only; desktop stub returns false. Spawns a FreeRTOS task that installs

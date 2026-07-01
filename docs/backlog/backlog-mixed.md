@@ -4,6 +4,18 @@ Forward-looking items whose work genuinely spans **both** the core and light dom
 
 ## Cross-domain
 
+### LightsControl — the central control hub (palette + global params + presets + external controllers)
+
+The eventual home for **global light control**, modelled on MoonLight's `ModuleLightsControl` ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Modules/ModuleLightsControl.h), [docs](https://github.com/MoonModules/MoonLight/blob/main/docs/moonlight/lightscontrol.md) — our own project, study don't copy). The concept worth carrying forward: **one module is the integration point between the device and the outside world** (IR remotes, DMX-in, MQTT / Home Assistant, hardware buttons, PIR) *and* the owner of the global light state effects read — so effects respond to one normalised interface instead of N disparate inputs. It owns: master on/off + brightness, RGB tint multipliers, the **active palette**, global **bpm / intensity** sliders broadcast to all active effects, and the **preset** system (below).
+
+**Pragmatic interim (decided 2026-06-30):** we are *not* building this module now. Its two pieces we need first live on the **Drivers** container (already the owner of global render params — brightness, lightPreset, the shared Correction): the **active palette** lands there in the palette stage (a `palette` select; effects read it via a static `Palettes::active()` seam, the `AudioModule::latestFrame()` pattern), and global **bpm / intensity** can follow the same way when a consumer needs them. When LightsControl is eventually built, it **absorbs** these controls from Drivers and becomes the hub the external controllers feed. Not a blocker for the palette work.
+
+### Light presets — save / load / loop a whole effect configuration
+
+MoonLight's preset system (part of `ModuleLightsControl`): **64 named slots**, each capturing the *complete* effect-tree configuration (all module control values), with save / load / delete, **preset looping** on a timer (rotate between a first/last slot), and Home-Assistant registration for external recall. The product owner has flagged this as **definitely needed**.
+
+Not a dependency of palettes — a separate feature, its natural home the LightsControl module above (or Drivers in the interim). Persistence already round-trips control values (the same overlay that restores the device-tree), so a preset is "snapshot the relevant subtree's JSON to a named file, restore it on recall" — the mechanism mostly exists; what's missing is the slot management + UI + loop timer. Complements the existing [presets UI note](backlog-core.md) (control-value bundles) — this is the light-domain, whole-effect-config version with looping. Build as its own stage when LightsControl (or its interim) is ready.
+
 ### MultiplyModifier mapping-LUT memory at large grids (investigation, re-verify on classic)
 
 `scenario_perf_full` on the S3 (2026-06-17) measured the MultiplyModifier's cost across grid sizes. The finding, stated correctly: the modifier **reduces compute** (with the default 2×2 kaleidoscope the effect renders only the ¼-size logical quadrant — Noise+Multiply at 16K is 29,647µs vs 50,555µs for Noise alone), and its real cost is **memory** — the mapping LUT's destinations array. Measured modifier heap cost on the S3: 16²→1.7KB, 32²→10.8KB, 64²→23.5KB, **128²(16K)→93KB** (`nrOfLightsType` is `uint32_t` on a PSRAM board). On the S3's 8MB PSRAM this is trivial. Under the physical→logical fold build each physical light contributes ≤1 destination, so the destinations array is bounded by the real light count regardless of chain depth — there is no build-time fan-out.

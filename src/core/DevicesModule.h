@@ -51,6 +51,7 @@ public:
         sink.append("{\"name\":");
         sink.writeJsonString(d.name[0] ? d.name : ip);
         sink.appendf(",\"ip\":\"%s\",\"type\":\"%s\"", ip, devTypeStr(d.type));
+        if (d.type == DevType::Hue) sink.appendf(",\"colour\":%u", d.colourCount);
         if (d.self) sink.append(",\"self\":true");
         sink.append("}");
     }
@@ -64,6 +65,7 @@ public:
         sink.writeJsonString(d.name[0] ? d.name : ip);
         sink.appendf(",\"ip\":\"%s\",\"url\":\"http://%s/\",\"type\":\"%s\"",
                      ip, ip, devTypeStr(d.type));
+        if (d.type == DevType::Hue) sink.appendf(",\"colour\":%u", d.colourCount);
         if (d.self) {
             sink.append(",\"self\":true");   // self is always "now" — no meaningful age
         } else if (d.cached) {
@@ -101,9 +103,15 @@ public:
                 Device& d = devices_[deviceCount_++];
                 std::memcpy(d.ip, octets, 4);
                 std::snprintf(d.name, sizeof(d.name), "%s", name);
-                d.type = (std::strcmp(typeStr, "projectMM") == 0) ? DevType::ProjectMM
-                       : (std::strcmp(typeStr, "WLED") == 0)      ? DevType::Wled
-                                                                  : DevType::Generic;
+                d.type = (std::strcmp(typeStr, "projectMM") == 0)  ? DevType::ProjectMM
+                       : (std::strcmp(typeStr, "WLED") == 0)       ? DevType::Wled
+                       : (std::strcmp(typeStr, "Hue bridge") == 0) ? DevType::Hue
+                                                                   : DevType::Generic;
+                // Clamp the persisted count to the valid range (0..127, the HueDriver's
+                // colourCount_ range) so a corrupt or hand-edited entry can't wrap into a bogus
+                // value when narrowed. 0 for non-bridge rows (the key is absent → readInt = 0).
+                const long colour = mm::json::readInt(mm::json::member(doc, el, "colour"));
+                d.colourCount = static_cast<uint8_t>(colour < 0 ? 0 : (colour > 127 ? 127 : colour));
                 d.self = false;
                 d.cached = true;  // restored, not re-heard live → UI shows "cached", not a time
                 // Stamp "now" so the cached entry gets its kCachedGraceMs PROBATION window
@@ -123,8 +131,44 @@ public:
         controls_.addList("devices", *this);   // this module is the ListSource
     }
 
+    // The boot DevicesModule (exactly one exists). A foreign-bridge driver in the light domain
+    // (HueDriver) registers a discovered bridge through this without a compile-time dependency
+    // on DevicesModule's address — the same static-seam shape as AudioModule::latestFrame().
+    static DevicesModule* active() { return active_; }
+
+    // Register a Hue bridge a HueDriver has connected to. Unlike upsertDevice (driven by a UDP
+    // presence packet), a bridge is discovered out-of-band — the driver already holds its IP +
+    // app key — so this is the explicit entry point for that. Idempotent: updates the name +
+    // colour count of the existing row, or inserts one. `colour` is how many of the bridge's
+    // lights are colour-capable, the figure for sizing a layout. Persisted like any device row.
+    void upsertHueBridge(const uint8_t ip[4], const char* name, uint8_t colour) {
+        Device* d = findByIp(ip);
+        bool persistChanged = false;
+        if (!d) {
+            if (deviceCount_ >= kMaxDevices) return;   // bounded; silently cap
+            d = &devices_[deviceCount_++];
+            std::memcpy(d->ip, ip, 4);
+            persistChanged = true;
+        }
+        if (d->type != DevType::Hue) { d->type = DevType::Hue; persistChanged = true; }
+        if (name && name[0] && std::strcmp(d->name, name) != 0) {
+            std::snprintf(d->name, sizeof(d->name), "%s", name);
+            persistChanged = true;
+        }
+        if (!d->name[0]) { formatDottedQuad(d->name, ip); persistChanged = true; }
+        if (d->colourCount != colour) { d->colourCount = colour; persistChanged = true; }
+        d->lastSeenMs = platform::millis();   // transient — keeps the bridge from ageing out
+        // A cached row coming (back) online is a status change even with no persisted field edit —
+        // refresh on that transition too, else a re-announced bridge stays greyed-out in the UI.
+        const bool wasCached = d->cached;
+        d->cached = false;
+        if (persistChanged) sortByName();              // re-sort only on a real persisted change
+        if (persistChanged || wasCached) refreshStatus();
+    }
+
     void setup() override {
         MoonModule::setup();
+        active_ = this;
         // The last-known device list is restored automatically before setup() by the
         // persistence overlay (the `devices` List control round-trips as JSON). So the
         // UI shows it INSTANTLY on boot — no waiting for an announcement to re-arrive.
@@ -192,7 +236,12 @@ private:
                                  // session. Cleared on the first live sighting.
         uint32_t lastSeenMs = 0; // platform::millis() at the most recent mDNS sighting.
                                  // Age-out drops a non-self device unheard for kStaleMs.
+        uint8_t  colourCount = 0; // Hue bridge only: how many of its lights are colour-capable
+                                    // (the figure for sizing a layout). 0 for non-bridge rows.
     };
+
+    // The boot instance, for active() — the foreign-bridge static seam (mirrors AudioModule).
+    static inline DevicesModule* active_ = nullptr;
 
     static constexpr uint8_t  kMaxDevices = 32;   // a LAN's worth; bounded, no heap
     // Broadcast our presence every this-many loop1s ticks (≈ seconds). Slow + light, like

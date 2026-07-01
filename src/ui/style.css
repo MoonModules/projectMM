@@ -640,6 +640,67 @@ body {
     border-radius: 4px;
     font-size: 13px;
 }
+
+/* Palette control: a custom dropdown whose every option shows its gradient (a native <option> can't
+   render a gradient). A trigger button + an absolutely-positioned list of gradient rows. */
+.palette-control {
+    flex: 1;
+    position: relative;
+}
+.palette-trigger {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    text-align: left;
+}
+.palette-swatch {
+    width: 48px;
+    height: 16px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    flex: 0 0 auto;
+}
+.palette-name { flex: 1; }
+.palette-caret { color: var(--fg-muted); flex: 0 0 auto; }
+.palette-list {
+    position: absolute;
+    top: calc(100% + 2px);
+    left: 0;
+    right: 0;
+    z-index: 30;
+    max-height: 280px;
+    overflow-y: auto;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+.palette-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    border: none;
+    color: var(--fg);
+    padding: 4px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    text-align: left;
+}
+.palette-item:hover { background: var(--bg-0); }
+.palette-item.selected { background: var(--accent); color: #fff; }
+.palette-item .palette-swatch { width: 64px; height: 18px; }
 /* Multi-line text control (e.g. script source). Compact by default (one row); the
    user drags the bottom-right grip down for more room. Monospace so code lines up.
    The browser's native resize handle is faint, so we paint an explicit grip — two

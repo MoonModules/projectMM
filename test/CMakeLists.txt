@@ -5,11 +5,15 @@ add_executable(mm_tests
     # core/
     unit/core/unit_Buffer.cpp
     unit/core/unit_Color.cpp
+    unit/core/unit_math8.cpp
+    unit/core/unit_noise.cpp
+    unit/core/unit_crc.cpp
     unit/core/unit_Control_apply_absent_key.cpp
     unit/core/unit_Control_list.cpp
     unit/core/unit_DeviceIdentify.cpp
     unit/core/unit_DevicesModule_ageout.cpp
     unit/core/unit_DevicesModule_discovery.cpp
+    unit/core/unit_DevicesModule_hue.cpp
     unit/core/unit_WledPacket.cpp
     unit/core/unit_FilesystemModule_persistence.cpp
     unit/core/unit_FirmwareUpdateModule.cpp
@@ -42,19 +46,26 @@ add_executable(mm_tests
     unit/light/unit_NetworkSendDriver_no_alloc_in_loop.cpp
     unit/light/unit_NetworkSendDriver_packet.cpp
     unit/light/unit_BlendMap.cpp
+    unit/light/unit_draw.cpp
+    unit/light/unit_GameOfLifeEffect.cpp
+    unit/light/unit_DemoReelEffect.cpp
+    unit/light/unit_TextEffect.cpp
     unit/light/unit_Coord3D.cpp
-    unit/light/unit_CheckerboardEffect.cpp
+    unit/light/unit_effects_render.cpp
     unit/light/unit_SineEffect.cpp
     unit/light/unit_DistortionWavesEffect.cpp
     unit/light/unit_Correction.cpp
     unit/light/unit_Drivers_container.cpp
     unit/light/unit_Drivers_firstOutputRgb.cpp
+    unit/light/unit_HueDriver.cpp
+    unit/light/unit_Palette.cpp
+    unit/light/unit_WaveEffect.cpp
     unit/light/unit_FireEffect.cpp
-    unit/light/unit_GameOfLifeEffect.cpp
     unit/light/unit_GridLayout.cpp
     unit/light/unit_SphereLayout.cpp
     unit/light/unit_WheelLayout.cpp
     unit/light/unit_Layer_extrude.cpp
+    unit/light/unit_Layer_persistence.cpp
     unit/light/unit_Layer_sparse_mapping.cpp
     unit/light/unit_Layer_modifier_chain.cpp
     unit/light/unit_Layer_live_modifier.cpp
@@ -70,6 +81,7 @@ add_executable(mm_tests
     unit/light/unit_RandomMapModifier.cpp
     unit/light/unit_RotateModifier.cpp
     unit/light/unit_RegionModifier.cpp
+    unit/light/unit_PinwheelModifier.cpp
     unit/light/unit_NoiseEffect.cpp
     unit/light/unit_ParticlesEffect.cpp
     unit/light/unit_PlasmaEffect.cpp

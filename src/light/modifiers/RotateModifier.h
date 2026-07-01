@@ -1,7 +1,7 @@
 #pragma once
 
 #include "light/modifiers/ModifierBase.h"
-#include "core/color.h"           // sin8, cos8 — integer trig
+#include "core/math8.h"           // sin8, cos8 — integer trig
 
 #include <cstdint>
 
@@ -30,6 +30,7 @@ namespace mm {
 //
 // Prior art: MoonLight M_MoonLight.h Rotate (modifyXYZ per-frame transform). Same per-frame
 // coordinate remap; we name the hook modifyLive and carry an explicit matrix.
+// Author: WildCats08 / @Brandon502 (MoonLight) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Modifiers/M_MoonLight.h
 class RotateModifier : public ModifierBase {
 public:
     Dim dimensions() const override { return Dim::D2; }   // 2D rotation (advisory chip)

@@ -54,7 +54,7 @@ private:
 using nrOfLightsType = std::conditional_t<platform::hasPsram, uint32_t, uint16_t>;
 
 // Dimensional support. Effects use this to declare which axes they iterate so the
-// Layer can extrude lower-dimensional output across unused axes (D1 row → fill y/z,
+// Layer can extrude lower-dimensional output across unused axes (D1 column → fill x/z,
 // D2 slice → fill z, D3 → no extrusion). Modifiers use it to advertise which axes
 // they can transform. The UI derives the 📏/🟦/🧊 chip from it (captured generically
 // by core's ModuleFactory, which detects a `dimensions()` method without naming

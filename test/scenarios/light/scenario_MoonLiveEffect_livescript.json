@@ -68,7 +68,7 @@
   "steps": [
     {
       "name": "add-moonlive",
-      "description": "Add a MoonLiveEffect to the Layer. Its default source `fill(0, 0, 255);` compiles on-device to native code; measure that the wired effect renders.",
+      "description": "Add a MoonLiveEffect to the Layer. Its default source (random pixels) compiles on-device to native code; measure that the wired effect renders.",
       "op": "add_module",
       "id": "ML",
       "type": "MoonLiveEffect",

@@ -4,6 +4,38 @@ What landed on [NightDriverStrip](https://github.com/PlummersSoftwareLLC/NightDr
 
 Summarised via the GitHub commits API (no local clone), so counts are all commits on `main`, not first-parent merges — the bullets filter out dependency bumps, whitespace, and pure refactors. The one release in the window, **v1.3.0**, was published 2026-01-10 but tagged from a late-November commit; it isn't a clean month boundary, so months are kept whole with the release noted as context.
 
+## June 2026 (up to v2.0.0)
+
+The big one: **NightDriverStrip 2.0.0** shipped on June 14 — a major release cut from `main`.
+
+**New**
+- Brand-new Web UI replacing the old one, plus a new browser-based web installer for flashing devices.
+- Runtime-selectable output drivers: settings that used to be compile-time (like strip type) can now be changed on the device without rebuilding.
+- APA102 / SK9822 strips are now a first-class output type alongside WS281x and HUB75.
+- Multi-layered, categorized device settings structure.
+- New optional WiFi-activity output pin that goes HIGH while WiFi is drawing; projects can now define zero active effects and stay idle until then.
+- Effect-timeout reset on a remote-control effect switch is now a user setting (previous always-reset behavior stays the default).
+- Effects reworked (weather, stocks, subscribers, etc.) to display usefully on short 48x16 matrices.
+- New and revised effects, plus smarter memory handling (targeted mix of internal RAM and PSRAM).
+
+**Fixed**
+- Render hiccup/stutter when settings auto-saved: SPIFFS/JSON writes no longer block the render thread.
+- Effect-manager crash shortly after load when the effect set changed.
+- Serpentine-matrix visualization corrected.
+- Lower COLORDATA server framerate optimized for smoother remote color streaming.
+- PSRAM-related instability during flash/cache writes reduced by keeping save-time JSON in internal RAM.
+
+## June 2026 (post-v2.0.0)
+
+- **v2.0.1** (also June 14): patch that fixes the web installer failing to build for the 2.0.0 release (removed a stale project entry).
+- Stock-ticker effect now shows correct live data, fetched through the new V2 API.
+- Fixed 64x32 (wide-and-short) displays that were rotating and doubling their content instead of scaling — effect previews in the Web UI and CLI now match the active output driver's pixel mapping (issue #878).
+
+**Watching**
+- Issue #877 ("networking seems broken") drew heavy discussion (38 comments) around the WebUI being unreachable after a recent merge on some setups; closed in June.
+
+Auditability: ~40 first-parent merges/commits on `main` with author-date in 2026-06-01..2026-06-30 (`commits?sha=main&since=…until=…`); two versioned releases published June 14 — v2.0.0 (commit ce00eaa) and v2.0.1 (commit 835015b), both ancestors of `main`, so the month is split at v2.0.0. Issues checked via `search/issues` for `created:2026-06-01..2026-06-30` (0 opened in range) and `closed:2026-06-01..2026-06-30` (#877, #878, #825 closed; #878 and #877 user-facing).
+
 ## May 2026
 
 *~75 commits on `main`, 2026-05-01 … 2026-05-31.*

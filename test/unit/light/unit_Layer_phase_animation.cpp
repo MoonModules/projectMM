@@ -1,5 +1,5 @@
 // @module Layer
-// @also MetaballsEffect, CheckerboardEffect, LavaLampEffect, SpiralEffect
+// @also MetaballsEffect, SpiralEffect, LavaLampEffect, SpiralEffect
 
 #include "doctest.h"
 #include "light/layers/Layers.h"
@@ -7,7 +7,7 @@
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
 #include "light/effects/MetaballsEffect.h"
-#include "light/effects/CheckerboardEffect.h"
+#include "light/effects/SpiralEffect.h"
 #include "light/effects/LavaLampEffect.h"
 #include "light/effects/SpiralEffect.h"
 #include "light/effects/NoiseEffect.h"
@@ -24,9 +24,10 @@ namespace {
 
 // Run the effect through a sequence of short ticks totalling `total_ms`, take
 // snapshots along the way, and return true if at least two snapshots differ.
-// The robustness matters because some effects' visible state flips on parity of
-// phaseCell (CheckerboardEffect) — a single before/after pair can land on the
-// same parity by accident. Multiple samples across a longer interval can't.
+// The robustness matters because some effects' visible state can land on a
+// near-identical frame at two sampled instants by accident — a single
+// before/after pair can miss the motion. Multiple samples across a longer
+// interval can't.
 //
 // Time advances through the platform test-clock seam — no wall-clock sleeps,
 // so the test is deterministic and instant regardless of CI load.
@@ -34,8 +35,8 @@ template <typename Effect>
 bool animates_over_ms(int total_ms) {
     mm::Layouts layouts;
     mm::GridLayout grid;
-    // 32×32 covers CheckerboardEffect's default cell_size=4 (8×8 cells) and is
-    // small enough to keep the test fast.
+    // 32×32 is large enough to show the effect's spatial motion and small
+    // enough to keep the test fast.
     grid.width = 32; grid.height = 32; grid.depth = 1;
     layouts.addChild(&grid);
     mm::Layer layer;
@@ -70,9 +71,9 @@ TEST_CASE("MetaballsEffect animates over a 100ms gap (desktop dt ≈ 0..1ms)") {
     CHECK(animates_over_ms<mm::MetaballsEffect>(100));
 }
 
-// Checkerboard advances at desktop speed (cells flip across 100ms).
-TEST_CASE("CheckerboardEffect animates over a 100ms gap") {
-    CHECK(animates_over_ms<mm::CheckerboardEffect>(100));
+// SpiralEffect advances at desktop speed (the spiral rotates across 100ms).
+TEST_CASE("SpiralEffect animates over a 100ms gap") {
+    CHECK(animates_over_ms<mm::SpiralEffect>(100));
 }
 
 // LavaLamp animates across 100ms (blobs move).

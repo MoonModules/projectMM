@@ -62,7 +62,7 @@ labelled summary with a thumbnail:
 
 | Collapsed | Expanded |
 |---|---|
-| ![Board picker collapsed](../assets/screenshots/installer-board-picker-collapsed.png) | ![Board picker expanded](../assets/screenshots/installer-board-picker-expanded.png) |
+| ![Board picker collapsed](../assets/ui/installer-board-picker-collapsed.png) | ![Board picker expanded](../assets/ui/installer-board-picker-expanded.png) |
 
 ## Catalog schema (`deviceModels.json`)
 

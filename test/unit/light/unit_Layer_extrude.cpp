@@ -1,5 +1,5 @@
 // @module Layer
-// @also RainbowEffect, NoiseEffect, PlasmaEffect, CheckerboardEffect, FireEffect, ParticlesEffect
+// @also RainbowEffect, NoiseEffect, PlasmaEffect, SpiralEffect, FireEffect, ParticlesEffect
 
 #include "doctest.h"
 #include "light/layers/Layer.h"
@@ -7,15 +7,15 @@
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/NoiseEffect.h"
 #include "light/effects/PlasmaEffect.h"
-#include "light/effects/CheckerboardEffect.h"
+#include "light/effects/SpiralEffect.h"
 #include "light/effects/FireEffect.h"
 #include "light/effects/ParticlesEffect.h"
 
 // Layer::extrude lets a low-dimensional effect "just work" on a higher-dimensional
-// grid: the effect writes only its own slice (D2 → z=0 plane; D1 → row at y=0,z=0)
+// grid: the effect writes only its own slice (D2 → z=0 plane; D1 → column at x=0,z=0)
 // and Layer copies that slice across the unused axes. These tests pin the
 // behaviour so a D2 effect on a 3D grid produces identical z-slices, and a
-// hypothetical D1 effect produces identical rows and slices.
+// hypothetical D1 effect (1D runs along Y) produces identical columns and slices.
 //
 // A separate group of tests covers the other direction: a D3 effect run on a
 // 2D or 1D layer. EffectBase's contract says the effect must honour the layer's
@@ -59,28 +59,29 @@ TEST_CASE("D2 effect on 3D grid: z-slices are identical (Layer::extrude)") {
     }
 }
 
-// A D1 stub: writes a gradient along x in row (y=0, z=0) and nothing else. The
-// effect doesn't actually iterate y/z — extrude is expected to do it. Keeps the
-// test independent of any specific D1 production effect (none exist today; this
-// pins the framework contract).
+// A D1 stub: 1D runs along Y, so it writes a gradient down the (x=0) column and
+// nothing else. The effect doesn't iterate x/z — extrude is expected to spread the
+// column across x (then across z). Keeps the test independent of any specific D1
+// production effect (none exist today; this pins the framework contract).
 class D1StubEffect : public mm::EffectBase {
 public:
     mm::Dim dimensions() const override { return mm::Dim::D1; }
     void loop() override {
         uint8_t* buf = buffer();
         mm::lengthType w = width();
+        mm::lengthType h = height();
         uint8_t cpl = channelsPerLight();
-        for (mm::lengthType x = 0; x < w; x++) {
-            size_t offset = static_cast<size_t>(x) * cpl;
-            buf[offset + 0] = static_cast<uint8_t>(x * 4);
-            buf[offset + 1] = static_cast<uint8_t>(255 - x * 4);
+        for (mm::lengthType y = 0; y < h; y++) {
+            size_t offset = static_cast<size_t>(y) * w * cpl;   // the x=0 pixel of row y
+            buf[offset + 0] = static_cast<uint8_t>(y * 4);
+            buf[offset + 1] = static_cast<uint8_t>(255 - y * 4);
             buf[offset + 2] = 128;
         }
     }
 };
 
-// A D1 effect writes row y=0,z=0; extrude duplicates that row across every y and every z-slice.
-TEST_CASE("D1 effect on 3D grid: rows and z-slices are identical (Layer::extrude)") {
+// A D1 effect writes the x=0 column; extrude duplicates it across every x and every z-slice.
+TEST_CASE("D1 effect on 3D grid: columns and z-slices are identical (Layer::extrude)") {
     mm::Layouts layouts;
     mm::GridLayout grid;
     grid.width = 8;
@@ -99,15 +100,16 @@ TEST_CASE("D1 effect on 3D grid: rows and z-slices are identical (Layer::extrude
     layer.loop();
 
     auto* data = layer.buffer().data();
-    const size_t rowBytes = static_cast<size_t>(grid.width) * 3;
+    const size_t cpl = 3;
+    const size_t rowBytes = static_cast<size_t>(grid.width) * cpl;
     const size_t sliceBytes = rowBytes * grid.height;
 
-    // Within z=0: every y>0 row equals y=0 row.
-    for (mm::lengthType y = 1; y < grid.height; y++) {
-        const uint8_t* y0 = data;
-        const uint8_t* yn = data + y * rowBytes;
-        for (size_t i = 0; i < rowBytes; i++) {
-            REQUIRE(yn[i] == y0[i]);
+    // Within z=0: in every row, each x>0 pixel equals the x=0 pixel (column spread across x).
+    for (mm::lengthType y = 0; y < grid.height; y++) {
+        const uint8_t* x0 = data + static_cast<size_t>(y) * rowBytes;   // the x=0 pixel
+        for (mm::lengthType x = 1; x < grid.width; x++) {
+            const uint8_t* xn = x0 + static_cast<size_t>(x) * cpl;
+            for (size_t c = 0; c < cpl; c++) REQUIRE(xn[c] == x0[c]);
         }
     }
 
@@ -254,9 +256,9 @@ static void check_d2_on_3d(const char* tag) {
     }
 }
 
-// CheckerboardEffect (D2) on a 3D layer: extrude copies z=0 to every z>0 (stateless D2 contract).
-TEST_CASE("D2 effect on 3D layer: Checkerboard extruded across z") {
-    check_d2_on_3d<mm::CheckerboardEffect>("CheckerboardEffect on 3D layer");
+// SpiralEffect (D2) on a 3D layer: extrude copies z=0 to every z>0 (stateless D2 contract).
+TEST_CASE("D2 effect on 3D layer: Spiral extruded across z") {
+    check_d2_on_3d<mm::SpiralEffect>("SpiralEffect on 3D layer");
 }
 
 // FireEffect (D2, stateful — heat buffer sized to w×h) extrudes cleanly across z on a 3D layer.

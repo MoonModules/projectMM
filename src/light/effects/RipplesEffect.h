@@ -22,6 +22,7 @@ namespace mm {
 // Float trig in the loop matches the existing wave effects (Plasma, LavaLamp);
 // the hot-path integer-math preference is for per-light colour work, not the
 // handful of transcendental ops a wave front needs.
+// Author: MoonLight — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 class RipplesEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🟦🦅"; }  // MoonLight origin · water-ripple

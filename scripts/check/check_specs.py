@@ -50,11 +50,43 @@ def find_moonmodules():
             modules.append(h_file)
     return modules
 
+# Effects, modifiers, layouts, and drivers each document themselves as one compact-row page per type
+# rather than a file per module (docs consolidation — see the folder-structure decision). A module
+# whose type name ends in one of these suffixes is documented on the matching shared page; everything
+# else keeps a per-module page named for the type. The match is purely on the type-name **suffix**, so
+# EVERY *Layout module (CarLightsLayout, CubeLayout, PanelLayout, RingLayout, …) routes to layouts.md,
+# every *Driver to drivers.md, etc. — not just a hand-picked subset. New effect/modifier/layout/driver
+# types fold in automatically. (Layouts/Layers/Drivers are CONTAINERS, not leaf modules — none of those
+# stems ends in a suffix below ("Drivers" ≠ "Driver"), so each container keeps its own per-module page;
+# the CRTP base ParallelLedDriver is skipped in discover_modules as a template.)
+CONSOLIDATED_PAGES = {
+    "Effect": SPECS / "light" / "effects" / "effects.md",
+    "Modifier": SPECS / "light" / "modifiers" / "modifiers.md",
+    "Layout": SPECS / "light" / "layouts" / "layouts.md",
+    "Driver": SPECS / "light" / "drivers" / "drivers.md",
+}
+
+
 def find_spec(module_path):
-    """Find the matching spec .md file for a source .h file."""
+    """Find the matching spec .md for a source .h.
+
+    A module whose type name ends in Effect/Modifier/Layout is documented on the shared
+    per-type page (its row must carry every control name — checked by check_spec_freshness).
+    Everything else uses the per-module page (stem match), as before.
+    """
     name = module_path.stem  # e.g. "NoiseEffect"
 
-    # Search all spec directories
+    # MoonLive is a live-script module under light/moonlive/, not a normal effect — it keeps its
+    # own page despite the *Effect suffix. Only the per-type folders consolidate.
+    in_moonlive = "moonlive" in module_path.parts
+    if not in_moonlive:
+        for suffix, page in CONSOLIDATED_PAGES.items():
+            if name.endswith(suffix):
+                if page.exists():
+                    return page
+                break  # consolidated page missing — fall through to the per-module stem search
+
+    # Per-module page: match by filename stem anywhere under docs/moonmodules/.
     for md in SPECS.rglob("*.md"):
         if md.stem == name:
             return md

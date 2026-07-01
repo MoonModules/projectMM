@@ -1,6 +1,6 @@
 # NetworkModule
 
-![NetworkModule controls](../../assets/screenshots/NetworkModule.png)
+![NetworkModule controls](../../assets/core/NetworkModule.png)
 
 Manages all device connectivity with automatic fallback: Ethernet → WiFi STA → WiFi AP. One MoonModule, one UI card — the user sees "Network", not three separate technologies.
 
