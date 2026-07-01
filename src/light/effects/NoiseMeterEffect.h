@@ -16,8 +16,10 @@ namespace mm {
 // organic gradient instead of a flat bar. Each frame the buffer fades a little (motion trail), the
 // audio level (scaled by `width`) sets how many rows light up from the bottom, and for each lit row a
 // noise sample — taken from a field that both scrolls (the aux0/aux1 phase accumulators) and is
-// modulated by the live level — picks the palette colour. Every column (x) and depth slice (z) shares
-// that row's colour, so the meter reads as one wide block of light.
+// modulated by the live level — picks the palette colour. The colour depends only on the row (y), so
+// the effect writes the x=0 column and Layer::extrude fans each row across every x and z — the meter
+// reads as one wide block of light without the effect duplicating the broadcast itself (that is the
+// framework's job; see architecture.md § Dimensionality).
 //
 // Prior art: WLED's "Noisemeter" sound-reactive effect (Andrew Tuline / WLED-SR). The fadeRate/width
 // knobs, the level→length mapping, the inoise8(row·level + aux0, aux1 + row·level) field sampling, and
@@ -27,7 +29,7 @@ namespace mm {
 class NoiseMeterEffect : public EffectBase {
 public:
     const char* tags() const override { return "🐙📊"; }   // WLED origin · audio
-    Dim dimensions() const override { return Dim::D3; }    // fills every (x, z) for each lit row y
+    Dim dimensions() const override { return Dim::D1; }    // writes the x=0 column; extrude fans x and z
 
     // Defaults match WLED's Noisemeter exactly.
     uint8_t fadeRate = 240;   // per-frame fade-to-black amount (motion trail), range 200..254
@@ -51,11 +53,12 @@ public:
         const Coord3D dims{static_cast<lengthType>(sizeX), static_cast<lengthType>(sizeY),
                            static_cast<lengthType>(sizeZ)};
 
-        draw::fade(buf, fadeRate);
+        layer()->fadeToBlackBy(fadeRate);
 
         // Level scaled by `width` into a 0..255 length proxy, then mapped onto the column height.
-        // tmpSound2 = level * 2 * width / 255  (WLED uses volumeRaw here; projectMM has no separate
-        // raw value, so f->level approximates it — a known, source-sanctioned fidelity gap).
+        // tmpSound2 = level * 2 * width / 255. WLED uses volumeRaw here (the instantaneous, un-smoothed
+        // level) so the meter snaps to transients; projectMM's f->level IS that raw value (computeLevel
+        // recomputes it per block with no smoothing — see AudioFrame::level), so this is faithful.
         const uint16_t level = f->level;
         uint32_t tmpSound2 = (static_cast<uint32_t>(level) * 2u * width) / 255u;
         if (tmpSound2 > 255u) tmpSound2 = 255u;   // tmpSound2 feeds map(0..255 → 0..sizeY); cap the
@@ -77,11 +80,9 @@ public:
             const uint8_t index = inoise8(coordA, coordB);
             const RGB col = colorFromPalette(*Palettes::active(), index);
 
+            // D1: write only the x=0 column; Layer::extrude fans this row across every x and z.
             const lengthType drawY = static_cast<lengthType>(sizeY - 1 - y);
-            for (int x = 0; x < sizeX; x++)
-                for (int z = 0; z < sizeZ; z++)
-                    draw::pixel(buf, dims, {static_cast<lengthType>(x), drawY,
-                                            static_cast<lengthType>(z)}, col);
+            draw::pixel(buf, dims, {0, drawY, 0}, col);
         }
 
         // Scroll the noise field each frame. aux0 and aux1 are advanced by two slow, slightly-detuned

@@ -70,19 +70,24 @@ TEST_CASE("AudioModule: teardown clears the active mic (latestFrame falls back t
     CHECK(f->peakHz == 0);
 }
 
-TEST_CASE("AudioModule: last setup() wins, any add/remove order stays coherent") {
-    // The robustness rule: add/remove modules in any order, the answer stays valid.
+TEST_CASE("AudioModule: two mics — first wins, survivor re-elects, any order stays coherent") {
+    // The robustness rule for a device with TWO AudioModules (two mics). Regression for a real bug:
+    // removing the ACTIVE mic used to leave active_ null while the other mic kept running, so every
+    // audio effect went silent (latestFrame() returned the static silence). The fix: first live module
+    // wins the seat, teardown() vacates it, and any running module re-claims an empty seat in loop().
     mm::AudioModule a, b;
     a.onBuildControls();
     b.onBuildControls();
 
     a.setup();
     CHECK(mm::AudioModule::latestFrame() == a.audioFrame());
-    b.setup();                                          // b is now the active mic
-    CHECK(mm::AudioModule::latestFrame() == b.audioFrame());
+    b.setup();                                          // second mic captured, but a keeps the seat
+    CHECK(mm::AudioModule::latestFrame() == a.audioFrame());   // FIRST wins, not last
 
-    a.teardown();                                       // tearing down the INACTIVE one
-    CHECK(mm::AudioModule::latestFrame() == b.audioFrame());   // must not disturb b
+    a.teardown();                                       // tearing down the ACTIVE one vacates the seat
+    // Before the survivor's next tick the seat is empty; b re-claims it in loop() (self-election).
+    b.loop();                                           // b (still live) takes over
+    CHECK(mm::AudioModule::latestFrame() == b.audioFrame());   // effects keep reading a live frame
     b.teardown();
     // Both gone: back to the static silence, no dangling pointer.
     CHECK(mm::AudioModule::latestFrame()->level == 0);

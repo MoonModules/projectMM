@@ -27,7 +27,7 @@ A 3D cube volume, `width`×`height`×`depth`, wired in a configurable axis order
 
 <a id="humansizedcube"></a>
 
-### Human Sized Cube
+### Human-Sized Cube
 
 A hollow walk-in cube built from five LED-curtain faces (front, back, top, left, right), each a `width`×`height`×`depth` curtain — for large/room-scale cube installations.
 

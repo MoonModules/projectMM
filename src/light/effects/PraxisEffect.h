@@ -30,6 +30,12 @@ public:
     const char* tags() const override { return "💫"; }  // MoonLight origin
     Dim dimensions() const override { return Dim::D2; }  // writes only the z=0 slice; extrude fills depth
 
+    // Hue-scroll speed lever (projectMM addition — MoonLight has no speed control on Praxis; its
+    // scroll rate is fixed at elapsed/40). speed scales the temporal hue scroll only, leaving the
+    // MoonLight mutator defaults untouched. Default 8 reproduces MoonLight's elapsed/40 rate
+    // (huebase = now*speed/320 = now/40 at speed 8); lower it for a calmer drift, raise it for faster.
+    uint8_t speed = 4;               // 1..64; 8 == MoonLight's fixed rate, default 4 = half (calmer)
+
     // Controls — MoonLight's exact defaults and ranges.
     uint8_t macroMutatorFreq = 3;    // macro mutator beat frequency (0..15)
     uint8_t macroMutatorMin  = 250;  // macro mutator low end (0..255), scaled <<8 into the 16-bit sweep
@@ -39,6 +45,7 @@ public:
     uint8_t microMutatorMax  = 255;  // micro mutator high end (0..255)
 
     void onBuildControls() override {
+        controls_.addUint8("speed", speed, 1, 64);
         controls_.addUint8("macroMutatorFreq", macroMutatorFreq, 0, 15);
         controls_.addUint8("macroMutatorMin", macroMutatorMin, 0, 255);
         controls_.addUint8("macroMutatorMax", macroMutatorMax, 0, 255);
@@ -66,7 +73,7 @@ public:
         const uint16_t micro = beatsin16(microMutatorFreq, now,
                                          microMutatorMin, microMutatorMax);
 
-        const uint32_t huebase = now / 40;
+        const uint32_t huebase = now * speed / 320;   // speed 8 == MoonLight's now/40; lower = calmer
         const int64_t  microDiv = static_cast<int64_t>(micro) + 1;  // micro+1, guards a divide-by-zero
 
         // hue = huebase + (x + y·macro·x) / (micro+1), truncated to the 0..255 palette wheel index.

@@ -122,8 +122,20 @@ inline void blendPixel(Buffer& buf, Coord3D dims, Coord3D p, RGB c, uint8_t amt)
     d[off + 0] = out.r; d[off + 1] = out.g; d[off + 2] = out.b;
 }
 
-// Fade the whole buffer toward black by amt/255 (MoonLight's layer fadeToBlackBy). Hot-ish but
-// off the per-pixel-effect path — one pass over the bytes.
+// Add a colour into a pixel, saturating (a bright pixel can't wrap to dark) — WLED's addRGB / additive
+// setPixelColor. Used to re-stamp a light on top of a blur so its centre stays bright. Clipped like pixel().
+inline void addPixel(Buffer& buf, Coord3D dims, Coord3D p, RGB c) {
+    const size_t off = offsetOf(buf, dims, p);
+    if (off + 2 >= buf.bytes()) return;
+    uint8_t* d = buf.data();
+    d[off + 0] = qadd8(d[off + 0], c.r);
+    d[off + 1] = qadd8(d[off + 1], c.g);
+    d[off + 2] = qadd8(d[off + 2], c.b);
+}
+
+// Fade the whole buffer toward black by amt/255 — one pass over the bytes. This is the primitive the
+// Layer's once-per-frame collected fade (Layer::fadeToBlackBy) applies; effects request a fade through
+// the Layer (which MINs the amount across effects and calls this once) rather than calling it directly.
 inline void fade(Buffer& buf, uint8_t amt) {
     const uint8_t keep = static_cast<uint8_t>(255 - amt);
     uint8_t* d = buf.data();
@@ -198,6 +210,7 @@ inline void blur(Buffer& buf, Coord3D dims, uint8_t amt) {
 // Fill the whole buffer with one colour (MoonLight's fill_solid).
 inline void fill(Buffer& buf, RGB c) {
     const uint8_t cpl = buf.channelsPerLight();
+    if (cpl == 0) return;   // a 0-channel buffer has no colour to write; guards off += 0 spinning
     uint8_t* d = buf.data();
     const size_t n = buf.bytes();
     for (size_t off = 0; off + cpl <= n; off += cpl) {
@@ -233,12 +246,17 @@ inline lengthType text(Buffer& buf, Coord3D dims, const fonts::Font& font, const
                        lengthType x, lengthType y, RGB c) {
     if (!str) return 0;
     lengthType cx = x, cy = y;
+    lengthType firstLineWidth = 0;   // frozen at the first '\n' so a multi-line string still reports line 1
+    bool onFirstLine = true;
     for (const char* p = str; *p; p++) {
-        if (*p == '\n') { cx = x; cy = static_cast<lengthType>(cy + font.height); continue; }
+        if (*p == '\n') {
+            if (onFirstLine) { firstLineWidth = static_cast<lengthType>(cx - x); onFirstLine = false; }
+            cx = x; cy = static_cast<lengthType>(cy + font.height); continue;
+        }
         glyph(buf, dims, font, *p, cx, cy, c);
         cx = static_cast<lengthType>(cx + font.width);
     }
-    return static_cast<lengthType>(cx - x);
+    return onFirstLine ? static_cast<lengthType>(cx - x) : firstLineWidth;
 }
 
 }  // namespace draw

@@ -14,7 +14,7 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
 
 ## Controls
 
-- `source` — the script text (default: random pixels — `setRGB(random16(65535), random16(256), random16(256), random16(256));`, one random light in a random colour each tick). Editing it recompiles live: a valid script swaps in on the next tick; a failed compile frees the old code, shows the diagnostic in the module status, and renders dark until fixed (the script-editor loop, robust + no reboot).
+- `source` — the script text (default: random pixels — `setRGB(random16(256), random16(256), random16(256), random16(256));`, one random light in a random colour each tick). Editing it recompiles live: a valid script swaps in on the next tick; a failed compile frees the old code, shows the diagnostic in the module status, and renders dark until fixed (the script-editor loop, robust + no reboot).
 - **Scripted controls** — a script declares a tunable variable with a range annotation, and the engine surfaces it as a real `uint8` MoonModule control (slider + UI + persistence), bound to a live value the running native code reads each tick:
 
   ```c

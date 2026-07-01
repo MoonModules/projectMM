@@ -114,6 +114,7 @@ inline constexpr uint8_t kFont4x6_rows[] = {
     0x50, 0xa0, 0x00, 0x00, 0x00, 0x00,
 };
 inline constexpr Font kFont4x6{ kFont4x6_rows, 4, 6 };
+static_assert(sizeof(kFont4x6_rows) == 95 * 6, "kFont4x6: 95 printable ASCII glyphs, one byte per row");
 
 // 6x8: 6x8, ASCII 32..126
 inline constexpr uint8_t kFont6x8_rows[] = {
@@ -214,6 +215,7 @@ inline constexpr uint8_t kFont6x8_rows[] = {
     0x28, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 inline constexpr Font kFont6x8{ kFont6x8_rows, 6, 8 };
+static_assert(sizeof(kFont6x8_rows) == 95 * 8, "kFont6x8: 95 printable ASCII glyphs, one byte per row");
 
 // The available fonts, in the order the TextEffect's font select lists them.
 inline constexpr Font kAll[] = { kFont4x6, kFont6x8 };

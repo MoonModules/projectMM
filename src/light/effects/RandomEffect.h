@@ -39,7 +39,7 @@ public:
         if (n == 0 || cpl < 1) return;
 
         // Dim the whole buffer (source: layer->fadeToBlackBy(fade)).
-        draw::fade(buf, fade);
+        layer()->fadeToBlackBy(fade);
 
         // Light one random light to a random palette colour (source:
         // setRGB(random16(nrOfLights), ColorFromPalette(pal, random8()))). The index is a flat

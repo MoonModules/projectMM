@@ -82,7 +82,7 @@ public:
         const Coord3D dims{static_cast<lengthType>(cols), static_cast<lengthType>(rows), depthDim()};
 
         // Motion trail: dim the whole buffer each frame (MoonLight: fadeToBlackBy(100)).
-        draw::fade(buf, 100);
+        layer()->fadeToBlackBy(100);
 
         constexpr float gravity = -9.81f;
         const uint32_t time = elapsed();

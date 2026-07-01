@@ -79,7 +79,7 @@ public:
         Buffer& buf = layer()->buffer();
         const Coord3D dims{w, h, d};
 
-        draw::fade(buf, 50);
+        layer()->fadeToBlackBy(50);
 
         for (size_t i = 0; i < nbStars_; i++) {
             const nrOfLightsType index = indexes_[i];

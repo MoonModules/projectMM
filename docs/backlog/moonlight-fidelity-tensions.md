@@ -11,35 +11,20 @@ Status legend: 🟡 open (needs PO decision) · 🟢 resolved (decision recorded
 
 ---
 
-## 1. 🟡 GEQ3D / GEQ — `cols / NUM_BANDS` integer bar width collapses on narrow grids
+## 1. 🟢 GEQ3D — `cols / NUM_BANDS` narrow-grid collapse — RESOLVED (2026-07-01)
 
-- **MoonLight:** bar x-position is `linex = i * (cols / NUM_BANDS)` and width `cols / NUM_BANDS`
-  (verbatim, verified in E_MoonModules.h). On a grid where `cols < numBands` (e.g. 8 columns,
-  16 bands) this integer division is **0**, so every bar collapses to x=0.
-- **Principle in tension:** *Effects must run at every grid size* / robustness. The result is
-  degenerate (all bars stacked at column 0) though not a crash.
-- **Shipped:** kept faithful — reproduces MoonLight's `cols / NUM_BANDS` exactly. No crash (draw
-  primitives clip; early-return on 0×0). CodeRabbit flagged it; accepted-with-reason because
-  "fixing" the bar math to remapped boundaries would change bar placement on **normal** grids too
-  (different rounding), diverging from what users see in MoonLight.
-- **Decision needed:** is "16 bands need ≥16 columns, else they pile at x=0, same as MoonLight"
-  acceptable? Or do we want a projectMM-only guard (e.g. clamp numBands to cols, or remap bar
-  boundaries) accepting a *visible divergence from MoonLight* on normal grids? Fidelity says leave
-  it; robustness-purism says guard it. **PO call.**
+Resolved per the "same UX, improvements allowed" rule: **clamp the drawn band count to the column
+count** so bars spread instead of piling at x=0 on a narrow grid. Invisible on normal grids
+(cols ≥ numBands → no-op), so no fidelity loss where it matters. See
+[moonlight-improvements.md](moonlight-improvements.md). (GEQ — the flat 2D one — was *not* affected:
+it maps each column to a band, so it never had the collapse.)
 
-## 2. 🟡 GEQ3D — projector sweep is frame-counter throttled, not time/BPM based
+## 2. 🟢 GEQ3D — frame-counter sweep → time-based — RESOLVED (2026-07-01)
 
-- **MoonLight:** `if (counter++ % (11 - speed) == 0) projector += dir;` — the vanishing-point sweep
-  advances per *loop call*, so its real-world speed depends on the device's frame rate (a fast
-  device sweeps faster than a slow one at the same `speed` setting).
-- **Principle in tension:** projectMM's convention is time-based motion (BPM / elapsed-ms), so an
-  effect looks the same on a 30 FPS and a 280 FPS device. CodeRabbit flagged the frame-dependence.
-- **Shipped:** kept faithful — frame-counter throttle, exactly as MoonLight. This means GEQ3D's
-  sweep speed is **not** frame-rate-independent (a known projectMM-wide expectation it breaks).
-- **Decision needed:** convert the sweep to elapsed-ms/BPM (frame-rate-independent, the projectMM
-  way, but **visibly different cadence** from MoonLight on any given device) — or keep MoonLight's
-  frame-counter (faithful, but speed varies by device FPS)? This is the cleanest example of the
-  fidelity-vs-projectMM-convention tension. **PO call.**
+Resolved: converted the projector sweep to a **time-based triangle wave** (`triwave8(beat8(...))`),
+so `speed` means the same on every device (frame-rate-independent). Not throttled — a fast board
+renders the same sweep more smoothly, a slow one choppier. Once-per-frame, no per-pixel cost. See
+[moonlight-improvements.md](moonlight-improvements.md).
 
 ---
 
@@ -69,14 +54,27 @@ Status legend: 🟡 open (needs PO decision) · 🟢 resolved (decision recorded
   the same loudness MoonLight's `volume` reaches ~1.0?), and whether `volumeRaw` (which we don't
   have separately — NoiseMeter uses it) needs a real raw value added to AudioFrame, or `level` is a
   good-enough stand-in. **PO call after bench.**
+- **Synth-audio bench (2026-07-01, P4 mic-less + `simulate=music`):** under a known-good synthesized
+  frame the FreqMatrix gate (`peakHz > 80 && levelSmoothed > 64`) opens on **398/400** frames, so the
+  *threshold and code path are correct* — a synth signal lights the effect. This isolates the open
+  question to **real-mic scaling only**: whether a live INMP441 `level`/`levelSmoothed` reaches the
+  same ~64+ the synth does at the loudness a user calls "music playing". The earlier "FreqMatrix/Blurz
+  show nothing on the S3 with music" report is therefore a *mic gain/scale* question (does the real
+  `gain`/`floor` bring the signal over the gate), not an effect bug. **Cross-check on the S3 with the
+  synth as the reference: if the synth lights it and the real mic doesn't, raise `gain` / lower the
+  gate, don't touch the effect.**
 
-## 5. ⚪ Audio effects — `AudioFrame` has no separate `volumeRaw`
+## 5. 🟢 Audio effects — raw vs smoothed level — RESOLVED (2026-07-01)
 
-- **MoonLight:** NoiseMeter reads `sharedData.volumeRaw` (unsmoothed), distinct from `volume`.
-- **projectMM:** `AudioFrame` has only `level` (smoothed RMS). The 3d NoiseMeter port uses `level`
-  as a stand-in (commented).
-- **Decision needed:** add a `volumeRaw`/unsmoothed field to `AudioFrame` + AudioModule (a small
-  producer change) for an exact NoiseMeter, or accept `level` as the stand-in? Low stakes; **PO call.**
+The premise was backwards: `AudioFrame::level` was NOT smoothed — `computeLevel` recomputes it raw
+per audio block, so it's already WLED's `volumeRaw` (the instantaneous, transient-snapping value).
+NoiseMeter using it was correct, not a stand-in. The real gap was the *other* direction: no smoothed
+value. Resolved by **adding `AudioFrame::levelSmoothed`** (an EMA of `level` in AudioModule) so
+effects that want WLED's calm `volume`/`volumeSmth` can read it, and doing an **audio-effect sweep**
+to point each effect at the value matching its behaviour: NoiseMeter → raw `level` (unchanged, VU
+snaps to beats); FreqMatrix, AudioSpectrum's VU bar, AudioVolume → `levelSmoothed` (breathing/flowing
+look). Bands-driven effects (GEQ, GEQ3D, PaintBrush, FreqSaws, Blurz) read per-band magnitudes,
+unaffected. See [moonlight-improvements.md](moonlight-improvements.md).
 
 ## 6. 🟡 Reconstructed logic — effects whose MoonLight source was incomplete (cross-check on bench)
 

@@ -25,13 +25,12 @@ public:
     lengthType nrOfTubes = 4;
     lengthType ledsPerTube = 54;
     lengthType tubeDistance = 10;
-    bool reversed = false;   // odd → each tube wired from its top (y descending)
+    bool reversed = false;   // when set, each tube is wired from its top (y descending)
 
     void onBuildControls() override {
-        // RECONSTRUCTED: MoonLight declares these as bare "slider" controls with
-        // no explicit min/max (uint8_t defaults 0..255). projectMM's addInt16
-        // needs explicit ranges; these preserve the geometry (≥1 tube of ≥1
-        // light, non-negative spacing) while keeping the box bounded.
+        // MoonLight's counterparts are bare "slider" controls (uint8_t, 0..255).
+        // These explicit ranges hold the geometry (≥1 tube of ≥1 light,
+        // non-negative spacing) while keeping the box bounded.
         controls_.addInt16("nrOfTubes",    nrOfTubes,    1, 64);
         controls_.addInt16("ledsPerTube",  ledsPerTube,  1, 255);
         controls_.addInt16("tubeDistance", tubeDistance, 0, 255);

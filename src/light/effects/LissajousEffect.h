@@ -48,7 +48,7 @@ public:
         const Coord3D dims{static_cast<lengthType>(w), static_cast<lengthType>(h), depthDim()};
 
         // Motion trail: dim the whole buffer each frame (source: layer->fadeToBlackBy(fadeRate)).
-        draw::fade(buf, fadeRate);
+        layer()->fadeToBlackBy(fadeRate);
 
         // Shared phase, advancing with elapsed time. Kept wide (16-bit) like the source; only the
         // sin8/cos8 LUT argument below is truncated to uint8_t (the mod-256 wrap), so the high bits

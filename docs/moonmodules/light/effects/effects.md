@@ -4,7 +4,7 @@ Every effect, one block each: its preview, what it does, and what each control m
 
 **Jump to:** [MoonLight](#moonlight-effects) · [MoonModules](#moonmodules-effects) · [WLED](#wled-effects) · [FastLED](#fastled-effects) · [projectMM-native](#projectmm-native-effects)
 
-> Some WLED-origin effects show a preview gif from [WLED-Utils](https://github.com/scottrbailey/WLED-Utils) by scottrbailey (the canonical WLED effect gif set, cross-linked with credit) as an interim illustration — these show WLED's rendering and are replaced with our own capture once the effect is bench-verified. Effects with a local `../../../assets/…` gif already show our own output.
+> Some WLED-origin effects show a preview gif from [WLED-Utils](https://github.com/scottrbailey/WLED-Utils) by scottrbailey (the canonical WLED effect gif set, cross-linked with credit); these show WLED's rendering. Effects with a local `../../../assets/…` gif show our own output.
 
 ## MoonLight effects
 
@@ -452,11 +452,12 @@ An oscilloscope waveform scrolls across the grid with a fading trail; six select
 
 <img src="../../../assets/light/effects/FireEffect.gif" width="300" alt="Fire effect preview">
 
-Fire2012-style heat field — sparks at the base rise and cool through a black→red→yellow→white ramp; spark count scales with width.
+Fire2012-style heat field — sparks at the base rise and cool through the active palette (heat = palette index, cold at the low end, hottest at the high end); spark count scales with width.
 
 - `cooling` — how fast heat dissipates as it rises (higher = shorter flames).
 - `sparking` — chance of a new spark at the base each frame (higher = livelier fire).
-- `hue_shift` — rotate the flame's colour ramp.
+
+The flame colour comes from the **active palette**. For the classic fire look pick the **Lava** palette (black→red→orange→yellow→white — the recommended default); any palette works, so an Ocean or Forest palette turns the flame blue or green.
 
 [Tests](../../../tests/unit-tests.md#fireeffect)
 

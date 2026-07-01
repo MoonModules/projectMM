@@ -24,6 +24,7 @@ namespace mm {
 class AudioSpectrumEffect : public EffectBase {
 public:
     const char* tags() const override { return "📊"; }
+    Dim dimensions() const override { return Dim::D2; }   // writes the z=0 slice; extrude fills z
 
     // 0 = height gradient (green base → red top, the VU look); 1 = per-band hue
     // (each column its own colour across the spectrum, the rainbow analyser look).
@@ -64,14 +65,18 @@ public:
 
         if (levelRow) {
             const lengthType y = static_cast<lengthType>(h - 1);   // bottom row
+            // The VU bar uses the SMOOTHED level so it glides with the music instead of jittering
+            // per audio block — the calm VU look. (The spectrum bars above use the raw per-band
+            // magnitudes, which stay snappy.)
+            const uint16_t vu = f->levelSmoothed;
             const lengthType litW = static_cast<lengthType>(
-                static_cast<uint32_t>(f->level > 255 ? 255 : f->level) * w / 255u);
+                static_cast<uint32_t>(vu > 255 ? 255 : vu) * w / 255u);
             for (lengthType x = 0; x < litW; x++) {
-                // Green → red across the width, the VU-meter look.
+                // Green → red across the width, the VU-meter look. D2: write the z=0 slice only;
+                // Layer::extrude fans it across z (the framework's job, not the effect's).
                 const uint8_t frac = static_cast<uint8_t>(
                     static_cast<uint32_t>(x) * 255u / (w > 1 ? w : 1));
-                for (lengthType z = 0; z < d; z++)
-                    setRGB(x, y, z, frac, static_cast<uint8_t>(255 - frac), 0);
+                setRGB(x, y, 0, frac, static_cast<uint8_t>(255 - frac), 0);
             }
         }
 
@@ -120,8 +125,7 @@ public:
                                     : static_cast<uint8_t>(static_cast<uint32_t>(255 - frac) * mag / 255u);
                     b = 0;
                 }
-                for (lengthType z = 0; z < d; z++)
-                    setRGB(x, y, z, r, g, b);
+                setRGB(x, y, 0, r, g, b);   // D2: z=0 only; extrude fans across z
             }
         }
     }

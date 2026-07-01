@@ -35,9 +35,11 @@ public:
     const char* tags() const override { return "🐙📊"; }  // WLED-lineage · audio
     Dim dimensions() const override { return Dim::D2; }
 
-    // MoonLight/WLED defaults.
-    uint8_t fadeRate   = 16;     // per-frame fade-to-black strength (1..255)
-    uint8_t blur       = 128;    // box-blur strength applied after drawing the dot (1..255)
+    // MoonLight/WLED defaults (fadeRate 48, blur 127). fadeRate 48 (not 16) fades the trail faster so
+    // each dot stays distinct and punchy instead of lingering into a muddy wash — the low value was a
+    // drift from the source that made Blurz read as a faint smear.
+    uint8_t fadeRate   = 48;     // per-frame fade-to-black strength (1..255)
+    uint8_t blur       = 127;    // box-blur strength applied after drawing the dot (1..255)
     bool    freqMap    = false;  // position the dot by dominant frequency instead of scanning/random
     bool    geqScanner = false;  // steady sweep across the strip (vs. random jump) when freqMap is off
 
@@ -74,7 +76,7 @@ public:
         if (firstFrame_) { draw::fill(buf, RGB{0, 0, 0}); firstFrame_ = false; }
 
         // Per-frame fade gives the blurred dot its decaying trail (WLED fadeToBlackBy(fadeRate)).
-        draw::fade(buf, fadeRate);
+        layer()->fadeToBlackBy(fadeRate);
 
         const AudioFrame* f = AudioModule::latestFrame();
         if (!f) return;
@@ -121,10 +123,25 @@ public:
         // Address the linear dot index as an (x,y) on the flat run: x = idx % cols, y = idx / cols.
         const int dx = segLoc % cols;
         const int dy = segLoc / cols;
-        draw::pixel(buf, dims, {static_cast<lengthType>(dx), static_cast<lengthType>(dy), 0}, c);
+
+        // Dot RADIUS scales with the fixture so the blob reads the same size on a 16×16 and a 128×128
+        // panel (WLED draws a single pixel, which vanishes on a big grid — this is the projectMM
+        // improvement). r = min(w,h)/32: 0 on a ≤32 grid (one pixel, the WLED look), 4 on a 128 grid
+        // (a 9×9 core). Drawn as a small filled square, then blurred into a soft glowing blob.
+        const int r = (cols < rows ? cols : rows) / 32;
+        for (int oy = -r; oy <= r; oy++)
+            for (int ox = -r; ox <= r; ox++)
+                draw::pixel(buf, dims, {static_cast<lengthType>(dx + ox), static_cast<lengthType>(dy + oy), 0}, c);
 
         // Blur the whole buffer — the defining smear (WLED SEGMENT.blur(custom1)).
         draw::blur(buf, dims, blur);
+
+        // Re-stamp the dot core ON TOP of the blur (WLED's addRGB after blur2d). The blur spreads the
+        // dot into its halo but also dilutes its centre — a blurred dot fades to near-nothing without
+        // this. Re-adding the colour keeps the core bright so the smear reads as a glowing dot.
+        for (int oy = -r; oy <= r; oy++)
+            for (int ox = -r; ox <= r; ox++)
+                draw::addPixel(buf, dims, {static_cast<lengthType>(dx + ox), static_cast<lengthType>(dy + oy), 0}, c);
     }
 
 private:

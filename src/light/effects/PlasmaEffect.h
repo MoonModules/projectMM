@@ -37,7 +37,11 @@ public:
         uint32_t now = elapsed();
         uint32_t dt = now - lastElapsed_;
         lastElapsed_ = now;
-        phase_ += static_cast<uint64_t>(dt) * bpm * static_cast<uint64_t>(w) * 64 / 60000;
+        // Phase advances purely with time and bpm — NOT with grid width. The earlier `* w` term made
+        // the plasma scroll width-times faster on a wide panel (a 128-wide grid ran 128× too fast);
+        // dropping it makes the speed the same on every fixture. 256 phase units (one full wrap of the
+        // uint8 wave inputs) per beat: dt(ms) * bpm / 60000 * 256.
+        phase_ += static_cast<uint64_t>(dt) * bpm * 256 / 60000;
 
         uint8_t step_x = static_cast<uint8_t>(256 / scale_x);
         uint8_t step_y = static_cast<uint8_t>(256 / scale_y);

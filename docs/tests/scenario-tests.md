@@ -312,9 +312,9 @@ Add a third modifier (Checkerboard mask) on top of the chain — a 3-deep fold. 
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | — / 32,258-200,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 18,182-200,000 | — / unlimited | — / unlimited |
 
-- `pc-macos`: observed 2026-06-26 → 2026-06-27
+- `pc-macos`: observed 2026-06-26 → 2026-07-01
 
 #### `remove-middle` (remove_module)  📏
 
@@ -324,9 +324,9 @@ Remove the middle modifier (Multiply) — the chain re-folds with Region then Ch
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | — / 9,524-55,556 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 6,536-55,556 | — / unlimited | — / unlimited |
 
-- `pc-macos`: observed 2026-06-26 → 2026-06-27
+- `pc-macos`: observed 2026-06-26 → 2026-07-01
 
 #### `add-live-rotate` (add_module)  📏
 
@@ -336,9 +336,9 @@ Add a DYNAMIC Rotate on top of the static chain — its modifyLive runs the per-
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | — / 5,405-31,250 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 5,128-31,250 | — / unlimited | — / unlimited |
 
-- `pc-macos`: observed 2026-06-26 → 2026-06-29
+- `pc-macos`: observed 2026-06-26 → 2026-07-01
 
 ### scenario_modifier_swap
 
@@ -391,13 +391,13 @@ Checkerboard modifier active — masks half the lights; pipeline stays live (dri
 | `esp32-eth` | — / 769-990 | — / 170KB-225KB | — / 76KB-108KB |
 | `esp32p4-eth` | — / 2,747-2,762 | — / 33242KB | — / 376KB |
 | `esp32s3-n16r8` | — / 924-943 | — / 8349KB | — / 92KB |
-| `pc-macos` | — / 9,615-58,824 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 4,184-58,824 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-25
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
 - `esp32p4-eth`: observed 2026-06-25
 - `esp32s3-n16r8`: observed 2026-06-25
-- `pc-macos`: observed 2026-06-07 → 2026-06-27
+- `pc-macos`: observed 2026-06-07 → 2026-07-01
 
 #### `multiply-2` (measure)  📏
 
@@ -414,13 +414,13 @@ Back to Multiply — replace round-trips cleanly, pipeline live again.
 | `esp32-eth` | — / 1,587-2,278 | — / 169KB-225KB | — / 76KB-108KB |
 | `esp32p4-eth` | — / 6,329-6,410 | — / 33243KB | — / 376KB |
 | `esp32s3-n16r8` | — / 2,146-2,604 | — / 8349KB-8350KB | — / 92KB |
-| `pc-macos` | — / 26,316-166,667 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 10,101-166,667 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-25
 - `esp32-eth`: observed 2026-06-07 → 2026-06-08
 - `esp32p4-eth`: observed 2026-06-25
 - `esp32s3-n16r8`: observed 2026-06-25
-- `pc-macos`: observed 2026-06-07 → 2026-06-27
+- `pc-macos`: observed 2026-06-07 → 2026-07-01
 
 ### scenario_perf_full
 
@@ -585,7 +585,7 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 | `esp32` | — / 8,403-9,901 | — / 126KB-147KB | — / 108KB |
 | `esp32p4-eth` | — / 15,873-17,857 | — / 33225KB-33245KB | — / 376KB |
 | `esp32s3-n16r8` | — / 7,042-9,259 | — / 8333KB-8352KB | — / 88KB-112KB |
-| `pc-macos` | — / 142,857-— | — / unlimited | — / unlimited |
+| `pc-macos` | — / 83,333-— | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17 → 2026-06-25
 - `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
@@ -605,7 +605,7 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 | `esp32` | — / 8,475-9,901 | — / 135KB-147KB | — / 108KB |
 | `esp32p4-eth` | — / 15,873-17,857 | — / 33225KB-33245KB | — / 376KB |
 | `esp32s3-n16r8` | — / 7,692-9,434 | — / 8338KB-8352KB | — / 92KB-112KB |
-| `pc-macos` | — / 142,857-— | — / unlimited | — / unlimited |
+| `pc-macos` | — / 111,111-— | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17 → 2026-06-25
 - `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
@@ -627,7 +627,7 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 | `esp32` | — / 6,711-9,804 | — / 134KB-147KB | — / 108KB |
 | `esp32p4-eth` | — / 15,385-18,868 | — / 33226KB-33245KB | — / 376KB |
 | `esp32s3-n16r8` | — / 8,403-9,901 | — / 8336KB-8352KB | — / 92KB-112KB |
-| `pc-macos` | — / 142,857-— | — / unlimited | — / unlimited |
+| `pc-macos` | — / 111,111-— | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17 → 2026-06-25
 - `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
@@ -829,7 +829,7 @@ Quiet baseline: render-only, audio + discovery off. The cleanest render floor; t
 | `esp32` | — / 144-149 | — / 111KB-122KB | — / 96KB-100KB |
 | `esp32p4-eth` | — / 438-486 | — / 33194KB-33210KB | — / 376KB |
 | `esp32s3-n16r8` | — / 119-162 | — / 8307KB-8317KB | — / 92KB-112KB |
-| `pc-macos` | — / 13,514-71,429 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 9,434-71,429 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17 → 2026-06-26
 - `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
@@ -883,7 +883,7 @@ Bare minimum: Grid(16²) + Layer + Spiral (light effect). No modifier, no driver
 | `esp32` | — / 6,173-8,850 | — / 125KB-147KB | — / 108KB |
 | `esp32p4-eth` | — / 13,699-18,519 | — / 33228KB-33246KB | — / 376KB |
 | `esp32s3-n16r8` | — / 5,814-8,850 | — / 8316KB-8347KB | — / 80KB-104KB |
-| `pc-macos` | — / 142,857-— | — / unlimited | — / unlimited |
+| `pc-macos` | — / 125,000-— | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-17 → 2026-06-25
 - `esp32p4-eth`: observed 2026-06-17 → 2026-06-25
@@ -1108,7 +1108,7 @@ Pipeline renders with the single remaining grid, same as the baseline.
 | Board | FPS | heap | block |
 |---|---|---|---|
 | `esp32-eth` | — / 41,667 | — / 224KB | — / 108KB |
-| `pc-macos` | — / 15,873-125,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 6,623-125,000 | — / unlimited | — / unlimited |
 | `pc-windows` | — / 33,333-38,462 | — / unlimited | — / unlimited |
 
 - `esp32-eth`: observed 2026-06-08
@@ -1131,9 +1131,9 @@ Add a MoonLiveEffect whose source declares a `speed` control and uses it. The co
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | — / 1,000,000-— | — / unlimited | — / unlimited |
+| `pc-macos` | — / 250,000-— | — / unlimited | — / unlimited |
 
-- `pc-macos`: observed 2026-06-28 → 2026-06-30
+- `pc-macos`: observed 2026-06-28 → 2026-07-01
 
 #### `set-source-with-control` (set_control)  📏
 
@@ -1191,7 +1191,7 @@ Push a broken script. Compile fails, the previous code is freed, the effect rend
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | — / 1,000,000-— | — / unlimited | — / unlimited |
+| `pc-macos` | — / 125,000-— | — / unlimited | — / unlimited |
 
 - `pc-macos`: observed 2026-06-28 → 2026-07-01
 
@@ -1408,7 +1408,7 @@ Disable mirrorX. Modifier control triggers a pipeline rebuild — measures the r
 | `esp32-eth` | — / 10.4 | — / 132KB | — / 48KB-50KB |
 | `esp32-eth-wifi` | ≥ 10.0 / 12.0 | ≥ 103KB / 94KB | — / 48KB |
 | `esp32p4-eth` | — / 5,952-6,135 | — / 33238KB | — / 376KB |
-| `pc-macos` | ≥ 5,000 / 3,226-9,259 | unlimited / unlimited | — / unlimited |
+| `pc-macos` | ≥ 5,000 / 2,857-9,259 | unlimited / unlimited | — / unlimited |
 | `pc-windows` | — / 2,024-2,392 | — / unlimited | — / unlimited |
 
 - `esp32`: observed 2026-06-02
@@ -1694,7 +1694,7 @@ Pipeline renders with both drivers wired.
 
 | Board | FPS | heap | block |
 |---|---|---|---|
-| `pc-macos` | — / 15,152-125,000 | — / unlimited | — / unlimited |
+| `pc-macos` | — / 10,204-125,000 | — / unlimited | — / unlimited |
 
 - `pc-macos`: observed 2026-06-13 → 2026-07-01
 

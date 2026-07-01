@@ -13,7 +13,7 @@ public:
     // 3D layouts. Opt-in to that promise so the framework doesn't iterate z.
     Dim dimensions() const override { return Dim::D2; }
 
-    uint8_t speed = 60; // BPM
+    uint8_t speed = 20; // BPM — one full hue cycle every 3 s; 60 (a whole rainbow per second) reads too fast
 
     void onBuildControls() override {
         controls_.addUint8("speed", speed, 1, 255);

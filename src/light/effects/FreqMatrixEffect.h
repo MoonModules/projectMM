@@ -83,7 +83,7 @@ public:
         // (WLED's optional audio-driven speed), down to a 1 ms floor.
         uint32_t period = static_cast<uint32_t>(256 - speed);              // RECONSTRUCTED
         if (audioSpeed) {                                                  // RECONSTRUCTED
-            const uint32_t lvl = f->level > 255 ? 255 : f->level;
+            const uint32_t lvl = f->levelSmoothed > 255 ? 255 : f->levelSmoothed;
             period = period > (lvl >> 2) ? period - (lvl >> 2) : 1;       // louder → faster scroll
         }
         if (period == 0) period = 1;
@@ -92,16 +92,17 @@ public:
         lastScrollMs_ = now;
 
         // --- Brightness of the new pixel (WLED: pixVal = volumeSmth * intensity * sensitivity
-        // / 256.0, clamped 255). On our 0..255 integer level the divisor becomes /2560 so a full-scale
-        // level·fx·sensitivity maps near 255 (see the fidelity-scale note above).
-        const uint32_t level = f->level > 255 ? 255 : f->level;
+        // / 256.0, clamped 255). WLED uses the SMOOTHED volume here (this is a flowing scroll, not a
+        // transient meter), so read f->levelSmoothed. On our 0..255 integer level the divisor becomes
+        // /2560 so a full-scale level·fx·sensitivity maps near 255 (see the fidelity-scale note above).
+        const uint32_t level = f->levelSmoothed > 255 ? 255 : f->levelSmoothed;
         uint32_t pixVal = (level * fx * sensitivity) / 2560u;
         if (pixVal > 255) pixVal = 255;
         const uint8_t bri = static_cast<uint8_t>(pixVal);
 
-        // --- Colour of the new pixel. Black unless there is a real tone above 80 Hz and the volume is
-        // above a quarter scale (WLED: peakHz > 80 && volumeSmth > 0.25). 0.25 on WLED's 0..1 volume
-        // is reproduced as level > 64 on our 0..255 level (fidelity-scale note above).
+        // --- Colour of the new pixel. Black unless there is a real tone above 80 Hz and the (smoothed)
+        // volume is above a quarter scale (WLED: peakHz > 80 && volumeSmth > 0.25). 0.25 on WLED's
+        // 0..1 volume is reproduced as level > 64 on our 0..255 smoothed level (fidelity-scale note).
         RGB newColor{0, 0, 0};
         if (f->peakHz > 80 && level > 64) {
             // Frequency window → 0..255 hue index. WLED:

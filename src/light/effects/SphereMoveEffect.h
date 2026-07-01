@@ -47,7 +47,7 @@ public:
         const Coord3D dims{static_cast<lengthType>(w), static_cast<lengthType>(h), static_cast<lengthType>(d)};
 
         // Full clear each frame (source: fadeToBlackBy(255)).
-        draw::fade(buf, 255);
+        layer()->fadeToBlackBy(255);
 
         const uint32_t ms = elapsed();
 

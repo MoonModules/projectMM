@@ -31,7 +31,9 @@ public:
     const char* tags() const override { return "💫🌙📊"; }  // MoonLight origin · MoonModules · audio
     Dim dimensions() const override { return Dim::D2; }
 
-    uint8_t speed     = 2;     // projector sweep rate (1..10; higher = faster — throttle is 11-speed)
+    uint8_t speed     = 2;     // projector sweep rate (1..10; higher = faster). Time-based (BPM), so
+                               // the sweep is at the same wall-clock position on every device — a
+                               // fast board just renders it more smoothly, a slow board choppier.
     uint8_t frontFill = 228;   // bar front-face fill strength (0..255)
     uint8_t horizon   = 0;     // vanishing-point Y row (0..rows-1); the projector sits at this row
     uint8_t depth     = 176;   // perspective depth: how far the side/top lines reach toward the projector
@@ -62,17 +64,24 @@ public:
 
         // Motion trail: dim the whole buffer each frame instead of clearing it (source:
         // layer->fadeToBlackBy(16) per frame).
-        draw::fade(buf, 16);
+        layer()->fadeToBlackBy(16);
 
-        // Advance the projector (vanishing point) along X; bounce at the edges. The throttle
-        // (11-speed) means a higher speed steps more often. projector_ is unsigned, so the ==0
-        // bounce is the lower edge (the uint wrap can't go negative).
-        if (counter_++ % static_cast<uint32_t>(11 - speed) == 0) projector_ += projector_dir_;
-        if (projector_ >= cols) projector_dir_ = -1;
-        if (projector_ == 0)    projector_dir_ = 1;
-
-        const int NUM_BANDS = numBands;
-        const int projector = projector_;
+        // Projector (vanishing point) position along X, as a TIME-BASED triangle wave: it sweeps
+        // 0→cols→0 driven by elapsed(), so at any wall-clock instant every device shows the projector
+        // at the same place — a fast board renders the sweep more smoothly, a slow one choppier, but
+        // neither is throttled to the other's pace. (MoonLight advanced it by a per-frame counter, so
+        // its sweep ran faster on a high-FPS device; this is the frame-rate-independent improvement.)
+        // triwave8(beat8(bpm)) is the textbook time triangle: beat8 ramps 0..255 at `bpm`, triwave8
+        // folds it into an up-then-down 0..255, scaled to the column span. speed 1..10 → ~3..30 BPM.
+        const uint8_t bpm = static_cast<uint8_t>(speed * 3);
+        const uint8_t sweep = triwave8(beat8(bpm, elapsed()));   // 0..255 triangle over time
+        // Clamp the drawn band count to the column count: MoonLight's bar width is `cols / NUM_BANDS`,
+        // which truncates to 0 when there are fewer columns than bands (e.g. 8 cols, 16 bands), so
+        // every bar piles at x=0. Capping bands to cols keeps the width ≥ 1 so the bars spread across
+        // the available width. Invisible on normal grids (cols ≥ numBands → this is a no-op); it only
+        // fixes the degenerate narrow-grid case. Once per frame, off the per-pixel path.
+        const int NUM_BANDS = numBands <= cols ? static_cast<int>(numBands) : cols;
+        const int projector = static_cast<int>(static_cast<uint32_t>(sweep) * cols / 255u);
         // horizon is a Y row used as the vanishing point's y; clamp the 0..255 control to the grid.
         const int hzn = horizon < rows ? horizon : rows - 1;
         const int split = imap(projector, 0, cols, 0, NUM_BANDS - 1);
@@ -203,10 +212,6 @@ private:
     static int MAXi(int a, int b) { return a > b ? a : b; }
     // The member `depth` (control) hides the inherited grid-depth accessor name; qualify it.
     lengthType depthDim() const { return EffectBase::depth() > 0 ? EffectBase::depth() : 1; }
-
-    uint16_t projector_ = 0;
-    int8_t   projector_dir_ = 1;
-    uint32_t counter_ = 0;
 };
 
 } // namespace mm

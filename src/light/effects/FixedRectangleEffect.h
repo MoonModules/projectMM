@@ -35,8 +35,12 @@ public:
 
     // Box origin (min 0) and extent (min 1). Named rect* to avoid hiding the inherited
     // width()/height()/depth() grid accessors; the UI control names carry the source's labels.
+    // Default to a 15×15×15 box at the origin (0,0,0): visible out of the box on a large panel
+    // instead of the source's 1×1×1 single pixel. Origin 0 is the most grid-proof choice — it can
+    // never clip to nothing on a small or flat grid. The draw loop clamps each axis to the grid
+    // (MINi(origin+extent, size)), so on a grid smaller than 15 the box just fills to the edge.
     int16_t rectX = 0, rectY = 0, rectZ = 0;
-    int16_t rectW = 1, rectH = 1, rectD = 1;
+    int16_t rectW = 15, rectH = 15, rectD = 15;
 
     bool alternateWhite = false;
 
@@ -66,14 +70,13 @@ public:
         const Coord3D dims{static_cast<lengthType>(w), static_cast<lengthType>(h), depthDim()};
 
         // Motion trail: dim the whole buffer each frame (source: layer->fadeToBlackBy(10)).
-        draw::fade(buf, 10);
+        layer()->fadeToBlackBy(10);
 
         // The white/colour chequerboard toggle. MoonLight keeps it as a member but resets it to
         // false at the top of each draw, so it is effectively per-frame state — a plain local here.
         bool alternate = false;
 
         const RGB rgb{red, green, blue};
-        const bool anyColor = (red || green || blue);
 
         // Iterate the box clamped to the live grid (origin + extent, capped at each axis size).
         const int zEnd = MINi(rectZ + rectD, d > 0 ? d : 1);
@@ -87,9 +90,9 @@ public:
                     // a white tile paints white RGB + W=white; a coloured tile paints rgb + W=0.
                     const bool isWhiteTile = alternateWhite && alternate;
                     const Coord3D p{static_cast<lengthType>(x), static_cast<lengthType>(y), static_cast<lengthType>(z)};
-                    if (anyColor) {
-                        draw::pixel(buf, dims, p, isWhiteTile ? RGB{255, 255, 255} : rgb);
-                    }
+                    // Always write RGB: a white tile paints {255,255,255} even when the colour is all
+                    // zero, and a coloured tile writes rgb (clearing any stale pixel from a prior frame).
+                    draw::pixel(buf, dims, p, isWhiteTile ? RGB{255, 255, 255} : rgb);
                     // White channel (4th) only on RGBW grids. Follow the chequerboard branch: the
                     // white tile carries `white`, a coloured tile clears W so it never tints the
                     // colour and no stale W persists in the RGBW buffer. draw::pixel writes RGB only.

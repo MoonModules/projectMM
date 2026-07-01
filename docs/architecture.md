@@ -369,6 +369,19 @@ Effects know nothing about hardware, protocols, physical LED layout, or mapping.
 
 **Speed convention.** Effects with a speed control use BPM (beats per minute). `uint8_t`, default 60 (= 1 beat per second). Human-readable, musically meaningful, DMX-compatible. The effect converts BPM to animation rate internally using elapsed millis.
 
+### Buffer persistence — the layer does not clear each frame
+
+The Layer's buffer **persists** frame to frame: `Layer::loop()` does not clear it before running effects. The buffer holds the previous frame until an effect overwrites or fades it, and is zeroed **once** on allocation/resize. (This is the standard LED-animation model — FastLED, WLED, and MoonLight all persist their frame buffer rather than auto-clear.) Each effect owns its own background:
+
+- A **full-grid** effect (Plasma, Rainbow, Fire, Noise) writes every pixel each frame — the previous frame is simply overwritten.
+- A **trail** effect calls `layer()->fadeToBlackBy(amt)` to decay the previous frame before painting its new pixels — a comet leaves a fading tail because the old pixels are still there to fade.
+- A **read-prior** effect (a scroll like FreqMatrix, Game-of-Life, a blur) reads last frame's pixels via `draw::get` / `draw::blur` and acts on them — the persistence *is* its state.
+- A **sparse** effect that wants a clean frame calls `draw::fill(buf, {0,0,0})` itself (e.g. RubiksCube, whose draw touches only surface voxels).
+
+There is deliberately **no per-effect "persistence" flag**: persistence is universal, so a flag would change no framework behaviour (unlike `dimensions()`, which drives extrude). Multiple effects on one layer *interact* through the shared persistent buffer — that is a feature.
+
+**Collected fade (`Layer::fadeToBlackBy`).** Fade is a Layer operation, not a per-effect buffer pass (MoonLight's `VirtualLayer::fadeToBlackBy`). Effects register a fade amount; the Layer keeps the **MIN** across all requesting effects (the gentlest fade wins, so the longest requested trail is honoured) and applies **one** whole-buffer pass at the start of the next frame, then resets the collected amount. So N fading effects on one layer cost a single pass, not N, and one effect's fade never darkens another's just-painted pixels mid-frame. An auto-clear would make trails and read-prior effects impossible without a shadow buffer; this model gets them for free.
+
 ### Dimensionality
 
 Every effect declares its native dimensionality through `EffectBase::dimensions()`, returning `Dim::D1`, `Dim::D2`, or `Dim::D3` (default: "I iterate every axis the layer gives me"). The Layer uses this to **extrude** lower-dimensional output across the unused axes after each effect's `loop()`:

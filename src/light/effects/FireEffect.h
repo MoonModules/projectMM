@@ -1,6 +1,7 @@
 #pragma once
 
 #include "light/layers/Layer.h"
+#include "light/Palette.h"        // colorFromPalette, Palettes::active — heat → palette colour
 #include "core/color.h"
 #include "platform/platform.h"
 
@@ -17,12 +18,10 @@ public:
 
     uint8_t cooling = 55;
     uint8_t sparking = 120;
-    uint8_t hue_shift = 0;
 
     void onBuildControls() override {
         controls_.addUint8("cooling", cooling, 1, 255);
         controls_.addUint8("sparking", sparking, 1, 255);
-        controls_.addUint8("hue_shift", hue_shift, 0, 255);
     }
 
     void onBuildState() override {
@@ -103,9 +102,16 @@ public:
             }
         }
 
-        // 4. Render heat to RGB via fire palette (with optional hue rotation)
+        // 4. Render heat to RGB through the active palette: the heat value (0 = cold, 255 = hottest)
+        //    is the palette index, so the flame takes the palette's low→high gradient. The Lava
+        //    palette (black→red→orange→yellow→white) gives the classic fire look and is the intended
+        //    default; any palette works (an Ocean/Forest palette makes a blue/green "fire").
+        //    A completely cold cell (heat 0) always stays black — the "sky" above the flame — rather
+        //    than taking the palette's index-0 colour (Lava's is black, but Ocean's is blue, which
+        //    would tint the whole background). Only a warm cell is coloured.
+        const Palette& pal = *Palettes::active();
         for (nrOfLightsType i = 0; i < heatCount_; i++) {
-            RGB c = heatToRgb(heat_[i], hue_shift);
+            RGB c = heat_[i] == 0 ? RGB{0, 0, 0} : colorFromPalette(pal, heat_[i]);
             size_t off = static_cast<size_t>(i) * cpl;
             if (cpl >= 1) buf[off + 0] = c.r;
             if (cpl >= 2) buf[off + 1] = c.g;
@@ -129,33 +135,6 @@ private:
             heat_ = nullptr;
         }
         heatCount_ = 0;
-    }
-
-    // Heat 0-255 mapped to black -> red -> yellow -> white.
-    // hue_shift rotates the resulting RGB around the colour wheel (via HSV).
-    static RGB heatToRgb(uint8_t heat, uint8_t hue_shift) {
-        uint8_t r, g, b;
-        if (heat < 85) {
-            r = static_cast<uint8_t>(heat * 3);
-            g = 0;
-            b = 0;
-        } else if (heat < 170) {
-            r = 255;
-            g = static_cast<uint8_t>((heat - 85) * 3);
-            b = 0;
-        } else {
-            r = 255;
-            g = 255;
-            b = static_cast<uint8_t>((heat - 170) * 3);
-        }
-        if (hue_shift == 0) return {r, g, b};
-        // Cheap hue rotation: re-encode via HSV using max-channel as value
-        uint8_t maxc = r > g ? (r > b ? r : b) : (g > b ? g : b);
-        if (maxc == 0) return {0, 0, 0};
-        // Approximate hue from RGB by walking the existing fire ramp range
-        // and rotating it by hue_shift. Simpler: just rotate via hsvToRgb with
-        // heat as the hue input.
-        return hsvToRgb(static_cast<uint8_t>(heat + hue_shift), 255, maxc);
     }
 };
 

@@ -1815,7 +1815,9 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
             # A standalone <img …> line (the per-module doc pages put the preview gif on its own
             # line above the description). Resolve a relative src to /api/doc-asset/ and keep the
             # width, like the table-cell path does — the allowlist below doesn't cover <img>.
-            img_m = re.fullmatch(r'<img src="(?P<src>[^"]+)"(?:\s+width="(?P<w>\d+)")?[^>]*>', stripped_check)
+            img_m = re.fullmatch(
+                r'<img src="(?P<src>[^"]+)"(?:\s+width="(?P<w>\d+)")?(?:\s+alt="(?P<alt>[^"]*)")?[^>]*>',
+                stripped_check)
             if img_m:
                 src_ = img_m.group("src")
                 if not src_.startswith(("http://", "https://", "/")):
@@ -1825,7 +1827,9 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
                     except ValueError:
                         pass
                 wattr = f' width="{img_m.group("w")}"' if img_m.group("w") else ""
-                lines.append(f'<img src="{src_}"{wattr} style="margin:4px 0">')
+                # Preserve alt (accessibility text) like _render_cell does, verbatim like src/width.
+                aattr = f' alt="{img_m.group("alt")}"' if img_m.group("alt") is not None else ""
+                lines.append(f'<img src="{src_}"{wattr}{aattr} style="margin:4px 0">')
                 continue
 
             # Pass-through for a fixed allowlist of structural HTML tags used

@@ -29,8 +29,10 @@ public:
         const uint8_t cpl = channelsPerLight();
         const size_t total = static_cast<size_t>(w) * h * d * cpl;
 
-        // level is ~0..255; scale to the brightness ceiling.
-        const uint16_t level = AudioModule::latestFrame()->level;
+        // level is ~0..255; scale to the brightness ceiling. Uses the SMOOTHED level so the whole
+        // surface glows/breathes with the music instead of jittering per audio block (the calm VU
+        // look, the same choice as AudioSpectrum's VU bar).
+        const uint16_t level = AudioModule::latestFrame()->levelSmoothed;
         const uint16_t v = static_cast<uint16_t>(
             (level > 255 ? 255 : level) * brightness / 255);
 

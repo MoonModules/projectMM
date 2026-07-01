@@ -30,9 +30,10 @@ namespace mm {
 class DemoReelEffect : public EffectBase {
 public:
     const char* tags() const override { return "🎬"; }   // demo reel
-    // The hosted child may be any dimensionality; declare D3 so the framework never extrudes on the
-    // reel's behalf — the child effect declares its own dimensions() and the Layer extrudes for it
-    // when we run its loop() through the same path.
+    // D3: the reel produces a COMPLETE frame — it runs the child, extrudes the child's output itself,
+    // then draws the name overlay on top — so the Layer must not extrude again (that would fan the
+    // child's x=0 column across X and wipe the overlay). The child's own dimensionality is handled
+    // inside loop() via layer()->extrude(child dim) BEFORE the overlay, not by reporting it here.
     Dim dimensions() const override { return Dim::D3; }
 
     uint8_t interval      = 8;      // seconds each effect plays before advancing
@@ -67,6 +68,12 @@ public:
         }
 
         current_->loop();   // render the hosted effect into our Layer's buffer this tick
+        // Extrude the child's output NOW (the Layer skips it — the reel is D3). A hosted D1/D2 effect
+        // (NoiseMeter, FreqMatrix, GEQ…) writes only its x=0 column / z=0 slice; fan it across the
+        // unused axes here, BEFORE the name overlay, so the overlay isn't wiped by a later extrude.
+        // Use the dim cached at swapTo() — not a per-frame downcast of current_, which is a MoonModule*
+        // whose EffectBase subobject cast is only valid for a live effect child.
+        layer()->extrude(currentDim_);
 
         // Overlay the playing effect's name (the reel as a showcase tool). Drawn on top of the
         // hosted output in the compact 4x6 font at the TOP-left — overwriting a few pixels is fine
@@ -100,6 +107,7 @@ private:
     uint8_t eligibleCount_ = 0;
     uint8_t cursor_ = 0;                 // index INTO eligible_ of the current effect
     MoonModule* current_ = nullptr;      // the live hosted effect (owned; deleted on swap/teardown)
+    Dim currentDim_ = Dim::D3;           // cached dimensionality of current_ (set in swapTo, drives extrude)
     uint32_t lastSwitchMs_ = 0;
     Random8 rng_;
 
@@ -148,7 +156,19 @@ private:
         mod->setup();
         mod->onBuildState();
         current_ = mod;
+        // Cache the child's dimensionality from the FACTORY (which probed it at registration via
+        // if-constexpr), not by downcasting mod. An Effect-role type is not guaranteed to be an
+        // EffectBase — a bare MoonModule can register with Effect role — so static_cast<EffectBase*>
+        // then a virtual call is undefined behaviour (it crashed on such a type). typeDim returns 0
+        // ("N/A") for a non-EffectBase, treated as D3 (no extrude); 1/2/3 for a real effect. The
+        // extrude then runs through the same registry data the Layer uses. RTTI-free (-fno-rtti).
+        const uint8_t d = ModuleFactory::typeDim(eligible_[which]);
+        currentDim_ = (d == 1) ? Dim::D1 : (d == 2) ? Dim::D2 : Dim::D3;
         lastSwitchMs_ = elapsed();
+        // No clear on switch: the buffer persists, so the incoming effect settles over the outgoing
+        // one — a full-grid effect overwrites in a frame, a trail effect fades the old content away.
+        // Letting them blend for a moment is the intended behaviour, not a defect (the Layer never
+        // clears; effects own their background).
         refreshStatus();
     }
 

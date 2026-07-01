@@ -82,5 +82,7 @@ TEST_CASE("TextEffect: scroll animates and is safe at any size") {
     // 1×1 and 0×0 must not crash either.
     Scene tiny(1, 1); tiny.text.scroll = true; std::strcpy(tiny.text.text_, "X");
     tiny.layer.onBuildState(); tiny.layer.loop();
+    Scene zero(0, 0); zero.text.scroll = true; std::strcpy(zero.text.text_, "X");
+    zero.layer.onBuildState(); zero.layer.loop();
     CHECK(true);   // reaching here without a crash is the assertion
 }

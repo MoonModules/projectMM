@@ -13,8 +13,9 @@ namespace mm {
 //
 // Per axis the logical extent becomes ceil(size/2) = (size+1)/2 (an odd extent
 // keeps its centre column unpaired), and a physical coordinate at or past that
-// half-extent reflects to `half*2 - 1 - pos` (the far edge maps to logical 0, the
-// column just past centre maps to the last logical column).
+// half-extent reflects to `half*2 - 1 - pos`. For an even extent the far edge maps
+// to logical 0; for an odd extent the unpaired centre column is the last logical
+// column, so the far edge maps to logical 1 (half*2 - 1 - (size-1) = 1).
 //
 // Prior art: MoonLight's Mirror modifier (M_MoonLight.h) — same (size+1)/2 halving
 // and `modifierSize*2 - 1 - position` reflection, per-axis mirror bools. Written

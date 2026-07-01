@@ -92,7 +92,7 @@ public:
         const Coord3D dims{w, h, depthDim()};
 
         // Motion streaks: fade the previous frame rather than clearing it.
-        draw::fade(buf, blur);
+        layer()->fadeToBlackBy(blur);
 
         const int sizeX = w;
         const int sizeY = h;

@@ -82,7 +82,7 @@ public:
         Buffer& buf = layer()->buffer();
         const Coord3D dims{static_cast<lengthType>(sizeX), static_cast<lengthType>(sizeY), depthDim()};
 
-        draw::fade(buf, fade);
+        layer()->fadeToBlackBy(fade);
 
         // deltaMs since the last frame — drives the band decay and the BandPhases integrator.
         const unsigned long now = elapsed();

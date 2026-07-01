@@ -93,7 +93,7 @@ public:
         const Coord3D dims{static_cast<lengthType>(cols), static_cast<lengthType>(rows), depthDim()};
 
         // Motion trail: dim the whole buffer each frame (WLED: fadeToBlackBy(fadeOut)).
-        draw::fade(buf, fadeOut);
+        layer()->fadeToBlackBy(fadeOut);
 
         // Advance the peak-fall clock once per frame. The remembered peaks drop one row whenever the
         // counter wraps `ripple`; ripple == 0 disables the dot entirely (handled at draw time).

@@ -37,7 +37,7 @@ TEST_CASE("RainbowEffect writes non-zero RGB data to buffer") {
     CHECK(hasNonZero);
 }
 
-// Pixel (0,0) is at full saturation and value (one channel exactly 255) — confirms hsvToRgb wiring.
+// Pixel (0,0) carries a lit palette colour — confirms the effect writes a real RGB there.
 TEST_CASE("RainbowEffect pixel 0,0 produces valid RGB") {
     mm::Layouts layouts;
     mm::GridLayout grid;
@@ -57,12 +57,12 @@ TEST_CASE("RainbowEffect pixel 0,0 produces valid RGB") {
     layer.loop();
 
     auto* data = layer.buffer().data();
-    // Pixel (0,0): hue depends on elapsed, but should always have full saturation/value
-    // At least one channel should be 255 (full value with hsvToRgb at v=255)
+    // Pixel (0,0): the effect maps the diagonal hue through the active palette, so the exact colour
+    // depends on elapsed() (the phase) and the palette. The stable, time-independent contract is that
+    // the effect writes a LIT colour there (not black) — asserting a channel == 255 was false, since
+    // palette colours are not all fully saturated (the old hsvToRgb(h,255,255) assumption is stale).
     uint8_t r = data[0], g = data[1], b = data[2];
     CHECK((r > 0 || g > 0 || b > 0));
-    // With hsvToRgb(h, 255, 255), the max channel is always 255
-    CHECK((r == 255 || g == 255 || b == 255));
 }
 
 // Distant pixels carry different hues (the rainbow gradient is spatial, not uniform).

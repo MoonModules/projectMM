@@ -90,7 +90,8 @@ public:
                             static_cast<uint8_t>(blue  * brightness / 255)};
                 draw::fill(buf, c);
                 // Write W every frame (white may be 0) so a stale W from a prior frame/effect is cleared.
-                if (cpl >= 4) writeWhite(buf, nLights, cpl, white);
+                // Scale W by brightness like RGB, so the whole RGBW colour dims together.
+                if (cpl >= 4) writeWhite(buf, nLights, cpl, static_cast<uint8_t>(white * brightness / 255));
                 break;
             }
             case 1: {  // Palette spread across the lights: light i → wheel index map(i,0,nLights,0,256).

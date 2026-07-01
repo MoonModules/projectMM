@@ -46,7 +46,11 @@ public:
         // high byte as the time phase (uint8 angle), same accumulator idiom as elsewhere.
         if (speed) phase_ += static_cast<uint64_t>(dt) * speed;
         const uint8_t t = static_cast<uint8_t>((phase_ * 256) / 60000);
-        const uint8_t ty = static_cast<uint8_t>((static_cast<uint16_t>(t) * 333) >> 8);  // ~1.3·t
+        // ty is the y-axis time phase, running ~1.3× t. Deriving it from the raw phase_ accumulator
+        // (not from the already-wrapped uint8 t) keeps it CONTINUOUS: computing ty as (t*333)>>8 made
+        // ty jump by ~76 every time t wrapped 255→0 (~once a second), because 1.3 isn't an integer
+        // multiple of 256 — a visible shift. From phase_ the wrap is seamless (both are smooth uint8s).
+        const uint8_t ty = static_cast<uint8_t>((phase_ * 333) / 60000);   // ~1.3·t, continuous across wraps
 
         for (lengthType y = 0; y < h; y++) {
             const uint8_t sy = sin8(static_cast<uint8_t>(static_cast<uint8_t>(y) * freq_y + ty));

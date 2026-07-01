@@ -65,6 +65,7 @@ add_executable(mm_tests
     unit/light/unit_SphereLayout.cpp
     unit/light/unit_WheelLayout.cpp
     unit/light/unit_Layer_extrude.cpp
+    unit/light/unit_Layer_persistence.cpp
     unit/light/unit_Layer_sparse_mapping.cpp
     unit/light/unit_Layer_modifier_chain.cpp
     unit/light/unit_Layer_live_modifier.cpp

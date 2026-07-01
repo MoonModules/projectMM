@@ -58,9 +58,15 @@ public:
 
         const uint32_t now = elapsed();
 
-        // First run, or a requested re-scramble, or the 3 s "solved" hold expiring: build a fresh
-        // scramble. (step_-3100 > now catches the hold window the same way the source does.)
-        if ((doInit_ && now > step_) || (step_ - 3100 > now)) {
+        // (Re-)scramble on a requested re-scramble (doInit_ — set on first run and on control change,
+        // once past the initial delay), OR when `step_` is stuck unreasonably far in the future.
+        // MoonLight writes the second check as `step - 3100 > now`, but with unsigned `step_` that
+        // UNDERFLOWS whenever step_ < 3100 (the first ~3 s of uptime, and after every turn where step_
+        // is set to `now`), so it fires init EVERY frame — the cube re-scrambles each tick and the
+        // display FLASHES instead of turning one slice at a time. The fix is a wrap-safe SIGNED
+        // difference: re-init only when step_ is genuinely more than 3100 ms ahead of now.
+        const int32_t ahead = static_cast<int32_t>(step_ - now);   // how far step_ is in the future (signed)
+        if ((doInit_ && now > step_) || ahead > 3100) {
             step_ = now + 1000;
             doInit_ = false;
             init(buf, dims, w, h, d);
@@ -199,6 +205,11 @@ private:
         // Project the cube onto the LED volume: every in-bounds voxel is coloured by the outer face
         // it sits nearest. (MoonLight's drawCube, with the isMapped()-skip and sizeX++/etc dropped.)
         void drawCube(Buffer& buf, Coord3D dims, lengthType sx, lengthType sy, lengthType sz) const {
+            // This effect owns its background: drawCube writes only the SURFACE voxels (the loop has
+            // no else for the interior), and a turn moves stickers to new positions, so without a
+            // wipe the old pose's stickers linger and the cube accretes garbage — it never settles.
+            // One fill per draw (drawCube runs once per turn, not per frame), the sparse-effect idiom.
+            draw::fill(buf, {0, 0, 0});
             const int sizeX = MAXi(sx - 1, 1), sizeY = MAXi(sy - 1, 1), sizeZ = MAXi(sz - 1, 1);
             // Integer form of round(coord * (SIZE+1) / size): for non-negative operands round(a/b) is
             // (2a + b) / (2b), which reproduces round(coord*scale) exactly at these magnitudes — no

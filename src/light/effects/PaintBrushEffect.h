@@ -51,13 +51,14 @@ public:
 
         // Per-frame: advance the hue, then fade the whole field toward black (a decaying trail).
         aux0Hue++;
-        draw::fade(buf, fadeRate);
+        layer()->fadeToBlackBy(fadeRate);
 
         // Optional per-frame phase jitter shared by every endpoint this frame.
         aux1Chaos = phase_chaos ? rng_.next8() : 0;
 
         const Coord3D dims{cols, rows, depth};
         const AudioFrame* f = AudioModule::latestFrame();
+        if (!f) return;   // silence frame is non-null in practice; guard before dereferencing bands[]
         const uint32_t ms = elapsed();
         // bass term added to every oscillator bpm (MoonLight's bands[0]/NUM_GEQ_CHANNELS).
         const uint8_t base = static_cast<uint8_t>(f->bands[0] / kBands);
