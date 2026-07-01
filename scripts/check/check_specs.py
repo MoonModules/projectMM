@@ -50,13 +50,15 @@ def find_moonmodules():
             modules.append(h_file)
     return modules
 
-# Effects, modifiers, and the leaf layouts (Grid/Sphere/Wheel) document themselves as one
-# compact-row page per type rather than a file per module (docs consolidation — see the
-# folder-structure decision). A module of one of these types is documented on its shared page;
-# every other module keeps a per-module page named for the type. Keyed by type-name suffix so a
-# new effect/modifier/layout/driver is folded in automatically. (Layouts/Layers/Drivers are
-# CONTAINERS, not leaf modules — "Drivers" does not end in "Driver", so the container keeps its own
-# per-module page; the CRTP base ParallelLedDriver is skipped in discover_modules as a template.)
+# Effects, modifiers, layouts, and drivers each document themselves as one compact-row page per type
+# rather than a file per module (docs consolidation — see the folder-structure decision). A module
+# whose type name ends in one of these suffixes is documented on the matching shared page; everything
+# else keeps a per-module page named for the type. The match is purely on the type-name **suffix**, so
+# EVERY *Layout module (CarLightsLayout, CubeLayout, PanelLayout, RingLayout, …) routes to layouts.md,
+# every *Driver to drivers.md, etc. — not just a hand-picked subset. New effect/modifier/layout/driver
+# types fold in automatically. (Layouts/Layers/Drivers are CONTAINERS, not leaf modules — none of those
+# stems ends in a suffix below ("Drivers" ≠ "Driver"), so each container keeps its own per-module page;
+# the CRTP base ParallelLedDriver is skipped in discover_modules as a template.)
 CONSOLIDATED_PAGES = {
     "Effect": SPECS / "light" / "effects" / "effects.md",
     "Modifier": SPECS / "light" / "modifiers" / "modifiers.md",

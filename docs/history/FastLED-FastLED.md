@@ -6,7 +6,7 @@ What landed on [FastLED](https://github.com/FastLED/FastLED)'s main branch, mont
 
 Released **3.10.4** (2026-06-16), cut from `master`.
 
-New:
+**New**
 - STM32: Arduino UNO Q board support.
 - New NXP LPC8xx family drivers land (LPC804 PLU, LPC845 bit-bang + PWM/DMA-to-GPIO, LPC11xx) — early bring-up, bench-validated.
 - Unified `fl::Watchdog` API with real hardware implementations across platforms (ESP32, Teensy 4, AVR, Apollo3, RP2040, STM32) plus a non-allocating reset/crash-classification helper.
@@ -14,7 +14,7 @@ New:
 - ScreenMap gains a v2 schema (auto-detected), and a new `.fled` container format for video/screenmaps that `FxSdCard` can load.
 - FFT now auto-detects ESP-DSP on ESP32 (no opt-in macro needed).
 
-Fixed:
+**Fixed**
 - RGBW colorimetric path reworked: native LED gamut + D65 as the default source, improved strict/boosted solvers, corrected dual- and 3-channel solving.
 - ESP32: reliable streaming for SPI strips over ~680 LEDs; ESP32-C6 routes Serial to HWCDC with non-blocking writes and rejects USB-serial pins for LED output.
 - Teensy Audio selection fixed on low-memory boards; nRF52 now honors configured SPI data rates.
@@ -22,12 +22,12 @@ Fixed:
 
 ## June 2026 (post-3.10.4)
 
-New:
+**New**
 - Teensy 4.x LED driver bring-up: ObjectFLED and FlexIO parallel output engines plus a new LPUART-based WS2812 driver (inverted-TX + eDMA), and FlexPWM-based RX capture.
 - New WS2812-style RX capture path on classic ESP32 (RMT4) and LPC845 (SCT+DMA).
 - ARM Cortex-M DSP-extension SIMD backend wired up for Teensy 3.x/4.x (faster scale/blend on those chips).
 
-Fixed:
+**Fixed**
 - SM16824E chipset timing corrected to match the datasheet.
 - RGBW gamut configuration is now kept per strip.
 - Fixed a memory leak in the chunked `fl::deque` container.

@@ -1534,7 +1534,11 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
         The renderer resolves relative image src values to ROOT-relative paths
         before building the URL, so this handler only needs a simple join."""
         import mimetypes
-        rel = self.path[len("/api/doc-asset/"):]
+        from urllib.parse import unquote
+        # URL-decode the path: a doc image with a space in its name is written `Hue%20driver.png` in
+        # the markdown, so the request path carries `%20`; without decoding, the file lookup would seek
+        # a literal "%20" in the name and 404.
+        rel = unquote(self.path[len("/api/doc-asset/"):])
         # Resolve against ROOT and ensure no escape.
         try:
             asset_path = (ROOT / rel).resolve()
@@ -1659,14 +1663,14 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
                     except ValueError:
                         pass
                     src_ = f"/api/doc-asset/{src_}"
-                wattr = f' width="{width}"' if width else ""
-                # Preserve the author's alt text (accessibility + markdownlint) — the raw-<img> path
-                # dropped it before; keep it consistent with the markdown-image path above.
+                # Escape every attribute value that reaches the HTML — src/width/style as well as alt —
+                # so a doc-page value with a quote or angle bracket can't break the tag or inject markup.
+                wattr = f' width="{html_mod.escape(width)}"' if width else ""
                 altattr = f' alt="{html_mod.escape(alt_)}"' if alt_ else ""
                 # Preserve an author-set width style (the cross-renderer size lever) and append our
                 # margin so the preview isn't flush against the cell edges.
                 style = (style + ";" if style else "") + "margin:4px 0"
-                return f'<img src="{src_}"{wattr}{altattr} style="{style}">'
+                return f'<img src="{html_mod.escape(src_)}"{wattr}{altattr} style="{html_mod.escape(style)}">'
             # No raw HTML → ordinary escaped+inline cell (the common case).
             if "<img" not in c and "<a id=" not in c and "<br" not in c:
                 return render_inline(html_mod.escape(c))
@@ -1833,11 +1837,12 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
                     except ValueError:
                         pass
                 w_ = _attr("width")
-                wattr = f' width="{w_}"' if w_ else ""
-                # Preserve alt (accessibility text) like _render_cell does, verbatim like src/width.
+                # Escape every attribute value before it reaches the HTML (like _render_cell._img does)
+                # so a doc-page src/width/alt with a quote or bracket can't break the tag or inject markup.
+                wattr = f' width="{html_mod.escape(w_)}"' if w_ else ""
                 alt_ = _attr("alt")
-                aattr = f' alt="{alt_}"' if alt_ is not None else ""
-                lines.append(f'<img src="{src_}"{wattr}{aattr} style="margin:4px 0">')
+                aattr = f' alt="{html_mod.escape(alt_)}"' if alt_ is not None else ""
+                lines.append(f'<img src="{html_mod.escape(src_)}"{wattr}{aattr} style="margin:4px 0">')
                 continue
 
             # Pass-through for a fixed allowlist of structural HTML tags used

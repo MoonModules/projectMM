@@ -2,6 +2,7 @@
 
 #include "light/layers/Layer.h"
 #include "core/color.h"
+#include "core/math8.h"           // mm::Random8 — the shared per-effect PRNG (particle spawn)
 #include "platform/platform.h"
 
 #include <cstring>
@@ -118,12 +119,8 @@ private:
     bool initialized_ = false;
     uint8_t* trail_ = nullptr;
     size_t trailBytes_ = 0;
-    uint32_t rngState_ = 0xBADF00Du;
-
-    uint8_t rand8() {
-        rngState_ = rngState_ * 1103515245u + 12345u;
-        return static_cast<uint8_t>((rngState_ >> 16) & 0xFF);
-    }
+    Random8 rng_{0xBADF00Du};   // the shared PRNG; rand8() adapts it to the call shape below
+    uint8_t rand8() { return rng_.next8(); }
 
     void initParticles() {
         lengthType w = width();

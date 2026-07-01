@@ -3,6 +3,7 @@
 #include "light/layers/Layer.h"
 #include "light/Palette.h"     // colorFromPalette + the global active palette
 #include "core/math8.h"        // sin8 (integer sine LUT)
+#include "core/noise.h"        // inoise8 — the shared value-noise field (the "Noise" waveform)
 #include "core/color.h"        // scale8
 #include "platform/platform.h" // alloc — the fade trail buffer
 
@@ -150,7 +151,7 @@ private:
             case 4: v = static_cast<uint8_t>(                                // Sin3: three summed sines
                         (sin8(phase) + sin8(static_cast<uint8_t>(phase * 2))
                                      + sin8(static_cast<uint8_t>(phase * 3))) / 3); break;
-            default: v = valueNoise(phase); break;                           // Noise (type 5)
+            default: v = inoise8(phase); break;                              // Noise (type 5) — shared 1D value noise
         }
         const lengthType y = static_cast<lengthType>((static_cast<uint32_t>(v) * h) / 256);
         return y < h ? y : static_cast<lengthType>(h - 1);
@@ -160,18 +161,6 @@ private:
     static uint8_t triangle8(uint8_t x) {
         return x < 128 ? static_cast<uint8_t>(x * 2)
                        : static_cast<uint8_t>((255 - x) * 2);
-    }
-
-    // 1-D value noise from a small integer hash (the NoiseEffect hash, reduced to one axis) — a
-    // smoothly-varying pseudo-random byte, so the "Noise" wave jitters without being pure static.
-    static uint8_t valueNoise(uint8_t x) {
-        uint32_t hi = x >> 4, lo = x & 0x0F;     // cell + fractional position
-        uint8_t a = hash(hi), b = hash(hi + 1);
-        return static_cast<uint8_t>(a + ((static_cast<int>(b) - a) * lo) / 16);  // lerp between cells
-    }
-    static uint8_t hash(uint32_t n) {
-        n = (n << 13) ^ n;
-        return static_cast<uint8_t>((n * (n * n * 15731u + 789221u) + 1376312589u) >> 24);
     }
 
     // Write one pixel into the trail plane (bounds-checked; the join loop can reach any y).

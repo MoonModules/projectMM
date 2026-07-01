@@ -3,6 +3,7 @@
 #include "light/layers/Layer.h"
 #include "light/Palette.h"        // colorFromPalette, Palettes::active — heat → palette colour
 #include "core/color.h"
+#include "core/math8.h"           // mm::Random8 — the shared per-effect PRNG (sparks/cooling)
 #include "platform/platform.h"
 
 #include <cstring>
@@ -123,12 +124,8 @@ public:
 private:
     uint8_t* heat_ = nullptr;
     nrOfLightsType heatCount_ = 0;
-    uint32_t rngState_ = 0xC0FFEEu;
-
-    uint8_t rand8() {
-        rngState_ = rngState_ * 1103515245u + 12345u;
-        return static_cast<uint8_t>((rngState_ >> 16) & 0xFF);
-    }
+    Random8 rng_{0xC0FFEEu};   // the shared PRNG; rand8() adapts it to the call shape below
+    uint8_t rand8() { return rng_.next8(); }
 
     void releaseHeat() {
         if (heat_) {

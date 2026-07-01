@@ -107,12 +107,8 @@ private:
     uint8_t hue_[MAX_RIPPLES] = {};
     bool initialized_ = false;
     uint32_t lastElapsed_ = 0;
-    uint32_t rngState_ = 0xC0DECAFEu;
-
-    uint8_t rand8() {
-        rngState_ = rngState_ * 1103515245u + 12345u;
-        return static_cast<uint8_t>((rngState_ >> 16) & 0xFF);
-    }
+    Random8 rng_{0xC0DECAFEu};   // the shared PRNG; rand8() adapts it to the call shape below
+    uint8_t rand8() { return rng_.next8(); }
 
     void spawn(uint8_t i, lengthType w, lengthType h) {
         cx_[i] = static_cast<lengthType>((static_cast<uint16_t>(rand8()) * w) >> 8);

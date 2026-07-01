@@ -8,9 +8,9 @@ The library: Yves Bazin's (hpwit) C-like compiler/interpreter for the ESP32 — 
 
 ## June 2026
 
-No user-facing activity: no merged commits on `main` and no notable issues in June 2026. (Latest commit on `main` predates the window — June 2025.)
+No user-facing activity: no commits on `main` **or any of the ~30 version branches** (v2.x/v3.x, dev, mem*) in June 2026, and no notable issues. (Latest commit on `main` predates the window — June 2025.)
 
-_Checked: commits on `main` author-dated 2026-06-01..2026-06-30 (0 commits); issues created 2026-06-01..2026-06-30, closed 2026-06-01..2026-06-30, and updated 2026-06-01..2026-06-30 (0 each); PRs created in-window (0); no versioned release published in June 2026._
+_Checked: commits author-dated 2026-06-01..2026-06-30 on `main` and every version branch (`v2`…`v3.3`, `dev`, `mem2`…`mem4`, `memory`) — 0 on each; issues created / closed / updated 2026-06-01..2026-06-30 (0 each); PRs created in-window (0); no versioned release published in June 2026._
 
 ## February 2026
 

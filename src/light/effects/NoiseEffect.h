@@ -34,6 +34,9 @@ public:
         // per tick would truncate sub-unit progress to zero on a fast board (short dt) or small grid,
         // stalling the field. Factor 64 tuned so 60 BPM at 128-wide gives smooth motion.
         uint32_t now = elapsed();
+        // First tick: seed lastElapsed_ to now so the field starts at phase 0 instead of jumping by
+        // the whole device uptime (lastElapsed_ is 0 until the first loop) — the WaveEffect pattern.
+        if (!started_) { lastElapsed_ = now; started_ = true; }
         uint32_t dt = now - lastElapsed_;
         lastElapsed_ = now;
         phase_ += static_cast<uint64_t>(dt) * bpm * w * 64;
@@ -69,6 +72,7 @@ public:
 private:
     uint64_t phase_ = 0;
     uint32_t lastElapsed_ = 0;
+    bool     started_ = false;   // first-tick guard: seed lastElapsed_ before the first delta
     // The value-noise field itself (hash + smoothstep + bi/trilinear interp) is the shared
     // inoise8 in core/noise.h — this effect just scales coordinates into it and colours the
     // result through the palette.
