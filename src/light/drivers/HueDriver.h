@@ -360,6 +360,11 @@ private:
         pushCursor_ = 0;
         for (uint8_t i = 0; i < kMaxLights; i++) sent_[i] = false;
         freeNameBuffers();   // drop the old bridge's names; the re-fetch re-allocs for the new one
+        // Rebuild the option arrays NOW so roomOptions_/lightOptions_ don't dangle into the freed
+        // name buffers until the next onBuildControls. With the counts above zeroed, both collapse
+        // to the single "All" sentinel (no name-buffer deref), which is the correct empty state.
+        buildRoomOptions();
+        buildLightOptions();
         rebuildDriven();   // empty caches → empty driven set, until the re-fetch repopulates them
     }
 

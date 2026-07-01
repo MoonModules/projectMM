@@ -111,7 +111,7 @@ TEST_CASE("HueDriver: room/light selection filters the driven set") {
 // the light count as driven-of-total: "N-M lights" while filtered, the plain "M lights" when not.
 TEST_CASE("HueDriver: status reports the driven-of-total light count") {
     mm::HueDriver hue;
-    std::strcpy(hue.appKey, "test-key");   // non-empty key → "paired" rather than "unpaired"
+    hue.appKey[0] = 'k'; hue.appKey[1] = '\0';   // any non-empty key → "paired" not "unpaired"; size-independent
     const char* lights =
         "{\"1\":{\"state\":{\"hue\":1,\"reachable\":true},\"name\":\"Lamp A\"},"
         "\"2\":{\"state\":{\"hue\":2,\"reachable\":true},\"name\":\"Lamp B\"},"

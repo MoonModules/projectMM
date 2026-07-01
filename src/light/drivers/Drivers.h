@@ -160,7 +160,7 @@ public:
     // PreviewDriver reads the RGB source buffer directly, so the simulator is
     // unaffected. RGB-ordered outputs (some ArtNet/network sinks) flip it back.
     uint8_t lightPreset = 2;  // index into kLightPresetOptions; 2 = GRB
-    uint8_t palette = 0;      // index into mm::palettes::kNames; the global active palette effects read
+    uint8_t palette = 0;      // index into mm::palettes::kBuiltins; the global active palette effects read
 
     // Two ways to wire the source Layer:
     //  - setLayers(Layers*): bind the container; layer_ is re-resolved from

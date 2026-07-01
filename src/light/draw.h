@@ -3,6 +3,7 @@
 #include "light/light_types.h"   // Coord3D, lengthType
 #include "light/layers/Buffer.h" // Buffer (flat light array)
 #include "core/color.h"          // RGB, scale8
+#include "core/math8.h"          // qadd8 — saturating add for blur's seep accumulation
 #include "light/Palette.h"       // blend(RGB,RGB,amt) — for blendPixel
 
 // Geometry draw primitives for effects/modifiers: set a pixel, draw a line — bounds-clipped,
@@ -127,6 +128,70 @@ inline void fade(Buffer& buf, uint8_t amt) {
     uint8_t* d = buf.data();
     const size_t n = buf.bytes();
     for (size_t i = 0; i < n; i++) d[i] = scale8(d[i], keep);
+}
+
+// Box blur, working 1D→3D against the flat Buffer — one unified primitive, not a blur1d/blur2d/blur3d
+// trio (the *common patterns first* / "primitives are 3D-aware" rule, same as draw::line). It runs a
+// separable seep pass along each axis whose extent is >1: a 1D layer blurs along x; 2D along x then
+// y; 3D along x, y, z. `amt` (0 = none, 255 = max) is split keep=255-amt / seep=amt>>1 per pixel.
+//
+// Algorithm: the canonical FastLED blur1d single-forward-pass with carryover — each pixel keeps
+// `keep` of itself, seeps `seep` forward to the next pixel and `seep` back to the previous one, so
+// one O(N) pass per axis approximates a symmetric box blur. Behaviour is identical to MoonLight's
+// blur1d/blurRows/blurColumns (verified against VirtualLayer.cpp); the speed comes from doing it on
+// the raw bytes — a stride walk with three uint8 carried in registers, no per-pixel getRGB/setRGB/
+// Coord3D construction (the overhead that makes a generic-layer blur an FPS killer). Prior art:
+// FastLED's blur1d (Mark Kriegsman), the recognisable carryover-seep; our byte-level implementation.
+//
+// `stride` is the byte step between adjacent pixels ALONG the blurred axis (cpl for x, w·cpl for y,
+// w·h·cpl for z); `lineCount`/`lineStride` walk the starts of each parallel line. RGB only (first 3
+// channels); a W channel is untouched. Saturating adds (qadd8) so a bright pixel can't wrap to dark.
+inline void blurAxis(uint8_t* d, size_t cpl, size_t len, size_t stride,
+                     size_t lineCount, size_t lineStride, uint8_t amt) {
+    if (len < 2 || cpl < 3) return;                 // nothing to seep along a 1-pixel (or sub-RGB) axis
+    const uint8_t keep = static_cast<uint8_t>(255 - amt);
+    const uint8_t seep = static_cast<uint8_t>(amt >> 1);
+    for (size_t l = 0; l < lineCount; l++) {
+        uint8_t* base = d + l * lineStride;
+        uint8_t cr = 0, cg = 0, cb = 0;             // carryover (the seep flowing forward), starts black
+        size_t off = 0, prev = 0;
+        for (size_t i = 0; i < len; i++, off += stride) {
+            uint8_t* px = base + off;
+            const uint8_t pr = scale8(px[0], seep), pg = scale8(px[1], seep), pb = scale8(px[2], seep);
+            px[0] = qadd8(scale8(px[0], keep), cr);  // keep self + receive prev pixel's forward seep
+            px[1] = qadd8(scale8(px[1], keep), cg);
+            px[2] = qadd8(scale8(px[2], keep), cb);
+            if (i) {                                 // seep back into the previous pixel (deferred add)
+                uint8_t* pv = base + prev;
+                pv[0] = qadd8(pv[0], pr); pv[1] = qadd8(pv[1], pg); pv[2] = qadd8(pv[2], pb);
+            }
+            cr = pr; cg = pg; cb = pb; prev = off;
+        }
+        uint8_t* last = base + prev;                 // the final forward seep lands on the last pixel
+        last[0] = qadd8(last[0], cr); last[1] = qadd8(last[1], cg); last[2] = qadd8(last[2], cb);
+    }
+}
+
+// Blur the whole buffer by `amt`, separably along every axis with extent >1 (x, then y, then z —
+// MoonLight's blur2d order, extended to z). One call covers 1D/2D/3D. Off the per-pixel-effect path.
+inline void blur(Buffer& buf, Coord3D dims, uint8_t amt) {
+    if (amt == 0) return;
+    uint8_t* d = buf.data();
+    const size_t cpl = buf.channelsPerLight();
+    const size_t w = dims.x > 0 ? static_cast<size_t>(dims.x) : 0;
+    const size_t h = dims.y > 0 ? static_cast<size_t>(dims.y) : 0;
+    const size_t z = dims.z > 0 ? static_cast<size_t>(dims.z) : 0;
+    if (w == 0 || h == 0 || z == 0) return;
+    if (static_cast<size_t>(w * h * z) * cpl > buf.bytes()) return;   // dims/buffer mismatch guard
+    // x-pass: each (y,z) line is `w` pixels, stride cpl; lines start every w·cpl bytes, h·z of them.
+    blurAxis(d, cpl, w, cpl, h * z, w * cpl, amt);
+    // y-pass: each (x,z) line is `h` pixels, stride w·cpl. Lines: for each z, the w columns — start
+    // offsets are z·(h·w·cpl) + x·cpl. Walk them as one run of (w·z) lines stepping by cpl, but the
+    // z blocks aren't contiguous in column-start, so loop z outside.
+    for (size_t zz = 0; zz < z; zz++)
+        blurAxis(d + zz * h * w * cpl, cpl, h, w * cpl, w, cpl, amt);
+    // z-pass (3D only): each (x,y) line is `z` pixels, stride w·h·cpl; w·h lines stepping by cpl.
+    if (z > 1) blurAxis(d, cpl, z, w * h * cpl, w * h, cpl, amt);
 }
 
 // Fill the whole buffer with one colour (MoonLight's fill_solid).

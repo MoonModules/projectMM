@@ -2046,7 +2046,11 @@ function openPicker(anchorEl, opts) {
     // Close any existing picker
     document.querySelectorAll(".type-picker").forEach(p => p.remove());
 
-    const filtered = availableTypes.filter(t => opts.roles.includes(t.role));
+    // Alphabetical by display name so the picker list is scannable regardless of registration
+    // order (localeCompare — case-insensitive, locale-aware).
+    const filtered = availableTypes
+        .filter(t => opts.roles.includes(t.role))
+        .sort((a, b) => (a.displayName || a.name).localeCompare(b.displayName || b.name));
 
     const picker = document.createElement("div");
     picker.className = "type-picker";

@@ -229,6 +229,14 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 - A horizontal 3-cell blinker oscillates to vertical after one step (period-2 oscillator). This is the canonical "the rules actually run" check: birth on 3, death of the ends (1 neighbour each).
 - A lone cell (0 neighbours) dies — the dead-by-isolation rule, and a sanity check that an empty grid stays empty (no spontaneous births at count 0 under Conway).
 
+## DemoReelEffect
+
+`test/unit/light/unit_DemoReelEffect.cpp`
+
+- The reel enumerates the effect registry, hosts one effect at a time, and renders it into a real Layer — one tick leaves non-zero buffer bytes.
+- It never hosts itself (skips its own registry entry), so there's no infinite self-instantiation.
+- Advancing through more than a full lap create/build/teardown/deletes a real effect against the live grid each step, and every hosted effect renders without a crash — the robustness path for the dynamic child swap.
+
 ## GridLayout
 
 `test/unit/light/unit_GridLayout.cpp`
@@ -925,7 +933,7 @@ Unit tests are the fastest tier in the [test strategy](../testing.md): they run 
 
 `test/unit/light/unit_draw.cpp`
 
-- drawPixel writes inside the grid and silently clips outside it (no out-of-bounds write).
+- `mm::draw::pixel()` writes inside the grid and silently clips outside it (no out-of-bounds write).
 - A 1D line (a row): every pixel from a.x to b.x inclusive is lit.
 - A 2D diagonal: endpoints are lit and the line is contiguous (one pixel per step on the main diagonal of a square).
 - A 3D line: drives all three axes, endpoints lit, no out-of-bounds on a small cube.

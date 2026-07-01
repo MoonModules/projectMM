@@ -329,7 +329,8 @@ private:
         // R-pentomino offsets; pattern[0][1] becomes 3 for the glider variant.
         uint8_t pattern[5][2] = {{1, 0}, {0, 1}, {1, 1}, {2, 1}, {2, 2}};
         if (!rng_.below(5)) pattern[0][1] = 3;
-        const RGB color = colorFromPalette(*Palettes::active(), rng_.next8());
+        const uint8_t colorIndex = rng_.next8();
+        const RGB color = colorFromPalette(*Palettes::active(), colorIndex);
 
         // random8(1, size-N) needs size>N; guard tiny grids (degenerate axes collapse to 0).
         const uint8_t xHi = w > 3 ? static_cast<uint8_t>(w > 258 ? 255 : w - 3) : 1;
@@ -353,6 +354,10 @@ private:
                     if (nx >= w || ny >= h) continue;
                     const nrOfLightsType i2 = idx(nx, ny, z, w, h);
                     setBit(future_, i2, true);
+                    // Record the cell's colour index so later neighbour-colour inheritance sees a
+                    // live (non-zero marker) colour for these injected cells, not 0 (dead). Drawn
+                    // green under colorByAge, but colors_ still carries the palette index it ages from.
+                    colors_[i2] = colorIndex;
                     if (buf) draw::pixel(*buf, dims, {nx, ny, z}, colorByAge ? RGB{0, 255, 0} : color);
                 }
                 return;
@@ -404,11 +409,17 @@ private:
                             }
 
                     const Coord3D p{x, y, z};
-                    if (cellValue && !surviveNumbers_[neighbors]) {
+                    // B/S rulesets are single-digit (0..8, classic Conway notation), so the tables
+                    // are sized 9. In 3D the 3×3×3 neighbourhood yields up to 26 neighbours; a count
+                    // ≥9 is in no single-digit ruleset, so it reads as "not a birth/survive count"
+                    // (the cell dies / stays dead) — clamp the lookup to avoid the OOB table read.
+                    const bool survives = neighbors < 9 && surviveNumbers_[neighbors];
+                    const bool born     = neighbors < 9 && birthNumbers_[neighbors];
+                    if (cellValue && !survives) {
                         // Loneliness / overpopulation: dies, blur toward background.
                         setBit(future_, cIndex, false);
                         if (!testMode && buf) draw::blendPixel(*buf, dims, p, bg, frameBlur);
-                    } else if (!cellValue && birthNumbers_[neighbors]) {
+                    } else if (!cellValue && born) {
                         // Reproduction: inherit a living neighbour's colour, mutate sometimes.
                         setBit(future_, cIndex, true);
                         uint8_t colorIndex = (colorCount > 0) ? nColors[rng_.below(colorCount)] : rng_.next8();

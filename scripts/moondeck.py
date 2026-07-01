@@ -1668,7 +1668,7 @@ code {{ background: transparent; color: #c0c0c0; padding: 0; }}
                        r'(?:\s+style="(?P<style>[^"]*)")?[^>]*>',
                        lambda m: _stash(_img(m)), c)
             c = re.sub(r'<a id="([a-z0-9-]+)"></a>', lambda m: _stash(f'<a id="{m.group(1)}"></a>'), c)
-            c = re.sub(r'<br\s*/?>', lambda m: _stash("<br>"), c)
+            c = re.sub(r'<br\s*/?>', lambda _: _stash("<br>"), c)
             out = render_inline(html_mod.escape(c))
             for i, html in enumerate(tokens):
                 out = out.replace(f"\x00{i}\x00", html)

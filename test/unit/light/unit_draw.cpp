@@ -84,3 +84,83 @@ TEST_CASE("draw: a line partly off the grid clips cleanly") {
     CHECK_FALSE(isBlack(at(buf, dims, 3, 2, 0)));   // last on-grid cell lit
     // (cells x>=4 don't exist; the test passing without a crash proves the clip)
 }
+
+namespace {
+// Reference blur (the FastLED blur1d carryover-seep, written the slow-but-obvious way) along x for
+// one row, used to pin draw::blur's fast byte-level pass to the canonical behaviour. Mirrors
+// MoonLight's blurRows for a single row.
+void refBlurRowX(Buffer& b, Coord3D dims, lengthType y, lengthType z, uint8_t amt) {
+    const uint8_t keep = static_cast<uint8_t>(255 - amt), seep = static_cast<uint8_t>(amt >> 1);
+    uint8_t* d = b.data();
+    auto at3 = [&](lengthType x) { return d + (static_cast<size_t>(z) * dims.y * dims.x + static_cast<size_t>(y) * dims.x + x) * 3; };
+    uint8_t cr = 0, cg = 0, cb = 0;
+    for (lengthType x = 0; x < dims.x; x++) {
+        uint8_t* px = at3(x);
+        const uint8_t pr = scale8(px[0], seep), pg = scale8(px[1], seep), pb = scale8(px[2], seep);
+        px[0] = qadd8(scale8(px[0], keep), cr); px[1] = qadd8(scale8(px[1], keep), cg); px[2] = qadd8(scale8(px[2], keep), cb);
+        if (x) { uint8_t* pv = at3(x - 1); pv[0] = qadd8(pv[0], pr); pv[1] = qadd8(pv[1], pg); pv[2] = qadd8(pv[2], pb); }
+        cr = pr; cg = pg; cb = pb;
+    }
+    if (dims.x) { uint8_t* last = at3(dims.x - 1); last[0] = qadd8(last[0], cr); last[1] = qadd8(last[1], cg); last[2] = qadd8(last[2], cb); }
+}
+}  // namespace
+
+// draw::blur on a 1D row matches the canonical carryover-seep reference byte-for-byte (same
+// behaviour as FastLED blur1d / MoonLight blurRows), and is symmetric around a centred bright pixel.
+TEST_CASE("draw: blur matches the reference carryover-seep on a 1D row") {
+    Buffer got, ref;
+    Coord3D dims{5, 1, 1};
+    REQUIRE(got.allocate(5, 3));
+    REQUIRE(ref.allocate(5, 3));
+    // A single white pixel in the centre of both buffers.
+    draw::pixel(got, dims, {2, 0, 0}, {255, 255, 255});
+    draw::pixel(ref, dims, {2, 0, 0}, {255, 255, 255});
+
+    draw::blur(got, dims, 128);
+    refBlurRowX(ref, dims, 0, 0, 128);
+
+    for (lengthType x = 0; x < 5; x++) {
+        const RGB g = at(got, dims, x, 0, 0), r = at(ref, dims, x, 0, 0);
+        CHECK(g.r == r.r); CHECK(g.g == r.g); CHECK(g.b == r.b);
+    }
+    // Centre stays brightest, the two immediate neighbours are equally lit (symmetry), the centre
+    // still has the most energy, and it spread outward (neighbours non-black).
+    CHECK(at(got, dims, 1, 0, 0).r == at(got, dims, 3, 0, 0).r);
+    CHECK(at(got, dims, 2, 0, 0).r > at(got, dims, 1, 0, 0).r);
+    CHECK_FALSE(isBlack(at(got, dims, 1, 0, 0)));
+    CHECK_FALSE(isBlack(at(got, dims, 3, 0, 0)));
+}
+
+// blur runs separably on every axis with extent>1: a 2D blur spreads a centre pixel to all four
+// orthogonal neighbours; a 3D blur reaches the z neighbours too. And it never writes out of bounds.
+TEST_CASE("draw: blur spreads in 2D and 3D and is safe at degenerate sizes") {
+    {   // 2D: centre pixel of a 5×5 reaches its 4 orthogonal neighbours.
+        Buffer buf; Coord3D dims{5, 5, 1};
+        REQUIRE(buf.allocate(25, 3));
+        draw::pixel(buf, dims, {2, 2, 0}, {255, 255, 255});
+        draw::blur(buf, dims, 160);
+        CHECK_FALSE(isBlack(at(buf, dims, 1, 2, 0)));   // -x
+        CHECK_FALSE(isBlack(at(buf, dims, 3, 2, 0)));   // +x
+        CHECK_FALSE(isBlack(at(buf, dims, 2, 1, 0)));   // -y
+        CHECK_FALSE(isBlack(at(buf, dims, 2, 3, 0)));   // +y
+        // x/y symmetry: the four orthogonal neighbours carry equal energy.
+        CHECK(at(buf, dims, 1, 2, 0).r == at(buf, dims, 2, 1, 0).r);
+    }
+    {   // 3D: the z neighbours light up too.
+        Buffer buf; Coord3D dims{3, 3, 3};
+        REQUIRE(buf.allocate(27, 3));
+        draw::pixel(buf, dims, {1, 1, 1}, {255, 255, 255});
+        draw::blur(buf, dims, 160);
+        CHECK_FALSE(isBlack(at(buf, dims, 1, 1, 0)));   // -z
+        CHECK_FALSE(isBlack(at(buf, dims, 1, 1, 2)));   // +z
+    }
+    {   // Degenerate: amt=0 is a no-op; 1×1×1 and a single-pixel axis don't crash.
+        Buffer buf; Coord3D dims{1, 1, 1};
+        REQUIRE(buf.allocate(1, 3));
+        draw::pixel(buf, dims, {0, 0, 0}, {200, 100, 50});
+        draw::blur(buf, dims, 255);                     // nothing to seep — must be a safe no-op
+        CHECK(at(buf, dims, 0, 0, 0).r == 200);
+        draw::blur(buf, dims, 0);                       // amt 0 returns immediately
+        CHECK(at(buf, dims, 0, 0, 0).r == 200);
+    }
+}
