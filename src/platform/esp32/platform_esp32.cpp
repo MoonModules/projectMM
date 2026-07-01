@@ -1142,7 +1142,9 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
         const uint32_t cms = remainingMs();
         timeval ctv{};
         ctv.tv_sec = static_cast<time_t>(cms / 1000);
-        ctv.tv_usec = static_cast<suseconds_t>((cms % 1000) * 1000);
+        // decltype the field (not suseconds_t) so the same code compiles on Winsock's timeval too,
+        // where tv_usec is `long` and suseconds_t doesn't exist — see platform_desktop.cpp.
+        ctv.tv_usec = static_cast<decltype(ctv.tv_usec)>((cms % 1000) * 1000);
         if (::select(fd + 1, nullptr, &wf, nullptr, &ctv) <= 0) return 0;   // timeout / error
         int soerr = 0; socklen_t len = sizeof(soerr);
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &len);
@@ -1156,7 +1158,7 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
     const uint32_t sms = remainingMs();
     timeval tv{};
     tv.tv_sec = static_cast<time_t>(sms / 1000);
-    tv.tv_usec = static_cast<suseconds_t>((sms % 1000) * 1000);
+    tv.tv_usec = static_cast<decltype(tv.tv_usec)>((sms % 1000) * 1000);
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 

@@ -530,7 +530,9 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
         const uint32_t cms = remainingMs();
         timeval ctv{};
         ctv.tv_sec = static_cast<time_t>(cms / 1000);
-        ctv.tv_usec = static_cast<suseconds_t>((cms % 1000) * 1000);
+        // decltype the field, not suseconds_t: tv_usec is `long` on Winsock's timeval (no suseconds_t
+        // on Windows) and suseconds_t on POSIX — decltype resolves to the right type on every platform.
+        ctv.tv_usec = static_cast<decltype(ctv.tv_usec)>((cms % 1000) * 1000);
         if (::select(static_cast<int>(sock(fd)) + 1, nullptr, &wf, nullptr, &ctv) <= 0) return 0;  // timeout / error
         int soerr = 0; socklen_t len = sizeof(soerr);
         ::getsockopt(sock(fd), SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&soerr), &len);
@@ -549,7 +551,7 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
 #else
     timeval tv{};
     tv.tv_sec = static_cast<time_t>(sms / 1000);
-    tv.tv_usec = static_cast<suseconds_t>((sms % 1000) * 1000);
+    tv.tv_usec = static_cast<decltype(tv.tv_usec)>((sms % 1000) * 1000);
     ::setsockopt(sock(fd), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     ::setsockopt(sock(fd), SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 #endif
