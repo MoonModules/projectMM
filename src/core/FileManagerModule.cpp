@@ -5,6 +5,10 @@
 
 namespace mm {
 
+namespace {
+constexpr uint32_t kUsageRefreshMs = 5u * 60u * 1000u;
+}
+
 void FileManagerModule::onBuildControls() {
     // Only `show hidden` is a control: the whole File Manager surface is the tree panel (app.js
     // renderFileManager), which lists over /api/dir and reads the gauges from /api/state; the
@@ -16,9 +20,10 @@ void FileManagerModule::onBuildControls() {
     // Filesystem-usage gauge (used / total bytes), read from the platform. Shown below the tree in
     // the panel — the File Manager is where filesystem space is relevant, so it owns the control.
     // Bound only when the platform reports a real partition (desktop / a no-data-partition chip
-    // reports 0). loop1s refreshes the used value; the total is fixed.
+    // reports 0). loop1s refreshes the used value sparingly; the total is fixed.
     totalBytes_ = static_cast<uint32_t>(platform::filesystemTotal());
     usedBytes_ = static_cast<uint32_t>(platform::filesystemUsed());
+    lastUsageRefreshMs_ = platform::millis();
     if (totalBytes_ > 0) {
         controls_.addProgress("filesystem", usedBytes_, totalBytes_);
         controls_.setHidden(controls_.count() - 1, true);   // renders as the usage bar in the panel, not generically
@@ -37,7 +42,15 @@ void FileManagerModule::onBuildControls() {
 }
 
 void FileManagerModule::loop1s() {
-    if (totalBytes_ > 0) usedBytes_ = static_cast<uint32_t>(platform::filesystemUsed());
+    if (totalBytes_ == 0) return;
+
+    const uint32_t now = platform::millis();
+    if (lastUsageRefreshMs_ != 0 && now - lastUsageRefreshMs_ < kUsageRefreshMs) return;
+
+    // LittleFS usage accounting can take tens of milliseconds on ESP32; keep it
+    // off the once-per-second housekeeping burst while LED output is active.
+    lastUsageRefreshMs_ = now;
+    usedBytes_ = static_cast<uint32_t>(platform::filesystemUsed());
 }
 
 void FileManagerModule::setup() {

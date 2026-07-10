@@ -106,6 +106,8 @@ public:
             (void)platform::coprocessorWifi();   // prime the static (the control points at it)
         }
 
+        if (scheduler_) scheduler_->setTargetFps(fpsCap_);
+
         if (chipFlashVal_ > 0) {
             std::snprintf(flashStr_, sizeof(flashStr_), "%uMB",
                           static_cast<unsigned>(chipFlashVal_ / (1024 * 1024)));
@@ -142,6 +144,7 @@ public:
         // Dynamic (updated every second)
         controls_.addReadOnly("uptime", uptimeStr_, sizeof(uptimeStr_));
         controls_.addReadOnly("fps", fpsStr_, sizeof(fpsStr_));
+        controls_.addUint8("fpsCap", fpsCap_, 10, 120);
         controls_.addReadOnly("tickTimeUs", tickStr_, sizeof(tickStr_));
         if (totalInternalVal_ > 0) {
             controls_.addProgress("heap", heapUsedVal_, totalInternalVal_);
@@ -193,6 +196,12 @@ public:
         MoonModule::onBuildControls();
     }
 
+    void onUpdate(const char* name) override {
+        if (std::strcmp(name, "fpsCap") == 0 && scheduler_) {
+            scheduler_->setTargetFps(fpsCap_);
+        }
+    }
+
     void loop1s() override {
         // deviceName is the single network identity (mDNS <name>.local, SoftAP SSID,
         // DHCP hostname all derive from it), so it must stay a valid hostname whatever
@@ -218,6 +227,8 @@ public:
 
         uint32_t fps = scheduler_ ? scheduler_->fps() : 0;
         std::snprintf(fpsStr_, sizeof(fpsStr_), "%u", static_cast<unsigned>(fps));
+
+        if (scheduler_) scheduler_->setTargetFps(fpsCap_);
 
         uint32_t tickUs = scheduler_ ? scheduler_->tickTimeUs() : 0;
         std::snprintf(tickStr_, sizeof(tickStr_), "%u", static_cast<unsigned>(tickUs));
@@ -290,6 +301,7 @@ private:
     // entry ("Olimex ESP32-Gateway Rev G" = 26) with headroom; the Improv RPC handler
     // caps str_len against this size dynamically.
     char deviceModel_[32] = {};
+    uint8_t fpsCap_ = 60;
 
     // Dynamic (updated in loop1s)
     char uptimeStr_[16] = {};

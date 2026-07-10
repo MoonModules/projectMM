@@ -108,6 +108,8 @@ public:
         addWindowControls();   // start / count — the slice of the shared buffer this driver outputs
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
+        controls_.addReadOnly("backend", backend_, sizeof(backend_));
+        controls_.addReadOnly("frameStats", frameStats_, sizeof(frameStats_));
         controls_.addBool("loopbackTest", loopbackTest);
         // loopbackTxPin / loopbackRxPin are always bound (so persistence can load
         // them any time) but only shown while the test mode is on — same always-
@@ -233,6 +235,13 @@ public:
         if (n == 0 || outCh == 0 || pinCount_ == 0
             || !symbols_ || symbolCap_ < symbolsFor(n, outCh)) return;
 
+        for (uint8_t i = 0; i < pinCount_; i++) {
+            if (platform::rmtWs2812Busy(rmt_[i])) {
+                recordSkippedFrame();
+                return;
+            }
+        }
+
         // Fused single pass: correct one light into wire bytes, encode those
         // bytes straight into the symbol buffer. No second sweep over encoded
         // data, no per-light heap.
@@ -262,20 +271,35 @@ public:
         // resize lands a tick before the config re-parse) n can be below Σ pinCounts_ — cap each
         // pin at the encoded boundary so it never clocks out stale symbols past what we wrote.
         const size_t wordsPerLight = static_cast<size_t>(outCh) * 8;
-        bool started[kMaxPins] = {};
         for (uint8_t i = 0; i < pinCount_; i++) {
             const nrOfLightsType pinStart = static_cast<nrOfLightsType>(pinOffsets_[i] / wordsPerLight);
             if (pinStart >= n) break;  // contiguous: this pin and all later ones are past the encoded lights
             const nrOfLightsType pinLights =
                 (pinStart + pinCounts_[i] > n) ? static_cast<nrOfLightsType>(n - pinStart) : pinCounts_[i];
             if (pinLights == 0) continue;
-            started[i] = platform::rmtWs2812Transmit(rmt_[i], symbols_ + pinOffsets_[i],
-                                        static_cast<size_t>(pinLights) * wordsPerLight);
+            if (!platform::rmtWs2812Transmit(rmt_[i], symbols_ + pinOffsets_[i],
+                                             static_cast<size_t>(pinLights) * wordsPerLight)) {
+                recordSkippedFrame();
+            }
         }
-        for (uint8_t i = 0; i < pinCount_; i++) {
-            if (started[i]) platform::rmtWs2812Wait(rmt_[i], 1000 /* ms */);
+    }
+
+    void loop1s() override {
+        const uint32_t skipped = skippedFrames_;
+        skippedFrames_ = 0;
+        std::snprintf(frameStats_, sizeof(frameStats_), "skip %lu/s total %lu",
+                      static_cast<unsigned long>(skipped),
+                      static_cast<unsigned long>(skippedTotal_));
+        if (!configErr_ && !configWarn_) {
+            if (skipped > 0) {
+                std::snprintf(skipStatus_, sizeof(skipStatus_), "RMT skipped %lu frames/s",
+                              static_cast<unsigned long>(skipped));
+                setStatus(skipStatus_, Severity::Warning);
+            } else if (status() == skipStatus_) {
+                clearStatus();
+            }
         }
-        if (cfg_.reset_us) platform::delayUs(cfg_.reset_us);
+        MoonModule::loop1s();
     }
 
     /// Test-only accessors. symbolBuffer/symbolCapacity mirror ArtNet's
@@ -301,6 +325,7 @@ private:
     const Correction* correction_ = nullptr;
 
     LedDriverConfig cfg_;
+    char backend_[16] = "none";
     platform::RmtWs2812Handle rmt_[kMaxPins];
     uint16_t       pinList_[kMaxPins] = {};    // parsed pins, list order
     nrOfLightsType pinCounts_[kMaxPins] = {};  // lights per pin (slice lengths)
@@ -312,6 +337,10 @@ private:
     bool inited_ = false;                      // all-or-nothing across the pins
     uint32_t* symbols_ = nullptr;   // owned; one word per WS2812 data bit
     size_t symbolCap_ = 0;          // words allocated
+    uint32_t skippedFrames_ = 0;
+    uint32_t skippedTotal_ = 0;
+    char frameStats_[32] = "skip 0/s total 0";
+    char skipStatus_[40] = {};
 
     // The parse-error literal currently shown in the status slot (nullptr when
     // configErr_, failBuf_, kFailBufLen and the clearConfigErr/clearFailBuf/
@@ -319,6 +348,15 @@ private:
     // the LCD and Parlio drivers). The on-demand FAIL string (failBuf_) is only
     // formatted when a loopback or channel init FAILs; PASS/jumper/unsupported use
     // flash literals.
+
+    void setBackend(const char* value) {
+        std::snprintf(backend_, sizeof(backend_), "%s", value ? value : "none");
+    }
+
+    void recordSkippedFrame() {
+        skippedFrames_++;
+        skippedTotal_++;
+    }
 
     // The chip's TX-channel cap caps the pin list; on targets without RMT
     // (desktop, where the constant is 0) fall back to kMaxPins so the parsing
@@ -524,6 +562,7 @@ private:
             return;
         }
         inited_ = true;
+        setBackend(platform::rmtWs2812Backend(rmt_[0]));
         // A prior init failure recovered (e.g. a pin fixed) — drop the stale error.
         if (failBuf_ && status() == failBuf_) clearFailBuf();
         if (status() == kInitFailMsg) clearStatus();
@@ -537,6 +576,7 @@ private:
         for (uint8_t i = 0; i < kMaxPins; i++) {
             if (rmt_[i].impl) platform::rmtWs2812Deinit(rmt_[i]);
         }
+        setBackend("none");
         inited_ = false;
     }
 };

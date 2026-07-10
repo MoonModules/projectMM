@@ -43,7 +43,16 @@ struct RmtTxState {
     rmt_channel_handle_t channel = nullptr;
     rmt_encoder_handle_t encoder = nullptr;
     uint32_t resolutionHz = 0;
+    bool withDma = false;
+    volatile bool busy = false;
 };
+
+bool IRAM_ATTR rmtTxDoneCb(rmt_channel_handle_t, const rmt_tx_done_event_data_t*,
+                           void* user) {
+    auto* st = static_cast<RmtTxState*>(user);
+    if (st) st->busy = false;
+    return false;
+}
 
 } // namespace
 
@@ -51,6 +60,30 @@ bool rmtWs2812Init(RmtWs2812Handle& h, uint8_t gpio, uint32_t resolutionHz, bool
     auto* st = new (std::nothrow) RmtTxState();
     if (!st) return false;
 
+#if SOC_RMT_SUPPORT_DMA
+    auto makeCfg = [&](bool withDma) {
+        rmt_tx_channel_config_t txCfg = {};
+        txCfg.gpio_num = static_cast<gpio_num_t>(gpio);
+        txCfg.clk_src = RMT_CLK_SRC_DEFAULT;
+        txCfg.resolution_hz = resolutionHz;
+        txCfg.mem_block_symbols = withDma ? 1024 : SOC_RMT_MEM_WORDS_PER_CHANNEL;
+        txCfg.trans_queue_depth = 4;
+        txCfg.flags.invert_out = invert ? 1 : 0;
+        txCfg.flags.with_dma = withDma ? 1 : 0;
+        return txCfg;
+    };
+    rmt_tx_channel_config_t txCfg = makeCfg(true);
+    esp_err_t chanErr = rmt_new_tx_channel(&txCfg, &st->channel);
+    if (chanErr != ESP_OK) {
+        txCfg = makeCfg(false);
+        chanErr = rmt_new_tx_channel(&txCfg, &st->channel);
+    }
+    if (chanErr != ESP_OK) {
+        delete st;
+        return false;
+    }
+    st->withDma = txCfg.flags.with_dma != 0;
+#else
     rmt_tx_channel_config_t txCfg = {};
     txCfg.gpio_num = static_cast<gpio_num_t>(gpio);
     txCfg.clk_src = RMT_CLK_SRC_DEFAULT;
@@ -68,9 +101,19 @@ bool rmtWs2812Init(RmtWs2812Handle& h, uint8_t gpio, uint32_t resolutionHz, bool
         delete st;
         return false;
     }
+#endif
 
     rmt_copy_encoder_config_t copyCfg = {};
     if (rmt_new_copy_encoder(&copyCfg, &st->encoder) != ESP_OK) {
+        rmt_del_channel(st->channel);
+        delete st;
+        return false;
+    }
+
+    rmt_tx_event_callbacks_t cbs = {};
+    cbs.on_trans_done = rmtTxDoneCb;
+    if (rmt_tx_register_event_callbacks(st->channel, &cbs, st) != ESP_OK) {
+        rmt_del_encoder(st->encoder);
         rmt_del_channel(st->channel);
         delete st;
         return false;
@@ -93,9 +136,16 @@ uint32_t rmtWs2812Resolution(const RmtWs2812Handle& h) {
     return st ? st->resolutionHz : 0;
 }
 
+const char* rmtWs2812Backend(const RmtWs2812Handle& h) {
+    auto* st = static_cast<RmtTxState*>(h.impl);
+    if (!st) return "none";
+    return st->withDma ? "RMT DMA" : "RMT";
+}
+
 bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint32_t* symbols, size_t symbolCount) {
     auto* st = static_cast<RmtTxState*>(h.impl);
     if (!st || !symbols || symbolCount == 0) return false;
+    if (st->busy) return false;
 
     rmt_transmit_config_t txCfg = {};
     txCfg.loop_count = 0;   // single shot, no hardware loop
@@ -105,8 +155,16 @@ bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint32_t* symbols, size_t symbo
     // clock out concurrently, which is what makes a multi-pin frame cost the
     // longest strand instead of the sum. The caller pairs this with
     // rmtWs2812Wait and owns the inter-frame latch after the last wait.
-    return rmt_transmit(st->channel, st->encoder, symbols,
-                        symbolCount * sizeof(uint32_t), &txCfg) == ESP_OK;
+    st->busy = true;
+    const esp_err_t err = rmt_transmit(st->channel, st->encoder, symbols,
+                                       symbolCount * sizeof(uint32_t), &txCfg);
+    if (err != ESP_OK) st->busy = false;
+    return err == ESP_OK;
+}
+
+bool rmtWs2812Busy(const RmtWs2812Handle& h) {
+    auto* st = static_cast<RmtTxState*>(h.impl);
+    return st && st->busy;
 }
 
 void rmtWs2812Wait(RmtWs2812Handle& h, uint32_t timeoutMs) {
@@ -125,12 +183,16 @@ void rmtWs2812Wait(RmtWs2812Handle& h, uint32_t timeoutMs) {
     // and calls rmt_transmit again; if the channel is still busy, rmt_transmit
     // returns an error, rmtWs2812Transmit returns false, and RmtLedDriver::loop()
     // skips waiting on that channel (its started[] guard) — no crash, no corruption.
-    rmt_tx_wait_all_done(st->channel, timeoutMs);
+    if (rmt_tx_wait_all_done(st->channel, timeoutMs) == ESP_OK) st->busy = false;
 }
 
 void rmtWs2812Deinit(RmtWs2812Handle& h) {
     auto* st = static_cast<RmtTxState*>(h.impl);
     if (!st) return;
+    if (st->busy) {
+        rmt_tx_wait_all_done(st->channel, 250);
+        st->busy = false;
+    }
     if (st->channel) {
         rmt_disable(st->channel);
         rmt_del_channel(st->channel);

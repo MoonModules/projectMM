@@ -65,10 +65,20 @@ public:
     void tick();
     void teardown();
 
+    void setTargetFps(uint8_t fps) {
+        if (fps < 10) fps = 10;
+        if (fps > 120) fps = 120;
+        targetFps_ = fps;
+    }
+    uint8_t targetFps() const { return targetFps_; }
+
     uint32_t elapsed() const;
     void buildState();
 
     uint32_t tickTimeUs() const { return tickTimeUs_; }
+    uint32_t workTimeUs() const { return workTimeUs_; }
+    uint32_t maxWorkTimeUs() const { return maxWorkTimeUs_; }
+    uint32_t maxFrameTimeUs() const { return maxFrameTimeUs_; }
     uint32_t fps() const { return tickTimeUs_ > 0 ? 1000000 / tickTimeUs_ : 0; }
     uint8_t moduleCount() const { return moduleCount_; }
     MoonModule* module(uint8_t i) const { return i < moduleCount_ ? modules_[i] : nullptr; }
@@ -131,8 +141,18 @@ private:
     uint32_t lastLoop1s_ = 0;
     uint32_t tickTimeUs_ = 0;
     uint32_t tickAccumUs_ = 0;
+    uint32_t workTimeUs_ = 0;
+    uint32_t workAccumUs_ = 0;
+    uint32_t maxWorkTimeUs_ = 0;
+    uint32_t maxFrameTimeUs_ = 0;
+    uint32_t maxWorkAccumUs_ = 0;
+    uint32_t maxFrameAccumUs_ = 0;
     uint32_t frameCount_ = 0;        // frames in current 1-second window (for averaging)
     uint32_t lastTimingUpdate_ = 0;   // 1-second window start
+    uint32_t lastFrameStartUs_ = 0;
+    uint8_t loop1sCursor_ = 0;
+    uint8_t targetFps_ = 60;
+    bool loop1sSweepActive_ = false;
 };
 
 // --- Drivers master-state reads, shared by every consumer that mirrors the light state (the WLED

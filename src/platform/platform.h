@@ -426,12 +426,20 @@ bool rmtWs2812Init(RmtWs2812Handle& h, uint8_t gpio, uint32_t resolutionHz, bool
 // The driver converts its ns timings to ticks with this. 0 if not initialised.
 uint32_t rmtWs2812Resolution(const RmtWs2812Handle& h);
 
+// Human-readable backend name for diagnostics ("RMT DMA", "RMT", "none").
+const char* rmtWs2812Backend(const RmtWs2812Handle& h);
+
 // Start transmitting `symbolCount` pre-encoded WS2812 RMT symbols and return
 // immediately — channels started back-to-back clock out concurrently. Pair with
 // rmtWs2812Wait; the caller owns the inter-frame latch (delayUs) after the last
 // wait. The symbol buffer must stay valid until the wait returns. Returns false
 // when the channel isn't initialised (and on targets without RMT).
 bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint32_t* symbols, size_t symbolCount);
+
+// True while a previously-started frame is still being clocked out by the RMT
+// peripheral. Used by non-blocking LED drivers to skip stale frames instead of
+// overwriting a symbol buffer still owned by DMA/RMT.
+bool rmtWs2812Busy(const RmtWs2812Handle& h);
 
 // Block until the channel's in-flight transmission finishes, bounded by
 // `timeoutMs` so a wedged peripheral can't hang the render tick forever — a
