@@ -1,17 +1,15 @@
 // @module NetworkModule
 
-// Unit tests for NetworkModule::setWifiCredentials — the bridge the Improv
-// listener (and any future credential pusher) uses to hand SSID + password
-// off to the network state machine without touching control bindings.
-//
-// Scope is narrow on purpose: this verifies the buffer copy + dirty flag,
-// not the WiFi state transitions (which need the platform layer, a real
-// radio, and the tick1s() tick). The desktop platform's wifiStaInit stub
-// returns false safely, so the call completes without raising side effects.
+// Unit tests for NetworkModule WiFi credentials, network-state controls,
+// and IP validators. The desktop WiFi backend is a safe stub: it lets tests
+// verify buffer copies, delayed web-control apply, and fallback behaviour
+// without requiring a real radio.
 
 #include "doctest.h"
 #include "platform_config.h"       // pulls in platform::hasWiFi before NetworkModule.h
 #include "core/NetworkModule.h"
+#include "core/Scheduler.h"
+#include "platform/platform.h"
 #include "conditional_controls.h"  // shared conditional-control invariant helpers
 
 #include <cstring>
@@ -63,6 +61,58 @@ TEST_CASE("NetworkModule::setWifiCredentials accepts long SSID without crash") {
     longSsid[sizeof(longSsid) - 1] = 0;
     net.setWifiCredentials(longSsid, "pw");
     CHECK(net.dirty());
+}
+
+namespace {
+struct ClockGuard { ~ClockGuard() { mm::platform::setTestNowMs(0); } };
+}
+
+// Web-written credentials drive the same STA apply path as Improv, after both fields settle.
+TEST_CASE("NetworkModule web credential controls schedule WiFi STA apply") {
+    ClockGuard clockGuard;
+    mm::platform::setTestNowMs(1000);
+
+    mm::Scheduler scheduler;
+    auto* net = new mm::NetworkModule();
+    net->setName("Network");
+    net->setScheduler(&scheduler);
+    scheduler.addModule(net);
+    scheduler.setup();
+
+    CHECK(scheduler.setControl("Network", "ssid", "{\"value\":\"homeAP\"}") == mm::Scheduler::SetControlResult::Ok);
+    CHECK_FALSE(net->wifiCredentialApplyPendingForTest());
+    CHECK(std::strcmp(net->status(), "WiFi SSID saved; press connect") == 0);
+
+    CHECK(scheduler.setControl("Network", "password", "{\"value\":\"secret123\"}") == mm::Scheduler::SetControlResult::Ok);
+    CHECK(net->wifiCredentialApplyPendingForTest());
+    CHECK(std::strcmp(net->status(), "WiFi credentials saved; connecting soon") == 0);
+
+    mm::platform::setTestNowMs(1000 + mm::NetworkModule::wifiCredentialApplyDelayMsForTest() + 1);
+    net->tick1s();
+
+    CHECK_FALSE(net->wifiCredentialApplyPendingForTest());
+    CHECK(std::strcmp(net->status(), "No network") == 0);
+    scheduler.release();
+}
+
+// The explicit connect button lets an open network apply with an empty password.
+TEST_CASE("NetworkModule connectWifi applies open-network credentials") {
+    ClockGuard clockGuard;
+    mm::platform::setTestNowMs(1000);
+
+    mm::Scheduler scheduler;
+    auto* net = new mm::NetworkModule();
+    net->setName("Network");
+    net->setScheduler(&scheduler);
+    scheduler.addModule(net);
+    scheduler.setup();
+
+    CHECK(scheduler.setControl("Network", "ssid", "{\"value\":\"openAP\"}") == mm::Scheduler::SetControlResult::Ok);
+    CHECK_FALSE(net->wifiCredentialApplyPendingForTest());
+    CHECK(scheduler.setControl("Network", "connectWifi", "{\"value\":1}") == mm::Scheduler::SetControlResult::Ok);
+    CHECK_FALSE(net->wifiCredentialApplyPendingForTest());
+    CHECK(std::strcmp(net->status(), "No network") == 0);
+    scheduler.release();
 }
 
 // After setup(), NetworkModule exposes a `mode` read-only control whose value

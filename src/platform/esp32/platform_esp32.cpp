@@ -415,6 +415,7 @@ static bool wifiApActive_ = false;
 static esp_netif_t* staNetif_ = nullptr;
 static esp_netif_t* apNetif_ = nullptr;
 static bool wifiInitDone_ = false;
+static uint8_t wifiStaDisconnectReason_ = 0;
 #endif
 
 static void ensureNetifInit() {
@@ -763,7 +764,10 @@ static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
                              int32_t id, void* data) {
     if (base == WIFI_EVENT) {
         if (id == WIFI_EVENT_STA_DISCONNECTED) {
-            ESP_LOGI(NET_TAG, "WiFi STA disconnected");
+            auto* event = static_cast<wifi_event_sta_disconnected_t*>(data);
+            wifiStaDisconnectReason_ = event ? static_cast<uint8_t>(event->reason) : 0;
+            ESP_LOGI(NET_TAG, "WiFi STA disconnected, reason=%u",
+                     static_cast<unsigned>(wifiStaDisconnectReason_));
             wifiStaConnected_ = false;
         } else if (id == WIFI_EVENT_AP_STACONNECTED) {
             ESP_LOGI(NET_TAG, "WiFi AP client connected");
@@ -922,6 +926,10 @@ void wifiStaStop() {
     ESP_LOGI(NET_TAG, "WiFi STA stopped + deinit");
 }
 
+uint8_t wifiStaDisconnectReason() {
+    return wifiStaDisconnectReason_;
+}
+
 int wifiStaRssi() {
     if (!wifiStaConnected_) return 0;
     wifi_ap_record_t info{};
@@ -1050,6 +1058,7 @@ bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) { return false;
 bool wifiStaConnected() { return false; }
 void wifiStaGetIPv4(uint8_t out[4])      { out[0] = out[1] = out[2] = out[3] = 0; }
 void wifiStaStop() {}
+uint8_t wifiStaDisconnectReason() { return 0; }
 int wifiStaRssi() { return 0; }
 void wifiStaBssid(uint8_t out[6]) { std::memset(out, 0, 6); }
 int wifiStaChannel() { return 0; }

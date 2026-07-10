@@ -140,49 +140,13 @@ public:
         ssid_[sizeof(ssid_) - 1] = 0;
         std::strncpy(password_, password ? password : "", sizeof(password_) - 1);
         password_[sizeof(password_) - 1] = 0;
+        wifiCredentialApplyPending_ = false;
         markDirty();
         FilesystemModule::noteDirty();   // start the debounce so the change actually flushes
                                          // (markDirty alone only sets the bit; the save scheduler
                                          // needs noteDirty to arm — Improv-pushed creds would
                                          // otherwise persist only if some other control changed)
-        if constexpr (platform::hasWiFi) {
-            // Tear down any prior WiFi state (AP-fallback, mid-flight STA
-            // attempt, or stale init from a previous reconfigure) so the
-            // platform's event-handler registration runs fresh.
-            if (state_ == State::AP) {
-                platform::wifiApStop();
-                noteRadioStopped();
-                apShutdownPending_ = false;
-            }
-            if (state_ == State::WaitingSta || state_ == State::ConnectedSta) {
-                platform::wifiStaStop();
-                noteRadioStopped();
-            }
-            if (platform::wifiStaInit(ssid_, password_)) {
-                state_ = State::WaitingSta;
-                stateChangeTime_ = platform::millis();
-                // Apply the TX-power cap NOW, before the radio's first
-                // probe / auth / assoc burst — that's the window the
-                // weak-power brown-out cap exists to protect. Waiting for the
-                // next tick1s() tick to syncTxPower would leave up to
-                // 1 s of full-power TX during association, the exact
-                // failure mode the cap defends against. syncTxPower
-                // itself is cheap and idempotent.
-                syncTxPower();
-                std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi STA: %s", ssid_);
-                setStatus(statusBuf_, Severity::Status);
-                // Re-evaluate control visibility — rssi was visible while
-                // state_ was ConnectedSta (any prior call to wifiStaConnected)
-                // and would otherwise stay rendered with a now-stale reading
-                // until the cascade either reconnects (onConnected rebuilds)
-                // or falls back to AP (startAP rebuilds). Match those paths.
-                rebuildControls();
-            } else {
-                // STA init failed (OOM, GPIO conflict). Try to recover via
-                // AP so the user can re-enter credentials manually.
-                startAP();
-            }
-        }
+        startStaFromStoredCredentials();
     }
 
     /// Networking is infrastructure — keep the cascade ticking even when the user
@@ -258,6 +222,7 @@ public:
         if constexpr (platform::hasWiFi) {
             controls_.addText("ssid", ssid_, sizeof(ssid_));
             controls_.addPassword("password", password_, sizeof(password_));
+            controls_.addButton("connectWifi");
             // RSSI is meaningful only while associated as a STA. Hide on
             // Ethernet / AP / Idle to avoid showing a stale 0 dBm reading.
             controls_.addReadOnlyInt("rssi", rssi_, "dBm");
@@ -281,6 +246,9 @@ public:
             // TX-power cap is meaningless on Ethernet / Idle where the radio is off.
             controls_.addInt16("txPowerSetting", txPowerSetting_, 0, 21);
             controls_.setHidden(controls_.count() - 1, !radioOn);
+            updateLastDrop();
+            controls_.addReadOnly("lastDrop", lastDropBuf_, sizeof(lastDropBuf_));
+            controls_.setHidden(controls_.count() - 1, lastDropBuf_[0] == 0);
         }
         controls_.addBool("mDNS", mdnsEnabled_);
 
@@ -356,8 +324,43 @@ public:
         // Chain to base is at the top of this method — see comment there.
     }
 
+    void onControlChanged(const char* controlName) override {
+        if constexpr (platform::hasWiFi) {
+            if (!controlName) return;
+            const bool ssidChanged = std::strcmp(controlName, "ssid") == 0;
+            const bool passwordChanged = std::strcmp(controlName, "password") == 0;
+            const bool connectRequested = std::strcmp(controlName, "connectWifi") == 0;
+            if (!ssidChanged && !passwordChanged && !connectRequested) return;
+
+            if (ssid_[0] == 0) {
+                wifiCredentialApplyPending_ = false;
+                std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi SSID empty; AP active");
+                setStatus(statusBuf_, Severity::Status);
+                return;
+            }
+
+            if (connectRequested) {
+                wifiCredentialApplyPending_ = false;
+                startStaFromStoredCredentials();
+                return;
+            }
+
+            if (ssidChanged && password_[0] == 0) {
+                wifiCredentialApplyPending_ = false;
+                std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi SSID saved; press connect");
+                setStatus(statusBuf_, Severity::Status);
+                return;
+            }
+
+            wifiCredentialApplyPending_ = true;
+            wifiCredentialChangedAt_ = platform::millis();
+            std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi credentials saved; connecting soon");
+            setStatus(statusBuf_, Severity::Status);
+        }
+    }
     void tick1s() override {
         uint32_t now = platform::millis();
+        maybeApplyPendingWifiCredentials(now);
         uint32_t elapsed = now - stateChangeTime_;
 
         switch (state_) {
@@ -389,10 +392,10 @@ public:
                     if (platform::wifiStaConnected()) {
                         onConnected("WiFi STA");
                     } else if (elapsed > 10000) {
-                        // WiFi STA didn't connect in 10s, start AP
                         platform::wifiStaStop();
                         noteRadioStopped();
-                        startAP();
+                        if (staReconnectMode_) retryStaReconnect(now);
+                        else startAP();
                     }
                 }
                 break;
@@ -433,11 +436,12 @@ public:
                         platform::mdnsStop();
                         onConnected("Ethernet");
                     } else if (!platform::wifiStaConnected()) {
-                        std::printf("NetworkModule: WiFi STA dropped, starting AP\n");
+                        std::printf("NetworkModule: WiFi STA dropped, reconnecting\n");
                         platform::mdnsStop();
+                        mdnsRunning_ = false;
                         platform::wifiStaStop();
                         noteRadioStopped();
-                        startAP();
+                        startStaReconnect(now, true);
                     } else {
                         updateStatusIP();
                     }
@@ -526,6 +530,12 @@ private:
     uint32_t stateChangeTime_ = 0;
     bool apShutdownPending_ = false;
     bool mdnsRunning_ = false;
+    bool wifiCredentialApplyPending_ = false;
+    bool staReconnectMode_ = false;
+    uint8_t staReconnectAttempts_ = 0;
+    uint32_t wifiCredentialChangedAt_ = 0;
+    static constexpr uint32_t kWifiCredentialApplyDelayMs = 3000;
+    static constexpr uint8_t kStaReconnectAttemptsBeforeAp = 12;
     // The device name last registered with mDNS, so syncMdns() can detect a live
     // rename (deviceName changed in SystemModule) and re-advertise — without it,
     // the .local name would keep announcing the old name until a reconnect. 24 =
@@ -562,6 +572,7 @@ private:
     char modeStr_[20] = {};   // longest label "Ethernet (waiting)" = 19+NUL
     int8_t rssi_ = 0;
     int8_t txPower_ = 0;
+    char lastDropBuf_[12] = {};
 
     // User-settable TX-power cap in whole dBm (0..21). Default 0 = "no
     // override". Persisted via the control binding. The platform setter
@@ -699,6 +710,8 @@ private:
     static constexpr const char* ethTypeOptions_[] = {"None", "LAN8720", "IP101", "W5500", "YT8531"};
 
     void startAP() {
+        staReconnectMode_ = false;
+        staReconnectAttempts_ = 0;
         // Same identity as the DHCP hostname and the mDNS .local name — all three read
         // SystemModule's deviceName, so a device shows ONE name everywhere. (Previously
         // had a separate "MM-AP" fallback, which could diverge when the name was empty.)
@@ -727,6 +740,8 @@ private:
         } else {
             state_ = State::ConnectedSta;
         }
+        staReconnectMode_ = false;
+        staReconnectAttempts_ = 0;
         stateChangeTime_ = platform::millis();
 
         // Shut down lower-priority WiFi connections (no-op in the Ethernet-only build).
@@ -775,6 +790,9 @@ public:
             if (state_ == State::ConnectedSta) platform::wifiStaGetIPv4(out);
         }
     }
+    // Test-only accessors for the web-credential delayed-apply path.
+    bool wifiCredentialApplyPendingForTest() const { return wifiCredentialApplyPending_; }
+    static constexpr uint32_t wifiCredentialApplyDelayMsForTest() { return kWifiCredentialApplyDelayMs; }
 
 private:
     /// The device's network name is owned solely by SystemModule; NetworkModule only
@@ -799,6 +817,106 @@ private:
         setStatus(statusBuf_, Severity::Status);
     }
 
+    void maybeApplyPendingWifiCredentials(uint32_t now) {
+        if constexpr (platform::hasWiFi) {
+            if (!wifiCredentialApplyPending_) return;
+            if (now - wifiCredentialChangedAt_ < kWifiCredentialApplyDelayMs) return;
+            wifiCredentialApplyPending_ = false;
+
+            if (ssid_[0] == 0) {
+                if (state_ != State::AP) startAP();
+                return;
+            }
+            startStaFromStoredCredentials();
+        }
+    }
+
+    void startStaFromStoredCredentials() {
+        if constexpr (platform::hasWiFi) {
+            if (ssid_[0] == 0) {
+                if (state_ != State::AP) startAP();
+                return;
+            }
+
+            if (state_ == State::ConnectedEth || state_ == State::WaitingEth) {
+                std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi credentials saved");
+                setStatus(statusBuf_, Severity::Status);
+                return;
+            }
+
+            staReconnectMode_ = false;
+            staReconnectAttempts_ = 0;
+
+            if (state_ == State::AP) {
+                platform::wifiApStop();
+                noteRadioStopped();
+                apShutdownPending_ = false;
+            }
+            if (state_ == State::WaitingSta || state_ == State::ConnectedSta) {
+                platform::mdnsStop();
+                mdnsRunning_ = false;
+                platform::wifiStaStop();
+                noteRadioStopped();
+            }
+
+            if (platform::wifiStaInit(ssid_, password_)) {
+                state_ = State::WaitingSta;
+                stateChangeTime_ = platform::millis();
+                syncTxPower();
+                std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi STA: %s", ssid_);
+                setStatus(statusBuf_, Severity::Status);
+                rebuildControls();
+                if (scheduler_) scheduler_->buildState();
+            } else {
+                startAP();
+            }
+        }
+    }
+
+    void updateLastDrop() {
+        if constexpr (platform::hasWiFi) {
+            const uint8_t reason = platform::wifiStaDisconnectReason();
+            if (reason == 0) {
+                lastDropBuf_[0] = 0;
+            } else {
+                std::snprintf(lastDropBuf_, sizeof(lastDropBuf_), "%u", static_cast<unsigned>(reason));
+            }
+        }
+    }
+
+    void startStaReconnect(uint32_t now, bool resetAttempts) {
+        if constexpr (platform::hasWiFi) {
+            if (resetAttempts) staReconnectAttempts_ = 0;
+            staReconnectMode_ = true;
+            retryStaReconnect(now);
+        }
+    }
+
+    void retryStaReconnect(uint32_t now) {
+        if constexpr (platform::hasWiFi) {
+            if (ssid_[0] == 0 || staReconnectAttempts_ >= kStaReconnectAttemptsBeforeAp) {
+                std::printf("NetworkModule: WiFi reconnect exhausted, starting AP\n");
+                startAP();
+                return;
+            }
+
+            staReconnectAttempts_++;
+            if (platform::wifiStaInit(ssid_, password_)) {
+                state_ = State::WaitingSta;
+                stateChangeTime_ = now;
+                syncTxPower();
+                std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi reconnect %u/%u",
+                              static_cast<unsigned>(staReconnectAttempts_),
+                              static_cast<unsigned>(kStaReconnectAttemptsBeforeAp));
+                setStatus(statusBuf_, Severity::Warning);
+                rebuildControls();
+                if (scheduler_) scheduler_->buildState();
+            } else {
+                std::printf("NetworkModule: WiFi reconnect init failed, starting AP\n");
+                startAP();
+            }
+        }
+    }
     // Apply txPowerSetting_ to the radio whenever it changes (UI write,
     // board-injected value, or first time it lands after STA/AP comes up).
     // Mirrors syncMdns()'s shape: cheap idempotent check, called from
@@ -900,11 +1018,12 @@ private:
             // avoids leaving a stale 5-minute-old reading visible if the
             // user toggles the hidden flag off via DevTools.
             rssi_ = (state_ == State::ConnectedSta)
-                    ? static_cast<int8_t>(platform::wifiStaRssi()) : 0;
+                ? static_cast<int8_t>(platform::wifiStaRssi()) : 0;
             const bool radioOn = (state_ == State::ConnectedSta
                                   || state_ == State::WaitingSta
                                   || state_ == State::AP);
             txPower_ = radioOn ? static_cast<int8_t>(platform::wifiTxPower()) : 0;
+            updateLastDrop();
         }
     }
 
