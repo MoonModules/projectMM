@@ -5,6 +5,15 @@ dependencies:
     version: "^1.16.0"
   improv/improv:
     version: "^1.2.5"
+  # Espressif's standard phone-app provisioning protocol over BLE. Optional and
+  # Kconfig-gated because Bluetooth/NimBLE costs flash + RAM and is meaningful
+  # only on native-radio WiFi firmware variants. Kconfig gate uses the
+  # `$CONFIG{NAME}` form (NO `CONFIG_` prefix inside the braces), matching the
+  # component-manager rule parser.
+  espressif/network_provisioning:
+    version: "^1.2.4"
+    rules:
+      - if: "$CONFIG{MM_BLE_PROVISIONING} == True"
   # IP101 Ethernet PHY for the ESP32-P4-NANO. IDF v6 moved the per-PHY drivers
   # out of esp_eth core into managed components; only referenced on the P4 build
   # (ethInit's IP101 ctor is behind `#ifdef CONFIG_IDF_TARGET_ESP32P4`; the

@@ -51,6 +51,16 @@ Serial/BLE Improv Wi-Fi provisioning — the web installer hands credentials to 
 
 Detail: [technical](moxygen/ImprovProvisioningModule.md)
 
+<a id="ble-provisioning"></a>
+
+### BLE provisioning
+
+Espressif BLE Wi-Fi provisioning for phone-app onboarding. The service accepts credentials locally and hands them to Network, which owns connection, persistence, and AP fallback.
+
+- `ble_status` — read-only provisioning state and BLE service name.
+
+Detail: [technical](moxygen/BleProvisioningModule.md)
+
 <a id="devices"></a>
 
 ### Devices

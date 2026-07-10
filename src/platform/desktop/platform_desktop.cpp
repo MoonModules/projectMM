@@ -762,6 +762,19 @@ bool improvProvisioningInit(const ImprovDeviceInfo& /*info*/,
     return false;
 }
 
+bool bleProvisioningInit(const ImprovDeviceInfo& /*info*/,
+                         char* /*ssidOut*/, size_t /*ssidOutLen*/,
+                         char* /*passwordOut*/, size_t /*passwordOutLen*/,
+                         std::atomic<bool>* /*ready*/,
+                         char* statusBuf, size_t statusBufLen) {
+    if (statusBuf && statusBufLen > 0) {
+        std::snprintf(statusBuf, statusBufLen, "unsupported on desktop");
+    }
+    return false;
+}
+
+void bleProvisioningStop() {}
+
 void reboot() {
     // Desktop: the device is the host process. Exit cleanly; the OS user / supervisor
     // can restart it. Matches the "device disappeared from the network" semantics the

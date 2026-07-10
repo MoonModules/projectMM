@@ -1,0 +1,11 @@
+# Standard BLE WiFi provisioning via Espressif network_provisioning.
+CONFIG_MM_BLE_PROVISIONING=y
+
+# network_provisioning's BLE transport runs on NimBLE.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_NETWORK_PROV_NETWORK_TYPE_WIFI=y
+
+# Use protocomm Security 1 (X25519 + PoP + AES-CTR), with a per-device PoP
+# derived from the MAC suffix at runtime.
+CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_1=y

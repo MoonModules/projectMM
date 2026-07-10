@@ -381,6 +381,18 @@ bool improvProvisioningInit(const ImprovDeviceInfo& info,
                             char* opOut = nullptr, size_t opOutLen = 0,
                             std::atomic<bool>* opReady = nullptr);
 
+// BLE WiFi provisioning through Espressif's standard network_provisioning
+// phone-app protocol. Same publication model as Improv: accepted credentials
+// are copied into caller-owned buffers and `ready` is release-stored by the
+// platform event handler; the module polls from the scheduler thread and hands
+// them to NetworkModule.
+bool bleProvisioningInit(const ImprovDeviceInfo& info,
+                         char* ssidOut, size_t ssidOutLen,
+                         char* passwordOut, size_t passwordOutLen,
+                         std::atomic<bool>* ready,
+                         char* statusBuf, size_t statusBufLen);
+void bleProvisioningStop();
+
 class UdpSocket {
 public:
     UdpSocket() = default;

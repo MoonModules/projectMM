@@ -22,4 +22,14 @@ menu "projectMM"
             path on an eth-only build (link up but no IP). Only the WiFi build
             (esp32p4-eth-wifi) sets this, via sdkconfig.defaults.esp32p4-eth-wifi.
 
+    config MM_BLE_PROVISIONING
+        bool "Enable BLE WiFi provisioning"
+        default n
+        help
+            Pulls Espressif's network_provisioning component and enables its
+            BLE GATT transport for native-radio WiFi firmwares. The service
+            accepts WiFi credentials from Espressif-compatible phone apps, then
+            hands successful credentials to projectMM's NetworkModule so the
+            normal persistence and fallback flow remains authoritative.
+
 endmenu

@@ -75,6 +75,9 @@ constexpr bool hasOta = false;
 // listener-install on desktop.
 constexpr bool hasImprov = false;
 
+// BLE provisioning is an ESP32 radio feature. Desktop keeps the seam stubbed.
+constexpr bool hasBleProvisioning = false;
+
 } // namespace mm::platform
 
 // MM_MOONLIVE_HAS_HOST_JIT — 1 when this desktop host has BOTH the emit blob AND the general
