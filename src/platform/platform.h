@@ -153,6 +153,7 @@ bool wifiStaInit(const char* ssid, const char* password);
 bool wifiStaConnected();
 void wifiStaGetIPv4(uint8_t out[4]);   // see ethGetIPv4 — same octet contract
 void wifiStaStop();
+uint8_t wifiStaDisconnectReason();      // last ESP-IDF STA disconnect reason, 0 = none/unknown
 
 // STA-side RSSI in dBm (negative, e.g. -58). Returns 0 when the STA isn't
 // associated or the call fails — NetworkModule only surfaces this control
