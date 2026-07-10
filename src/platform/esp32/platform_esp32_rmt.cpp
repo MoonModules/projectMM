@@ -43,7 +43,16 @@ struct RmtTxState {
     rmt_channel_handle_t channel = nullptr;
     rmt_encoder_handle_t encoder = nullptr;
     uint32_t resolutionHz = 0;
+    bool withDma = false;
+    volatile bool busy = false;
 };
+
+bool IRAM_ATTR rmtTxDoneCb(rmt_channel_handle_t, const rmt_tx_done_event_data_t*,
+                           void* user) {
+    auto* st = static_cast<RmtTxState*>(user);
+    if (st) st->busy = false;
+    return false;
+}
 
 } // namespace
 
@@ -51,15 +60,39 @@ bool rmtWs2812Init(RmtWs2812Handle& h, uint8_t gpio, uint32_t resolutionHz, bool
     auto* st = new (std::nothrow) RmtTxState();
     if (!st) return false;
 
+#if SOC_RMT_SUPPORT_DMA
+    // On S3/P4, let DMA clock sustained WS2812 frames instead of relying on
+    // interrupt refills of the tiny RMT FIFO. A delayed refill under WiFi/HTTP
+    // load can stretch a bit cell and show up as random flashing pixels.
+    auto makeCfg = [&](bool withDma) {
+        rmt_tx_channel_config_t txCfg = {};
+        txCfg.gpio_num = static_cast<gpio_num_t>(gpio);
+        txCfg.clk_src = RMT_CLK_SRC_DEFAULT;
+        txCfg.resolution_hz = resolutionHz;
+        txCfg.mem_block_symbols = withDma ? 1024 : SOC_RMT_MEM_WORDS_PER_CHANNEL;
+        txCfg.trans_queue_depth = 4;
+        txCfg.flags.invert_out = invert ? 1 : 0;
+        txCfg.flags.with_dma = withDma ? 1 : 0;
+        return txCfg;
+    };
+    rmt_tx_channel_config_t txCfg = makeCfg(true);
+    esp_err_t chanErr = rmt_new_tx_channel(&txCfg, &st->channel);
+    if (chanErr != ESP_OK) {
+        txCfg = makeCfg(false);
+        chanErr = rmt_new_tx_channel(&txCfg, &st->channel);
+    }
+    if (chanErr != ESP_OK) {
+        delete st;
+        return false;
+    }
+    st->withDma = txCfg.flags.with_dma != 0;
+#else
     rmt_tx_channel_config_t txCfg = {};
     txCfg.gpio_num = static_cast<gpio_num_t>(gpio);
     txCfg.clk_src = RMT_CLK_SRC_DEFAULT;
     txCfg.resolution_hz = resolutionHz;
-    // Two memory blocks of symbols ping-pong so the DMA-less channel can refill
-    // while sending — the classic anti-glitch shape. The per-channel block size
-    // is a chip fact (64 words classic, 48 on the S3 — a hardcoded 64 makes
-    // rmt_new_tx_channel reject S3); the copy encoder streams from our buffer
-    // regardless.
+    // DMA-less chips refill the channel from interrupts; the per-channel block
+    // size is a chip fact (64 words classic, 48 on the S3 family).
     txCfg.mem_block_symbols = SOC_RMT_MEM_WORDS_PER_CHANNEL;
     txCfg.trans_queue_depth = 4;
     txCfg.flags.invert_out = invert ? 1 : 0;
@@ -68,9 +101,19 @@ bool rmtWs2812Init(RmtWs2812Handle& h, uint8_t gpio, uint32_t resolutionHz, bool
         delete st;
         return false;
     }
+#endif
 
     rmt_copy_encoder_config_t copyCfg = {};
     if (rmt_new_copy_encoder(&copyCfg, &st->encoder) != ESP_OK) {
+        rmt_del_channel(st->channel);
+        delete st;
+        return false;
+    }
+
+    rmt_tx_event_callbacks_t cbs = {};
+    cbs.on_trans_done = rmtTxDoneCb;
+    if (rmt_tx_register_event_callbacks(st->channel, &cbs, st) != ESP_OK) {
+        rmt_del_encoder(st->encoder);
         rmt_del_channel(st->channel);
         delete st;
         return false;
@@ -93,9 +136,16 @@ uint32_t rmtWs2812Resolution(const RmtWs2812Handle& h) {
     return st ? st->resolutionHz : 0;
 }
 
+const char* rmtWs2812Backend(const RmtWs2812Handle& h) {
+    auto* st = static_cast<RmtTxState*>(h.impl);
+    if (!st) return "none";
+    return st->withDma ? "RMT DMA" : "RMT";
+}
+
 bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint32_t* symbols, size_t symbolCount) {
     auto* st = static_cast<RmtTxState*>(h.impl);
     if (!st || !symbols || symbolCount == 0) return false;
+    if (st->busy) return false;
 
     rmt_transmit_config_t txCfg = {};
     txCfg.loop_count = 0;   // single shot, no hardware loop
@@ -105,8 +155,16 @@ bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint32_t* symbols, size_t symbo
     // clock out concurrently, which is what makes a multi-pin frame cost the
     // longest strand instead of the sum. The caller pairs this with
     // rmtWs2812Wait and owns the inter-frame latch after the last wait.
-    return rmt_transmit(st->channel, st->encoder, symbols,
-                        symbolCount * sizeof(uint32_t), &txCfg) == ESP_OK;
+    st->busy = true;
+    const esp_err_t err = rmt_transmit(st->channel, st->encoder, symbols,
+                                       symbolCount * sizeof(uint32_t), &txCfg);
+    if (err != ESP_OK) st->busy = false;
+    return err == ESP_OK;
+}
+
+bool rmtWs2812Busy(const RmtWs2812Handle& h) {
+    auto* st = static_cast<RmtTxState*>(h.impl);
+    return st && st->busy;
 }
 
 void rmtWs2812Wait(RmtWs2812Handle& h, uint32_t timeoutMs) {
@@ -125,12 +183,16 @@ void rmtWs2812Wait(RmtWs2812Handle& h, uint32_t timeoutMs) {
     // and calls rmt_transmit again; if the channel is still busy, rmt_transmit
     // returns an error, rmtWs2812Transmit returns false, and RmtLedDriver::loop()
     // skips waiting on that channel (its started[] guard) — no crash, no corruption.
-    rmt_tx_wait_all_done(st->channel, timeoutMs);
+    if (rmt_tx_wait_all_done(st->channel, timeoutMs) == ESP_OK) st->busy = false;
 }
 
 void rmtWs2812Deinit(RmtWs2812Handle& h) {
     auto* st = static_cast<RmtTxState*>(h.impl);
     if (!st) return;
+    if (st->busy) {
+        rmt_tx_wait_all_done(st->channel, 250);
+        st->busy = false;
+    }
     if (st->channel) {
         rmt_disable(st->channel);
         rmt_del_channel(st->channel);
@@ -242,7 +304,18 @@ size_t rmtWs2812RxCapture(uint8_t gpio, uint32_t resolutionHz,
 namespace {
 
 constexpr uint32_t kLoopbackResHz = 40'000'000;  // 25 ns/tick, same as the driver
-constexpr uint16_t kT0H = 14, kT1H = 28, kPeriod = 50;  // 350/700/1250 ns in ticks
+
+uint16_t loopbackTicksFromNs(uint32_t ns) {
+    uint16_t ticks = static_cast<uint16_t>(
+        (static_cast<uint64_t>(ns) * kLoopbackResHz) / 1'000'000'000ull);
+    return ticks == 0 ? 1 : ticks;
+}
+
+uint16_t clampedHighTicks(uint16_t high, uint16_t period) {
+    if (period < 2) return 1;
+    if (high == 0) return 1;
+    return high < period ? high : static_cast<uint16_t>(period - 1);
+}
 
 } // namespace
 
@@ -364,7 +437,8 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
 
 } // namespace detail
 
-RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio) {
+RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio,
+                                    uint32_t t0hNs, uint32_t t1hNs, uint32_t periodNs) {
     RmtLoopbackResult r;
     r.sent[0] = 0xA5; r.sent[1] = 0x00; r.sent[2] = 0xFF;  // recognisable pattern
 
@@ -372,10 +446,14 @@ RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio) {
     if (!r.jumperDetected) return r;   // no point running RMT through a dead wire
 
     // Build 24 symbols (3 bytes × 8 bits, MSB-first) for the pattern.
-    const uint32_t sym0 = static_cast<uint32_t>(kT0H) | (1u << 15)
-                        | (static_cast<uint32_t>(kPeriod - kT0H) << 16);
-    const uint32_t sym1 = static_cast<uint32_t>(kT1H) | (1u << 15)
-                        | (static_cast<uint32_t>(kPeriod - kT1H) << 16);
+    const uint16_t period = loopbackTicksFromNs(periodNs);
+    const uint16_t t0h = clampedHighTicks(loopbackTicksFromNs(t0hNs), period);
+    const uint16_t t1h = clampedHighTicks(loopbackTicksFromNs(t1hNs), period);
+    const uint16_t threshold = static_cast<uint16_t>((t0h + t1h) / 2);
+    const uint32_t sym0 = static_cast<uint32_t>(t0h) | (1u << 15)
+                        | (static_cast<uint32_t>(period - t0h) << 16);
+    const uint32_t sym1 = static_cast<uint32_t>(t1h) | (1u << 15)
+                        | (static_cast<uint32_t>(period - t1h) << 16);
     constexpr size_t kBits = 24;
     uint32_t txSymbols[kBits];
     size_t s = 0;
@@ -414,7 +492,7 @@ RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio) {
         // Decode the first 24 captured symbols → bytes (HIGH closer to T1H = 1).
         for (size_t b = 0; b < kBits; b++) {
             uint16_t high = static_cast<uint16_t>(rxSymbols[b] & 0x7FFF);
-            uint8_t bit = (high >= ((kT0H + kT1H) / 2)) ? 1 : 0;
+            uint8_t bit = (high >= threshold) ? 1 : 0;
             r.got[b / 8] = static_cast<uint8_t>((r.got[b / 8] << 1) | bit);
         }
         r.pass = (r.got[0] == r.sent[0] && r.got[1] == r.sent[1] && r.got[2] == r.sent[2]);
@@ -431,7 +509,8 @@ RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio) {
 // a long wire under whatever RF the device is doing — so it catches the
 // frame-rate corruption and interference the short test is blind to.
 RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t txGpio, uint8_t rxGpio,
-                                         uint16_t lights, uint8_t channels) {
+                                         uint16_t lights, uint8_t channels,
+                                         uint32_t t0hNs, uint32_t t1hNs, uint32_t periodNs) {
     RmtLoopbackResult r;
     r.sent[0] = 0xA5; r.sent[1] = 0x00; r.sent[2] = 0xFF;
     if (lights == 0 || channels < 3 || channels > 4) return r;
@@ -439,10 +518,14 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t txGpio, uint8_t rxGpio,
     r.jumperDetected = detail::loopbackJumperOk(txGpio, rxGpio);
     if (!r.jumperDetected) return r;
 
-    const uint32_t sym0 = static_cast<uint32_t>(kT0H) | (1u << 15)
-                        | (static_cast<uint32_t>(kPeriod - kT0H) << 16);
-    const uint32_t sym1 = static_cast<uint32_t>(kT1H) | (1u << 15)
-                        | (static_cast<uint32_t>(kPeriod - kT1H) << 16);
+    const uint16_t period = loopbackTicksFromNs(periodNs);
+    const uint16_t t0h = clampedHighTicks(loopbackTicksFromNs(t0hNs), period);
+    const uint16_t t1h = clampedHighTicks(loopbackTicksFromNs(t1hNs), period);
+    const uint16_t threshold = static_cast<uint16_t>((t0h + t1h) / 2);
+    const uint32_t sym0 = static_cast<uint32_t>(t0h) | (1u << 15)
+                        | (static_cast<uint32_t>(period - t0h) << 16);
+    const uint32_t sym1 = static_cast<uint32_t>(t1h) | (1u << 15)
+                        | (static_cast<uint32_t>(period - t1h) << 16);
     const uint8_t bitsPerLight = static_cast<uint8_t>(channels * 8);
 #if !SOC_RMT_SUPPORT_DMA
     // No RMT DMA (classic ESP32): the RX capture can hold at most one hardware
@@ -511,7 +594,7 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t txGpio, uint8_t rxGpio,
         size_t mismatch = SIZE_MAX;
         for (size_t b = 0; b < kBits; b++) {
             const uint16_t high = static_cast<uint16_t>(rxSymbols[b] & 0x7FFF);
-            const uint8_t bit = (high >= ((kT0H + kT1H) / 2)) ? 1 : 0;
+            const uint8_t bit = (high >= threshold) ? 1 : 0;
             const uint8_t pos = static_cast<uint8_t>(b % bitsPerLight);
             const uint8_t expByte = (pos / 8u) < 3 ? r.sent[pos / 8u] : 0x00;
             const uint8_t exp = (expByte >> (7 - (pos & 7))) & 1u;
@@ -526,7 +609,7 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t txGpio, uint8_t rxGpio,
         const size_t lightStart = badLight * bitsPerLight;
         for (size_t b = 0; b < 24 && lightStart + b < cap.got; b++) {
             const uint8_t bit = ((rxSymbols[lightStart + b] & 0x7FFF)
-                                 >= ((kT0H + kT1H) / 2)) ? 1 : 0;
+                                 >= threshold) ? 1 : 0;
             r.got[b / 8] = static_cast<uint8_t>((r.got[b / 8] << 1) | bit);
         }
     }

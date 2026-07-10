@@ -71,7 +71,7 @@ TEST_CASE("Correction BGR preset: full reverse") {
     CHECK(out[2] == 10);  // R
 }
 
-// RGBW preset adds a fourth white channel derived as min(R, G, B) per pixel.
+// RGBW preset adds a fourth white channel derived as min(R, G, B) for RGB-only pixels.
 TEST_CASE("Correction RGBW preset: 4 channels, white = min(r,g,b)") {
     Correction c;
     c.rebuild(255, LightPreset::RGBW);
@@ -86,6 +86,19 @@ TEST_CASE("Correction RGBW preset: 4 channels, white = min(r,g,b)") {
     CHECK(out[3] == 10);  // W = min(10,20,30)
 }
 
+// RGBW layers carry a real W byte; preserve it instead of re-deriving white from RGB.
+TEST_CASE("Correction RGBW preset: explicit source white wins when present") {
+    Correction c;
+    c.rebuild(255, LightPreset::RGBW);
+    const uint8_t src[4] = {10, 20, 30, 200};
+    uint8_t out[4] = {};
+    c.apply(src, out, 4);
+    CHECK(out[0] == 10);
+    CHECK(out[1] == 20);
+    CHECK(out[2] == 30);
+    CHECK(out[3] == 200);
+}
+
 // GRBW preset combines the GRB reorder with the W derivation (G, R, B, W=min).
 TEST_CASE("Correction GRBW preset: reordered RGB + white") {
     Correction c;
@@ -98,6 +111,21 @@ TEST_CASE("Correction GRBW preset: reordered RGB + white") {
     CHECK(out[1] == 10);  // R
     CHECK(out[2] == 30);  // B
     CHECK(out[3] == 10);  // W = min
+}
+
+// WGRB covers white-first RGBW pixels found on some SK6812-compatible strips.
+TEST_CASE("Correction WGRB preset: white can be first") {
+    Correction c;
+    c.rebuild(255, LightPreset::WGRB);
+    CHECK(c.outChannels == 4);
+    CHECK(c.deriveWhite);
+    const uint8_t src[3] = {10, 20, 30};
+    uint8_t out[4] = {};
+    c.apply(src, out);
+    CHECK(out[0] == 10);  // W = min
+    CHECK(out[1] == 20);  // G
+    CHECK(out[2] == 10);  // R
+    CHECK(out[3] == 30);  // B
 }
 
 // Brightness scaling runs before white derivation so W = min of the *scaled* RGB values.

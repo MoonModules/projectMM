@@ -9,6 +9,7 @@
 #include "light/drivers/Correction.h"
 #include "light/Palette.h"   // the global active palette + its select control
 #include "core/LightSummary.h"   // the POD published for the domain-neutral WLED/MQTT consumers
+#include "core/FilesystemModule.h" // noteDirty for one-time legacy setting migrations
 #include "platform/platform.h"
 
 #include <cstring>  // std::strcmp in onUpdate
@@ -108,9 +109,9 @@ public:
     /// lights-control surface). Default on so a freshly-flashed board lights up.
     bool on = true;
     /// Physical wire format: channel order and whether the light is RGBW (index into
-    /// `kLightPresetOptions`; options `RGB`, `RBG`, `GRB`, `GBR`, `BRG`, `BGR`, `RGBW`,
-    /// `GRBW`). RGBW presets make each driver emit 4 channels per light with white
-    /// derived as `min(R,G,B)` from the (brightness-scaled) RGB.
+    /// `kLightPresetOptions`; RGB orders plus every RGBW byte permutation). RGBW
+    /// presets make each driver emit 4 channels per light with white derived as
+    /// `min(R,G,B)` from the (brightness-scaled) RGB.
     ///
     /// GRB (index 2) is the wire order of WS2812/SK6812 strips — the common case, so a
     /// freshly-flashed board with a strip attached shows correct colours out of the box.
@@ -124,6 +125,16 @@ public:
     /// changing this recolours every such effect live. The select index expands the chosen
     /// gradient into the active 16-entry palette on `onUpdate` (cheap, off the hot path).
     uint8_t palette = 0;
+
+    /// Hidden migration marker for the physical-light preset schema. Older builds
+    /// had only RGB plus two RGBW presets, so a saved numeric index can mean the
+    /// wrong wire byte order after the expanded RGBW preset list lands.
+    uint8_t lightPresetSchema = 0;
+
+    void setLegacyLightDefaults(uint8_t preset, uint8_t brightnessCap = 255) {
+        legacyLightPresetTarget_ = preset;
+        legacyBrightnessCap_ = brightnessCap;
+    }
 
     // Two ways to wire the source Layer:
     //  - setLayers(Layers*): bind the container; layer_ is re-resolved from
@@ -149,6 +160,8 @@ public:
         controls_.addBool("on", on);   // master power — first so it renders at the top of the card
         controls_.addUint8("brightness", brightness, 0, 255);
         controls_.addSelect("lightPreset", lightPreset, kLightPresetOptions, kLightPresetCount);
+        controls_.addUint8("lightPresetSchema", lightPresetSchema, 0, kLightPresetSchemaVersion);
+        controls_.setHidden(controls_.count() - 1, true);
         controls_.addPalette("palette", palette, mm::paletteOptions, mm::palettes::kCount);
         MoonModule::onBuildControls();  // cascade to driver children
     }
@@ -176,6 +189,7 @@ public:
     }
 
     void setup() override {
+        migrateLegacyLightDefaults();
         correction_.rebuild(effectiveBrightness(), static_cast<LightPreset>(lightPreset));
         Palettes::setActive(palette);   // seed the global active palette from the persisted index
         MoonModule::setup();
@@ -291,6 +305,33 @@ private:
     // stops being read; only one Drivers exists in the pinned tree, so no re-election dance is needed.
     LightSummary summary_;
     inline static Drivers* active_ = nullptr;
+
+    static constexpr uint8_t kLightPresetSchemaVersion = 1;
+    static constexpr uint8_t kNoLegacyLightPresetTarget = 255;
+    uint8_t legacyLightPresetTarget_ = kNoLegacyLightPresetTarget;
+    uint8_t legacyBrightnessCap_ = 255;
+
+    void migrateLegacyLightDefaults() {
+        if (lightPresetSchema >= kLightPresetSchemaVersion) return;
+
+        bool changed = false;
+        if (legacyLightPresetTarget_ < kLightPresetCount &&
+            lightPreset != legacyLightPresetTarget_) {
+            lightPreset = legacyLightPresetTarget_;
+            changed = true;
+        }
+        if (brightness > legacyBrightnessCap_) {
+            brightness = legacyBrightnessCap_;
+            changed = true;
+        }
+        lightPresetSchema = kLightPresetSchemaVersion;
+        changed = true;
+
+        if (changed) {
+            markDirty();
+            FilesystemModule::noteDirty();
+        }
+    }
 
     void passBufferToDrivers() {
         // No active Layer (e.g. the last Layer was just deleted): clear every

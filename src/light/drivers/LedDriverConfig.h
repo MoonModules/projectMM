@@ -4,6 +4,12 @@
 
 namespace mm {
 
+inline constexpr uint8_t kLedChipsetWs2812b = 0;
+inline constexpr uint8_t kLedChipsetSk6812Rgbw = 1;
+inline constexpr const char* kLedChipsetOptions[] = {"WS2812B", "SK6812 RGBW"};
+inline constexpr uint8_t kLedChipsetCount =
+    sizeof(kLedChipsetOptions) / sizeof(kLedChipsetOptions[0]);
+
 // Wire timing for a clockless addressable-LED chipset (WS2812B by default).
 // Pure data — no platform include — so the encoder that reads it is host-testable.
 //
@@ -18,6 +24,26 @@ struct LedDriverConfig {
     uint32_t period_ns = 1250;   // full bit cell (t?h + the trailing LOW)
     uint32_t reset_us  = 300;    // idle-LOW latch between frames (>= 300 us, current silicon)
     bool     invert    = false;  // flip output polarity, for inverting level-shifters
+
+    void applyChipset(uint8_t chipset) {
+        const bool keepInvert = invert;
+        switch (chipset) {
+            case kLedChipsetSk6812Rgbw:
+                t0h_ns = 300;
+                t1h_ns = 600;
+                period_ns = 1250;
+                reset_us = 300;
+                break;
+            case kLedChipsetWs2812b:
+            default:
+                t0h_ns = 350;
+                t1h_ns = 700;
+                period_ns = 1250;
+                reset_us = 300;
+                break;
+        }
+        invert = keepInvert;
+    }
 };
 
 } // namespace mm

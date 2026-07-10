@@ -176,7 +176,7 @@ public:
                 // winStart_ shifts this driver's whole slice; laneStart_ is the
                 // per-lane offset within it.
                 correction_->apply(src + (winStart_ + laneStart_[lane] + row) * srcCh,
-                                   wire + lane * 4);
+                                   wire + lane * 4, srcCh);
             }
             encodeWs2812LcdSlots(wire, mask, outCh, out);
             out += static_cast<size_t>(outCh) * 8 * 3;

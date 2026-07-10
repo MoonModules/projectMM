@@ -641,7 +641,7 @@ private:
             // brightness slider and a swapped colour order reach Hue too — same as the physical
             // drivers. apply() writes outChannels bytes; we read the first three (RGB) for HSV.
             uint8_t rgb[4] = { px[0], px[1], px[2], 0 };
-            if (correction_) correction_->apply(px, rgb);
+            if (correction_) correction_->apply(px, rgb, cpl);
             char body[80];
             if (diffAndFormat(li, rgb[0], rgb[1], rgb[2], body, sizeof(body))) {
                 char host[16]; bridgeStr(host);

@@ -990,10 +990,12 @@ bool rmtWs2812Init(RmtWs2812Handle& /*h*/, uint8_t /*gpio*/, uint32_t /*resoluti
     return false;
 }
 uint32_t rmtWs2812Resolution(const RmtWs2812Handle& /*h*/) { return 0; }
+const char* rmtWs2812Backend(const RmtWs2812Handle& /*h*/) { return "none"; }
 bool rmtWs2812Transmit(RmtWs2812Handle& /*h*/, const uint32_t* /*symbols*/,
                        size_t /*symbolCount*/) {
     return false;
 }
+bool rmtWs2812Busy(const RmtWs2812Handle& /*h*/) { return false; }
 void rmtWs2812Wait(RmtWs2812Handle& /*h*/, uint32_t /*timeoutMs*/) {}
 void rmtWs2812Deinit(RmtWs2812Handle& /*h*/) {}
 size_t rmtWs2812RxCapture(uint8_t /*gpio*/, uint32_t /*resolutionHz*/,
@@ -1001,11 +1003,15 @@ size_t rmtWs2812RxCapture(uint8_t /*gpio*/, uint32_t /*resolutionHz*/,
                           uint32_t /*timeoutMs*/) {
     return 0;
 }
-RmtLoopbackResult rmtWs2812Loopback(uint8_t /*txGpio*/, uint8_t /*rxGpio*/) {
+RmtLoopbackResult rmtWs2812Loopback(uint8_t /*txGpio*/, uint8_t /*rxGpio*/,
+                                    uint32_t /*t0hNs*/, uint32_t /*t1hNs*/,
+                                    uint32_t /*periodNs*/) {
     return {};   // not supported off ESP32
 }
 RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t /*txGpio*/, uint8_t /*rxGpio*/,
-                                         uint16_t /*lights*/, uint8_t /*channels*/) {
+                                         uint16_t /*lights*/, uint8_t /*channels*/,
+                                         uint32_t /*t0hNs*/, uint32_t /*t1hNs*/,
+                                         uint32_t /*periodNs*/) {
     return {};   // not supported off ESP32
 }
 
