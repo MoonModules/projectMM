@@ -22,6 +22,9 @@ exposes through SystemModule:
                      release workflow as a -D flag. #ifndef "" fallback for
                      local/dev builds (no channel). MM_VERSION = what code;
                      MM_RELEASE = which channel.
+  MM_PRODUCT_NAME  - branded product key (`projectMM`, `custom-product`, ...).
+  MM_BRAND_NAME    - user-facing brand (`projectMM`, `Custom Brand`, ...).
+  MM_AUTO_UPDATE_MANIFEST_URL - baked update manifest URL for AutoUpdateModule.
 
 The generator rewrites the whole file from this template each time
 library.json changes; the #ifndef defaults below are part of the template,
@@ -81,12 +84,27 @@ content = f'''#pragma once
 #define MM_RELEASE ""
 #endif
 
+#ifndef MM_PRODUCT_NAME
+#define MM_PRODUCT_NAME "projectMM"
+#endif
+
+#ifndef MM_BRAND_NAME
+#define MM_BRAND_NAME "projectMM"
+#endif
+
+#ifndef MM_AUTO_UPDATE_MANIFEST_URL
+#define MM_AUTO_UPDATE_MANIFEST_URL ""
+#endif
+
 namespace mm {{
 
-constexpr const char* kVersion      = MM_VERSION;
-constexpr const char* kBuildDate    = MM_BUILD_DATE;
-constexpr const char* kFirmwareName = MM_FIRMWARE_NAME;
-constexpr const char* kRelease      = MM_RELEASE;
+constexpr const char* kVersion               = MM_VERSION;
+constexpr const char* kBuildDate             = MM_BUILD_DATE;
+constexpr const char* kFirmwareName          = MM_FIRMWARE_NAME;
+constexpr const char* kRelease               = MM_RELEASE;
+constexpr const char* kProductName           = MM_PRODUCT_NAME;
+constexpr const char* kBrandName             = MM_BRAND_NAME;
+constexpr const char* kAutoUpdateManifestUrl = MM_AUTO_UPDATE_MANIFEST_URL;
 
 }} // namespace mm
 '''

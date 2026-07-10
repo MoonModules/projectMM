@@ -98,6 +98,23 @@ Detail: [technical](moxygen/FirmwareUpdateModule.md)
 
 [Tests](../../tests/unit-tests.md#firmwareupdatemodule)
 
+<a id="auto-update"></a>
+
+### Auto Update
+
+Manifest-driven automatic firmware updates. Builds can bake a default manifest URL into the image; when that URL is empty the module stays idle until configured. The updater fetches the manifest, selects a newer app image for this chip, refuses full flash bundles, verifies SHA-256 during download, and then hands the image to the existing OTA task.
+
+- `manifestUrl` — HTTPS manifest URL. Empty disables checks.
+- `autoInstall` — install a newer compatible image automatically.
+- `checkIntervalMin` — regular check cadence, 15–1440 minutes.
+- `retryMin` — retry cadence after a failed check, 1–240 minutes.
+- `bootDelaySec` — startup delay before the first check, 10–3600 seconds.
+- read-only — `latest`, `lastCheck`.
+
+Detail: [technical](moxygen/AutoUpdateModule.md)
+
+[Tests](../../tests/unit-tests.md#autoupdatemodule)
+
 <a id="file-manager"></a>
 
 ### File Manager

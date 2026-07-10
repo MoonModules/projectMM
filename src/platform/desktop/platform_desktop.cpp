@@ -345,6 +345,8 @@ const char* resetReason() {
     return "OK";
 }
 
+void markOtaAppValid() {}
+
 size_t firmwareSize() { return 0; }
 size_t firmwarePartition() { return 0; }
 size_t flashChipSize() { return 0; }
@@ -615,6 +617,13 @@ bool http_fetch_to_ota(const char* /*url*/,
     return false;
 }
 
+bool http_fetch_to_ota_checked(const char* url, const char* /*expectedSha256*/,
+                               uint32_t /*expectedSize*/,
+                               char* statusBuf, size_t statusBufLen,
+                               uint32_t* bytesReadOut, uint32_t* bytesTotalOut) {
+    return http_fetch_to_ota(url, statusBuf, statusBufLen, bytesReadOut, bytesTotalOut);
+}
+
 bool otaWriteStream(FsWriteSrc /*src*/, void* /*user*/, size_t /*contentLen*/,
                     char* statusBuf, size_t statusBufLen, uint32_t* bytesReadOut) {
     // No OTA partition on desktop — call sites guard with `if constexpr (mm::platform::hasOta)`.
@@ -741,6 +750,11 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
         else body[0] = '\0';
     }
     return status;
+}
+
+int httpGet(const char* /*url*/, char* body, size_t bodyLen, uint32_t /*timeoutMs*/) {
+    if (body && bodyLen) body[0] = 0;
+    return 0;
 }
 
 

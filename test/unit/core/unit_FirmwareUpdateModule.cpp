@@ -35,15 +35,19 @@ TEST_CASE("FirmwareUpdateModule firmware control populated") {
     // appears on a real device but NOT on desktop/test where firmwarePartition() returns 0 — assert
     // its TYPE only when present (a Progress control), rather than its presence, so this stays valid
     // on both.
-    bool hasVersion = false, hasBuild = false;
+    bool hasVersion = false, hasBuild = false, hasProduct = false, hasBrand = false;
     for (uint8_t i = 0; i < fw.controls().count(); i++) {
         const auto& c = fw.controls()[i];
         if (std::strcmp(c.name, "version") == 0) hasVersion = true;
         if (std::strcmp(c.name, "build") == 0) hasBuild = true;
+        if (std::strcmp(c.name, "product") == 0) hasProduct = true;
+        if (std::strcmp(c.name, "brand") == 0) hasBrand = true;
         if (std::strcmp(c.name, "firmwarePartition") == 0) CHECK(c.type == mm::ControlType::Progress);
     }
     CHECK(hasVersion);
     CHECK(hasBuild);
+    CHECK(hasProduct);
+    CHECK(hasBrand);
 }
 
 // OTA phase is surfaced through the shared status slot (MoonModule::setStatus()),

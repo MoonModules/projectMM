@@ -318,6 +318,23 @@ const char* resetReason() {
     }
 }
 
+void markOtaAppValid() {
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    esp_ota_img_states_t state;
+    if (running && esp_ota_get_state_partition(running, &state) == ESP_OK && state == ESP_OTA_IMG_VALID) {
+        return;
+    }
+
+    const esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+    if (err == ESP_OK) {
+        ESP_LOGI("mm_ota", "OTA app confirmed valid");
+    } else if (err == ESP_ERR_NOT_FOUND) {
+        ESP_LOGD("mm_ota", "No OTA data partition; skipping OTA valid mark");
+    } else {
+        ESP_LOGW("mm_ota", "OTA valid mark failed: %s", esp_err_to_name(err));
+    }
+}
+
 size_t firmwareSize() {
     // Get actual running image size from the image header
     const esp_partition_t* part = esp_ota_get_running_partition();

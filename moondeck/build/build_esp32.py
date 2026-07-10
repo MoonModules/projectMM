@@ -427,6 +427,15 @@ def firmware_cmake_args(firmware: str, release: str = "", version: str = "",
     # Same for the computed version — empty leaves build_info.h's library.json default.
     if version:
         args.append(f'-DMM_VERSION="{version}"')
+        # ESP-IDF OTA validation compares the app descriptor PROJECT_VER, not
+        # the projectMM build_info value. Keep them in lockstep for OTA builds.
+        args.append(f"-DPROJECT_VER={version}")
+    if spec.get("product"):
+        args.append(f'-DMM_PRODUCT_NAME="{spec["product"]}"')
+    if spec.get("brand"):
+        args.append(f'-DMM_BRAND_NAME="{spec["brand"]}"')
+    if spec.get("auto_update_manifest_url"):
+        args.append(f'-DMM_AUTO_UPDATE_MANIFEST_URL="{spec["auto_update_manifest_url"]}"')
     if spec["eth_only"]:
         # Drop the WiFi components from the link, and tell our code to compile
         # out the WiFi paths (MM_ETH_ONLY → esp32/main/CMakeLists.txt).
@@ -534,7 +543,7 @@ def stale_feature_cache(build_dir: Path, extra: list[str], chip: str) -> str | N
     # reused, so a changed --version would silently build the stale version (it's a
     # compile-time define, like the feature flags above). Detect a value mismatch and
     # force a clean reconfigure so the binary never lies about its version.
-    for flag in ("MM_VERSION", "MM_RELEASE"):
+    for flag in ("MM_VERSION", "PROJECT_VER", "MM_RELEASE", "MM_PRODUCT_NAME", "MM_BRAND_NAME", "MM_AUTO_UPDATE_MANIFEST_URL"):
         wanted = next((a[len(f"-D{flag}="):] for a in extra
                        if a.startswith(f"-D{flag}=")), None)
         if wanted is None:

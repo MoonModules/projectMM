@@ -163,6 +163,8 @@ const char* hostIp();
 // "BROWNOUT", "DEEPSLEEP", or "UNKNOWN". On desktop always returns "OK". UI uses
 // this to flag a "crashed" prior boot (PANIC / INT_WDT / TASK_WDT / BROWNOUT).
 const char* resetReason();
+// Confirm the current OTA image after startup succeeds; desktop builds keep this a no-op.
+void markOtaAppValid();
 size_t firmwareSize();        // firmware image bytes
 size_t firmwarePartition();   // app partition size (firmware capacity)
 size_t flashChipSize();       // total flash chip capacity
@@ -305,6 +307,15 @@ bool http_fetch_to_ota(const char* url,
                        char* statusBuf, size_t statusBufLen,
                        uint32_t* bytesReadOut, uint32_t* bytesTotalOut);
 
+// Same URL OTA path, with manifest-supplied SHA-256 and size checks. The task
+// hashes the downloaded app bytes before esp_https_ota_finish commits the image.
+// expectedSha256 may be null/empty to skip the hash; expectedSize 0 skips the
+// size check. AutoUpdateModule uses both.
+bool http_fetch_to_ota_checked(const char* url, const char* expectedSha256,
+                               uint32_t expectedSize,
+                               char* statusBuf, size_t statusBufLen,
+                               uint32_t* bytesReadOut, uint32_t* bytesTotalOut);
+
 // OTA — flash a firmware image STREAMED from `src` (no URL fetch; the caller pulls the bytes,
 // e.g. straight off an HTTP upload body). Same producer callback shape as fsWriteStream: `src`
 // fills up to `cap` bytes, returns the count (0 = clean EOF), and sets `*abort` to fail the OTA
@@ -330,6 +341,11 @@ bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
 // fetch / the old mDNS browse). Built on raw sockets, same primitives as the HTTP server.
 int httpRequest(const char* method, const char* host, uint16_t port, const char* path,
                 const char* reqBody, uint32_t timeoutMs, char* body, size_t bodyLen);
+
+// Synchronous HTTP(S) GET into a fixed caller buffer. TLS uses the bundled root
+// store on ESP32 and follows redirects. Returns HTTP status or 0 on transport
+// failure; body is always NUL-terminated when bodyLen > 0.
+int httpGet(const char* url, char* body, size_t bodyLen, uint32_t timeoutMs);
 
 // Improv WiFi provisioning over UART0.
 // ESP32 only; desktop stub returns false. Spawns a FreeRTOS task that installs
