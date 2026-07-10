@@ -1003,11 +1003,15 @@ size_t rmtWs2812RxCapture(uint8_t /*gpio*/, uint32_t /*resolutionHz*/,
                           uint32_t /*timeoutMs*/) {
     return 0;
 }
-RmtLoopbackResult rmtWs2812Loopback(uint8_t /*txGpio*/, uint8_t /*rxGpio*/) {
+RmtLoopbackResult rmtWs2812Loopback(uint8_t /*txGpio*/, uint8_t /*rxGpio*/,
+                                    uint32_t /*t0hNs*/, uint32_t /*t1hNs*/,
+                                    uint32_t /*periodNs*/) {
     return {};   // not supported off ESP32
 }
 RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t /*txGpio*/, uint8_t /*rxGpio*/,
-                                         uint16_t /*lights*/, uint8_t /*channels*/) {
+                                         uint16_t /*lights*/, uint8_t /*channels*/,
+                                         uint32_t /*t0hNs*/, uint32_t /*t1hNs*/,
+                                         uint32_t /*periodNs*/) {
     return {};   // not supported off ESP32
 }
 

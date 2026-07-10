@@ -430,10 +430,9 @@ uint32_t rmtWs2812Resolution(const RmtWs2812Handle& h);
 const char* rmtWs2812Backend(const RmtWs2812Handle& h);
 
 // Start transmitting `symbolCount` pre-encoded WS2812 RMT symbols and return
-// immediately — channels started back-to-back clock out concurrently. Pair with
-// rmtWs2812Wait; the caller owns the inter-frame latch (delayUs) after the last
-// wait. The symbol buffer must stay valid until the wait returns. Returns false
-// when the channel isn't initialised (and on targets without RMT).
+// immediately — channels started back-to-back clock out concurrently. The symbol
+// buffer must stay valid while rmtWs2812Busy() is true. Returns false when the
+// channel isn't initialised, already busy, or on targets without RMT.
 bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint32_t* symbols, size_t symbolCount);
 
 // True while a previously-started frame is still being clocked out by the RMT
@@ -441,11 +440,8 @@ bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint32_t* symbols, size_t symbo
 // overwriting a symbol buffer still owned by DMA/RMT.
 bool rmtWs2812Busy(const RmtWs2812Handle& h);
 
-// Block until the channel's in-flight transmission finishes, bounded by
-// `timeoutMs` so a wedged peripheral can't hang the render tick forever — a
-// timed-out frame is simply dropped and re-encoded next tick (self-heals). With
-// N channels waited sequentially the worst case is N×timeoutMs; acceptable for
-// the same self-healing reason.
+// Legacy/blocking wait for diagnostics and loopback tests. Runtime LED output
+// should prefer rmtWs2812Busy() and skip stale frames instead of waiting here.
 void rmtWs2812Wait(RmtWs2812Handle& h, uint32_t timeoutMs);
 
 void rmtWs2812Deinit(RmtWs2812Handle& h);
@@ -470,7 +466,8 @@ struct RmtLoopbackResult {
     uint32_t bitsChecked = 0;     // total WS2812 bits verified (frame mode); 24 for the short test
     uint32_t firstBadBit = 0;     // index of the first wrong bit, or bitsChecked when all pass
 };
-RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio);
+RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio,
+                                    uint32_t t0hNs, uint32_t t1hNs, uint32_t periodNs);
 
 // Whole-FRAME RMT loopback: instead of a 24-bit synthetic burst, transmit a
 // real `lights`-light WS2812 frame (the per-light pattern 0xA5/0x00/0xFF
@@ -480,7 +477,8 @@ RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio);
 // the data line that a 24-bit burst can't — a single flipped bit anywhere in
 // the frame fails the test and reports its position. No-op off ESP32.
 RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t txGpio, uint8_t rxGpio,
-                                         uint16_t lights, uint8_t channels);
+                                         uint16_t lights, uint8_t channels,
+                                         uint32_t t0hNs, uint32_t t1hNs, uint32_t periodNs);
 
 // ---------------------------------------------------------------------------
 // LCD_CAM parallel WS2812 output (ESP32-S3). The driver

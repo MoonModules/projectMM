@@ -7,19 +7,50 @@ namespace mm {
 // Light preset = the physical wire format a driver emits: channel order plus
 // whether the light has a white channel. The order in this enum is index-aligned
 // with kLightPresetOptions below (the Select control's option list), so the
-// control's uint8 value casts straight to LightPreset.
-enum class LightPreset : uint8_t { RGB, RBG, GRB, GBR, BRG, BGR, RGBW, GRBW };
+// control's uint8 value casts straight to LightPreset. RGBW includes every
+// 4-channel permutation so controllers can use white-first RGBW pixels
+// without a driver-specific swap.
+enum class LightPreset : uint8_t {
+    RGB, RBG, GRB, GBR, BRG, BGR,
+    RGBW, RBGW, GRBW, GBRW, BRGW, BGRW,
+    RWGB, RWBG, GWRB, GWBR, BWRG, BWGR,
+    WRGB, WRBG, WGRB, WGBR, WBRG, WBGR,
+};
 
 inline constexpr const char* kLightPresetOptions[] =
-    {"RGB", "RBG", "GRB", "GBR", "BRG", "BGR", "RGBW", "GRBW"};
+    {"RGB", "RBG", "GRB", "GBR", "BRG", "BGR",
+     "RGBW", "RBGW", "GRBW", "GBRW", "BRGW", "BGRW",
+     "RWGB", "RWBG", "GWRB", "GWBR", "BWRG", "BWGR",
+     "WRGB", "WRBG", "WGRB", "WGBR", "WBRG", "WBGR"};
 inline constexpr uint8_t kLightPresetCount =
     sizeof(kLightPresetOptions) / sizeof(kLightPresetOptions[0]);
 
+inline constexpr uint8_t kLightPresetChannels[kLightPresetCount] = {
+    3, 3, 3, 3, 3, 3,
+    4, 4, 4, 4, 4, 4,
+    4, 4, 4, 4, 4, 4,
+    4, 4, 4, 4, 4, 4,
+};
+
+// Source-channel indices per output byte. Source is logical RGB plus W at index
+// 3 for RGBW presets. W is explicit when the layer carries 4 channels; otherwise
+// it is derived as min(R,G,B) so RGB-only effects still light RGBW strips.
+inline constexpr uint8_t kLightPresetOrder[kLightPresetCount][4] = {
+    {0, 1, 2, 3}, {0, 2, 1, 3}, {1, 0, 2, 3},
+    {1, 2, 0, 3}, {2, 0, 1, 3}, {2, 1, 0, 3},
+    {0, 1, 2, 3}, {0, 2, 1, 3}, {1, 0, 2, 3},
+    {1, 2, 0, 3}, {2, 0, 1, 3}, {2, 1, 0, 3},
+    {0, 3, 1, 2}, {0, 3, 2, 1}, {1, 3, 0, 2},
+    {1, 3, 2, 0}, {2, 3, 0, 1}, {2, 3, 1, 0},
+    {3, 0, 1, 2}, {3, 0, 2, 1}, {3, 1, 0, 2},
+    {3, 1, 2, 0}, {3, 2, 0, 1}, {3, 2, 1, 0},
+};
+
 // Output correction applied per-light by each physical driver as it reads the
 // shared source buffer: brightness scale, channel reorder, and (for RGBW presets)
-// white derivation. The Drivers container owns one Correction instance, rebuilds
-// it on a brightness / light-preset change (cheap, cold path), and hands a const
-// pointer to each driver child. apply() is the hot-path per-light transform.
+// explicit/derived white. The Drivers container owns one Correction instance,
+// rebuilds it on a brightness / light-preset change (cheap, cold path), and hands
+// a const pointer to each driver child. apply() is the hot-path per-light transform.
 //
 // Today only NetworkSendDriver consumes it; future LED drivers (WS2812 via RMT,
 // APA102 via SPI) apply the same correction before their protocol encode.
@@ -32,7 +63,7 @@ struct Correction {
     uint8_t briLut[256] = {};       // briLut[v] = (v * brightness) / 255 (scale8)
     uint8_t order[4] = {0, 1, 2, 3}; // source-channel index for each output position
     uint8_t outChannels = 3;        // 3 (RGB family) or 4 (RGBW family)
-    bool    deriveWhite = false;    // RGBW presets: W = min(r, g, b)
+    bool    deriveWhite = false;    // RGBW presets: W = src[3] when present, else min(r,g,b)
 
     // Cold path: recompute the LUT + preset-derived layout. Called from Drivers on
     // setup, on a structural rebuild, and on a brightness / light-preset onUpdate.
@@ -40,37 +71,25 @@ struct Correction {
         for (int v = 0; v < 256; v++) {
             briLut[v] = static_cast<uint8_t>((v * brightness) / 255);
         }
-        // Clamp out-of-range presets (corrupt persisted lightPreset cast to
-        // the enum) to RGB BEFORE the switch — that way the switch stays
-        // exhaustive, the compiler warns on a missing enumerator if we add
-        // one without handling it (-Wswitch), and apply() always reads
-        // initialised order/outChannels/deriveWhite.
-        if (static_cast<uint8_t>(preset) >= kLightPresetCount) {
-            preset = LightPreset::RGB;
-        }
-        // order[] holds the SOURCE channel index to place at each OUTPUT position.
-        // Source is always RGB (indices 0=R, 1=G, 2=B), white at index 3.
-        switch (preset) {
-            case LightPreset::RGB:  order[0]=0; order[1]=1; order[2]=2; outChannels=3; deriveWhite=false; break;
-            case LightPreset::RBG:  order[0]=0; order[1]=2; order[2]=1; outChannels=3; deriveWhite=false; break;
-            case LightPreset::GRB:  order[0]=1; order[1]=0; order[2]=2; outChannels=3; deriveWhite=false; break;
-            case LightPreset::GBR:  order[0]=1; order[1]=2; order[2]=0; outChannels=3; deriveWhite=false; break;
-            case LightPreset::BRG:  order[0]=2; order[1]=0; order[2]=1; outChannels=3; deriveWhite=false; break;
-            case LightPreset::BGR:  order[0]=2; order[1]=1; order[2]=0; outChannels=3; deriveWhite=false; break;
-            case LightPreset::RGBW: order[0]=0; order[1]=1; order[2]=2; order[3]=3; outChannels=4; deriveWhite=true; break;
-            case LightPreset::GRBW: order[0]=1; order[1]=0; order[2]=2; order[3]=3; outChannels=4; deriveWhite=true; break;
-        }
+        uint8_t idx = static_cast<uint8_t>(preset);
+        if (idx >= kLightPresetCount) idx = static_cast<uint8_t>(LightPreset::RGB);
+        for (uint8_t i = 0; i < 4; i++) order[i] = kLightPresetOrder[idx][i];
+        outChannels = kLightPresetChannels[idx];
+        deriveWhite = outChannels == 4;
     }
 
-    // Hot path: transform one source light (3-channel RGB at `src`) into `out`
-    // (`outChannels` bytes). Brightness via LUT, then reorder, then white. No
-    // allocation, integer-only.
-    inline void apply(const uint8_t* src, uint8_t* out) const {
+    // Hot path: transform one source light into `out` (`outChannels` bytes).
+    // Brightness via LUT, then reorder, then white. RGBW layers provide an
+    // explicit W byte; RGB layers keep the legacy derived-white fallback.
+    // No allocation, integer-only.
+    inline void apply(const uint8_t* src, uint8_t* out, uint8_t srcChannels = 3) const {
         const uint8_t r = briLut[src[0]];
         const uint8_t g = briLut[src[1]];
         const uint8_t b = briLut[src[2]];
         if (deriveWhite) {
-            const uint8_t w = r < g ? (r < b ? r : b) : (g < b ? g : b);  // min(r,g,b)
+            const uint8_t w = srcChannels >= 4
+                ? briLut[src[3]]
+                : (r < g ? (r < b ? r : b) : (g < b ? g : b));  // min(r,g,b)
             const uint8_t v[4] = {r, g, b, w};
             for (uint8_t i = 0; i < outChannels; i++) out[i] = v[order[i]];
         } else {

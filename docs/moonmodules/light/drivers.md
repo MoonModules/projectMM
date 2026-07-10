@@ -18,6 +18,8 @@ Addressable WS2812B-class LEDs over a wire, one GPIO per strand. Three periphera
 
 - `pins` — data GPIO list, e.g. `18,17,16` (one strand each). Empty idles until set; changing it re-inits live.
 - `ledsPerPin` — lights per pin, matched by position; empty or short = even split of the remainder.
+- `chipset` - wire timing profile, currently `WS2812B` or `SK6812 RGBW`.
+- `backend` - display-only output backend, e.g. `RMT DMA` when DMA streaming is active.
 - `loopbackTest` — on/off TX→RX loopback self-test (jumper the first pin to `loopbackRxPin`); verdict in the status field.
 - `loopbackTxPin` / `loopbackRxPin` — optional TX override + the RX pin for the self-test. Shown only while `loopbackTest` is on.
 
@@ -89,7 +91,7 @@ Detail: [technical](moxygen/PreviewDriver.md)
 
 ## LED output — details
 
-The three LED-output peripherals, compared. All drive WS2812B-class strips with the same `pins` / `ledsPerPin` / `loopback*` controls and the same wire contract; they differ in parallelism and chip.
+The three LED-output peripherals, compared. All drive WS2812B/SK6812-class strips with the same `pins` / `ledsPerPin` / `chipset` / `loopback*` controls and the same wire contract; they differ in parallelism and chip.
 
 | Peripheral | Chip | Strands | Notes |
 |------------|------|---------|-------|

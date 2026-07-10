@@ -101,3 +101,20 @@ TEST_CASE("encoder: RGBW preset yields 32 symbols per light") {
     CHECK(h0.level == 1);
     CHECK((h0.duration == T0H || h0.duration == T1H));
 }
+
+TEST_CASE("encoder: explicit RGBW white channel reaches the last wire byte") {
+    mm::Correction c;
+    c.rebuild(255, mm::LightPreset::GRBW);  // G,R,B,W
+    const uint8_t logical[4] = {0, 0, 0, 0xFF};
+    uint8_t wire[4] = {};
+    c.apply(logical, wire, 4);
+    CHECK(wire[0] == 0x00);
+    CHECK(wire[1] == 0x00);
+    CHECK(wire[2] == 0x00);
+    CHECK(wire[3] == 0xFF);
+
+    uint32_t out[32] = {};
+    mm::encodeWs2812Symbols(wire, c.outChannels, T0H, T1H, PERIOD, out);
+    for (int i = 0; i < 24; i++) checkBit(out[i], T0H);
+    for (int i = 24; i < 32; i++) checkBit(out[i], T1H);
+}

@@ -66,6 +66,16 @@ public:
     /// not this safety cap.
     char ledsPerPin[48] = "";
 
+    /// LED timing profile. Generic boards default to WS2812B; RGBW fixtures can use
+    /// SK6812 RGBW timing so their 4-channel pixels decode with more margin.
+    uint8_t chipset = kLedChipsetWs2812b;
+
+    void setChipset(uint8_t value) {
+        if (value >= kLedChipsetCount) value = kLedChipsetWs2812b;
+        chipset = value;
+        cfg_.applyChipset(chipset);
+    }
+
     /// On-device loopback self-test — RMT is a transceiver, so the driver verifies its own output
     /// on real silicon (replaces the old standalone test firmware). Tick to run a one-shot RMT
     /// TX→RX round-trip: jumper the first pin (TX) to `loopbackRxPin`, it transmits a known WS2812
@@ -92,8 +102,9 @@ public:
     /// and still clocked back to back; the S3/P4 capture the full frame via DMA.
     bool     loopbackFrame = false;
 
-    // 40 MHz RMT tick clock = 25 ns/tick: t0h 350ns→14, t1h 700ns→28, period
-    // 1250ns→50 ticks. The encoder converts ns→ticks via the granted resolution,
+    // 40 MHz RMT tick clock = 25 ns/tick; chipset timings convert from ns to ticks
+    // via the granted resolution, e.g. WS2812B t0h 350 ns -> 14 ticks and SK6812
+    // RGBW t0h 300 ns -> 12 ticks at the requested clock.
     // so this is the requested clock, not a hard-coded tick count.
     static constexpr uint32_t kResolutionHz = 40'000'000;
 
@@ -108,6 +119,7 @@ public:
         addWindowControls();   // start / count — the slice of the shared buffer this driver outputs
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
+        controls_.addSelect("chipset", chipset, kLedChipsetOptions, kLedChipsetCount);
         controls_.addReadOnly("backend", backend_, sizeof(backend_));
         controls_.addReadOnly("frameStats", frameStats_, sizeof(frameStats_));
         controls_.addBool("loopbackTest", loopbackTest);
@@ -141,10 +153,12 @@ public:
     /// OFF clears the result.
     void onUpdate(const char* name) override {
         const bool isTestControl = std::strcmp(name, "loopbackTest") == 0;
+        const bool isChipsetControl = std::strcmp(name, "chipset") == 0;
         const bool isPinControl  = std::strcmp(name, "pins") == 0
                                 || std::strcmp(name, "loopbackTxPin") == 0
                                 || std::strcmp(name, "loopbackRxPin") == 0
                                 || std::strcmp(name, "loopbackFrame") == 0;
+        if (isChipsetControl) setChipset(chipset);
         if (isTestControl && !loopbackTest) {
             // Toggling the test off clears the loopback verdict, then re-derives
             // the real driver status — a config/init error must survive (a blind
@@ -153,7 +167,7 @@ public:
             clearStatus();
             parseConfig();
             reinit();
-        } else if (loopbackTest && (isTestControl || isPinControl)) {
+        } else if (loopbackTest && (isTestControl || isPinControl || isChipsetControl)) {
             // A `pins` edit changes pinList_/pinCount_, but onUpdate runs BEFORE the
             // onBuildState() sweep re-parses (and loopbackRxPin/loopbackFrame don't
             // trigger that sweep at all), so refresh here before testing — otherwise
@@ -175,7 +189,7 @@ public:
     /// reinit() (a rebuild) calls — so a rebuild freed the buffer loop() needs.
     /// Keeping the two apart makes that mistake impossible here and lets the host
     /// unit test (unit_RmtLedDriver_lifecycle.cpp) pin it.
-    void setup() override { parseConfig(); reinit(); }
+    void setup() override { setChipset(chipset); parseConfig(); reinit(); }
     /// Release the RMT channels and free the symbol buffer, then clear the shared
     /// fail/config-error state (DriverBase::teardown()).
     void teardown() override {
@@ -214,9 +228,9 @@ public:
     }
 
     /// Per-tick output: fuse the correction and WS2812 symbol-encode in one pass
-    /// over this driver's window, then start every pin's transmit before waiting on
-    /// any, so the tick costs the longest strand rather than the sum. Inert off RMT
-    /// chips and idle until inited with a source buffer + correction.
+    /// over this driver's window, then start every pin's transmit and return. RMT/DMA
+    /// clocks the strip out in hardware; if the previous frame is still busy, this
+    /// tick is skipped so the render loop never blocks on the physical wire time.
     void loop() override {
         if constexpr (platform::rmtTxChannels == 0) return;  // inert off RMT chips
         if (!inited_ || !sourceBuffer_ || !sourceBuffer_->data() || !correction_) return;
@@ -254,17 +268,13 @@ public:
         uint8_t wire[4];
         for (nrOfLightsType i = 0; i < n; i++) {
             // Read the windowed light: this driver's slice starts at winStart_.
-            correction_->apply(src + (winStart_ + i) * srcCh, wire);
+            correction_->apply(src + (winStart_ + i) * srcCh, wire, srcCh);
             encodeWs2812Symbols(wire, outCh, t0h, t1h, period, symbols_ + s);
             s += static_cast<size_t>(outCh) * 8;
         }
-        // Start every pin's slice before waiting on any — the channels clock out
-        // concurrently, so the tick is charged the longest strand, not the sum.
-        // The shared reset gap (the WS2812 latch) runs once, after the last wait.
-        // Wait ONLY on channels whose transmit started: a failed transmit gives
-        // no done-callback, so waiting on it would block the full 1000 ms timeout
-        // and a single bad pin would stall the tick (the same guard the LCD /
-        // Parlio loops use, here per channel).
+        // Start every pin's slice back-to-back. The channels clock out concurrently
+        // and completion is tracked by the platform callback; the next loop() skips
+        // while any channel is busy, preserving the symbol buffer for DMA/RMT.
         // Transmit only up to the n lights actually encoded this frame: pins are laid out
         // contiguously from light 0, so pin i covers lights [pinStart, pinStart+pinCounts_[i]).
         // Normally Σ pinCounts_ == n, but if the buffer shrank since the last parseConfig (a grid
@@ -493,9 +503,11 @@ private:
             const uint16_t lights = pinCounts_[0] > 0
                 ? static_cast<uint16_t>(pinCounts_[0]) : 64;
             const uint8_t ch = correction_ ? correction_->outChannels : 3;
-            r = platform::rmtWs2812LoopbackFrame(txPin, rxPin, lights, ch);
+            r = platform::rmtWs2812LoopbackFrame(txPin, rxPin, lights, ch,
+                                                 cfg_.t0h_ns, cfg_.t1h_ns, cfg_.period_ns);
         } else {
-            r = platform::rmtWs2812Loopback(txPin, rxPin);
+            r = platform::rmtWs2812Loopback(txPin, rxPin,
+                                            cfg_.t0h_ns, cfg_.t1h_ns, cfg_.period_ns);
         }
         reinit();
         if (!r.jumperDetected) {
