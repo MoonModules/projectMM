@@ -18,10 +18,9 @@ namespace mm {
 /// time and publishes each module's loop time.
 ///
 /// **Loop rates:** three cadences cover every module. `loop()` is the hot path for
-/// effects and drivers, called every iteration — the Scheduler handles pacing (yielding
-/// to other tasks between iterations via `taskYIELD()` on ESP32, an optional sleep on
-/// desktop). `loop20ms()` runs every ~20 ms for UI updates, control reads, and network
-/// polling. `loop1s()` runs every ~1 second for diagnostics, reconnects, and
+/// effects and drivers, called when the elapsed-time FPS gate opens. `loop20ms()` runs
+/// every ~20 ms for UI updates, control reads, and network polling. `loop1s()` runs every
+/// ~1 second for diagnostics, reconnects, and
 /// housekeeping. Not every module needs `loop()`: system modules (HTTP, WiFi) use
 /// `loop20ms()` or `loop1s()` only.
 ///
@@ -79,7 +78,7 @@ public:
     uint32_t workTimeUs() const { return workTimeUs_; }
     uint32_t maxWorkTimeUs() const { return maxWorkTimeUs_; }
     uint32_t maxFrameTimeUs() const { return maxFrameTimeUs_; }
-    uint32_t fps() const { return tickTimeUs_ > 0 ? 1000000 / tickTimeUs_ : 0; }
+    uint32_t fps() const { return fps_; }
     uint8_t moduleCount() const { return moduleCount_; }
     MoonModule* module(uint8_t i) const { return i < moduleCount_ ? modules_[i] : nullptr; }
 
@@ -147,7 +146,9 @@ private:
     uint32_t maxFrameTimeUs_ = 0;
     uint32_t maxWorkAccumUs_ = 0;
     uint32_t maxFrameAccumUs_ = 0;
-    uint32_t frameCount_ = 0;        // frames in current 1-second window (for averaging)
+    uint32_t frameCount_ = 0;        // rendered frames in current 1-second window
+    uint32_t tickSampleCount_ = 0;   // scheduler ticks sampled in current 1-second window
+    uint32_t fps_ = 0;               // rendered frames in the last completed 1-second window
     uint32_t lastTimingUpdate_ = 0;   // 1-second window start
     uint32_t lastFrameStartUs_ = 0;
     uint8_t loop1sCursor_ = 0;

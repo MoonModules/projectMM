@@ -190,7 +190,7 @@ void rmtWs2812Deinit(RmtWs2812Handle& h) {
     auto* st = static_cast<RmtTxState*>(h.impl);
     if (!st) return;
     if (st->busy) {
-        rmt_tx_wait_all_done(st->channel, 250);
+        if (rmt_tx_wait_all_done(st->channel, 250) != ESP_OK) return;
         st->busy = false;
     }
     if (st->channel) {

@@ -64,21 +64,21 @@ void Scheduler::setup() {
 
 void Scheduler::tick() {
     uint32_t tickStart = platform::micros();
+    bool renderedFrame = false;
 
-    if (lastFrameStartUs_ != 0) {
-        const uint32_t targetFrameUs = 1000000u / targetFps_;
-        const uint32_t dueUs = lastFrameStartUs_ + targetFrameUs;
-        for (;;) {
-            const uint32_t nowUs = platform::micros();
-            if (static_cast<int32_t>(nowUs - dueUs) >= 0) break;
-            const uint32_t remainingUs = dueUs - nowUs;
-            if (remainingUs >= 2000) platform::delayMs(remainingUs / 1000);
-            else platform::yield();
-        }
-    }
-    lastFrameStartUs_ = platform::micros();
-    const uint32_t workStartUs = lastFrameStartUs_;
     uint32_t now = platform::millis();
+    const uint32_t targetFrameUs = 1000000u / targetFps_;
+    if (lastFrameStartUs_ != 0) {
+        const uint32_t nowUs = platform::micros();
+        if (static_cast<int32_t>(nowUs - (lastFrameStartUs_ + targetFrameUs)) >= 0) {
+            renderedFrame = true;
+            lastFrameStartUs_ = nowUs;
+        }
+    } else {
+        renderedFrame = true;
+        lastFrameStartUs_ = platform::micros();
+    }
+    const uint32_t workStartUs = platform::micros();
 
     // Scheduler gates loop callbacks by `enabled()` — disabled modules don't tick.
     // System modules that need to keep running regardless (HttpServer, Network,
@@ -88,11 +88,13 @@ void Scheduler::tick() {
     auto shouldRun = [](MoonModule* m) {
         return !m->respectsEnabled() || m->enabled();
     };
-    for (uint8_t i = 0; i < moduleCount_; i++) {
-        if (!shouldRun(modules_[i])) continue;
-        uint32_t modStart = platform::micros();
-        modules_[i]->loop();
-        modules_[i]->addAccumUs(platform::micros() - modStart);
+    if (renderedFrame) {
+        for (uint8_t i = 0; i < moduleCount_; i++) {
+            if (!shouldRun(modules_[i])) continue;
+            uint32_t modStart = platform::micros();
+            modules_[i]->loop();
+            modules_[i]->addAccumUs(platform::micros() - modStart);
+        }
     }
 
     if (now - lastLoop20ms_ >= 20) {
@@ -122,7 +124,7 @@ void Scheduler::tick() {
         if (loop1sCursor_ >= moduleCount_) loop1sSweepActive_ = false;
     }
 
-    frameCount_++;
+    if (renderedFrame) frameCount_++;
 
     // Every 1 second: publish per-module timing. Do this before closing the
     // scheduler timing window so the publish walk itself is counted in maxWorkUs.
@@ -139,21 +141,24 @@ void Scheduler::tick() {
     const uint32_t workElapsedUs = tickEndUs - workStartUs;
     tickAccumUs_ += frameElapsedUs;
     workAccumUs_ += workElapsedUs;
+    tickSampleCount_++;
     if (workElapsedUs > maxWorkAccumUs_) maxWorkAccumUs_ = workElapsedUs;
     if (frameElapsedUs > maxFrameAccumUs_) maxFrameAccumUs_ = frameElapsedUs;
 
     // Every 1 second: compute scheduler averages/maxima.
     if (publishWindow) {
-        tickTimeUs_ = frameCount_ > 0 ? tickAccumUs_ / frameCount_ : 0;
-        workTimeUs_ = frameCount_ > 0 ? workAccumUs_ / frameCount_ : 0;
+        tickTimeUs_ = tickSampleCount_ > 0 ? tickAccumUs_ / tickSampleCount_ : 0;
+        workTimeUs_ = tickSampleCount_ > 0 ? workAccumUs_ / tickSampleCount_ : 0;
         maxWorkTimeUs_ = maxWorkAccumUs_;
         maxFrameTimeUs_ = maxFrameAccumUs_;
+        fps_ = frameCount_;
 
         tickAccumUs_ = 0;
         workAccumUs_ = 0;
         maxWorkAccumUs_ = 0;
         maxFrameAccumUs_ = 0;
         frameCount_ = 0;
+        tickSampleCount_ = 0;
         lastTimingUpdate_ = platform::millis();
     }
 }
