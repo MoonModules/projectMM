@@ -116,6 +116,17 @@
 
 #include <cstdio>
 
+namespace {
+const mm::AutoUpdateRuntime kAutoUpdateRuntime{
+    mm::platform::millis,
+    mm::platform::networkReady,
+    mm::platform::httpGet,
+    mm::platform::chipModel,
+    mm::platform::firmwarePartition,
+    mm::platform::http_fetch_to_ota_checked,
+};
+}
+
 static void registerModuleTypes() {
     // Second argument is the module's spec page relative to docs/moonmodules/ —
     // the UI builds a help link from it. Effects/modifiers/leaf-layouts share one
@@ -334,6 +345,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     auto* autoUpdateModule = static_cast<mm::AutoUpdateModule*>(
         mm::ModuleFactory::create("AutoUpdateModule"));
     autoUpdateModule->setName("Auto Update");
+    autoUpdateModule->setRuntime(&kAutoUpdateRuntime);
 
     // Network (platform stubs return false on desktop — module is a no-op)
     auto* networkModule = static_cast<mm::NetworkModule*>(mm::ModuleFactory::create("NetworkModule"));

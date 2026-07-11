@@ -35,6 +35,7 @@ struct OtaTaskParams {
     size_t statusBufLen;
     uint32_t* bytesReadOut;   // current bytes downloaded
     uint32_t* bytesTotalOut;  // image size; 0 until esp_https_ota reports it
+    std::atomic<bool>* inFlightFlag = nullptr;
     char expectedSha256[65];
     uint32_t expectedSize = 0;
     psa_hash_operation_t sha = PSA_HASH_OPERATION_INIT;
@@ -64,6 +65,15 @@ void otaHashFinish(OtaTaskParams* p) {
     if (!p || !p->hashActive) return;
     psa_hash_abort(&p->sha);
     p->hashActive = false;
+}
+
+void otaTaskFinish(OtaTaskParams* p, bool clearInFlight = true) {
+    if (!p) return;
+    otaHashFinish(p);
+    if (clearInFlight && p->inFlightFlag) {
+        p->inFlightFlag->store(false, std::memory_order_release);
+    }
+    delete p;
 }
 
 esp_err_t otaHttpEvent(esp_http_client_event_t* evt) {
@@ -101,7 +111,7 @@ void otaTask(void* arg) {
         if (initStatus != PSA_SUCCESS) {
             otaSetStatus(p, "error: sha init %d", static_cast<int>(initStatus));
             p->hashActive = false;
-            delete p;
+            otaTaskFinish(p);
             vTaskDelete(nullptr);
             return;
         }
@@ -111,7 +121,7 @@ void otaTask(void* arg) {
             otaSetStatus(p, "error: sha setup %d", static_cast<int>(hashStatus));
             psa_hash_abort(&p->sha);
             p->hashActive = false;
-            delete p;
+            otaTaskFinish(p);
             vTaskDelete(nullptr);
             return;
         }
@@ -154,8 +164,7 @@ void otaTask(void* arg) {
         // We surface the IDF error name plus a pointer to the log.
         otaSetStatus(p, "error: ota begin %s (see serial log)",
                      esp_err_to_name(err));
-        otaHashFinish(p);
-        delete p;
+        otaTaskFinish(p);
         vTaskDelete(nullptr);
         return;
     }
@@ -170,8 +179,7 @@ void otaTask(void* arg) {
         if (p->expectedSize > 0 && static_cast<uint32_t>(total) != p->expectedSize) {
             otaSetStatus(p, "error: size mismatch");
             esp_https_ota_abort(handle);
-            otaHashFinish(p);
-            delete p;
+            otaTaskFinish(p);
             vTaskDelete(nullptr);
             return;
         }
@@ -185,8 +193,7 @@ void otaTask(void* arg) {
     if (err != ESP_OK) {
         otaSetStatus(p, "error: ota perform %s", esp_err_to_name(err));
         esp_https_ota_abort(handle);
-        otaHashFinish(p);
-        delete p;
+        otaTaskFinish(p);
         vTaskDelete(nullptr);
         return;
     }
@@ -194,8 +201,7 @@ void otaTask(void* arg) {
     if (!esp_https_ota_is_complete_data_received(handle)) {
         otaSetStatus(p, "error: incomplete download");
         esp_https_ota_abort(handle);
-        otaHashFinish(p);
-        delete p;
+        otaTaskFinish(p);
         vTaskDelete(nullptr);
         return;
     }
@@ -203,8 +209,7 @@ void otaTask(void* arg) {
     if (p->expectedSize > 0 && p->hashedBytes != p->expectedSize) {
         otaSetStatus(p, "error: size mismatch");
         esp_https_ota_abort(handle);
-        otaHashFinish(p);
-        delete p;
+        otaTaskFinish(p);
         vTaskDelete(nullptr);
         return;
     }
@@ -219,7 +224,7 @@ void otaTask(void* arg) {
             otaSetStatus(p, "error: sha finish %d",
                          static_cast<int>(hashStatus));
             esp_https_ota_abort(handle);
-            delete p;
+            otaTaskFinish(p);
             vTaskDelete(nullptr);
             return;
         }
@@ -227,7 +232,7 @@ void otaTask(void* arg) {
         if (std::strcmp(actual, p->expectedSha256) != 0) {
             otaSetStatus(p, "error: sha256 mismatch");
             esp_https_ota_abort(handle);
-            delete p;
+            otaTaskFinish(p);
             vTaskDelete(nullptr);
             return;
         }
@@ -237,7 +242,7 @@ void otaTask(void* arg) {
     if (err != ESP_OK) {
         // After finish, abort isn't valid — handle is consumed. Surface and exit.
         otaSetStatus(p, "error: ota finish %s", esp_err_to_name(err));
-        delete p;
+        otaTaskFinish(p);
         vTaskDelete(nullptr);
         return;
     }
@@ -246,7 +251,7 @@ void otaTask(void* arg) {
     // UI's last frame before reboot shows a clean "Y KB / Y KB".
     if (*p->bytesTotalOut > 0) *p->bytesReadOut = *p->bytesTotalOut;
     otaSetStatus(p, "rebooting");
-    delete p;
+    otaTaskFinish(p, false);
     // 600 ms delay gives the HTTP response time to make it back to the browser
     // before the device drops the socket on restart.
     vTaskDelay(pdMS_TO_TICKS(600));
@@ -258,8 +263,13 @@ void otaTask(void* arg) {
 bool http_fetch_to_ota_checked(const char* url, const char* expectedSha256,
                                uint32_t expectedSize,
                                char* statusBuf, size_t statusBufLen,
-                               uint32_t* bytesReadOut, uint32_t* bytesTotalOut) {
+                               uint32_t* bytesReadOut, uint32_t* bytesTotalOut,
+                               std::atomic<bool>* inFlightFlag) {
+    auto clearInFlight = [&]() {
+        if (inFlightFlag) inFlightFlag->store(false, std::memory_order_release);
+    };
     if (!url || !statusBuf || statusBufLen == 0 || !bytesReadOut || !bytesTotalOut) {
+        clearInFlight();
         return false;
     }
 
@@ -271,6 +281,7 @@ bool http_fetch_to_ota_checked(const char* url, const char* expectedSha256,
     if (urlLen > kUrlMax) {
         std::snprintf(statusBuf, statusBufLen,
                       "error: url too long (%zu > %zu)", urlLen, kUrlMax);
+        clearInFlight();
         return false;
     }
 
@@ -279,6 +290,7 @@ bool http_fetch_to_ota_checked(const char* url, const char* expectedSha256,
     auto* p = new (std::nothrow) OtaTaskParams{};
     if (!p) {
         std::snprintf(statusBuf, statusBufLen, "error: out of memory");
+        clearInFlight();
         return false;
     }
     std::memcpy(p->url, url, urlLen + 1);   // includes NUL; size already verified
@@ -286,6 +298,7 @@ bool http_fetch_to_ota_checked(const char* url, const char* expectedSha256,
     p->statusBufLen = statusBufLen;
     p->bytesReadOut = bytesReadOut;
     p->bytesTotalOut = bytesTotalOut;
+    p->inFlightFlag = inFlightFlag;
     if (expectedSha256 && expectedSha256[0]) {
         std::snprintf(p->expectedSha256, sizeof(p->expectedSha256), "%s", expectedSha256);
     }
@@ -297,7 +310,7 @@ bool http_fetch_to_ota_checked(const char* url, const char* expectedSha256,
     BaseType_t ok = xTaskCreate(&otaTask, "urlOta", 12288, p, 5, nullptr);
     if (ok != pdPASS) {
         otaSetStatus(p, "error: task create failed");
-        delete p;
+        otaTaskFinish(p);
         return false;
     }
     return true;
@@ -305,9 +318,10 @@ bool http_fetch_to_ota_checked(const char* url, const char* expectedSha256,
 
 bool http_fetch_to_ota(const char* url,
                        char* statusBuf, size_t statusBufLen,
-                       uint32_t* bytesReadOut, uint32_t* bytesTotalOut) {
+                       uint32_t* bytesReadOut, uint32_t* bytesTotalOut,
+                       std::atomic<bool>* inFlightFlag) {
     return http_fetch_to_ota_checked(url, nullptr, 0, statusBuf, statusBufLen,
-                                     bytesReadOut, bytesTotalOut);
+                                     bytesReadOut, bytesTotalOut, inFlightFlag);
 }
 
 bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,

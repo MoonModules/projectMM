@@ -669,7 +669,7 @@ void HttpServerModule::handleFirmwareUpload(platform::TcpConnection& conn, const
         return;
     }
     // Same 409 concurrency guard as handleFirmwareUrl: one OTA at a time (both write g_ota* state).
-    if (otaInFlight()) {
+    if (!otaTryStart()) {
         sendResponse(conn, 409, "application/json", "{\"error\":\"ota already in progress\"}");
         return;
     }
@@ -688,6 +688,7 @@ void HttpServerModule::handleFirmwareUpload(platform::TcpConnection& conn, const
     const bool ok = platform::otaWriteStream(&uploadPull, &src, contentLen,
                                              g_otaStatus, sizeof(g_otaStatus), &g_otaBytesRead);
     if (!ok) {
+        otaFinish();
         char msg[96];
         std::snprintf(msg, sizeof(msg), "{\"error\":\"ota failed: %.60s\"}", g_otaStatus);
         sendResponse(conn, 500, "application/json", msg);
@@ -1745,7 +1746,7 @@ void HttpServerModule::handleFirmwareUrl(platform::TcpConnection& conn, const ch
     // shows garbled progress. Check g_otaStatus for an in-flight state and
     // reject early with 409. Successful OTAs reboot, so the only path that
     // re-enables a new attempt after an in-flight one is an explicit error.
-    if (otaInFlight()) {
+    if (!otaTryStart()) {
         sendResponse(conn, 409, "application/json",
                      "{\"error\":\"ota already in progress\"}");
         return;
@@ -1773,7 +1774,9 @@ void HttpServerModule::handleFirmwareUrl(platform::TcpConnection& conn, const ch
     g_otaBytesTotal = 0;
 
     if (!platform::http_fetch_to_ota(url, g_otaStatus, sizeof(g_otaStatus),
-                                     &g_otaBytesRead, &g_otaBytesTotal)) {
+                                     &g_otaBytesRead, &g_otaBytesTotal,
+                                     &g_otaInFlight)) {
+        otaFinish();
         // The platform may have already written an error string; pass it through.
         char err[128];
         std::snprintf(err, sizeof(err),

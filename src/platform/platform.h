@@ -305,7 +305,8 @@ void setHostname(const char* name);
 // to the UI without extra wiring.
 bool http_fetch_to_ota(const char* url,
                        char* statusBuf, size_t statusBufLen,
-                       uint32_t* bytesReadOut, uint32_t* bytesTotalOut);
+                       uint32_t* bytesReadOut, uint32_t* bytesTotalOut,
+                       std::atomic<bool>* inFlightFlag = nullptr);
 
 // Same URL OTA path, with manifest-supplied SHA-256 and size checks. The task
 // hashes the downloaded app bytes before esp_https_ota_finish commits the image.
@@ -314,7 +315,8 @@ bool http_fetch_to_ota(const char* url,
 bool http_fetch_to_ota_checked(const char* url, const char* expectedSha256,
                                uint32_t expectedSize,
                                char* statusBuf, size_t statusBufLen,
-                               uint32_t* bytesReadOut, uint32_t* bytesTotalOut);
+                               uint32_t* bytesReadOut, uint32_t* bytesTotalOut,
+                               std::atomic<bool>* inFlightFlag = nullptr);
 
 // OTA — flash a firmware image STREAMED from `src` (no URL fetch; the caller pulls the bytes,
 // e.g. straight off an HTTP upload body). Same producer callback shape as fsWriteStream: `src`

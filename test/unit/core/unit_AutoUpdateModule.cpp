@@ -49,6 +49,30 @@ TEST_CASE("AutoUpdateModule rejects full-bundle offset zero") {
     CHECK(d.code == AutoUpdateModule::DecisionCode::BadOffset);
 }
 
+// Installable OTA candidates must carry a non-zero size so the OTA task can
+// enforce the manifest contract before committing the image.
+TEST_CASE("AutoUpdateModule rejects missing OTA image size") {
+    char manifest[900];
+    std::snprintf(manifest, sizeof(manifest),
+        "{\"version\":\"9.0.0\",\"ota\":{\"path\":\"firmware.bin\","
+        "\"offset\":65536,\"chipFamily\":\"ESP32-S3\",\"sha256\":\"%s\"}}", kHash);
+    auto d = AutoUpdateModule::selectCandidate(manifest, "https://x.test/manifest.json",
+                                               "1.0.0", "ESP32-S3");
+    CHECK(d.code == AutoUpdateModule::DecisionCode::MissingSize);
+    CHECK_FALSE(d.shouldInstall());
+}
+
+TEST_CASE("AutoUpdateModule rejects zero OTA image size") {
+    char manifest[900];
+    std::snprintf(manifest, sizeof(manifest),
+        "{\"version\":\"9.0.0\",\"ota\":{\"path\":\"firmware.bin\","
+        "\"offset\":65536,\"chipFamily\":\"ESP32-S3\",\"size\":0,\"sha256\":\"%s\"}}", kHash);
+    auto d = AutoUpdateModule::selectCandidate(manifest, "https://x.test/manifest.json",
+                                               "1.0.0", "ESP32-S3");
+    CHECK(d.code == AutoUpdateModule::DecisionCode::MissingSize);
+    CHECK_FALSE(d.shouldInstall());
+}
+
 // ESP Web Tools manifests pick the app part for the matching chip family.
 TEST_CASE("AutoUpdateModule selects app part from ESP Web Tools builds") {
     char manifest[1200];

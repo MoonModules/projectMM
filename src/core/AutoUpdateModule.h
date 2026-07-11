@@ -1,11 +1,11 @@
 #pragma once
 
 #include "core/MoonModule.h"
-#include "core/FirmwareUpdateModule.h"
 #include "core/JsonUtil.h"
 #include "core/build_info.h"
-#include "platform/platform.h"
+#include "core/OtaUpdateState.h"
 
+#include <atomic>
 #include <cctype>
 #include <cstdarg>
 #include <cstdint>
@@ -14,6 +14,19 @@
 #include <cstring>
 
 namespace mm {
+
+struct AutoUpdateRuntime {
+    uint32_t (*millis)() = nullptr;
+    bool (*networkReady)() = nullptr;
+    int (*httpGet)(const char* url, char* body, size_t bodyLen, uint32_t timeoutMs) = nullptr;
+    const char* (*chipModel)() = nullptr;
+    size_t (*firmwarePartition)() = nullptr;
+    bool (*httpFetchToOtaChecked)(const char* url, const char* expectedSha256,
+                                  uint32_t expectedSize,
+                                  char* statusBuf, size_t statusBufLen,
+                                  uint32_t* bytesReadOut, uint32_t* bytesTotalOut,
+                                  std::atomic<bool>* inFlightFlag) = nullptr;
+};
 
 /// Automatic manifest-driven firmware update. Designed for firmware channels
 /// where an update URL may be baked into the image so it survives a settings
@@ -34,6 +47,7 @@ public:
         BadOffset,
         MissingVersion,
         MissingHash,
+        MissingSize,
         TooLarge,
     };
 
@@ -58,13 +72,16 @@ public:
         autoInstall_ = manifestUrl_[0] != 0;
     }
 
+    void setRuntime(const AutoUpdateRuntime* runtime) { runtime_ = runtime; }
+
     void setup() override {
+        MoonModule::setup();
         scheduleAfter(static_cast<uint32_t>(bootDelaySec_) * 1000u);
         if (manifestUrl_[0] && autoInstall_) setStatusf(Severity::Status, "waiting for network");
         else clearStatus();
     }
 
-    void onBuildControls() override {
+    void defineControls() override {
         controls_.addText("manifestUrl", manifestUrl_, sizeof(manifestUrl_), validateUrl);
         controls_.addBool("autoInstall", autoInstall_);
         controls_.addUint16("checkIntervalMin", checkIntervalMin_, 15, 1440);
@@ -72,9 +89,10 @@ public:
         controls_.addUint16("bootDelaySec", bootDelaySec_, 10, 3600);
         controls_.addReadOnly("latest", latestVersion_, sizeof(latestVersion_));
         controls_.addReadOnly("lastCheck", lastCheckStr_, sizeof(lastCheckStr_));
+        MoonModule::defineControls();
     }
 
-    void onUpdate(const char* name) override {
+    void onControlChanged(const char* name) override {
         if (!name) return;
         if (std::strcmp(name, "manifestUrl") == 0 ||
             std::strcmp(name, "autoInstall") == 0 ||
@@ -85,19 +103,19 @@ public:
         }
     }
 
-    void loop1s() override {
-        if (!enabled()) return;
+    void tick1s() override {
+        MoonModule::tick1s();
         if (!manifestUrl_[0]) {
             clearStatus();
             return;
         }
         if (!autoInstall_) { clearStatus(); return; }
         if (otaInFlight()) return;
-        if (!platform::networkReady()) {
+        if (!runtimeReady()) {
             setStatusf(Severity::Status, "waiting for network");
             return;
         }
-        const uint32_t now = platform::millis();
+        const uint32_t now = runtime_->millis();
         if (!timeReached(now, nextCheckMs_)) return;
         checkNow();
     }
@@ -118,7 +136,8 @@ public:
     static Decision selectCandidate(const char* manifestJson,
                                     const char* manifestUrl,
                                     const char* currentVersion,
-                                    const char* chipFamily) {
+                                    const char* chipFamily,
+                                    size_t firmwarePartition = 0) {
         static json::JsonDoc doc;
         if (!json::parse(manifestJson, doc) ||
             !doc.rootNode() || doc.rootNode()->type != json::JsonType::Object) {
@@ -147,8 +166,8 @@ public:
             d.candidate = c;
             return d;
         }
-        const size_t part = platform::firmwarePartition();
-        if (part > 0 && c.size > 0 && c.size > part) {
+        if (c.size == 0) return fail(DecisionCode::MissingSize, "size missing");
+        if (firmwarePartition > 0 && c.size > firmwarePartition) {
             return fail(DecisionCode::TooLarge, "image too large");
         }
         char resolved[sizeof(c.url)] = {};
@@ -179,9 +198,10 @@ private:
     char lastCheckStr_[24] = "never";
     char statusBuf_[96] = {};
     char manifestBuf_[json::kMaxJsonLen] = {};
+    const AutoUpdateRuntime* runtime_ = nullptr;
 
     static bool validateUrl(const char* s) {
-        return !s || !*s || std::strncmp(s, "https://", 8) == 0 || std::strncmp(s, "http://", 7) == 0;
+        return !s || !*s || std::strncmp(s, "https://", 8) == 0;
     }
 
     static void copyString(char* dst, size_t dstLen, const char* src) {
@@ -202,7 +222,7 @@ private:
     }
 
     void scheduleAfter(uint32_t delayMs) {
-        nextCheckMs_ = platform::millis() + delayMs;
+        nextCheckMs_ = nowMs() + delayMs;
     }
 
     void scheduleRetry() {
@@ -214,18 +234,27 @@ private:
     }
 
     void checkNow() {
-        const uint32_t now = platform::millis();
+        if (!validateUrl(manifestUrl_)) {
+            setStatusf(Severity::Warning, "manifest URL must be HTTPS");
+            scheduleRetry();
+            rebuildControls();
+            return;
+        }
+        if (!runtime_) return;
+
+        const uint32_t now = runtime_->millis();
         std::snprintf(lastCheckStr_, sizeof(lastCheckStr_), "%lus",
                       static_cast<unsigned long>(now / 1000u));
         setStatusf(Severity::Status, "checking");
-        const int code = platform::httpGet(manifestUrl_, manifestBuf_, sizeof(manifestBuf_), 12000);
+        const int code = runtime_->httpGet(manifestUrl_, manifestBuf_, sizeof(manifestBuf_), 12000);
         if (code != 200) {
             setStatusf(Severity::Warning, "manifest HTTP %d", code);
             scheduleRetry();
             rebuildControls();
             return;
         }
-        Decision d = selectCandidate(manifestBuf_, manifestUrl_, kVersion, platform::chipModel());
+        Decision d = selectCandidate(manifestBuf_, manifestUrl_, kVersion, runtime_->chipModel(),
+                                     runtime_->firmwarePartition());
         if (d.candidate.version[0]) copyString(latestVersion_, sizeof(latestVersion_), d.candidate.version);
         if (!d.shouldInstall()) {
             setStatusf(d.code == DecisionCode::UpToDate ? Severity::Status : Severity::Warning,
@@ -236,20 +265,33 @@ private:
             return;
         }
 
+        if (!otaTryStart()) return;
         copyString(g_otaStatus, sizeof(g_otaStatus), "starting");
         g_otaBytesRead = 0;
         g_otaBytesTotal = d.candidate.size;
         setStatusf(Severity::Status, "installing %s", d.candidate.version);
-        const bool ok = platform::http_fetch_to_ota_checked(
+        const bool ok = runtime_->httpFetchToOtaChecked(
             d.candidate.url, d.candidate.sha256, d.candidate.size,
-            g_otaStatus, sizeof(g_otaStatus), &g_otaBytesRead, &g_otaBytesTotal);
+            g_otaStatus, sizeof(g_otaStatus), &g_otaBytesRead, &g_otaBytesTotal,
+            &g_otaInFlight);
         if (!ok) {
+            otaFinish();
             setStatusf(Severity::Error, "OTA start failed");
             scheduleRetry();
         } else {
             scheduleNormal();
         }
         rebuildControls();
+    }
+
+    bool runtimeReady() const {
+        return runtime_ && runtime_->millis && runtime_->networkReady && runtime_->httpGet &&
+               runtime_->chipModel && runtime_->firmwarePartition &&
+               runtime_->httpFetchToOtaChecked && runtime_->networkReady();
+    }
+
+    uint32_t nowMs() const {
+        return (runtime_ && runtime_->millis) ? runtime_->millis() : 0;
     }
 
     static Decision fail(DecisionCode code, const char* reason) {

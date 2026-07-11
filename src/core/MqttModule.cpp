@@ -285,7 +285,7 @@ void MqttModule::subscribeUpdateSet() {
 // rather than corrupting the running OTA task. On desktop platform::http_fetch_to_ota is
 // a stub returning false; the install command safely reports failure via g_otaStatus.
 void MqttModule::handleUpdateInstall(const char* payload, size_t payloadLen) {
-    if (otaInFlight()) return;   // matches the /api/firmware/url 409 guard's intent
+    if (!otaTryStart()) return;   // matches the /api/firmware/url 409 guard's intent
 
     // Copy the payload into a bounded local buffer for null-termination + shape checks.
     // A malformed / oversized payload is refused; no partial URL reaches http_fetch_to_ota.
@@ -313,8 +313,11 @@ void MqttModule::handleUpdateInstall(const char* payload, size_t payloadLen) {
     g_otaBytesRead = 0;
     g_otaBytesTotal = 0;
 
-    (void)platform::http_fetch_to_ota(url, g_otaStatus, sizeof(g_otaStatus),
-                                      &g_otaBytesRead, &g_otaBytesTotal);
+    if (!platform::http_fetch_to_ota(url, g_otaStatus, sizeof(g_otaStatus),
+                                     &g_otaBytesRead, &g_otaBytesTotal,
+                                     &g_otaInFlight)) {
+        otaFinish();
+    }
     // No response to publish — HA polls the retained update/state (which the OTA success
     // path implicitly renegotiates on reboot, or a future release-check refreshes).
 }
