@@ -98,8 +98,10 @@ static auto startTime = std::chrono::steady_clock::now();
 // Test-only override for millis(); 0 means "use the real clock". std::atomic so
 // a test can set it from one thread while a tested module reads from another.
 static std::atomic<uint32_t> testNowMs{0};
+static std::atomic<bool> testWifiApInitResult{false};
 
 void setTestNowMs(uint32_t ms) { testNowMs.store(ms, std::memory_order_relaxed); }
+void setTestWifiApInitResult(bool ok) { testWifiApInitResult.store(ok, std::memory_order_relaxed); }
 
 uint32_t millis() {
     uint32_t override_ = testNowMs.load(std::memory_order_relaxed);
@@ -576,7 +578,9 @@ int wifiStaRssi() { return 0; }
 void wifiStaBssid(uint8_t out[6]) { std::memset(out, 0, 6); }
 int wifiStaChannel() { return 0; }
 
-bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
+bool wifiApInit(const char* /*apName*/, const char* /*ip*/) {
+    return testWifiApInitResult.load(std::memory_order_relaxed);
+}
 bool wifiApConnected() { return false; }
 void wifiApStop() {}
 

@@ -84,6 +84,7 @@ namespace mm::platform {
 static std::atomic<uint32_t> testNowMs{0};
 
 void setTestNowMs(uint32_t ms) { testNowMs.store(ms, std::memory_order_relaxed); }
+void setTestWifiApInitResult(bool) {}
 
 uint32_t millis() {
     uint32_t override_ = testNowMs.load(std::memory_order_relaxed);

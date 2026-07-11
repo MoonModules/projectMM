@@ -17,6 +17,7 @@ uint32_t micros();
 // in release so cases stay independent. ESP32 honours the override too so a
 // scenario-tests run on real hardware can still freeze time if needed.
 void setTestNowMs(uint32_t ms);
+void setTestWifiApInitResult(bool ok);
 
 void* alloc(size_t bytes);
 void free(void* ptr);

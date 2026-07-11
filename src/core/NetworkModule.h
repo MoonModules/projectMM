@@ -334,8 +334,7 @@ public:
 
             if (ssid_[0] == 0) {
                 wifiCredentialApplyPending_ = false;
-                std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi SSID empty; AP active");
-                setStatus(statusBuf_, Severity::Status);
+                if (state_ != State::AP) startAP();
                 return;
             }
 

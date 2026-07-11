@@ -22,7 +22,6 @@ constexpr const char* TAG = "mm-ble-prov";
 
 struct BleProvisioningState {
     char serviceName[32] = {};
-    char pop[8] = {};
     char pendingSsid[33] = {};
     char pendingPassword[64] = {};
     char* ssidOut = nullptr;
@@ -32,8 +31,8 @@ struct BleProvisioningState {
     std::atomic<bool>* ready = nullptr;
     char* statusBuf = nullptr;
     size_t statusBufLen = 0;
-    bool initialized = false;
-    bool started = false;
+    std::atomic<bool> initialized{false};
+    std::atomic<bool> started{false};
 };
 
 BleProvisioningState g_bleProv;
@@ -70,16 +69,13 @@ void makeIdentity(const ImprovDeviceInfo& info) {
     const char* name = (info.name && info.name[0]) ? info.name : "projectMM";
     std::snprintf(g_bleProv.serviceName, sizeof(g_bleProv.serviceName),
                   "%.20s-%02X%02X%02X", name, mac[3], mac[4], mac[5]);
-    std::snprintf(g_bleProv.pop, sizeof(g_bleProv.pop),
-                  "%02X%02X%02X", mac[3], mac[4], mac[5]);
 }
 
 void bleProvEventCb(void* /*user_data*/, network_prov_cb_event_t event, void* event_data) {
     switch (event) {
         case NETWORK_PROV_START:
-            setStatus("BLE: %s PoP %s", g_bleProv.serviceName, g_bleProv.pop);
-            ESP_LOGI(TAG, "BLE provisioning started, service=%s pop=%s",
-                     g_bleProv.serviceName, g_bleProv.pop);
+            setStatus("BLE: %s", g_bleProv.serviceName);
+            ESP_LOGI(TAG, "BLE provisioning started, service=%s", g_bleProv.serviceName);
             break;
         case NETWORK_PROV_WIFI_CRED_RECV: {
             auto* cfg = static_cast<wifi_sta_config_t*>(event_data);
@@ -111,12 +107,12 @@ void bleProvEventCb(void* /*user_data*/, network_prov_cb_event_t event, void* ev
                 setStatus("BLE provisioning stopped");
             }
             network_prov_mgr_deinit();
-            g_bleProv.started = false;
-            g_bleProv.initialized = false;
+            g_bleProv.started.store(false, std::memory_order_release);
+            g_bleProv.initialized.store(false, std::memory_order_release);
             break;
         case NETWORK_PROV_DEINIT:
-            g_bleProv.started = false;
-            g_bleProv.initialized = false;
+            g_bleProv.started.store(false, std::memory_order_release);
+            g_bleProv.initialized.store(false, std::memory_order_release);
             break;
         default:
             break;
@@ -130,7 +126,7 @@ bool bleProvisioningInit(const ImprovDeviceInfo& info,
                          char* passwordOut, size_t passwordOutLen,
                          std::atomic<bool>* ready,
                          char* statusBuf, size_t statusBufLen) {
-    if (g_bleProv.started) return true;
+    if (g_bleProv.started.load(std::memory_order_acquire)) return true;
     if (!ssidOut || ssidOutLen == 0 || !passwordOut || passwordOutLen == 0 || !ready) {
         return false;
     }
@@ -161,36 +157,35 @@ bool bleProvisioningInit(const ImprovDeviceInfo& info,
         ESP_LOGW(TAG, "network_prov_mgr_init failed: %s", esp_err_to_name(err));
         return false;
     }
-    g_bleProv.initialized = true;
+    g_bleProv.initialized.store(true, std::memory_order_release);
 
-    network_prov_security1_params_t* secParams = g_bleProv.pop;
     err = network_prov_mgr_start_provisioning(
-        NETWORK_PROV_SECURITY_1,
-        static_cast<const void*>(secParams),
+        NETWORK_PROV_SECURITY_0,
+        nullptr,
         g_bleProv.serviceName,
         nullptr);
     if (err != ESP_OK) {
         setStatus("BLE start failed: %s", esp_err_to_name(err));
         ESP_LOGW(TAG, "network_prov_mgr_start_provisioning failed: %s", esp_err_to_name(err));
         network_prov_mgr_deinit();
-        g_bleProv.initialized = false;
+        g_bleProv.initialized.store(false, std::memory_order_release);
         return false;
     }
 
-    g_bleProv.started = true;
-    setStatus("BLE: %s PoP %s", g_bleProv.serviceName, g_bleProv.pop);
+    g_bleProv.started.store(true, std::memory_order_release);
+    setStatus("BLE: %s", g_bleProv.serviceName);
     return true;
 }
 
 void bleProvisioningStop() {
-    if (!g_bleProv.initialized) return;
-    if (g_bleProv.started) {
+    if (!g_bleProv.initialized.load(std::memory_order_acquire)) return;
+    if (g_bleProv.started.load(std::memory_order_acquire)) {
         network_prov_mgr_stop_provisioning();
     } else {
         network_prov_mgr_deinit();
-        g_bleProv.initialized = false;
+        g_bleProv.initialized.store(false, std::memory_order_release);
     }
-    g_bleProv.started = false;
+    g_bleProv.started.store(false, std::memory_order_release);
 }
 
 #else

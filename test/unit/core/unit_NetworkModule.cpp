@@ -64,7 +64,21 @@ TEST_CASE("NetworkModule::setWifiCredentials accepts long SSID without crash") {
 }
 
 namespace {
-struct ClockGuard { ~ClockGuard() { mm::platform::setTestNowMs(0); } };
+struct ClockGuard {
+    ~ClockGuard() {
+        mm::platform::setTestNowMs(0);
+        mm::platform::setTestWifiApInitResult(false);
+    }
+};
+
+const char* modeControlValue(const mm::NetworkModule& net) {
+    for (uint8_t i = 0; i < net.controls().count(); i++) {
+        if (std::strcmp(net.controls()[i].name, "mode") == 0) {
+            return static_cast<const char*>(net.controls()[i].ptr);
+        }
+    }
+    return nullptr;
+}
 }
 
 // Web-written credentials drive the same STA apply path as Improv, after both fields settle.
@@ -112,6 +126,30 @@ TEST_CASE("NetworkModule connectWifi applies open-network credentials") {
     CHECK(scheduler.setControl("Network", "connectWifi", "{\"value\":1}") == mm::Scheduler::SetControlResult::Ok);
     CHECK_FALSE(net->wifiCredentialApplyPendingForTest());
     CHECK(std::strcmp(net->status(), "No network") == 0);
+    scheduler.release();
+}
+
+// Clearing SSID through the generic control path starts AP mode rather than only
+// changing status text.
+TEST_CASE("NetworkModule clearing SSID through web controls starts AP") {
+    ClockGuard clockGuard;
+    mm::platform::setTestNowMs(1000);
+    mm::platform::setTestWifiApInitResult(true);
+
+    mm::Scheduler scheduler;
+    auto* net = new mm::NetworkModule();
+    net->setName("Network");
+    net->setScheduler(&scheduler);
+    scheduler.addModule(net);
+    scheduler.setup();
+
+    CHECK(scheduler.setControl("Network", "ssid", "{\"value\":\"homeAP\"}") == mm::Scheduler::SetControlResult::Ok);
+    CHECK(scheduler.setControl("Network", "connectWifi", "{\"value\":1}") == mm::Scheduler::SetControlResult::Ok);
+    CHECK(scheduler.setControl("Network", "ssid", "{\"value\":\"\"}") == mm::Scheduler::SetControlResult::Ok);
+
+    CHECK_FALSE(net->wifiCredentialApplyPendingForTest());
+    REQUIRE(modeControlValue(*net) != nullptr);
+    CHECK(std::strcmp(modeControlValue(*net), "WiFi AP") == 0);
     scheduler.release();
 }
 
