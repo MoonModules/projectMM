@@ -98,8 +98,10 @@ static auto startTime = std::chrono::steady_clock::now();
 // Test-only override for millis(); 0 means "use the real clock". std::atomic so
 // a test can set it from one thread while a tested module reads from another.
 static std::atomic<uint32_t> testNowMs{0};
+static std::atomic<bool> testWifiApInitResult{false};
 
 void setTestNowMs(uint32_t ms) { testNowMs.store(ms, std::memory_order_relaxed); }
+void setTestWifiApInitResult(bool ok) { testWifiApInitResult.store(ok, std::memory_order_relaxed); }
 
 uint32_t millis() {
     uint32_t override_ = testNowMs.load(std::memory_order_relaxed);
@@ -571,11 +573,14 @@ bool wifiStaConnected() { return false; }
 void wifiStaGetIPv4(uint8_t out[4]) { out[0] = out[1] = out[2] = out[3] = 0; }
 void setHostname(const char* /*name*/) {}   // no DHCP client on desktop
 void wifiStaStop() {}
+uint8_t wifiStaDisconnectReason() { return 0; }
 int wifiStaRssi() { return 0; }
 void wifiStaBssid(uint8_t out[6]) { std::memset(out, 0, 6); }
 int wifiStaChannel() { return 0; }
 
-bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
+bool wifiApInit(const char* /*apName*/, const char* /*ip*/) {
+    return testWifiApInitResult.load(std::memory_order_relaxed);
+}
 bool wifiApConnected() { return false; }
 void wifiApStop() {}
 
@@ -761,6 +766,19 @@ bool improvProvisioningInit(const ImprovDeviceInfo& /*info*/,
     }
     return false;
 }
+
+bool bleProvisioningInit(const ImprovDeviceInfo& /*info*/,
+                         char* /*ssidOut*/, size_t /*ssidOutLen*/,
+                         char* /*passwordOut*/, size_t /*passwordOutLen*/,
+                         std::atomic<bool>* /*ready*/,
+                         char* statusBuf, size_t statusBufLen) {
+    if (statusBuf && statusBufLen > 0) {
+        std::snprintf(statusBuf, statusBufLen, "unsupported on desktop");
+    }
+    return false;
+}
+
+void bleProvisioningStop() {}
 
 void reboot() {
     // Desktop: the device is the host process. Exit cleanly; the OS user / supervisor

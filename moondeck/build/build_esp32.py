@@ -131,7 +131,8 @@ FIRMWARES: dict[str, dict] = {
     # replaces the old separate `esp32` (WiFi-only) + `esp32-eth-wifi` keys.
     "esp32": {
         "chip": "esp32",
-        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth"],
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth",
+                      "sdkconfig.defaults.ble-provisioning"],
         "eth_only": False,
         "description": "ESP32 classic — WiFi + Ethernet (RMII; per-board pins/PHY "
                        "from deviceModels.json, default LAN8720 pins).",
@@ -140,7 +141,7 @@ FIRMWARES: dict[str, dict] = {
     "esp32-16mb": {
         "chip": "esp32",
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.16mb",
-                      "sdkconfig.defaults.eth"],
+                      "sdkconfig.defaults.eth", "sdkconfig.defaults.ble-provisioning"],
         "eth_only": False,
         "description": "ESP32 classic with 16 MB flash — WiFi + Ethernet. Same silicon "
                        "as `esp32`; this variant uses the extra flash for bigger OTA "
@@ -159,7 +160,7 @@ FIRMWARES: dict[str, dict] = {
     "esp32s3-n16r8": {
         "chip": "esp32s3",
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32s3-n16r8",
-                      "sdkconfig.defaults.eth-spi"],
+                      "sdkconfig.defaults.eth-spi", "sdkconfig.defaults.ble-provisioning"],
         "eth_only": False,
         "description": "ESP32-S3 DevKitC-1 (N16R8: 16 MB flash, 8 MB octal PSRAM) — WiFi + "
                        "W5500 SPI Ethernet (external module, pins per board in deviceModels.json)",
@@ -168,7 +169,7 @@ FIRMWARES: dict[str, dict] = {
     "esp32s3-n8r8": {
         "chip": "esp32s3",
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32s3-n8r8",
-                      "sdkconfig.defaults.eth-spi"],
+                      "sdkconfig.defaults.eth-spi", "sdkconfig.defaults.ble-provisioning"],
         "eth_only": False,
         "description": "ESP32-S3 (N8R8: 8 MB flash, 8 MB octal PSRAM) — WiFi + W5500 SPI "
                        "Ethernet. Half the flash of N16R8; the N16R8 binary overruns an "
@@ -204,7 +205,8 @@ FIRMWARES: dict[str, dict] = {
     },
     "esp32s31": {
         "chip": "esp32s31",
-        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32s31"],
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32s31",
+                      "sdkconfig.defaults.ble-provisioning"],
         "eth_only": False,
         "description": "Espressif ESP32-S31 Function-CoreBoard-1 — WiFi 6 + 1 Gbps "
                        "Ethernet LED control (RISC-V, 16 MB flash, PSRAM). The on-chip "

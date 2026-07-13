@@ -43,13 +43,25 @@ Detail: [technical](moxygen/NetworkModule.md)
 
 ### Improv provisioning
 
-Serial/BLE Improv Wi-Fi provisioning — the web installer hands credentials to a fresh device over this protocol during the flash-and-connect flow.
+Serial Improv Wi-Fi provisioning — the web installer hands credentials to a fresh device over this protocol during the flash-and-connect flow.
 
 <img src="../../assets/core/ImprovProvisioningModule.png" width="300" alt="Improv provisioning module controls">
 
 - `provision_status` — read-only provisioning state.
 
 Detail: [technical](moxygen/ImprovProvisioningModule.md)
+
+<a id="ble-provisioning"></a>
+
+### BLE provisioning
+
+Espressif BLE Wi-Fi provisioning for phone-app onboarding. It advertises only while Network is in AP fallback, accepts credentials locally, and hands them to Network, which owns connection and persistence. The current Security0 transport has no proof-of-possession secret; restricting it to onboarding keeps configured devices from reopening unauthenticated provisioning after every reboot.
+
+- `ble_status` — read-only provisioning state and BLE service name.
+
+Detail: [technical](moxygen/BleProvisioningModule.md)
+
+[Tests](../../tests/unit-tests.md#bleprovisioningmodule)
 
 <a id="devices"></a>
 

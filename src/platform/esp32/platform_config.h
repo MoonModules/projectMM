@@ -269,6 +269,12 @@ constexpr bool hasOta = true;
 // (no serial peripheral) leaves it false.
 constexpr bool hasImprov = true;
 
+#if defined(CONFIG_MM_BLE_PROVISIONING) && defined(CONFIG_BT_ENABLED) && !defined(MM_NO_WIFI) && !defined(CONFIG_IDF_TARGET_ESP32P4)
+constexpr bool hasBleProvisioning = true;
+#else
+constexpr bool hasBleProvisioning = false;
+#endif
+
 } // namespace mm::platform
 
 // MM_MOONLIVE_HAS_HOST_JIT — always 0 on ESP32. The unit tests that consume this macro run on

@@ -84,6 +84,7 @@ namespace mm::platform {
 static std::atomic<uint32_t> testNowMs{0};
 
 void setTestNowMs(uint32_t ms) { testNowMs.store(ms, std::memory_order_relaxed); }
+void setTestWifiApInitResult(bool) {}
 
 uint32_t millis() {
     uint32_t override_ = testNowMs.load(std::memory_order_relaxed);
@@ -415,6 +416,7 @@ static bool wifiApActive_ = false;
 static esp_netif_t* staNetif_ = nullptr;
 static esp_netif_t* apNetif_ = nullptr;
 static bool wifiInitDone_ = false;
+static uint8_t wifiStaDisconnectReason_ = 0;
 #endif
 
 static void ensureNetifInit() {
@@ -763,7 +765,10 @@ static void wifiEventHandler(void* /*arg*/, esp_event_base_t base,
                              int32_t id, void* data) {
     if (base == WIFI_EVENT) {
         if (id == WIFI_EVENT_STA_DISCONNECTED) {
-            ESP_LOGI(NET_TAG, "WiFi STA disconnected");
+            auto* event = static_cast<wifi_event_sta_disconnected_t*>(data);
+            wifiStaDisconnectReason_ = event ? static_cast<uint8_t>(event->reason) : 0;
+            ESP_LOGI(NET_TAG, "WiFi STA disconnected, reason=%u",
+                     static_cast<unsigned>(wifiStaDisconnectReason_));
             wifiStaConnected_ = false;
         } else if (id == WIFI_EVENT_AP_STACONNECTED) {
             ESP_LOGI(NET_TAG, "WiFi AP client connected");
@@ -922,6 +927,10 @@ void wifiStaStop() {
     ESP_LOGI(NET_TAG, "WiFi STA stopped + deinit");
 }
 
+uint8_t wifiStaDisconnectReason() {
+    return wifiStaDisconnectReason_;
+}
+
 int wifiStaRssi() {
     if (!wifiStaConnected_) return 0;
     wifi_ap_record_t info{};
@@ -1050,6 +1059,7 @@ bool wifiStaInit(const char* /*ssid*/, const char* /*password*/) { return false;
 bool wifiStaConnected() { return false; }
 void wifiStaGetIPv4(uint8_t out[4])      { out[0] = out[1] = out[2] = out[3] = 0; }
 void wifiStaStop() {}
+uint8_t wifiStaDisconnectReason() { return 0; }
 int wifiStaRssi() { return 0; }
 void wifiStaBssid(uint8_t out[6]) { std::memset(out, 0, 6); }
 int wifiStaChannel() { return 0; }
@@ -1109,6 +1119,7 @@ bool mdnsInit(const char* deviceName) {
     // interface. Idempotent on the targets where the predef ETH already covers it:
     // mdns_register_netif returns ESP_ERR_INVALID_STATE ("already registered"), which we
     // treat as success, so this one path fixes the P4 without regressing S31/classic/S3.
+#ifndef MM_NO_ETH
     if (ethNetif_ && ethConnected()) {
         esp_err_t regErr = mdns_register_netif(ethNetif_);
         if (regErr == ESP_OK || regErr == ESP_ERR_INVALID_STATE) {
@@ -1119,6 +1130,7 @@ bool mdnsInit(const char* deviceName) {
             ESP_LOGW(NET_TAG, "mDNS eth netif register failed: %s", esp_err_to_name(regErr));
         }
     }
+#endif
 
     // FORCE A FRESH RE-ADVERTISE: remove any existing service record, then add it back.
     // A reconnect / interface switch / live rename re-runs this; just renaming the

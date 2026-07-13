@@ -104,6 +104,7 @@
 #include "core/IrService.h"
 #include "core/FileManagerModule.h"
 #include "core/FirmwareUpdateModule.h"
+#include "core/BleProvisioningModule.h"
 #include "core/ImprovProvisioningModule.h"
 #include "core/MqttModule.h"
 #include "core/DevicesModule.h"
@@ -113,7 +114,30 @@
 
 #include "core/NetworkModule.h"
 
+#include <atomic>
 #include <cstdio>
+
+namespace {
+
+bool startBleProvisioning(const char* deviceName, const char* chipModel, const char* version,
+                          char* ssidOut, size_t ssidOutLen,
+                          char* passwordOut, size_t passwordOutLen,
+                          std::atomic<bool>* ready,
+                          char* statusBuf, size_t statusBufLen) {
+    const mm::platform::ImprovDeviceInfo info{deviceName, chipModel, version};
+    return mm::platform::bleProvisioningInit(
+        info, ssidOut, ssidOutLen, passwordOut, passwordOutLen,
+        ready, statusBuf, statusBufLen);
+}
+
+[[maybe_unused]] const mm::BleProvisioningRuntime kBleProvisioningRuntime{
+    mm::platform::millis,
+    mm::platform::chipModel,
+    startBleProvisioning,
+    mm::platform::bleProvisioningStop,
+};
+
+} // namespace
 
 static void registerModuleTypes() {
     // Second argument is the module's spec page relative to docs/moonmodules/ —
@@ -223,6 +247,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::IrService>("IrService", "core/services.md#ir");
     mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/system.md#file-manager");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/system.md#firmware-update");
+    mm::ModuleFactory::registerType<mm::BleProvisioningModule>("BleProvisioningModule", "core/system.md#ble-provisioning");
     mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/system.md#improv-provisioning");
     mm::ModuleFactory::registerType<mm::MqttModule>("MqttModule", "core/system.md#mqtt");
     mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/system.md#devices");
@@ -362,6 +387,20 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
         improvModule->markWiredByCode();
     }
 
+    // BLE provisioning uses Espressif's standard phone-app protocol. It is a
+    // Network child for the same reason as Improv: the transport publishes
+    // credentials; NetworkModule owns persistence and connection state.
+    mm::BleProvisioningModule* bleProvisioningModule = nullptr;
+    if constexpr (mm::platform::hasBleProvisioning) {
+        bleProvisioningModule = static_cast<mm::BleProvisioningModule*>(
+            mm::ModuleFactory::create("BleProvisioningModule"));
+        bleProvisioningModule->setName("BLE Provision");
+        bleProvisioningModule->setSystemModule(systemModule);
+        bleProvisioningModule->setNetworkModule(networkModule);
+        bleProvisioningModule->setRuntime(&kBleProvisioningRuntime);
+        bleProvisioningModule->markWiredByCode();
+    }
+
     // MQTT service: a code-wired child of Network (like Improv), bridging the light controls to a
     // broker for Homebridge/Home-Assistant. Built on every networked target (it uses TCP, so it
     // works over WiFi or Ethernet); disabled until the user sets a broker. systemModule is injected
@@ -458,6 +497,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     scheduler.addModule(fileManagerModule);
     scheduler.addModule(firmwareUpdateModule);
     if (improvModule) networkModule->addChild(improvModule);
+    if (bleProvisioningModule) networkModule->addChild(bleProvisioningModule);
     if (mqttModule) networkModule->addChild(mqttModule);
     // Devices: discovers other devices on the LAN. Child of Network (discovery
     // depends on the network being up); wired-by-code so persistence preserves it

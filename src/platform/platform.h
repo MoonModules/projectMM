@@ -17,6 +17,7 @@ uint32_t micros();
 // in release so cases stay independent. ESP32 honours the override too so a
 // scenario-tests run on real hardware can still freeze time if needed.
 void setTestNowMs(uint32_t ms);
+void setTestWifiApInitResult(bool ok);
 
 void* alloc(size_t bytes);
 void free(void* ptr);
@@ -225,6 +226,7 @@ bool wifiStaInit(const char* ssid, const char* password);
 bool wifiStaConnected();
 void wifiStaGetIPv4(uint8_t out[4]);   // see ethGetIPv4 — same octet contract
 void wifiStaStop();
+uint8_t wifiStaDisconnectReason();      // last ESP-IDF STA disconnect reason, 0 = none/unknown
 
 // STA-side RSSI in dBm (negative, e.g. -58). Returns 0 when the STA isn't
 // associated or the call fails — NetworkModule only surfaces this control
@@ -380,6 +382,18 @@ bool improvProvisioningInit(const ImprovDeviceInfo& info,
                             std::atomic<bool>* txPowerReady = nullptr,
                             char* opOut = nullptr, size_t opOutLen = 0,
                             std::atomic<bool>* opReady = nullptr);
+
+// BLE WiFi provisioning through Espressif's standard network_provisioning
+// phone-app protocol. Same publication model as Improv: accepted credentials
+// are copied into caller-owned buffers and `ready` is release-stored by the
+// platform event handler; the module polls from the scheduler thread and hands
+// them to NetworkModule.
+bool bleProvisioningInit(const ImprovDeviceInfo& info,
+                         char* ssidOut, size_t ssidOutLen,
+                         char* passwordOut, size_t passwordOutLen,
+                         std::atomic<bool>* ready,
+                         char* statusBuf, size_t statusBufLen);
+void bleProvisioningStop();
 
 class UdpSocket {
 public:
