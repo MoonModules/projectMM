@@ -114,7 +114,30 @@
 
 #include "core/NetworkModule.h"
 
+#include <atomic>
 #include <cstdio>
+
+namespace {
+
+bool startBleProvisioning(const char* deviceName, const char* chipModel, const char* version,
+                          char* ssidOut, size_t ssidOutLen,
+                          char* passwordOut, size_t passwordOutLen,
+                          std::atomic<bool>* ready,
+                          char* statusBuf, size_t statusBufLen) {
+    const mm::platform::ImprovDeviceInfo info{deviceName, chipModel, version};
+    return mm::platform::bleProvisioningInit(
+        info, ssidOut, ssidOutLen, passwordOut, passwordOutLen,
+        ready, statusBuf, statusBufLen);
+}
+
+[[maybe_unused]] const mm::BleProvisioningRuntime kBleProvisioningRuntime{
+    mm::platform::millis,
+    mm::platform::chipModel,
+    startBleProvisioning,
+    mm::platform::bleProvisioningStop,
+};
+
+} // namespace
 
 static void registerModuleTypes() {
     // Second argument is the module's spec page relative to docs/moonmodules/ —
@@ -374,6 +397,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
         bleProvisioningModule->setName("BLE Provision");
         bleProvisioningModule->setSystemModule(systemModule);
         bleProvisioningModule->setNetworkModule(networkModule);
+        bleProvisioningModule->setRuntime(&kBleProvisioningRuntime);
         bleProvisioningModule->markWiredByCode();
     }
 

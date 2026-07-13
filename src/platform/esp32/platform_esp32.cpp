@@ -1119,6 +1119,7 @@ bool mdnsInit(const char* deviceName) {
     // interface. Idempotent on the targets where the predef ETH already covers it:
     // mdns_register_netif returns ESP_ERR_INVALID_STATE ("already registered"), which we
     // treat as success, so this one path fixes the P4 without regressing S31/classic/S3.
+#ifndef MM_NO_ETH
     if (ethNetif_ && ethConnected()) {
         esp_err_t regErr = mdns_register_netif(ethNetif_);
         if (regErr == ESP_OK || regErr == ESP_ERR_INVALID_STATE) {
@@ -1129,6 +1130,7 @@ bool mdnsInit(const char* deviceName) {
             ESP_LOGW(NET_TAG, "mDNS eth netif register failed: %s", esp_err_to_name(regErr));
         }
     }
+#endif
 
     // FORCE A FRESH RE-ADVERTISE: remove any existing service record, then add it back.
     // A reconnect / interface switch / live rename re-runs this; just renaming the

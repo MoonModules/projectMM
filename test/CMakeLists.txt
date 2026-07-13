@@ -41,6 +41,7 @@ add_executable(mm_tests
     unit/core/unit_MoonModule_lifecycle.cpp
     unit/core/unit_MoonModule_movechild.cpp
     unit/core/unit_MoonModule_replacechild.cpp
+    unit/core/unit_BleProvisioningModule.cpp
     unit/core/unit_NetworkModule.cpp
     unit/core/unit_NetworkModule_ethernet.cpp
     unit/core/unit_Sort.cpp

@@ -789,9 +789,11 @@ public:
             if (state_ == State::ConnectedSta) platform::wifiStaGetIPv4(out);
         }
     }
+    bool provisioningMode() const { return state_ == State::AP; }
     // Test-only accessors for the web-credential delayed-apply path.
     bool wifiCredentialApplyPendingForTest() const { return wifiCredentialApplyPending_; }
     static constexpr uint32_t wifiCredentialApplyDelayMsForTest() { return kWifiCredentialApplyDelayMs; }
+    void setProvisioningModeForTest(bool active) { state_ = active ? State::AP : State::Idle; }
 
 private:
     /// The device's network name is owned solely by SystemModule; NetworkModule only
@@ -865,7 +867,7 @@ private:
                 std::snprintf(statusBuf_, sizeof(statusBuf_), "WiFi STA: %s", ssid_);
                 setStatus(statusBuf_, Severity::Status);
                 rebuildControls();
-                if (scheduler_) scheduler_->buildState();
+                if (scheduler_) scheduler_->prepareTree();
             } else {
                 startAP();
             }
@@ -909,7 +911,7 @@ private:
                               static_cast<unsigned>(kStaReconnectAttemptsBeforeAp));
                 setStatus(statusBuf_, Severity::Warning);
                 rebuildControls();
-                if (scheduler_) scheduler_->buildState();
+                if (scheduler_) scheduler_->prepareTree();
             } else {
                 std::printf("NetworkModule: WiFi reconnect init failed, starting AP\n");
                 startAP();
