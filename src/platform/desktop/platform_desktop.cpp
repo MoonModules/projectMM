@@ -410,6 +410,8 @@ const char* resetReason() {
     return "OK";
 }
 
+void markOtaAppValid() {}
+
 size_t firmwareSize() { return 0; }
 size_t firmwarePartition() { return 0; }
 size_t flashChipSize() { return 0; }
@@ -671,13 +673,24 @@ void mdnsShutdown() {}
 // so this stub exists for compile coverage only.
 bool http_fetch_to_ota(const char* /*url*/,
                        char* statusBuf, size_t statusBufLen,
-                       uint32_t* bytesReadOut, uint32_t* bytesTotalOut) {
+                       uint32_t* bytesReadOut, uint32_t* bytesTotalOut,
+                       std::atomic<bool>* inFlightFlag) {
     if (statusBuf && statusBufLen > 0) {
         std::snprintf(statusBuf, statusBufLen, "unsupported on desktop");
     }
     if (bytesReadOut) *bytesReadOut = 0;
     if (bytesTotalOut) *bytesTotalOut = 0;
+    if (inFlightFlag) inFlightFlag->store(false, std::memory_order_release);
     return false;
+}
+
+bool http_fetch_to_ota_checked(const char* url, const char* /*expectedSha256*/,
+                               uint32_t /*expectedSize*/,
+                               char* statusBuf, size_t statusBufLen,
+                               uint32_t* bytesReadOut, uint32_t* bytesTotalOut,
+                               std::atomic<bool>* inFlightFlag) {
+    return http_fetch_to_ota(url, statusBuf, statusBufLen, bytesReadOut, bytesTotalOut,
+                             inFlightFlag);
 }
 
 bool otaWriteStream(FsWriteSrc /*src*/, void* /*user*/, size_t /*contentLen*/,
@@ -806,6 +819,11 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
         else body[0] = '\0';
     }
     return status;
+}
+
+int httpGet(const char* /*url*/, char* body, size_t bodyLen, uint32_t /*timeoutMs*/) {
+    if (body && bodyLen) body[0] = 0;
+    return 0;
 }
 
 

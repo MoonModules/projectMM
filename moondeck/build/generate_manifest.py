@@ -31,6 +31,7 @@ Inputs:
 """
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -96,6 +97,18 @@ def parts_from_flasher_args(flasher_args: dict, prefix: str, size: str) -> list[
     return parts
 
 
+def add_asset_metadata(parts: list[dict], asset_dir: Path) -> None:
+    """Attach size/md5/sha256 when the referenced .bin exists locally."""
+    for p in parts:
+        local = asset_dir / Path(p["path"]).name
+        if not local.exists():
+            continue
+        data = local.read_bytes()
+        p["size"] = len(data)
+        p["md5"] = hashlib.md5(data).hexdigest()
+        p["sha256"] = hashlib.sha256(data).hexdigest()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--firmware", required=True, choices=sorted(CHIP_FAMILIES))
@@ -103,6 +116,8 @@ def main() -> int:
     parser.add_argument("--release-url", required=True,
                         help="Base URL where the .bin assets live (no trailing slash).")
     parser.add_argument("--flasher-args", required=True, type=Path)
+    parser.add_argument("--asset-dir", type=Path,
+                        help="Directory containing staged .bin assets; defaults to --out's directory.")
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args()
 
@@ -130,6 +145,9 @@ def main() -> int:
     if not parts:
         print(f"generate_manifest: no recognised parts in {args.flasher_args}")
         return 1
+    add_asset_metadata(parts, args.asset_dir or args.out.parent)
+    ota_part = next((p for p in parts if p["offset"] == 0x10000
+                     and Path(p["path"]).name == f"{prefix}.bin"), None)
 
     # ESP Web Tools resolves the per-part `path` relative to the manifest URL,
     # so absolute URLs are the simplest robust shape — the manifest stays
@@ -152,9 +170,19 @@ def main() -> int:
             }
         ],
     }
+    if ota_part:
+        manifest["ota"] = {
+            "path": ota_part["path"],
+            "offset": ota_part["offset"],
+            "version": args.version,
+            "chipFamily": CHIP_FAMILIES[args.firmware],
+        }
+        for key in ("size", "md5", "sha256"):
+            if key in ota_part:
+                manifest["ota"][key] = ota_part[key]
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(manifest, indent=2) + "\n")
+    args.out.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"generate_manifest: wrote {args.out} ({len(parts)} parts, "
           f"{CHIP_FAMILIES[args.firmware]})")
     return 0

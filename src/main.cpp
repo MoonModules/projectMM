@@ -105,6 +105,7 @@
 #include "core/IrService.h"
 #include "core/FileManagerModule.h"
 #include "core/FirmwareUpdateModule.h"
+#include "core/AutoUpdateModule.h"
 #include "core/ImprovProvisioningModule.h"
 #include "core/MqttModule.h"
 #include "core/DevicesModule.h"
@@ -115,6 +116,17 @@
 #include "core/NetworkModule.h"
 
 #include <cstdio>
+
+namespace {
+const mm::AutoUpdateRuntime kAutoUpdateRuntime{
+    mm::platform::millis,
+    mm::platform::networkReady,
+    mm::platform::httpGet,
+    mm::platform::chipModel,
+    mm::platform::firmwarePartition,
+    mm::platform::http_fetch_to_ota_checked,
+};
+}
 
 static void registerModuleTypes() {
     // Second argument is the module's spec page relative to docs/moonmodules/ —
@@ -227,6 +239,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::IrService>("IrService", "core/services.md#ir");
     mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/system.md#file-manager");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/system.md#firmware-update");
+    mm::ModuleFactory::registerType<mm::AutoUpdateModule>("AutoUpdateModule", "core/system.md#auto-update");
     mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/system.md#improv-provisioning");
     mm::ModuleFactory::registerType<mm::MqttModule>("MqttModule", "core/system.md#mqtt");
     mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/system.md#devices");
@@ -332,6 +345,11 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     auto* firmwareUpdateModule = static_cast<mm::FirmwareUpdateModule*>(
         mm::ModuleFactory::create("FirmwareUpdateModule"));
     firmwareUpdateModule->setName("Firmware");
+
+    auto* autoUpdateModule = static_cast<mm::AutoUpdateModule*>(
+        mm::ModuleFactory::create("AutoUpdateModule"));
+    autoUpdateModule->setName("Auto Update");
+    autoUpdateModule->setRuntime(&kAutoUpdateRuntime);
 
     // Network (platform stubs return false on desktop — module is a no-op)
     auto* networkModule = static_cast<mm::NetworkModule*>(mm::ModuleFactory::create("NetworkModule"));
@@ -470,6 +488,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     scheduler.addModule(systemModule);
     scheduler.addModule(fileManagerModule);
     scheduler.addModule(firmwareUpdateModule);
+    scheduler.addModule(autoUpdateModule);
     if (improvModule) networkModule->addChild(improvModule);
     if (mqttModule) networkModule->addChild(mqttModule);
     // Devices: discovers other devices on the LAN. Child of Network (discovery
@@ -491,6 +510,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     scheduler.addModule(httpServer);
 
     scheduler.setup();
+    mm::platform::markOtaAppValid();
 
     uint32_t lights = layouts->totalLightCount();
     uint32_t bufBytes = lights * 3;

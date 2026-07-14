@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/MoonModule.h"
+#include "core/OtaUpdateState.h"
 #include "core/build_info.h"   // kVersion / kRelease / kBuildDate / kFirmwareName
 #include "platform/platform.h" // firmwareSize / firmwarePartition
 
@@ -10,35 +11,8 @@
 
 namespace mm {
 
-// File-scope globals shared with the OTA route + the platform-layer task.
-// Declared `inline` (C++17) so multiple translation units that include the
-// header still share one storage instance (the header is included from
-// HttpServerModule.cpp via the route, and from the module instantiation
-// site in main.cpp — both must see the same g_otaStatus). An anonymous
-// namespace would do the opposite — per-TU storage — which is why we
-// use `inline` here.
-//
-// g_otaBytesRead / g_otaBytesTotal are the live byte counters the task writes.
-// The UI renders them as "X KB / Y KB" via the existing progress control. The
-// total starts at 0 (unknown) and flips to the real image size as soon as
-// esp_https_ota_get_image_size returns it; the module's tick1s() re-binds
-// the progress control when that transition happens so the static total
-// captured by addProgress reflects reality (addProgress takes total by value,
-// not pointer — re-bind is the cheaper alternative to widening that contract).
-inline char     g_otaStatus[64]     = "idle";
-inline uint32_t g_otaBytesRead      = 0;
-inline uint32_t g_otaBytesTotal     = 0;
-
-// True while an OTA is running (as opposed to idle / a terminal "success"/"failed:…").
-// The URL and upload flash paths both gate their 409 "already in progress" guard on this,
-// so the set of in-flight states lives in one place instead of a duplicated strcmp chain.
-inline bool otaInFlight() {
-    return std::strcmp(g_otaStatus, "starting")    == 0 ||
-           std::strcmp(g_otaStatus, "downloading") == 0 ||
-           std::strcmp(g_otaStatus, "flashing")    == 0 ||
-           std::strcmp(g_otaStatus, "rebooting")   == 0;
-}
-
+// Shared OTA status storage lives in OtaUpdateState.h so trigger modules can use
+// the lifecycle gate without depending on this UI module.
 /// A thin status surface for OTA flashing — surfaces flash progress as live
 /// read-only controls plus the per-module status banner
 ///
@@ -122,6 +96,9 @@ public:
         std::snprintf(versionStr_, sizeof(versionStr_), "%s", kVersion);
         std::snprintf(buildStr_, sizeof(buildStr_), "%s", kBuildDate);
         std::snprintf(firmwareStr_, sizeof(firmwareStr_), "%s", kFirmwareName);
+        std::snprintf(productStr_, sizeof(productStr_), "%s", kProductName);
+        std::snprintf(brandStr_, sizeof(brandStr_), "%s", kBrandName);
+        std::snprintf(updateManifestStr_, sizeof(updateManifestStr_), "%s", kAutoUpdateManifestUrl);
     }
 
     void defineControls() override {
@@ -130,6 +107,9 @@ public:
         controls_.addReadOnly("version", versionStr_, sizeof(versionStr_));
         controls_.addReadOnly("build", buildStr_, sizeof(buildStr_));
         controls_.addReadOnly("firmware", firmwareStr_, sizeof(firmwareStr_));
+        controls_.addReadOnly("product", productStr_, sizeof(productStr_));
+        controls_.addReadOnly("brand", brandStr_, sizeof(brandStr_));
+        if (updateManifestStr_[0]) controls_.addReadOnly("updateManifest", updateManifestStr_, sizeof(updateManifestStr_));
         firmwareSizeVal_ = static_cast<uint32_t>(platform::firmwareSize());
         totalFlashVal_ = static_cast<uint32_t>(platform::firmwarePartition());
         if (totalFlashVal_ > 0) {
@@ -191,6 +171,9 @@ private:
     char     versionStr_[32] = {};   ///< pure semver — such as "2.0.0" or "2.1.0-dev.7"
     char     buildStr_[24]   = {};
     char     firmwareStr_[24] = {};  ///< build variant name, such as "esp32s3-n16r8"
+    char     productStr_[24] = {};
+    char     brandStr_[24] = {};
+    char     updateManifestStr_[96] = {};
     uint32_t firmwareSizeVal_ = 0;   ///< bytes used in the app partition
     uint32_t totalFlashVal_   = 0;   ///< app partition size
 };
