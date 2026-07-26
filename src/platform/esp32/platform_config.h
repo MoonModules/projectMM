@@ -141,9 +141,9 @@ constexpr bool hasI2sMic = false;
 
 
 // Some boards put the mic behind an I2S audio codec configured over I2C (vs a
-// direct I2S MEMS mic). The codec type + its control pins are a fixed board
-// property, so they live here per-target (like ethConfigDefault), not as
-// AudioService controls — the I2S data pins (ws/sd/sck) stay user controls.
+// direct I2S MEMS mic). The codec type + its control pins are fixed by the
+// firmware's hardware target, so they live here (like ethConfigDefault), not as
+// AudioService controls. The I2S data pins (ws/sd/sck) stay user controls.
 // `audioCodecInit` (platform.h) consumes these; CodecType is neutral so a second
 // codec is just another enum value + a backend branch.
 enum class CodecType : uint8_t { None = 0, Es8311 = 1 };
@@ -151,16 +151,17 @@ struct AudioCodecPins {
     uint16_t i2cSda;
     uint16_t i2cScl;
     uint16_t mclk;      // I2S master clock the codec needs (separate from BCLK/WS)
-    uint8_t  i2cAddr;   // codec I2C address (ES8311 default 0x18)
+    uint8_t  i2cAddr;   // 7-bit codec I2C address (ES8311 default 0x18)
 };
 
-// Default None; the ESP32-S31 Function-CoreBoard has an ES8311 (addr 0x18, I2C
-// SDA on GPIO51 / SCL on GPIO50, MCLK on GPIO52 — bench-confirmed by I2C scan; the
-// schematic net labels read SDA/SCL the other way round. See
-// docs/reference/esp32-s31-coreboard.md.).
+// The ESP32-S31 Function-CoreBoard and the dedicated JC-ESP32P4-M3-DEV firmware
+// carry an ES8311. Other firmware variants keep the direct-mic/no-codec path.
 #ifdef CONFIG_IDF_TARGET_ESP32S31
 constexpr CodecType audioCodecType = CodecType::Es8311;
 constexpr AudioCodecPins audioCodecPins = { /*sda*/ 51, /*scl*/ 50, /*mclk*/ 52, /*addr*/ 0x18 };
+#elif defined(CONFIG_MM_JC_P4_M3)
+constexpr CodecType audioCodecType = CodecType::Es8311;
+constexpr AudioCodecPins audioCodecPins = { /*sda*/ 7, /*scl*/ 8, /*mclk*/ 13, /*addr*/ 0x18 };
 #else
 constexpr CodecType audioCodecType = CodecType::None;
 constexpr AudioCodecPins audioCodecPins = { 0, 0, 0, 0 };

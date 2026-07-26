@@ -1,0 +1,43 @@
+name: Build JC ESP32-P4 M3 firmware
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/jc-esp32p4-m3-audio
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.1-beta1
+          target: esp32p4
+          path: esp32
+          command: python ../moondeck/build/build_esp32.py --firmware esp32p4-jc-m3-eth --release jc-m3-test
+
+      - name: Stage flash package
+        run: |
+          set -euo pipefail
+          B=build/esp32-esp32p4-jc-m3-eth
+          mkdir -p dist
+          cp "$B/projectMM.bin" dist/
+          cp "$B/bootloader/bootloader.bin" dist/
+          cp "$B/partition_table/partition-table.bin" dist/
+          cp "$B/ota_data_initial.bin" dist/
+          cp "$B/flasher_args.json" dist/
+          cp "$B/flash_args" dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: projectMM-esp32p4-jc-m3-eth
+          path: dist/

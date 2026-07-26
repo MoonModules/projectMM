@@ -193,6 +193,15 @@ FIRMWARES: dict[str, dict] = {
                        "WiFi-less fallback; esp32p4-eth-wifi adds the C6 radio.",
         "ships": True,
     },
+    "esp32p4-jc-m3-eth": {
+        "chip": "esp32p4",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32p4-eth",
+                      "sdkconfig.defaults.esp32p4-jc-m3"],
+        "eth_only": True,
+        "description": "JC-ESP32P4-M3-DEV with Ethernet + on-board ES8311 microphone "
+                       "(I2C 0x18, dedicated codec configuration).",
+        "ships": True,
+    },
     "esp32p4-eth-wifi": {
         "chip": "esp32p4",
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.esp32p4-eth",
