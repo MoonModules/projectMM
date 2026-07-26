@@ -32,10 +32,10 @@ jobs:
         run: |
           set -euo pipefail
           B=build/esp32-esp32p4-jc-m3-eth
-          mkdir -p dist
+          mkdir -p dist/bootloader dist/partition_table
           cp "$B/projectMM.bin" dist/
-          cp "$B/bootloader/bootloader.bin" dist/
-          cp "$B/partition_table/partition-table.bin" dist/
+          cp "$B/bootloader/bootloader.bin" dist/bootloader/
+          cp "$B/partition_table/partition-table.bin" dist/partition_table/
           cp "$B/ota_data_initial.bin" dist/
           cp "$B/flasher_args.json" dist/
           cp "$B/flash_args" dist/
