@@ -42,6 +42,9 @@ def test_jc_m3_codec_dependency_is_kconfig_selected():
     assert "i2cCtrlCfg.addr = pins.i2cAddr << 1;" in codec_source
     assert "es8311Cfg.digital_mic = false;" in codec_source
     assert "fs.bits_per_sample = 32;" in codec_source
+    assert "st->codec->set_fs(st->codec, &fs)" in codec_source
+    assert "st->codec->enable(st->codec, true)" in codec_source
+    assert "esp_codec_dev_new(" not in codec_source
 
 
 def test_jc_m3_device_model_applies_the_schematic_audio_pins():

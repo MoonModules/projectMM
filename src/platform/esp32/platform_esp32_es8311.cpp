@@ -40,13 +40,12 @@ namespace {
 
 const char* ES_TAG = "mm_es8311";
 
-// The codec device + the interfaces and I2C bus it sits on, kept alive between
-// init and deinit (the codec keeps streaming once opened; the I2S read drains it).
+// The codec interface + its control interface and I2C bus, kept alive between
+// init and deinit (the codec keeps streaming once enabled; the I2S read drains it).
 struct CodecState {
     i2c_master_bus_handle_t   i2cBus  = nullptr;
     const audio_codec_ctrl_if_t* ctrl = nullptr;
     const audio_codec_if_t*   codec   = nullptr;
-    esp_codec_dev_handle_t    dev     = nullptr;
 };
 
 CodecState* g_codec = nullptr;
@@ -54,7 +53,6 @@ CodecState* g_codec = nullptr;
 // Tear down a partially- or fully-built CodecState in reverse order.
 void deinitState(CodecState* st) {
     if (!st) return;
-    if (st->dev) { esp_codec_dev_close(st->dev); esp_codec_dev_delete(st->dev); }
     if (st->codec) audio_codec_delete_codec_if(st->codec);
     if (st->ctrl) audio_codec_delete_ctrl_if(st->ctrl);
     if (st->i2cBus) i2c_del_master_bus(st->i2cBus);
@@ -111,12 +109,6 @@ bool audioCodecInit(CodecType type, const AudioCodecPins& pins, uint32_t sampleR
     st->codec = es8311_codec_new(&es8311Cfg);
     if (!st->codec) { ESP_LOGE(ES_TAG, "es8311_codec_new failed"); deinitState(st); return false; }
 
-    esp_codec_dev_cfg_t devCfg = {};
-    devCfg.codec_if = st->codec;
-    devCfg.dev_type = ESP_CODEC_DEV_TYPE_IN;              // input (mic) device
-    st->dev = esp_codec_dev_new(&devCfg);
-    if (!st->dev) { ESP_LOGE(ES_TAG, "esp_codec_dev_new failed"); deinitState(st); return false; }
-
     esp_codec_dev_sample_info_t fs = {};
     fs.sample_rate = sampleRate;
     fs.channel = 1;
@@ -125,12 +117,21 @@ bool audioCodecInit(CodecType type, const AudioCodecPins& pins, uint32_t sampleR
     // AudioService analyzes; a 16-bit codec word in that slot loses precision
     // and presents the sample at a different significance.
     fs.bits_per_sample = 32;
-    if (esp_codec_dev_open(st->dev, &fs) != ESP_CODEC_DEV_OK) {
-        ESP_LOGE(ES_TAG, "esp_codec_dev_open failed");
+    // ProjectMM owns the I2S channel in platform_esp32_i2s.cpp, so configure the
+    // codec interface directly. esp_codec_dev_new is the higher-level adapter
+    // for callers that also give the component a data_if; it rejects a null
+    // data_if and is therefore the wrong layer for this split-ownership design.
+    if (!st->codec->set_fs || st->codec->set_fs(st->codec, &fs) != ESP_CODEC_DEV_OK) {
+        ESP_LOGE(ES_TAG, "es8311 sample format failed");
         deinitState(st);
         return false;
     }
-    esp_codec_dev_set_in_gain(st->dev, 30.0f);            // mic gain (dB), a reasonable default
+    if (!st->codec->enable || st->codec->enable(st->codec, true) != ESP_CODEC_DEV_OK) {
+        ESP_LOGE(ES_TAG, "es8311 enable failed");
+        deinitState(st);
+        return false;
+    }
+    if (st->codec->set_mic_gain) st->codec->set_mic_gain(st->codec, 30.0f);
 
     g_codec = st;
     return true;
