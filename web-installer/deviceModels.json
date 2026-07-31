@@ -1019,6 +1019,66 @@
     ]
   },
   {
+    "name": "JC-ESP32P4-M3-DEV",
+    "chip": "ESP32-P4",
+    "firmwares": [
+      "esp32p4-jc-m3-eth"
+    ],
+    "image": "assets/deviceModels/jc-esp32p4-m3-dev.jpg",
+    "url": "https://github.com/p1ngb4ck/unofficial_guition_esp32p4_repo/tree/main/JC-ESP32P4-M3-Dev",
+    "supported": [
+      "Audio",
+      "Ethernet"
+    ],
+    "planned": [
+      "Speaker",
+      "Display",
+      "Touchscreen",
+      "Camera",
+      "MicroSD"
+    ],
+    "modules": [
+      {
+        "type": "System",
+        "id": "System",
+        "controls": {
+          "deviceModel": "JC-ESP32P4-M3-DEV"
+        }
+      },
+      {
+        "type": "AudioService",
+        "id": "Audio",
+        "parent_id": "Services",
+        "controls": {
+          "sckPin": 12,
+          "wsPin": 10,
+          "sdPin": 48
+        }
+      },
+      {
+        "type": "NetworkModule",
+        "id": "Network",
+        "controls": {
+          "ethType": 2,
+          "ethPhyAddr": 1,
+          "ethMdcGpio": 31,
+          "ethMdioGpio": 52,
+          "ethRstGpio": 51,
+          "ethClockGpio": 50,
+          "ethClockExtIn": true
+        }
+      },
+      {
+        "type": "I2cScanModule",
+        "id": "I2cScan",
+        "controls": {
+          "sda": 7,
+          "scl": 8
+        }
+      }
+    ]
+  },
+  {
     "name": "MHC-WLED ESP32-P4 shield",
     "chip": "ESP32-P4",
     "firmwares": [

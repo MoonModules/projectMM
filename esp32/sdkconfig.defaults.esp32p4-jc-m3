@@ -1,0 +1,6 @@
+# JC-ESP32P4-M3-DEV board features layered onto the common P4 configuration.
+#
+# The board has an ES8311 codec at I2C address 0x18. The Kconfig symbol selects
+# its fixed control/MCLK wiring in platform_config.h and includes Espressif's
+# esp_codec_dev managed component through main/idf_component.yml.
+CONFIG_MM_JC_P4_M3=y
