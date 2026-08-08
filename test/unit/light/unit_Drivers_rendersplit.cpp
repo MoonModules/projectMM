@@ -11,7 +11,7 @@
 #include "doctest.h"
 #include "light/drivers/Drivers.h"
 #include "light/drivers/ParallelLedDriver.h"
-#include "light/layers/Layers.h"
+#include "light/layers/Effects.h"
 #include "light/layers/Layer.h"
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
@@ -86,12 +86,12 @@ public:
     uint16_t touched = 0;
 };
 
-// Two enabled Layers over a shared Layouts/Grid → needOutput is true (≥2 layers composite), so a real
+// Two enabled Effects over a shared Layouts/Grid → needOutput is true (≥2 layers composite), so a real
 // outputBuffer_ exists for the driver to read across the core boundary.
 struct Rig {
     mm::Layouts layouts;
     mm::GridLayout grid;
-    mm::Layers layers;
+    mm::Effects layers;
     mm::Layer layerA;
     mm::Layer layerB;
     mm::Drivers drivers;
@@ -103,7 +103,7 @@ struct Rig {
         layers.addChild(&layerA);
         layers.addChild(&layerB);
         layers.setLayouts(&layouts);   // propagates to the child layers
-        drivers.setLayers(&layers);
+        drivers.setEffects(&layers);
         layers.applyState();           // sizes the layer buffers
     }
 };
@@ -133,7 +133,7 @@ struct HookGuard {
 TEST_CASE("render-split: a single-layer multicore config stays engaged across many ticks (no flap)") {
     mm::Layouts layouts;
     mm::GridLayout grid;
-    mm::Layers layers;
+    mm::Effects layers;
     mm::Layer layer;
     mm::Drivers drivers;
     grid.width = 64; grid.height = 1; grid.depth = 1;
@@ -141,7 +141,7 @@ TEST_CASE("render-split: a single-layer multicore config stays engaged across ma
     layer.setChannelsPerLight(3);
     layers.addChild(&layer);          // ONE layer (the bench config), not two
     layers.setLayouts(&layouts);
-    drivers.setLayers(&layers);
+    drivers.setEffects(&layers);
     layers.applyState();
 
     MockDriver d;

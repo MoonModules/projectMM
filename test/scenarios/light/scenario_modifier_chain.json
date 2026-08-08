@@ -35,8 +35,8 @@
     {
       "name": "fix-layers",
       "op": "add_module",
-      "id": "Layers",
-      "type": "Layers",
+      "id": "Effects",
+      "type": "Effects",
       "props": {
         "layouts": "Layouts"
       }
@@ -46,7 +46,7 @@
       "op": "add_module",
       "id": "Layer",
       "type": "Layer",
-      "parent_id": "Layers",
+      "parent_id": "Effects",
       "props": {
         "channelsPerLight": 3
       }
@@ -82,7 +82,7 @@
       "id": "Drivers",
       "type": "Drivers",
       "props": {
-        "layers": "Layers"
+        "effects": "Effects"
       }
     },
     {

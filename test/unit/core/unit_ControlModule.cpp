@@ -14,7 +14,7 @@
 #include "light/effects/NoiseEffect.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/layers/Layer.h"
-#include "light/layers/Layers.h"
+#include "light/layers/Effects.h"
 #include "light/drivers/Drivers.h"
 #include "platform/platform.h"
 
@@ -25,7 +25,7 @@
 
 namespace {
 
-// A device with Layers and a ControlModule, built the way production builds one: through the
+// A device with Effects and a ControlModule, built the way production builds one: through the
 // factory, with an isolated filesystem so the assertions do not depend on what is on this machine.
 struct Device {
     mm::Scheduler scheduler;
@@ -43,7 +43,7 @@ struct Device {
         std::filesystem::remove_all(root_);
         mm::platform::fsSetRoot(root_);
 
-        mm::ModuleFactory::registerType<mm::Layers>("Layers");
+        mm::ModuleFactory::registerType<mm::Effects>("Effects");
         mm::ModuleFactory::registerType<mm::Layer>("Layer");
         mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect");
         mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
@@ -53,7 +53,7 @@ struct Device {
         fs = new mm::FilesystemModule();
         fs->setTypeName("FilesystemModule");
         fs->setScheduler(&scheduler);
-        layers = mm::ModuleFactory::create("Layers");
+        layers = mm::ModuleFactory::create("Effects");
         drivers = mm::ModuleFactory::create("Drivers");
         control = static_cast<mm::ControlModule*>(mm::ModuleFactory::create("ControlModule"));
         scheduler.addModule(fs);
@@ -86,7 +86,7 @@ struct Device {
         FAIL("no control named ", controlName);
     }
 
-    /// What the next save captures: exactly one of Layouts / Layers / Drivers / Services.
+    /// What the next save captures: exactly one of Layouts / Effects / Drivers / Services.
     void setCapture(const char* typeName) {
         auto& cs = control->controls();
         for (uint8_t i = 0; i < cs.count(); i++) {
@@ -211,9 +211,9 @@ TEST_CASE("ControlModule refuses to apply a preset carrying several roles") {
     d.add(layer, "NoiseEffect");
 
     const char* body =
-        "{\"captures\":\"Layouts,Layers\","
-        "\"Layers.enabled\":true,"
-        "\"Layers.0.type\":\"Layer\",\"Layers.0.enabled\":true}";
+        "{\"captures\":\"Layouts,Effects\","
+        "\"Effects.enabled\":true,"
+        "\"Effects.0.type\":\"Layer\",\"Effects.0.enabled\":true}";
     mm::platform::fsMkdir(mm::ControlModule::kPresetDir);
     char path[160];
     std::snprintf(path, sizeof(path), "%s/legacy.json", mm::ControlModule::kPresetDir);
@@ -237,9 +237,9 @@ TEST_CASE("ControlModule refuses a preset whose subtree this build does not have
     // reason rather than report success for a preset that changed nothing.
     const std::string body =
         "{\"captures\":\"NoSuchTopLevelXyz\","
-        "\"Layers.enabled\":true,"
-        "\"Layers.0.type\":\"Layer\",\"Layers.0.enabled\":true,"
-        "\"Layers.0.0.type\":\"NoiseEffect\",\"Layers.0.0.enabled\":true}";
+        "\"Effects.enabled\":true,"
+        "\"Effects.0.type\":\"Layer\",\"Effects.0.enabled\":true,"
+        "\"Effects.0.0.type\":\"NoiseEffect\",\"Effects.0.0.enabled\":true}";
     mm::platform::fsMkdir(mm::ControlModule::kPresetDir);
     char path[128];
     std::snprintf(path, sizeof(path), "%s/mixed.json", mm::ControlModule::kPresetDir);
@@ -261,7 +261,7 @@ TEST_CASE("ControlModule survives a corrupt preset file") {
     mm::platform::fsMkdir(mm::ControlModule::kPresetDir);
     char path[128];
     std::snprintf(path, sizeof(path), "%s/broken.json", mm::ControlModule::kPresetDir);
-    const char* truncated = "{\"captures\":\"Layers\",\"Layers.0.ty";
+    const char* truncated = "{\"captures\":\"Effects\",\"Effects.0.ty";
     REQUIRE(mm::platform::fsWriteAtomic(path, truncated, std::strlen(truncated)));
 
     d.control->setup();
@@ -287,7 +287,7 @@ TEST_CASE("ControlModule shows what each preset captures") {
     d.control->writeListRow(sink, 0);
     const std::string row(sink.data(), sink.size());
     CHECK(row.find("\"name\":\"look\"") != std::string::npos);
-    CHECK(row.find("Layers") != std::string::npos);
+    CHECK(row.find("Effects") != std::string::npos);
 }
 
 // The pad grid answers "what is on right now" without a click, so the applied preset marks itself
@@ -389,7 +389,7 @@ TEST_CASE("ControlModule reports the roles a preset covers") {
     mm::JsonSink sink;
     d.control->writeListRow(sink, 0);
     const std::string row(sink.data(), sink.size());
-    CHECK(row.find("\"roles\":[\"layer\"]") != std::string::npos);   // Layers is captured by default
+    CHECK(row.find("\"roles\":[\"effects\"]") != std::string::npos);   // Effects is captured by default
 }
 
 // Fader 1 rides the global brightness every driver scales by, through the same setControl primitive
@@ -500,7 +500,7 @@ TEST_CASE("ControlModule keeps one active preset per captured role") {
     d.setText("name", "geometry");
     d.press("save");
 
-    d.setCapture("Layers");
+    d.setCapture("Effects");
     d.setText("name", "look");
     d.press("save");
     REQUIRE(d.control->listRowCount() == 2);
@@ -515,7 +515,7 @@ TEST_CASE("ControlModule keeps one active preset per captured role") {
 
     // And each reports WHICH role it holds, which is what the pad colors itself by.
     CHECK(d.rowNamed("geometry").find("\"activeRoles\":[\"driver\"]") != std::string::npos);
-    CHECK(d.rowNamed("look").find("\"activeRoles\":[\"layer\"]") != std::string::npos);
+    CHECK(d.rowNamed("look").find("\"activeRoles\":[\"effects\"]") != std::string::npos);
 }
 
 // Each role is held independently, so applying a look replaces the look and leaves the geometry
@@ -527,7 +527,7 @@ TEST_CASE("ControlModule replaces only the role a preset carries") {
 
     d.setCapture("Drivers");
     d.setText("name", "hardware");  d.press("save");
-    d.setCapture("Layers");
+    d.setCapture("Effects");
     d.setText("name", "lookA");     d.press("save");
     d.setText("name", "lookB");     d.press("save");
 
@@ -576,7 +576,7 @@ TEST_CASE("ControlModule reports an apply that changed nothing") {
     Device d;
     d.add(d.layers, "Layer");
 
-    d.setCapture("Layers");
+    d.setCapture("Effects");
     d.setText("name", "look");
     d.press("save");
     REQUIRE(d.control->listRowCount() == 1);
@@ -667,7 +667,7 @@ TEST_CASE("ControlModule writes a preset that is well-formed JSON") {
     auto* layer = d.add(d.layers, "Layer");
     d.add(layer, "NoiseEffect");
 
-    d.setCapture("Layers");
+    d.setCapture("Effects");
     d.setText("name", "wellformed");
     d.press("save");
 
@@ -700,7 +700,7 @@ TEST_CASE("ControlModule persists the look a preset applied") {
     auto* layer = d.add(d.layers, "Layer");
     d.add(layer, "NoiseEffect");
 
-    d.setCapture("Layers");
+    d.setCapture("Effects");
     d.setText("name", "keeper");
     d.press("save");
 
@@ -735,7 +735,7 @@ TEST_CASE("ControlModule exposes only look-only presets to external surfaces") {
     auto* layer = d.add(d.layers, "Layer");
     d.add(layer, "NoiseEffect");
 
-    d.setCapture("Layers");
+    d.setCapture("Effects");
     d.setText("name", "purelook");  d.press("save");
 
     d.setCapture("Drivers");
@@ -782,7 +782,7 @@ TEST_CASE("ControlModule sizes the Home Assistant look list to the presets that 
     // Nothing to publish yet.
     CHECK(lookNames().first == 0);
 
-    d.setCapture("Layers");
+    d.setCapture("Effects");
     d.setText("name", "one");       d.press("save");
     const auto afterOne = lookNames();
     CHECK(afterOne.first == 1);
@@ -810,7 +810,7 @@ TEST_CASE("ControlModule bumps its revision on every preset-set change") {
     Device d;
     d.add(d.layers, "Layer");
 
-    d.setCapture("Layers");
+    d.setCapture("Effects");
     d.setText("name", "first");
     d.press("save");
     const uint32_t afterFirst = d.control->presetsRevision();
@@ -842,7 +842,7 @@ TEST_CASE("ControlModule refuses to save a new preset onto an occupied pad") {
         FAIL("no control named ", name);
     };
 
-    d.setCapture("Layers");
+    d.setCapture("Effects");
     d.setText("name", "holder");
     setU8("slot", 5);
     d.press("save");
@@ -872,7 +872,7 @@ TEST_CASE("ControlModule stops showing a deleted preset as active") {
     auto* layer = d.add(d.layers, "Layer");
     d.add(layer, "NoiseEffect");
 
-    d.setCapture("Layers");
+    d.setCapture("Effects");
     d.setText("name", "doomed");
     d.press("save");
     d.activate("doomed");
@@ -889,7 +889,7 @@ TEST_CASE("ControlModule keeps a renamed preset active under its new name") {
     auto* layer = d.add(d.layers, "Layer");
     d.add(layer, "NoiseEffect");
 
-    d.setCapture("Layers");
+    d.setCapture("Effects");
     d.setText("name", "before");
     d.press("save");
     d.activate("before");

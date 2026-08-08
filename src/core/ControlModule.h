@@ -21,7 +21,7 @@ namespace mm {
 /// generic — MoonLight's presets carry effects and modifiers only, ours carry whichever top-level
 /// subtrees the user chose to capture.
 ///
-/// Top-level by necessity rather than convention: a preset reaches ACROSS Layouts, Layers, Drivers
+/// Top-level by necessity rather than convention: a preset reaches ACROSS Layouts, Effects, Drivers
 /// and Services, so this module cannot be a child of any of them.
 ///
 /// **Not to be confused with `LightPresetsModule`**, which despite the name is a different thing: a
@@ -39,7 +39,7 @@ namespace mm {
 /// The `capture` controls choose which top-level subtrees a save includes, and the file records the
 /// choice, so applying one is never a surprise about what it will touch.
 ///
-/// That choice is what decides **portability**. A preset capturing `Layers` alone is a look: effects,
+/// That choice is what decides **portability**. A preset capturing `Effects` alone is a look: effects,
 /// modifiers, their settings, and nothing about the hardware — it applies on any board and drives
 /// whatever that board has. Adding `Drivers` makes it a device snapshot that carries pin maps and
 /// lane counts, which is what you want for cloning a board and NOT what you want for sharing a look.
@@ -70,19 +70,20 @@ public:
     static constexpr uint8_t kMaxNameLen = 32;
     /// The top-level subtrees a preset can carry. Names are `typeName()`s, which is what the file
     /// records and what `Scheduler` resolves them back to.
-    static constexpr const char* kCapturable[] = {"Layouts", "Layers", "Drivers", "Services"};
-    /// The role each capturable subtree holds, so a pad can show what a preset covers with the same
-    /// emoji the module cards use (ROLE_EMOJI in the UI): one vocabulary rather than a second set
-    /// invented here. Index-aligned with kCapturable.
-    static constexpr const char* kCaptureRole[] = {"layout", "layer", "driver", "service"};
+    static constexpr const char* kCapturable[] = {"Layouts", "Effects", "Drivers", "Services"};
+    /// What each capturable subtree covers, named after the CONTAINER rather than after a module
+    /// inside it: a preset that captures `Effects` reports "effects". Calling it "layer" named the
+    /// container's child type, which reads as though the preset held a single Layer. Index-aligned
+    /// with kCapturable; the UI maps these to the same emoji the module cards use (ROLE_EMOJI).
+    static constexpr const char* kCaptureRole[] = {"layout", "effects", "driver", "service"};
     static constexpr uint8_t kCaptureCount = sizeof(kCapturable) / sizeof(kCapturable[0]);
     static_assert(sizeof(kCapturable) / sizeof(kCapturable[0]) ==
                   sizeof(kCaptureRole) / sizeof(kCaptureRole[0]),
                   "kCapturable and kCaptureRole are index-aligned");
-    /// Index of "Layers" within kCapturable — the role a pure look occupies.
-    static constexpr uint8_t kLayersRole = 1;
-    static_assert(kCapturable[kLayersRole][0] == 'L' && kCapturable[kLayersRole][1] == 'a' &&
-                  kCapturable[kLayersRole][5] == 's', "kLayersRole must index Layers");
+    /// Index of "Effects" within kCapturable — the role a pure look occupies.
+    static constexpr uint8_t kEffectsRole = 1;
+    static_assert(kCapturable[kEffectsRole][0] == 'E' && kCapturable[kEffectsRole][1] == 'f' &&
+                  kCapturable[kEffectsRole][6] == 's', "kEffectsRole must index Effects");
 
     /// How many faders the bank shows. Fixed for now; the surfaces we will map onto this have 8
     /// (X-Touch) or 9 (nanoKONTROL), so the count becomes a control once a second surface needs it.
@@ -207,7 +208,7 @@ public:
 
     // ---- Presets as an external surface (Home Assistant, and any future consumer) --------------
     //
-    // A preset carrying ONLY Layers is a look: it changes what the lights show and nothing else. One
+    // A preset carrying ONLY Effects is a look: it changes what the lights show and nothing else. One
     // that also carries Drivers or Layouts rewires pins or geometry, which must not be reachable from
     // a voice assistant or an automation that thinks it is picking a colour scheme. These two calls
     // are the whole seam a publisher needs, so no consumer has to learn the file format or the
@@ -224,8 +225,8 @@ public:
         return n == 1 ? found : kCaptureCount;
     }
 
-    /// Is this preset a pure look? With one role per preset this is simply "its role is Layers".
-    bool isLookOnly(uint8_t row) const { return roleOf(row) == kLayersRole; }
+    /// Is this preset a pure look? With one role per preset this is simply "its role is Effects".
+    bool isLookOnly(uint8_t row) const { return roleOf(row) == kEffectsRole; }
 
     /// The preset's name, or null for an out-of-range row.
     const char* presetName(uint8_t row) const {
@@ -254,7 +255,7 @@ public:
 
     /// The look applied most recently, or "" when none is. Reports the LAYER role's holder, since a
     /// look is by definition what occupies that role.
-    const char* currentLook() const { return current_[kLayersRole]; }
+    const char* currentLook() const { return current_[kEffectsRole]; }
 
     bool isEditableList() const override { return true; }
 
@@ -687,7 +688,7 @@ private:
     }
 
     /// Is `type` in the comma-separated `captures` header? Whole-token match, so "Layer" never
-    /// matches "Layers".
+    /// matches "Effects".
     static bool listHas(const char* list, const char* type) {
         const size_t tlen = std::strlen(type);
         for (const char* p = list; *p;) {
@@ -740,7 +741,7 @@ private:
     /// Which ONE subtree the next save captures, as an index into kCapturable. A preset carries
     /// exactly one role: "this preset is a look" is a thing a user can hold in their head, where
     /// "a look and a geometry, lit for one and superseded for the other" is not.
-    uint8_t captureRole_ = kLayersRole;   // a look, by default
+    uint8_t captureRole_ = kEffectsRole;   // a look, by default
     /// Which preset currently holds each capturable role, index-aligned with kCapturable. A
     /// preset that carries layout+layer claims both, so applying a layer-only preset afterwards
     /// replaces the layer holder and leaves the layout one lit. That is what a mixed preset means

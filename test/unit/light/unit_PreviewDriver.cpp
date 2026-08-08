@@ -5,7 +5,7 @@
 #include "light/drivers/PreviewDriver.h"
 #include "light/drivers/Drivers.h"
 #include "light/layers/Layer.h"
-#include "light/layers/Layers.h"
+#include "light/layers/Effects.h"
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/SphereLayout.h"
@@ -287,12 +287,12 @@ TEST_CASE("PreviewDriver retries a dropped coordinate table, withholds frames un
 // freed Layer; the next prepare read layer_->layouts() on freed memory and
 // crashed the device (LoadProhibited → boot loop, since the broken tree persists).
 // Now passBufferToDrivers clears the drivers' layer_/sourceBuffer_ to null, a safe
-// idle state. This drives the real path: Drivers bound to a Layers CONTAINER
+// idle state. This drives the real path: Drivers bound to a Effects CONTAINER
 // (self-healing), the Layer removed, then prepareTree re-resolves activeLayer()=null.
 TEST_CASE("PreviewDriver tolerates the active Layer being deleted") {
     mm::GridLayout g; g.width = 16; g.height = 16; g.depth = 1;
     mm::Layouts group; group.addChild(&g);
-    mm::Layers layers;
+    mm::Effects layers;
     auto* layer = new mm::Layer();
     layer->setChannelsPerLight(3);
     layers.addChild(layer);
@@ -304,7 +304,7 @@ TEST_CASE("PreviewDriver tolerates the active Layer being deleted") {
     CaptureBroadcaster cap;
     preview->setBroadcaster(&cap);
     drivers.addChild(preview);
-    drivers.setLayers(&layers);          // container-bound: layer_ re-resolved at prepareTree
+    drivers.setEffects(&layers);          // container-bound: layer_ re-resolved at prepareTree
     drivers.defineControls();
 
     layers.applyState();

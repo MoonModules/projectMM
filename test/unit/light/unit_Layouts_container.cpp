@@ -9,7 +9,7 @@
 // Pins the contract that Layouts skips disabled children both in totalLightCount
 // and in forEachCoord, and that subsequent enabled children's physical indices
 // shift down to close the gap (no holes). Matches the universal-gate behaviour
-// applied by Layer / Layers / Drivers to their own children.
+// applied by Layer / Effects / Drivers to their own children.
 
 namespace {
 

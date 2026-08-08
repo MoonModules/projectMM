@@ -1,12 +1,12 @@
 # Core services
 
-The user-added **Service** modules — capability bridges the device provides or consumes, added and removed at runtime in the `Services` container (the core-domain twin of the light domain's `Layers`/`Drivers`). Fixed device infrastructure (identity, network, inspection tools) lives under **System** — see [core/system.md](system.md). Every row links to its generated technical page (the full API, from the `.h`) and its tests.
+The user-added **Service** modules — capability bridges the device provides or consumes, added and removed at runtime in the `Services` container (the core-domain twin of the light domain's `Effects`/`Drivers`). Fixed device infrastructure (identity, network, inspection tools) lives under **System** — see [core/system.md](system.md). Every row links to its generated technical page (the full API, from the `.h`) and its tests.
 
 <a id="services"></a>
 
-### Services
+## Services
 
-The top-level container the Service modules hang under — a grouping node with no controls of its own, the same shape as `Layers`/`Drivers` in the light domain. Adds/removes its children (Audio, IR) at runtime via the generic module machinery.
+The top-level container the Service modules hang under — a grouping node with no controls of its own, the same shape as `Effects`/`Drivers` in the light domain. Adds/removes its children (Audio, IR) at runtime via the generic module machinery.
 
 Detail: [technical](moxygen/Services.md)
 

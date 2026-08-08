@@ -3,7 +3,7 @@
 
 #include "doctest.h"
 #include "light/modifiers/RandomMapModifier.h"
-#include "light/layers/Layers.h"
+#include "light/layers/Effects.h"
 #include "light/layers/Layer.h"
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"

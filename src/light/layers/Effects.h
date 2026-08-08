@@ -11,11 +11,11 @@ namespace mm {
 ///
 /// **Why a container:** multi-layer composition (alpha-blend, additive, layered overlays) needs a place to walk every layer in order so drivers can merge their buffers before consuming the result. With one child Layer this is a thin pass-through: tick() runs the child Layer's tick() in order; behaviour matches the single-Layer pipeline byte-for-byte (Drivers takes its single-layer fast path).
 ///
-/// **No buffer of its own:** each Layer owns its buffer and the `Drivers` container owns the composited output. Layers wires the shared `Layouts` into every child so each can size its buffer. Two queries serve the Drivers compositor: `activeLayer` (the first enabled child, or a disabled one as fallback) answers physical dimensions and feeds the single-layer fast path, and `forEachEnabledLayer` walks the enabled children in container order (bottom→top) marking the bottom layer that clears the buffer. `enabledLayerCount` lets Drivers pick the fast path (one enabled layer → hand its buffer straight to the driver) versus the composite path (≥2 → blend into the output buffer).
+/// **No buffer of its own:** each Layer owns its buffer and the `Drivers` container owns the composited output. Effects wires the shared `Layouts` into every child so each can size its buffer. Two queries serve the Drivers compositor: `activeLayer` (the first enabled child, or a disabled one as fallback) answers physical dimensions and feeds the single-layer fast path, and `forEachEnabledLayer` walks the enabled children in container order (bottom→top) marking the bottom layer that clears the buffer. `enabledLayerCount` lets Drivers pick the fast path (one enabled layer → hand its buffer straight to the driver) versus the composite path (≥2 → blend into the output buffer).
 ///
-/// **Prior art:** MoonLight's `PhysicalLayer` runs N `VirtualLayer`s and composites their buffers into the display channel — same idea, different shape: Drivers (not Layers) does the compositing here (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight).
-/// @card Layers.png
-class Layers : public MoonModule {
+/// **Prior art:** MoonLight's `PhysicalLayer` runs N `VirtualLayer`s and composites their buffers into the display channel — same idea, different shape: Drivers (not Effects) does the compositing here (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight).
+/// @card Effects.png
+class Effects : public MoonModule {
 public:
     const char* acceptsChildRoles() const override { return "layer"; }
 
@@ -43,9 +43,9 @@ public:
     }
 
     /// Role-filtered loop propagation: only tick children that are Layers.
-    /// The factory / UI shouldn't allow non-Layer children of a Layers
+    /// The factory / UI shouldn't allow non-Layer children of an Effects
     /// container, but if one slips in (test fixture, hand-crafted config),
-    /// ticking it through Layers would run its loop at the wrong tree
+    /// ticking it through Effects would run its loop at the wrong tree
     /// depth (an Effect that should be ticked inside a Layer). Matches
     /// the role-filter precedent in setLayouts / activeLayer above.
     void tick() MM_NONBLOCKING override {

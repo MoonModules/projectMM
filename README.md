@@ -20,7 +20,7 @@ If you like projectMM, give it a ⭐️, fork it, or open an issue or pull reque
 
 🧊 **Native 3D from the ground up**: 2D and 1D are just the cases where a dimension is size 1. Effects never pick a mode.
 
-🎛️ **Pluggable pipeline**: Layouts → Layers (effects + modifiers) → Drivers. Build it visually in the browser, and every change applies live (settings also persist to flash across power cycles).
+🎛️ **Pluggable pipeline**: Layouts → Effects (layers of effects + modifiers) → Drivers. Build it visually in the browser, and every change applies live (settings also persist to flash across power cycles).
 
 🔄 **No reboot to apply a configuration change**: edit a pin map, a strand length, an output protocol, or the mic on a running device and it takes effect on the very next frame, with no init-at-boot step, no restart. Where most LED-controller firmware needs a reboot for a pin or protocol change, projectMM applies it live. (Flashing new *firmware* over OTA still needs the usual power cycle, since that's a binary swap rather than a config change.)
 

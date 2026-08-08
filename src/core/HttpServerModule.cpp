@@ -1643,7 +1643,7 @@ HttpServerModule::OpResult HttpServerModule::applyAddModule(
         char* outName, size_t outNameLen) {
     if (!typeName || typeName[0] == 0) return OpResult::BadRequest;
 
-    // Top-level modules (Layouts/Layers/Drivers/Filesystem/System/Network/HttpServer)
+    // Top-level modules (Layouts/Effects/Drivers/Filesystem/System/Network/HttpServer)
     // are policy-fixed and wired in main.cpp at boot. Only *child* adds are allowed —
     // anything else would orphan the module (never ticked, leaked).
     if (!parentId || parentId[0] == 0) return OpResult::BadRequest;
@@ -1805,7 +1805,7 @@ void HttpServerModule::handleDeleteModule(platform::TcpConnection& conn, const c
         return;
     }
 
-    // Top-level modules (Layouts/Layers/Drivers/Filesystem/System/Network/HttpServer)
+    // Top-level modules (Layouts/Effects/Drivers/Filesystem/System/Network/HttpServer)
     // have no parent — they're registered via Scheduler::addModule in main.cpp and the
     // top-level shape is policy-fixed. Reject the delete here instead of release+delete'ing
     // a module that the scheduler still holds a pointer to (which would dangle on next tick).

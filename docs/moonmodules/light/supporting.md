@@ -18,13 +18,13 @@ Detail: [technical](moxygen/Layer.md)
 
 <a id="layers"></a>
 
-### Layers
+### Effects
 
 The container of layers — composites them (blend mode + opacity per layer) into the final light buffer.
 
-<img src="../../assets/light/Layers.png" width="300" alt="Layers container">
+<img src="../../assets/light/Effects.png" width="300" alt="Effects container">
 
-Detail: [technical](moxygen/Layers.md)
+Detail: [technical](moxygen/Effects.md)
 
 [Tests](../../tests/unit-tests.md#layers)
 

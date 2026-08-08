@@ -8,7 +8,7 @@
     "ParlioLedDriver",
     "Layouts",
     "GridLayout",
-    "Layers",
+    "Effects",
     "Layer",
     "NoiseEffect",
     "Drivers",
@@ -36,8 +36,8 @@
     {
       "name": "fix-layers",
       "op": "add_module",
-      "id": "Layers",
-      "type": "Layers",
+      "id": "Effects",
+      "type": "Effects",
       "props": {
         "layouts": "Layouts"
       }
@@ -47,7 +47,7 @@
       "op": "add_module",
       "id": "Layer",
       "type": "Layer",
-      "parent_id": "Layers",
+      "parent_id": "Effects",
       "props": {
         "channelsPerLight": 3
       }
@@ -65,7 +65,7 @@
       "id": "Drivers",
       "type": "Drivers",
       "props": {
-        "layers": "Layers"
+        "effects": "Effects"
       }
     }
   ],
@@ -90,7 +90,7 @@
       "name": "clear-layers",
       "description": "Start clean: drop whatever effects/modifiers the device had.",
       "op": "clear_children",
-      "id": "Layers"
+      "id": "Effects"
     },
     {
       "name": "clear-drivers",
@@ -103,7 +103,7 @@
       "op": "add_module",
       "id": "Layer",
       "type": "Layer",
-      "parent_id": "Layers",
+      "parent_id": "Effects",
       "props": {
         "channelsPerLight": 3
       }

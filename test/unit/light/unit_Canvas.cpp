@@ -10,7 +10,7 @@
 #include "light/draw.h"
 #include "light/effects/SolidEffect.h"
 #include "light/layers/Layer.h"
-#include "light/layers/Layers.h"
+#include "light/layers/Effects.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/Layouts.h"
 

@@ -25,8 +25,8 @@
     {
       "name": "fix-layers",
       "op": "add_module",
-      "id": "Layers",
-      "type": "Layers",
+      "id": "Effects",
+      "type": "Effects",
       "props": {
         "layouts": "Layouts"
       }
@@ -37,7 +37,7 @@
       "name": "clear-layers",
       "description": "Start clean: drop whatever effects/modifiers/layouts/drivers the device had (pre-wired Preview survives).",
       "op": "clear_children",
-      "id": "Layers"
+      "id": "Effects"
     },
     {
       "name": "clear-layouts",
@@ -65,7 +65,7 @@
       "op": "add_module",
       "id": "Layer",
       "type": "Layer",
-      "parent_id": "Layers",
+      "parent_id": "Effects",
       "props": {
         "channelsPerLight": 3
       }

@@ -2,7 +2,7 @@
 
 The device's control surface — the place that says "put the device into this state", whatever asked for it. A preset applied from the grid, and later a fader moved on a MIDI desk, arrive at the same code. Its first capability is presets; the surface layout exists so external controllers map onto something that already looks like them.
 
-`ControlModule` is a top-level module, a peer of Layouts / Layers / Drivers rather than a child of Services: it reaches *across* the top-level modules, so it cannot sit inside one.
+`ControlModule` is a top-level module, a peer of Layouts / Effects / Drivers rather than a child of Services: it reaches *across* the top-level modules, so it cannot sit inside one.
 
 ## Control modules
 
@@ -35,22 +35,22 @@ A preset captures **exactly one** top-level subtree, recorded in the file:
 ```json
 {
   "slot": 12,
-  "captures": "Layers",
-  "Layers.enabled": true, "Layers.0.type": "Layer", "Layers.0.0.type": "NoiseEffect"
+  "captures": "Effects",
+  "Effects.enabled": true, "Effects.0.type": "Layer", "Effects.0.0.type": "NoiseEffect"
 }
 ```
 
 Each captured subtree is exactly the bytes the persistence engine already writes for that module, namespaced under a `<TypeName>.` key prefix. Save and restore therefore reuse the engine that reconciles a tree against JSON ([`saveSubtreeTo` / `applySubtree`](moxygen/FilesystemModule.md)) rather than a second serializer that could drift from it.
 
-One subtree per preset is the whole model: a preset is *a look*, or *a geometry*, or *a hardware setup*, or *a service configuration. Never a combination. A `Layers` preset is a look, and applies to a board with completely different hardware; a `Drivers` preset carries pin maps and is device-specific. Choosing the role is a single radio button when saving, and the pad's color says which role it holds.
+One subtree per preset is the whole model: a preset is *a look*, or *a geometry*, or *a hardware setup*, or *a service configuration. Never a combination. A `Effects` preset is a look, and applies to a board with completely different hardware; a `Drivers` preset carries pin maps and is device-specific. Choosing the role is a single radio button when saving, and the pad's color says which role it holds.
 
 A preset naming a subtree this build does not have is refused with a reason rather than partially applied, and a file written by an older build that names several subtrees is listed but not applied, so it can be seen and deleted rather than silently vanishing. A malformed file leaves the live tree untouched.
 
 ### One active preset per role
 
-Each subtree is a **role**: layout, layer, driver, service. A preset holds its own role and leaves the other three alone, so a layout preset and a look can be active at the same time, and applying a new look replaces only the look.
+Each subtree is a **role**: layout, effects, driver, service. A preset holds its own role and leaves the other three alone, so a layout preset and a look can be active at the same time, and applying a new look replaces only the look.
 
-A pad is tinted by its role: layout blue, layer violet, driver green, service amber.
+A pad is tinted by its role: layout blue, effects violet, driver green, service amber.
 
 ### Applying is a rebuild
 
@@ -60,7 +60,7 @@ Structural mutation quiesces the render worker, and mutations run inline on the 
 
 ## Home Assistant
 
-Looks reach Home Assistant two ways, and only `Layers` presets travel either of them.
+Looks reach Home Assistant two ways, and only `Effects` presets travel either of them.
 
 **The WLED integration** (`/presets.json`) is the native path: HA renders looks in its own preset dropdown, shows which one is applied, and applies one when it is chosen. This is what HA calls a preset.
 

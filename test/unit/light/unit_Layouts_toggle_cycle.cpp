@@ -2,7 +2,7 @@
 // @also Layer, Drivers
 
 #include "doctest.h"
-#include "light/layers/Layers.h"
+#include "light/layers/Effects.h"
 #include "light/layers/Layer.h"
 #include "light/layouts/Layouts.h"
 #include "light/layouts/GridLayout.h"
@@ -44,7 +44,7 @@ private:
 // point (core 0 goes back to rendering; the next frame's boundary waits). Here the test wants the
 // frame observable, so it waits the worker out — the same wait Drivers itself does at the next
 // boundary. Off the split this is a no-op and the ticks were already synchronous.
-void rebuildAndTick(mm::Layouts& layouts, mm::Layers& layersC, mm::Drivers& driversC) {
+void rebuildAndTick(mm::Layouts& layouts, mm::Effects& layersC, mm::Drivers& driversC) {
     layouts.applyState();
     layersC.applyState();
     driversC.setLayer(layersC.activeLayer());
@@ -68,7 +68,7 @@ TEST_CASE("Toggle a single layout off then on: pipeline survives and renders aga
     grid.width = 4; grid.height = 4; grid.depth = 1;
     layouts.addChild(&grid);
 
-    mm::Layers layersC;
+    mm::Effects layersC;
     mm::Layer layer;
     layer.setChannelsPerLight(3);
     mm::RainbowEffect effect;

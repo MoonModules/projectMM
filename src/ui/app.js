@@ -884,7 +884,7 @@ function renderChildTabs(mod, childrenEl, depth) {
         addTab.title = "add " + rolesAcceptedBy(mod).join(" / ");
         addTab.addEventListener("click", () => {
             // THIS card's own footer — a plain querySelector would match the first .card-footer in the
-            // subtree, which belongs to a nested child's card (Layers would then offer the Layer's
+            // subtree, which belongs to a nested child's card (Effects would then offer the Layer's
             // effects instead of another layer). Scope to direct children of this card.
             const card = childrenEl.parentElement;
             const footer = [...card.children].find(el => el.classList.contains("card-footer"));
@@ -1026,7 +1026,7 @@ function createCard(mod, depth) {
     card.appendChild(title);
 
     // -- Controls --
-    // Child-hosting modules deeper in the tree (Layers, Layer, Drivers, Layouts)
+    // Child-hosting modules deeper in the tree (Effects, Layer, Drivers, Layouts)
     // collapse their own controls so the children are the focus by default.
     // Modules that merely host a code-wired child (Network → Improv) keep their
     // controls expanded — the parent's settings are the main point, the code-wired
@@ -1388,7 +1388,7 @@ function allAcceptedChildRoles() {
 //
 // We test mod.role against the UNION of all containers' acceptsChildRoles, not
 // against this module's specific parent. That's exact while the role→container
-// mapping is 1:1 (effect→Layer, driver→Drivers, layout→Layouts, layer→Layers) —
+// mapping is 1:1 (effect→Layer, driver→Drivers, layout→Layouts, layer→Effects) —
 // a child of an add-accepted role is always under the one container that
 // accepts it. If a role ever becomes accepted by more than one container, this
 // would need the parent threaded in to scope the check to the actual parent.
@@ -2142,7 +2142,7 @@ function buildCaptureToggles(body, moduleName) {
     const ctrl = mod && (mod.controls || []).find(c => c.name === "captures");
     if (!ctrl) return;
     const names = Array.isArray(ctrl.options) && ctrl.options.length
-        ? ctrl.options : ["Layouts", "Layers", "Drivers", "Services"];
+        ? ctrl.options : ["Layouts", "Effects", "Drivers", "Services"];
     const wrap = document.createElement("div");
     wrap.className = "surface-popup-captures";
     names.forEach((n, i) => {
@@ -3135,10 +3135,10 @@ function syncVisibleControls(mod) {
     const card = document.querySelector(`.card[data-module="${cssEscape(mod.name)}"]`);
     if (!card) return false;
     // The controls host is THIS card's own collapse wrapper — must be a DIRECT
-    // child (`:scope >`), not any descendant: a container card (e.g. Layers) nests
+    // child (`:scope >`), not any descendant: a container card (e.g. Effects) nests
     // its child cards (Layer) inside .card-children, and a plain
     // `card.querySelector(".card-controls-collapse")` would reach down and match
-    // the CHILD's wrapper. That made Layers adopt Layer's control rows as its own,
+    // the CHILD's wrapper. That made Effects adopt Layer's control rows as its own,
     // so both cards saw a control-set mismatch every WS frame and rebuilt each
     // other's rows in a loop — tearing down (and closing) any open <select>.
     const host = card.querySelector(":scope > .card-controls-collapse") || card;
@@ -3410,7 +3410,7 @@ function cssEscape(s) {
 // Role → emoji. The role part of the MoonLight emoji-key system
 // (https://moonmodules.org/MoonLight/moonlight/overview/#emoji-key):
 // 🔥 effect · 💎 modifier · 🚥 layout · ☸️ driver · 🥞 layer (projectMM
-// addition — every Layer instance, child of the Layers container). The role
+// addition — every Layer instance, child of the Effects container). The role
 // tag is derived here, not duplicated in every module's tags() string — one
 // source of truth in the UI saves repeating the same character in ~30 module
 // headers and a few bytes per type in /api/types. Each module's tags() then
@@ -3424,6 +3424,7 @@ const ROLE_EMOJI = {
     modifier:   "💎",
     layout:     "🚥",
     layer:      "🥞",
+    effects:    "🥞",   // the container a preset captures; same pancake as the Layers it holds
     service:    "🛰️",
     generic:    "⚙️",
 };
@@ -3434,7 +3435,7 @@ const ROLE_EMOJI = {
 // averaged into one tint.
 const ROLE_HUE = {
     layout:   210,   // blue
-    layer:    280,   // violet
+    effects:  280,   // violet
     driver:   150,   // green
     service:   35,   // amber
 };
@@ -3487,7 +3488,7 @@ function emojiTagsFor(t) {
 function openTypePicker(parentMod, anchorEl) {
     const roles = rolesAcceptedBy(parentMod);
     // One candidate = no choice to make, so don't stage a picker to ask a question with one answer:
-    // "+" on Layers just adds a Layer. (Same filter openPicker uses, so the two can't disagree about
+    // "+" on Effects just adds a Layer. (Same filter openPicker uses, so the two can't disagree about
     // what the candidates are.)
     const candidates = availableTypes.filter(t => roles.includes(t.role));
     if (candidates.length === 1) {
@@ -3716,7 +3717,7 @@ function attachDragHandlers(card, mod) {
     card.addEventListener("dragover", (e) => {
         // Only allow drop on a true sibling — same .card-children container.
         // Cards now nest, so equal data-depth is no longer enough: two effects
-        // under different Layers share a depth but aren't siblings.
+        // under different Effects share a depth but aren't siblings.
         const src = document.querySelector(".card.dragging");
         if (!src || src === card) return;
         if (src.parentElement === card.parentElement &&
@@ -3734,7 +3735,7 @@ function attachDragHandlers(card, mod) {
         // Innermost card wins — without stopPropagation the drop bubbles to every
         // ancestor card that also has a drop handler, firing a SECOND move onto
         // the grandparent's child list (e.g. dropping onto Mirror also dropped
-        // onto the Layer card → move into Layers, index 0 → undoing the first
+        // onto the Layer card → move into Effects, index 0 → undoing the first
         // move). Same reason dragstart stops propagation above.
         e.stopPropagation();
         card.classList.remove("drag-over");

@@ -137,7 +137,7 @@ public:
     /// caller that stores a subtree elsewhere (ControlModule's presets, one file per named preset)
     /// gets the persistence format for free rather than growing a second serializer that could
     /// drift from this one. Emits the enclosing `{}`; returns false only on allocation failure.
-    /// `prefix` namespaces every key ("Layers.0.type"), so several subtrees can share one flat
+    /// `prefix` namespaces every key ("Effects.0.type"), so several subtrees can share one flat
     /// object and `applySubtree` reads each back with the same prefix. Empty for a bare subtree.
     bool saveSubtreeTo(MoonModule* m, JsonSink& sink, const char* prefix = "");
 

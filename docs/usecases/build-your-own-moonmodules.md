@@ -23,7 +23,7 @@ A projectMM light show is a small tree of MoonModules:
 
 ```
 Layouts   →  where the LEDs are in space (a Grid, a sphere, a strip)
-Layers    →  a stack of images being drawn
+Effects    →  a stack of images being drawn
   Layer   →  one image, built by…
     Effect     →  draws color into the image (the fun part)
     Modifier   →  bends/masks/repeats the image
@@ -319,7 +319,7 @@ You get all of that "release the pin on disable" behaviour by implementing the s
 ## What to read next
 
 - **The effects catalog:** [docs/moonmodules/light/effects.md](../moonmodules/light/effects.md) — every shipped effect, with screenshots and controls. The best source of copy-and-tweak starting points.
-- **The architecture doc:** [docs/architecture.md](../architecture.md) — the render pipeline (Layouts → Layers → Effects/Modifiers → Drivers) and the hot-path rules (why we avoid heap and floats inside `tick()`).
+- **The architecture doc:** [docs/architecture.md](../architecture.md) — the render pipeline (Layouts → Effects → Layer → Effect/Modifier → Drivers) and the hot-path rules (why we avoid heap and floats inside `tick()`).
 - **Coding standards:** [docs/coding-standards.md](../coding-standards.md) — the house style (header-only light modules, `constexpr`, naming) so your module reads like the rest.
 - **The real modules:** the smallest ones make the best teachers — `RainbowEffect` (a clean loop), `GameOfLifeEffect` (the memory lifecycle), `GridLayout` (`forEachCoord`).
 

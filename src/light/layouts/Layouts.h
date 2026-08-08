@@ -9,7 +9,7 @@
 namespace mm {
 
 
-/// Top-level container for one or more `LayoutBase` children — it defines the physical light topology of the installation and is shared by every Layer in the `Layers` container (one Layouts describing the physical setup, multiple Layers render into it).
+/// Top-level container for one or more `LayoutBase` children — it defines the physical light topology of the installation and is shared by every Layer in the `Effects` container (one Layouts describing the physical setup, multiple Effects render into it).
 ///
 /// **Coordinate iteration is owned by the container, not the layer:** `forEachCoord` walks every enabled child layout's coordinates in registration order, offsetting physical indices so multiple layouts (for example 16 strips making one panel) stitch into a single flat physical address space without overlap. A Layer *uses* those coordinates to build its LUT. `totalLightCount` (the sum across enabled children) sizes both the layer buffer and the driver output buffer.
 ///
@@ -25,7 +25,7 @@ public:
 
     /// Sum of `lightCount` across enabled children — sizes the layer buffer and the
     /// driver output buffer. Disabled children are skipped, the same gate
-    /// Layer/Layers/Drivers apply to their children. Indices of subsequent enabled
+    /// Layer/Effects/Drivers apply to their children. Indices of subsequent enabled
     /// layouts shift down to close the gap — disable Layout A and Layout B's lights
     /// move to indices 0..N. Users who need a stable index-to-fixture mapping disable
     /// the driver, not the layout.

@@ -463,7 +463,7 @@ body.cards-resizing {
     display: none;
 }
 
-/* Tab strip — a container of interchangeable peers (Drivers, Layers, Layouts, Services) shows one
+/* Tab strip — a container of interchangeable peers (Drivers, Effects, Layouts, Services) shows one
    child at a time, so the card stays short however many exist. The strip scrolls sideways rather
    than wrapping: a row of tabs that reflows to two lines shifts every card below it on each add.
    (A Layer's effect+modifier chain is NOT tabbed — that stack is ordered and meant to be seen.) */

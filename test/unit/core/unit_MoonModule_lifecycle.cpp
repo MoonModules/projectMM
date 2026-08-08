@@ -6,7 +6,7 @@
 // branch on the empty children_ array.
 //
 // Regression target: before this propagation existed, every container
-// (Layers, Drivers, NetworkModule-with-children) had to write the same
+// (Effects, Drivers, NetworkModule-with-children) had to write the same
 // 5-line per-child block by hand; one missing block meant a child's loop
 // callback silently never ran. The lifecycle-propagation tests below pin
 // the gating + dispatch rules so a future change to MoonModule::tickChildren

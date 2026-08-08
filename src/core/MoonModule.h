@@ -17,7 +17,7 @@ namespace mm {
 /// Read-vs-write is NOT a role distinction — direction is a per-module decision, not a role split —
 /// so one role spans the category, justified by that named roster, not one member (core grows
 /// slower than the domain, see CLAUDE.md). Services is the core-domain twin of the light domain's
-/// `Layers`/`Drivers`: a top-level container of user-added children of one role.
+/// `Effects`/`Drivers`: a top-level container of user-added children of one role.
 enum class ModuleRole : uint8_t { Generic, Effect, Modifier, Driver, Layout, Layer, Service };
 
 /// Lowercase role name for JSON/API output. Single source of truth so the role

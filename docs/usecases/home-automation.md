@@ -108,7 +108,7 @@ Because Hue is a rate-limited HTTP hub (~10 commands/s), this is **smooth ambien
 
 To set it up:
 
-1. **Add a Hue driver.** In the device's web UI pipeline (**Layers → a Layer → its Drivers**), add a **Hue** driver. Enter your bridge's IP in `bridgeIp` (find it in the Hue app, or at [discovery.meethue.com](https://discovery.meethue.com)).
+1. **Add a Hue driver.** In the device's web UI pipeline, add a **Hue** driver to the top-level **Drivers** container. Enter your bridge's IP in `bridgeIp` (find it in the Hue app, or at [discovery.meethue.com](https://discovery.meethue.com)).
 2. **Pair with the bridge.** Press the physical **link button** on the Hue bridge, then click the driver's **`pair`** button within ~30 seconds. The device claims an app key (stored on the driver as `appKey`) — a one-time step; the status line reports `paired, N lights`.
 3. **Pick what it drives.** The driver lists the bridge's color-capable, reachable bulbs and its rooms; use the `room` / `light` controls to aim the effect at all bulbs, one room, or a single light. Each selected bulb becomes one pixel of the driver's window.
 4. **Run an effect.** Any effect on the layer now drives the bulbs — the global brightness slider and color-order correction apply to them just like a physical strip (brightness 0 turns a bulb off).

@@ -19,7 +19,7 @@
 #include "core/ModuleFactory.h"
 #include "light/effects/NoiseEffect.h"
 #include "light/layers/Layer.h"
-#include "light/layers/Layers.h"
+#include "light/layers/Effects.h"
 #include "platform/platform.h"
 
 #include <filesystem>
@@ -300,7 +300,7 @@ TEST_CASE("MqttModule: topic identity is MAC-stable, not affected by a device re
 
 namespace {
 
-/// Rig + a real preset stack (FilesystemModule, ControlModule, a Layers tree), so the MQTT<->preset
+/// Rig + a real preset stack (FilesystemModule, ControlModule, a Effects tree), so the MQTT<->preset
 /// seams are exercised against the real modules rather than a stub. Filesystem isolated per fixture.
 struct PresetRig : Rig {
     FilesystemModule* fs = nullptr;
@@ -314,7 +314,7 @@ struct PresetRig : Rig {
         std::filesystem::remove_all(root_);
         platform::fsSetRoot(root_);
 
-        ModuleFactory::registerType<Layers>("Layers");
+        ModuleFactory::registerType<Effects>("Effects");
         ModuleFactory::registerType<Layer>("Layer");
         ModuleFactory::registerType<NoiseEffect>("NoiseEffect");
         ModuleFactory::registerType<ControlModule>("ControlModule");
@@ -322,7 +322,7 @@ struct PresetRig : Rig {
         fs = new FilesystemModule();
         fs->setTypeName("FilesystemModule");
         fs->setScheduler(&scheduler);
-        layers = ModuleFactory::create("Layers");
+        layers = ModuleFactory::create("Effects");
         control = static_cast<ControlModule*>(ModuleFactory::create("ControlModule"));
         scheduler.addModule(fs);
         scheduler.addModule(layers);
@@ -337,12 +337,12 @@ struct PresetRig : Rig {
         std::filesystem::remove_all(root_);
     }
 
-    /// Drop a valid Layers look into the preset folder and rescan, as a save or an upload would.
+    /// Drop a valid Effects look into the preset folder and rescan, as a save or an upload would.
     void addLook(const char* name) {
         platform::fsMkdir(ControlModule::kPresetDir);
         char path[160];
         std::snprintf(path, sizeof(path), "%s/%s.json", ControlModule::kPresetDir, name);
-        const char* body = "{\"captures\":\"Layers\",\"Layers.enabled\":true}";
+        const char* body = "{\"captures\":\"Effects\",\"Effects.enabled\":true}";
         REQUIRE(platform::fsWriteAtomic(path, body, std::strlen(body)));
         control->setup();   // rescan picks it up and bumps the revision
     }

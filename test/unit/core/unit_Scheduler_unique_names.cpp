@@ -43,7 +43,7 @@ TEST_CASE("Scheduler::ensureUniqueName suffixes the second occurrence") {
     // must be renamed; the first stays.
     mm::Scheduler s;
     auto* parent = new Stub();
-    parent->setName("Layers");
+    parent->setName("Effects");
     s.addModule(parent);
 
     auto* first = new Stub();
@@ -65,7 +65,7 @@ TEST_CASE("Scheduler::ensureUniqueName suffixes the second occurrence") {
 TEST_CASE("Scheduler::ensureUniqueName keeps suffixing past 'Foo-2'") {
     mm::Scheduler s;
     auto* parent = new Stub();
-    parent->setName("Layers");
+    parent->setName("Effects");
     s.addModule(parent);
 
     auto* a = new Stub(); a->setName("Layer");   parent->addChild(a);
@@ -88,7 +88,7 @@ TEST_CASE("Scheduler::deduplicateNamesInTree walks the whole tree") {
     // must disambiguate every duplicate.
     mm::Scheduler s;
     auto* layers = new Stub();
-    layers->setName("Layers");
+    layers->setName("Effects");
     s.addModule(layers);
 
     auto* layerA = new Stub();
@@ -121,11 +121,11 @@ TEST_CASE("Scheduler::deduplicateNamesInTree walks the whole tree") {
 // firstByName(name) returns the first match in DFS order, or nullptr if no module carries that name.
 TEST_CASE("Scheduler::firstByName returns the first match in tree-walk order") {
     mm::Scheduler s;
-    auto* p = new Stub(); p->setName("Layers");      s.addModule(p);
+    auto* p = new Stub(); p->setName("Effects");      s.addModule(p);
     auto* a = new Stub(); a->setName("Layer");       p->addChild(a);
     auto* b = new Stub(); b->setName("Other");       p->addChild(b);
 
-    CHECK(s.firstByName("Layers") == p);
+    CHECK(s.firstByName("Effects") == p);
     CHECK(s.firstByName("Layer")  == a);
     CHECK(s.firstByName("Other")  == b);
     CHECK(s.firstByName("Missing") == nullptr);
@@ -142,7 +142,7 @@ TEST_CASE("Scheduler::ensureUniqueName leaves the colliding name alone when the 
     // result than the caller asked for. This test pins that refusal.
     mm::Scheduler s;
     auto* parent = new Stub();
-    parent->setName("Layers");
+    parent->setName("Effects");
     s.addModule(parent);
 
     // Create one base "GlowParticles" plus eight "GlowParticles-2".."GlowParticles-9".

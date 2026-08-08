@@ -49,10 +49,10 @@
     },
     {
       "name": "fix-layers",
-      "description": "Layers: the top-level container the Layer hangs under — the standard tree the live device boots with. A pinned single Layer (parent_id-less, props.layouts) is the older shape the host runner tolerates but the device's live reachability check does not.",
+      "description": "Effects: the top-level container the Layer hangs under — the standard tree the live device boots with. A pinned single Layer (parent_id-less, props.layouts) is the older shape the host runner tolerates but the device's live reachability check does not.",
       "op": "add_module",
-      "id": "Layers",
-      "type": "Layers",
+      "id": "Effects",
+      "type": "Effects",
       "props": {
         "layouts": "Layouts"
       }
@@ -62,7 +62,7 @@
       "op": "add_module",
       "id": "Layer",
       "type": "Layer",
-      "parent_id": "Layers",
+      "parent_id": "Effects",
       "props": {
         "channelsPerLight": 3
       }
@@ -80,7 +80,7 @@
       "id": "Drivers",
       "type": "Drivers",
       "props": {
-        "layers": "Layers"
+        "effects": "Effects"
       }
     },
     {

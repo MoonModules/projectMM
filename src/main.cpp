@@ -1,5 +1,5 @@
 #include "core/Scheduler.h"
-#include "light/layers/Layers.h"
+#include "light/layers/Effects.h"
 #include "light/layouts/GridLayout.h"
 #include "light/layouts/GridBlacksLayout.h"
 #include "light/layouts/SphereLayout.h"
@@ -25,6 +25,7 @@
 #include "light/effects/FireEffect.h"
 #include "light/effects/ParticlesEffect.h"
 #include "light/moonlive/MoonLiveEffect.h"
+#include "light/moonlive/MoonLiveModifier.h"
 #include "light/effects/SpiralEffect.h"
 #include "light/effects/RingsEffect.h"
 #include "light/effects/RipplesEffect.h"
@@ -155,7 +156,7 @@ static void registerModuleTypes() {
     // core modules keep a per-module page named for the type.
     // Containers
     mm::ModuleFactory::registerType<mm::Layouts>("Layouts", "light/supporting.md#layouts");
-    mm::ModuleFactory::registerType<mm::Layers>("Layers", "light/supporting.md#layers");
+    mm::ModuleFactory::registerType<mm::Effects>("Effects", "light/supporting.md#effects");
     mm::ModuleFactory::registerType<mm::Layer>("Layer", "light/supporting.md#layer");
     mm::ModuleFactory::registerType<mm::Drivers>("Drivers", "light/supporting.md#drivers");
     mm::ModuleFactory::registerType<mm::LightPresetsModule>("LightPresetsModule", "light/supporting.md#lightpresets");
@@ -245,6 +246,7 @@ static void registerModuleTypes() {
     // Modifiers — alphabetical by display name.
     mm::ModuleFactory::registerType<mm::BlockModifier>("BlockModifier", "light/modifiers.md#block");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers.md#checkerboard");
+    mm::ModuleFactory::registerType<mm::MoonLiveModifier>("MoonLiveModifier", "light/MoonLiveModifier.md");
     mm::ModuleFactory::registerType<mm::CircleModifier>("CircleModifier", "light/modifiers.md#circle");
     mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier", "light/modifiers.md#mirror");
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier", "light/modifiers.md#multiply");
@@ -363,12 +365,12 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     systemModule->addChild(pinsModule);
 
     // Services — top-level container for user-added capability modules (Audio, IR).
-    // The core-domain twin of the light domain's Layers/Drivers: a grouping node
+    // The core-domain twin of the light domain's Effects/Drivers: a grouping node
     // whose children the user adds/removes at runtime. Added as a root below.
     auto* servicesModule = static_cast<mm::Services*>(mm::ModuleFactory::create("Services"));
 
     // ControlModule — puts the device into a named state. Top-level rather than a Services child
-    // because a preset reaches ACROSS Layouts/Layers/Drivers/Services, so it cannot live inside one
+    // because a preset reaches ACROSS Layouts/Effects/Drivers/Services, so it cannot live inside one
     // of them. Boot-wired: presets are a device capability, not something a user adds.
     auto* controlModule = static_cast<mm::ControlModule*>(mm::ModuleFactory::create("ControlModule"));
 
@@ -449,14 +451,14 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     auto* grid = static_cast<mm::GridLayout*>(mm::ModuleFactory::create("GridLayout"));
     layouts->addChild(grid);
 
-    // Layers: top-level container; one or more layers, each rendering
+    // Effects: top-level container; one or more layers, each rendering
     // into its own buffer. Today one Layer with one effect + one modifier.
-    auto* layersContainer = static_cast<mm::Layers*>(mm::ModuleFactory::create("Layers"));
+    auto* effectsContainer = static_cast<mm::Effects*>(mm::ModuleFactory::create("Effects"));
     auto* layer = static_cast<mm::Layer*>(mm::ModuleFactory::create("Layer"));
     layer->setChannelsPerLight(3);
-    layersContainer->addChild(layer);
+    effectsContainer->addChild(layer);
     // setLayouts wires the shared Layouts to the container AND propagates to every child Layer.
-    layersContainer->setLayouts(layouts);
+    effectsContainer->setLayouts(layouts);
 
     // One default effect so a bare device (no catalog inject) still shows lights out
     // of the box — but NO default modifier: the boot Layer is just an effect on a
@@ -466,13 +468,13 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     layer->addChild(noise);
 
     // Drivers: top-level container; one or more Driver children. Bound to the
-    // Layers container — Drivers re-resolves the active Layer from it at every
+    // Effects container — Drivers re-resolves the active Layer from it at every
     // prepareTree, so a Layer cleared+rebuilt via the API self-heals without
     // re-running this wiring. Binding the container (not a single Layer) is what
     // lets a driver read across N Layer buffers from one place — the hook
     // multi-layer blending uses.
     auto* drivers = static_cast<mm::Drivers*>(mm::ModuleFactory::create("Drivers"));
-    drivers->setLayers(layersContainer);
+    drivers->setEffects(effectsContainer);
 
     // Output drivers (NetworkSend + the LED drivers: RMT / LCD_CAM / Parlio) are
     // NOT boot-wired. They are added explicitly per board through the catalog
@@ -488,7 +490,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // PreviewDriver is the one driver that stays boot-wired: it needs the HTTP
     // server's WS broadcaster (set below, once httpServer exists), a reference only
     // main.cpp has and the catalog can't supply. It reads the active Layer (resolved
-    // by the Drivers container's setLayers above) for the light positions and the
+    // by the Drivers container's setEffects above) for the light positions and the
     // sparse buffer it streams; it owns its own scratch buffers.
     // The light-preset library: a boot-wired singleton under Drivers (child role `preset`). It owns
     // the named channel-role wirings every driver references by id; exactly one exists, so drivers
@@ -529,7 +531,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // network is up), services (the user-added-capability container: Audio, IR — placed after
     // network because a service may use it, e.g. WLED audio sync, and before the light pipeline
     // so a capability like audio is available to the effects that consume it), light pipeline
-    // (Layouts → Layers → Drivers), then HTTP. The Scheduler walks roots in this order each
+    // (Layouts → Effects → Drivers), then HTTP. The Scheduler walks roots in this order each
     // tick; child propagation happens inside each root.
     scheduler.addModule(filesystemModule);
     scheduler.addModule(systemModule);
@@ -552,7 +554,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     scheduler.addModule(servicesModule);
     scheduler.addModule(controlModule);
     scheduler.addModule(layouts);
-    scheduler.addModule(layersContainer);
+    scheduler.addModule(effectsContainer);
     scheduler.addModule(drivers);
     scheduler.addModule(httpServer);
 

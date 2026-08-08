@@ -30,7 +30,7 @@ Coding conventions live in [coding-standards.md](coding-standards.md); how to bu
   - [The pipeline](#the-pipeline)
   - [3D from the start](#3d-from-the-start)
   - [Layouts and Layout](#layouts-and-layout)
-  - [Layers and Layer](#layers-and-layer)
+  - [Effects and Layer](#effects-and-layer)
   - [Effects](#effects)
     - [Dimensionality](#dimensionality)
     - [Robustness rules](#robustness-rules)
@@ -284,7 +284,7 @@ A **service** is a MoonModule (role `ModuleRole::Service`) that bridges to the o
 
 The defining line is the **data relationship, not the connector**: *does the module consume the light output buffer?* If yes it's a **driver** (ArtNet, DMX, SPI-LED all consume the buffer, differing only in transport; a DMX sender uses a UART/RS-485 transport but is a driver because it sends the rendered buffer). If no, it's a **service**.
 
-Services are **user-add/deletable children of the `Services` container** — the core-domain twin of the light pipeline's `Layers`/`Drivers`: a top-level container holding user-added children of one role. The firmware is identical whether or not the hardware is wired, so the user adds the module when they solder a gyro on and removes it later, reusing the generic child add/replace/delete + persistence machinery (`Services` declares `acceptsChildRoles("service")`). Fixed device infrastructure (identity, network, the inspection tools Tasks/I2cScan) lives under **System** instead, wired by code, not user-added — that is the System/Services split. Direction is per-module, not a role: a service may read (gyro), write (relay), or both, so one `Service` role spans the category. Each is a header-only or `.h`+`.cpp` core module under `src/core/`, reaches hardware only through a domain-neutral platform primitive (`platform::i2c*`, `platform::audioMic*`, …), and gets a spec in `docs/moonmodules/core/services.md` (enforced by `check_specs.py`). Most poll in `tick20ms`/`tick1s`; the exception is a service whose data an effect consumes *every frame*: [AudioService](moonmodules/core/moxygen/AudioService.md) reads + analyses its I²S microphone in `tick()` because the audio effects react per render tick, and its per-tick cost (one FFT) is part of the render budget. Automatic bus-probe detection is out of scope; the manual path is the foundation.
+Services are **user-add/deletable children of the `Services` container** — the core-domain twin of the light pipeline's `Effects`/`Drivers`: a top-level container holding user-added children of one role. The firmware is identical whether or not the hardware is wired, so the user adds the module when they solder a gyro on and removes it later, reusing the generic child add/replace/delete + persistence machinery (`Services` declares `acceptsChildRoles("service")`). Fixed device infrastructure (identity, network, the inspection tools Tasks/I2cScan) lives under **System** instead, wired by code, not user-added — that is the System/Services split. Direction is per-module, not a role: a service may read (gyro), write (relay), or both, so one `Service` role spans the category. Each is a header-only or `.h`+`.cpp` core module under `src/core/`, reaches hardware only through a domain-neutral platform primitive (`platform::i2c*`, `platform::audioMic*`, …), and gets a spec in `docs/moonmodules/core/services.md` (enforced by `check_specs.py`). Most poll in `tick20ms`/`tick1s`; the exception is a service whose data an effect consumes *every frame*: [AudioService](moonmodules/core/moxygen/AudioService.md) reads + analyses its I²S microphone in `tick()` because the audio effects react per render tick, and its per-tick cost (one FFT) is part of the render budget. Automatic bus-probe detection is out of scope; the manual path is the foundation.
 
 **An effect reads a service's data** via the shared-struct pull pattern from [§ Data exchange](#data-exchange-between-modules), no new mechanism: the service owns a small POD struct overwritten in place each poll/tick, and the consuming effect holds a `const` pointer to it. The first concrete case is audio: AudioService produces an `AudioFrame` (level + 16-band spectrum + peak) that [AudioVolumeEffect](moonmodules/light/effects.md) and [AudioSpectrumEffect](moonmodules/light/effects.md) consume. It reaches the frame through a static `AudioService::latestFrame()` rather than a boot-time setter, a small variation on the pattern, because an audio effect can be added through the UI *after* boot and must still find the one live mic (a setter only wired the boot instance). The active mic registers itself in `setup()` and clears the pointer in `release()`, so add/remove in any order returns either the live frame or a static silent one, never null. A service that only *displays* its readings (the gyro today) skips the consumer side entirely.
 
@@ -316,11 +316,11 @@ The light domain is everything specific to driving lights. **Light** here means 
 Modules in the light pipeline can be added, replaced, or removed dynamically at runtime.
 
 ```text
-              Layouts (shared by every Layer in Layers)
+              Layouts (shared by every Layer in Effects)
                 ├── GridLayout  ──→ coordinate iterator
                 └── WheelLayout ──→ coordinate iterator
                         │
-                    Layers
+                    Effects
                 ┌───────┼───────┐
                 ▼       ▼       ▼
             Layer A  Layer B  Layer C
@@ -339,12 +339,12 @@ Modules in the light pipeline can be added, replaced, or removed dynamically at 
 
 **Data flow.** The pipeline instantiates both core data-exchange shapes (see [§ Data exchange between modules](#data-exchange-between-modules)):
 
-- *Shared-struct (pull):* `Drivers` hands every child driver a `Buffer*` (source) plus a `Correction*` (shared brightness/reorder/white), and `Layer` exposes its pixel buffer to `Drivers` directly on the identity-mapping fast path: each consumer holds a `const`-pointer and reads it per frame. The pointers are **(re)bound on every rebuild**, not just at boot: `Drivers::prepare()` re-resolves the active `Layer` (`Layers::activeLayer()`) and calls `passBufferToDrivers()`, which re-runs `setSourceBuffer()`/`setLayer()` on each child (clearing them to `nullptr` when there is no active Layer). So a held pointer is valid only until the next rebuild — which is exactly why the consumers re-read it each frame and tolerate a null (the [robustness rule](#robustness)): a Layer add/delete/replace re-binds or clears it live, no dangling reference.
+- *Shared-struct (pull):* `Drivers` hands every child driver a `Buffer*` (source) plus a `Correction*` (shared brightness/reorder/white), and `Layer` exposes its pixel buffer to `Drivers` directly on the identity-mapping fast path: each consumer holds a `const`-pointer and reads it per frame. The pointers are **(re)bound on every rebuild**, not just at boot: `Drivers::prepare()` re-resolves the active `Layer` (`Effects::activeLayer()`) and calls `passBufferToDrivers()`, which re-runs `setSourceBuffer()`/`setLayer()` on each child (clearing them to `nullptr` when there is no active Layer). So a held pointer is valid only until the next rebuild — which is exactly why the consumers re-read it each frame and tolerate a null (the [robustness rule](#robustness)): a Layer add/delete/replace re-binds or clears it live, no dangling reference.
 - *Push to a core sink:* `PreviewDriver` owns the preview wire format (a one-time coordinate table + per-frame RGB point list) and pushes the bytes to a `BinaryBroadcaster` (the core HTTP server). The server broadcasts them over WebSocket without knowing they're a preview: the format and the light types stay entirely in the driver. See [PreviewDriver](moonmodules/light/moxygen/PreviewDriver.md).
 
 **Graceful degradation under transport backpressure.** The preview is the transport-side sibling of the memory-side [§ Degradation cascade](#degradation-cascade): when the browser can't keep up with a full-resolution frame (128² = ~49 KB), the producer sheds quality rather than stall the loop, in video-streaming order, frame rate then resolution. The frame streams from the driver buffer with no intermediate copy, a resumable memory-adaptive chunk per tick, and the next frame starts only once the previous drained, so the effective frame rate self-limits to what the link sustains. Only when a single frame can't drain promptly does it downsample via a spatial lattice (the adaptive-bitrate idea behind HLS/DASH, on a binary WebSocket). Each delivered frame is whole (a WebSocket message is atomic), the render loop is charged a bounded slice per tick, and a client blocked past the spin budget is closed and reconnects (a blip, not a freeze). The mechanism is payload-agnostic and lives in [PreviewDriver](moonmodules/light/moxygen/PreviewDriver.md) + `HttpServerModule`, so other bulky streams can ride the same transport.
 
-**Naming convention.** Capital `Layouts`, `Layers`, `Drivers` are class names (always capitalised when referring to the class). Lowercase "layouts", "layers", "drivers" is the English plural, used freely when context makes it clear. Singular "layout", "layer", "driver" is an individual instance.
+**Naming convention.** Capital `Layouts`, `Effects`, `Drivers` are class names (always capitalised when referring to the class). Lowercase "layouts", "layers", "drivers" is the English plural, used freely when context makes it clear. Singular "layout", "layer", "driver" is an individual instance.
 
 ## 3D from the start
 
@@ -369,13 +369,13 @@ Positions are computed algorithmically, not stored. Grid is the most commonly us
 
 Multiple layouts can live in one Layouts container. Each layout describes one light type: the model is one light type per layout (LED strips, or par lights), not mixed in a single Layouts.
 
-## Layers and Layer
+## Effects and Layer
 
-**Layers** (a MoonModule) is the top-level container for one or more layers. Each layer renders independently into its own buffer; the Drivers container composes those buffers downstream.
+**Effects** (a MoonModule) is the top-level container for one or more layers. Each layer renders independently into its own buffer; the Drivers container composes those buffers downstream.
 
 **Multi-layer composition.** The container composes more than one Layer's buffer into the shared output: each enabled Layer renders into its own buffer, and the Drivers container's blend+map step composites them in container order (bottom→top) into the physical buffer (which is why that buffer is a *blend* buffer in [§ Memory strategy](#memory-strategy)). Each Layer carries a `blendMode` (alpha-over or additive) and an `opacity` — inert parameters the Layer never acts on; Drivers reads them and the container child order, and blends bottom→top. The bottom layer clears + overwrites the output; each layer above blends onto the accumulated frame per its mode and opacity. With a single enabled Layer this is the degenerate case: a thin pass-through that hands the driver the Layer's buffer directly (no composite), byte-for-byte the single-layer pipeline. The blend math is integer-only per the hot-path rule (8-bit alpha-over `(src·α + dst·(255−α))/255`, additive sum-with-clamp); cost scales with the enabled-layer count.
 
-A **Layer** (a MoonModule, child of Layers) owns:
+A **Layer** (a MoonModule, child of Effects) owns:
 
 - A **buffer**: the light data effects write into (logical space).
 - A **mapping LUT**: built by the layer from the shared Layouts and the layer's static modifiers.
@@ -386,7 +386,7 @@ A layer can have **multiple effects**. Each effect writes to the buffer sequenti
 
 A layer applies **all its enabled modifiers as a chain** during the mapping build (`Layer::rebuildLUT`): each modifier is a coordinate fold, and they compose in child order (M₁∘M₂∘…). Modifiers are **reorderable** in the UI, and order is meaningful (a multiply-then-checkerboard mask differs from checkerboard-then-multiply, just as mirror-then-rotate differs from rotate-then-mirror). The fold contract (the three hooks, the physical→logical build, the live pass) is documented in [ModifierBase](moonmodules/light/moxygen/ModifierBase.md).
 
-Each layer references the shared Layouts. The layer builds its mapping by walking the Layouts container's **physical** coordinates and folding each through the static modifier chain to its logical cell — N physical lights folding onto one logical cell is the fan-out (a Multiply kaleidoscope), so the build never produces a fan-out overflow. Different layers in Layers can have different modifiers, producing different mappings from the same Layouts.
+Each layer references the shared Layouts. The layer builds its mapping by walking the Layouts container's **physical** coordinates and folding each through the static modifier chain to its logical cell — N physical lights folding onto one logical cell is the fan-out (a Multiply kaleidoscope), so the build never produces a fan-out overflow. Different layers in Effects can have different modifiers, producing different mappings from the same Layouts.
 
 ## Effects
 
@@ -472,7 +472,7 @@ A recompile is the normal cold-path rebuild: editing the `source` control routes
 
 ## Modifiers
 
-A modifier (MoonModule) lives inside a layer alongside its effects. Modifiers expose a virtual interface: the Layer calls modifier methods without knowing the concrete type (no `dynamic_cast`). A layer applies **all** its enabled modifiers as a chain, in child order — each a coordinate fold composed into one mapping (see [§ Layers and Layer](#layers-and-layer)).
+A modifier (MoonModule) lives inside a layer alongside its effects. Modifiers expose a virtual interface: the Layer calls modifier methods without knowing the concrete type (no `dynamic_cast`). A layer applies **all** its enabled modifiers as a chain, in child order — each a coordinate fold composed into one mapping (see [§ Effects and Layer](#effects-and-layer)).
 
 A modifier is a coordinate transform, applied in one of two ways (the fold contract is in [ModifierBase](moonmodules/light/moxygen/ModifierBase.md)):
 
@@ -600,7 +600,7 @@ The UI is **MoonModule-driven**. It contains no hard-coded knowledge of specific
 
 Adding a new MoonModule with controls needs **zero changes** to the UI files. This extends to the tree-mutation affordances: which modules accept children (and of what role) comes from each type's `acceptsChildRoles()`, and whether a module can be deleted/replaced comes from its `userEditable()`: both declared on the C++ side and reported in `/api/types` + `/api/state`. The UI hardcodes no list of "which types are containers" or "which roles are editable"; a new container type or a fixed child is a one-line C++ override.
 
-The light domain plugs into the UI at three points: a fixed top-level tree (Layouts / Layers / Drivers pinned in `main.cpp`, root reorder disabled while child reorder works via drag-and-drop), a binary WebSocket preview channel ([PreviewDriver](moonmodules/light/moxygen/PreviewDriver.md): a `0x03` coordinate table sent once per LUT rebuild plus per-frame `0x02` RGB point lists, so sparse layouts preview at their real positions), and per-role emoji for the chip filter (the `ROLE_EMOJI` map in `app.js` is the single source of truth: `effect`, `driver`, …, `service`). Full UI spec: [docs/moonmodules/core/ui.md](moonmodules/core/ui.md).
+The light domain plugs into the UI at three points: a fixed top-level tree (Layouts / Effects / Drivers pinned in `main.cpp`, root reorder disabled while child reorder works via drag-and-drop), a binary WebSocket preview channel ([PreviewDriver](moonmodules/light/moxygen/PreviewDriver.md): a `0x03` coordinate table sent once per LUT rebuild plus per-frame `0x02` RGB point lists, so sparse layouts preview at their real positions), and per-role emoji for the chip filter (the `ROLE_EMOJI` map in `app.js` is the single source of truth: `effect`, `driver`, …, `service`). Full UI spec: [docs/moonmodules/core/ui.md](moonmodules/core/ui.md).
 
 ## Tag emoji legend
 

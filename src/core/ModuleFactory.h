@@ -109,7 +109,7 @@ public:
     //   Driver   → strip "Driver"   (PreviewDriver → Preview)
     //   Generic  → strip "Module"   (FilesystemModule → Filesystem)
     //   Layer    → no suffix (the class is literally named "Layer")
-    // Names without the suffix are returned unchanged (Layouts, Layers, Drivers).
+    // Names without the suffix are returned unchanged (Layouts, Effects, Drivers).
     static const char* displayNameFor(const char* typeName, ModuleRole role) {
         const char* suffix = "";
         switch (role) {

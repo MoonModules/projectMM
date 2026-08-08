@@ -12,7 +12,8 @@ namespace {
 // `ControlAnno` is a captured `// @control min..max` comment (a control's UI range). A plain
 // `//` line comment is skipped like whitespace; only the @control form becomes a token, carrying
 // its min/max in annoMin/annoMax. `Assign` is `=` (a control declaration's initializer).
-enum class Tok { Ident, Number, Assign, LParen, RParen, Comma, Semicolon, ControlAnno, End, Error };
+enum class Tok { Ident, Number, Assign, LParen, RParen, Comma, Semicolon, ControlAnno,
+                 Plus, Minus, Star, End, Error };
 
 struct Lexer {
     const char* p;
@@ -76,6 +77,13 @@ struct Lexer {
         if (c == ')') { p++; kind = Tok::RParen; return; }
         if (c == ',') { p++; kind = Tok::Comma; return; }
         if (c == ';') { p++; kind = Tok::Semicolon; return; }
+        if (c == '+') { p++; kind = Tok::Plus;    return; }
+        if (c == '-') { p++; kind = Tok::Minus;   return; }
+        if (c == '*') { p++; kind = Tok::Star;    return; }
+        // '/' only reaches here when it is NOT the `//` a comment starts with (handled above).
+        // '/' and '%' are deliberately NOT tokens yet: a divide needs a two-argument host call
+        // (no ISA here has a divide instruction) and Call is unary today. A script using them gets
+        // "unexpected character", which is the honest answer. Backlogged with that reason.
         if (isDigit(c)) {
             long v = 0; readNumber(v);
             number = v; kind = Tok::Number; return;
@@ -144,11 +152,73 @@ struct Parser {
         return true;
     }
 
-    // expr := number | ident | call.  Returns the vreg holding the value (or 0 on failure). A bare
-    // ident that names a declared control reads its live value (a LoadCtrl of its arena offset); an
-    // ident followed by `(` is a call.
+    // expr    := term { ("+" | "-") term }
+    // term    := primary { "*" primary }
+    // primary := number | ident | call | "(" expr ")"
+    //
+    // Precedence climbing, the textbook shape: each level consumes the tighter-binding one below
+    // it, so `2 + 3 * 4` is 14 rather than 20 without any special case. Every operator lowers to IR
+    // the three backends ALREADY have (Const/Add/Mul) — a - b is emitted as a + (b * -1), because
+    // no ISA here has a subtract and Xtensa's add-immediate encodes only 1..15, so negating the
+    // immediate would silently produce a wrong constant.
     VReg parseExpr() {
+        VReg lhs = parseTerm();
+        while (!failed && (lex.kind == Tok::Plus || lex.kind == Tok::Minus)) {
+            const bool negate = (lex.kind == Tok::Minus);
+            lex.advance();
+            VReg rhs = parseTerm();
+            if (failed) return 0;
+            if (negate) {
+                VReg m = alloc();
+                emit({IrOp::Const, m, 0,0,0,0, -1, nullptr, {}});
+                VReg n = alloc();
+                emit({IrOp::Mul, n, rhs, m, 0,0, 0, nullptr, {}});
+                freeTemp(m); freeTemp(rhs);
+                rhs = n;
+            }
+            VReg dst = alloc();
+            emit({IrOp::Add, dst, lhs, rhs, 0,0, 0, nullptr, {}});
+            freeTemp(lhs); freeTemp(rhs);
+            lhs = dst;
+        }
+        return lhs;
+    }
+
+    VReg parseTerm() {
+        VReg lhs = parsePrimary();
+        while (!failed && lex.kind == Tok::Star) {
+            lex.advance();
+            VReg rhs = parsePrimary();
+            if (failed) return 0;
+            VReg dst = alloc();
+            emit({IrOp::Mul, dst, lhs, rhs, 0,0, 0, nullptr, {}});
+            freeTemp(lhs); freeTemp(rhs);
+            lhs = dst;
+        }
+        return lhs;
+    }
+
+    // A bare ident that names a declared control reads its live value (a LoadCtrl of its arena
+    // offset); an ident followed by `(` is a call.
+    VReg parsePrimary() {
         if (failed) return 0;
+        if (lex.kind == Tok::LParen) {                   // grouping
+            lex.advance();
+            VReg v = parseExpr();
+            if (!expect(Tok::RParen, "expected ')'")) return 0;
+            return v;
+        }
+        if (lex.kind == Tok::Minus) {                    // unary minus: 0 - v, as (v * -1)
+            lex.advance();
+            VReg v = parsePrimary();
+            if (failed) return 0;
+            VReg m = alloc();
+            emit({IrOp::Const, m, 0,0,0,0, -1, nullptr, {}});
+            VReg dst = alloc();
+            emit({IrOp::Mul, dst, v, m, 0,0, 0, nullptr, {}});
+            freeTemp(m); freeTemp(v);
+            return dst;
+        }
         if (lex.kind == Tok::Number) {
             if (lex.number < 0 || lex.number > 65535) { fail("number out of range (0..65535)"); return 0; }
             VReg v = alloc();

@@ -14,7 +14,7 @@
 
 namespace mm {
 
-/// A `Layer` MoonModule (role `ModuleRole::Layer`, child of the `Layers` container) owns a buffer, a mapping LUT, an ordered effect list, and an ordered modifier list, and references the shared `Layouts` that describes the physical topology.
+/// A `Layer` MoonModule (role `ModuleRole::Layer`, child of the `Effects` container) owns a buffer, a mapping LUT, an ordered effect list, and an ordered modifier list, and references the shared `Layouts` that describes the physical topology.
 ///
 /// **Ownership:** a `Buffer` (logical light data, sized to the logical box); a `MappingLUT` (logical lights to physical positions); effects (write lights into the buffer, dynamic heap-grown list, no fixed max); modifiers (transform the LUT or light values, same dynamic list).
 ///

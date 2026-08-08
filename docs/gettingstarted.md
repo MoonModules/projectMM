@@ -269,14 +269,14 @@ on **serpentine** if your strip zig-zags back and forth.
 
 > [Layouts](moonmodules/light/supporting.md)
 
-**Layers** — what plays on the lights. Add an **effect** (a moving pattern), stack
+**Effects** — what plays on the lights. Add an **effect** (a moving pattern), stack
 several to blend them, and reshape them with **modifiers** (mirror, rotate, and
 more). Each effect has its own controls — speed, color mode, and so on — that you
 tweak live.
 
-![The Layers module](assets/gettingstarted/02-09-UI-Layers.png)
+![The Effects module](assets/gettingstarted/02-09-UI-Layers.png)
 
-> [Layers](moonmodules/light/supporting.md) · [Layer](moonmodules/light/supporting.md)
+> [Effects](moonmodules/light/supporting.md) · [Layer](moonmodules/light/supporting.md)
 
 **Drivers** — where the colors go. Set overall **brightness** and color order,
 then add an output: real LED strips on a pin, or send the frame over the network

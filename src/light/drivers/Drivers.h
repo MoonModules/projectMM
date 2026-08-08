@@ -5,7 +5,7 @@
 #include "core/ActiveInstance.h"  // the summary-seat election (the seat + its RAII vacate)
 #include "light/layers/Buffer.h"
 #include "light/layers/Layer.h"
-#include "light/layers/Layers.h"
+#include "light/layers/Effects.h"
 #include "light/layers/BlendMap.h"
 #include "light/drivers/Correction.h"
 #include "light/Palette.h"   // the global active palette + its select control
@@ -24,7 +24,7 @@ namespace mm {
 /// **Naming convention.** Capital `Drivers` is the container class; lowercase
 /// "driver"/"drivers" is the English singular/plural for individual `DriverBase`
 /// children. Capitalisation disambiguates "the Drivers container" from "two drivers
-/// running" (same rule for `Layouts`/layout and `Layers`/layer).
+/// running" (same rule for `Layouts`/layout and `Effects`/layer).
 ///
 /// **Shared output buffer.** Necessary because blend+map writes to arbitrary physical
 /// positions via LUT — the output is not filled sequentially, so a driver cannot read
@@ -35,7 +35,7 @@ namespace mm {
 /// (the zero-copy fast path, at the cost of parallelism).
 ///
 /// **Multi-layer composition.** When two or more layers are enabled, Drivers composites
-/// them into the shared output buffer each frame in Layers container order (bottom→top,
+/// them into the shared output buffer each frame in Effects container order (bottom→top,
 /// via `forEachEnabledLayer`). The bottom layer clears and overwrites the buffer; each
 /// layer above blends onto the accumulated frame per its own `blendMode` and `opacity`
 /// (the inert per-Layer controls). Drivers owns the orchestration because only it sees
@@ -176,18 +176,18 @@ public:
     uint8_t palette = 0;
 
     // Two ways to wire the source Layer:
-    //  - setLayers(Layers*): bind the container; layer_ is re-resolved from
+    //  - setEffects(Effects*): bind the container; layer_ is re-resolved from
     //    activeLayer() at every prepareTree. This makes the link self-healing —
     //    a Layer cleared and rebuilt via the API (clear_children + add_module)
     //    is picked up on the next prepareTree without re-running main.cpp wiring.
     //  - setLayer(Layer*): pin a specific Layer directly (test rigs that build a
-    //    Layer outside a Layers container). Skips re-resolution.
-    void setLayers(Layers* layers) {
-        layers_ = layers;
-        if (layers_) layer_ = layers_->activeLayer();
+    //    Layer outside a Effects container). Skips re-resolution.
+    void setEffects(Effects* layers) {
+        effects_ = layers;
+        if (effects_) layer_ = effects_->activeLayer();
     }
     void setLayer(Layer* layer) {
-        layers_ = nullptr;  // explicit pin overrides container resolution
+        effects_ = nullptr;  // explicit pin overrides container resolution
         layer_ = layer;
     }
 
@@ -283,8 +283,8 @@ public:
     void prepare() override {
         // Re-resolve the active Layer from the bound container so a Layer that
         // was cleared and rebuilt via the API is picked up here (self-healing).
-        // setLayer() pins a Layer directly and leaves layers_ null — skip then.
-        if (layers_) layer_ = layers_->activeLayer();
+        // setLayer() pins a Layer directly and leaves effects_ null — skip then.
+        if (effects_) layer_ = effects_->activeLayer();
         // The output (composition) buffer is needed when we must blend into a
         // physical-space buffer rather than hand a driver a Layer's logical buffer
         // directly: whenever ≥2 layers composite, OR a single layer has a LUT
@@ -300,10 +300,10 @@ public:
         // fallback activeLayer() may return (which exists only so geometry stays
         // queryable while every layer is toggled off). With no enabled layer there
         // is nothing to emit, so no output buffer — drivers go idle (see
-        // passBufferToDrivers). A pinned setLayer() (layers_ null) is always treated
+        // passBufferToDrivers). A pinned setLayer() (effects_ null) is always treated
         // as the live source.
-        Layer* const out = layers_ ? layers_->firstEnabledLayer() : layer_;
-        const uint8_t enabled = layers_ ? layers_->enabledLayerCount() : (layer_ ? 1 : 0);
+        Layer* const out = effects_ ? effects_->firstEnabledLayer() : layer_;
+        const uint8_t enabled = effects_ ? effects_->enabledLayerCount() : (layer_ ? 1 : 0);
         const bool needOutput = out && (enabled > 1 || out->lut().hasLUT());
 
         // The render↔encode split wants an outputBuffer_ EVEN in the identity case (a lone no-LUT
@@ -377,7 +377,7 @@ public:
     bool firstOutputRgb(uint8_t out[3]) const override {
         const Buffer* src = nullptr;
         if (outputBuffer_.data()) src = &outputBuffer_;
-        else if (Layer* l = layers_ ? layers_->firstEnabledLayer() : layer_; l && l->buffer().data())
+        else if (Layer* l = effects_ ? effects_->firstEnabledLayer() : layer_; l && l->buffer().data())
             src = &l->buffer();
         if (!src || src->count() == 0 || src->channelsPerLight() < 3) return false;
         const uint8_t* p = src->data();
@@ -408,9 +408,9 @@ public:
         // The single-layer source, resolved ONCE: both single-layer branches below need the same
         // value, and declaring it per-branch in an if-init shadowed the outer one (MSVC C4456 —
         // legitimately: two `Layer* out` in one chain reads as a bug even when it isn't).
-        Layer* srcLayer = layers_ ? layers_->firstEnabledLayer() : layer_;
+        Layer* srcLayer = effects_ ? effects_->firstEnabledLayer() : layer_;
 
-        if (outputBuffer_.data() && layers_ && layers_->enabledLayerCount() > 1) {
+        if (outputBuffer_.data() && effects_ && effects_->enabledLayerCount() > 1) {
             // Multi-layer composite: blend each enabled layer in container order.
             // The first (bottom) layer clears + overwrites; each subsequent layer
             // blends onto the accumulated frame per its own blendMode + opacity.
@@ -418,7 +418,7 @@ public:
             // specialized loop each — no-LUT layers blend 1:1, LUT layers map),
             // and a full-opacity additive/overwrite layer pays no alpha math, so
             // cost scales with enabled-layer count only.
-            layers_->forEachEnabledLayer([&](Layer* L, bool first) {
+            effects_->forEachEnabledLayer([&](Layer* L, bool first) {
                 BlendOp op = first ? BlendOp::Overwrite : L->blendOp();
                 uint8_t op_opacity = first ? 255 : L->opacity;
                 blendMap(L->buffer(), outputBuffer_, L->lut(), L->channelsPerLight(),
@@ -478,7 +478,7 @@ public:
     void quiesce() override { if (!quiesceEncode()) stopEncodeTask(); }
 
 private:
-    Layers* layers_ = nullptr;  // bound container; layer_ re-resolved from it at prepareTree
+    Effects* effects_ = nullptr;  // bound container; layer_ re-resolved from it at prepareTree
     Layer* layer_ = nullptr;
     Buffer outputBuffer_;
 
@@ -626,8 +626,8 @@ private:
         // while the split encodes from outputBuffer_ would output a stale frame.
         // The source is the first *enabled* layer, never the disabled fallback activeLayer() returns
         // when all layers are off — with no enabled layer buf stays null and every driver idles (its
-        // last frame is not re-sent). A pinned setLayer() (layers_ null) is always the live source.
-        Layer* const out = layers_ ? layers_->firstEnabledLayer() : layer_;
+        // last frame is not re-sent). A pinned setLayer() (effects_ null) is always the live source.
+        Layer* const out = effects_ ? effects_->firstEnabledLayer() : layer_;
         Buffer* buf = out ? (outputBuffer_.data() ? &outputBuffer_ : &out->buffer())
                           : nullptr;
         for (uint8_t i = 0; i < childCount(); i++) {

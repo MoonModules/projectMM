@@ -16,7 +16,7 @@
 #include "light/effects/NoiseEffect.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/layers/Layer.h"
-#include "light/layers/Layers.h"
+#include "light/layers/Effects.h"
 #include "platform/platform.h"
 
 #include <cstdio>
@@ -26,7 +26,7 @@
 
 namespace {
 
-// A Layers tree the same way production builds one: through the factory, so every module carries a
+// A Effects tree the same way production builds one: through the factory, so every module carries a
 // real typeName(). That matters here rather than being ceremony — reconciliation matches children BY
 // TYPE, and a module constructed with `new` has an empty type name that can never match.
 //
@@ -40,7 +40,7 @@ struct Tree {
 
     Tree() {
         // Isolate the filesystem: without this the boot load reads the developer's real
-        // /.config/Layers.json and the tree arrives with whatever that machine happened to have,
+        // /.config/Effects.json and the tree arrives with whatever that machine happened to have,
         // so the assertions below would depend on the box the tests run on.
         // A monotonic counter, not millis(): two fixtures built in the same millisecond would share
         // a root and read each other's files.
@@ -49,7 +49,7 @@ struct Tree {
         std::filesystem::remove_all(root_);
         mm::platform::fsSetRoot(root_);
 
-        mm::ModuleFactory::registerType<mm::Layers>("Layers");
+        mm::ModuleFactory::registerType<mm::Effects>("Effects");
         mm::ModuleFactory::registerType<mm::Layer>("Layer");
         mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect");
         mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
@@ -57,7 +57,7 @@ struct Tree {
         fs = new mm::FilesystemModule();
         fs->setTypeName("FilesystemModule");
         fs->setScheduler(&scheduler);
-        layers = mm::ModuleFactory::create("Layers");
+        layers = mm::ModuleFactory::create("Effects");
         scheduler.addModule(fs);
         scheduler.addModule(layers);
         scheduler.setup();
@@ -75,7 +75,7 @@ struct Tree {
         return m;
     }
 
-    // The effect type at Layers→Layer[0]→child[0], or "" when there is none.
+    // The effect type at Effects→Layer[0]→child[0], or "" when there is none.
     const char* effectType() const {
         auto* layer = layers->child(0);
         if (!layer) return "";
@@ -136,7 +136,7 @@ TEST_CASE("applySubtree recreates children the live tree no longer has") {
 
     const std::string preset = serialize(t.fs, t.layers);
 
-    // Everything under Layers is removed, as a user clearing their setup would.
+    // Everything under Effects is removed, as a user clearing their setup would.
     auto* gone = t.layers->child(0);
     t.layers->removeChild(gone);
     gone->release();
@@ -209,19 +209,19 @@ TEST_CASE("a prefixed subtree round-trips inside a larger object") {
     t.add(layer, "NoiseEffect");
 
     mm::JsonSink sink;
-    sink.append("{\"captures\":\"Layers\",");
-    REQUIRE(t.fs->saveSubtreeTo(t.layers, sink, "Layers."));
+    sink.append("{\"captures\":\"Effects\",");
+    REQUIRE(t.fs->saveSubtreeTo(t.layers, sink, "Effects."));
     sink.append("}");
     const std::string preset(sink.data(), sink.size());
 
-    CHECK(preset.find("\"Layers.0.type\":\"Layer\"") != std::string::npos);
-    CHECK(preset.find("\"Layers.0.0.type\":\"NoiseEffect\"") != std::string::npos);
+    CHECK(preset.find("\"Effects.0.type\":\"Layer\"") != std::string::npos);
+    CHECK(preset.find("\"Effects.0.0.type\":\"NoiseEffect\"") != std::string::npos);
 
     // Change the look, then restore it from the prefixed body.
     auto* old = layer->replaceChildAt(0, mm::ModuleFactory::create("RainbowEffect"));
     if (old) { old->release(); mm::Scheduler::deleteTree(old); }
     REQUIRE(std::strcmp(t.effectType(), "RainbowEffect") == 0);
 
-    CHECK(t.fs->applySubtree(t.layers, preset.c_str(), "Layers."));
+    CHECK(t.fs->applySubtree(t.layers, preset.c_str(), "Effects."));
     CHECK(std::strcmp(t.effectType(), "NoiseEffect") == 0);
 }

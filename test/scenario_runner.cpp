@@ -11,7 +11,7 @@
 #include "light/layouts/SphereLayout.h"
 #include "light/layers/Layer.h"
 #include "light/layouts/Layouts.h"
-#include "light/layers/Layers.h"
+#include "light/layers/Effects.h"
 #include "light/effects/LinesEffect.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/NoiseEffect.h"
@@ -177,7 +177,7 @@ static void registerScenarioTypes() {
     mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout");
     mm::ModuleFactory::registerType<mm::GridBlacksLayout>("GridBlacksLayout");
     mm::ModuleFactory::registerType<mm::SphereLayout>("SphereLayout");
-    mm::ModuleFactory::registerType<mm::Layers>("Layers");
+    mm::ModuleFactory::registerType<mm::Effects>("Effects");
     mm::ModuleFactory::registerType<mm::Layer>("Layer");
     mm::ModuleFactory::registerType<mm::LinesEffect>("LinesEffect");
     mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect");
@@ -313,14 +313,14 @@ struct ScenarioContext {
         // Wire props (only when the step has any).
         if (step.has("props")) {
             auto& props = step["props"];
-            if (std::strcmp(type, "Layers") == 0) {
+            if (std::strcmp(type, "Effects") == 0) {
                 // Wire the container's Layouts (mirrors main.cpp's
-                // layersContainer->setLayouts). Layers re-propagates this to its
-                // child Layers at every prepareTree, so a Layer added later picks
+                // effectsContainer->setLayouts). Effects re-propagates this to its
+                // child Effects at every prepareTree, so a Layer added later picks
                 // it up — the self-healing path the device relies on.
                 if (props.has("layouts")) {
                     auto* layoutsModule = static_cast<mm::Layouts*>(modules[props["layouts"].str]);
-                    if (layoutsModule) static_cast<mm::Layers*>(mod)->setLayouts(layoutsModule);
+                    if (layoutsModule) static_cast<mm::Effects*>(mod)->setLayouts(layoutsModule);
                 }
             } else if (std::strcmp(type, "Layer") == 0) {
                 auto* layer = static_cast<mm::Layer*>(mod);
@@ -332,13 +332,13 @@ struct ScenarioContext {
                     layer->setChannelsPerLight(static_cast<uint8_t>(props["channelsPerLight"].num));
                 }
             } else if (std::strcmp(type, "Drivers") == 0) {
-                // Prefer binding the Layers container (self-healing: the active
+                // Prefer binding the Effects container (self-healing: the active
                 // Layer is re-resolved at every prepareTree, so a Layer cleared
                 // and rebuilt mid-scenario is picked up — mirrors main.cpp).
                 // Fall back to pinning a specific Layer for older fixtures.
-                if (props.has("layers")) {
-                    auto* layersModule = static_cast<mm::Layers*>(modules[props["layers"].str]);
-                    if (layersModule) static_cast<mm::Drivers*>(mod)->setLayers(layersModule);
+                if (props.has("effects")) {
+                    auto* effectsModule = static_cast<mm::Effects*>(modules[props["effects"].str]);
+                    if (effectsModule) static_cast<mm::Drivers*>(mod)->setEffects(effectsModule);
                 } else if (props.has("layer")) {
                     auto* layerModule = static_cast<mm::Layer*>(modules[props["layer"].str]);
                     if (layerModule) static_cast<mm::Drivers*>(mod)->setLayer(layerModule);

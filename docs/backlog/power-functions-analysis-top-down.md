@@ -245,7 +245,7 @@ What they do *not* remove is the conceptual one: an effect is 3D when its idea i
 
 ## 6d. Live performance ("DeeJaying") ❓ *(an argument that it is reachable, not a built capability)*
 
-A stretch goal worth recording because the infrastructure is largely built: **playing effects live from the control surface — pads, faders, encoders — with no code changes.** What already exists: control changes reach a running module without a rebuild (`MoonModule::onControlChanged`), the surface routes faders and encoders through `Scheduler::setControl` (the same domain-neutral primitive IR and MQTT use), Layers composite with blend modes and opacity, and presets snapshot and restore whole subtrees.
+A stretch goal worth recording because the infrastructure is largely built: **playing effects live from the control surface — pads, faders, encoders — with no code changes.** What already exists: control changes reach a running module without a rebuild (`MoonModule::onControlChanged`), the surface routes faders and encoders through `Scheduler::setControl` (the same domain-neutral primitive IR and MQTT use), Effects composite with blend modes and opacity, and presets snapshot and restore whole subtrees.
 
 Power functions sharpen this in a specific way: **the more of an effect's mechanics live in shared, control-driven primitives, the more of it is playable rather than fixed.** A hand-rolled accumulator is private state a surface cannot reach; a `BeatPhase` fed from a control is a tempo a performer can ride. The same holds for `particles` (gravity, drag, emission as live parameters) and the field family (warp amount, octaves).
 

@@ -8,7 +8,7 @@
 // Regression: the UI's enable/disable toggle on a child driver (e.g. ArtNet,
 // Preview) was a no-op — the driver kept running. Cause: Drivers::tick() called
 // child(i)->tick() unconditionally, skipping the per-child `enabled` check that
-// Layer::tick() does for effects and Layers::tick() does for child Layers.
+// Layer::tick() does for effects and Effects::tick() does for its child Layers.
 // (The Scheduler only walks top-level modules, so it never sees these children.)
 //
 // These tests pin the gate so the regression can't return silently. A stub
