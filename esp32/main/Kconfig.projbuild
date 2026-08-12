@@ -22,4 +22,12 @@ menu "projectMM"
             path on an eth-only build (link up but no IP). Only the WiFi build
             (esp32p4-eth-wifi) sets this, via sdkconfig.defaults.esp32p4-eth-wifi.
 
+    config MM_JC_P4_M3
+        bool "JC-ESP32P4-M3-DEV: include the on-board ES8311 microphone codec"
+        default n
+        help
+            Selects the JC board's ES8311 control wiring and pulls the
+            esp_codec_dev managed component. The dedicated esp32p4-jc-m3-eth
+            firmware sets this via sdkconfig.defaults.esp32p4-jc-m3.
+
 endmenu

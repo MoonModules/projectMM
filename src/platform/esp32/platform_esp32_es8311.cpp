@@ -1,14 +1,14 @@
 // ES8311 audio-codec init — the I2C control half of the microphone path on boards
-// whose mic is an analog part behind an ES8311 I2S codec (the ESP32-S31
-// Function-CoreBoard), rather than a direct digital I2S MEMS mic. The I2S *read*
+// whose mic is an analog part behind an ES8311 I2S codec, rather than a direct
+// digital I2S MEMS mic. The I2S *read*
 // stays in platform_esp32_i2s.cpp (audioMic*); this file only brings the codec up
 // over I2C so it streams its ADC (mic) onto the I2S bus the read then drains. So
 // the audio domain code (AudioService) is unchanged — it calls audioCodecInit (a
 // no-op on direct-mic boards) before audioMicInit, and reads samples as always.
 //
-// Uses Espressif's esp_codec_dev managed component (the recognised ES8311 driver),
-// gated to the S31 in main/idf_component.yml. This is the platform layer's first
-// I2C master bus — owned here, behind the boundary.
+// Uses Espressif's esp_codec_dev managed component (the recognized ES8311
+// driver), gated to codec-bearing firmware in main/idf_component.yml. This is
+// the platform layer's first I2C master bus, owned here behind the boundary.
 //
 // Compiles on every ESP32 chip: the codec path is under SOC_I2S_SUPPORTED and the
 // esp_codec_dev availability gate; everything else gets an inert stub (audioCodecInit
@@ -40,13 +40,12 @@ namespace {
 
 const char* ES_TAG = "mm_es8311";
 
-// The codec device + the interfaces and I2C bus it sits on, kept alive between
-// init and deinit (the codec keeps streaming once opened; the I2S read drains it).
+// The codec interface + its control interface and I2C bus, kept alive between
+// init and deinit (the codec keeps streaming once enabled; the I2S read drains it).
 struct CodecState {
     i2c_master_bus_handle_t   i2cBus  = nullptr;
     const audio_codec_ctrl_if_t* ctrl = nullptr;
     const audio_codec_if_t*   codec   = nullptr;
-    esp_codec_dev_handle_t    dev     = nullptr;
 };
 
 CodecState* g_codec = nullptr;
@@ -54,7 +53,6 @@ CodecState* g_codec = nullptr;
 // Tear down a partially- or fully-built CodecState in reverse order.
 void deinitState(CodecState* st) {
     if (!st) return;
-    if (st->dev) { esp_codec_dev_close(st->dev); esp_codec_dev_delete(st->dev); }
     if (st->codec) audio_codec_delete_codec_if(st->codec);
     if (st->ctrl) audio_codec_delete_ctrl_if(st->ctrl);
     if (st->i2cBus) i2c_del_master_bus(st->i2cBus);
@@ -91,7 +89,10 @@ bool audioCodecInit(CodecType type, const AudioCodecPins& pins, uint32_t sampleR
     // streams the ADC onto the bus). The mic path is record-only.
     audio_codec_i2c_cfg_t i2cCtrlCfg = {};
     i2cCtrlCfg.port = I2C_NUM_0;
-    i2cCtrlCfg.addr = pins.i2cAddr;          // ES8311 default 0x18
+    // esp_codec_dev keeps the legacy 8-bit wire address and shifts it to seven
+    // bits inside its modern i2c_master adapter. The platform config stores the
+    // address in the standard i2cdetect shape (0x18), so convert at this seam.
+    i2cCtrlCfg.addr = pins.i2cAddr << 1;
     i2cCtrlCfg.bus_handle = st->i2cBus;
     st->ctrl = audio_codec_new_i2c_ctrl(&i2cCtrlCfg);
     if (!st->ctrl) { ESP_LOGE(ES_TAG, "codec i2c ctrl failed"); deinitState(st); return false; }
@@ -99,7 +100,8 @@ bool audioCodecInit(CodecType type, const AudioCodecPins& pins, uint32_t sampleR
     es8311_codec_cfg_t es8311Cfg = {};
     es8311Cfg.ctrl_if = st->ctrl;
     es8311Cfg.codec_mode = ESP_CODEC_DEV_WORK_MODE_ADC;   // record / mic only
-    es8311Cfg.use_mclk = true;                            // MCLK provided to the codec on GPIO52
+    es8311Cfg.digital_mic = false;                        // onboard analog microphone
+    es8311Cfg.use_mclk = true;                            // MCLK uses the firmware target's codec pin
     es8311Cfg.mclk_div = 256;                             // MCLK = 256 * sample_rate (the standard
                                                           // I2S ratio; the codec's coeff table is
                                                           // keyed on it — 0 fails "configure rate").
@@ -107,22 +109,29 @@ bool audioCodecInit(CodecType type, const AudioCodecPins& pins, uint32_t sampleR
     st->codec = es8311_codec_new(&es8311Cfg);
     if (!st->codec) { ESP_LOGE(ES_TAG, "es8311_codec_new failed"); deinitState(st); return false; }
 
-    esp_codec_dev_cfg_t devCfg = {};
-    devCfg.codec_if = st->codec;
-    devCfg.dev_type = ESP_CODEC_DEV_TYPE_IN;              // input (mic) device
-    st->dev = esp_codec_dev_new(&devCfg);
-    if (!st->dev) { ESP_LOGE(ES_TAG, "esp_codec_dev_new failed"); deinitState(st); return false; }
-
     esp_codec_dev_sample_info_t fs = {};
     fs.sample_rate = sampleRate;
     fs.channel = 1;
-    fs.bits_per_sample = 16;
-    if (esp_codec_dev_open(st->dev, &fs) != ESP_CODEC_DEV_OK) {
-        ESP_LOGE(ES_TAG, "esp_codec_dev_open failed");
+    // The platform RX channel uses a 32-bit standard-I2S slot. Match the codec's
+    // word length so its 24-bit ADC result stays aligned in the int32_t samples
+    // AudioService analyzes; a 16-bit codec word in that slot loses precision
+    // and presents the sample at a different significance.
+    fs.bits_per_sample = 32;
+    // ProjectMM owns the I2S channel in platform_esp32_i2s.cpp, so configure the
+    // codec interface directly. esp_codec_dev_new is the higher-level adapter
+    // for callers that also give the component a data_if; it rejects a null
+    // data_if and is therefore the wrong layer for this split-ownership design.
+    if (!st->codec->set_fs || st->codec->set_fs(st->codec, &fs) != ESP_CODEC_DEV_OK) {
+        ESP_LOGE(ES_TAG, "es8311 sample format failed");
         deinitState(st);
         return false;
     }
-    esp_codec_dev_set_in_gain(st->dev, 30.0f);            // mic gain (dB), a reasonable default
+    if (!st->codec->enable || st->codec->enable(st->codec, true) != ESP_CODEC_DEV_OK) {
+        ESP_LOGE(ES_TAG, "es8311 enable failed");
+        deinitState(st);
+        return false;
+    }
+    if (st->codec->set_mic_gain) st->codec->set_mic_gain(st->codec, 30.0f);
 
     g_codec = st;
     return true;
