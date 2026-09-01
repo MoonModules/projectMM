@@ -17,7 +17,8 @@ add_executable(mm_tests
     unit/core/unit_fields.cpp
     unit/core/unit_crc.cpp
     unit/core/unit_AudioService_sync.cpp
-    unit/core/unit_IrService.cpp
+    unit/core/unit_ButtonService.cpp
+    unit/core/unit_InfraredService.cpp
     unit/core/unit_TcpConnect.cpp
     unit/core/unit_MqttPacket.cpp
     unit/core/unit_MqttModule.cpp

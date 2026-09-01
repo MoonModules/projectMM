@@ -273,12 +273,7 @@ def _run_one(path: Path, update_contract: bool, update_reason: str | None,
         return 0
 
     if touched_observed or touched_contract:
-        # Serialize, then put each sample window back on one line: a 32-element array
-        # spread over 32 lines hides the statistics it belongs to (_observed.py).
-        text = _observed.compact_samples(
-            json.dumps(scenario, indent=2, ensure_ascii=False))
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text + "\n")
+        _observed.save_scenario(path, scenario)
         what = []
         if touched_observed:
             what.append(f"observed[{target}] × {touched_observed}")

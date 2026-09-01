@@ -71,19 +71,43 @@ checkout and no tooling, just the app and the session file from the latest relea
 
 Detail: [technical](moxygen/OscModule.md)
 
-<a id="ir"></a>
+<a id="infrared"></a>
 
-### IR
+### Infrared
 
-A Service (added per board): an IR remote receiver that drives other modules' controls through the shared `Scheduler::setControl` primitive. It **learns** any remote (NEC-over-RMT): pick an action in `learn`, press a button to bind its code. What each action does + the status-line messages: ⌄ details.
+A Service (added per board): an infrared remote receiver whose **rows** map learned codes onto other modules' controls, through the shared `Scheduler::setControl` primitive. A remote press and an OSC message are indistinguishable to whatever they drive.
 
-<img src="../../assets/core/IrService.png" width="300" alt="IR module controls">
+**A row is the binding.** There is no fixed set of actions: a remote has twenty keys, so it has twenty rows, each learned and each pointing wherever you want. Set a row's `learn` and the next code received binds to it, which is how any remote works without a shipped code table. Arming one row disarms any other, so a code cannot bind twice.
 
-- `pin` — the IR receiver GPIO (unset until entered; on the SE16 it shares GPIO 5 with the Ethernet MISO via the board switch, on the LightCrafter it is its own GPIO 4 alongside Ethernet).
-- `learn` — pick an action to bind (`on/off` / brightness up / brightness down / palette next / palette prev); the next received code binds to it, then learning disarms. The first option, `off`, is the disarmed state (bind nothing), not a light action.
-- `code on/off` / `code brightness up` / `code brightness down` / `code palette next` / `code palette prev` — read-only, the learned code for each action (persisted).
+A fresh service starts with no rows. Add one, learn a key, pick a target.
 
-Detail: [technical](moxygen/IrService.md)
+- `pin` — the receiver GPIO (unset until entered; on the SE16 it shares GPIO 5 with the Ethernet MISO via the board switch, on the LightCrafter it is its own GPIO 4). The status line reports whether the channel actually opened, not merely that a pin is set.
+- `codes` — the mapping rows. Per row: `code` (the learned frame, editable as hex so a code read elsewhere can be typed), `learn` (arm this row for the next frame), and the shared target fields below.
+
+Detail: [technical](moxygen/InfraredService.md)
+
+<a id="button"></a>
+
+### Button
+
+A Service (added per board): **a list of buttons**, each on its own GPIO, each driving a control through the same `Scheduler::setControl` primitive the infrared service uses. A press and a UI click are the same thing to whatever they drive.
+
+A list because boards have more than one: a QuinLED Dig-Next-2 has three, a stage rig has a pedalboard. A **foot pedal needs no module of its own** — electrically it is a momentary switch on a jack, so it is a row with `kind = set`.
+
+- `debounceMs` — how long a level must hold before it counts as a real press. Debounced here rather than in the platform layer, because a bouncing contact is a property of the switch. Polled at 50 Hz: a contact closes for tens of milliseconds.
+- `buttons` — the rows. Per row: `pin`, `activeLow` (on for the usual wiring, a switch to ground with an internal pull-up; off for a switch feeding 3V3), a live `pressed` readout so you can see a button work before binding it, and the shared target fields below.
+
+#### What a row targets
+
+Both services share these three fields, because what happens after an input fires is the same whichever input fired it:
+
+- `target` — `Module.control`. Pointing at `Control.switch1` puts the input on the control surface, where OSC, MQTT and the web UI reach the same switch; pointing at `Drivers.on` drives that control directly. The surface is the recommended path, not a rule.
+- `kind` — `toggle` reads the target and writes its inverse (a light switch); `set` writes `value` while held and 0 on release (hold-to-activate, a pedal); `delta` adds `value`, clamped to the control's own bounds (a brightness nudge, a palette step).
+- `value` — what `set` writes, or the signed nudge `delta` applies. Unused by `toggle`.
+
+Only a `set` row acts on the release. A toggle or a delta acting on both edges would fire twice for one push.
+
+Detail: [technical](moxygen/ButtonService.md)
 
 ## Audio — details
 

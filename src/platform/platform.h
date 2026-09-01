@@ -1500,23 +1500,62 @@ inline constexpr size_t kI2cBusUnavailable = static_cast<size_t>(-1);
 // maxOut), or kI2cBusUnavailable if the bus couldn't be opened.
 size_t i2cScan(uint16_t sda, uint16_t scl, uint8_t* out, size_t maxOut);
 
+// --- GPIO as an input/output ROLE ------------------------------------------------------------
+// The pair above (gpioCapability / gpioLiveState) answers "what is this pin, and what is it doing"
+// for the pin map: a diagnostic, sampled on tick1s. These three are the working seam a module uses
+// to actually READ a switch or DRIVE a line, which nothing could do before: a button, a foot pedal,
+// a relay enable. Deliberately minimal and synchronous, matching irRead's shape - the module owns
+// debouncing and edge detection, because a bouncing contact is a property of the switch, not of the
+// platform.
+
+/// The internal pull to enable on an input. A mechanical switch needs one; a pin driven by another
+/// device usually does not.
+enum class GpioPull : uint8_t { None = 0, Up, Down };
+
+/// Configure one GPIO as an input, with an optional internal pull. Idempotent: re-configuring a pin
+/// the caller already owns is not an error, so a live pin-control change just re-runs it. Returns
+/// false when `gpio` is not a usable input on this chip (gpioCapability().validGpio is false).
+/// Desktop accepts any pin and reads back what setTestGpioLevel injected, so button logic is
+/// host-testable with no hardware.
+bool gpioInputBegin(uint8_t gpio, GpioPull pull);
+
+/// Read a pin configured by gpioInputBegin: true = HIGH. Cheap enough for a per-tick poll (one
+/// register read on ESP32); no allocation, never blocks. An unconfigured pin reads false.
+///
+/// RAW: the level as the pad reads it, deliberately unfiltered. The ESP32 has a hardware glitch
+/// filter, and this seam does not use it, because debouncing is a property of the SWITCH rather than
+/// of the pin: the time constant belongs to the module that knows what is wired (ButtonService owns
+/// it, in milliseconds it can explain). A filter here would be a second, invisible one underneath,
+/// tuned in clock cycles, that no test could reach and no other platform could reproduce.
+bool gpioRead(uint8_t gpio);
+
+/// Drive one GPIO as a push-pull output. Configures it on first use, so no separate begin: a caller
+/// that owns the pin just writes it. Returns false when the pin has no output driver
+/// (gpioCapability().outputCapable is false, e.g. classic ESP32 34-39). This is what a relay enable
+/// needs, and what MoonLive's "write to gpio" builtin will call.
+bool gpioWrite(uint8_t gpio, bool high);
+
+/// Test-only (desktop): make gpioRead(gpio) return `level`. Same shape as setTestGpioCapability.
+void setTestGpioLevel(uint8_t gpio, bool level);
+void clearTestGpioLevel();
+
 // Poll the IR receiver on `pin` for a decoded remote frame. Returns true and writes the
 // frame into `codeOut` when a fresh code is available since the last call, false otherwise
 // (nothing received, or IR decode unavailable on this target). Self-contained like i2cScan -
 // it owns whatever peripheral it needs (an RMT RX channel on ESP32). Non-blocking: safe to
-// call every tick. IrService is the sole caller. ESP32 decodes NEC over RMT; desktop has no IR
+// call every tick. InfraredService is the sole caller. ESP32 decodes NEC over RMT; desktop has no IR
 // hardware and always returns false.
 bool irRead(uint16_t pin, uint32_t& codeOut);
 
 // Release the IR RX channel so the pin it held is free for another module. irRead lazily reopens
-// it on the next call, so this is safe to call any time; IrService calls it on disable (the pin
+// it on the next call, so this is safe to call any time; InfraredService calls it on disable (the pin
 // then shows as freed in the pin map, and is genuinely reusable). No-op if no channel is open, and
 // on desktop (no IR hardware).
 void irStop();
 
 // Open (or confirm) the IR RX channel on `pin` and report whether it's live: the difference between
 // "a pin is configured" (which irRead can't distinguish from "no code this tick") and "the RMT-RX
-// channel actually bound and is armed". IrService calls this to give a truthful status: a busy pin or
+// channel actually bound and is armed". InfraredService calls this to give a truthful status: a busy pin or
 // a bad GPIO fails to open, and the user must see that, not a stale "ready". Idempotent for an
 // unchanged pin (reuses the open channel). Returns true on ESP32 when the channel is live; desktop
 // has no IR hardware, so it returns true (no channel to fail: the desktop status stays "ready").

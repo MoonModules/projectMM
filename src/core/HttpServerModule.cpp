@@ -1345,7 +1345,7 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
 HttpServerModule::OpResult HttpServerModule::applySetControl(
         const char* moduleName, const char* controlName, const char* valueJson) {
     // The generic control-set is a Scheduler primitive (it owns the tree + persistence hook),
-    // shared with every other control writer: Improv, the WLED bridge, IrService. This wrapper
+    // shared with every other control writer: Improv, the WLED bridge, InfraredService. This wrapper
     // only maps its result onto the HTTP OpResult so the response carries the right status code.
     if (!scheduler_) return OpResult::ModuleNotFound;
     switch (scheduler_->setControl(moduleName, controlName, valueJson)) {

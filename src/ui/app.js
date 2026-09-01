@@ -3903,15 +3903,21 @@ function fillEditableListDetail(panel, detail, moduleName, ctrlName, id, optionS
             // A row ACTION rather than a value: the click PATCHes the field like any edit, and the
             // source reads the arrival as "do this to this row" (ControlModule's preset `apply`).
             // Generic on purpose: a row button is a primitive the list has lacked, not a
-            // preset-specific affordance. Refetches, because an action typically changes the row set
-            // or the wider tree, unlike a field edit which the WS push reconciles.
+            // preset-specific affordance.
+            //
+            // `refetch` is opt-IN because a full refetch rebuilds every card, which collapses the
+            // expanded row the button lives in. That is right for an action that reshapes the tree
+            // (applying a preset) and wrong for one that arms a mode the user is about to use: the
+            // infrared learn button closed its own row and left nowhere to watch the result. Without
+            // it the WS push reconciles the row in place, which is what a field edit already relies
+            // on.
             const btn = document.createElement("button");
             btn.className = "list-field-btn";
             btn.textContent = f.label || f.name;
             btn.addEventListener("click", async () => {
                 btn.disabled = true;
                 await listSetField(moduleName, ctrlName, id, f.name, "");
-                refetchState();
+                if (f.refetch) refetchState();
                 btn.disabled = false;
             });
             vEl.appendChild(btn);

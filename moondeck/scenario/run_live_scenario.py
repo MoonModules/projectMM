@@ -901,9 +901,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
         print(f"  contract[{target}] NOT written (run failed; observed still saved)")
 
     if wrote_observations[0] or contract_safe_to_write:
-        with open(scenario_path, "w") as f:
-            json.dump(scenario, f, indent=2, ensure_ascii=False)
-            f.write("\n")
+        _observed.save_scenario(scenario_path, scenario)
         what = []
         if wrote_observations[0]:
             what.append(f"observed[{target}]")

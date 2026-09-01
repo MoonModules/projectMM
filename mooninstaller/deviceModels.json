@@ -893,7 +893,7 @@
         }
       },
       {
-        "type": "IrService",
+        "type": "InfraredService",
         "id": "Ir",
         "parent_id": "Services",
         "controls": {
@@ -951,7 +951,7 @@
         }
       },
       {
-        "type": "IrService",
+        "type": "InfraredService",
         "id": "Ir",
         "parent_id": "Services",
         "controls": {

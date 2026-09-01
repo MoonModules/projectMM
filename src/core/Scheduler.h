@@ -117,7 +117,7 @@ public:
 
     /// The single live Scheduler, or nullptr before setup() / after release(). Mirrors
     /// FilesystemModule::instance_ — the one Scheduler is statically reachable so a module
-    /// created by the factory (IrService) can call setControl() without a per-module injection.
+    /// created by the factory (InfraredService) can call setControl() without a per-module injection.
     static Scheduler* instance() { return instance_; }
 
     /// Outcome of setControl — the generic control-set primitive's result. Transport

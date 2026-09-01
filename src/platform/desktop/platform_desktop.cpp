@@ -2174,8 +2174,41 @@ size_t i2cScan(uint16_t /*sda*/, uint16_t /*scl*/, uint8_t* /*out*/, size_t /*ma
     return kI2cBusUnavailable;
 }
 
-// No IR receiver on the host — the seam is a no-op so IrService runs (its buttons still work
+// No IR receiver on the host: the seam is a no-op so InfraredService runs (its buttons still work
 // through Scheduler::setControl); reception is ESP32-only.
+// GPIO on a host has no pins, so reads come from what a test injected. That is the point: the
+// button/pedal logic (debounce, edge, latch) is ordinary code and gets tested here, leaving only
+// the electrical half for the bench.
+namespace {
+// A flat table rather than a map: a pin number IS the index, there are at most 48 of them, and this
+// allocates nothing.
+constexpr uint8_t kMaxGpio = 48;
+bool g_gpioLevel[kMaxGpio] = {};
+}
+
+bool gpioInputBegin(uint8_t gpio, GpioPull pull) {
+    if (gpio >= kMaxGpio) return false;
+    // The PULL sets the resting level, as it does on a board: a pull-up idles HIGH, a pull-down
+    // idles LOW. Without this every pin idled LOW, which an active-low button reads as HELD, so a
+    // desktop with no hardware reported a phantom press the moment a row named a pin. A test that
+    // wants a different level still calls setTestGpioLevel after this.
+    g_gpioLevel[gpio] = (pull == GpioPull::Up);
+    return true;
+}
+
+bool gpioRead(uint8_t gpio) { return gpio < kMaxGpio && g_gpioLevel[gpio]; }
+
+bool gpioWrite(uint8_t gpio, bool high) {
+    // A write is observable through gpioRead, so a test can drive a pin and read back what a module
+    // put there (a relay enable, MoonLive's write-then-read hello world).
+    if (gpio >= kMaxGpio) return false;
+    g_gpioLevel[gpio] = high;
+    return true;
+}
+
+void setTestGpioLevel(uint8_t gpio, bool level) { if (gpio < kMaxGpio) g_gpioLevel[gpio] = level; }
+void clearTestGpioLevel() { for (bool& b : g_gpioLevel) b = false; }
+
 bool irRead(uint16_t /*pin*/, uint32_t& /*codeOut*/) { return false; }
 void irStop() {}   // no IR hardware on desktop
 bool irChannelReady(uint16_t /*pin*/) { return true; }   // no channel to fail on desktop

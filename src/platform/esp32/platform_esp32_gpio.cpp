@@ -112,4 +112,49 @@ GpioLiveState gpioLiveState(uint8_t gpio) {
     return s;
 }
 
+// --- GPIO as a working input/output -----------------------------------------------------------
+// The two above are the pin map's diagnostics. These are the role: a module that owns a pin reads a
+// switch or drives a line through them. Thin by design - gpio_config once, then the register-level
+// get/set - so a per-tick poll costs a read and the module keeps the policy (debounce, edges).
+
+bool gpioInputBegin(uint8_t gpio, GpioPull pull) {
+    if (!GPIO_IS_VALID_GPIO(gpio)) return false;
+    gpio_config_t cfg = {};
+    cfg.pin_bit_mask = 1ULL << gpio;
+    cfg.mode         = GPIO_MODE_INPUT;
+    cfg.pull_up_en   = pull == GpioPull::Up   ? GPIO_PULLUP_ENABLE   : GPIO_PULLUP_DISABLE;
+    cfg.pull_down_en = pull == GpioPull::Down ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE;
+    cfg.intr_type    = GPIO_INTR_DISABLE;      // polled, not interrupt-driven: see the seam's docs
+    return gpio_config(&cfg) == ESP_OK;
+}
+
+bool gpioRead(uint8_t gpio) {
+    if (!GPIO_IS_VALID_GPIO(gpio)) return false;
+    return gpio_get_level(static_cast<gpio_num_t>(gpio)) != 0;
+}
+
+bool gpioWrite(uint8_t gpio, bool high) {
+    // Output-capable, not merely valid: the classic ESP32's 34-39 are input-only, and driving one
+    // silently does nothing. Refusing here is what lets a caller report the pin rather than wonder.
+    if (!GPIO_IS_VALID_OUTPUT_GPIO(gpio)) return false;
+    // Configured on first use so a caller that owns the pin just writes it. gpio_config is
+    // idempotent, and this runs on a control change, never per frame.
+    gpio_config_t cfg = {};
+    cfg.pin_bit_mask = 1ULL << gpio;
+    // INPUT_OUTPUT, not OUTPUT: plain output leaves the input buffer DISABLED, so gpio_get_level
+    // reads 0 on a pin that is really driving high, and the pin map's "see the wire" column lies
+    // about it. That cost a long debugging round on a relay that was working the whole time. The
+    // input buffer costs nothing here and makes a driven pin readable, which is what every other
+    // peripheral on this chip already does (an RMT LED pin reports dir=both for the same reason).
+    cfg.mode         = GPIO_MODE_INPUT_OUTPUT;
+    cfg.intr_type    = GPIO_INTR_DISABLE;
+    if (gpio_config(&cfg) != ESP_OK) return false;
+    return gpio_set_level(static_cast<gpio_num_t>(gpio), high ? 1 : 0) == ESP_OK;
+}
+
+// The test seams are desktop-only: on a board the pins are real, and a test that wants to inject a
+// level has the hardware to do it.
+void setTestGpioLevel(uint8_t, bool) {}
+void clearTestGpioLevel() {}
+
 }  // namespace mm::platform

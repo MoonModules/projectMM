@@ -4,17 +4,39 @@ Forward-looking items whose work genuinely spans **both** the core and light dom
 
 ## Cross-domain
 
-### LightsControl — the central control hub (palette + global params + presets + external controllers)
+### LightsControl: not building it (decided 2026-09-01)
 
-The eventual home for **global light control**, modelled on MoonLight's `ModuleLightsControl` ([source](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Modules/ModuleLightsControl.h), [docs](https://github.com/MoonModules/MoonLight/blob/main/docs/moonlight/lightscontrol.md) — our own project, study don't copy). The concept worth carrying forward: **one module is the integration point between the device and the outside world** (IR remotes, DMX-in, MQTT / Home Assistant, hardware buttons, PIR) *and* the owner of the global light state effects read — so effects respond to one normalised interface instead of N disparate inputs. It owns: master on/off + brightness, RGB tint multipliers, the **active palette**, global **bpm / intensity** sliders broadcast to all active effects, and the **preset** system (below).
+The idea was one module owning global light state (master on/off, brightness, palette, bpm) and
+acting as the integration point for external controllers, modelled on MoonLight's
+`ModuleLightsControl`. **It is not being built**, and the two reasons are worth keeping:
 
-**Pragmatic interim (decided 2026-06-30):** we are *not* building this module now. Its two pieces we need first live on the **Drivers** container (already the owner of global render params — brightness, lightPreset, the shared Correction): the **active palette** lands there in the palette stage (a `palette` select; effects read it via a static `Palettes::active()` seam, the `AudioService::latestFrame()` pattern), and global **bpm / intensity** can follow the same way when a consumer needs them. When LightsControl is eventually built, it **absorbs** these controls from Drivers and becomes the hub the external controllers feed. Not a blocker for the palette work.
+**The generic ControlModule is already the hub.** It carries the surface (switches, encoders,
+faders, pads) that every transport writes: OSC, MQTT, the WLED bridge, the web UI, and now the
+physical inputs. A second hub beside it would be the split brain the OSC plan forbids.
+
+**A global light param belongs to the module that uses it.** `palette` lives on `Drivers` because
+that is where it is consumed (effects read it through `Palettes::active()`), and the same holds for
+`brightness` and `on`. Moving them into a hub separates a value from its consumer and buys nothing:
+encapsulation, not centralisation.
+
+So the surface reaches INTO those modules rather than owning their state, which is already how it
+works: `fader1` targets `Drivers.brightness`, `switch1` targets `Drivers.on`, and `encoder1` targets
+`Drivers.palette`. Those bindings are hardcoded today and become user-assignable as a UI plus
+persistence job (see [power-functions-analysis-top-down.md](power-functions-analysis-top-down.md),
+per-control assignment).
+
+**What an encoder bound to a select needs:** the option NAME under the knob, not the index, so
+turning through palettes reads "Rainbow" rather than "37". One rule in the generic UI (an encoder
+bound to a select renders its target's option label) rather than per-module code, which is how the
+rest of the UI already works. A `uint8_t` encoder covers 256 options, comfortably past the palette
+count, and whether it wraps or clamps at the ends follows the bound control's type: a palette ring
+wraps, a brightness does not.
 
 ### Light presets — save / load / loop a whole effect configuration
 
 MoonLight's preset system (part of `ModuleLightsControl`): **64 named slots**, each capturing the *complete* effect-tree configuration (all module control values), with save / load / delete, **preset looping** on a timer (rotate between a first/last slot), and Home-Assistant registration for external recall. The product owner has flagged this as **definitely needed**.
 
-Not a dependency of palettes — a separate feature, its natural home the LightsControl module above (or Drivers in the interim). Persistence already round-trips control values (the same overlay that restores the device-tree), so a preset is "snapshot the relevant subtree's JSON to a named file, restore it on recall" — the mechanism mostly exists; what's missing is the slot management + UI + loop timer. Complements the existing [presets UI note](backlog-core.md) (control-value bundles) — this is the light-domain, whole-effect-config version with looping. Build as its own stage when LightsControl (or its interim) is ready.
+**Partly shipped since this was written.** `ControlModule` owns the preset system: a pad grid of slots, save and apply, and `capture` controls that choose which subtrees a save includes. So the home question is settled (the surface, not a hub), and what remains from the description above is **preset looping** on a timer, rotating between a first and last slot, plus Home Assistant registration for external recall. Persistence already round-trips control values, so the mechanism is there; the loop timer is the missing piece. Complements the [presets UI note](backlog-core.md) (control-value bundles).
 
 ### MultiplyModifier mapping-LUT memory at large grids (investigation, re-verify on classic)
 

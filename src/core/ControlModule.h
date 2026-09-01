@@ -190,6 +190,13 @@ public:
     }
 
     void defineControls() override {
+        // The display strip, ABOVE everything: on the desks this mirrors a channel reads display,
+        // then buttons, then knob, then fader, and control order is render order. One shared readout
+        // rather than a label per control, which is also how the hardware does it: it shows whatever
+        // was touched last, so there is no per-cell staleness to reason about. A surface without
+        // displays simply ignores it.
+        controls_.addReadOnly("display", display_, sizeof(display_));
+
         // The switch row sits at the TOP, above the encoders, matching the surfaces this mirrors
         // (a channel's buttons are above its knob, which is above its fader). Control order is
         // render order, so the declaration order IS the layout.
@@ -201,7 +208,7 @@ public:
         // render order.
         for (uint8_t i = 0; i < kEncoderCount; i++) {
             controls_.addControl(kEncoderNames[i], encoders_[i]);
-            controls_.setEncoder(controls_.count() - 1, true, nullptr);
+            controls_.setEncoder(controls_.count() - 1, true, encoderTarget(i));
         }
         controls_.addList("presets", *this);
         // The fader bank. Each fader is a plain uint8 control, so it persists, appears in /api/state,
@@ -259,6 +266,7 @@ public:
         for (uint8_t i = 0; i < kEncoderCount; i++) {
             if (std::strcmp(controlName, kEncoderNames[i]) != 0) continue;
             sentEncoders_[i] = encoders_[i];
+            driveEncoder(i);
             return;
         }
         for (uint8_t i = 0; i < kSwitchCount; i++) {
@@ -322,7 +330,9 @@ public:
         sink.writeJsonString(p.name);
         sink.append("},{\"name\":\"captures\",\"type\":\"text\",\"readonly\":true,\"value\":");
         sink.writeJsonString(p.captures[0] ? p.captures : "(unknown)");
-        sink.append("},{\"name\":\"apply\",\"type\":\"button\",\"label\":\"apply\"}]}");
+        // refetch: applying a preset rewrites the module tree, so the whole card set is stale.
+        sink.append("},{\"name\":\"apply\",\"type\":\"button\",\"label\":\"apply\","
+                    "\"refetch\":true}]}");
     }
 
     // ---- Presets as an external surface (Home Assistant, and any future consumer) --------------
@@ -432,6 +442,15 @@ public:
         return index == 0 ? "Drivers.on" : nullptr;
     }
 
+    /// What an encoder drives, as "Module.control", or null when it drives nothing yet. Encoder 1 is
+    /// the palette, the third of the global light params after fader 1's brightness and switch 1's
+    /// on/off, and an encoder rather than a fader because a palette is a LIST to step through rather
+    /// than a level to ride. Palette stays on `Drivers` where it is consumed; the surface reaches
+    /// into it, which is why there is no separate lights-control module.
+    static const char* encoderTarget(uint8_t index) {
+        return index == 0 ? "Drivers.palette" : nullptr;
+    }
+
     /// Drives whatever `switchTarget` declares. A BOOL body, not a number: the target is a bool
     /// control, and parseBool accepts `true`/`1` but not the 255 a byte path would send.
     void driveSwitch(uint8_t index) {
@@ -448,6 +467,9 @@ public:
         char body[32];
         std::snprintf(body, sizeof(body), "{\"value\":%s}", switches_[index] ? "true" : "false");
         sched->setControl(module, dot + 1, body);
+        // A bool has no option names, so the strip says on or off rather than 1 or 0: the reason
+        // the strip exists is that a number is not what a person reads.
+        std::snprintf(display_, sizeof(display_), "%s: %s", dot + 1, switches_[index] ? "on" : "off");
     }
 
     /// Read every bound control back, so a surface FOLLOWS what it drives.
@@ -471,6 +493,10 @@ public:
         auto* sched = Scheduler::instance();
         if (!sched) return;
         for (uint8_t i = 0; i < kFaderCount; i++) pullTarget(SurfaceControl::Fader, i, faders_[i]);
+        // Encoders follow too, now that encoder 1 drives the palette: without this, changing the
+        // palette from the web UI, MQTT or OSC leaves the encoder holding a stale index and pushing
+        // it to any attached surface. "A surface FOLLOWS what it drives" is this method's contract.
+        for (uint8_t i = 0; i < kEncoderCount; i++) pullTarget(SurfaceControl::Encoder, i, encoders_[i]);
         for (uint8_t i = 0; i < kSwitchCount; i++) {
             uint8_t v = switches_[i] ? 255 : 0;
             if (pullTarget(SurfaceControl::Switch, i, v)) switches_[i] = v != 0;
@@ -480,7 +506,9 @@ public:
     /// One control's read-back. Splits the target, asks the scheduler, and reports whether `value`
     /// moved so the caller can store it in whatever the control's own storage is.
     bool pullTarget(SurfaceControl kind, uint8_t index, uint8_t& value) {
-        const char* target = kind == SurfaceControl::Switch ? switchTarget(index) : surfaceTarget(index);
+        const char* target = kind == SurfaceControl::Switch  ? switchTarget(index)
+                           : kind == SurfaceControl::Encoder ? encoderTarget(index)
+                                                             : surfaceTarget(index);
         if (!target) return false;                    // unassigned: nothing to follow
         const char* dot = std::strchr(target, '.');
         if (!dot) return false;
@@ -513,6 +541,59 @@ public:
         char body[32];
         std::snprintf(body, sizeof(body), "{\"value\":%u}", static_cast<unsigned>(faders_[index]));
         sched->setControl(module, dot + 1, body);
+        showOnStrip(module, dot + 1, faders_[index]);
+    }
+
+    /// Write an encoder's value onto whatever it targets, the same way a fader does.
+    ///
+    /// Separate from driveFader only because the value comes from a different bank: the write itself
+    /// is identical, and both go through `Scheduler::setControl` so the change rebuilds derived state
+    /// and persists exactly as a UI edit would. Encoder 1 drives the palette, which is why this
+    /// exists at all: without it an encoder recorded a value and drove nothing.
+    void driveEncoder(uint8_t index) {
+        const char* target = encoderTarget(index);
+        if (!target) return;                          // unassigned
+        const char* dot = std::strchr(target, '.');
+        if (!dot) return;
+        auto* sched = Scheduler::instance();
+        if (!sched) return;
+        char module[24];
+        const size_t n = std::min(static_cast<size_t>(dot - target), sizeof(module) - 1);
+        std::memcpy(module, target, n);
+        module[n] = '\0';
+        char body[32];
+        std::snprintf(body, sizeof(body), "{\"value\":%u}", static_cast<unsigned>(encoders_[index]));
+        sched->setControl(module, dot + 1, body);
+        showOnStrip(module, dot + 1, encoders_[index]);
+    }
+
+    /// Write what just happened onto the display strip.
+    ///
+    /// The NAME of a select's option rather than its index, which is the whole point: turning
+    /// encoder 1 through the palettes has to read "Rainbow", not "37". Read from the target
+    /// control's own descriptor, so this works for any select anyone binds later without a line of
+    /// per-module UI code.
+    void showOnStrip(const char* module, const char* control, uint8_t value) {
+        auto* sched = Scheduler::instance();
+        MoonModule* target = sched ? sched->firstByName(module) : nullptr;
+        if (!target) return;
+        const ControlList& cs = target->controls();
+        for (uint8_t i = 0; i < cs.count(); i++) {
+            if (std::strcmp(cs[i].name, control) != 0) continue;
+            // A Select carries its options in the descriptor: `aux` is the array, `max` the count.
+            // Select ONLY: a Palette's aux is a FUNCTION pointer (addPalette takes optionsFn), so
+            // reading it as an array of strings would dereference a code address. A palette's number
+            // is the honest readout until that seam offers a name by index.
+            const bool isSelect = cs[i].type == ControlType::Select && cs[i].aux;
+            if (isSelect && value < cs[i].max) {
+                const auto* opts = reinterpret_cast<const char* const*>(cs[i].aux);
+                std::snprintf(display_, sizeof(display_), "%s: %s", control, opts[value]);
+            } else {
+                std::snprintf(display_, sizeof(display_), "%s: %u", control,
+                              static_cast<unsigned>(value));
+            }
+            return;
+        }
     }
 
     /// Reorder: the grid can be arranged to match a physical control surface, so pad 3 here is
@@ -956,6 +1037,7 @@ private:
 
     static constexpr const char* kSwitchNames[kSwitchCount] =
         {"switch1", "switch2", "switch3", "switch4", "switch5", "switch6", "switch7", "switch8"};
+    char    display_[32] = {};   ///< the strip: what the surface last touched, in words
     uint8_t faders_[kFaderCount] = {};
     uint8_t encoders_[kEncoderCount] = {};
     /// bool, not uint8: a switch is on or off, and the UI renders a checkbox from the type. An

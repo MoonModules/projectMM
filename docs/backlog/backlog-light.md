@@ -311,6 +311,43 @@ The industry-standard answer is **daisy-chaining** — a sending card's ports ea
 
 ## Sensors and audio-reactive input
 
+### The sensors an installation needs (2026-09-01)
+
+**Why this is a commitment rather than a wish list.** One of the intended uses is art installations,
+and an installation people can interact with has to sense them: that is stated in
+[architecture.md](../architecture.md#the-problem). Sensing is therefore part of the product, not a
+convenience, and an input peripheral is first-class alongside an output driver. The scope is still
+narrow on purpose: a lighting controller that senses its audience, not a home-automation platform.
+
+What shipped, and what a piece can already react to: **audio** (AudioService: RMS level and a 16-band
+FFT, I2S mic or line-in, or a peer's stream over the network), **IR** (IrService, a learnable
+remote), and **a button** (ButtonService on the GPIO seam, which covers foot pedals in momentary
+mode). An **IMU** exists on an unmerged branch (GyroDriver, below).
+
+The sensors worth having next, in the order an installation asks for them:
+
+- **Motion / presence (PIR)** — the single most common interactive trigger: someone walks up, the
+  piece wakes. Electrically a digital pin, so `ButtonService` almost covers it; what differs is the
+  semantic (a level, not a press) and the hold time. MoonLight models it as its own pin role
+  (`pin_PIR`, "HIGH = lights on, LOW = lights off"), which is the shape to follow.
+- **Distance (ultrasonic HC-SR04, or a ToF like the VL53L0X)** — turns presence into a continuous
+  value: a hand's distance drives brightness, a visitor's approach drives an effect parameter. The
+  ToF is I2C (the bus GyroDriver's platform layer already opened); the ultrasonic is a trigger pulse
+  and an echo-width measure, which needs a timing seam the GPIO one does not yet provide.
+- **Touch** — the classic ESP32's capacitive touch pins need no external part, so a conductive
+  surface becomes an input. The Dig-2-Go's own button is on a touch-capable pin, though it reads
+  fine as a plain digital switch.
+- **Light level (LDR or a BH1750)** — an installation that dims itself to the room, and the obvious
+  companion to a piece that runs day and night.
+- **Rotary encoder** — the physical knob for an installation without a screen, and the one input
+  that maps onto ControlModule's encoder bank directly.
+
+**None of these need new architecture**, which is the point of recording them together: each is a
+Service under the core `Services` container, reaching the rest of the system through
+`Scheduler::setControl`, exactly as Audio, IR and the button already do. What they need is a
+platform seam per sensing modality (the GPIO seam shipped; I2C exists; a pulse-timing seam does
+not), and a module each.
+
 ### Audio-reactive follow-ups
 
 The manual level + 16-band FFT spectrum has shipped (AudioService; what landed and why is in [lessons.md](../history/lessons.md)). These are the deferred follow-ups, each its own increment:

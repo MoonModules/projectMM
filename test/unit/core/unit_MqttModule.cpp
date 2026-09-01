@@ -5,7 +5,7 @@
 // matching Drivers control through the shared Scheduler::setControl primitive — the same seam IR and
 // the WLED bridge use. The socket is not involved: feedForTest() injects raw MQTT bytes (built with
 // the tested MqttPacket builders) exactly as the broker would deliver them, so the routing is
-// provable with no broker (mirrors IrService::injectCodeForTest). A FakeDrivers stands in for the
+// provable with no broker (mirrors InfraredService::injectCodeForTest). A FakeDrivers stands in for the
 // real Drivers with the on / brightness / palette controls MQTT targets.
 
 #include "doctest.h"

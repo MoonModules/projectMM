@@ -234,15 +234,18 @@ private:
                 if (d.type == ControlType::Pin) {
                     const int8_t v = *static_cast<int8_t*>(d.ptr);
                     if (v >= 0) addPinClaim(static_cast<uint8_t>(v), m->name(), roleFor(d.name));
-                } else if (d.type == ControlType::Text && std::strcmp(d.name, "pins") == 0) {
-                    // The LED-driver lane CSV ("18,19,20"): one claim per pin, role "LED lane N". parsePinList
-                    // dedups within the one string, so a lane list never self-collides here — and it rejects
-                    // any out-of-range pin (> MM_MAX_GPIO) outright, so every returned pin is a real GPIO.
+                } else if (d.type == ControlType::Text && isPinListName(d.name)) {
+                    // A pin CSV ("18,19,20"): one claim per pin. Matched on the NAME ENDING in "pins"
+                    // rather than being exactly "pins", so a module with more than one list is
+                    // visible here too (Drivers' "relayPins" beside an LED driver's "pins"); a claim
+                    // the map cannot see is a pin nothing guards. parsePinList dedups within the one
+                    // string, so a list never self-collides, and it rejects any out-of-range pin
+                    // (> MM_MAX_GPIO) outright, so every returned pin is a real GPIO.
                     uint16_t pins[kMaxClaims];
                     uint8_t n = 0;
                     if (!parsePinList(static_cast<const char*>(d.ptr), pins, kMaxClaims, n))
                         for (uint8_t p = 0; p < n; p++)
-                            addLaneClaim(static_cast<uint8_t>(pins[p]), m->name(), p);
+                            addLaneClaim(static_cast<uint8_t>(pins[p]), m->name(), d.name, p);
                 }
             }
             // Pins the module holds that are not controls: silicon-fixed pads (an EMAC's data bus).
@@ -279,10 +282,28 @@ private:
                 gradeClaim(*c, isOutputRole(role));
             }
         }
-        void addLaneClaim(uint8_t gpio, const char* owner, uint8_t laneIdx) {
+        /// A control name that holds a comma-separated pin list: "pins", or anything ending in it
+        /// ("relayPins"). One rule rather than a list of names, so a new list is seen by the map the
+        /// moment it follows the convention.
+        static bool isPinListName(const char* name) {
+            const size_t n = std::strlen(name);
+            if (n < 4) return false;
+            // Case-insensitive on the suffix, because the convention is camelCase: an LED driver's
+            // control is "pins" and Drivers' is "relayPins", and a case-sensitive compare silently
+            // matched only the first. Silently, because a missed claim looks exactly like a pin
+            // nobody uses.
+            const char* s = name + n - 4;
+            return (s[0] == 'p' || s[0] == 'P') && s[1] == 'i' && s[2] == 'n' && s[3] == 's';
+        }
+
+        void addLaneClaim(uint8_t gpio, const char* owner, const char* control, uint8_t laneIdx) {
             if (Claim* c = reserve(gpio, owner)) {
-                std::snprintf(c->role, sizeof(c->role), "LED lane %u", static_cast<unsigned>(laneIdx));
-                gradeClaim(*c, /*isOutput=*/true);   // an LED lane always drives the pin
+                // Named after the control, so a row says what the pin IS: an LED driver's "pins"
+                // reads "LED lane 0", Drivers' "relayPins" reads "relay 0".
+                const bool isLed = std::strcmp(control, "pins") == 0;
+                std::snprintf(c->role, sizeof(c->role), isLed ? "LED lane %u" : "relay %u",
+                              static_cast<unsigned>(laneIdx));
+                gradeClaim(*c, /*isOutput=*/true);   // both drive the pin
             }
         }
 

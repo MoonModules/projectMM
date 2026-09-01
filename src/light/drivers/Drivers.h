@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/PinList.h"        // parsePinList: the relay list, same parser the LED drivers use
 #include "light/drivers/DriverBase.h"  // DriverBase — the Drivers container casts its children to it
 #include "core/MoonModule.h"
 #include "core/ActiveInstance.h"  // the summary-seat election (the seat + its RAII vacate)
@@ -186,6 +187,22 @@ public:
     /// lights-control surface). Default on so a freshly-flashed board lights up.
     bool on = true;
 
+    /// The GPIOs that switch the LED power supply, comma-separated, empty where nothing is wired
+    /// (which is most boards).
+    ///
+    /// A relay-gated board cuts the strip's power rather than only its data: the QuinLED Dig-2-Go's
+    /// GPIO 12 is its "LED Relay enable pin" (vendor pinout), and with it open a perfectly correct
+    /// data line lights nothing.
+    ///
+    /// A LIST, because boards do not agree on the count and it does not track the LED pins: the
+    /// Dig-2-Go has one relay for one output, while the Dig-Next-2 has FOUR relays for TWO outputs.
+    /// There is no per-driver mapping to be made, and MoonLight's own model says why: every one of
+    /// them carries the same `Relay_LightsOn` role, so they all follow master power together. That
+    /// is also why this lives beside `on` rather than on a driver: a relay gates the SUPPLY, which
+    /// several drivers share, where a driver's own controls (lightPreset, pins) describe that one
+    /// driver's output.
+    char relayPins[24] = "";
+
     /// Multicore render↔encode split (Step 2a): run the drivers' encode+transmit on the
     /// second core while the render loop draws the next frame on core 0, so a frame costs
     /// `max(render, encode)` instead of `render + encode`. The encode is the dominant CPU cost at
@@ -263,6 +280,11 @@ public:
 
     void defineControls() override {
         controls_.addControl("on", on);   // master power — first so it renders at the top of the card
+        // The GPIOs that switch the LED supply, for a board that gates power behind a relay: a
+        // comma-separated list, because a board can have one per output (a Dig-Quad has four). Empty
+        // on everything else, which is most boards: a deviceModel fills it in, the same way it fills
+        // in LED pins (architecture.md, deviceModel owns what is wired on the product).
+        controls_.addText("relayPins", relayPins, sizeof(relayPins));
         controls_.addControl("brightness", brightness, 0, 255);
         controls_.addPalette("palette", palette, mm::paletteOptions, mm::palettes::kCount);
         // Only where it can DO something: a rig of LED strips has no aim to hold, so the control
@@ -306,7 +328,58 @@ public:
             std::strcmp(controlName, "brightness") == 0) {
             rebuildAllCorrections();
         }
+        // The relay follows `on`, and is written HERE rather than per frame: switching power is a
+        // state change, not a per-frame concern, and a mechanical relay would wear out doing it at
+        // frame rate (the Dig-2-Go's is solid-state, but the rule holds for the ones that are not).
+        // Also written when the pin itself changes, so entering it on a live device closes the relay
+        // straight away instead of at the next toggle.
+        if (std::strcmp(controlName, "on") == 0 || std::strcmp(controlName, "relayPins") == 0) {
+            applyRelay();
+        }
     }
+
+    /// Drive the power relay to match `on`.
+    ///
+    /// Some boards gate the LED supply behind a relay (the QuinLED Dig-2-Go's GPIO 12 is its "LED
+    /// Relay enable pin"), so the data line can be perfectly correct and the strip stay dark. The
+    /// relay belongs to `on` rather than to a driver or a service: it is the physical expression of
+    /// master power, and `on` is the one control the UI, the WLED bridge, MQTT and OSC all already
+    /// write. A second on/off would be a split brain, with nothing able to say which one meant off.
+    void applyRelay() {
+        // Release a pin the user just cleared, or it stays asserted forever on a GPIO nothing owns.
+        // The same reasoning InfraredService applies when its pin is unset.
+        if (!relayPins[0]) {
+            for (uint8_t i = 0; i < lastRelayCount_; i++)
+                platform::gpioWrite(static_cast<uint8_t>(lastRelayPins_[i]), false);
+            lastRelayCount_ = 0;
+            return;
+        }
+        uint16_t pins[kMaxRelays] = {};
+        uint8_t n = 0;
+        // parsePinList returns a static error literal, which every other caller feeds straight into
+        // setStatus. Reporting it is the difference between a typo'd list and a working one.
+        if (const char* err = parsePinList(relayPins, pins, kMaxRelays, n)) {
+            setStatus(err, Severity::Warning);
+            return;
+        }
+        for (uint8_t i = 0; i < n; i++) {
+            // An input-only pin (classic ESP32 34-39) refuses the write, and the seam says so: a
+            // relay wired to one would otherwise look configured and do nothing.
+            if (!platform::gpioWrite(static_cast<uint8_t>(pins[i]), on))
+                setStatus("relay pin cannot drive an output", Severity::Warning);
+            lastRelayPins_[i] = static_cast<uint8_t>(pins[i]);
+        }
+        lastRelayCount_ = n;
+    }
+
+    /// Relays one device can carry. Four is the most any board in the catalog wires (Dig-Next-2);
+    /// eight leaves room without costing anything, the list being text.
+    static constexpr uint8_t kMaxRelays = 8;
+
+    /// The pins actually driven last time, so clearing the list can release them. The control's text
+    /// is gone by then, which is why the numbers are kept rather than re-parsed.
+    uint8_t lastRelayPins_[kMaxRelays] = {};
+    uint8_t lastRelayCount_ = 0;
 
     /// `multicore` is the one Drivers control that is STRUCTURAL: it decides whether the cross-core
     /// handoff buffer is allocated and the core-1 encode task runs, both of which live in prepare().
@@ -399,6 +472,9 @@ public:
         // an effect's setPan() would fall outside the light, and a fixture would not move until
         // some later rebuild widened it.
         publishFixtureChannels();
+        // Close the relay for the persisted `on` at boot. Without this a relay board comes up dark
+        // until something toggles the control, which reads as a dead device.
+        applyRelay();
     }
 
     void prepare() override {

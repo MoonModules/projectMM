@@ -146,7 +146,8 @@
 #include "core/I2cScanModule.h"
 #include "core/TasksModule.h"
 #include "core/PinsModule.h"
-#include "core/IrService.h"
+#include "core/ButtonService.h"
+#include "core/InfraredService.h"
 #include "core/FileManagerModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/ImprovProvisioningModule.h"
@@ -312,7 +313,8 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::I2cScanModule>("I2cScanModule", "core/system.md#i2c-scan");
     mm::ModuleFactory::registerType<mm::TasksModule>("TasksModule", "core/system.md#tasks");
     mm::ModuleFactory::registerType<mm::PinsModule>("PinsModule", "core/system.md#pins");
-    mm::ModuleFactory::registerType<mm::IrService>("IrService", "core/services.md#ir");
+    mm::ModuleFactory::registerType<mm::ButtonService>("ButtonService", "core/services.md#button");
+    mm::ModuleFactory::registerType<mm::InfraredService>("InfraredService", "core/services.md#infrared");
     mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/system.md#file-manager");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/system.md#firmware-update");
     mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/system.md#improv-provisioning");
