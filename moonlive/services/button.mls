@@ -1,6 +1,6 @@
 class Button {
   int pin = 0;
-  int last = 0;
+  int last = 1;
   int now = 0;
 
   void defineControls() {
@@ -11,7 +11,7 @@ class Button {
     now = gpioRead(pin);
     if (now != last) {
       last = now;
-      setControl("switch1", now);
+      setControl("switch1", 1 - now);
     }
   }
 }

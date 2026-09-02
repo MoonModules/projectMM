@@ -275,3 +275,19 @@ TEST_CASE("one remote key binds to one row, so a re-learned key moves rather tha
     CHECK(rig.drivers->brightness == 110);   // the newest binding won
     CHECK(rig.drivers->on == true);          // and the first row no longer holds the code
 }
+
+TEST_CASE("an explicit false disarms a row, so a learn can be canceled") {
+    // The UI's button sends {"value":""} and means "arm". The API can also send a real boolean, and
+    // `false` has to mean disarm: parseString reads only quoted strings, so a JSON boolean left the
+    // buffer empty and took the same path as the button, making a row impossible to un-arm.
+    Rig rig;
+    uint32_t id = 0;
+    REQUIRE(rig.ir->addListRow(id));
+
+    REQUIRE(rig.ir->setListRowField(id, "learn", "{\"value\":true}"));
+    REQUIRE(rig.ir->setListRowField(id, "learn", "{\"value\":false}"));
+    // Disarmed: the next code is NOT captured, so the row stays unbound and reports the code as
+    // unassigned rather than silently learning it.
+    rig.fire(0x2468);
+    CHECK(std::strstr(rig.ir->status(), "unassigned") != nullptr);
+}

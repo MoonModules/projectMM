@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # Both vocabularies: a .mle compiles against the light table, a .mls against the service one, and
 # this check asks only "is the script valid C++", which needs every name either could call.
 BUILTINS = [
+    ROOT / "src" / "core" / "moonlive" / "MoonLiveBuiltins_common.h",
     ROOT / "src" / "light" / "moonlive" / "MoonLiveBuiltins_light.h",
     ROOT / "src" / "core" / "moonlive" / "MoonLiveBuiltins_service.h",
 ]

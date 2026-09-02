@@ -73,7 +73,9 @@ TEST_CASE("AudioService: switching out of Local mode clears the mic status") {
     a.mode = AudioService::kSimMode;
     a.applyState();
     CHECK(noMicMessage());
-    CHECK(a.status()[0] == 0);       // Simulate has no sync either, so here it IS empty
+    // Simulate has no sync either, so here the line IS empty. Null or empty: a module that has
+    // never reported anything has a null status, which is the same "nothing to say".
+    CHECK((a.status() == nullptr || a.status()[0] == 0));
 
     a.release();
 }

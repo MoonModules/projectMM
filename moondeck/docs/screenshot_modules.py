@@ -145,6 +145,7 @@ CORE_MODULES = [
     "I2cScanModule",
     "InfraredService",
     "ButtonService",
+    "MoonLiveService",
 ]
 
 # Core modules that are CHILDREN of another module (so they have no top-level nav entry
@@ -161,6 +162,7 @@ CORE_NAV_ROOT = {
     "AudioService": "Services",
     "InfraredService": "Services",
     "ButtonService": "Services",
+    "MoonLiveService": "Services",
     "I2cScanModule": "SystemModule",
 }
 # FileManagerModule, FirmwareUpdateModule, SystemModule, NetworkModule are top-level

@@ -12,6 +12,104 @@ builtin **in the same step**, because a builtin is one table row plus a host fun
 (`MoonLiveBuiltins_light.h`, 53 of them today) and because the script is how the seam gets tested
 before any module depends on it. A step is done when both halves work on the bench.
 
+## Background: what a driver is, where inputs live, and the GPIO seam
+
+Merged in from the separate GPIO-seam plan (2026-09-02), whose steps are now either shipped or
+carried into the step list below. This is the analysis that decided the shape, kept because nothing
+else records it.
+
+## What a driver is: the contradiction, and the correction
+
+Two definitions are in the repo today and they do not agree.
+
+- [`docs/moonmodules/light/drivers.md:3`](../../moonmodules/light/drivers.md): "A driver sends
+  lights somewhere." Output-only, light-specific.
+- [`docs/architecture.md:143`](../../architecture.md): "producers vs consumers: producers generate
+  data, consumers process and output it. Effects are producers, drivers are consumers." A role in a
+  dataflow, said of the light domain.
+
+The product owner's definition is broader than both: **a driver communicates with hardware or the
+network**, which explicitly includes talking to GPIOs. That is the definition this plan adopts, and
+it is the better one: it describes what the code *is* (the boundary between the device and the
+physical world) rather than what today's instances happen to do.
+
+**The concrete contradiction in code.** `DriverBase` declares `virtual void setSourceBuffer(Buffer*)
+= 0`: every driver is *structurally required* to consume a light buffer. So the light domain's
+`DriverBase` is not "anything that talks to hardware"; it is specifically "a consumer of the light
+buffer that outputs it". Every one of the sixteen drivers under `src/light/drivers/` does exactly
+that. The narrow wording in `drivers.md` is therefore an accurate description of `DriverBase`, and
+the disagreement is that it claims the word "driver" while describing only the light-domain
+specialization of it.
+
+**The resolution, and it is a rename of concepts rather than of code.** There are two distinct
+things, and the repo needs both words:
+
+| | what it is | where it lives | contract |
+|---|---|---|---|
+| **Driver** (light domain) | consumes the light buffer and outputs it | `Drivers` container, `DriverBase` | `setSourceBuffer` |
+| **Service** (core domain) | a capability bridge the device provides or consumes | `Services` container, `ModuleRole::Service` | none imposed |
+
+`services.md` already states this precisely: Services are "capability bridges the device provides or
+consumes ... the core-domain twin of the light domain's Effects/Drivers". Audio and IR already live
+there. Both talk to hardware; neither touches the light buffer.
+
+So under the PO's broader definition, a light Driver and a core Service are **both** drivers in the
+general sense: two families of the same idea, split by whether the light buffer is involved. The
+documentation should say that, and `drivers.md` should stop implying its own definition is the only
+one.
+
+**Action:** amend `drivers.md:3` to scope its claim ("A *light* driver sends lights somewhere"), and
+add a line to `architecture.md` naming the general sense and the two families. No code changes.
+
+## Where the new inputs go: Services
+
+A button, a foot pedal and a game controller are capability bridges the device **consumes**. They
+produce no lights and never touch the light buffer, so they are Services, beside Audio and IR. This
+is not a new container or a new role: `Services::acceptsChildRoles()` already returns `"service"`,
+and `ModuleRole::Service` already exists.
+
+## The GPIO seam
+
+`platform.h` already carries a well-built GPIO vocabulary, and it is the industry-standard shape:
+`gpioCapability(gpio)` (static truth: valid / output-capable / RTC / strap / reserved, from the
+IDF's own `GPIO_IS_VALID_GPIO`, `GPIO_IS_VALID_OUTPUT_GPIO`, `rtc_gpio_is_valid_gpio`) and
+`gpioLiveState(gpio)` (what a pin is doing now). `PinsModule` is the ownership map.
+
+What is missing is an **input role**: `gpioLiveState` reads the pad, but it is a diagnostic sampled
+on tick1s, not an input path. Two functions close it:
+
+```cpp
+// Configure one GPIO as an input with an optional internal pull. Idempotent; re-configuring a pin
+// the caller already owns is not an error. Returns false on a pin gpioCapability rejects.
+bool gpioInputBegin(uint8_t gpio, GpioPull pull);
+// Read one configured input. Cheap enough for a 20 ms poll; no allocation, no blocking.
+bool gpioRead(uint8_t gpio);
+```
+
+Plus `gpioWrite(uint8_t, bool)` for the output half, which the Dig-2-Go's relay needs and which
+MoonLive's hello-world requires (below). Desktop implements all three against the existing test-seam
+pattern (`setTestGpioLiveState`), so button logic is host-testable without hardware.
+
+**Debouncing belongs in the module, not the seam.** The seam reports the pad; a bouncing contact is
+a property of the switch, and the module owns the time constant as a control. This keeps the
+platform layer a thin, faithful boundary, which is what the platform rule asks for.
+
+## USB game controllers: why this is its own plan
+
+A USB gamepad is not a GPIO. It needs **USB Host**, which on our targets means:
+
+- **Classic ESP32 cannot do it at all** (no USB Host peripheral; it has no USB OTG). So this feature
+  is S3/P4-only, and the Dig-2-Go in front of us could never use it.
+- **S3/P4** have USB-OTG, and the IDF ships a USB Host stack plus a HID class driver. A gamepad is a
+  HID device with a report descriptor that must be parsed to know which byte is which button/axis:
+  that parsing is the real work, and it is why "support gamepads" is not a small item.
+- **Desktop** would use the OS gamepad API, a completely different implementation behind the same
+  seam.
+
+The mapping half is easy once reports arrive (buttons -> pads, axes -> encoders/faders, through the
+same `setControl`); the transport half is a genuine project. Scope it separately, after the GPIO
+inputs land, and expect it to be S3/P4-only from the start.
+
 ## The sensors this plan is tested against
 
 Agreed with the product owner, and all on the bench. **One per seam**: each proves a different
@@ -103,6 +201,20 @@ table**. A sensor that only does one is half-built. The full reasoning is in
 5. **What `setControl` may reach from a script.** Recommendation: **the `Control` module only**. A
    script drives the surface, the surface drives everything, which is the same two-step model the
    tables use. Unrestricted is simpler and lets a script rewrite a driver's pin list.
+
+## Step 0b: the two open items carried in from the GPIO-seam plan
+
+That plan had seven steps. Five shipped (the GPIO seam, ButtonService, the Dig-2-Go catalog entry,
+the MoonLive GPIO builtins and MoonLiveService). Two did not, and they are small enough to state
+rather than schedule:
+
+- **The driver definition in the docs.** `drivers.md:3` still reads "A driver sends lights
+  somewhere", the output-only wording the analysis above set out to correct. The correction is two
+  edits and no code: scope that line to a LIGHT driver, and name the general sense plus its two
+  families in `architecture.md`. It is cheap, and every other document defers to it.
+- **`/mm/pad/N` in `OscModule`.** Every input can fire a pad now (the pad target resolves through the
+  generic pad-grid list), but OSC has no path for one, so a surface cannot. Decide what a press means
+  on an empty slot and whether a nonzero value is press-versus-hold.
 
 ## Step 1: rebuild Infrared and Button around a mapping list
 
@@ -231,12 +343,13 @@ class NearTrigger {
   int pin = 0;
   int threshold = 50;
   int wasNear = 0;
+  int near = 0;
   void defineControls() {
     addControl("pin", pin, 0, 48);
     addControl("threshold", threshold, 0, 255);
   }
   void tick20ms() {
-    int near = readDistance(pin) < threshold;
+    near = gpioRead(pin);          // step 4 replaces this with an I2C distance read
     if (near != wasNear) { wasNear = near; if (near) setControl("Control", "pad3", 1); }
   }
 }
@@ -254,11 +367,22 @@ and catalog entry, `MoonLiveService` registered under Services, and `unit_MoonLi
 pinning the whole path (a script reads an injected pin level and drives `switch1`, declares its own
 controls, and survives a missing or broken script).
 
-Still open, and the step is not done until they are:
+**BENCH-VERIFIED (2026-09-02, QuinLED Dig-2-Go, 300 LEDs on RmtLed).** `sweep.mls` compiled to 752
+bytes of Xtensa, published its declared `bpm` control, and swept faders 5-8 continuously with no
+boot loop and no crash. Measured on the board:
 
-- **The bench test.** A green host run is not verified: the script has never executed on an ESP32,
-  where the JIT emits Xtensa rather than arm64 and the pin is a real button. The Dig-2-Go has one on
-  GPIO 0 and `moonlive/services/button.mls` is written for it.
+| | desktop | Dig-2-Go |
+|---|---|---|
+| script tick | 58 us | **966 us** |
+| for scale | | Drivers 6887 us, Effects 209 us |
+| frame rate | | **67-85 fps with and without the script** |
+
+The tick is 17x the host's, which is the number worth knowing before a script does anything heavier.
+It is still only about 12% of what the LED driver costs on the same frame, and the frame rate moved
+no more with the script running than it does between two samples without it. So a scripted service
+is affordable at this size on a classic ESP32.
+
+Still open, and the step is not done until they are:
 - **The `.mls` picker.** The extension map and syntax highlighting are wired; nobody has confirmed
   the picker offers `.mls` files or that "new script" writes `kServiceTemplate`.
 - **The catalog card.** `services.md` has no MoonLiveService section, and `@card
@@ -278,6 +402,216 @@ Two things this step found, which the text above predates:
   the arena. Correct but oblique: the main entry still carries a light-domain assumption, and the
   next non-light binding meets it the same way. Worth splitting the guard out of `run()`, or naming
   the two entries for what they are.
+
+## Step 2b: encoders send DELTAS, the way an encoder actually works
+
+A rotary encoder has no end stops. It reports MOVEMENT, not position: one detent clockwise is "+1",
+and the device it is plugged into owns the value and decides what +1 means. That is what every
+control surface does, and it is what Mackie Control (the protocol this surface already follows)
+sends: a signed-bit delta per detent, not a position. The informal name is an ENDLESS encoder; the
+formal one is continuous rotation, and the message it sends is a RELATIVE (or incremental) value,
+against a potentiometer's ABSOLUTE one.
+
+**Ours are absolute today, and that is the problem.** `encoderN` is a `uint8_t` 0..255 in
+`ControlModule`, and the surface accumulates detents into it (`nudgeEncoder`). So the encoder holds
+a SECOND copy of whatever it targets, and the second copy has to be kept in step with the first:
+`followTargets` pulls every encoder from its target once a second, `mirrorOne` pushes changes back
+out, and `sentEncoders_` remembers what each attached surface was last told.
+
+That mirroring is not free, and it is visibly lossy at the edges:
+
+- **A wide target does not fit.** `getControl` answers in surface units, so a Uint16 holding 300
+  reads back as 255. The encoder's copy is then wrong, and the next turn computes from the wrong
+  base. `getControlWide` fixed the ACTION path; the mirror still clamps because a byte is what the
+  surface speaks.
+- **Wrap versus clamp belongs to the target, not the knob.** A palette ring should wrap from the
+  last palette to the first; brightness should stop at 255. With the value living on the encoder,
+  the surface has to know which, for a target it is only loosely bound to.
+- **Nothing to sync is simpler than syncing.** `followTargets`, `pullTarget`, `mirrorOne` and
+  `sentEncoders_` all exist to keep two numbers equal. A relative encoder has one number.
+
+**The change:** an encoder carries no value. A detent applies `+1` or `-1` to whatever it targets,
+through the same `runInputAction` delta path a mapping row already uses, and the target's own type
+and bounds decide the result. The surface stops holding a copy, so there is nothing to pull, nothing
+to mirror, and no clamp.
+
+- `encoderN` becomes a control the transports WRITE a delta to rather than a value: a positive
+  number steps up, a negative one steps down, and reading it back answers nothing meaningful.
+- The seven-segment readout under each encoder shows the TARGET's value, not the encoder's, which is
+  what a desk shows and what a user is actually asking about.
+- The display strip is unaffected: it already names the target and its value.
+
+**Two transports send absolute positions today** and have to send deltas instead: OSC's
+`/mm/encoder/N` and the WLED bridge, plus whatever a MIDI surface would send (Mackie's signed bit is
+the encoding to follow). Both are small, and both get simpler: a delta needs no scaling from the
+target's range into 0..255.
+
+**Test:** an encoder stepping a Uint16 target past 255 (which the absolute form could not do), a
+palette ring wrapping while brightness clamps at the same detent, and the readout following the
+target rather than the knob. Bench: the Dig-2-Go's encoder1 on the palette, turned a full revolution
+in each direction, with the strip naming each palette as it passes.
+
+## Step 2c: the surface's own bindings become assignable
+
+`fader1` drives `Drivers.brightness`, `switch1` drives `Drivers.on` and `encoder1` drives
+`Drivers.palette`, hardcoded in `ControlModule::surfaceTarget` and its siblings. Everything around
+them is already general: the write goes through `Scheduler::setControl`, the read-back through
+`getControl`, and `followTargets` keeps the surface showing what its targets actually hold. Only the
+NAMES are fixed, and this replaces them with an assignment a user makes.
+
+**The target is the string the inputs already speak.** `"Module.control"`, the same form a button or
+infrared row stores, resolved by the same `composeTarget` / `decomposeTarget` helpers. A surface
+control and a mapping row then name a target one way rather than two, and a target typed into either
+means the same thing.
+
+**Any control the REST API can set** (product owner, 2026-09-02). Not a curated allow-list per
+module: the dropdown is generated from the LIVE module tree, so it can only ever offer what exists,
+and a control added tomorrow is assignable without anyone remembering to list it. The pairing is
+exactly what `/api/control` takes, which is the point: there is no second vocabulary to keep in step
+with the first.
+
+**Two-way, which is not new work.** `Scheduler::getControl` is the documented mirror of `setControl`,
+and `followTargets` already pulls each surface control from its target once a second so a change made
+from the web UI, MQTT or OSC moves the fader. A user-assigned target uses the identical path. (Step
+2b removed that pull for ENCODERS on the grounds that an endless knob has no position to correct.
+With assignable targets the surface has to show what its knob drives, so the pull comes back and step
+2b's premise is worth revisiting: see the note below.)
+
+**Persisted with the Control module**, as configuration, in its own JSON and restored at boot, like
+every other control value. Deliberately NOT captured in light presets: a pad that silently re-maps
+the whole desk mid-set is a surprise a performer cannot recover from, and a preset is about a LOOK.
+
+### The UI
+
+The popup already exists and is already reachable on a touch screen: `attachTargetPopup` opens on
+right-click and on long-press, and today it shows one read-only line ("drives Drivers.palette"). The
+change is what that line becomes:
+
+- **Two dropdowns**, module then control, not a typed string. A typo in `"Drivres.palette"` is
+  invisible until the fader silently does nothing, which is the same reasoning that made the infrared
+  row's target a dropdown rather than a text box.
+- **The control list follows the module choice**, filtered to what a surface can actually drive: a
+  fader cannot meaningfully move a filename, and offering one produces a control that looks assigned
+  and does nothing.
+- **A clear button**, because unassigning has to be as easy as assigning.
+- **ONE way in: an assign MODE**, which is what Ableton, Bitwig, Reaper, TouchOSC and Open Stage
+  Control all do. An `assign` button on the surface's card turns it on; every fader, knob and switch
+  outlines in the accent color; a single tap on one opens its picker; the button reads `done` to
+  turn it off.
+
+**One mechanism, not several** (product owner, 2026-09-02). The alternatives were tried and each
+fails somewhere: right-click has no touch equivalent, long-press has no mouse equivalent, and
+double-click COLLIDES with the control itself, since double-clicking a fader also moves it. A mode
+has no such conflict, because while it is on a tap means exactly one thing, and it is identical on a
+mouse and a touch screen.
+
+The mode also has to suppress the control's own gestures while it is on: the knob's drag and wheel,
+and the fader's range input, are muted so the tap that opens a picker cannot also move the value it
+is about to re-target.
+
+**Test:** assigning `fader2` to a second module's control and driving it; a target changed from the
+web UI moving the surface control within a second (the follow path); an assignment surviving a
+reboot; and clearing an assignment leaving the control inert rather than still driving its old
+target. Bench: the Dig-2-Go, with a fader assigned to something other than brightness.
+
+### The encoder question this reopens
+
+The product owner's framing (2026-09-02): **the HARDWARE sends deltas, and everything we display is
+the absolute result.** A rotary encoder, an X-Touch, a Mackie surface: each reports movement, and the
+device turns that into a value once, at the boundary. `applyEncoderDelta` is exactly that boundary
+and already works.
+
+Step 2b went further and made the SOFTWARE knob relative too, which put the delta on the wire between
+the browser and the device, where both sides hold the absolute value and neither needs one. The cost
+shows up as a UI knob that can read 106 while its target reads 59. Worth revisiting once this step
+lands, because assignable targets need the surface to show what its control drives, which is the
+mirroring step 2b removed.
+
+### Measured: the 1 Hz state push stays, and instant feedback needs a different mechanism
+
+The surface shows a value changed by something else (a script, OSC, another client) up to a second
+late, because the UI learns it from the 1 Hz state patch. The obvious fix is a faster push, and the
+measurement says no (desktop, 2026-09-02, a full pipeline plus a sweeping script):
+
+- **460 us average** per patch, **8.5 ms worst case**, ~600 bytes, 14 leaves changed.
+
+At 1 Hz that is 0.05% of a core. At 50 Hz the average alone is 23 ms of render budget per second,
+and the worst case is longer than a whole 20 ms tick, so a spike drops a frame. On an ESP32 both
+numbers are several times larger, which is exactly the LED stutter that made this 1 Hz in the first
+place (HttpServerModule.h, the state-push note).
+
+The 34 KB full serialize that originally forced the rate IS gone, replaced by the value-diff. What
+costs now is the diff itself: it walks every leaf, serializes it and hashes it, so the cost scales
+with the number of controls rather than with what changed.
+
+**So instant feedback is a targeted push, not a faster one** (product owner, 2026-09-02: push the
+change rather than poll for it). A surface control that changes sends its own leaf immediately,
+which is one value rather than a walk of all of them, and the periodic patch stays at 1 Hz as the
+catch-up for everything else.
+
+The mechanism to copy is already there: `MoonModule::setSchemaChangedHook` is a static hook the
+HTTP server installs, and a value hook takes the same shape. What makes it a feature rather than a
+line:
+
+- **Coalescing.** A script sweeping a fader at 50 Hz must not become 50 pushes a second: the whole
+  point of the measurement above is that the render thread cannot afford that. A pending-set drained
+  on tick20ms is the shape, so a burst collapses to one push per 20 ms.
+- **Baseline bookkeeping.** The periodic patch compares against a cached hash per leaf. A pushed
+  leaf has to update that baseline, or the next patch sends the same value again.
+- **Which controls.** Only the ones a person watches move (the surface), not every control on the
+  device: a driver's telemetry changing 50 times a second is exactly what the 1 Hz sampling is for.
+
+A user's own action already feels instant, since the UI updates locally on send. What this buys is
+the case where something ELSE moved the control: a script, OSC, a second browser.
+
+### Open: `addControl` is still in the light header
+
+The domain-neutral builtins moved to `core/moonlive/MoonLiveBuiltins_common.h` (2026-09-02): the
+math, the waveforms, noise, randomness and print. `addControl` did NOT, so the service table still
+includes the light header for that one function, which leaves core depending on a domain for the
+sake of declaring a setting.
+
+It stayed behind because it is not a pure function: it writes through an `AddControlSink`, a
+per-thread slot table that also serves `addLight` and the draw canvas, and moving that machinery is
+a bigger job than moving thirteen pure functions was. `smin` went back to the light table for the
+same class of reason, and correctly: it wraps `draw::smin`, so it IS a light idea.
+
+Worth finishing when the sink table is touched for another reason. The include is honest about why
+it is there.
+
+### Open: a control written continuously should not be persisted at that rate
+
+Found while testing a scripted sweep (2026-09-02): a `.mls` service running on tick20ms and writing
+four faders makes 200 `setControl` calls a second, and every one of them ends in `markDirty()` plus
+`noteDirty()`, because that is what the generic control-change reaction does for any writer.
+
+**Nothing is written to flash, and that is an accident rather than a design.** The debounce waits
+two seconds after the LAST dirty mark, so a 50 Hz writer re-stamps the timer before it ever expires.
+Measured: with the sweep running, `ControlModule.json` sat untouched for 35 minutes; the moment the
+sweep stopped and one fader moved, it was written within seconds.
+
+So there is no flash churn today, but the shape is wrong in both directions. A continuously written
+control **never persists at all**, so a power cut loses it (the reboot handler's `flushPending()` is
+the only thing that saves it, and a power cut does not call it). And the protection depends on the
+write rate staying above the debounce: a script writing every three seconds would rewrite the file
+every three seconds, forever.
+
+The cost measured on the host is small (~30us per tick, about 0.15% of a core at 50 Hz), and it has
+NOT been measured on an ESP32, where the same script does those 200 calls on the render thread and
+each one walks `rebuildControls()`.
+
+**The product owner's framing** (2026-09-02): a script should not be responsible for the pace, the
+system should manage it. Two things follow, and both belong in the persistence layer rather than in
+every script:
+
+- **Rate-limit the persistence, not the value.** A surface control moving at 50 Hz needs its value
+  applied 50 times a second and saved at most once. The dirty mark is what wants a ceiling.
+- **Ask whether a swept value is configuration at all.** A fader position a script is driving is live
+  state, closer to a sensor reading than to a setting a user chose. Something declared that way would
+  not mark dirty in the first place, which also settles the question above.
+
+Worth doing before a scripted service is a normal thing to run on a device, and worth measuring on
+the board first: the tick cost is the number that decides how much of this matters.
 
 ## Step 3: analog in, and the expression pedal
 

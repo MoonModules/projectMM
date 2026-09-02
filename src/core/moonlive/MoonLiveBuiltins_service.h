@@ -4,10 +4,9 @@
 #include "core/moonlive/MoonLiveBuiltins.h"
 #include "core/Scheduler.h"
 #include "platform/platform.h"   // gpioInputBegin / gpioRead / gpioWrite
-// addControl and print: declared in the light header because that is where the sink machinery grew,
-// but neither is a light idea. Declaring a setting and logging a value are what ANY script does, so
-// they are reused here rather than re-implemented. Worth hoisting the sinks into core the next time
-// this file needs something else from over there.
+#include "core/moonlive/MoonLiveBuiltins_common.h"   // the neutral half: math, waveforms, print
+// addControl still comes from the light header: its sink machinery lives there, and moving that is
+// a bigger job than moving a pure function. Everything else a service borrowed is now in core.
 #include "light/moonlive/MoonLiveBuiltins_light.h"
 
 #include <cstdint>
@@ -53,7 +52,10 @@ extern "C" inline uint32_t mm_service_gpioRead(const uintptr_t* args, uint32_t, 
     // for no reason. A script still needs no begin/read pair: the first read opens it.
     static bool opened[49] = {};
     if (!opened[pin]) {
-        platform::gpioInputBegin(static_cast<uint8_t>(pin), platform::GpioPull::Up);
+        // Cached only on SUCCESS: the seam refuses an invalid pin and one wired to flash, PSRAM or
+        // USB, and marking a refused pin as open meant reading it forever and reporting whatever a
+        // floating read returned as if it were a button.
+        if (!platform::gpioInputBegin(static_cast<uint8_t>(pin), platform::GpioPull::Up)) return 0;
         opened[pin] = true;
     }
     return platform::gpioRead(static_cast<uint8_t>(pin)) ? 1u : 0u;
@@ -108,8 +110,16 @@ inline SysVarTable serviceSysVars() {
 }
 
 /// The service built-in table the binding injects into the compiler.
-inline BuiltinTable serviceBuiltins() {
-    BuiltinTable t;
+inline const BuiltinTable& serviceBuiltins() {
+    // Built ONCE and reused: the table is ~2 KB by value and never changes after registration, and
+    // it was being rebuilt on every prepare sweep, including the sweeps whose hash check returns
+    // immediately because nothing was edited.
+    static const BuiltinTable table = [] {
+        BuiltinTable t;
+    // The neutral half: a service gets sin, noise, beat, print and the rest, because none of that
+    // is about light. It could not before, which is why a sweep had to be spelled as integer
+    // arithmetic while an effect one line away could call sin().
+    addCommonBuiltins(t);
     // gpioRead(pin)          -> 0/1. The input half: any switch, PIR, or level a pin can carry.
     t.add({"gpioRead", 1, /*returns*/ true, BuiltinKind::Call, &mm_service_gpioRead, {}});
     // gpioWrite(pin, on)     -> 0/1. The output half: a relay, an indicator, a chip's enable line.
@@ -124,10 +134,9 @@ inline BuiltinTable serviceBuiltins() {
     // byRef/byStr masks say. A service without this could be configured only by editing its source.
     t.add({"addControl", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_addControl, {},
            /*byRef*/ 0x2, /*byStr*/ 0x1});
-    // print(v)               -> log v and return it. The script author's only debugger, and a
-    // service running headless on a bench board is exactly where one is needed.
-    t.add({"print", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_print, {}});
-    return t;
+        return t;
+    }();
+    return table;
 }
 
 }  // namespace mm::moonlive

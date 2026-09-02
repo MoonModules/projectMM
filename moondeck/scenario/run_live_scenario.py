@@ -460,23 +460,38 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                         else:
                             print(f"  +     {step.get('id', '?')} ({step['type']})")
                             created_modules.append(step.get("id", ""))
+                        # The step's declared PROPS, applied whether the module was just created or
+                        # already existed. /api/modules takes the shape but not the values, so a
+                        # scenario saying `{"width": 32}` measured a module at its defaults; and an
+                        # existing module measured whatever the last run left on it.
+                        for key, value in (step.get("props") or {}).items():
+                            ok = False
+                            try:
+                                pr = client.post("/api/control",
+                                                 {"module": step.get("id", ""), "control": key,
+                                                  "value": value})
+                                ok = bool(pr.get("ok"))
+                            except urllib.error.HTTPError as pe:
+                                if not step.get("optional"):
+                                    raise
+                                print(f"  SET   {step.get('id','?')}.{key}: skipped "
+                                      f"(optional, not offered on {target}: {pe.code})")
+                                continue
+                            # A 200 with ok:false is a REJECTION, the same as a 400: the device
+                            # refused the value. Silently accepting it measured a configuration the
+                            # scenario never got.
+                            if not ok:
+                                if not step.get("optional"):
+                                    raise RuntimeError(
+                                        f"{step.get('id','?')}.{key} = {value!r} was rejected")
+                                print(f"  SET   {step.get('id','?')}.{key}: skipped "
+                                      f"(optional, rejected on {target})")
                         # The step's declared PROPS, applied after creation. /api/modules takes the
                         # shape but not the values, so a scenario saying `{"width": 32}` created a
                         # module at its defaults and every later measurement was of a pipeline the
                         # scenario never asked for. The desktop runner applies them; without this
                         # the same scenario measured two different things on the two runners.
-                        for key, value in (step.get("props") or {}).items():
-                            try:
-                                client.post("/api/control",
-                                            {"module": step.get("id", ""), "control": key,
-                                             "value": value})
-                            except urllib.error.HTTPError as pe:
-                                # A prop the target does not offer is the same not-available-here
-                                # case an optional set_control is, and fails the step otherwise.
-                                if not step.get("optional"):
-                                    raise
-                                print(f"  SET   {step.get('id','?')}.{key}: skipped "
-                                      f"(optional, not offered on {target}: {pe.code})")
+
                     elif step.get("optional"):
                         step_result["status"] = "ok"
                         skipped_ids.add(step.get("id", ""))

@@ -857,7 +857,11 @@ body.cards-resizing {
    rows. clamp() rather than a fixed width so the columns follow the card when the right pane is
    dragged narrower or wider, which is the behaviour the cards already have. The upper bound stops a
    wide pane from inflating 8 columns into something that pushes the surface off-screen. */
-.card { --surface-col: clamp(26px, 5.2vw, 52px); }
+/* A FIXED column, not a viewport-relative one. The surface scrolls horizontally now, so it does not
+   need to shrink to fit, and shrinking was doing damage: at 26px the three-digit readouts under the
+   encoders ran into each other, and the width tracked the WINDOW rather than the pane, so a narrow
+   pane in a wide window overflowed anyway. 44px fits a 3-digit readout with room around it. */
+.card { --surface-col: 44px; }
 
 /* The switch strip shares the encoder strip's geometry, so switch N lines up over encoder N and
    fader N. Only the ORDER differs: a switch has no separate readout, so it is control then name. */
@@ -938,7 +942,9 @@ body.cards-resizing {
 /* A segmented readout: lit segments over unlit ghosts, so it reads as a real LED module. Three
    cells of the same sixteen-segment renderer the display strip uses, so both stay identical by
    construction rather than by keeping two geometries in step. */
-.seg-readout { width: 42px; height: 20px; }
+/* Wins over the .seg16 sizing below, which is the full-width display strip's: a readout carries BOTH
+   classes, and at equal specificity the later rule would take it. */
+.seg16.seg-readout { width: 42px; height: 20px; }
 
 /* The surface's display strip: sixteen-segment cells spanning the card, the scribble strip above a
    desk's channels. Same lit/unlit treatment as the seven-segment readouts so the two read as one
@@ -961,7 +967,12 @@ body.cards-resizing {
 .seg16-off { fill: #ff3b30; stroke: #ff3b30; opacity: 0.12; }
 
 /* No label, so the strip takes its own row rather than leaving the label column empty. */
-.control-row.control-display-strip { display: block; }
+.control-row.control-display-strip {
+    display: block;
+    /* 14px, the seam a bank already has above the presets (an 8px .surface-break plus the row's own
+       6px margin). The strip is a bank of its own, so it gets the same. */
+    margin-bottom: 14px;
+}
 
 /* A floating popup anchored to a surface control: the place a pad or a fader is CONFIGURED, as
    opposed to triggered. Floating rather than inline so opening one does not reflow the surface
@@ -2028,3 +2039,62 @@ button.fileedit-pick:disabled { opacity: 0.6; cursor: default; }
 }
 .fw-overlay-box progress { width: 100%; }
 .fw-overlay-msg { color: var(--fg-muted); margin: 0; overflow-wrap: anywhere; }
+
+/* ASSIGN MODE: while it is on, a tap on a surface control opens its target picker rather than moving
+   it, so the controls have to LOOK different or the mode is invisible and a user wonders why their
+   fader stopped working. The outline says "clickable for something else"; the cursor confirms it. */
+.assign-toggle.active { background: var(--accent); color: var(--bg-0, #10162e); }
+body.assign-mode .control-fader,
+body.assign-mode .control-encoder,
+body.assign-mode .control-switch {
+    outline: 1px dashed var(--accent);
+    outline-offset: 2px;
+    cursor: pointer;
+}
+/* The knob and the range input underneath both claim the pointer, so the cursor has to be set on
+   them too or it reverts over the very part a user aims at. */
+body.assign-mode .control-encoder .knob,
+body.assign-mode .control-fader input,
+body.assign-mode .control-encoder input { cursor: pointer; }
+
+/* A surface label now carries the target's name, which is longer than "fad1" and must not widen the
+   column: the bank's alignment is the whole point of a surface. Ellipsis rather than wrap, so every
+   channel stays one line tall. */
+.control-switch .control-label,
+.control-encoder .control-label,
+.control-fader .control-label {
+    max-width: var(--surface-col);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The fader bank gets the same seam above it as the switch bank has below the display. The
+   surface-break the builder inserts sits BETWEEN two banks of strips, and the preset list is not a
+   bank, so the pad grid ended flush against the first fader.
+   
+   Every fader, not just the one after the list: the strips are siblings on one line, so a margin on
+   the first alone pushed it 8px below the other seven. */
+.control-row.control-fader { margin-top: 8px; }
+
+/* THE SURFACE SCROLLS AS ONE. A desk's banks line up in columns: switch N over knob N over pad N over
+   fader N. When the pane narrows, a bank that wraps to a second row destroys that alignment and the
+   surface stops reading as one instrument, which is exactly what it is.
+   
+   So the card scrolls horizontally instead of wrapping, and every bank keeps the same width, which
+   is what keeps the columns in line while it scrolls. The pads already worked this way; this puts
+   the strips and the pads on the same footing. */
+.card:has(.control-display-strip) { overflow-x: auto; }
+.card:has(.control-display-strip) .control-row.control-switch,
+.card:has(.control-display-strip) .control-row.control-encoder,
+.card:has(.control-display-strip) .control-row.control-fader { flex-shrink: 0; }
+/* The strips are INLINE-FLEX siblings in normal flow, so they wrap like words once eight of them do
+   not fit. `white-space: nowrap` on the card is what stops that: flex-shrink alone kept each strip
+   its own size while still letting the line break between them. */
+.card:has(.control-display-strip) { white-space: nowrap; }
+/* The rows inside a strip (a label under a knob) still wrap normally: only the LINE OF STRIPS must
+   not break. */
+.card:has(.control-display-strip) .control-row { white-space: normal; }
+/* One row per bank, whatever the width: without this the strips are inline-flex siblings that wrap
+   as soon as eight of them do not fit. */
+.card:has(.control-display-strip) .surface-break { break-after: always; }

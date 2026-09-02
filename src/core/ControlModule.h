@@ -7,6 +7,7 @@
 #include "core/JsonSink.h"
 #include "core/Scheduler.h"
 #include "core/JsonUtil.h"
+#include "core/InputMapping.h"   // runInputAction: an encoder detent is a delta like any other
 #include "platform/platform.h"
 
 #include <cstdarg>   // setStatusf
@@ -134,8 +135,8 @@ public:
         if (!s) return;
         for (uint8_t i = 0; i < kSwitchCount; i++)
             s->sendValue(SurfaceControl::Switch, i, switches_[i] ? 255 : 0);
-        for (uint8_t i = 0; i < kEncoderCount; i++) s->sendValue(SurfaceControl::Encoder, i, encoders_[i]);
         for (uint8_t i = 0; i < kFaderCount; i++)   s->sendValue(SurfaceControl::Fader, i, faders_[i]);
+        for (uint8_t i = 0; i < kEncoderCount; i++) s->sendValue(SurfaceControl::Encoder, i, encoders_[i]);
     }
 
     /// Detach. A surface MUST do this before it is destroyed: mirrorToSurfaces walks this list from
@@ -155,8 +156,17 @@ public:
     /// control does.
     void applyEncoderDelta(uint8_t index, int8_t delta) {
         if (index >= kEncoderCount) return;
+        // THE hardware boundary, and the only place a delta exists. A rotary encoder and a Mackie
+        // surface both report movement rather than position, so the detent is added to what the
+        // control currently holds (which the follow keeps equal to its target) and the result is
+        // written like any other value. Clamped to the byte the control is; the TARGET's own bounds
+        // are applied by setControl underneath.
         const int v = static_cast<int>(encoders_[index]) + delta;
         encoders_[index] = static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v));
+        // driveEncoder clamps to the target's range and stores what it wrote, so a knob turned past
+        // the end stops there rather than counting on to 255 and needing to unwind before the next
+        // step down does anything.
+        driveEncoder(index);
     }
 
     /// A hand is on this control. Feedback to it is suppressed while held, or the device fights the
@@ -174,8 +184,12 @@ public:
     /// INCLUDING the ones a surface just made, which is the echo this design avoids by construction.
     /// Sampling also means a value that arrived and left between two samples never bounces.
     void mirrorToSurfaces() {
-        if (surfaceCount_ == 0) return;
+        // FOLLOW first, and unconditionally: the surface controls have to track what they drive
+        // whether or not a MIDI or OSC surface is attached, because the WEB UI shows them too. This
+        // returned early when nothing was attached, so a fader assigned to a control changed from
+        // anywhere else sat at its old value until something happened to rebuild the card.
         followTargets();
+        if (surfaceCount_ == 0) return;
         for (uint8_t i = 0; i < kSwitchCount; i++)
             mirrorOne(SurfaceControl::Switch, i, switches_[i] ? 255 : 0, sentSwitches_[i]);
         for (uint8_t i = 0; i < kEncoderCount; i++)
@@ -187,6 +201,10 @@ public:
     void tick1s() MM_NONBLOCKING override {
         MoonModule::tick1s();
         mirrorToSurfaces();
+        // The strip falls back to the device's name once what it was showing has gone stale. A
+        // scribble strip that still reads "palette Rainbow" an hour later is claiming something just
+        // happened; the name is what a desk shows when nothing has.
+        settleStrip();
     }
 
     void defineControls() override {
@@ -210,6 +228,30 @@ public:
         for (uint8_t i = 0; i < kEncoderCount; i++) {
             controls_.addControl(kEncoderNames[i], encoders_[i]);
             controls_.setEncoder(controls_.count() - 1, true, encoderTarget(i));
+        }
+        // The ASSIGNMENTS, one hidden text control per surface control. Hidden because a desk shows
+        // knobs and faders, not 24 rows of target strings: the popup on each control is where a user
+        // sets one. They are controls rather than private state so they persist with this module and
+        // are settable through /api/control like everything else, which is also how the UI writes
+        // them. Named "<control>Target" so the pairing is obvious in the JSON and in a curl.
+        // The names live in a member array, not on the stack: a control's `name` is a BORROWED
+        // pointer, so a local buffer would dangle the moment defineControls returned.
+        for (uint8_t i = 0; i < kSwitchCount; i++) {
+            std::snprintf(targetNames_[i], kTargetNameLen, "%sTarget", kSwitchNames[i]);
+            controls_.addText(targetNames_[i], switchTargets_[i], kTargetLen);
+            controls_.setHidden(controls_.count() - 1, true);
+        }
+        for (uint8_t i = 0; i < kEncoderCount; i++) {
+            const uint8_t n = kSwitchCount + i;
+            std::snprintf(targetNames_[n], kTargetNameLen, "%sTarget", kEncoderNames[i]);
+            controls_.addText(targetNames_[n], encoderTargets_[i], kTargetLen);
+            controls_.setHidden(controls_.count() - 1, true);
+        }
+        for (uint8_t i = 0; i < kFaderCount; i++) {
+            const uint8_t n = kSwitchCount + kEncoderCount + i;
+            std::snprintf(targetNames_[n], kTargetNameLen, "%sTarget", kFaderNames[i]);
+            controls_.addText(targetNames_[n], faderTargets_[i], kTargetLen);
+            controls_.setHidden(controls_.count() - 1, true);
         }
         controls_.addList("presets", *this);
         // The fader bank. Each fader is a plain uint8 control, so it persists, appears in /api/state,
@@ -258,21 +300,43 @@ public:
     /// value edit the base handles.
     void onControlChanged(const char* controlName) override {
         if (std::strcmp(controlName, "save") == 0) { savePreset(); return; }
+        // An ASSIGNMENT changed: the surface metadata carries each control's target, and it is
+        // captured when the control list is built, so the card would keep showing the old binding
+        // until something else rebuilt it. Rebuilding also re-reads the new target's value on the
+        // next follow, so the control lands on what it now drives rather than pushing its own value
+        // into it.
+        if (std::strstr(controlName, "Target") != nullptr) {
+            rebuildControls();
+            followTargets();
+            return;
+        }
         for (uint8_t i = 0; i < kFaderCount; i++) {
             if (std::strcmp(controlName, kFaderNames[i]) != 0) continue;
-            sentFaders_[i] = faders_[i];   // see markSent
+            // NOT marked as already-sent here. That suppressed the echo for EVERY writer, not just
+            // for a surface echoing its own move: a script, the web UI or MQTT changing a fader left
+            // `sent` equal to the new value, so the next mirror pass saw no change and an attached
+            // surface never heard about it. A surface's own move is already suppressed by the touch
+            // mask in mirrorOne, which is the mechanism that knows WHO is moving the control.
             driveFader(i);
             return;
         }
         for (uint8_t i = 0; i < kEncoderCount; i++) {
             if (std::strcmp(controlName, kEncoderNames[i]) != 0) continue;
-            sentEncoders_[i] = encoders_[i];
+            // A transport writes a POSITION, exactly as it does for a fader, and the MOVEMENT is
+            // what reaches the target: the difference from the last position this encoder was at.
+            // That is what makes the knob endless without any transport, UI or surface having to
+            // learn a second convention, and it leaves every existing client working unchanged.
+            //
+            // The alternative, a delta inbox the caller centers itself, pushed the relative-ness out
+            // into every writer: the web UI, OSC, MQTT and a MIDI surface would each have to know
+            // to send 128-plus-a-step, and the UI's dial and readout stopped being able to show a
+            // position at all. Keeping the wire absolute keeps all of that unchanged.
             driveEncoder(i);
             return;
         }
         for (uint8_t i = 0; i < kSwitchCount; i++) {
             if (std::strcmp(controlName, kSwitchNames[i]) != 0) continue;
-            sentSwitches_[i] = switches_[i] ? 255 : 0;
+            // Not marked as already-sent, for the reason the fader branch above gives.
             driveSwitch(i);
             return;
         }
@@ -431,16 +495,18 @@ public:
     /// scales by); the rest are unassigned and do nothing until a target picker exists.
     /// What a fader drives, as "Module.control", or null when it drives nothing yet. The UI shows
     /// this in the fader's popup, so the answer comes from the module rather than the UI assuming.
-    static const char* surfaceTarget(uint8_t index) {
-        return index == 0 ? "Drivers.brightness" : nullptr;
+    const char* surfaceTarget(uint8_t index) const {
+        if (index >= kFaderCount || !faderTargets_[index][0]) return nullptr;   // unassigned drives nothing
+        return faderTargets_[index];
     }
 
     /// What a switch drives, as "Module.control", or null when it drives nothing yet. Switch 1 is
     /// the master on/off every driver honours, the natural partner to fader 1's brightness: the two
     /// controls a lighting desk expects to find first. The rest wait for the target picker, like
     /// the faders.
-    static const char* switchTarget(uint8_t index) {
-        return index == 0 ? "Drivers.on" : nullptr;
+    const char* switchTarget(uint8_t index) const {
+        if (index >= kSwitchCount || !switchTargets_[index][0]) return nullptr;   // unassigned drives nothing
+        return switchTargets_[index];
     }
 
     /// What an encoder drives, as "Module.control", or null when it drives nothing yet. Encoder 1 is
@@ -448,8 +514,9 @@ public:
     /// on/off, and an encoder rather than a fader because a palette is a LIST to step through rather
     /// than a level to ride. Palette stays on `Drivers` where it is consumed; the surface reaches
     /// into it, which is why there is no separate lights-control module.
-    static const char* encoderTarget(uint8_t index) {
-        return index == 0 ? "Drivers.palette" : nullptr;
+    const char* encoderTarget(uint8_t index) const {
+        if (index >= kEncoderCount || !encoderTargets_[index][0]) return nullptr;   // unassigned drives nothing
+        return encoderTargets_[index];
     }
 
     /// Drives whatever `switchTarget` declares. A BOOL body, not a number: the target is a bool
@@ -472,7 +539,7 @@ public:
         // the strip exists is that a number is not what a person reads.
         // The name stays here: a bare "ON" would not say which switch, where a palette name is
         // self-describing. No colon, which a segment cell cannot draw well.
-        std::snprintf(display_, sizeof(display_), "%s %s", dot + 1, switches_[index] ? "on" : "off");
+        writeStrip("%s %s", dot + 1, switches_[index] ? "on" : "off");
     }
 
     /// Read every bound control back, so a surface FOLLOWS what it drives.
@@ -496,14 +563,28 @@ public:
         auto* sched = Scheduler::instance();
         if (!sched) return;
         for (uint8_t i = 0; i < kFaderCount; i++) pullTarget(SurfaceControl::Fader, i, faders_[i]);
-        // Encoders follow too, now that encoder 1 drives the palette: without this, changing the
-        // palette from the web UI, MQTT or OSC leaves the encoder holding a stale index and pushing
-        // it to any attached surface. "A surface FOLLOWS what it drives" is this method's contract.
+        // Encoders follow too. An endless encoder has no position of its OWN, but the control that
+        // represents it here shows what it DRIVES, which is a position like any other: without this
+        // the encoder drifts one step from its target and two controls bound to the same thing
+        // disagree. What stays relative is the HARDWARE path (applyEncoderDelta), where a detent
+        // arrives and is converted once; everything displayed is the absolute result.
         for (uint8_t i = 0; i < kEncoderCount; i++) pullTarget(SurfaceControl::Encoder, i, encoders_[i]);
         for (uint8_t i = 0; i < kSwitchCount; i++) {
             uint8_t v = switches_[i] ? 255 : 0;
             if (pullTarget(SurfaceControl::Switch, i, v)) switches_[i] = v != 0;
         }
+    }
+
+    /// A target control's descriptor, for its type and bounds. Null when the module or the control
+    /// is not there, which is an unassigned or stale target.
+    static const ControlDescriptor* findControl(const char* moduleName, const char* controlName) {
+        auto* sched = Scheduler::instance();
+        MoonModule* m = sched ? sched->firstByName(moduleName) : nullptr;
+        if (!m) return nullptr;
+        const ControlList& cs = m->controls();
+        for (uint8_t i = 0; i < cs.count(); i++)
+            if (std::strcmp(cs[i].name, controlName) == 0) return &cs[i];
+        return nullptr;
     }
 
     /// One control's read-back. Splits the target, asks the scheduler, and reports whether `value`
@@ -528,10 +609,20 @@ public:
         return true;
     }
 
-    /// Drives whatever `surfaceTarget` declares, so the binding is stated ONCE: the popup and the
-    /// action cannot disagree, and a fader starts working the moment it gains a target.
-    void driveFader(uint8_t index) {
-        const char* target = surfaceTarget(index);
+    /// Write a surface control's value onto whatever it targets.
+    ///
+    /// ONE writer for faders and encoders alike, because they are the same thing here: a control
+    /// that holds its target's value and writes it. The difference between a potentiometer and an
+    /// endless encoder is a HARDWARE property, and it belongs at the hardware boundary
+    /// (`applyEncoderDelta`), which converts a detent into a value once. Above that line there is no
+    /// distinction to make, and making one cost a delta on the wire, a second array to remember
+    /// where each knob last was, a re-read after every write, and a follow that had to update both.
+    ///
+    /// Goes through `Scheduler::setControl` so the change rebuilds derived state and persists
+    /// exactly as a UI edit would.
+    void driveSurface(SurfaceControl kind, uint8_t index) {
+        const char* target = kind == SurfaceControl::Encoder ? encoderTarget(index)
+                                                             : surfaceTarget(index);
         if (!target) return;                          // unassigned
         const char* dot = std::strchr(target, '.');
         if (!dot) return;
@@ -541,34 +632,71 @@ public:
         const size_t n = std::min(static_cast<size_t>(dot - target), sizeof(module) - 1);
         std::memcpy(module, target, n);
         module[n] = '\0';
+        uint8_t value = kind == SurfaceControl::Encoder ? encoders_[index] : faders_[index];
+        // Clamped to the TARGET's range before writing: setControl REJECTS an out-of-range value
+        // rather than clamping it, so a surface control holding more than its target accepts wrote
+        // nothing at all and the two silently diverged. A Select and a Palette store the option
+        // COUNT in `max`, so their last valid index is one below it.
+        if (const ControlDescriptor* tc = findControl(module, dot + 1)) {
+            const int hi = (tc->type == ControlType::Select || tc->type == ControlType::Palette)
+                               ? static_cast<int>(tc->max) - 1 : static_cast<int>(tc->max);
+            if (value > hi) value = static_cast<uint8_t>(hi < 0 ? 0 : hi);
+            if (value < tc->min) value = tc->min;
+        }
+        // And the control itself holds what it just wrote, so the next read agrees with the target.
+        if (kind == SurfaceControl::Encoder) encoders_[index] = value; else faders_[index] = value;
         char body[32];
-        std::snprintf(body, sizeof(body), "{\"value\":%u}", static_cast<unsigned>(faders_[index]));
+        std::snprintf(body, sizeof(body), "{\"value\":%u}", static_cast<unsigned>(value));
         sched->setControl(module, dot + 1, body);
-        showOnStrip(module, dot + 1, faders_[index]);
+        showOnStrip(module, dot + 1, value);
+        followTargets();   // siblings on the same target update now, not at the next 1 Hz sample
     }
 
-    /// Write an encoder's value onto whatever it targets, the same way a fader does.
+    void driveFader(uint8_t index)   { driveSurface(SurfaceControl::Fader, index); }
+    void driveEncoder(uint8_t index) { driveSurface(SurfaceControl::Encoder, index); }
+
+    /// Put text on the display strip, and start its five-second life.
     ///
-    /// Separate from driveFader only because the value comes from a different bank: the write itself
-    /// is identical, and both go through `Scheduler::setControl` so the change rebuilds derived state
-    /// and persists exactly as a UI edit would. Encoder 1 drives the palette, which is why this
-    /// exists at all: without it an encoder recorded a value and drove nothing.
-    void driveEncoder(uint8_t index) {
-        const char* target = encoderTarget(index);
-        if (!target) return;                          // unassigned
-        const char* dot = std::strchr(target, '.');
-        if (!dot) return;
-        auto* sched = Scheduler::instance();
-        if (!sched) return;
-        char module[24];
-        const size_t n = std::min(static_cast<size_t>(dot - target), sizeof(module) - 1);
-        std::memcpy(module, target, n);
-        module[n] = '\0';
-        char body[32];
-        std::snprintf(body, sizeof(body), "{\"value\":%u}", static_cast<unsigned>(encoders_[index]));
-        sched->setControl(module, dot + 1, body);
-        showOnStrip(module, dot + 1, encoders_[index]);
+    /// THE writer: every caller goes through this rather than formatting into `display_` itself, so
+    /// the timeout cannot be forgotten by whatever writes it next. A scribble strip shows the thing
+    /// you just touched; an hour later that is not news, so it returns to the device's name.
+    void writeStrip(const char* fmt, ...) {
+        va_list ap;
+        va_start(ap, fmt);
+        std::vsnprintf(display_, sizeof(display_), fmt, ap);
+        va_end(ap);
+        stripUntilMs_ = platform::millis() + kStripHoldMs;
     }
+
+    /// Settle the strip once nothing has happened for a while: the change holds for five seconds,
+    /// then "projectMM" for five, then the device's NAME, which is where it stays.
+    ///
+    /// A sequence rather than a cycle, because the name is the resting state: it says WHICH device
+    /// this surface drives, which is what a glance at an idle desk should answer, and text that
+    /// keeps changing draws the eye to a strip with no news on it.
+    void settleStrip() {
+        const uint32_t now = platform::millis();
+        if (!stripUntilMs_ || now < stripUntilMs_) return;      // still showing the change
+        const char* name = deviceName();
+        // Two holds after the change: the product, then the device. Beyond that, nothing to do.
+        if (now < stripUntilMs_ + kStripHoldMs)
+            std::snprintf(display_, sizeof(display_), "projectMM");
+        else if (name && name[0])
+            std::snprintf(display_, sizeof(display_), "%s", name);
+        else
+            std::snprintf(display_, sizeof(display_), "projectMM");
+    }
+
+    /// The device's name, read through the control system rather than by reaching into SystemModule:
+    /// a module asks another module for a control, which is the one way anything here does that.
+    static const char* deviceName() {
+        const ControlDescriptor* c = findControl("System", "deviceName");
+        return (c && c->ptr && c->type == ControlType::Text) ? static_cast<const char*>(c->ptr)
+                                                             : nullptr;
+    }
+
+    /// How long the strip holds what it was told, before falling back to the device's name.
+    static constexpr uint32_t kStripHoldMs = 5000;
 
     /// Write what just happened onto the display strip.
     ///
@@ -602,21 +730,20 @@ public:
             // reading it as an array of strings would dereference a code address.
             const bool isSelect = cs[i].type == ControlType::Select && cs[i].aux;
             char paletteName[24] = {};
-            // The VALUE alone, not "control: value". The strip is a scribble strip: the knob the
-            // user just turned already says which control it was, and prefixing every readout with
-            // the control's name spent half a sixteen-cell display restating it, which truncated
-            // the name it exists to show ("PALETTE: FIERCE", with the rest cut off).
+            // "control value", with the name first: "palette Fierce Ice" says what moved as well as
+            // what it moved to, which a bare "Fierce Ice" leaves the reader to infer. It fits now
+            // that the strip is 28 cells; at 16 the prefix ate half the display and truncated the
+            // name it exists to show, which is why it was dropped when the strip was narrower.
             if (isSelect && value < cs[i].max) {
                 const auto* opts = reinterpret_cast<const char* const*>(cs[i].aux);
-                std::snprintf(display_, sizeof(display_), "%s", opts[value]);
+                writeStrip("%s %s", control, opts[value]);
             } else if (cs[i].type == ControlType::Palette && cs[i].aux && value < cs[i].max
                        && paletteNameAt(cs[i].aux, value, paletteName, sizeof(paletteName))) {
-                // "Rainbow", not "37": turning a knob through palettes has to read as the thing it
+                // The NAME, not "37": turning a knob through palettes has to read as the thing it
                 // selects, which is the whole point of the strip.
-                std::snprintf(display_, sizeof(display_), "%s", paletteName);
+                writeStrip("%s %s", control, paletteName);
             } else {
-                std::snprintf(display_, sizeof(display_), "%s %u", control,
-                              static_cast<unsigned>(value));
+                writeStrip("%s %u", control, static_cast<unsigned>(value));
             }
             return;
         }
@@ -1036,14 +1163,10 @@ private:
         va_start(ap, fmt);
         std::vsnprintf(statusBuf_, sizeof(statusBuf_), fmt, ap);
         va_end(ap);
-        setStatus(statusBuf_, Severity::Status);
-        // Copied with an explicit BOUND rather than "%s": the strip is 28 cells and the status
-        // buffer is twice that, so a long message is cut to what the display can physically show.
-        // snprintf's own truncation does the same thing, but GCC cannot tell a deliberate cut from
-        // an accident and fails the ESP32 build on it (-Werror=format-truncation), which is a fair
-        // question to ask: stating the width answers it.
-        std::strncpy(display_, statusBuf_, sizeof(display_) - 1);
-        display_[sizeof(display_) - 1] = 0;
+        // The STRIP only, not the status row: this card has a display, and "applied toast" on both
+        // says the same thing twice on lines a few pixels apart. The status row keeps what a strip
+        // of red segments cannot express, which is a warning or an error.
+        writeStrip("%s", statusBuf_);
     }
 
     /// Fader names are their position, so a surface binds to "fader1" rather than to a label a user
@@ -1064,7 +1187,6 @@ private:
     /// us looks like a change at the next sample and is sent straight back: a fader dragged over
     /// two seconds gets last second's position pushed back under the user's finger.
     uint8_t sentSwitches_[kSwitchCount] = {};
-    uint8_t sentEncoders_[kEncoderCount] = {};
     uint8_t sentFaders_[kFaderCount] = {};
     /// One bit per control, per bank: a hand is on it. See setTouched.
     uint32_t touchedSwitches_ = 0, touchedEncoders_ = 0, touchedFaders_ = 0;
@@ -1090,9 +1212,34 @@ private:
 
     static constexpr const char* kSwitchNames[kSwitchCount] =
         {"switch1", "switch2", "switch3", "switch4", "switch5", "switch6", "switch7", "switch8"};
-    char    display_[32] = {};   ///< the strip: what the surface last touched, in words
+    char     display_[32] = "projectMM";   ///< the strip: what the surface last touched, in words
+    /// When what the strip shows stops being news. The settle sequence measures from here, so it is
+    /// stamped by every write and never cleared: a boot starts the same sequence, from zero.
+    uint32_t stripUntilMs_ = 1;
     uint8_t faders_[kFaderCount] = {};
     uint8_t encoders_[kEncoderCount] = {};
+    /// What each attached surface was last SENT, so a value it already has is not echoed back. Same
+    /// as the faders': an encoder is a surface control like any other above the hardware line.
+    uint8_t sentEncoders_[kEncoderCount] = {};
+
+    /// What each surface control drives, as "Module.control", empty when unassigned.
+    ///
+    /// These were three static functions returning a fixed name for index 0. They are STORAGE now
+    /// because a user assigns them: the string is the same form a button or infrared row stores, so
+    /// a target means one thing across the whole device. Seeded with the bindings that were
+    /// hardcoded, so a fresh device behaves as it always did, and persisted with this module's other
+    /// controls, so a rig keeps its layout across a reboot.
+    ///
+    /// kTargetLen holds "SomeModuleName.someControlName" with room to spare; a longer pairing is
+    /// refused rather than truncated, because half a target names a control that does not exist.
+    static constexpr uint8_t kTargetLen = 40;
+    /// The control NAMES for those assignments ("fader1Target"), built once and borrowed by the
+    /// control descriptors, which never copy a name.
+    static constexpr uint8_t kTargetNameLen = 20;
+    char targetNames_[kSwitchCount + kEncoderCount + kFaderCount][kTargetNameLen] = {};
+    char faderTargets_[kFaderCount][kTargetLen]     = {"Drivers.brightness"};
+    char switchTargets_[kSwitchCount][kTargetLen]   = {"Drivers.on"};
+    char encoderTargets_[kEncoderCount][kTargetLen] = {"Drivers.palette"};
     /// bool, not uint8: a switch is on or off, and the UI renders a checkbox from the type. An
     /// on/off target set from a 0..255 fader would be a slider with two useful positions.
     bool switches_[kSwitchCount] = {};

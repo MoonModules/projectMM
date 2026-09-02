@@ -95,7 +95,9 @@ inline constexpr const char* kModifierTemplate =
 inline constexpr const char* kServiceTemplate =
     "class NewService {\n"
     "  int pin = 0;\n"
-    "  int last = 0;\n"
+    // last starts at 1, the level an idle pull-up reads: starting at 0 made the first tick see a
+    // change that had not happened and write the control before anyone touched the button.
+    "  int last = 1;\n"
     "  int now = 0;\n"
     "\n"
     "  void defineControls() {\n"
@@ -106,7 +108,9 @@ inline constexpr const char* kServiceTemplate =
     "    now = gpioRead(pin);\n"
     "    if (now != last) {\n"
     "      last = now;\n"
-    "      setControl(\"switch1\", now);\n"
+    // INVERTED: the wiring is active-low (a switch to ground with a pull-up), so a pressed button
+    // reads 0 and the switch it drives wants 1.
+    "      setControl(\"switch1\", 1 - now);\n"
     "    }\n"
     "  }\n"
     "}\n";

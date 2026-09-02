@@ -3,6 +3,7 @@
 #include <cstdio>
 
 #include "core/moonlive/MoonLiveBuiltins.h"
+#include "core/moonlive/MoonLiveBuiltins_common.h"   // the neutral half: math, waveforms, noise, print
 #include "core/moonlive/MoonLive.h"   // runDefineControls drives the engine
 #include "core/moonlive/MoonLiveIr.h"   // kArg3 — the register `t` is passed in
 
@@ -39,15 +40,6 @@ namespace mm::moonlive {
 //
 // A value a builtin takes as SIGNED: the script's own 32-bit two's complement, read as itself.
 //
-// This used to fold through a 16-BIT window (`v > 32767 ? v - 65536 : v`), because a script had no
-// way to hold a negative and the convention was that the top half of the 16-bit range meant one.
-// That window was the inverse of uint16_t member truncation, it was written down in neither place,
-// and it is what made `d = 60000` read as -5536: the script author thought in the member's range
-// and the builtin thought in the window's. int16_t members hold a negative directly now, so the
-// window has nothing left to undo and the value passes through.
-inline int32_t signedArg(uintptr_t a) {
-    return static_cast<int32_t>(uint32_t(a));
-}
 
 // A value a builtin takes as a BYTE: clamped to 0..255, not truncated to its low eight bits.
 //
@@ -85,89 +77,10 @@ extern "C" inline uint32_t mm_light_paletteB(const uintptr_t* args, uint32_t, co
     return colorFromPalette(*Palettes::active(), byteArg(args[0]), byteArg(args[1])).b;
 }
 
-extern "C" inline uint32_t mm_light_random16(const uintptr_t* args, uint32_t, const uint8_t*) {
-    const uint32_t n = uint32_t(args[0]);
-    // ATOMIC, because two threads run scripts at once: the render task walks a layout for the frame
-    // while the HTTP task asks the same layout for its light count after a control edit (the reason
-    // the addLight sink is a per-thread table below). A plain `static` here is a data race, and a
-    // lost update would additionally let two draws return the SAME value, which for a "random"
-    // helper is a correctness bug rather than a tolerable one. compare_exchange keeps the sequence
-    // exactly the LCG's, just serialized.
-    static std::atomic<uint32_t> seed{0x2545F491u};
-    uint32_t prev = seed.load(std::memory_order_relaxed), next;
-    do {
-        next = prev * 1664525u + 1013904223u;
-    } while (!seed.compare_exchange_weak(prev, next, std::memory_order_relaxed));
-    return n ? (next >> 16) % n : 0u;
-}
 
 
-// mod(a, b) → a % b, the wrap a cyclic animation needs. `t` grows without bound, so every effect
-// that repeats has to fold it back into a range: `mod(t * speed, width)` is a sweep that returns to
-// the start instead of running off the end once and never coming back.
-//
-// A Call rather than an operator because no ISA here has a cheap integer divide — Xtensa has none at
-// all, and emitting a division routine inline would cost more code than the whole script. One host
-// function, called like any other builtin, keeps the emitted code small and the three backends
-// identical. b == 0 returns 0 rather than trapping: a script must degrade, never fault.
-// SIGNED, like `%` in every language a script author already knows. A coordinate is signed now, so
-// an unsigned remainder here would be a bespoke rule with nothing on the page to signpost it: the
-// exact shape of the bugs this whole change set exists to remove.
-//
-// `t` is unsigned time and passes 2^31 after about 25 days, at which point `mod(t, n)` reads it as
-// negative. That is a real edge, and it is not the reason to keep this unsigned: `t` breaks at 2^32
-// regardless, so signedness moves WHEN rather than WHETHER. A wrapping clock needs its own answer,
-// not a modulo that hides it. No shipped script uses mod(t, ...).
-extern "C" inline uint32_t mm_light_mod(const uintptr_t* args, uint32_t, const uint8_t*) {
-    const int32_t a = static_cast<int32_t>(uint32_t(args[0]));
-    const int32_t b = static_cast<int32_t>(uint32_t(args[1]));
-    // INT32_MIN % -1 is UB and traps on x86-64 (the other three ISAs quietly wrap, which is why a
-    // bench never shows it). Same stance as b == 0: a script degrades, never faults.
-    if (b == 0 || (a == INT32_MIN && b == -1)) return 0;
-    return static_cast<uint32_t>(a % b);
-}
 
-// div(a, b) → a / b, and what the '/' OPERATOR lowers to. Registered under a name for the same
-// reason mod is: the parser resolves both operators through the builtin table, so core stays
-// domain-neutral and a divide is one host call rather than an instruction no ISA here has.
-// b == 0 SATURATES with the numerator's sign — IEEE 754's ±infinity mapped onto an int, and what
-// libfixmath does on divide overflow. The value is also the visually right one: `k / dist` at
-// dist == 0 is the CENTER of a ripple, where max reads as the peak the eye expects and 0 punched
-// a dark hole exactly there. 0/0 stays 0 (no direction to saturate toward). mod keeps returning
-// 0: there is no "infinite remainder". Either way a script degrades, never faults, and needs no
-// zero-check of its own.
-// SIGNED, for the reason given at mod above: `/` means what it means everywhere else. Scaling a
-// coordinate is the common case and coordinates go negative, so an unsigned divide turned
-// `uvX(...) * zoom / 40` on the left half of a grid into 107361151 rather than -13030.
-extern "C" inline uint32_t mm_light_div(const uintptr_t* args, uint32_t, const uint8_t*) {
-    const int32_t a = static_cast<int32_t>(uint32_t(args[0]));
-    const int32_t b = static_cast<int32_t>(uint32_t(args[1]));
-    if (b == 0)
-        return static_cast<uint32_t>(a > 0 ? INT32_MAX : a < 0 ? INT32_MIN : 0);
-    // INT32_MIN / -1 overflows: UB, and a SIGFPE on x86-64. Returns the saturated value a script
-    // would expect from negating INT32_MIN, rather than 0, which would read as "division broke".
-    if (a == INT32_MIN && b == -1) return static_cast<uint32_t>(INT32_MAX);
-    return static_cast<uint32_t>(a / b);
-}
 
-// fdiv(a, b) → the Q16.16 quotient, what the '/' OPERATOR lowers to when both sides are fixed.
-// A separate host call from div because the numerator must widen: the quotient of two Q16.16
-// values needs (a << 16) / b, and shifting a 32-bit fixed value left by 16 in registers wraps for
-// anything past |128.0| — which is exactly what froze two shipped shaders. int64 in the host is
-// exact over the whole range, and a divide is a host call on every ISA here anyway (libfixmath's
-// fix16_div does the same widening for the same reason).
-// b == 0 saturates with the numerator's sign, matching div; a quotient outside int32 saturates
-// too, rather than wrapping into a number nobody wrote.
-extern "C" inline uint32_t mm_light_fdiv(const uintptr_t* args, uint32_t, const uint8_t*) {
-    const int32_t a = static_cast<int32_t>(uint32_t(args[0]));
-    const int32_t b = static_cast<int32_t>(uint32_t(args[1]));
-    if (b == 0)
-        return static_cast<uint32_t>(a > 0 ? INT32_MAX : a < 0 ? INT32_MIN : 0);
-    const int64_t q = (static_cast<int64_t>(a) << 16) / b;
-    if (q > INT32_MAX) return static_cast<uint32_t>(INT32_MAX);
-    if (q < INT32_MIN) return static_cast<uint32_t>(INT32_MIN);
-    return static_cast<uint32_t>(static_cast<int32_t>(q));
-}
 
 // smoothstep(edge0, edge1, v) → a soft 0..65535 ramp between the edges, GLSL's own and the
 // anti-aliasing workhorse: wherever a script would draw a hard jaggy edge with an `if`, running
@@ -301,54 +214,8 @@ extern "C" inline uint32_t mm_light_escape(const uintptr_t* args, uint32_t, cons
     return (n >= iters) ? 0u : (n * 255u) / iters;
 }
 
-// smin(a, b, k) → the smooth minimum of two distances: two shapes FLOW into one another instead of
-// merely overlapping (Quilez). `k` is the blend radius, 0 a plain min. Wraps draw::smin, so a
-// script and a compiled effect melt shapes identically.
-//
-// The distances are signed and re-centered here. draw::smin already widens its intermediates to 64
-// bits, and that is load-bearing: a wrapped smin returns a value larger than BOTH inputs, which
-// inverts the blend rather than degrading it.
-extern "C" inline uint32_t mm_light_smin(const uintptr_t* args, uint32_t, const uint8_t*) {
-    return static_cast<uint32_t>(draw::smin(signedArg(args[0]), signedArg(args[1]),
-                                            static_cast<int32_t>(uint32_t(args[2]))));
-}
 
-// beat(bpm) / beatsin(bpm, low, high) → the TIME vocabulary an animation is actually written in.
-//
-// An effect does not think in milliseconds, it thinks in beats: `beat` is a rising sawtooth at a
-// given BPM, `beatsin` a sine oscillating between two bounds. Both wrap math8.h's beat8/beatsin16 —
-// the same functions the compiled effects use (GEQ3D, FreqSaws, Lines) with the same FastLED
-// semantics, so a script writes what an effect writer writes.
-//
-// SIXTEEN bit, not eight. A script's values are 32-bit, so an 8-bit beat would throw away range for
-// nothing and cap a sweep at 255 — short of the 128x128 walls this drives, and short of what
-// LinesEffect itself computes (a 16-bit beat scaled by the axis length). The full-scale range means
-// `beat(30) * width` and a shift is the sweep position on ANY fixture size.
-//
-// `ms` is an explicit argument — a script writes `beat(30, t)`. Threading the clock implicitly was
-// tried and is worse: a Call receives exactly the arguments the script names, so an implicit `ms`
-// arrives as zero and the animation silently stands still. Explicit also matches the C++ signature
-// (beat16(bpm, ms)), so a script and an effect read the same. The modulo and divide these need live
-// in the host function, which is why they are Calls — no ISA here has a cheap integer divide.
-extern "C" inline uint32_t mm_light_beat(const uintptr_t* args, uint32_t, const uint8_t*) {
-    const uint32_t bpm = uint32_t(args[0]), ms = uint32_t(args[1]);
-    return beat16(static_cast<uint8_t>(bpm), ms);
-}
-extern "C" inline uint32_t mm_light_beatsin(const uintptr_t* args, uint32_t, const uint8_t*) {
-    const uint32_t bpm = uint32_t(args[0]), ms = uint32_t(args[1]), high = uint32_t(args[2]);
-    // low is 0 and high is the caller's: a Call carries three arguments and bpm + ms take two, so
-    // the common "oscillate from 0 up to N" form is the one exposed rather than a packed pair.
-    return beatsin16(static_cast<uint8_t>(bpm), ms, 0, static_cast<uint16_t>(high));
-}
 
-// noise(x, y, z) → the 0..255 value-noise field at that point, the primitive behind fire, clouds,
-// plasma and lava. Coordinates are 16.0 fixed point: the HIGH byte picks the noise cell and the low
-// byte interpolates within it, so `x * 256 / scale` zooms and feeding `t` into an axis makes the
-// field flow. Three arguments is exactly a Call's budget, and 2D is the same call with z held at a
-// constant — one builtin rather than an arity family.
-extern "C" inline uint32_t mm_light_noise(const uintptr_t* args, uint32_t, const uint8_t*) {
-    return inoise8(uint32_t(args[0]), uint32_t(args[1]), uint32_t(args[2]));
-}
 
 // scale(value, n) → map a 0..65535 value onto 0..n-1. The other half of `beat`: a beat is full-scale
 // by design so it is fixture-independent, and this is what lands it on an actual axis. `beat(30, t)`
@@ -375,27 +242,8 @@ extern "C" inline uint32_t mm_light_polarR(const uintptr_t* args, uint32_t, cons
     return dist16(signedArg(args[0]), signedArg(args[1]));
 }
 
-extern "C" inline uint32_t mm_light_sin(const uintptr_t* args, uint32_t, const uint8_t*) {
-    const uint32_t angle = uint32_t(args[0]);
-    return static_cast<uint32_t>(sin16(static_cast<angle16>(angle)) + 32768);
-}
-extern "C" inline uint32_t mm_light_cos(const uintptr_t* args, uint32_t, const uint8_t*) {
-    const uint32_t angle = uint32_t(args[0]);
-    return static_cast<uint32_t>(cos16(static_cast<angle16>(angle)) + 32768);
-}
 
-// turn(n) → the angle step that divides one full revolution into n parts. A full turn is 65536 —
-// one past the largest number a script can write — so even with a divide operator the expression
-// could not be spelled. A circle therefore needs this as a builtin rather than as arithmetic.
-extern "C" inline uint32_t mm_light_turn(const uintptr_t* args, uint32_t, const uint8_t*) {
-    const uint32_t n = uint32_t(args[0]);
-    return n ? 65536u / n : 0u;
-}
 
-extern "C" inline uint32_t mm_light_scale(const uintptr_t* args, uint32_t, const uint8_t*) {
-    const uint32_t value = uint32_t(args[0]), n = uint32_t(args[1]);
-    return (value * n) >> 16;
-}
 
 // print(v) → write one value to the serial log, and return it so `print` can be dropped into an
 // expression without changing what it computes (`setXYZ(0, print(x), y, z)` still stores x).
@@ -409,35 +257,7 @@ extern "C" inline uint32_t mm_light_scale(const uintptr_t* args, uint32_t, const
 // line, stall the render (a UART write blocks) and bury the first values, which are the useful
 // ones. So a burst is capped and the rest are counted, not printed: the tail of a flood tells you
 // nothing the head did not.
-/// The remaining print budget. A binding resets it when it compiles, so every edit of a script gets
-/// a fresh window — without that, one burst silences the debugging tool for the life of the process,
-/// which is exactly when a second look at a misbehaving script is most needed.
-/// ATOMIC for the same reason random16's seed is: two threads run scripts concurrently. The decrement
-/// below is the one that matters: read-modify-write on a plain uint32_t lets two threads both see 1,
-/// both decrement, and the budget WRAP to ~4 billion, turning the bound that keeps `print` off the
-/// render tick's critical path into no bound at all.
-inline std::atomic<uint32_t>& printBudget() { static std::atomic<uint32_t> n{0}; return n; }
 
-/// Grant a fresh burst. Call from the binding's prepare(), alongside the compile.
-///
-/// print() writes to serial, which blocks, and an effect script runs on the render tick — so the
-/// burst is what bounds the cost: a handful of writes per compile, after which the call is a compare
-/// and a return. Draining through a queue would take the last of it off the tick; backlogged.
-inline void resetPrintBudget() { printBudget().store(32, std::memory_order_relaxed); }
-
-extern "C" inline uint32_t mm_light_print(const uintptr_t* args, uint32_t, const uint8_t*) {
-    const uint32_t v = uint32_t(args[0]);
-    // Claim one unit before printing, and only if there is one: a plain `if (left > 0) --left`
-    // can underflow past zero when two threads pass the test together.
-    auto& left = printBudget();
-    uint32_t have = left.load(std::memory_order_relaxed);
-    while (have > 0 && !left.compare_exchange_weak(have, have - 1, std::memory_order_relaxed)) {}
-    if (have > 0) {
-        std::printf("[script] %u\n", static_cast<unsigned>(v));
-        if (have == 1) std::printf("[script] (burst spent; edit the script for a fresh one)\n");
-    }
-    return v;
-}
 
 // addLight(x, y, z) → place one light at a position. The call a scripted LAYOUT is built on.
 //
@@ -1195,8 +1015,23 @@ inline SysVarTable modifierSysVars() { return lightSysVars(); }
 
 // The light-domain built-in table the binding injects into the compiler. setRGB and fill are
 // Inline (they lower to stores — the hot-path writers, no per-call cost); random16 is a Call.
-inline BuiltinTable lightBuiltins() {
-    BuiltinTable t;
+// The distances are signed and re-centered here. draw::smin already widens its intermediates to 64
+// bits, and that is load-bearing: a wrapped smin returns a value larger than BOTH inputs, which
+// inverts the blend rather than degrading it.
+extern "C" inline uint32_t mm_light_smin(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return static_cast<uint32_t>(draw::smin(signedArg(args[0]), signedArg(args[1]),
+                                            static_cast<int32_t>(uint32_t(args[2]))));
+}
+
+inline const BuiltinTable& lightBuiltins() {
+    // Built ONCE, for the reason serviceBuiltins gives: ~2 KB by value, constant after registration,
+    // and rebuilt on every prepare sweep including the ones that change nothing.
+    static const BuiltinTable table = [] {
+        BuiltinTable t;
+    // The neutral half first, so a name means the same thing here as in a service.
+    addCommonBuiltins(t);
+    // smin stays here: it wraps draw::smin, a shape helper, so it is not neutral.
+    t.add({"smin", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_smin, {}});
     // setRGB(index, r, g, b)  → write one pixel (bounds-guarded). Inline op StoreElem.
     t.add({"setRGB", 4, /*returns*/ false, BuiltinKind::Inline, nullptr, InlineOp::StoreElem});
     // setXYZ(x, y, z)         → write one POSITION (bounds-guarded). The same StoreElem as setRGB:
@@ -1249,12 +1084,6 @@ inline BuiltinTable lightBuiltins() {
     t.add({"collide", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_collide, {}});
     // render(maxLife) → draw the pool from the active palette.
     t.add({"render", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_render, {}});
-    // mod(value, limit)      → value % limit. The wrap every cyclic animation needs; see above.
-    // Also what the '%' OPERATOR resolves to, which is why the name stays even though `%` reads
-    // better: the parser looks it up here rather than core knowing any function by name.
-    t.add({"mod", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_mod, {}});
-    // div(a, b)              → a / b, and what the '/' operator resolves to. See mm_light_div.
-    t.add({"div", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_div, {}});
     // smoothstep(e0, e1, v)  → a soft 0..65535 ramp between two edges. Turns a distance into a
     // glow; signed arguments, re-centered like polarA. See mm_light_smoothstep.
     t.add({"smoothstep", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_smoothstep, {}});
@@ -1263,37 +1092,16 @@ inline BuiltinTable lightBuiltins() {
     // See mm_light_uvAxis.
     t.add({"uvX", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_uvX, {}, /*byRef*/ 0, /*byStr*/ 0, /*fixedArgs*/ 0, /*fixedReturn*/ true});
     t.add({"uvY", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_uvY, {}, /*byRef*/ 0, /*byStr*/ 0, /*fixedArgs*/ 0, /*fixedReturn*/ true});
-    // smin(a, b, k)          → the smooth minimum: two shapes melt into one surface. k = 0 is a
-    // plain union. See mm_light_smin.
-    t.add({"smin", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_smin, {}});
     // escape(cx, cy, jx, jy, iters) → the escape-time count for z = z*z + c, 0..255, 0 inside.
     // Mandelbrot with a zero seed, Julia otherwise. The one piece of maths a script cannot
     // express: it squares SIGNED values and script arithmetic is unsigned.
     t.add({"escape", 5, /*returns*/ true, BuiltinKind::Call, &mm_light_escape, {}, /*byRef*/ 0, /*byStr*/ 0, /*fixedArgs*/ 0x0f});
-    // beat(bpm, t)           → 0..65535 sawtooth at bpm. The clock an animation is written against.
-    t.add({"beat", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_beat, {}});
-    // beatsin(bpm, t, high)  → a sine 0..high at bpm. The same shape an effect reaches for.
-    t.add({"beatsin", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_beatsin, {}});
-    // noise(x, y, z)         → 0..255 value noise. The one primitive fire/clouds/plasma all start from.
-    t.add({"noise", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_noise, {}});
-    // scale(value, n)        → a 0..65535 value onto 0..n-1. Lands a beat on an axis.
-    t.add({"scale", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_scale, {}});
-    // turn(n)                → one revolution split n ways, for stepping a circle.
-    t.add({"turn", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_turn, {}});
-    // random16(n)             → a value in [0,n). A Call to the host helper (typed fn pointer).
-    // sin(angle) / cos(angle) → the circle. One turn is 0..65535, so a loop over N points steps
-    // by 65536/N; the result is biased unsigned (see above).
-    t.add({"sin", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_sin, {}});
     // polarA(dx, dy) / polarR(dx, dy) → polar from a centre. atan16 and dist16 already exist in
     // math16.h. NOT named `angle`/`radius`: a script wants those for its own controls
     // (ring.mll and balls.mle both declare `radius`), and a builtin would shadow them. Exposing
     // them here is what lets a radial effect drop its precomputed lookup table.
     t.add({"polarA", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_polarA, {}});
     t.add({"polarR", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_polarR, {}});
-    t.add({"cos", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_cos, {}});
-    t.add({"random16", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_random16, {}});
-    // print(v)                → log v and return it. The script-level debugger.
-    t.add({"print", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_print, {}});
     // addLight(x, y, z)      → place a light. A scripted layout's whole vocabulary.
     t.add({"addLight", 3, /*returns*/ false, BuiltinKind::Call, &mm_light_addLight, {}});
     // line(x1, y1, x2, y2, r, g, b) → a segment on the canvas, via the shared draw::line.
@@ -1308,10 +1116,6 @@ inline BuiltinTable lightBuiltins() {
     // setPaletteColor(x, y, i, bri) → one palette-coloured pixel. The form a script should reach
     // for: one call, one brightness evaluation, and no buffer-layout arithmetic at the call site.
     t.add({"setPaletteColor", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_setPaletteColor, {}});
-    // fdiv(a, b)             → the fixed '/' — see mm_light_fdiv. Both operands and the result
-    // are fixed; resolved by name exactly as div is, so core stays domain-neutral.
-    t.add({"fdiv", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_fdiv, {},
-           /*byRef*/ 0, /*byStr*/ 0, /*fixedArgs*/ 0x3, /*fixedReturn*/ true});
     // paletteR/G/B(i, bri)    → one channel each, for a script that needs the components. Kept
     // because setPaletteColor writes a pixel and cannot serve a script that wants the value.
     t.add({"paletteR", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_paletteR, {}});
@@ -1320,7 +1124,9 @@ inline BuiltinTable lightBuiltins() {
     // The table is built once at startup; a dropped registration would surface much later as
     // "unknown function" in a script, so it is caught HERE.
     MM_ASSERT_NO_BUILTIN_OVERFLOW(t);
-    return t;
+        return t;
+    }();
+    return table;
 }
 
 /// Run a script's `defineControls()`, so the controls it declares exist.

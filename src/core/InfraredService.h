@@ -147,9 +147,14 @@ public:
             // A button field PATCHes {"field":"learn","value":""}, so the body is never empty and the
             // VALUE is what says whether this is a press. An empty value means the button was
             // clicked, which arms; an explicit true or false lets the API arm or disarm directly.
+            // parseString returns nothing for a JSON BOOLEAN (it reads quoted strings), so an
+            // explicit {"value":false} left buf empty and defaulted to arm: the API could arm a row
+            // but never disarm it. Ask whether the key is there at all, and only then default.
             char buf[8] = {};
             json::parseString(valueJson, "value", buf, sizeof(buf));
-            const bool arm = buf[0] == 0 ? true : json::parseBool(valueJson, "value");
+            const bool arm = (buf[0] == 0 && !json::hasKey(valueJson, "value"))
+                                 ? true
+                                 : (buf[0] != 0 ? true : json::parseBool(valueJson, "value"));
             // One row learns at a time: arming a second would leave two rows waiting for the next
             // code, and the one that got it would be whichever the loop reached first.
             if (arm) for (uint8_t i = 0; i < count_; i++) rows_[i].learn = false;

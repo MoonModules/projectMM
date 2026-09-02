@@ -517,6 +517,14 @@ async function sendControl(moduleName, controlName, value) {
         const mod = allModules().find(m => m.name === moduleName);
         const ctrl = mod && Array.isArray(mod.controls) && mod.controls.find(c => c.name === controlName);
         if (ctrl) ctrl.value = value;
+        // Siblings on the same target move with it. The device already does this (followTargets runs
+        // on every surface write), but the browser would not see it until the next 1 Hz push, so a
+        // second fader bound to the same control lagged a second behind the one being dragged.
+        if (ctrl && ctrl.target) {
+            for (const c of mod.controls)
+                if (c !== ctrl && c.target === ctrl.target) c.value = value;
+            updateModuleControls(mod);
+        }
     }
     // Toggling expert mode changes which controls RENDER (the `advanced` ones), not just a value: so
     // re-render the cards. Structural change, same as an add/remove; the value write above already landed.
@@ -1594,6 +1602,25 @@ function createCard(mod, depth) {
         title.appendChild(actions);
     }
 
+    // The ASSIGN toggle, on the control surface's own card. Entering the mode is a property of the
+    // whole desk, so it belongs here rather than on each of its 24 controls. Added directly to the
+    // title row because the surface is a TOP-LEVEL module and never reaches createActionButtons,
+    // which exists for cards a user can delete or replace.
+    if (mod.type === "ControlModule") {
+        const assignBtn = document.createElement("button");
+        assignBtn.className = "card-btn assign-toggle" + (assignMode ? " active" : "");
+        // 🔗 for "link a control to what it drives", ✓ while the mode is on. Single glyph like the
+        // ✎ and × beside it, so the action row stays one row of 26px boxes.
+        assignBtn.textContent = assignMode ? "✓" : "🔗";
+        assignBtn.title = assignMode ? "Done assigning"
+                                     : "Choose what each fader, knob and switch drives";
+        assignBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            setAssignMode(!assignMode);
+        });
+        title.appendChild(assignBtn);
+    }
+
     // Help link → the module's spec page on the rendered docs site, far right of
     // the row. docPath comes from /api/types (relative to docs/moonmodules/, e.g.
     // "core/services.md#audio" or "light/effects.md#fire"); omitted if none.
@@ -2192,7 +2219,14 @@ function createControl(moduleName, moduleType, ctrl) {
             // The knob and the readout were built above, before these three lines ran, so they drew
             // against an empty input (the source of the 880 readouts). Refresh now that the value and
             // the bounds exist.
+            //
+            // And again once the ROW is complete: redrawRangeDecorations walks the input's siblings,
+            // and the decorations are appended after this point, so the call above finds a
+            // half-built row and every readout keeps whatever it first drew. That is the "all the
+            // numbers read 50 while the faders sit at different heights" the UI showed until a
+            // manual refresh rebuilt the card at a moment when the order happened to work out.
             redrawRangeDecorations(input);
+            queueMicrotask(() => redrawRangeDecorations(input));
             const numInput = document.createElement("input");
             numInput.type = "number";
             numInput.className = "control-value-input";
@@ -2372,6 +2406,9 @@ function createControl(moduleName, moduleType, ctrl) {
             sw.appendChild(track);
             row.appendChild(sw);
             appendResetButton(row, moduleName, ctrl, def, () => { input.checked = !!def; });
+            // A surface SWITCH is assignable like a fader or a knob: it drives a control, and
+            // switch1 driving Drivers.on is the same kind of binding fader1 has to brightness.
+            if (ctrl.switchRow) attachTargetPopup(row, input, ctrl);
             break;
         }
         case "text": {
@@ -3439,15 +3476,150 @@ function openPadEditor(anchorEl, moduleName, ctrlName, item, slot) {
 // value and turns drags into value changes.
 /// "What does this strip drive?": the same popup for an encoder and a fader, since the question and
 /// the answer are identical for both. Right-click on a pointer, long-press on touch.
-function attachTargetPopup(row, input, ctrl) {
-    const show = () => openSurfacePopup(input, ctrl.name, (body) => {
-        const line = document.createElement("div");
-        line.className = "surface-popup-row";
-        line.textContent = ctrl.target ? `drives ${ctrl.target}` : "unassigned: no target yet";
-        body.appendChild(line);
+// Every control in the live tree that a surface control can drive, as {module, control} pairs.
+//
+// Generated from the state the device already sends, so the picker can only ever offer something
+// that exists: a typed "Drivers.palette" is invisible when misspelled until the fader silently does
+// nothing. Text, file paths, passwords and buttons are left out, because a fader cannot meaningfully
+// move a filename and offering it produces a control that looks assigned and is not.
+const ASSIGNABLE_TYPES = new Set(["uint8", "uint16", "int16", "int32", "bool", "select", "palette", "pin"]);
+function assignableTargets() {
+    const out = [];
+    const walk = (mods) => {
+        for (const m of mods || []) {
+            for (const c of m.controls || []) {
+                // Not the surface's OWN controls: a fader driving another fader is a loop, and the
+                // hidden "...Target" strings are the assignments themselves.
+                if (m.type === "ControlModule") continue;
+                if (ASSIGNABLE_TYPES.has(c.type)) out.push({module: m.name, control: c.name});
+            }
+            walk(m.children);
+        }
+    };
+    walk(state && state.modules);
+    return out;
+}
+
+// ASSIGN MODE. While it is on, a tap on any surface control opens its target picker instead of
+// moving it. One flag rather than per-control state, because the mode is a property of the whole
+// surface: a desk is either being played or being wired.
+let assignMode = false;
+function setAssignMode(on) {
+    assignMode = on;
+    document.body.classList.toggle("assign-mode", on);
+    document.querySelectorAll(".assign-toggle").forEach(b => {
+        b.classList.toggle("active", on);
+        // The same two glyphs the builder uses: a word here and an emoji there made the button
+        // change shape as well as state.
+        b.textContent = on ? "✓" : "🔗";
+        b.title = on ? "Done assigning" : "Choose what each fader, knob and switch drives";
     });
-    row.addEventListener("contextmenu", (e) => { e.preventDefault(); show(); });
-    attachLongPress(row, show);
+    if (!on) document.querySelectorAll(".surface-popup").forEach(p => p.remove());
+}
+
+function attachTargetPopup(row, input, ctrl) {
+    const show = () => openSurfacePopup(input, ctrl.name, (body, close) => {
+        const pairs = assignableTargets();
+        const [curMod, curCtl] = (ctrl.target || "").split(".");
+
+        const mkRow = (label, el) => {
+            const r = document.createElement("div");
+            r.className = "surface-popup-row";
+            const s = document.createElement("span");
+            s.textContent = label;
+            r.append(s, el);
+            body.appendChild(r);
+            return r;
+        };
+
+        const modSel = document.createElement("select");
+        const ctlSel = document.createElement("select");
+        const mods = [...new Set(pairs.map(p => p.module))];
+
+        const fillControls = () => {
+            ctlSel.replaceChildren();
+            for (const p of pairs.filter(p => p.module === modSel.value)) {
+                const o = document.createElement("option");
+                o.value = p.control; o.textContent = p.control;
+                if (p.control === curCtl) o.selected = true;
+                ctlSel.appendChild(o);
+            }
+        };
+        for (const m of mods) {
+            const o = document.createElement("option");
+            o.value = m; o.textContent = m;
+            if (m === curMod) o.selected = true;
+            modSel.appendChild(o);
+        }
+        fillControls();
+        modSel.addEventListener("change", fillControls);
+
+        mkRow("module", modSel);
+        mkRow("control", ctlSel);
+
+        const buttons = document.createElement("div");
+        buttons.className = "surface-popup-row";
+        const assign = document.createElement("button");
+        assign.textContent = "assign";
+        const applyTarget = (value) => {
+            sendControl("Control", ctrl.name + "Target", value);
+            // Reflect it NOW. `target` is metadata beside the control, not its value, so
+            // sendControl's eager state update does not touch it and the card showed the old
+            // binding until the next 1 Hz push: a full second of looking like nothing happened.
+            const mod = allModules().find(m => m.name === "Control");
+            const c = mod && mod.controls.find(x => x.name === ctrl.name);
+            if (c) c.target = value;
+            ctrl.target = value;
+            renderCards();
+            close();
+        };
+        assign.addEventListener("click", () => {
+            if (!modSel.value || !ctlSel.value) return;
+            applyTarget(`${modSel.value}.${ctlSel.value}`);
+        });
+        const clear = document.createElement("button");
+        clear.textContent = "clear";
+        // Unassigning has to be as easy as assigning, or a mistake is only fixable through the API.
+        clear.addEventListener("click", () => applyTarget(""));
+        buttons.append(assign, clear);
+        body.appendChild(buttons);
+
+        const now = document.createElement("div");
+        now.className = "surface-popup-row";
+        now.textContent = ctrl.target ? `now drives ${ctrl.target}` : "unassigned";
+        body.appendChild(now);
+    });
+    // ONE mechanism: assign mode, then a plain tap. That is what Ableton, Bitwig, Reaper, TouchOSC
+    // and Open Stage Control all do, and it is the only shape that works identically on a mouse and
+    // a touch screen. The alternatives each fail somewhere: right-click has no touch equivalent,
+    // long-press has no mouse equivalent, and double-click COLLIDES with the control itself (a
+    // double-click on a fader also moves it, so the assignment and the value fight over one
+    // gesture). A mode has no such conflict, because a tap means only one thing while it is on.
+    row.addEventListener("click", (e) => {
+        if (!assignMode) return;                  // off: a click is an ordinary control interaction
+        e.preventDefault();
+        e.stopPropagation();
+        show();
+    }, /*capture=*/true);
+    // A fader is a range input, which changes on pointerdown before any click fires: captured and
+    // swallowed here, or the tap that opens the picker also moves the fader it is opening.
+    row.addEventListener("pointerdown", (e) => {
+        if (!assignMode) return;
+        e.preventDefault();
+        e.stopPropagation();
+    }, /*capture=*/true);
+    row.title = ctrl.target ? `drives ${ctrl.target}` : "unassigned";
+
+    // The LABEL says what it drives, so an assigned control is recognizable without opening
+    // anything: "fad1" is a position, "brightness" is what a user is looking for. The CONTROL half
+    // only, because the module is usually obvious from the control (a palette is Drivers') and a
+    // surface column is 26px wide. CSS ellipsis caps what does not fit.
+    const label = row.querySelector(".control-label");
+    if (label && ctrl.target) {
+        const dot = ctrl.target.indexOf(".");
+        label.textContent = dot >= 0 ? ctrl.target.slice(dot + 1) : ctrl.target;
+        label.title = `${displayName(ctrl.name)} drives ${ctrl.target}`;
+    }
 }
 
 function buildKnob(input, ctrl) {
@@ -3481,7 +3653,12 @@ function buildKnob(input, ctrl) {
     // a different origin and drew a quarter arc instead of the intended 270°.
     track.setAttribute("transform", "rotate(135 20 20)");
     fill.setAttribute("transform", "rotate(135 20 20)");
-    track.setAttribute("stroke-dasharray", `${CIRC * SWEEP} ${CIRC}`);
+    // An ENDLESS encoder's track is a full circle: the knob turns forever, so a track with a gap at
+    // the bottom draws end stops it does not have. Only the track changes; the fill and the pointer
+    // still sweep the same 270° against the value, exactly as a fader's do.
+    const endlessTrack = !!(ctrl && ctrl.encoder);
+    track.setAttribute("stroke-dasharray",
+                       endlessTrack ? `${CIRC} ${CIRC}` : `${CIRC * SWEEP} ${CIRC}`);
     const draw = () => {
         const [min, max] = bounds();
         const v = Number(input.value);
@@ -3506,6 +3683,9 @@ function buildKnob(input, ctrl) {
     // range input underneath makes the browser offer a resize cursor that suggests the wrong action.
     wrap.title = "drag up/down or scroll to turn";
     wrap.addEventListener("pointerdown", (e) => {
+        // In assign mode a tap picks a target, so the knob must not also turn: without this the
+        // value moved under the finger on the way to opening the picker.
+        if (assignMode) return;
         e.preventDefault();
         wrap.setPointerCapture(e.pointerId);
         wrap.classList.add("knob-turning");
@@ -3542,6 +3722,7 @@ function buildKnob(input, ctrl) {
     // Scroll to turn: the gesture people try first on anything round, and the one that works without
     // knowing the drag exists. `passive:false` so the page does not scroll underneath it.
     wrap.addEventListener("wheel", (e) => {
+        if (assignMode) return;
         e.preventDefault();
         const [min, max] = bounds();
         const step = Math.max(1, Math.round((max - min) / 100));
@@ -4209,6 +4390,10 @@ function relativeAge(sec) {
 
 function appendResetButton(row, moduleName, ctrl, def, applyVisually) {
     if (def === undefined || def === null) return;  // type not loaded yet or no default
+    // A SURFACE control has no default worth restoring: its value belongs to whatever it drives, so
+    // "reset" would drive that target to zero, which is a change rather than a reset. The row is
+    // also 26px wide, and the button was taking space from the thing being operated.
+    if (ctrl.fader || ctrl.encoder || ctrl.switchRow) return;
     const btn = document.createElement("button");
     btn.className = "reset-btn";
     btn.type = "button";
@@ -4710,6 +4895,21 @@ function updateModuleControls(mod) {
                 // rebuild on a real change is momentary and a direct consequence of that change.
                 const sig = JSON.stringify([rows, details]);
                 if (list.dataset.sig === sig) break;   // unchanged: leave the DOM (and any open edit) alone
+
+                // A field the user is STILL EDITING survives the rebuild. Committing one field
+                // changes the list, which rebuilds every row from the device's state, and any other
+                // field typed but not yet committed went back to what the device still had: every
+                // field had to be entered twice, the second time sticking only because the first
+                // had committed by then. The row fields already stamp dragTs on each keystroke, so
+                // the same one-second cooldown every other control uses applies here too.
+                const held = new Map();
+                for (const el of list.querySelectorAll("[data-dragkey]")) {
+                    const ts = dragTs[el.dataset.dragkey] || 0;
+                    if (Date.now() - ts < 1000) held.set(el.dataset.dragkey, el.value);
+                }
+                // Which field had focus, so typing can continue into the rebuilt one rather than
+                // into nothing: the rebuild replaces the node, and focus goes with it.
+                const focusedKey = document.activeElement?.dataset?.dragkey;
                 list.dataset.sig = sig;
                 // Preserve which detail panels are open across the rebuild. Capture the SAME key
                 // listRowKey emits: the row's stable `id` (on entry.dataset.rowId for editable
@@ -4729,6 +4929,18 @@ function updateModuleControls(mod) {
                      moduleName: mod.name, ctrlName: ctrl.name, optionSets: ctrl.optionSets || {}});
                 const newScroll = list.querySelector(".list-scroll");
                 if (newScroll) newScroll.scrollTop = prevScroll;
+                // Put the in-progress values back, and the caret with them where the field is the
+                // one being typed in: restoring the text alone would send the cursor to the start.
+                for (const el of list.querySelectorAll("[data-dragkey]")) {
+                    if (!held.has(el.dataset.dragkey)) continue;
+                    const wasFocused = el.dataset.dragkey === focusedKey;
+                    el.value = held.get(el.dataset.dragkey);
+                    if (wasFocused) el.focus();
+                    if (wasFocused && typeof el.setSelectionRange === "function") {
+                        const end = el.value.length;
+                        try { el.setSelectionRange(end, end); } catch { /* not a text input */ }
+                    }
+                }
                 break;
             }
         }
@@ -4855,7 +5067,8 @@ function emojiTagsFor(t) {
 function mlTypeForRole(role) {
     return role === "effect" ? "MoonLiveEffect"
          : role === "layout" ? "MoonLiveLayout"
-         : role === "modifier" ? "MoonLiveModifier" : null;
+         : role === "modifier" ? "MoonLiveModifier"
+         : role === "service" ? "MoonLiveService" : null;
 }
 
 /// Every shipped script, as picker rows, for the roles a parent accepts.

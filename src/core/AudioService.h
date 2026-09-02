@@ -694,9 +694,19 @@ private:
         lastSyncRecv_ = 0;
         std::memset(syncPeer_, 0, sizeof(syncPeer_));
         const uint8_t s = sync();
-        setStatus(s == 1 ? "send: waiting for network"
-                  : s == 2 ? "receive: waiting for network"
-                  : "");
+        // Only when there IS a socket to wait for. With sync off this cleared the line
+        // unconditionally, wiping a mic diagnosis ("check sdPin") that Local mode had just set: the
+        // user then saw an empty status for a mic that is still not working.
+        // With sync OFF, clear only what this function itself put there: a mic diagnosis from Local
+        // mode has to survive, and clearing unconditionally wiped it, so the user saw an empty line
+        // for a mic that still was not working.
+        if (s == 1)      setStatus("send: waiting for network");
+        else if (s == 2) setStatus("receive: waiting for network");
+        else if (const char* cur = status();
+                 cur && (std::strstr(cur, "waiting for network") || std::strstr(cur, "socket failed")
+                         || std::strstr(cur, "bind failed") || std::strstr(cur, "from ")
+                         || std::strstr(cur, "listening on")))
+            setStatus("");
     }
 
     /// Lazily open the sync socket for the current mode, once the network stack is up.

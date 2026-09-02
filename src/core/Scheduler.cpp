@@ -360,8 +360,12 @@ bool Scheduler::getControlWide(const char* moduleName, const char* controlName,
                 out = *static_cast<const int16_t*>(c.ptr);
                 return true;
             case ControlType::Int32:
-            case ControlType::Pin:
                 out = *static_cast<const int32_t*>(c.ptr);
+                return true;
+            // A Pin is int8_t storage (ControlList::addPin), so it cannot share the Int32 case:
+            // reading four bytes from a one-byte control returns three bytes of whatever follows it.
+            case ControlType::Pin:
+                out = *static_cast<const int8_t*>(c.ptr);
                 return true;
             // Same set the byte reader refuses: text, a file path, a password, a button. There is
             // no number to give, so say so rather than inventing one.

@@ -141,6 +141,10 @@ bool gpioWrite(uint8_t gpio, bool high) {
     // Output-capable, not merely valid: the classic ESP32's 34-39 are input-only, and driving one
     // silently does nothing. Refusing here is what lets a caller report the pin rather than wonder.
     if (!GPIO_IS_VALID_OUTPUT_GPIO(gpio)) return false;
+    // And not RESERVED, the same policy gpioInputBegin applies: a pin wired to flash, PSRAM or
+    // native USB corrupts the device when driven, and a relay list is exactly where a wrong number
+    // gets typed.
+    if (gpioCapability(gpio).reserved) return false;
     // Configured on first use so a caller that owns the pin just writes it. gpio_config is
     // idempotent, and this runs on a control change, never per frame.
     gpio_config_t cfg = {};

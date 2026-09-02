@@ -159,19 +159,22 @@ constexpr const char* kModifierFolder = "modifiers";   ///< its directory upstre
 /// upstream and in the factory script directory on the device.
 constexpr const char* kServiceCatalog[] = {
     "button.mls",
+    "sweep.mls",
 };
-constexpr size_t kServiceCatalogCount = 1;
+constexpr size_t kServiceCatalogCount = 2;
 /// What each service above declares about itself, in the same order.
 /// A dimension of 0 means the script says nothing, so the DEVICE decides the default.
 constexpr unsigned char kServiceCatalogDim[] = {
+    0,
     0,
 };
 /// The emoji each declares, "" when it declares none.
 constexpr const char* kServiceCatalogTags[] = {
     "",
+    "",
 };
 constexpr const char* kServiceFolder = "services";   ///< its directory upstream
 
-constexpr size_t kCatalogCount = 35;   ///< every factory script, all roles
+constexpr size_t kCatalogCount = 36;   ///< every factory script, all roles
 
 } // namespace mm::moonlive

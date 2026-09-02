@@ -168,8 +168,13 @@ inline bool runInputAction(const InputAction& a, bool pressed,
             case InputAction::Kind::Set:    next = pressed ? a.value : 0; break;
             case InputAction::Kind::Delta:  next = current + a.value; break;
         }
+        // A Select and a Palette store the option COUNT in `max`, so their last valid index is one
+        // below it: clamping to `max` produced a value the writer then clamped again, and a delta
+        // that overshot the end stopped short of it instead of landing on it.
+        const int hi = (c.type == ControlType::Select || c.type == ControlType::Palette)
+                           ? static_cast<int>(c.max) - 1 : static_cast<int>(c.max);
         if (next < c.min) next = c.min;
-        if (next > c.max) next = c.max;
+        if (next > hi) next = hi;
 
         // A bool control takes true/false; everything else takes a number. Both go through the same
         // primitive, which is what makes a switch and a palette the same code here.
@@ -255,8 +260,14 @@ inline void decomposeTarget(const char* target, uint8_t& type, uint8_t& number) 
         // DIGITS, not merely something: "Control.switchX" would otherwise report index 0 and
         // re-compose to "Control.switch0", a control that does not exist.
         if (*digits < '0' || *digits > '9') continue;
+        // The WHOLE suffix, not just its first character: "Control.switch1x" would otherwise read as
+        // switch 1 and re-compose to "Control.switch1", silently retargeting a row the editor
+        // touched. Same rule the pad path applies.
+        char* end = nullptr;
+        const unsigned long n = std::strtoul(digits, &end, 10);
+        if (*end != 0 || n < 1 || n > kMaxPadNumber) continue;
         type = i;
-        number = static_cast<uint8_t>(std::strtoul(digits, nullptr, 10));
+        number = static_cast<uint8_t>(n);
         return;
     }
 }
