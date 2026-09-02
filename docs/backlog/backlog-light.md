@@ -20,6 +20,61 @@ Forward-looking to-build items for the **light domain** (`src/light/`: drivers, 
 
 ## Drivers
 
+### Logarithmic brightness, and a power budget the device knows about (2026-09-02)
+
+`Drivers.brightness` scales the output linearly, and perceived lightness is not linear: the eye is
+closer to logarithmic, so the bottom quarter of the slider spends half the power budget for a modest
+visible change while the top half buys little and costs a lot.
+
+**Measured on MM-StadBeest** (LightCrafter 16, 1440 lights, through the new `power.mls` readout):
+
+| brightness | rail | current |
+|---|---|---|
+| 16 | 4.86 V | 0.9 A |
+| 60 | 3.9 V | 4.3 A |
+| 120 | (browned out) | |
+
+Current is roughly linear in the control value, so the usable range is compressed into the bottom of
+the travel and the top of the slider is a power hazard rather than a setting. The board crashed
+twice during this session at brightnesses a user would reasonably try.
+
+**Two pieces, and the second is what actually prevents the crash:**
+
+- **A gamma or log curve** from the control value to the output duty, so equal slider steps look like
+  equal brightness steps. The open question is WHERE: on the `brightness` control (every driver
+  inherits it, but the number then means something different to OSC, MQTT and every saved preset) or
+  in each driver's output stage (no meaning change, duplicated per driver).
+- **A power budget.** A device that knows its supply limit can cap brightness instead of browning
+  out. Boards with a sense resistor can measure it (see the power-monitoring entry below); boards
+  without can estimate from light count and channel values, which is what WLED's ABL does.
+
+NOTE the rail sag above is NOT the supply's fault: an LRS-350-5 delivers 60 A, and this browned out
+at 4.3 A. Roughly 0.25 ohm of series resistance in the feed, so wiring and injection points, which
+is worth measuring before tuning anything in firmware.
+
+### SE16 / LightCrafter power monitoring: sense pins now free, module still to build (2026-09-02)
+
+Both boards carry voltage and current sensors, and MoonLight records the pins
+(`MoonBase/Modules/ModuleIO.h`, board presets): **SE 16 V1 voltage GPIO 8, current GPIO 9;
+LightCrafter 16 voltage GPIO 5, current GPIO 6**.
+
+Those pins were occupied by our LED driver's `clockPin`/`dcPin`, which looked like a hard conflict
+until the meaning of those controls settled it: they are the **sacrificial** WR and DC lines
+`esp_lcd` mandates to build an i80 bus, toggled harmlessly with nothing wired to them
+(`MultiPinLedDriver::addBusControls`). Any free GPIO does, so they moved rather than the sensors:
+SE16 to 16/17 (it has 4/16/17 spare, so its native USB on 19/20 stays free) and LightCrafter to
+19/20 (its only spare pair, and it uses the UART bridge on 43/44 anyway).
+
+**Still open:** `AnalogService` shipped (plan step 3) and is host-verified, so the consumer exists.
+What remains is per board: `voltagePin`/`currentPin` in the two device definitions, "Power
+monitoring" moving from `planned` to `supported`, a scale factor for each (the divider ratio and
+shunt value, which are NOT in MoonLight's preset and need the schematic), and a reading checked
+against a meter.
+
+Worth doing because it also gives the ADC seam a real bench rig: an on-board analog signal beats a
+hand-wired potentiometer. NOTE the pin move is unverified on hardware, both boards being offline
+when it was made: confirm LED output still works after the change before trusting it.
+
 ### MoonI80 streaming ring — 48×256 shipped; open instruments and cleanups
 
 The ring's two regimes ship and are wall-verified through 48 strands × 256 (12,288 lights): prime-only when the frame fits the pool, the clock-oracle lapping ring above it (the near-prime pool — the ISR encodes only `nSlices − ringBufs` slices per frame), with `ringAuto` deriving the geometry per config and `shiftOverclock` trading the fps ceiling against '595 shift margin. The mechanism lives in the code + the technical page; the design arc in `docs/history/plans/` (the MoonI80 plans, all marked). Open items:
@@ -310,6 +365,49 @@ The industry-standard answer is **daisy-chaining** — a sending card's ports ea
 - **Docker image**, asked for by a user tracking updates in an IoT system. The Linux binary and `.deb` already ship, so this is packaging rather than new capability.
 
 ## Sensors and audio-reactive input
+
+### The sensors an installation needs (2026-09-01)
+
+**Why this is a commitment rather than a wish list.** One of the intended uses is art installations,
+and an installation people can interact with has to sense them: that is stated in
+[architecture.md](../architecture.md#the-problem). Sensing is therefore part of the product, not a
+convenience, and an input peripheral is first-class alongside an output driver. The scope is still
+narrow on purpose: a lighting controller that senses its audience, not a home-automation platform.
+
+What shipped, and what a piece can already react to: **audio** (AudioService: RMS level and a 16-band
+FFT, I2S mic or line-in, or a peer's stream over the network), **IR** (IrService, a learnable
+remote), and **a button** (ButtonService on the GPIO seam, which covers foot pedals in momentary
+mode). An **IMU** exists on an unmerged branch (GyroDriver, below).
+
+The sensors worth having next, in the order an installation asks for them:
+
+- **Motion / presence (PIR)**: the single most common interactive trigger: someone walks up, the
+  piece wakes. Electrically a digital pin, so `ButtonService` almost covers it; what differs is the
+  semantic (a level, not a press) and the hold time. MoonLight models it as its own pin role
+  (`pin_PIR`, "HIGH = lights on, LOW = lights off"), which is the shape to follow.
+- **Distance (ultrasonic HC-SR04, or a ToF like the VL53L0X)**: turns presence into a continuous
+  value: a hand's distance drives brightness, a visitor's approach drives an effect parameter. The
+  ToF is I2C, which today means SCANNING only: the register-level read and write a sensor needs is
+  the unmerged GyroDriver prerequisite (see input-mapping-analysis.md and the scripted-sensors
+  plan), not something that exists. The ultrasonic is a trigger pulse and an echo-width measure,
+  which needs a timing seam the GPIO one does not yet provide.
+- **Touch**: the classic ESP32's capacitive touch pins need no external part, so a conductive
+  surface becomes an input. The Dig-2-Go's own button is on a touch-capable pin, though it reads
+  fine as a plain digital switch.
+- **Light level (LDR or a BH1750)**: an installation that dims itself to the room, and the obvious
+  companion to a piece that runs day and night.
+- **Rotary encoder**: the physical knob for an installation without a screen, and the one input
+  that maps onto ControlModule's encoder bank directly.
+
+**None of these need new architecture**, which is the point of recording them together: each is a
+Service under the core `Services` container. How it reaches the rest of the system depends on what
+it produces. A THRESHOLD is an event ("closer than 50 cm"), and an event drives a control through
+`Scheduler::setControl`, exactly as the button and infrared rows do. A continuous VALUE is not an
+event: an effect reading a distance per frame needs the number, and pushing one through a control
+per sample would serialize a stream through a settings path. That is published as a shared frame
+the way `AudioService::latestFrame()` already does, and a sensor typically does both. What they need is a
+platform seam per sensing modality (the GPIO seam shipped; I2C exists; a pulse-timing seam does
+not), and a module each.
 
 ### Audio-reactive follow-ups
 

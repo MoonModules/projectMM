@@ -17,6 +17,7 @@
 #include "platform/platform.h"
 #include "core/moonlive/moonlive_emit.h"
 #include "light/moonlive/MoonLiveBuiltins_light.h"
+#include "core/moonlive/MoonLiveBuiltins_service.h"   // the service vocabulary a .mls compiles against
 #include "light/moonlive/MoonLiveScriptFile.h"   // the role extensions the sweep filters on
 #include "light/moonlive/MoonLiveScript.h"       // kMaxStatus: the status line a failure reports through
 #include "light/moonlive/script_catalog.h"       // generated: what the device offers
@@ -30,12 +31,11 @@
 #include <string>
 #include <vector>
 
-// Any of the three role extensions: one language, and the sweep compiles every script whatever
-// role its name claims.
+// Any role extension: one language, and the sweep compiles every script whatever role its name
+// claims. Delegates to the one definition (MoonLiveScriptFile.h) rather than listing the extensions
+// again: two copies of this list is exactly how a new role went missing from one sweep.
 inline bool mmIsScript(const std::filesystem::path& p) {
-    const auto e = p.extension().string();
-    return e == mm::moonlive::kEffectExt || e == mm::moonlive::kLayoutExt ||
-           e == mm::moonlive::kModifierExt;
+    return mm::moonlive::isScriptExt(p.extension().string().c_str());
 }
 
 
@@ -77,12 +77,20 @@ TEST_CASE("every script in moonlive/ compiles") {
             // — a layout gets the clock, an effect the grid, a modifier the grid plus a coordinate.
             // Using one shared list here would let a script read a name its module never writes and
             // still pass, which is the silent-zero this per-binding split exists to prevent.
+            const bool isService = std::string(sub) == "services";
             const moonlive::SysVarTable sys =
+                isService                       ? moonlive::serviceSysVars()  :
                 std::string(sub) == "layouts"   ? moonlive::layoutSysVars()   :
                 std::string(sub) == "modifiers" ? moonlive::modifierSysVars() :
                                                   moonlive::effectSysVars();
+            // A SERVICE compiles against its own table: it has gpioRead and setControl and no
+            // canvas, so compiling one against the light vocabulary would prove nothing about what
+            // the device will actually run, and would accept a script calling setRGB that fails on
+            // a real service.
+            const moonlive::BuiltinTable builtins =
+                isService ? moonlive::serviceBuiltins() : moonlive::lightBuiltins();
             moonlive::MoonLive engine;
-            const bool ok = engine.compile(src.c_str(), moonlive::lightBuiltins(), sys);
+            const bool ok = engine.compile(src.c_str(), builtins, sys);
             if (!ok) std::printf("FAIL %-28s %s\n", label.c_str(), engine.error());
             // compile() both PARSES and emits native code, and only the second half needs a
             // backend for this host's ISA. arm64 and x86-64 both have one; a --no-jit build and any
@@ -107,12 +115,12 @@ TEST_CASE("every script in moonlive/ compiles") {
 // device, and nothing else would notice, since the build succeeds and the file is right there.
 TEST_CASE("the shipped catalog names every script in moonlive/") {
     std::vector<std::string> onDisk;
-    for (const char* sub : {"layouts", "effects", "modifiers"})
+    for (const char* sub : {"layouts", "effects", "modifiers", "services"})
         for (const auto& f : scriptsIn(sub)) onDisk.push_back(f.filename().string());
     std::sort(onDisk.begin(), onDisk.end());
     REQUIRE(!onDisk.empty());
 
-    // The catalog is three arrays, one per role: the folder a script lives in is implied by its
+    // The catalog is one array per role: the folder a script lives in is implied by its
     // role and the role by its extension, so neither is stored per entry.
     std::vector<std::string> inCatalog;
     for (size_t i = 0; i < moonlive::kEffectCatalogCount; i++)
@@ -121,12 +129,20 @@ TEST_CASE("the shipped catalog names every script in moonlive/") {
         inCatalog.push_back(moonlive::kLayoutCatalog[i]);
     for (size_t i = 0; i < moonlive::kModifierCatalogCount; i++)
         inCatalog.push_back(moonlive::kModifierCatalog[i]);
+    for (size_t i = 0; i < moonlive::kServiceCatalogCount; i++)
+        inCatalog.push_back(moonlive::kServiceCatalog[i]);
     CHECK(inCatalog.size() == moonlive::kCatalogCount);
     std::sort(inCatalog.begin(), inCatalog.end());
 
     for (const auto& n : onDisk)
         if (!std::binary_search(inCatalog.begin(), inCatalog.end(), n))
             std::printf("MISSING from catalog: %s\n", n.c_str());
+    // And the other direction: a name the catalog offers that no longer exists upstream sends a
+    // device to fetch a file that is not there, which the count check alone would miss when a
+    // script is added and another removed in the same change.
+    for (const auto& n : inCatalog)
+        if (!std::binary_search(onDisk.begin(), onDisk.end(), n))
+            std::printf("STALE in catalog: %s\n", n.c_str());
     CHECK(inCatalog == onDisk);
 
     // Each array holds only its own role's extension. A modifier listed among the effects would be
@@ -476,4 +492,28 @@ TEST_CASE("every script example in the docs compiles") {
     // A page that stopped holding examples would make this vacuously green.
     CHECK_MESSAGE(checked > 0, "no doc examples found: the test would pass without checking anything");
     MESSAGE("compiled " << checked << " script examples from the docs");
+}
+
+// The service vocabulary is what a .mls compiles against, and it is easy to get wrong in a way no
+// other test would catch: a missing entry shows up only as "unknown function" on a device, at the
+// column of whichever call happened to come first.
+TEST_CASE("a service script compiles against the service vocabulary") {
+    const moonlive::BuiltinTable t = moonlive::serviceBuiltins();
+    CHECK_FALSE(t.full());                      // a dropped registration is silent otherwise
+    for (const char* name : {"gpioRead", "gpioWrite", "setControl", "addControl", "print"}) {
+        INFO(name);
+        CHECK(t.find(name, static_cast<uint8_t>(std::strlen(name))) != nullptr);
+    }
+    // And the whole template compiles: the file a user gets when they create a new service must
+    // work as handed to them, which is the one script guaranteed to be tried first.
+    moonlive::MoonLive engine;
+    const bool ok = engine.compile(moonlive::kServiceTemplate, moonlive::serviceBuiltins(),
+                                   moonlive::serviceSysVars());
+    if (!ok) std::printf("service template FAILED: %s\n", engine.error());
+#if MM_MOONLIVE_HAS_HOST_JIT
+    CHECK(ok);
+#else
+    CHECK((ok || std::string(engine.error()) == moonlive::kCodegenFailed));
+#endif
+    engine.free();
 }

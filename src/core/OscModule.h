@@ -58,6 +58,7 @@ public:
     /// convention: one above the de-facto receive port.
     uint16_t feedbackPort = 9001;
 
+
     void defineControls() override {
         MoonModule::defineControls();
         controls_.addControl("listen", enabledOsc);
@@ -65,7 +66,6 @@ public:
         controls_.addControl("feedback", feedback);
         controls_.addText("feedbackTo", feedbackTo_, sizeof(feedbackTo_));
         controls_.addControl("feedbackPort", feedbackPort, 1, 65535);
-        controls_.addReadOnly("status", statusStr_, sizeof(statusStr_));
     }
 
     void onControlChanged(const char* name) override {
@@ -112,6 +112,18 @@ public:
         sock_.sendToAddr(dest, feedbackPort, pkt, len);
     }
 
+    /// The status is time-dependent (a peer goes stale), so it is refreshed on the second, not only
+    /// when something arrives. tick1s rather than tick(): a status line changes at human speed.
+    void tick1s() MM_NONBLOCKING override {
+        MoonModule::tick1s();
+        // Only when the answer CHANGES, which is twice per client session rather than once a second:
+        // the string is identical on every tick in between, and a status line nobody is reading does
+        // not need rewriting. snprintf is cheap but this runs on the render thread.
+        if (!enabledOsc) return;
+        const bool fresh = peerFresh();
+        if (fresh != peerWasFresh_) { peerWasFresh_ = fresh; reportPeer(); }
+    }
+
     void tick() MM_NONBLOCKING override {
         if constexpr (!platform::hasNetwork) return;
         if (!enabledOsc) { if (open_) closeSocket(); return; }
@@ -135,9 +147,22 @@ public:
             // A CHANGED peer is a client on a new address. This catches a move between machines and
             // a controller that never sends /mm/hello; hello catches a restart on the same address,
             // which this cannot see. Both are cheap, and neither alone is enough.
+            lastRecvMs_ = platform::millis();
             if (std::memcmp(peer_, src, 4) != 0) {
                 std::memcpy(peer_, src, 4);
                 resendAll_ = true;
+                peerWasFresh_ = false;   // a new address: let the next tick1s say so
+                // REMEMBER it. feedbackTo is a persisted control, so writing the learned address
+                // there is what makes a rig survive a reboot: the fallback alone forgets the client
+                // on every restart and stays silent until it happens to send something, which for a
+                // surface that only transmits on touch can be a long time. A user who typed an
+                // address keeps it: this only fills in an empty field.
+                if (!feedbackTo_[0]) {
+                    std::snprintf(feedbackTo_, sizeof(feedbackTo_), "%u.%u.%u.%u",
+                                  src[0], src[1], src[2], src[3]);
+                    markDirty();
+                    FilesystemModule::noteDirty();
+                }
             }
             handle(pkt, static_cast<size_t>(n));
         }
@@ -249,12 +274,14 @@ private:
                 if (auto* c = ControlModule::active()) { c->addSurface(this); attached_ = true; }
             }
             lastFailMs_ = 0;
-            std::snprintf(statusStr_, sizeof(statusStr_), "listening on %u", static_cast<unsigned>(port));
+            reportPeer();
             return true;
         }
         sock_.close();
         lastFailMs_ = now == 0 ? 1 : now;
-        std::snprintf(statusStr_, sizeof(statusStr_), "port %u busy", static_cast<unsigned>(port));
+        // A busy port is a real failure, not a note: nothing will ever arrive, and the severity is
+        // what makes the card say so rather than looking like a normal state.
+        setStatusf(Severity::Error, "port %u busy", static_cast<unsigned>(port));
         return false;
     }
 
@@ -262,7 +289,7 @@ private:
         if (open_) sock_.close();
         open_ = false;
         lastFailMs_ = 0;
-        std::snprintf(statusStr_, sizeof(statusStr_), enabledOsc ? "opening" : "off");
+        setStatus(enabledOsc ? "opening" : "off");
     }
 
     /// Where feedback goes: the configured address when set, else the last peer that wrote to us.
@@ -286,14 +313,51 @@ private:
     }
 
     char     feedbackTo_[16] = {};   ///< an override; empty means "answer whoever wrote to us"
+    /// The port, and WHO last reached us on it.
+    ///
+    /// Our own address is not worth reporting: the user got to this card by typing it. Whether a
+    /// client is actually getting through is the thing they cannot see, and the first question worth
+    /// asking when a surface does not respond.
+    void reportPeer() {
+        // A peer that has gone QUIET is not a peer: the address alone would still claim a client is
+        // there minutes after it stopped, which is worse than saying nothing while someone is
+        // debugging a surface that died. Five seconds is long enough to survive an idle controller
+        // between gestures and short enough that the card stops lying quickly.
+        if (peerFresh())
+            setStatusf(Severity::Status, "%u from %u.%u.%u.%u", static_cast<unsigned>(port),
+                       peer_[0], peer_[1], peer_[2], peer_[3]);
+        else
+            setStatusf(Severity::Status, "listening on %u", static_cast<unsigned>(port));
+    }
+
+    /// Is a client still talking to us? Five seconds is long enough to survive an idle controller
+    /// between gestures, short enough that the card stops claiming a peer that has gone.
+    bool peerFresh() const {
+        return lastRecvMs_ != 0 && platform::millis() - lastRecvMs_ < kPeerStaleMs;
+    }
+    static constexpr uint32_t kPeerStaleMs = 5000;
+
     uint8_t  peer_[4] = {};          ///< the last source address, learned in tick()
+    uint32_t lastRecvMs_ = 0;        ///< when we last heard from it, so the status can go stale
+    bool     peerWasFresh_ = false;  ///< what the status last said, so it is rewritten only on a change
     bool     attached_ = false;
     bool     resendAll_ = false;   ///< a new peer appeared; push every value once
     platform::UdpSocket sock_;
     bool     open_ = false;
     uint32_t lastFailMs_ = 0;
     uint32_t received_ = 0;
-    char     statusStr_[24] = "off";
+    /// setStatus takes a BORROWED pointer, so the formatted text lives here rather than in a
+    /// temporary. The base class owns the status itself, including its severity.
+    char     statusStr_[32] = "off";
+
+    /// Format into that buffer and report it, the shape ControlModule uses for the same reason.
+    void setStatusf(Severity sev, const char* fmt, ...) {
+        va_list ap;
+        va_start(ap, fmt);
+        std::vsnprintf(statusStr_, sizeof(statusStr_), fmt, ap);
+        va_end(ap);
+        setStatus(statusStr_, sev);
+    }
 };
 
 } // namespace mm

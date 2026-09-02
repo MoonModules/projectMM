@@ -9,8 +9,8 @@ class RingLayout {
   string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("count", count, 3, 1000);            // lights evenly around the circle
-    addControl("radius", radius, 1, 127);           // how wide the circle is
+    addControl("count", count, 3, 1000); // lights evenly around the circle
+    addControl("radius", radius, 1, 127); // how wide the circle is
   }
 
   void placeLights() {

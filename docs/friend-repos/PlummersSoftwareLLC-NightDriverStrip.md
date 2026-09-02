@@ -4,6 +4,22 @@ What landed on [NightDriverStrip](https://github.com/PlummersSoftwareLLC/NightDr
 
 Summarised via the GitHub commits API (no local clone), so counts are all commits on `main`, not first-parent merges — the bullets filter out dependency bumps, whitespace, and pure refactors. Releases are noted as context rather than used as month boundaries: **v1.3.0** (published 2026-01-10) was tagged from a late-November commit, and the latest are **v2.0.0** and **v2.0.1**, both published 2026-06-14. v1.3.0 is not a clean month boundary so its month is kept whole; June IS split at v2.0.0, which was cut from `main` mid-month (see the two June sections below).
 
+## August 2026
+
+- **M5Stack Tab5 support**, a new build target for the Tab5's 1280x720 DSI display. Effects render into a logical canvas that the backend then scales up by a whole-number factor onto the panel, so the existing effect library runs on a screen far larger than the 64x32 matrix it was written for.
+- **Effects redrawn for high resolution.** Many patterns had never had to draw outside a 64x32 box. Animated GIF, Circuit, Life, Pong Clock, Radar, Smoke, Stocks, Swirl, Wave and the spectrum analyzer now size themselves to the matrix: the Stocks ticker picks a larger font on wide displays, and GIF/JPEG playback keeps the image's aspect ratio and centers it instead of stretching to fill.
+- **Faster blur on large panels.** Blur walks row-major framebuffers directly, which matters once a frame is millions of pixels rather than a couple of thousand.
+- **A new "Mesmerizer Tab" build** joins the existing Mesmerizer environments.
+- **Fixed: WiFi kept reconnecting when it was already connected.** The reconnect timer now checks whether the station is already associated before starting another attempt.
+- **Fixed: a WiFi crash on the Tab5.** Reading the IP, gateway and DNS from inside the connect callback could trip an assertion on the Tab5's hosted WiFi chip; the log line is now shorter and safe.
+- **Breaking, for builders: the ESP32 toolchain is now pinned to pioarduino 55.03.37** for every environment, replacing the earlier mix of official PlatformIO and pioarduino platforms. This is the first toolchain revision that works with Python 3.14 on macOS and Linux, so you no longer have to downgrade Python or edit VS Code settings to build. Platforms are now fetched into the project folder rather than a global cache.
+- **Partition tables updated** (standard, 8 MB, Feather and no-OTA) to meet the new toolchain's minimum settings-storage size. Re-flashing may be needed rather than an over-the-air update.
+- Note for TTGO T-Display builders: an unused display library dependency was dropped from that environment.
+
+No versioned release in August; the most recent is v2.0.1 from June 2026.
+
+_Checked: `repos/PlummersSoftwareLLC/NightDriverStrip/commits?sha=main` for 2026-08-01..2026-09-01 (4 commits, `29875f65`..`4d79c290`, all from PR #902 "M5TAB support", merged 2026-08-14); releases published in the window (none); issue search `repo:PlummersSoftwareLLC/NightDriverStrip is:issue created:2026-08-01..2026-08-31` and the same with `closed:` (0 results each)._
+
 ## July 2026
 
 A quiet month: one feature merge, no release, no issues.

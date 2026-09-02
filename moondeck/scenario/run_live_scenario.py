@@ -460,6 +460,38 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                         else:
                             print(f"  +     {step.get('id', '?')} ({step['type']})")
                             created_modules.append(step.get("id", ""))
+                        # The step's declared PROPS, applied whether the module was just created or
+                        # already existed. /api/modules takes the shape but not the values, so a
+                        # scenario saying `{"width": 32}` measured a module at its defaults; and an
+                        # existing module measured whatever the last run left on it.
+                        for key, value in (step.get("props") or {}).items():
+                            ok = False
+                            try:
+                                pr = client.post("/api/control",
+                                                 {"module": step.get("id", ""), "control": key,
+                                                  "value": value})
+                                ok = bool(pr.get("ok"))
+                            except urllib.error.HTTPError as pe:
+                                if not step.get("optional"):
+                                    raise
+                                print(f"  SET   {step.get('id','?')}.{key}: skipped "
+                                      f"(optional, not offered on {target}: {pe.code})")
+                                continue
+                            # A 200 with ok:false is a REJECTION, the same as a 400: the device
+                            # refused the value. Silently accepting it measured a configuration the
+                            # scenario never got.
+                            if not ok:
+                                if not step.get("optional"):
+                                    raise RuntimeError(
+                                        f"{step.get('id','?')}.{key} = {value!r} was rejected")
+                                print(f"  SET   {step.get('id','?')}.{key}: skipped "
+                                      f"(optional, rejected on {target})")
+                        # The step's declared PROPS, applied after creation. /api/modules takes the
+                        # shape but not the values, so a scenario saying `{"width": 32}` created a
+                        # module at its defaults and every later measurement was of a pipeline the
+                        # scenario never asked for. The desktop runner applies them; without this
+                        # the same scenario measured two different things on the two runners.
+
                     elif step.get("optional"):
                         step_result["status"] = "ok"
                         skipped_ids.add(step.get("id", ""))
@@ -529,7 +561,13 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                         # is the board-filtered option count, so the value is out of range
                         # and returns 400. A REQUIRED set_control that 400s still fails.
                         step_result["status"] = "skipped"
-                        print(f"  SET   {step.get('id','?')}.{step.get('key','?')} = {step.get('value','?')} — skipped (optional, value not offered on this target)")
+                        # And the MODULE is unavailable from here on. Marking only the step left
+                        # every later measure running against a module configured for a peripheral
+                        # this chip does not have: the numbers came out, looked like data, and
+                        # described a configuration that never applied. skipped_ids is the same set
+                        # an optional add uses, so the measures already know to skip it.
+                        skipped_ids.add(step.get("id", ""))
+                        print(f"  SET   {step.get('id','?')}.{step.get('key','?')} = {step.get('value','?')}: skipped (optional, value not offered on this target; later steps on it skip too)")
                     elif ce.code == 404:
                         # Transient: a set_control issued right after a structural
                         # change (replace/add) can race the device's prepareTree and
@@ -901,9 +939,7 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
         print(f"  contract[{target}] NOT written (run failed; observed still saved)")
 
     if wrote_observations[0] or contract_safe_to_write:
-        with open(scenario_path, "w") as f:
-            json.dump(scenario, f, indent=2, ensure_ascii=False)
-            f.write("\n")
+        _observed.save_scenario(scenario_path, scenario)
         what = []
         if wrote_observations[0]:
             what.append(f"observed[{target}]")

@@ -1316,6 +1316,7 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
         // row editors; a plain List stays read-only. The row objects carry a stable "id" the
         // /api/list/* ops address, and each editable row's detail carries its field descriptors.
         if (c.switchRow) sink.append(",\"switchRow\":true");
+        if (c.displayStrip) sink.append(",\"displayStrip\":true");
         // The target rides with all three surface kinds: a switch drives something too (switch1 is
         // the global on/off), and the popup that shows what a fader drives should say the same for
         // a switch rather than showing it as unassigned.
@@ -1345,7 +1346,7 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
 HttpServerModule::OpResult HttpServerModule::applySetControl(
         const char* moduleName, const char* controlName, const char* valueJson) {
     // The generic control-set is a Scheduler primitive (it owns the tree + persistence hook),
-    // shared with every other control writer: Improv, the WLED bridge, IrService. This wrapper
+    // shared with every other control writer: Improv, the WLED bridge, InfraredService. This wrapper
     // only maps its result onto the HTTP OpResult so the response carries the right status code.
     if (!scheduler_) return OpResult::ModuleNotFound;
     switch (scheduler_->setControl(moduleName, controlName, valueJson)) {

@@ -4,6 +4,24 @@ Forward-looking to-build items for the **core / infrastructure** domain (`src/co
 
 ## Distribution
 
+### OTA upload refuses a normal client: the body must arrive within ~50 ms (2026-09-02)
+
+`POST /api/firmware/upload` answers `400 {"error":"incomplete request body"}` to an ordinary
+`curl --data-binary @firmware.bin`, in 37 ms, before reading the image at all.
+
+The streaming branch sets `bodyNeeded` to the whole prefix buffer and then polls for it with a
+50-iteration, 1 ms budget (`HttpServerModule.cpp`, the read loop). A client that writes its headers
+and pauses before the body, which curl does, trips that timeout and is rejected. The browser path
+works because `fetch` hands the whole body to the socket at once.
+
+Worked around by writing headers plus the first 8 KB in a single `sendall` from a small Python
+client, after which a 1.97 MB image uploaded in 6.3 s and the device rebooted correctly. So the
+transfer is fine; the acceptance test is what is wrong.
+
+Worth fixing because OTA is the only route to a board whose USB port is unavailable, which is
+exactly when a firmware update matters most. The fix is to wait for the CONTENT-LENGTH the client
+declared rather than for a buffer to fill, and to time out on stall rather than on total elapsed.
+
 ### Release 2.0 — distribution catches up to the source tree
 
 1.0 ships ESP32 firmware (4 variants) + macOS arm64 + Windows x64. Still to add:
@@ -228,12 +246,18 @@ light domain, only the number crosses, mirroring what the probe already does); o
 accept that a scripted module's dimension chip reflects its type. Worth doing when someone is
 annoyed by the wrong chip, not before.
 
-### British spellings predate the prose gate (118 files)
+### British spellings and em-dashes predate the prose gate (319 files)
 
 `check_prose.py` reports on ADDED lines only, so the American-spelling rule has been enforced from
 the day it landed forward, and everything written before it was never swept. 118 files still carry
 `colour`, `centre`, `behaviour`, `recognise`, `initialise` and friends, in comments and in a few
 identifiers.
+
+**Em-dashes are the same story and the larger half**: 10,326 of them across 319 files under `docs/`,
+against the same rule and missed for the same reason. They are worse than the spellings to sweep
+mechanically, because the right replacement depends on the sentence (a colon where it explains, a
+comma for an aside, a full stop between two clauses), so a blind substitution produces prose nobody
+proofread. Count them per file and do the biggest offenders by hand.
 
 The gate keeps it from growing, so this is a one-time sweep rather than a leak. It is deliberately
 NOT folded into a feature branch: a whole-repo rename touches more files than any review can read,
@@ -1282,3 +1306,103 @@ Lower risk than the RGMII case (six pins rather than twelve, and nothing of ours
 **3. `clockPin` defaults to 10 and is hidden.** `MoonLedDriver::clockPin = 10` is a hardcoded default that lands inside the S31's reserved RGMII block, and `addBusControls` hides the control unless `pinExpanderMode()` is on. So on this board the value was invisible on the card, unchangeable through the UI, and still driving a pad. A pin with a real effect must be visible, whatever mode it is in.
 
 **This also closed the S31 Ethernet defect, open since 2026-07-26.** That entry (removed) blamed an RGMII Tx-clock mismatch at 100M for DHCP never completing, and had concluded "the frames never reach the router". The cause was the same collision: `ParallelLed`'s default `clockPin = 10` is `txd2`, so a DHCP DISCOVER was garbled exactly as the panel frames were. With the clock pin moved off the RGMII block the S31 leases normally, verified on the bench at `Eth: 192.168.1.125 (1000 Mbit)`. Two long-standing bugs, one GPIO.
+
+## Input transports: foot pedals, USB game controllers, and MoonLive at the pins (2026-09-01)
+
+`ButtonService` shipped with the [GPIO seam](../history/plans/Plan-20260901%20-%20Input%20services%20and%20the%20GPIO%20seam.md)
+(`gpioInputBegin` / `gpioRead` / `gpioWrite`). It names a target as `Module.control` and writes it
+through `Scheduler::setControl`, so a press and an OSC message are indistinguishable downstream.
+Three follow-ups build on that seam rather than beside it.
+
+**Foot pedals are two different things**, corrected in
+[input-mapping-analysis.md](input-mapping-analysis.md): a **footswitch** is a switch on a TS jack,
+which `ButtonService` in momentary mode already covers, while an **expression pedal** is a
+potentiometer on a TRS jack, which is an ADC read mapping onto a fader and does not exist yet.
+Neither is USB. **Action: document the footswitch, scope the expression pedal as an analog-input
+service.**
+
+**USB game controllers are their own project, and are S3/P4-only.** The mapping half is trivial once
+reports arrive (buttons to pads, axes to encoders and faders, all through `setControl`); the
+transport half is not:
+
+- The **classic ESP32 cannot do it at all**: no USB Host peripheral, no USB OTG. So the Dig-2-Go,
+  and every classic board, is out from the start.
+- **S3 and P4** have USB-OTG and the IDF ships a USB Host stack with a HID class driver. A gamepad
+  is a HID device whose report descriptor must be parsed to learn which byte is which button or
+  axis, and that parsing is the real work: descriptors vary per vendor, and the well-known
+  controllers each have quirks.
+- **Desktop** would go through the OS gamepad API behind the same seam, a wholly separate
+  implementation.
+
+Expect a plan of its own, after the GPIO inputs have settled. The honest scope is "a HID report
+parser plus a mapping UI", not "read a controller".
+
+**MoonLive at the pins** is the piece that makes the seam pay twice. The direction is that MoonLive
+gains driver scripts whose hello-world is "read from GPIO, write to GPIO", which needs:
+
+- `gpioRead(pin)` / `gpioWrite(pin, on)` as builtins, mapping straight onto the platform seam.
+- `setControl(module, control, value)` as a builtin. **This one needs a decision before it ships**:
+  it is the same primitive every transport already uses, so exposing it is consistent, but it also
+  lets any script write any control on any module. That is power worth granting deliberately rather
+  than as a side effect.
+- A `MoonLiveService` host module, the service twin of `MoonLiveEffect`: a `script` control, the
+  compile and status path, the picker integration. Mostly a copy of the existing binding, and it is
+  what turns "MoonLive can read a pin" into "a user can add a scripted service".
+
+`ButtonService` is then the precompiled sibling of a script anyone could write, exactly the
+relationship `ballpit.mle` has with `BallpitEffect`.
+
+## Relay-gated boards, and what a driver is (2026-09-01)
+
+Wiring a QuinLED Dig-2-Go found that its LED supply sits behind a relay on GPIO 12, the vendor's
+"LED Relay enable pin". Undriven, the data line is perfectly correct and the strip stays dark, which
+is a hard failure to diagnose from the firmware side. `Drivers` now carries a `relayPins` list that
+follows the master `on` control.
+
+**A list, because boards do not agree.** The Dig-2-Go has one relay for one LED output; the
+Dig-Next-2 has **four relays for two outputs**, all carrying the same `Relay_LightsOn` role in
+MoonLight's own model. So a relay maps to neither the device nor a driver, and every one of them
+follows master power together. It lives beside `on` rather than on a driver because a relay gates
+the SUPPLY, which several drivers share, where a driver's own controls describe that one driver's
+output.
+
+**Still open: the definition of a driver.** Two statements in the repo disagree.
+[`drivers.md:3`](../moonmodules/light/drivers.md) says "A driver sends lights somewhere", while
+[`architecture.md:143`](../architecture.md) frames drivers as the consumer half of producers vs
+consumers. The product owner's definition is broader than both and is the one to adopt: **a driver
+communicates with hardware or the network**, which explicitly includes talking to GPIOs.
+
+The concrete tension is in code: `DriverBase` declares `virtual void setSourceBuffer(Buffer*) = 0`,
+so every light driver is structurally required to consume the light buffer, and all sixteen do. The
+resolution is that there are two families of one idea, split by whether the light buffer is
+involved: a **light Driver** (`Drivers` container, consumes the buffer, outputs it) and a **core
+Service** (`Services` container, a capability bridge, no buffer). `services.md` already says exactly
+this. **Action: scope `drivers.md`'s claim to light drivers, and name the general sense in
+`architecture.md`.** Documentation only, no code.
+
+## The device catalog cannot seed a list row (2026-09-01)
+
+`deviceModels.json` describes a board by the modules it adds and the controls it sets, and the
+config push turns that into three ops: `planConfigOps` (`mooninstaller/config-ops.js`) emits `add`,
+`set` and `clearChildren`, and `HttpServerModule`'s APPLY_OP handler accepts exactly those. **There
+is no op for creating a row in a list control**, on either side.
+
+Found rebuilding the infrared service around a mapping list. Its five old actions (on/off,
+brightness up/down, palette next/prev) were meant to ship as default rows so a remote still worked
+out of the box, and they cannot: a row is not a control, so `controls: {...}` cannot express one. The
+service therefore starts empty and a user adds their first row by hand.
+
+Seeding them in the module's own `setup()` was tried and reverted: it works, but it puts a board's
+opinion in firmware, which is exactly what the rebuild removed, and it collides awkwardly with
+`restoreList` (which runs first on a configured device, so the guard is "only seed an empty list" and
+the interaction is subtle enough to have cost a debugging round).
+
+**What it would take:** an `addListRow` op carrying the parent module, the list control's name, and
+the row's fields, then a `setListRowField` per field (or one op with the whole row). The device side
+already has both primitives on `ListSource`, so this is plumbing rather than design: the catalog
+schema, the planner, the APPLY_OP encoding and the handler. Worth doing when a board genuinely ships
+with pre-bound inputs (a panel with three labelled buttons), which is also when someone can say what
+the rows should be.
+
+Until then a list is user-populated, which is the honest behavior: the device knows the pin, the
+user knows what the button should do.

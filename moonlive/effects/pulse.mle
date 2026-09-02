@@ -5,17 +5,17 @@ class PulseEffect {
   byte hueStep = 24;
   byte floorBri = 0;
 
-  int lit = 0;                    // brightness left from the last beat
-  int hue = 0;                    // palette position, walked per beat
+  int lit = 0; // brightness left from the last beat
+  int hue = 0; // palette position, walked per beat
 
   int dimensions() { return 1; }
 
   string tags() { return "💫🎵"; }
 
   void defineControls() {
-    addControl("decay", decay, 1, 120);             // how fast the flash falls away
-    addControl("hueStep", hueStep, 0, 128);         // palette steps per beat
-    addControl("floorBri", floorBri, 0, 128);       // never darker than this
+    addControl("decay", decay, 1, 120); // how fast the flash falls away
+    addControl("hueStep", hueStep, 0, 128); // palette steps per beat
+    addControl("floorBri", floorBri, 0, 128); // never darker than this
   }
 
   void tick() {

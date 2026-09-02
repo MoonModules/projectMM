@@ -6,6 +6,14 @@ The library: Yves Bazin's (hpwit) clockless-LED driver that clocks WS2812-class 
 
 > **Authorship note.** Most of the activity in this window is projectMM's own — `ewowi` authored ~53 of the in-window commits, with the rest from the maintainer (Yves Bazin / hpwit) and a couple of others. The IDF 5.5 / arduino-less ESP-IDF / RGBCCT / >65K-LED work below is largely projectMM upstreaming its driver needs into hpwit's library, then tracking the result here.
 
+## August 2026
+
+No activity. No commits on `main` in August 2026, and none on any other branch. The driver last changed on 2026-04-06, and the `esp32-p4-support` branch, which is the one carrying new hardware work, last moved on 2026-04-11.
+
+No issues were opened or closed. No release; the most recent is v1.4 from April 2026.
+
+_Checked: `repos/hpwit/I2SClocklessLedDriver/commits?sha=main` for 2026-08-01..2026-09-01 (0), and the same window on all 6 branches (0); releases published (none); issue search `repo:hpwit/I2SClocklessLedDriver is:issue created:2026-08-01..2026-08-31` and the same with `closed:` (0 results each)._
+
 ## July 2026
 
 No user-facing activity: no commits merged to `main` (latest activity is April 6, 2026) and no notable issues. No branch saw commits either — the newest work anywhere is the `esp32-p4-support` branch, last touched April 11, 2026.

@@ -29,12 +29,11 @@
 #include <cstdint>
 #include <vector>
 
-// Any of the three role extensions: one language, and the sweep compiles every script whatever
-// role its name claims.
+// Any role extension: one language, and the sweep compiles every script whatever role its name
+// claims. Delegates to the one definition (MoonLiveScriptFile.h) rather than listing the extensions
+// again: two copies of this list is exactly how a new role went missing from one sweep.
 inline bool mmIsScript(const std::filesystem::path& p) {
-    const auto e = p.extension().string();
-    return e == mm::moonlive::kEffectExt || e == mm::moonlive::kLayoutExt ||
-           e == mm::moonlive::kModifierExt;
+    return mm::moonlive::isScriptExt(p.extension().string().c_str());
 }
 
 

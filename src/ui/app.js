@@ -517,6 +517,14 @@ async function sendControl(moduleName, controlName, value) {
         const mod = allModules().find(m => m.name === moduleName);
         const ctrl = mod && Array.isArray(mod.controls) && mod.controls.find(c => c.name === controlName);
         if (ctrl) ctrl.value = value;
+        // Siblings on the same target move with it. The device already does this (followTargets runs
+        // on every surface write), but the browser would not see it until the next 1 Hz push, so a
+        // second fader bound to the same control lagged a second behind the one being dragged.
+        if (ctrl && ctrl.target) {
+            for (const c of mod.controls)
+                if (c !== ctrl && c.target === ctrl.target) c.value = value;
+            updateModuleControls(mod);
+        }
     }
     // Toggling expert mode changes which controls RENDER (the `advanced` ones), not just a value: so
     // re-render the cards. Structural change, same as an add/remove; the value write above already landed.
@@ -1594,6 +1602,25 @@ function createCard(mod, depth) {
         title.appendChild(actions);
     }
 
+    // The ASSIGN toggle, on the control surface's own card. Entering the mode is a property of the
+    // whole desk, so it belongs here rather than on each of its 24 controls. Added directly to the
+    // title row because the surface is a TOP-LEVEL module and never reaches createActionButtons,
+    // which exists for cards a user can delete or replace.
+    if (mod.type === "ControlModule") {
+        const assignBtn = document.createElement("button");
+        assignBtn.className = "card-btn assign-toggle" + (assignMode ? " active" : "");
+        // 🔗 for "link a control to what it drives", ✓ while the mode is on. Single glyph like the
+        // ✎ and × beside it, so the action row stays one row of 26px boxes.
+        assignBtn.textContent = assignMode ? "✓" : "🔗";
+        assignBtn.title = assignMode ? "Done assigning"
+                                     : "Choose what each fader, knob and switch drives";
+        assignBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            setAssignMode(!assignMode);
+        });
+        title.appendChild(assignBtn);
+    }
+
     // Help link → the module's spec page on the rendered docs site, far right of
     // the row. docPath comes from /api/types (relative to docs/moonmodules/, e.g.
     // "core/services.md#audio" or "light/effects.md#fire"); omitted if none.
@@ -2114,7 +2141,10 @@ function createControl(moduleName, moduleType, ctrl) {
     // it by name rather than the flag.
     if (moduleName === "System" && ctrl.name === "expertMode") label.classList.add("control-label--expert");
     label.textContent = displayName(ctrl.name);
-    row.appendChild(label);
+    // The display strip carries no label: it spans the card and shows whatever was last touched, so
+    // a label naming one control would be wrong the moment another moved.
+    if (ctrl.displayStrip) row.classList.add("control-display-strip");
+    else row.appendChild(label);
 
     const key = moduleName + ":" + ctrl.name;
     const def = defaultFor(moduleType, ctrl.name, ctrl);
@@ -2170,13 +2200,13 @@ function createControl(moduleName, moduleType, ctrl) {
                 input.classList.add("encoder-input");
                 row.classList.add("control-encoder");
                 row.appendChild(buildKnob(input, ctrl));
-                row.appendChild(buildSevenSeg(input));
+                row.appendChild(buildSegReadout(input));
                 attachTargetPopup(row, input, ctrl);
             }
             if (ctrl.fader) {
                 input.classList.add("fader-input");
                 row.classList.add("control-fader");
-                row.appendChild(buildSevenSeg(input));
+                row.appendChild(buildSegReadout(input));
                 // Right-click a fader to see (and later choose) what it drives: the same
                 // configure-on-the-control rule the pads follow.
                 attachTargetPopup(row, input, ctrl);
@@ -2189,7 +2219,14 @@ function createControl(moduleName, moduleType, ctrl) {
             // The knob and the readout were built above, before these three lines ran, so they drew
             // against an empty input (the source of the 880 readouts). Refresh now that the value and
             // the bounds exist.
+            //
+            // And again once the ROW is complete: redrawRangeDecorations walks the input's siblings,
+            // and the decorations are appended after this point, so the call above finds a
+            // half-built row and every readout keeps whatever it first drew. That is the "all the
+            // numbers read 50 while the faders sit at different heights" the UI showed until a
+            // manual refresh rebuilt the card at a moment when the order happened to work out.
             redrawRangeDecorations(input);
+            queueMicrotask(() => redrawRangeDecorations(input));
             const numInput = document.createElement("input");
             numInput.type = "number";
             numInput.className = "control-value-input";
@@ -2369,6 +2406,9 @@ function createControl(moduleName, moduleType, ctrl) {
             sw.appendChild(track);
             row.appendChild(sw);
             appendResetButton(row, moduleName, ctrl, def, () => { input.checked = !!def; });
+            // A surface SWITCH is assignable like a fader or a knob: it drives a control, and
+            // switch1 driving Drivers.on is the same kind of binding fader1 has to brightness.
+            if (ctrl.switchRow) attachTargetPopup(row, input, ctrl);
             break;
         }
         case "text": {
@@ -3113,6 +3153,16 @@ function createControl(moduleName, moduleType, ctrl) {
                 row.appendChild(a);
                 break;
             }
+            // The surface's display strip: sixteen-segment cells across the full card width,
+            // matching the seven-segment readouts under the encoders and faders.
+            if (ctrl.displayStrip) {
+                const strip = buildSeg16Strip(SEG16_CHARS, /*stretch=*/true);
+                strip.dataset.mid = moduleName;
+                strip.dataset.key = ctrl.name;
+                strip._setText(ctrl.value ?? "");
+                row.appendChild(strip);
+                break;
+            }
             const span = document.createElement("span");
             span.className = "display";
             span.dataset.mid = moduleName;
@@ -3426,15 +3476,164 @@ function openPadEditor(anchorEl, moduleName, ctrlName, item, slot) {
 // value and turns drags into value changes.
 /// "What does this strip drive?": the same popup for an encoder and a fader, since the question and
 /// the answer are identical for both. Right-click on a pointer, long-press on touch.
-function attachTargetPopup(row, input, ctrl) {
-    const show = () => openSurfacePopup(input, ctrl.name, (body) => {
-        const line = document.createElement("div");
-        line.className = "surface-popup-row";
-        line.textContent = ctrl.target ? `drives ${ctrl.target}` : "unassigned: no target yet";
-        body.appendChild(line);
+// Every control in the live tree that a surface control can drive, as {module, control} pairs.
+//
+// Generated from the state the device already sends, so the picker can only ever offer something
+// that exists: a typed "Drivers.palette" is invisible when misspelled until the fader silently does
+// nothing. Text, file paths, passwords and buttons are left out, because a fader cannot meaningfully
+// move a filename and offering it produces a control that looks assigned and is not.
+const ASSIGNABLE_TYPES = new Set(["uint8", "uint16", "int16", "int32", "bool", "select", "palette", "pin"]);
+function assignableTargets() {
+    const out = [];
+    const walk = (mods) => {
+        for (const m of mods || []) {
+            for (const c of m.controls || []) {
+                // Not the surface's OWN controls: a fader driving another fader is a loop, and the
+                // hidden "...Target" strings are the assignments themselves.
+                if (m.type === "ControlModule") continue;
+                if (ASSIGNABLE_TYPES.has(c.type)) out.push({module: m.name, control: c.name});
+            }
+            walk(m.children);
+        }
+    };
+    walk(state && state.modules);
+    return out;
+}
+
+// ASSIGN MODE. While it is on, a tap on any surface control opens its target picker instead of
+// moving it. One flag rather than per-control state, because the mode is a property of the whole
+// surface: a desk is either being played or being wired.
+let assignMode = false;
+function setAssignMode(on) {
+    assignMode = on;
+    document.body.classList.toggle("assign-mode", on);
+    document.querySelectorAll(".assign-toggle").forEach(b => {
+        b.classList.toggle("active", on);
+        // The same two glyphs the builder uses: a word here and an emoji there made the button
+        // change shape as well as state.
+        b.textContent = on ? "✓" : "🔗";
+        b.title = on ? "Done assigning" : "Choose what each fader, knob and switch drives";
     });
-    row.addEventListener("contextmenu", (e) => { e.preventDefault(); show(); });
-    attachLongPress(row, show);
+    if (!on) document.querySelectorAll(".surface-popup").forEach(p => p.remove());
+}
+
+function attachTargetPopup(row, input, ctrl) {
+    const show = () => openSurfacePopup(input, ctrl.name, (body, close) => {
+        const pairs = assignableTargets();
+        const [curMod, curCtl] = (ctrl.target || "").split(".");
+
+        const mkRow = (label, el) => {
+            const r = document.createElement("div");
+            r.className = "surface-popup-row";
+            const s = document.createElement("span");
+            s.textContent = label;
+            r.append(s, el);
+            body.appendChild(r);
+            return r;
+        };
+
+        const modSel = document.createElement("select");
+        const ctlSel = document.createElement("select");
+        const mods = [...new Set(pairs.map(p => p.module))];
+
+        const fillControls = () => {
+            ctlSel.replaceChildren();
+            for (const p of pairs.filter(p => p.module === modSel.value)) {
+                const o = document.createElement("option");
+                o.value = p.control; o.textContent = p.control;
+                if (p.control === curCtl) o.selected = true;
+                ctlSel.appendChild(o);
+            }
+        };
+        for (const m of mods) {
+            const o = document.createElement("option");
+            o.value = m; o.textContent = m;
+            if (m === curMod) o.selected = true;
+            modSel.appendChild(o);
+        }
+        fillControls();
+        modSel.addEventListener("change", fillControls);
+
+        mkRow("module", modSel);
+        mkRow("control", ctlSel);
+
+        const buttons = document.createElement("div");
+        buttons.className = "surface-popup-row";
+        const assign = document.createElement("button");
+        assign.textContent = "assign";
+        const applyTarget = (value) => {
+            sendControl("Control", ctrl.name + "Target", value);
+            // Reflect it NOW. `target` is metadata beside the control, not its value, so
+            // sendControl's eager state update does not touch it and the card showed the old
+            // binding until the next 1 Hz push: a full second of looking like nothing happened.
+            const mod = allModules().find(m => m.name === "Control");
+            const c = mod && mod.controls.find(x => x.name === ctrl.name);
+            if (c) c.target = value;
+            ctrl.target = value;
+            renderCards();
+            close();
+        };
+        assign.addEventListener("click", () => {
+            if (!modSel.value || !ctlSel.value) return;
+            applyTarget(`${modSel.value}.${ctlSel.value}`);
+        });
+        const clear = document.createElement("button");
+        clear.textContent = "clear";
+        // Unassigning has to be as easy as assigning, or a mistake is only fixable through the API.
+        clear.addEventListener("click", () => applyTarget(""));
+        buttons.append(assign, clear);
+        body.appendChild(buttons);
+
+        const now = document.createElement("div");
+        now.className = "surface-popup-row";
+        now.textContent = ctrl.target ? `now drives ${ctrl.target}` : "unassigned";
+        body.appendChild(now);
+    });
+    // ONE mechanism: assign mode, then a plain tap. That is what Ableton, Bitwig, Reaper, TouchOSC
+    // and Open Stage Control all do, and it is the only shape that works identically on a mouse and
+    // a touch screen. The alternatives each fail somewhere: right-click has no touch equivalent,
+    // long-press has no mouse equivalent, and double-click COLLIDES with the control itself (a
+    // double-click on a fader also moves it, so the assignment and the value fight over one
+    // gesture). A mode has no such conflict, because a tap means only one thing while it is on.
+    row.addEventListener("click", (e) => {
+        if (!assignMode) return;                  // off: a click is an ordinary control interaction
+        e.preventDefault();
+        e.stopPropagation();
+        show();
+    }, /*capture=*/true);
+    // A fader is a range input, which changes on pointerdown before any click fires: captured and
+    // swallowed here, or the tap that opens the picker also moves the fader it is opening.
+    row.addEventListener("pointerdown", (e) => {
+        if (!assignMode) return;
+        e.preventDefault();
+        e.stopPropagation();
+    }, /*capture=*/true);
+    // The same door for the keyboard. Without this, assign mode was reachable only by pointer: a
+    // keyboard user landing on a fader and pressing Enter or Space moved the control instead of
+    // opening its picker, so the assignment could not be made at all. Captured like the two above,
+    // for the same reason: a range input acts on the key before any click would fire.
+    row.addEventListener("keydown", (e) => {
+        if (!assignMode) return;
+        // EVERY key is swallowed while assigning, not just the two that open the picker: an arrow
+        // key on a focused fader still moves it, so a user tabbing through the surface in assign
+        // mode would change the values they are trying to re-target. In this mode the row is a
+        // button, and a button does not respond to arrows.
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.key === "Enter" || e.key === " ") show();
+    }, /*capture=*/true);
+    row.title = ctrl.target ? `drives ${ctrl.target}` : "unassigned";
+
+    // The LABEL says what it drives, so an assigned control is recognizable without opening
+    // anything: "fad1" is a position, "brightness" is what a user is looking for. The CONTROL half
+    // only, because the module is usually obvious from the control (a palette is Drivers') and a
+    // surface column is 26px wide. CSS ellipsis caps what does not fit.
+    const label = row.querySelector(".control-label");
+    if (label && ctrl.target) {
+        const dot = ctrl.target.indexOf(".");
+        label.textContent = dot >= 0 ? ctrl.target.slice(dot + 1) : ctrl.target;
+        label.title = `${displayName(ctrl.name)} drives ${ctrl.target}`;
+    }
 }
 
 function buildKnob(input, ctrl) {
@@ -3468,7 +3667,12 @@ function buildKnob(input, ctrl) {
     // a different origin and drew a quarter arc instead of the intended 270°.
     track.setAttribute("transform", "rotate(135 20 20)");
     fill.setAttribute("transform", "rotate(135 20 20)");
-    track.setAttribute("stroke-dasharray", `${CIRC * SWEEP} ${CIRC}`);
+    // An ENDLESS encoder's track is a full circle: the knob turns forever, so a track with a gap at
+    // the bottom draws end stops it does not have. Only the track changes; the fill and the pointer
+    // still sweep the same 270° against the value, exactly as a fader's do.
+    const endlessTrack = !!(ctrl && ctrl.encoder);
+    track.setAttribute("stroke-dasharray",
+                       endlessTrack ? `${CIRC} ${CIRC}` : `${CIRC * SWEEP} ${CIRC}`);
     const draw = () => {
         const [min, max] = bounds();
         const v = Number(input.value);
@@ -3493,6 +3697,9 @@ function buildKnob(input, ctrl) {
     // range input underneath makes the browser offer a resize cursor that suggests the wrong action.
     wrap.title = "drag up/down or scroll to turn";
     wrap.addEventListener("pointerdown", (e) => {
+        // In assign mode a tap picks a target, so the knob must not also turn: without this the
+        // value moved under the finger on the way to opening the picker.
+        if (assignMode) return;
         e.preventDefault();
         wrap.setPointerCapture(e.pointerId);
         wrap.classList.add("knob-turning");
@@ -3529,6 +3736,7 @@ function buildKnob(input, ctrl) {
     // Scroll to turn: the gesture people try first on anything round, and the one that works without
     // knowing the drag exists. `passive:false` so the page does not scroll underneath it.
     wrap.addEventListener("wheel", (e) => {
+        if (assignMode) return;
         e.preventDefault();
         const [min, max] = bounds();
         const step = Math.max(1, Math.round((max - min) / 100));
@@ -3542,54 +3750,142 @@ function buildKnob(input, ctrl) {
     return wrap;
 }
 
-// A seven-segment readout, the way the hardware shows a value: three digits, lit segments over an
-// unlit ghost so the display reads like a real LED module rather than plain text.
-const SEG7 = {
-    "0": "abcdef", "1": "bc", "2": "abdeg", "3": "abcdg", "4": "bcfg",
-    "5": "acdfg", "6": "acdefg", "7": "abc", "8": "abcdefg", "9": "abcdfg", " ": "",
-};
-function buildSevenSeg(input) {
-    const NS = "http://www.w3.org/2000/svg";
-    const wrap = document.createElement("div");
-    wrap.className = "seg7";
-    const svg = document.createElementNS(NS, "svg");
-    svg.setAttribute("viewBox", "0 0 42 20");
-    // Segment geometry per digit, in the standard a..g naming.
-    const seg = (x, y, horiz) => {
-        const p = document.createElementNS(NS, "rect");
-        p.setAttribute("x", String(x)); p.setAttribute("y", String(y));
-        p.setAttribute("width", horiz ? "7" : "2");
-        p.setAttribute("height", horiz ? "2" : "7");
-        p.setAttribute("rx", "1");
-        return p;
+// A SIXTEEN-SEGMENT readout: the ONE segmented display in the UI, used both for the numeric
+// readouts under the encoders and faders and for the surface's full-width display strip.
+//
+// It replaced a separate seven-segment renderer, which could only draw digits: two renderers meant
+// two geometries to keep visually matched (they drifted, and matching them again took several
+// passes), and it left the numeric readouts unable to ever show a word. Sixteen segments (the seven
+// segment bars with top, bottom and middle split in two, plus two verticals and four diagonals) is
+// what an alphanumeric LED module uses, and it renders M, W, N and K legibly where fourteen cannot.
+//
+// Segment names follow the usual convention:
+//   a1 a2   top left / right      f  h  j  k  b   upper verticals + diagonals
+//   g1 g2   middle left / right   e  n  m  l  c   lower verticals + diagonals
+//   d1 d2   bottom left / right
+// Space-separated so a segment name is a whole token: "a1" and "a" are different segments, and
+// substring matching would light both.
+const SEG16 = Object.fromEntries(Object.entries({
+    // Plain, not barred: a sixteen-segment module usually bars its zero to tell it from O, but these
+    // readouts are numeric and the strip shows words, so context settles it and a clean rectangle is
+    // what the readouts have always shown.
+    "0": "a1 a2 b c d1 d2 e f",       "1": "b c",
+    "2": "a1 a2 b g1 g2 e d1 d2",    "3": "a1 a2 b c d1 d2 g1 g2",
+    "4": "f b g1 g2 c",              "5": "a1 a2 f g1 g2 c d1 d2",
+    "6": "a1 a2 f g1 g2 e c d1 d2",  "7": "a1 a2 b c",
+    "8": "a1 a2 b c d1 d2 e f g1 g2","9": "a1 a2 b c d1 d2 f g1 g2",
+    "A": "a1 a2 b c e f g1 g2",      "B": "a1 a2 b c d1 d2 g2 j m",
+    "C": "a1 a2 f e d1 d2",          "D": "a1 a2 b c d1 d2 j m",
+    "E": "a1 a2 f e d1 d2 g1 g2",    "F": "a1 a2 f e g1 g2",
+    "G": "a1 a2 f e d1 d2 c g2",     "H": "b c e f g1 g2",
+    "I": "a1 a2 d1 d2 j m",          "J": "b c d1 d2 e",
+    "K": "e f g1 k l",               "L": "f e d1 d2",
+    "M": "b c e f h k",              "N": "b c e f h l",
+    "O": "a1 a2 b c d1 d2 e f",      "P": "a1 a2 b e f g1 g2",
+    "Q": "a1 a2 b c d1 d2 e f l",    "R": "a1 a2 b e f g1 g2 l",
+    "S": "a1 a2 f g1 g2 c d1 d2",    "T": "a1 a2 j m",
+    "U": "b c d1 d2 e f",            "V": "e f k n",
+    "W": "b c e f n l",              "X": "h k n l",
+    "Y": "h k m",                    "Z": "a1 a2 k n d1 d2",
+    "-": "g1 g2", "+": "g1 g2 j m", ".": "d1", ":": "j m", "/": "k n", " ": "",
+}).map(([ch, segs]) => [ch, new Set(segs.split(" ").filter(Boolean))]));
+
+// One character cell on the SEVEN-SEGMENT's own grid: 14 units wide, 20 tall, 2-unit strokes. The
+// readouts render 14 units at 14px (three cells in 42px), so the strip drawn on the identical grid
+// reads as the same instrument. The strip is then stretched horizontally to span the eight surface
+// columns, which is a small widening of the cells and leaves the stroke height untouched.
+function seg16Cell(NS, ox) {
+    const bar = (x, y, w, h) => {
+        const r = document.createElementNS(NS, "rect");
+        r.setAttribute("x", String(x)); r.setAttribute("y", String(y));
+        r.setAttribute("width", String(w)); r.setAttribute("height", String(h));
+        r.setAttribute("rx", "0.75");
+        return r;
     };
-    const digits = [];
-    for (let d = 0; d < 3; d++) {
-        const ox = d * 14 + 1;
-        const map = {
-            a: seg(ox + 2, 1, true),  b: seg(ox + 9, 2, false), c: seg(ox + 9, 11, false),
-            d: seg(ox + 2, 17, true), e: seg(ox, 11, false),    f: seg(ox, 2, false),
-            g: seg(ox + 2, 9, true),
-        };
-        for (const el of Object.values(map)) { el.setAttribute("class", "seg7-off"); svg.appendChild(el); }
-        digits.push(map);
-    }
-    wrap.appendChild(svg);
-    const draw = () => {
-        // Right-aligned, blank-padded: "  7", " 42", "255": how a 3-digit module displays.
-        const txt = String(Math.round(Number(input.value))).padStart(3, " ").slice(-3);
-        digits.forEach((map, i) => {
-            const on = SEG7[txt[i]] ?? "";
-            for (const [name, el] of Object.entries(map))
-                el.setAttribute("class", on.includes(name) ? "seg7-on" : "seg7-off");
-        });
+    // A diagonal is a 2-unit line with a round cap, matching the bars' weight and their rx rounding.
+    const diag = (x1, y1, x2, y2) => {
+        const l = document.createElementNS(NS, "line");
+        l.setAttribute("x1", String(x1)); l.setAttribute("y1", String(y1));
+        l.setAttribute("x2", String(x2)); l.setAttribute("y2", String(y2));
+        l.setAttribute("stroke-width", "1.5"); l.setAttribute("stroke-linecap", "round");
+        return l;
     };
+    // The seven-segment's own coordinates and cell size, but a 1.5-unit stroke against its 2.
+    //
+    // DELIBERATELY thinner, not a mismatch: a sixteen-segment glyph lights up to sixteen segments in
+    // the cell where a digit lights seven, and the two center verticals plus four diagonals crowd
+    // the middle. At an identical stroke width the strip reads noticeably bolder than the numbers
+    // below it, so matching the WEIGHT means drawing thinner than them.
+    const S = 1.5;
+    return {
+        a1: bar(ox + 2, 1, 3, S),        a2: bar(ox + 6, 1, 3, S),
+        d1: bar(ox + 2, 17.5, 3, S),     d2: bar(ox + 6, 17.5, 3, S),
+        g1: bar(ox + 2, 9.25, 3, S),     g2: bar(ox + 6, 9.25, 3, S),
+        f:  bar(ox + 0.25, 2, S, 7),     b:  bar(ox + 9.25, 2, S, 7),
+        e:  bar(ox + 0.25, 11, S, 7),    c:  bar(ox + 9.25, 11, S, 7),
+        j:  bar(ox + 4.75, 2, S, 7),     m:  bar(ox + 4.75, 11, S, 7),
+        h:  diag(ox + 2.7, 3.5, ox + 4.3, 7.9),   k: diag(ox + 8.3, 3.5, ox + 6.7, 7.9),
+        n:  diag(ox + 2.7, 16.9, ox + 4.3, 12.4), l: diag(ox + 8.3, 16.9, ox + 6.7, 12.4),
+    };
+}
+
+const EMPTY_SEGS = new Set();
+
+// Cells in the display strip: 28 at the seven-segment's 14-unit pitch, which is exactly the width
+// of the eight surface columns at one unit per pixel. Long enough for any built-in palette name.
+const SEG16_CHARS = 28;
+
+// The numeric readout under an encoder or fader: three cells bound to a range input, right-aligned
+// and blank-padded the way a three-digit module displays ("  7", " 42", "255"). Text-capable like
+// every cell here, so a readout that wants to show a word later needs no new renderer.
+function buildSegReadout(input) {
+    const wrap = buildSeg16Strip(3);
+    wrap.classList.add("seg-readout");
+    const draw = () => wrap._setText(
+        String(Math.round(Number(input.value))).padStart(3, " ").slice(-3));
     draw();
     input.addEventListener("input", draw);
     input.addEventListener("change", draw);
     // Same hook the knob exposes, so redrawRangeDecorations refreshes both without knowing what
     // either one is.
     wrap._redraw = draw;
+    return wrap;
+}
+
+// The display strip: `chars` cells of sixteen segments, driven by a string rather than a range
+// input. Returns the wrapper with a `_setText` hook the update path calls.
+function buildSeg16Strip(chars, stretch = false) {
+    const NS = "http://www.w3.org/2000/svg";
+    const wrap = document.createElement("div");
+    wrap.className = "seg16";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", `0 0 ${chars * 14} 20`);
+    // `stretch` fills the box in BOTH axes, which the display strip needs: it is set to the width of
+    // the eight surface columns, and preserving the ratio of a 28-cell box would shrink it to fit
+    // its 20px height and stop it reaching the eighth column. The three-cell readouts must NOT get
+    // this: their box is already the natural 42x20, and stretching blew the glyphs up to a solid
+    // bar.
+    if (stretch) svg.setAttribute("preserveAspectRatio", "none");
+    const cells = [];
+    for (let i = 0; i < chars; i++) {
+        const map = seg16Cell(NS, i * 14 + 1);
+        for (const el of Object.values(map)) {
+            el.setAttribute("class", "seg16-off");
+            svg.appendChild(el);
+        }
+        cells.push(map);
+    }
+    wrap.appendChild(svg);
+    wrap._setText = (text) => {
+        // Uppercased and left-aligned: the map is uppercase-only, and a name reads from the left the
+        // way a scribble strip does. An unmappable character shows as blank rather than as garbage.
+        const s = String(text ?? "").toUpperCase();
+        cells.forEach((map, i) => {
+            const on = SEG16[s[i]] ?? EMPTY_SEGS;
+            for (const [name, el] of Object.entries(map))
+                el.setAttribute("class", on.has(name) ? "seg16-on" : "seg16-off");
+        });
+    };
     return wrap;
 }
 
@@ -3903,15 +4199,21 @@ function fillEditableListDetail(panel, detail, moduleName, ctrlName, id, optionS
             // A row ACTION rather than a value: the click PATCHes the field like any edit, and the
             // source reads the arrival as "do this to this row" (ControlModule's preset `apply`).
             // Generic on purpose: a row button is a primitive the list has lacked, not a
-            // preset-specific affordance. Refetches, because an action typically changes the row set
-            // or the wider tree, unlike a field edit which the WS push reconciles.
+            // preset-specific affordance.
+            //
+            // `refetch` is opt-IN because a full refetch rebuilds every card, which collapses the
+            // expanded row the button lives in. That is right for an action that reshapes the tree
+            // (applying a preset) and wrong for one that arms a mode the user is about to use: the
+            // infrared learn button closed its own row and left nowhere to watch the result. Without
+            // it the WS push reconciles the row in place, which is what a field edit already relies
+            // on.
             const btn = document.createElement("button");
             btn.className = "list-field-btn";
             btn.textContent = f.label || f.name;
             btn.addEventListener("click", async () => {
                 btn.disabled = true;
                 await listSetField(moduleName, ctrlName, id, f.name, "");
-                refetchState();
+                if (f.refetch) refetchState();
                 btn.disabled = false;
             });
             vEl.appendChild(btn);
@@ -4102,6 +4404,10 @@ function relativeAge(sec) {
 
 function appendResetButton(row, moduleName, ctrl, def, applyVisually) {
     if (def === undefined || def === null) return;  // type not loaded yet or no default
+    // A SURFACE control has no default worth restoring: its value belongs to whatever it drives, so
+    // "reset" would drive that target to zero, which is a change rather than a reset. The row is
+    // also 26px wide, and the button was taking space from the thing being operated.
+    if (ctrl.fader || ctrl.encoder || ctrl.switchRow) return;
     const btn = document.createElement("button");
     btn.className = "reset-btn";
     btn.type = "button";
@@ -4549,6 +4855,10 @@ function updateModuleControls(mod) {
                 // has to know both shapes or the link goes stale on the next push.
                 const link = document.querySelector(`a.control-url[data-mid="${mid}"][data-key="${k}"]`);
                 if (link) { setUrlDisplay(link, ctrl.value); break; }
+                // The display strip is a segment renderer, not a span: it has to be patched through
+                // its own hook or the surface would freeze at whatever it showed on first render.
+                const strip = document.querySelector(`.seg16[data-mid="${mid}"][data-key="${k}"]`);
+                if (strip && strip._setText) { strip._setText(ctrl.value ?? ""); break; }
                 const span = document.querySelector(`span.display[data-mid="${mid}"][data-key="${k}"]`);
                 if (span) setText(span, String(ctrl.value ?? ""));
                 break;
@@ -4599,6 +4909,21 @@ function updateModuleControls(mod) {
                 // rebuild on a real change is momentary and a direct consequence of that change.
                 const sig = JSON.stringify([rows, details]);
                 if (list.dataset.sig === sig) break;   // unchanged: leave the DOM (and any open edit) alone
+
+                // A field the user is STILL EDITING survives the rebuild. Committing one field
+                // changes the list, which rebuilds every row from the device's state, and any other
+                // field typed but not yet committed went back to what the device still had: every
+                // field had to be entered twice, the second time sticking only because the first
+                // had committed by then. The row fields already stamp dragTs on each keystroke, so
+                // the same one-second cooldown every other control uses applies here too.
+                const held = new Map();
+                for (const el of list.querySelectorAll("[data-dragkey]")) {
+                    const ts = dragTs[el.dataset.dragkey] || 0;
+                    if (Date.now() - ts < 1000) held.set(el.dataset.dragkey, el.value);
+                }
+                // Which field had focus, so typing can continue into the rebuilt one rather than
+                // into nothing: the rebuild replaces the node, and focus goes with it.
+                const focusedKey = document.activeElement?.dataset?.dragkey;
                 list.dataset.sig = sig;
                 // Preserve which detail panels are open across the rebuild. Capture the SAME key
                 // listRowKey emits: the row's stable `id` (on entry.dataset.rowId for editable
@@ -4618,6 +4943,18 @@ function updateModuleControls(mod) {
                      moduleName: mod.name, ctrlName: ctrl.name, optionSets: ctrl.optionSets || {}});
                 const newScroll = list.querySelector(".list-scroll");
                 if (newScroll) newScroll.scrollTop = prevScroll;
+                // Put the in-progress values back, and the caret with them where the field is the
+                // one being typed in: restoring the text alone would send the cursor to the start.
+                for (const el of list.querySelectorAll("[data-dragkey]")) {
+                    if (!held.has(el.dataset.dragkey)) continue;
+                    const wasFocused = el.dataset.dragkey === focusedKey;
+                    el.value = held.get(el.dataset.dragkey);
+                    if (wasFocused) el.focus();
+                    if (wasFocused && typeof el.setSelectionRange === "function") {
+                        const end = el.value.length;
+                        try { el.setSelectionRange(end, end); } catch { /* not a text input */ }
+                    }
+                }
                 break;
             }
         }
@@ -4744,7 +5081,8 @@ function emojiTagsFor(t) {
 function mlTypeForRole(role) {
     return role === "effect" ? "MoonLiveEffect"
          : role === "layout" ? "MoonLiveLayout"
-         : role === "modifier" ? "MoonLiveModifier" : null;
+         : role === "modifier" ? "MoonLiveModifier"
+         : role === "service" ? "MoonLiveService" : null;
 }
 
 /// Every shipped script, as picker rows, for the roles a parent accepts.
@@ -4771,7 +5109,7 @@ async function mlScriptItems(roles) {
                 remote: isRemote,
                 // Without the extension: it is the file's business, not the reader's, and it keeps
                 // the row sorting next to the compiled modules rather than in a block of ".mle".
-                displayName: (isRemote ? "\u2601 " : "") + n.replace(/\.ml[elm]$/i, ""),
+                displayName: (isRemote ? "\u2601 " : "") + n.replace(/\.ml[elms]$/i, ""),
                 role,
                 // The scripted marker is what makes the row's kind visible, so it is added rather
                 // than assumed: a script whose own tags happen to omit it still reads correctly.
@@ -5632,7 +5970,8 @@ async function mlFetchCatalog() {
 
 /// Which catalog group a picker's extension belongs to, so a script picker offers only its own role.
 function mlGroupForExt(ext) {
-    return ext === ".mle" ? "effects" : ext === ".mll" ? "layouts" : ext === ".mlm" ? "modifiers" : null;
+    return ext === ".mle" ? "effects" : ext === ".mll" ? "layouts"
+         : ext === ".mlm" ? "modifiers" : ext === ".mls" ? "services" : null;
 }
 
 // Download one factory script and save it to the device.
@@ -6422,9 +6761,9 @@ function fmMountEditor(host, relPath, opts = {}) {
     // The footer carries Save and the status line, UNLESS the host supplies both: a card already has
     // a toolbar of file actions, so they belong there, and an empty strip under the box is a gap
     // rather than a layout.
-    // Highlighting is for SCRIPTS: a .mle/.mll/.mlm is MoonLive, which is C++, so Prism's own C++
+    // Highlighting is for SCRIPTS: a .mle/.mll/.mlm/.mls is MoonLive, which is C++, so Prism's own C++
     // grammar paints it with nothing of ours to maintain. A .json or a .txt edits as plain text.
-    const hlOn = /\.(mle|mll|mlm)$/i.test(relPath || "");
+    const hlOn = /\.(mle|mll|mlm|mls)$/i.test(relPath || "");
 
     // The highlight layer sits BEHIND a transparent textarea, both sharing one box and one set of
     // font metrics: a textarea cannot color its own text, and this is the standard way around that.

@@ -5,6 +5,7 @@ add_executable(mm_tests
     # core/
     unit/core/unit_PartitionTables.cpp
     unit/core/unit_SpscRing.cpp
+    unit/core/unit_AnalogService.cpp
     unit/core/unit_AudioCapture.cpp
     unit/core/unit_platform_audiofft.cpp
     unit/core/unit_Buffer.cpp
@@ -17,7 +18,9 @@ add_executable(mm_tests
     unit/core/unit_fields.cpp
     unit/core/unit_crc.cpp
     unit/core/unit_AudioService_sync.cpp
-    unit/core/unit_IrService.cpp
+    unit/core/unit_ButtonService.cpp
+    unit/core/unit_MoonLiveService.cpp
+    unit/core/unit_InfraredService.cpp
     unit/core/unit_TcpConnect.cpp
     unit/core/unit_MqttPacket.cpp
     unit/core/unit_MqttModule.cpp

@@ -89,7 +89,7 @@ public:
     void tick1s() MM_NONBLOCKING override;
 
     /// Feed inbound bytes as if they arrived from the broker socket — the entry the host unit tests
-    /// drive (there's no live broker in ctest). Mirrors IrService::injectCodeForTest.
+    /// drive (there's no live broker in ctest). Mirrors InfraredService::injectCodeForTest.
     void feedForTest(const uint8_t* bytes, size_t len);
 
     /// Test seam: capture every outbound packet sendPacket() writes, so a unit test can assert what

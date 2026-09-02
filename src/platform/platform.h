@@ -1500,23 +1500,108 @@ inline constexpr size_t kI2cBusUnavailable = static_cast<size_t>(-1);
 // maxOut), or kI2cBusUnavailable if the bus couldn't be opened.
 size_t i2cScan(uint16_t sda, uint16_t scl, uint8_t* out, size_t maxOut);
 
+// --- GPIO as an input/output ROLE ------------------------------------------------------------
+// The pair above (gpioCapability / gpioLiveState) answers "what is this pin, and what is it doing"
+// for the pin map: a diagnostic, sampled on tick1s. These three are the working seam a module uses
+// to actually READ a switch or DRIVE a line, which nothing could do before: a button, a foot pedal,
+// a relay enable. Deliberately minimal and synchronous, matching irRead's shape - the module owns
+// debouncing and edge detection, because a bouncing contact is a property of the switch, not of the
+// platform.
+
+/// The internal pull to enable on an input. A mechanical switch needs one; a pin driven by another
+/// device usually does not.
+enum class GpioPull : uint8_t { None = 0, Up, Down };
+
+/// Configure one GPIO as an input, with an optional internal pull. Idempotent: re-configuring a pin
+/// the caller already owns is not an error, so a live pin-control change just re-runs it. Returns
+/// false when `gpio` is not a usable input on this chip (gpioCapability().validGpio is false).
+/// Desktop accepts any pin and reads back what setTestGpioLevel injected, so button logic is
+/// host-testable with no hardware.
+bool gpioInputBegin(uint8_t gpio, GpioPull pull);
+
+/// Read a pin configured by gpioInputBegin: true = HIGH. Cheap enough for a per-tick poll (one
+/// register read on ESP32); no allocation, never blocks. An unconfigured pin reads false.
+///
+/// RAW: the level as the pad reads it, deliberately unfiltered. The ESP32 has a hardware glitch
+/// filter, and this seam does not use it, because debouncing is a property of the SWITCH rather than
+/// of the pin: the time constant belongs to the module that knows what is wired (ButtonService owns
+/// it, in milliseconds it can explain). A filter here would be a second, invisible one underneath,
+/// tuned in clock cycles, that no test could reach and no other platform could reproduce.
+bool gpioRead(uint8_t gpio);
+
+/// Drive one GPIO as a push-pull output. Configures it on first use, so no separate begin: a caller
+/// that owns the pin just writes it. Returns false when the pin has no output driver
+/// (gpioCapability().outputCapable is false, e.g. classic ESP32 34-39). This is what a relay enable
+/// needs, and what MoonLive's "write to gpio" builtin will call.
+bool gpioWrite(uint8_t gpio, bool high);
+
+/// Test-only (desktop): make gpioRead(gpio) return `level`. Same shape as setTestGpioCapability.
+void setTestGpioLevel(uint8_t gpio, bool level);
+void clearTestGpioLevel();
+
+/// Read one ADC pin. Returns false when `gpio` has no ADC on this chip, or the read failed.
+///
+/// RAW COUNTS, deliberately, in the chip's own resolution (0..4095 on ESP32 at 12 bits). Not
+/// millivolts: everything this seam exists for maps a travel to a range anyway (a pedal's usable
+/// throw is never the full sweep, so `AnalogService` carries min/max/invert per row), and a
+/// millivolt figure would add per-chip calibration machinery to serve a conversion the caller
+/// immediately undoes. A sensor that reports an actual voltage can have `adcReadMv` the day one
+/// exists; inventing it first would be a seam with no caller.
+///
+/// Configures the pin on first use, so there is no separate begin: the same shape `gpioWrite` uses,
+/// and for the same reason (a caller that owns the pin just reads it). Cheap enough for a per-tick
+/// poll and never blocks.
+///
+/// Unfiltered, exactly as `gpioRead` is: a potentiometer's jitter is a property of the pot and the
+/// wiring, so smoothing belongs to the module that knows what is connected. `AnalogService` owns
+/// its own, in a time constant it can explain.
+bool adcRead(uint8_t gpio, uint16_t& raw);
+
+/// The full-scale count `adcRead` reports on this platform, so a caller can scale without knowing
+/// the chip: 4095 at the ESP32's 12 bits. One number rather than a bit-depth, because a caller
+/// scaling a range wants the maximum, not the exponent that produced it.
+uint16_t adcMaxCount();
+
+/// Read one ADC pin as MILLIVOLTS. Returns false where `adcRead` would, or where the chip carries
+/// no calibration data.
+///
+/// The counterpart of `adcRead`, and NOT a convenience over it: the raw count is not a fixed
+/// fraction of full scale, because every chip's converter is nonlinear in its own measured way. The
+/// ESP32 stores per-chip correction in eFuse and the IDF applies it, so this is the only way to get
+/// a figure that means volts rather than "counts on this particular part".
+///
+/// The caller that needs this is a sensor whose reading is a VOLTAGE: a divider measuring the
+/// supply rail, a shunt amplifier reporting current. Scaling those from raw counts gives a number
+/// that looks plausible and is wrong, which is worse than refusing. A pedal or a pot needs no such
+/// thing and should keep using `adcRead`: it maps a travel to a range, and a calibrated voltage
+/// would be converted straight back out again.
+bool adcReadMv(uint8_t gpio, uint16_t& mv);
+
+/// Test-only (desktop): make adcReadMv(gpio) return `mv`.
+void setTestAdcMv(uint8_t gpio, uint16_t mv);
+
+/// Test-only (desktop): make adcRead(gpio) return `raw`. The counterpart of setTestGpioLevel, so a
+/// pedal's mapping is host-testable with no hardware.
+void setTestAdcValue(uint8_t gpio, uint16_t raw);
+void clearTestAdcValue();
+
 // Poll the IR receiver on `pin` for a decoded remote frame. Returns true and writes the
 // frame into `codeOut` when a fresh code is available since the last call, false otherwise
 // (nothing received, or IR decode unavailable on this target). Self-contained like i2cScan -
 // it owns whatever peripheral it needs (an RMT RX channel on ESP32). Non-blocking: safe to
-// call every tick. IrService is the sole caller. ESP32 decodes NEC over RMT; desktop has no IR
+// call every tick. InfraredService is the sole caller. ESP32 decodes NEC over RMT; desktop has no IR
 // hardware and always returns false.
 bool irRead(uint16_t pin, uint32_t& codeOut);
 
 // Release the IR RX channel so the pin it held is free for another module. irRead lazily reopens
-// it on the next call, so this is safe to call any time; IrService calls it on disable (the pin
+// it on the next call, so this is safe to call any time; InfraredService calls it on disable (the pin
 // then shows as freed in the pin map, and is genuinely reusable). No-op if no channel is open, and
 // on desktop (no IR hardware).
 void irStop();
 
 // Open (or confirm) the IR RX channel on `pin` and report whether it's live: the difference between
 // "a pin is configured" (which irRead can't distinguish from "no code this tick") and "the RMT-RX
-// channel actually bound and is armed". IrService calls this to give a truthful status: a busy pin or
+// channel actually bound and is armed". InfraredService calls this to give a truthful status: a busy pin or
 // a bad GPIO fails to open, and the user must see that, not a stale "ready". Idempotent for an
 // unchanged pin (reuses the open channel). Returns true on ESP32 when the channel is live; desktop
 // has no IR hardware, so it returns true (no channel to fail: the desktop status stays "ready").

@@ -2174,8 +2174,74 @@ size_t i2cScan(uint16_t /*sda*/, uint16_t /*scl*/, uint8_t* /*out*/, size_t /*ma
     return kI2cBusUnavailable;
 }
 
-// No IR receiver on the host — the seam is a no-op so IrService runs (its buttons still work
+// No IR receiver on the host: the seam is a no-op so InfraredService runs (its buttons still work
 // through Scheduler::setControl); reception is ESP32-only.
+// GPIO on a host has no pins, so reads come from what a test injected. That is the point: the
+// button/pedal logic (debounce, edge, latch) is ordinary code and gets tested here, leaving only
+// the electrical half for the bench.
+namespace {
+// A flat table rather than a map: a pin number IS the index, there are at most 48 of them, and this
+// allocates nothing.
+constexpr uint8_t kMaxGpio = 48;
+bool g_gpioLevel[kMaxGpio] = {};
+}
+
+bool gpioInputBegin(uint8_t gpio, GpioPull pull) {
+    if (gpio >= kMaxGpio) return false;
+    // The PULL sets the resting level, as it does on a board: a pull-up idles HIGH, a pull-down
+    // idles LOW. Without this every pin idled LOW, which an active-low button reads as HELD, so a
+    // desktop with no hardware reported a phantom press the moment a row named a pin. A test that
+    // wants a different level still calls setTestGpioLevel after this.
+    g_gpioLevel[gpio] = (pull == GpioPull::Up);
+    return true;
+}
+
+bool gpioRead(uint8_t gpio) { return gpio < kMaxGpio && g_gpioLevel[gpio]; }
+
+bool gpioWrite(uint8_t gpio, bool high) {
+    // A write is observable through gpioRead, so a test can drive a pin and read back what a module
+    // put there (a relay enable, MoonLive's write-then-read hello world).
+    if (gpio >= kMaxGpio) return false;
+    g_gpioLevel[gpio] = high;
+    return true;
+}
+
+void setTestGpioLevel(uint8_t gpio, bool level) { if (gpio < kMaxGpio) g_gpioLevel[gpio] = level; }
+void clearTestGpioLevel() { for (bool& b : g_gpioLevel) b = false; }
+
+// --- ADC ---
+// The desktop has no converter, so a read reports whatever a test injected. Same arrangement as the
+// GPIO level above: a pedal's mapping, its min/max/invert and its smoothing are ordinary logic, and
+// this is what lets all of it be pinned on the host with no hardware attached.
+namespace {
+uint16_t g_adcValue[kMaxGpio] = {};
+// Millivolts are injected SEPARATELY from the raw count rather than derived from it. On a board the
+// two are related by the chip's own eFuse curve, which a host cannot reproduce, so deriving one here
+// would let a test pass against an arithmetic relationship that does not hold on hardware.
+uint16_t g_adcMv[kMaxGpio] = {};
+}
+
+bool adcRead(uint8_t gpio, uint16_t& raw) {
+    if (gpio >= kMaxGpio) return false;
+    raw = g_adcValue[gpio];
+    return true;
+}
+
+// The ESP32's 12-bit full scale, reported here too so a host test scales exactly as the board does:
+// a mapping verified against 4095 on the desktop cannot then behave differently on a device.
+uint16_t adcMaxCount() { return 4095; }
+
+void setTestAdcValue(uint8_t gpio, uint16_t raw) { if (gpio < kMaxGpio) g_adcValue[gpio] = raw; }
+void clearTestAdcValue() { for (uint16_t& v : g_adcValue) v = 0; for (uint16_t& v : g_adcMv) v = 0; }
+
+bool adcReadMv(uint8_t gpio, uint16_t& mv) {
+    if (gpio >= kMaxGpio) return false;
+    mv = g_adcMv[gpio];
+    return true;
+}
+
+void setTestAdcMv(uint8_t gpio, uint16_t mv) { if (gpio < kMaxGpio) g_adcMv[gpio] = mv; }
+
 bool irRead(uint16_t /*pin*/, uint32_t& /*codeOut*/) { return false; }
 void irStop() {}   // no IR hardware on desktop
 bool irChannelReady(uint16_t /*pin*/) { return true; }   // no channel to fail on desktop

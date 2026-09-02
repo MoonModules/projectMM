@@ -50,7 +50,11 @@ namespace mm { using namespace ::mm; using namespace ::mm::moonlive;
 // Golden values, recorded from this backend. See the .inc for what they are and are not.
 #define MM_GOLD_GRID_LEN  225u
 #define MM_GOLD_FX_LEN    105u
-#define MM_GOLD_FILLLOOP_LEN 253u  // fits now: the host arguments left the register file
+#define MM_GOLD_FILLLOOP_LEN 254u  // fits now: the host arguments left the register file.
+                                   // 253 -> 254 when the sys-var read moved to the WIDE l32i:
+                                   // this script reads `height` (arena offset 64), which the
+                                   // narrow form's 4-bit offset field could not reach and
+                                   // silently wrapped to offset 0. One byte per sys-var read.
 #define MM_GOLD_FXLOOP_LEN  190u
 #define MM_GOLD_FXLOOP_HASH 307181036u
 #define MM_GOLD_FX_HASH   2796457628u
@@ -266,6 +270,39 @@ TEST_CASE("Xtensa mulhi emits mulsh, the signed high half") {
     CHECK(a.bytes()[2] == 0xb2);                   // mulsh, against mull's 0x82
     CHECK(a.bytes()[0] == 0x40);
     CHECK(a.bytes()[1] == 0x23);
+}
+
+TEST_CASE("Xtensa load32/store32 reach the WHOLE arena, not just the first 60 bytes") {
+    // THE BUG THIS PINS: l32i.n and s32i.n carry a FOUR-BIT word-scaled offset, so they reach byte
+    // 60 and no further. The control arena puts the script's members in [0, 64) and the host system
+    // variables at 64 and above, so `width` at offset 64 encoded as 64/4 = 16, overflowed the field
+    // to 0, and read the script's FIRST MEMBER instead. Every 2D script on every Xtensa board saw
+    // width/height/depth as whatever that member held, usually 0: lines.mle pinned its green row to
+    // y=0 and fractal.mle looped zero times. RISC-V and the host were correct throughout, which is
+    // why nothing caught it: the host JIT is arm64, and no golden pinned a sys-var load.
+    //
+    // Pinned as LENGTH rather than bytes because the point is which FORM was chosen: 2 bytes for the
+    // narrow one, 3 for the wide RRI8. A regression that silently returns to the narrow form for a
+    // high offset shows up here as 2.
+    using Asm = mm_xtensa_backend::mm::moonlive::XtensaAssembler;
+    using mm_xtensa_backend::mm::moonlive::R0;
+    using mm_xtensa_backend::mm::moonlive::R1;
+    Asm narrow(64); narrow.load32(R0, R1, 60);      // the last offset the narrow form can reach
+    CHECK(narrow.size() == 2);
+    Asm wide(64);   wide.load32(R0, R1, 64);        // the first it cannot: sys vars start here
+    CHECK(wide.size() == 3);
+
+    Asm sNarrow(64); sNarrow.store32(R1, 60, R0);
+    CHECK(sNarrow.size() == 2);
+    Asm sWide(64);   sWide.store32(R1, 64, R0);
+    CHECK(sWide.size() == 3);
+
+    // The whole arena is reachable, including the depth slot above the system variables. Checked as
+    // a SIZE as well as a non-overflow: a narrow encoding would wrap 72 to offset 8 and report no
+    // overflow at all, which is exactly how the original bug read the wrong byte in silence.
+    Asm top(64); top.load32(R0, R1, 72);   // the depth slot's word, above every system variable
+    CHECK_FALSE(top.overflowed());
+    CHECK(top.size() == 3);                // the wide form, never the 2-byte narrow one
 }
 
 TEST_CASE("Xtensa shlImm encodes 32-n where sarImm encodes n") {

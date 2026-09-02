@@ -6,7 +6,7 @@ The user-added **Service** modules — capability bridges the device provides or
 
 ## Services
 
-The top-level container the Service modules hang under — a grouping node with no controls of its own, the same shape as `Effects`/`Drivers` in the light domain. Adds/removes its children (Audio, IR) at runtime via the generic module machinery.
+The top-level container the Service modules hang under — a grouping node with no controls of its own, the same shape as `Effects`/`Drivers` in the light domain. Adds/removes its children (Audio, OSC, Infrared, Button, Analog, MoonLiveService) at runtime via the generic module machinery.
 
 Detail: [technical](moxygen/Services.md)
 
@@ -71,19 +71,91 @@ checkout and no tooling, just the app and the session file from the latest relea
 
 Detail: [technical](moxygen/OscModule.md)
 
-<a id="ir"></a>
+<a id="infrared"></a>
 
-### IR
+### Infrared
 
-A Service (added per board): an IR remote receiver that drives other modules' controls through the shared `Scheduler::setControl` primitive. It **learns** any remote (NEC-over-RMT): pick an action in `learn`, press a button to bind its code. What each action does + the status-line messages: ⌄ details.
+A Service (added per board): an infrared remote receiver whose **rows** map learned codes onto other modules' controls, through the shared `Scheduler::setControl` primitive. A remote press and an OSC message are indistinguishable to whatever they drive.
 
-<img src="../../assets/core/IrService.png" width="300" alt="IR module controls">
+**A row is the binding.** There is no fixed set of actions: a remote has twenty keys, so it has twenty rows, each learned and each pointing wherever you want. Set a row's `learn` and the next code received binds to it, which is how any remote works without a shipped code table. Arming one row disarms any other, so a code cannot bind twice.
 
-- `pin` — the IR receiver GPIO (unset until entered; on the SE16 it shares GPIO 5 with the Ethernet MISO via the board switch, on the LightCrafter it is its own GPIO 4 alongside Ethernet).
-- `learn` — pick an action to bind (`on/off` / brightness up / brightness down / palette next / palette prev); the next received code binds to it, then learning disarms. The first option, `off`, is the disarmed state (bind nothing), not a light action.
-- `code on/off` / `code brightness up` / `code brightness down` / `code palette next` / `code palette prev` — read-only, the learned code for each action (persisted).
+A fresh service starts with no rows. Add one, learn a key, pick a target.
 
-Detail: [technical](moxygen/IrService.md)
+- `pin`: the receiver GPIO (unset until entered; on the SE16 it shares GPIO 5 with the Ethernet MISO via the board switch, on the LightCrafter it is its own GPIO 4). The status line reports whether the channel actually opened, not merely that a pin is set.
+- `codes`: the mapping rows. Per row: `code` (the learned frame, editable as hex so a code read elsewhere can be typed), `learn` (arm this row for the next frame), and the shared target fields below.
+
+Detail: [technical](moxygen/InfraredService.md)
+
+<a id="button"></a>
+
+### Button
+
+A Service (added per board): **a list of buttons**, each on its own GPIO, each driving a control through the same `Scheduler::setControl` primitive the infrared service uses. A press and a UI click are the same thing to whatever they drive.
+
+A list because boards have more than one: a QuinLED Dig-Next-2 has three, a stage rig has a pedalboard. A **foot pedal needs no module of its own**: electrically it is a momentary switch on a jack, so it is a row with `kind = set`.
+
+- `debounceMs`: how long a level must hold before it counts as a real press. Debounced here rather than in the platform layer, because a bouncing contact is a property of the switch. Polled at 50 Hz: a contact closes for tens of milliseconds.
+- `buttons`: the rows. Per row: `pin`, `activeLow` (on for the usual wiring, a switch to ground with an internal pull-up; off for a switch feeding 3V3), a live `pressed` readout so you can see a button work before binding it, and the shared target fields below.
+
+#### What a row targets
+
+Both services share these three fields, because what happens after an input fires is the same whichever input fired it:
+
+- `target`: `Module.control`. Pointing at `Control.switch1` puts the input on the control surface, where OSC, MQTT and the web UI reach the same switch; pointing at `Drivers.on` drives that control directly. The surface is the recommended path, not a rule.
+- `kind`: `toggle` reads the target and writes its inverse (a light switch); `set` writes `value` while held and 0 on release (hold-to-activate, a pedal); `delta` adds `value`, clamped to the control's own bounds (a brightness nudge, a palette step). **`set` is Button-only**: it needs a release to write the 0, and a remote reports a press with no release, so an infrared row uses `toggle` or `delta`.
+- `value`: what `set` writes, or the signed nudge `delta` applies. Unused by `toggle`.
+
+Only a `set` row acts on the release. A toggle or a delta acting on both edges would fire twice for one push.
+
+Detail: [technical](moxygen/ButtonService.md)
+
+### Analog
+
+A Service (added per board): **a list of ADC pins**, each driving a control with a value rather than an event. The continuous twin of Button, which drives the same controls from a contact.
+
+An **expression pedal** is the shape this is built around, and it is why a row carries more than a pin. A pedal's usable travel is never the full sweep: it rests at some count and tops out well below full scale, so a raw reading mapped straight through gives a control that never reaches either end and jumps at one of them.
+
+- `smoothing`: how hard the running average pulls toward each new reading, as a percentage. 100 follows the pin exactly; a low number is a heavy filter that lags. An ADC pin jitters by a few counts even at rest, so some filtering is always wanted.
+- `deadband`: how far the smoothed value must move, in target units, before the control is written. Without it a resting pedal rewrites its target fifty times a second forever.
+- `inputs`: the rows. Per row: `pin`, `inMin` / `inMax` (the raw counts the travel actually spans), `invert` (a pot wired the other way round), live `raw` and `value` readouts so a pedal can be calibrated by watching it move, and the shared target fields above.
+
+The travel is mapped into **the control's own range**, so a pedal is configured once and works on any target: a Select with five options takes 0..4, a bool takes on and off. A row pointed at a pad does nothing, because there is no sensible reading of a pedal held at 40% of a preset.
+
+Reversed `inMin`/`inMax` means inverted, rather than being an error: calibrating by moving the pedal to each end sets whichever end was reached first.
+
+Scripts reach the same hardware with `adcRead(pin)` and `adcMax()`, which is the path for a sensor whose mapping is a condition rather than a range.
+
+Detail: [technical](moxygen/AnalogService.md)
+
+### MoonLiveService
+
+A Service (added per board): **a MoonLive script that reads hardware and drives controls**. The
+flexible half of the input story, and the twin of a scripted effect: `ButtonService` and `Infrared`
+are the compiled, shipped paths for the inputs a board is built with, and this is the path for
+everything else.
+
+Why a script rather than another module: a mapping row says "this pin drives that control", which is
+the right shape for a button and the wrong one for anything with a condition in it. A row cannot say
+"when the distance drops under 50 cm", cannot hold the state that stops it firing every tick, and
+cannot choose between two presets. A script can, so a sensor nobody wrote a module for needs a
+datasheet and eight lines rather than a firmware release.
+
+- `script`: which `.mls` file to run, picked from the script library. Naming a different one
+  recompiles live; a compile error shows on the status line and the service does nothing until it is
+  fixed.
+- Everything the script declares with `addControl` appears as a real control on the card, bound to
+  the value the running code reads, so a slider move lands without a recompile.
+
+A script runs on `tick20ms`, the 50 Hz poll, not the render tick: a contact closes for tens of
+milliseconds and a sensor answers at its own rate, so a heavy script costs its own tick rather than
+stuttering the lights at the frame rate.
+
+What a script can reach: `gpioRead(pin)` and `gpioWrite(pin, on)` for digital hardware, `adcRead(pin)` with `adcMax()` for analog, and
+`setControl(name, value)` for the output, which writes the CONTROL SURFACE and nothing else. That is
+the same two-step model the mapping rows use, so a script and a row reach a driver by one path
+rather than two.
+
+Detail: [technical](moxygen/MoonLiveService.md)
 
 ## Audio — details
 
@@ -213,8 +285,18 @@ placeholder rather than as part of the contract above.
 **It does not reach a Mackie desk.** The X-Touch and QCon Pro G2 speak Mackie Control over MIDI,
 not OSC: see [control surfaces](../../reference/control-surfaces.md) for what would.
 
-## IR — details
+## Infrared: details
 
-The learned actions drive the `Drivers` module: `on/off` toggles `Drivers.on` (master power), brightness up/down nudge `Drivers.brightness` (±16, clamped 0–255), and palette next/prev step `Drivers.palette`.
+Nothing is fixed in firmware. A row IS the binding: learn a key onto it, pick what it drives from
+the target dropdown, and pick whether the press toggles that control, or nudges it by a value. A
+handset with twenty keys is twenty rows. `set` is offered only where an input reports a release, so
+it is unavailable here: a remote code is a single event, and a `set` row would latch the control
+with nothing able to clear it.
 
-The status line reports setup state ("set pin to receive" / "ready"), the learn prompt, a binding ("learned … = 0x…"), a fired action ("Drivers.brightness → N", "Drivers.on → off"), and an unbound code ("received 0x… (unassigned)").
+One key binds to one row. Learning a key that another row already holds moves the binding rather
+than duplicating it, because dispatch fires the first row holding a code and a duplicate could
+never run.
+
+The status line reports setup state ("set pin to receive" / "ready"), the learn prompt, a binding
+("learned 0x..."), what a press did or why it did not, and an unbound code ("received 0x...
+(unassigned)").

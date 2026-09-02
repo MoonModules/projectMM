@@ -358,13 +358,51 @@ static constexpr uint8_t kAddrScratch = 12;   // a12
 // and they cover offsets 0..60 in steps of 4 — every arena offset, since the arena is 64 bytes.
 // RRRN format: imm/4 in the top nibble, then base, then the value/destination, then 0x8 (load)
 // or 0x9 (store).
+// l32i.n / s32i.n are the NARROW forms, and their offset field is FOUR BITS: it counts 4-byte
+// words, so it reaches offset 60 and no further. Past that the field overflows into the neighbouring
+// nibbles and the instruction silently addresses somewhere else entirely.
+//
+// That is not a theoretical bound. The control arena puts the script's members in [0, 64) and the
+// HOST SYSTEM VARIABLES at 64 and above, so `width` (offset 64) encoded as 64/4 = 16, wrapped the
+// 4-bit field to 0, and read the script's FIRST MEMBER instead. Every 2D script on every Xtensa
+// board therefore saw width, height and depth as whatever its first member happened to hold,
+// usually 0: `lines.mle` drew its green row at y=0 forever, and `fractal.mle` looped zero times and
+// painted a band. It reproduced on an ESP32-S3 and a classic ESP32, was correct on RISC-V and on the
+// host, and no test caught it because the host JIT is arm64 and the golden bytes never pinned a
+// sys-var load.
+//
+// The wide RRI8 forms carry an 8-bit word-scaled offset (0..1020), which covers the whole arena, so
+// they are used whenever the narrow one cannot reach. The narrow form is kept for what it does fit,
+// since it is 2 bytes against 3 and a member access is the common case.
+static constexpr int32_t kNarrowMax32 = 60;   // 4-bit field * 4-byte words
+
 void XtensaAssembler::load32(Reg d, Reg base, int32_t imm) {
-    emit2(uint16_t(((uint32_t(imm) / 4) << 12) | (uint32_t(ar(base)) << 8) |
-                   (uint32_t(ar(d)) << 4) | 0x8));
+    if (imm >= 0 && imm <= kNarrowMax32 && (imm % 4) == 0) {
+        emit2(uint16_t(((uint32_t(imm) / 4) << 12) | (uint32_t(ar(base)) << 8) |
+                       (uint32_t(ar(d)) << 4) | 0x8));                       // l32i.n
+        return;
+    }
+    // l32i aD, aBase, #off (RRI8, offset in 4-byte words). The byte layout is the one spillStore
+    // uses: {(t << 4) | 0x2, (op << 4) | s, imm8}, where the SECOND byte packs the opcode nibble in
+    // its high half and the base register in its low half. spillStore's literal 0x61 is exactly
+    // that: opcode 6 (s32i) over base a1. Writing a bare register there drops the opcode.
+    if (imm < 0 || imm / 4 > 255 || (imm % 4) != 0) { overflow_ = true; return; }
+    const uint8_t b[3] = {uint8_t((ar(d) << 4) | 0x2), uint8_t((0x2 << 4) | ar(base)),
+                          uint8_t(imm / 4)};
+    emit(b, 3);
 }
 void XtensaAssembler::store32(Reg base, int32_t imm, Reg val) {
-    emit2(uint16_t(((uint32_t(imm) / 4) << 12) | (uint32_t(ar(base)) << 8) |
-                   (uint32_t(ar(val)) << 4) | 0x9));
+    if (imm >= 0 && imm <= kNarrowMax32 && (imm % 4) == 0) {
+        emit2(uint16_t(((uint32_t(imm) / 4) << 12) | (uint32_t(ar(base)) << 8) |
+                       (uint32_t(ar(val)) << 4) | 0x9));                     // s32i.n
+        return;
+    }
+    // s32i aVal, aBase, #off (RRI8): opcode nibble 6 in the second byte's high half, where l32i
+    // uses 2. The first byte's low nibble stays 0x2 (the RRI8 instruction group).
+    if (imm < 0 || imm / 4 > 255 || (imm % 4) != 0) { overflow_ = true; return; }
+    const uint8_t b[3] = {uint8_t((ar(val) << 4) | 0x2), uint8_t((0x6 << 4) | ar(base)),
+                          uint8_t(imm / 4)};
+    emit(b, 3);
 }
 // The indexed forms compute the address into a12 first, the same dedicated scratch the byte path
 // uses: it sits outside the R0..R9 vreg map, so it never clobbers a live vreg.

@@ -6,7 +6,7 @@ This is a **fork of this project** building a commercial product on it: **HELIO*
 
 **Branch note: the work is not on the default branch.** `main` tracks our upstream and has not moved since 2026-07-09; every change lives in named branches, so each month below carries a **Branches** line for what moved on them. The repository has no issues and publishes no releases.
 
-## August 2026 (to the 21st)
+## August 2026
 
 - **HELIO product layer, stabilised.** One large commit ("Stabilize HELIO scenes, previews, output, and onboarding", 147 files vs our `main`) covering scene playback, the browser preview, LED output and first-run onboarding for the sphere product.
 - A browser-side optical simulation of the lamp (`helio-preview.js`, `heliotrace.js`, ~2,000 lines) renders internal reflections and an optional wall bounce, so the dashboard preview resembles the physical object rather than a flat grid.
@@ -16,7 +16,7 @@ This is a **fork of this project** building a commercial product on it: **HELIO*
 
 - **Branches:** only `codex/helio-private-wip` moved (2026-08-20). The other seven have been dormant since July.
 
-_Checked: commits on `main` for author-date 2026-08-01..2026-08-21 (0); commits on all 9 branches vs `MoonModules/projectMM@main` for the same window (2 commits, both on `codex/helio-private-wip`); releases published (none); issue search `repo:Funkelfetisch/projectMM is:issue created:2026-08-01..2026-08-21` and the same with `closed:` (0 results each, the repository has no issue tracker activity)._
+_Checked: commits on `main` for 2026-08-01..2026-09-01 (0; `main` last moved 2026-07-09); commits on all 9 branches for the same window, filtered to fork-authored work (1: `a649bd47` on `codex/helio-private-wip`, 2026-08-20, 139 files; the branch's other August commits are upstream `MoonModules/projectMM` carry-forward); no commit on any branch between 2026-08-21 and 2026-09-01; releases published (none); issue search `repo:Funkelfetisch/projectMM is:issue created:2026-08-01..2026-08-31` and the same with `closed:` (0 results each, the repository has no issue tracker activity)._
 
 ## July 2026
 

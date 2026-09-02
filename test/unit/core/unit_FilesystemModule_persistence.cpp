@@ -941,3 +941,127 @@ TEST_CASE("FilesystemModule restores a control that only exists after prepare()"
     mm::platform::fsSetRoot(".");
     std::filesystem::remove_all(tmpRoot);
 }
+
+// --- Live state is not configuration ------------------------------------------------------------
+
+namespace {
+/// A module with one saved setting and one live value, the shape a control surface has: the
+/// assignment is configuration, the position mirrors whatever it drives.
+struct LiveAndSaved : public mm::MoonModule {
+    uint8_t position = 0;      // live: something drives this continuously
+    uint8_t setting  = 7;      // ordinary configuration
+    void defineControls() override {
+        controls_.addControl("position", position, 0, 255);
+        controls_.setLive(controls_.count() - 1);
+        controls_.addControl("setting", setting, 0, 255);
+    }
+};
+}  // namespace
+
+TEST_CASE("A live control is left out of the saved file, and its neighbours still save") {
+    // A surface control's position MIRRORS its target, and that target persists in its own module.
+    // Writing the position too would store the same fact twice and let the two disagree on load.
+    char root[256];
+    std::snprintf(root, sizeof(root), "/tmp/mm_live_save_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(root);
+    mm::platform::fsSetRoot(root);
+    REQUIRE(mm::platform::fsMount());
+
+    LiveAndSaved m;
+    m.setName("Surface");
+    m.rebuildControls();
+    m.position = 200;
+    m.setting  = 42;
+
+    mm::FilesystemModule fs;
+    mm::JsonSink sink;
+    REQUIRE(fs.saveSubtreeTo(&m, sink));
+    const std::string json(sink.data(), sink.size());
+    CHECK(json.find("\"setting\"")  != std::string::npos);   // configuration is written
+    CHECK(json.find("\"position\"") == std::string::npos);   // live state is not
+
+    mm::platform::fsSetRoot("");
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("Writing a live control does not mark its module dirty, so a slow save still lands") {
+    // The defect this exists to remove: FilesystemModule waits two seconds after the LAST dirty
+    // mark, so a control written at 50 Hz re-stamped the timer forever and the module's file was
+    // never written AT ALL. Measured on an ESP32-P4: lastSaved only aged, across minutes. Everything
+    // else in that file, the assignments included, was lost on a power cut.
+    mm::Scheduler sched;
+    auto* m = new LiveAndSaved();
+    m->setName("Surface");
+    sched.addModule(m);
+    sched.setup();
+
+    m->clearDirty();
+    // A live write: applied, but not configuration.
+    CHECK(sched.setControl("Surface", "position", "{\"value\":123}") ==
+          mm::Scheduler::SetControlResult::Ok);
+    CHECK(m->position == 123);          // the value DID apply
+    CHECK_FALSE(m->dirty());          // and did not ask to be saved
+
+    // An ordinary setting still does.
+    CHECK(sched.setControl("Surface", "setting", "{\"value\":9}") ==
+          mm::Scheduler::SetControlResult::Ok);
+    CHECK(m->dirty());
+
+    sched.release();
+}
+
+TEST_CASE("A continuous writer cannot defer a pending save forever") {
+    // The starvation the deferral ceiling exists to remove, and the reason `live` alone was not
+    // enough: marking a surface control live stops IT from marking dirty, but the moment that
+    // control is ASSIGNED to something (a fader driving Drivers.brightness, two clicks in the UI)
+    // the write lands on an ordinary persisted control and the 50 Hz stream of dirty marks resumes
+    // one module downstream. Measured on an ESP32-P4: an unrelated setting changed while a sweep
+    // ran was still unsaved 56 seconds later.
+    //
+    // So the fix belongs in the mechanism: however often marks arrive, a pending save lands within
+    // MAX_DEFER_MS. The debounce still coalesces a burst; it just cannot be extended without end.
+    CHECK(mm::FilesystemModule::MAX_DEFER_MS > mm::FilesystemModule::DEBOUNCE_MS);
+
+    char root[256];
+    std::snprintf(root, sizeof(root), "/tmp/mm_defer_%u",
+                  static_cast<unsigned>(mm::platform::millis()));
+    std::filesystem::remove_all(root);
+    mm::platform::fsSetRoot(root);
+
+    mm::Scheduler sched;
+    auto* fs = new mm::FilesystemModule();
+    auto* m  = new LiveAndSaved();
+    m->setName("Surface");
+    m->setTypeName("LiveAndSaved");   // saveSubtree derives the filename from this; "" is skipped
+    sched.addModule(fs);
+    sched.addModule(m);
+    sched.setup();
+
+    // A change worth saving, then a continuous stream of marks arriving faster than the debounce,
+    // which is what a 50 Hz writer produces.
+    CHECK(sched.setControl("Surface", "setting", "{\"value\":99}") ==
+          mm::Scheduler::SetControlResult::Ok);
+    REQUIRE(m->dirty());
+
+    // Drive the module's clock past the ceiling, re-marking throughout so the debounce never
+    // expires on its own. Each tick1s is a second of device time.
+    // Re-claim the static instance: an earlier test in this binary may still own it, and
+    // noteDirty() is a static that routes to whoever holds it.
+    fs->setScheduler(&sched);
+
+    // A continuous writer: marks arrive faster than the debounce, so the debounce alone would never
+    // expire. The ceiling clock is AGED rather than waited out, because what is under test is the
+    // comparison in tick1s, not the host's ability to sleep for ten seconds.
+    for (int s = 0; s < 30 && m->dirty(); s++) {
+        mm::FilesystemModule::noteDirty();          // the continuous writer, faster than the debounce
+        fs->ageDirtyForTest(1000);                  // ... and a second of device time goes by
+        fs->tick1s();
+    }
+    // Within the ceiling the save must have landed, despite marks never stopping.
+    CHECK_FALSE(m->dirty());
+
+    sched.release();
+    mm::platform::fsSetRoot("");
+    std::filesystem::remove_all(root);
+}

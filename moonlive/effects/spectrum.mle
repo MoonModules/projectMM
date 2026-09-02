@@ -5,36 +5,30 @@ class SpectrumEffect {
   byte fadeAmt = 60;
   byte peakHold = 1;
 
-  int n = 0;
-  int b = 0;
-  int mag = 0;
-  int top = 0;
-  int bars = 0;
-
   int dimensions() { return 2; }
 
   string tags() { return "💫🎶"; }
 
   void defineControls() {
-    addControl("gain", gain, 10, 255);              // how hard the bands are driven
-    addControl("fadeAmt", fadeAmt, 1, 200);         // how fast a bar falls back
-    addControl("peakHold", peakHold, 0, 1);         // cap each bar with a bright peak
+    addControl("gain", gain, 10, 255); // how hard the bands are driven
+    addControl("fadeAmt", fadeAmt, 1, 200); // how fast a bar falls back
+    addControl("peakHold", peakHold, 0, 1); // cap each bar with a bright peak
   }
 
   void tick() {
     fade(fadeAmt);
 
-    bars = width;
+    int bars = width;
     if (width < 2) { bars = height; }
     for (int x = 0; x < bars; x = x + 1) {
-      b = div(x * 16, bars);
-      mag = div(audioBand(b) * gain, 100);
+      int b = div(x * 16, bars);
+      int mag = div(audioBand(b) * gain, 100);
       if (mag > 255) { mag = 255; }
       if (width < 2) {
         setRGB(x, div(paletteR(b * 16, 255) * mag, 255), div(paletteG(b * 16, 255) * mag, 255),
                div(paletteB(b * 16, 255) * mag, 255));
       }
-      top = div(mag * height, 256);
+      int top = div(mag * height, 256);
       if (width < 2) { top = 0; }
       for (int y = 0; y < top; y = y + 1) {
         setRGB((height - 1 - y) * width + x, paletteR(b * 16, 255), paletteG(b * 16, 255),

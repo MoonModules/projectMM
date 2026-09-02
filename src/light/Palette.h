@@ -345,6 +345,16 @@ private:
 // one {"name":…,"colors":"rrggbb rrggbb …"} object per built-in, the colors being the 16 entries
 // as space-separated hex so the UI renders each option as a gradient swatch.
 inline void paletteOptions(JsonSink& sink) {
+    // A NAME REQUEST rather than an options dump: core sets nameIndex to ask "what is palette N
+    // called", because it has no palette table of its own and this function pointer is the only
+    // channel it has into the light domain (Control.h, PaletteOptionsFn). Answering here costs one
+    // branch and no extra descriptor field, where dumping all 60 options just to read one name out
+    // of ~9 KB of JSON would need a buffer no ESP32 task stack can spare.
+    if (sink.nameIndex() >= 0) {
+        const uint8_t i = static_cast<uint8_t>(sink.nameIndex());
+        if (i < palettes::kCount) sink.append(palettes::kBuiltins[i].name);
+        return;
+    }
     for (uint8_t i = 0; i < palettes::kCount; i++) {
         const Palette p = Palettes::fromBuiltin(i);
         sink.appendf("%s{\"name\":\"%s\",\"colors\":\"", i > 0 ? "," : "", palettes::kBuiltins[i].name);

@@ -30,7 +30,13 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-BUILTINS = ROOT / "src" / "light" / "moonlive" / "MoonLiveBuiltins_light.h"
+# Both vocabularies: a .mle compiles against the light table, a .mls against the service one, and
+# this check asks only "is the script valid C++", which needs every name either could call.
+BUILTINS = [
+    ROOT / "src" / "core" / "moonlive" / "MoonLiveBuiltins_common.h",
+    ROOT / "src" / "light" / "moonlive" / "MoonLiveBuiltins_light.h",
+    ROOT / "src" / "core" / "moonlive" / "MoonLiveBuiltins_service.h",
+]
 SYSVARS = ("t", "width", "height", "depth", "xPos", "yPos", "zPos")
 
 CXX = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
@@ -38,13 +44,15 @@ pytestmark = pytest.mark.skipif(CXX is None, reason="no C++ compiler on PATH")
 
 
 def builtins():
-    """Every builtin the light vocabulary registers: (name, argc).
+    """Every builtin either vocabulary registers: (name, argc).
 
-    Read from the registration table itself. A hand-kept list here would pass while the engine
+    Read from the registration tables themselves. A hand-kept list here would pass while the engine
     moved on, which is the exact failure this test exists to prevent one level down.
     """
-    text = BUILTINS.read_text(encoding="utf-8")
-    found = re.findall(r't\.add\(\{"([A-Za-z0-9_]+)",\s*(\d+)', text)
+    found = []
+    for path in BUILTINS:
+        text = path.read_text(encoding="utf-8")
+        found += re.findall(r't\.add\(\{"([A-Za-z0-9_]+)",\s*(\d+)', text)
     assert found, "no builtins parsed: the registration shape changed"
     # A name can register twice (an overload by arity); keep the widest, since a call with fewer
     # arguments still matches a declaration with more only if defaults exist, which these lack.
@@ -63,7 +71,13 @@ def prelude() -> str:
     ]
     for v in SYSVARS:
         lines.append(f"inline int {v} = 0;")
+    # Builtins whose first argument is a NAME IN QUOTES are declared by hand below: the generated
+    # int-only form cannot express a string, and emitting both makes the call ambiguous rather than
+    # resolving it.
+    byString = {"addControl", "setControl"}
     for name, argc in builtins():
+        if name in byString:
+            continue
         args = ", ".join(["int"] * argc)
         lines.append(f"int {name}({args});")
     # toFixed/toInt are KEYWORDS, not builtins: the compiler recognizes them inline so each costs
@@ -72,6 +86,9 @@ def prelude() -> str:
     lines.append("int toFixed(int); int toInt(int);")
     # addControl binds a member BY REFERENCE and takes its label as a string, so the generated
     # int-only declaration cannot express it. Both member widths, spelled out.
+    # setControl names its target in quotes, so the int-only declaration cannot express it either.
+    # Same exception as addControl below, for the same reason.
+    lines.append("int setControl(string, int);")
     lines.append("void addControl(string, int&, int, int);")
     lines.append("void addControl(string, byte&, int, int);")
     lines.append("void addControl(string, bool&);")

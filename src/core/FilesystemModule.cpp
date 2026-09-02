@@ -61,7 +61,12 @@ void FilesystemModule::tick1s() MM_NONBLOCKING {
     if (!mounted_ || !scheduler_) return;
     updateLastSavedStr();
     if (!dirtyPending_) return;
-    if (platform::millis() - lastDirtyMs_ < DEBOUNCE_MS) return;
+    const uint32_t now = platform::millis();
+    // Two conditions, either of which saves. The DEBOUNCE waits for quiet, which coalesces a burst
+    // of edits into one write. The CEILING bounds how long that wait may last, because a continuous
+    // writer never goes quiet: without it a control driven at 50 Hz re-stamped the debounce forever
+    // and nothing in that module's file was ever saved, including settings a person had chosen.
+    if (now - lastDirtyMs_ < DEBOUNCE_MS && now - firstDirtyMs_ < MAX_DEFER_MS) return;
     flush();
 }
 
@@ -113,7 +118,11 @@ void FilesystemModule::flushPending() {
 
 void FilesystemModule::noteDirty() {
     if (!instance_) return;
-    instance_->lastDirtyMs_ = platform::millis();
+    const uint32_t now = platform::millis();
+    // The FIRST mark of a pending save starts the ceiling clock; later marks only move the debounce.
+    // Stamping both on every mark is what let a continuous writer defer the save forever.
+    if (!instance_->dirtyPending_) instance_->firstDirtyMs_ = now;
+    instance_->lastDirtyMs_ = now;
     instance_->dirtyPending_ = true;
 }
 

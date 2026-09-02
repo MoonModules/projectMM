@@ -56,7 +56,7 @@
       "description": "Stage a script before the card points at it.",
       "op": "write_file",
       "path": "/moonlive/sc-ctrl.mle",
-      "value": "class E { tick() { setRGB(0, 200, 60, 255); } }\n"
+      "value": "class E { void tick() { setRGB(0, 200, 60, 255); } }\n"
     },
     {
       "name": "add-control-script",
@@ -107,30 +107,30 @@
         },
         "esp32": {
           "tick_us": {
-            "p50": 942,
-            "p95": 942,
+            "p50": 11725,
+            "p95": 17023,
             "min": 942,
-            "max": 942,
-            "n": 1,
-            "samples": [942]
+            "max": 17023,
+            "n": 4,
+            "samples": [942, 17023, 11725, 14408]
           },
           "free_heap": {
-            "p50": 97028,
+            "p50": 35132,
             "p95": 97028,
-            "min": 97028,
+            "min": 33664,
             "max": 97028,
-            "n": 1,
-            "samples": [97028]
+            "n": 4,
+            "samples": [97028, 48500, 35132, 33664]
           },
           "max_alloc_block": {
-            "p50": 94208,
+            "p50": 26624,
             "p95": 94208,
-            "min": 94208,
+            "min": 26624,
             "max": 94208,
-            "n": 1,
-            "samples": [94208]
+            "n": 4,
+            "samples": [94208, 38912, 26624, 26624]
           },
-          "last_updated": "2026-07-24"
+          "last_updated": "2026-09-01"
         }
       }
     },
@@ -147,7 +147,7 @@
       "description": "Save the script file: editing a script in place is what re-derives its controls.",
       "op": "write_file",
       "path": "/moonlive/sc-ctrl.mle",
-      "value": "class SpeedEffect {\n  byte speed = 7;\n  defineControls() { addControl(\"speed\", speed, 0, 15); }\n  tick() { setRGB(speed, 0, 0, 255); }\n}\n"
+      "value": "class SpeedEffect {\n  byte speed = 7;\n  void defineControls() { addControl(\"speed\", speed, 0, 15); }\n  void tick() { setRGB(speed, 0, 0, 255); }\n}\n"
     },
     {
       "name": "set-source-with-control",
@@ -198,30 +198,30 @@
         },
         "esp32": {
           "tick_us": {
-            "p50": 963,
-            "p95": 963,
+            "p50": 12046,
+            "p95": 13439,
             "min": 963,
-            "max": 963,
-            "n": 1,
-            "samples": [963]
+            "max": 13439,
+            "n": 4,
+            "samples": [963, 13439, 13055, 12046]
           },
           "free_heap": {
-            "p50": 97244,
+            "p50": 34936,
             "p95": 97244,
-            "min": 97244,
+            "min": 33664,
             "max": 97244,
-            "n": 1,
-            "samples": [97244]
+            "n": 4,
+            "samples": [97244, 48244, 34936, 33664]
           },
           "max_alloc_block": {
-            "p50": 94208,
+            "p50": 26624,
             "p95": 94208,
-            "min": 94208,
+            "min": 26624,
             "max": 94208,
-            "n": 1,
-            "samples": [94208]
+            "n": 4,
+            "samples": [94208, 38912, 26624, 26624]
           },
-          "last_updated": "2026-07-24"
+          "last_updated": "2026-09-01"
         }
       }
     },
@@ -306,7 +306,7 @@
       "description": "Save the script file: editing a script in place is what re-derives its controls.",
       "op": "write_file",
       "path": "/moonlive/sc-ctrl.mle",
-      "value": "class SpeedEffect {\n  byte speed = 7;\n  byte hue = 128;\n  defineControls() { addControl(\"speed\", speed, 0, 15); addControl(\"hue\", hue, 0, 255); }\n  tick() { setRGB(speed, hue, 0, 255); }\n}\n"
+      "value": "class SpeedEffect {\n  byte speed = 7;\n  byte hue = 128;\n  void defineControls() { addControl(\"speed\", speed, 0, 15); addControl(\"hue\", hue, 0, 255); }\n  void tick() { setRGB(speed, hue, 0, 255); }\n}\n"
     },
     {
       "name": "edit-source-two-controls",
@@ -357,30 +357,30 @@
         },
         "esp32": {
           "tick_us": {
-            "p50": 934,
-            "p95": 934,
+            "p50": 11682,
+            "p95": 14965,
             "min": 934,
-            "max": 934,
-            "n": 1,
-            "samples": [934]
+            "max": 14965,
+            "n": 4,
+            "samples": [934, 14965, 11682, 11725]
           },
           "free_heap": {
-            "p50": 97252,
+            "p50": 34800,
             "p95": 97252,
-            "min": 97252,
+            "min": 32296,
             "max": 97252,
-            "n": 1,
-            "samples": [97252]
+            "n": 4,
+            "samples": [97252, 46048, 34800, 32296]
           },
           "max_alloc_block": {
-            "p50": 94208,
+            "p50": 26624,
             "p95": 94208,
-            "min": 94208,
+            "min": 26624,
             "max": 94208,
-            "n": 1,
-            "samples": [94208]
+            "n": 4,
+            "samples": [94208, 38912, 26624, 26624]
           },
-          "last_updated": "2026-07-24"
+          "last_updated": "2026-09-01"
         }
       }
     },
@@ -389,7 +389,7 @@
       "description": "Save the script file: editing a script in place is what re-derives its controls.",
       "op": "write_file",
       "path": "/moonlive/sc-ctrl.mle",
-      "value": "class SpeedEffect {\n  byte speed = 7;\n  defineControls() { addControl(\"speed\", speed, 0, 15); }\n  tick() { setRGB(speed, 0, 0, 255); }\n}\n"
+      "value": "class SpeedEffect {\n  byte speed = 7;\n  void defineControls() { addControl(\"speed\", speed, 0, 15); }\n  void tick() { setRGB(speed, 0, 0, 255); }\n}\n"
     },
     {
       "name": "edit-source-shrink-to-one-control",
@@ -440,30 +440,30 @@
         },
         "esp32": {
           "tick_us": {
-            "p50": 957,
-            "p95": 957,
+            "p50": 12785,
+            "p95": 13557,
             "min": 957,
-            "max": 957,
-            "n": 1,
-            "samples": [957]
+            "max": 13557,
+            "n": 4,
+            "samples": [957, 13528, 12785, 13557]
           },
           "free_heap": {
-            "p50": 97460,
+            "p50": 34732,
             "p95": 97460,
-            "min": 97460,
+            "min": 34376,
             "max": 97460,
-            "n": 1,
-            "samples": [97460]
+            "n": 4,
+            "samples": [97460, 48068, 34732, 34376]
           },
           "max_alloc_block": {
-            "p50": 94208,
+            "p50": 26624,
             "p95": 94208,
-            "min": 94208,
+            "min": 26624,
             "max": 94208,
-            "n": 1,
-            "samples": [94208]
+            "n": 4,
+            "samples": [94208, 38912, 26624, 26624]
           },
-          "last_updated": "2026-07-24"
+          "last_updated": "2026-09-01"
         }
       }
     },
@@ -472,7 +472,7 @@
       "description": "Save the script file: editing a script in place is what re-derives its controls.",
       "op": "write_file",
       "path": "/moonlive/sc-ctrl.mle",
-      "value": "class Broken {\n  byte speed = ;\n  tick() { setRGB(0,0,0,0); }\n}\n"
+      "value": "class Broken {\n  byte speed = ;\n  void tick() { setRGB(0,0,0,0); }\n}\n"
     },
     {
       "name": "edit-source-broken",
@@ -523,30 +523,30 @@
         },
         "esp32": {
           "tick_us": {
-            "p50": 901,
-            "p95": 901,
+            "p50": 11562,
+            "p95": 14993,
             "min": 901,
-            "max": 901,
-            "n": 1,
-            "samples": [901]
+            "max": 14993,
+            "n": 4,
+            "samples": [901, 14993, 11562, 12160]
           },
           "free_heap": {
-            "p50": 97728,
+            "p50": 34520,
             "p95": 97728,
-            "min": 97728,
+            "min": 32068,
             "max": 97728,
-            "n": 1,
-            "samples": [97728]
+            "n": 4,
+            "samples": [97728, 44020, 34520, 32068]
           },
           "max_alloc_block": {
-            "p50": 94208,
+            "p50": 26624,
             "p95": 94208,
-            "min": 94208,
+            "min": 26624,
             "max": 94208,
-            "n": 1,
-            "samples": [94208]
+            "n": 4,
+            "samples": [94208, 38912, 26624, 26624]
           },
-          "last_updated": "2026-07-24"
+          "last_updated": "2026-09-01"
         }
       }
     },
@@ -555,7 +555,7 @@
       "description": "Save the script file: editing a script in place is what re-derives its controls.",
       "op": "write_file",
       "path": "/moonlive/sc-ctrl.mle",
-      "value": "class BrightEffect {\n  byte bright = 200;\n  defineControls() { addControl(\"bright\", bright, 0, 255); }\n  tick() { fill(0, 0, bright); }\n}\n"
+      "value": "class BrightEffect {\n  byte bright = 200;\n  void defineControls() { addControl(\"bright\", bright, 0, 255); }\n  void tick() { fill(0, 0, bright); }\n}\n"
     },
     {
       "name": "edit-source-recover",
@@ -572,10 +572,10 @@
             "p95": 10,
             "min": 1,
             "max": 10,
-            "n": 15,
-            "samples": [2, 1, 3, 1, 10, 1, 1, 6, 1, 1, 1, 1, 1, 2, 1]
+            "n": 16,
+            "samples": [2, 1, 3, 1, 10, 1, 1, 6, 1, 1, 1, 1, 1, 2, 1, 1]
           },
-          "last_updated": "2026-08-31"
+          "last_updated": "2026-09-02"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -606,30 +606,30 @@
         },
         "esp32": {
           "tick_us": {
-            "p50": 1245,
-            "p95": 1245,
+            "p50": 12901,
+            "p95": 13473,
             "min": 1245,
-            "max": 1245,
-            "n": 1,
-            "samples": [1245]
+            "max": 13473,
+            "n": 4,
+            "samples": [1245, 12986, 12901, 13473]
           },
           "free_heap": {
-            "p50": 97440,
+            "p50": 34608,
             "p95": 97440,
-            "min": 97440,
+            "min": 31412,
             "max": 97440,
-            "n": 1,
-            "samples": [97440]
+            "n": 4,
+            "samples": [97440, 47696, 34608, 31412]
           },
           "max_alloc_block": {
-            "p50": 94208,
+            "p50": 26624,
             "p95": 94208,
-            "min": 94208,
+            "min": 26624,
             "max": 94208,
-            "n": 1,
-            "samples": [94208]
+            "n": 4,
+            "samples": [94208, 38912, 26624, 26624]
           },
-          "last_updated": "2026-07-24"
+          "last_updated": "2026-09-01"
         }
       }
     },
@@ -688,30 +688,30 @@
         },
         "esp32": {
           "tick_us": {
-            "p50": 957,
-            "p95": 957,
+            "p50": 11620,
+            "p95": 15111,
             "min": 957,
-            "max": 957,
-            "n": 1,
-            "samples": [957]
+            "max": 15111,
+            "n": 4,
+            "samples": [957, 15111, 11620, 12098]
           },
           "free_heap": {
-            "p50": 97240,
+            "p50": 34312,
             "p95": 97240,
-            "min": 97240,
+            "min": 33676,
             "max": 97240,
-            "n": 1,
-            "samples": [97240]
+            "n": 4,
+            "samples": [97240, 47428, 34312, 33676]
           },
           "max_alloc_block": {
-            "p50": 94208,
+            "p50": 26624,
             "p95": 94208,
-            "min": 94208,
+            "min": 26624,
             "max": 94208,
-            "n": 1,
-            "samples": [94208]
+            "n": 4,
+            "samples": [94208, 38912, 26624, 26624]
           },
-          "last_updated": "2026-07-24"
+          "last_updated": "2026-09-01"
         }
       }
     },
@@ -730,10 +730,37 @@
             "p95": 7,
             "min": 1,
             "max": 7,
-            "n": 15,
-            "samples": [1, 2, 3, 5, 1, 1, 7, 1, 1, 1, 1, 1, 1, 1, 1]
+            "n": 16,
+            "samples": [1, 2, 3, 5, 1, 1, 7, 1, 1, 1, 1, 1, 1, 1, 1, 1]
           },
-          "last_updated": "2026-08-31"
+          "last_updated": "2026-09-02"
+        },
+        "esp32": {
+          "tick_us": {
+            "p50": 12841,
+            "p95": 13581,
+            "min": 11640,
+            "max": 13581,
+            "n": 3,
+            "samples": [13581, 12841, 11640]
+          },
+          "free_heap": {
+            "p50": 34500,
+            "p95": 44300,
+            "min": 32116,
+            "max": 44300,
+            "n": 3,
+            "samples": [44300, 34500, 32116]
+          },
+          "max_alloc_block": {
+            "p50": 26624,
+            "p95": 38912,
+            "min": 26624,
+            "max": 38912,
+            "n": 3,
+            "samples": [38912, 26624, 26624]
+          },
+          "last_updated": "2026-09-01"
         }
       }
     }

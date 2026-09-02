@@ -143,7 +143,9 @@ CORE_MODULES = [
     "ImprovProvisioningModule",
     "AudioService",
     "I2cScanModule",
-    "IrService",
+    "InfraredService",
+    "ButtonService",
+    "MoonLiveService",
 ]
 
 # Core modules that are CHILDREN of another module (so they have no top-level nav entry
@@ -153,12 +155,14 @@ CORE_NAV_ROOT = {
     "MqttModule": "NetworkModule",
     "DevicesModule": "NetworkModule",
     "ImprovProvisioningModule": "NetworkModule",
-    # Audio / IR are user-added Services (children of the Services container); I2cScan is a
+    # Audio / infrared are user-added Services (children of the Services container); I2cScan is a
     # fixed System child (wired-by-code). They're added/present per-board and never exist in
     # the desktop tree — so they're captured against an ESP32, where these entries route the
     # shot to the right nav root.
     "AudioService": "Services",
-    "IrService": "Services",
+    "InfraredService": "Services",
+    "ButtonService": "Services",
+    "MoonLiveService": "Services",
     "I2cScanModule": "SystemModule",
 }
 # FileManagerModule, FirmwareUpdateModule, SystemModule, NetworkModule are top-level
@@ -529,11 +533,27 @@ def _screenshot_card(page: Page, module_id: str, out_path: Path) -> bool:
     return True
 
 
+def _click_child_tab(page: Page, module_id: str) -> None:
+    """Open the tab for `module_id`, if its parent shows its children behind a tab strip.
+
+    A TOP-LEVEL module renders one child at a time behind tabs (app.js renderChildTabs), so a
+    sibling's card is not merely scrolled out of view: it is not in the DOM at all. Without this the
+    capture only ever saw whichever child happened to be the active tab, and every other child of
+    Services / System failed with "screenshot failed". A no-op where there is no tab strip, so the
+    flat case is unchanged.
+    """
+    tab = page.query_selector(f'button.tab[data-tab-mid="{module_id}"]')
+    if tab:
+        tab.click()
+        page.wait_for_timeout(500)
+
+
 def screenshot_module(page: Page, host: str, module_id: str,
                       nav_root: str, out_path: Path) -> bool:
-    """Reload the UI, click nav, screenshot the module card."""
+    """Reload the UI, click nav, open the child's tab if there is one, screenshot the card."""
     _load_page(page, host)
     _click_nav(page, nav_root)
+    _click_child_tab(page, module_id)
     return _screenshot_card(page, module_id, out_path)
 
 

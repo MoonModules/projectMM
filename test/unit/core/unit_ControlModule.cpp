@@ -464,9 +464,18 @@ TEST_CASE("ControlModule saves a preset onto the chosen pad") {
     CHECK(row.find("\"slot\":20") != std::string::npos);
 }
 
-// The encoder row exists and is unassigned: the affordance ships before the binding UI, so an
-// encoder must be inert rather than driving something by accident.
-TEST_CASE("ControlModule has an encoder row that drives nothing yet") {
+// encoder1 selects the palette; the rest are unbound until the assignment UI lands, so they must be
+// inert rather than driving something by accident. Brightness is the canary: it belongs to fader1,
+// and no encoder may touch it.
+// A surface control's own name, not the hidden assignment beside it: every fader, switch and
+// encoder now has a "<name>Target" control holding what it drives, and a prefix match counts both.
+static bool isSurfaceControl(const char* name, const char* prefix) {
+    const size_t plen = std::strlen(prefix);
+    if (std::strncmp(name, prefix, plen) != 0) return false;
+    return std::strstr(name, "Target") == nullptr;
+}
+
+TEST_CASE("only the bound encoder drives anything") {
     Device d;
     auto brightness = [&] {
         auto& cs = d.drivers->controls();
@@ -479,7 +488,7 @@ TEST_CASE("ControlModule has an encoder row that drives nothing yet") {
     auto& cs = d.control->controls();
     uint8_t found = 0;
     for (uint8_t i = 0; i < cs.count(); i++) {
-        if (std::strncmp(cs[i].name, "enc", 3) != 0) continue;
+        if (!isSurfaceControl(cs[i].name, "enc")) continue;
         found++;
         *static_cast<uint8_t*>(cs[i].ptr) = 123;
         d.control->onControlChanged(cs[i].name);
@@ -911,12 +920,12 @@ TEST_CASE("ControlModule exposes eight switches, ahead of the encoders and fader
     auto& cs = d.control->controls();
     int firstSwitch = -1, firstEncoder = -1, firstFader = -1, switches = 0;
     for (uint8_t i = 0; i < cs.count(); i++) {
-        if (std::strncmp(cs[i].name, "switch", 6) == 0) {
+        if (isSurfaceControl(cs[i].name, "switch")) {
             switches++;
             if (firstSwitch < 0) firstSwitch = i;
-        } else if (std::strncmp(cs[i].name, "encoder", 7) == 0 && firstEncoder < 0) {
+        } else if (isSurfaceControl(cs[i].name, "encoder") && firstEncoder < 0) {
             firstEncoder = i;
-        } else if (std::strncmp(cs[i].name, "fader", 5) == 0 && firstFader < 0) {
+        } else if (isSurfaceControl(cs[i].name, "fader") && firstFader < 0) {
             firstFader = i;
         }
     }
@@ -1111,27 +1120,41 @@ TEST_CASE("a touched control is not driven, and resyncs when released") {
     d.control->removeSurface(&s);
 }
 
-// A Mackie encoder sends DETENTS, not a position, so the accumulation has to happen here: the
-// transport knows only "one click clockwise". Clamped, because a knob has no travel limit.
-TEST_CASE("an encoder delta accumulates and clamps at both ends") {
+// An endless encoder reports MOVEMENT, not position: a detent goes straight to whatever the encoder
+// targets, and the TARGET's own type and bounds decide the result. The surface holds no copy, which
+// is what removed the mirroring the absolute form needed (pull every second, push changes back,
+// remember what each surface was told).
+TEST_CASE("an encoder detent steps its target, which owns the value and its bounds") {
     Device d;
-    auto value = [&](uint8_t i) {
-        auto& cs = d.control->controls();
-        char name[16];
-        std::snprintf(name, sizeof(name), "encoder%u", static_cast<unsigned>(i + 1));
-        for (uint8_t k = 0; k < cs.count(); k++)
-            if (std::strcmp(cs[k].name, name) == 0) return *static_cast<uint8_t*>(cs[k].ptr);
+    // encoder1 targets Drivers.palette. Reading the TARGET, not the encoder: the encoder has no
+    // value to read, and a test asserting on one would be asserting the old contract.
+    auto palette = [&] {
+        auto& cs = d.drivers->controls();
+        for (uint8_t i = 0; i < cs.count(); i++)
+            if (std::strcmp(cs[i].name, "palette") == 0) return *static_cast<uint8_t*>(cs[i].ptr);
         return static_cast<uint8_t>(0);
     };
+    uint8_t max = 0;
+    {
+        auto& cs = d.drivers->controls();
+        for (uint8_t i = 0; i < cs.count(); i++)
+            if (std::strcmp(cs[i].name, "palette") == 0) max = cs[i].max;
+    }
+    REQUIRE(max > 4);
 
-    d.control->applyEncoderDelta(0, 10);
-    CHECK(value(0) == 10);
-    d.control->applyEncoderDelta(0, -4);
-    CHECK(value(0) == 6);
-    d.control->applyEncoderDelta(0, -120);
-    CHECK(value(0) == 0);                 // clamped, not wrapped to 242
-    for (int i = 0; i < 40; i++) d.control->applyEncoderDelta(0, 100);
-    CHECK(value(0) == 255);               // and clamped at the top
+    const uint8_t start = palette();
+    d.control->applyEncoderDelta(0, 3);
+    CHECK(palette() == start + 3);
+    d.control->applyEncoderDelta(0, -2);
+    CHECK(palette() == start + 1);
+
+    // The bound is the CONTROL's, not the knob's: a knob turns forever, and the target stops where
+    // its own range does rather than wrapping into a palette that does not exist.
+    // `max` on a Select or a Palette is the option COUNT, so the last valid index is one below it.
+    for (int i = 0; i < 200; i++) d.control->applyEncoderDelta(0, 5);
+    CHECK(palette() == max - 1);
+    for (int i = 0; i < 200; i++) d.control->applyEncoderDelta(0, -5);
+    CHECK(palette() == 0);
 }
 
 // Switch 1 is the master on/off every driver honours, the natural partner to fader 1's brightness:
@@ -1161,4 +1184,120 @@ TEST_CASE("ControlModule switch 1 drives the global on/off") {
     CHECK_FALSE(driversOn());     // the rig goes dark from the surface
     flip(true);
     CHECK(driversOn());           // and comes back
+}
+
+
+// The display strip: a knob that selects a palette has to read as the palette, not as a number. The
+// name lives in the light domain and ControlModule is core, so this also pins that the seam carrying
+// it (JsonSink::requestName into the PaletteOptionsFn) actually works end to end.
+TEST_CASE("the display strip names what an encoder selected, not its number") {
+    Device d;
+
+    // Find the palette control's option count, so the test picks a valid index rather than assuming
+    // how many palettes ship.
+    uint8_t paletteCount = 0;
+    auto& dcs = d.drivers->controls();
+    for (uint8_t i = 0; i < dcs.count(); i++)
+        if (std::strcmp(dcs[i].name, "palette") == 0) paletteCount = dcs[i].max;
+    REQUIRE(paletteCount > 1);
+
+    auto& cs = d.control->controls();
+    auto strip = [&]() -> const char* {
+        for (uint8_t i = 0; i < cs.count(); i++)
+            if (std::strcmp(cs[i].name, "display") == 0) return static_cast<const char*>(cs[i].ptr);
+        return "";
+    };
+
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, "encoder1") != 0) continue;
+        *static_cast<uint8_t*>(cs[i].ptr) = 1;
+        d.control->onControlChanged("encoder1");
+    }
+
+    // "palette <name>": what moved AND what it moved to, which fits now the strip is 28 cells. Not
+    // the bare number the fallback prints.
+    const char* s = strip();
+    INFO(s);
+    CHECK(std::strstr(s, "palette ") == s);
+    CHECK(std::strcmp(s, "palette 1") != 0);
+    // A real name: letters, not just digits.
+    bool hasLetter = false;
+    for (const char* c = s; *c; c++) if ((*c | 32) >= 'a' && (*c | 32) <= 'z') hasLetter = true;
+    CHECK(hasLetter);
+}
+
+// The surface's bindings were three hardcoded names (fader1 to brightness, switch1 to on, encoder1
+// to palette). They are assignments now: a string per control, settable like any other control,
+// persisted with the module, and reaching anything the REST API can set.
+TEST_CASE("a surface control drives whatever it is assigned to") {
+    Device d;
+    auto palette = [&] {
+        auto& cs = d.drivers->controls();
+        for (uint8_t i = 0; i < cs.count(); i++)
+            if (std::strcmp(cs[i].name, "palette") == 0) return *static_cast<uint8_t*>(cs[i].ptr);
+        return static_cast<uint8_t>(0);
+    };
+
+    // fader2 ships unassigned, so moving it drives nothing.
+    auto setFader = [&](const char* name, uint8_t v) {
+        auto& cs = d.control->controls();
+        for (uint8_t i = 0; i < cs.count(); i++)
+            if (std::strcmp(cs[i].name, name) == 0) {
+                *static_cast<uint8_t*>(cs[i].ptr) = v;
+                d.control->onControlChanged(name);
+            }
+    };
+    const uint8_t before = palette();
+    setFader("fader2", 9);
+    CHECK(palette() == before);
+
+    // Assign it, and the same move lands on the palette.
+    auto assign = [&](const char* which, const char* target) {
+        auto& cs = d.control->controls();
+        for (uint8_t i = 0; i < cs.count(); i++)
+            if (std::strcmp(cs[i].name, which) == 0) {
+                std::snprintf(static_cast<char*>(cs[i].ptr), 40, "%s", target);
+                d.control->onControlChanged(which);
+            }
+    };
+    assign("fader2Target", "Drivers.palette");
+    setFader("fader2", 9);
+    CHECK(palette() == 9);
+
+    // Clearing it stops the binding: the control stays, and drives nothing.
+    assign("fader2Target", "");
+    setFader("fader2", 21);
+    CHECK(palette() == 9);            // unchanged by the cleared fader
+}
+
+TEST_CASE("a surface control follows the control it drives, so the two never disagree") {
+    // Two-way: something else moving the target (the web UI, MQTT, a preset recall) has to move the
+    // fader, or the surface shows a value the rig is not running. This ran only when a MIDI or OSC
+    // surface was attached, so on a device with just the web UI the fader sat at its old value.
+    Device d;
+    auto& dcs = d.drivers->controls();
+    uint8_t* palettePtr = nullptr;
+    for (uint8_t i = 0; i < dcs.count(); i++)
+        if (std::strcmp(dcs[i].name, "palette") == 0) palettePtr = static_cast<uint8_t*>(dcs[i].ptr);
+    REQUIRE(palettePtr != nullptr);
+
+    auto faderValue = [&](const char* name) {
+        auto& cs = d.control->controls();
+        for (uint8_t i = 0; i < cs.count(); i++)
+            if (std::strcmp(cs[i].name, name) == 0) return *static_cast<uint8_t*>(cs[i].ptr);
+        return static_cast<uint8_t>(0);
+    };
+    auto assign = [&](const char* which, const char* target) {
+        auto& cs = d.control->controls();
+        for (uint8_t i = 0; i < cs.count(); i++)
+            if (std::strcmp(cs[i].name, which) == 0) {
+                std::snprintf(static_cast<char*>(cs[i].ptr), 40, "%s", target);
+                d.control->onControlChanged(which);
+            }
+    };
+
+    assign("fader4Target", "Drivers.palette");
+    *palettePtr = 17;                 // moved from somewhere that is not the surface
+    d.control->tick1s();              // the sampling tick that mirrors and follows
+    CHECK(faderValue("fader4") == 17);
 }

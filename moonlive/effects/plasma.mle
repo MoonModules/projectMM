@@ -9,8 +9,8 @@ class PlasmaEffect {
   string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("bpm", bpm, 1, 120);                 // how fast the waves travel
-    addControl("zoom", zoom, 1, 64);                // how large the features are
+    addControl("bpm", bpm, 1, 120); // how fast the waves travel
+    addControl("zoom", zoom, 1, 64); // how large the features are
   }
 
   void tick() {

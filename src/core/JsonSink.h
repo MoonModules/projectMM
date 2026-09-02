@@ -205,6 +205,14 @@ public:
     // Fixed-buffer mode only: did any append run out of capacity?
     bool overflowed() const { return overflowed_; }
 
+    // A PaletteOptionsFn call that wants ONE option's name rather than the whole option set (see
+    // Palette.h). -1, the default, is the ordinary "emit the options" call, so every existing
+    // caller is unchanged. It lives here because the function pointer takes only a sink: this is
+    // the one channel core has into the light domain, and widening the descriptor to carry a
+    // second pointer would cost memory on every control on the device for one display feature.
+    int nameIndex() const { return nameIndex_; }
+    void requestName(uint8_t index) { nameIndex_ = static_cast<int>(index); }
+
 private:
     static constexpr size_t STAGE_SIZE = 1024;
     static constexpr size_t FRAG_MAX = 256;
@@ -242,6 +250,7 @@ private:
     size_t fixedLen_ = 0;
     size_t fixedCap_ = 0;
     bool overflowed_ = false;
+    int  nameIndex_ = -1;   // >= 0: this sink is asking for that option's name (see requestName)
 };
 
 // Escape a string for embedding inside a JSON string literal: " → \" and

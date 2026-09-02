@@ -16,11 +16,11 @@ from pathlib import Path
 # The role a script plays, from its extension. This mirrors MoonLiveScriptFile.h's kEffectExt /
 # kLayoutExt / kModifierExt, and it is what a picker filters on: the DEVICE keeps one flat
 # directory, so the extension is the only role signal once a file lands there.
-ROLE_BY_EXT = {".mle": "Effect", ".mll": "Layout", ".mlm": "Modifier"}
+ROLE_BY_EXT = {".mle": "Effect", ".mll": "Layout", ".mlm": "Modifier", ".mls": "Service"}
 
 # Where each role lives in the repo. The device keeps one flat directory, so this is only ever part
 # of the download URL.
-FOLDER_BY_ROLE = {"Effect": "effects", "Layout": "layouts", "Modifier": "modifiers"}
+FOLDER_BY_ROLE = {"Effect": "effects", "Layout": "layouts", "Modifier": "modifiers", "Service": "services"}
 
 
 # What a script DECLARES about itself, read from its source. The script is the one home for this

@@ -1,0 +1,15 @@
+class Sweep {
+  int bpm = 8;
+
+  void defineControls() {
+    addControl("bpm", bpm, 1, 60);
+  }
+
+  void tick20ms() {
+    int level = beatsin(bpm, t, 255);
+    setControl("fader5", level);
+    setControl("fader6", 255 - level);
+    setControl("fader7", level);
+    setControl("fader8", 255 - level);
+  }
+}

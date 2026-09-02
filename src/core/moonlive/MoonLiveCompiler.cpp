@@ -186,7 +186,10 @@ struct Parser {
     // script was refused. In the frame, the number of live variables is bounded by memory rather
     // than by the register file, which is the whole point of the stack machine, and it is also what
     // makes function arguments and recursion fall out later rather than needing new machinery.
-    struct Local { const char* name; size_t nameLen; uint8_t slot; };
+    // `isFixed` is the local's half of the scaling wall the members already enforce: a Q16.16
+    // value and a whole number are both a 4-byte slot, so nothing but this flag distinguishes
+    // them, and mixing the two silently compares numbers 65,536 apart in meaning.
+    struct Local { const char* name; size_t nameLen; uint8_t slot; CtrlType type; };
     Local              locals[kMaxLocals] = {};
     uint8_t            localCount = 0;
     uint8_t            slotHighWater = 0;   // slots currently in scope
@@ -260,6 +263,35 @@ struct Parser {
 
     /// Find a declared MEMBER by name; its index, or -1. Names are token spans into the source
     /// rather than NUL-terminated strings, so compare by length and bytes.
+    /// Truncate `v` to the width `type` promises, in the value itself.
+    ///
+    /// A MEMBER narrows in its store: StoreCtrl writes one byte and the slot's upper three keep
+    /// their zero. A frame slot has no such instruction (Spill/Reload are whole-slot), so a byte
+    /// LOCAL would silently hold 300 where the member holds 44, and the same line would mean two
+    /// different things depending on where the variable was declared. Shifting up and back down
+    /// truncates with two ops every backend already has, which is also why it is spelled this way
+    /// rather than with a mask: the IR has no bitwise AND.
+    ///
+    /// A bool truncates to a byte for the same reason the member path does: every use of a bool is
+    /// a comparison, where any non-zero is true.
+    void narrowToType(VReg v, CtrlType type) {
+        if (type != CtrlType::Byte && type != CtrlType::Bool) return;
+        emit({IrOp::Shl, v, v, 0,0,0, 24, nullptr, {}});
+        emit({IrOp::Shr, v, v, 0,0,0, 24, nullptr, {}});
+    }
+
+    /// Whether a compile-time constant fits the range `type` promises.
+    ///
+    /// The same bounds a MEMBER's initializer is checked against, so `byte b = 300;` is refused
+    /// wherever it is written rather than becoming 44 in one position and 300 in the other.
+    static bool fitsInType(int64_t v, CtrlType type) {
+        switch (type) {
+            case CtrlType::Byte: return v >= 0 && v <= 255;
+            case CtrlType::Bool: return v >= 0 && v <= 1;
+            default:             return true;      // int and fixed take the whole slot
+        }
+    }
+
     int findMember(const char* name, size_t len) const {
         for (uint8_t i = 0; i < memberCount; i++)
             if (members[i].nameLen == len && std::strncmp(members[i].name, name, len) == 0)
@@ -572,6 +604,7 @@ struct Parser {
                 lex.advance();
                 VReg v = alloc();
                 emit({IrOp::Reload, v, 0,0,0,0, locals[li].slot, nullptr, {}});
+                exprIsFixed = (locals[li].type == CtrlType::Fixed);
                 return v;
             }
             // A MEMBER read. A control is a member the UI shows, so this one lookup answers both:
@@ -993,7 +1026,11 @@ struct Parser {
             {"toFixed", 7}, {"toInt", 5}, {"true", 4}, {"false", 5},
             // The type keywords too: `int int = 5;` parsed, declaring a member whose name the
             // class-body loop reads as the start of another declaration.
-            {"int", 3}, {"byte", 4}, {"bool", 4}, {"fixed", 5}, {"string", 6}};
+            {"int", 3}, {"byte", 4}, {"bool", 4}, {"fixed", 5}, {"string", 6},
+            // And the statement keywords parseStatement dispatches on. `int if = 0;` bound a
+            // variable to the word that OPENS a conditional, so every later `if` in the function
+            // parsed as a reference to it and the diagnostic pointed at the wrong line.
+            {"if", 2}, {"else", 4}, {"for", 3}, {"return", 6}, {"class", 5}, {"void", 4}};
         for (const auto& k : kWords)
             if (len == k.len && std::strncmp(n, k.w, k.len) == 0) return true;
         return false;
@@ -1097,7 +1134,7 @@ struct Parser {
         emit({IrOp::Spill, 0, init, 0,0,0, counterSlot, nullptr, {}});
         freeTemp(init);
         const uint8_t myLocal = localCount;
-        locals[localCount++] = {varName, varLen, counterSlot};
+        locals[localCount++] = {varName, varLen, counterSlot, CtrlType::Int};   // a counter counts
         if (!expect(Tok::Semicolon, "expected ';' after the for's first clause")) return false;
 
         // --- condition: ident < expr  (the only comparison the language has) ---
@@ -1294,10 +1331,20 @@ struct Parser {
                     return false;
                 }
             }
-        } else if (exprIsFixed) {
-            fail("a loop variable takes a whole number: write toInt(x)");
-            return false;
+        } else if ((locals[li].type == CtrlType::Fixed) != exprIsFixed) {
+            // Same wall as a member, and for the same reason: the slot holds raw bits, so a scaling
+            // mismatch is invisible at run time. A literal adopts the fixed side (`d = 5;` on a
+            // fixed local), which is what keeps the arithmetic readable; anything computed names
+            // its own conversion.
+            bool adopted = false;
+            if (locals[li].type == CtrlType::Fixed) {
+                if (!meet(true, -1, exprIsFixed, exprLitConst, adopted)) return false;
+            } else {
+                fail("this variable takes a whole number: write toInt(x)");
+                return false;
+            }
         }
+        if (li >= 0) narrowToType(v, locals[li].type);   // a byte local wraps at 255, like a member
         if (li >= 0) emit({IrOp::Spill,     0, v, 0,0,0, locals[li].slot,   nullptr, {}});
         // The store NARROWS: a byte or bool member takes StoreCtrl, which writes one byte, so the
         // value truncates in the instruction itself and the slot's upper three bytes keep the zero
@@ -1414,9 +1461,16 @@ struct Parser {
         }
         freeTemp(b); freeTemp(a);
 
+        // A braced body is a SCOPE: a local declared inside it dies at the '}', so its name stops
+        // resolving and its frame slot is handed back for the next block to reuse. Without this a
+        // sixteen-slot frame is spent by the sixteenth `int` anywhere in a function, however
+        // short-lived each one was, and a name declared in a then-block would still resolve in the
+        // else-block. Saved and restored exactly as parseFor does for its loop counter.
+        const uint8_t thenLocal = localCount, thenSlot = slotHighWater;
         while (!failed && lex.kind != Tok::RBrace && lex.kind != Tok::End)
             if (!parseStatement()) return false;
         if (failed) return false;
+        localCount = thenLocal; slotHighWater = thenSlot;
         if (!expect(Tok::RBrace, "expected '}' to close the if body")) return false;
 
         if (atKeyword("else", 4)) {
@@ -1431,9 +1485,11 @@ struct Parser {
             freeTemp(z);
             emit({IrOp::Label,    0, 0,0,0,0, lElse, nullptr, {}});
             if (!expect(Tok::LBrace, "expected '{': an else body is braced")) return false;
+            const uint8_t elseLocal = localCount, elseSlot = slotHighWater;
             while (!failed && lex.kind != Tok::RBrace && lex.kind != Tok::End)
                 if (!parseStatement()) return false;
             if (failed) return false;
+            localCount = elseLocal; slotHighWater = elseSlot;
             if (!expect(Tok::RBrace, "expected '}' to close the else body")) return false;
             emit({IrOp::Label, 0, 0,0,0,0, lEnd, nullptr, {}});
         } else {
@@ -1459,7 +1515,79 @@ struct Parser {
         emit({IrOp::Label,    0, 0,0,0,0, lSkip, nullptr, {}});
     }
 
+    /// `int x = expr;` inside a function body: a LOCAL, living in a frame slot for the rest of its
+    /// block.
+    ///
+    /// A member was the only place to put a value before this, which was wrong on three counts: a
+    /// member is PERSISTED (a transient sensor reading written to config), it is a memory load
+    /// rather than a register, and there are only eight member records against sixteen frame slots.
+    /// The two are separate budgets, so a local costs a member nothing.
+    ///
+    /// `int` only, which is what a frame slot holds: a byte or a bool would be the same slot with a
+    /// narrower promise, and `fixed` needs the fixed-ness tracked per local, which the slot record
+    /// has nowhere to put. Both are worth adding when a script wants them; refusing is honest until
+    /// then.
+    bool parseLocalDecl() {
+        // Every VALUE type a member has: int, byte, bool and fixed all mean the same inside a
+        // function as they do in the class body, so a script author meets no arbitrary wall. Only
+        // `string` is refused, because there is no runtime string to put in a slot.
+        const CtrlType declType = currentType();
+        if (declType == CtrlType::Str) {
+            fail("a local variable holds a number: string is a member type");
+            return false;
+        }
+        const bool wantFixed = (declType == CtrlType::Fixed);
+        lex.advance();
+        if (lex.kind != Tok::Ident) { fail("expected a variable name"); return false; }
+        const char* varName = lex.identBeg;
+        const size_t varLen = lex.identLen;
+        // The same three collisions a loop counter checks for, and for the same reasons: a system
+        // variable is read-only, a duplicate name binds a second slot to one name, and shadowing a
+        // member would make `x = 1` write somewhere the author did not mean.
+        if (isReservedWord(varName, varLen)) { fail("that name is a reserved word"); return false; }
+        // The same collision a MEMBER is checked for: a local named `fill` would shadow the builtin
+        // for the rest of the function, so the call a script wrote next would resolve to a variable.
+        if (table.find(varName, varLen)) { fail("that name shadows a built-in function"); return false; }
+        if (sysvars.find(varName, varLen)) { fail("name is a system variable"); return false; }
+        if (findLocal(varName, varLen) >= 0) { fail("that name is already in use here"); return false; }
+        if (findMember(varName, varLen) >= 0) { fail("a member of that name is declared"); return false; }
+        if (localCount >= kMaxLocals || slotHighWater >= kMaxLocals) {
+            fail("too many variables in this function");
+            return false;
+        }
+        lex.advance();
+        if (!expect(Tok::Assign, "a local variable is initialized: int x = 0;")) return false;
+        VReg init = parseExpr();
+        if (failed) return false;
+        // The initializer sets the scaling the declaration promised, and a LITERAL adopts it:
+        // `fixed d = 0;` is the natural way to start a fixed at zero, exactly as a fixed member's
+        // initializer reads. Anything computed names its own conversion.
+        if (wantFixed != exprIsFixed) {
+            bool adopted = false;
+            if (wantFixed) {
+                if (!meet(true, -1, exprIsFixed, exprLitConst, adopted)) return false;
+            } else {
+                fail("a local variable is a whole number: write toInt(x)");
+                return false;
+            }
+        }
+        // A literal is range-checked against the declared type, so `byte b = 300;` names the
+        // mistake rather than silently holding 44, exactly as a member's initializer does.
+        if (exprLitConst >= 0 && !fitsInType(ir.ops[exprLitConst].imm, declType)) {
+            fail("this number is out of range for that type");
+            return false;
+        }
+        const uint8_t slot = slotHighWater++;
+        if (slotHighWater > slotsUsed) slotsUsed = slotHighWater;
+        narrowToType(init, declType);
+        emit({IrOp::Spill, 0, init, 0,0,0, slot, nullptr, {}});
+        freeTemp(init);
+        locals[localCount++] = {varName, varLen, slot, declType};
+        return expect(Tok::Semicolon, "expected ';' after a variable declaration");
+    }
+
     bool parseStatement() {
+        if (atTypeKeyword()) return parseLocalDecl();
         if (atKeyword("for", 3)) return parseFor();
         if (atKeyword("if", 2))  return parseIf();
         if (atKeyword("return", 6)) return parseReturn();
@@ -1537,9 +1665,15 @@ struct Parser {
         if (!expect(Tok::LParen,  "expected '(' after the function name")) return false;
         if (!expect(Tok::RParen,  "expected ')': parameters arrive with typed members")) return false;
         if (!expect(Tok::LBrace,  "expected '{' to open the function body")) return false;
+        // Each function starts with an empty local scope and ends with one, so `tick()` and
+        // `tick20ms()` in the same class each get the whole frame rather than sharing what the
+        // first one happened to leave. Stage 1 emits functions inline, which is exactly why this is
+        // needed: without it the second function's locals would stack on top of the first's.
+        localCount = 0; slotHighWater = 0;
         while (!failed && lex.kind != Tok::RBrace && lex.kind != Tok::End)
             if (!parseStatement()) return false;
         if (failed) return false;
+        localCount = 0; slotHighWater = 0;
         return expect(Tok::RBrace, "expected '}' to close the function body");
     }
 

@@ -11,9 +11,9 @@ class EmberEffect {
   string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("cool", cool, 1, 120);              // how fast a cell loses heat
-    addControl("spark", spark, 0, 200);            // how fiercely new embers catch
-    addControl("cycle", cycle, 1, 120);            // how often the fire re-ignites
+    addControl("cool", cool, 1, 120); // how fast a cell loses heat
+    addControl("spark", spark, 0, 200); // how fiercely new embers catch
+    addControl("cycle", cycle, 1, 120); // how often the fire re-ignites
   }
 
   void tick() {

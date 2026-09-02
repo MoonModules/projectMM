@@ -5,7 +5,7 @@ class BallpitEffect {
   byte size = 2;
   byte bouncy = 180;
 
-  bool last = false;              // was a ball emitted on the last beat
+  bool last = false; // was a ball emitted on the last beat
 
   int dimensions() { return 2; }
 
@@ -13,9 +13,9 @@ class BallpitEffect {
 
   void defineControls() {
     pool(64);
-    addControl("balls", balls, 4, 60);              // how many balls share the pit
-    addControl("size", size, 1, 5);                 // how big each ball is
-    addControl("bouncy", bouncy, 60, 255);          // how much speed a bounce keeps
+    addControl("balls", balls, 4, 60); // how many balls share the pit
+    addControl("size", size, 1, 5); // how big each ball is
+    addControl("bouncy", bouncy, 60, 255); // how much speed a bounce keeps
   }
 
   void tick() {
@@ -27,7 +27,7 @@ class BallpitEffect {
     }
 
     gravity(30);
-    collide(size);      // before step(), or a shove can push a ball through a wall
+    collide(size); // before step(), or a shove can push a ball through a wall
     step();
     bounce(bouncy);
     age(1);

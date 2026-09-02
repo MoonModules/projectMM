@@ -3,7 +3,7 @@
 // only records how many symbols arrived and signals a queue (ISR-minimal: no decode, no driver
 // call in interrupt context — the same discipline as rmtWs2812RxCapture). irRead(), on the render
 // task, drains that signal non-blocking, decodes the captured symbols, and re-arms the channel.
-// IrService is the sole caller.
+// InfraredService is the sole caller.
 //
 // NEC protocol: a 9 ms lead mark + 4.5 ms space, then 32 bits LSB-first (address, ~address,
 // command, ~command), each a 560 µs mark followed by a 560 µs space (0) or a 1690 µs space (1),
@@ -143,7 +143,7 @@ bool irRead(uint16_t pin, uint32_t& codeOut) {
 void irStop() { closeChannel(); }   // release the RX channel + its pin; irRead reopens it lazily
 
 // Open-or-confirm the RX channel and report whether it's live — same lazy open irRead uses, exposed
-// so IrService can tell "pin set" from "channel actually bound + armed". Fails when the RMT channel
+// so InfraredService can tell "pin set" from "channel actually bound + armed". Fails when the RMT channel
 // can't be created (a busy pin, a bad GPIO, no free RMT block).
 bool irChannelReady(uint16_t pin) { return ensureChannel(static_cast<int>(pin)); }
 

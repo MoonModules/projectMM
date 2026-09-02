@@ -27,7 +27,8 @@ endif()
 file(GLOB SCRIPT_PATHS
      "${SCRIPT_DIR}/effects/*.mle"
      "${SCRIPT_DIR}/layouts/*.mll"
-     "${SCRIPT_DIR}/modifiers/*.mlm")
+     "${SCRIPT_DIR}/modifiers/*.mlm"
+     "${SCRIPT_DIR}/services/*.mls")
 list(SORT SCRIPT_PATHS)   # deterministic output: the same input must give a byte-identical header
 
 list(LENGTH SCRIPT_PATHS SCRIPT_COUNT)

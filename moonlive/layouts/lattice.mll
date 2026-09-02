@@ -10,9 +10,9 @@ class LatticeLayout {
   string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("cols", cols, 1, 32);                // lights across
-    addControl("rows", rows, 1, 32);                // lights down
-    addControl("layers", layers, 1, 32);            // grids stacked in depth
+    addControl("cols", cols, 1, 32); // lights across
+    addControl("rows", rows, 1, 32); // lights down
+    addControl("layers", layers, 1, 32); // grids stacked in depth
   }
 
   void placeLights() {

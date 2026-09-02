@@ -53,7 +53,8 @@ struct ControlDescriptor;
 /// **Save flow.** HttpServerModule calls `markDirty()` + `noteDirty()` on every
 /// successful mutation — control changes AND tree-shape changes (add / delete / move a
 /// module marks the parent dirty so its file is rewritten with the new child set).
-/// `noteDirty()` stamps `lastDirtyMs_`; `tick1s()` waits `DEBOUNCE_MS` (2 s) after the
+/// `noteDirty()` stamps `lastDirtyMs_` (and `firstDirtyMs_` when a save was not already
+/// pending, which bounds the wait: see MAX_DEFER_MS); `tick1s()` waits `DEBOUNCE_MS` (2 s) after the
 /// last dirty mark, then walks the tree and serialises any subtree with a dirty
 /// descendant to a flat JSON blob, written atomically (write to `.tmp`, then rename). A
 /// subtree's dirty flag clears only after its write succeeds; a failed write leaves it
@@ -86,6 +87,29 @@ public:
     static constexpr size_t MAX_PATH = 64;
     static constexpr size_t MAX_KEY = 48;
     static constexpr uint32_t DEBOUNCE_MS = 2000;
+    /// The CEILING on how long a pending save may be deferred, however often changes keep arriving.
+    ///
+    /// The debounce alone waits for quiet, which a continuous writer never provides: a script
+    /// driving a control at 50 Hz re-stamped `lastDirtyMs_` twenty times per DEBOUNCE_MS, so the
+    /// window never closed and the file was NEVER written. Measured on an ESP32-P4: an unrelated
+    /// setting changed while a sweep ran was still unsaved 40 seconds later, and a power cut would
+    /// have lost it. The starvation is not about the swept value itself, which nobody needs saved,
+    /// but about everything ELSE in the same file being held hostage by it.
+    ///
+    /// Ten seconds: long enough that a burst of edits still coalesces into one write (the reason
+    /// the debounce exists), short enough that a power cut loses at most that much. A save is one
+    /// atomic write of a small file, so the worst case this admits is one write per ten seconds
+    /// per module, which flash tolerates indefinitely.
+    static constexpr uint32_t MAX_DEFER_MS = 10000;
+
+    /// Test-only: age the pending save's ceiling clock by `ms`, as though that long had passed
+    /// since the first dirty mark.
+    ///
+    /// The starvation contract is "a pending save lands within MAX_DEFER_MS however often marks
+    /// arrive", and proving it by SLEEPING costs ten seconds of wall clock in a unit suite that
+    /// otherwise runs in nine. The same seam shape platform::setTestGpioLevel uses: the behavior
+    /// under test is the comparison in tick1s, not the host's ability to wait.
+    void ageDirtyForTest(uint32_t ms) { firstDirtyMs_ -= ms; }
 
     /// Singleton is registered in setScheduler() (called by main.cpp on the real
     /// FilesystemModule), NOT in the constructor. The factory creates short-lived
@@ -191,6 +215,9 @@ private:
     std::atomic<uint32_t> pendingApplyMask_{0};   // bit = scheduler module index; web task sets, render tick consumes
     bool everSaved_ = false;       ///< false until the first successful save
     uint32_t lastDirtyMs_ = 0;
+    /// When the CURRENT pending save first became dirty, so a continuous writer cannot defer it
+    /// forever. Stamped by the first noteDirty after a flush, not by every one. See MAX_DEFER_MS.
+    uint32_t firstDirtyMs_ = 0;
     uint32_t lastSaveMs_ = 0;
     char lastSaveStr_[24] = "never";  ///< "last saved" status string; FileManagerModule reads it via lastSavedStr()
     // No persistent load/save buffer: save serializes into a transient growable JsonSink and load

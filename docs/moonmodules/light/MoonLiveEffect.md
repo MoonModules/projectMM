@@ -63,10 +63,24 @@ The functions are **not built into the compiler** — `setRGB`, `fill`, `random1
   }
   ```
 
-  A declaration sits in the class body, not inside a function: it is a **member**, visible in every
-  function and surviving every call. That is the whole of what a declaration means, and whether the
-  UI shows one is the separate question `defineControls()` answers. A member no control names is
-  simply the script's own state.
+  **Where** a declaration sits is what it means. In the class body it is a **member**: visible in
+  every function, surviving every call, and persisted, which is what a setting is. Inside a
+  function it is a **local**: `int now = gpioRead(pin);` lives in a frame slot, dies at the closing
+  brace of its block, and is never written to config, which is what a working value is. Whether the
+  UI shows a member is the separate question `defineControls()` answers; a member no control names
+  is simply the script's own state.
+
+  A local takes **every value type a member does**, and each means the same thing in both
+  positions: `int`, `byte`, `bool` and `fixed`. A `byte` local wraps at 255 exactly as a `byte`
+  member does, and its initializer is range-checked the same way, so `byte b = 300;` is refused
+  rather than silently becoming 44. Only `string` is a member-only type, since there is no runtime
+  string to put in a frame slot. A local must be initialized where it is declared (`int x;` would
+  hold whatever the last block left there). The two scalings do not mix, exactly as they do not for
+  a member: `fixed d = 0;` starts a Q16.16 value at zero because the literal adopts the fixed side,
+  while anything computed names its own conversion. A local may not shadow a member or a system
+  variable, so `x = 1` can never write somewhere the author did not mean. The two budgets are separate: sixteen frame slots
+  against eight member records, and a block hands its slots back at its `}`, so a script is not
+  limited to sixteen locals in total.
 
   The member is named by identifier rather than by repeating the string, so a typo is a compile error here as it is there, and the quoted name is the UI label, free to differ from the member's name. The **default** comes from the member's initializer, so there is one home for the starting value. The range arguments are ordinary expressions, like every other argument in the language: `addControl("speed", speed, base, base * 4 + 5)` is valid.
 

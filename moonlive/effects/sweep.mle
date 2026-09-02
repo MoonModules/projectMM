@@ -7,25 +7,22 @@ class SweepEffect {
   byte panRange = 128;
   byte tiltRange = 96;
 
-  int spread = 0;
-  int dir = 1;
-
   int dimensions() { return 1; }
 
   string tags() { return "💫🎯"; }
 
   void defineControls() {
-    addControl("formation", formation, 0, 4);       // 0 fan, 1 mirror, 2 chase, 3 cross, 4 unison
-    addControl("panBpm", panBpm, 1, 120);           // how fast the heads swing sideways
-    addControl("tiltBpm", tiltBpm, 1, 120);         // how fast they swing up and down
-    addControl("panRange", panRange, 0, 255);       // how far the sideways swing travels
-    addControl("tiltRange", tiltRange, 0, 255);     // how far the vertical swing travels
+    addControl("formation", formation, 0, 4); // 0 fan, 1 mirror, 2 chase, 3 cross, 4 unison
+    addControl("panBpm", panBpm, 1, 120); // how fast the heads swing sideways
+    addControl("tiltBpm", tiltBpm, 1, 120); // how fast they swing up and down
+    addControl("panRange", panRange, 0, 255); // how far the sideways swing travels
+    addControl("tiltRange", tiltRange, 0, 255); // how far the vertical swing travels
   }
 
   void tick() {
     for (int i = 0; i < height; i = i + 1) {
-      spread = 0;
-      dir = 1;
+      int spread = 0;
+      int dir = 1;
       if (formation == 1) {
         if (i < div(height, 2)) { dir = 1; } else { dir = 0 - 1; }
       }

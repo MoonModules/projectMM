@@ -1,0 +1,22 @@
+class Power {
+  int pinV = 5;
+  int pinI = 6;
+  int volts = 0; // supply voltage in tenths: 123 is 12.3 V
+  int amps = 0; // current in tenths: 45 is 4.5 A
+
+  void defineControls() {
+    addControl("pinV", pinV, 0, 48); // voltage divider pin
+    addControl("pinI", pinI, 0, 48); // current sense pin
+    addControl("volts", volts, 0, 9999); // read-only readout
+    addControl("amps", amps, 0, 9999); // read-only readout
+  }
+
+  void tick20ms() {
+    int mvV = adcMv(pinV);
+    volts = div(mvV * 1143, 14300);
+
+    int mvI = adcMv(pinI);
+    amps = 0;
+    if (mvI > 330) { amps = div((mvI - 330) * 3775, 10000); }
+  }
+}

@@ -8,7 +8,7 @@ class LinesEffect {
   string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("bpm", bpm, 1, 240);                 // how fast the cross sweeps
+    addControl("bpm", bpm, 1, 240); // how fast the cross sweeps
   }
 
   void tick() {

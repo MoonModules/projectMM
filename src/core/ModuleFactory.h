@@ -120,7 +120,7 @@ public:
             case ModuleRole::Generic:  suffix = "Module";   break;
             case ModuleRole::Layer:    return typeName;     // no suffix to strip
             // Services name themselves by their subcategory, like the light-domain
-            // roles (AudioService → Audio, IrService → Ir) — strip "Service".
+            // roles (AudioService gives Audio, InfraredService gives Infrared): strip "Service".
             case ModuleRole::Service:  suffix = "Service";  break;
         }
         size_t typeLen = std::strlen(typeName);
