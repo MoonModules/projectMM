@@ -71,6 +71,30 @@ extern "C" inline uint32_t mm_service_gpioWrite(const uintptr_t* args, uint32_t,
     return platform::gpioWrite(static_cast<uint8_t>(pin), args[1] != 0) ? 1u : 0u;
 }
 
+/// adcRead(pin) -> the raw ADC count, or 0 where the pin has no ADC.
+///
+/// RAW counts (0..4095 on ESP32), the same numbers `AnalogService` maps: a script reading a pedal or
+/// a sense divider does its own arithmetic anyway, and a scaled value would hide which end of the
+/// travel the reading came from. `adcMax()` reports the full scale so a script can normalize without
+/// knowing the chip.
+///
+/// Opens nothing: the seam configures the pin on first use, so a script just reads it.
+extern "C" inline uint32_t mm_service_adcRead(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const uint32_t pin = static_cast<uint32_t>(args[0]);
+    if (pin > 48) return 0;
+    uint16_t raw = 0;
+    if (!platform::adcRead(static_cast<uint8_t>(pin), raw)) return 0;
+    return raw;
+}
+
+/// adcMax() -> the full-scale count adcRead reports on this platform.
+///
+/// So a script scales against the chip it is on rather than a number typed into the source: the same
+/// script normalizes correctly on a 12-bit ESP32 and on whatever a later platform reports.
+extern "C" inline uint32_t mm_service_adcMax(const uintptr_t*, uint32_t, const uint8_t*) {
+    return platform::adcMaxCount();
+}
+
 /// setControl(name, value) -> whether the write took.
 ///
 /// Writes a control on the CONTROL MODULE only, which is the decision recorded in the plan's step 0:
@@ -124,6 +148,11 @@ inline const BuiltinTable& serviceBuiltins() {
     t.add({"gpioRead", 1, /*returns*/ true, BuiltinKind::Call, &mm_service_gpioRead, {}});
     // gpioWrite(pin, on)     -> 0/1. The output half: a relay, an indicator, a chip's enable line.
     t.add({"gpioWrite", 2, /*returns*/ true, BuiltinKind::Call, &mm_service_gpioWrite, {}});
+    // adcRead(pin)           -> raw counts. The analog half: a pedal, a pot, a sense divider.
+    t.add({"adcRead", 1, /*returns*/ true, BuiltinKind::Call, &mm_service_adcRead, {}});
+    // adcMax()               -> this platform's full scale, so a script normalizes without a magic
+    // number. Zero arguments, like a system variable would be, but a call because it asks the seam.
+    t.add({"adcMax", 0, /*returns*/ true, BuiltinKind::Call, &mm_service_adcMax, {}});
     // setControl(name, v)    -> 0/1. The surface write: "switch1", "fader3", "pad7".
     // byStr 0x1: the FIRST argument is a name in quotes, which the compiler passes as a pointer into
     // the string pool. Without the mask it is parsed as a number and the call is rejected.

@@ -349,7 +349,9 @@ class NearTrigger {
     addControl("threshold", threshold, 0, 255);
   }
   void tick20ms() {
-    near = gpioRead(pin);          // step 4 replaces this with an I2C distance read
+    int distance = gpioRead(pin) * 100;   // step 4 replaces this with an I2C distance read
+    near = 0;
+    if (distance < threshold) { near = 1; }
     if (near != wasNear) { wasNear = near; if (near) setControl("Control", "pad3", 1); }
   }
 }
@@ -358,7 +360,9 @@ class NearTrigger {
 A mapping row cannot say "under 50 cm", cannot hold the edge state that stops it firing every tick,
 and cannot pick a different pad by time of day. That is the whole argument for a script over a
 richer JSON, and this test is what proves it rather than asserting it. Until step 4 lands the I2C
-read, the same shape is tested with the button (`gpioRead`) standing in for the distance.
+read, the same shape is tested with the button standing in for the sensor: `gpioRead` gives 0 or 1
+and the script scales it, so the comparison against `threshold` is the one the real sensor will use
+and only the source of the number changes.
 
 ### Step 2 status (2026-09-02): built and host-verified, NOT bench-verified
 
@@ -536,9 +540,10 @@ measurement says no (desktop, 2026-09-02, a full pipeline plus a sweeping script
 - **460 us average** per patch, **8.5 ms worst case**, ~600 bytes, 14 leaves changed.
 
 At 1 Hz that is 0.05% of a core. At 50 Hz the average alone is 23 ms of render budget per second,
-and the worst case is longer than a whole 20 ms tick, so a spike drops a frame. On an ESP32 both
-numbers are several times larger, which is exactly the LED stutter that made this 1 Hz in the first
-place (HttpServerModule.h, the state-push note).
+and the 8.5 ms worst case is most of what a 20 ms tick has left once the light pipeline has run, so
+a spike lands as a visible hitch rather than as headroom. On an ESP32 both numbers are several times
+larger, which is exactly the LED stutter that made this 1 Hz in the first place
+(HttpServerModule.h, the state-push note).
 
 The 34 KB full serialize that originally forced the rate IS gone, replaced by the value-diff. What
 costs now is the diff itself: it walks every leaf, serializes it and hashes it, so the cost scales
@@ -596,9 +601,20 @@ the only thing that saves it, and a power cut does not call it). And the protect
 write rate staying above the debounce: a script writing every three seconds would rewrite the file
 every three seconds, forever.
 
-The cost measured on the host is small (~30us per tick, about 0.15% of a core at 50 Hz), and it has
-NOT been measured on an ESP32, where the same script does those 200 calls on the render thread and
-each one walks `rebuildControls()`.
+The cost measured on the host is small (~30us per tick, about 0.15% of a core at 50 Hz).
+
+**Measured on an ESP32-P4 (2026-09-02, MM-P4 at .139, esp32p4rev1-eth).** The scripted sweep costs
+**58us per tick** for its four `setControl` calls, so **14.5us per call** including
+`rebuildControls()` + `markDirty()` + `noteDirty()`: 2.9 ms/s, **0.29% of one core** at 50 Hz, about
+2x the host figure. The render tick was unaffected (fps 482, tick 2071us, unchanged from baseline).
+
+**The starvation is confirmed on hardware, not just inferred.** With the sweep running, `lastSaved`
+climbed 20s, 40s, 1m, 2m, 3m, 4m across a three-minute sample and never reset: the file is never
+written at all while a 50 Hz writer runs.
+
+So the cost is NOT the problem and no optimization is called for; the shape is. What needs fixing is
+that a continuously written control never persists (a power cut loses it) while a slower writer would
+rewrite the file forever.
 
 **The product owner's framing** (2026-09-02): a script should not be responsible for the pace, the
 system should manage it. Two things follow, and both belong in the persistence layer rather than in
@@ -610,8 +626,32 @@ every script:
   state, closer to a sensor reading than to a setting a user chose. Something declared that way would
   not mark dirty in the first place, which also settles the question above.
 
-Worth doing before a scripted service is a normal thing to run on a device, and worth measuring on
-the board first: the tick cost is the number that decides how much of this matters.
+### SHIPPED (2026-09-02): both halves, and the second one was necessary
+
+BOTH were needed, and finding out why is the useful part of this entry.
+
+**`ControlDescriptor::live`** answers the second question: a surface position MIRRORS whatever it is
+assigned to, and that target persists in its own module, so saving the position stored the same fact
+twice and let the two disagree on load. The three position banks (switches, encoders, faders) are
+declared live; the ASSIGNMENTS still persist, and an unassigned control starts at 0, which is what it
+means. Live controls are excluded from the saved file and never mark their module dirty.
+
+**That alone did not fix the starvation**, which is the finding. Marking a surface control live stops
+IT from marking dirty, but the moment a user assigns it to something (a fader driving
+`Drivers.brightness`, two clicks in the UI) the write lands on an ordinary persisted control and the
+50 Hz stream of dirty marks resumes ONE MODULE DOWNSTREAM. Measured on the P4: an unrelated setting
+changed while a sweep ran was still unsaved 56 seconds later. So the first question needed answering
+too, in the mechanism rather than per control.
+
+**`FilesystemModule::MAX_DEFER_MS` (10 s)** is that ceiling: `noteDirty` stamps the ceiling clock
+only on the FIRST mark of a pending save, so later marks move the debounce without extending the
+wait without end. The debounce still coalesces a burst; it can no longer be starved. Verified on the
+P4 with a swept fader assigned to `Drivers.brightness`: `lastSaved` now cycles 0-7 s where it
+previously climbed past a minute.
+
+Cost measured before the fix: 14.5us per `setControl` on the P4, 0.29% of a core at 50 Hz, render
+tick unaffected. Small enough that no optimization was called for, which is why the work went into
+the shape rather than the speed.
 
 ## Step 3: analog in, and the expression pedal
 
@@ -626,6 +666,29 @@ An ADC read is the smallest new seam and unlocks a whole input class.
 **Test:** host tests with an injected value. Bench: a potentiometer on an ADC pin driving
 `Control.fader1`, first through `AnalogService` and then through a three-line script, so both halves
 are proven on the same hardware.
+
+### SHIPPED (2026-09-02): host-verified, NOT bench-verified
+
+- **Seam**: `adcRead(gpio, raw)` + `adcMaxCount()`, raw counts only. No millivolts: every consumer
+  maps a travel to a range anyway, so a calibrated voltage would add per-chip machinery to serve a
+  conversion the caller immediately undoes. ESP32 uses one kept ADC1 oneshot handle; **ADC1 only**,
+  because ADC2 is shared with the WiFi radio and would read fine on the bench then fail once the
+  device joined a network. Desktop reports an injected value (`setTestAdcValue`).
+- **`AnalogService`**: rows of pin + `inMin`/`inMax`/`invert`, an exponential filter (`smoothing`)
+  and a `deadband`, driving a target through the new `runInputLevel`.
+- **`runInputLevel`** is separate from `runInputAction` rather than a parameter on it: an event
+  carries no number and a level's value IS the reading, and a toggle or a delta driven at 50 Hz is
+  not something a user can mean. It rescales 0..255 into the control's own bounds, so one pedal
+  configuration works on any target.
+- **MoonLive**: `adcRead(pin)` and `adcMax()`, so a script normalizes without a magic number.
+
+**A bug the tests caught**: the integer exponential filter stops converging once the step truncates
+to zero, so a pedal pushed fully down settled at 253 rather than 255 and full brightness was
+unreachable. It now takes the remaining distance whole once the step rounds to nothing.
+
+**Still open**: the bench half. A pot on an ADC pin, both paths on the same hardware. The SE16 and
+LightCrafter sense pins are the natural rig and are now free (see `backlog-light.md`), but the scale
+factor per board needs the schematic.
 
 ## Step 4: I2C sensors
 

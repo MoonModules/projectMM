@@ -13,6 +13,7 @@
 #include "soc/gpio_num.h"     // GPIO_IS_VALID_GPIO / GPIO_IS_VALID_OUTPUT_GPIO
 #include "driver/gpio.h"      // gpio_get_level / gpio_get_drive_capability — the live-state reads
 #include "driver/rtc_io.h"    // rtc_gpio_is_valid_gpio
+#include "esp_adc/adc_oneshot.h"  // adcRead: the ADC1 oneshot unit
 #include "esp_heap_caps.h"    // heap_caps_get_total_size(MALLOC_CAP_SPIRAM) — detect PSRAM without a new
                               // component dep (the heap component is always linked; esp_psram is not,
                               // and adding it to REQUIRES would switch main to strict mode, hiding the
@@ -160,9 +161,59 @@ bool gpioWrite(uint8_t gpio, bool high) {
     return gpio_set_level(static_cast<gpio_num_t>(gpio), high ? 1 : 0) == ESP_OK;
 }
 
+// --- ADC ------------------------------------------------------------------------------------
+//
+// One oneshot unit, opened on first use and kept: the handle owns the peripheral, so opening one per
+// read would reconfigure it on every tick. ADC1 only, deliberately, which is what the pedal and the
+// board sense pins use. ADC2 is shared with the WiFi radio on every chip here and returns
+// ESP_ERR_TIMEOUT whenever the radio holds it, so a pin there would read fine on the bench and fail
+// once the device joined a network. Refusing is the honest answer until something needs it.
+namespace {
+adc_oneshot_unit_handle_t g_adc1 = nullptr;
+bool g_adcChanReady[ADC_CHANNEL_9 + 1] = {};
+
+/// The ADC1 channel this GPIO is, or -1. Per chip, because the mapping is fixed in silicon.
+int adc1ChannelFor(uint8_t gpio) {
+    adc_unit_t unit;
+    adc_channel_t chan;
+    if (adc_oneshot_io_to_channel(static_cast<int>(gpio), &unit, &chan) != ESP_OK) return -1;
+    if (unit != ADC_UNIT_1) return -1;      // ADC2 races the WiFi radio: see above
+    return static_cast<int>(chan);
+}
+}  // namespace
+
+bool adcRead(uint8_t gpio, uint16_t& raw) {
+    const int chan = adc1ChannelFor(gpio);
+    if (chan < 0) return false;
+    if (!g_adc1) {
+        adc_oneshot_unit_init_cfg_t init = {};
+        init.unit_id = ADC_UNIT_1;
+        if (adc_oneshot_new_unit(&init, &g_adc1) != ESP_OK) { g_adc1 = nullptr; return false; }
+    }
+    if (!g_adcChanReady[chan]) {
+        adc_oneshot_chan_cfg_t cfg = {};
+        // 12 dB (the full ~0..3.1 V span) and the chip's widest resolution: a sense divider and a
+        // pedal both swing across the whole range, and a narrower attenuation would clip them
+        // silently. adcMaxCount() reports the matching full scale so a caller scales correctly.
+        cfg.atten    = ADC_ATTEN_DB_12;
+        cfg.bitwidth = ADC_BITWIDTH_DEFAULT;
+        if (adc_oneshot_config_channel(g_adc1, static_cast<adc_channel_t>(chan), &cfg) != ESP_OK)
+            return false;
+        g_adcChanReady[chan] = true;
+    }
+    int value = 0;
+    if (adc_oneshot_read(g_adc1, static_cast<adc_channel_t>(chan), &value) != ESP_OK) return false;
+    raw = static_cast<uint16_t>(value < 0 ? 0 : value);
+    return true;
+}
+
+uint16_t adcMaxCount() { return 4095; }    // 12 bits, matching ADC_BITWIDTH_DEFAULT on these chips
+
 // The test seams are desktop-only: on a board the pins are real, and a test that wants to inject a
 // level has the hardware to do it.
 void setTestGpioLevel(uint8_t, bool) {}
 void clearTestGpioLevel() {}
+void setTestAdcValue(uint8_t, uint16_t) {}
+void clearTestAdcValue() {}
 
 }  // namespace mm::platform

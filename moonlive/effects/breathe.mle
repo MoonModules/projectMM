@@ -6,9 +6,6 @@ class BreatheEffect {
   byte drift = 20;
   byte floorBri = 20;
 
-  int bri = 0;                    // this frame's brightness
-  int p = 0;                      // this frame's palette position
-
   int dimensions() { return 1; }
 
   string tags() { return "💫"; }
@@ -21,8 +18,8 @@ class BreatheEffect {
   }
 
   void tick() {
-    bri = floorBri + div(beatsin(bpm, t, 255) * (255 - floorBri), 255);
-    p = hue + scale(beat(div(bpm, 2) + 1, t), drift + 1);
+    int bri = floorBri + div(beatsin(bpm, t, 255) * (255 - floorBri), 255);
+    int p = hue + scale(beat(div(bpm, 2) + 1, t), drift + 1);
     fill(paletteR(p, bri), paletteG(p, bri), paletteB(p, bri));
   }
 }

@@ -240,9 +240,13 @@ TEST_CASE("AudioService Local (not sending): no socket, reports off") {
     a.applyState();
     a.tick();
     CHECK_FALSE(a.syncOpenForTest());
-    // Nothing on the status line: sync is off, and the `mode` control already says so. The status
-    // row reports what needs reporting rather than restating a setting the user can see.
-    CHECK(status(a)[0] == 0);
+    // Nothing about SYNC on the status line: it is off, and the `mode` control already says so. The
+    // line is not required to be empty, because this is Local mode and a mic that cannot be opened
+    // reports there: CI has no capture device, so it says so, and that message must survive.
+    const char* s = status(a);
+    CHECK(std::strstr(s, "waiting for network") == nullptr);
+    CHECK(std::strstr(s, "listening on") == nullptr);
+    CHECK(std::strstr(s, "from ") == nullptr);
     a.release();
 }
 

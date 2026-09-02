@@ -6,11 +6,6 @@ class FractalEffect {
   byte zoom = 34;
   byte seed = 128;
 
-  fixed cx = 0.0;                 // this pixel, in the set's own space
-  fixed jx = 0.0;                 // the Julia constant, across
-  fixed jy = 0.0;                 // the Julia constant, down
-  int n = 0;                      // iterations this pixel survived
-
   int dimensions() { return 2; }
 
   string tags() { return "💫🖌️"; }
@@ -23,19 +18,19 @@ class FractalEffect {
   }
 
   void tick() {
-    jx = (toFixed(cos(beat(bpm, t)) - 32768) / 2560 * toFixed(seed) / 3277
+    fixed jx = (toFixed(cos(beat(bpm, t)) - 32768) / 2560 * toFixed(seed) / 3277
         - toFixed(cos(beat(bpm, t) * 2) - 32768) / 5120 * toFixed(seed) / 3277)
        * toFixed(870 + noise(t / 4, 0, 0)) / 1000;
-    jy = (toFixed(sin(beat(bpm, t)) - 32768) / 2560 * toFixed(seed) / 3277
+    fixed jy = (toFixed(sin(beat(bpm, t)) - 32768) / 2560 * toFixed(seed) / 3277
         - toFixed(sin(beat(bpm, t) * 2) - 32768) / 5120 * toFixed(seed) / 3277)
        * toFixed(870 + noise(t / 4, 0, 0)) / 1000;
 
     for (int y = 0; y < height; y = y + 1) {
       for (int x = 0; x < width; x = x + 1) {
-        cx = uvX(x, width, height) * toFixed(zoom) / 40;
+        fixed cx = uvX(x, width, height) * toFixed(zoom) / 40;
         if (seed == 0) { cx = cx - 0.55; }
 
-        n = escape(cx, uvY(y, width, height) * toFixed(zoom) / 40, jx, jy, iters);
+        int n = escape(cx, uvY(y, width, height) * toFixed(zoom) / 40, jx, jy, iters);
 
         setPaletteColor(x, y, mod(n * 4, 256), n * 255);
       }

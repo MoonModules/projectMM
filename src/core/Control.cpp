@@ -45,6 +45,10 @@ const char* controlTypeName(ControlType t) {
 }
 
 bool isPersistable(const ControlDescriptor& c) {
+    // LIVE STATE is never written: a value something drives continuously (a script sweeping a
+    // fader, a sensor reading) is not configuration, whatever its type. See
+    // ControlDescriptor::live.
+    if (c.live) return false;
     // A List defers to its source: rows re-derived at setup are not worth writing (see
     // ListSource::persistsList). Every other type answers from the type alone.
     if (c.type == ControlType::List) {

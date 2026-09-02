@@ -280,8 +280,18 @@ Scheduler::SetControlResult Scheduler::setControl(const char* moduleName,
         // tree-wide prepareTree only when the control reshapes dims/mapping); persist.
         target->rebuildControls();
         target->onControlChanged(controlName);
-        target->markDirty();
-        if (noteDirtyHook_) noteDirtyHook_();
+        // LIVE STATE does not mark the tree dirty. A control something drives continuously is not
+        // configuration (ControlDescriptor::live), and marking it re-stamped the debounce on every
+        // write: a 50 Hz writer kept the timer from ever expiring, so the module's file was never
+        // saved at all and a power cut lost everything in it, including the settings a person HAD
+        // chosen. Skipping the mark here is what lets those settle and save normally.
+        //
+        // `c` is the descriptor just applied, so this reads the flag of the control that changed
+        // rather than asking the module.
+        if (!c.live) {
+            target->markDirty();
+            if (noteDirtyHook_) noteDirtyHook_();
+        }
         if (target->affectsPrepare(controlName)) requestPrepareTree();
         return SetControlResult::Ok;
     }

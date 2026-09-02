@@ -20,6 +20,28 @@ Forward-looking to-build items for the **light domain** (`src/light/`: drivers, 
 
 ## Drivers
 
+### SE16 / LightCrafter power monitoring: sense pins now free, module still to build (2026-09-02)
+
+Both boards carry voltage and current sensors, and MoonLight records the pins
+(`MoonBase/Modules/ModuleIO.h`, board presets): **SE 16 V1 voltage GPIO 8, current GPIO 9;
+LightCrafter 16 voltage GPIO 5, current GPIO 6**.
+
+Those pins were occupied by our LED driver's `clockPin`/`dcPin`, which looked like a hard conflict
+until the meaning of those controls settled it: they are the **sacrificial** WR and DC lines
+`esp_lcd` mandates to build an i80 bus, toggled harmlessly with nothing wired to them
+(`MultiPinLedDriver::addBusControls`). Any free GPIO does, so they moved rather than the sensors:
+SE16 to 16/17 (it has 4/16/17 spare, so its native USB on 19/20 stays free) and LightCrafter to
+19/20 (its only spare pair, and it uses the UART bridge on 43/44 anyway).
+
+**Still open:** nothing reads the sensors yet. `AnalogService` (plan step 3) is the consumer; once
+it exists these two boards get `voltagePin`/`currentPin` in their device definitions, "Power
+monitoring" moves from `planned` to `supported`, and the raw counts need a scale factor per board
+(the divider ratio and shunt value, which are NOT in MoonLight's preset and need the schematic).
+
+Worth doing because it also gives the ADC seam a real bench rig: an on-board analog signal beats a
+hand-wired potentiometer. NOTE the pin move is unverified on hardware, both boards being offline
+when it was made: confirm LED output still works after the change before trusting it.
+
 ### MoonI80 streaming ring — 48×256 shipped; open instruments and cleanups
 
 The ring's two regimes ship and are wall-verified through 48 strands × 256 (12,288 lights): prime-only when the frame fits the pool, the clock-oracle lapping ring above it (the near-prime pool — the ISR encodes only `nSlices − ringBufs` slices per frame), with `ringAuto` deriving the geometry per config and `shiftOverclock` trading the fps ceiling against '595 shift margin. The mechanism lives in the code + the technical page; the design arc in `docs/history/plans/` (the MoonI80 plans, all marked). Open items:

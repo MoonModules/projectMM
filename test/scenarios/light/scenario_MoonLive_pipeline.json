@@ -209,7 +209,7 @@
       "description": "Write the script file the card points at, the way the editor saves it.",
       "op": "write_file",
       "path": "/moonlive/sc-fx.mle",
-      "value": "class FX { tick() { setRGB(random16(256), 255, 200, 60); } }\n"
+      "value": "class FX { void tick() { setRGB(random16(256), 255, 200, 60); } }\n"
     },
     {
       "name": "effect-gradient",
@@ -359,7 +359,7 @@
       "description": "Write the script file the card points at, the way the editor saves it.",
       "op": "write_file",
       "path": "/moonlive/sc-row.mll",
-      "value": "class L { placeLights() { for (int i = 0; i < 24; i = i + 1) { addLight(i, 0, 0); } } }\n"
+      "value": "class L { void placeLights() { for (int i = 0; i < 24; i = i + 1) { addLight(i, 0, 0); } } }\n"
     },
     {
       "name": "layout-a-row",
@@ -374,14 +374,14 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 5,
+            "p50": 7,
             "p95": 185,
             "min": 4,
             "max": 267,
             "n": 32,
-            "samples": [5, 4, 7, 5, 5, 5, 5, 4, 7, 5, 5, 10, 5, 5, 5, 5, 5, 6, 267, 185, 26, 70, 5, 5, 46, 54, 25, 10, 25, 19, 20, 13]
+            "samples": [7, 5, 5, 5, 5, 4, 7, 5, 5, 10, 5, 5, 5, 5, 5, 6, 267, 185, 26, 70, 5, 5, 46, 54, 25, 10, 25, 19, 20, 13, 30, 7]
           },
-          "last_updated": "2026-08-31"
+          "last_updated": "2026-09-02"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -516,7 +516,7 @@
       "description": "Write the script file the card points at, the way the editor saves it.",
       "op": "write_file",
       "path": "/moonlive/sc-mod.mlm",
-      "value": "class M { modifyLogical() { setXYZ(width - 1 - x, y, z); } }\n"
+      "value": "class M { void modifyLogical() { setXYZ(width - 1 - x, y, z); } }\n"
     },
     {
       "name": "modifier-mirror",
@@ -536,9 +536,9 @@
             "min": 4,
             "max": 559,
             "n": 32,
-            "samples": [8, 6, 5, 5, 5, 5, 5, 5, 9, 5, 5, 10, 4, 5, 5, 5, 5, 6, 32, 559, 17, 97, 5, 4, 25, 18, 19, 11, 19, 20, 15, 12]
+            "samples": [5, 5, 5, 5, 5, 5, 9, 5, 5, 10, 4, 5, 5, 5, 5, 6, 32, 559, 17, 97, 5, 4, 25, 18, 19, 11, 19, 20, 15, 12, 32, 7]
           },
-          "last_updated": "2026-08-31"
+          "last_updated": "2026-09-02"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -666,7 +666,7 @@
       "description": "Write the script file the card points at, the way the editor saves it.",
       "op": "write_file",
       "path": "/moonlive/sc-mod.mlm",
-      "value": "class M { modifyLogical() { setXYZ(y, x, z); } }\n"
+      "value": "class M { void modifyLogical() { setXYZ(y, x, z); } }\n"
     },
     {
       "name": "modifier-transpose-resync",
@@ -687,9 +687,9 @@
             "min": 5,
             "max": 520,
             "n": 32,
-            "samples": [6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 11, 5, 5, 5, 5, 5, 6, 520, 159, 26, 10, 6, 5, 36, 13, 11, 12, 12, 21, 19, 20]
+            "samples": [5, 5, 5, 5, 5, 5, 5, 5, 5, 11, 5, 5, 5, 5, 5, 6, 520, 159, 26, 10, 6, 5, 36, 13, 11, 12, 12, 21, 19, 20, 17, 8]
           },
-          "last_updated": "2026-08-31"
+          "last_updated": "2026-09-02"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -817,7 +817,7 @@
       "description": "Write the script file the card points at, the way the editor saves it.",
       "op": "write_file",
       "path": "/moonlive/sc-row.mll",
-      "value": "class L { placeLights() { for (int i = 0; i < 4; i = i + 1) { addLight(i, i\n"
+      "value": "class L { void placeLights() { for (int i = 0; i < 4; i = i + 1) { addLight(i, i\n"
     },
     {
       "name": "break-the-layout-resync",
@@ -968,7 +968,7 @@
       "description": "Write the script file the card points at, the way the editor saves it.",
       "op": "write_file",
       "path": "/moonlive/sc-row.mll",
-      "value": "class L { placeLights() { for (int i = 0; i < 12; i = i + 1) { addLight(i, 0, 0); } } }\n"
+      "value": "class L { void placeLights() { for (int i = 0; i < 12; i = i + 1) { addLight(i, 0, 0); } } }\n"
     },
     {
       "name": "recover-the-layout-resync",
@@ -989,9 +989,9 @@
             "min": 5,
             "max": 117,
             "n": 32,
-            "samples": [5, 5, 6, 7, 5, 5, 5, 5, 6, 5, 5, 10, 5, 5, 5, 5, 5, 6, 117, 34, 27, 32, 6, 6, 13, 8, 20, 13, 18, 20, 21, 24]
+            "samples": [6, 7, 5, 5, 5, 5, 6, 5, 5, 10, 5, 5, 5, 5, 5, 6, 117, 34, 27, 32, 6, 6, 13, 8, 20, 13, 18, 20, 21, 24, 25, 8]
           },
-          "last_updated": "2026-08-31"
+          "last_updated": "2026-09-02"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -1126,14 +1126,14 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 6,
+            "p50": 7,
             "p95": 96,
             "min": 5,
             "max": 397,
             "n": 32,
-            "samples": [5, 5, 6, 7, 5, 5, 5, 5, 5, 5, 5, 11, 5, 5, 5, 5, 5, 6, 96, 35, 26, 19, 7, 5, 10, 22, 397, 12, 17, 18, 22, 24]
+            "samples": [6, 7, 5, 5, 5, 5, 5, 5, 5, 11, 5, 5, 5, 5, 5, 6, 96, 35, 26, 19, 7, 5, 10, 22, 397, 12, 17, 18, 22, 24, 11, 8]
           },
-          "last_updated": "2026-08-31"
+          "last_updated": "2026-09-02"
         },
         "esp32s3-n16r8": {
           "tick_us": {

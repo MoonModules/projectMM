@@ -5,9 +5,6 @@ class CometTrailEffect {
   byte spread = 40;
   byte sparks = 3;
 
-  int hx = 0;                     // the comet's head, across
-  int hy = 0;                     // the comet's head, down
-
   int dimensions() { return 2; }
 
   string tags() { return "💫✨"; }
@@ -22,8 +19,8 @@ class CometTrailEffect {
   void tick() {
     fade(28);
 
-    hx = scale(beatsin(speed, t, 65535), width);
-    hy = scale(beatsin(speed + 7, t, 65535), height);
+    int hx = scale(beatsin(speed, t, 65535), width);
+    int hy = scale(beatsin(speed + 7, t, 65535), height);
 
     emit(hx, hy, beat(speed + 3, t), spread * 4, sparks, 90, scale(beat(6, t), 256));
 

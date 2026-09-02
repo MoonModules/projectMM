@@ -94,10 +94,9 @@ TEST_CASE("a scripted service reads a pin and drives the control surface") {
                 "class Button {\n"
                 "  int pin = 4;\n"
                 "  int last = 1;\n"
-                "  int now = 0;\n"
                 "  void defineControls() { addControl(\"pin\", pin, 0, 48); }\n"
                 "  void tick20ms() {\n"
-                "    now = gpioRead(pin);\n"
+                "    int now = gpioRead(pin);\n"
                 "    if (now != last) { last = now; setControl(\"switch1\", 1 - now); }\n"
                 "  }\n"
                 "}\n");
@@ -156,6 +155,33 @@ TEST_CASE("a service with no script, or a broken one, is a valid state and ticks
     CHECK(rig.control->switch1 == 0);
     // The diagnostic is on the status line, which is how a user sees what is wrong.
     CHECK(rig.svc->status() != nullptr);
+}
+
+TEST_CASE("a scripted service reads an analog pin and scales it itself") {
+    // The script half of step 3: the same pedal AnalogService maps with rows, expressed as
+    // arithmetic. `adcMax()` is what makes the script portable, so the source carries no 4095.
+    Rig rig;
+    writeScript("t_adc.mls",
+                "class Pedal {\n"
+                "  int pin = 4;\n"
+                "  void defineControls() { addControl(\"pin\", pin, 0, 48); }\n"
+                "  void tick20ms() {\n"
+                "    int raw = adcRead(pin);\n"
+                "    setControl(\"switch1\", div(raw, adcMax()));\n"   // 1 only at full scale
+                "  }\n"
+                "}\n");
+    rig.svc->setScript("t_adc.mls");
+    rig.svc->prepare();
+    REQUIRE(rig.svc->status() != nullptr);
+
+    platform::setTestAdcValue(kPin, 0);
+    rig.svc->tick20ms();
+    CHECK(rig.control->switch1 == 0);
+
+    platform::setTestAdcValue(kPin, platform::adcMaxCount());
+    rig.svc->tick20ms();
+    CHECK(rig.control->switch1 == 1);
+    platform::clearTestAdcValue();
 }
 
 TEST_CASE("a script cannot reach past the control surface") {

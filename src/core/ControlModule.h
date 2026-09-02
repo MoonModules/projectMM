@@ -219,15 +219,26 @@ public:
         // The switch row sits at the TOP, above the encoders, matching the surfaces this mirrors
         // (a channel's buttons are above its knob, which is above its fader). Control order is
         // render order, so the declaration order IS the layout.
+        // A surface control's POSITION is live state, not configuration: it MIRRORS whatever it is
+        // assigned to, and that target persists in its own module. Saving the position too would
+        // store the same fact twice and let the two disagree on load (a fader restored to 40 while
+        // the brightness it drives loaded 200). What does persist is the ASSIGNMENT, declared
+        // below. An unassigned control simply starts at 0, which is what it means.
+        //
+        // This also removes a defect: a script sweeping four faders at 50 Hz re-stamped the save
+        // debounce on every write, so ControlModule.json was NEVER written and the assignments in
+        // it were lost on a power cut. See ControlDescriptor::live.
         for (uint8_t i = 0; i < kSwitchCount; i++) {
             controls_.addControl(kSwitchNames[i], switches_[i]);
             controls_.setSwitchRow(controls_.count() - 1, true, switchTarget(i));
+            controls_.setLive(controls_.count() - 1);
         }
         // Encoders next: they sit ABOVE the pads on the surfaces this mirrors, and control order is
         // render order.
         for (uint8_t i = 0; i < kEncoderCount; i++) {
             controls_.addControl(kEncoderNames[i], encoders_[i]);
             controls_.setEncoder(controls_.count() - 1, true, encoderTarget(i));
+            controls_.setLive(controls_.count() - 1);
         }
         // The ASSIGNMENTS, one hidden text control per surface control. Hidden because a desk shows
         // knobs and faders, not 24 rows of target strings: the popup on each control is where a user
@@ -254,12 +265,14 @@ public:
             controls_.setHidden(controls_.count() - 1, true);
         }
         controls_.addList("presets", *this);
-        // The fader bank. Each fader is a plain uint8 control, so it persists, appears in /api/state,
-        // and is settable from anywhere the control system reaches — which is what a MIDI surface
-        // will bind to later. Rendered as a bank of vertical sliders by the UI.
+        // The fader bank. Each fader is a plain uint8 control: it appears in /api/state and is
+        // settable from anywhere the control system reaches, which is what a MIDI surface will bind
+        // to later. Rendered as a bank of vertical sliders by the UI. Live, like the rest of the
+        // surface: the position mirrors its target, and the target is what persists.
         for (uint8_t i = 0; i < kFaderCount; i++) {
             controls_.addControl(kFaderNames[i], faders_[i]);
             controls_.setFader(controls_.count() - 1, true, surfaceTarget(i));
+            controls_.setLive(controls_.count() - 1);
         }
         // The save form. All HIDDEN: these are what the pad popup drives, not controls a user reads
         // off the card. Shown on the card they were ambiguous — `name` and the capture toggles look
@@ -665,7 +678,8 @@ public:
         va_start(ap, fmt);
         std::vsnprintf(display_, sizeof(display_), fmt, ap);
         va_end(ap);
-        stripUntilMs_ = platform::millis() + kStripHoldMs;
+        stripWrittenMs_ = platform::millis();
+        stripActive_ = true;
     }
 
     /// Settle the strip once nothing has happened for a while: the change holds for five seconds,
@@ -675,11 +689,16 @@ public:
     /// this surface drives, which is what a glance at an idle desk should answer, and text that
     /// keeps changing draws the eye to a strip with no news on it.
     void settleStrip() {
-        const uint32_t now = platform::millis();
-        if (!stripUntilMs_ || now < stripUntilMs_) return;      // still showing the change
+        if (!stripActive_) return;
+        // ELAPSED time, never a comparison of two absolute stamps: millis() wraps about every 49.7
+        // days, and `now < deadline` reads false for the whole wrap on an uptime that crosses it,
+        // so the strip would freeze on whatever it last showed. Unsigned subtraction is correct
+        // across the wrap, which is why every deadline here is expressed as an age.
+        const uint32_t age = platform::millis() - stripWrittenMs_;
+        if (age < kStripHoldMs) return;                        // still showing the change
         const char* name = deviceName();
         // Two holds after the change: the product, then the device. Beyond that, nothing to do.
-        if (now < stripUntilMs_ + kStripHoldMs)
+        if (age < kStripHoldMs * 2)
             std::snprintf(display_, sizeof(display_), "projectMM");
         else if (name && name[0])
             std::snprintf(display_, sizeof(display_), "%s", name);
@@ -1213,9 +1232,12 @@ private:
     static constexpr const char* kSwitchNames[kSwitchCount] =
         {"switch1", "switch2", "switch3", "switch4", "switch5", "switch6", "switch7", "switch8"};
     char     display_[32] = "projectMM";   ///< the strip: what the surface last touched, in words
-    /// When what the strip shows stops being news. The settle sequence measures from here, so it is
-    /// stamped by every write and never cleared: a boot starts the same sequence, from zero.
-    uint32_t stripUntilMs_ = 1;
+    /// WHEN the strip was last written. The settle sequence measures an ELAPSED time from here
+    /// rather than comparing against an absolute deadline, so it survives the millis() wrap.
+    uint32_t stripWrittenMs_ = 0;
+    /// Whether a settle sequence is running. True from boot, so a device that nobody has touched
+    /// still walks from the greeting to its name instead of holding the startup text forever.
+    bool     stripActive_ = true;
     uint8_t faders_[kFaderCount] = {};
     uint8_t encoders_[kEncoderCount] = {};
     /// What each attached surface was last SENT, so a value it already has is not echoed back. Same

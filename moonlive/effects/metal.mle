@@ -5,12 +5,6 @@ class MetalEffect {
   byte blend = 40;
   byte glow = 30;
 
-  fixed ux = 0.0;                 // this pixel in uv space, across
-  fixed uy = 0.0;                 // this pixel in uv space, down
-  fixed cx = 0.0;                 // offset from the blob center, across
-  fixed cy = 0.0;                 // offset from the blob center, down
-  int d = 0;                      // distance from this pixel to the blob
-
   int dimensions() { return 2; }
 
   string tags() { return "💫🖌️"; }
@@ -24,12 +18,12 @@ class MetalEffect {
   void tick() {
     for (int y = 0; y < height; y = y + 1) {
       for (int x = 0; x < width; x = x + 1) {
-        ux = uvX(x, width, height);
-        uy = uvY(y, width, height);
+        fixed ux = uvX(x, width, height);
+        fixed uy = uvY(y, width, height);
 
-        cx = ux - toFixed(beatsin(bpm, t, 30000) - 15000) / 25000;
-        cy = uy - toFixed(beatsin(bpm + 5, t, 30000) - 15000) / 25000;
-        d = polarR(toInt(cx * 1024), toInt(cy * 1024)) - 358;
+        fixed cx = ux - toFixed(beatsin(bpm, t, 30000) - 15000) / 25000;
+        fixed cy = uy - toFixed(beatsin(bpm + 5, t, 30000) - 15000) / 25000;
+        int d = polarR(toInt(cx * 1024), toInt(cy * 1024)) - 358;
 
         cx = ux - toFixed(beatsin(bpm + 3, t, 30000) - 15000) / 25000;
         d = smin(d, polarR(toInt(cx * 1024), toInt(uy * 1024)) - 307, blend);

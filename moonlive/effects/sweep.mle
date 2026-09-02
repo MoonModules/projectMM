@@ -7,9 +7,6 @@ class SweepEffect {
   byte panRange = 128;
   byte tiltRange = 96;
 
-  int spread = 0;
-  int dir = 1;
-
   int dimensions() { return 1; }
 
   string tags() { return "💫🎯"; }
@@ -24,8 +21,8 @@ class SweepEffect {
 
   void tick() {
     for (int i = 0; i < height; i = i + 1) {
-      spread = 0;
-      dir = 1;
+      int spread = 0;
+      int dir = 1;
       if (formation == 1) {
         if (i < div(height, 2)) { dir = 1; } else { dir = 0 - 1; }
       }

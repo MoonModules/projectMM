@@ -3608,6 +3608,17 @@ function attachTargetPopup(row, input, ctrl) {
         e.preventDefault();
         e.stopPropagation();
     }, /*capture=*/true);
+    // The same door for the keyboard. Without this, assign mode was reachable only by pointer: a
+    // keyboard user landing on a fader and pressing Enter or Space moved the control instead of
+    // opening its picker, so the assignment could not be made at all. Captured like the two above,
+    // for the same reason: a range input acts on the key before any click would fire.
+    row.addEventListener("keydown", (e) => {
+        if (!assignMode) return;
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        e.stopPropagation();
+        show();
+    }, /*capture=*/true);
     row.title = ctrl.target ? `drives ${ctrl.target}` : "unassigned";
 
     // The LABEL says what it drives, so an assigned control is recognizable without opening
@@ -5095,7 +5106,7 @@ async function mlScriptItems(roles) {
                 remote: isRemote,
                 // Without the extension: it is the file's business, not the reader's, and it keeps
                 // the row sorting next to the compiled modules rather than in a block of ".mle".
-                displayName: (isRemote ? "\u2601 " : "") + n.replace(/\.ml[elm]$/i, ""),
+                displayName: (isRemote ? "\u2601 " : "") + n.replace(/\.ml[elms]$/i, ""),
                 role,
                 // The scripted marker is what makes the row's kind visible, so it is added rather
                 // than assumed: a script whose own tags happen to omit it still reads correctly.

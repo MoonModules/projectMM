@@ -1539,6 +1539,34 @@ bool gpioWrite(uint8_t gpio, bool high);
 void setTestGpioLevel(uint8_t gpio, bool level);
 void clearTestGpioLevel();
 
+/// Read one ADC pin. Returns false when `gpio` has no ADC on this chip, or the read failed.
+///
+/// RAW COUNTS, deliberately, in the chip's own resolution (0..4095 on ESP32 at 12 bits). Not
+/// millivolts: everything this seam exists for maps a travel to a range anyway (a pedal's usable
+/// throw is never the full sweep, so `AnalogService` carries min/max/invert per row), and a
+/// millivolt figure would add per-chip calibration machinery to serve a conversion the caller
+/// immediately undoes. A sensor that reports an actual voltage can have `adcReadMv` the day one
+/// exists; inventing it first would be a seam with no caller.
+///
+/// Configures the pin on first use, so there is no separate begin: the same shape `gpioWrite` uses,
+/// and for the same reason (a caller that owns the pin just reads it). Cheap enough for a per-tick
+/// poll and never blocks.
+///
+/// Unfiltered, exactly as `gpioRead` is: a potentiometer's jitter is a property of the pot and the
+/// wiring, so smoothing belongs to the module that knows what is connected. `AnalogService` owns
+/// its own, in a time constant it can explain.
+bool adcRead(uint8_t gpio, uint16_t& raw);
+
+/// The full-scale count `adcRead` reports on this platform, so a caller can scale without knowing
+/// the chip: 4095 at the ESP32's 12 bits. One number rather than a bit-depth, because a caller
+/// scaling a range wants the maximum, not the exponent that produced it.
+uint16_t adcMaxCount();
+
+/// Test-only (desktop): make adcRead(gpio) return `raw`. The counterpart of setTestGpioLevel, so a
+/// pedal's mapping is host-testable with no hardware.
+void setTestAdcValue(uint8_t gpio, uint16_t raw);
+void clearTestAdcValue();
+
 // Poll the IR receiver on `pin` for a decoded remote frame. Returns true and writes the
 // frame into `codeOut` when a fresh code is available since the last call, false otherwise
 // (nothing received, or IR decode unavailable on this target). Self-contained like i2cScan -

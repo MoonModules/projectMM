@@ -1,14 +1,13 @@
 class Button {
   int pin = 0;
   int last = 1;
-  int now = 0;
 
   void defineControls() {
     addControl("pin", pin, 0, 48);
   }
 
   void tick20ms() {
-    now = gpioRead(pin);
+    int now = gpioRead(pin);
     if (now != last) {
       last = now;
       setControl("switch1", 1 - now);

@@ -3,8 +3,6 @@
 class OctopusEffect {
   byte speed = 20;
   byte branches = 4;
-  byte cx = 0;
-  byte cy = 0;
 
   int dimensions() { return 2; }
 
@@ -16,8 +14,8 @@ class OctopusEffect {
   }
 
   void tick() {
-    cx = scale(32768, width);
-    cy = scale(32768, height);
+    int cx = scale(32768, width);
+    int cy = scale(32768, height);
 
     for (int y = 0; y < height; y = y + 1) {
       for (int x = 0; x < width; x = x + 1) {

@@ -5,6 +5,7 @@ add_executable(mm_tests
     # core/
     unit/core/unit_PartitionTables.cpp
     unit/core/unit_SpscRing.cpp
+    unit/core/unit_AnalogService.cpp
     unit/core/unit_AudioCapture.cpp
     unit/core/unit_platform_audiofft.cpp
     unit/core/unit_Buffer.cpp

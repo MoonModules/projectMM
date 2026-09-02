@@ -190,6 +190,80 @@ inline bool runInputAction(const InputAction& a, bool pressed,
     return false;
 }
 
+/// Drive a target with a CONTINUOUS value, scaled into the control's own range.
+///
+/// The analog twin of `runInputAction`. That one answers an EVENT: a press carries no number, so a
+/// `Set` row writes the fixed value the row was given and 0 on release. An analog input is the other
+/// shape, and its value IS the reading, so a row's stored `value` has nothing to say. Separate
+/// rather than an extra parameter on the event path, because the two differ in what they do with
+/// every kind: a toggle or a delta driven fifty times a second is not something a user can mean.
+///
+/// `level` is 0..255, the range every surface control uses, and it is rescaled here to whatever the
+/// target actually holds: a Select with five options takes 0..4, an Int16 takes its own bounds. A
+/// pedal is therefore configured once and works on any target rather than needing per-target ranges.
+inline bool runInputLevel(const InputAction& a, uint8_t level,
+                          char* outStatus, size_t statusLen) {
+    if (!a.assigned()) return false;
+    const char* dot = std::strchr(a.target, '.');
+    if (!dot || dot == a.target || !dot[1]) {
+        if (outStatus) std::snprintf(outStatus, statusLen, "%s: not Module.control", a.target);
+        return false;
+    }
+    char module[24] = {};
+    const size_t n = static_cast<size_t>(dot - a.target);
+    if (n >= sizeof(module)) {
+        if (outStatus) std::snprintf(outStatus, statusLen, "module name too long");
+        return false;
+    }
+    std::memcpy(module, a.target, n);
+    const char* control = dot + 1;
+
+    Scheduler* sched = Scheduler::instance();
+    if (!sched) return false;
+    MoonModule* target = sched->firstByName(module);
+    if (!target) {
+        if (outStatus) std::snprintf(outStatus, statusLen, "no %s module", module);
+        return false;
+    }
+    // A pad is a momentary thing: there is no sensible reading of "a pedal held at 40% of a preset",
+    // so an analog row pointed at one does nothing rather than firing it repeatedly on the way past.
+    if (std::strncmp(control, "pad", 3) == 0) {
+        if (outStatus) std::snprintf(outStatus, statusLen, "%s: a pad takes a press", a.target);
+        return false;
+    }
+
+    const ControlList& ctrls = target->controls();
+    for (uint8_t i = 0; i < ctrls.count(); i++) {
+        const ControlDescriptor& c = ctrls[i];
+        if (std::strcmp(c.name, control) != 0) continue;
+        // The control's OWN range, the same bound the event path applies: a Select and a Palette
+        // keep their option count in `max`, so their last index is one below it.
+        const int hi = (c.type == ControlType::Select || c.type == ControlType::Palette)
+                           ? static_cast<int>(c.max) - 1 : static_cast<int>(c.max);
+        const int lo = static_cast<int>(c.min);
+        int next = lo;
+        if (hi > lo) {
+            // Rounded, not truncated: at the top of the travel a truncating scale lands one short
+            // of the maximum, so a pedal pushed all the way could never reach full brightness.
+            const int32_t span = static_cast<int32_t>(hi) - lo;
+            next = lo + static_cast<int>((static_cast<int32_t>(level) * span + 127) / 255);
+        }
+        if (next < lo) next = lo;
+        if (next > hi) next = hi;
+
+        char valueJson[32];
+        if (c.type == ControlType::Bool)
+            std::snprintf(valueJson, sizeof(valueJson), "{\"value\":%s}", next ? "true" : "false");
+        else
+            std::snprintf(valueJson, sizeof(valueJson), "{\"value\":%d}", next);
+        sched->setControl(module, control, valueJson);
+        if (outStatus) std::snprintf(outStatus, statusLen, "%s -> %d", a.target, next);
+        return true;
+    }
+    if (outStatus) std::snprintf(outStatus, statusLen, "%s has no %s", module, control);
+    return false;
+}
+
 /// The action half of a mapping row, as JSON, for a module's `writeListRow`.
 ///
 /// Emitted by every input service so a row reads the same wherever it came from, and so the UI
@@ -226,6 +300,20 @@ inline constexpr const char* kTargetTypes[] = {
     "pad",        // Control.padN, fired: a preset slot, resolved through ControlModule::firePad
 };
 inline constexpr uint8_t kTargetTypeCount = sizeof(kTargetTypes) / sizeof(kTargetTypes[0]);
+
+/// The highest number each target type actually has, so a parse cannot accept a control that does
+/// not exist. The surface carries eight of each of switch, encoder and fader (ControlModule's
+/// kSwitchCount / kEncoderCount / kFaderCount) against sixty-four pads, so one shared bound would
+/// let "Control.switch40" through: it parses, it is stored, and it dispatches to nothing.
+///
+/// Indexed by target type, so the unassigned slot at 0 reads 0 and is never numbered.
+inline constexpr unsigned long kTargetTypeMaxNumber[kTargetTypeCount] = {
+    0,               // unassigned
+    8,               // switch
+    8,               // encoder
+    8,               // fader
+    kMaxPadNumber,   // pad
+};
 
 /// Whether a target type is numbered. Every type in the list is, now that the surface is the only
 /// destination the editor offers; kept as a named test so a future unnumbered type reads clearly.
@@ -265,7 +353,8 @@ inline void decomposeTarget(const char* target, uint8_t& type, uint8_t& number) 
         // touched. Same rule the pad path applies.
         char* end = nullptr;
         const unsigned long n = std::strtoul(digits, &end, 10);
-        if (*end != 0 || n < 1 || n > kMaxPadNumber) continue;
+        // Bounded by THIS type's count, not by the largest of them: see kTargetTypeMaxNumber.
+        if (*end != 0 || n < 1 || n > kTargetTypeMaxNumber[i]) continue;
         type = i;
         number = static_cast<uint8_t>(n);
         return;

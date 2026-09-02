@@ -109,6 +109,24 @@ Only a `set` row acts on the release. A toggle or a delta acting on both edges w
 
 Detail: [technical](moxygen/ButtonService.md)
 
+### Analog
+
+A Service (added per board): **a list of ADC pins**, each driving a control with a value rather than an event. The continuous twin of Button, which drives the same controls from a contact.
+
+An **expression pedal** is the shape this is built around, and it is why a row carries more than a pin. A pedal's usable travel is never the full sweep: it rests at some count and tops out well below full scale, so a raw reading mapped straight through gives a control that never reaches either end and jumps at one of them.
+
+- `smoothing`: how hard the running average pulls toward each new reading, as a percentage. 100 follows the pin exactly; a low number is a heavy filter that lags. An ADC pin jitters by a few counts even at rest, so some filtering is always wanted.
+- `deadband`: how far the smoothed value must move, in target units, before the control is written. Without it a resting pedal rewrites its target fifty times a second forever.
+- `inputs`: the rows. Per row: `pin`, `inMin` / `inMax` (the raw counts the travel actually spans), `invert` (a pot wired the other way round), live `raw` and `value` readouts so a pedal can be calibrated by watching it move, and the shared target fields above.
+
+The travel is mapped into **the control's own range**, so a pedal is configured once and works on any target: a Select with five options takes 0..4, a bool takes on and off. A row pointed at a pad does nothing, because there is no sensible reading of a pedal held at 40% of a preset.
+
+Reversed `inMin`/`inMax` means inverted, rather than being an error: calibrating by moving the pedal to each end sets whichever end was reached first.
+
+Scripts reach the same hardware with `adcRead(pin)` and `adcMax()`, which is the path for a sensor whose mapping is a condition rather than a range.
+
+Detail: [technical](moxygen/AnalogService.md)
+
 ### MoonLiveService
 
 A Service (added per board): **a MoonLive script that reads hardware and drives controls**. The

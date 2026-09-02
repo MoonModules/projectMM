@@ -56,7 +56,7 @@
       "description": "Stage a script before the card points at it.",
       "op": "write_file",
       "path": "/moonlive/sc-ctrl.mle",
-      "value": "class E { tick() { setRGB(0, 200, 60, 255); } }\n"
+      "value": "class E { void tick() { setRGB(0, 200, 60, 255); } }\n"
     },
     {
       "name": "add-control-script",
@@ -147,7 +147,7 @@
       "description": "Save the script file: editing a script in place is what re-derives its controls.",
       "op": "write_file",
       "path": "/moonlive/sc-ctrl.mle",
-      "value": "class SpeedEffect {\n  byte speed = 7;\n  defineControls() { addControl(\"speed\", speed, 0, 15); }\n  tick() { setRGB(speed, 0, 0, 255); }\n}\n"
+      "value": "class SpeedEffect {\n  byte speed = 7;\n  void defineControls() { addControl(\"speed\", speed, 0, 15); }\n  void tick() { setRGB(speed, 0, 0, 255); }\n}\n"
     },
     {
       "name": "set-source-with-control",
@@ -306,7 +306,7 @@
       "description": "Save the script file: editing a script in place is what re-derives its controls.",
       "op": "write_file",
       "path": "/moonlive/sc-ctrl.mle",
-      "value": "class SpeedEffect {\n  byte speed = 7;\n  byte hue = 128;\n  defineControls() { addControl(\"speed\", speed, 0, 15); addControl(\"hue\", hue, 0, 255); }\n  tick() { setRGB(speed, hue, 0, 255); }\n}\n"
+      "value": "class SpeedEffect {\n  byte speed = 7;\n  byte hue = 128;\n  void defineControls() { addControl(\"speed\", speed, 0, 15); addControl(\"hue\", hue, 0, 255); }\n  void tick() { setRGB(speed, hue, 0, 255); }\n}\n"
     },
     {
       "name": "edit-source-two-controls",
@@ -389,7 +389,7 @@
       "description": "Save the script file: editing a script in place is what re-derives its controls.",
       "op": "write_file",
       "path": "/moonlive/sc-ctrl.mle",
-      "value": "class SpeedEffect {\n  byte speed = 7;\n  defineControls() { addControl(\"speed\", speed, 0, 15); }\n  tick() { setRGB(speed, 0, 0, 255); }\n}\n"
+      "value": "class SpeedEffect {\n  byte speed = 7;\n  void defineControls() { addControl(\"speed\", speed, 0, 15); }\n  void tick() { setRGB(speed, 0, 0, 255); }\n}\n"
     },
     {
       "name": "edit-source-shrink-to-one-control",
@@ -472,7 +472,7 @@
       "description": "Save the script file: editing a script in place is what re-derives its controls.",
       "op": "write_file",
       "path": "/moonlive/sc-ctrl.mle",
-      "value": "class Broken {\n  byte speed = ;\n  tick() { setRGB(0,0,0,0); }\n}\n"
+      "value": "class Broken {\n  byte speed = ;\n  void tick() { setRGB(0,0,0,0); }\n}\n"
     },
     {
       "name": "edit-source-broken",
@@ -555,7 +555,7 @@
       "description": "Save the script file: editing a script in place is what re-derives its controls.",
       "op": "write_file",
       "path": "/moonlive/sc-ctrl.mle",
-      "value": "class BrightEffect {\n  byte bright = 200;\n  defineControls() { addControl(\"bright\", bright, 0, 255); }\n  tick() { fill(0, 0, bright); }\n}\n"
+      "value": "class BrightEffect {\n  byte bright = 200;\n  void defineControls() { addControl(\"bright\", bright, 0, 255); }\n  void tick() { fill(0, 0, bright); }\n}\n"
     },
     {
       "name": "edit-source-recover",
@@ -572,10 +572,10 @@
             "p95": 10,
             "min": 1,
             "max": 10,
-            "n": 15,
-            "samples": [2, 1, 3, 1, 10, 1, 1, 6, 1, 1, 1, 1, 1, 2, 1]
+            "n": 16,
+            "samples": [2, 1, 3, 1, 10, 1, 1, 6, 1, 1, 1, 1, 1, 2, 1, 1]
           },
-          "last_updated": "2026-08-31"
+          "last_updated": "2026-09-02"
         },
         "esp32s3-n16r8": {
           "tick_us": {
@@ -730,10 +730,10 @@
             "p95": 7,
             "min": 1,
             "max": 7,
-            "n": 15,
-            "samples": [1, 2, 3, 5, 1, 1, 7, 1, 1, 1, 1, 1, 1, 1, 1]
+            "n": 16,
+            "samples": [1, 2, 3, 5, 1, 1, 7, 1, 1, 1, 1, 1, 1, 1, 1, 1]
           },
-          "last_updated": "2026-08-31"
+          "last_updated": "2026-09-02"
         },
         "esp32": {
           "tick_us": {

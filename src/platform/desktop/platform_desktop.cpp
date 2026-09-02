@@ -2209,6 +2209,27 @@ bool gpioWrite(uint8_t gpio, bool high) {
 void setTestGpioLevel(uint8_t gpio, bool level) { if (gpio < kMaxGpio) g_gpioLevel[gpio] = level; }
 void clearTestGpioLevel() { for (bool& b : g_gpioLevel) b = false; }
 
+// --- ADC ---
+// The desktop has no converter, so a read reports whatever a test injected. Same arrangement as the
+// GPIO level above: a pedal's mapping, its min/max/invert and its smoothing are ordinary logic, and
+// this is what lets all of it be pinned on the host with no hardware attached.
+namespace {
+uint16_t g_adcValue[kMaxGpio] = {};
+}
+
+bool adcRead(uint8_t gpio, uint16_t& raw) {
+    if (gpio >= kMaxGpio) return false;
+    raw = g_adcValue[gpio];
+    return true;
+}
+
+// The ESP32's 12-bit full scale, reported here too so a host test scales exactly as the board does:
+// a mapping verified against 4095 on the desktop cannot then behave differently on a device.
+uint16_t adcMaxCount() { return 4095; }
+
+void setTestAdcValue(uint8_t gpio, uint16_t raw) { if (gpio < kMaxGpio) g_adcValue[gpio] = raw; }
+void clearTestAdcValue() { for (uint16_t& v : g_adcValue) v = 0; }
+
 bool irRead(uint16_t /*pin*/, uint32_t& /*codeOut*/) { return false; }
 void irStop() {}   // no IR hardware on desktop
 bool irChannelReady(uint16_t /*pin*/) { return true; }   // no channel to fail on desktop

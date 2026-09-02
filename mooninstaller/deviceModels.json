@@ -875,8 +875,8 @@
         "controls": {
           "peripheral": "LCD-IDF",
           "pins": "47,21,14,9,8,16,15,7,1,2,42,41,40,39,38,48",
-          "clockPin": 5,
-          "dcPin": 6
+          "clockPin": 19,
+          "dcPin": 20
         }
       },
       {
@@ -934,8 +934,8 @@
         "controls": {
           "peripheral": "LCD-IDF",
           "pins": "47,48,21,38,14,39,13,40,12,41,11,42,10,2,3,1",
-          "clockPin": 8,
-          "dcPin": 9
+          "clockPin": 16,
+          "dcPin": 17
         }
       },
       {

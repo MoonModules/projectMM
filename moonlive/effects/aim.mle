@@ -6,9 +6,6 @@ class AimEffect {
   byte spread = 0;
   byte bright = 255;
 
-  int lean = 0;                   // this head's share of the fan
-  int p = 0;                      // this head's pan, clamped to travel
-
   int dimensions() { return 1; }
 
   string tags() { return "💫🎯"; }
@@ -23,8 +20,8 @@ class AimEffect {
   void tick() {
     fill(bright, bright, bright);
     for (int i = 0; i < height; i = i + 1) {
-      lean = div(spread * i, height);
-      p = pan + lean - div(spread, 2);
+      int lean = div(spread * i, height);
+      int p = pan + lean - div(spread, 2);
       if (p < 0) { p = 0; }
       if (p > 255) { p = 255; }
       setPan(i, p);

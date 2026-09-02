@@ -1519,3 +1519,228 @@ TEST_CASE("a member declaration and a typed function are told apart") {
     // this pins the diagnostic rather than a silent misparse.
     CHECK((fnFirst.ok || std::strlen(fnFirst.error) > 0));
 }
+
+// --- Local variables ------------------------------------------------------------------------
+//
+// A value that lives for one tick had nowhere to go before this: a member is PERSISTED (a sensor
+// reading written to config), is a memory load rather than a register, and there are eight member
+// records against sixteen frame slots. These pin the local as its own budget.
+//
+// Note the leading `fill(...)` in several bodies: mmScript hoists a body's LEADING declarations to
+// class scope (they are members there), so a test about a LOCAL has to put a statement first or it
+// would be testing the member path it is meant to be distinct from.
+
+#if MM_MOONLIVE_HAS_HOST_JIT
+TEST_CASE("a local variable holds a value for the rest of the tick") {
+    auto buf = render(mmScript("fill(0,0,0);\n"
+                               "int v = 40;\n"
+                               "fill(v, v + 2, v * 2);"), 4);
+    for (int i = 0; i < 4; i++) {
+        CHECK(buf[i*3] == 40); CHECK(buf[i*3+1] == 42); CHECK(buf[i*3+2] == 80);
+    }
+}
+
+TEST_CASE("a local variable is assignable after it is declared") {
+    auto buf = render(mmScript("fill(0,0,0);\n"
+                               "int v = 5;\n"
+                               "v = v * 7;\n"
+                               "fill(v, 0, 0);"), 2);
+    CHECK(buf[0] == 35);
+}
+
+TEST_CASE("a local is initialized from a call, which is what a sensor read looks like") {
+    // The shape the service template needs: `int now = gpioRead(pin);`. Here random16 stands in for
+    // the read, bounded so the assertion is exact.
+    auto buf = render(mmScript("fill(0,0,0);\n"
+                               "int v = random16(1);\n"
+                               "fill(v + 9, 0, 0);"), 2);
+    CHECK(buf[0] == 9);       // random16(1) is 0, so this pins the call reached the slot
+}
+
+TEST_CASE("a local declared inside an if body does not leak past it") {
+    // Scoping, from the outside: the name stops resolving at the '}'. If it leaked, this would
+    // compile and the test would fail on the compile rather than the assertion.
+    uint8_t out[4096];
+    auto r = moonlive::compileSource(
+        mmScript("fill(0,0,0);\n"
+                 "if (1 == 1) { int inner = 3; fill(inner,0,0); }\n"
+                 "fill(inner, 0, 0);"),
+        kTable, kSys, out, sizeof(out));
+    CHECK_FALSE(r.ok);
+}
+
+TEST_CASE("blocks reuse frame slots, so the frame is not spent by a script's total locals") {
+    // The slot budget is what scoping BUYS. Six sequential blocks of six locals each is 36
+    // declarations against a sixteen-slot frame: it compiles only because each block hands its
+    // slots back at the '}'. Six blocks, not twenty, because an `if` also costs one of the sixteen
+    // LABELS (kIrLabels) and this test is about the slot budget, not that one.
+    std::string body = "fill(0,0,0);\n";
+    for (int i = 0; i < 6; i++) {
+        body += "if (1 == 1) {\n";
+        for (int j = 0; j < 6; j++)
+            body += "  int v" + std::to_string(j) + " = 1;\n";
+        body += "  fill(v0, v5, 0);\n}\n";
+    }
+    std::string src = "class T {\n  void tick() {\n" + body + "  }\n}\n";
+    uint8_t out[8192];
+    auto r = moonlive::compileSource(src.c_str(), kTable, kSys, out, sizeof(out));
+    CHECK(r.ok);
+}
+
+TEST_CASE("two functions each get the whole frame rather than sharing one") {
+    // Stage 1 emits functions inline, so without a per-function reset the second function's locals
+    // would stack on top of the first's and the pair would exhaust the frame together.
+    std::string a, b;
+    for (int i = 0; i < 12; i++) { a += "  int a" + std::to_string(i) + " = 1;\n"; }
+    for (int i = 0; i < 12; i++) { b += "  int b" + std::to_string(i) + " = 1;\n"; }
+    std::string src = "class T {\n  void tick() {\n" + a + "  }\n  void other() {\n" + b + "  }\n}\n";
+    uint8_t out[8192];
+    auto r = moonlive::compileSource(src.c_str(), kTable, kSys, out, sizeof(out));
+    CHECK(r.ok);
+}
+#endif  // MM_MOONLIVE_HAS_HOST_JIT
+
+TEST_CASE("a local variable must be initialized where it is declared") {
+    // `int x;` would leave the slot holding whatever the last block put there, which is a bug that
+    // reads as working code. Refusing keeps a declaration honest.
+    uint8_t out[2048];
+    auto r = moonlive::compileSource(mmScript("fill(0,0,0);\n int v;\n fill(v,0,0);"),
+                                     kTable, kSys, out, sizeof(out));
+    CHECK_FALSE(r.ok);
+    CHECK(std::strlen(r.error) > 0);
+}
+
+#if MM_MOONLIVE_HAS_HOST_JIT
+TEST_CASE("a byte local WRAPS at 255, exactly as a byte member does") {
+    // The point of giving a local a width: `byte` means the same thing inside a function as it does
+    // in the class body. A frame slot is four bytes and Spill has no narrowing form, so the value is
+    // truncated on the way in (shift up, shift back) rather than by the store. Without that this
+    // holds 300 as a local and 44 as a member, and the same line would mean two different things.
+    auto buf = render(mmScript("fill(0,0,0);\n"
+                               "byte b = 200;\n"
+                               "b = b + 100;\n"          // 300 truncates to 44
+                               "fill(b, 0, 0);"), 2);
+    CHECK(buf[0] == 44);
+}
+
+TEST_CASE("a bool local truncates the same way, so any non-zero reads true") {
+    auto buf = render(mmScript("fill(0,0,0);\n"
+                               "bool f = 1;\n"
+                               "int hit = 0;\n"
+                               "if (f > 0) { hit = 7; }\n"
+                               "fill(hit, 0, 0);"), 2);
+    CHECK(buf[0] == 7);
+}
+
+TEST_CASE("a byte local keeps its width across a block boundary") {
+    // The truncation must survive a spill and reload, which is what makes it a property of the
+    // VARIABLE rather than of one expression.
+    auto buf = render(mmScript("fill(0,0,0);\n"
+                               "byte b = 250;\n"
+                               "if (1 == 1) { b = b + 10; }\n"    // 260 -> 4
+                               "fill(b, 0, 0);"), 2);
+    CHECK(buf[0] == 4);
+}
+#endif  // MM_MOONLIVE_HAS_HOST_JIT
+
+TEST_CASE("a local of every value type is accepted; only string is refused") {
+    // All four value types mean the same inside a function as in the class body, so a script author
+    // meets no arbitrary wall. A string has no runtime value to put in a slot.
+    uint8_t out[4096];
+    for (const char* decl : {"int v = 1;", "byte v = 1;", "bool v = 1;", "fixed v = 1.5;"}) {
+        std::string body = std::string("fill(0,0,0);\n ") + decl + "\n fill(1,0,0);";
+        std::string src = "class T {\n  void tick() {\n" + body + "\n  }\n}\n";
+        auto r = moonlive::compileSource(src.c_str(), kTable, kSys, out, sizeof(out));
+        INFO(decl << " -> " << std::string(r.error));
+        CHECK(r.ok);
+    }
+    auto str = moonlive::compileSource(mmScript("fill(0,0,0);\n string s = 1;\n fill(1,0,0);"),
+                                       kTable, kSys, out, sizeof(out));
+    CHECK_FALSE(str.ok);
+}
+
+TEST_CASE("a local literal is range-checked against its declared type") {
+    // `byte b = 300;` names the mistake rather than silently holding 44, the same refusal a member
+    // initializer gives.
+    uint8_t out[4096];
+    auto b = moonlive::compileSource(mmScript("fill(0,0,0);\n byte v = 300;\n fill(v,0,0);"),
+                                     kTable, kSys, out, sizeof(out));
+    CHECK_FALSE(b.ok);
+    auto f = moonlive::compileSource(mmScript("fill(0,0,0);\n bool v = 5;\n fill(v,0,0);"),
+                                     kTable, kSys, out, sizeof(out));
+    CHECK_FALSE(f.ok);
+}
+
+TEST_CASE("a local may not shadow a member or a system variable") {
+    uint8_t out[2048];
+    // A member of the same name: `v = 1` would otherwise write somewhere the author did not mean.
+    auto shadowMember = moonlive::compileSource(
+        "class T {\n  int v = 1;\n  void tick() { fill(0,0,0); int v = 2; fill(v,0,0); }\n}\n",
+        kTable, kSys, out, sizeof(out));
+    CHECK_FALSE(shadowMember.ok);
+    // A system variable is read-only, so binding a slot to its name would silently detach it.
+    auto shadowSys = moonlive::compileSource(mmScript("fill(0,0,0);\n int t = 2;\n fill(t,0,0);"),
+                                             kTable, kSys, out, sizeof(out));
+    CHECK_FALSE(shadowSys.ok);
+}
+
+TEST_CASE("an int local takes a whole number, so a fractional initializer is refused") {
+    // The scaling wall, on the declaration: a Q16.16 value and a whole number are both a 4-byte
+    // slot, so nothing but the declared type tells them apart. `fixed v = 1.5;` is the way to say
+    // this (below); silently truncating into an int would not be.
+    uint8_t out[2048];
+    auto r = moonlive::compileSource(mmScript("fill(0,0,0);\n int v = 1.5;\n fill(v,0,0);"),
+                                     kTable, kSys, out, sizeof(out));
+    CHECK_FALSE(r.ok);
+}
+
+TEST_CASE("a local may be fixed, which is what a per-pixel coordinate needs") {
+    // The shape metal.mle and fractal.mle were holding as members purely because a local could not
+    // be fixed: uv coordinates are per-pixel scratch, computed and consumed inside the inner loop.
+    uint8_t out[4096];
+    auto r = moonlive::compileSource(
+        mmScript("fill(0,0,0);\n"
+                 "fixed ux = uvX(1, width, height);\n"
+                 "fixed cx = ux - 0.25;\n"
+                 "fill(toInt(cx * 100), 0, 0);"),
+        kTable, kSys, out, sizeof(out));
+    INFO(std::string(r.error));
+    CHECK(r.ok);
+}
+
+TEST_CASE("a fixed local starts at a whole number, which the literal adopts") {
+    // `fixed d = 0;` is how a fixed accumulator naturally opens, and reads the same as a fixed
+    // member's initializer. The literal converts at compile time and costs nothing at run time.
+    uint8_t out[4096];
+    auto r = moonlive::compileSource(mmScript("fill(0,0,0);\n fixed d = 0;\n d = d + 1.5;\n"
+                                              " fill(toInt(d * 10), 0, 0);"),
+                                     kTable, kSys, out, sizeof(out));
+    INFO(std::string(r.error));
+    CHECK(r.ok);
+}
+
+TEST_CASE("the two scalings do not mix in a local, in either direction") {
+    // The bug this wall exists to stop: raw bits 65,536 apart in meaning, invisible at run time.
+    uint8_t out[4096];
+    // A fixed value into an int local.
+    auto intTakesFixed = moonlive::compileSource(
+        mmScript("fill(0,0,0);\n int n = 0;\n n = uvX(1, width, height);\n fill(n,0,0);"),
+        kTable, kSys, out, sizeof(out));
+    CHECK_FALSE(intTakesFixed.ok);
+    // A computed whole number into a fixed local: it must name its conversion (toFixed).
+    auto fixedTakesInt = moonlive::compileSource(
+        mmScript("fill(0,0,0);\n fixed d = 0.0;\n d = width * 2;\n fill(toInt(d),0,0);"),
+        kTable, kSys, out, sizeof(out));
+    CHECK_FALSE(fixedTakesInt.ok);
+}
+
+TEST_CASE("a fixed local reports its scaling where it is read") {
+    // Reading the local must carry the fixed-ness out with it, or the value would meet an int at
+    // the next operator and compare as a number 65,536 away. Pinned from the outside: multiplying
+    // a fixed local by an int VARIABLE (never a literal, which adopts) is refused.
+    uint8_t out[4096];
+    auto r = moonlive::compileSource(
+        mmScript("fill(0,0,0);\n fixed d = 1.5;\n int n = 2;\n fill(toInt(d * n), 0, 0);"),
+        kTable, kSys, out, sizeof(out));
+    CHECK_FALSE(r.ok);
+}

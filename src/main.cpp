@@ -146,6 +146,7 @@
 #include "core/I2cScanModule.h"
 #include "core/TasksModule.h"
 #include "core/PinsModule.h"
+#include "core/AnalogService.h"
 #include "core/ButtonService.h"
 #include "core/InfraredService.h"
 #include "core/MoonLiveService.h"
@@ -315,6 +316,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::TasksModule>("TasksModule", "core/system.md#tasks");
     mm::ModuleFactory::registerType<mm::PinsModule>("PinsModule", "core/system.md#pins");
     mm::ModuleFactory::registerType<mm::ButtonService>("ButtonService", "core/services.md#button");
+    mm::ModuleFactory::registerType<mm::AnalogService>("AnalogService", "core/services.md#analog");
     mm::ModuleFactory::registerType<mm::InfraredService>("InfraredService", "core/services.md#infrared");
     mm::ModuleFactory::registerType<mm::MoonLiveService>("MoonLiveService", "core/services.md#moonliveservice");
     mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/system.md#file-manager");
