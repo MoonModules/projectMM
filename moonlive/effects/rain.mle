@@ -11,9 +11,9 @@ class RainEffect {
 
   void defineControls() {
     pool(400);
-    addControl("fall", fall, 4, 80);                // how fast a drop falls
-    addControl("wind", wind, 0, 255);               // which way it blows, 128 is straight down
-    addControl("drops", drops, 1, 12);              // drops emitted per frame
+    addControl("fall", fall, 4, 80); // how fast a drop falls
+    addControl("wind", wind, 0, 255); // which way it blows, 128 is straight down
+    addControl("drops", drops, 1, 12); // drops emitted per frame
   }
 
   void tick() {

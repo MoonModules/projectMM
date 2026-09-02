@@ -2,6 +2,14 @@
 
 What landed on [WLED-MM](https://github.com/MoonModules/WLED-MM)'s `mdev` (default) branch, month by month. External-context reference — a factual log of a friend repo's releases, not projectMM's own history or roadmap. Newest month on top. The reusable prompt that generates these lives in [README.md](README.md). Months are split at versioned-release boundaries (the rolling `nightly` tag is not a release).
 
+## August 2026
+
+*Summarised from 1 commit on `mdev` (no versioned release cut this month; the rolling `nightly` prerelease republished on 2026-08-13).*
+
+Dormant month. The single commit is a build-configuration fix with no user-visible change: the audio-reactive usermod is pinned by its full commit hash, because the pioarduino build tooling fails on short hashes. Nightly builds therefore keep resolving the audio-reactive dependency correctly.
+
+_Auditability: 1 commit on `mdev`, author-date 2026-08-01..2026-08-31 (f2d32c9c, "use long hash in AR_lib_deps"), via `gh api repos/MoonModules/WLED-MM/commits?sha=mdev&since=2026-08-01T00:00:00Z&until=2026-09-01T00:00:00Z`. Issues checked: `search/issues?q=repo:MoonModules/WLED-MM+is:issue+created:2026-08-01..2026-08-31` (0) and `closed:2026-08-01..2026-08-31` (0), no issues opened or closed all month. Releases checked (`repos/MoonModules/WLED-MM/releases`): only the rolling `nightly` prerelease (2026-08-13), which is not a versioned release, so no month split._
+
 ## July 2026
 
 *Summarised from 2 commits on `mdev`, both 2026-07-01 (no versioned release cut this month; the `nightly` prerelease republished on 2026-07-02 packages June's work).*

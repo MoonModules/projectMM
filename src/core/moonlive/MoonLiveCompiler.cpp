@@ -1026,7 +1026,11 @@ struct Parser {
             {"toFixed", 7}, {"toInt", 5}, {"true", 4}, {"false", 5},
             // The type keywords too: `int int = 5;` parsed, declaring a member whose name the
             // class-body loop reads as the start of another declaration.
-            {"int", 3}, {"byte", 4}, {"bool", 4}, {"fixed", 5}, {"string", 6}};
+            {"int", 3}, {"byte", 4}, {"bool", 4}, {"fixed", 5}, {"string", 6},
+            // And the statement keywords parseStatement dispatches on. `int if = 0;` bound a
+            // variable to the word that OPENS a conditional, so every later `if` in the function
+            // parsed as a reference to it and the diagnostic pointed at the wrong line.
+            {"if", 2}, {"else", 4}, {"for", 3}, {"return", 6}, {"class", 5}, {"void", 4}};
         for (const auto& k : kWords)
             if (len == k.len && std::strncmp(n, k.w, k.len) == 0) return true;
         return false;
@@ -1540,6 +1544,7 @@ struct Parser {
         // The same three collisions a loop counter checks for, and for the same reasons: a system
         // variable is read-only, a duplicate name binds a second slot to one name, and shadowing a
         // member would make `x = 1` write somewhere the author did not mean.
+        if (isReservedWord(varName, varLen)) { fail("that name is a reserved word"); return false; }
         if (sysvars.find(varName, varLen)) { fail("name is a system variable"); return false; }
         if (findLocal(varName, varLen) >= 0) { fail("that name is already in use here"); return false; }
         if (findMember(varName, varLen) >= 0) { fail("a member of that name is declared"); return false; }

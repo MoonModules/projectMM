@@ -5,19 +5,19 @@ class BallsEffect {
   byte size = 5;
   byte bpm = 20;
 
-  byte b = 0;                     // the ball being drawn
-  byte radius = 4;                // that ball's radius in lights
-  byte px = 0;                    // its center, across
-  byte py = 0;                    // its center, down
+  byte b = 0; // the ball being drawn
+  byte radius = 4; // that ball's radius in lights
+  byte px = 0; // its center, across
+  byte py = 0; // its center, down
 
   int dimensions() { return 2; }
 
   string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("count", count, 1, 4);               // how many balls bounce
-    addControl("size", size, 1, 10);                // ball size as a share of the grid
-    addControl("bpm", bpm, 1, 120);                 // how fast they travel
+    addControl("count", count, 1, 4); // how many balls bounce
+    addControl("size", size, 1, 10); // ball size as a share of the grid
+    addControl("bpm", bpm, 1, 120); // how fast they travel
   }
 
   void drawBall() {

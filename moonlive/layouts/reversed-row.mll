@@ -8,7 +8,7 @@ class ReversedRowLayout {
   string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("cols", cols, 1, 64);                // how many lights the strand has
+    addControl("cols", cols, 1, 64); // how many lights the strand has
   }
 
   void placeLights() {

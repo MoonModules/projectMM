@@ -4,6 +4,37 @@ What landed on [wled/WLED](https://github.com/wled/WLED)'s `main` branch, month 
 
 Months are **not** split at release dates: upstream WLED cuts releases from separate release branches (`0_15`, `16_x`), so the version tags aren't on `main` — `main` is the development trunk that feeds future releases. Each month notes which release shipped, as context.
 
+## August 2026
+
+A quieter, consolidation month on `main` after July's V5 platform switch: the toolchain moved forward again, drawing and segment bugs got fixed, and a set of long-open field reports were finally closed. No versioned release was published in August, so the month is not split.
+
+**New**
+- Trunk builds move to ESP-IDF 5.5.4, and the ESP32-C5 target now builds on the same platform as the rest (its NTP workaround is gone, so time settings behave normally there).
+- The Waveshare ESP32-S3 HUB75 build gains the SHTC3 v2 temperature and humidity sensor usermod.
+- Effects can now load palettes from their own code, so an effect can pick or cycle palettes itself.
+
+**Fixed**
+- Circle drawing is more accurate: outlines no longer come out slightly flat, and filled circles are rounder.
+- Renaming a segment while effects are running no longer risks a crash on dual-core ESP32.
+- If the device runs out of memory at startup, it now creates a small default segment instead of showing "no segments" with most controls disabled.
+- Pac-Man is hardened against drawing outside the strip, and ESP8266 gets a smaller DDP send packet so streaming does not fail, plus about 2.5 KB of flash back by dropping unusable GIF code.
+- ESP32 chip revision is reported correctly again on the V5 platform.
+
+**Fixed (reported by users)**
+- FW1906 strips no longer light the cool-white and warm-white channels on certain solid colors (#5812).
+- The effects list no longer loads incomplete or broken over a slow connection (#5813).
+- Waveshare ESP32-S3-RGB-Matrix HUB75 boards: boot failures (#5776) and swapped green and blue channels (#5815) both resolved.
+- Long-running strip flicker and strobe reports from the 0.15 line were closed out, including the LEDs-flashing-every-10-30-seconds thread (#4805), DRGB realtime strobing (#5512), and the effect jumping to "Copy Segment" (#5506). Also closed: white flash at full brightness before the boot preset loads (#5468), a permanently locked OTA on QuinLED Dig-Uno (#5158), and Gledopto Ethernet dropouts (#5431).
+
+**Watching**
+- Adding a second LED output crashes on 17.0.0-dev; confirmed and marked major (#5770).
+- Two proposals are gauging community interest: PPP-over-serial as a network transport, turning the USB cable into a full network link (#5811), and a DDP compression extension for low-bandwidth links (#5810), the busiest thread of the month.
+- An RFC proposes rewriting the settings web UI to be schema-driven, generated from the code rather than hand-written HTML (#5792).
+- A WLED-MM backport is proposed upstream: switching DDP, E1.31 and Art-Net output to AsyncUDP for better streaming performance (#5816).
+- A BSSID typed with colons or dashes is silently parsed wrong, so access-point pinning never matches (#5797).
+
+_Auditability: 52 commits on `main` with author-date 2026-08-01..2026-08-31 (range aa98fe4 ... c472e41), via `gh api repos/wled/WLED/commits?sha=main&since=2026-08-01T00:00:00Z&until=2026-09-01T00:00:00Z`. Issues via `search/issues` for `repo:wled/WLED+is:issue+created:2026-08-01..2026-08-31` (19 opened) and `repo:wled/WLED+is:issue+closed:2026-08-01..2026-08-31` (14 closed); only user-facing ones surfaced. No versioned release published in August 2026 (`repos/wled/WLED/releases`), so no month split. Internal refactors (the `netmindz` global-state encapsulation series, ~15 commits), CI changes, docs and dependency bumps are omitted._
+
 ## July 2026
 
 The month `main` switched to the **V5** platform: WLED's trunk moved from the ESP-IDF 4.4 / arduino-esp32 v2 build to ESP-IDF 5.3 / arduino-esp32 v3, and the long-running `V5` branch became the development trunk (merged July 19). Maintainers warned publicly that `main` would be unstable for a while, and the web UI now shows a "development build" banner. v16.0.1 shipped July 7 from a release branch, so the month is not split.

@@ -87,6 +87,21 @@ extern "C" inline uint32_t mm_service_adcRead(const uintptr_t* args, uint32_t, c
     return raw;
 }
 
+/// adcMv(pin) -> the pin's voltage in MILLIVOLTS, or 0 where the chip carries no calibration.
+///
+/// What a sensor reporting a VOLTAGE needs: a divider on a supply rail, a shunt amplifier reporting
+/// current. The raw count is not a fixed fraction of full scale (every converter is nonlinear in its
+/// own measured way), so scaling one by hand gives a number that looks right and is not. A pedal
+/// keeps using adcRead: it maps a travel to a range and would convert a calibrated figure straight
+/// back out again.
+extern "C" inline uint32_t mm_service_adcMv(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const uint32_t pin = static_cast<uint32_t>(args[0]);
+    if (pin > 48) return 0;
+    uint16_t mv = 0;
+    if (!platform::adcReadMv(static_cast<uint8_t>(pin), mv)) return 0;
+    return mv;
+}
+
 /// adcMax() -> the full-scale count adcRead reports on this platform.
 ///
 /// So a script scales against the chip it is on rather than a number typed into the source: the same
@@ -150,6 +165,9 @@ inline const BuiltinTable& serviceBuiltins() {
     t.add({"gpioWrite", 2, /*returns*/ true, BuiltinKind::Call, &mm_service_gpioWrite, {}});
     // adcRead(pin)           -> raw counts. The analog half: a pedal, a pot, a sense divider.
     t.add({"adcRead", 1, /*returns*/ true, BuiltinKind::Call, &mm_service_adcRead, {}});
+    // adcMv(pin)             -> millivolts, chip-calibrated: the form a voltage or current sensor
+    // needs, where a raw count would be a plausible-looking wrong answer.
+    t.add({"adcMv", 1, /*returns*/ true, BuiltinKind::Call, &mm_service_adcMv, {}});
     // adcMax()               -> this platform's full scale, so a script normalizes without a magic
     // number. Zero arguments, like a system variable would be, but a call because it asks the seam.
     t.add({"adcMax", 0, /*returns*/ true, BuiltinKind::Call, &mm_service_adcMax, {}});

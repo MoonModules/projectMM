@@ -11,9 +11,9 @@ class FountainEffect {
 
   void defineControls() {
     pool(300);
-    addControl("lift", lift, 20, 200);              // how hard the plume is thrown
-    addControl("pull", pull, 4, 60);                // how hard gravity pulls it back
-    addControl("sparks", sparks, 1, 12);            // drops emitted per frame
+    addControl("lift", lift, 20, 200); // how hard the plume is thrown
+    addControl("pull", pull, 4, 60); // how hard gravity pulls it back
+    addControl("sparks", sparks, 1, 12); // drops emitted per frame
   }
 
   void tick() {

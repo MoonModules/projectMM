@@ -9,8 +9,8 @@ class OctopusEffect {
   string tags() { return "💫🖌️"; }
 
   void defineControls() {
-    addControl("speed", speed, 1, 120);             // how fast the arms rotate
-    addControl("branches", branches, 1, 8);         // how many arms
+    addControl("speed", speed, 1, 120); // how fast the arms rotate
+    addControl("branches", branches, 1, 8); // how many arms
   }
 
   void tick() {

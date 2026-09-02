@@ -20,8 +20,6 @@
 #include <filesystem>
 #include <string>
 #include <fstream>
-#include <thread>
-#include <chrono>
 
 // The settings directory is created when the filesystem mounts, not left for the first save to
 // discover. A shipped binary starts in a directory that has never held one, and before this the
@@ -1052,12 +1050,13 @@ TEST_CASE("A continuous writer cannot defer a pending save forever") {
     // noteDirty() is a static that routes to whoever holds it.
     fs->setScheduler(&sched);
 
+    // A continuous writer: marks arrive faster than the debounce, so the debounce alone would never
+    // expire. The ceiling clock is AGED rather than waited out, because what is under test is the
+    // comparison in tick1s, not the host's ability to sleep for ten seconds.
     for (int s = 0; s < 30 && m->dirty(); s++) {
         mm::FilesystemModule::noteDirty();          // the continuous writer, faster than the debounce
+        fs->ageDirtyForTest(1000);                  // ... and a second of device time goes by
         fs->tick1s();
-        if (!m->dirty()) break;
-        // Real time, in the steps tick1s reads: millis() is the host clock.
-        std::this_thread::sleep_for(std::chrono::milliseconds(400));
     }
     // Within the ceiling the save must have landed, despite marks never stopping.
     CHECK_FALSE(m->dirty());

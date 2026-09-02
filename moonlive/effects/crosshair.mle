@@ -4,16 +4,16 @@ class CrosshairEffect {
   byte bpm = 30;
   byte spread = 3;
 
-  int cx = 0;                     // where the sight sits, across
-  int cy = 0;                     // where the sight sits, down
+  int cx = 0; // where the sight sits, across
+  int cy = 0; // where the sight sits, down
 
   int dimensions() { return 2; }
 
   string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("bpm", bpm, 1, 240);                 // how fast the sight sweeps
-    addControl("spread", spread, 0, 20);            // how thick the lines are
+    addControl("bpm", bpm, 1, 240); // how fast the sight sweeps
+    addControl("spread", spread, 0, 20); // how thick the lines are
   }
 
   void column() {

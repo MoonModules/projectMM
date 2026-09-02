@@ -10,9 +10,9 @@ class SparkleEffect {
   string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("density", density, 1, 40);          // how many lights catch per frame
-    addControl("fadeAmt", fadeAmt, 1, 120);         // how fast a spark dies
-    addControl("hueSpread", hueSpread, 0, 255);     // how much of the palette the sparks use
+    addControl("density", density, 1, 40); // how many lights catch per frame
+    addControl("fadeAmt", fadeAmt, 1, 120); // how fast a spark dies
+    addControl("hueSpread", hueSpread, 0, 255); // how much of the palette the sparks use
   }
 
   void tick() {

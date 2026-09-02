@@ -8,7 +8,7 @@ class ShiftModifier {
   string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("amount", amount, 0, 64);            // how far to slide, in lights
+    addControl("amount", amount, 0, 64); // how far to slide, in lights
   }
 
   void modifyLogical() {

@@ -331,8 +331,18 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
                 a.branchGeU(sCtr, idx, inRange);
                 a.movReg(idx, sCtr);
                 a.bind(inRange);
-                a.movImm(sAddr, width);
-                a.mulReg(idx, idx, sAddr);              // idx *= width  (a byte offset now)
+                // idx *= width, as a SHIFT rather than a multiply. ctrlWidth produces only 1 and
+                // 4 (see below), so the scaling is a compile-time power of two and the general
+                // form was paying for a generality that cannot arise: width 1 multiplied by one,
+                // which is two instructions and a scratch register to compute the number it
+                // already had, and width 4 ran a full integer multiply where a shift says the same
+                // thing. This runs on EVERY array access, so an effect holding per-item state
+                // (a particle array, a byte[] heat map) pays it per light.
+                //
+                // In the shared lowering rather than per backend: every assembler already has
+                // shlImm, so all four get it without a new primitive to implement four times.
+                if (width == 4)      a.shlImm(idx, idx, 2);
+                else if (width != 1) { a.movImm(sAddr, width); a.mulReg(idx, idx, sAddr); }
                 a.addImm(idx, idx, idxBase(op.imm));    // ... plus the array's base
                 // Two element widths, which is all ctrlWidth can produce: 1 for byte[] and
                 // bool[], 4 for int[] and fixed[].

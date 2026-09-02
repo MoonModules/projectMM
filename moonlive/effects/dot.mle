@@ -8,7 +8,7 @@ class DotEffect {
   string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("bpm", bpm, 1, 240);                 // how fast the dot walks
+    addControl("bpm", bpm, 1, 240); // how fast the dot walks
   }
 
   void tick() {

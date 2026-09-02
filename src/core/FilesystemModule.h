@@ -102,6 +102,15 @@ public:
     /// per module, which flash tolerates indefinitely.
     static constexpr uint32_t MAX_DEFER_MS = 10000;
 
+    /// Test-only: age the pending save's ceiling clock by `ms`, as though that long had passed
+    /// since the first dirty mark.
+    ///
+    /// The starvation contract is "a pending save lands within MAX_DEFER_MS however often marks
+    /// arrive", and proving it by SLEEPING costs ten seconds of wall clock in a unit suite that
+    /// otherwise runs in nine. The same seam shape platform::setTestGpioLevel uses: the behavior
+    /// under test is the comparison in tick1s, not the host's ability to wait.
+    void ageDirtyForTest(uint32_t ms) { firstDirtyMs_ -= ms; }
+
     /// Singleton is registered in setScheduler() (called by main.cpp on the real
     /// FilesystemModule), NOT in the constructor. The factory creates short-lived
     /// probe instances for /api/types defaults capture; the probe's destructor would

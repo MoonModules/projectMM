@@ -6,7 +6,7 @@ The user-added **Service** modules — capability bridges the device provides or
 
 ## Services
 
-The top-level container the Service modules hang under — a grouping node with no controls of its own, the same shape as `Effects`/`Drivers` in the light domain. Adds/removes its children (Audio, IR) at runtime via the generic module machinery.
+The top-level container the Service modules hang under — a grouping node with no controls of its own, the same shape as `Effects`/`Drivers` in the light domain. Adds/removes its children (Audio, OSC, Infrared, Button, Analog, MoonLiveService) at runtime via the generic module machinery.
 
 Detail: [technical](moxygen/Services.md)
 
@@ -150,7 +150,7 @@ A script runs on `tick20ms`, the 50 Hz poll, not the render tick: a contact clos
 milliseconds and a sensor answers at its own rate, so a heavy script costs its own tick rather than
 stuttering the lights at the frame rate.
 
-What a script can reach: `gpioRead(pin)` and `gpioWrite(pin, on)` for the hardware, and
+What a script can reach: `gpioRead(pin)` and `gpioWrite(pin, on)` for digital hardware, `adcRead(pin)` with `adcMax()` for analog, and
 `setControl(name, value)` for the output, which writes the CONTROL SURFACE and nothing else. That is
 the same two-step model the mapping rows use, so a script and a row reach a driver by one path
 rather than two.

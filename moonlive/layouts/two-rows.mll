@@ -8,7 +8,7 @@ class TwoRowsLayout {
   string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("cols", cols, 1, 64);                // lights in each row
+    addControl("cols", cols, 1, 64); // lights in each row
   }
 
   void placeLights() {

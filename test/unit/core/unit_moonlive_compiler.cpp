@@ -1531,6 +1531,52 @@ TEST_CASE("a member declaration and a typed function are told apart") {
 // would be testing the member path it is meant to be distinct from.
 
 #if MM_MOONLIVE_HAS_HOST_JIT
+#if MM_MOONLIVE_HAS_HOST_JIT
+TEST_CASE("an array is indexed correctly at both element widths, by a computed index") {
+    // The index scaling, from the outside. `idx * width` is emitted as a SHIFT (width 4) or skipped
+    // entirely (width 1), so a wrong shift or a wrongly skipped one reads the neighbouring element
+    // rather than failing loudly. A CONSTANT index would not catch it: the interesting path is an
+    // index the engine computes at run time, which is what a loop counter is.
+    //
+    // byte[]: width 1, so no scaling at all.
+    auto b = render(mmScript("byte heat[4];\n"
+                             "fill(0,0,0);\n"
+                             "for (int i = 0; i < 4; i = i + 1) { heat[i] = i * 10; }\n"
+                             "setRGB(0, heat[3], heat[1], heat[0]);"), 2);
+    CHECK(b[0] == 30);      // heat[3]
+    CHECK(b[1] == 10);      // heat[1]
+    CHECK(b[2] == 0);       // heat[0]
+
+    // int[]: width 4, the shift path, and the assertions have to distinguish THREE ways the
+    // scaling can be wrong. Two arrays side by side catch an OVER-scaled offset (it lands in the
+    // neighbour and reads its values). Element 0 holding a number wider than 16 bits catches an
+    // UNDER-scaled one (it lands part-way inside element 0, where no byte equals a real element
+    // value). A single array of small numbers catches neither: every wrong offset still reads
+    // something this same array wrote, which is how the first version of this test passed with a
+    // deliberately wrong shift.
+    auto w = render(mmScript("int big[4];\n"
+                             "int other[4];\n"
+                             "fill(0,0,0);\n"
+                             "for (int i = 0; i < 4; i = i + 1) { big[i] = i * 10 + 1; }\n"
+                             "for (int i = 0; i < 4; i = i + 1) { other[i] = 200 + i; }\n"
+                             "big[0] = 66000;\n"
+                             "setRGB(0, big[3], big[1], other[0]);"), 2);
+    CHECK(w[0] == 31);      // big[3]: not other[], not big[1], not a byte inside big[0]
+    CHECK(w[1] == 11);      // big[1]
+    CHECK(w[2] == 200);     // other[0]
+}
+
+TEST_CASE("an out-of-range index still clamps to the last element after the scaling change") {
+    // The clamp runs BEFORE the scaling, and both were touched, so this pins that an index past the
+    // end lands on the last element rather than reading past the array into the engine's own arena.
+    auto buf = render(mmScript("byte heat[4];\n"
+                               "fill(0,0,0);\n"
+                               "for (int i = 0; i < 4; i = i + 1) { heat[i] = i + 1; }\n"
+                               "setRGB(0, heat[99], 0, 0);"), 2);
+    CHECK(buf[0] == 4);     // the last element, not garbage
+}
+#endif  // MM_MOONLIVE_HAS_HOST_JIT
+
 TEST_CASE("a local variable holds a value for the rest of the tick") {
     auto buf = render(mmScript("fill(0,0,0);\n"
                                "int v = 40;\n"

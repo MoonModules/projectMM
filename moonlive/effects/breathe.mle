@@ -11,10 +11,10 @@ class BreatheEffect {
   string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("bpm", bpm, 1, 60);                  // breaths per minute
-    addControl("hue", hue, 0, 255);                 // where in the palette it sits
-    addControl("drift", drift, 0, 255);             // how far the color wanders per breath
-    addControl("floorBri", floorBri, 0, 200);       // never darker than this
+    addControl("bpm", bpm, 1, 60); // breaths per minute
+    addControl("hue", hue, 0, 255); // where in the palette it sits
+    addControl("drift", drift, 0, 255); // how far the color wanders per breath
+    addControl("floorBri", floorBri, 0, 200); // never darker than this
   }
 
   void tick() {

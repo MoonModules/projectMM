@@ -3614,10 +3614,13 @@ function attachTargetPopup(row, input, ctrl) {
     // for the same reason: a range input acts on the key before any click would fire.
     row.addEventListener("keydown", (e) => {
         if (!assignMode) return;
-        if (e.key !== "Enter" && e.key !== " ") return;
+        // EVERY key is swallowed while assigning, not just the two that open the picker: an arrow
+        // key on a focused fader still moves it, so a user tabbing through the surface in assign
+        // mode would change the values they are trying to re-target. In this mode the row is a
+        // button, and a button does not respond to arrows.
         e.preventDefault();
         e.stopPropagation();
-        show();
+        if (e.key === "Enter" || e.key === " ") show();
     }, /*capture=*/true);
     row.title = ctrl.target ? `drives ${ctrl.target}` : "unassigned";
 

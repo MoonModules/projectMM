@@ -14,6 +14,8 @@
 #include "driver/gpio.h"      // gpio_get_level / gpio_get_drive_capability — the live-state reads
 #include "driver/rtc_io.h"    // rtc_gpio_is_valid_gpio
 #include "esp_adc/adc_oneshot.h"  // adcRead: the ADC1 oneshot unit
+#include "esp_adc/adc_cali.h"      // adcReadMv: per-chip eFuse correction
+#include "esp_adc/adc_cali_scheme.h"
 #include "esp_heap_caps.h"    // heap_caps_get_total_size(MALLOC_CAP_SPIRAM) — detect PSRAM without a new
                               // component dep (the heap component is always linked; esp_psram is not,
                               // and adding it to REQUIRES would switch main to strict mode, hiding the
@@ -209,11 +211,58 @@ bool adcRead(uint8_t gpio, uint16_t& raw) {
 
 uint16_t adcMaxCount() { return 4095; }    // 12 bits, matching ADC_BITWIDTH_DEFAULT on these chips
 
+// --- Calibrated millivolts ---
+//
+// A raw count is not a fixed fraction of full scale: every part's converter is nonlinear in its own
+// way, and the ESP32 carries the correction for its own silicon in eFuse. The IDF applies it through
+// a calibration handle, created once per unit and kept, exactly as the oneshot handle is.
+//
+// Curve fitting where the chip supports it (S3, P4, C-series), line fitting on the classic ESP32.
+// The scheme is chosen by which macro the target defines, so no per-chip #if is needed here beyond
+// the two the IDF itself exposes.
+namespace {
+adc_cali_handle_t g_adcCali = nullptr;
+bool g_adcCaliTried = false;
+
+/// The calibration handle for ADC1 at our attenuation, or nullptr where the chip has no eFuse data.
+/// Attempted ONCE: a part without calibration would otherwise retry on every read.
+adc_cali_handle_t adcCali() {
+    if (g_adcCaliTried) return g_adcCali;
+    g_adcCaliTried = true;
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+    adc_cali_curve_fitting_config_t cfg = {};
+    cfg.unit_id  = ADC_UNIT_1;
+    cfg.atten    = ADC_ATTEN_DB_12;
+    cfg.bitwidth = ADC_BITWIDTH_DEFAULT;
+    if (adc_cali_create_scheme_curve_fitting(&cfg, &g_adcCali) != ESP_OK) g_adcCali = nullptr;
+#elif ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
+    adc_cali_line_fitting_config_t cfg = {};
+    cfg.unit_id  = ADC_UNIT_1;
+    cfg.atten    = ADC_ATTEN_DB_12;
+    cfg.bitwidth = ADC_BITWIDTH_DEFAULT;
+    if (adc_cali_create_scheme_line_fitting(&cfg, &g_adcCali) != ESP_OK) g_adcCali = nullptr;
+#endif
+    return g_adcCali;
+}
+}  // namespace
+
+bool adcReadMv(uint8_t gpio, uint16_t& mv) {
+    uint16_t raw = 0;
+    if (!adcRead(gpio, raw)) return false;
+    adc_cali_handle_t cali = adcCali();
+    if (!cali) return false;                    // no eFuse calibration: refuse rather than guess
+    int out = 0;
+    if (adc_cali_raw_to_voltage(cali, static_cast<int>(raw), &out) != ESP_OK) return false;
+    mv = static_cast<uint16_t>(out < 0 ? 0 : out);
+    return true;
+}
+
 // The test seams are desktop-only: on a board the pins are real, and a test that wants to inject a
 // level has the hardware to do it.
 void setTestGpioLevel(uint8_t, bool) {}
 void clearTestGpioLevel() {}
 void setTestAdcValue(uint8_t, uint16_t) {}
+void setTestAdcMv(uint8_t, uint16_t) {}
 void clearTestAdcValue() {}
 
 }  // namespace mm::platform

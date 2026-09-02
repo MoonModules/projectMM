@@ -2215,6 +2215,10 @@ void clearTestGpioLevel() { for (bool& b : g_gpioLevel) b = false; }
 // this is what lets all of it be pinned on the host with no hardware attached.
 namespace {
 uint16_t g_adcValue[kMaxGpio] = {};
+// Millivolts are injected SEPARATELY from the raw count rather than derived from it. On a board the
+// two are related by the chip's own eFuse curve, which a host cannot reproduce, so deriving one here
+// would let a test pass against an arithmetic relationship that does not hold on hardware.
+uint16_t g_adcMv[kMaxGpio] = {};
 }
 
 bool adcRead(uint8_t gpio, uint16_t& raw) {
@@ -2228,7 +2232,15 @@ bool adcRead(uint8_t gpio, uint16_t& raw) {
 uint16_t adcMaxCount() { return 4095; }
 
 void setTestAdcValue(uint8_t gpio, uint16_t raw) { if (gpio < kMaxGpio) g_adcValue[gpio] = raw; }
-void clearTestAdcValue() { for (uint16_t& v : g_adcValue) v = 0; }
+void clearTestAdcValue() { for (uint16_t& v : g_adcValue) v = 0; for (uint16_t& v : g_adcMv) v = 0; }
+
+bool adcReadMv(uint8_t gpio, uint16_t& mv) {
+    if (gpio >= kMaxGpio) return false;
+    mv = g_adcMv[gpio];
+    return true;
+}
+
+void setTestAdcMv(uint8_t gpio, uint16_t mv) { if (gpio < kMaxGpio) g_adcMv[gpio] = mv; }
 
 bool irRead(uint16_t /*pin*/, uint32_t& /*codeOut*/) { return false; }
 void irStop() {}   // no IR hardware on desktop

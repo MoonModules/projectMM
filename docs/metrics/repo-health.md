@@ -28,24 +28,24 @@ Current state only; the trend is this file's git history (`git log -p docs/metri
 
 | Target | Tick | FPS |
 |---|---:|---:|
-| desktop | 457 µs (−16 µs) ✓ | 2,188 (+74) ✓ |
+| desktop | 493 µs (+20 µs) ⚠ | 2,028 (−86) ⚠ |
 | esp32 | 8,354 µs (+20 µs) ⚠ | 119 |
 
 ### Scenario tick by target (p50 of each sample window)
 
 | Scenario | desktop-macos | desktop-windows | esp32 | esp32s3-n16r8 | esp32p4rev1-eth | esp32s31 | esp32-eth | esp32-eth-wifi | unknown |
 |---|---|---|---|---|---|---|---|---|---|
-| Audio_mutation | 34 (+4) ⚠ | 40 ? | 13,152 (+13,119) ⚠ | 47 ? | - | - | - | - | - |
+| Audio_mutation | 33 (+3) ⚠ | 40 ? | 13,152 (+13,119) ⚠ | 47 ? | - | - | - | - | - |
 | Driver_mutation | 37 (+6) ⚠ | 42 ? | 12,812 (+12,774) ⚠ | 39 ? | - | - | - | - | - |
-| Effects_composition | 329 (+31) ⚠ | 549 ? | - | - | - | - | - | - | - |
-| GridBlacks_blackpixel | 4 | 8 ? | 269 ? | 267 ? | - | - | - | - | - |
+| Effects_composition | 343 (+45) ⚠ | 549 ? | - | - | - | - | - | - | - |
+| GridBlacks_blackpixel | 5 (+1) ⚠ | 8 ? | 269 ? | 267 ? | - | - | - | - | - |
 | GridLayout_resize | 167 (+35) ⚠ | 219 ? | 1,352 ? | 1,011 ? | 1,143 ? | - | 95,771 ? | 82,231 ? | - |
-| Layer_base_pipeline | 73 (−2) ✓ | 118 ? | - | - | - | - | - | - | - |
+| Layer_base_pipeline | 75 | 118 ? | - | - | - | - | - | - | - |
 | Layer_memory_1to1 | 9 | 1 ? | - | - | - | - | - | - | - |
-| Layouts_mutation | 119 (+19) ⚠ | 111 ? | 13,692 (+13,656) ⚠ | 45 ? | - | - | 27 ? | - | - |
+| Layouts_mutation | 130 (+30) ⚠ | 111 ? | 13,692 (+13,656) ⚠ | 45 ? | - | - | 27 ? | - | - |
 | MoonLiveEffect_controls | 11 ? | - | 12,901 (+11,656) ⚠ | 4,624 ? | - | - | - | - | - |
-| MoonLiveEffect_livescript | 7 | - | 13,433 (+10,962) ⚠ ? | 8,255 ? | 11,336 ? | - | - | - | - |
-| MoonLive_pipeline | 6 | 1 ? | 9,604 ? | 3,278 ? | - | 11,398 ? | - | - | 4,393 ? |
+| MoonLiveEffect_livescript | 8 (+1) ⚠ | - | 13,433 (+10,962) ⚠ ? | 8,255 ? | 11,336 ? | - | - | - | - |
+| MoonLive_pipeline | 7 (+1) ⚠ | 1 ? | 9,604 ? | 3,278 ? | - | 11,398 ? | - | - | 4,393 ? |
 | MoonModule_control_change | 131 (−1) ✓ | 262 ? | 212 ? | 166 ? | 165 ? | - | 111,731 ? | 89,895 ? | - |
 | MqttModule_haDiscovery_toggle | 3 ? | - | 36 ? | 36 ? | - | - | - | - | - |
 | MultiplyModifier_memory_lut | 4 (+1) ⚠ | 3 ? | - | - | - | - | - | - | - |
@@ -53,10 +53,10 @@ Current state only; the trend is this file's git history (`git log -p docs/metri
 | NetworkModule_eth_reconfigure | - | - | 1,169 ? | 97,843 ? | - | - | - | - | - |
 | NetworkModule_mdns_toggle | 13 ? | - | 36 ? | 36 ? | 21 ? | - | 109,767 ? | 93,963 ? | - |
 | modifier_chain | 62 (+15) ⚠ | 69 ? | 13,337 | - | - | - | - | - | - |
-| modifier_swap | 30 (+5) ⚠ | 41 ? | 12,250 (+11,760) ⚠ | 354 ? | 362 ? | - | 1,010 ? | - | - |
-| perf_full | 371 (+68) ⚠ | 592 ? | 10,392 (+5,823) ⚠ | 16,915 ? | 17,433 ? | - | - | - | - |
-| perf_light | 21 (+3) ⚠ | 35 ? | 2,183 (+225) ⚠ | 2,485 ? | 2,038 ? | - | - | - | - |
-| peripheral_grid_sweep | 369 (+57) ⚠ | 649 ? | 6,991 ? | - | 11,495 ? | 12,273 ? | - | - | - |
+| modifier_swap | 31 (+6) ⚠ | 41 ? | 12,250 (+11,760) ⚠ | 354 ? | 362 ? | - | 1,010 ? | - | - |
+| perf_full | 429 (+126) ⚠ | 592 ? | 10,392 (+5,823) ⚠ | 16,915 ? | 17,433 ? | - | - | - | - |
+| perf_light | 23 (+5) ⚠ | 35 ? | 2,183 (+225) ⚠ | 2,485 ? | 2,038 ? | - | - | - | - |
+| peripheral_grid_sweep | 378 (+66) ⚠ | 649 ? | 6,991 ? | - | 11,495 ? | 12,273 ? | - | - | - |
 | peripheral_switch | 6 (+1) ⚠ | 9 ? | 437 (+48) ⚠ | 46 ? | 217 ? | - | - | - | - |
 
 Microseconds. `?` marks a cell backed by fewer than 4 samples, which is a first impression rather than a percentile; several are months old and were captured during a network reconfigure, so they read as whole milliseconds. `-` means that target has never run that scenario.
@@ -67,7 +67,7 @@ Microseconds. `?` marks a cell backed by fewer than 4 samples, which is a first 
 
 | Scenario | p50 | p95 | n |
 |---|---:|---:|---:|
-| Layer_base_pipeline | 73 µs (−2 µs) ✓ | 211 µs | 32 |
+| Layer_base_pipeline | 75 µs | 211 µs | 32 |
 | Layer_memory_1to1 | 9 µs | 40 µs | 32 |
 
 These build a bare pipeline with no optional modules, so a change here is a change in the pipeline itself rather than in what was measured. A new module belongs in an advanced scenario, which keeps its own numbers.

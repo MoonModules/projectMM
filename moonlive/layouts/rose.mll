@@ -9,8 +9,8 @@ class RoseLayout {
   string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("petals", petals, 1, 8);             // how many petals the curve draws
-    addControl("radius", radius, 4, 30);            // how far the petals reach
+    addControl("petals", petals, 1, 8); // how many petals the curve draws
+    addControl("radius", radius, 4, 30); // how far the petals reach
   }
 
   void placeLights() {

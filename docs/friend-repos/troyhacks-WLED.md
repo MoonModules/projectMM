@@ -6,6 +6,14 @@ This is a personal fork of [MoonModules/WLED-MM](https://github.com/MoonModules/
 
 **Branch note — the experiments live off `mdev`.** troyhacks branches heavily: `mdev` is the merge/alignment stream, but the distinctive work happens in named experimental branches (HDMI output, ESP32-P4, W5500 Ethernet, hardware-panel ports, voice control, a pure-IDFv5 port, a new settings subsystem). Those are *experiments*, not necessarily destined for `mdev`, so each month below carries a separate **Experimental branches** line for what moved on them — the frontier of what this fork is probing.
 
+## August 2026
+
+No independent work on `mdev`: the 2 commits in the window are an alignment with the MoonModules line (a merge of `MoonModules:mdev` on 2026-08-24, bringing in the audio-reactive dependency pin plus the ARTI scripting robustness work and the Waveshare S3 Matrix Driver board profile that had accumulated upstream since June), and the MM commit itself. Nothing user-facing originates in this fork on `mdev`. No versioned release was published, so the month is kept whole.
+
+- **Experimental branches:** `P4_experimental` is the active frontier, with 20 commits in August. The Pro DJ Link integration gained a strobe effect and can now switch playlists the way AutoMusic does, and its effect shuffling no longer washes everything to white. Art-Net output was reworked so custom pixel remapping applies to it, large pixel counts were fixed, and the custom mapping table now saves only the part actually in use and shows unmapped entries as `-1` rather than a large number. On ESP32-P4, external SD card audio input over I2S now reads correctly under IDF v5.
+
+_Checked: commits on `mdev` for author-date 2026-08-01..2026-08-31 (2: b537e0c9 merge, f2d32c9c inherited from MoonModules/WLED-MM), via `gh api repos/troyhacks/WLED/commits?sha=mdev&since=2026-08-01T00:00:00Z&until=2026-09-01T00:00:00Z`. All 28 branches were scanned for August activity; only `P4_experimental` moved (20 commits, 2026-08-04 ... 2026-08-29). Releases published in August 2026: none (`repos/troyhacks/WLED/releases`), so no month split. Issue search `repo:troyhacks/WLED+is:issue+created:2026-08-01..2026-08-31` and `closed:2026-08-01..2026-08-31` both return 0, the issue tracker is disabled on this fork._
+
 ## July 2026
 
 No user-facing activity: no commits were merged to `mdev` in July 2026 (the branch's most recent commit is still dated 2026-05-20), and no versioned release was published. The repository's issue tracker is disabled, so no issues were opened or closed.

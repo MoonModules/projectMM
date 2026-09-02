@@ -10,9 +10,9 @@ class MetalEffect {
   string tags() { return "💫🖌️"; }
 
   void defineControls() {
-    addControl("bpm", bpm, 1, 60);                  // how fast the blobs drift
-    addControl("blend", blend, 0, 120);             // how softly they melt together
-    addControl("glow", glow, 4, 120);               // halo around each blob
+    addControl("bpm", bpm, 1, 60); // how fast the blobs drift
+    addControl("blend", blend, 0, 120); // how softly they melt together
+    addControl("glow", glow, 4, 120); // halo around each blob
   }
 
   void tick() {

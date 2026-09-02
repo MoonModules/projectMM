@@ -9,8 +9,8 @@ class NoiseEffect {
   string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("speed", speed, 1, 120);             // how fast the field drifts
-    addControl("zoom", zoom, 1, 32);                // how large the features are
+    addControl("speed", speed, 1, 120); // how fast the field drifts
+    addControl("zoom", zoom, 1, 32); // how large the features are
   }
 
   void tick() {

@@ -512,12 +512,17 @@ public:
             else if (micStatusStale_)
                 setStatus("", Severity::Status);   // data flowing again, clear a prior diagnosis
             micStatusStale_ = (micSamples1s_ == 0 || micNonzero1s_ == 0);
-        } else {
-            // No mic to diagnose on this path (Receive, Simulate, or no wired I2S mic), so no
-            // diagnosis may be OUTSTANDING either. Without this the flag kept whatever Local mode
-            // last set: a mic fault, then a switch to Receive, and the sync line below stayed
-            // suppressed forever, so "listening" and "receiving from <ip>" could never appear again
-            // until a mic that is no longer being read happened to recover.
+        } else if (mode != 0) {
+            // No mic to diagnose on this path (Receive or Simulate), so no diagnosis may be
+            // OUTSTANDING either. Without this the flag kept whatever Local mode last set: a mic
+            // fault, then a switch to Receive, and the sync line below stayed suppressed forever,
+            // so "listening" and "receiving from <ip>" could never appear again until a mic that is
+            // no longer being read happened to recover.
+            //
+            // Gated on the MODE rather than on directMicLive, because that also goes false when
+            // Local audio FAILED TO INITIALIZE (`inited_` is false). Clearing the flag there let
+            // "sending" overwrite the capture-init error a second later, which is the one message
+            // that says why there is no audio.
             micStatusStale_ = false;
         }
         micSamples1s_ = 0;

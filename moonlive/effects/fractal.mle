@@ -11,10 +11,10 @@ class FractalEffect {
   string tags() { return "💫🖌️"; }
 
   void defineControls() {
-    addControl("bpm", bpm, 0, 30);                  // how fast the Julia seed travels
-    addControl("iters", iters, 8, 64);              // escape-time iterations per pixel
-    addControl("zoom", zoom, 12, 40);               // how far into the set to look
-    addControl("seed", seed, 0, 128);               // 0 holds the still Mandelbrot set
+    addControl("bpm", bpm, 0, 30); // how fast the Julia seed travels
+    addControl("iters", iters, 8, 64); // escape-time iterations per pixel
+    addControl("zoom", zoom, 12, 40); // how far into the set to look
+    addControl("seed", seed, 0, 128); // 0 holds the still Mandelbrot set
   }
 
   void tick() {
@@ -32,7 +32,8 @@ class FractalEffect {
 
         int n = escape(cx, uvY(y, width, height) * toFixed(zoom) / 40, jx, jy, iters);
 
-        setPaletteColor(x, y, mod(n * 4, 256), n * 255);
+        if (n == 0) { setPaletteColor(x, y, 0, 255); }   // inside the set
+        else { setPaletteColor(x, y, n, 255); }
       }
     }
   }

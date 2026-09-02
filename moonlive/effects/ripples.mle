@@ -9,8 +9,8 @@ class RipplesEffect {
   string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("bpm", bpm, 1, 120);                 // how fast the sources circle
-    addControl("rings", rings, 1, 32);              // how tightly the rings pack
+    addControl("bpm", bpm, 1, 120); // how fast the sources circle
+    addControl("rings", rings, 1, 32); // how tightly the rings pack
   }
 
   void tick() {

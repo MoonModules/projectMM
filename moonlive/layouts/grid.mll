@@ -9,8 +9,8 @@ class GridLayout {
   string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("cols", cols, 1, 128);               // lights across
-    addControl("rows", rows, 1, 128);               // lights down
+    addControl("cols", cols, 1, 128); // lights across
+    addControl("rows", rows, 1, 128); // lights down
   }
 
   void placeLights() {

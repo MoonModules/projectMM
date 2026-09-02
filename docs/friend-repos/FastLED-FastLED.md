@@ -2,6 +2,46 @@
 
 What landed on [FastLED](https://github.com/FastLED/FastLED)'s main branch, month by month. External-context reference (like the v1/v2/MoonLight inventories) — a factual log of a friend repo's releases, not projectMM's own history or roadmap. Newest month on top. The reusable prompt that generates these digests lives in [README.md](README.md).
 
+## August 2026
+
+No release cut this month (3.10.4, 2026-06-16, remains the published release, with the 3.10.5 tag on master unreleased), so the month is not split. Three threads dominate: filling in long-standing chipset and board gaps from very old issues, bringing the Raspberry Pi Pico 2 W online with WiFi and Bluetooth, and replacing the MP3 decoder.
+
+**New**
+- On-chip flash storage works at last: sketches can read and write files on an ESP32 without an SD card, through a new `fl::getEmbeddedFs()`.
+- Raspberry Pi Pico 2 W gains WiFi (CYW43) and Bluetooth LE, plus a device-to-device over-the-air update flow.
+- ESP32 sketches can now pick which SPI bus (SPI2 or SPI3) each strip uses, so two clocked strips can run on separate buses.
+- New chipsets: WS2818, LC8816E (RGBW), MY9221 (12-channel, as used on Grove chainable RGB modules), TM1812 in five-channel RGBWW mode, and HD107S as an alias.
+- New platforms: Chipintelli CI13XX (RISC-V), and Teknic ClearCore / SAME53 boards.
+- Non-addressable analog RGB LEDs get a real driver: `addLeds<ANALOG, RED_PIN, GREEN_PIN, BLUE_PIN>()` with 500 Hz PWM, and brightness, color correction, and temperature applied like any other strip.
+- Optional Oklab color blending (`fl::blend_oklab`) for smoother, more natural-looking fades than plain channel blending.
+- Pixel buffers can be saved and loaded as JSON, with a worked ESP32 flash-storage example.
+- ESP8266 sketches can override the clockless wait time with `FASTLED_ESP8266_CLOCKLESS_WAIT_TIME`.
+- The MoodRing example is split out on its own and reworked so kick, snare, and downbeat each do something visually distinct instead of all just changing speed.
+- MP3 playback switches to the minimp3 decoder and now decodes in fixed point by default, which is faster on chips without a floating-point unit. The old Helix decoder is gone, along with its license restrictions.
+
+**Fixed**
+- `FastLED.clear()` and `clearData()` only cleared the first strip of a parallel controller, which also made power limiting under-count. Open since 2020.
+- `rgb2hsv_approximate()` no longer overflows and returns wrong hues on some colors. Open since 2020.
+- ESP32: software SPI clock toggling no longer stomps on other pins changing at the same time.
+- ESP32: strip reset timing now follows each chipset's own datasheet value rather than a fixed one.
+- ESP32: selecting the legacy RMT4 backend on ESP-IDF 5 now gives one clear error instead of a build failure, and C2/C3/S2 fall back to bit-bang for clocked chipsets instead of failing.
+- ESP8266: Arduino `D0`-`D8` pin constants are no longer remapped twice, and example default pins moved off pins that conflict with serial.
+- SAMD51 builds, broken since 3.10.4, compile again; SAMD boards use native SERCOM for hardware SPI; the Adafruit QT Py M0 onboard NeoPixel pin and the Metro M4 board alias are recognized.
+- Seeed XIAO nRF52840 Plus/Sense Plus builds work under the Mbed core.
+- Teensy: builds fixed across the range (3.x `F_CPU_ACTUAL`, Teensy 4 SD card SPI, parallel output line masks), and Teensy 3.x/LC now emit a warning that the hardware is end-of-life and unvalidated.
+- AVR: ATmega644A hardware SPI pins added, and examples no longer default to the serial TX pin.
+- `FastLED.wait()` with no arguments now waits until output actually finishes instead of timing out early.
+- Video playback no longer crashes on zero-sized frames.
+- GS1903 strips get their own timing instead of borrowing WS2812's.
+- Browser/WASM preview: asset loading is bounded and verified, so a stalled download no longer hangs the sketch forever.
+
+**Watching**
+- A proposed license change from MIT to a new "FastLED Reciprocal License 1.0" is under discussion (#4046, #4047, #4048). Nothing has changed yet: master is still MIT. Under the proposal, shipping a product with modified FastLED would require publishing those modifications.
+- A large "profiled color pipeline" design is being planned in ten tracked phases (#4032 through #4044), aiming at datasheet-accurate color, gamut mapping, and float-free fixed-point output.
+- The open report that `show()`'s refresh throttle takes an unconditional deep yield (#3762) is still unresolved.
+
+_Auditability: 195 first-parent commits on `master` with author-date 2026-08-01..2026-08-31, via `git log --first-parent --since=2026-08-01 --until=2026-09-01 origin/master`. Issues via `gh api "search/issues?q=repo:FastLED/FastLED+is:issue+created:2026-08-01..2026-08-31&per_page=100"` (102 opened) and the same with `closed:2026-08-01..2026-08-31` (187 closed). The great majority of both are the project's own phase, meta, and CI trackers, so only user-facing ones are surfaced above. No versioned release was published in August (latest published release remains 3.10.4 from June; the `3.10.5` tag is an ancestor of master but has no GitHub release), so no month split._
+
 ## July 2026
 
 No release cut this month (3.10.4, 2026-06-16, remains the latest), so the month is not split. Two big threads: finishing the Raspberry Pi Pico driver family, and cutting the ESP32 platform loose from the Arduino core.

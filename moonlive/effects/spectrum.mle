@@ -10,9 +10,9 @@ class SpectrumEffect {
   string tags() { return "💫🎶"; }
 
   void defineControls() {
-    addControl("gain", gain, 10, 255);              // how hard the bands are driven
-    addControl("fadeAmt", fadeAmt, 1, 200);         // how fast a bar falls back
-    addControl("peakHold", peakHold, 0, 1);         // cap each bar with a bright peak
+    addControl("gain", gain, 10, 255); // how hard the bands are driven
+    addControl("fadeAmt", fadeAmt, 1, 200); // how fast a bar falls back
+    addControl("peakHold", peakHold, 0, 1); // cap each bar with a bright peak
   }
 
   void tick() {

@@ -11,10 +11,10 @@ class AimEffect {
   string tags() { return "💫🎯"; }
 
   void defineControls() {
-    addControl("pan", pan, 0, 255);                 // where the heads point, left to right
-    addControl("tilt", tilt, 0, 255);               // where the heads point, up and down
-    addControl("spread", spread, 0, 255);           // fan the rig out from that aim
-    addControl("bright", bright, 0, 255);           // how bright the heads burn
+    addControl("pan", pan, 0, 255); // where the heads point, left to right
+    addControl("tilt", tilt, 0, 255); // where the heads point, up and down
+    addControl("spread", spread, 0, 255); // fan the rig out from that aim
+    addControl("bright", bright, 0, 255); // how bright the heads burn
   }
 
   void tick() {

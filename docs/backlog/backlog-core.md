@@ -4,6 +4,24 @@ Forward-looking to-build items for the **core / infrastructure** domain (`src/co
 
 ## Distribution
 
+### OTA upload refuses a normal client: the body must arrive within ~50 ms (2026-09-02)
+
+`POST /api/firmware/upload` answers `400 {"error":"incomplete request body"}` to an ordinary
+`curl --data-binary @firmware.bin`, in 37 ms, before reading the image at all.
+
+The streaming branch sets `bodyNeeded` to the whole prefix buffer and then polls for it with a
+50-iteration, 1 ms budget (`HttpServerModule.cpp`, the read loop). A client that writes its headers
+and pauses before the body, which curl does, trips that timeout and is rejected. The browser path
+works because `fetch` hands the whole body to the socket at once.
+
+Worked around by writing headers plus the first 8 KB in a single `sendall` from a small Python
+client, after which a 1.97 MB image uploaded in 6.3 s and the device rebooted correctly. So the
+transfer is fine; the acceptance test is what is wrong.
+
+Worth fixing because OTA is the only route to a board whose USB port is unavailable, which is
+exactly when a firmware update matters most. The fix is to wait for the CONTENT-LENGTH the client
+declared rather than for a buffer to fill, and to time out on stall rather than on total elapsed.
+
 ### Release 2.0 — distribution catches up to the source tree
 
 1.0 ships ESP32 firmware (4 variants) + macOS arm64 + Windows x64. Still to add:

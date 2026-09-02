@@ -20,6 +20,38 @@ Forward-looking to-build items for the **light domain** (`src/light/`: drivers, 
 
 ## Drivers
 
+### Logarithmic brightness, and a power budget the device knows about (2026-09-02)
+
+`Drivers.brightness` scales the output linearly, and perceived lightness is not linear: the eye is
+closer to logarithmic, so the bottom quarter of the slider spends half the power budget for a modest
+visible change while the top half buys little and costs a lot.
+
+**Measured on MM-StadBeest** (LightCrafter 16, 1440 lights, through the new `power.mls` readout):
+
+| brightness | rail | current |
+|---|---|---|
+| 16 | 4.86 V | 0.9 A |
+| 60 | 3.9 V | 4.3 A |
+| 120 | (browned out) | |
+
+Current is roughly linear in the control value, so the usable range is compressed into the bottom of
+the travel and the top of the slider is a power hazard rather than a setting. The board crashed
+twice during this session at brightnesses a user would reasonably try.
+
+**Two pieces, and the second is what actually prevents the crash:**
+
+- **A gamma or log curve** from the control value to the output duty, so equal slider steps look like
+  equal brightness steps. The open question is WHERE: on the `brightness` control (every driver
+  inherits it, but the number then means something different to OSC, MQTT and every saved preset) or
+  in each driver's output stage (no meaning change, duplicated per driver).
+- **A power budget.** A device that knows its supply limit can cap brightness instead of browning
+  out. Boards with a sense resistor can measure it (see the power-monitoring entry below); boards
+  without can estimate from light count and channel values, which is what WLED's ABL does.
+
+NOTE the rail sag above is NOT the supply's fault: an LRS-350-5 delivers 60 A, and this browned out
+at 4.3 A. Roughly 0.25 ohm of series resistance in the feed, so wiring and injection points, which
+is worth measuring before tuning anything in firmware.
+
 ### SE16 / LightCrafter power monitoring: sense pins now free, module still to build (2026-09-02)
 
 Both boards carry voltage and current sensors, and MoonLight records the pins
@@ -33,10 +65,11 @@ until the meaning of those controls settled it: they are the **sacrificial** WR 
 SE16 to 16/17 (it has 4/16/17 spare, so its native USB on 19/20 stays free) and LightCrafter to
 19/20 (its only spare pair, and it uses the UART bridge on 43/44 anyway).
 
-**Still open:** nothing reads the sensors yet. `AnalogService` (plan step 3) is the consumer; once
-it exists these two boards get `voltagePin`/`currentPin` in their device definitions, "Power
-monitoring" moves from `planned` to `supported`, and the raw counts need a scale factor per board
-(the divider ratio and shunt value, which are NOT in MoonLight's preset and need the schematic).
+**Still open:** `AnalogService` shipped (plan step 3) and is host-verified, so the consumer exists.
+What remains is per board: `voltagePin`/`currentPin` in the two device definitions, "Power
+monitoring" moving from `planned` to `supported`, a scale factor for each (the divider ratio and
+shunt value, which are NOT in MoonLight's preset and need the schematic), and a reading checked
+against a meter.
 
 Worth doing because it also gives the ADC seam a real bench rig: an on-board analog signal beats a
 hand-wired potentiometer. NOTE the pin move is unverified on hardware, both boards being offline

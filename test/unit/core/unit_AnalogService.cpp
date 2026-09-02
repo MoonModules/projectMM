@@ -171,6 +171,21 @@ TEST_CASE("an analog row scales into whatever range its target actually holds") 
     CHECK(rig.surface->on == true);
 }
 
+TEST_CASE("an analog row pointed at a pad refuses, rather than firing it every tick") {
+    // A pad is a momentary thing, so "a pedal held at 40% of a preset" has no reading. The refusal
+    // has to be REPORTED as well as silent-at-the-target: a row that quietly did nothing would look
+    // like a broken pot, and one that fired on every poll would re-apply the preset 50 times a
+    // second for as long as the input sat there.
+    Rig rig;
+    rig.set("target", "\"Control.pad1\"");
+    rig.hold(2000);
+    // Nothing reached the surface control, and the module says why.
+    CHECK(rig.surface->fader1 == 0);
+    const char* s = rig.svc->status();
+    REQUIRE(s != nullptr);
+    CHECK(std::strstr(s, "pad") != nullptr);
+}
+
 TEST_CASE("an unconfigured or unassigned row does nothing, quietly") {
     // Robustness: a fresh row has no pin and no target, which is a valid state a user passes through
     // rather than a fault to report.

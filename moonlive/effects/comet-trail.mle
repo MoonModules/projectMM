@@ -11,9 +11,9 @@ class CometTrailEffect {
 
   void defineControls() {
     pool(400);
-    addControl("speed", speed, 4, 120);             // how fast the comet flies
-    addControl("spread", spread, 0, 200);           // how far the tail spreads
-    addControl("sparks", sparks, 1, 10);            // sparks thrown per frame
+    addControl("speed", speed, 4, 120); // how fast the comet flies
+    addControl("spread", spread, 0, 200); // how far the tail spreads
+    addControl("sparks", sparks, 1, 10); // sparks thrown per frame
   }
 
   void tick() {

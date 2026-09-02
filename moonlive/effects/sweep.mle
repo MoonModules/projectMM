@@ -12,11 +12,11 @@ class SweepEffect {
   string tags() { return "💫🎯"; }
 
   void defineControls() {
-    addControl("formation", formation, 0, 4);       // 0 fan, 1 mirror, 2 chase, 3 cross, 4 unison
-    addControl("panBpm", panBpm, 1, 120);           // how fast the heads swing sideways
-    addControl("tiltBpm", tiltBpm, 1, 120);         // how fast they swing up and down
-    addControl("panRange", panRange, 0, 255);       // how far the sideways swing travels
-    addControl("tiltRange", tiltRange, 0, 255);     // how far the vertical swing travels
+    addControl("formation", formation, 0, 4); // 0 fan, 1 mirror, 2 chase, 3 cross, 4 unison
+    addControl("panBpm", panBpm, 1, 120); // how fast the heads swing sideways
+    addControl("tiltBpm", tiltBpm, 1, 120); // how fast they swing up and down
+    addControl("panRange", panRange, 0, 255); // how far the sideways swing travels
+    addControl("tiltRange", tiltRange, 0, 255); // how far the vertical swing travels
   }
 
   void tick() {

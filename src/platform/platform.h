@@ -1562,6 +1562,24 @@ bool adcRead(uint8_t gpio, uint16_t& raw);
 /// scaling a range wants the maximum, not the exponent that produced it.
 uint16_t adcMaxCount();
 
+/// Read one ADC pin as MILLIVOLTS. Returns false where `adcRead` would, or where the chip carries
+/// no calibration data.
+///
+/// The counterpart of `adcRead`, and NOT a convenience over it: the raw count is not a fixed
+/// fraction of full scale, because every chip's converter is nonlinear in its own measured way. The
+/// ESP32 stores per-chip correction in eFuse and the IDF applies it, so this is the only way to get
+/// a figure that means volts rather than "counts on this particular part".
+///
+/// The caller that needs this is a sensor whose reading is a VOLTAGE: a divider measuring the
+/// supply rail, a shunt amplifier reporting current. Scaling those from raw counts gives a number
+/// that looks plausible and is wrong, which is worse than refusing. A pedal or a pot needs no such
+/// thing and should keep using `adcRead`: it maps a travel to a range, and a calibrated voltage
+/// would be converted straight back out again.
+bool adcReadMv(uint8_t gpio, uint16_t& mv);
+
+/// Test-only (desktop): make adcReadMv(gpio) return `mv`.
+void setTestAdcMv(uint8_t gpio, uint16_t mv);
+
 /// Test-only (desktop): make adcRead(gpio) return `raw`. The counterpart of setTestGpioLevel, so a
 /// pedal's mapping is host-testable with no hardware.
 void setTestAdcValue(uint8_t gpio, uint16_t raw);

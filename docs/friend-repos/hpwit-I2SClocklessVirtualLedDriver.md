@@ -4,6 +4,14 @@ What landed on [hpwit/I2SClocklessVirtualLedDriver](https://github.com/hpwit/I2S
 
 The library: Yves Bazin's (hpwit) "virtual pins" variant of the I2S clockless driver — drives far more strips than the chip has usable pins by fanning the I2S output through external shift registers. This multiplex technique is the load-bearing idea projectMM's LED-driver analysis singles out (factoring the shift-register multiplex out of the I2S/LCD peripheral code). Summarised via the GitHub commits API, read across all branches (`main`, `integration`, `int2`, `variable`, `hpwit-patch-1`, `dev`, `optomize`), not just `main`.
 
+## August 2026
+
+No activity. The repository remains dormant: no commits on `main` or any other branch in August 2026, and `main` has not moved since November 2024.
+
+No issues were opened or closed. No release; the most recent is v2.1 from January 2024.
+
+_Checked: `repos/hpwit/I2SClocklessVirtualLedDriver/commits?sha=main` for 2026-08-01..2026-09-01 (0), and the same window on all 7 branches (0); releases published (none); issue search `repo:hpwit/I2SClocklessVirtualLedDriver is:issue created:2026-08-01..2026-08-31` and the same with `closed:` (0 results each)._
+
 ## July 2026
 
 No user-facing activity this month: no commits merged to `main` (latest commit on `main` dates to November 2024), no commits on any other branch (newest anywhere is `variable`, December 2024), no releases published, and no issues opened, closed, or updated.

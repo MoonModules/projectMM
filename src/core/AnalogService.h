@@ -128,25 +128,34 @@ public:
     bool setListRowField(uint32_t id, const char* field, const char* valueJson) override {
         Row* r = find(id);
         if (!r) return false;
-        if (setInputActionField(r->action, field, valueJson)) { markDirty(); return true; }
+        // EVERY edit below changes what the row should be writing, so each clears `sent`. The
+        // deadband compares against the last value SENT, so without this an edit that lands within
+        // the deadband of the old value is swallowed: retargeting a row, or inverting it, left the
+        // new target untouched until the input happened to move far enough. Clearing `sent` makes
+        // the next poll write unconditionally, which is what "the configuration changed" means.
+        if (setInputActionField(r->action, field, valueJson)) { r->sent = false; markDirty(); return true; }
         if (std::strcmp(field, "pin") == 0) {
             r->pin = static_cast<int8_t>(json::parseInt(valueJson, "value"));
             r->primed = false;      // a new pin starts its average fresh rather than drifting from the old one
+            r->sent = false;
             markDirty();
             return true;
         }
         if (std::strcmp(field, "inMin") == 0) {
             r->inMin = clampCount(json::parseInt(valueJson, "value"));
+            r->sent = false;
             markDirty();
             return true;
         }
         if (std::strcmp(field, "inMax") == 0) {
             r->inMax = clampCount(json::parseInt(valueJson, "value"));
+            r->sent = false;
             markDirty();
             return true;
         }
         if (std::strcmp(field, "invert") == 0) {
             r->invert = json::parseBool(valueJson, "value") || json::parseInt(valueJson, "value") == 1;
+            r->sent = false;
             markDirty();
             return true;
         }

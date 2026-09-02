@@ -8,7 +8,7 @@ class DiagonalLayout {
   string tags() { return "💫"; }
 
   void defineControls() {
-    addControl("count", count, 1, 64);              // how many lights the run has
+    addControl("count", count, 1, 64); // how many lights the run has
   }
 
   void placeLights() {
