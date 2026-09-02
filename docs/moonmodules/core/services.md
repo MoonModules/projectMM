@@ -102,7 +102,7 @@ A list because boards have more than one: a QuinLED Dig-Next-2 has three, a stag
 Both services share these three fields, because what happens after an input fires is the same whichever input fired it:
 
 - `target`: `Module.control`. Pointing at `Control.switch1` puts the input on the control surface, where OSC, MQTT and the web UI reach the same switch; pointing at `Drivers.on` drives that control directly. The surface is the recommended path, not a rule.
-- `kind`: `toggle` reads the target and writes its inverse (a light switch); `set` writes `value` while held and 0 on release (hold-to-activate, a pedal); `delta` adds `value`, clamped to the control's own bounds (a brightness nudge, a palette step).
+- `kind`: `toggle` reads the target and writes its inverse (a light switch); `set` writes `value` while held and 0 on release (hold-to-activate, a pedal); `delta` adds `value`, clamped to the control's own bounds (a brightness nudge, a palette step). **`set` is Button-only**: it needs a release to write the 0, and a remote reports a press with no release, so an infrared row uses `toggle` or `delta`.
 - `value`: what `set` writes, or the signed nudge `delta` applies. Unused by `toggle`.
 
 Only a `set` row acts on the release. A toggle or a delta acting on both edges would fire twice for one push.

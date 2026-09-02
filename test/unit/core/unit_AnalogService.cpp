@@ -45,8 +45,8 @@ struct Rig {
         scheduler.setup();
         REQUIRE(svc->addListRow(rowId));
         set("pin", kPin);
+        // No `kind`: an analog row writes the scaled level, so the module refuses that field.
         set("target", "\"Control.fader1\"");
-        set("kind", "\"set\"");
     }
     ~Rig() { scheduler.release(); platform::clearTestAdcValue(); }
 
@@ -171,6 +171,27 @@ TEST_CASE("an analog row scales into whatever range its target actually holds") 
     CHECK(rig.surface->on == true);
 }
 
+TEST_CASE("an analog row refuses a field it would silently ignore") {
+    // `runInputLevel` writes the scaled reading, so `kind` and `value` have nothing to say here.
+    // Accepting them would store a setting the module ignores, which reads as a bug in the mapping
+    // rather than in the row's configuration.
+    Rig rig;
+    CHECK_FALSE(rig.svc->setListRowField(rig.rowId, "kind", "{\"value\":\"toggle\"}"));
+    CHECK_FALSE(rig.svc->setListRowField(rig.rowId, "value", "{\"value\":42}"));
+    // The target, which an analog row DOES have, still takes an edit.
+    CHECK(rig.svc->setListRowField(rig.rowId, "target", "{\"value\":\"Control.fader1\"}"));
+}
+
+TEST_CASE("an out-of-range pin is refused rather than narrowed into a different pin") {
+    // parseInt answers an int and the row stores an int8_t, so 300 would become 44 and point the
+    // row at a pin nobody named. -1 stays valid: it is the unconfigured state the poll checks for.
+    Rig rig;
+    CHECK_FALSE(rig.svc->setListRowField(rig.rowId, "pin", "{\"value\":300}"));
+    CHECK_FALSE(rig.svc->setListRowField(rig.rowId, "pin", "{\"value\":-2}"));
+    CHECK(rig.svc->setListRowField(rig.rowId, "pin", "{\"value\":-1}"));
+    CHECK(rig.svc->setListRowField(rig.rowId, "pin", "{\"value\":48}"));
+}
+
 TEST_CASE("an analog row pointed at a pad refuses, rather than firing it every tick") {
     // A pad is a momentary thing, so "a pedal held at 40% of a preset" has no reading. The refusal
     // has to be REPORTED as well as silent-at-the-target: a row that quietly did nothing would look
@@ -183,7 +204,9 @@ TEST_CASE("an analog row pointed at a pad refuses, rather than firing it every t
     CHECK(rig.surface->fader1 == 0);
     const char* s = rig.svc->status();
     REQUIRE(s != nullptr);
-    CHECK(std::strstr(s, "pad") != nullptr);
+    // The PAD-specific refusal, not the generic "has no such control": runInputLevel rejects a pad
+    // target before any lookup, so this holds whether or not a pad grid exists.
+    CHECK(std::strstr(s, "a pad takes a press") != nullptr);
 }
 
 TEST_CASE("an unconfigured or unassigned row does nothing, quietly") {

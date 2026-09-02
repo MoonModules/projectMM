@@ -12,7 +12,7 @@ Summarised via the GitHub commits API (no local clone), so counts are all commit
 - **A new "Mesmerizer Tab" build** joins the existing Mesmerizer environments.
 - **Fixed: WiFi kept reconnecting when it was already connected.** The reconnect timer now checks whether the station is already associated before starting another attempt.
 - **Fixed: a WiFi crash on the Tab5.** Reading the IP, gateway and DNS from inside the connect callback could trip an assertion on the Tab5's hosted WiFi chip; the log line is now shorter and safe.
-- **Breaking, for builders: the ESP32 toolchain is now pinned to pioarduino 55.03.37** for every environment, replacing the earlier mix of official PlatformIO and pioarduino platforms. This is the first release that works with Python 3.14 on macOS and Linux, so you no longer have to downgrade Python or edit VS Code settings to build. Platforms are now fetched into the project folder rather than a global cache.
+- **Breaking, for builders: the ESP32 toolchain is now pinned to pioarduino 55.03.37** for every environment, replacing the earlier mix of official PlatformIO and pioarduino platforms. This is the first toolchain revision that works with Python 3.14 on macOS and Linux, so you no longer have to downgrade Python or edit VS Code settings to build. Platforms are now fetched into the project folder rather than a global cache.
 - **Partition tables updated** (standard, 8 MB, Feather and no-OTA) to meet the new toolchain's minimum settings-storage size. Re-flashing may be needed rather than an over-the-air update.
 - Note for TTGO T-Display builders: an unused display library dependency was dropped from that environment.
 

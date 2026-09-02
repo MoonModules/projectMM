@@ -95,7 +95,9 @@ public:
                      static_cast<unsigned>(r.inMin), static_cast<unsigned>(platform::adcMaxCount()),
                      static_cast<unsigned>(r.inMax), static_cast<unsigned>(platform::adcMaxCount()),
                      r.invert ? "true" : "false");
-        writeInputActionDetailFields(sink, r.action);
+        // The TARGET only: `kind` and `value` are meaningless for a level, so offering them would
+        // render inputs whose edits setListRowField refuses.
+        writeInputTargetDetailField(sink, r.action);
         sink.append("]}");
     }
 
@@ -133,9 +135,25 @@ public:
         // the deadband of the old value is swallowed: retargeting a row, or inverting it, left the
         // new target untouched until the input happened to move far enough. Clearing `sent` makes
         // the next poll write unconditionally, which is what "the configuration changed" means.
-        if (setInputActionField(r->action, field, valueJson)) { r->sent = false; markDirty(); return true; }
+        // The TARGET is the only action field an analog row has: `runInputLevel` writes the scaled
+        // reading, so `kind` and `value` say nothing and accepting them would store a setting that
+        // is silently ignored. A row pointed at a control still needs the target, so the shared
+        // setter is called for that name alone rather than for the whole action.
+        if (std::strcmp(field, "target") == 0) {
+            if (!setInputActionField(r->action, field, valueJson)) return false;
+            r->sent = false;
+            markDirty();
+            return true;
+        }
+        if (std::strcmp(field, "kind") == 0 || std::strcmp(field, "value") == 0) return false;
         if (std::strcmp(field, "pin") == 0) {
-            r->pin = static_cast<int8_t>(json::parseInt(valueJson, "value"));
+            // BOUNDED before the narrowing cast: parseInt answers an int, and 300 would become 44
+            // as an int8_t, quietly pointing the row at a pin the user never named. -1 is the
+            // unconfigured state the poll checks for, and 48 is the highest GPIO any supported chip
+            // carries, which is the same bound the seam applies.
+            const int pin = json::parseInt(valueJson, "value");
+            if (pin < -1 || pin > 48) return false;
+            r->pin = static_cast<int8_t>(pin);
             r->primed = false;      // a new pin starts its average fresh rather than drifting from the old one
             r->sent = false;
             markDirty();

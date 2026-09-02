@@ -622,6 +622,36 @@ drop reports. Every give-up budget that remains must bound *lack of progress*, n
 total, or slow-but-healthy transfers get truncated.
 
 
+## A passing test is not evidence until it can fail (2026-09-02)
+
+The day before, two wrong conclusions came from tests that did not reproduce the user's conditions
+(below). This is the same root in its other form: tests that ran, passed, and could not have failed.
+Three in one session, each found only because something was deliberately broken to check.
+
+**A test that a wrong answer still satisfies.** A new test pinned MoonLive's array indexing at both
+element widths. It passed. Sabotaging the emitted shift from `<<2` to `<<3` and rebuilding, it
+passed AGAIN: one small array cannot show a wrong offset, because every wrong offset still lands on
+something that same array wrote. It needed two adjacent arrays (so an over-scaled read lands in the
+neighbor) and an element holding a number wider than 16 bits (so an under-scaled read lands
+mid-element, on a byte that is no element's value).
+
+**A suite that never compiled what it claimed to run.** Three scenarios had been green while
+proving nothing: their scripts predated the rule that a function declares its return type, so every
+script failed to compile, the layout placed no lights, and every measure recorded 0. The scenario
+reported PASS because the pipeline ticked. Twenty entry points needed `void`, after which one of
+them rendered 24 lights where it had rendered none.
+
+**A golden that froze the bug.** The Xtensa sys-var fix changed one emitted length, 253 to 254, and
+the golden test caught it. That golden had been pinning the BROKEN encoding as correct for two
+weeks, because it pinned a length rather than a behavior and the length was stable while the value
+read was wrong.
+
+**The check that works** is cheap and mechanical: after a test passes, break the thing it tests and
+confirm it fails. Not for every test, but for any test written to pin a fix, because that is exactly
+where a test shaped by the fix will agree with the fix regardless of whether either is right. The
+same session also saw a "0 findings" search that had searched the wrong layer, and a "compiled 36
+scripts" harness that was never linked into the binary at all.
+
 ## A test that does not reproduce the user's conditions proves nothing (2026-09-01)
 
 Two wrong conclusions in one session, from the same root, on the Windows install work.

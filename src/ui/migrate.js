@@ -27,6 +27,12 @@ export const FILE_RENAMES = {
 // merge made explicit when its value is deterministic; `review` flags what a map cannot decide.
 export const TYPE_RENAMES = {
     "Layers": { type: "Effects", date: "2026-08-08" },
+    // Infrared was rebuilt around learned-code ROWS, so the single-target controls it used to
+    // carry (`code on/off`, `code brightness up`, ...) have no equivalent: the codes themselves
+    // are gone and the remote has to be re-learned. The module carries over, which is what stops
+    // it vanishing from the tree on boot.
+    "IrService": { type: "InfraredService", date: "2026-09-02",
+                   review: "re-learn the remote: the old per-action code controls became rows" },
     // The three parallel drivers merge into ParallelLedDriver + a `peripheral` Select (values
     // per the peripheral-option rename in CONTROL_VALUE_RENAMES). Parlio and the MoonI80
     // backend map deterministically; the esp_lcd backend's name depends on the chip, review,

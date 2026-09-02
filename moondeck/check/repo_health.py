@@ -535,8 +535,9 @@ def render_markdown(new, old):
                        "milliseconds. `-` means that target has never run that scenario."), "",
                   (f"**Coverage: {have}/{cells} cells measured ({100 * have // cells}%), "
                    f"{solid} of them with 4+ samples ({100 * solid // cells}%).** The blanks are "
-                   "the point: a target that has never run a scenario cannot regress in it, and "
-                   "cannot be compared against the others. Filling the matrix means running the "
+                   "the point: a regression on a target that has never run a scenario cannot be "
+                   "DETECTED in it, and the target cannot be compared against the others. "
+                   "Filling the matrix means running the "
                    "scenario suite on each bench board, which is a standing task rather than a "
                    "one-off."), ""]
 

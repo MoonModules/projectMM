@@ -1545,6 +1545,9 @@ struct Parser {
         // variable is read-only, a duplicate name binds a second slot to one name, and shadowing a
         // member would make `x = 1` write somewhere the author did not mean.
         if (isReservedWord(varName, varLen)) { fail("that name is a reserved word"); return false; }
+        // The same collision a MEMBER is checked for: a local named `fill` would shadow the builtin
+        // for the rest of the function, so the call a script wrote next would resolve to a variable.
+        if (table.find(varName, varLen)) { fail("that name shadows a built-in function"); return false; }
         if (sysvars.find(varName, varLen)) { fail("name is a system variable"); return false; }
         if (findLocal(varName, varLen) >= 0) { fail("that name is already in use here"); return false; }
         if (findMember(varName, varLen) >= 0) { fail("a member of that name is declared"); return false; }

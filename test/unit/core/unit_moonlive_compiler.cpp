@@ -1717,6 +1717,16 @@ TEST_CASE("a local literal is range-checked against its declared type") {
     CHECK_FALSE(f.ok);
 }
 
+TEST_CASE("a local may not shadow a built-in function") {
+    // A local named `fill` would shadow the builtin for the rest of the function, so the next
+    // `fill(0,0,0)` a script wrote would resolve to a variable. Members are checked for exactly
+    // this; locals were not.
+    uint8_t out[2048];
+    auto r = moonlive::compileSource(mmScript("fill(0,0,0);\n int fill = 1;\n setRGB(0,fill,0,0);"),
+                                     kTable, kSys, out, sizeof(out));
+    CHECK_FALSE(r.ok);
+}
+
 TEST_CASE("a local may not shadow a member or a system variable") {
     uint8_t out[2048];
     // A member of the same name: `v = 1` would otherwise write somewhere the author did not mean.

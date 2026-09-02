@@ -297,9 +297,12 @@ TEST_CASE("Xtensa load32/store32 reach the WHOLE arena, not just the first 60 by
     Asm sWide(64);   sWide.store32(R1, 64, R0);
     CHECK(sWide.size() == 3);
 
-    // The whole arena is reachable, including the depth slot above the system variables.
+    // The whole arena is reachable, including the depth slot above the system variables. Checked as
+    // a SIZE as well as a non-overflow: a narrow encoding would wrap 72 to offset 8 and report no
+    // overflow at all, which is exactly how the original bug read the wrong byte in silence.
     Asm top(64); top.load32(R0, R1, 72);   // the depth slot's word, above every system variable
     CHECK_FALSE(top.overflowed());
+    CHECK(top.size() == 3);                // the wide form, never the 2-byte narrow one
 }
 
 TEST_CASE("Xtensa shlImm encodes 32-n where sarImm encodes n") {

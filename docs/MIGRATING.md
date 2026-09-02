@@ -24,6 +24,21 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### Infrared is a list of learned rows, and the remote must be re-learned
+
+**Action: re-learn the remote.** Affects any device with a configured infrared service.
+
+`IrService` becomes `InfraredService`, rebuilt around rows: a row learns a code and points it at any
+`Module.control`, where the old module carried five fixed actions (`code on/off`, `code brightness
+up`, and so on) each bound to one predetermined behavior. The module itself carries over through
+[migrate.js](https://github.com/MoonModules/projectMM/blob/main/src/ui/migrate.js)'s type map, so it
+does not vanish from the tree, but the codes it held have no equivalent: a learned code used to be a
+control's value, and is now a row. Press the remote's keys again against the rows you want.
+
+Restoring a backup taken before the change reports the rename and flags the module for review rather
+than silently dropping it. A device upgraded WITHOUT restoring a backup keeps its infrared module
+and loses the codes.
+
 ### The desktop build keeps its files in `build/fs`, not `build`
 
 **Action: move your data, or lose your settings.** Affects the DESKTOP build only, and only a

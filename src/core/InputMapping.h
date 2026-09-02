@@ -389,6 +389,18 @@ inline void writeInputTargetOptions(JsonSink& sink) {
 /// release exists to clear it: on a remote it would write its value and latch forever, which is the
 /// opposite of the momentary behavior the name promises. An input without a release offers toggle
 /// and delta, which are both complete in one event.
+/// The TARGET half alone, for an input whose value is the reading rather than a configured action.
+///
+/// An analog row has no `kind` and no `value`: `runInputLevel` writes the scaled level, so those two
+/// would be stored, shown, and ignored. Rendering them would offer an edit the module then refuses.
+inline void writeInputTargetDetailField(JsonSink& sink, const InputAction& a) {
+    uint8_t type = 0, number = 1;
+    decomposeTarget(a.target, type, number);
+    sink.appendf("{\"name\":\"target\",\"type\":\"select\",\"optionsRef\":\"targets\",\"value\":%d},"
+                 "{\"name\":\"number\",\"type\":\"uint8\",\"value\":%d}",
+                 static_cast<int>(type), static_cast<int>(number));
+}
+
 inline void writeInputActionDetailFields(JsonSink& sink, const InputAction& a,
                                          bool hasRelease = true) {
     // A dropdown and a number, not a text box: the target must name a real control exactly, and a
