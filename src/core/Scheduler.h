@@ -143,8 +143,12 @@ public:
     SetControlResult setControl(const char* moduleName, const char* controlName,
                                 const char* valueJson);
 
-    /// Read one control's value as a BYTE: the mirror of setControl, and the other half of what a
-    /// control surface needs. A surface that only writes drifts the moment anything else moves the
+    /// Read one control's value as a BYTE, in SURFACE units: the mirror of setControl, and the
+    /// other half of what a control surface needs.
+    ///
+    /// DERIVED from getControlWide below rather than reading the control itself: the two answer the
+    /// same question in different units, so the conversion is a rule (clamp to 8 bits, a Bool at
+    /// full scale) rather than a second per-type switch to keep in step. A surface that only writes drifts the moment anything else moves the
     /// target (the web UI, a preset recall, an audio-reactive effect), and starts out of step at
     /// boot, where the surface's own default has never met the target's persisted value.
     ///
@@ -159,6 +163,19 @@ public:
     /// Returns false when the module or control does not exist, or its type has no byte reading
     /// (a text or file-path control); `out` is untouched then.
     bool getControl(const char* moduleName, const char* controlName, uint8_t& out) const;
+
+    /// Read one control's value at its OWN width, signed. THE reader: the byte form above is this
+    /// one converted, so a new control type is added here and both callers follow.
+    ///
+    /// The byte reader is what a SURFACE speaks, and clamping is right there: a fader has 8 bits of
+    /// travel. It is wrong for arithmetic on the control itself. A Uint16 holding 300 reads
+    /// back 255, so a `+10` delta writes 265 rather than 310, and a negative Int16 clamps to 0, so a
+    /// delta can never move it down at all. An input mapping nudges the control, not the surface, so
+    /// it reads through this one.
+    ///
+    /// Returns false when the module or control does not exist, or its type has no numeric reading;
+    /// `out` is untouched then.
+    bool getControlWide(const char* moduleName, const char* controlName, int32_t& out) const;
 
 private:
     void walkAndEnsureUnique(MoonModule* mod);

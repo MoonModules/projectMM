@@ -11,6 +11,17 @@
 
 namespace mm {
 
+/// What a row's `value` may hold: the int16_t the action stores, so a delta can step down as well as
+/// up and a Set can carry any byte value. Stated once, and used by both the editor's bounds and the
+/// field that parses an edit.
+inline constexpr int kMinActionValue = -32768;
+inline constexpr int kMaxActionValue = 32767;
+
+/// The largest pad a target may name. A pad grid is 64 slots (ControlModule's presets), and a
+/// number past that cannot address anything, so it is refused rather than wrapped into range.
+inline constexpr unsigned long kMaxPadNumber = 64;
+
+
 /// What one physical input does: a target control, and how the input changes it.
 ///
 /// Shared by every input service (button, infrared, later encoder and analog) because the half that
@@ -126,8 +137,12 @@ inline bool runInputAction(const InputAction& a, bool pressed,
         // Only on the press: a pad fires once. A release firing it again would re-apply the same
         // preset for no reason, and would make a momentary row unusable on a pad.
         if (!pressed) return false;
-        const unsigned padNr = std::strtoul(control + 3, nullptr, 10);
-        if (padNr < 1) return false;
+        // The WHOLE suffix has to be a number in range: "pad3x" would otherwise fire pad 3, and
+        // "pad300" would wrap through the uint8_t cast and fire pad 44. A target the vocabulary
+        // cannot express does nothing, which is visible, rather than something else, which is not.
+        char* end = nullptr;
+        const unsigned long padNr = std::strtoul(control + 3, &end, 10);
+        if (*end != 0 || padNr < 1 || padNr > kMaxPadNumber) return false;
         return firePadRow(*target, static_cast<uint8_t>(padNr - 1), a.target, outStatus, statusLen);
     }
 
@@ -139,16 +154,14 @@ inline bool runInputAction(const InputAction& a, bool pressed,
         if (std::strcmp(c.name, control) != 0) continue;
 
         char valueJson[32];
-        // Through Scheduler::getControl, which switches on the control's declared TYPE and clamps a
-        // wider one rather than truncating it. Reading `c.ptr` as a uint8_t here was wrong: a Uint16
-        // holding 300 read back as 44 on a little-endian target, so a delta computed from a base
-        // that was never the control's value. That reader already exists and ControlModule uses it;
-        // re-implementing it is the duplicated per-type switch the coding standards forbid.
-        uint8_t cur8 = 0;
-        if (!sched->getControl(module, control, cur8)) return false;
-        // getControl answers a Bool as 255 so a surface has one scale for everything; a toggle needs
-        // it back as 0/1, which is what the control itself stores.
-        const int current = (c.type == ControlType::Bool) ? (cur8 ? 1 : 0) : cur8;
+        // Through Scheduler::getControlWide, which switches on the control's declared TYPE and
+        // answers at that type's own width. Reading `c.ptr` as a uint8_t here was wrong (a Uint16
+        // holding 300 read back as 44), and so is the surface's BYTE reader: it clamps 300 to 255,
+        // so a `+10` delta wrote 265 rather than 310, and it clamps a negative Int16 to 0, so a
+        // delta could never move one down. A mapping nudges the CONTROL, not the surface, so it
+        // reads in the control's units and the clamp below is the control's own bounds.
+        int32_t current = 0;
+        if (!sched->getControlWide(module, control, current)) return false;
         int next = 0;
         switch (a.kind) {
             case InputAction::Kind::Toggle: next = current == 0 ? 1 : 0; break;
@@ -268,9 +281,16 @@ inline void writeInputTargetOptions(JsonSink& sink) {
 /// builds inputs from, so a user can retarget a button without the API. Emitted here so both
 /// services offer the identical edit shape, and a third inherits it.
 ///
-/// `kind` is a select over the three things an input can do, which is the whole vocabulary: toggle a
-/// switch, nudge an encoder or fader, or write a pad.
-inline void writeInputActionDetailFields(JsonSink& sink, const InputAction& a) {
+/// `kind` is a select over what an input can do: toggle a switch, write a value while held, or nudge
+/// an encoder or fader.
+///
+/// `hasRelease` says whether this input reports letting go. A button does; a remote does NOT, since
+/// a code arrives as a single event with no matching release. So `set` is offered only where a
+/// release exists to clear it: on a remote it would write its value and latch forever, which is the
+/// opposite of the momentary behavior the name promises. An input without a release offers toggle
+/// and delta, which are both complete in one event.
+inline void writeInputActionDetailFields(JsonSink& sink, const InputAction& a,
+                                         bool hasRelease = true) {
     // A dropdown and a number, not a text box: the target must name a real control exactly, and a
     // typo is invisible until the input silently does nothing.
     uint8_t type = 0, number = 1;
@@ -278,10 +298,24 @@ inline void writeInputActionDetailFields(JsonSink& sink, const InputAction& a) {
     sink.appendf("{\"name\":\"target\",\"type\":\"select\",\"optionsRef\":\"targets\",\"value\":%d},"
                  "{\"name\":\"number\",\"type\":\"uint8\",\"value\":%d},",
                  static_cast<int>(type), static_cast<int>(number));
+    // The option LIST keeps all three positions whether or not `set` is usable, because the parser
+    // maps a select's index straight onto Kind: dropping the middle entry would make the UI's
+    // "delta" arrive as Set, which is the exact latch this is meant to prevent. Where there is no
+    // release the entry is relabeled instead, so it is visibly unavailable and the indices hold.
+    const int kindValue = static_cast<int>(a.kind);
     sink.appendf("{\"name\":\"kind\",\"type\":\"select\",\"value\":%d,"
-                 "\"options\":[\"toggle\",\"set\",\"delta\"]},"
-                 "{\"name\":\"value\",\"type\":\"uint8\",\"value\":%d}",
-                 static_cast<int>(a.kind), static_cast<int>(a.value));
+                 "\"options\":%s},"
+                 // A SIGNED range: a delta row's whole point is that it can go down, and the
+                 // action stores an int16_t, but the field declared no bounds so the editor offered
+                 // a plain box a negative could not survive. The renderer honors min/max, so
+                 // stating them is all a negative delta needs.
+                 "{\"name\":\"value\",\"type\":\"uint8\",\"value\":%d,"
+                 "\"min\":%d,\"max\":%d}",
+                 kindValue,
+                 hasRelease ? "[\"toggle\",\"set\",\"delta\"]"
+                            : "[\"toggle\",\"set (needs a release)\",\"delta\"]",
+                 static_cast<int>(a.value),
+                 static_cast<int>(kMinActionValue), static_cast<int>(kMaxActionValue));
 }
 
 /// Set one action field from a row edit. Returns false for a field this does not own, so a module
@@ -333,7 +367,11 @@ inline bool setInputActionField(InputAction& a, const char* field, const char* v
         return true;
     }
     if (std::strcmp(field, "value") == 0) {
-        a.value = static_cast<int16_t>(json::parseInt(valueJson, "value"));
+        // Clamped to what the field holds, not cast: a number past int16 would wrap, so a typed
+        // 40000 became a negative delta that stepped the wrong way.
+        const int v = json::parseInt(valueJson, "value");
+        a.value = static_cast<int16_t>(v < kMinActionValue ? kMinActionValue
+                                     : v > kMaxActionValue ? kMaxActionValue : v);
         return true;
     }
     return false;

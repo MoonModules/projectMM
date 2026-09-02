@@ -47,7 +47,12 @@ public:
     /// `owner` receives the status line and the dynamic-byte figure, so a binding does not repeat
     /// the reporting. `sysvars` is the one thing that genuinely differs per role (an effect is told
     /// its grid, a layout is not), which is why it is a parameter rather than a member.
-    bool sync(const SysVarTable& sysvars, MoonModule& owner) {
+    /// `builtins` is the VOCABULARY this script compiles against, alongside `sysvars`. The two
+    /// travel together: a service gets gpioRead and setControl with no `width`, an effect gets the
+    /// light table with the grid variables. Defaulted to the light table so the three light
+    /// bindings read exactly as they did.
+    bool sync(const SysVarTable& sysvars, MoonModule& owner,
+              const BuiltinTable& builtins = lightBuiltins()) {
         // Cheapest question first: does the file still hash to what is loaded? This runs on every
         // prepare sweep, and a file write now triggers one, so it must not cost a compile. One read
         // answers it, against a compile's read plus parse, codegen and exec-block allocation.
@@ -77,7 +82,7 @@ public:
         resetPrintBudget();
         const char* err = nullptr;
         uint32_t hash = 0;
-        if (compileScriptFile(engine_, name_, lightBuiltins(), sysvars, err, &hash)) {
+        if (compileScriptFile(engine_, name_, builtins, sysvars, err, &hash)) {
             // Declare the controls the script asks for, the way a compiled module does: by RUNNING
             // defineControls(). Before the binding's rebuildControls(), which turns the declared
             // list into UI cards.

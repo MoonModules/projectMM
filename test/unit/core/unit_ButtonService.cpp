@@ -23,9 +23,15 @@ namespace {
 struct FakeDrivers : public MoonModule {
     bool on = true;
     uint8_t brightness = 100;
+    // A control WIDER than a byte, and one that goes negative: the surface reads both as a clamped
+    // byte, which is right for a fader and wrong for arithmetic on the control itself.
+    uint16_t rate = 300;
+    int16_t offset = -50;
     void defineControls() override {
         controls_.addControl("on", on);
         controls_.addControl("brightness", brightness, 0, 255);
+        controls_.addControl("rate", rate, 0, 1000);
+        controls_.addControl("offset", offset, -100, 100);
     }
 };
 
@@ -316,4 +322,31 @@ TEST_CASE("a button bound to an empty pad reports it rather than firing somethin
     rig.hold(true, 100);
     CHECK(rig.pads->fired == 0);              // nothing near it fired
     CHECK(std::strstr(rig.buttons->status(), "empty") != nullptr);
+}
+
+TEST_CASE("a delta on a wide control counts from its real value, not a clamped byte") {
+    // The surface reads every control as a BYTE, which is right for a fader's 8 bits of travel and
+    // wrong here: a Uint16 holding 300 reads back 255, so `+10` wrote 265 instead of 310, and a
+    // negative Int16 clamps to 0, so a delta could never move one down at all. A mapping nudges the
+    // CONTROL, so it has to read in the control's own units.
+    Rig rig;
+    rig.addRow("Drivers.rate", "delta", 10);
+    rig.hold(false, 100);
+
+    rig.hold(true, 100);
+    CHECK(rig.drivers->rate == 310);        // 300 + 10, not 255 + 10
+}
+
+TEST_CASE("a delta moves a negative control down, which a clamped read could not") {
+    Rig rig;
+    const uint32_t id = rig.addRow("Drivers.offset", "delta", -10);
+    (void)id;
+    rig.hold(false, 100);
+
+    rig.hold(true, 100);
+    CHECK(rig.drivers->offset == -60);      // -50 - 10, where a clamp-to-0 read would give -10
+
+    // And the control's own floor still holds: the bounds are the CONTROL's, not the row's.
+    for (int i = 0; i < 10; i++) { rig.hold(false, 100); rig.hold(true, 100); }
+    CHECK(rig.drivers->offset == -100);
 }

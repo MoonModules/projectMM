@@ -336,6 +336,7 @@ struct ControlDescriptor {
     bool fader = false;     // Render as a vertical fader (see ControlList::setFader). Presentation only.
     bool encoder = false;   // Render as a rotary encoder (see ControlList::setEncoder).
     bool switchRow = false; // Render in the horizontal switch strip (see ControlList::setSwitchRow).
+    bool displayStrip = false; // Render as the full-width alphanumeric readout (setDisplayStrip).
     // What this surface control drives ("Drivers.brightness"), or null. ONE field for all three
     // kinds: a switch, an encoder and a fader each drive exactly one thing, and three fields would
     // be three ways to say it with two always null.
@@ -660,6 +661,17 @@ public:
     /// and unreadable as a surface: the point of a strip is that column N is one channel.
     void setSwitchRow(uint8_t i, bool switchRow = true, const char* target = nullptr) {
         if (i < count_) { controls_[i].switchRow = switchRow; controls_[i].surfaceTarget = target; }
+    }
+
+    /// Render this read-only text control as the surface's DISPLAY STRIP: a full-width alphanumeric
+    /// readout, no label, in the segmented style the numeric readouts already use. Presentation
+    /// only, like setFader and setEncoder.
+    ///
+    /// Nameless and full width because it mirrors the scribble strip above a desk's channels: it
+    /// shows whatever was last touched, so a label naming one thing would be wrong as soon as
+    /// something else moved, and a narrow cell would truncate the names it exists to show.
+    void setDisplayStrip(uint8_t i, bool strip = true) {
+        if (i < count_) controls_[i].displayStrip = strip;
     }
 
 private:

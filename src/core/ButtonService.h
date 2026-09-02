@@ -174,6 +174,7 @@ private:
         int8_t      pin = -1;
         bool        activeLow = true;    ///< a switch to ground with a pull-up: the usual wiring
         InputAction action{};
+        bool        open = false;        ///< the pin was accepted by the seam, so it is worth polling
         bool        pressed = false;     ///< the settled state
         bool        candidate = false;   ///< the level being timed
         uint16_t    sinceChange = 0;     ///< ms the candidate has held
@@ -189,15 +190,21 @@ private:
     /// Open one row's pin as an input. Pull-up for the common wiring (a switch to ground),
     /// pull-down when the switch feeds 3V3 instead, so `activeLow` picks the arrangement.
     void beginPin(Row& r) {
+        r.open = false;
         if (r.pin < 0) return;
-        platform::gpioInputBegin(static_cast<uint8_t>(r.pin),
-                                 r.activeLow ? platform::GpioPull::Up : platform::GpioPull::Down);
+        // A refused pin is NOT polled: the seam says no for a reason (an invalid GPIO, or one wired
+        // to flash / PSRAM / USB), and reading it anyway returns a level that means nothing. Without
+        // this the row looked configured and reported phantom presses from a floating read.
+        r.open = platform::gpioInputBegin(
+            static_cast<uint8_t>(r.pin),
+            r.activeLow ? platform::GpioPull::Up : platform::GpioPull::Down);
+        if (!r.open) setStatus("that pin cannot be used as an input", Severity::Warning);
         r.pressed = r.candidate = false;
         r.sinceChange = 0;
     }
 
     void pollRow(Row& r) MM_NONBLOCKING {
-        if (r.pin < 0) return;
+        if (r.pin < 0 || !r.open) return;
         const bool raw = platform::gpioRead(static_cast<uint8_t>(r.pin)) != r.activeLow;
 
         // Debounce by TIME, not by a sample count: a count would change meaning if the poll rate

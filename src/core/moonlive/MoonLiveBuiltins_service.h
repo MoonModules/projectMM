@@ -1,0 +1,133 @@
+#pragma once
+
+#include "core/moonlive/MoonLive.h"
+#include "core/moonlive/MoonLiveBuiltins.h"
+#include "core/Scheduler.h"
+#include "platform/platform.h"   // gpioInputBegin / gpioRead / gpioWrite
+// addControl and print: declared in the light header because that is where the sink machinery grew,
+// but neither is a light idea. Declaring a setting and logging a value are what ANY script does, so
+// they are reused here rather than re-implemented. Worth hoisting the sinks into core the next time
+// this file needs something else from over there.
+#include "light/moonlive/MoonLiveBuiltins_light.h"
+
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+
+// The SERVICE vocabulary: what a script can do when its job is reading hardware and driving
+// controls, rather than painting lights.
+//
+// Deliberately its own table rather than an extension of the light one. A service has no canvas, no
+// light buffer and no per-light coordinate, so `setRGB`, `noise` and `xPos` would either fail at
+// runtime or quietly do nothing; a table that offers them promises something it cannot keep. What a
+// service gets instead is the two things that make it a service: it can READ a pin and it can WRITE
+// a control.
+//
+// It lives in core because an input is domain-neutral: a button on a GPIO is not a light-domain
+// idea, and a service script must run on a device with no lights configured at all.
+
+namespace mm::moonlive {
+
+/// The moment a service runs: the 50 Hz poll, not the render frame.
+///
+/// A contact closes for tens of milliseconds and a sensor answers at its own rate, so the render
+/// tick would sample either thousands of times a second to learn the same thing. This is the same
+/// reason `ButtonService` polls on tick20ms, and it means a slow script cannot stutter the lights at
+/// the render rate: it costs its own tick instead.
+inline constexpr const char* kEntryTick20ms = "tick20ms";
+
+// --- The host functions -------------------------------------------------------------------------
+
+/// gpioRead(pin) -> 0 or 1.
+///
+/// Opens the pin on first use with a pull-up, the wiring a switch to ground needs and the same
+/// default `ButtonService::beginPin` uses for an active-low row. A script that wants the other
+/// arrangement drives the pin itself and reads the level; a script that wants debouncing writes it,
+/// because a time constant belongs to whoever knows what is wired (platform.h, gpioRead).
+extern "C" inline uint32_t mm_service_gpioRead(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const uint32_t pin = static_cast<uint32_t>(args[0]);
+    if (pin > 48) return 0;                      // out of range on every supported chip
+    // Opened ONCE per pin, not on every read. gpioInputBegin sets the resting level from the pull
+    // (platform_desktop.cpp), so calling it per read holds the pin at its idle state and a script
+    // could never see a press at all; on hardware it is also a peripheral reconfiguration per tick
+    // for no reason. A script still needs no begin/read pair: the first read opens it.
+    static bool opened[49] = {};
+    if (!opened[pin]) {
+        platform::gpioInputBegin(static_cast<uint8_t>(pin), platform::GpioPull::Up);
+        opened[pin] = true;
+    }
+    return platform::gpioRead(static_cast<uint8_t>(pin)) ? 1u : 0u;
+}
+
+/// gpioWrite(pin, on) -> whether the write took.
+///
+/// Returns 0 rather than failing silently when the pin has no output driver (a classic ESP32's
+/// 34-39), which is the one thing a script cannot discover for itself.
+extern "C" inline uint32_t mm_service_gpioWrite(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const uint32_t pin = static_cast<uint32_t>(args[0]);
+    if (pin > 48) return 0;
+    return platform::gpioWrite(static_cast<uint8_t>(pin), args[1] != 0) ? 1u : 0u;
+}
+
+/// setControl(name, value) -> whether the write took.
+///
+/// Writes a control on the CONTROL MODULE only, which is the decision recorded in the plan's step 0:
+/// a script drives the surface, and the surface drives everything else. That is the same two-step
+/// model the button and infrared mapping rows use, so a script and a mapping row reach a driver by
+/// one path rather than two, and a script cannot rewrite a driver's pin list or a network setting by
+/// naming it.
+///
+/// The name is a pointer into the compiled program's string pool, which outlives the run: the same
+/// way `addControl` receives its name (MoonLiveBuiltins_light.h, addControlDecl).
+extern "C" inline uint32_t mm_service_setControl(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const char* name = reinterpret_cast<const char*>(args[0]);
+    if (!name || !name[0]) return 0;
+    Scheduler* sched = Scheduler::instance();
+    if (!sched) return 0;
+    // A JSON object read for its "value" key, which is what the primitive documents and what every
+    // other caller passes: a bare number would not parse.
+    char valueJson[32];
+    std::snprintf(valueJson, sizeof(valueJson), "{\"value\":%d}",
+                  static_cast<int>(static_cast<int32_t>(args[1])));
+    // Through the one generic control-set primitive every transport uses, so a script write is
+    // indistinguishable from an OSC message or a remote press to whatever it drives.
+    return sched->setControl("Control", name, valueJson) == Scheduler::SetControlResult::Ok ? 1u : 0u;
+}
+
+// --- The tables ---------------------------------------------------------------------------------
+
+/// A service script's system variables: elapsed milliseconds, and nothing else.
+///
+/// No `width`/`height`/`depth`: a service is not attached to a grid, and a variable that always
+/// reads zero is a trap rather than a convenience. `t` rides an argument register, so it costs no
+/// instruction and no arena byte.
+inline SysVarTable serviceSysVars() {
+    SysVarTable t;
+    t.add({"t", SysVarKind::Arg, kArg3});
+    return t;
+}
+
+/// The service built-in table the binding injects into the compiler.
+inline BuiltinTable serviceBuiltins() {
+    BuiltinTable t;
+    // gpioRead(pin)          -> 0/1. The input half: any switch, PIR, or level a pin can carry.
+    t.add({"gpioRead", 1, /*returns*/ true, BuiltinKind::Call, &mm_service_gpioRead, {}});
+    // gpioWrite(pin, on)     -> 0/1. The output half: a relay, an indicator, a chip's enable line.
+    t.add({"gpioWrite", 2, /*returns*/ true, BuiltinKind::Call, &mm_service_gpioWrite, {}});
+    // setControl(name, v)    -> 0/1. The surface write: "switch1", "fader3", "pad7".
+    // byStr 0x1: the FIRST argument is a name in quotes, which the compiler passes as a pointer into
+    // the string pool. Without the mask it is parsed as a number and the call is rejected.
+    t.add({"setControl", 2, /*returns*/ true, BuiltinKind::Call, &mm_service_setControl, {},
+           /*byRef*/ 0, /*byStr*/ 0x1});
+    // addControl(name, member, min, max) -> declare a setting, exactly as an effect script does: the
+    // member is passed BY REFERENCE (its arena offset) and the name as a string, which is what the
+    // byRef/byStr masks say. A service without this could be configured only by editing its source.
+    t.add({"addControl", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_addControl, {},
+           /*byRef*/ 0x2, /*byStr*/ 0x1});
+    // print(v)               -> log v and return it. The script author's only debugger, and a
+    // service running headless on a bench board is exactly where one is needed.
+    t.add({"print", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_print, {}});
+    return t;
+}
+
+}  // namespace mm::moonlive

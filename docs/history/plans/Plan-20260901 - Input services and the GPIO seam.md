@@ -11,9 +11,9 @@ stage foot pedal, a USB game controller, and MoonLive scripts that talk to pins.
 
 Two definitions are in the repo today and they do not agree.
 
-- [`docs/moonmodules/light/drivers.md:3`](../../moonmodules/light/drivers.md) — "A driver sends
+- [`docs/moonmodules/light/drivers.md:3`](../../moonmodules/light/drivers.md): "A driver sends
   lights somewhere." Output-only, light-specific.
-- [`docs/architecture.md:143`](../../architecture.md) — "producers vs consumers: producers generate
+- [`docs/architecture.md:143`](../../architecture.md): "producers vs consumers: producers generate
   data, consumers process and output it. Effects are producers, drivers are consumers." A role in a
   dataflow, said of the light domain.
 
@@ -23,7 +23,7 @@ it is the better one: it describes what the code *is* (the boundary between the 
 physical world) rather than what today's instances happen to do.
 
 **The concrete contradiction in code.** `DriverBase` declares `virtual void setSourceBuffer(Buffer*)
-= 0` — every driver is *structurally required* to consume a light buffer. So the light domain's
+= 0`: every driver is *structurally required* to consume a light buffer. So the light domain's
 `DriverBase` is not "anything that talks to hardware"; it is specifically "a consumer of the light
 buffer that outputs it". Every one of the sixteen drivers under `src/light/drivers/` does exactly
 that. The narrow wording in `drivers.md` is therefore an accurate description of `DriverBase`, and
@@ -43,7 +43,7 @@ consumes ... the core-domain twin of the light domain's Effects/Drivers". Audio 
 there. Both talk to hardware; neither touches the light buffer.
 
 So under the PO's broader definition, a light Driver and a core Service are **both** drivers in the
-general sense — two families of the same idea, split by whether the light buffer is involved. The
+general sense: two families of the same idea, split by whether the light buffer is involved. The
 documentation should say that, and `drivers.md` should stop implying its own definition is the only
 one.
 
@@ -65,7 +65,7 @@ The [OSC plan](Plan-20260829%20-%20OSC%20control%20ingest.md) settled this and i
 > duplicating them would be the split-brain the architecture forbids.
 
 `ControlModule` is the surface (8x8 pads, 8 encoders, 8 faders), and every input reaches it through
-`Scheduler::setControl` — the same primitive `/api/control`, Improv, the WLED bridge and OSC use.
+`Scheduler::setControl`: the same primitive `/api/control`, Improv, the WLED bridge and OSC use.
 So the shape is one row per transport:
 
 ```
@@ -113,13 +113,14 @@ platform layer a thin, faithful boundary, which is what the platform rule asks f
 
 ## The modules
 
-**`ButtonService`** (core, Service). Declares its pin with `controls.addPin("pin", pin_)` — the
-established convention every LED driver already uses, which gives live reconfiguration and the
-PinsModule ownership entry for free. Controls: `pin`, `pull` (up/down/none), `activeLow`,
-`debounceMs`, and the action (which pad it fires, or a direct module/control target). A press routes
-through `setControl` like everything else.
+**`ButtonService`** (core, Service). AS BUILT this is a LIST, not a module-level pin: one board has
+three buttons and a pedalboard has eight, which a single pin could not express.
+`controls_.addList("buttons", *this)` publishes the rows, and each row carries its own `pin`,
+`activeLow` and `InputAction` (target, kind, value), with `debounceMs` shared across them because a
+board has one switch type in practice. A press routes through `setControl` like everything else.
 
-**Foot pedals** are `ButtonService` instances. A stage pedal is electrically a momentary switch on a
+**Foot pedals** are ROWS with `kind = set`, not separate `ButtonService` instances. A stage pedal is
+electrically a momentary switch on a
 jack: nothing new is needed beyond the module above, and the plan should say so rather than invent a
 `PedalService`. What a pedal *does* want, and a wall button does not, is **momentary vs latching**
 as a control: hold-to-activate versus press-to-toggle. That is one control on `ButtonService`.
@@ -134,8 +135,8 @@ from GPIO, write to GPIO", and that a precompiled equivalent always exists along
 
 That makes the GPIO seam load-bearing in a second way: `gpioRead` / `gpioWrite` become **MoonLive
 builtins**, and `ButtonService` becomes the precompiled sibling of a script anyone could write. This
-is exactly the relationship effects already have — `ballpit.mle` the script beside `BallpitEffect`
-the compiled module — and as of the picker work the two are indistinguishable when adding one.
+is exactly the relationship effects already have: `ballpit.mle` the script beside `BallpitEffect`
+the compiled module: and as of the picker work the two are indistinguishable when adding one.
 
 Two builtins, matching the seam:
 
@@ -181,10 +182,10 @@ that turns "MoonLive can read a pin" into "a user can add a scripted service fro
    latching on the host; bench test on the Dig-2-Go's GPIO 0.
 5. **Dig-2-Go catalog entry** gains its button pin (0), IR pin (5), mic pins (18/4/19) and relay (12)
    per [architecture.md:307](../../architecture.md), which puts button pins in the deviceModel. Also
-   add `flashBaud: 460800` — measured: the board's bridge fails at the CLI's fast default.
+   add `flashBaud: 460800`: measured: the board's bridge fails at the CLI's fast default.
 6. **MoonLive GPIO builtins** + the `setControl` decision + `MoonLiveService`. Its own plan if it
    grows; noted here so the seam in step 2 is designed with it in mind.
-7. **`GamepadService`** — separate plan (below).
+7. **`GamepadService`**: separate plan (below).
 
 ## USB game controllers: why this is its own plan
 

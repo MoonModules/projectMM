@@ -326,25 +326,31 @@ mode). An **IMU** exists on an unmerged branch (GyroDriver, below).
 
 The sensors worth having next, in the order an installation asks for them:
 
-- **Motion / presence (PIR)** — the single most common interactive trigger: someone walks up, the
+- **Motion / presence (PIR)**: the single most common interactive trigger: someone walks up, the
   piece wakes. Electrically a digital pin, so `ButtonService` almost covers it; what differs is the
   semantic (a level, not a press) and the hold time. MoonLight models it as its own pin role
   (`pin_PIR`, "HIGH = lights on, LOW = lights off"), which is the shape to follow.
-- **Distance (ultrasonic HC-SR04, or a ToF like the VL53L0X)** — turns presence into a continuous
+- **Distance (ultrasonic HC-SR04, or a ToF like the VL53L0X)**: turns presence into a continuous
   value: a hand's distance drives brightness, a visitor's approach drives an effect parameter. The
-  ToF is I2C (the bus GyroDriver's platform layer already opened); the ultrasonic is a trigger pulse
-  and an echo-width measure, which needs a timing seam the GPIO one does not yet provide.
-- **Touch** — the classic ESP32's capacitive touch pins need no external part, so a conductive
+  ToF is I2C, which today means SCANNING only: the register-level read and write a sensor needs is
+  the unmerged GyroDriver prerequisite (see input-mapping-analysis.md and the scripted-sensors
+  plan), not something that exists. The ultrasonic is a trigger pulse and an echo-width measure,
+  which needs a timing seam the GPIO one does not yet provide.
+- **Touch**: the classic ESP32's capacitive touch pins need no external part, so a conductive
   surface becomes an input. The Dig-2-Go's own button is on a touch-capable pin, though it reads
   fine as a plain digital switch.
-- **Light level (LDR or a BH1750)** — an installation that dims itself to the room, and the obvious
+- **Light level (LDR or a BH1750)**: an installation that dims itself to the room, and the obvious
   companion to a piece that runs day and night.
-- **Rotary encoder** — the physical knob for an installation without a screen, and the one input
+- **Rotary encoder**: the physical knob for an installation without a screen, and the one input
   that maps onto ControlModule's encoder bank directly.
 
 **None of these need new architecture**, which is the point of recording them together: each is a
-Service under the core `Services` container, reaching the rest of the system through
-`Scheduler::setControl`, exactly as Audio, IR and the button already do. What they need is a
+Service under the core `Services` container. How it reaches the rest of the system depends on what
+it produces. A THRESHOLD is an event ("closer than 50 cm"), and an event drives a control through
+`Scheduler::setControl`, exactly as the button and infrared rows do. A continuous VALUE is not an
+event: an effect reading a distance per frame needs the number, and pushing one through a control
+per sample would serialize a stream through a settings path. That is published as a shared frame
+the way `AudioService::latestFrame()` already does, and a sensor typically does both. What they need is a
 platform seam per sensing modality (the GPIO seam shipped; I2C exists; a pulse-timing seam does
 not), and a module each.
 

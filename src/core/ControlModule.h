@@ -196,6 +196,7 @@ public:
         // was touched last, so there is no per-cell staleness to reason about. A surface without
         // displays simply ignores it.
         controls_.addReadOnly("display", display_, sizeof(display_));
+        controls_.setDisplayStrip(controls_.count() - 1);
 
         // The switch row sits at the TOP, above the encoders, matching the surfaces this mirrors
         // (a channel's buttons are above its knob, which is above its fader). Control order is
@@ -416,8 +417,8 @@ public:
             std::snprintf(goneName, sizeof(goneName), "%s", presets_[i].name);
             const bool ok = platform::fsRemove(path);
             if (ok) clearCurrentIfNamed(goneName);
-            setStatusf(ok ? Severity::Status : Severity::Error,
-                       ok ? "deleted %s" : "could not delete %s", presets_[i].name);
+            if (ok) setSurfaceStatusf("deleted %s", presets_[i].name);
+            else    setStatusf(Severity::Error, "could not delete %s", presets_[i].name);
             rescan();
             return ok;
         }
@@ -469,7 +470,9 @@ public:
         sched->setControl(module, dot + 1, body);
         // A bool has no option names, so the strip says on or off rather than 1 or 0: the reason
         // the strip exists is that a number is not what a person reads.
-        std::snprintf(display_, sizeof(display_), "%s: %s", dot + 1, switches_[index] ? "on" : "off");
+        // The name stays here: a bare "ON" would not say which switch, where a palette name is
+        // self-describing. No colon, which a segment cell cannot draw well.
+        std::snprintf(display_, sizeof(display_), "%s %s", dot + 1, switches_[index] ? "on" : "off");
     }
 
     /// Read every bound control back, so a surface FOLLOWS what it drives.
@@ -573,7 +576,21 @@ public:
     /// encoder 1 through the palettes has to read "Rainbow", not "37". Read from the target
     /// control's own descriptor, so this works for any select anyone binds later without a line of
     /// per-module UI code.
-    void showOnStrip(const char* module, const char* control, uint8_t value) {
+/// The name of palette `index`, written into `out`. Returns false when it cannot be read.
+    ///
+    /// Core has no palette table: the light domain owns it and reaches core only through the
+    /// PaletteOptionsFn in the descriptor's `aux` (Control.h), so the name is asked for the one way
+    /// core is allowed to ask. The sink carries the request (JsonSink::requestName) because that
+    /// function pointer takes nothing else. Core stays palette-agnostic, which is the property the
+    /// seam exists to protect.
+    static bool paletteNameAt(uintptr_t optionsFn, uint8_t index, char* out, size_t outLen) {
+        JsonSink sink(out, outLen);
+        sink.requestName(index);
+        reinterpret_cast<PaletteOptionsFn>(optionsFn)(sink);
+        return out[0] != 0 && !sink.overflowed();
+    }
+
+        void showOnStrip(const char* module, const char* control, uint8_t value) {
         auto* sched = Scheduler::instance();
         MoonModule* target = sched ? sched->firstByName(module) : nullptr;
         if (!target) return;
@@ -582,14 +599,23 @@ public:
             if (std::strcmp(cs[i].name, control) != 0) continue;
             // A Select carries its options in the descriptor: `aux` is the array, `max` the count.
             // Select ONLY: a Palette's aux is a FUNCTION pointer (addPalette takes optionsFn), so
-            // reading it as an array of strings would dereference a code address. A palette's number
-            // is the honest readout until that seam offers a name by index.
+            // reading it as an array of strings would dereference a code address.
             const bool isSelect = cs[i].type == ControlType::Select && cs[i].aux;
+            char paletteName[24] = {};
+            // The VALUE alone, not "control: value". The strip is a scribble strip: the knob the
+            // user just turned already says which control it was, and prefixing every readout with
+            // the control's name spent half a sixteen-cell display restating it, which truncated
+            // the name it exists to show ("PALETTE: FIERCE", with the rest cut off).
             if (isSelect && value < cs[i].max) {
                 const auto* opts = reinterpret_cast<const char* const*>(cs[i].aux);
-                std::snprintf(display_, sizeof(display_), "%s: %s", control, opts[value]);
+                std::snprintf(display_, sizeof(display_), "%s", opts[value]);
+            } else if (cs[i].type == ControlType::Palette && cs[i].aux && value < cs[i].max
+                       && paletteNameAt(cs[i].aux, value, paletteName, sizeof(paletteName))) {
+                // "Rainbow", not "37": turning a knob through palettes has to read as the thing it
+                // selects, which is the whole point of the strip.
+                std::snprintf(display_, sizeof(display_), "%s", paletteName);
             } else {
-                std::snprintf(display_, sizeof(display_), "%s: %u", control,
+                std::snprintf(display_, sizeof(display_), "%s %u", control,
                               static_cast<unsigned>(value));
             }
             return;
@@ -920,7 +946,7 @@ private:
         // The preset now holds its role; the other three keep whoever held them, so a layout preset
         // and a layer preset stay lit together.
         std::snprintf(current_[role], sizeof(current_[role]), "%s", presetName);
-        setStatusf(Severity::Status, "applied %s", presetName);
+        setSurfaceStatusf("applied %s", presetName);
         return true;
     }
 
@@ -991,6 +1017,33 @@ private:
         std::vsnprintf(statusBuf_, sizeof(statusBuf_), fmt, ap);
         va_end(ap);
         setStatus(statusBuf_, sev);
+    }
+
+    /// Report a SURFACE action: the status row, and the display strip with it.
+    ///
+    /// The strip is this card's readout, so "applied pac" belongs on it rather than on a status row
+    /// sitting directly above an identical display. Two things are deliberately kept off it:
+    ///
+    /// - **Warnings and errors**, which carry a severity the status row shows as a color and an
+    ///   emoji. A strip of red segments expresses neither, and a failure that reads exactly like a
+    ///   success is worse than one on a separate row. So this reports Status only, by construction.
+    /// - **Anything that is not about the surface.** A system message (a filesystem state, a
+    ///   network note) has no business on a control surface's display, so the choice is made per
+    ///   call site rather than by testing the severity: a future status that is merely routine does
+    ///   not silently land on the strip by virtue of not being an error.
+    void setSurfaceStatusf(const char* fmt, ...) {
+        va_list ap;
+        va_start(ap, fmt);
+        std::vsnprintf(statusBuf_, sizeof(statusBuf_), fmt, ap);
+        va_end(ap);
+        setStatus(statusBuf_, Severity::Status);
+        // Copied with an explicit BOUND rather than "%s": the strip is 28 cells and the status
+        // buffer is twice that, so a long message is cut to what the display can physically show.
+        // snprintf's own truncation does the same thing, but GCC cannot tell a deliberate cut from
+        // an accident and fails the ESP32 build on it (-Werror=format-truncation), which is a fair
+        // question to ask: stating the width answers it.
+        std::strncpy(display_, statusBuf_, sizeof(display_) - 1);
+        display_[sizeof(display_) - 1] = 0;
     }
 
     /// Fader names are their position, so a surface binds to "fader1" rather than to a label a user

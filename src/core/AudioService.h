@@ -249,8 +249,6 @@ public:
             // projectMM-only sync group on a non-WLED port.
             controls_.addControl("syncPort", syncPort, 1, 65535);
             controls_.setHidden(controls_.count() - 1, !hasSocket);
-            controls_.addReadOnly("sync status", syncStr_, sizeof(syncStr_));
-            controls_.setHidden(controls_.count() - 1, !hasSocket);
         }
         // Read-only live read-outs (formatted in tick1s). These show the audio actually driving the
         // effects, so they stay visible in Receive too (there the frame comes off the network, not a
@@ -313,7 +311,10 @@ public:
     // Read-only views of the sync socket lifecycle so unit_AudioService_sync can assert it
     // through the public tick() without befriending the class or exposing internals broadly.
     bool syncOpenForTest() const { return syncOpen_; }
-    const char* syncStatusForTest() const { return syncStr_; }
+    /// The sync state as the card shows it. Reads the module's own status line rather than a
+    /// private buffer, because that IS the reported state now: a test asserting on anything else
+    /// could pass while the card said something different.
+    const char* syncStatusForTest() const { return status() ? status() : ""; }
     static constexpr uint32_t syncSendIntervalMsForTest() { return kSyncSendIntervalMs; }
     uint32_t syncSendCountForTest() const { return syncSendCount_; }
     static constexpr uint32_t syncFallbackMsForTest() { return kSyncFallbackMs; }
@@ -514,19 +515,30 @@ public:
         }
         micSamples1s_ = 0;
         micNonzero1s_ = 0;
-        // Live sync status: "sending" / "receiving" (peer audio fresh) / "listening"
-        // (bound, no peer) / "off". While the socket isn't open yet, leave the baseline
-        // syncReinit/syncEnsureSocket set ("waiting for network" / "…failed"); only once
-        // open do we report the moment-to-moment send/receive state.
+        // Live sync state on the module's OWN status line: "sending" / "receiving from <ip>" (peer
+        // audio fresh) / "listening" (bound, no peer). This used to be a separate "sync status"
+        // read-only control, which put a second status field on a card that already has one; a
+        // module reports through setStatus like every other module.
+        //
+        // Skipped while a mic fault is showing (Local + send runs both paths): a wiring warning
+        // outranks the routine note that packets are going out.
+        // While the socket isn't open yet, the baseline syncReinit/syncEnsureSocket set
+        // ("waiting for network" / "...failed") stands; only once open is the moment-to-moment state
+        // reported.
         if constexpr (platform::hasNetwork) {
             const uint8_t s = sync();
-            if (s == 0) std::snprintf(syncStr_, sizeof(syncStr_), "off");
-            else if (syncOpen_) {
-                if (s == 1) std::snprintf(syncStr_, sizeof(syncStr_), "sending");
-                else std::snprintf(syncStr_, sizeof(syncStr_),
-                              (lastSyncRecv_ != 0
-                               && platform::millis() - lastSyncRecv_ < kSyncFallbackMs)
-                                  ? "receiving" : "listening");
+            if (s != 0 && syncOpen_ && !micStatusStale_) {
+                if (s == 1) setStatus("sending");
+                else if (lastSyncRecv_ != 0
+                         && platform::millis() - lastSyncRecv_ < kSyncFallbackMs) {
+                    // Named, because "receiving" alone cannot tell a rig taking the right source
+                    // from one locked onto a neighbour.
+                    std::snprintf(syncStr_, sizeof(syncStr_), "receiving from %u.%u.%u.%u",
+                                  syncPeer_[0], syncPeer_[1], syncPeer_[2], syncPeer_[3]);
+                    setStatus(syncStr_);
+                } else {
+                    setStatus("listening");
+                }
             }
         }
         MoonModule::tick1s();
@@ -572,9 +584,10 @@ private:
     bool     syncPeakLatched_ = false;   // a beat seen since the last transmit (WLED's udpSamplePeak)
     uint32_t lastPeakMs_ = 0;            // when that beat was, for the refractory window
     uint32_t lastSyncRecv_ = 0;      // millis of the last received packet (receive auto-blend)
+    uint8_t  syncPeer_[4] = {};      // source address of that packet, for the status line
     bool     syncOpen_ = false;      // socket opened for the current mode (lazy-open latch)
     uint32_t lastSyncOpenFailMs_ = 0;  // millis of the last failed open (0 = none); bring-up backoff
-    char     syncStr_[32] = {};      // "sync status" read-out
+    char     syncStr_[40] = {};      // scratch for the "receiving from <ip>" status line
     static constexpr uint32_t kSyncSendIntervalMs = 25;   // ~40/s, WLED-friendly, well under a flood
     static constexpr uint32_t kSyncFallbackMs = 1000;     // no packet this long → resume local mic
     static constexpr uint32_t kSyncOpenRetryMs = 1000;    // pause between socket bring-up retries after a failure
@@ -679,11 +692,11 @@ private:
         syncOpen_ = false;
         lastSyncOpenFailMs_ = 0;           // a mode change retries bring-up immediately (no stale backoff)
         lastSyncRecv_ = 0;
+        std::memset(syncPeer_, 0, sizeof(syncPeer_));
         const uint8_t s = sync();
-        std::snprintf(syncStr_, sizeof(syncStr_),
-                      s == 1 ? "send: waiting for network"
-                      : s == 2 ? "receive: waiting for network"
-                      : "off");
+        setStatus(s == 1 ? "send: waiting for network"
+                  : s == 2 ? "receive: waiting for network"
+                  : "");
     }
 
     /// Lazily open the sync socket for the current mode, once the network stack is up.
@@ -709,10 +722,10 @@ private:
             char grp[16]; formatDottedQuad(grp, kSyncMulticastAddr_);
             if (syncSock_.open() && syncSock_.connect(grp, syncPort)) {
                 syncOpen_ = true;
-                std::snprintf(syncStr_, sizeof(syncStr_), "sending");
+                setStatus("sending");
             } else {
                 syncSock_.close();
-                std::snprintf(syncStr_, sizeof(syncStr_), "send: socket failed");
+                setStatus("send: socket failed", Severity::Error);
             }
         } else {                           // receive → bind the port, then JOIN the group
             // The join is what makes a multicast datagram reach this socket at all: binding the
@@ -720,10 +733,10 @@ private:
             char grp[16]; formatDottedQuad(grp, kSyncMulticastAddr_);
             if (syncSock_.open() && syncSock_.bind(syncPort) && syncSock_.joinMulticast(grp)) {
                 syncOpen_ = true;
-                std::snprintf(syncStr_, sizeof(syncStr_), "listening");
+                setStatus("listening");
             } else {
                 syncSock_.close();
-                std::snprintf(syncStr_, sizeof(syncStr_), "receive: bind failed");
+                setStatus("receive: bind failed", Severity::Error);
             }
         }
         // Stamp a failure (or clear the timer on success). now==0 is nudged to 1 so the
@@ -767,6 +780,9 @@ private:
             if (parseWledAudioSync(pkt, static_cast<size_t>(n), rf)) {
                 frame_ = rf;                       // received audio drives the effects
                 lastSyncRecv_ = platform::millis();
+                // Whose audio this is. A receiver with no peer named looks identical to one taking
+                // the wrong source, and on a multi-device rig that is the question being asked.
+                std::memcpy(syncPeer_, srcIp, sizeof(syncPeer_));
                 // Feed the peer level into the same 1 s peak window the local mic uses, so the
                 // "level RMS" read-out (tick1s → levelStr_) reflects received audio too, otherwise
                 // it freezes at the last local value while a peer is driving the effects.

@@ -362,6 +362,15 @@ public:
             setStatus(err, Severity::Warning);
             return;
         }
+        // Release the pins that are LEAVING the list before driving the new one. Clearing the list
+        // entirely is handled above, but shrinking it is the same problem: editing "12,13" to "12"
+        // left 13 asserted forever on a GPIO nothing owns any more, with no control naming it.
+        for (uint8_t i = 0; i < lastRelayCount_; i++) {
+            bool stillListed = false;
+            for (uint8_t j = 0; j < n; j++)
+                if (lastRelayPins_[i] == static_cast<uint8_t>(pins[j])) { stillListed = true; break; }
+            if (!stillListed) platform::gpioWrite(lastRelayPins_[i], false);
+        }
         for (uint8_t i = 0; i < n; i++) {
             // An input-only pin (classic ESP32 34-39) refuses the write, and the seam says so: a
             // relay wired to one would otherwise look configured and do nothing.

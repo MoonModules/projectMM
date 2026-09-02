@@ -18,6 +18,7 @@ add_executable(mm_tests
     unit/core/unit_crc.cpp
     unit/core/unit_AudioService_sync.cpp
     unit/core/unit_ButtonService.cpp
+    unit/core/unit_MoonLiveService.cpp
     unit/core/unit_InfraredService.cpp
     unit/core/unit_TcpConnect.cpp
     unit/core/unit_MqttPacket.cpp

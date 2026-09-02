@@ -464,9 +464,10 @@ TEST_CASE("ControlModule saves a preset onto the chosen pad") {
     CHECK(row.find("\"slot\":20") != std::string::npos);
 }
 
-// The encoder row exists and is unassigned: the affordance ships before the binding UI, so an
-// encoder must be inert rather than driving something by accident.
-TEST_CASE("ControlModule has an encoder row that drives nothing yet") {
+// encoder1 selects the palette; the rest are unbound until the assignment UI lands, so they must be
+// inert rather than driving something by accident. Brightness is the canary: it belongs to fader1,
+// and no encoder may touch it.
+TEST_CASE("only the bound encoder drives anything") {
     Device d;
     auto brightness = [&] {
         auto& cs = d.drivers->controls();
@@ -1161,4 +1162,46 @@ TEST_CASE("ControlModule switch 1 drives the global on/off") {
     CHECK_FALSE(driversOn());     // the rig goes dark from the surface
     flip(true);
     CHECK(driversOn());           // and comes back
+}
+
+
+// The display strip: a knob that selects a palette has to read as the palette, not as a number. The
+// name lives in the light domain and ControlModule is core, so this also pins that the seam carrying
+// it (JsonSink::requestName into the PaletteOptionsFn) actually works end to end.
+TEST_CASE("the display strip names what an encoder selected, not its number") {
+    Device d;
+
+    // Find the palette control's option count, so the test picks a valid index rather than assuming
+    // how many palettes ship.
+    uint8_t paletteCount = 0;
+    auto& dcs = d.drivers->controls();
+    for (uint8_t i = 0; i < dcs.count(); i++)
+        if (std::strcmp(dcs[i].name, "palette") == 0) paletteCount = dcs[i].max;
+    REQUIRE(paletteCount > 1);
+
+    auto& cs = d.control->controls();
+    auto strip = [&]() -> const char* {
+        for (uint8_t i = 0; i < cs.count(); i++)
+            if (std::strcmp(cs[i].name, "display") == 0) return static_cast<const char*>(cs[i].ptr);
+        return "";
+    };
+
+    for (uint8_t i = 0; i < cs.count(); i++) {
+        if (std::strcmp(cs[i].name, "encoder1") != 0) continue;
+        *static_cast<uint8_t*>(cs[i].ptr) = 1;
+        d.control->onControlChanged("encoder1");
+    }
+
+    // The NAME alone: no "palette: " prefix, because the strip is sixteen cells and restating the
+    // control the user just turned truncated the name it exists to show. Not the bare number the
+    // fallback prints either.
+    const char* s = strip();
+    INFO(s);
+    CHECK(s[0] != 0);
+    CHECK(std::strstr(s, "palette") == nullptr);
+    CHECK(std::strcmp(s, "1") != 0);
+    // A real name: letters, not just digits.
+    bool hasLetter = false;
+    for (const char* c = s; *c; c++) if ((*c | 32) >= 'a' && (*c | 32) <= 'z') hasLetter = true;
+    CHECK(hasLetter);
 }

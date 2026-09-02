@@ -24,7 +24,7 @@ The product owner's framing: **everything goes through ControlModule**. An input
 map its physical events onto the surface (switches, encoders, faders, pads); the surface maps onto
 whatever those drive. Two steps, each simple:
 
-```
+```text
 physical event            step 1: input service      step 2: ControlModule
   button on GPIO 0    ->  switch1                ->  Drivers.on
   IR code 0x40BF      ->  switch1                ->  Drivers.on
@@ -195,8 +195,9 @@ not configuration that could be derived: ST publishes no register-level datashee
 only the ULD API, and the ranging algorithms and SPAD calibration are not documented. Reimplementing
 it means reverse-engineering an undocumented DSP.
 
-**So it is compiled in per firmware, not per build.** 84 KB is 4.5% of the app image and matters on
-a 4 MB classic ESP32; it is noise on an S3 or P4. This is the first *peripheral* to need
+**So it is compiled in per firmware, not per build.** 84 KB is about 2% of a 4 MB classic ESP32's
+flash, and roughly 4.5% of the ~1.8 MB app PARTITION it actually competes for, which is the number
+that matters; it is noise on an S3 or P4. This is the first *peripheral* to need
 compile-time inclusion gated by the device catalog, the shape `MM_HLS` and `MM_NO_ETH` already
 have. A Dig-2-Go never carries it; a P4 installation does.
 

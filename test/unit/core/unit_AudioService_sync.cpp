@@ -57,14 +57,23 @@ TEST_CASE("AudioService: switching out of Local mode clears the mic status") {
     const bool localLeftStatus = a.status() != nullptr && a.status()[0] != 0;
     (void)localLeftStatus;
 
+    // What must not survive is the MIC message: a wiring diagnosis for hardware this mode does not
+    // use would send the user to a pin that is not the problem. The line itself is not required to
+    // be empty, because sync reports there too (receive says it is waiting for the network).
+    auto noMicMessage = [&]() {
+        const char* s = a.status();
+        return s == nullptr || std::strstr(s, "mic") == nullptr;
+    };
+
     a.mode = 1;                      // receive network
     a.applyState();                  // prepare() non-Local branch must clear the stale mic status
-    CHECK((a.status() == nullptr || a.status()[0] == 0));   // no lingering mic message on the status row
+    CHECK(noMicMessage());
 
     // And back to Simulate, same rule (no mic there either).
     a.mode = AudioService::kSimMode;
     a.applyState();
-    CHECK((a.status() == nullptr || a.status()[0] == 0));
+    CHECK(noMicMessage());
+    CHECK(a.status()[0] == 0);       // Simulate has no sync either, so here it IS empty
 
     a.release();
 }
@@ -171,7 +180,9 @@ TEST_CASE("AudioService Receive: a localhost WLED packet drives frame_, then hol
     }
     CHECK(landed);
     CHECK(a.audioFrame()->levelSmoothed == 111);
-    CHECK(std::strcmp(status(a), "receiving") == 0);   // fresh peer audio
+    // Named, not just "receiving": the packet came from loopback, so the status has to say so. A
+    // receiver that cannot name its source looks identical to one locked onto the wrong device.
+    CHECK(std::strcmp(status(a), "receiving from 127.0.0.1") == 0);
 
     // Receive is a pure network sink: advance virtual time past the fallback window with no new
     // packet, the peer goes stale and the status falls back to "listening" (bound, no fresh peer).
@@ -227,7 +238,9 @@ TEST_CASE("AudioService Local (not sending): no socket, reports off") {
     a.applyState();
     a.tick();
     CHECK_FALSE(a.syncOpenForTest());
-    CHECK(std::strcmp(status(a), "off") == 0);
+    // Nothing on the status line: sync is off, and the `mode` control already says so. The status
+    // row reports what needs reporting rather than restating a setting the user can see.
+    CHECK(status(a)[0] == 0);
     a.release();
 }
 
@@ -247,7 +260,7 @@ TEST_CASE("AudioService Local+send → Simulate: send stops, no socket") {
     a.mode = AudioService::kSimMode;
     a.applyState();              // re-prepare: syncReinit closes the socket for the new (no-socket) mode
     a.tick();
-    CHECK_FALSE(a.syncOpenForTest());          // socket closed, nothing broadcasting
-    CHECK(std::strcmp(status(a), "off") == 0); // sync status quiet in Simulate
+    CHECK_FALSE(a.syncOpenForTest());   // socket closed, nothing broadcasting
+    CHECK(status(a)[0] == 0);           // and quiet on the status line in Simulate
     a.release();
 }

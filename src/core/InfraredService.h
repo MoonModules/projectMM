@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cerrno>
 #include <cstring>
 
 namespace mm {
@@ -108,7 +109,9 @@ public:
         sink.writeJsonString(codeStr);
         sink.appendf("},{\"name\":\"learn\",\"type\":\"button\",\"label\":\"%s\"},",
                      r.learn ? "waiting..." : "learn");
-        writeInputActionDetailFields(sink, r.action);
+        // hasRelease=false: a remote code is a single event with no matching release, so a `set`
+        // row would write its value and latch forever.
+        writeInputActionDetailFields(sink, r.action, /*hasRelease=*/false);
         sink.append("]}");
     }
 
@@ -168,11 +171,18 @@ public:
             // whatever it holds is a prefix rather than what the user typed.
             if (std::strlen(buf) == sizeof(buf) - 1) return false;
             char* end = nullptr;
-            const unsigned long parsed = std::strtoul(buf, &end, 0);
+            errno = 0;
+            const unsigned long long parsed = std::strtoull(buf, &end, 0);
             // Trailing junk ("40BF!" or an empty string) means the user did not type a number, and
             // above 32 bits it is not a code this receiver can ever see.
-            if (end == buf || *end != 0 || parsed > 0xFFFFFFFFUL) return false;
+            //
+            // strtoULL and ERANGE, not strtoul: `unsigned long` is 32 bits on the ESP32, where
+            // strtoul saturates an over-large value to ULONG_MAX and a `> 0xFFFFFFFF` compare then
+            // passes. The bound would hold on a 64-bit host and silently fail on the device, which
+            // is the half of the range no host test can reach.
+            if (end == buf || *end != 0 || errno == ERANGE || parsed > 0xFFFFFFFFULL) return false;
             r->code = static_cast<uint32_t>(parsed);
+            claimCode(r->code, r);          // a typed code takes the binding the same way
             markDirty();
             return true;
         }
@@ -214,6 +224,17 @@ private:
         InputAction action{};
     };
 
+    /// Clear `code` from every row except `keep`, so one key binds to exactly one action.
+    ///
+    /// The dispatch loop fires the FIRST row holding a code and stops, so a duplicate is a row that
+    /// can never run: it looks bound in the list, and pressing the key does someone else's action.
+    /// The newest binding wins, which is what a user learning a key onto a second row means by it.
+    void claimCode(uint32_t code, const Row* keep) {
+        if (code == 0) return;
+        for (uint8_t i = 0; i < count_; i++)
+            if (&rows_[i] != keep && rows_[i].code == code) rows_[i].code = 0;
+    }
+
     Row* find(uint32_t id) {
         for (uint8_t i = 0; i < count_; i++) if (rows_[i].id == id) return &rows_[i];
         return nullptr;
@@ -226,6 +247,7 @@ private:
         for (uint8_t i = 0; i < count_; i++) {
             if (!rows_[i].learn) continue;
             rows_[i].code = code;
+            claimCode(code, &rows_[i]);     // one key, one row: the newest binding wins
             rows_[i].learn = false;
             std::snprintf(statusBuf_, sizeof(statusBuf_), "learned 0x%08lX",
                           static_cast<unsigned long>(code));
@@ -240,7 +262,21 @@ private:
 
         for (uint8_t i = 0; i < count_; i++) {
             if (rows_[i].code == 0 || rows_[i].code != code) continue;
-            if (runInputAction(rows_[i].action, /*pressed=*/true, statusBuf_, sizeof(statusBuf_)))
+            // A `set` row needs a release to clear it, and a remote has none: running it would
+            // write the value and leave the control latched with nothing able to undo it. Reported
+            // rather than ignored, because a row that silently does nothing reads as a broken
+            // remote. The editor does not offer the kind here; this is the API path.
+            if (rows_[i].action.kind == InputAction::Kind::Set) {
+                setStatus("a set row needs a release, which a remote has no way to send",
+                          Severity::Warning);
+                return;
+            }
+            // Reported whether or not it worked, and the buffer cleared first so the line reads
+            // THIS press rather than the last one. A row pointing at a missing module or an empty
+            // pad otherwise looks exactly like a dead remote, which sends the user to the batteries.
+            statusBuf_[0] = 0;
+            if (runInputAction(rows_[i].action, /*pressed=*/true, statusBuf_, sizeof(statusBuf_))
+                || statusBuf_[0])
                 setStatus(statusBuf_);
             return;
         }

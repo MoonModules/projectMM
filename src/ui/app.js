@@ -2114,7 +2114,10 @@ function createControl(moduleName, moduleType, ctrl) {
     // it by name rather than the flag.
     if (moduleName === "System" && ctrl.name === "expertMode") label.classList.add("control-label--expert");
     label.textContent = displayName(ctrl.name);
-    row.appendChild(label);
+    // The display strip carries no label: it spans the card and shows whatever was last touched, so
+    // a label naming one control would be wrong the moment another moved.
+    if (ctrl.displayStrip) row.classList.add("control-display-strip");
+    else row.appendChild(label);
 
     const key = moduleName + ":" + ctrl.name;
     const def = defaultFor(moduleType, ctrl.name, ctrl);
@@ -2170,13 +2173,13 @@ function createControl(moduleName, moduleType, ctrl) {
                 input.classList.add("encoder-input");
                 row.classList.add("control-encoder");
                 row.appendChild(buildKnob(input, ctrl));
-                row.appendChild(buildSevenSeg(input));
+                row.appendChild(buildSegReadout(input));
                 attachTargetPopup(row, input, ctrl);
             }
             if (ctrl.fader) {
                 input.classList.add("fader-input");
                 row.classList.add("control-fader");
-                row.appendChild(buildSevenSeg(input));
+                row.appendChild(buildSegReadout(input));
                 // Right-click a fader to see (and later choose) what it drives: the same
                 // configure-on-the-control rule the pads follow.
                 attachTargetPopup(row, input, ctrl);
@@ -3113,6 +3116,16 @@ function createControl(moduleName, moduleType, ctrl) {
                 row.appendChild(a);
                 break;
             }
+            // The surface's display strip: sixteen-segment cells across the full card width,
+            // matching the seven-segment readouts under the encoders and faders.
+            if (ctrl.displayStrip) {
+                const strip = buildSeg16Strip(SEG16_CHARS, /*stretch=*/true);
+                strip.dataset.mid = moduleName;
+                strip.dataset.key = ctrl.name;
+                strip._setText(ctrl.value ?? "");
+                row.appendChild(strip);
+                break;
+            }
             const span = document.createElement("span");
             span.className = "display";
             span.dataset.mid = moduleName;
@@ -3542,54 +3555,142 @@ function buildKnob(input, ctrl) {
     return wrap;
 }
 
-// A seven-segment readout, the way the hardware shows a value: three digits, lit segments over an
-// unlit ghost so the display reads like a real LED module rather than plain text.
-const SEG7 = {
-    "0": "abcdef", "1": "bc", "2": "abdeg", "3": "abcdg", "4": "bcfg",
-    "5": "acdfg", "6": "acdefg", "7": "abc", "8": "abcdefg", "9": "abcdfg", " ": "",
-};
-function buildSevenSeg(input) {
-    const NS = "http://www.w3.org/2000/svg";
-    const wrap = document.createElement("div");
-    wrap.className = "seg7";
-    const svg = document.createElementNS(NS, "svg");
-    svg.setAttribute("viewBox", "0 0 42 20");
-    // Segment geometry per digit, in the standard a..g naming.
-    const seg = (x, y, horiz) => {
-        const p = document.createElementNS(NS, "rect");
-        p.setAttribute("x", String(x)); p.setAttribute("y", String(y));
-        p.setAttribute("width", horiz ? "7" : "2");
-        p.setAttribute("height", horiz ? "2" : "7");
-        p.setAttribute("rx", "1");
-        return p;
+// A SIXTEEN-SEGMENT readout: the ONE segmented display in the UI, used both for the numeric
+// readouts under the encoders and faders and for the surface's full-width display strip.
+//
+// It replaced a separate seven-segment renderer, which could only draw digits: two renderers meant
+// two geometries to keep visually matched (they drifted, and matching them again took several
+// passes), and it left the numeric readouts unable to ever show a word. Sixteen segments (the seven
+// segment bars with top, bottom and middle split in two, plus two verticals and four diagonals) is
+// what an alphanumeric LED module uses, and it renders M, W, N and K legibly where fourteen cannot.
+//
+// Segment names follow the usual convention:
+//   a1 a2   top left / right      f  h  j  k  b   upper verticals + diagonals
+//   g1 g2   middle left / right   e  n  m  l  c   lower verticals + diagonals
+//   d1 d2   bottom left / right
+// Space-separated so a segment name is a whole token: "a1" and "a" are different segments, and
+// substring matching would light both.
+const SEG16 = Object.fromEntries(Object.entries({
+    // Plain, not barred: a sixteen-segment module usually bars its zero to tell it from O, but these
+    // readouts are numeric and the strip shows words, so context settles it and a clean rectangle is
+    // what the readouts have always shown.
+    "0": "a1 a2 b c d1 d2 e f",       "1": "b c",
+    "2": "a1 a2 b g1 g2 e d1 d2",    "3": "a1 a2 b c d1 d2 g1 g2",
+    "4": "f b g1 g2 c",              "5": "a1 a2 f g1 g2 c d1 d2",
+    "6": "a1 a2 f g1 g2 e c d1 d2",  "7": "a1 a2 b c",
+    "8": "a1 a2 b c d1 d2 e f g1 g2","9": "a1 a2 b c d1 d2 f g1 g2",
+    "A": "a1 a2 b c e f g1 g2",      "B": "a1 a2 b c d1 d2 g2 j m",
+    "C": "a1 a2 f e d1 d2",          "D": "a1 a2 b c d1 d2 j m",
+    "E": "a1 a2 f e d1 d2 g1 g2",    "F": "a1 a2 f e g1 g2",
+    "G": "a1 a2 f e d1 d2 c g2",     "H": "b c e f g1 g2",
+    "I": "a1 a2 d1 d2 j m",          "J": "b c d1 d2 e",
+    "K": "e f g1 k l",               "L": "f e d1 d2",
+    "M": "b c e f h k",              "N": "b c e f h l",
+    "O": "a1 a2 b c d1 d2 e f",      "P": "a1 a2 b e f g1 g2",
+    "Q": "a1 a2 b c d1 d2 e f l",    "R": "a1 a2 b e f g1 g2 l",
+    "S": "a1 a2 f g1 g2 c d1 d2",    "T": "a1 a2 j m",
+    "U": "b c d1 d2 e f",            "V": "e f k n",
+    "W": "b c e f n l",              "X": "h k n l",
+    "Y": "h k m",                    "Z": "a1 a2 k n d1 d2",
+    "-": "g1 g2", "+": "g1 g2 j m", ".": "d1", ":": "j m", "/": "k n", " ": "",
+}).map(([ch, segs]) => [ch, new Set(segs.split(" ").filter(Boolean))]));
+
+// One character cell on the SEVEN-SEGMENT's own grid: 14 units wide, 20 tall, 2-unit strokes. The
+// readouts render 14 units at 14px (three cells in 42px), so the strip drawn on the identical grid
+// reads as the same instrument. The strip is then stretched horizontally to span the eight surface
+// columns, which is a small widening of the cells and leaves the stroke height untouched.
+function seg16Cell(NS, ox) {
+    const bar = (x, y, w, h) => {
+        const r = document.createElementNS(NS, "rect");
+        r.setAttribute("x", String(x)); r.setAttribute("y", String(y));
+        r.setAttribute("width", String(w)); r.setAttribute("height", String(h));
+        r.setAttribute("rx", "0.75");
+        return r;
     };
-    const digits = [];
-    for (let d = 0; d < 3; d++) {
-        const ox = d * 14 + 1;
-        const map = {
-            a: seg(ox + 2, 1, true),  b: seg(ox + 9, 2, false), c: seg(ox + 9, 11, false),
-            d: seg(ox + 2, 17, true), e: seg(ox, 11, false),    f: seg(ox, 2, false),
-            g: seg(ox + 2, 9, true),
-        };
-        for (const el of Object.values(map)) { el.setAttribute("class", "seg7-off"); svg.appendChild(el); }
-        digits.push(map);
-    }
-    wrap.appendChild(svg);
-    const draw = () => {
-        // Right-aligned, blank-padded: "  7", " 42", "255": how a 3-digit module displays.
-        const txt = String(Math.round(Number(input.value))).padStart(3, " ").slice(-3);
-        digits.forEach((map, i) => {
-            const on = SEG7[txt[i]] ?? "";
-            for (const [name, el] of Object.entries(map))
-                el.setAttribute("class", on.includes(name) ? "seg7-on" : "seg7-off");
-        });
+    // A diagonal is a 2-unit line with a round cap, matching the bars' weight and their rx rounding.
+    const diag = (x1, y1, x2, y2) => {
+        const l = document.createElementNS(NS, "line");
+        l.setAttribute("x1", String(x1)); l.setAttribute("y1", String(y1));
+        l.setAttribute("x2", String(x2)); l.setAttribute("y2", String(y2));
+        l.setAttribute("stroke-width", "1.5"); l.setAttribute("stroke-linecap", "round");
+        return l;
     };
+    // The seven-segment's own coordinates and cell size, but a 1.5-unit stroke against its 2.
+    //
+    // DELIBERATELY thinner, not a mismatch: a sixteen-segment glyph lights up to sixteen segments in
+    // the cell where a digit lights seven, and the two center verticals plus four diagonals crowd
+    // the middle. At an identical stroke width the strip reads noticeably bolder than the numbers
+    // below it, so matching the WEIGHT means drawing thinner than them.
+    const S = 1.5;
+    return {
+        a1: bar(ox + 2, 1, 3, S),        a2: bar(ox + 6, 1, 3, S),
+        d1: bar(ox + 2, 17.5, 3, S),     d2: bar(ox + 6, 17.5, 3, S),
+        g1: bar(ox + 2, 9.25, 3, S),     g2: bar(ox + 6, 9.25, 3, S),
+        f:  bar(ox + 0.25, 2, S, 7),     b:  bar(ox + 9.25, 2, S, 7),
+        e:  bar(ox + 0.25, 11, S, 7),    c:  bar(ox + 9.25, 11, S, 7),
+        j:  bar(ox + 4.75, 2, S, 7),     m:  bar(ox + 4.75, 11, S, 7),
+        h:  diag(ox + 2.7, 3.5, ox + 4.3, 7.9),   k: diag(ox + 8.3, 3.5, ox + 6.7, 7.9),
+        n:  diag(ox + 2.7, 16.9, ox + 4.3, 12.4), l: diag(ox + 8.3, 16.9, ox + 6.7, 12.4),
+    };
+}
+
+const EMPTY_SEGS = new Set();
+
+// Cells in the display strip: 28 at the seven-segment's 14-unit pitch, which is exactly the width
+// of the eight surface columns at one unit per pixel. Long enough for any built-in palette name.
+const SEG16_CHARS = 28;
+
+// The numeric readout under an encoder or fader: three cells bound to a range input, right-aligned
+// and blank-padded the way a three-digit module displays ("  7", " 42", "255"). Text-capable like
+// every cell here, so a readout that wants to show a word later needs no new renderer.
+function buildSegReadout(input) {
+    const wrap = buildSeg16Strip(3);
+    wrap.classList.add("seg-readout");
+    const draw = () => wrap._setText(
+        String(Math.round(Number(input.value))).padStart(3, " ").slice(-3));
     draw();
     input.addEventListener("input", draw);
     input.addEventListener("change", draw);
     // Same hook the knob exposes, so redrawRangeDecorations refreshes both without knowing what
     // either one is.
     wrap._redraw = draw;
+    return wrap;
+}
+
+// The display strip: `chars` cells of sixteen segments, driven by a string rather than a range
+// input. Returns the wrapper with a `_setText` hook the update path calls.
+function buildSeg16Strip(chars, stretch = false) {
+    const NS = "http://www.w3.org/2000/svg";
+    const wrap = document.createElement("div");
+    wrap.className = "seg16";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", `0 0 ${chars * 14} 20`);
+    // `stretch` fills the box in BOTH axes, which the display strip needs: it is set to the width of
+    // the eight surface columns, and preserving the ratio of a 28-cell box would shrink it to fit
+    // its 20px height and stop it reaching the eighth column. The three-cell readouts must NOT get
+    // this: their box is already the natural 42x20, and stretching blew the glyphs up to a solid
+    // bar.
+    if (stretch) svg.setAttribute("preserveAspectRatio", "none");
+    const cells = [];
+    for (let i = 0; i < chars; i++) {
+        const map = seg16Cell(NS, i * 14 + 1);
+        for (const el of Object.values(map)) {
+            el.setAttribute("class", "seg16-off");
+            svg.appendChild(el);
+        }
+        cells.push(map);
+    }
+    wrap.appendChild(svg);
+    wrap._setText = (text) => {
+        // Uppercased and left-aligned: the map is uppercase-only, and a name reads from the left the
+        // way a scribble strip does. An unmappable character shows as blank rather than as garbage.
+        const s = String(text ?? "").toUpperCase();
+        cells.forEach((map, i) => {
+            const on = SEG16[s[i]] ?? EMPTY_SEGS;
+            for (const [name, el] of Object.entries(map))
+                el.setAttribute("class", on.has(name) ? "seg16-on" : "seg16-off");
+        });
+    };
     return wrap;
 }
 
@@ -4555,6 +4656,10 @@ function updateModuleControls(mod) {
                 // has to know both shapes or the link goes stale on the next push.
                 const link = document.querySelector(`a.control-url[data-mid="${mid}"][data-key="${k}"]`);
                 if (link) { setUrlDisplay(link, ctrl.value); break; }
+                // The display strip is a segment renderer, not a span: it has to be patched through
+                // its own hook or the surface would freeze at whatever it showed on first render.
+                const strip = document.querySelector(`.seg16[data-mid="${mid}"][data-key="${k}"]`);
+                if (strip && strip._setText) { strip._setText(ctrl.value ?? ""); break; }
                 const span = document.querySelector(`span.display[data-mid="${mid}"][data-key="${k}"]`);
                 if (span) setText(span, String(ctrl.value ?? ""));
                 break;
@@ -5638,7 +5743,8 @@ async function mlFetchCatalog() {
 
 /// Which catalog group a picker's extension belongs to, so a script picker offers only its own role.
 function mlGroupForExt(ext) {
-    return ext === ".mle" ? "effects" : ext === ".mll" ? "layouts" : ext === ".mlm" ? "modifiers" : null;
+    return ext === ".mle" ? "effects" : ext === ".mll" ? "layouts"
+         : ext === ".mlm" ? "modifiers" : ext === ".mls" ? "services" : null;
 }
 
 // Download one factory script and save it to the device.
@@ -6428,9 +6534,9 @@ function fmMountEditor(host, relPath, opts = {}) {
     // The footer carries Save and the status line, UNLESS the host supplies both: a card already has
     // a toolbar of file actions, so they belong there, and an empty strip under the box is a gap
     // rather than a layout.
-    // Highlighting is for SCRIPTS: a .mle/.mll/.mlm is MoonLive, which is C++, so Prism's own C++
+    // Highlighting is for SCRIPTS: a .mle/.mll/.mlm/.mls is MoonLive, which is C++, so Prism's own C++
     // grammar paints it with nothing of ours to maintain. A .json or a .txt edits as plain text.
-    const hlOn = /\.(mle|mll|mlm)$/i.test(relPath || "");
+    const hlOn = /\.(mle|mll|mlm|mls)$/i.test(relPath || "");
 
     // The highlight layer sits BEHIND a transparent textarea, both sharing one box and one set of
     // font metrics: a textarea cannot color its own text, and this is the standard way around that.

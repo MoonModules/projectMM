@@ -148,6 +148,7 @@
 #include "core/PinsModule.h"
 #include "core/ButtonService.h"
 #include "core/InfraredService.h"
+#include "core/MoonLiveService.h"
 #include "core/FileManagerModule.h"
 #include "core/FirmwareUpdateModule.h"
 #include "core/ImprovProvisioningModule.h"
@@ -315,6 +316,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::PinsModule>("PinsModule", "core/system.md#pins");
     mm::ModuleFactory::registerType<mm::ButtonService>("ButtonService", "core/services.md#button");
     mm::ModuleFactory::registerType<mm::InfraredService>("InfraredService", "core/services.md#infrared");
+    mm::ModuleFactory::registerType<mm::MoonLiveService>("MoonLiveService", "core/services.md#moonliveservice");
     mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/system.md#file-manager");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/system.md#firmware-update");
     mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/system.md#improv-provisioning");

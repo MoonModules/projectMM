@@ -119,6 +119,10 @@ GpioLiveState gpioLiveState(uint8_t gpio) {
 
 bool gpioInputBegin(uint8_t gpio, GpioPull pull) {
     if (!GPIO_IS_VALID_GPIO(gpio)) return false;
+    // A RESERVED pin is wired to flash, PSRAM or native USB, and routing I/O there corrupts the
+    // device (gpioCapability's own words). Refused rather than configured: the caller reports a pin
+    // it could not open, where a corrupted flash reports nothing at all.
+    if (gpioCapability(gpio).reserved) return false;
     gpio_config_t cfg = {};
     cfg.pin_bit_mask = 1ULL << gpio;
     cfg.mode         = GPIO_MODE_INPUT;

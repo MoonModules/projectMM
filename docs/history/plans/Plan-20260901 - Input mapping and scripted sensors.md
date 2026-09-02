@@ -81,9 +81,26 @@ table**. A sensor that only does one is half-built. The full reasoning is in
    a remote still works out of the box while nothing is fixed in firmware and a user can delete or
    rewrite any of them.
 
+3. **A script defines input hardware, and a script is where the LOGIC goes** (product owner,
+   2026-09-02). Once a script can read a pin and call `setControl`, a script IS an input module, and
+   the relationship to `ButtonService` is the one effects already have: the compiled module is the
+   fast, shipped path, the script is the flexible one for hardware nobody wrote a module for.
+
+   **Not a JSON.** A JSON can express a MAPPING (this pin drives that control) and that is exactly
+   what the mapping lists in step 1 already are. It cannot express a RULE ("if the distance sensor
+   reads under 50 cm, run preset 3"), and a JSON that grows conditionals, comparisons and sequencing
+   becomes a programming language with none of the tools of one. So the declarative half stays the
+   lists, and MoonLive is where an `if` belongs. The two compose: a script writes the surface, the
+   surface is what the lists already target.
+
+4. **One script per sensor, or one script for all of them: both, with no new mechanism.** A
+   `MoonLiveService` instance holds one script, so one instance per sensor type is the tidy default
+   and one instance driving several is a script with more members. This is the same choice a user
+   already has with effects, and it needs no `type` column or registry to support.
+
 **Still open, and it gates step 2 rather than step 1:**
 
-3. **What `setControl` may reach from a script.** Recommendation: **the `Control` module only**. A
+5. **What `setControl` may reach from a script.** Recommendation: **the `Control` module only**. A
    script drives the surface, the surface drives everything, which is the same two-step model the
    tables use. Unrestricted is simpler and lets a script rewrite a driver's pin list.
 
@@ -104,9 +121,12 @@ it stops the abbreviation spreading to the doc, the UI card and the device catal
 Both then grow **a list of mappings** via `Control::addList` + `addListRow`, the mechanism presets,
 devices, pins and tasks already use:
 
-- A **button row**: `pin`, `activeLow`, `event` (press / release / long-press), `target`, `mode`
-  (latching / momentary). A board with three buttons is three rows, which is the whole point.
-- An **infrared row**: `code` (learned), `target`, `mode` (set / toggle / nudge). Learning binds the
+- A **button row**, as built: `pin`, `activeLow`, and the shared action (`target`, `kind`, `value`).
+  `kind` is toggle / set / delta, where `set` is the momentary one (writes while held, clears on
+  release) and covers a foot pedal. No long-press: it needs a held-timer state machine
+  `ButtonService::pollRow` does not have, so it is step 6's trigger vocabulary rather than step 1's.
+  A board with three buttons is three rows, which is the whole point.
+- An **infrared row**: `code` (learned), plus the same shared action. Learning binds the
   next received code to the row being learned, so a remote's twenty keys are twenty rows a user adds
   rather than five the firmware chose.
 - `target` is a `Module.control` string, so `Control.switch1` (the recommended two-step path) and
@@ -119,7 +139,7 @@ only place they have ever existed.
 **MoonLive in this step:** nothing new. The GPIO builtins arrive in step 2; here a script cannot yet
 read a pin, so the table is the only path. Stated so the step is not held up waiting for it.
 
-**Test:** host tests for the row parsing and the event state machine (debounce, long-press timing),
+**Test:** host tests for the row parsing and the debounce state machine,
 and a test that the rename left no `IrService` behind. Bench: the Dig-2-Go's GPIO 0 button on one row
 and the infrared remote on another, both driving `Control.switch1`, so two inputs reaching one target
 is proven rather than assumed.
@@ -202,6 +222,63 @@ button, doing in eight lines what `ButtonService` does in a module. That compari
 **the compiled module and the script are interchangeable**, which is the relationship effects
 already have.
 
+**And the rule, not just the mapping.** The step is only finished when a script can express what a
+list cannot, which is the reason scripts are in this plan at all (step 0, decision 3). The second
+hello-world is a CONDITION driving an action:
+
+```c
+class NearTrigger {
+  int pin = 0;
+  int threshold = 50;
+  int wasNear = 0;
+  void defineControls() {
+    addControl("pin", pin, 0, 48);
+    addControl("threshold", threshold, 0, 255);
+  }
+  void tick20ms() {
+    int near = readDistance(pin) < threshold;
+    if (near != wasNear) { wasNear = near; if (near) setControl("Control", "pad3", 1); }
+  }
+}
+```
+
+A mapping row cannot say "under 50 cm", cannot hold the edge state that stops it firing every tick,
+and cannot pick a different pad by time of day. That is the whole argument for a script over a
+richer JSON, and this test is what proves it rather than asserting it. Until step 4 lands the I2C
+read, the same shape is tested with the button (`gpioRead`) standing in for the distance.
+
+### Step 2 status (2026-09-02): built and host-verified, NOT bench-verified
+
+Shipped: the `gpioRead` / `gpioWrite` / `setControl` builtins, a `.mls` extension with its template
+and catalog entry, `MoonLiveService` registered under Services, and `unit_MoonLiveService.cpp`
+pinning the whole path (a script reads an injected pin level and drives `switch1`, declares its own
+controls, and survives a missing or broken script).
+
+Still open, and the step is not done until they are:
+
+- **The bench test.** A green host run is not verified: the script has never executed on an ESP32,
+  where the JIT emits Xtensa rather than arm64 and the pin is a real button. The Dig-2-Go has one on
+  GPIO 0 and `moonlive/services/button.mls` is written for it.
+- **The `.mls` picker.** The extension map and syntax highlighting are wired; nobody has confirmed
+  the picker offers `.mls` files or that "new script" writes `kServiceTemplate`.
+- **The catalog card.** `services.md` has no MoonLiveService section, and `@card
+  MoonLiveService.png` names a file that does not exist.
+
+Two things this step found, which the text above predates:
+
+- **The hello-world in this plan does not compile as written.** MoonLive has no local variables, so
+  `int now = gpioRead(pin)` is a parse error; the value has to be a member. And `setControl` takes
+  two arguments (`"switch1"`, value), not three: the module is fixed to `Control` by step 0's
+  decision, so naming it at the call site would offer a choice that does not exist. The shipped
+  `kServiceTemplate` is the corrected form.
+- **`MoonLive::run()` refuses a call with no light buffer** (`!buf || nLights == 0 || cpl < 3`),
+  which is right for an effect and wrong as the engine's only entry: a service paints nothing, and
+  the guard rejected it SILENTLY, so the script compiled, reported its size and never ran a line.
+  `MoonLiveService` calls `runValue` instead, which invokes the same emitted block and asks only for
+  the arena. Correct but oblique: the main entry still carries a light-domain assumption, and the
+  next non-light binding meets it the same way. Worth splitting the guard out of `run()`, or naming
+  the two entries for what they are.
+
 ## Step 3: analog in, and the expression pedal
 
 An ADC read is the smallest new seam and unlocks a whole input class.
@@ -275,7 +352,7 @@ driver: 86,017 bytes, 1.94 s over I2C at 400 kHz, 0.23 s over SPI at 3 MHz). Tha
 written ourselves, since it is executable firmware for the sensor's own processor with no
 register-level datasheet published. Two consequences: **SPI is preferred** for the boot upload as
 well as the per-frame read, and the module is **compiled in per firmware** rather than into every
-image, gated by the device catalog the way `MM_HLS` already is. 84 KB is 4.5% of the app image and
+image, gated by the device catalog the way `MM_HLS` already is. 84 KB is roughly 4.5% of the ~1.8 MB app PARTITION (about 2% of a 4 MB chip's flash) and
 matters on a 4 MB classic; it is noise on an S3 or P4.
 
 The consumer is an effect or a modifier that maps zones onto lights, so the published frame is an
@@ -319,12 +396,35 @@ whose event is a *level* rather than a press. MoonLight models it exactly so (`p
 If the trigger vocabulary is going further (double-click, multi-click, from ESPHome's set), this is
 where it lands: the same timers, more states, and it multiplies what a three-button panel can do.
 
+## Worth an analysis of its own: modules exchanging values over the network
+
+**The question (product owner, 2026-09-02): AudioService syncs its frame between devices, so can any
+module send and receive its values the same way?**
+
+Worth taking seriously, and deliberately NOT folded into a step here, because it is a network
+question rather than an input one. Audio sync is a single hardcoded packet (`parseWledAudioSync`, a
+44-byte WLED v2 frame) carrying one struct between devices that both know what it means. Generalizing
+that means a module publishing arbitrary state to a peer group and another subscribing to it, which
+needs answers this plan has no reason to hold opinions about: what identifies a value across devices,
+what happens when two devices publish the same one, how a subscriber behaves when the peer goes away,
+and whether it is a broadcast or a subscription.
+
+It also overlaps two things that already exist: `DevicesModule` already discovers peers and knows
+what modules they run, and OSC and MQTT already carry control values off the device. So the honest
+first question is whether this is a new transport at all, or a matter of pointing the existing ones
+at each other.
+
+It touches inputs at exactly one point, which is why it came up here: a sensor on one device driving
+lights on another is the obvious use, and the two-step model already makes that expressible (a remote
+device's surface is just another target). That is enough to note; the design belongs in its own
+analysis alongside the backlog's existing network entries.
+
 ## Not in this plan
 
 - **USB game controllers**: a HID report-descriptor parser plus USB Host bring-up, S3/P4 only.
   Its own plan, and the mapping half is free once reports arrive.
 - **I2S sensors**: the platform's I2S surface is `audioMicInit`/`audioMicRead`, named for its job.
-  A non-audio I2S sensor would get its own seam named for its own job rather than generalising that
+  A non-audio I2S sensor would get its own seam named for its own job rather than generalizing that
   one. There is also a hardware limit: a classic ESP32 has two I2S controllers and the mic holds one.
 - **Rewriting OSC**: it already drives the surface, which is the model this plan extends to physical
   inputs. Its one gap, the missing `/mm/pad/N` handler, is worth doing alongside step 1 since every

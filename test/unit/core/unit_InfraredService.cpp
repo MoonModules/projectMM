@@ -241,3 +241,37 @@ TEST_CASE("a code that is not a number is refused rather than binding something 
     rig.fire(16575);
     CHECK(std::strstr(rig.ir->status(), "unassigned") == nullptr);
 }
+
+TEST_CASE("a set row is refused on a remote, which has no release to clear it") {
+    // `set` means "write while held, clear on release". A remote code is a single event with no
+    // release, so running one would latch the control with nothing able to undo it: the row would
+    // look like it worked once and then break the control it targeted.
+    Rig rig;
+    const uint32_t id = rig.addRow("Drivers.brightness", "set", 200);
+    rig.learn(id, 0x5150);
+
+    rig.fire(0x5150);
+    CHECK(rig.drivers->brightness == 100);          // untouched: not latched at 200
+    CHECK(std::strstr(rig.ir->status(), "release") != nullptr);
+
+    // Toggle and delta are unaffected: both are complete in one event.
+    const uint32_t d = rig.addRow("Drivers.brightness", "delta", 5);
+    rig.learn(d, 0x5151);
+    rig.fire(0x5151);
+    CHECK(rig.drivers->brightness == 105);
+}
+
+TEST_CASE("one remote key binds to one row, so a re-learned key moves rather than duplicates") {
+    // Dispatch fires the FIRST row holding a code and stops, so a duplicate is a row that can never
+    // run: it reads as bound in the list while the key does another row's action.
+    Rig rig;
+    const uint32_t a = rig.addRow("Drivers.on", "toggle");
+    const uint32_t b = rig.addRow("Drivers.brightness", "delta", 10);
+
+    rig.learn(a, 0x1234);
+    rig.learn(b, 0x1234);          // the SAME key, onto the second row
+
+    rig.fire(0x1234);
+    CHECK(rig.drivers->brightness == 110);   // the newest binding won
+    CHECK(rig.drivers->on == true);          // and the first row no longer holds the code
+}

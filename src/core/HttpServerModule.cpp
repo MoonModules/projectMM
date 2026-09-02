@@ -1316,6 +1316,7 @@ void HttpServerModule::writeControls(JsonSink& sink, MoonModule* mod) {
         // row editors; a plain List stays read-only. The row objects carry a stable "id" the
         // /api/list/* ops address, and each editable row's detail carries its field descriptors.
         if (c.switchRow) sink.append(",\"switchRow\":true");
+        if (c.displayStrip) sink.append(",\"displayStrip\":true");
         // The target rides with all three surface kinds: a switch drives something too (switch1 is
         // the global on/off), and the popup that shows what a fader drives should say the same for
         // a switch rather than showing it as unassigned.

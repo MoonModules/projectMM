@@ -155,6 +155,23 @@ constexpr const char* kModifierCatalogTags[] = {
 };
 constexpr const char* kModifierFolder = "modifiers";   ///< its directory upstream
 
-constexpr size_t kCatalogCount = 34;   ///< every factory script, all roles
+/// Every factory service, by file name. They live in `moonlive/services/`
+/// upstream and in the factory script directory on the device.
+constexpr const char* kServiceCatalog[] = {
+    "button.mls",
+};
+constexpr size_t kServiceCatalogCount = 1;
+/// What each service above declares about itself, in the same order.
+/// A dimension of 0 means the script says nothing, so the DEVICE decides the default.
+constexpr unsigned char kServiceCatalogDim[] = {
+    0,
+};
+/// The emoji each declares, "" when it declares none.
+constexpr const char* kServiceCatalogTags[] = {
+    "",
+};
+constexpr const char* kServiceFolder = "services";   ///< its directory upstream
+
+constexpr size_t kCatalogCount = 35;   ///< every factory script, all roles
 
 } // namespace mm::moonlive

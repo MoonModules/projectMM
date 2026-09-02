@@ -288,18 +288,54 @@ Scheduler::SetControlResult Scheduler::setControl(const char* moduleName,
     return SetControlResult::ControlNotFound;
 }
 
+namespace {
+
+/// Is this control a Bool (or the `enabled` pseudo-control, which is one)?
+///
+/// The byte reader needs it because a Bool alone reads back at FULL SCALE there, and a value of 1
+/// cannot say whether it came from a bool or from a Uint8 holding 1.
+bool boolTyped(MoonModule* target, const char* controlName) {
+    if (std::strcmp(controlName, "enabled") == 0) return true;
+    auto& ctrls = target->controls();
+    for (uint8_t i = 0; i < ctrls.count(); i++)
+        if (std::strcmp(ctrls[i].name, controlName) == 0)
+            return ctrls[i].type == ControlType::Bool;
+    return false;
+}
+
+}  // namespace
+
 bool Scheduler::getControl(const char* moduleName, const char* controlName,
                            uint8_t& out) const {
+    // DERIVED from the wide reader rather than repeating its per-type switch. The two answer the
+    // same question in different units, and the difference is a rule, not a second lookup: a
+    // surface has 8 bits of travel, so a wider value clamps rather than truncating, and a Bool
+    // reads back 255 so a switch and a fader answer on one scale.
+    //
+    // They were two switches over the same ControlType list, which is the duplication the coding
+    // standards forbid: a new control type had to be added to both, and only one of them was
+    // exercised by the surface.
+    int32_t wide = 0;
+    if (!getControlWide(moduleName, controlName, wide)) return false;
+
+    // A Bool is 0/1 at its own width; the surface wants it at full scale.
+    MoonModule* target = const_cast<Scheduler*>(this)->firstByName(moduleName);
+    if (target && boolTyped(target, controlName)) { out = wide ? 255 : 0; return true; }
+
+    out = static_cast<uint8_t>(wide < 0 ? 0 : (wide > 255 ? 255 : wide));
+    return true;
+}
+
+bool Scheduler::getControlWide(const char* moduleName, const char* controlName,
+                               int32_t& out) const {
     if (!moduleName || !controlName) return false;
-    // const_cast: firstByName walks the same tree and only reads it, but the traversal helpers are
-    // non-const because every other caller mutates what they find. Reading is the exception here.
     MoonModule* target = const_cast<Scheduler*>(this)->firstByName(moduleName);
     if (!target) return false;
 
-    // The module-level pseudo-control, matching setControl's own special case: a surface switch
-    // bound to "Module.enabled" must read back what it writes.
+    // 0/1 here, not the byte reader's 0/255: this answers in the control's OWN units, and a bool
+    // stores 0 or 1. A caller that wants surface units uses getControl.
     if (std::strcmp(controlName, "enabled") == 0) {
-        out = target->enabled() ? 255 : 0;
+        out = target->enabled() ? 1 : 0;
         return true;
     }
 
@@ -309,36 +345,26 @@ bool Scheduler::getControl(const char* moduleName, const char* controlName,
         if (std::strcmp(c.name, controlName) != 0) continue;
         if (!c.ptr) return false;
         switch (c.type) {
-            // A Bool reads back 0 or 255 so a switch and a fader answer in the same units: the
-            // surface then has one number to compare and one to send, whatever it is bound to.
             case ControlType::Bool:
-                out = *static_cast<const bool*>(c.ptr) ? 255 : 0;
+                out = *static_cast<const bool*>(c.ptr) ? 1 : 0;
                 return true;
             case ControlType::Uint8:
             case ControlType::Select:
             case ControlType::Palette:
                 out = *static_cast<const uint8_t*>(c.ptr);
                 return true;
-            // Clamped rather than truncated: a surface has 8 bits of travel, and a wider control
-            // reading back its low byte would jump the fader to an unrelated position.
-            case ControlType::Uint16: {
-                const uint16_t v = *static_cast<const uint16_t*>(c.ptr);
-                out = static_cast<uint8_t>(v > 255 ? 255 : v);
+            case ControlType::Uint16:
+                out = *static_cast<const uint16_t*>(c.ptr);
                 return true;
-            }
-            case ControlType::Int16: {
-                const int16_t v = *static_cast<const int16_t*>(c.ptr);
-                out = static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v));
+            case ControlType::Int16:
+                out = *static_cast<const int16_t*>(c.ptr);
                 return true;
-            }
             case ControlType::Int32:
-            case ControlType::Pin: {
-                const int32_t v = *static_cast<const int32_t*>(c.ptr);
-                out = static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v));
+            case ControlType::Pin:
+                out = *static_cast<const int32_t*>(c.ptr);
                 return true;
-            }
-            // Everything else has no byte reading: text, a file path, a password, a button. A
-            // surface cannot show one, so say so rather than inventing a number.
+            // Same set the byte reader refuses: text, a file path, a password, a button. There is
+            // no number to give, so say so rather than inventing one.
             default:
                 return false;
         }

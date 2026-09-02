@@ -228,12 +228,18 @@ light domain, only the number crosses, mirroring what the probe already does); o
 accept that a scripted module's dimension chip reflects its type. Worth doing when someone is
 annoyed by the wrong chip, not before.
 
-### British spellings predate the prose gate (118 files)
+### British spellings and em-dashes predate the prose gate (319 files)
 
 `check_prose.py` reports on ADDED lines only, so the American-spelling rule has been enforced from
 the day it landed forward, and everything written before it was never swept. 118 files still carry
 `colour`, `centre`, `behaviour`, `recognise`, `initialise` and friends, in comments and in a few
 identifiers.
+
+**Em-dashes are the same story and the larger half**: 10,326 of them across 319 files under `docs/`,
+against the same rule and missed for the same reason. They are worse than the spellings to sweep
+mechanically, because the right replacement depends on the sentence (a colon where it explains, a
+comma for an aside, a full stop between two clauses), so a blind substitution produces prose nobody
+proofread. Count them per file and do the biggest offenders by hand.
 
 The gate keeps it from growing, so this is a one-time sweep rather than a leak. It is deliberately
 NOT folded into a feature branch: a whole-repo rename touches more files than any review can read,
