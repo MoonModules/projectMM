@@ -26,6 +26,7 @@ using mm::Correction;
 // At brightness=255, the LUT maps every input value to itself (no scaling).
 TEST_CASE("Correction brightness LUT: full brightness is identity") {
     Correction c;
+    c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
     for (int v = 0; v < 256; v++) CHECK(c.briLut[v] == v);
 }
@@ -33,6 +34,7 @@ TEST_CASE("Correction brightness LUT: full brightness is identity") {
 // At brightness=128, every entry is roughly halved using scale8 (255→128, 128→64, 2→1).
 TEST_CASE("Correction brightness LUT: half brightness halves each value (scale8)") {
     Correction c;
+    c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
     mm::test::rebuildFromPreset(c, 128, mm::test::PresetOrder::RGB);
     CHECK(c.briLut[0] == 0);
     CHECK(c.briLut[255] == 128);   // (255*128)/255 = 128
@@ -43,6 +45,7 @@ TEST_CASE("Correction brightness LUT: half brightness halves each value (scale8)
 // RGB preset at full brightness passes the source RGB through unchanged (3 output channels, no white).
 TEST_CASE("Correction RGB preset: apply is identity at full brightness") {
     Correction c;
+    c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
     CHECK(c.outChannels == 3);
     CHECK(c.offWhite == Correction::kAbsent);   // no white channel for the RGB family
@@ -57,6 +60,7 @@ TEST_CASE("Correction RGB preset: apply is identity at full brightness") {
 // GRB preset swaps R and G in the output (G first, then R, then B) — for WS2812-like drivers.
 TEST_CASE("Correction GRB preset: channels reordered, 3 output channels") {
     Correction c;
+    c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::GRB);
     CHECK(c.outChannels == 3);
     CHECK(c.offWhite == Correction::kAbsent);   // no white channel for the RGB family
@@ -71,6 +75,7 @@ TEST_CASE("Correction GRB preset: channels reordered, 3 output channels") {
 // BGR preset reverses the channel order entirely (B, G, R).
 TEST_CASE("Correction BGR preset: full reverse") {
     Correction c;
+    c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::BGR);
     const uint8_t src[3] = {10, 20, 30};
     uint8_t out[3] = {};
@@ -83,6 +88,7 @@ TEST_CASE("Correction BGR preset: full reverse") {
 // RGBW preset adds a fourth white channel derived as min(R, G, B) per pixel.
 TEST_CASE("Correction RGBW preset: 4 channels, white = min(r,g,b)") {
     Correction c;
+    c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGBW);
     CHECK(c.outChannels == 4);
     CHECK(c.offWhite == 3);   // white derived into the 4th channel
@@ -98,6 +104,7 @@ TEST_CASE("Correction RGBW preset: 4 channels, white = min(r,g,b)") {
 // GRBW preset combines the GRB reorder with the W derivation (G, R, B, W=min).
 TEST_CASE("Correction GRBW preset: reordered RGB + white") {
     Correction c;
+    c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::GRBW);
     CHECK(c.outChannels == 4);
     const uint8_t src[3] = {10, 20, 30};
@@ -113,6 +120,7 @@ TEST_CASE("Correction GRBW preset: reordered RGB + white") {
 TEST_CASE("Correction: brightness applied BEFORE white derivation") {
     // White must be min of the *scaled* channels, not the raw ones.
     Correction c;
+    c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
     mm::test::rebuildFromPreset(c, 128, mm::test::PresetOrder::RGBW);  // half brightness
     const uint8_t src[3] = {100, 200, 60};  // scaled: 50, 100, 30 → min = 30
     uint8_t out[4] = {};
@@ -126,6 +134,7 @@ TEST_CASE("Correction: brightness applied BEFORE white derivation") {
 // rebuild() can switch the output channel count between RGB (3) and RGBW (4) on the fly.
 TEST_CASE("Correction: rebuild switches output channel count RGB<->RGBW") {
     Correction c;
+    c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
     CHECK(c.outChannels == 3);
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGBW);
@@ -143,6 +152,7 @@ using mm::WhiteMode;
 // written, not skipped, so a reused buffer can't keep a stale value (see the assertion below).
 TEST_CASE("Correction whiteMode None: white channel forced to 0, RGB intact") {
     Correction c;
+    c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGBW);
     c.whiteMode = WhiteMode::None;
     const uint8_t src[3] = {10, 20, 30};
@@ -161,6 +171,7 @@ TEST_CASE("Correction whiteMode None: white channel forced to 0, RGB intact") {
 // carries it) rather than adding it on top — R,G,B each drop by min(R,G,B).
 TEST_CASE("Correction whiteMode Accurate: white subtracted from RGB") {
     Correction c;
+    c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
     mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGBW);
     c.whiteMode = WhiteMode::Accurate;
     const uint8_t src[3] = {10, 20, 30};  // min = 10
@@ -179,6 +190,7 @@ using mm::ChannelRole;
 // curated preset names, proving the role array reaches any wiring.
 TEST_CASE("Correction roles array: arbitrary Custom wiring derives correct offsets") {
     Correction c;
+    c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
     const ChannelRole roles[4] = {ChannelRole::White, ChannelRole::Blue,
                                   ChannelRole::Green, ChannelRole::Red};
     c.rebuild(128, roles, 4);   // half brightness
@@ -202,6 +214,7 @@ TEST_CASE("Correction roles array: arbitrary Custom wiring derives correct offse
 // can carry any SUBSET of color roles (e.g. a 2-channel R,B light with no green channel).
 TEST_CASE("Correction roles array: absent color role is not emitted") {
     Correction c;
+    c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
     const ChannelRole roles[2] = {ChannelRole::Red, ChannelRole::Blue};   // no green channel
     c.rebuild(255, roles, 2);
     CHECK(c.offRed == 0);
@@ -219,6 +232,7 @@ TEST_CASE("Correction roles array: absent color role is not emitted") {
 // is left for the fixture role writer, and outChannels still counts it.
 TEST_CASE("Correction roles array: non-color role reserves a channel apply() skips") {
     Correction c;
+    c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
     const ChannelRole roles[4] = {ChannelRole::Pan, ChannelRole::Red,
                                   ChannelRole::Green, ChannelRole::Blue};
     c.rebuild(255, roles, 4);
@@ -241,6 +255,7 @@ TEST_CASE("Correction roles array: non-color role reserves a channel apply() ski
 // you can eyeball a fixture" behavior the finding asked for; a real per-emitter model comes later.
 TEST_CASE("Correction: WarmWhite/Yellow/UV synthesised from RGB via whiteMode") {
     Correction c;
+    c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
     const ChannelRole roles[6] = {ChannelRole::Red, ChannelRole::Green, ChannelRole::Blue,
                                   ChannelRole::WarmWhite, ChannelRole::Yellow, ChannelRole::UV};
     c.rebuild(255, roles, 6);
@@ -263,6 +278,7 @@ TEST_CASE("Correction: WarmWhite/Yellow/UV synthesised from RGB via whiteMode") 
 // pins the compute-stand-ins-before-White ordering (a regression would compute them post-subtraction).
 TEST_CASE("Correction Accurate: Yellow/UV use pre-subtraction RGB, not post-White") {
     Correction c;
+    c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
     // Fixture carries White AND Yellow AND UV, so all three synthesis paths run in one apply().
     const ChannelRole roles[6] = {ChannelRole::Red, ChannelRole::Green, ChannelRole::Blue,
                                   ChannelRole::White, ChannelRole::Yellow, ChannelRole::UV};
@@ -288,6 +304,7 @@ TEST_CASE("Correction Accurate: Yellow/UV use pre-subtraction RGB, not post-Whit
 // under whiteMode=None so none holds a stale value — the same reuse-safety the White channel has.
 TEST_CASE("Correction: UV dark on warm colors; whiteMode None zeroes WW/Y/UV") {
     Correction c;
+    c.curve = Correction::Curve::Linear;   // these pin roles and white math, not the curve
     const ChannelRole roles[6] = {ChannelRole::Red, ChannelRole::Green, ChannelRole::Blue,
                                   ChannelRole::WarmWhite, ChannelRole::Yellow, ChannelRole::UV};
     c.rebuild(255, roles, 6);
@@ -318,6 +335,7 @@ TEST_CASE("A preset's master dimmer channel is driven, so the fixture actually l
     const R roles[] = {R::Pan, R::None, R::Tilt, R::None, R::None, R::Dimmer,
                        R::None, R::Red, R::Green, R::Blue, R::White};
     mm::Correction c;
+    c.curve = mm::Correction::Curve::Linear;   // the dimmer channel is the subject, not the curve
     c.rebuild(255, roles, 11);
 
     const uint8_t src[3] = {200, 100, 50};
@@ -472,4 +490,91 @@ TEST_CASE("Each moving-head formation aims the rig differently") {
     CHECK(mirror[0] != mirror[3]);
 
     mm::platform::setTestNowMs(0);   // back to the real clock for every later test
+}
+
+// --- The perceptual curve -------------------------------------------------------------------
+
+// CIE 1931 lightness (CIE 15 / ISO 11664-4) is the default because it models the thing actually
+// being corrected: the eye's response to luminance. The endpoints are what a user notices first, and
+// the shape between them is what makes a fade look even.
+TEST_CASE("The CIE curve keeps the endpoints and bends the middle down") {
+    Correction c;
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    c.curve = Correction::Curve::Cie;
+    c.rebuildBrightness(255);
+
+    CHECK(c.briLut[0] == 0);       // black stays black
+    CHECK(c.briLut[255] == 255);   // and full stays full: the curve redistributes, it does not dim
+    // A mid control position is well under half output, which is the whole point: half the
+    // PERCEIVED brightness is a small fraction of the luminance.
+    CHECK(c.briLut[128] < 80);
+    CHECK(c.briLut[128] > 30);
+    // Monotonic, or a gradient would band or reverse.
+    for (int v = 1; v < 256; v++) CHECK(c.briLut[v] >= c.briLut[v - 1]);
+}
+
+// The guard that stops a fade-out snapping to black. Every curve here crushes the low end at 8
+// bits, so without it the dimmest usable values are simply missing.
+TEST_CASE("A non-zero value never curves down to black") {
+    for (auto curve : {Correction::Curve::Cie, Correction::Curve::Gamma22, Correction::Curve::Gamma28}) {
+        Correction c;
+        mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+        c.curve = curve;
+        c.rebuildBrightness(255);
+        for (int v = 1; v < 256; v++) CHECK(c.briLut[v] >= 1);
+    }
+}
+
+// Linear is not a fallback: a downstream device that corrects its own output needs the value on the
+// wire to mean duty cycle, or the picture is corrected twice.
+TEST_CASE("Linear is an exact identity at full brightness, for a device that corrects itself") {
+    Correction c;
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    c.curve = Correction::Curve::Linear;
+    c.rebuildBrightness(255);
+    for (int v = 0; v < 256; v++) CHECK(c.briLut[v] == v);
+}
+
+// Brightness is a LINEAR pre-scale and the curve is applied last. Turning the slider down must not
+// change the shape of the curve, only how far up it reaches.
+TEST_CASE("Brightness scales before the curve, so black stays black and the top tracks the slider") {
+    Correction c;
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGB);
+    c.curve = Correction::Curve::Cie;
+
+    c.rebuildBrightness(255);
+    const uint8_t fullTop = c.briLut[255];
+    c.rebuildBrightness(128);
+    const uint8_t halfTop = c.briLut[255];
+
+    CHECK(c.briLut[0] == 0);          // zero is zero at any brightness
+    CHECK(halfTop < fullTop);         // the slider still reaches the output
+    // Half the SLIDER is well under half the light, because the curve applies after the scale.
+    CHECK(halfTop < fullTop / 2);
+}
+
+// The white emitters are derived in LINEAR light and curved on the way out, so min() and the
+// Accurate subtraction mean what they say. A curve applied before the subtraction would remove an
+// amount that does not correspond to the light the white LED adds back.
+TEST_CASE("RGBW white is derived in linear light, then curved once") {
+    Correction c;
+    mm::test::rebuildFromPreset(c, 255, mm::test::PresetOrder::RGBW);
+    c.curve = Correction::Curve::Cie;
+    c.rebuildBrightness(255);
+    c.whiteMode = mm::WhiteMode::Accurate;
+
+    const uint8_t src[3] = {200, 150, 100};
+    uint8_t out[4] = {};
+    c.apply(src, out, 3);
+
+    // white = min(200,150,100) = 100 in LINEAR light, then curved.
+    Correction ref;
+    mm::test::rebuildFromPreset(ref, 255, mm::test::PresetOrder::RGB);
+    ref.curve = Correction::Curve::Cie;
+    ref.rebuildBrightness(255);
+    CHECK(out[3] == ref.briLut[100]);
+    // and RGB carry the remainder (200-100, 150-100, 0), each curved.
+    CHECK(out[0] == ref.briLut[100]);
+    CHECK(out[1] == ref.briLut[50]);
+    CHECK(out[2] == ref.briLut[0]);
 }

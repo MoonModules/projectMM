@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>    // snprintf: the seam copies the names it is handed
 
 namespace mm {
 
@@ -166,41 +167,52 @@ inline constexpr uint8_t kYelmag[]      = {0,4,1,70, 31,55,1,30, 63,255,4,7, 95,
 inline constexpr uint8_t kYellowout[]   = {0,0,1,255, 63,0,55,255, 127,0,255,255, 191,42,255,45, 255,255,0,0};
 
 // A built-in is a gradient ({stops,len}) or the special "rainbow" (generated via hsvToRgb).
-struct Builtin { const char* name; const uint8_t* stops; size_t len; bool rainbow; };
+/// A built-in palette: its name, its gradient, and the tags the picker filters on.
+///
+/// `tags` describes what the palette LOOKS LIKE, which is the question someone scrolling sixty
+/// entries is actually asking: warm or cold, one hue or many, calm or loud. It is not a category
+/// system to be completed, and an untagged palette is a valid state rather than an omission: an
+/// empty string simply means the palette is findable by name and swatch, as it was before.
+struct Builtin { const char* name; const uint8_t* stops; size_t len; bool rainbow;
+                 const char* tags = ""; };
 
 #define MM_PAL(name, arr) {name, arr, sizeof(arr), false}
+/// The same, with tags. Two macros rather than a default argument in one, because the table is
+/// written two entries per line and a trailing string on every row would cost the readability that
+/// layout exists for.
+#define MM_PAL_T(name, arr, tags) {name, arr, sizeof(arr), false, tags}
 inline constexpr Builtin kBuiltins[] = {
-    {"Rainbow",       nullptr, 0, true},
-    MM_PAL("Party",        kParty),       MM_PAL("Lava",         kLava),
-    MM_PAL("Ocean",        kOceanBreeze), MM_PAL("Forest",       kForest),
-    MM_PAL("Fierce Ice",   kFierceIce),   MM_PAL("Sunset",       kSunset),
-    MM_PAL("Sunset 2",     kSunset2),     MM_PAL("Orange & Teal",kOrangeTeal),
-    MM_PAL("Aurora",       kAurora),      MM_PAL("Aurora 2",     kAurora2),
-    MM_PAL("Atlantica",    kAtlantica),   MM_PAL("Analogous",    kAnalogous),
-    MM_PAL("April Night",  kAprilNight),  MM_PAL("Aqua Flash",   kAquaFlash),
-    MM_PAL("Autumn",       kAutumn),      MM_PAL("Beech",        kBeech),
-    MM_PAL("Blink Red",    kBlinkRed),    MM_PAL("C9",           kC9),
-    MM_PAL("C9 2",         kC9_2),        MM_PAL("C9 New",       kC9New),
-    MM_PAL("Candy",        kCandy),       MM_PAL("Candy2",       kCandy2),
-    MM_PAL("Colorfull",    kColorfull),   MM_PAL("Departure",    kDeparture),
-    MM_PAL("Drywet",       kDrywet),      MM_PAL("Fairy Reaf",   kFairyReaf),
-    MM_PAL("Grintage",     kGrintage),    MM_PAL("Hult",         kHult),
-    MM_PAL("Hult 64",      kHult64),      MM_PAL("Jul",          kJul),
-    MM_PAL("Landscape",    kLandscape),   MM_PAL("Light Pink",   kLightPink),
-    MM_PAL("Lite Light",   kLiteLight),   MM_PAL("Magenta",      kMagenta),
-    MM_PAL("Magred",       kMagred),      MM_PAL("Orangery",     kOrangery),
-    MM_PAL("Pastel",       kPastel),      MM_PAL("Pink Candy",   kPinkCandy),
-    MM_PAL("Red & Blue",   kRedBlue),     MM_PAL("Red Flash",    kRedFlash),
-    MM_PAL("Red Reaf",     kRedReaf),     MM_PAL("Red Shift",    kRedShift),
-    MM_PAL("Red Tide",     kRedTide),     MM_PAL("Retro Clown",  kRetroClown),
-    MM_PAL("Rewhi",        kRewhi),       MM_PAL("Rivendell",    kRivendell),
-    MM_PAL("Sakura",       kSakura),      MM_PAL("Semi Blue",    kSemiBlue),
-    MM_PAL("Sherbet",      kSherbet),     MM_PAL("Splash",       kSplash),
-    MM_PAL("Temperature",  kTemperature), MM_PAL("Tertiary",     kTertiary),
-    MM_PAL("Tiamat",       kTiamat),      MM_PAL("Toxy Reaf",    kToxyReaf),
-    MM_PAL("Vintage",      kVintage),     MM_PAL("Yelblu Hot",   kYelbluHot),
-    MM_PAL("Yelblu",       kYelblu),      MM_PAL("Yelmag",       kYelmag),
-    MM_PAL("Yellowout",    kYellowout),
+    {"Rainbow",       nullptr, 0, true, "🌈⚡️"},
+    MM_PAL_T("Party", kParty, "🌈⚡️"),       MM_PAL_T("Lava", kLava, "🔥💫"),
+    MM_PAL_T("Ocean", kOceanBreeze, "❄️💫"), MM_PAL_T("Forest", kForest, "❄️💫"),
+    MM_PAL_T("Fierce Ice", kFierceIce, "❄️💫"),   MM_PAL_T("Sunset", kSunset, "🔥💫"),
+    MM_PAL_T("Sunset 2", kSunset2, "🔥💫"),     MM_PAL_T("Orange & Teal", kOrangeTeal, "🌈💫"),
+    MM_PAL_T("Aurora", kAurora, "❄️💫"),      MM_PAL_T("Aurora 2", kAurora2, "🌈💫"),
+    MM_PAL_T("Atlantica", kAtlantica, "❄️💫"),   MM_PAL_T("Analogous", kAnalogous, "🌈💫"),
+    MM_PAL_T("April Night", kAprilNight, "🌑💫"),  MM_PAL_T("Aqua Flash", kAquaFlash, "❄️💫"),
+    MM_PAL_T("Autumn", kAutumn, "🔥💫"),      MM_PAL_T("Beech", kBeech, "🌑💫"),
+    MM_PAL_T("Blink Red", kBlinkRed, "🔥💫"),    MM_PAL_T("C9", kC9, "🌈💫"),
+    MM_PAL_T("C9 2", kC9_2, "💫"),        MM_PAL_T("C9 New", kC9New, "💫"),
+    MM_PAL_T("Candy", kCandy, "💫"),       MM_PAL_T("Candy2", kCandy2, "💫"),
+    MM_PAL_T("Colorfull", kColorfull, "💫"),   MM_PAL_T("Departure", kDeparture, "💫"),
+    MM_PAL_T("Drywet", kDrywet, "💫"),      MM_PAL_T("Fairy Reaf", kFairyReaf, "💫"),
+    MM_PAL_T("Grintage", kGrintage, "💫"),    MM_PAL_T("Hult", kHult, "💫"),
+    MM_PAL_T("Hult 64", kHult64, "💫"),      MM_PAL_T("Jul", kJul, "💫"),
+    MM_PAL_T("Landscape", kLandscape, "💫"),   MM_PAL_T("Light Pink", kLightPink, "💫"),
+    MM_PAL_T("Lite Light", kLiteLight, "💫"),   MM_PAL_T("Magenta", kMagenta, "💫"),
+    MM_PAL_T("Magred", kMagred, "💫"),      MM_PAL_T("Orangery", kOrangery, "💫"),
+    MM_PAL_T("Pastel", kPastel, "💫"),      MM_PAL_T("Pink Candy", kPinkCandy, "💫"),
+    MM_PAL_T("Red & Blue", kRedBlue, "💫"),     MM_PAL_T("Red Flash", kRedFlash, "💫"),
+    MM_PAL_T("Red Reaf", kRedReaf, "💫"),     MM_PAL_T("Red Shift", kRedShift, "💫"),
+    MM_PAL_T("Red Tide", kRedTide, "💫"),     MM_PAL_T("Retro Clown", kRetroClown, "💫"),
+    MM_PAL_T("Rewhi", kRewhi, "💫"),       MM_PAL_T("Rivendell", kRivendell, "💫"),
+    MM_PAL_T("Sakura", kSakura, "💫"),      MM_PAL_T("Semi Blue", kSemiBlue, "💫"),
+    MM_PAL_T("Sherbet", kSherbet, "💫"),     MM_PAL_T("Splash", kSplash, "💫"),
+    MM_PAL_T("Temperature", kTemperature, "💫"), MM_PAL_T("Tertiary", kTertiary, "💫"),
+    MM_PAL_T("Tiamat", kTiamat, "💫"),      MM_PAL_T("Toxy Reaf", kToxyReaf, "💫"),
+    MM_PAL_T("Vintage", kVintage, "💫"),     MM_PAL_T("Yelblu Hot", kYelbluHot, "💫"),
+    MM_PAL_T("Yelblu", kYelblu, "💫"),      MM_PAL_T("Yelmag", kYelmag, "💫"),
+    MM_PAL_T("Yellowout", kYellowout, "💫"),
 };
 #undef MM_PAL
 inline constexpr uint8_t kCount = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
@@ -344,20 +356,117 @@ private:
 // Emit the palette dropdown's options for a ControlType::Palette control (the PaletteOptionsFn):
 // one {"name":…,"colors":"rrggbb rrggbb …"} object per built-in, the colors being the 16 entries
 // as space-separated hex so the UI renders each option as a gradient swatch.
+/// How many SCRIPTED palettes the picker offers, and their names. Set by Drivers from the catalog
+/// plus whatever `.mlp` files the device carries, because Palette.h knows nothing about the
+/// filesystem and must not learn: this is the same one-pointer seam `Palettes::active()` is.
+///
+/// They sort FIRST in the picker, ahead of the sixty built-ins. A scripted palette is the thing a
+/// user just wrote or downloaded, so it is what they are looking for; a built-in is always there.
+struct LivePalettes {
+    static uint8_t count() { return count_; }
+    static const char* nameAt(uint8_t i) { return (i < count_ && names_ && names_[i]) ? names_[i] : ""; }
+    /// What the script declared about itself, for the picker's emoji filter. Empty when the device
+    /// carries a `.mlp` the catalog does not know, which is a script the user wrote: it is findable
+    /// by name, it just carries no chips.
+    static const char* tagsAt(uint8_t i) { return (i < count_ && tags_ && tags_[i]) ? tags_[i] : ""; }
+
+    /// REFERENCES the caller's arrays; it does not copy them.
+    ///
+    /// The names live in the publisher's own member array, which outlives the seam in practice: the
+    /// module that owns the palette control is the one that publishes, and it republishes whenever
+    /// its controls are rebuilt. A copy here would cost ~640 bytes of static RAM on every board,
+    /// including the ones with no PSRAM, to duplicate strings that already exist.
+    ///
+    /// The contract that makes this safe: a publisher must clear the seam before its arrays go.
+    static void set(const char* const* names, const char* const* tags, uint8_t n) {
+        names_ = names;
+        tags_ = tags;
+        count_ = names ? (n > kMax ? kMax : n) : 0;
+    }
+    /// Detach, for a publisher whose storage is about to go away.
+    ///
+    /// Takes the publisher's OWN array so a departing publisher cannot unpublish somebody else's:
+    /// a second Drivers (a probe, a module the user added and removed, a tree rebuilt around the
+    /// live one) publishes and is then destroyed, and an unconditional clear() would leave the
+    /// running Drivers' palettes silently missing from the picker. Clearing only when the seam
+    /// still points at the caller's storage makes publish/clear pair per owner rather than
+    /// globally, which is what made this a dangling pointer in the first place: whoever released
+    /// last decided what the seam held.
+    static void clear(const char* const* names = nullptr) {
+        if (names && names_ != names) return;      // someone else owns the seam now: leave it
+        names_ = nullptr;
+        tags_ = nullptr;
+        count_ = 0;
+    }
+
+    /// Scripted palettes sort LAST, after the built-ins, and the position is the whole point.
+    ///
+    /// A palette selection is an INDEX: it is persisted, it rides `seg[0].pal` over the WLED API,
+    /// and Home Assistant's integration renders `paletteNames` positionally. So an index that means
+    /// a different palette tomorrow is a silent corruption of every saved setting.
+    ///
+    /// Putting the scripted ones first would do exactly that: saving one more `.mlp` shifts every
+    /// built-in up by one, and a stored `palette: 12` quietly becomes palette 11. Last means the
+    /// sixty built-in indices are fixed forever and only the scripted tail renumbers, which is the
+    /// same trade WLED makes by growing its custom palettes downward from 255.
+    static bool isLive(uint8_t pickerIndex) { return pickerIndex >= palettes::kCount; }
+    /// The index into the underlying array (scripted or built-in) behind a picker index.
+    static uint8_t sourceIndex(uint8_t pickerIndex) {
+        return isLive(pickerIndex) ? static_cast<uint8_t>(pickerIndex - palettes::kCount)
+                                   : pickerIndex;
+    }
+
+    /// Case-insensitive name order, for sorting the scripted names among themselves.
+    static int cmpName(const char* a, const char* b) {
+        for (; *a && *b; ++a, ++b) {
+            const char la = (*a >= 'A' && *a <= 'Z') ? static_cast<char>(*a + 32) : *a;
+            const char lb = (*b >= 'A' && *b <= 'Z') ? static_cast<char>(*b + 32) : *b;
+            if (la != lb) return la < lb ? -1 : 1;
+        }
+        return *a ? 1 : (*b ? -1 : 0);
+    }
+
+    static constexpr uint8_t kMax = 16;   // a device carries a handful; the picker stays readable
+private:
+    static inline const char* const* names_ = nullptr;
+    static inline const char* const* tags_ = nullptr;
+    static inline uint8_t count_ = 0;
+};
+
 inline void paletteOptions(JsonSink& sink) {
     // A NAME REQUEST rather than an options dump: core sets nameIndex to ask "what is palette N
     // called", because it has no palette table of its own and this function pointer is the only
     // channel it has into the light domain (Control.h, PaletteOptionsFn). Answering here costs one
     // branch and no extra descriptor field, where dumping all 60 options just to read one name out
     // of ~9 KB of JSON would need a buffer no ESP32 task stack can spare.
+    const uint8_t live = LivePalettes::count();
     if (sink.nameIndex() >= 0) {
         const uint8_t i = static_cast<uint8_t>(sink.nameIndex());
-        if (i < palettes::kCount) sink.append(palettes::kBuiltins[i].name);
+        const uint8_t src = LivePalettes::sourceIndex(i);
+        if (LivePalettes::isLive(i)) { sink.append(LivePalettes::nameAt(src)); return; }
+        if (src < palettes::kCount) sink.append(palettes::kBuiltins[src].name);
         return;
     }
+    // The BUILT-INS first, keeping the indices every saved selection and the WLED API depend on.
     for (uint8_t i = 0; i < palettes::kCount; i++) {
         const Palette p = Palettes::fromBuiltin(i);
-        sink.appendf("%s{\"name\":\"%s\",\"colors\":\"", i > 0 ? "," : "", palettes::kBuiltins[i].name);
+        sink.appendf("%s{\"name\":\"%s\",\"tags\":\"%s\",\"colors\":\"", i > 0 ? "," : "",
+                     palettes::kBuiltins[i].name, palettes::kBuiltins[i].tags);
+        for (uint8_t e = 0; e < Palette::kEntries; e++)
+            sink.appendf("%s%02x%02x%02x", e > 0 ? " " : "", p.entry[e].r, p.entry[e].g, p.entry[e].b);
+        sink.append("\"}");
+    }
+    // Then the scripted tail, each marked with 🎨 so the list says at a glance which entries are
+    // code rather than a fixed gradient. A scripted palette's swatch is whatever is CURRENTLY
+    // active: its colors exist only once it has ticked, so any other guess would not match the wall.
+    for (uint8_t i = 0; i < live; i++) {
+        const Palette& p = *Palettes::active();
+        // The name alone: the 🎨 marker rides in `tags`, which the picker renders as a chip and
+        // filters on. Repeating it in the name showed it twice on every scripted row.
+        // `live` says this row runs a script, so the UI can mark it the way it marks a scripted
+        // effect without inferring it from the file extension.
+        sink.appendf(",{\"name\":\"%s\",\"live\":true,\"tags\":\"%s\",\"colors\":\"",
+                     LivePalettes::nameAt(i), LivePalettes::tagsAt(i));
         for (uint8_t e = 0; e < Palette::kEntries; e++)
             sink.appendf("%s%02x%02x%02x", e > 0 ? " " : "", p.entry[e].r, p.entry[e].g, p.entry[e].b);
         sink.append("\"}");
@@ -371,6 +480,20 @@ inline void paletteOptions(JsonSink& sink) {
 inline void paletteNames(JsonSink& sink) {
     for (uint8_t i = 0; i < palettes::kCount; i++)
         sink.appendf("%s\"%s\"", i > 0 ? "," : "", palettes::kBuiltins[i].name);
+    // The scripted tail too, in the SAME order the picker and `seg[0].pal` use. This list is
+    // positional: HA renders one dropdown entry per name and sends back the index, so stopping at
+    // the built-ins left every scripted palette unnameable and unselectable there while the device's
+    // own `palette` control accepted exactly those indices. paletteCount() below is what keeps the
+    // WLED `palcount` field agreeing with this list.
+    for (uint8_t i = 0; i < LivePalettes::count(); i++)
+        sink.appendf(",\"%s\"", LivePalettes::nameAt(i));
+}
+
+/// How many entries paletteNames() writes: the built-ins plus whatever scripted palettes the device
+/// currently carries. One home for the count, so the WLED shim's `palcount` cannot drift from the
+/// array it describes.
+inline uint8_t paletteCount() {
+    return static_cast<uint8_t>(palettes::kCount + LivePalettes::count());
 }
 
 }  // namespace mm

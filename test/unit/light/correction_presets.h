@@ -21,6 +21,11 @@ enum class PresetOrder : uint8_t { RGB, GRB, BGR, RGBW, GRBW };
 // Fill a Correction from a named order at `brightness`, via the production role-array rebuild.
 inline void rebuildFromPreset(mm::Correction& c, uint8_t brightness, PresetOrder order) {
     using R = mm::ChannelRole;
+    // LINEAR for the ordering and white-math tests. Those pin which byte a role lands in and how a
+    // white emitter is derived, neither of which is about the curve, and a perceptual curve would
+    // make every expected value a table lookup and hide what the test is actually asserting. The
+    // curve has its own tests, which set it explicitly.
+    c.curve = mm::Correction::Curve::Linear;
     switch (order) {
         case PresetOrder::RGB:  { R r[] = {R::Red, R::Green, R::Blue};            c.rebuild(brightness, r, 3); break; }
         case PresetOrder::GRB:  { R r[] = {R::Green, R::Red, R::Blue};            c.rebuild(brightness, r, 3); break; }

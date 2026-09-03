@@ -2520,6 +2520,11 @@ function createControl(moduleName, moduleType, ctrl) {
             picker.className = "control-select fileedit-pick";
             picker.dataset.mid = moduleName;
             picker.dataset.key = ctrl.name;
+            // A READ-ONLY filepath names the file something else chose, so it must not offer a
+            // second way to choose: the Drivers palette editor is the case, where `palette` owns the
+            // selection and this pane only edits what that selection resolved to. Two selectors for
+            // one value is how they end up disagreeing.
+            if (ctrl.readonly) { picker.disabled = true; picker.classList.add("is-readonly"); }
             // The options, as data. `fillPicker` appends option elements exactly as it did to the
             // <select>; they are never rendered, they are the list the modal is built from.
             picker.options = [];
@@ -3041,11 +3046,7 @@ function createControl(moduleName, moduleType, ctrl) {
             // toggles a list of styled rows, each a gradient swatch + name. The value still rides as
             // the option index. Prior art: MoonLight's palette control (same native-select limit).
             const opts = ctrl.options || [];
-            const gradientFor = (i) => {
-                const cols = (opts[i] || {}).colors || "";
-                const stops = cols.split(/\s+/).filter(Boolean).map(h => "#" + h);
-                return stops.length ? `linear-gradient(to right, ${stops.join(",")})` : "none";
-            };
+            const gradientFor = (i) => paletteGradientCss((opts[i] || {}).colors);
             const wrap = document.createElement("div");
             wrap.className = "palette-control";
             wrap.dataset.mid = moduleName;
@@ -3058,81 +3059,169 @@ function createControl(moduleName, moduleType, ctrl) {
             trigger.className = "palette-trigger";
             const triSwatch = document.createElement("span");
             triSwatch.className = "palette-swatch";
+            // The selected palette's emoji, beside the swatch, exactly as a module card shows its
+            // type's emoji: the closed control should say what KIND of palette is running (scripted
+            // or built-in, warm or cold) without opening the list to find out.
+            const triEmoji = document.createElement("span");
+            triEmoji.className = "palette-emoji";
             const triName = document.createElement("span");
             triName.className = "palette-name";
             const caret = document.createElement("span");
             caret.className = "palette-caret";
             caret.textContent = "▾";
             const paintTrigger = (i) => {
+                const o = opts[i] || {};
                 triSwatch.style.background = gradientFor(i);
-                triName.textContent = (opts[i] || {}).name || String(i);
+                triEmoji.textContent = (o.live ? SCRIPTED_EMOJI : "") + (o.tags || "");
+                triName.textContent = o.name || String(i);
             };
             paintTrigger(ctrl.value);
-            trigger.append(triSwatch, triName, caret);
+            trigger.append(triSwatch, triEmoji, triName, caret);
 
-            // The list of gradient rows, hidden until the trigger is clicked.
-            const list = document.createElement("div");
-            list.className = "palette-list";
-            list.hidden = true;
-            opts.forEach((opt, i) => {
-                const item = document.createElement("button");
-                item.type = "button";
-                item.className = "palette-item" + (i === ctrl.value ? " selected" : "");
-                item.dataset.idx = i;
-                const sw = document.createElement("span");
-                sw.className = "palette-swatch";
-                sw.style.background = gradientFor(i);
-                const nm = document.createElement("span");
-                nm.className = "palette-name";
-                nm.textContent = opt.name || String(i);
-                item.append(sw, nm);
-                item.addEventListener("click", () => {
-                    wrap.dataset.value = i;
-                    paintTrigger(i);
-                    list.querySelectorAll(".selected").forEach(x => x.classList.remove("selected"));
-                    item.classList.add("selected");
-                    closeList();
-                    dragTs[key] = Date.now();
-                    sendControl(moduleName, ctrl.name, i);
+            // The LIST is the shared picker, the same widget the module and script pickers use, so a
+            // palette gets search and emoji-chip filtering for free rather than through a second
+            // hand-rolled dropdown that would have to grow both. The trigger above stays: it is what
+            // makes a palette control recognizable at a glance, and a picker row cannot show the
+            // current selection while it is closed.
+            //
+            // Rows carry `colors`, which is what makes the picker paint a gradient beside each name;
+            // every other list passes none and is unchanged.
+            // Factory palettes the device does NOT hold yet, offered alongside the ones it does:
+            // without this a scripted palette can only be chosen once it is already downloaded, so
+            // there is nothing to select in order TO download it. Same contract the script pickers
+            // give every other MoonLive role.
+            //
+            // They sit LAST, after the local live palettes, because a palette is chosen by INDEX and
+            // that index is what the knob and Home Assistant step through. Renumbering is confined
+            // to the live section, which moves only when someone adds or removes a script.
+            const remotePalettes = () => {
+                const names = ((mlCatalog || {}).palettes || {}).names || [];
+                const tags = ((mlCatalog || {}).palettes || {}).tags || [];
+                // BOTH sides stripped of the extension before comparing: the device publishes a
+                // live palette by its full filename ("drift.mlp") and so does the catalog, but
+                // stripping only one side matched nothing, so every already-downloaded palette
+                // showed a second time as a "download me" row.
+                const bare = (s) => String(s).replace(/\.mlp$/, "");
+                const have = new Set(opts.filter(o => o.live).map(o => bare(o.name)));
+                return names.map((n, i) => ({ name: n, tags: tags[i] || "" }))
+                            .filter(r => !have.has(bare(r.name)));
+            };
+            const openList = async () => {
+                // The catalog is fetched lazily and cached, so ask for it BEFORE building the list:
+                // on the first open mlCatalog is still null and every remote row would be missing.
+                // A failure (offline device) is not fatal: the list falls back to what is local.
+                await mlFetchCatalog().catch(() => {});
+                const remote = remotePalettes();
+                const local = opts.map((o, i) => ({
+                    name: String(i),                 // the VALUE: a palette is chosen by index
+                    displayName: o.name || String(i),
+                    // The SCRIPTED marker is the same 📝 a scripted effect carries, prepended
+                    // here rather than baked into the device's tag string: it is a UI fact
+                    // ("this row runs a script"), and the scripted/compiled chips must filter
+                    // palettes by the same rule they filter every other list by.
+                    tags: (o.live ? SCRIPTED_EMOJI : "") + (o.tags || ""),
+                    colors: o.colors || "",
+                    role: "palette",
+                }));
+                // `colors: ""` is what marks a row as not-yet-downloaded: its swatch renders as a
+                // placeholder, because a scripted palette has no gradient until it has run once.
+                const items = local.concat(remote.map(r => ({
+                    name: "\u0000" + r.name,        // not an index: a NAME, to download then select
+                    displayName: r.name.replace(/\.mlp$/, ""),
+                    tags: SCRIPTED_EMOJI + (r.tags || ""),
+                    colors: "",
+                    role: "palette",
+                })));
+                openPicker(trigger, {
+                    items,
+                    actionLabel: "use",
+                    keepOrder: true,          // index order: the knob and HA step through it
+                    currentType: String(ctrl.value),
+                    commit: async (name) => {
+                        // A remote row carries a filename, not an index: fetch it, then let the
+                        // rebuilt control (the device re-lists its .mlp files) select it by index.
+                        if (name.charCodeAt(0) === 0) {
+                            const file = name.slice(1);
+                            try {
+                                await mlDownloadScript(file, "palettes");
+                            } catch (e) {
+                                alert("could not download " + file + ": " + (e && e.message ? e.message : e));
+                                return;
+                            }
+                            // The device re-lists its .mlp files on the next state fetch, so the
+                            // palette now HAS an index. Find it by name and select it, which is
+                            // what the user asked for by picking it.
+                            mlCatalog = null;               // it is local now: drop the cached list
+                            const want = file.replace(/\.mlp$/, "");
+                            // The device only re-lists its .mlp files when its controls rebuild, which
+                            // can land a beat after the state fetch. So look, and if the new palette
+                            // is not there yet, fetch once more before giving up: without the retry a
+                            // download that worked ended in nothing happening and no message.
+                            const findCtrl = () => {
+                                const mod = allModules().find(m => m.name === moduleName);
+                                return mod && Array.isArray(mod.controls)
+                                     && mod.controls.find(x => x.name === ctrl.name);
+                            };
+                            const findIdx = () => ((findCtrl() || {}).options || [])
+                                                   .findIndex(o => o.name === want);
+                            await refetchState();
+                            let idx = findIdx();
+                            if (idx < 0) {
+                                await new Promise(r => setTimeout(r, 600));
+                                await refetchState();
+                                idx = findIdx();
+                            }
+                            if (idx < 0) {
+                                // Downloaded, but the device has not published it. Say so: the file IS
+                                // on the device, so re-opening the picker will offer it.
+                                alert(want + " was downloaded but is not in the palette list yet - "
+                                      + "reopen the picker to select it.");
+                                return;
+                            }
+                            const fresh = document.querySelector(
+                                `.palette-control[data-mid="${moduleName}"][data-key="${ctrl.name}"]`);
+                            if (fresh) fresh.dataset.value = idx;
+                            // Repaint the trigger from findCtrl(), NOT paintTrigger()/opts: opts is
+                            // the array captured when this control was first rendered, and the palette
+                            // just downloaded is not in it (refetchState() updated state, not this
+                            // closure). Reading the wrong array would paint a stray row or a blank one,
+                            // so this mirrors updateModuleControls' own "palette" case: the same three
+                            // fields, keyed off the freshly-fetched control.
+                            const freshCtrl = ((findCtrl() || {}).options || [])[idx];
+                            if (fresh && freshCtrl) {
+                                const triSwatch = fresh.querySelector(".palette-trigger .palette-swatch");
+                                if (triSwatch) triSwatch.style.background = paletteGradientCss(freshCtrl.colors || "");
+                                const triEmoji = fresh.querySelector(".palette-trigger .palette-emoji");
+                                if (triEmoji) triEmoji.textContent = (freshCtrl.live ? SCRIPTED_EMOJI : "") + (freshCtrl.tags || "");
+                                const triName = fresh.querySelector(".palette-trigger .palette-name");
+                                if (triName) setText(triName, freshCtrl.name || String(idx));
+                            }
+                            // Stamped the same as the normal (already-local) branch below: without it a
+                            // WS state push landing in this window could overwrite the selection before
+                            // the next render even reads it.
+                            dragTs[key] = Date.now();
+                            sendControl(moduleName, ctrl.name, idx);
+                            return;
+                        }
+                        const i = Number(name);
+                        wrap.dataset.value = i;
+                        paintTrigger(i);
+                        dragTs[key] = Date.now();
+                        sendControl(moduleName, ctrl.name, i);
+                    },
                 });
-                list.appendChild(item);
-            });
-
-            // Open/close, dismissing on outside-click or Escape (the type-picker pattern).
-            let onDocClick = null;
-            const onKey = (e) => { if (e.key === "Escape") closeList(); };
-            const closeList = () => {
-                list.hidden = true;
-                wrap.dataset.open = "false";
-                if (onDocClick) {
-                    document.removeEventListener("pointerdown", onDocClick);
-                    document.removeEventListener("keydown", onKey);
-                    onDocClick = null;
-                }
             };
-            const openList = () => {
-                list.hidden = false;
-                wrap.dataset.open = "true";
-                dragTs[key] = Date.now();
-                // Bring the selected row into view (a long palette list may overflow the popup).
-                const sel = list.querySelector(".palette-item.selected");
-                if (sel) sel.scrollIntoView({ block: "nearest" });
-                onDocClick = (e) => { if (!wrap.contains(e.target)) closeList(); };
-                document.addEventListener("pointerdown", onDocClick);
-                document.addEventListener("keydown", onKey);
-            };
-            trigger.addEventListener("click", () => { list.hidden ? openList() : closeList(); });
 
-            wrap.append(trigger, list);
+            trigger.addEventListener("click", openList);
+
+            wrap.append(trigger);
             row.appendChild(wrap);
             // Reset to the default palette like every other persisted control: re-paint the trigger
-            // and the selected row to `def` (sendControl is handled by appendResetButton).
+            // (sendControl is handled by appendResetButton). No list to re-mark: the picker builds
+            // its rows fresh each time it opens, from the current value.
             appendResetButton(row, moduleName, ctrl, def, () => {
                 wrap.dataset.value = def;
                 paintTrigger(def);
-                list.querySelectorAll(".selected").forEach(x => x.classList.remove("selected"));
-                const r = list.querySelector(`.palette-item[data-idx="${def}"]`);
-                if (r) r.classList.add("selected");
             });
             break;
         }
@@ -4838,8 +4927,7 @@ function updateModuleControls(mod) {
                 if (wrap && wrap.dataset.open !== "true" && Number(wrap.dataset.value) !== Number(ctrl.value)) {
                     wrap.dataset.value = ctrl.value;
                     const cols = ((ctrl.options || [])[ctrl.value] || {}).colors || "";
-                    const stops = cols.split(/\s+/).filter(Boolean).map(h => "#" + h);
-                    const grad = stops.length ? `linear-gradient(to right, ${stops.join(",")})` : "none";
+                    const grad = paletteGradientCss(cols);
                     const triSwatch = wrap.querySelector(".palette-trigger .palette-swatch");
                     if (triSwatch) triSwatch.style.background = grad;
                     const triName = wrap.querySelector(".palette-trigger .palette-name");
@@ -4993,6 +5081,15 @@ function cssEscape(s) {
 // 6. Type picker
 // ---------------------------------------------------------------------------
 
+/// The CSS gradient for a palette's swatch, from the space-separated hex list the device sends.
+///
+/// One definition: the palette control, the swatch strip and the picker row all paint the same
+/// gradient, and three copies of this had already started to drift in their empty-list handling.
+function paletteGradientCss(colors) {
+    const stops = String(colors || "").split(/\s+/).filter(Boolean).map(h => "#" + h);
+    return stops.length ? `linear-gradient(to right, ${stops.join(",")})` : "none";
+}
+
 // Role → emoji, derived here rather than duplicated in every module's tags(): one home in the UI
 // saves repeating the same character in ~90 module headers and a few bytes per type in /api/types.
 // The dimensional chip comes from the type's `dim` the same way (DIM_EMOJI below), and both are
@@ -5109,7 +5206,7 @@ async function mlScriptItems(roles) {
                 remote: isRemote,
                 // Without the extension: it is the file's business, not the reader's, and it keeps
                 // the row sorting next to the compiled modules rather than in a block of ".mle".
-                displayName: (isRemote ? "\u2601 " : "") + n.replace(/\.ml[elms]$/i, ""),
+                displayName: (isRemote ? "\u2601 " : "") + n.replace(/\.ml[elmsp]$/i, ""),
                 role,
                 // The scripted marker is what makes the row's kind visible, so it is added rather
                 // than assumed: a script whose own tags happen to omit it still reads correctly.
@@ -5272,7 +5369,14 @@ function openPicker(anchorEl, opts) {
     // still that script alphabetically, and prefixed rows would otherwise collect in a block of
     // their own instead of sitting where the reader looks for them.
     const sortKey = (t) => (t.displayName || t.name).replace(/^[^\p{L}\p{N}]+/u, "");
-    const filtered = [...source].sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+    // `keepOrder` leaves the caller's order alone. A PALETTE is chosen by INDEX, and that index is
+    // what the control surface's knob steps through and what Home Assistant shows, so an
+    // alphabetical picker would disagree with both: turning the knob would jump around the list a
+    // user is reading. Where the order carries no meaning (module types, scripts) the alphabetical
+    // sort stands, because there a name is the only thing to look something up by.
+    const filtered = opts.keepOrder
+        ? [...source]
+        : [...source].sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
 
     const picker = document.createElement("div");
     picker.className = "type-picker";
@@ -5402,6 +5506,20 @@ function openPicker(anchorEl, opts) {
         matches.forEach((t, i) => {
             const item = document.createElement("div");
             item.className = "type-picker-item" + (i === selIdx ? " selected" : "");
+            // An optional COLOR SWATCH, for a list whose rows are colors rather than modules. Only
+            // palettes carry `colors`, so every other picker is untouched: the column simply is not
+            // built. Same gradient the native palette dropdown paints, so a palette looks the same
+            // whichever way it is chosen.
+            // `role: "palette"` builds the column, not `colors`: a scripted palette that is not
+            // downloaded yet HAS no gradient (it produces one only once it runs), and skipping the
+            // swatch for those rows would leave their names hanging in the emoji column.
+            if (t.colors || t.role === "palette") {
+                const sw = document.createElement("span");
+                sw.className = "type-picker-item-swatch"
+                             + (t.colors ? "" : " type-picker-item-swatch-empty");
+                if (t.colors) sw.style.background = paletteGradientCss(t.colors);
+                item.appendChild(sw);
+            }
             const emoji = document.createElement("span");
             emoji.className = "type-picker-item-emoji";
             emoji.textContent = emojiTagsFor(t).join("");
@@ -5971,7 +6089,8 @@ async function mlFetchCatalog() {
 /// Which catalog group a picker's extension belongs to, so a script picker offers only its own role.
 function mlGroupForExt(ext) {
     return ext === ".mle" ? "effects" : ext === ".mll" ? "layouts"
-         : ext === ".mlm" ? "modifiers" : ext === ".mls" ? "services" : null;
+         : ext === ".mlm" ? "modifiers" : ext === ".mls" ? "services"
+         : ext === ".mlp" ? "palettes" : null;
 }
 
 // Download one factory script and save it to the device.
@@ -6761,9 +6880,9 @@ function fmMountEditor(host, relPath, opts = {}) {
     // The footer carries Save and the status line, UNLESS the host supplies both: a card already has
     // a toolbar of file actions, so they belong there, and an empty strip under the box is a gap
     // rather than a layout.
-    // Highlighting is for SCRIPTS: a .mle/.mll/.mlm/.mls is MoonLive, which is C++, so Prism's own C++
+    // Highlighting is for SCRIPTS: a .mle/.mll/.mlm/.mls/.mlp is MoonLive, which is C++, so Prism's own C++
     // grammar paints it with nothing of ours to maintain. A .json or a .txt edits as plain text.
-    const hlOn = /\.(mle|mll|mlm|mls)$/i.test(relPath || "");
+    const hlOn = /\.(mle|mll|mlm|mls|mlp)$/i.test(relPath || "");
 
     // The highlight layer sits BEHIND a transparent textarea, both sharing one box and one set of
     // font metrics: a textarea cannot color its own text, and this is the standard way around that.

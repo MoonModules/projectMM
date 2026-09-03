@@ -1,0 +1,26 @@
+# MoonBase on a classic ESP32 with 8 MB flash (the ESP32-PICO-V3-02's embedded part).
+#
+# The same trade the 4 MB and 16 MB MoonBase tables make: dual-OTA spends half the app area on a
+# second copy of the firmware that sits idle except during an update, where MoonBase is a small
+# factory image that owns the device while the app is replaced. One app slot is enough and the
+# recovery story is stronger (a power cut mid-install boots MoonBase and the user retries over the
+# network). Here that returns 3 MB, and it goes to LittleFS.
+#
+# NOTE a device flashed with a different table keeps it until a FULL serial flash: OTA updates the
+# app, never the partition table.
+# Layout (8 MB = 0x800000):
+#   0x0000-0x8FFF     bootloader (reserved)
+#   0x9000-0xDFFF     nvs        (  20 KB)
+#   0xE000-0xFFFF     otadata    (   8 KB)
+#   0x10000-0xEFFFF   moonbase   ( 896 KB)  -> factory recovery image
+#   0xF0000-0x3EFFFF  app        (   3 MB)  -> ota_0
+#   0x3F0000-0x7EFFFF spiffs     (   4 MB)  -> LittleFS state
+#   0x7F0000-0x7FFFFF coredump   (  64 KB)
+#
+# Name,     Type, SubType,  Offset,   Size,     Flags
+nvs,        data, nvs,      0x9000,   0x5000,
+otadata,    data, ota,      0xe000,   0x2000,
+moonbase,   app,  factory,  0x10000,  0xE0000,
+app,        app,  ota_0,    0xF0000,  0x300000,
+spiffs,     data, spiffs,   0x3F0000, 0x400000,
+coredump,   data, coredump, 0x7F0000, 0x10000,

@@ -3,6 +3,7 @@
 
 #include "doctest.h"
 #include "light/drivers/ParallelLedDriver.h"
+#include "light/drivers/MultiPinLedDriver.h"   // I80Peripheral: the i80 clock/DC defaults
 #include "correction_presets.h"
 
 #include <cstring>
@@ -658,4 +659,98 @@ TEST_CASE("pinExpander degrades to direct on a peripheral that can't host it, ke
     CHECK_FALSE(d.pinExpanderMode());                           // but the EFFECTIVE mode is direct
     CHECK(d.severity() != mm::MoonModule::Severity::Error);     // NOT a dead-end error
     CHECK(d.laneCount() == 3);                                  // 3 pins → 3 direct lanes (not ×8)
+}
+
+// Regression: the i80 clock/DC defaults were 10/11, free GPIOs on the ESP32-S3 they were chosen on
+// and the FLASH bus (6-11) on a classic ESP32. On an ESP32-PICO-V3-02 (QuinLED Dig-Next-2) every
+// pin list wedged the board the moment it was applied: a TG1WDT_SYS_RESET with both CPUs stuck at
+// the same PC, no panic and no coredump, so nothing named the pin. The defaults are now chosen per
+// chip off the same `i2sLanes > 0` discriminator dmaBudgetBytes() uses, and reinit() refuses any
+// reserved bus pin outright rather than routing I/O onto flash.
+TEST_CASE("the i80 clock and DC defaults never land on a chip's flash pins") {
+    mm::I80Peripheral p;
+    // Classic ESP32 reserves 6-11 for flash; every other supported chip has 10/11 free. Whichever
+    // build this is, the defaults must sit outside that range on the classic path.
+    if (mm::platform::i2sLanes > 0) {
+        CHECK(p.clockPin != 10);
+        CHECK(p.dcPin != 11);
+        CHECK((p.clockPin < 6 || p.clockPin > 11));
+        CHECK((p.dcPin < 6 || p.dcPin > 11));
+    }
+    // And they are always real, distinct, output-capable pins: esp_lcd rejects a negative pin, and
+    // the two signals cannot share one wire.
+    CHECK(p.clockPin >= 0);
+    CHECK(p.dcPin >= 0);
+    CHECK(p.clockPin != p.dcPin);
+}
+
+// The guard itself, on the host: routing a bus pin onto a chip's flash/PSRAM lines corrupts the
+// device, and on the classic ESP32 the failing path busy-waits to a watchdog reset rather than
+// returning an error, so the driver must refuse BEFORE it touches the bus. setTestGpioCapability
+// is what makes that testable here, where every real pin is otherwise "safe".
+TEST_CASE("a bus pin wired to flash is refused, not routed") {
+    mm::platform::clearTestGpioCapability();
+    mm::platform::GpioCapability flash;      // what a flash pin reports
+    flash.reserved = true;
+    mm::platform::setTestGpioCapability(3, flash);
+
+    MockShiftDriver d;
+    MockPeripheral peripheral;
+    mm::Buffer src;
+    mm::Correction corr;
+    wire(d, peripheral, src, corr, 64, "3", /*shiftOn=*/false, /*latch=*/-1);
+
+    // Refused with a status that NAMES the pin, which is the whole point: the watchdog reset this
+    // replaces printed nothing a user could act on.
+    REQUIRE(d.status() != nullptr);
+    CHECK(std::strstr(d.status(), "GPIO 3") != nullptr);
+    CHECK(std::strstr(d.status(), "flash") != nullptr);
+    mm::platform::clearTestGpioCapability();
+}
+
+// The WR/DC half of the reserved-pin refusal, and the case the lane sweep alone cannot see: at
+// exactly the bus width there are no spare lanes for WR to be parked on, and DC never rides the
+// lane list at all (it goes straight to busInit). Both must still be refused.
+//
+// Through wire()/applyState() with a REAL I80Peripheral, not a bare instance: validateBusFatal()
+// reaches owner_->pinExpanderMode() on its no-hit path, and owner_ is only ever set by attach()
+// (setPeripheralForTest calls it), so a peripheral built and queried standalone is a null-owner
+// crash that no production caller can hit, since ParallelLedDriver always attaches before use.
+TEST_CASE("a full-width bus still refuses a WR or DC pin wired to flash") {
+    mm::platform::clearTestGpioCapability();
+    mm::platform::GpioCapability flash;
+    flash.reserved = true;
+    mm::platform::setTestGpioCapability(11, flash);       // stands in for a flash pin
+
+    // Inlined rather than routed through wire(), which is typed to MockPeripheral&: this test
+    // needs the REAL I80Peripheral (see the class comment above) so owner_ is genuinely attached.
+    MockShiftDriver d;
+    mm::I80Peripheral peripheral;
+    mm::Buffer src;
+    mm::Correction corr;
+    peripheral.clockPin = 10;
+    peripheral.dcPin    = 11;                              // DC on the reserved pin
+    d.setPeripheralForTest(&peripheral);
+    std::strcpy(d.pins, "10,20,21,22,23,24,25,26");        // full 8-wide bus: no spare lane for WR
+    d.pinExpander = false;
+    d.latchPin = -1;
+    d.doubleBuffer = false;
+    REQUIRE(src.allocate(8, 3));
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
+    d.defineControls();
+    d.setSourceBuffer(&src);
+    d.correctionForTest() = corr;
+    d.applyState();
+
+    REQUIRE(d.status() != nullptr);
+    CHECK(std::strstr(d.status(), "dcPin") != nullptr);
+    CHECK(std::strstr(d.status(), "flash") != nullptr);
+
+    peripheral.clockPin = 11;                              // and the same for WR
+    peripheral.dcPin    = 10;
+    d.applyState();
+    REQUIRE(d.status() != nullptr);
+    CHECK(std::strstr(d.status(), "clockPin") != nullptr);
+
+    mm::platform::clearTestGpioCapability();
 }

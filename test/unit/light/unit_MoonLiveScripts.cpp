@@ -68,7 +68,7 @@ std::string read(const std::filesystem::path& p) {
 
 TEST_CASE("every script in moonlive/ compiles") {
     int checked = 0;
-    for (const char* sub : {"layouts", "effects", "modifiers", "drivers"}) {
+    for (const char* sub : {"layouts", "effects", "modifiers", "drivers", "palettes"}) {
         for (const auto& file : scriptsIn(sub)) {
             const std::string src = read(file);
             const std::string label = std::string(sub) + "/" + file.filename().string();
@@ -78,6 +78,8 @@ TEST_CASE("every script in moonlive/ compiles") {
             // Using one shared list here would let a script read a name its module never writes and
             // still pass, which is the silent-zero this per-binding split exists to prevent.
             const bool isService = std::string(sub) == "services";
+            // A palette is a LIGHT-domain script: it fills the active palette, so it gets the light
+            // table (where setPalEntry lives) and the effect system variables.
             const moonlive::SysVarTable sys =
                 isService                       ? moonlive::serviceSysVars()  :
                 std::string(sub) == "layouts"   ? moonlive::layoutSysVars()   :
@@ -115,7 +117,7 @@ TEST_CASE("every script in moonlive/ compiles") {
 // device, and nothing else would notice, since the build succeeds and the file is right there.
 TEST_CASE("the shipped catalog names every script in moonlive/") {
     std::vector<std::string> onDisk;
-    for (const char* sub : {"layouts", "effects", "modifiers", "services"})
+    for (const char* sub : {"layouts", "effects", "modifiers", "services", "palettes"})
         for (const auto& f : scriptsIn(sub)) onDisk.push_back(f.filename().string());
     std::sort(onDisk.begin(), onDisk.end());
     REQUIRE(!onDisk.empty());
@@ -131,6 +133,8 @@ TEST_CASE("the shipped catalog names every script in moonlive/") {
         inCatalog.push_back(moonlive::kModifierCatalog[i]);
     for (size_t i = 0; i < moonlive::kServiceCatalogCount; i++)
         inCatalog.push_back(moonlive::kServiceCatalog[i]);
+    for (size_t i = 0; i < moonlive::kPaletteCatalogCount; i++)
+        inCatalog.push_back(moonlive::kPaletteCatalog[i]);
     CHECK(inCatalog.size() == moonlive::kCatalogCount);
     std::sort(inCatalog.begin(), inCatalog.end());
 

@@ -623,4 +623,27 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
 
   **What it costs when it comes:** a small preallocated record queue the built-in writes into, drained from a housekeeping path through the existing platform output seam. The budget and the burst-spent message stay as they are; only where the bytes are written moves. Worth doing when a script is left with a print in it on a real fixture, which is the case the cap exists for.
 
+- **ParallelLedDriver hangs in `esp_lcd_new_i80_bus` on classic ESP32** (2026-09-03). Setting any
+  pin list on a QuinLED Dig-Next-2 (ESP32-PICO-V3-02, IDF v6.1-rc1) resets the board:
+  `TG1WDT_SYS_RESET`, both CPUs stopped at the same PC, no panic and no coredump. Traced to the
+  call itself, which never returns: a log line immediately before `esp_lcd_new_i80_bus` prints and
+  the "created OK" line after it never does. RmtLedDriver on the same board is fine, so it is this
+  bus API rather than the chip or the wiring.
+
+  **What it is NOT**, each ruled out on the bench: the frame size (hangs at 3200 and 10112 bytes
+  alike, both far inside the internal-DMA budget), duplicate pins parked on WR (hangs with 8
+  distinct data pins), and the WR/DC pin choice (hangs on 10/11, on 21/22 and on 18/23). IDF does
+  declare `SOC_LCD_I80_SUPPORTED` for this target, so the driver is configured for an API the SOC
+  caps say exists.
+
+  **Next step:** call `esp_lcd_new_i80_bus` from a bare IDF example on the same chip and IDF pin. If
+  that hangs too it is upstream and belongs in an IDF issue; if it returns, the difference is in our
+  bus config. Until then classic-ESP32 boards use RmtLedDriver, and `ParallelLedDriver` stays
+  registered and selectable rather than compiled out: hiding it would remove the one path anyone can
+  retest with, and the driver is correct on every LCD_CAM chip.
+
+  LCD-MM cannot substitute here. It is `lcdLanes`-only by design (MoonLedDriver.h,
+  `lanesAvailable`) because the classic ESP32's i80 IS the I2S peripheral, which that backend does
+  not implement, so a chip without LCD_CAM has no second parallel route.
+
 (The shared lane-driver scaffolding extraction — when a 3rd parallel backend lands — is tracked separately under [§ Extract shared lane-driver scaffolding](#extract-shared-lane-driver-scaffolding-when-the-3rd-parallel-backend-lands-deferred) above.)

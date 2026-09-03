@@ -22,6 +22,13 @@
       "description": "ESP32-WROVER (classic ESP32, 4 MB flash + 4 MB quad PSRAM) — WiFi + Ethernet. Same silicon as `esp32`; this variant enables PSRAM for the larger buffers (big grids, preview) the WROVER's extra RAM allows."
     },
     {
+      "name": "esp32-pico",
+      "chip": "esp32",
+      "eth_only": false,
+      "ships": true,
+      "description": "ESP32-PICO-V3-02 (classic ESP32 SiP: 8 MB embedded flash + 2 MB embedded quad PSRAM). WiFi + Ethernet, same silicon as `esp32`; its own variant because the flash is 8 MB where the base assumes 4 and PSRAM is on (QuinLED Dig-Next-2)."
+    },
+    {
       "name": "esp32-eth",
       "chip": "esp32",
       "eth_only": true,

@@ -85,8 +85,22 @@ public:
     /// LCD_CAM driver parks both pins on a dummy GPIO for the same reason. To spend no GPIO at all, use
     /// MoonI80Peripheral: owning the DMA below esp_lcd, it holds DC at a constant level and routes WR only
     /// when a '595 needs it as SRCLK.
-    int8_t clockPin = 10;
-    int8_t dcPin = 11;
+    /// Per-chip, because 10/11 are free GPIOs on the S3 these were chosen on and are the FLASH bus
+    /// on a classic ESP32 (6-11): routing the i80 clock onto one wedges the board to a watchdog
+    /// reset with no panic and no coredump. `i2sLanes > 0` IS "this is the classic-ESP32 i80" (the
+    /// two backends are mutually exclusive per silicon), the same discriminator dmaBudgetBytes()
+    /// below keys on, rather than a raw CONFIG_IDF_TARGET that would put chip knowledge outside the
+    /// platform layer.
+    ///
+    /// 18/23 rather than the first free numbers: WR and DC are peripheral-fixed signals no WS2812
+    /// strand reads, so this default only has to avoid pins a BOARD is likely to have committed.
+    /// 21/22 look free chip-wise and are the QuinLED Dig-Next-2's relay lines, where claiming them
+    /// silently switched two power channels off (LEDs dark, no error anywhere). 18/23 are plain
+    /// GPIOs on every classic package: no strap, no flash, no UART, and unused by the catalog's
+    /// boards. A board that does wire them overrides the control, and reinit() refuses a reserved
+    /// pin outright.
+    int8_t clockPin = platform::i2sLanes > 0 ? 18 : 10;
+    int8_t dcPin    = platform::i2sLanes > 0 ? 23 : 11;
 
     // --- LedPeripheral descriptors ---
 
@@ -166,6 +180,14 @@ public:
         if (dcPin < 0) return "dcPin is unset — the i80 bus needs a valid DC GPIO";
         if (clockPin == dcPin)
             return "clockPin (WR) and dcPin are the same GPIO — they must differ";
+        // Neither may sit on a pin the chip wired to flash or PSRAM: routing I/O there corrupts the
+        // device. The driver's own sweep covers the bus LANES, but WR only rides that list when
+        // there are spare lanes to park it on (a full-width 8- or 16-pin setup has none) and DC
+        // never does, so these two are checked here, where the pair already lives.
+        if (platform::gpioCapability(static_cast<uint8_t>(clockPin)).reserved)
+            return "clockPin (WR) is wired to flash/PSRAM on this chip - pick another pin";
+        if (platform::gpioCapability(static_cast<uint8_t>(dcPin)).reserved)
+            return "dcPin is wired to flash/PSRAM on this chip - pick another pin";
         // The '595 latch is a BUS LANE, so it needs its own GPIO: sharing it with WR would make the
         // pixel clock double as the latch (the '595 would present a byte on every shift cycle), and
         // sharing it with DC would latch on the command phase. Both are fatal — the bus builds, but

@@ -211,7 +211,8 @@ file(GLOB MOONLIVE_SCRIPTS CONFIGURE_DEPENDS
      ${CMAKE_SOURCE_DIR}/moonlive/effects/*.mle
      ${CMAKE_SOURCE_DIR}/moonlive/layouts/*.mll
      ${CMAKE_SOURCE_DIR}/moonlive/modifiers/*.mlm
-     ${CMAKE_SOURCE_DIR}/moonlive/services/*.mls)
+     ${CMAKE_SOURCE_DIR}/moonlive/services/*.mls
+     ${CMAKE_SOURCE_DIR}/moonlive/palettes/*.mlp)
 # The file LIST itself is a dependency, not just each file's timestamp: DEPENDS notices an edited
 # script but not a DELETED one, so removing a script left it in the catalog and the device went on
 # offering a name that no longer exists upstream. The stamp is written at configure time from the

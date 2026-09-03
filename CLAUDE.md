@@ -189,6 +189,11 @@ The product owner commits. **Delegate the mechanical roles**: parallelizable or 
 
 **Anti-stalling.** If a build error or test failure survives 2 fix attempts: STOP. Ask, or roll back and re-approach (rolling back is itself a revert: ask).
 
+**Desktop first, always.** Build and verify on the desktop before any ESP32 build or flash: it is
+the fastest loop, and anything the desktop can prove (UI, logic, tests) is proven there rather than
+through a multi-minute compile and a 60-second flash. A device build comes after the desktop is
+clean, and only for what the desktop cannot show: the platform layer, timing, memory, real hardware.
+
 **Bench boards are free test rigs.** Build and flash freely to verify work; re-probe ports first. A *rigorous* change (anything that could brick, boot-loop, or wipe a board: flash erases, boot/partition/build-config changes, a first flash of an untested board) gets a one-sentence heads-up and a go-ahead first — the test is reversibility.
 
 **Invite the product owner to test, then STOP.** If the PO could see or judge the result, hand it over ("running on X, look at Y") and wait for their observation before concluding, documenting, or moving on. Leave the state running; don't revert, reflash, or reconfigure what they were about to look at.
