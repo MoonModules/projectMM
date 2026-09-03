@@ -129,6 +129,7 @@ add_executable(mm_tests
     unit/light/unit_Layer_phase_animation.cpp
     unit/light/unit_Layer_zero_grid.cpp
     unit/light/unit_Effects_container.cpp
+    unit/light/unit_MoonLivePalette.cpp
     unit/light/unit_MoonLiveModifier.cpp
     unit/light/unit_MoonLiveParticles.cpp
     unit/light/unit_MoonLiveLayout.cpp

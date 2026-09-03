@@ -328,6 +328,11 @@ struct FadeSink { FadeFn fn = nullptr; void* ctx = nullptr; };
 using CoordFn = void (*)(void* ctx, uint32_t x, uint32_t y, uint32_t z);
 struct CoordSink { CoordFn fn = nullptr; void* ctx = nullptr; };
 
+/// Where setPalEntry writes. A PALETTE script fills sixteen entries once per frame, so the sink
+/// carries an index rather than a light: it is a table, not a canvas.
+using PalFn = void (*)(void* ctx, uint8_t index, uint8_t r, uint8_t g, uint8_t b);
+struct PalSink { PalFn fn = nullptr; void* ctx = nullptr; };
+
 enum class MotionAxis : uint8_t { Pan = 0, Tilt = 1 };
 using MotionFn = void (*)(void* ctx, MotionAxis axis, uint32_t index, uint8_t value);
 struct MotionSink { MotionFn fn = nullptr; void* ctx = nullptr; };
@@ -352,7 +357,7 @@ namespace detail {
 // second table would repeat the claim/release machinery for the same lifetime.
 struct SinkSlot { std::atomic<uintptr_t> owner{0}; AddLightSink sink; draw::Canvas canvas;
                   AddControlSink controls; FadeSink fade; MotionSink motion; CoordSink coord;
-                  PoolSizeSink poolSize; PoolSink pool; };
+                  PalSink pal; PoolSizeSink poolSize; PoolSink pool; };
 /// Two slots: the render task and whichever task edits a control are the two that ever run a script
 /// at once. A third concurrent runner gets the overflow slot, which holds no sink — so its addLight
 /// calls no-op instead of writing through someone else's context.
@@ -448,6 +453,22 @@ inline void setCoordSink(CoordFn fn, void* ctx) MM_NONBLOCKING {
     detail::SinkSlot* s = detail::ownedSlot(fn != nullptr);
     if (!s) return;
     s->coord = {fn, ctx};
+    if (!fn) detail::releaseIfEmpty(s);
+}
+
+/// This thread's palette sink, or an empty one. Reading does not claim a slot.
+inline const PalSink& palSink() MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(false);
+    static constinit PalSink none{};
+    return s ? s->pal : none;
+}
+
+/// Point setPalEntry at the palette binding for one run; nullptr to detach. Installed around a
+/// single tick, so a script can only ever write the palette it was invoked to fill.
+inline void setPalSink(PalFn fn, void* ctx) MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(fn != nullptr);
+    if (!s) return;
+    s->pal = {fn, ctx};
     if (!fn) detail::releaseIfEmpty(s);
 }
 
@@ -617,6 +638,39 @@ inline void setDrawCanvas(const draw::Canvas& cv) MM_NONBLOCKING {
 /// script was writing `mod(bx + dx, width) + mod(by + dy, height) * width` at every call site.
 /// Out-of-range coordinates are dropped, not wrapped — a "negative" coordinate arrives as a huge
 /// unsigned value, and wrapping it would paint the wrong edge rather than nothing.
+/// setPalEntry(i, r, g, b) - write one of the sixteen active palette entries.
+///
+/// The PALETTE binding's only output, and the reason a palette can be code rather than data: an
+/// entry recomputed every frame can follow audio, drift, or come out of an algorithm, none of which
+/// a gradient stop list can express.
+///
+/// The index is BOUNDED rather than wrapped: a script computing an index from a control could
+/// otherwise write a neighbouring entry and produce a palette nobody wrote, which reads as an engine
+/// fault. Out of range does nothing, which is visible in the picture and blames the script.
+extern "C" inline uint32_t mm_light_setPalEntry(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const PalSink& s = palSink();
+    if (!s.fn) return 0;                          // no palette installed: not a palette script
+    const uint32_t i = uint32_t(args[0]);
+    if (i >= Palette::kEntries) return 0;
+    s.fn(s.ctx, static_cast<uint8_t>(i), byteArg(args[1]), byteArg(args[2]), byteArg(args[3]));
+    return 0;
+}
+
+/// setPalEntryHSV(i, h, s, v) - the same, in the color space a palette is usually reasoned in.
+///
+/// A hue sweep is one addition per entry in HSV and a table of magic numbers in RGB, which is why
+/// both exist rather than leaving a script to convert. Same name MoonLight uses, so a palette
+/// written there reads here.
+extern "C" inline uint32_t mm_light_setPalEntryHSV(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const PalSink& sink = palSink();
+    if (!sink.fn) return 0;
+    const uint32_t i = uint32_t(args[0]);
+    if (i >= Palette::kEntries) return 0;
+    const RGB c = hsvToRgb(byteArg(args[1]), byteArg(args[2]), byteArg(args[3]));
+    sink.fn(sink.ctx, static_cast<uint8_t>(i), c.r, c.g, c.b);
+    return 0;
+}
+
 extern "C" inline uint32_t mm_light_setPaletteColor(const uintptr_t* args, uint32_t, const uint8_t*) {
     const draw::Canvas& cv = drawCanvas();
     if (!cv.data) return 0;                       // no canvas installed (a layout, a modifier)
@@ -1116,6 +1170,11 @@ inline const BuiltinTable& lightBuiltins() {
     // setPaletteColor(x, y, i, bri) → one palette-coloured pixel. The form a script should reach
     // for: one call, one brightness evaluation, and no buffer-layout arithmetic at the call site.
     t.add({"setPaletteColor", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_setPaletteColor, {}});
+    // setPalEntry(i,r,g,b) / setPalEntryHSV(i,h,s,v) -> write one of the sixteen ACTIVE palette
+    // entries. A palette script's only output; a no-op in every other role, where no sink is
+    // installed, so an effect calling it changes nothing rather than corrupting the palette.
+    t.add({"setPalEntry", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_setPalEntry, {}});
+    t.add({"setPalEntryHSV", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_setPalEntryHSV, {}});
     // paletteR/G/B(i, bri)    → one channel each, for a script that needs the components. Kept
     // because setPaletteColor writes a pixel and cannot serve a script that wants the value.
     t.add({"paletteR", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_paletteR, {}});

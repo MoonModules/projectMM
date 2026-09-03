@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cmath>   // powf: the gamma presets, cold path only
+
 #include <cstdint>
 
 #include "light/ChannelRole.h"
@@ -52,7 +54,44 @@ inline constexpr uint8_t kWhiteModeCount =
 struct Correction {
     static constexpr uint8_t kAbsent = 255;   // color role not carried by this light
 
-    uint8_t briLut[256] = {};       // briLut[v] = (v * brightness) / 255 (scale8)
+    /// The perceptual curve the output LUT is filled through.
+    ///
+    /// `Cie` is the default and the standards answer: CIE 1931 lightness (CIE 15 / ISO 11664-4)
+    /// models how the eye responds to luminance, which is exactly what a brightness control should
+    /// be uniform in. hzeller's rpi-rgb-led-matrix, the reference HUB75 implementation, builds its
+    /// table the same way.
+    ///
+    /// `Linear` is not a fallback but a REQUIREMENT for two cases: a downstream device that applies
+    /// its own curve (correcting twice darkens as the square of the setting, the same reason the
+    /// dimmer channel is held open below), and any measurement or calibration that needs the value
+    /// on the wire to mean duty cycle.
+    ///
+    /// Gamma 2.2 is the DISPLAY convention (sRGB's effective exponent) and belongs to content that
+    /// is genuinely encoded that way. Gamma 2.8 is the stage-lighting convention: it emulates the
+    /// feel of a tungsten dimmer, whose flux rises as roughly the 3.4th power of voltage, rather
+    /// than modeling perception. Both are offered because curve choice is a legitimate preference,
+    /// and both are labeled for what they actually do.
+    enum class Curve : uint8_t { Cie = 0, Gamma22, Gamma28, Linear };
+
+    /// CIE 1931 lightness, inverted: a 0..255 control position to a 0..1 luminance fraction.
+    ///
+    /// The constants are load-bearing rather than tuning: 8 and 903.3 place the linear toe at
+    /// (6/29)^3 so the two segments meet with a continuous SLOPE, and the cube root alone has
+    /// infinite slope at zero, which is both numerically unstable and wrong for near-black. NOTE
+    /// 903.3 and 116: the widely copied LED snippets carry 902.3 and 119 from a Wikipedia typo,
+    /// including hzeller's own table, and the reported effect is a visibly worse low end.
+    static float cieLuminance(float control255) {
+        const float L = control255 * 100.0f / 255.0f;
+        return (L <= 8.0f) ? (L / 903.3f)
+                           : ((L + 16.0f) / 116.0f) * ((L + 16.0f) / 116.0f) * ((L + 16.0f) / 116.0f);
+    }
+
+
+    uint8_t briLut[256] = {};       // briLut[v] = curve(v * brightness / 255)
+    /// Which perceptual curve rebuildBrightness fills through. A DRIVER's setting, because whether
+    /// a curve belongs depends on what is downstream: a panel card that corrects its own pixels
+    /// needs Linear here or the picture is corrected twice.
+    Curve curve = Curve::Cie;
     // Derived hot-path cache: the output-byte position of each color role. Source is
     // always RGB (src[0]=R, src[1]=G, src[2]=B); the offset says where in `out` that
     // role's byte lands. Recomputed from the role array by rebuild(); GRB by default.
@@ -116,11 +155,36 @@ struct Correction {
     uint8_t outChannels = 3;        // bytes emitted per light (= channelsPerLight of the wiring)
     WhiteMode whiteMode = WhiteMode::Min;   // how white is synthesized from RGB (white lights only)
 
-    // Refresh just the brightness LUT (briLut[v] = v * brightness / 255). Split out so a brightness-
-    // only change re-scales the LUT without touching the channel offsets, and so a driver can apply
-    // brightness even when the role source (the preset library) isn't available yet.
+    // Refresh just the brightness LUT. Split out so a brightness-only change re-scales the LUT
+    // without touching the channel offsets, and so a driver can apply brightness even when the role
+    // source (the preset library) isn't available yet.
+    //
+    // ORDER, and it is the whole design: brightness is a LINEAR pre-scale and the curve is applied
+    // LAST. A gain only composes correctly in linear light (a 0.8 white balance applied to a curved
+    // value yields 0.8^2.2, not 80% of the light), and anything reasoning about physical quantities
+    // (current, power) has to read linear values too. Curving the brightness CONTROL as well as the
+    // values would correct twice: the fader then feels dead at the bottom and 50% looks like 15%.
+    // The slider becomes perceptually uniform on its own precisely because the curve sits after it.
     void rebuildBrightness(uint8_t brightness) {
-        for (int v = 0; v < 256; v++) briLut[v] = static_cast<uint8_t>((v * brightness) / 255);
+        for (int v = 0; v < 256; v++) {
+            const float linear = static_cast<float>(v) * brightness / 255.0f;   // scale first
+            float out = linear;
+            switch (curve) {
+                case Curve::Cie:     out = cieLuminance(linear) * 255.0f; break;
+                case Curve::Gamma22: out = powf(linear / 255.0f, 2.2f) * 255.0f; break;
+                case Curve::Gamma28: out = powf(linear / 255.0f, 2.8f) * 255.0f; break;
+                case Curve::Linear:  break;
+            }
+            int q = static_cast<int>(out + 0.5f);
+            // A non-zero input never lands on black. Every curve here crushes the low end into
+            // zero at 8 bits (CIE maps 1 and 2 to 0, gamma 2.2 maps 1..5 there), so without this a
+            // fade-out SNAPS off partway down and the dimmest usable settings are simply missing.
+            // FastLED spells the same guard as the `_video` suffix on its gamma helpers; WLED has
+            // no equivalent and its table does map 1 to 0. Costs the exactness of black only for
+            // inputs that were never black.
+            if (q <= 0 && v > 0 && brightness > 0) q = 1;
+            briLut[v] = static_cast<uint8_t>(q > 255 ? 255 : q);
+        }
     }
 
     // Cold path: refresh the brightness LUT and DERIVE the color-role offsets from the light's
@@ -202,9 +266,14 @@ struct Correction {
                 if (slot < srcChannels) out[chan[role]] = src[slot];
             });
         }
-        uint8_t r = briLut[src[0]];
-        uint8_t g = briLut[src[1]];
-        uint8_t b = briLut[src[2]];
+        // The white math runs on the LINEAR source, and the curve is applied to what comes OUT of
+        // it. min() and the Accurate subtraction are ordinary arithmetic: performed on curved
+        // values they no longer mean what they say, because the amount subtracted from red does not
+        // correspond to the light the white emitter adds back. Same rule that puts the curve last
+        // in the pipeline, one level down.
+        uint8_t r = src[0];
+        uint8_t g = src[1];
+        uint8_t b = src[2];
         // Every synthesized emitter (white + warm-white/yellow/UV) is gated by the ONE whiteMode:
         // None zeroes them (never a stale value — corrected_ is reused, not re-zeroed, frame to
         // frame), otherwise each is a best-effort approximation from RGB. Accurate additionally
@@ -222,26 +291,29 @@ struct Correction {
             // values BEFORE Accurate pulls white out below. Compute them here, off the pre-subtraction
             // r/g/b, so Accurate's `r -= w` (which only rebalances the RGB emitters) can't corrupt them.
             // warm white ≈ the white component (same as cold white for a warm-white-only strip).
-            if (offWarmWhite != kAbsent) out[offWarmWhite] = w;
+            if (offWarmWhite != kAbsent) out[offWarmWhite] = briLut[w];
             // yellow ≈ min(R,G) (the shared red+green component).
-            if (offYellow != kAbsent)    out[offYellow] = r < g ? r : g;
+            if (offYellow != kAbsent)    out[offYellow] = briLut[r < g ? r : g];
             // UV is out of gamut (no RGB pre-image), but it reads to the eye as deep blue/violet, so
             // drive it from the BLUE component that has no red/green to pair with — the violet-ish
             // excess `max(0, B - max(R,G))`. So UV fires on blues/purples, stays dark on warm colors.
             if (offUV != kAbsent) {
                 const uint8_t rg = r > g ? r : g;
-                out[offUV] = b > rg ? static_cast<uint8_t>(b - rg) : 0;
+                out[offUV] = briLut[b > rg ? static_cast<uint8_t>(b - rg) : 0];
             }
             // White last: it's the only emitter that (in Accurate) rebalances RGB, so it must run
             // after the stand-ins have read the pre-subtraction values.
             if (offWhite != kAbsent) {
                 if (whiteMode == WhiteMode::Accurate) { r -= w; g -= w; b -= w; }  // pull white out of RGB
-                out[offWhite] = w;
+                out[offWhite] = briLut[w];
             }
         }
-        if (offRed != kAbsent)   out[offRed] = r;
-        if (offGreen != kAbsent) out[offGreen] = g;
-        if (offBlue != kAbsent)  out[offBlue] = b;
+        // The curve, applied ONCE, to each emitter as it is written. Everything above this line is
+        // linear light, which is what lets min(), the subtraction and the stand-in approximations
+        // mean what they say.
+        if (offRed != kAbsent)   out[offRed] = briLut[r];
+        if (offGreen != kAbsent) out[offGreen] = briLut[g];
+        if (offBlue != kAbsent)  out[offBlue] = briLut[b];
     }
 };
 

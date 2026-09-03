@@ -1,0 +1,20 @@
+// Drift: the whole palette walks the color wheel, so every effect using it slowly changes hue.
+
+class Drift {
+  byte bpm = 4;
+  byte spread = 16;
+
+  string tags() { return "🎨"; }
+
+  void defineControls() {
+    addControl("bpm", bpm, 1, 60); // how fast the wheel turns
+    addControl("spread", spread, 1, 64); // hue distance between entries
+  }
+
+  void tick() {
+    int base = scale(beat(bpm, t), 256);
+    for (int i = 0; i < 16; i = i + 1) {
+      setPalEntryHSV(i, base + i * spread, 255, 255);
+    }
+  }
+}

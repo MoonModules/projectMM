@@ -127,6 +127,7 @@ public:
         const uint8_t effective =
             static_cast<uint8_t>((globalBrightness * localBrightness_) / 255);
         correction_.whiteMode = static_cast<WhiteMode>(whiteMode_);
+        correction_.curve = static_cast<Correction::Curve>(curveSel_);
         // Resolve the referenced preset's channel-role wiring from the library into our flat
         // Correction (cold path). On a missing id (a deleted preset) fall back to the library default
         // so a driver degrades to a valid RGB output rather than crashing — Robust-to-any-input.
@@ -265,6 +266,19 @@ protected:
     uint8_t presetSel_ = 0;          // the preset Select's chosen INDEX (mapped to an id in onControlChanged)
     uint8_t whiteMode_ = static_cast<uint8_t>(WhiteMode::Min);  // index into kWhiteModeOptions
     uint8_t localBrightness_ = 255;  // per-driver dim, multiplied with the global brightness
+    /// Which perceptual curve the output LUT is built through. CIE 1931 lightness by default: it is
+    /// the standards answer (CIE 15 / ISO 11664-4) and models the thing actually being corrected,
+    /// the eye's response to luminance. hzeller's rpi-rgb-led-matrix builds its HUB75 table the same
+    /// way. The alternatives are offered because curve choice is a legitimate preference, and each
+    /// is named for what it really does rather than presented as equivalent.
+    uint8_t curveSel_ = 0;           // index into kCurveOptions; 0 = CIE
+    static constexpr uint8_t kCurveCount = 4;
+    static constexpr const char* kCurveOptions[kCurveCount] = {
+        "CIE 1931",        // perceptual, the standard
+        "gamma 2.2",       // the DISPLAY convention (sRGB's effective exponent)
+        "gamma 2.8",       // the STAGE convention: emulates a tungsten dimmer's feel
+        "linear"           // no curve: for a downstream device that corrects its own output
+    };
     uint8_t lastGlobalBrightness_ = 0;  // last global brightness the container pushed (for self-rebuilds)
     // The PERSISTED reference: a preset id is a runtime handle (reassigned each boot), so what
     // survives a reboot is the preset NAME — stable, human-readable, and reorder-proof. A hidden
@@ -278,6 +292,10 @@ protected:
     /// every defineControls (which re-runs on a control change), so adding/renaming a preset shows up.
     void defineCorrectionControls() {
         controls_.addControl("localBrightness", localBrightness_, 0, 255);
+        // The perceptual curve, per driver rather than global, because whether one belongs depends
+        // on what is DOWNSTREAM: a panel card or fixture that corrects its own pixels needs Linear
+        // here, or the picture is corrected twice and darkens as the square of the setting.
+        controls_.addSelect("curve", curveSel_, kCurveOptions, kCurveCount);
         buildPresetOptions();                        // fill presetOptions_ from the library, sync id/sel/ref
         controls_.addSelect("lightPreset", presetSel_, presetOptions_, presetOptionCount_);
         controls_.addSelect("whiteMode", whiteMode_, kWhiteModeOptions, kWhiteModeCount);
@@ -302,7 +320,7 @@ protected:
     /// affectsPrepare() and its correction rebuilds in onControlChanged (both handled by DriverBase).
     static bool isCorrectionControl(const char* name) {
         return std::strcmp(name, "lightPreset") == 0 || std::strcmp(name, "localBrightness") == 0
-            || std::strcmp(name, "whiteMode") == 0;
+            || std::strcmp(name, "whiteMode") == 0 || std::strcmp(name, "curve") == 0;
     }
 
 private:

@@ -1,0 +1,26 @@
+// Beat flash: the palette sits in a deep color and jumps to white on every drum hit, so any effect
+// using it pulses with the room. Decays between beats rather than snapping back.
+
+class BeatFlash {
+  byte hue = 160;
+  byte decay = 24;
+  int level = 0;
+
+  string tags() { return "🎨🎶"; }
+
+  void defineControls() {
+    addControl("hue", hue, 0, 255); // the resting color
+    addControl("decay", decay, 1, 80); // how fast the flash falls away
+  }
+
+  void tick() {
+    if (audioBeat() > 0) { level = 255; }
+    if (level > decay) { level = level - decay; }
+    else { level = 0; }
+
+    for (int i = 0; i < 16; i = i + 1) {
+      int sat = 255 - level;
+      setPalEntryHSV(i, hue + i * 4, sat, 128 + div(level, 2));
+    }
+  }
+}

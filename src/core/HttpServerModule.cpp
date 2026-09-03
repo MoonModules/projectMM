@@ -2361,6 +2361,12 @@ void HttpServerModule::serveScriptCatalog(platform::TcpConnection& conn) {
     emit("modifiers", moonlive::kModifierFolder, moonlive::kModifierCatalog,
          moonlive::kModifierCatalogDim, moonlive::kModifierCatalogTags,
          moonlive::kModifierCatalogCount);
+    emit("services", moonlive::kServiceFolder, moonlive::kServiceCatalog,
+         moonlive::kServiceCatalogDim, moonlive::kServiceCatalogTags,
+         moonlive::kServiceCatalogCount);
+    emit("palettes", moonlive::kPaletteFolder, moonlive::kPaletteCatalog,
+         moonlive::kPaletteCatalogDim, moonlive::kPaletteCatalogTags,
+         moonlive::kPaletteCatalogCount);
     sink.append("}");
     sink.flush();
 }

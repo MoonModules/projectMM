@@ -1,0 +1,22 @@
+// Spectrum: the palette IS the room. Each entry takes its brightness from one frequency band, so
+// every effect using this palette reacts to the music without knowing anything about audio.
+
+class Spectrum {
+  byte gain = 100;
+  byte hue = 0;
+
+  string tags() { return "🎨🎶"; }
+
+  void defineControls() {
+    addControl("gain", gain, 10, 255); // how hard the bands drive the palette
+    addControl("hue", hue, 0, 255); // where in the wheel the colors sit
+  }
+
+  void tick() {
+    for (int i = 0; i < 16; i = i + 1) {
+      int mag = div(audioBand(i) * gain, 100);
+      if (mag > 255) { mag = 255; }
+      setPalEntryHSV(i, hue + i * 8, 255, mag);
+    }
+  }
+}

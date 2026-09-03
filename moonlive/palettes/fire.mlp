@@ -1,0 +1,33 @@
+// Fire: a heat ramp from black through red and orange into white, breathing as it burns.
+
+class Fire {
+  byte bpm = 12;
+  byte coolest = 40;
+
+  string tags() { return "🎨"; }
+
+  void defineControls() {
+    addControl("bpm", bpm, 1, 60); // how fast the fire breathes
+    addControl("coolest", coolest, 0, 128); // how dark the coldest entry falls
+  }
+
+  void tick() {
+    int breath = beatsin(bpm, t, 60);
+    for (int i = 0; i < 16; i = i + 1) {
+      int heat = div(i * 255, 15) + breath - 30;
+      if (heat < 0) { heat = 0; }
+      if (heat > 255) { heat = 255; }
+      if (heat < coolest) { heat = 0; }
+
+      int red = heat * 3;
+      if (red > 255) { red = 255; }
+      int green = 0;
+      if (heat > 85) { green = (heat - 85) * 3; }
+      if (green > 255) { green = 255; }
+      int blue = 0;
+      if (heat > 170) { blue = (heat - 170) * 3; }
+
+      setPalEntry(i, red, green, blue);
+    }
+  }
+}

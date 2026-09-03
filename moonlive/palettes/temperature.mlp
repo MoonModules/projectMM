@@ -1,0 +1,37 @@
+// Temperature: a physical color ramp from deep blue through white to amber, the way a heated
+// object actually changes color. Slide `kelvin` to move the whole palette along that curve.
+
+class Temperature {
+  byte kelvin = 128;
+  byte spread = 90;
+
+  string tags() { return "🎨"; }
+
+  void defineControls() {
+    addControl("kelvin", kelvin, 0, 255); // cold blue at 0, warm amber at 255
+    addControl("spread", spread, 0, 255); // how much of the curve the sixteen entries cover
+  }
+
+  void tick() {
+    for (int i = 0; i < 16; i = i + 1) {
+      int k = kelvin + div((i - 8) * spread, 16);
+      if (k < 0) { k = 0; }
+      if (k > 255) { k = 255; }
+
+      int red = 255;
+      int green = 255;
+      int blue = 255;
+      if (k < 128) {
+        red = 128 + k;
+        green = 170 + div(k, 3);
+      }
+      if (k > 128) {
+        blue = 255 - (k - 128) * 2;
+        green = 255 - div(k - 128, 3);
+      }
+      if (blue < 0) { blue = 0; }
+
+      setPalEntry(i, red, green, blue);
+    }
+  }
+}

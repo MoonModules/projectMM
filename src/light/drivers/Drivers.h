@@ -10,6 +10,8 @@
 #include "light/layers/BlendMap.h"
 #include "light/drivers/Correction.h"
 #include "light/Palette.h"   // the global active palette + its select control
+#include "light/moonlive/MoonLivePalette.h"   // a palette computed per frame by a script
+#include "light/moonlive/script_catalog.h"       // the tags each factory palette declares
 #include "core/LightSummary.h"   // the POD published for the domain-neutral WLED/MQTT consumers
 #include "platform/platform.h"
 
@@ -100,6 +102,10 @@ public:
         stopEncodeTask();
         renderSplitActive_ = false;
         seat_.vacate();
+        // Detach the scripted-palette seam for the same reason the summary seat is vacated: it
+        // REFERENCES this object's liveNames_/livePtrs_/liveTags_ arrays rather than copying them,
+        // so leaving it published points /api/state at freed memory the moment this Drivers goes.
+        LivePalettes::clear(livePtrs_);
         MoonModule::release();
     }
 
@@ -108,7 +114,10 @@ public:
     /// release() (a stack instance in a test, a tree torn down by its owner) would leave a thread
     /// dereferencing freed memory. Same dangling-static guard the summary seat uses — a destructor
     /// is the only place that can't be skipped.
-    ~Drivers() override { stopEncodeTask(); }
+    /// The palette seam is cleared here TOO, not only in release(): a destructor is the one place
+    /// that cannot be skipped, and a Drivers torn down without an explicit release() would leave
+    /// the seam pointing into freed member arrays.
+    ~Drivers() override { stopEncodeTask(); LivePalettes::clear(livePtrs_); }
 
     /// Stop the core-1 encode worker so a STRUCTURAL TREE MUTATION (a module replace / delete / add) can
     /// free tree nodes without the worker dereferencing them mid-tick. The worker ticks the driver
@@ -236,6 +245,59 @@ public:
     /// gradient into the active 16-entry palette on `onControlChanged` (cheap, off the hot path).
     uint8_t palette = 0;
 
+    /// Discover the `.mlp` files this device carries and publish their names to the picker.
+    ///
+    /// Cold path, on defineControls: the list changes when a user saves or deletes a script, which
+    /// is exactly when the controls are rebuilt anyway. The names are kept in a member array because
+    /// the seam holds POINTERS, so a local would dangle the moment this returned.
+    void refreshLivePalettes() {
+        liveCount_ = 0;
+        platform::fsList(moonlive::kScriptDir, [](const char* name, bool isDir, uint32_t, void* ctx) {
+            auto* self = static_cast<Drivers*>(ctx);
+            if (isDir || self->liveCount_ >= LivePalettes::kMax) return;
+            const size_t n = std::strlen(name);
+            if (n < 5 || std::strcmp(name + n - 4, moonlive::kPaletteExt) != 0) return;
+            // A bounded copy rather than snprintf("%s"): a name longer than the slot is TRUNCATED
+            // to fit, which is what a picker entry wants, and GCC cannot prove the %s form fits.
+            char* slot = self->liveNames_[self->liveCount_];
+            const size_t cap = sizeof(self->liveNames_[0]) - 1;
+            const size_t copy = n < cap ? n : cap;
+            std::memcpy(slot, name, copy);
+            slot[copy] = '\0';
+            self->livePtrs_[self->liveCount_] = self->liveNames_[self->liveCount_];
+            self->liveCount_++;
+        }, this);
+        // Alphabetical, because the picker MERGES this list with the built-ins by name and that
+        // merge walks both in order. An unsorted list here would interleave wrongly.
+        for (uint8_t i = 1; i < liveCount_; i++)
+            for (uint8_t j = i; j > 0 && LivePalettes::cmpName(livePtrs_[j], livePtrs_[j - 1]) < 0; j--) {
+                const char* tmp = livePtrs_[j]; livePtrs_[j] = livePtrs_[j - 1]; livePtrs_[j - 1] = tmp;
+            }
+        // The tags each script declared, from the catalog. A `.mlp` the catalog does not know is a
+        // script the user wrote: it keeps its place in the list and simply carries no chips, which
+        // is why the lookup falls back to an empty string rather than skipping the file.
+        for (uint8_t i = 0; i < liveCount_; i++) {
+            liveTags_[i] = "";
+            for (size_t c = 0; c < moonlive::kPaletteCatalogCount; c++)
+                if (std::strcmp(livePtrs_[i], moonlive::kPaletteCatalog[c]) == 0) {
+                    liveTags_[i] = moonlive::kPaletteCatalogTags[c];
+                    break;
+                }
+        }
+    }
+
+    char        liveNames_[LivePalettes::kMax][moonlive::kMaxScriptName + 1] = {};
+    const char* livePtrs_[LivePalettes::kMax] = {};
+    const char* liveTags_[LivePalettes::kMax] = {};
+    uint8_t     liveCount_ = 0;
+
+    /// The scripted palette: a `.mlp` name, and the binding that runs it. Empty means the built-in
+    /// `palette` select above is in charge, which is the default and the common case. The script is
+    /// owned HERE because this module owns the palette, and reached for its per-frame run through
+    /// MoonLivePalette's static seam, since the layers sample the palette before this module ticks.
+    char paletteScript_[moonlive::kMaxScriptName + 1] = {};
+    MoonLivePalette paletteScriptModule_;
+
     // Two ways to wire the source Layer:
     //  - setEffects(Effects*): bind the container; layer_ is re-resolved from
     //    activeLayer() at every prepareTree. This makes the link self-healing —
@@ -286,7 +348,28 @@ public:
         // in LED pins (architecture.md, deviceModel owns what is wired on the product).
         controls_.addText("relayPins", relayPins, sizeof(relayPins));
         controls_.addControl("brightness", brightness, 0, 255);
-        controls_.addPalette("palette", palette, mm::paletteOptions, mm::palettes::kCount);
+        // ONE picker for both kinds. The scripted palettes are published to the seam Palette.h reads
+        // and merged into the same alphabetical list, so a `.mlp` is chosen exactly like a built-in
+        // rather than through a second control the user has to know about.
+        refreshLivePalettes();
+        // Sized from THIS instance's scan (liveCount_), not the seam: defineControls also runs
+        // before prepare() has published, and a seam-sized control would cap at the built-ins and
+        // reject every scripted index, so selecting a live palette silently did nothing.
+        controls_.addPalette("palette", palette, mm::paletteOptions,
+                             static_cast<uint8_t>(liveCount_ + mm::palettes::kCount));
+        // The EDITOR, shown only while a scripted palette is selected: there is nothing to edit in a
+        // built-in gradient, and offering the pane would suggest otherwise.
+        //
+        // It is an EDITOR, not a second selector. `palette` above owns the choice; this names the
+        // file that choice resolved to, so the two cannot disagree. An earlier version let this
+        // control pick a script too, which meant a user could select `spectrum` here while `palette`
+        // still said something else and the card showed two answers to one question.
+        controls_.addFilePath("paletteScript", paletteScript_, sizeof(paletteScript_),
+                              moonlive::kPalettePick);
+        controls_.setHidden(controls_.count() - 1, !LivePalettes::isLive(palette));
+        controls_.setReadOnly(controls_.count() - 1, true);   // the selector is `palette`, above
+        // And the script's own controls, which only exist while one is running.
+        if (LivePalettes::isLive(palette)) paletteScriptModule_.publishControls(controls_);
         // Only where it can DO something: a rig of LED strips has no aim to hold, so the control
         // would be a question about hardware the user does not have. Same add-then-setHidden shape
         // the renderWait field below uses.
@@ -313,7 +396,34 @@ public:
     // per-driver channel order / white / local brightness live on each driver and rebuild there.
     void onControlChanged(const char* controlName) override {
         if (std::strcmp(controlName, "palette") == 0) {
-            Palettes::setActive(palette);   // rebuild the active 16-entry lookup (cheap, off the hot path)
+            if (LivePalettes::isLive(palette)) {
+                // A scripted palette: name its file and compile. The script then fills the entries
+                // every frame, so there is nothing to expand here.
+                std::snprintf(paletteScript_, sizeof(paletteScript_), "%s",
+                              LivePalettes::nameAt(LivePalettes::sourceIndex(palette)));
+                MoonLivePalette::setActiveInstance(&paletteScriptModule_);
+                paletteScriptModule_.setScript(paletteScript_);
+                paletteScriptModule_.prepare(*this);
+            } else {
+                // A built-in: detach any script, or it would keep overwriting the gradient every
+                // frame and the selection would appear to do nothing.
+                MoonLivePalette::setActiveInstance(nullptr);
+                paletteScript_[0] = 0;
+                Palettes::setActive(LivePalettes::sourceIndex(palette));
+            }
+            rebuildControls();   // the editor and the script's controls appear or disappear with it
+            return;
+        }
+        if (std::strcmp(controlName, "paletteScript") == 0) {
+            // Published to the seam Effects::tick reads. Only while a name is set, so clearing the
+            // field detaches the script rather than leaving a compiled one running unseen.
+            MoonLivePalette::setActiveInstance(paletteScript_[0] ? &paletteScriptModule_ : nullptr);
+            paletteScriptModule_.setScript(paletteScript_);
+            paletteScriptModule_.prepare(*this);
+            rebuildControls();              // the compile re-derives the script's own controls
+            // Clearing the name hands the palette back to the built-in select, which would otherwise
+            // keep whatever the script last wrote.
+            if (paletteScript_[0] == 0) Palettes::setActive(palette);
             return;
         }
         if (std::strcmp(controlName, "multicore") == 0) {
@@ -487,6 +597,14 @@ public:
     }
 
     void prepare() override {
+        // Discover and PUBLISH the scripted palettes. Publication lives here and not in
+        // defineControls() because the seam is one static slot whose last writer wins, and
+        // defineControls() also runs on detached instances (the /api/modules probe builds one to
+        // read its controls, then destroys it): such a probe would take the seam and empty it on
+        // its way out, and every `.mlp` vanished from the running picker. prepare() runs only on a
+        // module the scheduler actually mounted, which is exactly the owner the seam wants.
+        refreshLivePalettes();
+        LivePalettes::set(livePtrs_, liveTags_, liveCount_);
         // Re-resolve the active Layer from the bound container so a Layer that
         // was cleared and rebuilt via the API is picked up here (self-healing).
         // setLayer() pins a Layer directly and leaves effects_ null — skip then.

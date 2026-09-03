@@ -1274,6 +1274,28 @@ body.cards-resizing {
     flex: 0 0 auto;
 }
 .palette-name { flex: 1; }
+/* The selected palette's emoji, between the swatch and the name on the closed control. */
+.palette-emoji { flex: 0 0 auto; font-size: 0.95em; letter-spacing: -0.05em; }
+/* A palette row's gradient in the SHARED picker. Only rows carrying `colors` build this element,
+   so every other list (module types, scripts) is unaffected. Sized to sit with the emoji column
+   rather than to match the control's own swatch, which is wider because it stands alone. */
+.type-picker-item-swatch {
+    width: 40px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    flex: 0 0 auto;
+}
+/* A scripted palette the device has not downloaded yet: it has no gradient to show, because a
+   script produces its colors only once it runs. A dashed empty slot says "there is a palette here,
+   its colors are not known yet" and keeps the name column aligned with the rows that do have one. */
+.type-picker-item-swatch-empty {
+    border-style: dashed;
+    background: repeating-linear-gradient(45deg,
+        var(--border) 0 4px, transparent 4px 8px);
+}
+/* A read-only file picker: it names what something else chose, so it must not look clickable. */
+.fileedit-pick.is-readonly { opacity: 0.6; cursor: default; }
 .palette-caret { color: var(--fg-muted); flex: 0 0 auto; }
 .palette-list {
     position: absolute;

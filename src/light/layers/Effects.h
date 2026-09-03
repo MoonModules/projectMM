@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/MoonModule.h"
+#include "light/moonlive/MoonLivePalette.h"   // the per-frame scripted palette, run before the layers
 #include "light/layers/Layer.h"
 #include "light/layouts/Layouts.h"
 #include "platform/platform.h"
@@ -49,6 +50,11 @@ public:
     /// depth (an Effect that should be ticked inside a Layer). Matches
     /// the role-filter precedent in setLayouts / activeLayer above.
     void tick() MM_NONBLOCKING override {
+        // The scripted palette runs FIRST, so every layer in this frame samples the same sixteen
+        // entries. It is owned by Drivers (which owns the palette control) and reached through a
+        // static seam, because Drivers ticks after the layers and a palette applied there would be
+        // one frame late. A no-op when no `.mlp` is named, which is the common case.
+        MoonLivePalette::tickActive(platform::millis());
         for (uint8_t i = 0; i < childCount(); i++) {
             MoonModule* c = child(i);
             if (!c || c->role() != ModuleRole::Layer) continue;

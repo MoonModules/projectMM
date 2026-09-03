@@ -178,6 +178,35 @@ constexpr const char* kServiceCatalogTags[] = {
 };
 constexpr const char* kServiceFolder = "services";   ///< its directory upstream
 
-constexpr size_t kCatalogCount = 37;   ///< every factory script, all roles
+/// Every factory palette, by file name. They live in `moonlive/palettes/`
+/// upstream and in the factory script directory on the device.
+constexpr const char* kPaletteCatalog[] = {
+    "beat-flash.mlp",
+    "drift.mlp",
+    "fire.mlp",
+    "spectrum.mlp",
+    "temperature.mlp",
+};
+constexpr size_t kPaletteCatalogCount = 5;
+/// What each palette above declares about itself, in the same order.
+/// A dimension of 0 means the script says nothing, so the DEVICE decides the default.
+constexpr unsigned char kPaletteCatalogDim[] = {
+    0,
+    0,
+    0,
+    0,
+    0,
+};
+/// The emoji each declares, "" when it declares none.
+constexpr const char* kPaletteCatalogTags[] = {
+    "🎨🎶",
+    "🎨",
+    "🎨",
+    "🎨🎶",
+    "🎨",
+};
+constexpr const char* kPaletteFolder = "palettes";   ///< its directory upstream
+
+constexpr size_t kCatalogCount = 42;   ///< every factory script, all roles
 
 } // namespace mm::moonlive

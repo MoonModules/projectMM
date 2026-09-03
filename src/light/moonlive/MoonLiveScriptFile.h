@@ -27,8 +27,8 @@ inline constexpr const char* kScriptDir = "/moonlive";
 /// looks. A library you learn from has to be readable.
 inline constexpr const char* kFactoryScriptDir = "/.moonlive";
 
-/// A script's ROLE, in its file name. One language, three extensions: an effect is `.mle`, a
-/// layout `.mll`, a modifier `.mlm`, a service `.mls`.
+/// A script's ROLE, in its file name. One language, five extensions: an effect is `.mle`, a
+/// layout `.mll`, a modifier `.mlm`, a service `.mls`, a palette `.mlp`.
 ///
 /// Stated by the author rather than derived from the script's contents. Deriving it is tempting
 /// (the entry point a class defines already tells the engine which moment to call), but that
@@ -43,6 +43,7 @@ inline constexpr const char* kEffectExt   = ".mle";
 inline constexpr const char* kLayoutExt   = ".mll";
 inline constexpr const char* kModifierExt = ".mlm";
 inline constexpr const char* kServiceExt  = ".mls";
+inline constexpr const char* kPaletteExt  = ".mlp";
 
 /// What a NEW script starts out as, per role. A created file is a WORKING example rather than an
 /// empty one: an empty file fails to parse the moment it is made, so the first thing a new script
@@ -98,14 +99,13 @@ inline constexpr const char* kServiceTemplate =
     // last starts at 1, the level an idle pull-up reads: starting at 0 made the first tick see a
     // change that had not happened and write the control before anyone touched the button.
     "  int last = 1;\n"
-    "  int now = 0;\n"
     "\n"
     "  void defineControls() {\n"
     "    addControl(\"pin\", pin, 0, 48);\n"
     "  }\n"
     "\n"
     "  void tick20ms() {\n"
-    "    now = gpioRead(pin);\n"
+    "    int now = gpioRead(pin);\n"
     "    if (now != last) {\n"
     "      last = now;\n"
     // INVERTED: the wiring is active-low (a switch to ground with a pull-up), so a pressed button
@@ -118,10 +118,26 @@ inline constexpr const char* kServiceTemplate =
 /// What a `script` control tells the UI: where the files are, which of them to offer, and what a
 /// new one starts as. Borrowed by the control descriptor (addFilePath), so these live here next to
 /// the directory they name rather than being repeated in each binding.
+inline constexpr const char* kPaletteTemplate =
+    "class NewPalette {\n"
+    "  byte bpm = 20;\n"
+    "\n"
+    "  void defineControls() {\n"
+    "    addControl(\"bpm\", bpm, 1, 120); // how fast the colors move\n"
+    "  }\n"
+    "\n"
+    "  void tick() {\n"
+    "    for (int i = 0; i < 16; i = i + 1) {\n"
+    "      setPalEntryHSV(i, scale(beat(bpm, t), 256) + i * 16, 255, 255);\n"
+    "    }\n"
+    "  }\n"
+    "}\n";
+
 inline constexpr const char* kEffectPick[3]   = {kScriptDir, kEffectExt,   kEffectTemplate};
 inline constexpr const char* kLayoutPick[3]   = {kScriptDir, kLayoutExt,   kLayoutTemplate};
 inline constexpr const char* kModifierPick[3] = {kScriptDir, kModifierExt, kModifierTemplate};
 inline constexpr const char* kServicePick[3]  = {kScriptDir, kServiceExt,  kServiceTemplate};
+inline constexpr const char* kPalettePick[3]  = {kScriptDir, kPaletteExt,  kPaletteTemplate};
 
 /// Is `ext` one of the script extensions? One definition, beside the extensions themselves.
 ///
@@ -132,7 +148,8 @@ inline constexpr const char* kServicePick[3]  = {kScriptDir, kServiceExt,  kServ
 inline bool isScriptExt(const char* ext) {
     if (!ext) return false;
     return std::strcmp(ext, kEffectExt) == 0 || std::strcmp(ext, kLayoutExt) == 0 ||
-           std::strcmp(ext, kModifierExt) == 0 || std::strcmp(ext, kServiceExt) == 0;
+           std::strcmp(ext, kModifierExt) == 0 || std::strcmp(ext, kServiceExt) == 0 ||
+           std::strcmp(ext, kPaletteExt) == 0;
 }
 
 /// The largest script the loader will read into RAM at once. Not a language limit — the buffer is
@@ -257,7 +274,7 @@ inline bool compileScriptFile(MoonLive& engine, const char* name,
     const size_t len = std::strlen(name);
     const char* tail = len >= 4 ? name + len - 4 : "";
     if (len < 5 || len > kMaxScriptName || !isScriptExt(tail)) {
-        err = "script name must end in .mle, .mll, .mlm or .mls"; return false;
+        err = "script name must end in .mle, .mll, .mlm, .mls or .mlp"; return false;
     }
 
     // The user's copy wins over the factory one of the same name: that is what makes editing a

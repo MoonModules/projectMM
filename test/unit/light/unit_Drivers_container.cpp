@@ -5,6 +5,8 @@
 #include "light/drivers/LightPresetsModule.h"   // the non-deletable boot-wired preset library
 #include "../core/conditional_controls.h"   // mm::test::setControlValue
 
+#include <cstring>
+
 // Regression: the UI's enable/disable toggle on a child driver (e.g. ArtNet,
 // Preview) was a no-op — the driver kept running. Cause: Drivers::tick() called
 // child(i)->tick() unconditionally, skipping the per-child `enabled` check that
@@ -84,6 +86,10 @@ TEST_CASE("Drivers::on gates the correction LUT without clobbering brightness") 
     mm::Drivers drivers;
     CorrectionCapturingDriver drv;
     drivers.addChild(&drv);
+    drv.defineControls();
+    // Linear: what this pins is that `on` gates the LUT WITHOUT losing the brightness value, and a
+    // perceptual curve would restate every expected number as a lookup without testing anything new.
+    mm::test::setControlValue<uint8_t>(drv, "curve", 3);   // 3 = linear
     drivers.setup();                       // seeds drv's own correction_ from on(true)+brightness
 
     drivers.brightness = 200;
@@ -115,6 +121,10 @@ TEST_CASE("Drivers: a localBrightness change re-scales the driver's correction L
     drivers.brightness = 200;
     drivers.on = true;
     drv.defineControls();                           // bind the correction controls (localBrightness etc.)
+    // LINEAR, so the arithmetic below reads as the multiplication it is testing. What this pins is
+    // that BOTH sliders reach the LUT, which a perceptual curve would leave true but express as
+    // table lookups nobody can check by eye. The curve has its own tests.
+    mm::test::setControlValue<uint8_t>(drv, "curve", 3);   // 3 = linear
     drivers.setup();                                // seeds the driver's correction (global 200, local 255)
     CHECK(drv.correctionForTest().briLut[255] == 200);   // global 200 × local 255/255 = 200
 
@@ -177,4 +187,23 @@ TEST_CASE("Drivers accepts only driver-role children in the add picker") {
 TEST_CASE("LightPresets library is a non-deletable singleton") {
     mm::LightPresetsModule lib;
     CHECK_FALSE(lib.userEditable());
+}
+
+// Regression, the Drivers half of the dangling LivePalettes seam (the seam-contract half is pinned
+// in unit_Palette.cpp): the /api/modules probe constructs a Drivers, reads its controls, and
+// destroys it. That throwaway used to publish the seam from defineControls() and so owned it when
+// it died, first dangling it (the /api/state SIGSEGV) and, once clear() ran in the destructor,
+// emptying the running device's scripted-palette list instead. Publication belongs to prepare(),
+// which only a scheduler-mounted module runs, so a probe must leave the seam exactly as it found it.
+TEST_CASE("a probe Drivers (controls read, never prepared) leaves the scripted-palette seam alone") {
+    static const char* names[] = {"running.mlp"};
+    static const char* tags[]  = {""};
+    mm::LivePalettes::set(names, tags, 1);            // the running Drivers' publication
+    {
+        mm::Drivers probe;                            // what serveModules builds…
+        probe.defineControls();                       // …to read the control list…
+    }                                                 // …and immediately destroys
+    CHECK(mm::LivePalettes::count() == 1);
+    CHECK(std::strcmp(mm::LivePalettes::nameAt(0), "running.mlp") == 0);
+    mm::LivePalettes::clear();
 }
