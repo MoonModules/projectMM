@@ -106,6 +106,11 @@ public:
         // REFERENCES this object's liveNames_/livePtrs_/liveTags_ arrays rather than copying them,
         // so leaving it published points /api/state at freed memory the moment this Drivers goes.
         LivePalettes::clear(livePtrs_);
+        // The scripted-palette instance seam is the same shape and needs the same care: it points at
+        // paletteScriptModule_ (a member), and Effects::tick runs it every frame. Detach it and free
+        // the compiled script, or the render path keeps executing code owned by a dead Drivers.
+        MoonLivePalette::clearActiveInstance(&paletteScriptModule_);
+        paletteScriptModule_.release();
         MoonModule::release();
     }
 
@@ -117,7 +122,11 @@ public:
     /// The palette seam is cleared here TOO, not only in release(): a destructor is the one place
     /// that cannot be skipped, and a Drivers torn down without an explicit release() would leave
     /// the seam pointing into freed member arrays.
-    ~Drivers() override { stopEncodeTask(); LivePalettes::clear(livePtrs_); }
+    ~Drivers() override {
+        stopEncodeTask();
+        LivePalettes::clear(livePtrs_);
+        MoonLivePalette::clearActiveInstance(&paletteScriptModule_);
+    }
 
     /// Stop the core-1 encode worker so a STRUCTURAL TREE MUTATION (a module replace / delete / add) can
     /// free tree nodes without the worker dereferencing them mid-tick. The worker ticks the driver

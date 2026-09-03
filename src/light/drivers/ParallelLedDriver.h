@@ -1882,6 +1882,31 @@ protected:
         // that chip the failing esp_lcd path can BUSY-WAIT to a watchdog reset rather than return an
         // error. So refuse cleanly with a clear, actionable status instead of choking the init. Budget 0
         // (PSRAM-capable chips, or the streaming ring) means "no bound" → always passes. Cold path.
+        // REFUSE a bus pin the chip has wired to flash or PSRAM, for the same reason the DMA budget
+        // is pre-checked below: routing I/O onto one corrupts the device rather than failing, so
+        // what a user sees is a reset with no panic and no coredump, naming nothing. The platform
+        // already knows which pins these are (gpioCapability().reserved); this is the one path that
+        // was not asking. Data lanes are checked too, since the same corruption follows whichever
+        // bus pin lands there.
+        //
+        // This is a guard, NOT the fix for the classic-ESP32 hang (backlog-light.md): that one is
+        // inside esp_lcd_new_i80_bus itself and survives every legal pin choice. COLD PATH.
+        {
+            const uint16_t* bus = busPinList();
+            const uint8_t width = busPinCount();
+            for (uint8_t i = 0; i < width && i < kMaxLanes; i++) {
+                const uint16_t pin = bus[i];
+                if (pin > 48) continue;                       // unset/NC: nothing routed
+                if (!platform::gpioCapability(static_cast<uint8_t>(pin)).reserved) continue;
+                char msg[96];
+                std::snprintf(msg, sizeof(msg),
+                              "GPIO %u is wired to flash/PSRAM on this chip - pick another pin",
+                              unsigned(pin));
+                setStatus(msg, Severity::Error);
+                deinit();
+                return;
+            }
+        }
         if (const size_t budget = peripheral_->dmaBudgetBytes();
             !frameFitsDmaBudget(frameBytes_, budget)) {
             // deinit() above already cleared the bus and inited_ — just report and bail.

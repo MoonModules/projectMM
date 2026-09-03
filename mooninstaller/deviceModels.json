@@ -171,9 +171,9 @@
   },
   {
     "name": "QuinLED Dig-Next-2",
-    "chip": "ESP32",
+    "chip": "ESP32-PICO-V3-02",
     "firmwares": [
-      "esp32"
+      "esp32-pico"
     ],
     "image": "assets/deviceModels/quinled-dig-next-2.jpg",
     "url": "https://quinled.info/dig-next-2/",
@@ -183,15 +183,22 @@
     ],
     "planned": [
       "Button",
-      "Microphone",
-      "Relay"
+      "Microphone"
     ],
+    "flashBaud": 460800,
     "modules": [
       {
         "type": "System",
         "id": "System",
         "controls": {
           "deviceModel": "QuinLED Dig-Next-2"
+        }
+      },
+      {
+        "type": "Drivers",
+        "id": "Drivers",
+        "controls": {
+          "relayPins": "5,20,21,22"
         }
       },
       {

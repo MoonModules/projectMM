@@ -85,8 +85,22 @@ public:
     /// LCD_CAM driver parks both pins on a dummy GPIO for the same reason. To spend no GPIO at all, use
     /// MoonI80Peripheral: owning the DMA below esp_lcd, it holds DC at a constant level and routes WR only
     /// when a '595 needs it as SRCLK.
-    int8_t clockPin = 10;
-    int8_t dcPin = 11;
+    /// Per-chip, because 10/11 are free GPIOs on the S3 these were chosen on and are the FLASH bus
+    /// on a classic ESP32 (6-11): routing the i80 clock onto one wedges the board to a watchdog
+    /// reset with no panic and no coredump. `i2sLanes > 0` IS "this is the classic-ESP32 i80" (the
+    /// two backends are mutually exclusive per silicon), the same discriminator dmaBudgetBytes()
+    /// below keys on, rather than a raw CONFIG_IDF_TARGET that would put chip knowledge outside the
+    /// platform layer.
+    ///
+    /// 18/23 rather than the first free numbers: WR and DC are peripheral-fixed signals no WS2812
+    /// strand reads, so this default only has to avoid pins a BOARD is likely to have committed.
+    /// 21/22 look free chip-wise and are the QuinLED Dig-Next-2's relay lines, where claiming them
+    /// silently switched two power channels off (LEDs dark, no error anywhere). 18/23 are plain
+    /// GPIOs on every classic package: no strap, no flash, no UART, and unused by the catalog's
+    /// boards. A board that does wire them overrides the control, and reinit() refuses a reserved
+    /// pin outright.
+    int8_t clockPin = platform::i2sLanes > 0 ? 18 : 10;
+    int8_t dcPin    = platform::i2sLanes > 0 ? 23 : 11;
 
     // --- LedPeripheral descriptors ---
 

@@ -184,6 +184,18 @@ FIRMWARES: dict[str, dict] = {
                        "the larger buffers (big grids, preview) the WROVER's extra RAM allows.",
         "ships": True,
     },
+    "esp32-pico": {
+        "chip": "esp32",
+        "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth",
+                      "sdkconfig.defaults.esp32-pico"],
+        "moonbase": True,   # 8 MB: factory MoonBase + one app slot (see moonbase/)
+        "eth_only": False,
+        "description": "ESP32-PICO-V3-02 (classic ESP32 SiP: 8 MB embedded flash + 2 MB "
+                       "embedded quad PSRAM). WiFi + Ethernet, same silicon as `esp32`; its "
+                       "own variant because the flash is 8 MB where the base assumes 4 and "
+                       "PSRAM is on (QuinLED Dig-Next-2).",
+        "ships": True,
+    },
     "esp32-eth": {
         "chip": "esp32",
         "fragments": ["sdkconfig.defaults", "sdkconfig.defaults.eth", "sdkconfig.defaults.moonbase-4mb"],

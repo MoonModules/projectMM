@@ -94,6 +94,12 @@ public:
     /// knows nothing about.
     static MoonLivePalette* active() { return active_; }
     static void setActiveInstance(MoonLivePalette* p) { active_ = p; }
+    /// Detach, for an owner whose storage is about to go away. Takes the caller's own instance so a
+    /// departing owner cannot unpublish somebody else's, exactly as LivePalettes::clear does: this
+    /// is a static pointer INTO a Drivers member, and `Effects::tick` dereferences it every frame,
+    /// so a Drivers released or destroyed while still published leaves the render path running a
+    /// script in freed memory.
+    static void clearActiveInstance(const MoonLivePalette* p) { if (active_ == p) active_ = nullptr; }
 
     /// Run the active palette script, if there is one. Called once per frame before the layers.
     static void tickActive(uint32_t nowMs) MM_NONBLOCKING {

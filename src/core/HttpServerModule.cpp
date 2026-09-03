@@ -1743,7 +1743,8 @@ void HttpServerModule::serveWledDeviceJson(platform::TcpConnection& conn) {
                  // python-wled parser requires: and floods HA's log with `MissingField: filesystem`
                  // on every frame. Fix pinned on the bench with `sudo docker logs homeassistant`.
                  "\"lm\":\"\",\"lip\":\"\",\"ws\":-1,"
-                 // palcount = the real built-in count (matches the palettes[] array below); fxcount
+                 // palcount = the real palette count, built-ins PLUS the scripted tail, so it matches
+                 // the palettes[] array below entry for entry; fxcount
                  // stays 1 (this shim exposes one effect surface). cpal/umpal = 0 (no custom palettes).
                  "\"fxcount\":1,\"palcount\":%u,\"cpalcount\":0,\"umpalcount\":0,\"str\":false}",
                  // Non-zero or the WLED integration rejects the device: desktop's freeHeap() reports
@@ -1751,7 +1752,7 @@ void HttpServerModule::serveWledDeviceJson(platform::TcpConnection& conn) {
                  pmt,
                  static_cast<unsigned>(platform::freeHeap() ? platform::freeHeap() : 32768u),
                  static_cast<unsigned>(platform::millis() / 1000u),
-                 static_cast<unsigned>(mm::palettes::kCount));
+                 static_cast<unsigned>(mm::paletteCount()));
     // effects + palettes: python-wled's __pre_deserialize__ turns each array into an indexed dict.
     // effects stays one real entry ("Solid"): this shim drives a single Layer, so a longer effect list
     // would be a lie. palettes is the REAL built-in list (Palette.h paletteNames / kBuiltins) so HA's

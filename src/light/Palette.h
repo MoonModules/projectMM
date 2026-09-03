@@ -480,6 +480,20 @@ inline void paletteOptions(JsonSink& sink) {
 inline void paletteNames(JsonSink& sink) {
     for (uint8_t i = 0; i < palettes::kCount; i++)
         sink.appendf("%s\"%s\"", i > 0 ? "," : "", palettes::kBuiltins[i].name);
+    // The scripted tail too, in the SAME order the picker and `seg[0].pal` use. This list is
+    // positional: HA renders one dropdown entry per name and sends back the index, so stopping at
+    // the built-ins left every scripted palette unnameable and unselectable there while the device's
+    // own `palette` control accepted exactly those indices. paletteCount() below is what keeps the
+    // WLED `palcount` field agreeing with this list.
+    for (uint8_t i = 0; i < LivePalettes::count(); i++)
+        sink.appendf(",\"%s\"", LivePalettes::nameAt(i));
+}
+
+/// How many entries paletteNames() writes: the built-ins plus whatever scripted palettes the device
+/// currently carries. One home for the count, so the WLED shim's `palcount` cannot drift from the
+/// array it describes.
+inline uint8_t paletteCount() {
+    return static_cast<uint8_t>(palettes::kCount + LivePalettes::count());
 }
 
 }  // namespace mm

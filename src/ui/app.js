@@ -3147,18 +3147,35 @@ function createControl(moduleName, moduleType, ctrl) {
                             // palette now HAS an index. Find it by name and select it, which is
                             // what the user asked for by picking it.
                             mlCatalog = null;               // it is local now: drop the cached list
-                            await refetchState();
                             const want = file.replace(/\.mlp$/, "");
+                            // The device only re-lists its .mlp files when its controls rebuild, which
+                            // can land a beat after the state fetch. So look, and if the new palette
+                            // is not there yet, fetch once more before giving up: without the retry a
+                            // download that worked ended in nothing happening and no message.
+                            const findIdx = () => {
+                                const mod = allModules().find(m => m.name === moduleName);
+                                const c = mod && Array.isArray(mod.controls)
+                                        && mod.controls.find(x => x.name === ctrl.name);
+                                return ((c || {}).options || []).findIndex(o => o.name === want);
+                            };
+                            await refetchState();
+                            let idx = findIdx();
+                            if (idx < 0) {
+                                await new Promise(r => setTimeout(r, 600));
+                                await refetchState();
+                                idx = findIdx();
+                            }
+                            if (idx < 0) {
+                                // Downloaded, but the device has not published it. Say so: the file IS
+                                // on the device, so re-opening the picker will offer it.
+                                alert(want + " was downloaded but is not in the palette list yet - "
+                                      + "reopen the picker to select it.");
+                                return;
+                            }
                             const fresh = document.querySelector(
                                 `.palette-control[data-mid="${moduleName}"][data-key="${ctrl.name}"]`);
-                            const mod = allModules().find(m => m.name === moduleName);
-                            const fresh2 = mod && Array.isArray(mod.controls)
-                                         && mod.controls.find(c => c.name === ctrl.name);
-                            const idx = ((fresh2 || {}).options || []).findIndex(o => o.name === want);
-                            if (idx >= 0) {
-                                if (fresh) fresh.dataset.value = idx;
-                                sendControl(moduleName, ctrl.name, idx);
-                            }
+                            if (fresh) fresh.dataset.value = idx;
+                            sendControl(moduleName, ctrl.name, idx);
                             return;
                         }
                         const i = Number(name);
