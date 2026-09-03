@@ -180,6 +180,14 @@ public:
         if (dcPin < 0) return "dcPin is unset — the i80 bus needs a valid DC GPIO";
         if (clockPin == dcPin)
             return "clockPin (WR) and dcPin are the same GPIO — they must differ";
+        // Neither may sit on a pin the chip wired to flash or PSRAM: routing I/O there corrupts the
+        // device. The driver's own sweep covers the bus LANES, but WR only rides that list when
+        // there are spare lanes to park it on (a full-width 8- or 16-pin setup has none) and DC
+        // never does, so these two are checked here, where the pair already lives.
+        if (platform::gpioCapability(static_cast<uint8_t>(clockPin)).reserved)
+            return "clockPin (WR) is wired to flash/PSRAM on this chip - pick another pin";
+        if (platform::gpioCapability(static_cast<uint8_t>(dcPin)).reserved)
+            return "dcPin is wired to flash/PSRAM on this chip - pick another pin";
         // The '595 latch is a BUS LANE, so it needs its own GPIO: sharing it with WR would make the
         // pixel clock double as the latch (the '595 would present a byte on every shift cycle), and
         // sharing it with DC would latch on the command phase. Both are fatal — the bus builds, but

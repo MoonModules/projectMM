@@ -804,10 +804,10 @@ public:
             while (fits > 0 && frameBytesFor(static_cast<nrOfLightsType>(fits), outCh,
                                              slotBytes(), opp) > cap) fits--;
         }
-        std::snprintf(overCapBuf_, sizeof(overCapBuf_),
+        std::snprintf(statusBuf_, sizeof(statusBuf_),
                       "too many lights per pin: %u exceeds this peripheral's %u — lower ledsPerPin",
                       static_cast<unsigned>(maxLaneLights_), fits);
-        setStatus(overCapBuf_, Severity::Error);
+        setStatus(statusBuf_, Severity::Error);
     }
 
     bool busGaveUp() {
@@ -1322,7 +1322,12 @@ protected:
     // setStatus stores the POINTER, so the text has to outlive the call; and the message is written
     // once per over-capacity episode, not once per tick, since it would otherwise rewrite the status
     // at frame rate for as long as the count stays too high.
-    char overCapBuf_[96] = {};
+    /// ONE buffer for every formatted status this driver reports (over-capacity, reserved bus pin).
+    /// A member rather than a local because setStatus keeps the POINTER and does not copy
+    /// (MoonModule.h), so stack storage would dangle the moment the formatting call returns. Shared
+    /// rather than one per message: they are mutually exclusive cold-path refusals, each formatted
+    /// immediately before its own setStatus, and 96 bytes per variant adds up on a classic ESP32.
+    char statusBuf_[96] = {};
     bool overCapReported_ = false;
     static constexpr uint8_t kDeadFramesBeforeGiveUp = 8;
     // Given-up retry cadence: once given up, let one frame try every this-many ticks so a TRANSIENT stall
@@ -1894,15 +1899,16 @@ protected:
         {
             const uint16_t* bus = busPinList();
             const uint8_t width = busPinCount();
+            // The bus LANES here; the peripheral's own control pins (i80's WR/DC) are checked by
+            // validateBusFatal, which already owns that pair and runs on the same cold path.
             for (uint8_t i = 0; i < width && i < kMaxLanes; i++) {
                 const uint16_t pin = bus[i];
                 if (pin > 48) continue;                       // unset/NC: nothing routed
                 if (!platform::gpioCapability(static_cast<uint8_t>(pin)).reserved) continue;
-                char msg[96];
-                std::snprintf(msg, sizeof(msg),
+                std::snprintf(statusBuf_, sizeof(statusBuf_),
                               "GPIO %u is wired to flash/PSRAM on this chip - pick another pin",
                               unsigned(pin));
-                setStatus(msg, Severity::Error);
+                setStatus(statusBuf_, Severity::Error);
                 deinit();
                 return;
             }

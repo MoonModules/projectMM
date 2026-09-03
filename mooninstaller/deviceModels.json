@@ -171,7 +171,7 @@
   },
   {
     "name": "QuinLED Dig-Next-2",
-    "chip": "ESP32-PICO-V3-02",
+    "chip": "ESP32",
     "firmwares": [
       "esp32-pico"
     ],

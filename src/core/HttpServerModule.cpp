@@ -1822,7 +1822,11 @@ void HttpServerModule::applyWledState(const char* body) {
     if (palStart) {
         int pal = mm::json::parseIntStr(palStart + 6);
         if (pal < 0) pal = 0;
-        if (pal >= mm::palettes::kCount) pal = mm::palettes::kCount - 1;
+        // Against the FULL count, built-ins plus the scripted tail, because that is exactly the
+        // list served as `palettes[]` above: clamping to the built-ins rejected every scripted index
+        // this device had just offered, so picking one in Home Assistant silently snapped back to
+        // the last built-in.
+        if (pal >= mm::paletteCount()) pal = mm::paletteCount() - 1;
         char valueJson[24];
         std::snprintf(valueJson, sizeof(valueJson), "{\"value\":%d}", pal);
         applySetControl("Drivers", "palette", valueJson);

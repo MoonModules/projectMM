@@ -707,3 +707,50 @@ TEST_CASE("a bus pin wired to flash is refused, not routed") {
     CHECK(std::strstr(d.status(), "flash") != nullptr);
     mm::platform::clearTestGpioCapability();
 }
+
+// The WR/DC half of the reserved-pin refusal, and the case the lane sweep alone cannot see: at
+// exactly the bus width there are no spare lanes for WR to be parked on, and DC never rides the
+// lane list at all (it goes straight to busInit). Both must still be refused.
+//
+// Through wire()/applyState() with a REAL I80Peripheral, not a bare instance: validateBusFatal()
+// reaches owner_->pinExpanderMode() on its no-hit path, and owner_ is only ever set by attach()
+// (setPeripheralForTest calls it), so a peripheral built and queried standalone is a null-owner
+// crash that no production caller can hit, since ParallelLedDriver always attaches before use.
+TEST_CASE("a full-width bus still refuses a WR or DC pin wired to flash") {
+    mm::platform::clearTestGpioCapability();
+    mm::platform::GpioCapability flash;
+    flash.reserved = true;
+    mm::platform::setTestGpioCapability(11, flash);       // stands in for a flash pin
+
+    // Inlined rather than routed through wire(), which is typed to MockPeripheral&: this test
+    // needs the REAL I80Peripheral (see the class comment above) so owner_ is genuinely attached.
+    MockShiftDriver d;
+    mm::I80Peripheral peripheral;
+    mm::Buffer src;
+    mm::Correction corr;
+    peripheral.clockPin = 10;
+    peripheral.dcPin    = 11;                              // DC on the reserved pin
+    d.setPeripheralForTest(&peripheral);
+    std::strcpy(d.pins, "10,20,21,22,23,24,25,26");        // full 8-wide bus: no spare lane for WR
+    d.pinExpander = false;
+    d.latchPin = -1;
+    d.doubleBuffer = false;
+    REQUIRE(src.allocate(8, 3));
+    mm::test::rebuildFromPreset(corr, 255, mm::test::PresetOrder::GRB);
+    d.defineControls();
+    d.setSourceBuffer(&src);
+    d.correctionForTest() = corr;
+    d.applyState();
+
+    REQUIRE(d.status() != nullptr);
+    CHECK(std::strstr(d.status(), "dcPin") != nullptr);
+    CHECK(std::strstr(d.status(), "flash") != nullptr);
+
+    peripheral.clockPin = 11;                              // and the same for WR
+    peripheral.dcPin    = 10;
+    d.applyState();
+    REQUIRE(d.status() != nullptr);
+    CHECK(std::strstr(d.status(), "clockPin") != nullptr);
+
+    mm::platform::clearTestGpioCapability();
+}

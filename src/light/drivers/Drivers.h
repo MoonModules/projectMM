@@ -126,6 +126,10 @@ public:
         stopEncodeTask();
         LivePalettes::clear(livePtrs_);
         MoonLivePalette::clearActiveInstance(&paletteScriptModule_);
+        // Free the compiled script too, not just detach the seam: release() may never run (a stack
+        // instance in a test, a tree torn down by its owner) and the engine holds an exec block.
+        // release() is idempotent, so the ordinary path that calls both frees once.
+        paletteScriptModule_.release();
     }
 
     /// Stop the core-1 encode worker so a STRUCTURAL TREE MUTATION (a module replace / delete / add) can

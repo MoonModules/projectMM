@@ -3097,9 +3097,14 @@ function createControl(moduleName, moduleType, ctrl) {
             const remotePalettes = () => {
                 const names = ((mlCatalog || {}).palettes || {}).names || [];
                 const tags = ((mlCatalog || {}).palettes || {}).tags || [];
-                const have = new Set(opts.filter(o => o.live).map(o => o.name));
+                // BOTH sides stripped of the extension before comparing: the device publishes a
+                // live palette by its full filename ("drift.mlp") and so does the catalog, but
+                // stripping only one side matched nothing, so every already-downloaded palette
+                // showed a second time as a "download me" row.
+                const bare = (s) => String(s).replace(/\.mlp$/, "");
+                const have = new Set(opts.filter(o => o.live).map(o => bare(o.name)));
                 return names.map((n, i) => ({ name: n, tags: tags[i] || "" }))
-                            .filter(r => !have.has(r.name.replace(/\.mlp$/, "")));
+                            .filter(r => !have.has(bare(r.name)));
             };
             const openList = async () => {
                 // The catalog is fetched lazily and cached, so ask for it BEFORE building the list:
@@ -3152,12 +3157,13 @@ function createControl(moduleName, moduleType, ctrl) {
                             // can land a beat after the state fetch. So look, and if the new palette
                             // is not there yet, fetch once more before giving up: without the retry a
                             // download that worked ended in nothing happening and no message.
-                            const findIdx = () => {
+                            const findCtrl = () => {
                                 const mod = allModules().find(m => m.name === moduleName);
-                                const c = mod && Array.isArray(mod.controls)
-                                        && mod.controls.find(x => x.name === ctrl.name);
-                                return ((c || {}).options || []).findIndex(o => o.name === want);
+                                return mod && Array.isArray(mod.controls)
+                                     && mod.controls.find(x => x.name === ctrl.name);
                             };
+                            const findIdx = () => ((findCtrl() || {}).options || [])
+                                                   .findIndex(o => o.name === want);
                             await refetchState();
                             let idx = findIdx();
                             if (idx < 0) {
@@ -3175,6 +3181,25 @@ function createControl(moduleName, moduleType, ctrl) {
                             const fresh = document.querySelector(
                                 `.palette-control[data-mid="${moduleName}"][data-key="${ctrl.name}"]`);
                             if (fresh) fresh.dataset.value = idx;
+                            // Repaint the trigger from findCtrl(), NOT paintTrigger()/opts: opts is
+                            // the array captured when this control was first rendered, and the palette
+                            // just downloaded is not in it (refetchState() updated state, not this
+                            // closure). Reading the wrong array would paint a stray row or a blank one,
+                            // so this mirrors updateModuleControls' own "palette" case: the same three
+                            // fields, keyed off the freshly-fetched control.
+                            const freshCtrl = ((findCtrl() || {}).options || [])[idx];
+                            if (fresh && freshCtrl) {
+                                const triSwatch = fresh.querySelector(".palette-trigger .palette-swatch");
+                                if (triSwatch) triSwatch.style.background = paletteGradientCss(freshCtrl.colors || "");
+                                const triEmoji = fresh.querySelector(".palette-trigger .palette-emoji");
+                                if (triEmoji) triEmoji.textContent = (freshCtrl.live ? SCRIPTED_EMOJI : "") + (freshCtrl.tags || "");
+                                const triName = fresh.querySelector(".palette-trigger .palette-name");
+                                if (triName) setText(triName, freshCtrl.name || String(idx));
+                            }
+                            // Stamped the same as the normal (already-local) branch below: without it a
+                            // WS state push landing in this window could overwrite the selection before
+                            // the next render even reads it.
+                            dragTs[key] = Date.now();
                             sendControl(moduleName, ctrl.name, idx);
                             return;
                         }
