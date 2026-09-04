@@ -140,11 +140,15 @@ public:
                           ? static_cast<int32_t>(lut_.pitch(idx) >> 6)
                           : static_cast<int32_t>(z) - cz;
                 } else {
-                    const int32_t dx = static_cast<int32_t>(x) - cx;
-                    const int32_t dy = static_cast<int32_t>(y) - cy;
-                    baseAngle = atan16(dy, dx);
-                    r = dist16(dx, dy);
-                    along = static_cast<int32_t>(z) - cz;
+                    // The same address the table would have held, under the same mapping.
+                    const auto m = PolarLut::mappingOf(polar);
+                    const auto ad = PolarLut::addressOf(m, static_cast<int32_t>(x) - cx,
+                                                        static_cast<int32_t>(y) - cy,
+                                                        static_cast<int32_t>(z) - cz);
+                    baseAngle = ad.angle;
+                    r = ad.radius;
+                    along = m == PolarLut::Mapping::Spherical ? static_cast<int32_t>(ad.pitch >> 6)
+                                                              : static_cast<int32_t>(z) - cz;
                 }
 
                 // The strongest layer at this pixel wins, and how far it exceeds the visibility

@@ -173,6 +173,26 @@ of code is fine; a new IDF component is the expensive kind).
   the rename map and restore report) ships in the File Manager. Remaining: tier 2, a
   single-archive device endpoint (one request instead of a walk); tier 3, restore hosted on
   MoonBase's page, the migration answer for future partition-table moves.
+- **Restore clones a device's IDENTITY along with its config** (found answering
+  [#76](https://github.com/MoonModules/projectMM/issues/76), 2026-09-04). Backup bundles every
+  file including hidden `.config`, and restore writes them all back unfiltered, so restoring one
+  device's bundle onto another copies four things that must differ per device:
+
+  | field | why it must differ |
+  |---|---|
+  | `deviceName` | the single network identity: mDNS hostname, SoftAP SSID and DHCP hostname all derive from it (`SystemModule.h`). Twelve clones all answer to `<name>.local`, resolution goes non-deterministic, MoonDeck's device list collapses to one row |
+  | WiFi `password` | travels in the bundle (the UI button warns), so a shared or attached backup leaks it |
+  | a static IP | if set, every clone claims one address |
+  | `universeStart` and the Art-Net/DDP window | exactly what must differ per device in the light-pole case #76 describes: cloned, every pole shows the same thing |
+
+  This turns "clone this pole to the other eleven" from the feature the issue wants into a trap.
+  **The fix is small and is a prerequisite for the recipe idea rather than a separate job:** restore
+  treats identity as per-device, either skipping those fields or prompting once with the target's
+  current values prefilled. Worth deciding whether the bundle should carry the secrets at all, or
+  keep an identity section the restoring device is expected to supply.
+- **A backup is a file bundle, not a recipe** (#76 step 2): nothing binds it to a `deviceModel`, so
+  restoring a Dig-Quad bundle onto an S3 writes pin maps that do not fit the board. The 28 profiles
+  in `deviceModels.json` are the missing half.
 - **Firmware downgrade guard**: MoonBase installs whatever image it is given; a version display
   (read from the incoming image's app descriptor) before flashing would make an accidental
   downgrade visible.

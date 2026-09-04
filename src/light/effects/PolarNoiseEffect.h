@@ -100,11 +100,16 @@ public:
                           ? static_cast<int32_t>(lut_.pitch(i) >> 6)
                           : static_cast<int32_t>(z) - cz;
                 } else {
-                    const int32_t dx = static_cast<int32_t>(x) - cx;
-                    const int32_t dy = static_cast<int32_t>(y) - cy;
-                    a = atan16(dy, dx);
-                    r = dist16(dx, dy);
-                    along = static_cast<int32_t>(z) - cz;
+                    // The same address the table would have held, under the same mapping: a device
+                    // too tight for the table must show the same composition, not a different one.
+                    const auto m = PolarLut::mappingOf(polar);
+                    const auto ad = PolarLut::addressOf(m, static_cast<int32_t>(x) - cx,
+                                                        static_cast<int32_t>(y) - cy,
+                                                        static_cast<int32_t>(z) - cz);
+                    a = ad.angle;
+                    r = ad.radius;
+                    along = m == PolarLut::Mapping::Spherical ? static_cast<int32_t>(ad.pitch >> 6)
+                                                              : static_cast<int32_t>(z) - cz;
                 }
 
                 // The twist shears the angle by the radius, which is what turns concentric rings

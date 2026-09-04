@@ -1800,3 +1800,89 @@ TEST_CASE("a fixed local reports its scaling where it is read") {
         kTable, kSys, out, sizeof(out));
     CHECK_FALSE(r.ok);
 }
+
+// A script's own function can hand a value back, so a helper computes rather than only acts. The
+// return machinery already existed at the HOST boundary (a function declares int or void, and the
+// exit parks the value in the ABI register); what was missing was the call site taking it.
+//
+// What makes it harder than moving a register: the result has to survive the calls that FOLLOW it
+// in the same expression. So a script call now preserves the whole vreg pool exactly as a builtin
+// call does, and the callee's value is delivered into the destination vreg once that pool is back.
+// Parking it in the frame's argument region instead was tried and rotated the enclosing call's
+// arguments, since that region is still being filled as the expression parses.
+TEST_CASE("a script function's return value can be used in an expression") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile(
+        "class T {\n"
+        "  int answer() { return 21; }\n"
+        "  void tick() { setRGB(0, answer(), answer() + 1, 0); }\n"
+        "}\n", kTable, kSys));
+    std::vector<uint8_t> buf(4 * 3, 0);
+    eng.run(buf.data(), 4, 3, 0, "tick");
+    CHECK(buf[0] == 21);          // what the helper returned
+    CHECK(buf[1] == 22);          // and it is usable in arithmetic
+    eng.free();
+}
+
+TEST_CASE("a returned value survives the calls that follow it in the same expression") {
+    // The case that exposed both wrong designs: with the result in a register `a() + b()` read 6
+    // (b's value twice), and with it in the argument region the arguments came out rotated.
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile(
+        "class T {\n"
+        "  int a() { return 10; }\n"
+        "  int b() { return 3; }\n"
+        "  void tick() { setRGB(0, a() + b(), a(), b()); }\n"
+        "}\n", kTable, kSys));
+    std::vector<uint8_t> buf(4 * 3, 0);
+    eng.run(buf.data(), 4, 3, 0, "tick");
+    CHECK(buf[0] == 13);
+    CHECK(buf[1] == 10);
+    CHECK(buf[2] == 3);
+    eng.free();
+}
+
+TEST_CASE("a helper's value can drive a loop and a member") {
+    // What the feature is for: a helper that computes, called where a number is needed.
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile(
+        "class T {\n"
+        "  byte level = 4;\n"
+        "  int scaled() { return level * 10; }\n"
+        "  void tick() {\n"
+        "    for (int i = 0; i < 2; i = i + 1) { setRGB(i, scaled(), scaled() + i, 0); }\n"
+        "  }\n"
+        "}\n", kTable, kSys));
+    std::vector<uint8_t> buf(4 * 3, 0);
+    eng.run(buf.data(), 4, 3, 0, "tick");
+    CHECK(buf[0] == 40);
+    CHECK(buf[1] == 40);
+    CHECK(buf[3] == 40);
+    CHECK(buf[4] == 41);
+    eng.free();
+}
+
+TEST_CASE("a void function cannot be used as a value") {
+    // Reading the return register of a function that never wrote it would hand the script whatever
+    // the last call left there: a plausible number, silently wrong.
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile(
+        "class T {\n"
+        "  void act() { }\n"
+        "  void tick() { setRGB(0, act(), 0, 0); }\n"
+        "}\n", kTable, kSys));
+    eng.free();
+}
+
+TEST_CASE("a returning function still works as a statement, with its value dropped") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile(
+        "class T {\n"
+        "  int side() { return 7; }\n"
+        "  void tick() { side(); setRGB(0, 1, 0, 0); }\n"
+        "}\n", kTable, kSys));
+    std::vector<uint8_t> buf(4 * 3, 0);
+    eng.run(buf.data(), 4, 3, 0, "tick");
+    CHECK(buf[0] == 1);
+    eng.free();
+}

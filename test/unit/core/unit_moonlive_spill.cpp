@@ -1,6 +1,8 @@
 // @module MoonLive
 
 #include "doctest.h"
+
+#include <cstring>
 #include "moonlive_script_wrap.h"
 #include "core/moonlive/MoonLiveCompiler.h"
 #include "core/moonlive/MoonLiveSpill.h"
@@ -84,6 +86,62 @@ TEST_CASE("a script renders identical pixels at a squeezed register budget as at
     CHECK(tightOk);
     CHECK(full == tight);
     CHECK(litCount(full) == 6);       // and it actually did something
+}
+
+// A returned value is a DEFINITION, and the allocator has to see it as one.
+//
+// The rewriter remaps every operand of every op it renumbers, but only remaps a `dst` for an op
+// that declares it writes one. A value-returning call did not, so after a compaction the call still
+// wrote its pre-compaction register while the consumer read the new one: `a() + b()` came out as
+// whatever that register happened to hold. Invisible at the host's own budget, which takes the
+// already-fits path and renumbers nothing, so this drives the SQUEEZED budget through the script's
+// `tick` entry rather than the block start a plain renderAt would call.
+TEST_CASE("a value returned by a script function survives a squeezed register budget") {
+    const char* src =
+        "class T {\n"
+        "  int a() { return 40; }\n"
+        "  int b() { return 5; }\n"
+        "  void tick() {\n"
+        "    int p = a() + b();\n"
+        "    int q = a() + a();\n"
+        "    int r = b() + b();\n"
+        "    int s = p + q;\n"
+        "    for (int i = 0; i < 3; i = i + 1) { setRGB(i, p, q, r + s - 90); }\n"
+        "  }\n"
+        "}\n";
+
+    auto renderTick = [&](const moonlive::RegBudget* budget) {
+        uint8_t code[moonlive::kCodeCap];
+        auto r = moonlive::compileSource(src, kT, kSys, code, sizeof(code), budget);
+        REQUIRE(r.ok);
+        // Enter at `tick`, not at the block start: a multi-function script begins with its helpers,
+        // and calling the block start would run `a()` as the program.
+        uint16_t tickOffset = 0xFFFF;
+        for (uint8_t i = 0; i < r.entryCount; i++)
+            if (std::strncmp(r.entries[i].name, "tick", r.entries[i].nameLen) == 0) tickOffset = r.entries[i].offset;
+        REQUIRE(tickOffset != 0xFFFF);
+
+        std::vector<uint8_t> buf(4 * 3, 0);
+        void* blk = platform::allocExec(r.len);
+        REQUIRE(blk != nullptr);
+        platform::writeExec(blk, code, r.len);
+        uint8_t arena[moonlive::kArenaBytes] = {};
+        for (uint8_t i = 0; i < r.memberCount; i++) arena[r.members[i].offset] = r.members[i].def;
+        reinterpret_cast<CtrlFn>(static_cast<uint8_t*>(blk) + tickOffset)(buf.data(), 4, 3, 0, arena);
+        platform::freeExec(blk, r.len);
+        return buf;
+    };
+
+    const auto tightBudget = squeezed(11, 1);
+    const auto full = renderTick(nullptr);
+    const auto tight = renderTick(&tightBudget);
+
+    CHECK(full == tight);
+    for (int i = 0; i < 3; i++) {
+        CHECK(tight[i * 3 + 0] == 45);   // a() + b()
+        CHECK(tight[i * 3 + 1] == 80);   // a() + a()
+        CHECK(tight[i * 3 + 2] == 45);   // (b()+b()) + (p+q) - 90
+    }
 }
 
 // The back-edge case. Naive first-def-to-last-use intervals look dead early in a loop body, so the

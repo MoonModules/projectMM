@@ -104,7 +104,9 @@ public:
     void call(Reg d, Reg a, Reg b, Reg c, const void* fn);  // standard call to a host built-in
     /// Call a function in THIS block, by label: the script-to-script call. `jal ra, off` links the
     /// return address in x1 and jumps; the callee's own prologue saves ra, so recursion works.
-    void callLabel(Label l);
+    /// Every caller vreg is preserved across it exactly as call() does for a builtin, and the
+    /// callee's a0 is delivered into `d` when `take` is set.
+    void callLabel(Label l, Reg d = R0, bool take = false);
     void epilogue();                     // undo prologue's frame (if any), then ret
     /// Park `a` where the ABI returns a value, so the host reads it after the call. The move
     /// happens BEFORE the epilogue's teardown: on a windowed or frame-pointer ABI the

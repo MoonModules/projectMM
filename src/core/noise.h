@@ -385,10 +385,14 @@ inline uint8_t warpImpl(uint32_t x, uint32_t y, uint32_t z, uint16_t strength, u
         dx = (static_cast<int32_t>(inoise8(x, y)) - 128) * strength / 128;
         dy = (static_cast<int32_t>(inoise8(x + 0x9E37u, y + 0x7C15u)) - 128) * strength / 128;
     }
-    const uint32_t sx = static_cast<uint32_t>(static_cast<int32_t>(x) + dx);
-    const uint32_t sy = static_cast<uint32_t>(static_cast<int32_t>(y) + dy);
+    // The displacement is added in UNSIGNED arithmetic. Casting the coordinate to int32_t first
+    // was signed overflow (undefined behavior) for any coordinate past 2^31, which a scaled field
+    // reaches easily: `r * zoom + drift` on a large fixture is already past it. Unsigned wrapping is
+    // defined, and wrapping is what a noise coordinate wants anyway.
+    const uint32_t sx = x + static_cast<uint32_t>(dx);
+    const uint32_t sy = y + static_cast<uint32_t>(dy);
     if constexpr (Dims > 2) {
-        return fbm8(sx, sy, static_cast<uint32_t>(static_cast<int32_t>(z) + dz), octaves);
+        return fbm8(sx, sy, z + static_cast<uint32_t>(dz), octaves);
     } else {
         return fbm8(sx, sy, octaves);
     }

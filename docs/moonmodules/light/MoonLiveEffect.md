@@ -173,9 +173,11 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | `polarA(dx, dy)`, `polarR(dx, dy)` | angle and distance from a center, for a radial effect |
 | `fbm(x, y, octaves)` | octaves of noise summed at doubling frequency and halving amplitude, `0..255`: the cloud, smoke and terrain field. `octaves` is the cost knob, one noise sample each |
 | `warp(x, y, strength)` | the field sampled where the field itself displaced it, `0..255`: the flowing, marbled look. Three noise samples |
+| `fbm3(x, y, z, octaves)`, `warp3(x, y, z, strength)` | the same two fields with a third axis, so a volumetric fixture samples through the field rather than repeating one slice. On a panel, pass `0` for `z` and the result is the 2D form exactly |
 | `osc(rate, ms, shape)` | a low-frequency oscillator, `0..65535`, at `rate` cycles per minute. Shapes: 0 sine, 1 triangle, 2 sawtooth, 3 square. Stateless, so two oscillators sharing a rate hold their phase relationship |
 | `escape(cx, cy, jx, jy, iters)` | the Mandelbrot/Julia escape count, `0..255`, `0` inside the set. Zero seed = Mandelbrot; the four coordinates are `fixed`, so uv output flows straight in. The one loop a script cannot write: it squares signed values in 64 bits |
 | `setPaletteColor(x, y, index, bri)` | one light from the ACTIVE palette, in one call |
+| `setPaletteColorZ(x, y, z, index, bri)` | the same, addressing a light in a volume |
 | `paletteR(i, bri)`, `paletteG`, `paletteB` | one palette channel, when a script needs the value rather than a pixel |
 | `pool(n)` | size this script's particle pool, from `defineControls()`. Returns what it got |
 | `emit(x, y, angle, speed, n, life, hue)` | throw `n` particles from a point |
@@ -207,7 +209,7 @@ vocabulary follows the [WLED Particle System](https://github.com/wled/WLED) by D
 
 A class may define functions beside its entry point and call them, including calling itself. `effects/crosshair.mle` is the worked example: a `column()` and a `row()`, both called from `tick()`.
 
-These are real calls, not text pasted in by the compiler: the callee allocates its own frame when it runs, which is what lets one helper call another and what makes recursion work. A function takes no arguments and returns nothing yet, so a helper does a whole job rather than computing a value.
+These are real calls, not text pasted in by the compiler: the callee allocates its own frame when it runs, which is what lets one helper call another and what makes recursion work. A function takes no arguments yet, but it may RETURN a value: declare it `int` and the helper computes where a number is needed (`setRGB(0, level(), 0, 0)`); declare it `void` and it does a whole job instead.
 
 Two rules a script author meets:
 

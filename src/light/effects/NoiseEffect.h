@@ -64,11 +64,12 @@ public:
 
             uint8_t n;
             if (motion == 1) {
-                // Morph: space is still and time is the third axis. The field changes without
-                // travelling, which on a panel is the classic plasma wash.
+                // Morph: space is still and TIME is the third axis, with no depth term, so the
+                // field changes without traveling and a volumetric fixture shows the same field in
+                // every slice. On a panel it is the classic plasma wash. Drift spends that axis on
+                // depth instead, which is what separates the two.
                 n = inoise8(static_cast<uint32_t>(x) * 256u / sc,
-                            static_cast<uint32_t>(y) * 256u / sc,
-                            (static_cast<uint32_t>(z) * 256u / sc) + t);
+                            static_cast<uint32_t>(y) * 256u / sc, t);
             } else {
                 // Drift: the coordinates scroll, each axis at its own rate so the field flows
                 // instead of sliding rigidly. On a volumetric fixture z is the light's own depth,

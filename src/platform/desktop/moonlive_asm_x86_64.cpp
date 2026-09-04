@@ -809,7 +809,11 @@ void HostAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
 
 // Script-to-script call: bl-equivalent on x64 is `call rel32` (E8 xx xx xx xx). The callee's
 // prologue saves rbp and nonvolatiles, exactly like our own prologue, so calls nest.
-void HostAssembler::callLabel(Label l) {
+void HostAssembler::callLabel(Label l, Reg d, bool take) {
+    // The same preservation call() gives a builtin: push the whole pool, call, write the result over
+    // the pushed slot of `d` so the pops deliver it. Without it a value computed before the call and
+    // used after it, `a() + b()`, read the second call's result twice.
+    for (uint8_t v = 0; v < kRegCount; v++) emitPushReg(this, kX64Reg[v]);
     // Reload parked host arguments from their spill slots — the contract with IrOp::CallScript
     // in core, mirroring arm64. On x64 this matters: the arg registers ARE vregs the callee may
     // have consumed, so their live-across-a-called-function meaning has to be re-established.
@@ -819,17 +823,31 @@ void HostAssembler::callLabel(Label l) {
     // above the 32-byte shadow space. The entry-point function's prologue reads kArg4 from
     // [rbp+48] and it works because the C++ caller followed Win64 exactly. A script-to-script
     // call must do the same: without this store, the callee's `mov rdi, [rbp+48]` reads whatever
-    // happened to be in that stack slot (an old vreg-save byte, a return-address byte from a
-    // previous call), rdi becomes garbage, and the first host(kArg4) dereferences it and faults.
-    // [rsp+kShadowSpace] is the outgoing arg-5 slot prologue reserves for exactly this (see the
-    // frame layout above); call() saves vregs with pushes below rsp and reserves nothing here.
+    // happened to be in that stack slot, rdi becomes garbage, and the first host(kArg4)
+    // dereferences it and faults. The pushes above buried the slot prologue reserved, so a fresh
+    // outgoing area is opened here: shadow + the arg-5 slot, padded to keep rsp 16-aligned (the
+    // pushes leave it aligned, as call()'s own `sub rsp, kShadowSpace` relies on).
     // SysV passes arg 5 in r8, which IS R4 in the SysV map; the spillLoad above already put it
     // in the right register, so no stack store is needed.
+    emitSubRspImm32(this, int32_t(kShadowSpace) + 16);
     emitMovMemDispReg(this, x64::RSP, kShadowSpace, xr(R4));
 #endif
     addFixup(len_, l, FixKind::Call);
     uint8_t b[5] = { 0xE8, 0, 0, 0, 0 };
     emitBytes(b, 5);
+#if defined(_WIN32)
+    {
+        uint8_t add[4] = { rex_(true, false, false, false), 0x83, modrm_(0b11, 0, x64::RSP),
+                           uint8_t(kShadowSpace + 16) };
+        emitBytes(add, 4);
+    }
+#endif
+    if (take) {
+        uint8_t zx[2] = {0x89, 0xC0};                    // mov eax, eax: zero-extend the 32-bit result
+        emitBytes(zx, 2);
+        emitMovMemDispReg(this, x64::RSP, pushedSlot(d), x64::RAX);
+    }
+    for (uint8_t v = kRegCount; v-- > 0;) emitPopReg(this, kX64Reg[v]);
 }
 
 // Resolve all pending fixups: overwrite the rel32 field in each branch/call with (target - site).

@@ -10,9 +10,9 @@ namespace mm {
 // Tunnel: the demoscene classic — a texture mapped onto the inside of an infinite tube, so the
 // viewer appears to fly down it forever.
 //
-// The trick is that nothing is 3D. For each pixel, its ANGLE around the centre becomes one texture
+// The trick is that nothing is 3D. For each pixel, its ANGLE around the center becomes one texture
 // coordinate and the RECIPROCAL of its distance becomes the other. Because 1/r grows without bound
-// as you approach the centre, the texture compresses toward a vanishing point, and adding time to
+// as you approach the center, the texture compresses toward a vanishing point, and adding time to
 // that coordinate pulls it toward the viewer. Perspective for the price of a divide.
 //
 // It is the polar vocabulary carried to its conclusion: `atan16` and `dist16` give the angle and
@@ -92,16 +92,20 @@ public:
                           ? static_cast<int32_t>(lut_.pitch(i) >> 6)
                           : static_cast<int32_t>(z) - cz;
                 } else {
-                    const int32_t dx = static_cast<int32_t>(x) - cx;
-                    const int32_t dy = static_cast<int32_t>(y) - cy;
-                    r = dist16(dx, dy);
-                    a = atan16(dy, dx);
-                    along = static_cast<int32_t>(z) - cz;
+                    // The same address the table would have held, under the same mapping.
+                    const auto m = PolarLut::mappingOf(polar);
+                    const auto ad = PolarLut::addressOf(m, static_cast<int32_t>(x) - cx,
+                                                        static_cast<int32_t>(y) - cy,
+                                                        static_cast<int32_t>(z) - cz);
+                    a = ad.angle;
+                    r = ad.radius;
+                    along = m == PolarLut::Mapping::Spherical ? static_cast<int32_t>(ad.pitch >> 6)
+                                                              : static_cast<int32_t>(z) - cz;
                 }
 
-                // 1/r is the depth coordinate: distant wall (small r) compresses toward the centre,
+                // 1/r is the depth coordinate: distant wall (small r) compresses toward the center,
                 // which is exactly the perspective foreshortening a real tunnel has. The +1 keeps
-                // the pixel at the very centre from dividing by zero.
+                // the pixel at the very center from dividing by zero.
                 const uint32_t depthCoord = (static_cast<uint32_t>(depth) * 4096u) / (r + 1);
 
                 // The wall corkscrews: rotating by depth means each ring is turned a little more
@@ -118,7 +122,7 @@ public:
                 const uint32_t v = depthCoord + (t >> 5) + static_cast<uint32_t>(along * 256);
                 const uint8_t tex = fbm8(u, v, octaves);
 
-                // Vignette by distance so the centre reads as far away rather than merely small.
+                // Vignette by distance so the center reads as far away rather than merely small.
                 uint8_t bri = 255;
                 if (vignette) {
                     const uint32_t maxR = static_cast<uint32_t>(cx > cy ? cx : cy) + 1;

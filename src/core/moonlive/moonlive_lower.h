@@ -372,7 +372,10 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
                 // down, and for recursion it is the enclosing function), so this binds a label and
                 // the assembler patches the displacement once every function is placed.
                 if (op.imm < 0 || op.imm >= ir.fnCount) break;
-                a.callLabel(fnLabel[op.imm]);
+                // `b` marks a call whose value the caller wants; the backend delivers it into
+                // dst, since which register holds it is ABI knowledge (Xtensa's call8 rotates the
+                // window, so the callee's a2 is the caller's a10).
+                a.callLabel(fnLabel[op.imm], reg(op.dst), op.b != 0);
                 break;
             }
             case IrOp::Ret:

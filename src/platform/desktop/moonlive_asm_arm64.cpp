@@ -311,7 +311,18 @@ void HostAssembler::ret() { emit32(0xd65f03c0u); }
 // calls nest and therefore recurse.
 //
 // Pass the host arguments on (the contract is with IrOp::CallScript in core).
-void HostAssembler::callLabel(Label l) {
+void HostAssembler::callLabel(Label l, Reg d, bool take) {
+    // The same preservation call() gives a builtin: the whole vreg pool, the host args and x30 to
+    // the stack, the result parked in x15 (outside the pool) across the restore. Without it a value
+    // computed before the call and used after it, `a() + b()`, read the second call's result twice.
+    emit32(0xa9b807e0u);   // stp x0, x1,  [sp, #-128]!
+    emit32(0xa9017be2u);   // stp x2, x30, [sp, #16]
+    emit32(0xa90723e3u);   // stp x3, x8,  [sp, #112]
+    emit32(0xa90217e4u);   // stp x4, x5,  [sp, #32]
+    emit32(0xa9031fe6u);   // stp x6, x7,  [sp, #48]
+    emit32(0xa9042be9u);   // stp x9, x10, [sp, #64]
+    emit32(0xa90533ebu);   // stp x11,x12, [sp, #80]
+    emit32(0xa9063bedu);   // stp x13,x14, [sp, #96]
     // Reloading them is a NO-OP on this backend as long as R0..R4 map onto the ABI argument
     // registers x0..x4 and `bl` leaves them alone, which is why removing these four instructions
     // does not fail a single test here while the same omission crashes an S3. Emitted anyway, so
@@ -319,6 +330,16 @@ void HostAssembler::callLabel(Label l) {
     for (uint8_t v = 0; v < kHostArgSlots; v++) spillLoad(static_cast<Reg>(v), hostArgSlot(v));
     addFixup(len_, l, FixKind::Call);
     emit32(0x94000000u);   // bl #0: the 26-bit imm is patched below
+    if (take) emit32(0xaa0003efu);   // mov x15, x0   (result → x15, outside the pool)
+    emit32(0xa94723e3u);   // ldp x3, x8,  [sp, #112]
+    emit32(0xa9463bedu);   // ldp x13,x14, [sp, #96]
+    emit32(0xa94533ebu);   // ldp x11,x12, [sp, #80]
+    emit32(0xa9442be9u);   // ldp x9, x10, [sp, #64]
+    emit32(0xa9431fe6u);   // ldp x6, x7,  [sp, #48]
+    emit32(0xa94217e4u);   // ldp x4, x5,  [sp, #32]
+    emit32(0xa9417be2u);   // ldp x2, x30, [sp, #16]
+    emit32(0xa8c807e0u);   // ldp x0, x1,  [sp], #128
+    if (take) emit32(0xaa0f03e0u | uint32_t(mr(d)));   // mov x<dst>, x15
 }
 
 void HostAssembler::patchBranches() {

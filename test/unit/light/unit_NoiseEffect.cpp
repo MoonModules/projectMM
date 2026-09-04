@@ -108,3 +108,16 @@ TEST_CASE("Noise survives a degenerate grid rather than faulting") {
     const auto f = render(0, 0, 1, 0, 3);
     CHECK(f.empty());
 }
+
+TEST_CASE("morph shows the same field in every slice, because time is its third axis") {
+    // The two motions divide the one spare axis between them: drift spends it on depth, morph on
+    // time. So a volumetric fixture under morph is the same field repeated, which is what the
+    // catalog card promises. The code briefly added a depth term here as well, which made morph a
+    // second drift and left the documentation wrong rather than the behavior.
+    const auto f = render(8, 8, 4, 1, 40);
+    const std::size_t slice = 8 * 8 * 3;
+    REQUIRE(f.size() >= slice * 4);
+    for (std::size_t s = 1; s < 4; s++)
+        for (std::size_t i = 0; i < slice; i++)
+            REQUIRE(f[i] == f[slice * s + i]);
+}

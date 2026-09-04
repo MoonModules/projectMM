@@ -61,11 +61,11 @@ inline uint8_t byteArg(uintptr_t a) {
 }
 
 // The ACTIVE palette, so a script follows the device's palette control exactly as a compiled
-// effect does — which is the whole point: before this, a script could only hard-code colour.
+// effect does, which is the whole point: before this, a script could only hard-code color.
 //
-// Deliberately NO hsv() alongside it. A hue wheel is how an effect picks colour while IGNORING
+// Deliberately NO hsv() alongside it. A hue wheel is how an effect picks color while IGNORING
 // the user's palette, which is the habit the compiled effects were moved off (47 of 52 read the
-// palette; the exceptions are effects where colour carries meaning, like the axis-identifying
+// palette; the exceptions are effects where color carries meaning, like the axis-identifying
 // red/green/blue in LinesEffect). Giving scripts hsv() would reintroduce it as the easy default.
 extern "C" inline uint32_t mm_light_paletteR(const uintptr_t* args, uint32_t, const uint8_t*) {
     return colorFromPalette(*Palettes::active(), byteArg(args[0]), byteArg(args[1])).r;
@@ -228,9 +228,9 @@ extern "C" inline uint32_t mm_light_escape(const uintptr_t* args, uint32_t, cons
 // is biased into 0..65535 with the zero line at 32768. A script that wants a coordinate scales the
 // result: `scale(sin(a), width)` sweeps the whole axis, which is the same `scale` a beat uses.
 // polarA(dx, dy) / polarR(dx, dy) — the POLAR pair (Angle, Radius), for an effect written around distance and
-// bearing from a centre rather than around x/y. Both take offsets that a script computes as
-// `x - cx`, which is unsigned and therefore wraps for a point left of centre: the builtins
-// re-centre it themselves (see below), so a script does not have to reason about the wrap.
+// bearing from a center rather than around x/y. Both take offsets that a script computes as
+// `x - cx`, which is unsigned and therefore wraps for a point left of center: the builtins
+// re-center it themselves (see below), so a script does not have to reason about the wrap.
 //
 // polarA() returns an angle16 (65536 = one turn), so it feeds straight into sin()/cos(). polarR()
 // returns the true distance, not the octagonal approximation, because a visibly non-circular
@@ -257,6 +257,18 @@ extern "C" inline uint32_t mm_light_fbm(const uintptr_t* args, uint32_t, const u
 // over the grid and starts reading as something moving through it. Three noise samples per call.
 extern "C" inline uint32_t mm_light_warp(const uintptr_t* args, uint32_t, const uint8_t*) {
     return warp8(uint32_t(args[0]), uint32_t(args[1]), static_cast<uint16_t>(uint32_t(args[2])), 1);
+}
+
+// fbm3(x, y, z, octaves) / warp3(x, y, z, strength) → the volumetric forms of the two field
+// compositions. The kernels underneath are the same ones the compiled effects call, and each is its
+// 2D form when z is 0, so a script can pass a light's depth unconditionally.
+extern "C" inline uint32_t mm_light_fbm3(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return fbm8(uint32_t(args[0]), uint32_t(args[1]), uint32_t(args[2]),
+                static_cast<uint8_t>(uint32_t(args[3])));
+}
+extern "C" inline uint32_t mm_light_warp3(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return warp8(uint32_t(args[0]), uint32_t(args[1]), uint32_t(args[2]),
+                 static_cast<uint16_t>(uint32_t(args[3])), 1);
 }
 
 // osc(rate, ms, shape) → a low-frequency oscillator, 0..65535, `rate` cycles per minute at time
@@ -666,7 +678,7 @@ inline void setDrawCanvas(const draw::Canvas& cv) MM_NONBLOCKING {
     if (s) s->canvas = cv;
 }
 
-/// setPaletteColor(x, y, index, brightness) → one pixel, coloured from the ACTIVE palette.
+/// setPaletteColor(x, y, index, brightness) → one pixel, colored from the ACTIVE palette.
 ///
 /// One call where a script used to write three: `paletteR/G/B` each returned a single channel, so
 /// a palette pixel cost three host calls AND three evaluations of whatever expression produced the
@@ -708,6 +720,21 @@ extern "C" inline uint32_t mm_light_setPalEntryHSV(const uintptr_t* args, uint32
     if (i >= Palette::kEntries) return 0;
     const RGB c = hsvToRgb(byteArg(args[1]), byteArg(args[2]), byteArg(args[3]));
     sink.fn(sink.ctx, static_cast<uint8_t>(i), c.r, c.g, c.b);
+    return 0;
+}
+
+// setPaletteColorZ(x, y, z, index, bri) - one light in a VOLUME, from the active palette.
+//
+// A separate name rather than an optional argument on setPaletteColor: a builtin's arity is exact
+// (the compiler checks `n != fn->argc`), so an optional one would be a change to the call path for
+// a case the fixture already tells apart. On a fixture with no depth z is 0 and the two agree.
+extern "C" inline uint32_t mm_light_setPaletteColorZ(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const draw::Canvas& cv = drawCanvas();
+    if (!cv.data) return 0;                       // no canvas installed (a layout, a modifier)
+    const uint32_t x = uint32_t(args[0]), y = uint32_t(args[1]), z = uint32_t(args[2]);
+    if (x >= uint32_t(cv.dims.x) || y >= uint32_t(cv.dims.y) || z >= uint32_t(cv.dims.z)) return 0;
+    draw::pixel(cv, Coord3D{lengthType(x), lengthType(y), lengthType(z)},
+                colorFromPalette(*Palettes::active(), byteArg(args[3]), byteArg(args[4])));
     return 0;
 }
 
@@ -1130,7 +1157,7 @@ inline const BuiltinTable& lightBuiltins() {
     t.add({"setRGB", 4, /*returns*/ false, BuiltinKind::Inline, nullptr, InlineOp::StoreElem});
     // setXYZ(x, y, z)         → write one POSITION (bounds-guarded). The same StoreElem as setRGB:
     // three values at index * stride, and what differs is the destination the binding hands run()
-    // (a colour buffer for an effect, a coordinate for a modifier), so one op serves both and the
+    // (a color buffer for an effect, a coordinate for a modifier), so one op serves both and the
     // engine stays free of any notion of what the three bytes mean.
     //
     // A different OP from setRGB, not the same one with an argument hidden: StoreFirst writes
@@ -1190,7 +1217,7 @@ inline const BuiltinTable& lightBuiltins() {
     // Mandelbrot with a zero seed, Julia otherwise. The one piece of maths a script cannot
     // express: it squares SIGNED values and script arithmetic is unsigned.
     t.add({"escape", 5, /*returns*/ true, BuiltinKind::Call, &mm_light_escape, {}, /*byRef*/ 0, /*byStr*/ 0, /*fixedArgs*/ 0x0f});
-    // polarA(dx, dy) / polarR(dx, dy) → polar from a centre. atan16 and dist16 already exist in
+    // polarA(dx, dy) / polarR(dx, dy) → polar from a center. atan16 and dist16 already exist in
     // math16.h. NOT named `angle`/`radius`: a script wants those for its own controls
     // (ring.mll and balls.mle both declare `radius`), and a builtin would shadow them. Exposing
     // them here is what lets a radial effect drop its precomputed lookup table.
@@ -1201,6 +1228,9 @@ inline const BuiltinTable& lightBuiltins() {
     // script reaches the same vocabulary rather than summing octaves by hand in the grammar.
     t.add({"fbm", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_fbm, {}});
     t.add({"warp", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_warp, {}});
+    // Their 3D forms, so a script samples through a volume rather than repeating one slice.
+    t.add({"fbm3", 4, /*returns*/ true, BuiltinKind::Call, &mm_light_fbm3, {}});
+    t.add({"warp3", 4, /*returns*/ true, BuiltinKind::Call, &mm_light_warp3, {}});
     // osc(rate, ms, shape) → an LFO, the unit every animated quantity is made of. Stateless, so
     // oscillators sharing a rate hold their relationship for as long as the device runs.
     t.add({"osc", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_osc, {}});
@@ -1215,9 +1245,12 @@ inline const BuiltinTable& lightBuiltins() {
     // follows from how the member was declared, so the two can no longer disagree.
     t.add({"addControl", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_addControl, {},
            /*byRef*/ 0x2, /*byStr*/ 0x1});
-    // setPaletteColor(x, y, i, bri) → one palette-coloured pixel. The form a script should reach
+    // setPaletteColor(x, y, i, bri) → one palette-colored pixel. The form a script should reach
     // for: one call, one brightness evaluation, and no buffer-layout arithmetic at the call site.
     t.add({"setPaletteColor", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_setPaletteColor, {}});
+    // The volumetric write: the same call with the light's depth, so a script paints a cube rather
+    // than its z = 0 slice.
+    t.add({"setPaletteColorZ", 5, /*returns*/ false, BuiltinKind::Call, &mm_light_setPaletteColorZ, {}});
     // setPalEntry(i,r,g,b) / setPalEntryHSV(i,h,s,v) -> write one of the sixteen ACTIVE palette
     // entries. A palette script's only output; a no-op in every other role, where no sink is
     // installed, so an effect calling it changes nothing rather than corrupting the palette.

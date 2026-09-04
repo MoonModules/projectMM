@@ -405,7 +405,7 @@ Uses the global palette. Origin: projectMM original; inspired by Atari's Pong (1
 
 <a id="aurora"></a>
 
-### Aurora 🔬 · 2D
+### Aurora 🔬 · 3D
 
 Several noise fields, each drifting on its own clock, read in polar coordinates and composited into curtains of light. Nothing is simulated: layers of the same field at different scales, moved by independent oscillators, interfere with each other, and the interference is what reads as curtains folding through one another. The strongest layer at each pixel wins, so the layers stay distinct instead of averaging into haze, and which layer won picks the region of the palette. Every palette gives a different aurora.
 

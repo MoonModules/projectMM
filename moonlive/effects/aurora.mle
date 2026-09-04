@@ -7,7 +7,7 @@ class AuroraEffect {
   byte twist = 40;
   byte contrast = 150;
 
-  int dimensions() { return 2; }
+  int dimensions() { return 3; }
 
   string tags() { return "💫"; }
 
@@ -22,25 +22,35 @@ class AuroraEffect {
   void tick() {
     int driftA = div(osc(speed, t, 2), 64);
     int driftB = div(osc(mod(speed * 3, 127) + 1, t, 2), 64);
+    int driftC = div(osc(mod(speed * 7, 113) + 1, t, 2), 64);
 
-    for (int y = 0; y < height; y = y + 1) {
-      for (int x = 0; x < width; x = x + 1) {
-        int a = polarA(x - div(width, 2), y - div(height, 2));
-        int r = polarR(x - div(width, 2), y - div(height, 2));
-        a = div(a + r * twist, 64) * zoom;
+    for (int z = 0; z < depth; z = z + 1) {
+      for (int y = 0; y < height; y = y + 1) {
+        for (int x = 0; x < width; x = x + 1) {
+          int a = polarA(x - div(width, 2), y - div(height, 2));
+          int r = polarR(x - div(width, 2), y - div(height, 2));
+          a = div(a + r * twist, 64) * zoom;
 
-        int best = warp(a, r * zoom + driftA, fold * 4);
-        int other = warp(a + zoom * 3, r * zoom + driftB + 4096, fold * 4);
+          int d = (z - div(depth, 2)) * zoom;
 
-        int index = 40;
-        if (other > best) {
-          best = other;
-          index = 170;
-        }
-        if (best > contrast) {
-          setPaletteColor(x, y, index, div((best - contrast) * 255, 256 - contrast));
-        } else {
-          setPaletteColor(x, y, index, 0);
+          int best = warp3(a, r * zoom + driftA, d, fold * 4);
+          int other = warp3(a + zoom * 3, r * zoom + driftB + 4096, d, fold * 4);
+
+          int index = 40;
+          if (other > best) {
+            best = other;
+            index = 170;
+          }
+          other = warp3(a + zoom * 6, r * zoom + driftC + 8192, d, fold * 4);
+          if (other > best) {
+            best = other;
+            index = 100;
+          }
+          if (best > contrast) {
+            setPaletteColorZ(x, y, z, index, div((best - contrast) * 255, 256 - contrast));
+          } else {
+            setPaletteColorZ(x, y, z, index, 0);
+          }
         }
       }
     }

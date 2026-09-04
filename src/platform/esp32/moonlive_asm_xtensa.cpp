@@ -164,7 +164,14 @@ void XtensaAssembler::addFixup(size_t at, Label label, FixKind kind) {
 // explicit sp adjust plus an s32i of a0). Reaching a windowed callee with call0 hands it a frame it
 // never allocated. The callee owes the 32-byte window reserve like any other call8 frame, which its
 // own per-function prologue provides.
-void XtensaAssembler::callLabel(Label l) {
+void XtensaAssembler::callLabel(Label l, Reg d, bool take) {
+    // The same preservation call() gives a builtin. The window protects a2..a7 (R0..R5) by itself;
+    // a8..a11 (R6..R9) become the callee's a0..a3 and are overwritten, so they go to the frame first,
+    // in the slots call() owns. Without this a value computed before the call and used after it,
+    // `a() + b()`, read the second call's result twice.
+    auto s32i = [&](uint8_t r, uint8_t off4){ const uint8_t enc[3]={uint8_t((r<<4)|2),0x61,off4}; emit(enc,3); };
+    auto l32i = [&](uint8_t r, uint8_t off4){ const uint8_t enc[3]={uint8_t((r<<4)|2),0x21,off4}; emit(enc,3); };
+    s32i(8, 4); s32i(9, 5); s32i(10, 6); s32i(11, 7);
     // Pass the host arguments on (the contract is with IrOp::CallScript in core). The Xtensa
     // delta: call8 ROTATES the window by 8, so the callee's a2..a6 are this routine's a10..a14 and
     // the arguments are written to the OUTGOING window, not to a2..a6, which stay this frame's own.
@@ -180,6 +187,11 @@ void XtensaAssembler::callLabel(Label l) {
     // xtensa-esp32-elf-as, which encodes `call8 target` at pc 6 with target 0 as a5 ff ff.
     const uint8_t enc[3] = {0x25, 0x00, 0x00};
     emit(enc, 3);
+    // The result lands in a10, which the restore below overwrites: park it in the frame first, the
+    // slot call() already uses for exactly this, then deliver it once the pool is back.
+    if (take) s32i(10, kResultSlot);
+    l32i(8, 4); l32i(9, 5); l32i(10, 6); l32i(11, 7);
+    if (take) l32i(ar(d), kResultSlot);
 }
 
 // movi aD, #imm. The narrow byte form carries only 0..255, so a wider constant (a uint16 like

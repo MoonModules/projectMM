@@ -45,7 +45,7 @@ constexpr size_t kEffectCatalogCount = 25;
 /// A dimension of 0 means the script says nothing, so the DEVICE decides the default.
 constexpr unsigned char kEffectCatalogDim[] = {
     1,
-    2,
+    3,
     2,
     2,
     1,

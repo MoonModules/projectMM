@@ -135,7 +135,9 @@ public:
     /// Call a function in THIS block, by label: the script-to-script call. The return address is
     /// linked into x30 (arm64 `bl`) or pushed on the stack (x86-64 `call rel32`); either way the
     /// callee's prologue preserves it, which is what lets the call nest.
-    void callLabel(Label l);
+    /// Every caller vreg is preserved across it exactly as call() does for a builtin, and the
+    /// return value is delivered into `d` when `take` is set.
+    void callLabel(Label l, Reg d = R0, bool take = false);
     void ret();
 
 private:

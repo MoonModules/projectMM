@@ -110,12 +110,45 @@ public:
         list.addSelect("mapping", c.mapping, kMappingOptions, 3);
     }
 
+    /// The polar address of one light, computed rather than read: what an effect uses when the table
+    /// was declined (a device too tight for it) or switched off.
+    ///
+    /// Takes the mapping, so the fallback renders the SAME composition the table would have. An
+    /// earlier version computed cylindrical unconditionally, so a fixture set to spherical or radial
+    /// silently reverted to cylindrical the moment memory ran short: the effect kept working and
+    /// quietly showed a different thing, which is worse than not working.
+    struct Address {
+        angle16  angle;   ///< around the axis
+        uint32_t radius;  ///< in pixels from the center
+        angle16  pitch;   ///< elevation, under Spherical; 0 otherwise
+    };
+    /// The mapping a Controls block selects, clamped to one this class defines. The control is a
+    /// select index and a saved config can hold a value from a build that offered more of them, so
+    /// the clamp is what keeps an unknown index rendering as cylindrical rather than reading past
+    /// the switch. One home: the table builder and every effect's computed fallback ask here.
+    static Mapping mappingOf(const Controls& c) {
+        return static_cast<Mapping>(c.mapping > 2 ? 0 : c.mapping);
+    }
+
+    static Address addressOf(Mapping mapping, int32_t dx, int32_t dy, int32_t dz) {
+        switch (mapping) {
+            case Mapping::Radial:
+                return {0, dist16(dist16(dx, dy), dz), 0};
+            case Mapping::Spherical:
+                return {atan16(dy, dx), dist16(dist16(dx, dy), dz),
+                        atan16(dz, static_cast<int32_t>(dist16(dx, dy)))};
+            case Mapping::Cylindrical:
+            default:
+                return {atan16(dy, dx), dist16(dx, dy), 0};
+        }
+    }
+
     /// Build (or release) the table for a fixture of this size, per the controls. The one call an
     /// effect makes from prepare().
     bool prepareFor(const Controls& c, lengthType w, lengthType h, lengthType d) {
         if (!c.use) { release(); return false; }
         return prepare(static_cast<uint16_t>(w), static_cast<uint16_t>(h), static_cast<uint16_t>(d),
-                       c.wide, static_cast<Mapping>(c.mapping > 2 ? 0 : c.mapping));
+                       c.wide, mappingOf(c));
     }
 
     /// The 2D form. A separate overload rather than a defaulted depth, because `prepare(w, h, true)`
@@ -182,31 +215,13 @@ public:
                 const int32_t dy = static_cast<int32_t>(y) - cy;
                 const int32_t dz = static_cast<int32_t>(z) - cz;
 
-                // The three projections differ only here: what the angle means and what the radius
-                // measures. Everything below is common, which is why adding one costs a case.
-                angle16 a = 0;
-                uint32_t r = 0;
-                angle16 pitch = 0;
-                switch (mapping) {
-                    case Mapping::Radial:
-                        // No angle at all: distance from the center, so the field reads as shells.
-                        r = dist16(dist16(dx, dy), dz);
-                        break;
-                    case Mapping::Spherical:
-                        // Around and up: the second angle is the elevation above the xy plane, so a
-                        // sphere's surface maps onto the field evenly rather than pinching.
-                        a = atan16(dy, dx);
-                        r = dist16(dist16(dx, dy), dz);
-                        pitch = atan16(dz, static_cast<int32_t>(dist16(dx, dy)));
-                        break;
-                    case Mapping::Cylindrical:
-                    default:
-                        // The 2D address, with depth left to the caller: identical to a panel's at
-                        // every z, which is what makes this the default.
-                        a = atan16(dy, dx);
-                        r = dist16(dx, dy);
-                        break;
-                }
+                // Through addressOf, the same call the computed fallback makes: the table is a
+                // CACHE of that function, so a second copy of the projections here is the one way
+                // the two could disagree, and unit_PolarLut_equivalence pins that they do not.
+                const Address ad = addressOf(mapping, dx, dy, dz);
+                angle16 a = ad.angle;
+                uint32_t r = ad.radius;
+                angle16 pitch = ad.pitch;
                 // Scale the radius to full range against the furthest corner, so `radius` is a
                 // position from center (0) to edge (full scale) rather than a pixel count. Both
                 // steps ROUND rather than truncate: a caller scaling back to pixels truncates twice

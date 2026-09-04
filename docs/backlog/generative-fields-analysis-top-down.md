@@ -346,7 +346,59 @@ holding several coordinates meets the 16-slot ceiling faster (§ 8b there).
 Ordering note: this is the step that makes a 3D script possible, so it follows phase 1b rather than
 leading it. A script that can hold a coordinate but calls kernels that ignore z has gained nothing.
 
-### Phase 2: the 16-bit Layer (large, cross-cutting)
+### Phase 2: the 16-bit Layer: BUILT, MEASURED, STASHED (2026-09-04)
+
+**Decision: the wide frame buffer is not the way to precision; phases 3 and 4 start in 8 bits.**
+The whole phase was built and verified (every golden matched through a narrowed hash, every driver
+and both preview paths read at the layer's width), then measured, and the measurement reversed the
+premise. It is held in a local `git stash` (`2026-09-04 phase 2 ...`) pending the product owner's
+call on where it should live: a stash is local and unpushed, so it does not survive a drop or a
+fresh clone, and "recoverable if the wall says otherwise" needs a branch or a tag to be true.
+
+**The number.** A noise field plus the driver's per-light read, the same benchmark on both targets:
+
+| | 8-bit | 16-bit | cost |
+|---|---|---|---|
+| ESP32-S3, 128x128 | 18.25 ms | 28.58 ms | **+56.5%** (effect +50%, driver read +63%) |
+| desktop arm64, 128x128 | 0.48 ms | 0.76 ms | +57.9% |
+
+The two agree, which is rare for a host benchmark against Xtensa and is what makes the number
+trustworthy. On the S3 the driver read was the LARGER half: the per-light reassembly of two bytes
+into a channel is what an in-order core punishes. The 8-bit dispatch itself cost nothing measurable
+(a loop-invariant branch), so the work was correct; it was aimed one layer too high.
+
+**Why the premise was wrong.** Phase 2 existed to prepare phases 3 and 4. Phase 4's own first step is
+temporal dithering, and phase 3's trails need a precise ACCUMULATOR, not a wide frame buffer (the
+Wave effect already does this with a private plane). That is also how the ANIMartRIX and FlowFields
+engines work: float per pixel, quantized to 8 bits in the very last step, dithered. The precision
+lives in the computation, not in the frame. A wide frame buffer buys smoother gradients, which is
+visible on Rainbow across a 768-wide panel and nowhere else we looked; phases 3 and 4 add motion and
+structure, not gradients.
+
+**What stayed in the tree (all correct at 8 bits, all pinned):** the three CodeRabbit findings on
+PR 95 (`warpImpl` unsigned wrap, morph without a depth term, the polar fallback keeping its mapping,
+each with a test), and a golden for Fire, which had none. What went to the stash: `Buffer`/`Canvas`
+width, `putChannel`/`getChannel`, the wide `Correction` path, every driver's width dispatch, the
+16-bit noise/palette/color/LUT kernels, and nine effects moved onto `draw::pixel` (see below).
+
+**Two findings to carry forward.**
+- **A raw byte write is invisible to a grep for the draw API.** Nine effects address `buffer()`
+  directly and use no draw call; the plan counted seven. Grep for `buffer()`, `data()[`, `* cpl` and
+  `memcpy` as well.
+- **Moving an effect onto `draw::pixel` is a hot-path REGRESSION**, not a cleanup. Measured on the
+  desktop over a 256x256 RGB frame: the row pointer the effects use writes a light in 0.26 ns;
+  `draw::pixel` with x and y already known costs +170% (the `offsetOf` multiplies and the bounds
+  check per light); a flat-index effect that first reconstructs x, y, z with three divides and then
+  calls it costs +327%. Step 5 below is therefore withdrawn as written. If uniformity is wanted, the
+  draw API needs a row or span form that an effect can advance, not a per-light coordinate write.
+
+**Should the wide buffer ever come back**, the stash holds a complete, tested implementation whose
+only open item was the MoonLive store (a script's `StoreElem` writes three consecutive bytes). The
+design for that is worked out: keep byte stores, emit a second one per channel, no new encodings.
+
+The original phase plan follows, kept as the record of what was built and measured.
+
+#### Phase 2 as planned (superseded)
 1. `Buffer`: bytes per channel; `Canvas`: sample width; `Layer::prepare()` picks the width by the allocation check (option B) or fixed 16 (option A), per the sign-off.
 2. `draw.h`: every `Canvas` and `Buffer` primitive as one template instantiated for both widths; `get`/`pixel` widen 8-bit RGB on write and narrow on read for the existing callers.
 3. `BlendMap`: both paths templated; the output buffer follows the Layer's width.

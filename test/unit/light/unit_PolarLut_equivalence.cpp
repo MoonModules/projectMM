@@ -7,6 +7,7 @@
 // compared pixel by pixel. This is the evidence behind the re-baselined golden.
 
 #include "doctest.h"
+#include "light/effects/AuroraEffect.h"
 #include "light/effects/PolarNoiseEffect.h"
 #include "light/effects/SpiralEffect.h"
 #include "light/effects/TunnelEffect.h"
@@ -25,7 +26,8 @@ namespace {
 /// Render one effect for `frames` and return the final buffer. `EffectT` is any effect carrying the
 /// polar-table controls, so the same comparison covers every effect that reads the address.
 template <typename EffectT>
-std::vector<uint8_t> render(lengthType w, lengthType h, bool useTable, bool wide = false, uint16_t frames = 60) {
+std::vector<uint8_t> render(lengthType w, lengthType h, bool useTable, bool wide = false,
+                            uint16_t frames = 60, lengthType d = 1, uint8_t mapping = 0) {
     platform::setTestNowMs(1000);
     Layouts layouts;
     GridLayout grid;
@@ -33,7 +35,8 @@ std::vector<uint8_t> render(lengthType w, lengthType h, bool useTable, bool wide
     EffectT effect;
     effect.polar.use = useTable;
     effect.polar.wide = wide;
-    grid.width = w; grid.height = h; grid.depth = 1;
+    effect.polar.mapping = mapping;
+    grid.width = w; grid.height = h; grid.depth = d;
     layouts.addChild(&grid);
     layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
@@ -99,4 +102,16 @@ TEST_CASE("an effect still renders when the polar table cannot be built") {
     std::size_t lit = 0;
     for (uint8_t v : exact) lit += v > 0 ? 1 : 0;
     CHECK(lit > exact.size() / 4);
+}
+
+TEST_CASE("the computed fallback keeps the mapping the table would have used") {
+    // A device too tight for the table must show the SAME composition, not a different one. The
+    // fallback computed cylindrical unconditionally at first, so a fixture set to spherical or
+    // radial silently reverted the moment memory ran short: still rendering, quietly wrong.
+    for (uint8_t mapping = 0; mapping < 3; mapping++) {
+        const auto tabled = render<AuroraEffect>(8, 8, true,  /*wide=*/true, 40, 5, mapping);
+        const auto exact  = render<AuroraEffect>(8, 8, false, /*wide=*/false, 40, 5, mapping);
+        const Diff d = compare(tabled, exact, 0);
+        CHECK(d.worst == 0);
+    }
 }

@@ -35,7 +35,7 @@ Five hard limits, all found by hitting them:
 | script state | **64 bytes** shared by all members | `kCtrlBytes`, `MoonLiveBuiltins.h:132` |
 | distinct members | **8** | `kMaxCtrls`, same file |
 | branch labels | **16** (an `if` or `for` takes up to 2) | `kIrLabels`, `MoonLiveIr.h:201` |
-| frame slots | **16**, shared by live variables, loop counters and staged call arguments | `kMaxLocals`, `MoonLiveIr.h` |
+| frame slots | **32**, shared by live variables, loop counters and staged call arguments ✅ | `kMaxLocals`, `MoonLiveIr.h` |
 | ~~numeric types~~ | ~~`uint8_t`, `uint16_t`, `int16_t`~~ → **`int`, `byte`, `bool`, `fixed`, `string`** ✅ | still no float: `fixed` is Q16.16 |
 | ~~builtin table~~ | ~~16, and 16 used~~ → **64** ✅ | `BuiltinTable::kMax` — raised, with an overflow assert |
 
@@ -419,17 +419,20 @@ with different state silently does the wrong thing. It is also what makes helper
 Script functions DO exist and ship: `balls.mle` calls `drawBall()`, `crosshair.mle` calls three
 helpers, and every layout and modifier is one. Recursion works. Three limits sit on top of them, and
 `aurora.mle` hit all three at once writing a `bright(v)` helper to apply one contrast window to two
-layers (2026-09-04):
+layers (2026-09-04). **The return value shipped the same day**, so two remain:
 
 | limit | what the compiler says |
 |---|---|
 | no parameters | `a script function takes no arguments yet` |
-| no return value | `a script function returns nothing yet` |
 | no forward calls: a helper must be declared ABOVE its caller | `unknown function`, with the column but not the name |
 
-The third is the cheapest to build and the most confusing to meet, since the message is the one an
-actual typo produces: a second pass over the class body resolves it, which the code comment names as
-the reason it is refused rather than half-supported.
+A function may now RETURN a value: `int f() { return ...; }` and the call is an expression. Each
+backend's `callLabel` preserves the whole vreg pool and delivers the result into the destination
+register, so a value survives the calls that follow it in the same expression.
+
+The forward call is the cheapest to build and the most confusing to meet, since the message is the
+one an actual typo produces: a second pass over the class body resolves it, which the code comment
+names as the reason it is refused rather than half-supported.
 
 Parameters and returns also relieve § 8b: a helper's variables are live only inside it, so factoring
 a loop body into a function is how a script stays under the frame budget.
@@ -496,9 +499,8 @@ each call's staged arguments drawn from the same 16.
 So the real cost is **stack**, not encoding: each slot is 4 bytes of frame on the render task, and
 `kAsmLabels`/`kAsmFixups` next door carry the warning that this project has already bootlooped a P4
 on an oversized stack frame. 16 slots is 64 bytes; 32 would be 128. That is a cheap change on its
-face, and the honest next step is to MEASURE the deepest compile-chain frame at 32 the way the
-`kAsmLabels` note measured 48/96, then pick a number. Worth doing together with § 8, since both are
-"probably just a constant" and both want the same measurement.
+face, and the measurement settled it: **`kMaxLocals` is 32** (2026-09-04), 128 bytes of frame, and
+the encoding was never the limit on any backend.
 
 ### 9. Division: ✅ *shipped*
 
