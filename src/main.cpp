@@ -44,6 +44,7 @@
 #include "light/effects/SolidEffect.h"
 #include "light/effects/StarSkyEffect.h"
 #include "light/effects/SdfShapesEffect.h"
+#include "light/effects/AuroraEffect.h"
 #include "light/effects/PolarNoiseEffect.h"
 #include "light/effects/WaterRippleEffect.h"
 #include "light/effects/TunnelEffect.h"
@@ -237,6 +238,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::SineEffect>("SineEffect", "light/effects.md#sine");
     mm::ModuleFactory::registerType<mm::SolidEffect>("SolidEffect", "light/effects.md#solid");
     mm::ModuleFactory::registerType<mm::SdfShapesEffect>("SdfShapesEffect", "light/effects.md#sdfshapes");
+    mm::ModuleFactory::registerType<mm::AuroraEffect>("AuroraEffect", "light/effects.md#aurora");
     mm::ModuleFactory::registerType<mm::PolarNoiseEffect>("PolarNoiseEffect", "light/effects.md#polarnoise");
     mm::ModuleFactory::registerType<mm::WaterRippleEffect>("WaterRippleEffect", "light/effects.md#waterripple");
     mm::ModuleFactory::registerType<mm::TunnelEffect>("TunnelEffect", "light/effects.md#tunnel");

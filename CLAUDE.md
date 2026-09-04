@@ -194,6 +194,22 @@ the fastest loop, and anything the desktop can prove (UI, logic, tests) is prove
 through a multi-minute compile and a 60-second flash. A device build comes after the desktop is
 clean, and only for what the desktop cannot show: the platform layer, timing, memory, real hardware.
 
+**ESP32 build and flash: ONLY when the product owner approves.** Not "when it seems useful", not to
+confirm something compiles, not at the end of a phase, not to take a measurement the agent thinks is
+interesting. The PO says when a board is written to, every time. Ask, then wait. This is the rule an
+agent breaks by being helpful, and it has been broken repeatedly in one session.
+
+**Desktop build and test: only when needed as a prerequisite to continue.** A build earns its place
+when the next step cannot happen without it: code that must compile before it can be measured, a test
+that must run before its result can be read. Not after every edit, and not to re-confirm what the
+last build already proved.
+
+**Fast cycles: be sparse with anything slow.** The general form, applying to every expensive step:
+ESP32 builds, full-suite runs, scenario runs, gate lists, repo-wide sweeps. Run the cheapest thing
+that answers the question at hand (one test case, one check), and save the heavy step for when its
+answer is actually needed or the PO asks. A minute per step compounds across a session into the PO
+waiting instead of working.
+
 **Bench boards are free test rigs.** Build and flash freely to verify work; re-probe ports first. A *rigorous* change (anything that could brick, boot-loop, or wipe a board: flash erases, boot/partition/build-config changes, a first flash of an untested board) gets a one-sentence heads-up and a go-ahead first — the test is reversibility.
 
 **Invite the product owner to test, then STOP.** If the PO could see or judge the result, hand it over ("running on X, look at Y") and wait for their observation before concluding, documenting, or moving on. Leave the state running; don't revert, reflash, or reconfigure what they were about to look at.

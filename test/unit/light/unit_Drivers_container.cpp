@@ -4,6 +4,7 @@
 #include "light/drivers/Drivers.h"
 #include "light/drivers/LightPresetsModule.h"   // the non-deletable boot-wired preset library
 #include "../core/conditional_controls.h"   // mm::test::setControlValue
+#include "platform/platform.h"                 // gpioRead: the desktop reads back what gpioWrite put there
 
 #include <cstring>
 
@@ -206,4 +207,31 @@ TEST_CASE("a probe Drivers (controls read, never prepared) leaves the scripted-p
     CHECK(mm::LivePalettes::count() == 1);
     CHECK(std::strcmp(mm::LivePalettes::nameAt(0), "running.mlp") == 0);
     mm::LivePalettes::clear();
+}
+
+// The power relay is the physical expression of "the lights are off", and brightness 0 is off as
+// much as `on` = false is: a WLED-style client says off by sending bri 0 without touching `on`, and
+// a strip at zero still draws its idle current through a closed relay. So the relay opens at
+// brightness 0 and closes again the moment brightness returns, with `on` unchanged either way.
+TEST_CASE("the relay opens at brightness 0 and closes again when brightness returns") {
+    mm::platform::clearTestGpioLevel();
+    mm::Drivers drivers;
+    std::strcpy(drivers.relayPins, "12");
+    drivers.on = true;
+    drivers.brightness = 100;
+    drivers.onControlChanged("relayPins");            // entering the pin closes the relay at once
+    CHECK(mm::platform::gpioRead(12));
+
+    drivers.brightness = 0;
+    drivers.onControlChanged("brightness");
+    CHECK_FALSE(mm::platform::gpioRead(12));          // off by brightness, `on` still true
+
+    drivers.brightness = 1;
+    drivers.onControlChanged("brightness");
+    CHECK(mm::platform::gpioRead(12));                // the smallest non-zero brightness is on
+
+    drivers.on = false;
+    drivers.onControlChanged("on");
+    CHECK_FALSE(mm::platform::gpioRead(12));          // and `on` still opens it whatever brightness says
+    mm::platform::clearTestGpioLevel();
 }

@@ -1,0 +1,48 @@
+// Aurora: layered noise curtains, each drifting on its own clock, read around the center.
+
+class AuroraEffect {
+  byte speed = 30;
+  byte zoom = 40;
+  byte fold = 60;
+  byte twist = 40;
+  byte contrast = 150;
+
+  int dimensions() { return 2; }
+
+  string tags() { return "💫"; }
+
+  void defineControls() {
+    addControl("speed", speed, 0, 120); // how fast the curtains drift
+    addControl("zoom", zoom, 1, 255); // noise cells across the grid
+    addControl("fold", fold, 0, 255); // how far the field folds over itself
+    addControl("twist", twist, 0, 255); // how much the radius leans the curtains
+    addControl("contrast", contrast, 0, 255); // how much of the field lights
+  }
+
+  void tick() {
+    int driftA = div(osc(speed, t, 2), 64);
+    int driftB = div(osc(mod(speed * 3, 127) + 1, t, 2), 64);
+
+    for (int y = 0; y < height; y = y + 1) {
+      for (int x = 0; x < width; x = x + 1) {
+        int a = polarA(x - div(width, 2), y - div(height, 2));
+        int r = polarR(x - div(width, 2), y - div(height, 2));
+        a = div(a + r * twist, 64) * zoom;
+
+        int best = warp(a, r * zoom + driftA, fold * 4);
+        int other = warp(a + zoom * 3, r * zoom + driftB + 4096, fold * 4);
+
+        int index = 40;
+        if (other > best) {
+          best = other;
+          index = 170;
+        }
+        if (best > contrast) {
+          setPaletteColor(x, y, index, div((best - contrast) * 255, 256 - contrast));
+        } else {
+          setPaletteColor(x, y, index, 0);
+        }
+      }
+    }
+  }
+}

@@ -8,19 +8,18 @@
 using namespace mm;
 
 // Determinism: the same coordinate always gives the same value (a pure function of position),
-// so a field is reproducible frame to frame and across the 1D/2D/3D entry points at z/y = 0.
+// so a field is reproducible frame to frame and across the 2D/3D entry points at z = 0.
 TEST_CASE("noise: inoise8 is deterministic and the lower-D calls agree at zero on the extra axes") {
     CHECK(inoise8(1234u) == inoise8(1234u));
     CHECK(inoise8(50u, 80u) == inoise8(50u, 80u));
     CHECK(inoise8(7u, 9u, 11u) == inoise8(7u, 9u, 11u));
-    // 2D at y=0 equals 1D at the same x (the hash uses 0 for the absent axes in both).
-    CHECK(inoise8(300u, 0u) == inoise8(300u));
+    // 1D is NOT 2D at y=0: it draws ±1 gradients of its own (core/noise.h says why).
     // 3D at z=0 equals 2D at the same (x,y).
     CHECK(inoise8(640u, 128u, 0u) == inoise8(640u, 128u));
 }
 
-// Smoothness: neighbouring positions WITHIN a cell (sub-256 steps) differ only a little — that's
-// what makes it value noise rather than a raw hash (which would jump randomly every step).
+// Smoothness: neighboring positions WITHIN a cell (sub-256 steps) differ only a little: that's
+// what makes it noise rather than a raw hash (which would jump randomly every step).
 TEST_CASE("noise: inoise8 varies smoothly inside a cell") {
     // Walk across one cell (x from 0x100 to 0x1FF — cell index 1) in small steps; consecutive
     // samples must not jump wildly. (Across a cell BOUNDARY it can change more — that's expected.)
@@ -89,9 +88,42 @@ TEST_CASE("16-bit interpolation stays exact across the full range") {
 }
 
 TEST_CASE("16-bit noise is smooth where the 8-bit form would step") {
-    // The whole point of the tier: sampling finer than the 8-bit LUT resolves must produce
-    // intermediate values rather than a staircase.
+    // The whole point of the tier: sampling finer than an 8-bit fraction resolves must produce
+    // intermediate values rather than a staircase. Four cells along x at a fixed y, sixteen samples
+    // per 8-bit step: a field stepping at 8 bits could show at most 4 * 256 distinct values.
     std::set<uint16_t> values;
-    for (uint32_t f = 0; f < 256; f++) values.insert(inoise16(0x10000u + f * 16u));
-    CHECK(values.size() > 150);       // a stepped field repeats a handful; rounding costs a few
+    for (uint32_t f = 0; f < 4u * 4096u; f++) values.insert(inoise16(0x10000u + f * 16u, 0x18000u));
+    CHECK(values.size() > 2000);
+}
+
+TEST_CASE("fbm keeps its full range however many octaves are summed") {
+    // Octaves are near-independent, so their spread grows like the root of the sum of squares while
+    // the normalizer divides by the sum of amplitudes. Left uncorrected the field narrows with every
+    // octave added: 4 octaves measured 54..199 of 0..255, so an effect stretching the top of the
+    // field could never reach full brightness and every fbm read flatter than the noise under it.
+    for (uint8_t octaves = 1; octaves <= 4; octaves++) {
+        uint8_t lo = 255, hi = 0;
+        for (uint32_t y = 0; y < 1200; y += 7)
+            for (uint32_t x = 0; x < 1200; x += 7) {
+                const uint8_t v = fbm8(x * 40, y * 40, octaves);
+                lo = v < lo ? v : lo;
+                hi = v > hi ? v : hi;
+            }
+        CHECK(lo < 32);        // reaches the dark end
+        CHECK(hi > 224);       // and the bright end, at every octave count
+    }
+}
+
+TEST_CASE("16-bit fbm keeps its range too") {
+    for (uint8_t octaves = 1; octaves <= 4; octaves++) {
+        uint16_t lo = 65535, hi = 0;
+        for (uint32_t y = 0; y < 900; y += 7)
+            for (uint32_t x = 0; x < 900; x += 7) {
+                const uint16_t v = fbm16(x * 2600, y * 2600, octaves);
+                lo = v < lo ? v : lo;
+                hi = v > hi ? v : hi;
+            }
+        CHECK(lo < 8192);
+        CHECK(hi > 57343);
+    }
 }

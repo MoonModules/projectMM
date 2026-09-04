@@ -298,7 +298,7 @@ TEST_CASE("hashInt is a pure function of its inputs") {
     CHECK(hashInt(5, 9, 0, 42) == hashInt(5, 9, 0, 42));
 }
 
-TEST_CASE("hashInt gives neighbouring pixels unrelated values") {
+TEST_CASE("hashInt gives neighboring pixels unrelated values") {
     // Adjacent inputs must not produce adjacent outputs, or a dissolve would appear in stripes.
     int differing = 0;
     for (uint32_t x = 0; x < 64; x++)

@@ -159,7 +159,7 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | `mod(a, b)` | `a % b` — the wrap a cyclic animation needs |
 | `beat(bpm, t)` | a `0..65535` sawtooth at `bpm` |
 | `beatsin(bpm, t, high)` | a sine `0..high` at `bpm` |
-| `noise(x, y, z)` | `0..255` value noise at that point — the field behind fire, clouds and plasma |
+| `noise(x, y, z)` | `0..255` gradient noise at that point, the field behind fire, clouds and plasma |
 | `scale(value, n)` | a `0..65535` value onto `0..n-1` — lands a wave on an axis |
 | `sin(angle)`, `cos(angle)` | the circle; one turn is `0..65535`, result biased to `1..65535` centered at 32768 |
 | `turn(n)` | one revolution split `n` ways — the angle step for placing `n` points on a circle |
@@ -171,6 +171,9 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | `smin(a, b, k)` | the smooth minimum of two distances, so shapes melt into one surface rather than overlapping |
 | `fade(amt)` | dim every light toward black, FastLED's `fadeToBlackBy`. The trail primitive |
 | `polarA(dx, dy)`, `polarR(dx, dy)` | angle and distance from a center, for a radial effect |
+| `fbm(x, y, octaves)` | octaves of noise summed at doubling frequency and halving amplitude, `0..255`: the cloud, smoke and terrain field. `octaves` is the cost knob, one noise sample each |
+| `warp(x, y, strength)` | the field sampled where the field itself displaced it, `0..255`: the flowing, marbled look. Three noise samples |
+| `osc(rate, ms, shape)` | a low-frequency oscillator, `0..65535`, at `rate` cycles per minute. Shapes: 0 sine, 1 triangle, 2 sawtooth, 3 square. Stateless, so two oscillators sharing a rate hold their phase relationship |
 | `escape(cx, cy, jx, jy, iters)` | the Mandelbrot/Julia escape count, `0..255`, `0` inside the set. Zero seed = Mandelbrot; the four coordinates are `fixed`, so uv output flows straight in. The one loop a script cannot write: it squares signed values in 64 bits |
 | `setPaletteColor(x, y, index, bri)` | one light from the ACTIVE palette, in one call |
 | `paletteR(i, bri)`, `paletteG`, `paletteB` | one palette channel, when a script needs the value rather than a pixel |

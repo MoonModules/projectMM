@@ -6,7 +6,7 @@
 namespace mm {
 
 // Author: FastLED inoise field (Mark Kriegsman)
-/// Smooth animated value-noise effect (3D on volumetric layouts).
+/// Smooth animated gradient-noise effect (3D on volumetric layouts).
 /// @card NoiseEffect.gif
 class NoiseEffect : public EffectBase {
 public:
@@ -69,8 +69,8 @@ public:
 
 private:
     BeatPhase phase_;
-    // The value-noise field itself (hash + smoothstep + bi/trilinear interp) is the shared
-    // inoise8 in core/noise.h — this effect just scales coordinates into it and colors the
+    // The gradient-noise field itself (lattice hash, gradient dot products, quintic fade, bi- or
+    // trilinear blend) is the shared inoise8 in core/noise.h: this effect just scales coordinates into it and colors the
     // result through the palette.
 };
 

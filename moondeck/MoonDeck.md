@@ -204,6 +204,17 @@ The ESP32 half reads `esp32/monitor.log`, and refreshes it by opening the serial
 
 In `--commit` mode it also writes the repo-health snapshot (below), reusing the tick/FPS it just measured.
 
+### bench_kernels
+
+Kernel micro-bench: nanoseconds per call for the power-function kernels (noise, fBm, warp, and every kernel added since), on this host.
+
+```bash
+uv run moondeck/check/bench_kernels.py            # build (Release) and run
+uv run moondeck/check/bench_kernels.py --no-build # run the binary already built
+```
+
+A report, not a check: the Markdown table it prints is pasted into performance.md, and a kernel swap is accepted against the previous rows (the gradient-noise swap's bound is 1.3x per sample). Host timings; the S3 is 20-40x slower per core, so the ratio between rows is what transfers, and `collect_kpi.py` on a board gives the absolute cost. Builds only the `mm_bench` target, so it does not drag the test suite through the compiler.
+
 ### repo_health
 
 Measure the repo's current state into `repo-health.json` — flash per firmware variant, tick/FPS per target, lines of code by area, comment density, test counts, docs inventory.

@@ -3,7 +3,7 @@
 #include "core/moonlive/MoonLiveBuiltins.h"
 #include "core/math8.h"    // beatsin16: the shared time vocabulary
 #include "core/math16.h"   // beat16 / sin16 / cos16: full-range waveforms
-#include "core/noise.h"    // inoise8: the shared value-noise field
+#include "core/noise.h"    // inoise8: the shared gradient-noise field
 
 #include <atomic>
 #include <cstdint>
@@ -165,7 +165,7 @@ extern "C" inline uint32_t mm_ml_beatsin(const uintptr_t* args, uint32_t, const 
     return beatsin16(static_cast<uint8_t>(bpm), ms, 0, static_cast<uint16_t>(high));
 }
 
-// noise(x, y, z) → the 0..255 value-noise field at that point, the primitive behind fire, clouds,
+// noise(x, y, z) → the 0..255 gradient-noise field at that point, the primitive behind fire, clouds,
 // plasma and lava. Coordinates are 16.0 fixed point: the HIGH byte picks the noise cell and the low
 // byte interpolates within it, so `x * 256 / scale` zooms and feeding `t` into an axis makes the
 // field flow. Three arguments is exactly a Call's budget, and 2D is the same call with z held at a

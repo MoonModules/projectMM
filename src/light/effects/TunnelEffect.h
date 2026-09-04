@@ -1,8 +1,9 @@
 #pragma once
 
 #include "core/math16.h"              // atan16, dist16, kaleido, BeatPhase
-#include "core/noise.h"               // fbm8 — the tunnel wall texture
+#include "core/noise.h"               // fbm8: the tunnel wall texture
 #include "light/effects/EffectBase.h"
+#include "light/polar.h"              // PolarLut: the per-pixel angle and radius, precomputed
 
 namespace mm {
 
@@ -38,6 +39,12 @@ public:
     uint8_t octaves  = 2;    // wall texture detail, and the cost knob
     bool    vignette = true; // darken toward the vanishing point so it reads as receding
 
+    /// Read the polar address from a table instead of computing it per pixel (light/polar.h). It
+    /// costs 2 bytes per pixel, 4 when wide, and the effect falls back to computing the address
+    /// when the device cannot spare them.
+    bool usePolarTable = true;
+    bool widePolarTable = false;
+
     void defineControls() override {
         controls_.addControl("bpm", bpm, 0, 120);
         controls_.addControl("depth", depth, 1, 255);
@@ -45,7 +52,17 @@ public:
         controls_.addControl("segments", segments, 1, 16);
         controls_.addControl("octaves", octaves, 1, 4);
         controls_.addControl("vignette", vignette);
+        controls_.addControl("polarTable", usePolarTable);
+        controls_.addControl("polarTable16", widePolarTable);
     }
+    void prepare() override {
+        // The polar address is built here, not in tick(): prepare() is where a module builds state
+        // and where allocation is allowed, and it runs again on every resize and control change, so
+        // the table is always current without the render path ever allocating.
+        if (usePolarTable) lut_.prepare(static_cast<uint16_t>(width()), static_cast<uint16_t>(height()), widePolarTable);
+        else               lut_.release();
+    }
+
 
     void tick() MM_NONBLOCKING override {
         const draw::Canvas cv = canvas();
@@ -56,13 +73,24 @@ public:
 
         const int32_t cx = w / 2, cy = h / 2;
 
-        for (lengthType y = 0; y < h; y++) {
-            for (lengthType x = 0; x < w; x++) {
-                const int32_t dx = static_cast<int32_t>(x) - cx;
-                const int32_t dy = static_cast<int32_t>(y) - cy;
+        // The polar address does not change between frames, so it is read from a table; if the
+        // device cannot spare the memory the effect computes it per pixel and looks the same.
+        const bool table = lut_.ready();
 
-                const uint32_t r = dist16(dx, dy);
-                angle16 a = atan16(dy, dx);
+        std::size_t i = 0;
+        for (lengthType y = 0; y < h; y++) {
+            for (lengthType x = 0; x < w; x++, i++) {
+                uint32_t r;
+                angle16 a;
+                if (table) {
+                    a = lut_.angle(i);
+                    r = lut_.radiusPixels(i);
+                } else {
+                    const int32_t dx = static_cast<int32_t>(x) - cx;
+                    const int32_t dy = static_cast<int32_t>(y) - cy;
+                    r = dist16(dx, dy);
+                    a = atan16(dy, dx);
+                }
 
                 // 1/r is the depth coordinate: distant wall (small r) compresses toward the centre,
                 // which is exactly the perspective foreshortening a real tunnel has. The +1 keeps
@@ -94,6 +122,7 @@ public:
     }
 
 private:
+    PolarLut  lut_{*this};
     BeatPhase phase_;
 };
 

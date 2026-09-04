@@ -97,9 +97,10 @@ Detail: [technical](moxygen/RingLayout.md)
 
 ### Rings 241
 
-The classic 241-LED concentric-ring disc: nested rings of 1, 8, 12, 16, 24, 32, 40, 48, 60 LEDs sharing a centre.
+The classic 241-LED concentric-ring disc: nested rings of 1, 8, 12, 16, 24, 32, 40, 48, 60 LEDs sharing a center.
 
 - `scale` — overall radius scale (1–10).
+- `outside in`: light 0 on the outer ring, wired inward, instead of at the center wired outward. The direction around each ring is unchanged.
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)
 

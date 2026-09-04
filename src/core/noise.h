@@ -2,166 +2,239 @@
 
 #include <cstdint>
 
-// Value noise: a smooth, deterministic pseudo-random field, the staple "organic motion"
-// source for LED effects. inoise8 returns a 0..255 value that varies smoothly across space,
-// so neighbouring coordinates give similar values (unlike a raw hash). Sample it across a
-// grid for clouds/plasma/fire-like fields; scroll a coordinate (or pass a time offset) to
-// animate. 1D, 2D and 3D variants share one hash + a smoothstep interpolation.
+// Gradient noise: a smooth, deterministic pseudo-random field, the staple "organic motion" source
+// for LED effects. inoise8 returns a 0..255 value that varies smoothly across space, so
+// neighboring coordinates give similar values (unlike a raw hash). Sample it across a grid for
+// clouds/plasma/fire-like fields; scroll a coordinate (or pass a time offset) to animate. 1D, 2D
+// and 3D share one gradient set and one interpolation.
 //
-// **This is VALUE noise, and FastLED's `inoise8` is GRADIENT noise.** The name is kept because it is
-// the one every LED effect author reaches for and the 0..255 contract matches, but the character
-// differs: value noise reads blockier and more axis-aligned, and uses the full output range where
-// FastLED's compresses toward the middle. A ported effect will therefore LOOK slightly different for
-// a reason its author cannot see from the call site, which is why it is stated here rather than left
-// to be discovered. Prior art: Ken Perlin's method by way of FastLED; the hash + smoothstep + lerp
-// are ours, promoted from NoiseEffect so every effect shares one field generator.
+// The algorithm is Perlin's improved noise (Ken Perlin, "Improving Noise", SIGGRAPH 2002): a
+// pseudo-random GRADIENT at every lattice corner (one of the twelve cube-edge directions, chosen by
+// a hash), the dot product of that gradient with the offset from the corner, a quintic fade
+// 6t⁵ − 15t⁴ + 10t³ on the fraction, and a linear blend across the corners. Gradient noise is zero
+// at every lattice point and has no value bias toward the corners, which is why it reads as smooth
+// and isotropic where value noise (a random VALUE per corner) reads blocky and axis-aligned at low
+// frequency. 2D is 3D with the z offset at zero (inoise8(x, y) == inoise8(x, y, 0)); 1D takes ±1
+// gradients of its own, since the cube-edge set projected onto one axis is zero for six codes of
+// sixteen. The cost scales with the corners: 2, 4 and 8 corner dot products.
 //
-// Coordinates are 16.0 fixed scaled however the caller likes — the high byte selects the
-// noise CELL, the low byte the interpolation position within it. So a larger coordinate step
-// per pixel = finer noise (more cells across the grid); a smaller step = broader, smoother.
+// Output uses the full range. The gradient dot product is signed offsets added, so the blend spans
+// ±one cell rather than the ±√3/2 the unit-vector bound suggests: an exact search over every
+// gradient choice at every fraction gives ±half a cell in 1D, ±one cell in 2D and ±1.035 cells in
+// 3D. Each tier halves the raw blend onto its range, so the midpoint is the field's mean and 0 and
+// the top value are both reached; the clamp is a guard only the 3D extreme touches. Written fresh,
+// integer throughout: the hash and the fade table are ours, the gradient trick is Perlin's.
+//
+// Coordinates are 16.0 fixed scaled however the caller likes: the high byte selects the noise
+// CELL, the low byte the interpolation position within it. So a larger coordinate step per pixel is
+// finer noise (more cells across the grid); a smaller step is broader and smoother.
 
 namespace mm {
 namespace noise {
 
-// Integer hash → 0..255. Three coords (z=0 for 1D/2D) feed one well-mixed avalanche.
-constexpr uint8_t hash(uint32_t x, uint32_t y, uint32_t z) {
-    uint32_t h = x * 1619u + y * 31337u + z * 6271u;
-    h = (h >> 13) ^ h;
-    h = h * (h * h * 60493u + 19990303u) + 1376312589u;
-    return static_cast<uint8_t>((h >> 16) & 0xFF);
+/// Lattice hash: a corner's gradient index, 0..15. Each coordinate times its own odd constant,
+/// xored (the products of x and x + 1 are shared across a cell's corners, so this part is six
+/// multiplies per 3D sample rather than 24), then one xorshift, one multiply, and the top nibble
+/// of the product, its best-mixed part. Four bits is all a gradient needs, so this is the whole
+/// hash: a byte-wide avalanche spent three multiplies per corner on bits nothing read. Checked
+/// against that avalanche: the sixteen codes are uniform to 0.6%, and adjacent corners are
+/// independent to the same 5% the avalanche managed (a linear pre-mix with one multiply was NOT:
+/// adjacent corners correlated six-fold, which reads as lattice patterns). Both tiers share it, so
+/// the 16-bit field is the 8-bit one at finer resolution rather than an unrelated field.
+constexpr uint32_t corner(uint32_t x, uint32_t y, uint32_t z) {
+    uint32_t h = (x * 0x8da6b343u) ^ (y * 0xd8163841u) ^ (z * 0xcb1ab31fu);
+    h ^= h >> 16;
+    h *= 0x7feb352du;
+    return h >> 28;
 }
 
-// Smoothstep 3t²−2t³ on 0..255 — turns the linear cell fraction into an eased one so the
-// field has no hard creases at cell boundaries (the difference between value noise and a
-// blocky grid).
-constexpr uint8_t smoothstep(uint8_t t) {
-    uint16_t t2 = static_cast<uint16_t>(t) * t / 255;
-    uint16_t t3 = static_cast<uint16_t>(t2) * t / 255;
-    return static_cast<uint8_t>((3 * t2 - 2 * t3) & 0xFF);
+/// Perlin's twelve cube-edge gradients (every signed permutation of (1, 1, 0)), padded to sixteen
+/// with four repeats so the hash's low nibble indexes them by a mask rather than a modulo. A table
+/// rather than Perlin's select expression because the selects compile to branches, and a core
+/// without a branch predictor pays for each one: the select form was 44 branches per 2D sample on
+/// Xtensa, the table is loads and small multiplies.
+inline constexpr int8_t kGradient[16][3] = {
+    {1, 1, 0}, {-1, 1, 0}, {1, -1, 0}, {-1, -1, 0},
+    {1, 0, 1}, {-1, 0, 1}, {1, 0, -1}, {-1, 0, -1},
+    {0, 1, 1}, {0, -1, 1}, {0, 1, -1}, {0, -1, -1},
+    {1, 1, 0}, {0, -1, 1}, {-1, 1, 0}, {0, -1, -1},
+};
+
+/// Dot product of corner gradient `h` (0..15) with the offset, over the axes the arity samples.
+template <int Dims>
+constexpr int32_t grad(uint32_t h, int32_t x, int32_t y, int32_t z) {
+    // 1D takes ±1 gradients of its own: six of the sixteen cube-edge gradients have no x component,
+    // which would leave a 1D cell flat wherever both corners drew one.
+    if constexpr (Dims == 1) return (h & 1u) ? -x : x;
+    const int8_t* g = kGradient[h];
+    int32_t d = g[0] * x;
+    if constexpr (Dims > 1) d += g[1] * y;
+    if constexpr (Dims > 2) d += g[2] * z;
+    return d;
 }
 
-// Linear interpolate a→b by t/255.
-constexpr uint8_t lerp8(uint8_t a, uint8_t b, uint8_t t) {
-    int16_t delta = static_cast<int16_t>(b) - static_cast<int16_t>(a);
-    return static_cast<uint8_t>(static_cast<int16_t>(a) + delta * t / 255);
+/// The quintic fade 6t⁵ − 15t⁴ + 10t³ as a table over t = i/256, i = 0..256, in 0.16 fixed
+/// (0..65536). The 16-bit tier interpolates between entries on its low byte; the 8-bit tier
+/// indexes it directly. A table because the polynomial needs a 40-bit intermediate per sample.
+struct FadeTable {
+    uint32_t v[257];
+    constexpr FadeTable() : v{} {
+        for (uint64_t i = 0; i <= 256; i++) {
+            // (6i⁵ − 3840i⁴ + 655360i³) / 2^24 == (6t⁵ − 15t⁴ + 10t³) · 65536 for t = i/256.
+            const uint64_t i3 = i * i * i;
+            v[i] = static_cast<uint32_t>((6u * i3 * i * i - 3840u * i3 * i + 655360u * i3) >> 24);
+        }
+    }
+};
+inline constexpr FadeTable kFade{};
+
+/// fade for an 8-bit fraction: a table lookup.
+constexpr uint32_t fade8(uint8_t t) { return kFade.v[t]; }
+
+/// fade for a 16-bit fraction: the table on the high byte, linear on the low byte.
+constexpr uint32_t fade16(uint16_t t) {
+    const uint32_t a = kFade.v[t >> 8], b = kFade.v[(t >> 8) + 1];
+    return a + (((b - a) * (t & 0xFFu)) >> 8);
 }
 
-/// The 16-bit tier's internals. The 8-bit forms above quantise at EVERY stage — the corner values,
-/// the interpolation and the octave sum — so a gradient that should be smooth steps visibly once a
-/// fixture is large. These are the same three functions at 16 bits.
-constexpr uint16_t hash16(uint32_t x, uint32_t y, uint32_t z) {
-    uint32_t h = x * 374761393u + y * 668265263u + z * 2147483647u;
-    h = (h ^ (h >> 13)) * 1274126177u;
-    return static_cast<uint16_t>((h ^ (h >> 16)) & 0xFFFF);
+/// The two tiers as policies for the one core below: the fraction width, the fade of a fraction, and the blend a→b by a 0.16 weight sized to the tier's operand range.
+struct Tier8 {
+    static constexpr int kFrac = 8;
+    static constexpr uint32_t fade(int32_t f) { return fade8(static_cast<uint8_t>(f)); }
+    /// Operands stay within ±2^11 (three offsets of a 256 cell), so the product fits 32 bits.
+    static constexpr int32_t blend(int32_t a, int32_t b, uint32_t w) {
+        return a + (((b - a) * static_cast<int32_t>(w)) >> 16);
+    }
+};
+struct Tier16 {
+    static constexpr int kFrac = 16;
+    static constexpr uint32_t fade(int32_t f) { return fade16(static_cast<uint16_t>(f)); }
+    /// Operands reach 2^18 against a 2^16 weight: a widening multiply (two on a 32-bit core).
+    static constexpr int32_t blend(int32_t a, int32_t b, uint32_t w) {
+        return a + static_cast<int32_t>((static_cast<int64_t>(b - a) * static_cast<int64_t>(w)) >> 16);
+    }
+};
+
+/// The core: gradient noise over the corners of one lattice cell. `x/y/z` are fixed point with
+/// `Tier::kFrac` fraction bits (the whole part selects the cell); an unused axis is passed as 0.
+/// One instantiation per arity so each compiles to straight-line code over exactly its corners.
+/// `layer` is one z-slice (2 or 4 corners with the blends between them) and 3D is that slice at z
+/// and z + 1 blended by the z fade: written this way because one body with eight corners in
+/// flight spilled half its registers on a 16-register window (52 stack stores per sample on
+/// Xtensa), while the slice form keeps at most four. Returns the raw blend in cell units: ±half a
+/// cell in 1D, ±one cell in 2D, ±1.035 cells in 3D (the exact extremes, from a search over every
+/// gradient choice at every fraction).
+template <class Tier, int Dims>
+constexpr int32_t layer(uint32_t ix, uint32_t iy, uint32_t iz, int32_t fx, int32_t fy, int32_t fz, uint32_t wx, uint32_t wy) {
+    constexpr int32_t kCell = 1 << Tier::kFrac;
+    int32_t v = Tier::blend(grad<Dims>(corner(ix, iy, iz),     fx,         fy, fz),
+                            grad<Dims>(corner(ix + 1, iy, iz), fx - kCell, fy, fz), wx);
+    if constexpr (Dims > 1) {
+        v = Tier::blend(v, Tier::blend(grad<Dims>(corner(ix, iy + 1, iz),     fx,         fy - kCell, fz),
+                                       grad<Dims>(corner(ix + 1, iy + 1, iz), fx - kCell, fy - kCell, fz), wx), wy);
+    }
+    return v;
 }
 
-/// Smoothstep at 16 bits: 3t² − 2t³, the standard ease that removes the linear kink between cells.
-constexpr uint16_t smoothstep16(uint16_t t) {
-    const uint32_t t1 = t;
-    const uint32_t t2 = (t1 * t1) >> 16;
-    const uint32_t t3 = (t2 * t1) >> 16;
-    const uint32_t v = 3u * t2 - 2u * t3;
-    return static_cast<uint16_t>(v > 65535u ? 65535u : v);
+template <class Tier, int Dims>
+constexpr int32_t raw(uint32_t x, uint32_t y, uint32_t z) {
+    constexpr int32_t kCell = 1 << Tier::kFrac;
+    const uint32_t ix = x >> Tier::kFrac, iy = y >> Tier::kFrac, iz = z >> Tier::kFrac;
+    const int32_t fx = static_cast<int32_t>(x & (kCell - 1));
+    const int32_t fy = static_cast<int32_t>(y & (kCell - 1));
+    const int32_t fz = static_cast<int32_t>(z & (kCell - 1));
+    const uint32_t wx = Tier::fade(fx);
+    const uint32_t wy = Dims > 1 ? Tier::fade(fy) : 0;
+    int32_t v = layer<Tier, Dims>(ix, iy, iz, fx, fy, fz, wx, wy);
+    if constexpr (Dims > 2) v = Tier::blend(v, layer<Tier, Dims>(ix, iy, iz + 1, fx, fy, fz - kCell, wx, wy), Tier::fade(fz));
+    return v;
 }
 
-/// Linear interpolate a→b by t/65535.
+/// Map a raw blend onto the tier's unsigned range: halve it (the extreme is ±one cell) and center
+/// it on the midpoint. The clamp is a guard that only the 3D extreme past one cell reaches.
+template <class Tier>
+constexpr uint32_t out(int32_t raw) {
+    constexpr int32_t kCell = 1 << Tier::kFrac;
+    const int32_t v = kCell / 2 + (raw >> 1);
+    return static_cast<uint32_t>(v < 0 ? 0 : (v > kCell - 1 ? kCell - 1 : v));
+}
+
+/// Linear interpolate a→b by t/65536, unsigned 16-bit endpoints. The 16-bit tier's general lerp,
+/// kept for callers that blend field values rather than gradients.
 constexpr uint16_t lerp16(uint16_t a, uint16_t b, uint16_t t) {
     const int32_t delta = static_cast<int32_t>(b) - static_cast<int32_t>(a);
     // 64-bit intermediate: `delta * t` reaches 4.29e9 against an INT32_MAX of 2.15e9, so the 32-bit
-    // form was signed overflow (undefined behaviour) on roughly a quarter of samples. It happened to
+    // form was signed overflow (undefined behavior) on roughly a quarter of samples. It happened to
     // produce the right low bits on wrap-around hardware, which is what kept it invisible.
     return static_cast<uint16_t>(static_cast<int32_t>(a)
                                  + static_cast<int32_t>((static_cast<int64_t>(delta) * t) >> 16));
 }
 
+/// Octave sums narrow, and this is what widens them back.
+///
+/// fbm divides its octave sum by the sum of the AMPLITUDES, which is what keeps the result inside
+/// range. But octaves are near-independent, so their spread grows like the root of the sum of
+/// squares rather than like the sum: dividing by the latter shrinks the field every octave added.
+/// Measured on the shipped noise, 4 octaves spanned 54..199 of 0..255, so a caller stretching the
+/// top of the field (a contrast window, a threshold) could never reach full brightness however it
+/// was configured, and every fbm read flatter than the noise underneath it.
+///
+/// The gain is that ratio per octave count, in 8.8 fixed, applied around the midpoint so the field
+/// stays centered. One octave needs none and the series settles by about six.
+inline constexpr uint16_t kFbmGain[9] = {256, 256, 343, 391, 417, 430, 437, 440, 442};
+
+/// Re-widen an octave sum around the midpoint. `mid` is 128 at the 8-bit tier, 32768 at 16-bit.
+constexpr int32_t fbmWiden(int32_t v, int32_t mid, uint8_t octaves) {
+    const uint16_t g = kFbmGain[octaves > 8 ? 8 : octaves];
+    return mid + (((v - mid) * g) >> 8);
+}
+
 }  // namespace noise
 
-// 1D value noise: x is a 16.0 fixed coordinate (high byte = cell, low byte = position).
+// 1D gradient noise: x is a 16.0 fixed coordinate (high byte = cell, low byte = position).
 constexpr uint8_t inoise8(uint32_t x) {
-    const uint32_t ix = x >> 8;
-    const uint8_t fx = noise::smoothstep(static_cast<uint8_t>(x & 0xFF));
-    return noise::lerp8(noise::hash(ix, 0, 0), noise::hash(ix + 1, 0, 0), fx);
+    return static_cast<uint8_t>(noise::out<noise::Tier8>(noise::raw<noise::Tier8, 1>(x, 0, 0)));
 }
 
-// 2D value noise with bilinear interpolation over the 4 cell corners.
+// 2D gradient noise over the 4 cell corners.
 constexpr uint8_t inoise8(uint32_t x, uint32_t y) {
-    const uint32_t ix = x >> 8, iy = y >> 8;
-    const uint8_t fx = noise::smoothstep(static_cast<uint8_t>(x & 0xFF));
-    const uint8_t fy = noise::smoothstep(static_cast<uint8_t>(y & 0xFF));
-    const uint8_t v00 = noise::hash(ix,     iy,     0);
-    const uint8_t v10 = noise::hash(ix + 1, iy,     0);
-    const uint8_t v01 = noise::hash(ix,     iy + 1, 0);
-    const uint8_t v11 = noise::hash(ix + 1, iy + 1, 0);
-    return noise::lerp8(noise::lerp8(v00, v10, fx), noise::lerp8(v01, v11, fx), fy);
+    return static_cast<uint8_t>(noise::out<noise::Tier8>(noise::raw<noise::Tier8, 2>(x, y, 0)));
 }
 
-// 3D value noise with trilinear interpolation over the 8 cube corners.
+// 3D gradient noise over the 8 cube corners.
 constexpr uint8_t inoise8(uint32_t x, uint32_t y, uint32_t z) {
-    const uint32_t ix = x >> 8, iy = y >> 8, iz = z >> 8;
-    const uint8_t fx = noise::smoothstep(static_cast<uint8_t>(x & 0xFF));
-    const uint8_t fy = noise::smoothstep(static_cast<uint8_t>(y & 0xFF));
-    const uint8_t fz = noise::smoothstep(static_cast<uint8_t>(z & 0xFF));
-    const uint8_t v000 = noise::hash(ix,     iy,     iz);
-    const uint8_t v100 = noise::hash(ix + 1, iy,     iz);
-    const uint8_t v010 = noise::hash(ix,     iy + 1, iz);
-    const uint8_t v110 = noise::hash(ix + 1, iy + 1, iz);
-    const uint8_t v001 = noise::hash(ix,     iy,     iz + 1);
-    const uint8_t v101 = noise::hash(ix + 1, iy,     iz + 1);
-    const uint8_t v011 = noise::hash(ix,     iy + 1, iz + 1);
-    const uint8_t v111 = noise::hash(ix + 1, iy + 1, iz + 1);
-    const uint8_t z0 = noise::lerp8(noise::lerp8(v000, v100, fx), noise::lerp8(v010, v110, fx), fy);
-    const uint8_t z1 = noise::lerp8(noise::lerp8(v001, v101, fx), noise::lerp8(v011, v111, fx), fy);
-    return noise::lerp8(z0, z1, fz);
+    return static_cast<uint8_t>(noise::out<noise::Tier8>(noise::raw<noise::Tier8, 3>(x, y, z)));
 }
 
 // --- 16-bit noise ---------------------------------------------------------------------------
 //
-// The same value noise at 16 bits. math16.h states why the tier exists: 256 levels band visibly on
-// a large fixture, so everything an effect writes against is 16-bit. The 8-bit forms above stay for
-// the cases where a byte is what the caller needs anyway (a palette index, a brightness).
+// The same gradient noise at 16 bits. math16.h states why the tier exists: 256 levels band visibly
+// on a large fixture, so everything an effect writes against is 16-bit. The 8-bit forms above stay
+// for the cases where a byte is what the caller needs anyway (a palette index, a brightness).
 
-/// 1D value noise at 16 bits. `x` is 16.16 fixed point: the whole part selects the cell, the
+/// 1D gradient noise at 16 bits. `x` is 16.16 fixed point: the whole part selects the cell, the
 /// fraction interpolates within it.
 constexpr uint16_t inoise16(uint32_t x) {
-    const uint32_t ix = x >> 16;
-    const uint16_t fx = noise::smoothstep16(static_cast<uint16_t>(x & 0xFFFF));
-    return noise::lerp16(noise::hash16(ix, 0, 0), noise::hash16(ix + 1, 0, 0), fx);
+    return static_cast<uint16_t>(noise::out<noise::Tier16>(noise::raw<noise::Tier16, 1>(x, 0, 0)));
 }
 
-/// 2D value noise at 16 bits — the common case for a panel.
+/// 2D gradient noise at 16 bits: the common case for a panel.
 constexpr uint16_t inoise16(uint32_t x, uint32_t y) {
-    const uint32_t ix = x >> 16, iy = y >> 16;
-    const uint16_t fx = noise::smoothstep16(static_cast<uint16_t>(x & 0xFFFF));
-    const uint16_t fy = noise::smoothstep16(static_cast<uint16_t>(y & 0xFFFF));
-    const uint16_t v00 = noise::hash16(ix,     iy,     0);
-    const uint16_t v10 = noise::hash16(ix + 1, iy,     0);
-    const uint16_t v01 = noise::hash16(ix,     iy + 1, 0);
-    const uint16_t v11 = noise::hash16(ix + 1, iy + 1, 0);
-    return noise::lerp16(noise::lerp16(v00, v10, fx), noise::lerp16(v01, v11, fx), fy);
+    return static_cast<uint16_t>(noise::out<noise::Tier16>(noise::raw<noise::Tier16, 2>(x, y, 0)));
 }
 
-/// 3D value noise at 16 bits — z is the axis a 2D effect uses as time, so the field evolves in
+/// 3D gradient noise at 16 bits. `z` is the axis a 2D effect uses as time, so the field evolves in
 /// place instead of scrolling past.
 constexpr uint16_t inoise16(uint32_t x, uint32_t y, uint32_t z) {
-    const uint32_t ix = x >> 16, iy = y >> 16, iz = z >> 16;
-    const uint16_t fx = noise::smoothstep16(static_cast<uint16_t>(x & 0xFFFF));
-    const uint16_t fy = noise::smoothstep16(static_cast<uint16_t>(y & 0xFFFF));
-    const uint16_t fz = noise::smoothstep16(static_cast<uint16_t>(z & 0xFFFF));
-    const uint16_t z0 = noise::lerp16(
-        noise::lerp16(noise::hash16(ix, iy, iz), noise::hash16(ix + 1, iy, iz), fx),
-        noise::lerp16(noise::hash16(ix, iy + 1, iz), noise::hash16(ix + 1, iy + 1, iz), fx), fy);
-    const uint16_t z1 = noise::lerp16(
-        noise::lerp16(noise::hash16(ix, iy, iz + 1), noise::hash16(ix + 1, iy, iz + 1), fx),
-        noise::lerp16(noise::hash16(ix, iy + 1, iz + 1), noise::hash16(ix + 1, iy + 1, iz + 1), fx), fy);
-    return noise::lerp16(z0, z1, fz);
+    return static_cast<uint16_t>(noise::out<noise::Tier16>(noise::raw<noise::Tier16, 3>(x, y, z)));
 }
 
 /// Fractal Brownian motion at 16 bits: `octaves` samples at doubling frequency, halving amplitude.
 inline uint16_t fbm16(uint32_t x, uint32_t y, uint8_t octaves) {
     if (octaves == 0) return 32768;                     // no octaves: flat mid-field
     // The sum is 64-bit so each octave keeps its full 16 bits. Shifting each sample down by 8 to fit
-    // a 32-bit accumulator made the result 8-bit wearing a 16-bit type — measured at 195 distinct
-    // values over 20,000 samples, low byte never set — which is exactly the banding this tier is for.
+    // a 32-bit accumulator made the result 8-bit wearing a 16-bit type: measured at 195 distinct
+    // values over 20,000 samples, low byte never set: which is exactly the banding this tier is for.
     uint64_t sum = 0;
     uint32_t norm = 0, amp = 32768;
     for (uint8_t o = 0; o < octaves && amp > 0; o++) {
@@ -170,29 +243,31 @@ inline uint16_t fbm16(uint32_t x, uint32_t y, uint8_t octaves) {
         x <<= 1; y <<= 1;                               // double the frequency
         amp >>= 1;                                      // halve the contribution
     }
-    return norm ? static_cast<uint16_t>(sum / norm) : 32768;
+    if (!norm) return 32768;
+    const int32_t widened = noise::fbmWiden(static_cast<int32_t>(sum / norm), 32768, octaves);
+    return static_cast<uint16_t>(widened < 0 ? 0 : (widened > 65535 ? 65535 : widened));
 }
 
 // --- Field composition ------------------------------------------------------------------------
 //
-// One noise sample is a smooth blur; the looks people actually recognise come from COMPOSING
+// One noise sample is a smooth blur; the looks people actually recognize come from COMPOSING
 // samples. Three standard compositions cover most of it, and each is a few lines over `inoise8`
 // rather than a new field generator:
 //
-//   fbm      — sum octaves at doubling frequency and halving amplitude. Turns the blur into
+//   fbm     : sum octaves at doubling frequency and halving amplitude. Turns the blur into
 //              cloud/terrain/smoke structure: large shapes with fine detail on them.
-//   turbulence — the same sum over |noise|, whose creases read as billows and flame.
-//   warp     — sample noise at a coordinate that noise itself displaced (domain warping). This
+//   turbulence: the same sum over |noise|, whose creases read as billows and flame.
+//   warp    : sample noise at a coordinate that noise itself displaced (domain warping). This
 //              is the one that produces the flowing, marbled, liquid look; Iñigo Quilez's
 //              "warping" article is the canonical description.
 //
 // Cost is stated per call because it is the thing that decides whether an effect fits: each
 // octave is one `inoise8`, so fbm(3) costs three samples, and warp costs its own samples PLUS the
-// field it then samples. On a large fixture that multiplies by pixel count — see the per-target
+// field it then samples. On a large fixture that multiplies by pixel count: see the per-target
 // budget in the power-function docs before reaching for octaves on a 128x128 wall.
 
 /// Fractal Brownian motion: `octaves` samples at doubling frequency, halving amplitude, returned
-/// normalised to 0..255. octaves=1 is plain noise; 3-4 is the usual cloud look.
+/// normalized to 0..255. octaves=1 is plain noise; 3-4 is the usual cloud look.
 inline uint8_t fbm8(uint32_t x, uint32_t y, uint8_t octaves) {
     if (octaves == 0) return 128;                       // no octaves: flat mid-field
     uint32_t sum = 0, norm = 0, amp = 128;
@@ -202,10 +277,12 @@ inline uint8_t fbm8(uint32_t x, uint32_t y, uint8_t octaves) {
         x <<= 1; y <<= 1;                               // double the frequency
         amp >>= 1;                                      // halve the contribution
     }
-    return static_cast<uint8_t>(norm ? sum / norm : 128);
+    if (!norm) return 128;
+    const int32_t widened = noise::fbmWiden(static_cast<int32_t>(sum / norm), 128, octaves);
+    return static_cast<uint8_t>(widened < 0 ? 0 : (widened > 255 ? 255 : widened));
 }
 
-/// 3D fbm — the same sum with a z axis, so a 2D effect can use z as time for a field that evolves
+/// 3D fbm: the same sum with a z axis, so a 2D effect can use z as time for a field that evolves
 /// in place rather than scrolling past.
 inline uint8_t fbm8(uint32_t x, uint32_t y, uint32_t z, uint8_t octaves) {
     if (octaves == 0) return 128;
@@ -216,7 +293,9 @@ inline uint8_t fbm8(uint32_t x, uint32_t y, uint32_t z, uint8_t octaves) {
         x <<= 1; y <<= 1; z <<= 1;
         amp >>= 1;
     }
-    return static_cast<uint8_t>(norm ? sum / norm : 128);
+    if (!norm) return 128;
+    const int32_t widened = noise::fbmWiden(static_cast<int32_t>(sum / norm), 128, octaves);
+    return static_cast<uint8_t>(widened < 0 ? 0 : (widened > 255 ? 255 : widened));
 }
 
 /// Turbulence: fbm over |noise - 128|, which creases the field where it crosses the midpoint. The

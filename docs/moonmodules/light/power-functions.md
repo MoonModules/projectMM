@@ -124,9 +124,9 @@ One sample is a soft blur; the character comes from composing them. Summing octa
 
 | Power function | What it does | Effects | Modifiers |
 |---|---|---|---|
-| `inoise8` | Value noise in 1D, 2D or 3D: a smooth, deterministic pseudo-random field | Noise, Noise2D, NoiseMeter, Wave | — |
-| `fbm8` | Sums noise octaves at doubling frequency and halving amplitude, turning a blur into cloud and terrain structure | PolarNoise, Tunnel | — |
-| `warp8` | Samples noise at a coordinate that noise itself displaced — the flowing, marbled look | PolarNoise | — |
+| `inoise8` | Perlin gradient noise in 1D, 2D or 3D: a smooth, deterministic pseudo-random field | Noise, Noise2D, NoiseMeter, Wave | `noise` |
+| `fbm8` | Sums noise octaves at doubling frequency and halving amplitude, turning a blur into cloud and terrain structure. Re-widened per octave count, so the field keeps its full range however many are summed | PolarNoise, Tunnel, Aurora | `fbm` |
+| `warp8` | Samples noise at a coordinate that noise itself displaced — the flowing, marbled look | PolarNoise, Aurora | `warp` |
 | `turbulence8` | Sums the folded absolute value of noise, whose creases read as billowing smoke and flame | *(no caller yet)* | — |
 | `blobCentres` + `blobField` | Orbits N sources on sine paths and sums their inverse-square falloff — the metaball field behind anything fluid or molten | LavaLamp, Metaballs | — |
 
@@ -144,9 +144,10 @@ The 16-bit forms matter here: the 8-bit versions step visibly on a large fixture
 
 | Power function | What it does | Effects | Modifiers |
 |---|---|---|---|
-| `atan16` | The angle of a point as a 16-bit turn, smooth enough that a sweep shows no steps on a large fixture | PolarNoise, Spiral, Tunnel | — |
-| `dist16` | True Euclidean radius — not the octagon `dist8` approximates, and it does not saturate at 255 | PolarNoise, Rings, Spiral, Tunnel | — |
-| `kaleido` | Folds an angle into n mirrored wedges, giving any field n-fold symmetry for one modulo | PolarNoise, Tunnel | — |
+| `PolarLut` | Every pixel's angle and radius, built once per geometry and read as a table. 34% of a PolarNoise frame on an ESP32-S3, at 2 bytes per pixel (4 at full precision); declines the table when free heap minus the reserve cannot hold it, and the caller computes the address instead | PolarNoise, Spiral, Tunnel, Aurora | — |
+| `atan16` | The angle of a point as a 16-bit turn, smooth enough that a sweep shows no steps on a large fixture | Rings, and the fallback path of every `PolarLut` caller | — |
+| `dist16` | True Euclidean radius — not the octagon `dist8` approximates, and it does not saturate at 255 | Rings, and the fallback path of every `PolarLut` caller | — |
+| `kaleido` | Folds an angle into n mirrored wedges, giving any field n-fold symmetry for one modulo | PolarNoise, Tunnel, Aurora | — |
 | `isqrt` | Integer square root with no divide and no float | PaintBrush, WaterRipple | — |
 | `sin8` / `cos8` | The 8-bit oscillators — the internal fast path where a mod-256 result is exactly right | *(the 16-bit forms are the contract)* | **Rotate** |
 
@@ -165,6 +166,7 @@ The framerate rule lives here too: everything in this group is driven by elapsed
 | Power function | What it does | Effects | Modifiers |
 |---|---|---|---|
 | `sin16` / `cos16` | 16-bit oscillators, smooth where the 8-bit forms visibly step on a large fixture | Echo, SdfShapes | — |
+| `OscillatorBank` | N independent low-frequency oscillators advanced once per frame and read per pixel, each with its own rate, shape, range and phase offset. Their phases are held together, so oscillators sharing a rate keep their relationship for as long as the device runs | Aurora, PolarNoise | — |
 | `map32` | Maps a value between ranges, clamped, with the fencepost handled once so the last column is never lost | FreqMatrix, FreqSaws, GEQ, GEQ3D, Spectrum, StarField | — |
 | `hashInt` | Hashes position and time to a random-looking but reproducible value, so devices agree without exchanging anything | Dissolve, WaterRipple | — |
 | `peakHold` | Rises instantly to a new high then decays slowly — the falling peak dot every VU meter has | Spectrum | — |

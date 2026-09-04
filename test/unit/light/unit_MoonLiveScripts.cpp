@@ -311,7 +311,7 @@ TEST_CASE("a script reads elapsed time, so it can animate") {
 // (adjacent points inside one cell differ a little, not wildly) and it actually VARIES across the
 // field (a constant would be smooth too, and useless).
 #if MM_MOONLIVE_HAS_HOST_JIT
-TEST_CASE("noise is smooth across neighbouring points, and varies across the field") {
+TEST_CASE("noise is smooth across neighboring points, and varies across the field") {
     uint8_t code[4096];
     // One light per sample: light i gets the noise at x = i * 64, so the 32 lights walk 8 whole
     // cells (256 units each) and the buffer IS a real slice of the field, not a corner of one cell.

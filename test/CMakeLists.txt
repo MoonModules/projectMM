@@ -10,6 +10,7 @@ add_executable(mm_tests
     unit/core/unit_platform_audiofft.cpp
     unit/core/unit_Buffer.cpp
     unit/core/unit_ScratchBuffer.cpp
+    unit/core/unit_Oscillators.cpp
     unit/core/unit_ActiveInstance.cpp
     unit/core/unit_Color.cpp
     unit/core/unit_math8.cpp
@@ -104,6 +105,9 @@ add_executable(mm_tests
     unit/light/unit_Circle.cpp
     unit/light/unit_Particles.cpp
     unit/light/unit_Shader.cpp
+    unit/light/unit_PolarLut.cpp
+    unit/light/unit_PolarLut_equivalence.cpp
+    unit/light/unit_AuroraEffect.cpp
     unit/light/unit_Effects_framerate.cpp
     unit/light/unit_SineEffect.cpp
     unit/light/unit_DistortionWavesEffect.cpp
@@ -118,6 +122,7 @@ add_executable(mm_tests
     unit/light/unit_WaveEffect.cpp
     unit/light/unit_FireEffect.cpp
     unit/light/unit_GridLayout.cpp
+    unit/light/unit_Rings241Layout.cpp
     unit/light/unit_SingleColumnLayout.cpp
     unit/light/unit_SphereLayout.cpp
     unit/light/unit_WheelLayout.cpp
@@ -202,3 +207,8 @@ set_tests_properties(unit_tests PROPERTIES
 # Scenario runner (replays scenario JSON files in-process)
 add_executable(mm_scenarios scenario_runner.cpp)
 target_link_libraries(mm_scenarios PRIVATE mm_core mm_platform)
+
+# Kernel micro-bench: ns per call for the power-function kernels, on the host. A report, not a
+# test (no ctest registration): the numbers go into performance.md and gate a kernel swap.
+add_executable(mm_bench bench/bench_kernels.cpp)
+target_link_libraries(mm_bench PRIVATE mm_core mm_platform)

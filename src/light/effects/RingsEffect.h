@@ -82,8 +82,13 @@ public:
                     const int32_t dx = static_cast<int32_t>(x) - cx_[i];
                     const int32_t dy = static_cast<int32_t>(y) - cy_[i];
                     // Kept wide for the same reason as maxR: clamping the per-pixel distance to a
-                    // byte made every light past 255 from a ripple's centre read as exactly 255, so
+                    // byte made every light past 255 from a ripple's center read as exactly 255, so
                     // the ring never appeared out there at all.
+                    //
+                    // Computed rather than read from a PolarLut, unlike the other radial effects:
+                    // this distance is from a RIPPLE's center, not the grid's, and each ripple moves
+                    // and respawns. A table per ripple would cost N times the memory and a rebuild
+                    // whenever one respawns, which is more than the dist16 it would save.
                     const uint32_t d = dist16(dx, dy);
                     int32_t diff = static_cast<int32_t>(d) - static_cast<int32_t>(radius_[i]);
                     if (diff < 0) diff = -diff;   // stays int32: narrowing truncated large distances

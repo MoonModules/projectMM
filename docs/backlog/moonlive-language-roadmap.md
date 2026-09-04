@@ -35,12 +35,18 @@ Five hard limits, all found by hitting them:
 | script state | **64 bytes** shared by all members | `kCtrlBytes`, `MoonLiveBuiltins.h:132` |
 | distinct members | **8** | `kMaxCtrls`, same file |
 | branch labels | **16** (an `if` or `for` takes up to 2) | `kIrLabels`, `MoonLiveIr.h:201` |
+| frame slots | **16**, shared by live variables, loop counters and staged call arguments | `kMaxLocals`, `MoonLiveIr.h` |
 | ~~numeric types~~ | ~~`uint8_t`, `uint16_t`, `int16_t`~~ → **`int`, `byte`, `bool`, `fixed`, `string`** ✅ | still no float: `fixed` is Q16.16 |
 | ~~builtin table~~ | ~~16, and 16 used~~ → **64** ✅ | `BuiltinTable::kMax` — raised, with an overflow assert |
 
 The branch budget was binary-searched with generated scripts: **6 `if`/`else` + 2 `for` compiles,
 7 does not.** The state budget is what caps the balls effect at 4 balls rather than 25 — six fields
 per ball needs ~150 bytes and six members.
+
+The frame-slot budget was hit writing `aurora.mle` (2026-09-04), the first two-layer shader: it
+compiles only after folding intermediates back into the expressions that use them, which is the
+readability the language exists to give. Factoring the loop body into a helper would relieve it,
+once helpers can take arguments and return values (§ 6). See § 8b.
 
 ## What a simulation effect gives up today
 
@@ -383,11 +389,29 @@ does not foreclose float.
 **Settled** by the type-system design above: `fixed` is Q16.16 on a uniform int slot, float
 stays out, and the range analysis lives there.
 
-### 6. Function arguments — *moderate, removes a real footgun*
+### 6. Function arguments and return values — *moderate, removes a real footgun*
 
 `draw(i)` instead of setting a member the helper reads. The current shape is not just verbose:
 caller and callee agree by convention and nothing checks it, so a helper called from two places
 with different state silently does the wrong thing. It is also what makes helpers composable.
+
+Script functions DO exist and ship: `balls.mle` calls `drawBall()`, `crosshair.mle` calls three
+helpers, and every layout and modifier is one. Recursion works. Three limits sit on top of them, and
+`aurora.mle` hit all three at once writing a `bright(v)` helper to apply one contrast window to two
+layers (2026-09-04):
+
+| limit | what the compiler says |
+|---|---|
+| no parameters | `a script function takes no arguments yet` |
+| no return value | `a script function returns nothing yet` |
+| no forward calls: a helper must be declared ABOVE its caller | `unknown function`, with the column but not the name |
+
+The third is the cheapest to build and the most confusing to meet, since the message is the one an
+actual typo produces: a second pass over the class body resolves it, which the code comment names as
+the reason it is refused rather than half-supported.
+
+Parameters and returns also relieve § 8b: a helper's variables are live only inside it, so factoring
+a loop body into a function is how a script stays under the frame budget.
 
 ### 7. Signed values: ✅ *shipped*
 
@@ -424,6 +448,36 @@ script value cannot express however signed it is.
 16 is tight enough that a straightforward nested draw does not fit. Raising `kIrLabels` costs
 compile-time table space and nothing at run time. Measure what a realistic effect needs before
 picking a number — the balls port wanted ~12 and had to be folded down.
+
+### 8b. More frame slots — *the encoding is NOT the limit; measure the stack*
+
+**16 live variables**, shared by a script's named variables, its loop counters, and the arguments it
+stages for a call. The budget is what is live AT ONCE rather than a total: a call hands its staging
+slots back, and an `if`, `else` or `for` block hands its locals back at the closing brace
+([MoonLiveEffect.md](../moonmodules/light/MoonLiveEffect.md) documents both). A script that exceeds
+it fails with "too many variables in this function", "too many arguments to hold" or "too many loop
+variables".
+
+Sixteen is enough for the shipped corpus and was not enough for the first two-layer shader:
+`aurora.mle` wants an oscillator per layer, the grid centre, a polar angle and radius, and a field
+sample per layer, all live in the same scope inside two nested loops, with the loop counters and
+each call's staged arguments drawn from the same 16.
+
+`kMaxLocals`'s own comment says raising it "means widening the frame on all three backends together
+— the slot index is an instruction field". **Measured on the shipped assemblers, that is not so:**
+
+| backend | how a slot is addressed | slots the encoding allows |
+|---|---|---|
+| Xtensa | `s32i/l32i`, an 8-bit offset counting 4-byte words | 256 |
+| RISC-V | `sw/lw`, a 12-bit signed offset from the frame pointer | 2048 |
+| host (arm64, x86-64) | an offset from a parked frame pointer | not encoding-bound |
+
+So the real cost is **stack**, not encoding: each slot is 4 bytes of frame on the render task, and
+`kAsmLabels`/`kAsmFixups` next door carry the warning that this project has already bootlooped a P4
+on an oversized stack frame. 16 slots is 64 bytes; 32 would be 128. That is a cheap change on its
+face, and the honest next step is to MEASURE the deepest compile-chain frame at 32 the way the
+`kAsmLabels` note measured 48/96, then pick a number. Worth doing together with § 8, since both are
+"probably just a constant" and both want the same measurement.
 
 ### 9. Division: ✅ *shipped*
 

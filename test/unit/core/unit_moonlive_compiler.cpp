@@ -1534,7 +1534,7 @@ TEST_CASE("a member declaration and a typed function are told apart") {
 #if MM_MOONLIVE_HAS_HOST_JIT
 TEST_CASE("an array is indexed correctly at both element widths, by a computed index") {
     // The index scaling, from the outside. `idx * width` is emitted as a SHIFT (width 4) or skipped
-    // entirely (width 1), so a wrong shift or a wrongly skipped one reads the neighbouring element
+    // entirely (width 1), so a wrong shift or a wrongly skipped one reads the neighboring element
     // rather than failing loudly. A CONSTANT index would not catch it: the interesting path is an
     // index the engine computes at run time, which is what a loop counter is.
     //

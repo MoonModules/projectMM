@@ -13,7 +13,7 @@
 #include "core/math8.h"    // beatsin16 — the shared time vocabulary
 #include "core/math16.h"   // beat16 / triwave16 — full-range waveforms
 #include "light/shader.h"  // shader::smoothstep, the GLSL vocabulary, already in fixed point
-#include "core/noise.h"    // inoise8 — the shared value-noise field
+#include "core/noise.h"    // inoise8: the shared gradient-noise field
 #include <cstring>
 #include "core/AudioService.h"   // the audio vocabulary reads the latest frame
 #include "light/draw.h"    // draw::line, the shared 3D Bresenham a script draws with
@@ -243,6 +243,43 @@ extern "C" inline uint32_t mm_light_polarR(const uintptr_t* args, uint32_t, cons
 }
 
 
+
+// fbm(x, y, octaves) → octaves of noise summed at doubling frequency and halving amplitude, 0..255.
+// One noise() sample is a smooth blur; this is what turns it into cloud, smoke and terrain, with a
+// broad shape and finer structure on it. Coordinates are the same 16.0 fixed point noise() takes.
+// `octaves` is the cost knob: each one is another noise sample per pixel.
+extern "C" inline uint32_t mm_light_fbm(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return fbm8(uint32_t(args[0]), uint32_t(args[1]), static_cast<uint8_t>(uint32_t(args[2])));
+}
+
+// warp(x, y, strength) → the field sampled at a point that the field itself displaced, 0..255.
+// This is the primitive behind the flowing, marbled look: the field stops reading as a texture laid
+// over the grid and starts reading as something moving through it. Three noise samples per call.
+extern "C" inline uint32_t mm_light_warp(const uintptr_t* args, uint32_t, const uint8_t*) {
+    return warp8(uint32_t(args[0]), uint32_t(args[1]), static_cast<uint16_t>(uint32_t(args[2])), 1);
+}
+
+// osc(rate, ms, shape) → a low-frequency oscillator, 0..65535, `rate` cycles per minute at time
+// `ms`. Shapes: 0 sine, 1 triangle, 2 sawtooth, 3 square (core/oscillators.h names them).
+//
+// Every animated quantity in a generative field is one of these, and a composition is several at
+// different rates: where a shape sits, how far a coordinate is displaced, how fast a layer turns.
+// A pure function of time rather than a stateful bank, because a script has no state between
+// frames: two calls with the same rate stay locked together for as long as the device runs, which
+// is what the compiled OscillatorBank gives an effect and what a composition needs.
+extern "C" inline uint32_t mm_light_osc(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const uint32_t rate = uint32_t(args[0]), ms = uint32_t(args[1]), shape = uint32_t(args[2]);
+    if (rate == 0) return shape == 3 ? 0u : 32768u;          // held still, at the shape's start
+    // The phase, as an angle16: rate cycles per minute means rate * ms / 60000 turns.
+    const uint32_t phase = static_cast<uint32_t>((static_cast<uint64_t>(ms) * rate * 65536u) / 60000u);
+    const angle16 a = static_cast<angle16>(phase);
+    switch (shape) {
+        case 1:  return triwave16(a);
+        case 2:  return a;
+        case 3:  return a < 32768 ? 0u : 65535u;
+        default: return static_cast<uint32_t>(sin16(a) + 32768);
+    }
+}
 
 
 // print(v) → write one value to the serial log, and return it so `print` can be dropped into an
@@ -1156,6 +1193,14 @@ inline const BuiltinTable& lightBuiltins() {
     // them here is what lets a radial effect drop its precomputed lookup table.
     t.add({"polarA", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_polarA, {}});
     t.add({"polarR", 2, /*returns*/ true, BuiltinKind::Call, &mm_light_polarR, {}});
+    // fbm(x, y, octaves) / warp(x, y, strength) → the two compositions over noise() that turn one
+    // smooth field into cloud and into flow. The compiled effects are written out of these, so a
+    // script reaches the same vocabulary rather than summing octaves by hand in the grammar.
+    t.add({"fbm", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_fbm, {}});
+    t.add({"warp", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_warp, {}});
+    // osc(rate, ms, shape) → an LFO, the unit every animated quantity is made of. Stateless, so
+    // oscillators sharing a rate hold their relationship for as long as the device runs.
+    t.add({"osc", 3, /*returns*/ true, BuiltinKind::Call, &mm_light_osc, {}});
     // addLight(x, y, z)      → place a light. A scripted layout's whole vocabulary.
     t.add({"addLight", 3, /*returns*/ false, BuiltinKind::Call, &mm_light_addLight, {}});
     // line(x1, y1, x2, y2, r, g, b) → a segment on the canvas, via the shared draw::line.

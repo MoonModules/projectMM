@@ -144,7 +144,7 @@ public:
 #include "light/draw.h"           // draw::pixel / fill / line / fade / blur — write pixels by coordinate
 #include "light/Palette.h"        // colorFromPalette, Palettes::active — the palette system
 #include "core/math8.h"           // beat8 / beatsin8 / sin8 / random8 — the integer animation helpers
-#include "core/noise.h"           // inoise8 — the shared value-noise field
+#include "core/noise.h"           // inoise8: the shared gradient-noise field
 #include "core/color.h"           // RGB
 #include "core/crc.h"             // crc16 — grid/state fingerprints (stasis detection)
 #include "core/ScratchBuffer.h"   // ScratchBuffer<T> — self-sizing scratch memory for stateful effects

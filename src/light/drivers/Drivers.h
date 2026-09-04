@@ -451,24 +451,29 @@ public:
             std::strcmp(controlName, "brightness") == 0) {
             rebuildAllCorrections();
         }
-        // The relay follows `on`, and is written HERE rather than per frame: switching power is a
-        // state change, not a per-frame concern, and a mechanical relay would wear out doing it at
-        // frame rate (the Dig-2-Go's is solid-state, but the rule holds for the ones that are not).
-        // Also written when the pin itself changes, so entering it on a live device closes the relay
-        // straight away instead of at the next toggle.
-        if (std::strcmp(controlName, "on") == 0 || std::strcmp(controlName, "relayPins") == 0) {
+        // The relay follows `on` and brightness, and is written HERE rather than per frame:
+        // switching power is a state change, not a per-frame concern, and a mechanical relay would
+        // wear out doing it at frame rate (the Dig-2-Go's is solid-state, but the rule holds for the
+        // ones that are not). Also written when the pin itself changes, so entering it on a live
+        // device closes the relay straight away instead of at the next toggle. A brightness drag
+        // costs at most one edge, at the zero boundary: the level only changes there.
+        if (std::strcmp(controlName, "on") == 0 || std::strcmp(controlName, "brightness") == 0 ||
+            std::strcmp(controlName, "relayPins") == 0) {
             applyRelay();
         }
     }
 
-    /// Drive the power relay to match `on`.
+    /// Drive the power relay: closed while `on` and brightness is above zero, open otherwise.
     ///
     /// Some boards gate the LED supply behind a relay (the QuinLED Dig-2-Go's GPIO 12 is its "LED
     /// Relay enable pin"), so the data line can be perfectly correct and the strip stay dark. The
     /// relay belongs to `on` rather than to a driver or a service: it is the physical expression of
     /// master power, and `on` is the one control the UI, the WLED bridge, MQTT and OSC all already
     /// write. A second on/off would be a split brain, with nothing able to say which one meant off.
+    /// Brightness 0 opens it too: a strip at zero draws its idle current for nothing, and a slider
+    /// at 0 is how a WLED-style client says "off" without touching `on`.
     void applyRelay() {
+        const bool closed = on && brightness > 0;
         // Release a pin the user just cleared, or it stays asserted forever on a GPIO nothing owns.
         // The same reasoning InfraredService applies when its pin is unset.
         if (!relayPins[0]) {
@@ -497,7 +502,7 @@ public:
         for (uint8_t i = 0; i < n; i++) {
             // An input-only pin (classic ESP32 34-39) refuses the write, and the seam says so: a
             // relay wired to one would otherwise look configured and do nothing.
-            if (!platform::gpioWrite(static_cast<uint8_t>(pins[i]), on))
+            if (!platform::gpioWrite(static_cast<uint8_t>(pins[i]), closed))
                 setStatus("relay pin cannot drive an output", Severity::Warning);
             lastRelayPins_[i] = static_cast<uint8_t>(pins[i]);
         }

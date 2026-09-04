@@ -1,0 +1,309 @@
+{
+  "name": "scenario_Aurora_fps",
+  "module": "AuroraEffect",
+  "mode": "mutate",
+  "also": [
+    "OscillatorBank",
+    "PolarLut",
+    "GridLayout",
+    "Layer"
+  ],
+  "description": "What a layered shader costs, one control at a time. Aurora samples a warped noise field once per layer per pixel, so its frame time is set by three knobs that multiply: how many layers, how many octaves inside each, and whether the field warps at all. The steps walk them from the cheapest configuration to the most expensive on one grid, so the ratios between the observed numbers are what an author reads to choose settings for a fixture, and a jump in any one of them between commits is a regression with a name. The grid is deliberately 64x64: large enough that per-pixel cost dominates, small enough to run on every target the contracts name.",
+  "fixture": [
+    {
+      "name": "fix-layouts",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "fix-layers",
+      "op": "add_module",
+      "id": "Effects",
+      "type": "Effects",
+      "props": {
+        "layouts": "Layouts"
+      }
+    },
+    {
+      "name": "fix-drivers",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "effects": "Effects"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "name": "canvas-clear-layers",
+      "description": "Self-canvas: clear and rebuild the pipeline this scenario assumes, so it runs from any device state.",
+      "op": "clear_children",
+      "id": "Effects"
+    },
+    {
+      "name": "canvas-clear-layouts",
+      "op": "clear_children",
+      "id": "Layouts"
+    },
+    {
+      "name": "canvas-grid",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 64,
+        "height": 64
+      }
+    },
+    {
+      "name": "canvas-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "parent_id": "Effects"
+    },
+    {
+      "name": "aurora-defaults",
+      "description": "Aurora as it ships: 3 layers, 2 octaves, warp on. This is the number a catalog card promises, and the one every step below is read against.",
+      "op": "add_module",
+      "id": "Aurora",
+      "type": "AuroraEffect",
+      "parent_id": "Layer",
+      "measure": true,
+      "contract": {
+        "desktop-macos": {
+          "tick_us": 3000,
+          "free_heap": 0,
+          "set_by": "2026-09-04",
+          "reason": "initial contract: Aurora at 64x64, 3 layers, 2 octaves, warp on"
+        }
+      },
+      "observed": {
+        "desktop-macos": {
+          "tick_us": {
+            "p50": 478,
+            "p95": 650,
+            "min": 474,
+            "max": 650,
+            "n": 3,
+            "samples": [478, 474, 650]
+          },
+          "last_updated": "2026-09-04"
+        }
+      }
+    },
+    {
+      "name": "one-layer",
+      "description": "The cost knob at its cheapest. Layers are the outer multiplier: each one is a full warped field sample per pixel, so this should land near a third of the step above.",
+      "op": "set_control",
+      "id": "Aurora",
+      "key": "layers",
+      "value": 1,
+      "measure": true,
+      "contract": {
+        "desktop-macos": {
+          "tick_us": 1500,
+          "free_heap": 0,
+          "set_by": "2026-09-04",
+          "reason": "initial contract: one layer, roughly a third of the three-layer cost"
+        }
+      },
+      "observed": {
+        "desktop-macos": {
+          "tick_us": {
+            "p50": 207,
+            "p95": 208,
+            "min": 207,
+            "max": 208,
+            "n": 3,
+            "samples": [207, 207, 208]
+          },
+          "last_updated": "2026-09-04"
+        }
+      }
+    },
+    {
+      "name": "one-layer-no-warp",
+      "description": "Warp off: the field is sampled where it lies rather than where the field displaced it, which is two fewer noise samples per pixel. The cheapest Aurora that still reads as Aurora, and the configuration a large wall runs.",
+      "op": "set_control",
+      "id": "Aurora",
+      "key": "warp",
+      "value": 0,
+      "measure": true,
+      "contract": {
+        "desktop-macos": {
+          "tick_us": 900,
+          "free_heap": 0,
+          "set_by": "2026-09-04",
+          "reason": "initial contract: one layer without domain warping"
+        }
+      },
+      "observed": {
+        "desktop-macos": {
+          "tick_us": {
+            "p50": 127,
+            "p95": 128,
+            "min": 127,
+            "max": 128,
+            "n": 3,
+            "samples": [127, 127, 128]
+          },
+          "last_updated": "2026-09-04"
+        }
+      }
+    },
+    {
+      "name": "four-layers-no-warp",
+      "description": "Four unwarped layers: the same total field samples as roughly one warped layer, arranged as more structure instead of more folding. Reading this against one-layer-no-warp is how an author trades detail for depth at a fixed budget.",
+      "op": "set_control",
+      "id": "Aurora",
+      "key": "layers",
+      "value": 4,
+      "measure": true,
+      "contract": {
+        "desktop-macos": {
+          "tick_us": 3400,
+          "free_heap": 0,
+          "set_by": "2026-09-04",
+          "reason": "initial contract: four layers, warp off"
+        }
+      },
+      "observed": {
+        "desktop-macos": {
+          "tick_us": {
+            "p50": 304,
+            "p95": 306,
+            "min": 303,
+            "max": 306,
+            "n": 3,
+            "samples": [304, 303, 306]
+          },
+          "last_updated": "2026-09-04"
+        }
+      }
+    },
+    {
+      "name": "four-layers-four-octaves",
+      "description": "Four unwarped layers at four octaves: the octave knob at its top, with warp still off from the step above. Read against four-layers-no-warp, this is what octaves alone cost.",
+      "op": "set_control",
+      "id": "Aurora",
+      "key": "octaves",
+      "value": 4,
+      "measure": true,
+      "contract": {
+        "desktop-macos": {
+          "tick_us": 7000,
+          "free_heap": 0,
+          "set_by": "2026-09-04",
+          "reason": "initial contract: four layers, four octaves, warp still off"
+        }
+      },
+      "observed": {
+        "desktop-macos": {
+          "tick_us": {
+            "p50": 474,
+            "p95": 480,
+            "min": 474,
+            "max": 480,
+            "n": 3,
+            "samples": [474, 474, 480]
+          },
+          "last_updated": "2026-09-04"
+        }
+      }
+    },
+    {
+      "name": "warp-back-on",
+      "description": "Warp back on, so the two steps below measure the configuration Aurora actually ships. Setting it explicitly rather than relying on the default is what keeps each number readable on its own.",
+      "op": "set_control",
+      "id": "Aurora",
+      "key": "warp",
+      "value": 60,
+      "measure": true,
+      "contract": {
+        "desktop-macos": {
+          "tick_us": 9000,
+          "free_heap": 0,
+          "set_by": "2026-09-04",
+          "reason": "initial contract: four layers, four octaves, warp on: the true ceiling"
+        }
+      },
+      "observed": {
+        "desktop-macos": {
+          "tick_us": {
+            "p50": 785,
+            "p95": 937,
+            "min": 785,
+            "max": 937,
+            "n": 2,
+            "samples": [937, 785]
+          },
+          "last_updated": "2026-09-04"
+        }
+      }
+    },
+    {
+      "name": "kaleidoscope",
+      "description": "Fold the composition into six wedges, at the ceiling settings above. The symmetry is applied to the angle before the field is ever sampled, so it costs one modulo per pixel and not a second pass over the field: the small step from warp-back-on is what pins that claim.",
+      "op": "set_control",
+      "id": "Aurora",
+      "key": "segments",
+      "value": 6,
+      "measure": true,
+      "contract": {
+        "desktop-macos": {
+          "tick_us": 9500,
+          "free_heap": 0,
+          "set_by": "2026-09-04",
+          "reason": "initial contract: the fold adds one modulo per pixel, not a pass"
+        }
+      },
+      "observed": {
+        "desktop-macos": {
+          "tick_us": {
+            "p50": 814,
+            "p95": 821,
+            "min": 507,
+            "max": 821,
+            "n": 3,
+            "samples": [507, 814, 821]
+          },
+          "last_updated": "2026-09-04"
+        }
+      }
+    },
+    {
+      "name": "back-to-defaults",
+      "description": "Octaves back to the shipped 2, with four layers and the fold still on. Returning near the four-layers steps above is what shows the effect carries no state that accumulates across reconfiguration.",
+      "op": "set_control",
+      "id": "Aurora",
+      "key": "octaves",
+      "value": 2,
+      "measure": true,
+      "contract": {
+        "desktop-macos": {
+          "tick_us": 4200,
+          "free_heap": 0,
+          "set_by": "2026-09-04",
+          "reason": "initial contract: four layers, two octaves, folded"
+        }
+      },
+      "observed": {
+        "desktop-macos": {
+          "tick_us": {
+            "p50": 643,
+            "p95": 658,
+            "min": 333,
+            "max": 658,
+            "n": 3,
+            "samples": [333, 643, 658]
+          },
+          "last_updated": "2026-09-04"
+        }
+      }
+    }
+  ]
+}

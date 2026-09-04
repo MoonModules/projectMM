@@ -4,7 +4,7 @@
 
 namespace mm {
 
-// Noise 2D: a smoothly drifting value-noise field. Each (x,y) pixel reads a 3D noise sample whose
+// Noise 2D: a smoothly drifting gradient-noise field. Each (x,y) pixel reads a 3D noise sample whose
 // X/Y coordinates are the grid position scaled by `scale` (larger scale = finer, more detailed
 // noise; smaller = broad, smooth blobs) and whose Z coordinate is time, so the whole field flows /
 // morphs over the frames. The 0..255 noise value indexes the active palette directly, giving the
@@ -18,11 +18,11 @@ namespace mm {
 // 1 — the division can never be by zero.
 //
 // Prior art: MoonLight's Noise2D effect (E_MoonModules / MoonModules), itself in the WLED
-// noise-effect lineage (FastLED inoise8 — Perlin/value noise, Mark Kriegsman / Ken Perlin). The
+// noise-effect lineage (FastLED inoise8, Perlin noise, Mark Kriegsman / Ken Perlin). The
 // per-pixel coordinate-scale + time-on-Z animation and the direct palette indexing are reproduced
 // exactly here, written fresh on EffectBase + the shared draw / noise primitives.
 // Author: WLED (Noise 2D) — https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h
-/// 2D value-noise effect.
+/// 2D gradient-noise effect.
 class Noise2DEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🌙🐙"; }  // MoonLight origin · MoonModules · WLED

@@ -202,7 +202,7 @@ Detail: [technical](moxygen/RandomEffect.md)
 
 <img src="../../assets/light/effects/RingsEffect.gif" width="300" alt="Rings effect preview">
 
-Expanding concentric rings from random centres, additive overlap (calm defaults).
+Expanding concentric rings from random centers, additive overlap (calm defaults).
 
 - `count` — number of concentric rings (1–255).
 - `speed` — expansion rate.
@@ -221,7 +221,7 @@ Detail: [technical](moxygen/RingsEffect.md)
 
 <img src="../../assets/light/effects/RipplesEffect.gif" width="300" alt="Ripples effect preview">
 
-Distance-from-centre sets a per-column wave phase; the lit surface ripples like water.
+Distance-from-center sets a per-column wave phase; the lit surface ripples like water.
 
 - `speed` — wave animation rate (0 = frozen, 99 = fast).
 - `interval` — wavefront spacing (low = tight rings, high = wide).
@@ -403,6 +403,26 @@ The court is fixed point rather than pixels, so the game plays identically on a 
 
 Uses the global palette. Origin: projectMM original; inspired by Atari's Pong (1972)
 
+<a id="aurora"></a>
+
+### Aurora 🔬 · 2D
+
+Several noise fields, each drifting on its own clock, read in polar coordinates and composited into curtains of light. Nothing is simulated: layers of the same field at different scales, moved by independent oscillators, interfere with each other, and the interference is what reads as curtains folding through one another. The strongest layer at each pixel wins, so the layers stay distinct instead of averaging into haze, and which layer won picks the region of the palette. Every palette gives a different aurora.
+
+- `speed` — master rate; every layer's motion scales from it, and 0 freezes the composition.
+- `scale` — noise cells across the grid: low is broad curtains, high is fine structure.
+- `layers` — how many fields are composited, and the main cost knob.
+- `warp` — how far the field displaces its own sample angle, which is what makes a curtain fold over itself rather than sweep past.
+- `twist` — how much the radius shears the angle, giving the curtains their lean.
+- `segments` — kaleidoscope wedges; 1 leaves the composition unfolded.
+- `contrast` — how much of the field lights. Low is cloud, high is a few sharp curtains. The window is placed against the field's own measured range, so this means the same thing on any grid and at any octave count.
+- `octaves` — detail within each layer, multiplying the cost knob.
+- `polarTable`, `polarTable16` — as PolarNoise above.
+
+Cost is one warped fbm per layer per pixel, so `layers` times `octaves` is the budget. The polar address is a table read rather than an angle and a distance per pixel.
+
+Origin: projectMM original, in the shader vocabulary Stefan Petrick made recognizable in the LED world
+
 <a id="ballpit"></a>
 
 ### Ballpit 🔬 · 2D
@@ -486,7 +506,7 @@ Origin: projectMM original, on Sébastien Truchet's 1704 tiling and the standard
 
 ### Tunnel 🔬 · 2D
 
-A texture mapped onto the inside of an infinite tube, so the viewer appears to fly down it forever. Nothing is 3D: the angle around the centre is one texture coordinate and the reciprocal of the distance is the other, which is perspective for the price of a divide.
+A texture mapped onto the inside of an infinite tube, so the viewer appears to fly down it forever. Nothing is 3D: the angle around the center is one texture coordinate and the reciprocal of the distance is the other, which is perspective for the price of a divide.
 
 - `bpm` — how fast the tunnel flies past.
 - `depth` — texture scale along the tunnel; higher is finer rings.
@@ -504,7 +524,7 @@ Origin: projectMM original, on the standard demoscene tunnel
 A rotating 3D object drawn as shaded spheres — the demoscene classic that named the technique. The smallest complete demonstration of putting 3D on a panel: rotate, project, sort back-to-front, shade by distance, draw.
 
 - `bpm` — rotation speed.
-- `size` — ball radius at the object's centre, in pixels.
+- `size` — ball radius at the object's center, in pixels.
 - `spread` — how far apart the balls sit.
 - `distance` — how far the object is from the viewer.
 - `fade` — dim the far balls, which is what reads as depth.
@@ -550,7 +570,7 @@ Origin: projectMM original, on Iñigo Quilez's raymarching and distance-function
 
 ### PolarNoise 🔬 · 2D
 
-A warped noise field addressed by angle and radius, folded into a kaleidoscope. The field turns and breathes around the centre rather than scrolling past it.
+A warped noise field addressed by angle and radius, folded into a kaleidoscope. The field turns and breathes around the center rather than scrolling past it.
 
 - `bpm` — how fast the field drifts.
 - `scale` — noise cells across the grid: low is broad shapes, high is fine detail.
@@ -558,6 +578,8 @@ A warped noise field addressed by angle and radius, folded into a kaleidoscope. 
 - `warp` — domain-warp strength; 0 gives a plain field.
 - `octaves` — fbm octaves, and the main cost knob.
 - `twist` — how much the radius shears the angle, setting the spiral.
+- `polarTable` — read each pixel's angle and radius from a table instead of computing them every frame. On by default: it is the same picture, measured 34% faster on an ESP32-S3, and costs 2 bytes per pixel. Turn it off on a device short of memory; the effect then computes the address and looks identical.
+- `polarTable16` — hold that table at full 16-bit precision, at 4 bytes per pixel instead of 2.
 
 Cost scales with `octaves` and `warp`: at `warp` > 0 and `octaves` 2 it is roughly 4 noise samples per pixel. On a large wall set `octaves` to 1 or `warp` to 0, which degrades to a plain polar noise that still reads well.
 
@@ -751,7 +773,7 @@ Detail: [technical](moxygen/GEQ3DEffect.md)
 
 ### Noise2D 💫🌙🐙 · 2D
 
-A smoothly drifting value-noise field: each pixel samples 3D noise (grid position × `scale`, time on the Z axis) and indexes the palette directly, giving an organic plasma wash that morphs over time.
+A smoothly drifting gradient-noise field: each pixel samples 3D noise (grid position × `scale`, time on the Z axis) and indexes the palette directly, giving an organic plasma wash that morphs over time.
 
 - `speed` — how fast the field morphs (time-flow rate).
 - `scale` — noise zoom (higher = finer, more detailed).
@@ -933,7 +955,7 @@ Detail: [technical](moxygen/FireEffect.md)
 
 <img src="../../assets/light/effects/NoiseEffect.gif" width="300" alt="Noise effect preview">
 
-Smooth animated value noise; true 3D field on volumetric layouts.
+Smooth animated gradient noise; true 3D field on volumetric layouts.
 
 - `scale` — spatial frequency of the field (1–32, higher = finer detail).
 - `bpm` — scroll speed (8 noise cells per beat).

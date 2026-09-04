@@ -15,6 +15,7 @@ namespace mm::moonlive {
 /// upstream and in the factory script directory on the device.
 constexpr const char* kEffectCatalog[] = {
     "aim.mle",
+    "aurora.mle",
     "ballpit.mle",
     "balls.mle",
     "breathe.mle",
@@ -39,11 +40,12 @@ constexpr const char* kEffectCatalog[] = {
     "spectrum.mle",
     "sweep.mle",
 };
-constexpr size_t kEffectCatalogCount = 24;
+constexpr size_t kEffectCatalogCount = 25;
 /// What each effect above declares about itself, in the same order.
 /// A dimension of 0 means the script says nothing, so the DEVICE decides the default.
 constexpr unsigned char kEffectCatalogDim[] = {
     1,
+    2,
     2,
     2,
     1,
@@ -71,6 +73,7 @@ constexpr unsigned char kEffectCatalogDim[] = {
 /// The emoji each declares, "" when it declares none.
 constexpr const char* kEffectCatalogTags[] = {
     "💫🎯",
+    "💫",
     "💫✨",
     "💫",
     "💫",
@@ -207,6 +210,6 @@ constexpr const char* kPaletteCatalogTags[] = {
 };
 constexpr const char* kPaletteFolder = "palettes";   ///< its directory upstream
 
-constexpr size_t kCatalogCount = 42;   ///< every factory script, all roles
+constexpr size_t kCatalogCount = 43;   ///< every factory script, all roles
 
 } // namespace mm::moonlive

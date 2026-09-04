@@ -1,7 +1,7 @@
 // @module draw
 // @also Canvas
 
-// draw::splat draws a point at a fractional position by spreading its light over the neighbouring
+// draw::splat draws a point at a fractional position by spreading its light over the neighboring
 // pixels. What makes it correct rather than merely soft is conservation: a point contributes exactly
 // its own brightness, wherever it lands. If the weights summed to more than one pixel's worth, a
 // moving point would pulse brighter as it crossed cell boundaries; if less, it would dim.

@@ -117,7 +117,7 @@ TEST_CASE("a negative radius draws nothing") {
 
 // The reason lineAA exists: a diagonal that is not at 45 degrees lands between cells, and Wu
 // splits it rather than snapping. A perfectly diagonal line has nothing to split.
-TEST_CASE("an anti-aliased line spreads a shallow diagonal over neighbouring cells") {
+TEST_CASE("an anti-aliased line spreads a shallow diagonal over neighboring cells") {
     Surface s(8, 8);
     draw::lineAA(s.cv, {0, 0, 0}, {7, 3, 0}, RGB{255, 0, 0});
     // Somewhere along the run, two vertically-adjacent cells are both partly lit — the AA signature.
