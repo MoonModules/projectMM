@@ -341,7 +341,7 @@ variables, so a new builtin should take a name a script would not: `polarA`/`pol
 the obvious ones. The compile-every-script test caught it immediately, which is the argument for
 keeping that test cheap to run.
 
-### 4b. Two predefined structs: `Coord3D` and `CRGB` — *and they make #4 land properly*
+### 4b. Predefined structs: `Coord3D` now, a color type after the 16-bit Layer — *and they make #4 land properly*
 
 Most of what a script manipulates is a POSITION or a COLOUR, and today both are loose integers: a
 coordinate is three separate values or an index the script computes by hand
@@ -349,7 +349,20 @@ coordinate is three separate values or an index the script computes by hand
 travel together. Two predefined types would carry them:
 
 - **`Coord3D`** — `{x, y, z}`, the shape `setXYZ`, `addLight` and every layout already think in.
-- **`CRGB`** — `{r, g, b}`, the FastLED name, matching `RGB` in `core/color.h`.
+- **A color struct** — `{r, g, b}`, matching `RGB` in `core/color.h`.
+
+**No `HSV` struct.** The builtins already record the decision and the reason
+(`MoonLiveBuiltins_light.h`): a hue wheel is how an effect picks color while IGNORING the user's
+palette, and 47 of 52 compiled effects were moved off that habit. A predefined `HSV` would put it
+back as the easy default. HSV stays where it earns its place, in `setPalEntryHSV`, which is
+authoring a palette rather than bypassing one.
+
+**The color one waits, and does not take FastLED's `CRGB` name.** The
+[generative-fields plan](generative-fields-analysis-top-down.md) makes the Layer 16-bit with the
+channel width decided at run time and `draw.h` templated over both widths, so a script-visible color
+fixed at three `uint8_t` would be the one place the width stops being runtime data. Specify it after
+that phase lands, under our own name (CLAUDE.md: our own code, our own names). `Coord3D` has no such
+dependency and goes first.
 
 Predefined rather than user-declarable structs (#10): these two are what the ENGINE already passes
 around, so they need no general struct machinery — just two known layouts the compiler understands
@@ -360,6 +373,14 @@ The payoff is that #4 becomes the natural signature rather than a special case:
 ```c
 setColorFromPalette(pos, index, brightness);     // pos is a Coord3D
 ```
+
+**Scope: a predefined struct is a type, not a calling convention.** One that appeared only in
+builtin signatures would be a special case the language does not need. `Coord3D` is a class member,
+a local, a function argument and a return value, exactly as `int`, `byte`, `bool` and `fixed` are,
+which makes § 6 (arguments and returns) a prerequisite rather than a nicety. Two costs to settle
+when it is added: whether a member is one member record or three of the eight, and hence 6 of the 64
+arena bytes; and that a local occupies one frame slot per field under today's flat allocator, so a
+script holding a few coordinates reaches the 16-slot ceiling sooner (§ 8b).
 
 One call, one brightness evaluation, and the index arithmetic stops being open-coded at every call
 site. It also removes the `mod(...) + mod(...) * width` flattening a script writes today, which is
@@ -514,11 +535,18 @@ Not exposed, each with a reason: `spray`
 (`emit` with a wide cone is one), `spawn` (per-particle in a whole-pool API), `force`/`forceSmall`
 (needs the `acc` buffer for wind nothing needs yet), `attract`, `wrap`, `liveCount`, `clear`.
 
-### 10. Structs — *readability, once the arena is bigger*
+### 10. User structs, and arrays of them — *readability, once the arena is bigger*
 
 `ball[i].x` instead of parallel arrays. Genuinely nicer and closer to how a precompiled effect
 reads, but parallel arrays work the moment the arena is big enough. Last because #1 removes most
 of the pain, not because it does not matter.
+
+Arrays of the five scalar types already ship (`byte heat[16]` in `ember.mle`), so what is missing
+here is arrays OF STRUCTS, and it splits in two. An array of a PREDEFINED struct (§ 4b) is the
+smaller half and the one an effect reaches for first: a script holding `Coord3D pos[8]` is exactly
+the parallel-array flattening this item exists to remove, and the element width the array path
+already carries (`idxPack`) is the machinery it needs. An array of a USER struct needs the general
+declaration machinery above it. Worth building in that order if this is picked up.
 
 ## How to know a step landed
 

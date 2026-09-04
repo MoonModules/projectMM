@@ -419,7 +419,7 @@ Several noise fields, each drifting on its own clock, read in polar coordinates 
 - `octaves` — detail within each layer, multiplying the cost knob.
 - `polarTable`, `polarTable16` — as PolarNoise above.
 
-Cost is one warped fbm per layer per pixel, so `layers` times `octaves` is the budget. The polar address is a table read rather than an angle and a distance per pixel.
+Cost is one warped field sample per layer per pixel. With `warp` above zero each of those is a `warp8`, which spends two noise samples finding where to look before the `octaves` samples of the field itself, so the budget is `layers` × (`octaves` + 2); at `warp` 0 it is `layers` × `octaves`. The polar address is a table read rather than an angle and a distance per pixel.
 
 Origin: projectMM original, in the shader vocabulary Stefan Petrick made recognizable in the LED world
 
@@ -769,21 +769,6 @@ Detail: [technical](moxygen/GEQ3DEffect.md)
 
 [Tests](../../tests/unit-tests.md#geq3deffect)
 
-<a id="noise2d"></a>
-
-### Noise2D 💫🌙🐙 · 2D
-
-A smoothly drifting gradient-noise field: each pixel samples 3D noise (grid position × `scale`, time on the Z axis) and indexes the palette directly, giving an organic plasma wash that morphs over time.
-
-- `speed` — how fast the field morphs (time-flow rate).
-- `scale` — noise zoom (higher = finer, more detailed).
-
-Origin: WLED · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h)
-
-Detail: [technical](moxygen/Noise2DEffect.md)
-
-[Tests](../../tests/unit-tests.md#noise2deffect)
-
 <a id="paintbrush"></a>
 
 ### PaintBrush 💫🌙📊 · 3D
@@ -951,16 +936,17 @@ Detail: [technical](moxygen/FireEffect.md)
 
 <a id="noise"></a>
 
-### Noise ⚡️ · 2D/3D
+### Noise ⚡️💫🌙🐙 · 1D/2D/3D
 
 <img src="../../assets/light/effects/NoiseEffect.gif" width="300" alt="Noise effect preview">
 
-Smooth animated gradient noise; true 3D field on volumetric layouts.
+A gradient-noise field indexed straight into the palette: the plainest way to turn the field into light, and the effect every other noise effect is a variation on.
 
-- `scale` — spatial frequency of the field (1–32, higher = finer detail).
-- `bpm` — scroll speed (8 noise cells per beat).
+- `motion` — what moves. **`drift`** scrolls the sample coordinates, so the field slides across the fixture like weather, each axis at its own rate so it flows rather than translating rigidly; on a volumetric fixture the third axis is the light's own depth, so the slices differ. **`morph`** holds the coordinates still and puts time on the third axis, so the field changes in place without going anywhere, which on a panel is the classic plasma wash; there is then no axis left for depth, so a volumetric fixture shows the same field in every slice.
+- `scale` — spatial frequency: low is broad blobs, high is fine detail.
+- `bpm` — how fast it moves.
 
-Origin: FastLED · inoise field (Mark Kriegsman)
+Origin: FastLED · inoise field (Mark Kriegsman); the `morph` form from WLED via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_WLED.h), which shipped it as a separate Noise2D effect until the two were merged
 
 Detail: [technical](moxygen/NoiseEffect.md)
 

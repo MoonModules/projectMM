@@ -68,6 +68,33 @@ public:
     /// not this safety cap.
     char ledsPerPin[48] = "";
 
+    /// Wire timing. Named by SPEED rather than by chipset, because chipset names do not partition
+    /// the timings: SK6812 and WS2812B decode identically, while "WS2811" covers two different bit
+    /// rates. The chip names in each label are examples of what that timing drives, not a list.
+    ///
+    /// The default satisfies WS2812, WS2812B and SK6812 at once, which is why it has served every
+    /// strip so far. A 12V WS2811 strip in its low-speed mode needs twice the bit cell and reads
+    /// the default as noise past the first few lights (issue #94).
+    uint8_t timing = 0;
+
+    /// The three numbers behind `timing`, shown only when it is `custom`. A strip whose datasheet
+    /// matches no preset is then a control change rather than a firmware release, and what a user
+    /// finds by trying is a number they can report back.
+    uint16_t t0hNs = 350;
+    uint16_t t1hNs = 700;
+    uint16_t periodNs = 1250;
+
+    /// The index of `custom` in the table below: the one option that reads the three fields.
+    static constexpr uint8_t kTimingCustom = 3;
+
+    /// The presets, in the order the select lists them.
+    static constexpr const char* kTimingOptions[] = {
+        "800kHz WS2812B/SK6812",   // 350 / 700 / 1250: the default, and most strips
+        "400kHz WS2811",           // 500 / 1200 / 2500: 12V WS2811 in low-speed mode
+        "800kHz WS2811 fast",      // 250 / 600 / 1250: WS2811 strapped to high speed
+        "custom",                  // the three fields below
+    };
+
     /// On-device loopback self-test — RMT is a transceiver, so the driver verifies its own output
     /// on real silicon (replaces the old standalone test firmware). Tick to run a one-shot RMT
     /// TX→RX round-trip: jumper the first pin (TX) to `loopbackRxPin`, it transmits a known WS2812
@@ -110,6 +137,19 @@ public:
         addWindowControls();   // start / count — the slice of the shared buffer this driver outputs
         controls_.addText("pins", pins, sizeof(pins));
         controls_.addText("ledsPerPin", ledsPerPin, sizeof(ledsPerPin));
+        controls_.addSelect("timing", timing, kTimingOptions,
+                            static_cast<uint8_t>(sizeof(kTimingOptions) / sizeof(kTimingOptions[0])));
+        // The custom fields are always bound so persistence can load them whatever the mode, and
+        // shown only in custom mode: the same add-then-setHidden shape the loopback controls use.
+        // Ranges are the encodable window at the 40 MHz tick clock, not datasheet limits: a user
+        // reading their own datasheet should be able to type what it says.
+        const bool custom = timing == kTimingCustom;
+        controls_.addControl("t0hNs", t0hNs, 50, 4000);
+        controls_.setHidden(controls_.count() - 1, !custom);
+        controls_.addControl("t1hNs", t1hNs, 50, 4000);
+        controls_.setHidden(controls_.count() - 1, !custom);
+        controls_.addControl("periodNs", periodNs, 200, 8000);
+        controls_.setHidden(controls_.count() - 1, !custom);
         controls_.addControl("loopbackTest", loopbackTest);
         controls_.setAdvanced(controls_.count() - 1);   // expert-mode: a bench self-test, not a normal-use control
         // loopbackTxPin / loopbackRxPin are always bound (so persistence can load
@@ -131,6 +171,8 @@ public:
     /// sweep runs and parseConfig()/reinit() pick up the new lists.
     bool affectsPrepare(const char* name) const override {
         return std::strcmp(name, "pins") == 0 || std::strcmp(name, "ledsPerPin") == 0
+            || std::strcmp(name, "timing") == 0 || std::strcmp(name, "t0hNs") == 0
+            || std::strcmp(name, "t1hNs") == 0 || std::strcmp(name, "periodNs") == 0
             || isWindowControl(name);
     }
 
@@ -316,6 +358,15 @@ private:
     Buffer* sourceBuffer_ = nullptr;
 
     LedDriverConfig cfg_;
+
+public:
+    /// The wire timing the `timing` control resolved to. The tests assert against this rather than
+    /// against RMT ticks, so what is pinned is the contract a datasheet states (nanoseconds) rather
+    /// than the tick clock that happens to express it. Same injection-point role as
+    /// `correctionForTest()`; read-only, since the control is the way to change it.
+    const LedDriverConfig& wireTimingForTest() const { return cfg_; }
+
+private:
     platform::RmtWs2812Handle rmt_[kMaxPins];
     uint16_t       pinList_[kMaxPins] = {};    // parsed pins, list order
     nrOfLightsType pinCounts_[kMaxPins] = {};  // lights per pin (slice lengths)
@@ -369,7 +420,33 @@ private:
     // the current buffer/correction. On error: pinCount_ = 0 (tick() idles) and
     // the static error literal goes to the status slot; a later successful parse
     // clears it. Off the hot path.
+    /// Turn the `timing` selection into the wire timing the encoder reads. Called from
+    /// parseConfig, so every path that rebuilds the driver picks it up: the numbers are read per
+    /// frame from cfg_, so a change takes effect on the next frame with no channel reinit (the RMT
+    /// tick clock is unchanged, only how many ticks each bit lasts).
+    void applyTiming() {
+        switch (timing) {
+            // The 400 kHz WS2811 mode: T0H 0.5 us, T1H 1.2 us, 2.5 us cell. Twice the bit period,
+            // so a frame takes twice as long; at 18 lights that is ~1 ms, at 1000 it is ~60 ms.
+            case 1: cfg_.t0h_ns = 500; cfg_.t1h_ns = 1200; cfg_.period_ns = 2500; break;
+            // WS2811 strapped to its high-speed mode: the same 1.25 us cell as WS2812 with narrower
+            // pulses. Within the WS2812 decode window, so it is a refinement rather than a rescue.
+            case 2: cfg_.t0h_ns = 250; cfg_.t1h_ns = 600;  cfg_.period_ns = 1250; break;
+            case kTimingCustom:
+                // Trusted as typed, but ordered: a t1h below t0h encodes 1 as a shorter pulse than
+                // 0, which no chip decodes, and a period below t1h cannot contain the pulse.
+                cfg_.t0h_ns = t0hNs;
+                cfg_.t1h_ns = t1hNs > t0hNs ? t1hNs : static_cast<uint16_t>(t0hNs + 50);
+                cfg_.period_ns = periodNs > cfg_.t1h_ns ? periodNs
+                                                        : static_cast<uint16_t>(cfg_.t1h_ns + 50);
+                break;
+            // The default: satisfies WS2812, WS2812B and SK6812 at once.
+            default: cfg_.t0h_ns = 350; cfg_.t1h_ns = 700; cfg_.period_ns = 1250; break;
+        }
+    }
+
     bool parseConfig() {
+        applyTiming();
         pinCount_ = 0;
         uint8_t n = 0;
         const char* warn = nullptr;

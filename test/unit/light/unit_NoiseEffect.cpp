@@ -1,164 +1,110 @@
 // @module NoiseEffect
-// @also PlasmaEffect, RainbowEffect
+// @also noise, Palette
+
+// Noise is the plainest field effect: a gradient-noise sample straight into the palette. Its one
+// character control decides what moves, which is what used to be two separate effects (the second
+// was Noise2D, whose morph behavior is the `morph` option here). These pin that both options render,
+// that they differ, and that each moves the way its name says.
 
 #include "doctest.h"
-#include "light/layouts/Layouts.h"
 #include "light/effects/NoiseEffect.h"
-#include "light/effects/PlasmaEffect.h"
-#include "light/effects/RainbowEffect.h"
+#include "light/layers/Layer.h"
 #include "light/layouts/GridLayout.h"
+#include "light/layouts/Layouts.h"
+#include "platform/platform.h"
 
-// Hash one z-slice of the layer buffer (used by 3D-depth tests below).
-static uint32_t hashSlice(const uint8_t* data, size_t sliceBytes) {
-    uint32_t h = 2166136261u;
-    for (size_t i = 0; i < sliceBytes; i++) { h ^= data[i]; h *= 16777619u; }
-    return h;
-}
+#include <array>
+#include <cstdint>
+#include <set>
+#include <vector>
 
-// One tick on an 8×8 grid leaves at least one non-zero byte (noise paints somewhere).
-TEST_CASE("NoiseEffect writes non-zero RGB data to buffer") {
-    mm::Layouts layouts;
-    mm::GridLayout grid;
-    grid.width = 8;
-    grid.height = 8;
-    grid.depth = 1;
+using namespace mm;
+
+namespace {
+
+/// Render Noise for `frames` on a w x h x d fixture and return the final buffer.
+std::vector<uint8_t> render(lengthType w, lengthType h, lengthType d, uint8_t motion,
+                            uint16_t frames = 40) {
+    platform::setTestNowMs(1000);
+    Layouts layouts;
+    GridLayout grid;
+    Layer layer;
+    NoiseEffect effect;
+    effect.motion = motion;
+    grid.width = w; grid.height = h; grid.depth = d;
     layouts.addChild(&grid);
-
-    mm::Layer layer;
     layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
-
-    mm::NoiseEffect noise;
-    layer.addChild(&noise);
-
+    layer.addChild(&effect);
     layer.applyState();
-    layer.tick();
-
+    for (uint16_t f = 0; f < frames; f++) {
+        platform::setTestNowMs(1000 + static_cast<uint32_t>(f) * 20);
+        layer.tick();
+    }
     auto& buf = layer.buffer();
-    REQUIRE(buf.data() != nullptr);
+    return std::vector<uint8_t>(buf.data(), buf.data() + buf.bytes());
+}
 
-    bool hasNonZero = false;
-    for (size_t i = 0; i < buf.bytes(); i++) {
-        if (buf.data()[i] != 0) { hasNonZero = true; break; }
+std::size_t differing(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
+    std::size_t n = 0;
+    for (std::size_t i = 0; i < a.size() && i < b.size(); i++) n += a[i] != b[i] ? 1 : 0;
+    return n;
+}
+
+}  // namespace
+
+TEST_CASE("both motions paint a field rather than a flat wash") {
+    for (uint8_t motion = 0; motion < 2; motion++) {
+        const auto f = render(16, 16, 1, motion);
+        std::set<uint8_t> values(f.begin(), f.end());
+        CHECK(values.size() > 8);          // a real field, not one repeated color
     }
-    CHECK(hasNonZero);
 }
 
-// Opposite corners of a 16×16 grid carry different colors (noise is not flat).
-TEST_CASE("NoiseEffect produces spatial variation") {
-    mm::Layouts layouts;
-    mm::GridLayout grid;
-    grid.width = 16;
-    grid.height = 16;
-    grid.depth = 1;
-    layouts.addChild(&grid);
-
-    mm::Layer layer;
-    layer.setLayouts(&layouts);
-    layer.setChannelsPerLight(3);
-
-    mm::NoiseEffect noise;
-    layer.addChild(&noise);
-
-    layer.applyState();
-    layer.tick();
-
-    auto* data = layer.buffer().data();
-    // Compare corners — noise should produce different values
-    uint8_t r0 = data[0], g0 = data[1], b0 = data[2];
-    size_t lastIdx = (16 * 16 - 1) * 3;
-    uint8_t r1 = data[lastIdx], g1 = data[lastIdx + 1], b1 = data[lastIdx + 2];
-    CHECK((r0 != r1 || g0 != g1 || b0 != b1));
-}
-
-// Noise and Rainbow produce visibly different frames on the same grid (sanity check that they're distinct algorithms).
-TEST_CASE("NoiseEffect produces different output than RainbowEffect") {
-    mm::Layouts layouts;
-    mm::GridLayout grid;
-    grid.width = 8;
-    grid.height = 8;
-    grid.depth = 1;
-    layouts.addChild(&grid);
-
-    // Render rainbow
-    mm::Layer layer1;
-    layer1.setLayouts(&layouts);
-    layer1.setChannelsPerLight(3);
-    mm::RainbowEffect rainbow;
-    layer1.addChild(&rainbow);
-    layer1.applyState();
-    layer1.tick();
-
-    // Render noise
-    mm::Layer layer2;
-    layer2.setLayouts(&layouts);
-    layer2.setChannelsPerLight(3);
-    mm::NoiseEffect noise;
-    layer2.addChild(&noise);
-    layer2.applyState();
-    layer2.tick();
-
-    // Compare buffers — should differ
-    bool differs = false;
-    for (size_t i = 0; i < layer1.buffer().bytes(); i++) {
-        if (layer1.buffer().data()[i] != layer2.buffer().data()[i]) {
-            differs = true;
-            break;
-        }
+TEST_CASE("drift moves the field across the fixture; morph changes it in place") {
+    // The distinction the control exists for, and the reason the two used to be separate effects.
+    // Drift scrolls the sample coordinates, so a later frame is the same field shifted. Morph holds
+    // the coordinates and advances time, so the field changes without going anywhere. Either way
+    // the picture must move, which is what this checks: a still frame would mean the motion control
+    // does nothing at all.
+    for (uint8_t motion = 0; motion < 2; motion++) {
+        const auto early = render(24, 24, 1, motion, 10);
+        const auto late  = render(24, 24, 1, motion, 120);
+        CHECK(differing(early, late) > early.size() / 4);
     }
-    CHECK(differs);
 }
 
-// Z-axis variation tests: with depth > 1 each z-slice must differ from the
-// next. A 2D-only effect (the previous behaviour) produced identical slices —
-// these tests pin the bug fixed.
-
-// With depth > 1, adjacent and distant z-slices each render differently (3D noise, not a stack of identical 2D slices).
-TEST_CASE("NoiseEffect produces different output per z-slice with depth > 1") {
-    mm::Layouts layouts;
-    mm::GridLayout grid;
-    grid.width = 8; grid.height = 8; grid.depth = 8;
-    layouts.addChild(&grid);
-
-    mm::Layer layer;
-    layer.setLayouts(&layouts);
-    layer.setChannelsPerLight(3);
-    mm::NoiseEffect noise;
-    layer.addChild(&noise);
-    layer.applyState();
-    layer.tick();
-
-    const size_t sliceBytes = static_cast<size_t>(grid.width) * grid.height * 3;
-    REQUIRE(layer.buffer().bytes() == sliceBytes * grid.depth);
-
-    uint32_t h0 = hashSlice(layer.buffer().data() + 0 * sliceBytes, sliceBytes);
-    uint32_t h1 = hashSlice(layer.buffer().data() + 1 * sliceBytes, sliceBytes);
-    uint32_t h4 = hashSlice(layer.buffer().data() + 4 * sliceBytes, sliceBytes);
-    CHECK(h0 != h1);  // adjacent slices differ
-    CHECK(h0 != h4);  // distant slices differ
+TEST_CASE("the two motions are genuinely different fields") {
+    const auto drift = render(24, 24, 1, 0, 60);
+    const auto morph = render(24, 24, 1, 1, 60);
+    CHECK(differing(drift, morph) > drift.size() / 2);
 }
 
-// Same z-slice variation requirement holds for Plasma — each depth plane renders differently.
-TEST_CASE("PlasmaEffect produces different output per z-slice with depth > 1") {
-    mm::Layouts layouts;
-    mm::GridLayout grid;
-    grid.width = 8; grid.height = 8; grid.depth = 8;
-    layouts.addChild(&grid);
+TEST_CASE("on a volumetric fixture drifting slices differ from each other") {
+    // What a 3D fixture buys: the light's own depth is the third noise axis, so the field has real
+    // depth rather than one slice repeated. Morph spends that axis on time instead, so its slices
+    // are identical by design and only drift is checked here.
+    const auto f = render(8, 8, 4, 0, 40);
+    const std::size_t slice = 8 * 8 * 3;
+    REQUIRE(f.size() >= slice * 4);
+    std::size_t diff = 0;
+    for (std::size_t i = 0; i < slice; i++) diff += f[i] != f[slice * 3 + i] ? 1 : 0;
+    CHECK(diff > slice / 4);
+}
 
-    mm::Layer layer;
-    layer.setLayouts(&layouts);
-    layer.setChannelsPerLight(3);
-    mm::PlasmaEffect plasma;
-    layer.addChild(&plasma);
-    layer.applyState();
-    layer.tick();
+TEST_CASE("Noise renders on a strip, a panel and a cube alike") {
+    // Any effect on any fixture: a 1D strip is not what a field effect is designed around, but it
+    // must still paint something rather than failing or going dark.
+    for (auto dims : {std::array<lengthType, 3>{64, 1, 1}, {16, 16, 1}, {8, 8, 8}}) {
+        const auto f = render(dims[0], dims[1], dims[2], 0);
+        REQUIRE(f.size() == static_cast<std::size_t>(dims[0]) * dims[1] * dims[2] * 3);
+        std::size_t lit = 0;
+        for (uint8_t v : f) lit += v > 0 ? 1 : 0;
+        CHECK(lit > f.size() / 8);
+    }
+}
 
-    const size_t sliceBytes = static_cast<size_t>(grid.width) * grid.height * 3;
-    REQUIRE(layer.buffer().bytes() == sliceBytes * grid.depth);
-
-    uint32_t h0 = hashSlice(layer.buffer().data() + 0 * sliceBytes, sliceBytes);
-    uint32_t h2 = hashSlice(layer.buffer().data() + 2 * sliceBytes, sliceBytes);
-    uint32_t h7 = hashSlice(layer.buffer().data() + 7 * sliceBytes, sliceBytes);
-    CHECK(h0 != h2);
-    CHECK(h0 != h7);
+TEST_CASE("Noise survives a degenerate grid rather than faulting") {
+    const auto f = render(0, 0, 1, 0, 3);
+    CHECK(f.empty());
 }

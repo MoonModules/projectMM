@@ -13,6 +13,7 @@
 #include "light/layouts/Layouts.h"
 #include "platform/platform.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -20,16 +21,27 @@ using namespace mm;
 
 namespace {
 
+template <typename F>
+std::vector<uint8_t> render3(lengthType w, lengthType h, lengthType d, F configure,
+                             uint16_t frames = 60, uint32_t startMs = 1000);
+
 /// Render Aurora with `configure` applied, and return the final frame.
 template <typename F>
 std::vector<uint8_t> render(lengthType w, lengthType h, F configure, uint16_t frames = 60, uint32_t startMs = 1000) {
+    return render3(w, h, 1, configure, frames, startMs);
+}
+
+/// The volumetric form: `d` lights deep.
+template <typename F>
+std::vector<uint8_t> render3(lengthType w, lengthType h, lengthType d, F configure,
+                             uint16_t frames, uint32_t startMs) {
     platform::setTestNowMs(startMs);
     Layouts layouts;
     GridLayout grid;
     Layer layer;
     AuroraEffect effect;
     configure(effect);
-    grid.width = w; grid.height = h; grid.depth = 1;
+    grid.width = w; grid.height = h; grid.depth = d;
     layouts.addChild(&grid);
     layer.setLayouts(&layouts);
     layer.setChannelsPerLight(3);
@@ -127,7 +139,44 @@ TEST_CASE("Aurora renders on a grid too small to have a center") {
 TEST_CASE("Aurora renders the same picture whether or not the polar table is available") {
     // The table is an optimization, not part of the look: a device that cannot spare the memory
     // gets the same composition.
-    const auto tabled = render(32, 32, [](AuroraEffect& e) { e.widePolarTable = true; });
-    const auto exact  = render(32, 32, [](AuroraEffect& e) { e.usePolarTable = false; });
+    const auto tabled = render(32, 32, [](AuroraEffect& e) { e.polar.wide = true; });
+    const auto exact  = render(32, 32, [](AuroraEffect& e) { e.polar.use = false; });
     CHECK(differing(tabled, exact) == 0);
+}
+
+TEST_CASE("on a volumetric fixture the curtains have depth instead of one repeated slice") {
+    // What a cube buys over a panel: the field is sampled through the volume, so a light at the
+    // front and one at the back of the same column are in different parts of the composition.
+    const auto f = render3(8, 8, 6, [](AuroraEffect& e) { e.contrast = 40; }, 40);
+    const std::size_t slice = 8 * 8 * 3;
+    REQUIRE(f.size() >= slice * 6);
+    std::size_t diff = 0;
+    for (std::size_t i = 0; i < slice; i++) diff += f[i] != f[slice * 5 + i] ? 1 : 0;
+    CHECK(diff > slice / 4);
+}
+
+TEST_CASE("each projection composes the volume differently") {
+    // The control earns its place only if the three look different on the same fixture.
+    const auto cyl = render3(8, 8, 6, [](AuroraEffect& e) { e.polar.mapping = 0; e.contrast = 40; }, 40);
+    const auto sph = render3(8, 8, 6, [](AuroraEffect& e) { e.polar.mapping = 1; e.contrast = 40; }, 40);
+    const auto rad = render3(8, 8, 6, [](AuroraEffect& e) { e.polar.mapping = 2; e.contrast = 40; }, 40);
+    std::size_t a = 0, b = 0;
+    for (std::size_t i = 0; i < cyl.size(); i++) {
+        a += cyl[i] != sph[i] ? 1 : 0;
+        b += cyl[i] != rad[i] ? 1 : 0;
+    }
+    CHECK(a > cyl.size() / 8);
+    CHECK(b > cyl.size() / 8);
+}
+
+TEST_CASE("Aurora renders on a strip, a panel and a cube alike") {
+    // Any effect on any dimension: a strip is one line through a field designed around two axes, so
+    // it is not what Aurora is for, but it must still light rather than fail or go dark.
+    for (auto dims : {std::array<lengthType, 3>{64, 1, 1}, {16, 16, 1}, {8, 8, 8}}) {
+        const auto f = render3(dims[0], dims[1], dims[2], [](AuroraEffect& e) { e.contrast = 30; }, 30);
+        REQUIRE(f.size() == static_cast<std::size_t>(dims[0]) * dims[1] * dims[2] * 3);
+        std::size_t lit = 0;
+        for (uint8_t v : f) lit += v > 0 ? 1 : 0;
+        CHECK(lit > 0);
+    }
 }

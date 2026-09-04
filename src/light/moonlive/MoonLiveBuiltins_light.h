@@ -269,7 +269,10 @@ extern "C" inline uint32_t mm_light_warp(const uintptr_t* args, uint32_t, const 
 // is what the compiled OscillatorBank gives an effect and what a composition needs.
 extern "C" inline uint32_t mm_light_osc(const uintptr_t* args, uint32_t, const uint8_t*) {
     const uint32_t rate = uint32_t(args[0]), ms = uint32_t(args[1]), shape = uint32_t(args[2]);
-    if (rate == 0) return shape == 3 ? 0u : 32768u;          // held still, at the shape's start
+    // No special case for rate 0: the phase is then 0 and each shape's own value at phase 0 is the
+    // right answer (a sine sits at its midpoint, a triangle and a sawtooth at their start, a square
+    // low). An earlier version returned the midpoint for all four, which held a triangle and a saw
+    // at 32768 rather than at 0.
     // The phase, as an angle16: rate cycles per minute means rate * ms / 60000 turns.
     const uint32_t phase = static_cast<uint32_t>((static_cast<uint64_t>(ms) * rate * 65536u) / 60000u);
     const angle16 a = static_cast<angle16>(phase);

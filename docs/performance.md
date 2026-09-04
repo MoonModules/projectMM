@@ -66,23 +66,26 @@ Binary sizes:
 
 The 3D path is the closest to the bound and the reason: 3D gradient noise does eight dot products the value form never did, and the S3 instruction count for a 3D sample is 1.3x the old one. Method worth keeping: compile the kernel with the target's own compiler (`xtensa-esp32s3-elf-g++ -O2 -S`) and count instructions, branches and stack spills BEFORE flashing; three restructurings were compared that way in seconds, and the one flash went to the winner. The P4 and S31 numbers are open until those boards are back on the bench.
 
-**All rows, ns per sample, best of 5:**
+**All rows, ns per sample, best of 5.** Re-measured 2026-09-04 after the benchmark stopped dispatching through `std::function`: a type-erased call cannot be inlined, so it added an indirect call to every sample and the old figures were part kernel and part harness. Every row roughly halved, which is the size of what was being attributed to the kernels:
 
 | Kernel | ns/sample | Msamples/s |
 |---|---:|---:|
-| inoise8 1D | 2.6 | 381.6 |
-| inoise8 2D | 5.4 | 184.1 |
-| inoise8 3D | 11.5 | 86.7 |
-| inoise16 1D | 3.2 | 315.8 |
-| inoise16 2D | 7.0 | 143.6 |
-| inoise16 3D | 13.3 | 75.2 |
-| fbm8 2D, 2 octaves | 11.7 | 85.5 |
-| fbm8 2D, 4 octaves | 24.2 | 41.3 |
-| fbm16 2D, 2 octaves | 13.5 | 73.8 |
-| fbm16 2D, 4 octaves | 27.1 | 37.0 |
-| turbulence8 2D, 2 octaves | 12.8 | 78.1 |
-| warp8 2D, 1 octave | 21.9 | 45.7 |
-| warp8 2D, 2 octaves | 29.8 | 33.5 |
+| inoise8 1D | 1.8 | 554.4 |
+| inoise8 2D | 4.6 | 218.5 |
+| inoise8 3D | 10.1 | 99.5 |
+| inoise16 1D | 1.0 | 954.4 |
+| inoise16 2D | 2.1 | 481.1 |
+| inoise16 3D | 12.5 | 80.1 |
+| fbm8 2D, 2 octaves | 10.0 | 100.0 |
+| fbm8 2D, 4 octaves | 21.3 | 47.0 |
+| fbm16 2D, 2 octaves | 5.2 | 190.7 |
+| fbm16 2D, 4 octaves | 11.8 | 84.9 |
+| turbulence8 2D, 2 octaves | 10.2 | 98.2 |
+| warp8 2D, 1 octave | 16.6 | 60.1 |
+| warp8 2D, 2 octaves | 25.5 | 39.2 |
+| atan16 | 1.5 | 649.1 |
+| dist16 | 8.0 | 125.3 |
+| polar address (dist16 + atan16 + kaleido) | 9.9 | 101.3 |
 
 That reading held: the 8-bit tier improved most (2D by 4x on the host), because the value form quantized at every stage where the gradient form carries its dot products at full width.
 

@@ -42,7 +42,7 @@ namespace mm {
 class AuroraEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🖌️"; }   // power-function showcase
-    Dim dimensions() const override { return Dim::D2; }  // writes the z=0 slice; extrude fills z
+    Dim dimensions() const override { return Dim::D3; }  // volumetric: the curtains have depth
 
     static constexpr uint8_t kMaxLayers = 4;
 
@@ -55,9 +55,9 @@ public:
     uint8_t contrast = 140;  // the visibility window: higher = fewer, sharper curtains
     uint8_t octaves  = 2;    // detail within each layer, multiplying the cost knob
 
-    /// Read the polar address from a table instead of computing it per pixel (light/polar.h).
-    bool usePolarTable = true;
-    bool widePolarTable = false;
+    /// The polar address: whether to read it from a table, at what precision, and how a
+    /// volumetric fixture's coordinates become an angle and a radius (light/polar.h).
+    PolarLut::Controls polar;
 
     void defineControls() override {
         controls_.addControl("speed", speed, 0, 120);
@@ -68,21 +68,19 @@ public:
         controls_.addControl("segments", segments, 1, 16);
         controls_.addControl("contrast", contrast, 0, 255);
         controls_.addControl("octaves", octaves, 1, 4);
-        controls_.addControl("polarTable", usePolarTable);
-        controls_.addControl("polarTable16", widePolarTable);
+        PolarLut::addControls(controls_, polar);
     }
 
     void prepare() override {
         // The polar address is built here, not in tick(): prepare() is where a module builds state
         // and where allocation is allowed, and it runs again on every resize and control change, so
         // the table is always current without the render path ever allocating.
-        if (usePolarTable) lut_.prepare(static_cast<uint16_t>(width()), static_cast<uint16_t>(height()), widePolarTable);
-        else               lut_.release();
+        lut_.prepareFor(polar, width(), height(), EffectBase::depth());
     }
 
     void tick() MM_NONBLOCKING override {
         const draw::Canvas cv = canvas();
-        const lengthType w = width(), h = height();
+        const lengthType w = width(), h = height(), dep = depth();
         const uint8_t n = layers < 1 ? 1 : (layers > kMaxLayers ? kMaxLayers : layers);
 
         // Each layer gets three oscillators: how far it has drifted, how its scale breathes, and how
@@ -102,7 +100,7 @@ public:
         bank_.advance(elapsed());
 
         const bool table = lut_.ready();
-        const int32_t cx = w / 2, cy = h / 2;
+        const int32_t cx = w / 2, cy = h / 2, cz = dep / 2;
 
         // Hoist everything constant across the frame: the pixel loop should read, not compute.
         uint32_t drift[kMaxLayers];
@@ -126,18 +124,27 @@ public:
         uint8_t frameMax = 0, frameMin = 255;
 
         std::size_t idx = 0;
+        for (lengthType z = 0; z < dep; z++)
         for (lengthType y = 0; y < h; y++) {
             for (lengthType x = 0; x < w; x++, idx++) {
                 angle16 baseAngle;
                 uint32_t r;
+                // The depth coordinate the field samples along. Under cylindrical the address is
+                // the same at every height, so this is what separates the slices; under the other
+                // two the address already carries depth and this rides along with it.
+                int32_t along;
                 if (table) {
                     baseAngle = lut_.angle(idx);
                     r = lut_.radiusPixels(idx);
+                    along = lut_.mapping() == PolarLut::Mapping::Spherical
+                          ? static_cast<int32_t>(lut_.pitch(idx) >> 6)
+                          : static_cast<int32_t>(z) - cz;
                 } else {
                     const int32_t dx = static_cast<int32_t>(x) - cx;
                     const int32_t dy = static_cast<int32_t>(y) - cy;
                     baseAngle = atan16(dy, dx);
                     r = dist16(dx, dy);
+                    along = static_cast<int32_t>(z) - cz;
                 }
 
                 // The strongest layer at this pixel wins, and how far it exceeds the visibility
@@ -152,11 +159,15 @@ public:
 
                     const uint32_t fx = (static_cast<uint32_t>(a) >> 6) * layerScale[i] / 16u;
                     const uint32_t fy = (r * layerScale[i]) + (drift[i] >> 6) + i * 4096u;
+                    // Depth is the field's third axis, so a volumetric fixture samples through the
+                    // field rather than repeating one slice. On a panel `along` is 0 at every light
+                    // and this reduces to the 2D sample exactly.
+                    const uint32_t fz = static_cast<uint32_t>(along * static_cast<int32_t>(layerScale[i]));
 
                     // The field displaces its own sample angle, which is what makes a curtain fold
                     // over itself rather than merely sweep past.
-                    const uint8_t v = warp > 0 ? warp8(fx, fy, static_cast<uint16_t>(warp) * 4, octaves)
-                                               : fbm8(fx, fy, octaves);
+                    const uint8_t v = warp > 0 ? warp8(fx, fy, fz, static_cast<uint16_t>(warp) * 4, octaves)
+                                               : fbm8(fx, fy, fz, octaves);
                     if (v > best) { best = v; winner = i; }
                 }
 
@@ -185,7 +196,7 @@ public:
                 // curtain jumped from one end of it to the other. Brightness belongs in the
                 // brightness.
                 const uint8_t index = static_cast<uint8_t>((winner * 255u) / n);
-                draw::pixel(cv, {x, y, 0}, colorFromPalette(*Palettes::active(), index, bri));
+                draw::pixel(cv, {x, y, z}, colorFromPalette(*Palettes::active(), index, bri));
             }
         }
 

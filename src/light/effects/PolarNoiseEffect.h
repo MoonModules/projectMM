@@ -36,7 +36,7 @@ namespace mm {
 class PolarNoiseEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🖌️"; }   // power-function showcase
-    Dim dimensions() const override { return Dim::D2; }  // writes the z=0 slice; extrude fills z
+    Dim dimensions() const override { return Dim::D3; }  // volumetric: the field turns through depth
 
     uint8_t bpm      = 8;    // how fast the field drifts
     uint8_t scale    = 40;   // noise cells across the grid: low = broad shapes, high = fine detail
@@ -45,17 +45,9 @@ public:
     uint8_t octaves  = 2;    // fbm octaves — the main cost knob
     uint8_t twist    = 30;   // how much the radius shears the angle, giving the field a spiral set
 
-    /// Read the polar address from a table rather than computing it per pixel. On by default: it is
-    /// the same address either way. Turning it off trades frame time for the two bytes per pixel the
-    /// table costs, which is the tradeoff on a device with a large grid and little memory, and it is
-    /// how the fallback path stays exercised rather than being code nothing ever runs.
-    bool usePolarTable = true;
-
-    /// Hold the polar address at full 16-bit precision, at twice the memory. The 8-bit default
-    /// quantizes the angle to 256 steps, which a noise field samples through without showing it;
-    /// an effect whose look depends on a fine angle (a slow rotation, a palette read straight from
-    /// the angle) turns this on.
-    bool widePolarTable = false;
+    /// The polar address: whether to read it from a table, at what precision, and how a
+    /// volumetric fixture's coordinates become an angle and a radius (light/polar.h).
+    PolarLut::Controls polar;
 
     void defineControls() override {
         controls_.addControl("bpm", bpm, 0, 60);
@@ -66,21 +58,19 @@ public:
         controls_.addControl("twist", twist, 0, 255);
         // The address tradeoff, as controls because it is the user's to make: the table costs 2
         // bytes per pixel (4 when wide) and buys back the per-pixel atan16 and dist16.
-        controls_.addControl("polarTable", usePolarTable);
-        controls_.addControl("polarTable16", widePolarTable);
+        PolarLut::addControls(controls_, polar);
     }
     void prepare() override {
         // The polar address is built here, not in tick(): prepare() is where a module builds state
         // and where allocation is allowed, and it runs again on every resize and control change, so
         // the table is always current without the render path ever allocating.
-        if (usePolarTable) lut_.prepare(static_cast<uint16_t>(width()), static_cast<uint16_t>(height()), widePolarTable);
-        else               lut_.release();
+        lut_.prepareFor(polar, width(), height(), EffectBase::depth());
     }
 
 
     void tick() MM_NONBLOCKING override {
         const draw::Canvas cv = canvas();
-        const lengthType w = width(), h = height();
+        const lengthType w = width(), h = height(), dep = depth();
 
         // The drift is an oscillator: a sawtooth that only ever moves forward, which is what makes
         // the field breathe outward rather than rock back and forth.
@@ -91,22 +81,30 @@ public:
         // Build the address table if the grid changed; a rebuild is the only frame that pays for it.
         // If it cannot be allocated the effect still renders, computing the address per pixel.
         const bool table = lut_.ready();
-        const int32_t cx = w / 2, cy = h / 2;
+        const int32_t cx = w / 2, cy = h / 2, cz = dep / 2;
 
         std::size_t i = 0;
+        for (lengthType z = 0; z < dep; z++)
         for (lengthType y = 0; y < h; y++) {
             for (lengthType x = 0; x < w; x++, i++) {
                 // The polar address, and the radius in the pixel units the field is scaled in.
                 angle16 a;
                 uint32_t r;
+                // The axis the field is sampled along through the fixture. Zero at every light on a
+                // panel, so the volumetric form reduces exactly to the flat one there.
+                int32_t along;
                 if (table) {
                     a = lut_.angle(i);
                     r = lut_.radiusPixels(i);
+                    along = lut_.mapping() == PolarLut::Mapping::Spherical
+                          ? static_cast<int32_t>(lut_.pitch(i) >> 6)
+                          : static_cast<int32_t>(z) - cz;
                 } else {
                     const int32_t dx = static_cast<int32_t>(x) - cx;
                     const int32_t dy = static_cast<int32_t>(y) - cy;
                     a = atan16(dy, dx);
                     r = dist16(dx, dy);
+                    along = static_cast<int32_t>(z) - cz;
                 }
 
                 // The twist shears the angle by the radius, which is what turns concentric rings
@@ -122,12 +120,13 @@ public:
                 // axis, which reads as the pattern breathing outward.
                 const uint32_t fx = (static_cast<uint32_t>(a) >> 6) * scale / 16u;
                 const uint32_t fy = (r * scale) + (t >> 6);
+                const uint32_t fz = static_cast<uint32_t>(along * static_cast<int32_t>(scale));
 
-                const uint8_t v = warp > 0 ? warp8(fx, fy, static_cast<uint16_t>(warp) * 4, octaves)
-                                           : fbm8(fx, fy, octaves);
+                const uint8_t v = warp > 0 ? warp8(fx, fy, fz, static_cast<uint16_t>(warp) * 4, octaves)
+                                           : fbm8(fx, fy, fz, octaves);
 
                 const RGB c = colorFromPalette(*Palettes::active(), v, 255);
-                draw::pixel(cv, {x, y, 0}, c);
+                draw::pixel(cv, {x, y, z}, c);
             }
         }
     }

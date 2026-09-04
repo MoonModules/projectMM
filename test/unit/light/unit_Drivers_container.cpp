@@ -235,3 +235,37 @@ TEST_CASE("the relay opens at brightness 0 and closes again when brightness retu
     CHECK_FALSE(mm::platform::gpioRead(12));          // and `on` still opens it whatever brightness says
     mm::platform::clearTestGpioLevel();
 }
+
+// A typo in the relay list must not leave the previous relays closed. Reporting the parse error and
+// returning looked right, but the pins from the last VALID list stayed asserted on GPIOs no control
+// named any more: the strip kept its power through a brightness of zero, and nothing in the UI said
+// why. An unparseable list means no relays, which is the same state as an empty one.
+TEST_CASE("a typo in the relay list releases the relays it used to hold") {
+    mm::platform::clearTestGpioLevel();
+    mm::Drivers drivers;
+    std::strcpy(drivers.relayPins, "12,13");
+    drivers.on = true;
+    drivers.brightness = 100;
+    drivers.onControlChanged("relayPins");
+    CHECK(mm::platform::gpioRead(12));
+    CHECK(mm::platform::gpioRead(13));
+
+    // Mid-edit the list is briefly nonsense, which is the normal way a user types one.
+    std::strcpy(drivers.relayPins, "12,,x");
+    drivers.onControlChanged("relayPins");
+    CHECK_FALSE(mm::platform::gpioRead(12));
+    CHECK_FALSE(mm::platform::gpioRead(13));
+
+    // And the driver has forgotten them, so a later brightness change does not resurrect either pin.
+    drivers.brightness = 200;
+    drivers.onControlChanged("brightness");
+    CHECK_FALSE(mm::platform::gpioRead(12));
+    CHECK_FALSE(mm::platform::gpioRead(13));
+
+    // A corrected list takes effect normally.
+    std::strcpy(drivers.relayPins, "13");
+    drivers.onControlChanged("relayPins");
+    CHECK(mm::platform::gpioRead(13));
+    CHECK_FALSE(mm::platform::gpioRead(12));
+    mm::platform::clearTestGpioLevel();
+}

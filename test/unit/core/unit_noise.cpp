@@ -127,3 +127,34 @@ TEST_CASE("16-bit fbm keeps its range too") {
         CHECK(hi > 57343);
     }
 }
+
+// The contract that makes the field library dimension-generic: a 2D call is the 3D call with the
+// missing axis at zero. Without it a volumetric fixture and a panel would sample different fields
+// for the same coordinates, and an effect could not simply pass z through.
+TEST_CASE("every field kernel's 2D form is its 3D form with z at zero") {
+    for (uint32_t y = 0; y < 4000; y += 231) {
+        for (uint32_t x = 0; x < 4000; x += 197) {
+            CHECK(fbm8(x, y, 2) == fbm8(x, y, 0u, 2));
+            CHECK(fbm8(x, y, 4) == fbm8(x, y, 0u, 4));
+            CHECK(fbm16(x, y, 2) == fbm16(x, y, 0u, 2));
+            CHECK(fbm16(x, y, 3) == fbm16(x, y, 0u, 3));
+            CHECK(turbulence8(x, y, 2) == turbulence8(x, y, 0u, 2));
+            CHECK(warp8(x, y, 240, 1) == warp8(x, y, 0u, 240, 1));
+            CHECK(warp8(x, y, 512, 2) == warp8(x, y, 0u, 512, 2));
+        }
+    }
+}
+
+TEST_CASE("the z axis actually changes the field, rather than being carried and ignored") {
+    // The other half of the contract: passing z must do something, or "3D support" is a signature
+    // change. A volumetric fixture's slices have to differ from each other.
+    int differing = 0, total = 0;
+    for (uint32_t y = 0; y < 3000; y += 311) {
+        for (uint32_t x = 0; x < 3000; x += 271) {
+            total++;
+            if (fbm8(x, y, 0u, 2) != fbm8(x, y, 3000u, 2)) differing++;
+        }
+    }
+    REQUIRE(total > 50);
+    CHECK(differing * 4 > total * 3);      // three quarters of samples move with z
+}

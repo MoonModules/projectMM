@@ -31,8 +31,8 @@ std::vector<uint8_t> render(lengthType w, lengthType h, bool useTable, bool wide
     GridLayout grid;
     Layer layer;
     EffectT effect;
-    effect.usePolarTable = useTable;
-    effect.widePolarTable = wide;
+    effect.polar.use = useTable;
+    effect.polar.wide = wide;
     grid.width = w; grid.height = h; grid.depth = 1;
     layouts.addChild(&grid);
     layer.setLayouts(&layouts);

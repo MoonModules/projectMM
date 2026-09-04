@@ -30,20 +30,20 @@ namespace mm {
 class TunnelEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🖌️"; }   // power-function showcase
-    Dim dimensions() const override { return Dim::D2; }  // writes the z=0 slice; extrude fills z
+    Dim dimensions() const override { return Dim::D3; }  // volumetric: the wall recedes through depth
 
     uint8_t bpm      = 20;   // how fast the tunnel flies past
-    uint8_t depth    = 60;   // texture scale along the tunnel: higher = finer rings
+    uint8_t depth    = 60;   // texture scale along the tunnel: higher = finer rings.
+                             // Shadows EffectBase::depth() (the fixture's), which is why the few
+                             // uses of that one below are qualified.
     uint8_t twist    = 40;   // rotation per unit depth, so the tunnel corkscrews
     uint8_t segments = 1;    // kaleidoscope the wall; 1 leaves it plain
     uint8_t octaves  = 2;    // wall texture detail, and the cost knob
     bool    vignette = true; // darken toward the vanishing point so it reads as receding
 
-    /// Read the polar address from a table instead of computing it per pixel (light/polar.h). It
-    /// costs 2 bytes per pixel, 4 when wide, and the effect falls back to computing the address
-    /// when the device cannot spare them.
-    bool usePolarTable = true;
-    bool widePolarTable = false;
+    /// The polar address: whether to read it from a table, at what precision, and how a
+    /// volumetric fixture's coordinates become an angle and a radius (light/polar.h).
+    PolarLut::Controls polar;
 
     void defineControls() override {
         controls_.addControl("bpm", bpm, 0, 120);
@@ -52,44 +52,51 @@ public:
         controls_.addControl("segments", segments, 1, 16);
         controls_.addControl("octaves", octaves, 1, 4);
         controls_.addControl("vignette", vignette);
-        controls_.addControl("polarTable", usePolarTable);
-        controls_.addControl("polarTable16", widePolarTable);
+        PolarLut::addControls(controls_, polar);
     }
     void prepare() override {
         // The polar address is built here, not in tick(): prepare() is where a module builds state
         // and where allocation is allowed, and it runs again on every resize and control change, so
         // the table is always current without the render path ever allocating.
-        if (usePolarTable) lut_.prepare(static_cast<uint16_t>(width()), static_cast<uint16_t>(height()), widePolarTable);
-        else               lut_.release();
+        lut_.prepareFor(polar, width(), height(), EffectBase::depth());
     }
 
 
     void tick() MM_NONBLOCKING override {
         const draw::Canvas cv = canvas();
-        const lengthType w = width(), h = height();
+        const lengthType w = width(), h = height(), dep = EffectBase::depth();
 
         phase_.advance(elapsed(), bpm);
         const uint32_t t = phase_.phase(65536);
 
-        const int32_t cx = w / 2, cy = h / 2;
+        const int32_t cx = w / 2, cy = h / 2, cz = dep / 2;
 
         // The polar address does not change between frames, so it is read from a table; if the
         // device cannot spare the memory the effect computes it per pixel and looks the same.
         const bool table = lut_.ready();
 
         std::size_t i = 0;
+        for (lengthType z = 0; z < dep; z++)
         for (lengthType y = 0; y < h; y++) {
             for (lengthType x = 0; x < w; x++, i++) {
                 uint32_t r;
                 angle16 a;
+                // How far along the tube this light sits. A volumetric fixture is a real tube, so
+                // depth is literally distance down it: the wall texture scrolls past each slice at
+                // its own offset rather than every slice showing the same ring.
+                int32_t along;
                 if (table) {
                     a = lut_.angle(i);
                     r = lut_.radiusPixels(i);
+                    along = lut_.mapping() == PolarLut::Mapping::Spherical
+                          ? static_cast<int32_t>(lut_.pitch(i) >> 6)
+                          : static_cast<int32_t>(z) - cz;
                 } else {
                     const int32_t dx = static_cast<int32_t>(x) - cx;
                     const int32_t dy = static_cast<int32_t>(y) - cy;
                     r = dist16(dx, dy);
                     a = atan16(dy, dx);
+                    along = static_cast<int32_t>(z) - cz;
                 }
 
                 // 1/r is the depth coordinate: distant wall (small r) compresses toward the centre,
@@ -105,7 +112,10 @@ public:
                 // Sample the wall texture in (angle, depth) space, with time pulling the depth
                 // coordinate toward the viewer.
                 const uint32_t u = (static_cast<uint32_t>(a) >> 5);
-                const uint32_t v = depthCoord + (t >> 5);
+                // Depth down the tube adds to the texture's own depth coordinate, so a light further
+                // in shows wall that is further away. On a panel `along` is 0 and this is the flat
+                // tunnel exactly.
+                const uint32_t v = depthCoord + (t >> 5) + static_cast<uint32_t>(along * 256);
                 const uint8_t tex = fbm8(u, v, octaves);
 
                 // Vignette by distance so the centre reads as far away rather than merely small.
@@ -116,7 +126,7 @@ public:
                     bri = static_cast<uint8_t>(rel < 20 ? 20 : rel);
                 }
 
-                draw::pixel(cv, {x, y, 0}, colorFromPalette(*Palettes::active(), tex, bri));
+                draw::pixel(cv, {x, y, z}, colorFromPalette(*Palettes::active(), tex, bri));
             }
         }
     }

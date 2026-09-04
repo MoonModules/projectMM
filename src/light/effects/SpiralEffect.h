@@ -19,25 +19,21 @@ public:
     uint8_t twist = 4;
     uint8_t hue_shift = 0;
 
-    /// Read the polar address from a table instead of computing it per pixel (light/polar.h). It
-    /// costs 2 bytes per pixel, 4 when wide, and the effect falls back to computing the address
-    /// when the device cannot spare them.
-    bool usePolarTable = true;
-    bool widePolarTable = false;
+    /// The polar address: whether to read it from a table, at what precision, and how a
+    /// volumetric fixture's coordinates become an angle and a radius (light/polar.h).
+    PolarLut::Controls polar;
 
     void defineControls() override {
         controls_.addControl("bpm", bpm, 1, 255);
         controls_.addControl("twist", twist, 1, 255);
         controls_.addControl("hue_shift", hue_shift, 0, 255);
-        controls_.addControl("polarTable", usePolarTable);
-        controls_.addControl("polarTable16", widePolarTable);
+        PolarLut::addControls(controls_, polar);
     }
     void prepare() override {
         // The polar address is built here, not in tick(): prepare() is where a module builds state
         // and where allocation is allowed, and it runs again on every resize and control change, so
         // the table is always current without the render path ever allocating.
-        if (usePolarTable) lut_.prepare(static_cast<uint16_t>(width()), static_cast<uint16_t>(height()), widePolarTable);
-        else               lut_.release();
+        lut_.prepareFor(polar, width(), height(), depth());
     }
 
 

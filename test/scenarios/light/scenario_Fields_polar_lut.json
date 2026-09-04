@@ -86,11 +86,11 @@
         "desktop-macos": {
           "tick_us": {
             "p50": 281,
-            "p95": 289,
+            "p95": 387,
             "min": 189,
-            "max": 289,
-            "n": 3,
-            "samples": [289, 189, 281]
+            "max": 387,
+            "n": 9,
+            "samples": [289, 189, 281, 384, 274, 387, 283, 278, 281]
           },
           "last_updated": "2026-09-04"
         }
@@ -115,12 +115,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 189,
-            "p95": 194,
+            "p50": 275,
+            "p95": 284,
             "min": 183,
-            "max": 194,
-            "n": 3,
-            "samples": [183, 189, 194]
+            "max": 284,
+            "n": 9,
+            "samples": [183, 189, 194, 279, 273, 275, 284, 281, 281]
           },
           "last_updated": "2026-09-04"
         }
@@ -145,12 +145,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 177,
-            "p95": 180,
+            "p50": 274,
+            "p95": 282,
             "min": 168,
-            "max": 180,
-            "n": 3,
-            "samples": [168, 180, 177]
+            "max": 282,
+            "n": 9,
+            "samples": [168, 180, 177, 279, 274, 274, 282, 281, 282]
           },
           "last_updated": "2026-09-04"
         }
@@ -175,12 +175,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 175,
-            "p95": 179,
+            "p50": 274,
+            "p95": 284,
             "min": 168,
-            "max": 179,
-            "n": 3,
-            "samples": [168, 175, 179]
+            "max": 284,
+            "n": 9,
+            "samples": [168, 175, 179, 278, 274, 273, 284, 277, 282]
           },
           "last_updated": "2026-09-04"
         }
@@ -205,12 +205,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 86,
-            "p95": 88,
+            "p50": 137,
+            "p95": 142,
             "min": 83,
-            "max": 88,
-            "n": 3,
-            "samples": [83, 86, 88]
+            "max": 142,
+            "n": 9,
+            "samples": [83, 86, 88, 138, 137, 137, 142, 140, 138]
           },
           "last_updated": "2026-09-04"
         }
@@ -235,20 +235,26 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 257,
-            "p95": 264,
+            "p50": 413,
+            "p95": 501,
             "min": 250,
-            "max": 264,
-            "n": 3,
-            "samples": [250, 257, 264]
+            "max": 501,
+            "n": 9,
+            "samples": [250, 257, 264, 422, 413, 410, 501, 413, 417]
           },
           "last_updated": "2026-09-04"
         }
       }
     },
     {
+      "name": "remove-polarnoise",
+      "description": "Take PolarNoise off the layer before Aurora goes on it. Adding a second effect to a layer does not replace the first: both render, so the step below would have measured the pair and reported it as Aurora's cost.",
+      "op": "remove_module",
+      "id": "PolarNoise"
+    },
+    {
       "name": "swap-to-aurora",
-      "description": "Aurora on the same layer: three layers of warped noise over the same address, each on its own oscillator. Several field samples per pixel, so this is the frame time that decides what the fps contract can promise.",
+      "description": "Aurora alone on the layer: three layers of warped noise over the same address, each on its own oscillator. Several field samples per pixel, so this is the frame time that decides what the fps contract can promise.",
       "op": "add_module",
       "id": "Aurora",
       "type": "AuroraEffect",
@@ -265,12 +271,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 970,
-            "p95": 981,
+            "p50": 1200,
+            "p95": 1239,
             "min": 960,
-            "max": 981,
-            "n": 3,
-            "samples": [960, 970, 981]
+            "max": 1239,
+            "n": 9,
+            "samples": [960, 970, 981, 1200, 1187, 1206, 1234, 1239, 1206]
           },
           "last_updated": "2026-09-04"
         }
@@ -295,12 +301,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 561,
-            "p95": 561,
-            "min": 560,
-            "max": 561,
-            "n": 3,
-            "samples": [560, 561, 561]
+            "p50": 479,
+            "p95": 590,
+            "min": 460,
+            "max": 590,
+            "n": 9,
+            "samples": [560, 561, 561, 479, 460, 590, 474, 479, 476]
           },
           "last_updated": "2026-09-04"
         }

@@ -108,6 +108,7 @@ add_executable(mm_tests
     unit/light/unit_PolarLut.cpp
     unit/light/unit_PolarLut_equivalence.cpp
     unit/light/unit_AuroraEffect.cpp
+    unit/light/unit_NoiseEffect.cpp
     unit/light/unit_Effects_framerate.cpp
     unit/light/unit_SineEffect.cpp
     unit/light/unit_DistortionWavesEffect.cpp

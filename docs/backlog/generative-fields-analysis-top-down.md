@@ -20,7 +20,7 @@ An unmarked line is context or rationale.
 - **(proposal) MoonLive operates on the Layer, not on a handle.** With the Layer at 16 bits the frame buffer IS the wide state, so advection, decay and the emitters are whole-frame builtins on the script's own layer, the shape `fill` and `fade` already have; the polar LUT and the oscillator bank are handles declared in `defineControls()`, the shape `pool()` has. Multi-argument host calls already ship (`emit` takes seven), so nothing here waits on the engine; the one engine change is the pixel-store inline ops learning the 16-bit element (§ 4).
 - **Budgets are the bottom-up's, restated as targets per target.** Shaders: samples per pixel against ~750 cycles per sample on the S3, ~250 on the P4; advection: cycles per frame plus bytes of state, PSRAM-class for walls. Framerate is protected by rule: every kernel is `dt`-driven, transport stays sub-pixel per frame, and a showcase must hold its stated fps on its stated fixture or its cost knob is the default (§ 5).
 - **Four showcases, three plus fluid**, specified to the control level: *Aurora* (a pure shader), *Trails* (emitters and flows), *Nebula* (a shader feeding a flow), *Fluid* (the solver, P4 and desktop) (§ 6).
-- **Six phases, desktop first, bench last; the product owner decides when enough is done to commit.** Noise swap; fields and Aurora; the 16-bit Layer; advection and Trails; composition, dithering and SIMD; fluid. The catalog sweep that decision 5 mandates is a follow-on plan, fed by the [effects × power functions inventory](effects-power-function-inventory.md); only the effects a phase touches directly (the noise effects in phase 0, PolarNoise in phase 1, the raw-byte writers in phase 2) are rewritten inside this plan. Each phase lands with its unit tests, its goldens, its scenario, its MoonLive builtins and script, and its catalog cards (§ 8).
+- **Eight phases, desktop first, bench last; the product owner decides when enough is done to commit.** Noise swap; fields and Aurora; three dimensions everywhere; Coord3D in MoonLive; the 16-bit Layer; advection and Trails; composition, dithering and SIMD; fluid. The catalog sweep that decision 5 mandates is a follow-on plan, fed by the [effects × power functions inventory](effects-power-function-inventory.md); only the effects a phase touches directly (the noise effects in phase 0, PolarNoise in phase 1, the raw-byte writers in phase 2) are rewritten inside this plan. Each phase lands with its unit tests, its goldens, its scenario, its MoonLive builtins and script, and its catalog cards (§ 8).
 
 ## 0. Inputs and the decisions taken
 
@@ -103,7 +103,7 @@ No path you have today gets slower: the 8-bit instantiations are the same code c
 
 ### The surface, counted
 
-What touches Layer bytes and therefore changes in phase 2: `Buffer` (bytes per channel, 1 or 2), `Canvas` (a sample-width field), the 25 `Canvas` and 12 `Buffer` overloads in `draw.h` (one template each), `BlendMap` (identity and LUT paths, both widths), `Layer::extrude` and `fadeToBlackBy` (bytes-per-light already, width-agnostic after the template), `Correction::apply` (16-bit input, quantize to the declared wire width; the one quantization site), `DriverBase` (the declared wire width), `PreviewDriver` (quantized through the same path), `NetworkReceiveEffect` (widens), the **7 effects that write raw bytes** (AudioVolume, BouncingBalls, Fire, Lines, NetworkReceive, Rainbow, Noise), `colorFromPalette` (unchanged: returns 8-bit RGB, widened at the write), the MoonLive `StoreElem` / `FillElems` inline ops on all three backends (element = 3 × 2 bytes), and the zero-copy driver path. Modifiers are coordinate-only and untouched; the mapping LUT is index-only and untouched.
+What touches Layer bytes and therefore changes in phase 2: `Buffer` (bytes per channel, 1 or 2), `Canvas` (a sample-width field), the 25 `Canvas` and 12 `Buffer` overloads in `draw.h` (one template each), `BlendMap` (identity and LUT paths, both widths), `Layer::extrude` and `fadeToBlackBy` (bytes-per-light already, width-agnostic after the template), `Correction::apply` (16-bit input, quantize to the declared wire width; the one quantization site), `DriverBase` (the declared wire width), `PreviewDriver` (quantized through the same path), `NetworkReceiveEffect` (widens), the **7 effects that write raw bytes** (AudioVolume, BouncingBalls, Fire, Lines, NetworkReceive, Rainbow, Noise), `colorFromPalette` (unchanged: returns 8-bit RGB, widened at the write), the MoonLive `StoreElem` / `FillElems` inline ops on all three backends (element = `channelsPerLight` × the Layer's bytes per channel, NOT a fixed 3 × 2: the ops already store N bytes rather than a fixed RGB, and a phase that hardcoded three channels would break the RGBW and multi-channel DMX fixtures the same buffer serves), and the zero-copy driver path. Modifiers are coordinate-only and untouched; the mapping LUT is index-only and untouched.
 
 ## 3. The kernels
 
@@ -185,7 +185,7 @@ The one engine change this plan requires: the `StoreElem` and `FillElems` inline
 
 ## 5. Performance plan
 
-**Currencies.** Shaders: samples per pixel, against ~750 cycles per sample on the S3 and ~250 on the P4 (bottom-up, Part 3), with the gradient-noise swap held within 1.3× of that. Advection: cycles per frame and bytes of state; the target per pass is ~40 cycles per pixel per channel on the S3, so a 128² RGB separable advect is ~4 ms on the S3 and ~1.3 ms on the P4, wall-capable at 50 fps with the shader budget left for the emitters.
+**Currencies.** Shaders: samples per pixel, against ~750 cycles per sample on the S3 and ~250 on the P4 (bottom-up, Part 3), with the gradient-noise swap held within 1.3× of that. Advection: cycles per frame and bytes of state. The target is ~40 cycles per pixel per channel PER PASS, and separable advection is two passes (x then y), so a 128² RGB advect is 128·128·3·40·2 cycles: **~16 ms on the S3** at 240 MHz and **~10 ms on the P4** at 400 MHz. (An earlier draft said 4 ms and 1.3 ms, which matched neither one pass nor two: the arithmetic gives 8.2 ms for a single S3 pass. The numbers below follow from the corrected figures.) That is 60 fps on the P4 with room for the emitters, and on the S3 it is the whole frame at 60 fps, so a 128² wall runs advection at 30 fps or drops to 64² for 50. The phase-3 scenario sets the contract per target from measurement rather than from this estimate.
 
 **Framerate as the rendering method, by rule.** Every kernel takes `dt`; no kernel takes a frame count. `advect` clamps the per-frame displacement to one pixel and reports when it clamps (the `frameTime`-style status), so a slow frame smears rather than tears. `decay` is a half-life. The oscillator bank is `dt`-integrated. A showcase's stated fps on its stated fixture is a scenario contract; when it fails, the default of its cost knob moves, not the contract.
 
@@ -224,7 +224,7 @@ The steps below are work order, not commit order. Each step is finished on the d
 2. Implement Perlin improved noise behind `inoise8/16` (2D and 3D; 1D as the 2D with y = 0), integer, same coordinate convention, same output ranges. Delete the "value noise" note in `noise.h`.
 3. Run the micro-bench: accept only within 1.3× per sample; else optimize (the 8-gradient 2D form, a 12-entry gradient table) before continuing.
 4. Desktop build, `ctest`: the seven noise goldens fail as expected; update them in the same commit with the reason.
-5. Flash S3 and P4; `collect_kpi.py --commit`; the product owner judges Noise, Noise2D, PolarNoise, Tunnel on the panel. Catalog cards: no text change unless the look note in a card mentions value noise.
+5. On the product owner's go-ahead (CLAUDE.md § Build: a board is written to only when they say so), flash S3 and P4; `collect_kpi.py --commit`; they judge Noise, PolarNoise and Tunnel on the panel. Catalog cards: no text change unless the look note in a card mentions value noise.
 
 ### Phase 1: fields and Aurora (medium)
 1. `core/oscillators.h` with its unit tests.
@@ -233,7 +233,7 @@ The steps below are work order, not commit order. Each step is finished on the d
 4. `AuroraEffect`: the three-layer shader, controls per § 6, card in effects.md, golden.
 5. MoonLive: `polar()` and `oscillators()` handles with their builtins; `polarA`/`polarR` read the LUT when declared; `aurora.mle`; the compile-every-script test and a script golden.
 6. Scenario: fields (LUT rebuild on resize, memory ladder), Aurora's fps contract per target.
-7. Desktop, S3, P4; performance.md rows; the product owner's look.
+7. Desktop first; then S3 and P4 on the product owner's go-ahead; performance.md rows; their look.
 
 ### Open from phase 1
 
@@ -262,6 +262,89 @@ dominates) removes the discontinuity and measured 2.7x less frame-to-frame chang
 time per pixel (42.8 against 41.4 ns on the host). Built, measured, then REVERTED on the product
 owner's call: it did not address the hitch above, and the cost is real. Revisit when the hitch is
 understood, since the two may be related.
+
+### Phase 1b: three dimensions everywhere (medium)
+
+Dimension-generic is a stated input of this plan (§ 0), and the library is not there yet. The gap is
+uneven rather than absent, and the hot-path worry it raises turns out not to be the blocker.
+
+**Where it already holds.** `draw::` is `Coord3D` throughout (pixel, line, blendPixel, addPixel,
+glyph). `blur` runs a third pass behind `if (z > 1)`, so a 2D layout pays nothing for the capability.
+`inoise8` and `inoise16` have real 1D, 2D and 3D forms, each compiling to its own straight-line body
+over exactly its corners after the phase 0 swap.
+
+**Where it does not.** `fbm16`, `turbulence8` and `warp8` stop at 2D; only `fbm8` has a 3D overload.
+`PolarLut` stores angle and radius on a plane, with no z. `atan16` and `dist16` are planar by nature.
+
+**A 3D-capable kernel costs a 2D layout nothing**, and the tree already shows both ways to get that:
+the third axis is either a template parameter that compiles away (`if constexpr (Dims > 2)` in the
+noise core) or a runtime guard on a value that is 1 (`blur`). Neither is a per-pixel branch. So the
+missing overloads are mechanical.
+
+The one that is not mechanical is **polar in three dimensions**, and the answer is a control rather
+than a decision. Spherical (two angles and a radius), cylindrical (an angle, a radius and a height)
+and distance-from-center are three different looks, and which one is right is a property of the
+FIXTURE: a sphere wants the first, a tube or curtain the second, a cube may want any of them. The
+choice costs nothing per pixel because it is made once when the table is built, and the table is the
+same size either way. Cylindrical is the default: it reduces to exactly today's behavior when depth
+is 1, so no existing 2D fixture changes.
+
+**What "dimension-generic" does NOT claim.** The KERNELS take any arity; an EFFECT still looks good
+only at the arities its design has. Aurora on a strip is one radial line through the field, which
+reads as a slow flicker rather than as curtains, and no amount of library work changes that. The
+Layer already handles the mismatch (a D2 effect on a 3D layer has its z=0 slice copied across z, a
+D1 effect its column copied across x), so an effect that declares less than the fixture is correct
+rather than broken. Which effects earn a genuine 1D or 3D form is per-effect judgment, made in the
+catalog sweep, not a property this phase delivers.
+
+1. `fbm16`, `turbulence8` and `warp8` gain their 3D overloads, matching `fbm8`'s existing shape.
+2. `PolarLut` gains a z axis and a `mapping` control (cylindrical default, spherical, radial), with
+   the 2D path bit-identical to today's at depth 1.
+3. The effects that are `Dim::D2` only because their kernels were: Aurora, PolarNoise and Tunnel are
+   the three that a volumetric fixture would show something new, and all three are blocked on step 2
+   rather than on their own code. Noise2D needs no polar work at all: it already samples 3D noise
+   with time on z, so a volumetric form is passing the light's own z instead.
+4. ✅ **Noise2D and Noise were the same effect**, and are now one: Noise
+   already uses the light's real z when depth > 1, and the two differ only in control names and
+   scale defaults (`bpm`/4 against `speed`/64). Merging them is a catalog decision with a golden and
+   a card, so it was done here rather than deferred: `motion` chooses drift (the old Noise) or morph
+   (the old Noise2D), the drift golden is unchanged, and the second effect is deleted.
+5. Unit tests per kernel that a 2D call is exactly the 3D call with z held at zero, which is what
+   makes the extension safe to make everywhere else. ✅ *(shipped: `fbm8`, `fbm16`, `turbulence8` and
+   `warp8` all have 3D forms, and `warp8`'s 2D form is now literally the 3D one at z = 0, so the two
+   cannot drift apart.)*
+
+### Phase 1c: Coord3D in MoonLive (medium)
+
+A script computes a position as three loose integers today, and flattens it by hand
+(`mod(bx+dx, width) + mod(by+dy, height) * width`), which is the buffer layout leaking into every
+effect. The engine already passes `Coord3D` everywhere, so the script vocabulary is the odd one out.
+
+This is **not** general struct support. The MoonLive roadmap settles that: a predefined struct is one
+the compiler knows by layout, needing no user-declarable struct machinery
+([roadmap § 4b](moonlive-language-roadmap.md), with user structs deferred to § 10 for readability
+rather than capability). It depends on the multi-value call ABI (§ 2 there), which is what makes a
+coordinate in and a color out expressible at all.
+
+**`Coord3D` yes; the color struct waits for phase 2.** The roadmap pairs `Coord3D` with a `CRGB`,
+and that pairing predates the 16-bit decision. A script-visible color fixed at three `uint8_t` would
+be the one place in the pipeline where the channel width stops being runtime data, exactly as phase 2
+makes `draw.h` a template over both widths and has `Correction` quantize once at the driver. So the
+color type is specified AFTER phase 2 knows what it is, and it takes our own name rather than
+FastLED's (CLAUDE.md: our own code, our own names). A coordinate has no such dependency, which is
+why it goes first.
+
+**How far it goes: as far as every other type.** A predefined struct that only appears in builtin
+signatures would be a special case, and the language does not need another one. `Coord3D` is a
+class member, a local, a function argument and a return value, the same as `int`, `byte`, `bool` and
+`fixed`. Arguments and returns are roadmap § 6, which this step therefore depends on. Two
+consequences worth stating: a member costs three of the 8 member records and 6 of the 64 arena bytes
+unless the compiler packs it as one record, which is worth deciding when the type is added rather
+than after; and a local costs one frame slot per field under today's flat allocator, so a script
+holding several coordinates meets the 16-slot ceiling faster (§ 8b there).
+
+Ordering note: this is the step that makes a 3D script possible, so it follows phase 1b rather than
+leading it. A script that can hold a coordinate but calls kernels that ignore z has gained nothing.
 
 ### Phase 2: the 16-bit Layer (large, cross-cutting)
 1. `Buffer`: bytes per channel; `Canvas`: sample width; `Layer::prepare()` picks the width by the allocation check (option B) or fixed 16 (option A), per the sign-off.

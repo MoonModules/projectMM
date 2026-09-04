@@ -45,7 +45,6 @@
 #include "light/effects/BouncingBallsEffect.h"
 #include "light/effects/FixedRectangleEffect.h"
 #include "light/effects/LissajousEffect.h"
-#include "light/effects/Noise2DEffect.h"
 #include "light/effects/PraxisEffect.h"
 #include "light/effects/SolidEffect.h"
 #include "light/effects/SphereMoveEffect.h"
@@ -138,7 +137,6 @@ TEST_CASE("time-driven effects render byte-identical frames (migration guard)") 
     SUBCASE("BouncingBallsEffect")    { BouncingBallsEffect e;       golden::checkGolden("BouncingBallsEffect", golden::renderHash(e, 16, 16, 1), 0x8b89c982e566f5b4ull); }
     SUBCASE("FixedRectangleEffect")   { FixedRectangleEffect e;      golden::checkGolden("FixedRectangleEffect", golden::renderHash(e, 16, 16, 1), 0x22b828f908e9ce1cull); }
     SUBCASE("LissajousEffect")        { LissajousEffect e;           golden::checkGolden("LissajousEffect", golden::renderHash(e, 16, 16, 1), 0x7a5f13102f039d12ull); }
-    SUBCASE("Noise2DEffect")          { Noise2DEffect e;             golden::checkGolden("Noise2DEffect", golden::renderHash(e, 16, 16, 1), 0xf8cfe517a606b68bull); }
     SUBCASE("PraxisEffect")           { PraxisEffect e;              golden::checkGolden("PraxisEffect", golden::renderHash(e, 16, 16, 1), 0x0420f0404b3f12c5ull); }
     SUBCASE("SolidEffect")            { SolidEffect e;               golden::checkGolden("SolidEffect", golden::renderHash(e, 16, 16, 1), 0x56711c1cf0c8ae83ull); }
     SUBCASE("SphereMoveEffect")       { SphereMoveEffect e;          golden::checkGolden("SphereMoveEffect", golden::renderHash(e, 16, 16, 1), 0xb3f3d7c75fe49fdbull); }

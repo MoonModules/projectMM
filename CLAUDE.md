@@ -204,13 +204,13 @@ when the next step cannot happen without it: code that must compile before it ca
 that must run before its result can be read. Not after every edit, and not to re-confirm what the
 last build already proved.
 
-**Fast cycles: be sparse with anything slow.** The general form, applying to every expensive step:
-ESP32 builds, full-suite runs, scenario runs, gate lists, repo-wide sweeps. Run the cheapest thing
-that answers the question at hand (one test case, one check), and save the heavy step for when its
-answer is actually needed or the PO asks. A minute per step compounds across a session into the PO
-waiting instead of working.
+**Fast cycles: ASK before running anything slow.** Applies to every expensive step: ESP32 builds,
+full scenario sweeps, gate lists, repo-wide sweeps, `collect_kpi`. Run the cheapest thing that
+answers the question at hand (one test case, one scenario by name, one check); when the heavy one is
+actually needed, say what it is and why, then wait for the go-ahead. A minute per step compounds
+across a session into the PO waiting instead of working, and a sweep run twice wastes it twice.
 
-**Bench boards are free test rigs.** Build and flash freely to verify work; re-probe ports first. A *rigorous* change (anything that could brick, boot-loop, or wipe a board: flash erases, boot/partition/build-config changes, a first flash of an untested board) gets a one-sentence heads-up and a go-ahead first — the test is reversibility.
+**Bench boards cost nothing to break, but they cost the PO's time to use.** They are free test rigs in the sense that matters for RISK: nothing on them is precious, so verifying on one needs no ceremony. They are not free in TIME, which is why the flashing rule above stands: the PO says when a board is written to. Re-probe ports first, since they drift between sessions. A *rigorous* change (anything that could brick, boot-loop, or wipe a board: flash erases, boot/partition/build-config changes, a first flash of an untested board) needs a one-sentence heads-up on top of the normal go-ahead, because there the test is reversibility rather than time.
 
 **Invite the product owner to test, then STOP.** If the PO could see or judge the result, hand it over ("running on X, look at Y") and wait for their observation before concluding, documenting, or moving on. Leave the state running; don't revert, reflash, or reconfigure what they were about to look at.
 

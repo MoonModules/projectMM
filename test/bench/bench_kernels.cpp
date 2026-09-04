@@ -21,7 +21,6 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
-#include <functional>
 
 namespace {
 
@@ -29,13 +28,14 @@ constexpr uint32_t kGrid = 256;          // samples per axis per pass
 constexpr uint32_t kStep = 40;           // 16.0 fixed coordinate step: ~6.4 noise cells across
 constexpr int kRuns = 5;                 // best-of
 
-struct Row {
-    const char* name;
-    std::function<uint32_t(uint32_t x, uint32_t y, uint32_t z)> fn;
-};
-
 /// Time one kernel over the grid; returns the best ns per sample across kRuns.
-double bench(const Row& row) {
+///
+/// The kernel arrives as a TEMPLATE parameter, not a std::function: a type-erased call cannot be
+/// inlined, so it adds an indirect call to every sample and lands in the same nanoseconds the
+/// measurement is trying to attribute to the kernel. At 5 ns a sample that is a large share of what
+/// is being reported.
+template <typename Fn>
+double bench(Fn fn) {
     double best = 1e18;
     volatile uint32_t sink = 0;                 // the checksum the optimizer must honor
     for (int run = 0; run < kRuns; run++) {
@@ -43,7 +43,7 @@ double bench(const Row& row) {
         const auto t0 = std::chrono::steady_clock::now();
         for (uint32_t y = 0; y < kGrid; y++)
             for (uint32_t x = 0; x < kGrid; x++)
-                acc += row.fn(x * kStep, y * kStep, (x + y) * 3);
+                acc += fn(x * kStep, y * kStep, (x + y) * 3);
         const auto t1 = std::chrono::steady_clock::now();
         sink = sink + acc;
         const double ns = std::chrono::duration<double, std::nano>(t1 - t0).count() / (kGrid * kGrid);
@@ -52,39 +52,37 @@ double bench(const Row& row) {
     return best;
 }
 
+/// One row of the table: measure `fn` and print it.
+template <typename Fn>
+void row(const char* name, Fn fn) {
+    const double ns = bench(fn);
+    std::printf("| %s | %.1f | %.1f |\n", name, ns, 1000.0 / ns);
+}
+
 }  // namespace
 
 int main() {
     using namespace mm;
-    const Row rows[] = {
-        {"inoise8 1D",          [](uint32_t x, uint32_t, uint32_t)    { return uint32_t(inoise8(x)); }},
-        {"inoise8 2D",          [](uint32_t x, uint32_t y, uint32_t)  { return uint32_t(inoise8(x, y)); }},
-        {"inoise8 3D",          [](uint32_t x, uint32_t y, uint32_t z){ return uint32_t(inoise8(x, y, z)); }},
-        {"inoise16 1D",         [](uint32_t x, uint32_t, uint32_t)    { return uint32_t(inoise16(x)); }},
-        {"inoise16 2D",         [](uint32_t x, uint32_t y, uint32_t)  { return uint32_t(inoise16(x, y)); }},
-        {"inoise16 3D",         [](uint32_t x, uint32_t y, uint32_t z){ return uint32_t(inoise16(x, y, z)); }},
-        {"fbm8 2D, 2 octaves",  [](uint32_t x, uint32_t y, uint32_t)  { return uint32_t(fbm8(x, y, 2)); }},
-        {"fbm8 2D, 4 octaves",  [](uint32_t x, uint32_t y, uint32_t)  { return uint32_t(fbm8(x, y, 4)); }},
-        {"fbm16 2D, 2 octaves", [](uint32_t x, uint32_t y, uint32_t)  { return uint32_t(fbm16(x, y, 2)); }},
-        {"fbm16 2D, 4 octaves", [](uint32_t x, uint32_t y, uint32_t)  { return uint32_t(fbm16(x, y, 4)); }},
-        {"turbulence8 2D, 2 octaves", [](uint32_t x, uint32_t y, uint32_t) { return uint32_t(turbulence8(x, y, 2)); }},
-        {"warp8 2D, 1 octave",  [](uint32_t x, uint32_t y, uint32_t)  { return uint32_t(warp8(x, y, 512, 1)); }},
-        {"warp8 2D, 2 octaves", [](uint32_t x, uint32_t y, uint32_t)  { return uint32_t(warp8(x, y, 512, 2)); }},
-        // The polar address, computed per pixel per frame by every radial effect today. The phase-1
-        // LUT replaces these three with two table reads, so this is the row it has to beat.
-        {"atan16",              [](uint32_t x, uint32_t y, uint32_t)  { return uint32_t(atan16(int32_t(y) - 128, int32_t(x) - 128)); }},
-        {"dist16",              [](uint32_t x, uint32_t y, uint32_t)  { return dist16(int32_t(x) - 128, int32_t(y) - 128); }},
-        {"polar address (dist16 + atan16 + kaleido)", [](uint32_t x, uint32_t y, uint32_t) {
-            const int32_t dx = int32_t(x) - 128, dy = int32_t(y) - 128;
-            const uint32_t r = dist16(dx, dy);
-            return uint32_t(kaleido(angle16(atan16(dy, dx) + r * 4), 5)) + r;
-        }},
-    };
-
     std::printf("| Kernel | ns/sample | Msamples/s |\n|---|---:|---:|\n");
-    for (const Row& row : rows) {
-        const double ns = bench(row);
-        std::printf("| %s | %.1f | %.1f |\n", row.name, ns, 1000.0 / ns);
-    }
+    row("inoise8 1D",          [](uint32_t x, uint32_t, uint32_t)     { return uint32_t(inoise8(x)); });
+    row("inoise8 2D",          [](uint32_t x, uint32_t y, uint32_t)   { return uint32_t(inoise8(x, y)); });
+    row("inoise8 3D",          [](uint32_t x, uint32_t y, uint32_t z) { return uint32_t(inoise8(x, y, z)); });
+    row("inoise16 1D",         [](uint32_t x, uint32_t, uint32_t)     { return uint32_t(inoise16(x)); });
+    row("inoise16 2D",         [](uint32_t x, uint32_t y, uint32_t)   { return uint32_t(inoise16(x, y)); });
+    row("inoise16 3D",         [](uint32_t x, uint32_t y, uint32_t z) { return uint32_t(inoise16(x, y, z)); });
+    row("fbm8 2D, 2 octaves",  [](uint32_t x, uint32_t y, uint32_t)   { return uint32_t(fbm8(x, y, 2)); });
+    row("fbm8 2D, 4 octaves",  [](uint32_t x, uint32_t y, uint32_t)   { return uint32_t(fbm8(x, y, 4)); });
+    row("fbm16 2D, 2 octaves", [](uint32_t x, uint32_t y, uint32_t)   { return uint32_t(fbm16(x, y, 2)); });
+    row("fbm16 2D, 4 octaves", [](uint32_t x, uint32_t y, uint32_t)   { return uint32_t(fbm16(x, y, 4)); });
+    row("turbulence8 2D, 2 octaves", [](uint32_t x, uint32_t y, uint32_t) { return uint32_t(turbulence8(x, y, 2)); });
+    row("warp8 2D, 1 octave",  [](uint32_t x, uint32_t y, uint32_t)   { return uint32_t(warp8(x, y, 512, 1)); });
+    row("warp8 2D, 2 octaves", [](uint32_t x, uint32_t y, uint32_t)   { return uint32_t(warp8(x, y, 512, 2)); });
+    row("atan16",              [](uint32_t x, uint32_t y, uint32_t)   { return uint32_t(atan16(int32_t(y) - 128, int32_t(x) - 128)); });
+    row("dist16",              [](uint32_t x, uint32_t y, uint32_t)   { return dist16(int32_t(x) - 128, int32_t(y) - 128); });
+    row("polar address (dist16 + atan16 + kaleido)", [](uint32_t x, uint32_t y, uint32_t) {
+        const int32_t dx = int32_t(x) - 128, dy = int32_t(y) - 128;
+        const uint32_t r = dist16(dx, dy);
+        return uint32_t(kaleido(angle16(atan16(dy, dx) + r * 4), 5)) + r;
+    });
     return 0;
 }

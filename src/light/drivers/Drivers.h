@@ -488,6 +488,13 @@ public:
         // setStatus. Reporting it is the difference between a typo'd list and a working one.
         if (const char* err = parsePinList(relayPins, pins, kMaxRelays, n)) {
             setStatus(err, Severity::Warning);
+            // Release what the OLD list held before giving up. A typo mid-edit would otherwise leave
+            // the previous relays asserted on GPIOs no control names any more, so the strip stays
+            // powered after brightness reaches zero and nothing in the UI explains why. An
+            // unparseable list means no relays, which is the same state as an empty one.
+            for (uint8_t i = 0; i < lastRelayCount_; i++)
+                platform::gpioWrite(lastRelayPins_[i], false);
+            lastRelayCount_ = 0;
             return;
         }
         // Release the pins that are LEAVING the list before driving the new one. Clearing the list

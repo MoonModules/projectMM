@@ -68,7 +68,6 @@
 #include "light/effects/RandomEffect.h"
 #include "light/effects/LissajousEffect.h"
 #include "light/effects/RubiksCubeEffect.h"
-#include "light/effects/Noise2DEffect.h"
 #include "light/effects/BouncingBallsEffect.h"
 #include "light/effects/TetrixEffect.h"
 #include "light/effects/TextEffect.h"
@@ -224,7 +223,6 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::MoonLiveEffect>("MoonLiveEffect", "light/MoonLiveEffect.md");
     mm::ModuleFactory::registerType<mm::NetworkReceiveEffect>("NetworkReceiveEffect", "light/effects.md#networkreceive");
     mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect", "light/effects.md#noise");
-    mm::ModuleFactory::registerType<mm::Noise2DEffect>("Noise2DEffect", "light/effects.md#noise2d");
     mm::ModuleFactory::registerType<mm::NoiseMeterEffect>("NoiseMeterEffect", "light/effects.md#noisemeter");
     mm::ModuleFactory::registerType<mm::PaintBrushEffect>("PaintBrushEffect", "light/effects.md#paintbrush");
     mm::ModuleFactory::registerType<mm::ParticlesEffect>("ParticlesEffect", "light/effects.md#particles");

@@ -9,6 +9,10 @@
 
 #include "doctest.h"
 #include "core/MoonModule.h"
+#include "light/effects/AuroraEffect.h"
+#include "light/effects/PolarNoiseEffect.h"
+#include "light/effects/SpiralEffect.h"
+#include "light/effects/TunnelEffect.h"
 #include "light/polar.h"
 #include "platform/platform.h"
 
@@ -215,4 +219,118 @@ TEST_CASE("releasing the table gives the memory back and the next prepare rebuil
     REQUIRE(o.lut.prepare(48, 48, false));
     CHECK(o.dynamicBytes() == held);
     CHECK(o.lut.radiusAt(24, 24) == 0);              // and it is the same table as before
+}
+
+// --- volumetric fixtures ----------------------------------------------------
+//
+// "Angle and radius" has no single meaning in three dimensions, so the projection is a control.
+// These pin what each one promises, and that the default costs an existing 2D fixture nothing.
+
+TEST_CASE("at one light deep every projection is the flat address, so no panel changes") {
+    // The property that makes cylindrical a safe default: a panel is a depth-1 volume, and all
+    // three mappings have to agree there or switching one would alter a fixture that has no depth.
+    Owner flat, cyl, sph, rad;
+    REQUIRE(flat.lut.prepare(24, 24, true));
+    REQUIRE(cyl.lut.prepare(24, 24, 1, true, PolarLut::Mapping::Cylindrical));
+    REQUIRE(sph.lut.prepare(24, 24, 1, true, PolarLut::Mapping::Spherical));
+    REQUIRE(rad.lut.prepare(24, 24, 1, true, PolarLut::Mapping::Radial));
+    for (uint16_t y = 0; y < 24; y++)
+        for (uint16_t x = 0; x < 24; x++) {
+            CHECK(cyl.lut.angleAt(x, y) == flat.lut.angleAt(x, y));
+            CHECK(cyl.lut.radiusAt(x, y) == flat.lut.radiusAt(x, y));
+            CHECK(rad.lut.radiusAt(x, y) == flat.lut.radiusAt(x, y));
+            CHECK(sph.lut.angleAt(x, y) == flat.lut.angleAt(x, y));
+        }
+}
+
+TEST_CASE("cylindrical carries depth separately, so every slice reads the same address") {
+    // A tube or a stack of panels: the pattern is the same at every height, which is what lets an
+    // effect use depth for something else entirely.
+    Owner o;
+    REQUIRE(o.lut.prepare(16, 16, 8, true, PolarLut::Mapping::Cylindrical));
+    for (uint16_t z = 1; z < 8; z++)
+        for (uint16_t y = 0; y < 16; y += 3)
+            for (uint16_t x = 0; x < 16; x += 3) {
+                CHECK(o.lut.angleAt(x, y, z) == o.lut.angleAt(x, y, 0));
+                CHECK(o.lut.radiusAt(x, y, z) == o.lut.radiusAt(x, y, 0));
+            }
+}
+
+TEST_CASE("radial measures distance from the center of the volume, so the field reads as shells") {
+    Owner o;
+    REQUIRE(o.lut.prepare(9, 9, 9, true, PolarLut::Mapping::Radial));
+    CHECK(o.lut.radiusAt(4, 4, 4) == 0);            // the center light
+    CHECK(o.lut.radiusAt(0, 0, 0) == 65535);        // a corner, the furthest point
+    CHECK(o.lut.radiusAt(8, 8, 8) > 60000);
+    // Equidistant lights share a radius whichever axis they lie on: that is what makes it a shell.
+    CHECK(o.lut.radiusAt(0, 4, 4) == o.lut.radiusAt(4, 0, 4));
+    CHECK(o.lut.radiusAt(4, 4, 0) == o.lut.radiusAt(4, 0, 4));
+}
+
+TEST_CASE("spherical adds an elevation, so a sphere maps evenly instead of pinching") {
+    Owner o;
+    REQUIRE(o.lut.prepare(17, 17, 17, true, PolarLut::Mapping::Spherical));
+    // On the equator the elevation is zero; above and below the center it points up and down.
+    CHECK(o.lut.pitchAt(16, 8, 8) == 0);
+    const angle16 up = o.lut.pitchAt(16, 8, 16);
+    const angle16 down = o.lut.pitchAt(16, 8, 0);
+    CHECK(up > 0);
+    CHECK(up < 32768);                               // above the plane, less than a quarter turn
+    CHECK(down > 32768);                             // below it, wrapped the other way
+    // And the radius is the distance through the volume, not across a slice.
+    CHECK(o.lut.radiusAt(8, 8, 8) == 0);
+    CHECK(o.lut.radiusAt(8, 8, 16) > 30000);
+}
+
+TEST_CASE("only spherical pays for the third table") {
+    // The second angle is what spherical needs and the others do not, so it is what spherical alone
+    // allocates: a fixture on cylindrical must not carry memory for a value it never reads.
+    Owner cyl, sph;
+    REQUIRE(cyl.lut.prepare(16, 16, 4, false, PolarLut::Mapping::Cylindrical));
+    REQUIRE(sph.lut.prepare(16, 16, 4, false, PolarLut::Mapping::Spherical));
+    CHECK(cyl.lut.bytes() == 16 * 16 * 4 * 2);       // angle + radius
+    CHECK(sph.lut.bytes() == 16 * 16 * 4 * 3);       // + elevation
+    CHECK(cyl.lut.pitchAt(3, 3, 2) == 0);            // and reading it is safe, not a fault
+}
+
+TEST_CASE("switching projection live rebuilds the table and frees what the new one does not need") {
+    Owner o;
+    REQUIRE(o.lut.prepare(16, 16, 4, false, PolarLut::Mapping::Spherical));
+    const std::size_t withPitch = o.lut.bytes();
+    REQUIRE(o.lut.prepare(16, 16, 4, false, PolarLut::Mapping::Cylindrical));
+    CHECK(o.lut.bytes() < withPitch);
+    CHECK(o.lut.mapping() == PolarLut::Mapping::Cylindrical);
+}
+
+TEST_CASE("the volumetric index matches the buffer's own ordering") {
+    // A pixel loop reads by running index; if the table ordered its lights differently the field
+    // would be sheared through the volume rather than merely wrong at one light.
+    Owner o;
+    REQUIRE(o.lut.prepare(5, 4, 3, true, PolarLut::Mapping::Spherical));
+    std::size_t i = 0;
+    for (uint16_t z = 0; z < 3; z++)
+        for (uint16_t y = 0; y < 4; y++)
+            for (uint16_t x = 0; x < 5; x++, i++) {
+                CHECK(o.lut.index(x, y, z) == i);
+                CHECK(o.lut.angle(i) == o.lut.angleAt(x, y, z));
+                CHECK(o.lut.radius(i) == o.lut.radiusAt(x, y, z));
+            }
+}
+
+TEST_CASE("an effect can bind the polar controls before it has a fixture") {
+    // defineControls() runs before an effect is attached to a layer, and again on the throwaway
+    // instances the /api/types probe builds, so anything it asks about the fixture dereferences a
+    // null layer. An earlier addControls() hid the mapping on a flat fixture and segfaulted the
+    // framerate sweep for exactly that reason.
+    AuroraEffect a;
+    PolarNoiseEffect p;
+    TunnelEffect t;
+    SpiralEffect s;
+    a.defineControls();
+    p.defineControls();
+    t.defineControls();
+    s.defineControls();
+    // And the controls are all there, on an effect that has never seen a layer.
+    CHECK(a.controls().count() > 3);
+    CHECK(s.controls().count() > 3);
 }
