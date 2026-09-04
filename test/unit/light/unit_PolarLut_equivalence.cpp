@@ -7,6 +7,8 @@
 // compared pixel by pixel. This is the evidence behind the re-baselined golden.
 
 #include "doctest.h"
+
+#include "golden_frame.h"   // ScopedTestClock: restores the real clock on scope exit
 #include "light/effects/AuroraEffect.h"
 #include "light/effects/PolarNoiseEffect.h"
 #include "light/effects/SpiralEffect.h"
@@ -28,7 +30,9 @@ namespace {
 template <typename EffectT>
 std::vector<uint8_t> render(lengthType w, lengthType h, bool useTable, bool wide = false,
                             uint16_t frames = 60, lengthType d = 1, uint8_t mapping = 0) {
-    platform::setTestNowMs(1000);
+    // RAII, so the override is cleared even if a REQUIRE below exits early: a leaked test clock
+    // freezes time for every test that runs after this one in the same binary.
+    const mm::golden::ScopedTestClock clock(1000);
     Layouts layouts;
     GridLayout grid;
     Layer layer;

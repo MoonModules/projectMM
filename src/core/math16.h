@@ -1,6 +1,6 @@
 #pragma once
 
-// 16-bit fixed-point tier — the power-function contract's numeric vocabulary.
+// 16-bit fixed-point tier: the power-function contract's numeric vocabulary.
 //
 // Why a 16-bit tier alongside math8.h: an 8-bit result positions to 256 levels, which visibly steps
 // on a large fixture (a 12K-light wall shows the staircase in a slow gradient or a slow-moving
@@ -9,10 +9,10 @@
 // design) and as the internal fast path.
 //
 // Cost discipline, measured rather than assumed: interpolating the existing 8-bit `sin8_lut` was
-// tried first (zero new bytes) and REJECTED — rounding the endpoints to 8 bits distorts the segments
+// tried first (zero new bytes) and REJECTED: rounding the endpoints to 8 bits distorts the segments
 // the interpolation runs between, giving 1.1% of amplitude, worse than the 0.69% of FastLED's
 // classic `lib8tion` sin16. A 130-byte quarter-wave 16-bit table with the same linear interpolation
-// measures 0.031% — 22x better than lib8tion at a cost that rounds to nothing. FastLED master's
+// measures 0.031%: 22x better than lib8tion at a cost that rounds to nothing. FastLED master's
 // `fl::sin32` is near-exact but spends 1040 bytes plus two int64 multiplies per call; this is the
 // middle that keeps large-fixture gradients smooth without that. A quadratic core can swap in behind
 // this same name if a field-heavy effect ever needs it.
@@ -43,14 +43,14 @@ inline constexpr int16_t sin16_quarter[65] = {
     32767
 };
 
-/// Sine over a 16-bit angle, returning SIGNED -32767..32767 — FastLED's sin16 contract.
+/// Sine over a 16-bit angle, returning SIGNED -32767..32767: FastLED's sin16 contract.
 ///
 /// Verified against the two codebases users port FROM, at master rather than at a release, because
 /// FastLED 4.0 is close and the contract we bind to should be the one users will have:
 ///   - FastLED master (6a120dedc9, 2026-08-07): `fl/math/sin32.h` declares `i16 sin16lut(u16)`,
 ///     commented "output is between -32767 and 32767".
 ///   - WLED main (c1838ed4, 2026-08-05): `constexpr int16_t (*sinFunction)(uint16_t) = &sin16_t`,
-///     and its effects write `sin16_t(x) + 32768` when they want an unsigned value — precisely the
+///     and its effects write `sin16_t(x) + 32768` when they want an unsigned value: precisely the
 ///     arithmetic that broke silently against our old unsigned return.
 ///
 /// The unsigned 0..65535 form (32768 at the zero crossing) was tried first, to match `sin8`. It is
@@ -69,7 +69,7 @@ constexpr int16_t sin16(angle16 theta) {
     // Odd quadrants run the quarter wave backwards (sin descends from the peak).
     const uint16_t walk = (quadrant & 1) ? static_cast<uint16_t>(0x4000 - pos) : pos;
     // uint16 for the index, NOT uint8: walk reaches 0x4000 exactly at a quadrant boundary in an odd
-    // quadrant, and >>8 is then 64 — which a uint8 holds fine but only by luck of the cast order.
+    // quadrant, and >>8 is then 64: which a uint8 holds fine but only by luck of the cast order.
     // Keeping it wide makes the "table has 65 entries so idx==64 is valid" invariant explicit.
     const uint16_t idx  = static_cast<uint16_t>(walk >> 8);           // 0..64
     const uint8_t frac  = static_cast<uint8_t>(walk & 0xFF);
@@ -101,7 +101,7 @@ constexpr int32_t map32(int32_t v, int32_t inLo, int32_t inHi, int32_t outLo, in
     // in an int32 subtraction, so computing the spans in 32 bits overflows at the extremes. The
     // product of two 32-bit spans fits in int64 for every range this maps between: an extent, a
     // byte, a band count, a frequency. Mapping a FULL int32 range onto another full int32 range
-    // would exceed it (offset and outSpan both approach 2^32), which no caller does — the widest
+    // would exceed it (offset and outSpan both approach 2^32), which no caller does: the widest
     // real case is a 16-bit phase onto a grid extent, five orders of magnitude short of it.
     const int64_t inSpan  = static_cast<int64_t>(inHi)  - static_cast<int64_t>(inLo);
     const int64_t outSpan = static_cast<int64_t>(outHi) - static_cast<int64_t>(outLo);
@@ -117,7 +117,7 @@ constexpr int32_t map32(int32_t v, int32_t inLo, int32_t inHi, int32_t outLo, in
 /// once: the per-tick product `dt * bpm * scale / 60000` rounds to ZERO when dt is under a
 /// millisecond (every desktop frame, and an ESP32 running a small fixture fast), so the animation
 /// silently freezes. The fix all nine converged on is to accumulate the RAW numerator in 64 bits and
-/// divide only at the read — which is what this does.
+/// divide only at the read: which is what this does.
 ///
 /// Usage: one member per animated quantity; call `advance(elapsedMs, rate)` once per frame, then
 /// read as often as needed. `rate` is BPM-like: the caller's speed control, whatever its units.
@@ -125,7 +125,7 @@ class BeatPhase {
 public:
     /// Accumulate this frame's contribution. Safe to call with a rate of 0 (the phase holds).
     /// The first call only establishes the time base, so a large `elapsed` at startup cannot jump
-    /// the phase — the same first-tick guard three of the nine effects carried by hand.
+    /// the phase: the same first-tick guard three of the nine effects carried by hand.
     void advance(uint32_t elapsedMs, uint32_t rate) {
         if (!started_) { started_ = true; lastMs_ = elapsedMs; return; }
         const uint32_t dt = elapsedMs - lastMs_;   // unsigned: correct across the millis() wrap
@@ -133,7 +133,7 @@ public:
         num_ += static_cast<uint64_t>(dt) * rate;
     }
 
-    /// The phase scaled by `scale` and divided late — `phase(256)` is the uint8 angle form
+    /// The phase scaled by `scale` and divided late: `phase(256)` is the uint8 angle form
     /// (256 = full turn) the effects use, `phase(65536)` the angle16 form.
     /// Returns the raw scaled value; the caller truncates to its angle width, which is where the
     /// free wrap happens.
@@ -146,7 +146,7 @@ public:
     /// scales for its second axis).
     uint64_t numerator() const { return num_; }
 
-    /// Feed a pre-scaled product directly — for the callers whose rate already carries a factor.
+    /// Feed a pre-scaled product directly: for the callers whose rate already carries a factor.
     void advanceScaled(uint32_t elapsedMs, uint64_t scaledRate) {
         if (!started_) { started_ = true; lastMs_ = elapsedMs; return; }
         const uint32_t dt = elapsedMs - lastMs_;
@@ -163,14 +163,14 @@ private:
 };
 
 /// Integer square root of a 32-bit value, rounded down. Binary restoring method: no divide, no
-/// float, ~16 iterations worst case — which matters because the ESP32 has no fast divide and effects
+/// float, ~16 iterations worst case: which matters because the ESP32 has no fast divide and effects
 /// call this per pixel when they need a true distance.
 ///
 /// PaintBrushEffect hand-rolled this; it lives here so a caller reaching for a distance gets the
 /// same one. Where a comparison against a threshold will do (is this point inside a circle?), prefer
-/// comparing SQUARED values and skip this entirely — measured on hardware, the squared form is ~14
+/// comparing SQUARED values and skip this entirely: measured on hardware, the squared form is ~14
 /// cycles/pixel against ~108 for the sqrt.
-/// Integer square root of a 64-bit value — the wide form, for values whose square exceeds 32 bits.
+/// Integer square root of a 64-bit value: the wide form, for values whose square exceeds 32 bits.
 /// `dist16` needs it: two coordinates of only 70000 already square-and-sum past UINT32_MAX, so the
 /// 32-bit form saturated at 65535 and reported the wrong distance well inside normal range.
 ///
@@ -208,9 +208,9 @@ constexpr uint32_t isqrt(uint32_t v) {
 // `atan2_8`/`dist8` in math8.h are the 8-bit forms: an octant atan2 and an OCTAGONAL distance
 // (max + half-min), which is up to ~12% off a true radius and saturates at 255. On a small panel
 // neither shows; on a large one the octagon reads as visible corners on what should be a circle,
-// and the saturation flattens everything past 255 lights from the centre.
+// and the saturation flattens everything past 255 lights from the center.
 //
-// These are the 16-bit forms for addressing a grid in polar coordinates — the vocabulary behind
+// These are the 16-bit forms for addressing a grid in polar coordinates: the vocabulary behind
 // every radial look: rings, spirals, rotation, kaleidoscopes, tunnels, radial wipes, a spectrum
 // bent around a circle. `atan16` returns an angle16 (65536 = one turn) so it feeds sin16 and the
 // palette directly; `dist16` returns a true Euclidean radius via isqrt. Both are general grid
@@ -229,10 +229,10 @@ inline constexpr int16_t atan16_octant[33] = {
 /// Angle of (x, y) as an angle16, measured counter-clockwise from +x. Full 16-bit resolution, so a
 /// gradient swept around the circle has no visible steps on a large fixture.
 inline angle16 atan16(int32_t y, int32_t x) {
-    if (x == 0 && y == 0) return 0;                       // the centre has no direction
+    if (x == 0 && y == 0) return 0;                       // the center has no direction
     // Fold into the first octant, remembering which one, then interpolate the arctangent there.
     // Unsigned magnitudes: negating INT32_MIN has no int32 representation, so the obvious
-    // `x < 0 ? -x : x` is undefined behaviour at exactly one input per axis. Widening first keeps
+    // `x < 0 ? -x : x` is undefined behavior at exactly one input per axis. Widening first keeps
     // the fold exact across the whole range.
     //
     // `0u - v` rather than `-v`: the unary form is well-defined on an unsigned (it is modular
@@ -260,7 +260,7 @@ inline angle16 atan16(int32_t y, int32_t x) {
     return static_cast<angle16>(a);
 }
 
-/// True Euclidean distance from the origin to (dx, dy) — a real radius, not the octagon `dist8`
+/// True Euclidean distance from the origin to (dx, dy): a real radius, not the octagon `dist8`
 /// approximates, and it does not saturate at 255.
 inline uint32_t dist16(int32_t dx, int32_t dy) {
     // Squared in UNSIGNED 64-bit and rooted with the 64-bit isqrt. The obvious 32-bit form is wrong
@@ -297,7 +297,7 @@ constexpr frac16 easeInOutCubic(frac16 t) {
     return static_cast<frac16>(65535ull - ((4ull * u * u * u) >> 32));
 }
 
-/// Quadratic ease out: fast start, gentle settle — the "arrives and rests" curve.
+/// Quadratic ease out: fast start, gentle settle. The "arrives and rests" curve.
 ///
 /// The squared term divides by 65535 rather than shifting by 16: `(65535·65535) >> 16` is 65534,
 /// which would leave the curve one unit short at t=0 and start a fade barely lit.
@@ -309,7 +309,7 @@ constexpr frac16 easeOutQuad(frac16 t) {
 // --- Followers and meters ---------------------------------------------------------------------
 
 /// A one-pole low-pass follower: `current` moves a fraction of the way toward `target` each frame.
-/// This is how a value stops jittering — a meter, a control, a beat-driven size. `rate` is 0..255,
+/// This is how a value stops jittering: a meter, a control, a beat-driven size. `rate` is 0..255,
 /// where 255 snaps instantly and small values glide.
 ///
 /// Deliberately frame-rate dependent in its simple form, which is what every LED codebase uses; a
@@ -320,7 +320,7 @@ constexpr uint8_t smoothFollow(uint8_t current, uint8_t target, uint8_t rate) {
     const int32_t delta = static_cast<int32_t>(target) - current;
     // Round the step AWAY from zero so every nonzero rate makes progress. A plain shift truncates
     // toward zero, which for a small rate means an upward step rounds to 0 and the value never
-    // rises, while a downward step of the same size rounds to -1 and does move — a follower that
+    // rises, while a downward step of the same size rounds to -1 and does move: a follower that
     // could fall but not climb (measured: rate 1 moved 100->99 but left 0 at 0).
     const int32_t step = (delta * rate) / 256;
     if (step != 0) return static_cast<uint8_t>(current + step);
@@ -328,7 +328,7 @@ constexpr uint8_t smoothFollow(uint8_t current, uint8_t target, uint8_t rate) {
 }
 
 /// The falling-peak meter: rise INSTANTLY to a new high, then decay slowly. The asymmetry is the
-/// whole point — a peak that eased upward would miss transients, and one that dropped instantly
+/// whole point: a peak that eased upward would miss transients, and one that dropped instantly
 /// would show nothing to read. Every VU meter with a floating peak dot is this function.
 constexpr uint8_t peakHold(uint8_t peak, uint8_t value, uint8_t decay) {
     if (value > peak) return value;                    // instant attack
@@ -337,7 +337,7 @@ constexpr uint8_t peakHold(uint8_t peak, uint8_t value, uint8_t decay) {
 
 // --- Position-addressable randomness -----------------------------------------------------------
 
-/// A hash of up to four integers to 0..65535 — random-LOOKING but a pure function of its inputs, so
+/// A hash of up to four integers to 0..65535: random-LOOKING but a pure function of its inputs, so
 /// the same pixel gets the same value on every device and every frame.
 ///
 /// This is what a stream RNG cannot do: `Random8` advances per CALL, so a device that renders one
@@ -353,7 +353,7 @@ constexpr uint16_t hashInt(uint32_t a, uint32_t b = 0, uint32_t c = 0, uint32_t 
     return static_cast<uint16_t>(h >> 16);
 }
 
-/// Fold an angle into `segments` mirrored wedges — the kaleidoscope. Any field sampled through
+/// Fold an angle into `segments` mirrored wedges: the kaleidoscope. Any field sampled through
 /// this gains n-fold symmetry, which is why a mediocre noise field becomes a mandala for the cost
 /// of one modulo: the fold is applied to the ANGLE, and everything downstream is unchanged.
 ///
@@ -364,7 +364,7 @@ inline angle16 kaleido(angle16 a, uint8_t segments) {
     const uint32_t wedge = 65536u / segments;
     uint32_t within = a % wedge;                       // position inside this wedge
     const uint32_t index = a / wedge;
-    // Reflect alternate wedges and return the FOLDED coordinate — deliberately one wedge wide, not
+    // Reflect alternate wedges and return the FOLDED coordinate: deliberately one wedge wide, not
     // the original angle. That is what a kaleidoscope is: every wedge maps onto the same range, so a
     // field sampled through it repeats n times around the circle, and mirroring every other wedge is
     // what makes the seams join rather than showing a hard edge. A caller that wants the full turn
@@ -382,7 +382,7 @@ inline angle16 kaleido(angle16 a, uint8_t segments) {
 // it. These are the same textbook shapes at full 16-bit range, so a position scales to any axis
 // length without the caller rescaling.
 
-// Triangle wave: 0 to 65535 over the first half of the cycle and back over the second — the fold of
+// Triangle wave: 0 to 65535 over the first half of the cycle and back over the second. The fold of
 // a ramp, the 16-bit twin of triwave8. Cheaper and sharper than a sine where an effect wants a
 // linear sweep out and back.
 constexpr uint16_t triwave16(uint16_t i) {
@@ -391,7 +391,7 @@ constexpr uint16_t triwave16(uint16_t i) {
 }
 
 // beat16: a 0..65535 sawtooth completing `bpm` cycles per minute, measured from `timebase`.
-// The 16-bit twin of beat8 — same FastLED semantics, full range, so `beat16(bpm) * n >> 16` lands
+// The 16-bit twin of beat8: same FastLED semantics, full range, so `beat16(bpm) * n >> 16` lands
 // on any axis length evenly rather than in 1/256ths.
 constexpr uint16_t beat16(uint8_t bpm, uint32_t ms, uint32_t timebase = 0) {
     if (bpm == 0) return 0;
@@ -399,6 +399,49 @@ constexpr uint16_t beat16(uint8_t bpm, uint32_t ms, uint32_t timebase = 0) {
     if (period == 0) return 0;
     const uint32_t pos = (ms - timebase) % period;
     return static_cast<uint16_t>((pos * 65536u) / period);
+}
+
+/// Half-life decay: the fraction of a value that SURVIVES after `dtMs`, as a 0..65536 weight.
+///
+/// `0.5^(dt / halfLifeMs)`, the textbook exponential decay written so the caller states the thing
+/// they actually mean: "half of it is gone after N milliseconds". Framerate independence is then a
+/// property of the formula rather than of the caller's arithmetic, because the exponent carries dt:
+/// two 10 ms steps and one 20 ms step reach the same place, which `decay(2·dt) == decay(dt)²` pins.
+///
+/// This exists because the per-frame form does not survive a fast device. A "keep 240 of 255 each
+/// frame" fade is a decay whose half-life moves with the framerate, so the same setting is a long
+/// tail at 60 fps and an instant clear at 1200; the effects that hit this carry a remainder by hand
+/// (ParticlesEffect's `fadeCarry_`, and the Layer's own) to stop the fade truncating to nothing.
+///
+/// Returns 65536 (unchanged) for a zero dt or a zero half-life, and 0 once the value could not
+/// survive rounding anyway: a caller multiplies by this and shifts down 16.
+inline uint32_t halfLifeKeep(uint32_t dtMs, uint32_t halfLifeMs) {
+    if (dtMs == 0 || halfLifeMs == 0) return 65536;
+    // 2^-x by table lookup on the fraction, then a shift for the whole halvings. 33 entries at
+    // 1/32 of a half-life, linearly interpolated: measured worst error 3.95 of 65536 (0.006%),
+    // which is under one part in 255 at the byte width every caller narrows to.
+    // Held as the DROP below 65536, so the first entry (a full 65536, one past uint16_t) fits the
+    // same 16-bit table as the rest rather than widening every entry to carry one value.
+    static constexpr uint16_t kPow2Drop[33] = {
+            0,  1404,  2779,  4123,  5439,  6727,  7987,  9220,
+        10427, 11608, 12763, 13894, 15001, 16084, 17143, 18180,
+        19195, 20188, 21160, 22111, 23041, 23952, 24843, 25715,
+        26568, 27403, 28220, 29020, 29802, 30568, 31317, 32050,
+        32768,
+    };
+    // How many half-lives have passed, in 1/32nds. A long stall shifts the result to zero rather
+    // than wrapping: 32 halvings is already below one part in 4 billion.
+    const uint64_t units = (static_cast<uint64_t>(dtMs) * 32u) / halfLifeMs;
+    const uint32_t whole = static_cast<uint32_t>(units >> 5);
+    if (whole >= 32) return 0;
+    const uint32_t i = static_cast<uint32_t>(units & 31u);
+    // Interpolate between the table's entries on the sub-1/32 remainder, which the multiply above
+    // has already discarded, so recover it at the finer scale the division allows.
+    const uint64_t fine = (static_cast<uint64_t>(dtMs) * 32u * 256u) / halfLifeMs;
+    const uint32_t f = static_cast<uint32_t>(fine & 255u);
+    const uint32_t a = kPow2Drop[i], b = kPow2Drop[i + 1];
+    const uint32_t drop = a + (((b - a) * f) >> 8);
+    return (65536u - drop) >> whole;
 }
 
 }  // namespace mm

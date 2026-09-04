@@ -5,13 +5,13 @@
 #include "core/moonlive/MoonLiveBuiltins.h"
 #include "core/moonlive/MoonLiveBuiltins_common.h"   // the neutral half: math, waveforms, noise, print
 #include "core/moonlive/MoonLive.h"   // runDefineControls drives the engine
-#include "core/moonlive/MoonLiveIr.h"   // kArg3 — the register `t` is passed in
+#include "core/moonlive/MoonLiveIr.h"   // kArg3: the register `t` is passed in
 
 #include <atomic>
 #include <cstdint>
 
-#include "core/math8.h"    // beatsin16 — the shared time vocabulary
-#include "core/math16.h"   // beat16 / triwave16 — full-range waveforms
+#include "core/math8.h"    // beatsin16: the shared time vocabulary
+#include "core/math16.h"   // beat16 / triwave16: full-range waveforms
 #include "light/shader.h"  // shader::smoothstep, the GLSL vocabulary, already in fixed point
 #include "core/noise.h"    // inoise8: the shared gradient-noise field
 #include <cstring>
@@ -19,7 +19,7 @@
 #include "light/draw.h"    // draw::line, the shared 3D Bresenham a script draws with
 #include "light/particles.h" // particles::Pool, the kernel a scripted particle effect drives
 
-// MoonLive — the LIGHT-DOMAIN built-in registration. This is the only place the LED vocabulary
+// MoonLive: the LIGHT-DOMAIN built-in registration. This is the only place the LED vocabulary
 // lives: the function NAMES (`setRGB`, `fill`, `random16`), their arg counts, and the meaning
 // of the inline opcodes (StoreElem = an RGB pixel write, FillElems = fill every light). The core
 // compiler sees only the neutral BuiltinTable / InlineOp tags this file hands it. A different
@@ -31,7 +31,7 @@ namespace mm::moonlive {
 // random16(n) → a pseudo-random value in [0, n). A simple LCG, deterministic enough that the
 // runtime Bounds guard always sees an in-range index; the same implementation on every target
 // so a script behaves identically. The one host helper exposed as a Call so far.
-// The palette, as THREE builtins — `paletteR(i, bri)`, `paletteG(i, bri)`, `paletteB(i, bri)`.
+// The palette, as THREE builtins: `paletteR(i, bri)`, `paletteG(i, bri)`, `paletteB(i, bri)`.
 // `bri` is the brightness colorFromPalette already takes, and it is what gives a shape a
 // radial falloff instead of a flat fill. A builtin returns
 // one uint32_t, so a packed 0xRRGGBB would need the script to unpack it, and the language has no
@@ -170,7 +170,7 @@ extern "C" inline uint32_t mm_light_uvY(const uintptr_t* args, uint32_t, const u
 // no rescaling anywhere.
 //
 // The products are int64 and have to be. z*z at the escape radius is 4.0, whose Q32 square is
-// about 7.4e10 — an int32 overflows there and the point reads as escaped when it has not, which
+// about 7.4e10: an int32 overflows there and the point reads as escaped when it has not, which
 // draws holes in the middle of the set.
 //
 // `iters` is the detail dial and the cost: the loop is bounded by it, so a script trades
@@ -220,14 +220,14 @@ extern "C" inline uint32_t mm_light_escape(const uintptr_t* args, uint32_t, cons
 // scale(value, n) → map a 0..65535 value onto 0..n-1. The other half of `beat`: a beat is full-scale
 // by design so it is fixture-independent, and this is what lands it on an actual axis. `beat(30, t)`
 // then `scale(…, width)` is the sweep position, which is exactly what LinesEffect computes
-// (`beat * n / 65536`) — including the detail that it REACHES n-1, where the naive `/ 65535` form
+// (`beat * n / 65536`): including the detail that it REACHES n-1, where the naive `/ 65535` form
 // truncates one short and the last column never lights.
-// sin(angle) / cos(angle) — the full-turn wave, angle 0..65535 for one revolution.
+// sin(angle) / cos(angle): the full-turn wave, angle 0..65535 for one revolution.
 //
 // math16's sin16/cos16 return SIGNED -32768..32767; a script's values are unsigned, so the result
 // is biased into 0..65535 with the zero line at 32768. A script that wants a coordinate scales the
 // result: `scale(sin(a), width)` sweeps the whole axis, which is the same `scale` a beat uses.
-// polarA(dx, dy) / polarR(dx, dy) — the POLAR pair (Angle, Radius), for an effect written around distance and
+// polarA(dx, dy) / polarR(dx, dy): the POLAR pair (Angle, Radius), for an effect written around distance and
 // bearing from a center rather than around x/y. Both take offsets that a script computes as
 // `x - cx`, which is unsigned and therefore wraps for a point left of center: the builtins
 // re-center it themselves (see below), so a script does not have to reason about the wrap.
@@ -305,7 +305,7 @@ extern "C" inline uint32_t mm_light_osc(const uintptr_t* args, uint32_t, const u
 // That case cost a long debugging session before this existed.
 //
 // **Rate-limited, because the call sites are per-light.** A modifier's script runs once per light
-// per mapping rebuild — 16,384 times on a 128x128 wall. Printing all of them would flood the serial
+// per mapping rebuild: 16,384 times on a 128x128 wall. Printing all of them would flood the serial
 // line, stall the render (a UART write blocks) and bury the first values, which are the useful
 // ones. So a burst is capped and the rest are counted, not printed: the tail of a flood tells you
 // nothing the head did not.
@@ -315,25 +315,25 @@ extern "C" inline uint32_t mm_light_osc(const uintptr_t* args, uint32_t, const u
 //
 // A layout cannot write into a buffer the way an effect does: it does not know how many lights it
 // will place until it has placed them, and on a classic ESP32 a 16k-light fixture would need 48 KB
-// of coordinate staging — memory that board does not have. So the script CALLS OUT instead, once
+// of coordinate staging: memory that board does not have. So the script CALLS OUT instead, once
 // per light, and the host decides what to do with each: count it on the sizing pass, emit it into
 // the consumer's sink on the walk. Nothing is stored.
 //
 // The active sink is set by the binding around each run. Outside a run it is null and a call is
-// ignored — a script that reaches addLight from an effect places nothing rather than corrupting
+// ignored: a script that reaches addLight from an effect places nothing rather than corrupting
 // something.
 using AddLightFn = void (*)(void* ctx, uint16_t x, uint16_t y, uint16_t z);
 
 /// PER-THREAD, not one global: the sink belongs to whichever thread is running a script, and more
 /// than one does. A layout is asked for its light count and its coordinates from the HTTP task when a
-/// control is edited, while the render task walks the same layout for the frame — as one global, one
+/// control is edited, while the render task walks the same layout for the frame: as one global, one
 /// thread cleared the sink while the other was mid-run and the built-in called through a live
 /// function pointer with a null context. That is a null dereference on the render core, seen as an
 /// intermittent crash while resizing a scripted layout.
 ///
 /// Keyed on platform::currentThreadId() rather than C++ `thread_local`, which is UNUSABLE on the
 /// ESP32: the compiler reaches TLS through the THREADPTR special register, and a FreeRTOS task
-/// created without TLS has THREADPTR = 0 — so the access dereferences a small offset from null and
+/// created without TLS has THREADPTR = 0: so the access dereferences a small offset from null and
 /// dies inside the exception handler. Measured: EXCVADDR 0xfffffff0, `Double exception` in
 /// _xt_context_save, on every scripted LAYOUT (the only binding whose script calls a host function).
 /// Reading the task handle costs one load and needs no per-task setup.
@@ -395,13 +395,35 @@ struct MotionSink { MotionFn fn = nullptr; void* ctx = nullptr; };
 /// read-only handle installed around each tick. A script calling pool(400) from tick() therefore
 /// reaches no sizing sink and gets a no-op returning the live count, which is what keeps allocation
 /// off the render path entirely.
+using TrailSizeFn = bool (*)(void* ctx, bool want);
+struct TrailSizeSink { TrailSizeFn fn = nullptr; void* ctx = nullptr; };
+
 using PoolSizeFn = uint16_t (*)(void* ctx, uint16_t count);
 struct PoolSizeSink { PoolSizeFn fn = nullptr; void* ctx = nullptr; };
 struct PoolSink { particles::Pool* pool = nullptr; uint32_t scale = particles::FrameTime::kOne; };
 
+/// The trail plane a script advects and decays, and the frame's dt.
+///
+/// A data handle rather than a function sink, for PoolSink's reason: the script names a flow and a
+/// persistence, and the BINDING owns the two planes, their geometry and the ping-pong between them.
+/// Framerate independence is the system's property too: `dtMs` arrives here rather than being asked
+/// of the script, so a script author cannot get it wrong and a slow frame cannot skip the decay.
+struct FlowSink {
+    uint16_t* a = nullptr;          ///< one of the two planes, three uint16 per light
+    uint16_t* b = nullptr;          ///< the other; which one holds the trail is `front`
+    /// Points at the BINDING's own flag, so a script's advect calls flip the owner's state
+    /// directly. Copying the flag into the sink and reading it back afterwards would work only for
+    /// an even number of swaps, and a script may advect once, twice or not at all.
+    bool* front = nullptr;          ///< true: `a` holds the trail; false: `b` does
+    lengthType w = 0, h = 0, d = 0;
+    uint32_t dtMs = 0;
+    uint16_t* live() const { return !front ? nullptr : (*front ? a : b); }
+    uint16_t* spare() const { return !front ? nullptr : (*front ? b : a); }
+};
+
 namespace detail {
 // `owner` is ATOMIC and claimed with compare_exchange: the claim used to be a load then a store,
-// so two threads could both see the same slot free and both take it — leaving them sharing one
+// so two threads could both see the same slot free and both take it: leaving them sharing one
 // sink, which is the very aliasing this table exists to prevent.
 //
 // The slot is the ONE per-thread home for everything a running script's built-ins reach: the
@@ -409,9 +431,10 @@ namespace detail {
 // second table would repeat the claim/release machinery for the same lifetime.
 struct SinkSlot { std::atomic<uintptr_t> owner{0}; AddLightSink sink; draw::Canvas canvas;
                   AddControlSink controls; FadeSink fade; MotionSink motion; CoordSink coord;
-                  PalSink pal; PoolSizeSink poolSize; PoolSink pool; };
+                  PalSink pal; PoolSizeSink poolSize; PoolSink pool; FlowSink flow;
+                  TrailSizeSink trailSize; };
 /// Two slots: the render task and whichever task edits a control are the two that ever run a script
-/// at once. A third concurrent runner gets the overflow slot, which holds no sink — so its addLight
+/// at once. A third concurrent runner gets the overflow slot, which holds no sink: so its addLight
 /// calls no-op instead of writing through someone else's context.
 // constinit at namespace scope, not a function-local static: a local static carries a thread-safe
 // initialisation guard, which is a lock, and this is read from the render tick. Constant
@@ -419,7 +442,7 @@ struct SinkSlot { std::atomic<uintptr_t> owner{0}; AddLightSink sink; draw::Canv
 inline constinit SinkSlot gSinkSlots[2]{};
 inline SinkSlot* sinkSlots() MM_NONBLOCKING { return gSinkSlots; }
 /// PERMANENTLY EMPTY. A third concurrent runner reads this and finds no sink, so its addLight calls
-/// no-op — setAddLightSink deliberately never installs here, because a shared sink would let two
+/// no-op: setAddLightSink deliberately never installs here, because a shared sink would let two
 /// overflow threads write through each other's context.
 inline const AddLightSink& sinkOverflow() { static const AddLightSink s; return s; }
 /// The canvas twin of sinkOverflow: data stays null, so a third runner's draw calls no-op.
@@ -575,6 +598,37 @@ inline void setPoolSink(particles::Pool* pool, uint32_t scale) MM_NONBLOCKING {
     if (!pool) detail::releaseIfEmpty(s);
 }
 
+/// Where trail() asks for its plane, during defineControls only (the pool's own shape).
+inline const TrailSizeSink& trailSizeSink() MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(false);
+    static constinit TrailSizeSink none{};
+    return s ? s->trailSize : none;
+}
+
+/// Install the trail sizer for one defineControls() run; nullptr to detach.
+inline void setTrailSizeSink(TrailSizeFn fn, void* ctx) MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(fn != nullptr);
+    if (!s) return;
+    s->trailSize = {fn, ctx};
+    if (!fn) detail::releaseIfEmpty(s);
+}
+
+/// The trail plane this run may advect and decay, or an empty handle when there is none.
+inline FlowSink& flowSink() MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(false);
+    static constinit FlowSink none{};
+    return s ? s->flow : none;
+}
+
+/// Hand the flow builtins their planes for one run; a null front detaches. The binding owns the
+/// buffers and reads `swapped` afterwards to learn which one now holds the trail.
+inline void setFlowSink(const FlowSink& f) MM_NONBLOCKING {
+    detail::SinkSlot* s = detail::ownedSlot(f.a != nullptr);
+    if (!s) return;
+    s->flow = f;
+    if (!f.a) detail::releaseIfEmpty(s);
+}
+
 /// Point addControl at a consumer for the duration of one defineControls() run; nullptr to detach.
 /// False when the two-slot table is full, which the caller must not treat as an installed sink:
 /// every addControl would then be a silent no-op and the script would publish no controls at all.
@@ -599,7 +653,7 @@ inline void setAddLightSink(AddLightFn fn, void* ctx) {
     }
     // Install ONLY into an owned slot. Writing through addLightSink() would install into the shared
     // overflow sink when both slots are taken, and a second overflow thread would then run through
-    // the first one's context — the exact aliasing the two-slot table exists to prevent. A third
+    // the first one's context: the exact aliasing the two-slot table exists to prevent. A third
     // concurrent runner instead gets no sink at all, so its addLight calls no-op: visibly nothing
     // placed, rather than lights written through another thread's layout.
     detail::SinkSlot* s = detail::ownedSlot(true);
@@ -682,13 +736,13 @@ inline void setDrawCanvas(const draw::Canvas& cv) MM_NONBLOCKING {
 ///
 /// One call where a script used to write three: `paletteR/G/B` each returned a single channel, so
 /// a palette pixel cost three host calls AND three evaluations of whatever expression produced the
-/// brightness — the compiler evaluates each argument independently. Measured on an S3, that was
+/// brightness: the compiler evaluates each argument independently. Measured on an S3, that was
 /// 1451 us flat vs 1940 us with a per-pixel falloff; folding it into one call removes two of the
 /// three calls and two of the three brightness computations.
 ///
 /// Takes x/y rather than a flat index so the buffer layout stops leaking into every script: a
 /// script was writing `mod(bx + dx, width) + mod(by + dy, height) * width` at every call site.
-/// Out-of-range coordinates are dropped, not wrapped — a "negative" coordinate arrives as a huge
+/// Out-of-range coordinates are dropped, not wrapped: a "negative" coordinate arrives as a huge
 /// unsigned value, and wrapping it would paint the wrong edge rather than nothing.
 /// setPalEntry(i, r, g, b) - write one of the sixteen active palette entries.
 ///
@@ -697,7 +751,7 @@ inline void setDrawCanvas(const draw::Canvas& cv) MM_NONBLOCKING {
 /// a gradient stop list can express.
 ///
 /// The index is BOUNDED rather than wrapped: a script computing an index from a control could
-/// otherwise write a neighbouring entry and produce a palette nobody wrote, which reads as an engine
+/// otherwise write a neighboring entry and produce a palette nobody wrote, which reads as an engine
 /// fault. Out of range does nothing, which is visible in the picture and blames the script.
 extern "C" inline uint32_t mm_light_setPalEntry(const uintptr_t* args, uint32_t, const uint8_t*) {
     const PalSink& s = palSink();
@@ -758,6 +812,110 @@ extern "C" inline uint32_t mm_light_setPaletteColor(const uintptr_t* args, uint3
 ///
 /// Reaches nothing from a layout or a modifier, where no sink is installed, so the call is a
 /// no-op there rather than fading a layer the script is not ticking in.
+/// trail(1) asks for the trail plane; trail(0) gives it up. Answers whether one is available.
+///
+/// The pool's shape, for the pool's reason: the planes are two 16-bit buffers (96 KB on a 20-cube),
+/// so they exist only for a script that says it advects, and the ask happens at defineControls
+/// where allocation is legal. Called from tick() it REPORTS rather than resizing, so the render
+/// path never allocates.
+extern "C" inline uint32_t mm_light_trail(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const TrailSizeSink& s = trailSizeSink();
+    if (!s.fn) return flowSink().live() != nullptr ? 1u : 0u;   // outside defineControls: report
+    return s.fn(s.ctx, uint32_t(args[0]) != 0) ? 1u : 0u;
+}
+
+// The flow builtins: a script names a wind and a persistence, and the binding owns the planes.
+//
+// `flowNoise(scale, strength)` and `flowCurl(scale, strength)` each ADVECT the whole trail plane in
+// one call, because the alternative (a script loop calling a per-pixel rule) would cross the script
+// boundary once per light, which on a 20-cube is 8000 calls a frame. One call, the loop in C++.
+
+/// Advect the trail along a noise field: two decoupled samples, one per axis.
+extern "C" inline uint32_t mm_light_flowNoise(const uintptr_t* args, uint32_t, const uint8_t*) {
+    FlowSink& f = flowSink();
+    if (!f.live() || !f.spare()) return 0;
+    const uint32_t cells = (uint32_t(args[0]) ? uint32_t(args[0]) : 1u) * 256u;
+    const int32_t strength = signedArg(args[1]);
+    const uint32_t t = platform::millis();
+    draw::advect16(f.spare(), f.live(), f.w, f.h, f.d,
+                   [&](lengthType x, lengthType y, lengthType z, draw::pos_t& vx, draw::pos_t& vy) {
+                       const uint32_t fx = uint32_t(x) * cells, fy = uint32_t(y) * cells;
+                       const uint32_t fz = uint32_t(z) * cells + t / 4u;
+                       const int32_t nx = int32_t(inoise16(fx, fy, fz)) - 32768;
+                       const int32_t ny = int32_t(inoise16(fx + 0x9E37u, fy + 0x7C15u, fz)) - 32768;
+                       vx = draw::pos_t((nx * strength) >> 15);
+                       vy = draw::pos_t((ny * strength) >> 15);
+                   }, draw::Edge::Clamp);
+    *f.front = !*f.front;                 // the destination now holds the trail
+    return 0;
+}
+
+/// Advect the trail along a curl field: the same, but divergence-free, so nothing clumps.
+extern "C" inline uint32_t mm_light_flowCurl(const uintptr_t* args, uint32_t, const uint8_t*) {
+    FlowSink& f = flowSink();
+    if (!f.live() || !f.spare()) return 0;
+    const uint32_t cells = (uint32_t(args[0]) ? uint32_t(args[0]) : 1u) * 256u;
+    const int32_t strength = signedArg(args[1]);
+    const uint32_t t = platform::millis();
+    draw::advect16(f.spare(), f.live(), f.w, f.h, f.d,
+                   [&](lengthType x, lengthType y, lengthType z, draw::pos_t& vx, draw::pos_t& vy) {
+                       int32_t cx = 0, cy = 0;
+                       curl16(uint32_t(x) * cells, uint32_t(y) * cells,
+                              uint32_t(z) * cells + t / 4u, strength, cx, cy);
+                       vx = draw::pos_t(cx);
+                       vy = draw::pos_t(cy);
+                   }, draw::Edge::Clamp);
+    *f.front = !*f.front;
+    return 0;
+}
+
+/// Dim the trail by a half-life in milliseconds: the tail's length, in seconds rather than frames.
+///
+/// `trailDecay`, not `decay`: a builtin name is reserved for every script, and `decay` is an
+/// ordinary word for a member (`pulse.mle` and `beat-flash.mlp` both declare one). Taking it broke
+/// both scripts, which is a real backward-compatibility break for a name this vocabulary does not
+/// need. The existing `fade` builtin already pushed authors to `fadeAmt` for the same reason.
+extern "C" inline uint32_t mm_light_trailDecay(const uintptr_t* args, uint32_t, const uint8_t*) {
+    FlowSink& f = flowSink();
+    if (!f.live()) return 0;
+    const size_t n = size_t(f.w) * f.h * f.d * 3;
+    draw::decay16(f.live(), n, uint32_t(args[0]), f.dtMs);
+    return 0;
+}
+
+/// Throw light into the trail: a disc at the plane's full width, so the decay has somewhere to go.
+/// Takes a palette index rather than a color, as setPaletteColor does.
+///
+/// `radius` in whole lights, and it is what decides whether a long tail is visible at all. Advection
+/// spreads a head bilinearly, so after N frames one light's worth of brightness covers roughly N
+/// pixels: a single-pixel head on a 4-second tail arrives at about 1 part in 255 and the panel reads
+/// as a faint smear. A disc injects radius^2 times as much for the same tail, which is the knob that
+/// makes persistence usable rather than merely long.
+extern "C" inline uint32_t mm_light_emitTrail(const uintptr_t* args, uint32_t, const uint8_t*) {
+    FlowSink& f = flowSink();
+    uint16_t* plane = f.live();
+    if (!plane) return 0;
+    const int32_t cx = signedArg(args[0]), cy = signedArg(args[1]), cz = signedArg(args[2]);
+    const RGB c = colorFromPalette(*Palettes::active(), byteArg(args[3]), byteArg(args[4]));
+    const int32_t r = args ? signedArg(args[5]) : 0;
+    const int32_t rad = r < 0 ? 0 : (r > 32 ? 32 : r);          // a runaway radius is a full-frame loop
+    const uint16_t wr = uint16_t((c.r << 8) | c.r);             // widened by repeating the byte, so a
+    const uint16_t wg = uint16_t((c.g << 8) | c.g);             // full head is 65535 rather than 65280
+    const uint16_t wb = uint16_t((c.b << 8) | c.b);
+    for (int32_t dy = -rad; dy <= rad; dy++) {
+        for (int32_t dx = -rad; dx <= rad; dx++) {
+            if (dx * dx + dy * dy > rad * rad) continue;        // a disc, not a square
+            const int32_t x = cx + dx, y = cy + dy;
+            if (x < 0 || y < 0 || cz < 0 || x >= f.w || y >= f.h || cz >= f.d) continue;
+            const size_t off = (size_t(cz) * f.h * f.w + size_t(y) * f.w + x) * 3;
+            plane[off + 0] = wr;
+            plane[off + 1] = wg;
+            plane[off + 2] = wb;
+        }
+    }
+    return 0;
+}
+
 extern "C" inline uint32_t mm_light_fade(const uintptr_t* args, uint32_t, const uint8_t*) {
     const FadeSink& f = fadeSink();
     if (!f.fn) return 0;
@@ -1067,7 +1225,7 @@ inline void writeSysVarSlot(uint8_t* arenaSlot, uint32_t value) MM_NONBLOCKING {
 }
 
 /// The system variables a light script can read. Each binding registers the names it actually
-/// WRITES, so an unwritten name stays unknown rather than reading a silent 0 — a script that asks
+/// WRITES, so an unwritten name stays unknown rather than reading a silent 0: a script that asks
 /// for something its host never supplies gets a compile error naming it, which is the honest answer.
 ///
 /// Registering is also what RESERVES the name: a script cannot declare a control or a loop variable
@@ -1135,7 +1293,7 @@ inline SysVarTable effectSysVars()   { return lightSysVars(); }
 inline SysVarTable modifierSysVars() { return lightSysVars(); }
 
 // The light-domain built-in table the binding injects into the compiler. setRGB and fill are
-// Inline (they lower to stores — the hot-path writers, no per-call cost); random16 is a Call.
+// Inline (they lower to stores: the hot-path writers, no per-call cost); random16 is a Call.
 // The distances are signed and re-centered here. draw::smin already widens its intermediates to 64
 // bits, and that is load-bearing: a wrapped smin returns a value larger than BOTH inputs, which
 // inverts the blend rather than degrading it.
@@ -1170,6 +1328,12 @@ inline const BuiltinTable& lightBuiltins() {
     // fade(amt)              → dim every light toward black, FastLED's fadeToBlackBy. The trail
     // primitive, collected by the layer so N fading effects cost one pass. See mm_light_fade.
     t.add({"fade", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_fade, {}});
+    // The flow family: each advects the whole plane in one call (see the handlers).
+    t.add({"trail", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_trail, {}});
+    t.add({"flowNoise", 2, false, BuiltinKind::Call, &mm_light_flowNoise, {}});
+    t.add({"flowCurl", 2, false, BuiltinKind::Call, &mm_light_flowCurl, {}});
+    t.add({"trailDecay", 1, false, BuiltinKind::Call, &mm_light_trailDecay, {}});
+    t.add({"emitTrail", 6, false, BuiltinKind::Call, &mm_light_emitTrail, {}});
     // setPan(index, value) / setTilt(index, value) → aim a moving head. Calls, not Inline stores:
     // the channel offset comes from the layer's fixture map, which the engine cannot see.
     // The audio vocabulary. All return 0 without audio, so a script written for a rig with a
@@ -1283,7 +1447,8 @@ inline const BuiltinTable& lightBuiltins() {
 /// modifier). Installed and detached in the same bracket as the control sink: sizing a pool and
 /// declaring a control are the same moment, and sharing the bracket means a script's pool cannot
 /// be resized from anywhere else.
-inline void runDefineControls(MoonLive& engine, PoolSizeFn sizePool = nullptr, void* poolCtx = nullptr) {
+inline void runDefineControls(MoonLive& engine, PoolSizeFn sizePool = nullptr, void* poolCtx = nullptr,
+                              TrailSizeFn sizeTrail = nullptr, void* trailCtx = nullptr) {
     // A script with no defineControls() declares no controls, which is the honest answer for one
     // that wants no UI: there is nothing to clear and nothing to run.
     if (!engine.hasEntry(kEntryDefineControls)) return;
@@ -1296,12 +1461,14 @@ inline void runDefineControls(MoonLive& engine, PoolSizeFn sizePool = nullptr, v
             static_cast<MoonLive*>(ctx)->addDeclaredControl(n, off, lo, hi, type);
         }, &engine)) return;
     if (sizePool) setPoolSizeSink(sizePool, poolCtx);
+    if (sizeTrail) setTrailSizeSink(sizeTrail, trailCtx);
     engine.clearDeclaredControls();      // re-runnable: rebuild rather than append
     // A one-light scratch buffer: this entry point writes no pixels, but `run` refuses a null or
     // undersized one, and honoring that contract costs less than carving out an exception.
     uint8_t scratch[3] = {};
     engine.run(scratch, 1, 3, 0, kEntryDefineControls);
     if (sizePool) setPoolSizeSink(nullptr, nullptr);
+    if (sizeTrail) setTrailSizeSink(nullptr, nullptr);
     setAddControlSink(nullptr, nullptr);
 }
 

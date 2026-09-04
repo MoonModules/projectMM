@@ -412,4 +412,37 @@ inline uint8_t warp8(uint32_t x, uint32_t y, uint16_t strength, uint8_t octaves 
     return warpImpl<2>(x, y, 0u, strength, octaves);
 }
 
+/// Curl of a noise potential: a velocity field that cannot pile up or thin out.
+///
+/// The perpendicular gradient of a scalar field (Bridson, "Curl-Noise for Procedural Fluid Flow",
+/// SIGGRAPH 2007). Taking the gradient of a potential and turning it 90 degrees gives a field whose
+/// divergence is zero BY CONSTRUCTION: whatever flows into a region flows out again. That is what
+/// separates it from sampling noise straight into a velocity, where the field has sources and sinks
+/// and anything carried by it collects in the sinks and drains from the sources, which looks like
+/// clumping rather than flow.
+///
+/// The output is scaled by `strength`, in the caller's own units (sub-pixels per frame for a
+/// transport). `eps` is the sampling distance for the central difference, in the same 16.16
+/// coordinates as the field: too small and the difference is quantization noise, too large and the
+/// curl is of a blurrier field than the one being sampled. The default is a sixteenth of a cell.
+inline void curl16(uint32_t x, uint32_t y, uint32_t z, int32_t strength,
+                   int32_t& vx, int32_t& vy, uint32_t eps = 4096) {
+    // Two central differences of the potential. dP/dy becomes the x component and -dP/dx the y,
+    // which is the 90-degree turn: the flow runs ALONG the potential's contours rather than up them.
+    const int32_t dy = static_cast<int32_t>(inoise16(x, y + eps, z))
+                     - static_cast<int32_t>(inoise16(x, y - eps, z));
+    const int32_t dx = static_cast<int32_t>(inoise16(x + eps, y, z))
+                     - static_cast<int32_t>(inoise16(x - eps, y, z));
+    // The differences span roughly a quarter of the range at the default eps, so >>15 keeps the
+    // result near `strength` rather than swamping it. A caller wanting a wilder field raises eps.
+    vx = (dy * strength) >> 15;
+    vy = (-dx * strength) >> 15;
+}
+
+/// The 2D form: the same field at a fixed z, which is what a panel wants.
+inline void curl16(uint32_t x, uint32_t y, int32_t strength, int32_t& vx, int32_t& vy,
+                   uint32_t eps = 4096) {
+    curl16(x, y, 0u, strength, vx, vy, eps);
+}
+
 }  // namespace mm

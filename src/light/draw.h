@@ -4,25 +4,25 @@
 #include "light/layers/Buffer.h" // Buffer (flat light array)
 #include "core/color.h"          // RGB, scale8
 #include "core/math8.h"
-#include "core/math16.h"       // isqrt — true-distance SDFs; the squared forms avoid it          // qadd8 — saturating add for blur's seep accumulation
-#include "light/Palette.h"       // blend(RGB,RGB,amt) — for blendPixel
-#include "light/fonts.h"         // fonts::Font — bitmap glyph tables for draw::text
+#include "core/math16.h"       // isqrt: true-distance SDFs; halfLifeKeep: the decay weight
+#include "light/Palette.h"       // blend(RGB,RGB,amt): for blendPixel
+#include "light/fonts.h"         // fonts::Font: bitmap glyph tables for draw::text
 
-#include <algorithm>             // std::reverse — in-place rotation for a wrapping scroll
-#include <cstring>               // std::memmove/memcpy/memset — the scroll's run moves
+#include <algorithm>             // std::reverse: in-place rotation for a wrapping scroll
+#include <cstring>               // std::memmove/memcpy/memset: the scroll's run moves
 
-// Geometry draw primitives for effects/modifiers: set a pixel, draw a line — bounds-clipped,
+// Geometry draw primitives for effects/modifiers: set a pixel, draw a line: bounds-clipped,
 // integer-only, working 1D→3D against the flat light Buffer. The "core absorbs the hard part"
 // rule applied to drawing: the Bresenham + clipping lives here once, so an effect calls
 // drawLine() instead of re-rolling it. Light-domain (it touches the light Buffer), not core.
 //
 // Prior art: the line algorithm is Bresenham (1962) generalised to 3D (the textbook DDA-error
-// form). FastLED keeps draw in its 2D/matrix add-ons, not core — same split here.
+// form). FastLED keeps draw in its 2D/matrix add-ons, not core: same split here.
 //
 // The Buffer is a flat array of `count` lights × `cpl` channels; the grid SHAPE (w,h,d) lives on
 // the Layer/Layout, so the caller passes `dims` (the Coord3D extent). Index order matches the
 // engine: off = (z·h·w + y·w + x)·cpl. A pixel outside [0,w)×[0,h)×[0,d) is silently clipped, so
-// a line that runs off the grid just stops drawing — no out-of-bounds write (the robustness rule).
+// a line that runs off the grid just stops drawing: no out-of-bounds write (the robustness rule).
 
 namespace mm::draw {
 
@@ -30,7 +30,7 @@ namespace mm::draw {
 /// The surface a draw call writes to: a buffer plus the grid dimensions that address it.
 ///
 /// Today every draw call takes `(Buffer&, Coord3D dims)` as two independent arguments that nothing
-/// checks for agreement — pass dims from one layer with a buffer from another, or (far likelier) a
+/// checks for agreement: pass dims from one layer with a buffer from another, or (far likelier) a
 /// dims computed with the depth guard and one without, and the result is silent misaddressing.
 /// Binding them into one value makes the mismatch unrepresentable rather than merely detected.
 ///
@@ -39,7 +39,7 @@ namespace mm::draw {
 ///
 /// **Passed BY VALUE, deliberately.** It is a small POD (pointer + 3 int16 + 2 small ints) and
 /// measured 62 instructions in a per-pixel fill loop against 67 for today's separate arguments and
-/// 69 for a `const Canvas&` — a reference member forces the extents to be re-read from memory
+/// 69 for a `const Canvas&`: a reference member forces the extents to be re-read from memory
 /// because the compiler must assume they alias the buffer being written, while a by-value POD stays
 /// in registers. So the abstraction is not a cost here; it is a small win.
 struct Canvas {
@@ -55,7 +55,7 @@ struct Canvas {
                       buf.channelsPerLight()};
     }
 
-    /// Byte offset of a coordinate, or `bytes` when it is outside the grid — the one address
+    /// Byte offset of a coordinate, or `bytes` when it is outside the grid: the one address
     /// computation every draw call shares, so the addressing rule (x fastest, then y, then z) has a
     /// single home.
     size_t offsetOf(Coord3D p) const {
@@ -65,7 +65,7 @@ struct Canvas {
     }
 };
 
-/// One pixel, clipped to the grid — the Canvas form. Same semantics as the (Buffer&, dims) overload
+/// One pixel, clipped to the grid: the Canvas form. Same semantics as the (Buffer&, dims) overload
 /// below, which remains until the migration completes and is then removed (a permanent two-API
 /// window would be worse than either shape alone).
 inline void pixel(const Canvas& cv, Coord3D p, RGB c) {
@@ -90,7 +90,7 @@ namespace detail {
 /// Buffer and Canvas forms of `line` share one error-carry loop instead of drifting apart.
 ///
 /// `shorten` (0..255) pulls b back toward a by that fraction, with the *2 rounding the original
-/// used — the perspective/length lever effects animate.
+/// used: the perspective/length lever effects animate.
 template <typename PlotFn>
 inline void walkLine(Coord3D a, Coord3D b, uint8_t shorten, PlotFn plot) {
     if (shorten == 0) return;
@@ -137,7 +137,7 @@ inline void walkLine(Coord3D a, Coord3D b, uint8_t shorten, PlotFn plot) {
 }  // namespace detail
 
 // One pixel, clipped to the grid. Writes R/G/B where channels fit (cpl may be 1..N); extra
-// channels (e.g. a W in RGBW) are left as-is — the driver derives white, same as effects do.
+// channels (e.g. a W in RGBW) are left as-is: the driver derives white, same as effects do.
 inline void pixel(Buffer& buf, Coord3D dims, Coord3D p, RGB c) {
     if (p.x < 0 || p.y < 0 || p.z < 0 || p.x >= dims.x || p.y >= dims.y || p.z >= dims.z) return;
     const uint8_t cpl = buf.channelsPerLight();
@@ -152,11 +152,11 @@ inline void pixel(Buffer& buf, Coord3D dims, Coord3D p, RGB c) {
 
 // A straight line a→b, clipped to the grid. 3D Bresenham: step along the dominant axis and carry
 // an integer error term per other axis (the textbook generalisation of the 2D line). Works for
-// 1D (a row), 2D (a plane), and 3D (a volume) without special-casing — a degenerate axis just
+// 1D (a row), 2D (a plane), and 3D (a volume) without special-casing: a degenerate axis just
 // never steps. Endpoints are inclusive.
 //
 // `shorten` (0..255, default 255 = full line) draws only the first shorten/255 of the way from a
-// toward b — the far endpoint is pulled back toward `a`. 255 = whole line, 128 ≈ half, 1 = the
+// toward b: the far endpoint is pulled back toward `a`. 255 = whole line, 128 ≈ half, 1 = the
 // start pixel, 0 = nothing. This is the perspective/length lever (MoonLight's `depth` param):
 // effects animate the drawn tip by varying `shorten`, so a fixed pair of endpoints traces a
 // sweeping partial segment over successive frames. (WLEDMM's *2-rounding shorten, generalised 3D.)
@@ -192,8 +192,8 @@ inline void blendPixel(Buffer& buf, Coord3D dims, Coord3D p, RGB c, uint8_t amt)
     d[off + 0] = out.r; d[off + 1] = out.g; d[off + 2] = out.b;
 }
 
-// Add a color into a pixel, saturating (a bright pixel can't wrap to dark) — WLED's addRGB / additive
-// setPixelColor. Used to re-stamp a light on top of a blur so its centre stays bright. Clipped like pixel().
+// Add a color into a pixel, saturating (a bright pixel can't wrap to dark): WLED's addRGB / additive
+// setPixelColor. Used to re-stamp a light on top of a blur so its center stays bright. Clipped like pixel().
 inline void addPixel(Buffer& buf, Coord3D dims, Coord3D p, RGB c) {
     const size_t off = offsetOf(buf, dims, p);
     if (off + 2 >= buf.bytes()) return;
@@ -203,7 +203,7 @@ inline void addPixel(Buffer& buf, Coord3D dims, Coord3D p, RGB c) {
     d[off + 2] = qadd8(d[off + 2], c.b);
 }
 
-// Fade the whole buffer toward black by amt/255 — one pass over the bytes. This is the primitive the
+// Fade the whole buffer toward black by amt/255: one pass over the bytes. This is the primitive the
 // Layer's once-per-frame collected fade (Layer::fadeToBlackBy) applies; effects request a fade through
 // the Layer (which MINs the amount across effects and calls this once) rather than calling it directly.
 inline void fade(Buffer& buf, uint8_t amt) {
@@ -213,17 +213,17 @@ inline void fade(Buffer& buf, uint8_t amt) {
     for (size_t i = 0; i < n; i++) d[i] = scale8(d[i], keep);
 }
 
-// Box blur, working 1D→3D against the flat Buffer — one unified primitive, not a blur1d/blur2d/blur3d
+// Box blur, working 1D→3D against the flat Buffer: one unified primitive, not a blur1d/blur2d/blur3d
 // trio (the *common patterns first* / "primitives are 3D-aware" rule, same as draw::line). It runs a
 // separable seep pass along each axis whose extent is >1: a 1×N 1D layer blurs along y (its only
 // axis with extent>1); 2D along x then y; 3D along x, y, z. `amt` (0 = none, 255 = max) is split
 // keep=255-amt / seep=amt>>1 per pixel.
 //
-// Algorithm: the canonical FastLED blur1d single-forward-pass with carryover — each pixel keeps
+// Algorithm: the canonical FastLED blur1d single-forward-pass with carryover: each pixel keeps
 // `keep` of itself, seeps `seep` forward to the next pixel and `seep` back to the previous one, so
-// one O(N) pass per axis approximates a symmetric box blur. Behaviour is identical to MoonLight's
+// one O(N) pass per axis approximates a symmetric box blur. Behavior is identical to MoonLight's
 // blur1d/blurRows/blurColumns (verified against VirtualLayer.cpp); the speed comes from doing it on
-// the raw bytes — a stride walk with three uint8 carried in registers, no per-pixel getRGB/setRGB/
+// the raw bytes: a stride walk with three uint8 carried in registers, no per-pixel getRGB/setRGB/
 // Coord3D construction (the overhead that makes a generic-layer blur an FPS killer). Prior art:
 // FastLED's blur1d (Mark Kriegsman), the recognisable carryover-seep; our byte-level implementation.
 //
@@ -256,7 +256,7 @@ inline void blurAxis(uint8_t* d, size_t cpl, size_t len, size_t stride,
     }
 }
 
-// Blur the whole buffer by `amt`, separably along every axis with extent >1 (x, then y, then z —
+// Blur the whole buffer by `amt`, separably along every axis with extent >1 (x, then y, then z , 
 // MoonLight's blur2d order, extended to z). One call covers 1D/2D/3D. Off the per-pixel-effect path.
 inline void blur(Buffer& buf, Coord3D dims, uint8_t amt) {
     if (amt == 0) return;
@@ -269,7 +269,7 @@ inline void blur(Buffer& buf, Coord3D dims, uint8_t amt) {
     if (static_cast<size_t>(w * h * z) * cpl > buf.bytes()) return;   // dims/buffer mismatch guard
     // x-pass: each (y,z) line is `w` pixels, stride cpl; lines start every w·cpl bytes, h·z of them.
     blurAxis(d, cpl, w, cpl, h * z, w * cpl, amt);
-    // y-pass: each (x,z) line is `h` pixels, stride w·cpl. Lines: for each z, the w columns — start
+    // y-pass: each (x,z) line is `h` pixels, stride w·cpl. Lines: for each z, the w columns: start
     // offsets are z·(h·w·cpl) + x·cpl. Walk them as one run of (w·z) lines stepping by cpl, but the
     // z blocks aren't contiguous in column-start, so loop z outside.
     for (size_t zz = 0; zz < z; zz++)
@@ -303,7 +303,7 @@ inline void glyph(Buffer& buf, Coord3D dims, const fonts::Font& font, char ch, l
         const uint8_t bits = rows[ry];
         // Columns are MSB-first: the LEFTMOST glyph column (rx=0) is bit 7, the next bit 6, … so
         // read column rx from bit (7 - rx). (Reading (rx + 8-width) instead mirrors each glyph
-        // left-to-right — a 'b' renders as a 'd'.)
+        // left-to-right: a 'b' renders as a 'd'.)
         for (uint8_t rx = 0; rx < font.width; rx++)
             if ((bits >> (7 - rx)) & 0x01)
                 pixel(buf, dims, {static_cast<lengthType>(x + rx), static_cast<lengthType>(y + ry), 0}, c);
@@ -333,7 +333,7 @@ inline lengthType text(Buffer& buf, Coord3D dims, const fonts::Font& font, const
 // ---- Canvas overloads --------------------------------------------------------------------------
 // The Canvas forms of the primitives above. Most carry their OWN implementation rather than
 // forwarding to the (Buffer&, dims) form, because `Canvas` holds a raw pointer where the older
-// signatures take a Buffer&. That means a pair CAN drift, and one already did — the Canvas `blur`
+// signatures take a Buffer&. That means a pair CAN drift, and one already did: the Canvas `blur`
 // looped its y-pass differently from the Buffer form until a reviewer caught it. `line` is the
 // exception: both forms share `detail::walkLine`, so its error-carry loop has exactly one home.
 //
@@ -345,6 +345,57 @@ inline lengthType text(Buffer& buf, Coord3D dims, const fonts::Font& font, const
 inline void fade(const Canvas& cv, uint8_t amt) {
     const uint8_t keep = static_cast<uint8_t>(255 - amt);
     for (size_t i = 0; i < cv.bytes; i++) cv.data[i] = scale8(cv.data[i], keep);
+}
+
+/// Decay every sample toward black by a HALF-LIFE: after `halfLifeMs`, half of it is gone.
+///
+/// The framerate-independent form of `fade`, and the one to reach for on state that persists across
+/// frames (a trail plane, an advected field). `fade` takes "how much to lose this frame", which
+/// means the same setting is a long tail at 60 fps and an instant clear at 1200; this takes a
+/// duration, so the picture is identical on any device and `dt` does the work.
+///
+/// The weight is computed ONCE per call (`mm::halfLifeKeep`) and the loop is a multiply and a shift
+/// per byte, so this costs what `fade` costs.
+///
+/// **The 8-bit limit, measured (2026-09-04).** An 8-BIT buffer cannot hold this decay at a high
+/// framerate, and no rounding rule fixes it. Decaying 200 over a 500 ms half-life in 500 ms of
+/// frames, where the exact answer is 100:
+///
+/// | frame | truncating | rounding | a 16-bit accumulator |
+/// |---|---|---|---|
+/// | 50 ms | 96 | 100 | 100 |
+/// | 5 ms | 73 | 100 | 101 |
+/// | 1 ms | **0** | **200** | 102 |
+///
+/// Truncating loses a fraction every frame until a fast device erases the trail outright; rounding
+/// puts it back every frame until the trail never decays and the effect turns solid, which is the
+/// exact symptom `fade` already has. Both failures are the QUANTIZATION, not the weight: the value
+/// is re-rounded to a byte hundreds of times a second. So an effect whose trail must survive at any
+/// framerate keeps its plane WIDER than the layer (16 bits per channel in its own ScratchBuffer)
+/// and narrows once on the way out, which is where the precision belongs. `decay` on a byte plane
+/// is honest for a slow cadence (a 50 ms tick, or a half-life short enough that a frame's loss is
+/// several counts) and is what the Layer's collected `fadeToBlackBy` already does.
+inline void decay(const Canvas& cv, uint32_t halfLifeMs, uint32_t dtMs) {
+    const uint32_t keep = mm::halfLifeKeep(dtMs, halfLifeMs);
+    if (keep >= 65536) return;                 // nothing elapsed, or no half-life asked for
+    if (keep == 0) { std::memset(cv.data, 0, cv.bytes); return; }
+    for (size_t i = 0; i < cv.bytes; i++)
+        cv.data[i] = static_cast<uint8_t>((static_cast<uint32_t>(cv.data[i]) * keep) >> 16);
+}
+
+/// The same decay over a 16-bit plane: the form a trail uses, and the one that holds at any
+/// framerate (the table above). `n` is the number of 16-bit samples, not bytes.
+///
+/// Separate from the Canvas form rather than a template over it, because the two are different
+/// enough to be worth reading apart: this one owns no geometry, since a scratch plane is a flat
+/// array its effect already knows the shape of.
+inline void decay16(uint16_t* data, size_t n, uint32_t halfLifeMs, uint32_t dtMs) {
+    if (!data) return;
+    const uint32_t keep = mm::halfLifeKeep(dtMs, halfLifeMs);
+    if (keep >= 65536) return;
+    if (keep == 0) { std::memset(data, 0, n * sizeof(uint16_t)); return; }
+    for (size_t i = 0; i < n; i++)
+        data[i] = static_cast<uint16_t>((static_cast<uint32_t>(data[i]) * keep) >> 16);
 }
 
 /// Fill every light with one color, leaving any channel beyond RGB untouched.
@@ -363,13 +414,13 @@ inline void blendPixel(const Canvas& cv, Coord3D p, RGB c, uint8_t amt) {
     pixel(cv, p, blend(cur, c, amt));
 }
 
-/// Saturating additive pixel — light adds, so this never wraps to black.
+/// Saturating additive pixel: light adds, so this never wraps to black.
 inline void addPixel(const Canvas& cv, Coord3D p, RGB c) {
     const RGB cur = get(cv, p);
     pixel(cv, p, RGB{qadd8(cur.r, c.r), qadd8(cur.g, c.g), qadd8(cur.b, c.b)});
 }
 
-/// Separable box blur over every axis with extent > 1 — one call covers 1D/2D/3D. The axis passes
+/// Separable box blur over every axis with extent > 1: one call covers 1D/2D/3D. The axis passes
 /// are the Buffer form's: the y-pass loops z on the OUTSIDE because a z-slice's column starts are
 /// not contiguous, which a single call cannot express.
 inline void blur(const Canvas& cv, uint8_t amt) {
@@ -386,7 +437,7 @@ inline void blur(const Canvas& cv, uint8_t amt) {
     if (z > 1) blurAxis(cv.data, cpl, z, w * h * cpl, w * h, cpl, amt);   // z
 }
 
-/// A straight line a→b on a Canvas — the same 3D Bresenham the Buffer form runs, reached through
+/// A straight line a→b on a Canvas: the same 3D Bresenham the Buffer form runs, reached through
 /// the shared walker below so the error-carry loop has exactly one home.
 inline void line(const Canvas& cv, Coord3D a, Coord3D b, RGB c, uint8_t shorten = 255) {
     detail::walkLine(a, b, shorten, [&](Coord3D p) { pixel(cv, p, c); });
@@ -396,13 +447,13 @@ inline void line(const Canvas& cv, Coord3D a, Coord3D b, RGB c, uint8_t shorten 
 //
 // A field of N sources orbiting on sine paths, summed per pixel with an inverse-square falloff.
 // This is the standard implicit-surface primitive: anything that reads as fluid, merging, molten or
-// organic is this field under a different coloring — blobs, plasma cores, glowing orbs, an audio
+// organic is this field under a different coloring: blobs, plasma cores, glowing orbs, an audio
 // band driving a source's radius. Two effects use it today (they computed byte-identical fields
 // from two private copies of the loop) and differ ONLY in the coloring they apply, which is the
 // evidence for the seam: the field is shared, the coloring is the effect's own.
 //
-// The oscillator tables stay with the CALLER, so a caller is free to drive sources from anything —
-// a control, audio, a particle position — rather than from the sine paths the current callers use.
+// The oscillator tables stay with the CALLER, so a caller is free to drive sources from anything , 
+// a control, audio, a particle position: rather than from the sine paths the current callers use.
 // A kernel that hard-coded one set of constants would have made every future effect look the same.
 //
 // Prior art: Jim Blinn's 1982 blobby model; the integer inverse-square form follows WLED's metaball
@@ -415,8 +466,8 @@ struct BlobPath {
     uint8_t phaseY;
 };
 
-/// Evaluate blob centres for this frame into `outX`/`outY` (caller-sized to `count`).
-inline void blobCentres(const BlobPath* paths, uint8_t count, uint8_t t, lengthType w, lengthType h,
+/// Evaluate blob centers for this frame into `outX`/`outY` (caller-sized to `count`).
+inline void blobCenters(const BlobPath* paths, uint8_t count, uint8_t t, lengthType w, lengthType h,
                         int16_t* outX, int16_t* outY) {
     for (uint8_t b = 0; b < count; b++) {
         const uint8_t tb = static_cast<uint8_t>(t * paths[b].speedMul);
@@ -430,7 +481,7 @@ inline void blobCentres(const BlobPath* paths, uint8_t count, uint8_t t, lengthT
 /// caller passing a 24.8 sub-pixel radius squared would overflow.
 ///
 /// The field at one pixel: the sum over blobs of r²·64 / (d² + 1). The `+1` keeps a pixel sitting
-/// exactly on a centre from dividing by zero, and the ·64 holds precision in the integer divide.
+/// exactly on a center from dividing by zero, and the ·64 holds precision in the integer divide.
 /// Returns the raw sum; the caller decides how it maps to color, and how it clamps.
 inline uint32_t blobField(lengthType x, lengthType y, const int16_t* bx, const int16_t* by,
                           uint8_t count, int32_t r2) {
@@ -448,12 +499,12 @@ inline uint32_t blobField(lengthType x, lengthType y, const int16_t* bx, const i
 //
 // A shift register over the whole grid: every light moves `delta` steps along one axis, and the
 // vacated edge is left dark (the caller paints the new content into it). FreqMatrix hand-rolled this
-// as a per-pixel copy loop reading each neighbour through get()/pixel(); the same move is one
+// as a per-pixel copy loop reading each neighbor through get()/pixel(); the same move is one
 // `memmove` per contiguous run, because the addressing rule puts x adjacent in memory and a whole
 // row adjacent along y.
 //
-// `wrap` chooses between the two useful behaviours: a shift register (false — content falls off the
-// end and the far edge goes dark) and a loop (true — content that leaves one edge re-enters the
+// `wrap` chooses between the two useful behaviors: a shift register (false: content falls off the
+// end and the far edge goes dark) and a loop (true: content that leaves one edge re-enters the
 // other), which is the marquee/tunnel idiom. Prior art: WLED's `move()` and the classic shift
 // register; the wrapping form is the standard scrolling-texture primitive.
 
@@ -468,9 +519,9 @@ inline void scroll(const Canvas& cv, uint8_t axis, int delta, bool wrap = false)
     // this BEFORE reducing modulo the extent, which would turn it into a no-op.)
     if (!wrap && (delta >= extent || delta <= -extent)) { fill(cv, RGB{0, 0, 0}); return; }
 
-    // Wrapping reduces into the axis and normalises to a positive rotation, since rotating left by n
+    // Wrapping reduces into the axis and normalizes to a positive rotation, since rotating left by n
     // equals rotating right by extent-n. A shift keeps its sign: the direction decides which end
-    // goes dark, so it cannot be normalised away.
+    // goes dark, so it cannot be normalized away.
     int shift = delta % extent;
     if (shift == 0) return;                        // a full turn when wrapping; nothing to do
     if (wrap && shift < 0) shift += extent;
@@ -520,7 +571,7 @@ inline void scroll(const Canvas& cv, uint8_t axis, int delta, bool wrap = false)
             // shift does not overwrite a source it has yet to read.
             if (wrap) {
                 // Rotate by three reversals, the same trick the contiguous path above uses. No
-                // scratch buffer, so a light of ANY channel count rotates whole — a fixed-size
+                // scratch buffer, so a light of ANY channel count rotates whole: a fixed-size
                 // temporary silently truncated the extra channels of a wide fixture, and there is
                 // no ceiling worth guessing at here. It is also O(extent) instead of
                 // O(shift x extent): a 64-row column scrolled by 30 was doing 1920 cell copies.
@@ -559,7 +610,7 @@ inline void scroll(const Canvas& cv, uint8_t axis, int delta, bool wrap = false)
 // --- Rectangles and bars -----------------------------------------------------------------------
 //
 // `bar` is the audio-meter staple: a run of `len` cells growing from an origin along one axis. Four
-// effects hand-rolled it, and their loops disagreed on everything that matters — which end is the
+// effects hand-rolled it, and their loops disagreed on everything that matters: which end is the
 // floor, whether the color varies along the run, and what happens when the run overshoots the grid.
 //
 // The color is a CALLBACK rather than a single RGB because that is what the call sites actually do:
@@ -571,11 +622,11 @@ inline void scroll(const Canvas& cv, uint8_t axis, int delta, bool wrap = false)
 //
 // **What a MoonLive script gets, stated because the two forms are NOT equivalent.** A script calls
 // builtins through a table that carries plain scalars (`core/moonlive/MoonLiveBuiltins.h`), and the
-// grammar is a function-call statement with expression arguments — no loops, no closures. So a
+// grammar is a function-call statement with expression arguments: no loops, no closures. So a
 // script can reach the flat form, `bar(x, y, len, dir, r, g, b)`, and gets a SOLID bar. The
-// per-cell gradient GEQ draws is not expressible that way, and a colour-callback builtin cannot be
+// per-cell gradient GEQ draws is not expressible that way, and a color-callback builtin cannot be
 // registered in that table at all. Closing that gap needs a scalar-shaped primitive a script can
-// call — a gradient bar taking two endpoint colours, or a palette-ramp variant — which is a
+// call: a gradient bar taking two endpoint colors, or a palette-ramp variant: which is a
 // deliberate addition, not something the callback form provides for free. Tracked in the
 // power-function plan rather than assumed away here.
 
@@ -637,7 +688,7 @@ inline void rect(const Canvas& cv, lengthType x, lengthType y, lengthType w, len
 // --- Circles ---------------------------------------------------------------------------------
 //
 // Two implementations, deliberately, because they answer different questions. `circle`/`fillCircle`
-// take INTEGER pixel coordinates and use Bresenham's midpoint algorithm — no multiply per pixel, no
+// take INTEGER pixel coordinates and use Bresenham's midpoint algorithm: no multiply per pixel, no
 // distance, exactly the cells on the rim. That is the right tool when a shape sits on the grid.
 //
 // The SDF forms above (`sdCircle` + `coverage`) are the right tool when the circle MOVES: they give
@@ -670,7 +721,7 @@ inline void circle(const Canvas& cv, lengthType cx, lengthType cy, lengthType r,
 }
 
 /// A filled disc: the same midpoint walk, drawing a horizontal span per scanline instead of points,
-/// colored per row by `colorAt(dyFromCenter)` — the signed row offset, so a caller can ramp a
+/// colored per row by `colorAt(dyFromCenter)`: the signed row offset, so a caller can ramp a
 /// gradient across the disc.
 template <typename ColorFn>
 inline void fillCircle(const Canvas& cv, lengthType cx, lengthType cy, lengthType r, ColorFn colorAt) {
@@ -702,7 +753,7 @@ inline void fillCircle(const Canvas& cv, lengthType cx, lengthType cy, lengthTyp
 //
 // Wu's 1991 algorithm: where Bresenham picks ONE cell per step, Wu lights the two cells straddling
 // the true line and splits the intensity between them by distance. The result is a line without
-// staircase edges, at roughly twice the writes. `line` (Bresenham, above) stays the default — this
+// staircase edges, at roughly twice the writes. `line` (Bresenham, above) stays the default: this
 // is for the cases where the stair-stepping is the thing you notice.
 //
 // The blend is additive so a line crossing existing content brightens rather than replaces it,
@@ -787,7 +838,7 @@ inline void sprite(const Canvas& cv, const sprites::Sprite& s, uint8_t frame,
     }
 }
 
-/// Blit one glyph on a Canvas — the Canvas form of `glyph`. Same MSB-first column order and the
+/// Blit one glyph on a Canvas: the Canvas form of `glyph`. Same MSB-first column order and the
 /// same clipping; only the pixel writer differs.
 inline void glyph(const Canvas& cv, const fonts::Font& font, char ch, lengthType x, lengthType y, RGB c) {
     if (ch < 32 || ch > 126) return;
@@ -801,7 +852,7 @@ inline void glyph(const Canvas& cv, const fonts::Font& font, char ch, lengthType
     }
 }
 
-/// Draw a NUL-terminated string on a Canvas — the Canvas form of `text`. Returns the first line's
+/// Draw a NUL-terminated string on a Canvas: the Canvas form of `text`. Returns the first line's
 /// pixel width, as the Buffer form does.
 inline lengthType text(const Canvas& cv, const fonts::Font& font, const char* str,
                        lengthType x, lengthType y, RGB c) {
@@ -821,14 +872,14 @@ inline lengthType text(const Canvas& cv, const fonts::Font& font, const char* st
 }
 
 /// Byte offset of a coordinate on a Canvas, or `bytes` when it is outside the grid. The Canvas form
-/// of `offsetOf` — for effects that need the raw index (e.g. to touch a W channel `pixel` leaves
+/// of `offsetOf`: for effects that need the raw index (e.g. to touch a W channel `pixel` leaves
 /// alone). Delegates to Canvas::offsetOf so the addressing rule keeps one home.
 inline size_t offsetOf(const Canvas& cv, Coord3D p) { return cv.offsetOf(p); }
 
 // ---- Sub-pixel positioning ----------------------------------------------------------------------
 
 /// A position in **24.8 fixed point**: one pixel = 256 sub-units, so `x >> 8` is the pixel and the
-/// low byte is the fraction within it. int32 covers ±8 million pixels — a 16K-light strip has room
+/// low byte is the fraction within it. int32 covers ±8 million pixels: a 16K-light strip has room
 /// to spare, where an int16 sub-pixel type (WLED-PS uses 10.6) runs out at ±512.
 using pos_t = int32_t;
 
@@ -840,29 +891,29 @@ inline constexpr int32_t kSubOne = 1 << kSubShift;
 inline constexpr pos_t toSub(lengthType px) { return static_cast<pos_t>(px) << kSubShift; }
 
 /// Decode a sub-pixel coordinate to the pixel that contains it. Uses an arithmetic shift, which
-/// floors toward negative infinity — the behaviour a grid wants, so -0.5 lands in pixel -1 rather
+/// floors toward negative infinity: the behavior a grid wants, so -0.5 lands in pixel -1 rather
 /// than being pulled to 0 and doubling up on the boundary.
 inline constexpr lengthType toPixel(pos_t sub) { return static_cast<lengthType>(sub >> kSubShift); }
 
-/// Draw a point at a FRACTIONAL position, spreading its light across the neighbouring pixels by
+/// Draw a point at a FRACTIONAL position, spreading its light across the neighboring pixels by
 /// how much of each it covers (Xiaolin Wu, SIGGRAPH 1991; the same weighting WLED's `wu_pixel` and
 /// its particle renderer use).
 ///
 /// Why it matters: a whole-pixel write makes a moving point jump from cell to cell, which on a
-/// coarse matrix reads as stepping. Splitting the light between neighbours by coverage lets the eye
+/// coarse matrix reads as stepping. Splitting the light between neighbors by coverage lets the eye
 /// see it *between* pixels, so a 16x16 panel gains apparent resolution. This is the difference the
 /// canon survey ranks as the single highest-leverage primitive for motion.
 ///
 /// Additive with saturation, because light adds: two points landing on one pixel brighten it rather
-/// than one overwriting the other. Weights are computed once per axis and are exact — the four
+/// than one overwriting the other. Weights are computed once per axis and are exact: the four
 /// corner weights sum to 256, so a point contributes exactly its own brightness, no more.
 ///
-/// 1D/2D/3D: a degenerate axis (extent 1) contributes no second neighbour, so the same call is a
+/// 1D/2D/3D: a degenerate axis (extent 1) contributes no second neighbor, so the same call is a
 /// 2-pixel blend on a strand, 4 on a matrix, 8 in a volume.
 inline void splat(const Canvas& cv, pos_t x, pos_t y, pos_t z, RGB c) {
     const lengthType px = toPixel(x), py = toPixel(y), pz = toPixel(z);
     // Fraction within the pixel, 0..255. Masking (rather than subtracting) is correct for negatives
-    // too: -1.25 px has fraction 0.75 relative to pixel -2, which is what the neighbour weighting
+    // too: -1.25 px has fraction 0.75 relative to pixel -2, which is what the neighbor weighting
     // needs.
     const uint16_t fx = static_cast<uint16_t>(x & (kSubOne - 1));
     const uint16_t fy = static_cast<uint16_t>(y & (kSubOne - 1));
@@ -880,7 +931,7 @@ inline void splat(const Canvas& cv, pos_t x, pos_t y, pos_t z, RGB c) {
         const uint32_t wy = dy ? fy : (kSubOne - fy);
         const uint32_t wz = dz ? fz : (kSubOne - fz);
         // Weight is the covered fraction of this corner: the product of the per-axis coverages,
-        // normalised back to 0..255 (>>16 for the two extra 8-bit factors).
+        // normalized back to 0..255 (>>16 for the two extra 8-bit factors).
         const uint32_t w = (wx * wy * wz) >> (2 * kSubShift);
         if (w == 0) continue;
 
@@ -900,7 +951,7 @@ inline void splat(const Canvas& cv, pos_t x, pos_t y, RGB c) { splat(cv, x, y, 0
 //
 // Everything above WRITES. These read, which is the other half of the vocabulary and the one the
 // canon survey found missing: once a grid can be sampled at an arbitrary sub-pixel coordinate, a
-// whole family follows from three lines each — feedback, tunnels, zoom, rotation, plasma warp,
+// whole family follows from three lines each: feedback, tunnels, zoom, rotation, plasma warp,
 // motion trails. Without it, each of those needs its own bespoke loop.
 //
 // `sampleWrap` takes SUB-PIXEL coordinates (the same 24.8 `pos_t` as splat) and returns a bilinear
@@ -932,7 +983,121 @@ inline RGB sampleWrap(const Canvas& cv, pos_t x, pos_t y, lengthType z = 0) {
                mix(mix(c00.b, c10.b, fx), mix(c01.b, c11.b, fx), fy)};
 }
 
-/// Combine two colors by taking the brighter channel — the "screen"/max operator feedback chains
+/// How a sample outside the grid is read: wrapped around, or held at the edge.
+enum class Edge : uint8_t {
+    Wrap,    ///< the far side comes back around: seamless for a scroll, a tunnel, a torus flow
+    Clamp,   ///< the edge pixel repeats: what a flow leaving the grid should smear against
+};
+
+/// Bilinear sample at a sub-pixel coordinate, holding the edge pixel outside the grid.
+///
+/// The Clamp half of `sampleWrap`. A flow that carries pixels off one side must not have them
+/// reappear on the other, which is what Wrap does and what makes it wrong for a wind: the trail
+/// would loop the panel instead of leaving it.
+inline RGB sampleClamp(const Canvas& cv, pos_t x, pos_t y, lengthType z = 0) {
+    if (cv.dims.x <= 0 || cv.dims.y <= 0) return RGB{0, 0, 0};
+    const int32_t x0 = toPixel(x), y0 = toPixel(y);
+    const uint8_t fx = static_cast<uint8_t>(x & (kSubOne - 1));
+    const uint8_t fy = static_cast<uint8_t>(y & (kSubOne - 1));
+    const auto clamp = [](int32_t v, lengthType n) {
+        return static_cast<lengthType>(v < 0 ? 0 : (v >= n ? n - 1 : v));
+    };
+    const lengthType xa = clamp(x0, cv.dims.x), xb = clamp(x0 + 1, cv.dims.x);
+    const lengthType ya = clamp(y0, cv.dims.y), yb = clamp(y0 + 1, cv.dims.y);
+    const RGB c00 = get(cv, {xa, ya, z}), c10 = get(cv, {xb, ya, z});
+    const RGB c01 = get(cv, {xa, yb, z}), c11 = get(cv, {xb, yb, z});
+    const auto mix = [](uint8_t a, uint8_t b, uint8_t tt) {
+        return static_cast<uint8_t>(a + (((static_cast<int32_t>(b) - a) * tt) >> 8));
+    };
+    return RGB{mix(mix(c00.r, c10.r, fx), mix(c01.r, c11.r, fx), fy),
+               mix(mix(c00.g, c10.g, fx), mix(c01.g, c11.g, fx), fy),
+               mix(mix(c00.b, c10.b, fx), mix(c01.b, c11.b, fx), fy)};
+}
+
+/// Sample under either edge rule, so a caller carries the choice as data rather than a branch.
+inline RGB sampleEdge(const Canvas& cv, pos_t x, pos_t y, Edge edge, lengthType z = 0) {
+    return edge == Edge::Wrap ? sampleWrap(cv, x, y, z) : sampleClamp(cv, x, y, z);
+}
+
+/// Move every pixel of `src` along a velocity field and write the result into `dst`.
+///
+/// Advection: the transport half of a flow, and the primitive a trail is made of. `rule` answers,
+/// for a pixel, which way and how fast the medium is moving there; this walks BACKWARD along that
+/// velocity and samples where the pixel must have come from, which is the standard stable form
+/// (Stam, "Stable Fluids", SIGGRAPH 1999). Going backward rather than forward is what keeps it from
+/// tearing: every destination pixel is written exactly once, so no gaps open where the field
+/// diverges and nothing is written twice where it converges.
+///
+/// `dst` and `src` MUST be different planes. Reading and writing one buffer would sample pixels the
+/// same pass had already moved, which smears along the walk order rather than along the flow: the
+/// caller keeps a scratch plane and swaps, the ping-pong an effect owns.
+///
+/// The rule is called once per pixel and returns sub-pixel units per frame, so a velocity already
+/// carries the frame's dt: the caller scales it, since only the caller knows the cadence.
+template <typename Rule>
+inline void advect(const Canvas& dst, const Canvas& src, Rule&& rule, Edge edge = Edge::Wrap) {
+    if (!dst.data || !src.data) return;
+    if (dst.dims.x != src.dims.x || dst.dims.y != src.dims.y) return;   // two shapes, no meaning
+    for (lengthType z = 0; z < dst.dims.z; z++) {
+        for (lengthType y = 0; y < dst.dims.y; y++) {
+            for (lengthType x = 0; x < dst.dims.x; x++) {
+                pos_t vx = 0, vy = 0;
+                rule(x, y, z, vx, vy);
+                // BACKWARD: where did what is here now come from? Hence the subtraction.
+                const pos_t sx = toSub(x) - vx;
+                const pos_t sy = toSub(y) - vy;
+                pixel(dst, {x, y, z}, sampleEdge(src, sx, sy, edge, z));
+            }
+        }
+    }
+}
+
+/// Advect a 16-BIT plane: the form a trail uses, and the reason it survives.
+///
+/// The Canvas vocabulary is 8-bit throughout (`get`, `pixel` and `sampleWrap` all speak `RGB`), so a
+/// wide plane cannot borrow it: a Canvas over 16-bit data would read the high and low halves of one
+/// channel as two different colors. This is the same walk against `uint16_t` samples, three per
+/// light, with the bilinear blend done at full width so the transport does not quantize what the
+/// decay is about to multiply. `n` is samples, `w`/`h`/`d` the geometry they are laid out in.
+///
+/// Edge::Clamp holds the border sample; Edge::Wrap brings the far side around.
+template <typename Rule>
+inline void advect16(uint16_t* dst, const uint16_t* src, lengthType w, lengthType h, lengthType d,
+                     Rule&& rule, Edge edge = Edge::Wrap) {
+    if (!dst || !src || w <= 0 || h <= 0 || d <= 0) return;
+    const auto fold = [&](int32_t v, lengthType n) -> lengthType {
+        if (edge == Edge::Wrap) { const int32_t m = v % n; return static_cast<lengthType>(m < 0 ? m + n : m); }
+        return static_cast<lengthType>(v < 0 ? 0 : (v >= n ? n - 1 : v));
+    };
+    for (lengthType z = 0; z < d; z++) {
+        for (lengthType y = 0; y < h; y++) {
+            for (lengthType x = 0; x < w; x++) {
+                pos_t vx = 0, vy = 0;
+                rule(x, y, z, vx, vy);
+                const pos_t sx = toSub(x) - vx, sy = toSub(y) - vy;      // BACKWARD, as advect()
+                const int32_t x0 = toPixel(sx), y0 = toPixel(sy);
+                const uint32_t fx = static_cast<uint32_t>(sx & (kSubOne - 1));
+                const uint32_t fy = static_cast<uint32_t>(sy & (kSubOne - 1));
+                const lengthType xa = fold(x0, w), xb = fold(x0 + 1, w);
+                const lengthType ya = fold(y0, h), yb = fold(y0 + 1, h);
+                const size_t slice = static_cast<size_t>(z) * h * w;
+                const size_t i00 = (slice + static_cast<size_t>(ya) * w + xa) * 3;
+                const size_t i10 = (slice + static_cast<size_t>(ya) * w + xb) * 3;
+                const size_t i01 = (slice + static_cast<size_t>(yb) * w + xa) * 3;
+                const size_t i11 = (slice + static_cast<size_t>(yb) * w + xb) * 3;
+                const size_t o = (slice + static_cast<size_t>(y) * w + x) * 3;
+                for (uint8_t c = 0; c < 3; c++) {
+                    // Two lerps at full width: the top edge, the bottom edge, then between them.
+                    const uint32_t a = src[i00 + c] + (((static_cast<int32_t>(src[i10 + c]) - src[i00 + c]) * static_cast<int32_t>(fx)) >> kSubShift);
+                    const uint32_t b = src[i01 + c] + (((static_cast<int32_t>(src[i11 + c]) - src[i01 + c]) * static_cast<int32_t>(fx)) >> kSubShift);
+                    dst[o + c] = static_cast<uint16_t>(a + (((static_cast<int32_t>(b) - static_cast<int32_t>(a)) * static_cast<int32_t>(fy)) >> kSubShift));
+                }
+            }
+        }
+    }
+}
+
+/// Combine two colors by taking the brighter channel: the "screen"/max operator feedback chains
 /// use so a trail brightens rather than averaging away.
 inline RGB combineMax(RGB a, RGB b) {
     return RGB{a.r > b.r ? a.r : b.r, a.g > b.g ? a.g : b.g, a.b > b.b ? a.b : b.b};
@@ -941,13 +1106,13 @@ inline RGB combineMax(RGB a, RGB b) {
 
 // ---- Signed distance fields --------------------------------------------------------------------
 //
-// An SDF answers "how far is this point from the shape's edge?" — negative inside, zero on the edge,
+// An SDF answers "how far is this point from the shape's edge?": negative inside, zero on the edge,
 // positive outside (Iñigo Quilez's 2D/3D distance-function catalog is the reference). One number
 // then gives a filled shape, an anti-aliased edge, an outline (`|d| - width`), a glow (a falloff of
 // d), and a smooth blend between shapes (`smin`), instead of a separate routine for each.
 //
 // It is also where dimension-generic stops being a slogan: `length(p) - r` is two points on a
-// strand, a circle on a matrix and a sphere in a volume — the SAME code, because only the length
+// strand, a circle on a matrix and a sphere in a volume: the SAME code, because only the length
 // changes. A rasteriser needs a different algorithm per dimension.
 //
 // **Distances are in sub-pixel units (pos_t, 24.8)**, so a shape can move and grow smoothly rather
@@ -958,8 +1123,8 @@ inline RGB combineMax(RGB a, RGB b) {
 // shape therefore has a `*Sq` variant that answers "inside/outside and by how much, squared", and
 // effects should reach for it unless they need a real distance (outline width, linear falloff).
 
-/// Squared distance from a point to a circle's centre, minus the squared radius. Negative inside,
-/// zero on the rim, positive outside — the sign and the ordering match the true SDF, so a threshold
+/// Squared distance from a point to a circle's center, minus the squared radius. Negative inside,
+/// zero on the rim, positive outside: the sign and the ordering match the true SDF, so a threshold
 /// test behaves identically without paying for a square root.
 inline int32_t sdCircleSq(pos_t px, pos_t py, pos_t cx, pos_t cy, pos_t r) {
     // Work in whole sub-units squared; int64 because a 24.8 coordinate squared overflows int32 on a
@@ -975,7 +1140,7 @@ inline int32_t sdCircleSq(pos_t px, pos_t py, pos_t cx, pos_t cy, pos_t r) {
     return static_cast<int32_t>(diff);
 }
 
-/// True signed distance to a circle's edge, in sub-pixel units. Costs a square root — use
+/// True signed distance to a circle's edge, in sub-pixel units. Costs a square root: use
 /// `sdCircleSq` unless the actual distance is needed (an outline of a given width, a linear glow).
 inline int32_t sdCircle(pos_t px, pos_t py, pos_t cx, pos_t cy, pos_t r) {
     const int64_t dx = px - cx, dy = py - cy;
@@ -984,7 +1149,7 @@ inline int32_t sdCircle(pos_t px, pos_t py, pos_t cx, pos_t cy, pos_t r) {
     return static_cast<int32_t>(d) - r;
 }
 
-/// Signed distance to an axis-aligned box centred at (cx, cy) with half-extents (bx, by).
+/// Signed distance to an axis-aligned box centered at (cx, cy) with half-extents (bx, by).
 ///
 /// Outside, this is the Chebyshev distance (the larger axis overshoot) rather than the Euclidean
 /// one: it is exact along the faces, differs only near the corners, and costs no square root. For a
@@ -1001,7 +1166,7 @@ inline int32_t sdBox(pos_t px, pos_t py, pos_t cx, pos_t cy, pos_t bx, pos_t by)
     return qx > qy ? qx : qy;
 }
 
-/// Signed distance to a line segment a→b, minus `thickness` — a capsule, which is what a drawn line
+/// Signed distance to a line segment a→b, minus `thickness`: a capsule, which is what a drawn line
 /// with soft edges actually is. Projects the point onto the segment, clamps to its ends, then
 /// measures. One square root; the projection itself is integer.
 inline int32_t sdSegment(pos_t px, pos_t py, pos_t ax, pos_t ay, pos_t bx, pos_t by, pos_t thickness) {
@@ -1023,12 +1188,12 @@ inline int32_t sdSegment(pos_t px, pos_t py, pos_t ax, pos_t ay, pos_t bx, pos_t
     return static_cast<int32_t>(d) - thickness;
 }
 
-/// Smooth minimum of two distances — the operator that makes two shapes flow into each other rather
+/// Smooth minimum of two distances: the operator that makes two shapes flow into each other rather
 /// than simply overlapping (Quilez, "smooth minimum"). `k` is the blend radius in sub-pixel units:
 /// 0 gives a hard union (a plain `min`), larger values a longer merge.
 ///
 /// This is metaballs generalised: the classic inverse-square blob field is one look, whereas `smin`
-/// blends ANY pair of shapes — a circle into a box, a segment into a circle.
+/// blends ANY pair of shapes: a circle into a box, a segment into a circle.
 inline int32_t smin(int32_t a, int32_t b, int32_t k) {
     if (k <= 0) return a < b ? a : b;
     // Polynomial smooth min: h = clamp(0.5 + 0.5*(b-a)/k), mix(b, a, h) - k*h*(1-h).
@@ -1047,7 +1212,7 @@ inline int32_t smin(int32_t a, int32_t b, int32_t k) {
 }
 
 /// Turn a signed distance into coverage: 255 well inside, 0 well outside, a ramp across the edge.
-/// This is the anti-aliasing an SDF gives for free — the pixel is lit in proportion to how much of
+/// This is the anti-aliasing an SDF gives for free: the pixel is lit in proportion to how much of
 /// it the shape covers, so an edge reads as smooth instead of stepped.
 ///
 /// The ramp is one pixel wide by default, which matches how much area a boundary actually crosses.
@@ -1057,6 +1222,100 @@ inline uint8_t coverage(int32_t d, pos_t edge = kSubOne) {
     if (d >= edge) return 0;
     // Map [-edge, +edge] onto [255, 0].
     return static_cast<uint8_t>(((edge - d) * 255) / (2 * edge));
+}
+
+
+// --- Filled shapes with soft edges -------------------------------------------------------------
+//
+// `circle` and `fillCircle` above are Bresenham: whole pixels, hard edges, the right answer for a
+// ring outline. These are the SDF forms, which take sub-pixel centers and radii and shade the
+// boundary by coverage, so a small disc can sit between pixels and a growing one does not jump a
+// whole cell at a time. On a 16x16 panel that difference is the whole difference between a blob
+// that moves and a blob that stutters.
+
+/// A filled disc with an anti-aliased edge, additive so overlapping discs brighten.
+///
+/// Coverage per pixel from the signed distance, over the bounding box only: a disc of radius r
+/// touches (2r+2)^2 pixels however large the grid is, so this costs the shape rather than the frame.
+inline void disc(const Canvas& cv, pos_t cx, pos_t cy, pos_t r, RGB c, lengthType z = 0) {
+    if (r <= 0) return;
+    const lengthType x0 = toPixel(cx - r) - 1, x1 = toPixel(cx + r) + 1;
+    const lengthType y0 = toPixel(cy - r) - 1, y1 = toPixel(cy + r) + 1;
+    for (lengthType y = y0; y <= y1; y++) {
+        for (lengthType x = x0; x <= x1; x++) {
+            // The pixel's CENTER against the edge: sampling the corner biases the shape half a
+            // pixel up and left, which shows as a disc that drifts as it grows.
+            const int32_t d = sdCircle(toSub(x) + kSubOne / 2, toSub(y) + kSubOne / 2, cx, cy, r);
+            const uint8_t cov = coverage(d);
+            if (cov == 0) continue;
+            addPixel(cv, {x, y, z}, RGB{scale8(c.r, cov), scale8(c.g, cov), scale8(c.b, cov)});
+        }
+    }
+}
+
+/// The volumetric form: a filled sphere, shaded the same way.
+///
+/// Separate rather than a defaulted depth on `disc`, because the cost differs by an order: a sphere
+/// touches (2r+2)^3 pixels. A caller on a panel should get the cheap one without thinking about it.
+inline void sphere(const Canvas& cv, pos_t cx, pos_t cy, pos_t cz, pos_t r, RGB c) {
+    if (r <= 0) return;
+    const lengthType x0 = toPixel(cx - r) - 1, x1 = toPixel(cx + r) + 1;
+    const lengthType y0 = toPixel(cy - r) - 1, y1 = toPixel(cy + r) + 1;
+    const lengthType z0 = toPixel(cz - r) - 1, z1 = toPixel(cz + r) + 1;
+    for (lengthType z = z0; z <= z1; z++) {
+        for (lengthType y = y0; y <= y1; y++) {
+            for (lengthType x = x0; x <= x1; x++) {
+                const int64_t dx = toSub(x) + kSubOne / 2 - cx;
+                const int64_t dy = toSub(y) + kSubOne / 2 - cy;
+                const int64_t dz = toSub(z) + kSubOne / 2 - cz;
+                const uint64_t d2 = static_cast<uint64_t>(dx * dx + dy * dy + dz * dz);
+                const uint32_t dist = isqrt(static_cast<uint32_t>(d2 > UINT32_MAX ? UINT32_MAX : d2));
+                const uint8_t cov = coverage(static_cast<int32_t>(dist) - r);
+                if (cov == 0) continue;
+                addPixel(cv, {x, y, z}, RGB{scale8(c.r, cov), scale8(c.g, cov), scale8(c.b, cov)});
+            }
+        }
+    }
+}
+
+// --- Velocity rules ----------------------------------------------------------------------------
+//
+// A velocity rule answers, for one point, which way the medium is moving there. They are plain
+// functions rather than objects because none of them holds state: everything that varies over time
+// arrives as an argument, so an effect can drive one from a control, an oscillator or audio without
+// the rule knowing. `advect` takes any callable of this shape, so these are conveniences, not a
+// closed set: an effect with its own idea writes a lambda.
+//
+// All return sub-pixels PER CALL, so the caller has already folded in the frame's dt. Prior art:
+// the flow vocabulary of 4wheeljive's FlowFields (from a Stefan Petrick concept) and, for curl,
+// Bridson 2007.
+
+/// A steady wind: everything moves the same way at the same speed.
+inline void flowWind(angle16 direction, int32_t speed, pos_t& vx, pos_t& vy) {
+    vx = static_cast<pos_t>((static_cast<int32_t>(cos16(direction)) * speed) >> 15);
+    vy = static_cast<pos_t>((static_cast<int32_t>(sin16(direction)) * speed) >> 15);
+}
+
+/// Out from a center, or into it when `speed` is negative. The fountain and the drain.
+inline void flowRadial(lengthType x, lengthType y, lengthType cx, lengthType cy,
+                       int32_t speed, pos_t& vx, pos_t& vy) {
+    const int32_t dx = static_cast<int32_t>(x) - cx, dy = static_cast<int32_t>(y) - cy;
+    if (dx == 0 && dy == 0) { vx = vy = 0; return; }        // the center has no direction to go
+    const angle16 a = atan16(dy, dx);
+    flowWind(a, speed, vx, vy);
+}
+
+/// Around a center and outward at once: the spiral, which is the two above added.
+inline void flowSpiral(lengthType x, lengthType y, lengthType cx, lengthType cy,
+                       int32_t angular, int32_t radial, pos_t& vx, pos_t& vy) {
+    const int32_t dx = static_cast<int32_t>(x) - cx, dy = static_cast<int32_t>(y) - cy;
+    if (dx == 0 && dy == 0) { vx = vy = 0; return; }
+    const angle16 a = atan16(dy, dx);
+    pos_t rx, ry, tx, ty;
+    flowWind(a, radial, rx, ry);                            // outward
+    flowWind(static_cast<angle16>(a + 16384), angular, tx, ty);   // and a quarter turn from it
+    vx = rx + tx;
+    vy = ry + ty;
 }
 
 }  // namespace mm::draw

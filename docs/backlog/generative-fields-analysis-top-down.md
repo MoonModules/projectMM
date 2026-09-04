@@ -146,15 +146,30 @@ A velocity rule is a function `(x, y, t, params) → (vx, vy)` in `pos_t` per fr
 ### 3.5 `advect` (`draw.h`)
 
 ```cpp
-draw::advect(cv, scratch, rule, dtMs, Edge::Wrap|Clamp);   // full 2D: backward sample, bilinear, per channel
+draw::advect(dst, src, rule, Edge::Wrap|Clamp);            // backward sample, bilinear, per channel
 draw::advectSeparable(cv, scratch, xProf, yProf, Edge);    // two 1D passes through the scratch plane
 ```
+
+**Shipped (2026-09-04), with the 3D cost measured.** The signature took `dst, src` rather than
+`cv, scratch` and dropped `dtMs`: the two planes must differ (reading and writing one buffer samples
+pixels the same pass already moved, smearing along the walk order instead of the flow), and the rule
+returns sub-pixel units per frame, so only the caller knows the cadence to scale by. `sampleWrap`
+already existed and covered the Wrap half; `sampleClamp` and `sampleEdge` are new, and Clamp is what
+a wind wants, since a trail leaving the panel must not reappear on the far side.
+
+**The PO's prerequisite, that 3D awareness must not cost the 2D path, holds: 1%.** Desktop, median
+of 11, every destination byte verified written: a 20x20 panel is 16.98 ns/light, the 20x20x20 cube
+17.09. The z loop runs once at depth 1, so a panel pays a loop counter. In absolute terms the cube
+advects in **0.14 ms**, under 1% of a 20 ms frame, so transport is cheap and the flow rules'
+noise sampling is what will set the cost.
 
 The semi-Lagrangian step (Stam 1999): for each destination pixel, `src = dst − v · dt`, read the previous frame at `src` with bilinear interpolation (four loads, three lerps per channel), write to `scratch`, swap. On the 16-bit Layer the color state is the Layer itself; `scratch` is one effect-owned plane of the same width. Partial transport (`blend` fraction) is a parameter. Budget: ~40 cycles per pixel per channel per pass on the S3 (the field's 80% share is what this is measured against).
 
 ### 3.6 `decay` (`draw.h`)
 
-`draw::decay(cv, halfLifeMs, dtMs)`: multiply every sample by `k = 0.5^(dt / t½)`, `k` computed once per frame from a 16-bit `pow2` table. Framerate-independent by definition; a unit test pins `decay(2·dt) == decay(dt)²` within one LSB. The Layer's collected `fadeToBlackBy` remains the one 8-bit-per-frame decay for effects that want it; `decay` is the half-life form on wide state.
+`draw::decay(cv, halfLifeMs, dtMs)`: multiply every sample by `k = 0.5^(dt / t½)`, `k` computed once per frame from a 16-bit `pow2` table (`mm::halfLifeKeep`). Framerate-independent by definition; a unit test pins `decay(2·dt) == decay(dt)²` within one LSB.
+
+**Shipped, with a measured limit (2026-09-04): an 8-BIT plane cannot hold this decay at a high framerate, and no rounding rule fixes it.** Decaying 200 over a 500 ms half-life in 500 ms of frames, exact answer 100: truncating gives 96 at 50 ms frames, 73 at 5 ms and **0** at 1 ms; rounding gives 100, 100 and **200**, the trail frozen solid. Both are the QUANTIZATION rather than the weight, the value being re-rounded to a byte hundreds of times a second. A 16-bit accumulator holds 100/101/102. So `decay` on a byte canvas is honest at a slow cadence and `decay16` on a wide scratch plane is what a trail uses: the precision belongs in the ACCUMULATOR, not the frame buffer, which is the same conclusion phase 2 reached from the other side. The Layer's collected `fadeToBlackBy` remains the one 8-bit-per-frame decay for effects that want it; `decay` is the half-life form on wide state.
 
 ### 3.7 `lineAA`, `disc` (`draw.h`)
 
@@ -411,6 +426,19 @@ The original phase plan follows, kept as the record of what was built and measur
 10. Docs: architecture.md § Buffer types, memory strategy, the leddriver mode-3 note closed, MIGRATING.md if any API a script or driver sees changed.
 
 ### Phase 3: advection and Trails (medium)
+
+**Volumetric from the start (PO, 2026-09-04).** TrailsEffect is `Dim::D3`, as Aurora is: the bench
+S3 is a 20x20x20 cube, so a flat trail would be the thing on the wall. Per function: `decay` and
+`decay16` are already dimension-blind (they walk the buffer flat); `advect` needs a TRILINEAR
+sampler for 3D, since `sampleWrap` takes `pos_t x, y` with a whole-pixel z, which is 8 corner reads
+instead of 4 plus a `vz` from the rule; `flowWind`, `flowRadial`, `flowSpiral` and `curl16` all have
+3D forms (3D curl is a cross product of gradients, not one perpendicular) while `flowRings` stays
+planar; `disc` becomes a sphere through `sdSphere`. The effect is written 3D-aware from the start
+because `dimensions()` and the plane sizing are decided once, but `advect` ships 2D first and gains
+the trilinear path in step 4, so step 3 still reaches the wall early. **Memory is the constraint a
+volumetric trail meets first**: a 16-bit RGB plane is 48 KB on a 20-cube and 1.5 MB on a 64-cube
+(PSRAM only), against 24 KB for a 64x64 panel.
+
 1. `advect` (2D and separable), the velocity rules, `curl16`, `decay`, `lineAA`, `disc`, with their unit tests.
 2. `TrailsEffect`: emitters, flows, the bank for breathing, scratch plane in `ScratchBuffer`, card, golden.
 3. MoonLive: the flow, advect, decay and emitter builtins; `trails.mle`; script golden.
@@ -422,6 +450,14 @@ The original phase plan follows, kept as the record of what was built and measur
 2. `fieldScale` and `fieldRate` as shared mechanisms (`draw::upscale`, a frame-skip helper on the bank's clock).
 3. `NebulaEffect` and `nebula.mle`; card, golden, scenario contract.
 4. The PIE variants of the noise inner loop and the bilinear lerp for S3 and P4 behind `src/platform/`, bit-identical tests against the scalar forms; the FPU `curl16` where `hasFpu`.
+   - **The P4's PPA is for `upscale`, not for advection (2026-09-04).** The Pixel Processing
+     Accelerator is a 2D-DMA blitter: it transforms a whole rectangle by ONE affine transform
+     (scale, rotate, translate, blend) with no CPU in the loop. Advection displaces every pixel by
+     its OWN velocity, so the interesting rules (`flowNoise`, `curl16`) do not map onto it at all,
+     and the ones that would (a rigid scroll, `flowRadial`) are the cheap cases anyway. Where it
+     does fit is `fieldScale`'s bilinear `draw::upscale` above, which is exactly a scaled blit, and
+     the sprite blit already backlogged under [Sprite follow-ups](backlog-light.md). Both are P4
+     only, so PPA can be an acceleration behind an existing signature, never the main path.
 5. KPI per target; the product owner's look on the wall.
 
 ### Phase 5: fluid (medium; P4 and desktop)

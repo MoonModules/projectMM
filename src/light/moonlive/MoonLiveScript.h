@@ -35,6 +35,10 @@ public:
     /// a binding with no particles, which is every binding but the effect today.
     void setPoolSizer(PoolSizeFn fn, void* ctx) { sizePool_ = fn; poolCtx_ = ctx; }
 
+    /// The same for a binding that owns a trail plane: the script asks with `trail(1)`, and only a
+    /// script that asks pays for the two 16-bit planes.
+    void setTrailSizer(TrailSizeFn fn, void* ctx) { sizeTrail_ = fn; trailCtx_ = ctx; }
+
     /// Re-read the file and recompile IFF its content hash moved.
     ///
     /// Returns true when a NEW program was installed. That return value is load-bearing rather than
@@ -86,7 +90,7 @@ public:
             // Declare the controls the script asks for, the way a compiled module does: by RUNNING
             // defineControls(). Before the binding's rebuildControls(), which turns the declared
             // list into UI cards.
-            runDefineControls(engine_, sizePool_, poolCtx_);
+            runDefineControls(engine_, sizePool_, poolCtx_, sizeTrail_, trailCtx_);
             // What the script SAYS it is, read once per compile rather than per frame. Both are
             // cold-path questions the host asks about a program, the same two a compiled module
             // answers with `Dim dimensions()` and `const char* tags()`.
@@ -197,7 +201,7 @@ public:
         const moonlive::DeclaredControl* decls = engine_.declaredControls(n);
         for (uint8_t i = 0; i < n; i++) {
             uint8_t* slot = engine_.controlSlot(decls[i].offset);
-            if (!slot) continue;   // engine not compiled yet — controls appear after prepare
+            if (!slot) continue;   // engine not compiled yet: controls appear after prepare
             // Published as the widget the member's TYPE calls for. Every scalar occupies the same
             // 4-byte slot, so this is no longer a width dispatch: it is the semantic one, and the
             // storage underneath is identical in all three cases.
@@ -209,13 +213,13 @@ public:
             // byte and bool point at the slot's LOW BYTE, which is only correct because the two
             // are masked on store: the upper three bytes are always zero, so a 1-byte control
             // reading and writing that byte sees the member's whole value. On a big-endian target
-            // the low byte would be at offset+3 — no supported target is one.
+            // the low byte would be at offset+3: no supported target is one.
             switch (decls[i].type) {
                 case moonlive::CtrlType::Bool:
                     // NORMALIZED before the byte is ever read as a `bool`. A script's store
                     // truncates rather than normalizing, so a bool member can legally hold 7
                     // (`flag = 7;` is ordinary arithmetic to the language), and a C++ bool object
-                    // holding anything but 0 or 1 is undefined behaviour the moment it is read.
+                    // holding anything but 0 or 1 is undefined behavior the moment it is read.
                     // One write at publish time settles it; every later write comes through
                     // applyControlValue's parseBool, which yields 0 or 1 by construction.
                     *slot = (*slot != 0) ? 1 : 0;
@@ -282,8 +286,10 @@ private:
     char     failedScript_[kMaxScriptName + 1] = "";
 
     size_t     reportedBytes_ = 0;   // what this script last added to the owner's total
-    PoolSizeFn sizePool_ = nullptr;
-    void*      poolCtx_  = nullptr;
+    PoolSizeFn  sizePool_  = nullptr;
+    void*       poolCtx_   = nullptr;
+    TrailSizeFn sizeTrail_ = nullptr;
+    void*       trailCtx_  = nullptr;
 };
 
 }  // namespace mm::moonlive

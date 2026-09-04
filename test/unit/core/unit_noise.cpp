@@ -158,3 +158,39 @@ TEST_CASE("the z axis actually changes the field, rather than being carried and 
     REQUIRE(total > 50);
     CHECK(differing * 4 > total * 3);      // three quarters of samples move with z
 }
+
+TEST_CASE("a curl field has no sources or sinks, so what it carries cannot pile up") {
+    // The reason curl exists rather than sampling noise straight into a velocity. A field with
+    // divergence has places where flow converges (anything carried there collects into a clump) and
+    // places where it diverges (the medium thins to nothing). Curl is the perpendicular gradient of
+    // a potential, so its divergence is zero by construction, and what it carries keeps its shape.
+    //
+    // Measured here against the naive alternative over the same points: two noise samples used
+    // directly as vx and vy.
+    double curlDiv = 0, naiveDiv = 0;
+    int n = 0;
+    constexpr uint32_t kCell = 1u << 16, kEps = 4096;
+    for (uint32_t y = kCell * 2; y < kCell * 10; y += kCell / 2) {
+        for (uint32_t x = kCell * 2; x < kCell * 10; x += kCell / 2) {
+            int32_t ax, ay, bx, by, cx2, cy2, dx2, dy2;
+            mm::curl16(x + kEps, y, 1000, ax, ay);
+            mm::curl16(x - kEps, y, 1000, bx, by);
+            mm::curl16(x, y + kEps, 1000, cx2, cy2);
+            mm::curl16(x, y - kEps, 1000, dx2, dy2);
+            curlDiv += std::abs(static_cast<double>(ax - bx) + static_cast<double>(cy2 - dy2));
+
+            const auto naive = [](uint32_t a, uint32_t b, bool second) {
+                const int32_t v = second ? static_cast<int32_t>(mm::inoise16(a + 0x9E37u, b + 0x7C15u))
+                                         : static_cast<int32_t>(mm::inoise16(a, b));
+                return static_cast<double>(v - 32768) * 1000.0 / 32768.0;
+            };
+            naiveDiv += std::abs((naive(x + kEps, y, false) - naive(x - kEps, y, false))
+                                 + (naive(x, y + kEps, true) - naive(x, y - kEps, true)));
+            n++;
+        }
+    }
+    REQUIRE(n > 0);
+    // Two orders of magnitude apart, measured: curl ~0.3, noise-as-velocity ~90.
+    CHECK(curlDiv / n < 5.0);
+    CHECK(naiveDiv / n > 20.0);
+}

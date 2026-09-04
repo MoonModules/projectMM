@@ -885,7 +885,22 @@ function drawVerts() {
     // Fade them by base sprite size — full rings ≥8px, gone ≤4px — so the layout shows on
     // small/zoomed grids and the lit pattern reads cleanly when dense. Lit dots are never
     // faded (their alpha ignores uRingFade in the shader).
-    const ringFade = Math.max(0, Math.min(1, (pointSize - 4) / 4));
+    let ringFade = Math.max(0, Math.min(1, (pointSize - 4) / 4));
+    // A VOLUME needs the opposite of a flat grid. On a panel the placeholders sit in one plane and
+    // an opaque one costs nothing; in a cube every dark LED is in front of some other LED, so at a
+    // large dot size the placeholders stack into a solid grey wall and the lit pattern inside it
+    // cannot be seen at all. Fade them by the depth they have to be seen through, and further as
+    // the dots grow: the layout still reads, and the effect shows through it.
+    if (dims > 2) {
+        // A volume stacks its placeholders: seen through N slices they compose as 1-(1-a)^N, so
+        // the same alpha that is a light tint on a panel is a wall in a cube. Solve for the per-LED
+        // value that holds the TOTAL at a quarter whatever the depth, so the layout stays readable
+        // without hiding the effect inside it. (The occlusion itself is fixed above, by not writing
+        // depth; this is what keeps the remaining tint from adding up.)
+        const kVolumeHaze = 0.25;
+        const perLed = 1 - Math.pow(1 - kVolumeHaze, 1 / Math.max(1, bZ));
+        ringFade = Math.min(ringFade, perLed / 0.22);   // 0.22 is the shader's base alpha
+    }
     gl.uniform1f(glLocs.uRingFade, ringFade);
 
     // Two passes so lit LEDs always sit ABOVE the grey placeholders (your "lights should layer
@@ -894,10 +909,15 @@ function drawVerts() {
     // off-LED placeholders and writes depth; pass 2 draws the lit LEDs with depthFunc LEQUAL
     // and depth-WRITE off — so a lit dot beats a co-located placeholder (equal depth passes)
     // yet lit dots still depth-sort against each other in a true 3D cube under any pan/tilt.
-    gl.uniform1f(glLocs.uLitPass, 0.0);                 // placeholders (write depth)
+    // Placeholders do NOT write depth. They are decoration, not geometry: an unlit LED that
+    // occupies the depth buffer HIDES every lit LED behind it, however transparent it looks, since
+    // the depth test rejects the later fragment before its alpha is ever considered. That is what
+    // made a cube a solid wall at large dot sizes: not the grey, the depth. With the write off, a
+    // dark LED tints what is behind it and nothing more, so a volume is seen through.
+    gl.depthMask(false);
+    gl.uniform1f(glLocs.uLitPass, 0.0);                 // placeholders (no depth write)
     gl.drawArrays(gl.POINTS, 0, lastVertCount);
     gl.depthFunc(gl.LEQUAL);
-    gl.depthMask(false);
     gl.uniform1f(glLocs.uLitPass, 1.0);                 // lit LEDs, on top
     gl.drawArrays(gl.POINTS, 0, lastVertCount);
     gl.depthMask(true);

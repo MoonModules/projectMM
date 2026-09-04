@@ -53,7 +53,7 @@ public:
 
         int16_t bx[NUM_BLOBS] = {};
         int16_t by[NUM_BLOBS] = {};
-        draw::blobCentres(BLOB_PATHS, NUM_BLOBS, t, w, h, bx, by);
+        draw::blobCenters(BLOB_PATHS, NUM_BLOBS, t, w, h, bx, by);
         int32_t r2 = static_cast<int32_t>(radius) * radius;
 
         for (lengthType y = 0; y < h; y++) {

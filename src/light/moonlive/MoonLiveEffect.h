@@ -8,7 +8,7 @@
 #include <cstring>
 #include <cstdio>
 
-// MoonLiveEffect — a scripted effect rendered by the MoonLive engine (§3.3 of
+// MoonLiveEffect: a scripted effect rendered by the MoonLive engine (§3.3 of
 // livescripts-analysis-top-down.md). The thin binding side of the engine/binding seam: it
 // IS a first-class EffectBase (role, controls, lifecycle, generic UI), and its tick()
 // delegates to a compiled MoonLive over this effect's own buffer.
@@ -16,7 +16,7 @@
 // The effect holds a `source` text control; prepare compiles it through the engine and
 // tick() runs the emitted native code over the buffer (emit → allocExec → call → write). A
 // source edit recompiles live; a parse error shows in the module status and the layer goes
-// dark — robust, no reboot.
+// dark: robust, no reboot.
 
 namespace mm {
 
@@ -46,7 +46,7 @@ public:
     // script recompiles (the script-editor loop), which re-derives the control set.
     void defineControls() override {
         // The script NAME, not the script. The text lives in a file the UI loads, edits and
-        // saves through /api/file — so a module costs ~32 bytes here instead of a resident
+        // saves through /api/file: so a module costs ~32 bytes here instead of a resident
         // kilobyte, and a script is bounded by the filesystem rather than by this array.
         controls_.addFilePath("script", script_.buffer(), script_.bufferSize(),
                               moonlive::kEffectPick);
@@ -64,7 +64,7 @@ public:
     }
 
     // Compile the source on the cold rebuild path. A failed compile (parse error or no exec
-    // memory) surfaces in the module status and leaves tick() a no-op — the effect renders
+    // memory) surfaces in the module status and leaves tick() a no-op: the effect renders
     // dark, the device keeps running (robustness + no-reboot). A *source* edit re-enters here and
     // recompiles, so a new script swaps in live; a broken edit just shows its diagnostic.
     // Compile the script if the file changed, then surface whatever it declares.
@@ -77,7 +77,15 @@ public:
         script_.setPoolSizer([](void* ctx, uint16_t n) -> uint16_t {
             return static_cast<MoonLiveEffect*>(ctx)->particles_.resize(n);
         }, this);
+        // Whether the script wants a trail plane, asked the same way and for the same reason: two
+        // 16-bit planes are 96 KB on a 20-cube, so only a script that advects pays for them.
+        script_.setTrailSizer([](void* ctx, bool want) -> bool {
+            return static_cast<MoonLiveEffect*>(ctx)->resizeTrail(want);
+        }, this);
         script_.sync(moonlive::effectSysVars(), *this);
+        // The planes follow the FIXTURE, so a resize re-sizes them even though the script did not
+        // change: sync() only re-runs defineControls when the source did.
+        if (trailWanted_) resizeTrail(true);
         // The compile re-derives the declared-control set, so rebuild the control list to surface
         // it (the same rebuildControls() pattern NetworkModule uses when a state change reshapes
         // its controls). Each scripted control re-binds to its (stable-address) arena slot.
@@ -121,11 +129,34 @@ public:
         // computed: framerate independence is the system's property, not the script author's.
         if (particles_.count() > 0)
             moonlive::setPoolSink(&particles_.pool(), particles_.advance(elapsed()));
+        // The trail plane, for a script that advects. Allocated only when one asked for it, since
+        // it is two 16-bit planes: on a 20-cube that is 96 KB, which a script drawing dots must not
+        // pay. The binding owns the geometry, the ping-pong and the dt for the same reason it owns
+        // the particle pool's frame scale: none of it is the script author's to get right.
+        const uint32_t nowMs = elapsed();
+        const uint32_t dt = nowMs - lastTickMs_;
+        lastTickMs_ = nowMs;
+        if (trailA_) {
+            moonlive::FlowSink f{};
+            f.a = trailA_.data();
+            f.b = trailB_.data();
+            f.front = &trailFront_;
+            f.w = width(); f.h = height(); f.d = depth();
+            f.dtMs = dt;
+            moonlive::setFlowSink(f);
+        }
         // The frame moment: run `tick` if the script defined one. A script that defines only
         // `modifyLogical` renders nothing here and folds coordinates instead, which is the author's
         // choice rather than an error.
         if (script_.engine().hasEntry(moonlive::kEntryTick))
             script_.engine().run(buffer(), nrOfLights(), cpl, elapsed(), moonlive::kEntryTick);
+        // The trail plane onto the layer, taking each channel's high byte: the one narrowing step,
+        // and the one the script cannot do for itself. Without it a script advects and decays a
+        // plane nobody ever reads, which renders black however correct the flow is.
+        if (trailA_) {
+            moonlive::setFlowSink({});
+            blitTrail();
+        }
         moonlive::setPoolSink(nullptr, 0);
         moonlive::setMotionSink(nullptr, nullptr);
         moonlive::setFadeSink(nullptr, nullptr);
@@ -141,7 +172,7 @@ public:
         EffectBase::release();
     }
 
-    /// Replace the script. The next prepare() compiles it — the same path a UI edit takes, so a
+    /// Replace the script. The next prepare() compiles it: the same path a UI edit takes, so a
     /// test and a user exercise identical code.
     /// Point the module at a script in the shared script directory. The file itself is written by
     /// the UI (or the File Manager); this only says WHICH one, and the next prepare() compiles it.
@@ -160,6 +191,49 @@ private:
     // renders nothing until one is named, rather than every new module compiling the same effect.
     moonlive::MoonLiveScript script_;
     moonlive::MoonLiveParticles particles_{*this};
+    // The trail planes: two, because advection reads one and writes the other (reading and writing
+    // one buffer would sample pixels the same pass had already moved). `trailFront_` says which
+    // holds the trail, and the flow builtins flip it through a pointer.
+    ScratchBuffer<uint16_t> trailA_{*this};
+    ScratchBuffer<uint16_t> trailB_{*this};
+    bool                    trailFront_ = true;
+    bool                    trailWanted_ = false;
+    uint32_t                lastTickMs_ = 0;
+
+    /// The wide trail plane onto the layer. `draw::pixel` per light rather than a memcpy, because
+    /// the plane holds three uint16 per light while the layer holds `cpl` bytes: the widths differ
+    /// and so may the channel count.
+    void blitTrail() {
+        const uint16_t* p = (trailFront_ ? trailA_ : trailB_).data();
+        if (!p) return;
+        const draw::Canvas cv = canvas();
+        const lengthType w = width(), h = height(), d = depth();
+        const std::size_t samples = static_cast<std::size_t>(w) * h * d * 3;
+        std::size_t i = 0;
+        for (lengthType z = 0; z < d; z++)
+            for (lengthType y = 0; y < h; y++)
+                for (lengthType x = 0; x < w; x++, i += 3) {
+                    if (i + 2 >= samples) return;
+                    draw::pixel(cv, {x, y, z}, RGB{static_cast<uint8_t>(p[i] >> 8),
+                                                   static_cast<uint8_t>(p[i + 1] >> 8),
+                                                   static_cast<uint8_t>(p[i + 2] >> 8)});
+                }
+    }
+
+    /// Size (or free) the trail planes for the current fixture. Returns whether one is available,
+    /// which is what the script sees: a device too small to hold them reports the truth rather than
+    /// rendering nothing in silence.
+    bool resizeTrail(bool want) {
+        trailWanted_ = want;
+        if (!want) { trailA_.resize(0); trailB_.resize(0); return false; }
+        const size_t n = static_cast<size_t>(width()) * height() * depth() * 3;
+        if (n == 0) { trailA_.resize(0); trailB_.resize(0); return false; }
+        if (!trailA_.resize(n) || !trailB_.resize(n)) {
+            trailA_.resize(0); trailB_.resize(0);       // a half-allocated pair is worse than none
+            return false;
+        }
+        return true;
+    }
 };
 
 }  // namespace mm

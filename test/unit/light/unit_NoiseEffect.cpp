@@ -7,6 +7,8 @@
 // that they differ, and that each moves the way its name says.
 
 #include "doctest.h"
+
+#include "golden_frame.h"   // ScopedTestClock: restores the real clock on scope exit
 #include "light/effects/NoiseEffect.h"
 #include "light/layers/Layer.h"
 #include "light/layouts/GridLayout.h"
@@ -25,7 +27,9 @@ namespace {
 /// Render Noise for `frames` on a w x h x d fixture and return the final buffer.
 std::vector<uint8_t> render(lengthType w, lengthType h, lengthType d, uint8_t motion,
                             uint16_t frames = 40) {
-    platform::setTestNowMs(1000);
+    // RAII, so the override is cleared even if a REQUIRE below exits early: a leaked test clock
+    // freezes time for every test that runs after this one in the same binary.
+    const mm::golden::ScopedTestClock clock(1000);
     Layouts layouts;
     GridLayout grid;
     Layer layer;

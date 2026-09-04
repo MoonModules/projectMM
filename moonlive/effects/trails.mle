@@ -1,0 +1,50 @@
+// Trails: dots thrown into a flowing medium, leaving tails the flow carries and bends.
+
+class TrailsEffect {
+  byte speed = 60;
+  byte zoom = 30;
+  byte dots = 3;
+  byte persistence = 120;
+  byte curl = 1;
+
+  int dimensions() { return 3; }
+
+  string tags() { return "💫🖌️";  }
+
+  void defineControls() {
+    trail(1);
+    addControl("speed", speed, 0, 255); // how fast the medium moves
+    addControl("zoom", zoom, 1, 255); // the flow's cell size
+    addControl("dots", dots, 1, 8); // how many emitters throw light in
+    addControl("persistence", persistence, 0, 255); // how long a tail survives
+    addControl("curl", curl, 0, 1); // 1 = divergence-free, so nothing clumps
+  }
+
+  void tick() {
+    int span = width;
+    if (height > span) { span = height; }
+
+    int cells = div(zoom * 64, span) + 1;
+    int push = div(speed * 4 * span, 64);
+
+    if (curl > 0) { flowCurl(cells, push); } else { flowNoise(cells, push); }
+    trailDecay(20 + persistence * persistence / 16);
+
+    int head = div(span, 256) + 1;
+    if (head > 4) { head = 4; }
+
+    int area = (head * 2 + 1) * (head * 2 + 1);
+    int n = div(dots * width * height, 4096 * div(area, 9));
+    if (n < 1) { n = 1; }
+    if (n > 64) { n = 64; }
+
+    for (int i = 0; i < n; i = i + 1) {
+      int a = osc(speed / 4 + 4 + i * 3, t, 0) + i * div(65535, n);
+      int b = osc(speed / 3 + 5 + i * 5, t, 0) + i * 9973;
+      int px = scale(sin(a), width);
+      int py = scale(cos(b), height);
+      int pz = scale(sin(b * 2), depth);
+      emitTrail(px, py, pz, mod(i * div(255, n) + div(t, 64), 256), 255, head);
+    }
+  }
+}

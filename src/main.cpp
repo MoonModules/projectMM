@@ -47,6 +47,7 @@
 #include "light/effects/AuroraEffect.h"
 #include "light/effects/PolarNoiseEffect.h"
 #include "light/effects/WaterRippleEffect.h"
+#include "light/effects/TrailsEffect.h"
 #include "light/effects/TunnelEffect.h"
 #include "light/effects/EchoEffect.h"
 #include "light/effects/DissolveEffect.h"
@@ -239,6 +240,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::AuroraEffect>("AuroraEffect", "light/effects.md#aurora");
     mm::ModuleFactory::registerType<mm::PolarNoiseEffect>("PolarNoiseEffect", "light/effects.md#polarnoise");
     mm::ModuleFactory::registerType<mm::WaterRippleEffect>("WaterRippleEffect", "light/effects.md#waterripple");
+    mm::ModuleFactory::registerType<mm::TrailsEffect>("TrailsEffect", "light/effects.md#trails");
     mm::ModuleFactory::registerType<mm::TunnelEffect>("TunnelEffect", "light/effects.md#tunnel");
     mm::ModuleFactory::registerType<mm::EchoEffect>("EchoEffect", "light/effects.md#echo");
     mm::ModuleFactory::registerType<mm::DissolveEffect>("DissolveEffect", "light/effects.md#dissolve");

@@ -1810,6 +1810,41 @@ TEST_CASE("a fixed local reports its scaling where it is read") {
 // call does, and the callee's value is delivered into the destination vreg once that pool is back.
 // Parking it in the frame's argument region instead was tried and rotated the enclosing call's
 // arguments, since that region is still being filled as the expression parses.
+TEST_CASE("every shipped script still compiles after a builtin is added") {
+    // A builtin name is reserved for every script, so ADDING one can stop an existing script
+    // compiling: its member of that name becomes a call. Measured, not hypothetical: a `decay`
+    // builtin broke pulse.mle and beat-flash.mlp, which both declare `byte decay`, and the
+    // diagnostic pointed at the member rather than at the name that took it. It is `trailDecay`.
+    //
+    // The names below are the ones a member ACTUALLY uses in the shipped scripts today. A new
+    // builtin wanting one of them takes a compound name instead, as `fade` pushed authors to
+    // `fadeAmt`. (`scale` is a long-standing core builtin and no script declares it, so the rule
+    // is about what scripts use, not about every ordinary word.)
+    static constexpr const char* kNamesScriptsDeclare[] = {
+        "decay", "speed", "fade", "bri", "hue", "zoom", "twist", "contrast", "sparkle",
+    };
+    const moonlive::BuiltinTable& t = moonlive::lightBuiltins();
+    for (const char* word : kNamesScriptsDeclare) {
+        // `fade` is the exception that proves the rule: it was taken first, and every script since
+        // has written `fadeAmt`. Nothing else here may become a builtin.
+        if (std::strcmp(word, "fade") == 0) continue;
+        INFO("a builtin took a name the shipped scripts declare as a member: ", std::string(word));
+        CHECK(t.find(word, std::strlen(word)) == nullptr);
+    }
+}
+
+TEST_CASE("the builtin table has room for every name the light domain registers") {
+    // The table fails SILENTLY when full: add() returns false, nothing checks each call, and the
+    // script reports "unknown function" for a builtin that plainly exists in the source. The
+    // registration-time guard only prints, which no CI run reads, so this is the check that fails.
+    // It also keeps real headroom visible: the table hit 61 of 64 when the flow builtins landed.
+    const moonlive::BuiltinTable& t = moonlive::lightBuiltins();
+    CHECK_FALSE(t.full());                       // nothing was dropped
+    CHECK(t.registered() < moonlive::BuiltinTable::kMax);
+    // A domain within a couple of names of the cap is one commit from the silent failure.
+    CHECK(moonlive::BuiltinTable::kMax - t.registered() >= 4);
+}
+
 TEST_CASE("a script function's return value can be used in an expression") {
     moonlive::MoonLive eng;
     REQUIRE(eng.compile(
