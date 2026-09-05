@@ -195,7 +195,7 @@ public:
     /// **ON is simply the better configuration — the switch exists to A/B it, not because some setups
     /// should run it OFF.** The one-frame output latency it adds (~8–20 ms) sits inside the perceptual
     /// audio↔visual sync window and is small next to what the pipeline already spends (FFT window +
-    /// render + the 8–16 ms WS2812 wire itself), so there is no user class — sound-reactive included —
+    /// render + the 8–16 ms WS2812 wire itself), so there is no user class (audio-reactive included)
     /// that should turn it off for latency. Leave it ON and take the fps.
     ///
     /// **It is per-driver because the resource is per-driver:** each driver's second DMA buffer lives
@@ -547,7 +547,7 @@ public:
     /// DOUBLE-BUFFER (doubleBuffer ON — encode N+1 while N clocks out, `max(encode, wire)` per tick,
     /// +1 frame latency, +1 DMA buffer). Inert off this chip and idle until inited with a source
     /// buffer + correction. (The double-buffer defaults ON — it overlaps the blocking wire wait and
-    /// lifted the P4 whole-board rate 48→76 fps; OFF is the sound-reactive 0-latency opt-out and pays
+    /// lifted the P4 whole-board rate 48→76 fps; OFF is the audio-reactive 0-latency opt-out and pays
     /// for exactly one buffer — see the doubleBuffer control + docs/history/lessons.md.)
     // REPORTED AS BLOCKING, deliberately: tickSync()/tickRing() reach busWaitIfBusy(), which
     // waits for the DMA transfer to finish (bounded by waitBudgetMs, and self-limiting via

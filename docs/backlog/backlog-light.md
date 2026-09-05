@@ -25,6 +25,71 @@ Forward-looking to-build items for the **light domain** (`src/light/`: drivers, 
 MoonLight has several moving-head effects that have no equivalent here, two of them troyhack's.
 Migrate them all, on the power functions per the standing mandate rather than traced across.
 
+### Speed up the fluid solver: 4 fps at 128x128, and it is not the divide (2026-09-05)
+
+Measured on an S31 (RISC-V, 320 MHz, octal PSRAM at 200 MHz), `iterations` 5, depth 1:
+
+| grid | Fluid tick | fps | cycles per cell-update |
+|---|---|---|---|
+| 32x32 | 8.5 ms | 109 | 151 |
+| 64x64 | 38 ms | 24 | 159 |
+| 128x128 | 204 ms | 4 | 205 |
+
+A cell-update is four loads, three adds, a multiply and a store: under 20 cycles of arithmetic. It
+costs **151 even at 32x32**, where the whole working set is small enough to cache, so the loop
+itself is roughly 8x more expensive than the work it does. Memory adds a further 35% by 128x128 but
+is not the wall: at 4 fps the solver moves ~25 MB/s, about 5% of what this PSRAM delivers.
+
+**A wrong turn worth recording.** The first diagnosis blamed the 64-bit divide in `relax()`, on the
+reasoning that Xtensa has no integer divide instruction. It was implemented (a power-of-two shift
+dispatched once per call, bit-exact over 8M values) and measured on the board: **no change, 326 ms
+before and after**, so it was reverted. Two errors: the S31 is RISC-V rather than Xtensa, and at
+151 cycles per update the divide was never the dominant term. A desktop measurement could not have
+caught either, since arm64 divides in hardware; only the board settles it.
+
+**Allocation placement is worth 1.6x, and nobody chose it.** Same firmware, same grid, same
+controls: **326 ms after a fresh boot, 204 ms after resizing the grid to 32 and back to 128**,
+reproducible across reboots. The solver's six buffers are ~638 KB and land in PSRAM either way, but
+where they land at boot is slower than where they land once the heap has moved. Whatever is done
+about speed, this says a boot-time allocation can be paying a large penalty invisibly, and it is
+worth understanding before optimizing the loop around it.
+
+Ordered by expected return:
+
+1. **Cut the 64-bit arithmetic in the inner loop.** Every cell computes an `int64` shift, an
+   `int64` multiply and an `int64` divide on a 32-bit core, where each is several instructions and
+   a register pair. This is the most likely source of the 151 cycles. A 32-bit formulation, or a
+   narrower intermediate with a proven bound, is the first thing to measure. Precedent: the SWAR
+   work found the 32-bit pair form bit-identical and 41% smaller.
+2. **Hoist `idx()`.** The loop addresses five neighbors per cell through `idx(x, y)`, each a
+   multiply-add. Walking row pointers instead is the standard fix and removes most of the address
+   arithmetic.
+3. **Understand the allocation-placement effect above**, since it is worth more than most loop
+   tuning and costs nothing to trigger deliberately once understood.
+4. **Solve the pressure at half resolution.** Pressure is smooth, so a half-scale solve with a
+   bilinear upsample of its gradient costs a quarter of the cells. Same trade `fieldScale` already
+   makes for noise fields, measured 3.0x there. Changes the picture slightly, unlike 1 to 3.
+5. **Fewer iterations, documented per target.** Linear in cost: 5 to 2 is 2.5x, and the picture
+   gets springier. The card should say what a target can afford rather than leaving a user to find
+   4 fps.
+6. **Question whether the full solver belongs on this class of board at all.** See the ColorTrails
+   entry below: a separable noise advection gets a flowing, swirling picture for two passes over
+   the grid and no solve. The fluid's own header already calls it a desktop and P4 effect.
+
+**Why `fluid.mle` runs at 13 fps while the compiled effect runs at 3.** They are not the same
+algorithm, and the script is not a faster fluid: it is not a solver at all. `fluid.mle` calls
+`flowCurl`, which is curl noise, a divergence-free velocity read analytically from noise
+derivatives in one advection pass, with no solve. Per frame at 128x128 the script visits ~16k cells
+and divides nowhere; the compiled solver visits ~429k, of which 318k carry the 64-bit divide. That
+is 27x the work, and the measured gap is only 4.3x because the interpreter gives most of it back in
+dispatch overhead. So a COMPILED curl effect would beat both. What curl cannot do is what a solver
+does: no pressure, no interaction between jets, and no vortex forming out of the flow's own
+history. Whether that is worth 27x is a question for the product owner's eyes.
+
+**Measure on hardware, not on the desktop**: this is an in-order-core property and the desktop
+divides in hardware, which is exactly how the wrong diagnosis above survived a desktop check.
+Record before and after in performance.md per target.
+
 ## Drivers
 
 ### Logarithmic brightness, and a power budget the device knows about (2026-09-02)

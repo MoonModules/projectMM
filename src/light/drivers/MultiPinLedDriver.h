@@ -145,8 +145,8 @@ public:
     }
     const char* initFailMsg() const override {
         // Names the same peripheral the label does, so the error and the dropdown agree.
-        return (platform::i2sLanes > 0) ? "I2S-IDF: bus init failed — check pins / memory"
-                                       : "LCD-IDF: bus init failed — check pins / memory";
+        return (platform::i2sLanes > 0) ? "I2S-IDF: bus init failed, check pins / memory"
+                                       : "LCD-IDF: bus init failed, check pins / memory";
     }
 
     /// Spare bus lanes (shift mode, when the board has fewer data pins than the bus is wide) park on

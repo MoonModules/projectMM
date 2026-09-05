@@ -24,6 +24,18 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### `soundReactive` is now `audioReactive`
+
+**Action: re-set one control.** Affects Fish Tank, Flying Toasters, Pacman, Pong, Space Invaders,
+Sprite Fountain and MovingHead, if you had turned the control on.
+
+One name for one thing: the service is `AudioService`, the frame is `AudioFrame`, the effects are
+audio-reactive. The control that made a sprite effect follow the music was the last place still
+calling it sound, so it is renamed rather than left as the odd one out.
+
+A restored config maps the old name to the new one and carries its value. On a device upgraded in
+place the control returns to its default (off); switch it back on where you had it.
+
 ### Noise2D is gone; Noise renders it
 
 **Action: re-set one control.** Affects any device with a Noise2D effect on a layer.

@@ -90,6 +90,22 @@ class AudioService : public MoonModule {
 public:
     /// Block size = FFT size: a power of two. 512 samples at 22050 Hz is ~23 ms of
     /// audio per frame, fine resolution (~43 Hz/bin) at a modest per-tick cost.
+    /// What every producer of raw bands does next, once: the meter ballistic, the spectral flux
+    /// and the onset decision. Four paths write `frame_.bands` (the mic, two simulations and a
+    /// received sync packet); routing them all through here is what keeps the four consumers of
+    /// the frame seeing one definition of "smoothed" and one definition of "a hit".
+    void finishBands() {
+        smoothBands(frame_.bands, frame_.bandsSmoothed);
+        frame_.flux = spectralFlux(prevBands_, frame_.bands);
+        std::memcpy(prevBands_, frame_.bands, sizeof(prevBands_));
+        frame_.onset = onset_.feed(frame_.flux, platform::millis()) ? frame_.flux : 0;
+        if (frame_.onset) onsetCount_++;
+        if (frame_.flux > fluxPeak_) fluxPeak_ = frame_.flux;
+    }
+    uint8_t       prevBands_[16] = {};   ///< last block's raw bands, the flux's reference
+    BandConditioner cond_;               ///< the per-band floor and peak tables, learned live
+    OnsetDetector onset_;                ///< the hit decision, with its running mean and refractory
+
     static constexpr size_t kBlock = 512;
     static constexpr size_t kMag = kBlock / 2;   ///< real-FFT magnitude bins
 
@@ -133,8 +149,18 @@ public:
     uint8_t  floor = 100;        ///< noise floor (dB display floor), bands/level
                                  ///< below this read as silence. Raise to keep an
                                  ///< ambient room dark, lower for a quiet room.
-    uint8_t  gain = 222;         ///< sensitivity, HIGHER = more (a narrower dB window
+    uint8_t  gain = 128;         ///< sensitivity, HIGHER = more (a narrower dB window
                                  ///< so a given sound fills more of the bar).
+    /// Per-band conditioning (AudioBands.h, BandConditioner): the learner that levels the RIG,
+    /// mic response and room, without touching the music's own balance. `agc` picks whether the
+    /// tables keep learning; `ratio` is a compressor's N:1 (1 = off); `maxGain` caps the lift in
+    /// dB so a silent band is never amplified into its own noise.
+    /// Who sets the display window: 0 = manual (the floor and gain sliders), 1 = automatic (the
+    /// per-band learner). One choice rather than two overlapping mechanisms, so a slider on screen
+    /// is always a slider that does something.
+    uint8_t  levels = 1;
+    uint8_t  ratio = 4;          ///< automatic: N of N:1, how hard the bands are levelled
+    uint8_t  maxGain = 24;       ///< automatic: the most a band is lifted, in dB
     /// Simulated-audio pattern (only shown, and only used, in Simulate mode, see `mode`). The synthesized
     /// signal drives audio-reactive effects with no mic or music, for a preview/demo device or a test:
     ///   `music`: a plausible song: multi-sine bands + a swelling volume + a periodic beat + a
@@ -228,8 +254,20 @@ public:
         controls_.addSelect("sampleRate", sampleRateSel, kRateOptions, kSampleRateCount);
         controls_.setHidden(controls_.count() - 1, !localMode);
         // floor/gain condition the local FFT/level mapping.
-        controls_.addControl("floor", floor, 0, 255); controls_.setHidden(controls_.count() - 1, !localMode);
-        controls_.addControl("gain", gain, 1, 255);   controls_.setHidden(controls_.count() - 1, !localMode);
+        // ONE decision, then the controls that decision needs. `levels` says who sets the display
+        // window: a person (the floor and gain sliders) or the learner (which measures each band's
+        // own floor and typical peak and maps them onto the window for you). Showing both sets at
+        // once was the confusing part: four sliders for two jobs, with `agc` silently overriding
+        // what `floor` and `gain` meant while leaving them on screen.
+        static constexpr const char* kLevelsOptions[] = {"manual", "automatic"};
+        controls_.addSelect("levels", levels, kLevelsOptions, 2);
+        controls_.setHidden(controls_.count() - 1, !localMode);
+        const bool manual = levels == 0;
+        controls_.addControl("floor", floor, 0, 255); controls_.setHidden(controls_.count() - 1, !localMode || !manual);
+        controls_.addControl("gain", gain, 1, 255);   controls_.setHidden(controls_.count() - 1, !localMode || !manual);
+        // Automatic: how hard it levels the bands, and the one guard that keeps it honest.
+        controls_.addControl("strength", ratio, 1, 20);  controls_.setHidden(controls_.count() - 1, !localMode || manual);
+        controls_.addControl("maxBoost", maxGain, 0, 40); controls_.setHidden(controls_.count() - 1, !localMode || manual);
         // "send audio": broadcast the locally-analyzed frame. Only meaningful in Local mode.
         if constexpr (platform::hasNetwork) {
             controls_.addControl("send audio", send);
@@ -259,6 +297,9 @@ public:
         // instantaneous RMS, recomputed every audio block, this read-out is the human-readable
         // summary of it, not a separate statistic.
         controls_.addReadOnly("level RMS", levelStr_, sizeof(levelStr_));
+        // The onset diagnostic: hits per second and the peak flux, the one row that answers
+        // "is the detector hearing the beat" without a per-band list (audio roadmap, § The UI).
+        controls_.addReadOnly("onsets", onsetStr_, sizeof(onsetStr_));
         controls_.addReadOnly("peakHz", peakStr_, sizeof(peakStr_));
         MoonModule::defineControls();
     }
@@ -271,7 +312,10 @@ public:
             || std::strcmp(name, "sckPin") == 0 || std::strcmp(name, "mclkPin") == 0
             || std::strcmp(name, "device") == 0
             || std::strcmp(name, "sampleRate") == 0 || std::strcmp(name, "mode") == 0
-            || std::strcmp(name, "send audio") == 0 || std::strcmp(name, "syncPort") == 0;
+            || std::strcmp(name, "send audio") == 0 || std::strcmp(name, "syncPort") == 0
+            // `levels` swaps which sliders are shown (manual floor/gain against the learner's
+            // strength/maxBoost), so it toggles rows exactly as mode and send do.
+            || std::strcmp(name, "levels") == 0;
     }
 
     /// Pure build (see MoonModule::prepare): claim the frame election (this instance's frame_ drives the
@@ -419,7 +463,11 @@ public:
         applyWindow(samples_, kBlock, windowed_);
         platform::audioFft(windowed_, kBlock, mag_);
         magnitudesToBands(mag_, kMag, sampleRate(), floor, gain,
-                          frame_.bands, peakHz, peakMag);
+                          frame_.bands, peakHz, peakMag,
+                          levels == 1 ? &cond_ : nullptr,
+                          static_cast<uint32_t>(kBlock * 1000u / sampleRate()),
+                          ratio, static_cast<float>(maxGain), true);
+        finishBands();
 
         // Peak frequency: the exact-Hz FFT bin, held when there's no real signal so
         // it doesn't wander in silence.
@@ -457,6 +505,7 @@ public:
             const uint8_t pos = static_cast<uint8_t>((t / 250u) % 16u);
             const uint8_t env = triwave8(static_cast<uint8_t>((t % 250u) * 255u / 250u));  // 0..255 within a step
             for (uint8_t b = 0; b < 16; b++) frame_.bands[b] = (b == pos) ? env : 0;
+            finishBands();
             frame_.level = env;
             frame_.peakHz = static_cast<uint16_t>(80 + pos * 700);   // bass→~10.6 kHz across the 16 steps
             frame_.peakMag = env;
@@ -478,6 +527,7 @@ public:
             const uint8_t swell = sin8(static_cast<uint8_t>(t / 24u));             // slow volume breath
             uint16_t lvl = static_cast<uint16_t>(swell / 2u + sum / 32u + beat / 2u);
             frame_.level = lvl > 255 ? 255 : lvl;
+            finishBands();
             // Peak drifts across the spectrum so freq-mapped effects move.
             frame_.peakHz = static_cast<uint16_t>(80 + sin8(static_cast<uint8_t>(t / 40u)) * 40u);
             frame_.peakMag = frame_.level;
@@ -490,6 +540,9 @@ public:
 
     void tick1s() MM_NONBLOCKING override {
         std::snprintf(levelStr_, sizeof(levelStr_), "%u", static_cast<unsigned>(levelPeak_));
+        std::snprintf(onsetStr_, sizeof(onsetStr_), "%u/s, flux %u",
+                      static_cast<unsigned>(onsetCount_), static_cast<unsigned>(fluxPeak_));
+        onsetCount_ = 0; fluxPeak_ = 0;
         std::snprintf(peakStr_, sizeof(peakStr_), "%u Hz", static_cast<unsigned>(frame_.peakHz));
         levelPeak_ = 0;   // reset for the next window
 
@@ -577,6 +630,9 @@ private:
     AudioFrame frame_;
 
     char levelStr_[12] = {};
+    char onsetStr_[20] = {};
+    uint8_t onsetCount_ = 0;  ///< onsets in the current 1 s display window (UI only)
+    uint8_t fluxPeak_ = 0;    ///< peak flux in that window (UI only)
     char peakStr_[12] = {};
     uint8_t levelPeak_ = 0;   // peak frame_.level across the current 1 s display window (UI only)
 
@@ -800,7 +856,15 @@ private:
             if (n <= 0) break;                     // -1 = nothing pending
             AudioFrame rf;
             if (parseWledAudioSync(pkt, static_cast<size_t>(n), rf)) {
+                // The packet carries RAW bands; the ballistic is ours and lives across packets.
+                // A whole-frame copy would zero it forty times a second, so the smoothed state is
+                // carried over the copy and then advanced by this packet's bands, exactly as the
+                // mic path advances it by a block.
+                uint8_t keep[16];
+                std::memcpy(keep, frame_.bandsSmoothed, sizeof(keep));
                 frame_ = rf;                       // received audio drives the effects
+                std::memcpy(frame_.bandsSmoothed, keep, sizeof(keep));
+                finishBands();
                 lastSyncRecv_ = platform::millis();
                 // Whose audio this is. A receiver with no peer named looks identical to one taking
                 // the wrong source, and on a multi-device rig that is the question being asked.

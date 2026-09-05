@@ -623,7 +623,7 @@ private:
 
     // --- RMT channels (hardware; RMT targets only) ---
 
-    static constexpr const char* kInitFailMsg = "RMT init failed — check the pins";
+    static constexpr const char* kInitFailMsg = "RMT init failed, check the pins";
 
     // All-or-nothing: a failing pin deinits everything and reports which pin,
     // so tick()'s guard stays a single bool and the user sees one clear error
