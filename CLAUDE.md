@@ -26,7 +26,7 @@ A high-performance system driving large LED installations and DMX fixtures. One 
 
 ## The Process
 
-Every change follows the same timeline: **main → branch → build → test → document → commit → merge → release**. The **product owner** (PO) is the person initiating a branch, and any contributor can be one. The PO initiates every event and every gate list; if unsure, ask ("Feature work is done; run pre-commit, or do you want to look first?"). This holds even when the list would only be *checking* work in progress: running it to see where things stand is still starting a gate list. Verify work in progress with the individual tools instead (a build, `ctest`, one check script); the list itself is the PO's to fire. A conditional check runs only when its objective trigger matches; an applicable-but-skipped check needs a one-line reason in the commit/PR/release notes. Each cycle produces visible output, and each cycle subtracts: remove code and docs that stopped earning their place, or know why each one stays. `backlog/` and `history/` shrink too. External contributors follow the same timeline: fork, branch, PR into main, with the same checks and review.
+Every change follows the same timeline: **main → branch → build → test → document → commit → merge → release**. The **product owner** (PO) is the person initiating a branch, and any contributor can be one. The PO initiates every event and every gate list; if unsure, ask ("Feature work is done; run pre-commit, or do you want to look first?"). This holds even when the list would only be *checking* work in progress: running it to see where things stand is still starting a gate list. Verify work in progress with the individual tools instead (a build, `test_desktop.py`, one check script); the list itself is the PO's to fire. A conditional check runs only when its objective trigger matches; an applicable-but-skipped check needs a one-line reason in the commit/PR/release notes. Each cycle produces visible output, and each cycle subtracts: remove code and docs that stopped earning their place, or know why each one stays. `backlog/` and `history/` shrink too. External contributors follow the same timeline: fork, branch, PR into main, with the same checks and review.
 
 ### Main
 
@@ -49,8 +49,8 @@ Implement against the architecture ([docs/architecture.md](docs/architecture.md)
 
 | Task | Command |
 |---|---|
-| desktop build (zero warnings) | `cmake --build build` |
-| unit tests | `ctest --test-dir build --output-on-failure` |
+| desktop build (zero warnings) | `uv run moondeck/build/build_desktop.py` |
+| unit tests | `uv run moondeck/test/test_desktop.py` |
 | scenario tests | `uv run moondeck/scenario/run_scenario.py` |
 | **run the desktop firmware** | `uv run moondeck/run/run_desktop.py` |
 | ESP32 firmware build | `uv run moondeck/build/build_esp32.py --firmware <fw>` |
@@ -69,6 +69,13 @@ All Python goes through `uv run` (full rule: [coding-standards](docs/coding-stan
 Keep a branch under ~100 changed files: past that CodeRabbit declines the PR outright rather than reviewing part of it, so the branch silently loses a review layer. Split, or say so in the PR.
 
 **MoonDeck** is the project's tooling: every build, flash, monitor, test, and check task is one Python script under `moondeck/`, and MoonDeck itself is the local web dashboard that runs those same scripts for a human ([moondeck/MoonDeck.md](moondeck/MoonDeck.md) is the per-script reference). Agents invoke the scripts from the command line — one set of scripts, two front ends — and every gate invokes one of them. Deliberately our own scripts rather than an embedded toolchain like PlatformIO: the firmware builds vendor-native against pinned ESP-IDF versions, and the tooling covers far more than compile-and-flash — one script per task keeps humans, agents, and CI on the identical path (rationale: [building.md § MoonDeck](docs/building.md#moondeck--the-dev-console)).
+
+**Never run the underlying tool directly when a script wraps it.** `ctest`, `cmake --build`,
+`pytest`, `node --test` and `idf.py` all have a MoonDeck script in front of them, and the script is
+the contract: it picks the right per-host build directory, applies the flags the gate expects, and
+tees its output where the dashboard and the PO's report read it. Reaching past it produces a number
+that looks right and is measured differently, or a stale binary the script would have rebuilt. If a
+task seems to have no script, that is worth saying rather than working around.
 
 ### Test
 
@@ -109,13 +116,22 @@ On "run pre-commit": run the checks whose trigger the diff matches, report one l
 | platform boundary | `uv run moondeck/check/check_platform_boundary.py` | `src/`, except `src/platform/` |
 | hot-path discipline | `uv run moondeck/check/check_nonblocking.py --incremental` | `src/` |
 | ESP32 firmware fresh | `uv run moondeck/check/check_esp32_built.py --firmware <fw>` | `src/`, `esp32/`, `CMakeLists.txt`, `library.json`, except `src/platform/desktop/` |
-| host tests (Python) | `uv run --with pytest --with pyserial --with markdown --with wled pytest test/python -q` | `moondeck/`, `test/python/`, `moonlive/` |
-| host tests (JS) | `node --test "test/js/**/*.test.mjs"` | `mooninstaller/`, `test/js/`, `src/ui/` |
-| desktop build (zero warnings) 🐢 | `cmake --build build` | `src/`, `test/`, `CMakeLists.txt`, `library.json` |
-| unit tests 🐢 | `ctest --test-dir build --output-on-failure --no-tests=error -C Release` | same as the desktop build |
+| host tests (Python) | `uv run moondeck/test/test_host.py --python` | `moondeck/`, `test/python/`, `moonlive/` |
+| host tests (JS) | `uv run moondeck/test/test_host.py --js` | `mooninstaller/`, `test/js/`, `src/ui/` |
+| desktop build (zero warnings) 🐢 | `uv run moondeck/build/build_desktop.py --tests` | `src/`, `test/`, `CMakeLists.txt`, `library.json` |
+| unit tests 🐢 | `uv run moondeck/test/test_desktop.py` | same as the desktop build |
 | scenario tests 🐢 | `uv run moondeck/scenario/run_scenario.py` | same, plus `test/scenarios/` |
 | no-backend build 🐢 | `uv run moondeck/build/build_desktop.py --no-jit --tests` | MoonLive sources or their tests |
 | Improv smoke test (needs a board) | `uv run moondeck/build/improv_smoke_test.py --port <port>` | `src/core/ImprovFrame.h`, `src/platform/esp32/platform_esp32_improv.cpp`, `mooninstaller/index.html`, `src/ui/install-picker.js`, `moondeck/build/improv_` |
+| repo health 🐢 | `uv run moondeck/check/collect_kpi.py --commit` | always |
+
+**Repo health runs on EVERY commit**, whatever the diff touches, because it is the only place the
+numbers that creep are visible: flash and DRAM per target, binary size, the scenario tick matrix,
+source and test line counts, and the complexity warnings. A docs-only commit moves none of them and
+takes seconds to prove it; a one-line driver change can move flash by kilobytes and nothing else
+would say so. It RECORDS rather than passes or fails, and writes to the tree, so its output belongs
+in the commit message (see below) and its diff belongs in the commit. Read the deltas before
+committing: a number that moved without a reason in the diff is an irregularity to explain.
 
 The Improv smoke test needs an ESP32 on a USB port, so it is a recommendation rather than a blocker: it covers the provisioning path a user meets before the device is on the network, which nothing else exercises. Run it when the diff touches that path and a board is at hand, and say so in the commit when it is skipped.
 

@@ -6,6 +6,7 @@
 #include "platform/platform.h"   // platform::audioFft (desktop naive DFT)
 
 #include <cmath>
+#include <cstring>   // std::memcpy: clang finds it transitively, GCC does not (CI's sanitizer builds)
 #include <numbers>
 #include <vector>
 

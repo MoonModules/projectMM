@@ -263,8 +263,12 @@ public:
         controls_.addSelect("levels", levels, kLevelsOptions, 2);
         controls_.setHidden(controls_.count() - 1, !localMode);
         const bool manual = levels == 0;
-        controls_.addControl("floor", floor, 0, 255); controls_.setHidden(controls_.count() - 1, !localMode || !manual);
-        controls_.addControl("gain", gain, 1, 255);   controls_.setHidden(controls_.count() - 1, !localMode || !manual);
+        // Shown in BOTH modes, because they are not only the manual band mapping: computeLevel
+        // reads them for `level` and `levelSmoothed` (the volume every VU-style effect follows)
+        // whatever `levels` says. Hiding them in automatic left a user unable to reach values
+        // that were still shaping the picture.
+        controls_.addControl("floor", floor, 0, 255); controls_.setHidden(controls_.count() - 1, !localMode);
+        controls_.addControl("gain", gain, 1, 255);   controls_.setHidden(controls_.count() - 1, !localMode);
         // Automatic: how hard it levels the bands, and the one guard that keeps it honest.
         controls_.addControl("strength", ratio, 1, 20);  controls_.setHidden(controls_.count() - 1, !localMode || manual);
         controls_.addControl("maxBoost", maxGain, 0, 40); controls_.setHidden(controls_.count() - 1, !localMode || manual);

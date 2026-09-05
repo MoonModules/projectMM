@@ -371,7 +371,7 @@ measure on the smallest device it claims to support.
 ### Two failed attempts means stop
 
 The rule the project already carries applies hardest here, because a picture always
-suggests one more plausible tweak. Two attempts that do not fix it means the diagnosis is
+suggests one more plausible tweak. Two attempts that do not fix it mean the diagnosis is
 wrong, not the parameters. On this page a second "fix" made an effect visibly worse than
 the bug it targeted.
 

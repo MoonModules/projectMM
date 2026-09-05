@@ -173,6 +173,10 @@ public:
         return std::strcmp(name, "pins") == 0 || std::strcmp(name, "ledsPerPin") == 0
             || std::strcmp(name, "timing") == 0 || std::strcmp(name, "t0hNs") == 0
             || std::strcmp(name, "t1hNs") == 0 || std::strcmp(name, "periodNs") == 0
+            // Not because it rebuilds anything: defineControls decides whether the loopback pins
+            // are shown, and only a prepare sweep re-runs it. Without this the checkbox toggles a
+            // mode whose three controls never appear, so the test cannot be aimed from the UI.
+            || std::strcmp(name, "loopbackTest") == 0
             || isWindowControl(name);
     }
 
@@ -284,6 +288,18 @@ public:
         // Encode within this driver's window only. winLen_ is the slice length;
         // txLightCount_ (Σ pinCounts_) is what the pins clock out — n is the min,
         // so a window smaller than the configured pin total never reads past it.
+        // A frame still on the wire OWNS symbols_: the RMT copy encoder streams straight out of it,
+        // so re-encoding now rewrites bytes the peripheral is mid-way through clocking. That is not
+        // a dropped frame, it is a corrupted one, and it shows as a handful of lights in a color
+        // the effect never drew. Only a timed-out wait leaves this set, so the normal path never
+        // sees it; when it happens, skipping the tick lets the transfer finish and the next tick
+        // encodes cleanly. Bench: this is what remained after the memory-block and interrupt
+        // priority work, and it is independent of light count, which is what ruled those out.
+        if (txInFlight_) {
+            txInFlight_ = !waitForPins();     // still busy: leave symbols_ alone for another tick
+            if (txInFlight_) return;
+        }
+
         const nrOfLightsType n = txLightCount_ < winLen_ ? txLightCount_ : winLen_;
         const uint8_t outCh = correction_.outChannels;
         // Same defensive guard ArtNet uses: skip rather than overrun if the
@@ -331,10 +347,22 @@ public:
             started[i] = platform::rmtWs2812Transmit(rmt_[i], symbols_ + pinOffsets_[i],
                                         static_cast<size_t>(pinLights) * wordsPerLight);
         }
-        for (uint8_t i = 0; i < pinCount_; i++) {
-            if (started[i]) platform::rmtWs2812Wait(rmt_[i], 1000 /* ms */);
-        }
+        for (uint8_t i = 0; i < pinCount_; i++) started_[i] = started[i];
+        txInFlight_ = !waitForPins();
         if (cfg_.reset_us) platform::delayUs(cfg_.reset_us);
+    }
+
+    /// Wait on every pin that actually started, and report whether they all finished. A pin whose
+    /// transmit never started is not waited on: with no done-callback coming, that would spend the
+    /// full timeout and let one bad pin stall the tick.
+    bool waitForPins() MM_NONBLOCKING {
+        bool allDone = true;
+        for (uint8_t i = 0; i < pinCount_; i++) {
+            if (!started_[i]) continue;
+            if (platform::rmtWs2812Wait(rmt_[i], 1000 /* ms */)) started_[i] = false;
+            else allDone = false;
+        }
+        return allDone;
     }
 
     /// Test-only accessors. symbolBuffer/symbolCapacity mirror ArtNet's
@@ -376,6 +404,8 @@ private:
     nrOfLightsType winLen_ = 0;                // window length (lights), clamped to the buffer
     uint8_t pinCount_ = 0;                     // 0 = idle (parse error / no pins)
     bool inited_ = false;                      // all-or-nothing across the pins
+    bool started_[kMaxPins] = {};              // which pins have a transmit still to be waited on
+    bool txInFlight_ = false;                  // a frame is still clocking out of symbols_
     uint32_t* symbols_ = nullptr;   // owned; one word per WS2812 data bit
     size_t symbolCap_ = 0;          // words allocated
     // Per-light scratch for correction_.apply(): `outChannels` bytes, one light at a time. Heap, sized
@@ -513,7 +543,17 @@ private:
         const size_t need = symbolsFor(n, ch);
         if (symbols_ && symbolCap_ >= need) return;
         freeSymbols();
-        symbols_ = static_cast<uint32_t*>(platform::alloc(need * sizeof(uint32_t)));
+        // INTERNAL RAM, deliberately, on a chip that would otherwise put this in PSRAM. The RMT copy
+        // encoder runs inside the refill interrupt and reads these symbols straight into the
+        // peripheral's memory, so on a DMA-less classic ESP32 every refill is a read of this buffer
+        // under a 40-160 us deadline. From PSRAM that read goes through the 32 KB cache that WiFi
+        // and the render loop also churn, and one miss is a stall of microseconds: a late refill,
+        // a few wrong lights, at any light count and on any core. Bench: QuinLED Dig-Next-2
+        // (PICO-V3-02, 2 MB PSRAM), 2026-09-05. The buffer is small (24 bytes x 4 per light: 24 KB
+        // at 256 lights) so internal RAM affords it; a board that cannot falls back to the general
+        // heap rather than to no output at all.
+        symbols_ = static_cast<uint32_t*>(platform::allocInternal(need * sizeof(uint32_t)));
+        if (!symbols_) symbols_ = static_cast<uint32_t*>(platform::alloc(need * sizeof(uint32_t)));
         symbolCap_ = symbols_ ? need : 0;
         publishHeapBytes();   // the symbol buffer grew — refresh the memory readout
     }

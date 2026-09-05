@@ -1244,7 +1244,7 @@ function showUpdateOverlay() {
         // A URL install hears POST /cancel; a file upload cancels by dropping its connection
         // (MoonBase's single-connection server is busy receiving it), so abort the fetch.
         if (uploadCtl) uploadCtl.abort();
-        fetch("/cancel", { method: "POST" }).catch(() => {});
+        fetch("/api/firmware/cancel", { method: "POST" }).catch(() => {});
     });
     box.append(h, msg, bar, cancel, dismiss);
     ov.appendChild(box);
@@ -1328,7 +1328,7 @@ async function moonbaseUpdateFlow(opts) {
             const uploadCtl = new AbortController();
             ui.setUpload(uploadCtl);
             try {
-                const r = await fetch("/install", {
+                const r = await fetch("/api/firmware/upload", {
                     method: "POST", headers: { "Content-Type": "application/octet-stream" },
                     body: opts.file, signal: uploadCtl.signal });
                 if (!r.ok) throw new Error(await r.text());
@@ -1380,9 +1380,9 @@ async function moonbaseUpdateFlow(opts) {
                 ui.status("The install was interrupted \u2014 retrying\u2026");
                 try {
                     if (opts.url) {
-                        await fetch("/install-url", { method: "POST", body: opts.url });
+                        await fetch("/api/firmware/url", { method: "POST", body: opts.url });
                     } else {
-                        await fetch("/install", {
+                        await fetch("/api/firmware/upload", {
                             method: "POST", headers: { "Content-Type": "application/octet-stream" },
                             body: opts.file });
                     }

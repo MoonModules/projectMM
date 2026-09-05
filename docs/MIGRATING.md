@@ -24,6 +24,23 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### MoonBase serves the OTA routes under the application's names
+
+**Action: nothing on most devices; a serial flash on a MoonBase device updated from a browser.**
+Affects the 4 MB classic, `esp32-16mb` and the S3-Zero, the variants that carry MoonBase.
+
+MoonBase served `/install`, `/install-url`, `/boot-app`, `/last-url` and `/cancel` while the
+application served `/api/firmware/upload`, `/api/firmware/url` and `/api/firmware/moonbase`: two
+names for one operation, across images that a single browser page talks to in turn during one
+update. It now serves them under the application's names.
+
+The break is between the two images on a device, not between a device and its config. A device
+whose MoonBase predates this change still answers only the old names, so an updated application
+handing over to it leaves the browser calling routes that image does not have. The way through is
+the same as any MoonBase update: flash both images over serial once
+([building.md](building.md#flashing-a-running-device-over-the-network)). A device flashed serially
+from this version on is consistent and needs nothing.
+
 ### `soundReactive` is now `audioReactive`
 
 **Action: re-set one control.** Affects Fish Tank, Flying Toasters, Pacman, Pong, Space Invaders,

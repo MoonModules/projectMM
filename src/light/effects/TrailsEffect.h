@@ -101,7 +101,7 @@ public:
         bank_.set(1, {.rate = 7, .low = static_cast<int32_t>(256 - breathe),
                       .high = static_cast<int32_t>(256 + breathe),
                       .phaseOffset = 0, .wave = Wave::Sine});
-        // advance() takes an ABSOLUTE timestamp and computes its own delta (math16.h BeatPhase),
+        // advanceTo() takes an ABSOLUTE timestamp and computes its own delta (math16.h BeatPhase),
         // so passing this frame's dt feeds it the CHANGE in frame time: a few percent of the right
         // motion on a jittery device, and none at all where the frame time is steady.
         bank_.advanceTo(now);

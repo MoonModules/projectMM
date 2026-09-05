@@ -75,7 +75,10 @@ public:
             // Peak-hold: takes a new maximum at once, falls back slowly.
             // Peak-hold falls by a half-life, so "how long it stays up" is stated in seconds and
             // holds at any framerate, the same rule the trail effects decay by.
-            const uint16_t keep = halfLifeKeep(step, 200u + static_cast<uint32_t>(peakHold) * 12u);
+            // The real elapsed time, not `step`: the cap exists to stop a stall throwing the
+            // spring, but a half-life is stated in seconds and must count every millisecond that
+            // passed, or the peak hangs longer than asked for after any hitch.
+            const uint16_t keep = halfLifeKeep(dt, 200u + static_cast<uint32_t>(peakHold) * 12u);
             peak_[b] = reading > peak_[b]
                      ? reading
                      : static_cast<uint8_t>((static_cast<uint32_t>(peak_[b]) * keep) >> 16);

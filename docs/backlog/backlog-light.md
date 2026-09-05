@@ -25,6 +25,52 @@ Forward-looking to-build items for the **light domain** (`src/light/`: drivers, 
 MoonLight has several moving-head effects that have no equivalent here, two of them troyhack's.
 Migrate them all, on the power functions per the standing mandate rather than traced across.
 
+### RMT over DMA on the S3/P4, with a completion callback (Funkelfetisch, July 2026)
+
+Funkelfetisch's fork carries a finished branch, `codex/upstream-rmt-rgbw-performance`, that the
+classic-ESP32 flicker work of 2026-09-05 makes worth adopting: on chips with RMT DMA
+(`SOC_RMT_SUPPORT_DMA`: S3, P4) it sets `with_dma` with the IDF-recommended 1024-symbol block, so
+the frame streams from RAM and the refill interrupt that causes flicker on a DMA-less chip does not
+exist at all. It replaces the blocking `rmt_tx_wait_all_done` with `rmt_tx_register_event_callbacks`
+(`on_trans_done`) plus a per-channel busy flag so the next tick skips while a frame is in flight,
+and reports `"RMT DMA"` in the driver status so a user can see which path is live. Files:
+`platform_esp32_rmt.cpp` (+105), `RmtLedDriver.h` (+75), `LedDriverConfig.h`, `Correction.h`
+(RGBW presets, a separate topic in the same branch), with unit tests.
+
+What it does NOT address: on the classic ESP32 the DMA half compiles to nothing, and nothing in it
+moves the channel's interrupt off core 0 (the root cause found on the Dig-Next-2, fixed by
+creating the channel from core 1). The two are complementary, one driver with the right answer
+per chip: DMA where the silicon has it, the core-1 refill where it does not. Adopt his DMA and
+callback path, keep the core hop, and drop the classic-only `txInFlight_` guard where his busy
+flag covers it. Study, do not copy: write it against the seam as it stands, credit the branch.
+
+### A script's setControl rebuilds a control subtree on every write (2026-09-06)
+
+Measured on the P4 at .139: **2 fps**, with `MoonLive-2` at 251 ms and `MoonLive-3` at 245 ms per
+tick, together 498 ms of a 506 ms frame, and HTTP down to a 0.5 s round trip because it is served
+from the same loop. Both services ran `sweep.mls`, whose `tick20ms` writes four faders. Two copies
+at 50 Hz is 400 control writes a second, and `Scheduler::setControl` calls `rebuildControls()`
+unconditionally on each one:
+
+```
+clearControlsRecursive();   // wipes this module's controls AND every child's, recursively
+defineControls();           // then rebuilds them all
+```
+
+So each fader write tears down and re-creates the whole `Control` subtree. A person moving a slider
+does this a few times a second and nobody notices; a script at 50 Hz multiplies it by hundreds.
+
+Two things to fix, and they are independent. **The rebuild should be conditional**: a `live`
+control's value change cannot alter the schema, and `rebuildControls` already computes
+`schemaSignature()` before and after to decide whether to notify, so it knows. Rebuilding only when
+the shape can actually change (what `setLive` and `affectsPrepare` already distinguish) removes the
+cost for every value write, scripted or human. **And the script tick is too fast for its job**: a
+fader sweep does not need 50 Hz, so `sweep.mls` should run on a slower tick, which also caps the
+damage any future script can do through this path.
+
+Not a regression from the RMT work: it predates it and was found while measuring an unrelated slow
+board.
+
 ### Speed up the fluid solver: 4 fps at 128x128, and it is not the divide (2026-09-05)
 
 Measured on an S31 (RISC-V, 320 MHz, octal PSRAM at 200 MHz), `iterations` 5, depth 1:

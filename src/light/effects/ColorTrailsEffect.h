@@ -95,7 +95,7 @@ public:
                       .phaseOffset = 0, .wave = Wave::Saw});
         bank_.set(1, {.rate = static_cast<uint16_t>((speed * 3u) / 22u), .low = 0, .high = 65535,
                       .phaseOffset = 16384, .wave = Wave::Saw});
-        // advance() takes an ABSOLUTE timestamp and computes its own delta (math16.h BeatPhase):
+        // advanceTo() takes an ABSOLUTE timestamp and computes its own delta (math16.h BeatPhase):
         // passing this frame's dt instead makes every delta a few milliseconds of a clock that
         // never advances, so the emitters sit still while the picture flickers between them.
         bank_.advanceTo(now);
@@ -187,8 +187,13 @@ private:
             // on itself the way a circle does, so the line it lays down keeps finding new ground.
             const angle16 a = static_cast<angle16>(bank_.phase(1));
             const angle16 b = static_cast<angle16>(bank_.phase(1) * 3u / 2u);
-            const lengthType cx = static_cast<lengthType>(w / 2 + (static_cast<int32_t>(sin16(a)) * (w / 2 - 1)) / 32768);
-            const lengthType cy = static_cast<lengthType>(h / 2 + (static_cast<int32_t>(cos16(b)) * (h / 2 - 1)) / 32768);
+            // `size` scales the figure's reach, the same control the orbit radius reads, so the
+            // two emitters grow and shrink together instead of the Lissajous always spanning the
+            // whole panel.
+            const int32_t reachX = ((w / 2 - 1) * static_cast<int32_t>(size)) / 255;
+            const int32_t reachY = ((h / 2 - 1) * static_cast<int32_t>(size)) / 255;
+            const lengthType cx = static_cast<lengthType>(w / 2 + (static_cast<int32_t>(sin16(a)) * reachX) / 32768);
+            const lengthType cy = static_cast<lengthType>(h / 2 + (static_cast<int32_t>(cos16(b)) * reachY) / 32768);
             splat(p, w, h, d, cx, cy, dot, static_cast<uint8_t>(hue + 128));
         }
         if (m == Mode::All || m == Mode::Border) {

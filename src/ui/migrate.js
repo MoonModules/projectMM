@@ -65,7 +65,7 @@ export const CONTROL_RENAMES = {
     // that makes a sprite effect follow the music is audioReactive. Scoped to the seven effects that
     // declare it, per the rule above.
     "soundReactive": {
-        to: "audioReactive", date: "2026-09-05",
+        name: "audioReactive", date: "2026-09-05",
         onTypes: ["FishTankEffect", "FlyingToastersEffect", "PacmanEffect", "PongEffect",
                   "SpaceInvadersEffect", "SpriteFountainEffect", "MovingHeadEffect"],
     },
