@@ -1,0 +1,47 @@
+// Nebula: a noise field births light, a curl flow carries it into a folding cloud.
+
+class NebulaEffect {
+  byte speed = 40;
+  byte zoom = 40;
+  byte contrast = 200;
+  byte persistence = 140;
+  byte rate = 1;
+
+  int dimensions() { return 3; }
+
+  string tags() { return "💫🖌️"; }
+
+  void defineControls() {
+    trail(1);
+    addControl("speed", speed, 0, 255); // how fast the cloud moves
+    addControl("zoom", zoom, 1, 255); // the field's cell size
+    addControl("contrast", contrast, 0, 255); // how much of the field is born
+    addControl("persistence", persistence, 0, 255); // how long light survives
+    addControl("rate", rate, 1, 8); // birth the field every n frames
+  }
+
+  void tick() {
+    int span = width;
+    if (height > span) { span = height; }
+
+    int grain = div(zoom * 256, span * 16) + 1;
+    int push = div(speed * 4 * span, 64);
+
+    flowCurl(zoom, push);
+    trailDecay(40 + persistence * persistence / 12);
+
+    if (fieldRate(rate) > 0) {
+      for (int z = 0; z < depth; z = z + 1) {
+        for (int y = 0; y < height; y = y + 1) {
+          for (int x = 0; x < width; x = x + 1) {
+            int v = fbm3(x * grain, y * grain + div(t, 32), z * grain, 2);
+            if (v > contrast) {
+              int bri = div((v - contrast) * 255, 256 - contrast);
+              emitTrail(x, y, z, bri, bri, 0);
+            }
+          }
+        }
+      }
+    }
+  }
+}

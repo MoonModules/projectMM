@@ -89,6 +89,32 @@ The 3D path is the closest to the bound and the reason: 3D gradient noise does e
 
 That reading held: the 8-bit tier improved most (2D by 4x on the host), because the value form quantized at every stage where the gradient form carries its dot products at full width.
 
+### Fluid solver cost (host)
+
+`scenario_Fluid_solver`, desktop macOS arm64, tick in µs. The solver is Stam's stable fluid: several
+passes over the grid per frame, plus `iterations` Gauss-Seidel sweeps for the pressure projection
+that keeps the flow divergence-free.
+
+| Grid | iterations | tick µs |
+|---|---:|---:|
+| 32×32 | 1 | 20 |
+| 32×32 | 5 (default) | 30 |
+| 32×32 | 20 | 69 |
+| 64×64 | 5 | 133 |
+| 20×20×20 cube | 5 | 249 |
+| 16×16 | 5 | 7 |
+
+Two properties an author picks a setting from. **`iterations` is near-linear**: 1 to 20 is 20 to
+69 µs, since each is another sweep over the whole grid. **The forcing is free next to the solver**:
+going from 2 jets to 4, and persistence from 150 to 255, moved 135 µs to 134 µs, inside the noise.
+So the grid and the iteration count are the two knobs that matter, and the jets are a look rather
+than a cost. **A cube is depth times one panel**: twenty 20×20 slices, each its own medium, cost
+249 µs against 133 for one 64×64 panel with about half the lights, which is the per-slice solve
+paying its boundary and projection twenty times over.
+
+Device rows are open: the P4 and S3 numbers need a board and have not been measured, so what
+this effect can carry on either is an open question rather than a claim.
+
 ### Memory at 128×128 with mirror
 
 | Module | dynamicBytes | Breakdown |

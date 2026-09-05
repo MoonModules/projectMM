@@ -415,6 +415,7 @@ struct FlowSink {
     /// directly. Copying the flag into the sink and reading it back afterwards would work only for
     /// an even number of swaps, and a script may advect once, twice or not at all.
     bool* front = nullptr;          ///< true: `a` holds the trail; false: `b` does
+    const uint32_t* frame = nullptr;   ///< the binding's frame counter, for fieldRate
     lengthType w = 0, h = 0, d = 0;
     uint32_t dtMs = 0;
     uint16_t* live() const { return !front ? nullptr : (*front ? a : b); }
@@ -830,6 +831,24 @@ extern "C" inline uint32_t mm_light_trail(const uintptr_t* args, uint32_t, const
 // one call, because the alternative (a script loop calling a per-pixel rule) would cross the script
 // boundary once per light, which on a 20-cube is 8000 calls a frame. One call, the loop in C++.
 
+/// Should this frame do the expensive work? `fieldRate(n)` answers true once every n frames.
+///
+/// A script's ONLY practical way to afford a per-pixel loop on a large fixture: crossing the script
+/// boundary once per light costs 8000 calls a frame on a cube, and skipping four in five of those is
+/// the difference between an effect that runs and one that does not. What a caller puts inside the
+/// gate is its own composition; guarding the expensive BIRTH while the flow and the decay run every
+/// frame keeps the motion smooth and costs only detail, which is what nebula.mle does.
+///
+/// The counter lives with the binding, not the script: a script holding its own frame count would
+/// have to reason about what a frame is, which is the system's business.
+extern "C" inline uint32_t mm_light_fieldRate(const uintptr_t* args, uint32_t, const uint8_t*) {
+    FlowSink& f = flowSink();
+    if (!f.frame) return 1;                       // no binding: never skip, so a script still works
+    const uint32_t n = uint32_t(args[0]);
+    if (n <= 1) return 1;
+    return (*f.frame % n) == 0 ? 1u : 0u;
+}
+
 /// Advect the trail along a noise field: two decoupled samples, one per axis.
 extern "C" inline uint32_t mm_light_flowNoise(const uintptr_t* args, uint32_t, const uint8_t*) {
     FlowSink& f = flowSink();
@@ -905,9 +924,12 @@ extern "C" inline uint32_t mm_light_emitTrail(const uintptr_t* args, uint32_t, c
     for (int32_t dy = -rad; dy <= rad; dy++) {
         for (int32_t dx = -rad; dx <= rad; dx++) {
             if (dx * dx + dy * dy > rad * rad) continue;        // a disc, not a square
-            const int32_t x = cx + dx, y = cy + dy;
+            // Widened for the sum: cx and cy come from the SCRIPT, so either may be near
+            // INT32_MAX, and adding the radius to that is signed overflow before the bounds test
+            // ever runs. Only a coordinate that passed the test is narrowed for indexing.
+            const int64_t x = static_cast<int64_t>(cx) + dx, y = static_cast<int64_t>(cy) + dy;
             if (x < 0 || y < 0 || cz < 0 || x >= f.w || y >= f.h || cz >= f.d) continue;
-            const size_t off = (size_t(cz) * f.h * f.w + size_t(y) * f.w + x) * 3;
+            const size_t off = (size_t(cz) * f.h * f.w + size_t(y) * f.w + size_t(x)) * 3;
             plane[off + 0] = wr;
             plane[off + 1] = wg;
             plane[off + 2] = wb;
@@ -1330,6 +1352,7 @@ inline const BuiltinTable& lightBuiltins() {
     t.add({"fade", 1, /*returns*/ false, BuiltinKind::Call, &mm_light_fade, {}});
     // The flow family: each advects the whole plane in one call (see the handlers).
     t.add({"trail", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_trail, {}});
+    t.add({"fieldRate", 1, /*returns*/ true, BuiltinKind::Call, &mm_light_fieldRate, {}});
     t.add({"flowNoise", 2, false, BuiltinKind::Call, &mm_light_flowNoise, {}});
     t.add({"flowCurl", 2, false, BuiltinKind::Call, &mm_light_flowCurl, {}});
     t.add({"trailDecay", 1, false, BuiltinKind::Call, &mm_light_trailDecay, {}});

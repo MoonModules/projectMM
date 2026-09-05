@@ -3,6 +3,8 @@
 #include "doctest.h"
 #include "core/noise.h"
 
+#include <cmath>   // std::abs on doubles: GCC does not get it transitively
+
 #include <set>
 
 using namespace mm;

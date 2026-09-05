@@ -141,6 +141,7 @@ public:
             f.a = trailA_.data();
             f.b = trailB_.data();
             f.front = &trailFront_;
+            f.frame = &frameCount_;
             f.w = width(); f.h = height(); f.d = depth();
             f.dtMs = dt;
             moonlive::setFlowSink(f);
@@ -157,6 +158,10 @@ public:
             moonlive::setFlowSink({});
             blitTrail();
         }
+        // Outside the trail branch: the counter is the BINDING's frame count, and `fieldRate(n)` is
+        // a rate limiter any script may use. Advanced only when a trail existed, a script that
+        // skips `trail(1)` got a frozen counter and fieldRate answered 1 on every frame forever.
+        frameCount_++;
         moonlive::setPoolSink(nullptr, 0);
         moonlive::setMotionSink(nullptr, nullptr);
         moonlive::setFadeSink(nullptr, nullptr);
@@ -197,6 +202,7 @@ private:
     ScratchBuffer<uint16_t> trailA_{*this};
     ScratchBuffer<uint16_t> trailB_{*this};
     bool                    trailFront_ = true;
+    uint32_t                frameCount_ = 0;   ///< the counter fieldRate reads
     bool                    trailWanted_ = false;
     uint32_t                lastTickMs_ = 0;
 

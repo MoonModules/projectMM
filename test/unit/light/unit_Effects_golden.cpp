@@ -8,7 +8,13 @@
 // AudioSpectrum) are deliberately ABSENT: their output depends on whatever the audio service holds,
 // so a hash over their frames would pin the test rig's audio state rather than the effect. Their
 // migrations rely on their behaviour tests plus the Canvas equivalence test in unit_Canvas.
-// @also SineEffect, PlasmaEffect, NoiseEffect, DistortionWavesEffect, LavaLampEffect, MetaballsEffect, SpiralEffect, RingsEffect, WaveEffect, RainbowEffect
+// @also AuroraEffect, BallpitEffect, BouncingBallsEffect, DissolveEffect, DistortionWavesEffect, EchoEffect,
+// @also FireEffect, FireworksEffect, FishTankEffect, FixedRectangleEffect, FluidEffect,
+// @also FlyingToastersEffect, GameOfLifeEffect, LavaLampEffect, LissajousEffect, MetaballsEffect,
+// @also NebulaEffect, NoiseEffect, PacmanEffect, PlasmaEffect, PolarNoiseEffect, PraxisEffect,
+// @also RainbowEffect, RingsEffect, RubiksCubeEffect, SdfShapesEffect, SineEffect, SolidEffect,
+// @also SphereMoveEffect, SpiralEffect, StarFieldEffect, StarSkyEffect, TetrixEffect, TextEffect,
+// @also TrailsEffect, TruchetEffect, TunnelEffect, WaterRippleEffect, WaveEffect
 
 // Pins the EXACT rendered output of the time-driven effects, so the power-function migration's
 // "renders exactly the same" claim is proved rather than asserted.
@@ -65,6 +71,8 @@
 #include "light/effects/SdfShapesEffect.h"
 #include "light/effects/PolarNoiseEffect.h"
 #include "light/effects/WaterRippleEffect.h"
+#include "light/effects/FluidEffect.h"
+#include "light/effects/NebulaEffect.h"
 #include "light/effects/TrailsEffect.h"
 #include "light/effects/TunnelEffect.h"
 #include "light/effects/EchoEffect.h"
@@ -100,6 +108,13 @@ using namespace mm;
 // sum of squares while the normalizer divides by the sum of amplitudes, and 4 octaves had shrunk to
 // 54..199 of 0..255. Every fbm field is now higher contrast, which is a visible improvement rather
 // than a neutral change; unit_noise pins the range at every octave count.
+// Trails moved on 2026-09-04, for two deliberate fixes. Its first tick now measures a ZERO delta
+// rather than the whole uptime, which had teleported the flow and decayed the trail away on the
+// frame it started. And its emitters are paced by TIME rather than firing every frame: writing a
+// head per frame injects light at the framerate (measured 1.37 at 1200 fps against 60, which the
+// framerate audit caught). Scaling the head's brightness by dt was tried first and is wrong here,
+// because writeWide SETS the pixel rather than accumulating, so twenty dim writes do not add up to
+// one bright one and the fast device came out twice as dark instead.
 // Tunnel moved on 2026-09-04 for the same reason as PolarNoise below, and Spiral moved with them
 // (it has no golden). All three are pinned instead by unit_PolarLut_equivalence, which renders each
 // through the table and through the computed address and requires the 16-bit table to be identical.
@@ -112,7 +127,9 @@ TEST_CASE("time-driven effects render byte-identical frames (migration guard)") 
     SUBCASE("two SDF shapes orbit and melt together, with a soft edge")       { SdfShapesEffect e;       golden::checkGolden("SdfShapesEffect", golden::renderHash(e, 16, 16, 1), 0xbcfb74b4836606a3ull); }
     SUBCASE("a warped noise field folded into a kaleidoscope")      { PolarNoiseEffect e;      golden::checkGolden("PolarNoiseEffect", golden::renderHash(e, 16, 16, 1), 0x8d48e0d1e0180610ull); }
     SUBCASE("heat rises, cools and colors through the palette")      { FireEffect e;            golden::checkGolden("FireEffect", golden::renderHash(e, 16, 16, 1), 0x1cadbabb59bc489bull); }
-    SUBCASE("dots thrown into a flow, leaving tails it carries and bends") { TrailsEffect e; golden::checkGolden("TrailsEffect", golden::renderHash(e, 16, 16, 1), 0x890d030651bf7d7cull); }
+    SUBCASE("dye poured into a simulated medium, carried by the flow it works out") { FluidEffect e; golden::checkGolden("FluidEffect", golden::renderHash(e, 16, 16, 1), 0xdef67ab1f131e137ull); }
+    SUBCASE("a field births light and a curl flow carries it into a cloud")          { NebulaEffect e; golden::checkGolden("NebulaEffect", golden::renderHash(e, 16, 16, 1), 0xc42116cc9f9cc33full); }
+    SUBCASE("dots thrown into a flow, leaving tails it carries and bends") { TrailsEffect e; golden::checkGolden("TrailsEffect", golden::renderHash(e, 16, 16, 1), 0x30489b453830f597ull); }
     SUBCASE("layered noise curtains, each drifting on its own clock")      { AuroraEffect e;          golden::checkGolden("AuroraEffect", golden::renderHash(e, 16, 16, 1), 0xfb4329a20959443dull); }
     SUBCASE("drops ripple, reflect off the edges and interfere")     { WaterRippleEffect e;     golden::checkGolden("WaterRippleEffect", golden::renderHash(e, 16, 16, 1), 0xa11f9c4f27cba8d5ull); }
     SUBCASE("a texture-mapped tunnel flying toward a vanishing point")          { TunnelEffect e;          golden::checkGolden("TunnelEffect", golden::renderHash(e, 16, 16, 1), 0x7b4d4451a3de3887ull); }

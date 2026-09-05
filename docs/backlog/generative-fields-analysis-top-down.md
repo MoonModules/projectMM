@@ -460,10 +460,50 @@ volumetric trail meets first**: a 16-bit RGB plane is 48 KB on a 20-cube and 1.5
      only, so PPA can be an acceleration behind an existing signature, never the main path.
 5. KPI per target; the product owner's look on the wall.
 
+### A scripted control's name can disagree with the file that declares it (2026-09-04, open)
+
+Reproduced on the desktop with `Nebula.mle`, and the three facts contradict each other:
+
+- the module's `script` control holds `Nebula.mle` (so the UI is NOT lowercasing the selection);
+- `GET /api/file?path=/moonlive/Nebula.mle` returns a file whose line 20 is `addControl("rate", ...)`;
+- the UI renders that slider as **`rate1`**, a name the file no longer contains anywhere.
+
+So the compiled program disagrees with its own source. `resolveScript` is exact-match and prefers
+the user's copy, which is correct, and the picker sets `option.value` to the exact filename, so
+neither is the cause. The `rate1` text is a name the file held EARLIER in the session, which points
+at the control list surviving a recompile rather than at the resolver or the UI.
+
+**Ruled out by measurement, so a future look need not repeat it**: the builtin table has room (65 of
+96); `kMaxCtrls` is 8 against 5 declared; the 64-byte arena holds five `byte` members; declaration
+ORDER is irrelevant (moving the control first changed nothing); the control NAME is irrelevant
+(renaming it changed nothing); `aurora.mle` and `trails.mle` have the identical shape and are fine.
+
+**Where to start**: `rebuildControls()` after a recompile, and whether a declared control that
+vanishes from the script is cleared from `ControlList` or merely left behind. A test that compiles a
+script, edits one control's name, recompiles and asserts the OLD name is gone would pin it.
+
+**A second, smaller thing this exposed**: `/moonlive/Nebula.mle` and `/.moonlive/nebula.mle` are two
+files on the device and one on a case-insensitive desktop, and nothing stops a user creating a
+capital-N file beside a lowercase catalog entry. The fork mechanism assumes the two names match.
+
 ### Phase 5: fluid (medium; P4 and desktop)
-1. `light/fluid.h` with its unit tests (divergence after `project` within tolerance; a jet moves dye; rest state is stable).
-2. `FluidEffect` and `fluid.mle`; card with its per-target honesty; golden; scenario on the P4.
-3. The backlog entry closes; performance.md rows on P4 and desktop.
+1. ✅ `light/fluid.h` with its unit tests (divergence after `project` within tolerance; a jet moves dye; rest state is stable).
+2. ✅ `FluidEffect` and `fluid.mle`; card, golden, and `scenario_Fluid_solver`. The scenario runs on the host; a P4 run needs a board.
+3. ✅ performance.md carries the desktop rows; the P4 and S3 rows are open, since they need a board.
+
+**Two bugs the jets taught, both worth keeping.** The first shipped picture was a hollow RING, and
+the cause was the forcing rather than the solver: jets pinned to one circle at `w/3`, all sweeping
+the same direction, all aimed purely tangentially. Measuring speed by radius showed the energy in a
+band (1.35 at r5 against 0.33 at the center) while `|grad v|` was a healthy 0.30 per cell, so the
+medium was working and being asked the wrong question. The fix is three-part: the radius breathes
+between center and wall, the aim leans either side of the tangent, and alternate jets sweep against
+each other so they collide, because colliding jets are what roll up vortex pairs. After it, the peak
+sits mid-panel (0.78 at r2) and the outer band halves.
+
+The second: a purely time-paced pour never fires on the opening tick, because `dt` is deliberately 0
+there, and on a fast device it then takes many frames to owe a whole period. The panel stays black
+in the meantime and every resize repeats it. The first pour is now unconditional. The scenario's
+`buffer non-zero after render` check is what caught it, at 16×16.
 
 ### After the phases: the catalog sweep (large; its own plan)
 Decision 5 mandates that every natural-motion effect runs on the power functions. That sweep is not a phase of this plan: it is sized and sequenced in its own plan once the kernels exist, from the [effects × power functions inventory](effects-power-function-inventory.md), which records for each of the 58 effects what it uses today and what it could use. Two rules carry over: each rewrite is compared on the panel against the effect as it ran and lands only if at least as beautiful, and an effect a showcase supersedes outright is deleted, the way a particle-system effect replaces its non-PS twin.

@@ -82,7 +82,7 @@ Detail: [technical](moxygen/LavaLampEffect.md)
 
 <a id="lines"></a>
 
-### Lines 💫 · , 
+### Lines 💫 · 3D 
 
 <img src="../../assets/light/effects/LinesEffect.gif" width="300" alt="Lines effect preview">
 
@@ -502,11 +502,50 @@ A maze of interlocking arcs that never repeats, drawn without storing a single t
 
 Origin: projectMM original, on Sébastien Truchet's 1704 tiling and the standard shader fract/hash/smoothstep idiom
 
+<a id="fluid"></a>
+
+### Fluid 💫🖌️ · 3D
+
+Light poured into a simulated medium and carried by it. Every other flow in this library is a function of position and time; this one is state, so a jet fired now changes where everything downstream goes for seconds afterwards and the same settings never quite repeat a minute. The solver is Stam's stable fluid (diffuse, project, advect, project), which is unconditionally stable at any timestep, and the projection is what keeps the flow divergence-free so dye neither piles up nor drains away.
+
+The jets are the effect's character, and they are deliberately not on a fixed circle: each one's radius breathes between the center and the wall, its aim leans either side of the tangent, and alternate jets sweep against each other. Jets pinned to one circle all turning the same way sum into a single rotation, which the solver faithfully renders as a hollow ring with a dead middle. Colliding jets are what roll up vortex pairs.
+
+- `jets`: how many places light is poured in.
+- `force`: how hard each one pushes the medium.
+- `swirl`: how fast the jets sweep, which is what stirs vortices rather than pumping in one direction.
+- `viscosity`: how much the medium drags on itself; higher is syrup, lower is smoke.
+- `persistence`: how long dye survives, as a half-life.
+- `iterations`: pressure-solve effort, and the honest cost knob. At 1 the flow reads springy because the medium is not properly divergence-free.
+
+The dye is held at 16 bits and narrowed once on the way out, dithered temporally: a value multiplied by slightly less than one many times a second has nowhere to go at 8 bits.
+
+On a cube every depth slice is its own medium and the jets drift through the slices, so each one is stirred in turn and the slices differ rather than one plane repeating. Nothing is carried between slices: that is a volumetric solve, a different solver rather than a flag, and the same per-slice shape Trails has. A panel is depth 1 and pays nothing for it. Cost is several passes over the grid per frame plus `iterations` more for the pressure solve, so it is sized for the desktop and the P4. What an S3 can carry is unmeasured (performance.md holds the desktop rows).
+
+Origin: projectMM original, after Stam 1999 "Stable Fluids"
+
+<a id="nebula"></a>
+
+### Nebula 💫🖌️ · 3D
+
+A noise field decides where light is born, a curl flow decides where it goes, and between them the cloud keeps folding into itself. The field is thresholded hard, so only its top survives and the rest is black; the flow is divergence-free, so nothing piles up or thins out. Neither half is new: what is, is that the emitter is a FIELD rather than a handful of dots, so light enters everywhere at once and the flow shapes a whole cloud instead of drawing trails.
+
+- `speed`: how fast the medium moves, and with it the whole cloud.
+- `scale`: the field's cell size; low is broad clouds, high is wisps.
+- `contrast`: what FRACTION of the field is bright enough to be born, placed against the field's own measured range rather than an absolute value, so the same setting means the same thing on any fixture. Measured on a 64x64 panel: 0 floods it, 128 is a haze, 192 (the default) a cloud with bright cores, 255 a few wisps.
+- `persistence`: how long light survives once it is in the flow, as a half-life.
+- `octaves`: detail within the field, and its cost knob.
+- `fieldScale`: compute the field at half or quarter resolution and stretch it. A field is smooth, so this costs little visually and saves a great deal: measured 3.0x at half and 6.6x at quarter on a curl field.
+- `fieldRate`: recompute the field every N frames. The flow still carries the cloud every frame, so this costs detail rather than smoothness.
+
+The cloud is held at 16 bits and narrowed once on the way out, dithered temporally, which is what keeps a slow fade smooth rather than stepped.
+
+Origin: projectMM original, composing the noise-field and curl-flow kernels
+
 <a id="trails"></a>
 
 ### Trails 💫🖌️ · 3D
 
-Dots thrown into a moving medium, leaving tails the flow carries and bends. Nothing draws a tail: the tail is the previous frames' dots, transported along a velocity field and dimmed, which is why the shape of the flow is visible in it. The medium moves through the volume too, so on a cube the tails lean through depth rather than a plane repeating.
+Dots thrown into a moving medium, leaving tails the flow carries and bends. Nothing draws a tail: the tail is the previous frames' dots, transported along a velocity field and dimmed, which is why the shape of the flow is visible in it. On a cube each depth slice gets its own flow, so the slices differ rather than one plane repeating, though light is carried within a slice and not yet between them: the transport is 2D per slice until 3D advection ships.
 
 - `speed`: how fast the medium moves, and with it every tail.
 - `dots`: how many emitters are throwing light in.
@@ -578,7 +617,7 @@ A lit 3D scene rendered by marching a ray through a distance field, one ray per 
 - `cameraY`: camera height above the floor.
 - `showFloor`: include the ground plane.
 
-**Compiled only where the SoC declares a hardware FPU** (`SOC_CPU_HAS_FPU`, which every ESP32 variant and the desktop satisfy). This is the one stated exception to the integer-only render-path rule, and it is gated rather than assumed. The cost is per *pixel*, not per chip: measured at 0.30 ms/frame for 32×32 on desktop, and 1.64 ms for 4096 lights on an ESP32-S3 while still holding 409 fps. What limits it is pixel count; `steps` trades quality for cost. Frames also stream over NetworkSend, so a desktop can drive a fixture that could never compute this locally.
+**Compiled only where the SoC declares a hardware FPU** (`SOC_CPU_HAS_FPU`, which the desktop and every ESP32 target this project builds satisfy: S3, P4, S31 and the classic ESP32 were each checked). A target without one simply does not carry the effect, rather than failing to build. This is the one stated exception to the integer-only render-path rule, and it is gated rather than assumed. The cost is per *pixel*, not per chip: measured at 0.30 ms/frame for 32×32 on desktop, and 1.64 ms for 4096 lights on an ESP32-S3 while still holding 409 fps. What limits it is pixel count; `steps` trades quality for cost. Frames also stream over NetworkSend, so a desktop can drive a fixture that could never compute this locally.
 
 Origin: projectMM original, on Iñigo Quilez's raymarching and distance-function articles
 
@@ -594,8 +633,8 @@ A warped noise field addressed by angle and radius, folded into a kaleidoscope. 
 - `warp`: domain-warp strength; 0 gives a plain field.
 - `octaves`: fbm octaves, and the main cost knob.
 - `twist`: how much the radius shears the angle, setting the spiral.
-- `polarTable`: read each pixel's angle and radius from a table instead of computing them every frame. On by default: it is the same picture, measured 34% faster on an ESP32-S3, and costs 2 bytes per pixel. Turn it off on a device short of memory; the effect then computes the address and looks identical.
-- `polarTable16`: hold that table at full 16-bit precision, at 4 bytes per pixel instead of 2.
+- `polarTable`: read each pixel's angle and radius from a table instead of computing them every frame. On by default: measured 34% faster on an ESP32-S3, at 2 bytes per pixel. The 8-bit table quantizes the angle to 256 steps, so it is not pixel-identical to computing the address: a minority of channels differ, and only where the field is steepest. Turn it off on a device short of memory, and the effect computes the address per pixel instead.
+- `polarTable16`: hold that table at full 16-bit precision, at 4 bytes per pixel instead of 2. This one IS pixel-identical to computing the address, which a unit test pins.
 
 Cost scales with `octaves` and `warp`: at `warp` > 0 and `octaves` 2 it is roughly 4 noise samples per pixel. On a large wall set `octaves` to 1 or `warp` to 0, which degrades to a plain polar noise that still reads well.
 

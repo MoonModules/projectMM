@@ -1278,6 +1278,221 @@ inline void sphere(const Canvas& cv, pos_t cx, pos_t cy, pos_t cz, pos_t r, RGB 
     }
 }
 
+// --- Rendering below the output resolution -----------------------------------------------------
+//
+// The cost of a field effect is per light, so the cheapest way to afford one on a large fixture is
+// to compute FEWER lights and interpolate the rest. A field is smooth by construction, which is
+// exactly the property that makes this nearly free visually: at half resolution a noise field
+// carries a quarter of the samples and the eye cannot tell, because the values in between were
+// always going to be close to their neighbors.
+//
+// This is the `fieldScale` lever. Its companion is `fieldRate`, which is not a primitive: an effect
+// updates its field every N frames and lets the oscillators advance every frame, so the motion
+// stays smooth while the expensive part runs less often.
+//
+// **What it is worth depends on the field's cost per sample, and only that.** The stretch itself is
+// a fixed price per OUTPUT light (measured at 1.55 ns a sample, which is the bilinear arithmetic's
+// own floor), so it saves nothing on a field that was already cheap. Measured on a 64x64 layer:
+//
+//   | field | full | half | quarter |
+//   |---|---|---|---|
+//   | 2-octave fbm (1 noise sample) | 59 us | 34 us (1.7x) | 23 us (2.6x) |
+//   | curl (4 noise samples) | 212 us | 71 us (3.0x) | 32 us (6.6x) |
+//
+// So this is a lever for the expensive fields, the ones an S3 cannot otherwise afford, and a
+// caller reaching for it on a cheap one is paying the stretch for almost nothing.
+
+/// One destination column's blend: the two source columns and the weight between them.
+struct UpscaleTap { uint16_t a, b; uint16_t w; };
+
+/// Bilinearly stretch a smaller 16-bit plane over a larger one.
+///
+/// `src` is `sw x sh x sd` samples, three per light; `dst` is `dw x dh x dd`. Both are the effect's
+/// own planes, so this takes raw pointers rather than a Canvas: a field at half resolution is not a
+/// fixture and has no channel count of its own.
+///
+/// The z axis is interpolated too when both planes have depth, so a volumetric field can be
+/// computed on a coarse cube. A plane with `sd == 1` is stretched flat across the destination's
+/// depth instead, which is what a 2D field on a 3D fixture wants and costs no z work at all.
+///
+/// `taps` is the caller's scratch, `dw` entries: the per-column blend table, hoisted out of the
+/// inner loop. It belongs to the caller because this runs from tick(), where neither the heap nor
+/// a large frame is available. An earlier version held it as a 4096-entry local, which is 24 KB on
+/// a stack the ESP32 gives 12 KB (CONFIG_ESP_MAIN_TASK_STACK_SIZE), so the first stretched frame
+/// would have overflowed it. Pass fewer than `dw` entries and the call does nothing.
+inline void upscale16(uint16_t* dst, lengthType dw, lengthType dh, lengthType dd,
+                      const uint16_t* src, lengthType sw, lengthType sh, lengthType sd,
+                      UpscaleTap* taps, size_t tapCount) {
+    if (!dst || !src || dw <= 0 || dh <= 0 || dd <= 0 || sw <= 0 || sh <= 0 || sd <= 0) return;
+    if (!taps || tapCount < static_cast<size_t>(dw)) return;
+    // Map destination center to source in 16.16, so the edges land on the edges rather than
+    // drifting half a cell: (d + 0.5) * s / D - 0.5, the standard alignment.
+    //
+    // The mapping is computed ONCE per axis, not per pixel: it needs a 64-bit divide by a runtime
+    // extent, and doing that three times per output sample made the upscale cost more than the
+    // field it was meant to save (measured: a flat 22 us against a field that dropped from 59 to
+    // 15). The x row is a small table, y and z are stepped, so the inner loop is adds and shifts.
+    const auto axis = [](lengthType d, lengthType dn, lengthType sn) -> int32_t {
+        if (dn <= 1) return 0;
+        const int64_t num = (static_cast<int64_t>(d) * 2 + 1) * sn - dn;
+        return static_cast<int32_t>((num << 15) / dn);          // 16.16, may be negative at the edge
+    };
+    const auto clamp = [](int32_t v, lengthType n) -> size_t {
+        return static_cast<size_t>(v < 0 ? 0 : (v >= n ? n - 1 : v));
+    };
+    // One entry per destination column: the two source columns it blends and the weight between.
+    UpscaleTap* row = taps;
+    for (lengthType x = 0; x < dw; x++) {
+        const int32_t fx = axis(x, dw, sw);
+        row[x] = {static_cast<uint16_t>(clamp(fx >> 16, sw)),
+                  static_cast<uint16_t>(clamp((fx >> 16) + 1, sw)),
+                  static_cast<uint16_t>(fx & 0xFFFF)};
+    }
+    const bool interpZ = sd > 1;
+    for (lengthType z = 0; z < dd; z++) {
+        const int32_t fz = interpZ ? axis(z, dd, sd) : 0;
+        const int32_t z0 = fz >> 16;
+        const uint32_t wz = static_cast<uint32_t>(fz & 0xFFFF);
+        const size_t za = clamp(z0, sd), zb = interpZ ? clamp(z0 + 1, sd) : za;
+        for (lengthType y = 0; y < dh; y++) {
+            const int32_t fy = axis(y, dh, sh);
+            const int32_t y0 = fy >> 16;
+            const uint32_t wy = static_cast<uint32_t>(fy & 0xFFFF);
+            const size_t ya = clamp(y0, sh), yb = clamp(y0 + 1, sh);
+            for (lengthType x = 0; x < dw; x++) {
+                const UpscaleTap tap = row[x];
+                const uint32_t wx = tap.w;
+                const size_t xa = tap.a, xb = tap.b;
+                const size_t slA = za * sh * sw, slB = zb * sh * sw;
+                const size_t o = ((static_cast<size_t>(z) * dh + y) * dw + x) * 3;
+                for (uint8_t c = 0; c < 3; c++) {
+                    const auto at = [&](size_t sl, size_t yy, size_t xx) -> uint32_t {
+                        return src[(sl + yy * sw + xx) * 3 + c];
+                    };
+                    // SIGNED difference: `b - a` on unsigned wraps whenever the field descends,
+                    // and a wrapped row blended against an unwrapped one lands far outside the
+                    // input range (a 2x2 saddle of 0 and 100 produced 98354). A noise field is a
+                    // saddle almost everywhere, so this lit whole cells at full brightness.
+                    const auto lerp = [](uint32_t a, uint32_t b, uint32_t w) -> uint32_t {
+                        return static_cast<uint32_t>(static_cast<int64_t>(a)
+                             + (((static_cast<int64_t>(b) - static_cast<int64_t>(a))
+                                 * static_cast<int64_t>(w)) >> 16));
+                    };
+                    // Two rows of the near slice, then the far one, then between them.
+                    const uint32_t n0 = lerp(at(slA, ya, xa), at(slA, ya, xb), wx);
+                    const uint32_t n1 = lerp(at(slA, yb, xa), at(slA, yb, xb), wx);
+                    uint32_t v = lerp(n0, n1, wy);
+                    if (interpZ) {
+                        const uint32_t f0 = lerp(at(slB, ya, xa), at(slB, ya, xb), wx);
+                        const uint32_t f1 = lerp(at(slB, yb, xa), at(slB, yb, xb), wx);
+                        v = lerp(v, lerp(f0, f1, wy), wz);
+                    }
+                    dst[o + c] = static_cast<uint16_t>(v);
+                }
+            }
+        }
+    }
+}
+
+// --- Narrowing 16-bit state to the wire -------------------------------------------------------
+//
+// Everything above computes wider than it writes. A field is 16-bit, a trail plane is 16-bit, and
+// the wire is a byte, so somewhere the low half is thrown away. Doing that by `>> 8` is what makes
+// a slow gradient band: measured on a dark 2%-wide ramp across 64 lights, the 16-bit values hold 64
+// distinct levels and the truncation leaves 6.
+//
+// Dithering does not add levels. It moves the error somewhere the eye integrates it away:
+//
+//   - ORDERED (a 4x4 Bayer matrix, no state) spreads the error over SPACE. The mean lands right
+//     (28.14 against 28.01 ideal, versus truncation's 27.59) and the band edge dissolves into a
+//     texture. Free, and correct on a still image.
+//   - TEMPORAL (one byte of carry per channel) spreads it over TIME: the remainder of this frame's
+//     truncation is added to the next, so a pixel alternates between two levels in the proportion
+//     its true value asks for. Measured over 32 frames, eight neighbors a fraction of a byte apart
+//     resolve to 25.59, 25.75, 25.91, 26.06 ... where truncation reports 25, 25, 25, 26. This is
+//     what makes a slow fade smooth rather than stepped, and it is the reason a 16-bit pipeline is
+//     worth having at all on 8-bit LEDs.
+//
+// Temporal needs a byte of state per channel, which the caller owns: the state must persist across
+// frames and belongs to whoever owns the plane. Ordered needs none, which is why it is the fallback
+// for a caller with nowhere to keep it.
+
+/// How the low half of a 16-bit sample is disposed of on the way to a byte.
+enum class Dither : uint8_t {
+    None,      ///< truncate: the fastest, and what bands
+    Ordered,   ///< a 4x4 Bayer threshold on the pixel's position: stateless, spatial
+    Temporal,  ///< carry the error into the next frame: needs a byte per channel, and is smoothest
+};
+
+/// The 4x4 Bayer matrix, scaled to a 0..255 threshold. The standard recurrence, in its usual order.
+inline constexpr uint8_t kBayer4[16] = {
+      8, 136,  40, 168,
+    200,  72, 232, 104,
+     56, 184,  24, 152,
+    248, 120, 216,  88,
+};
+
+/// Narrow one 16-bit sample to a byte, dithered.
+///
+/// `carry` is the caller's per-channel state and is READ AND WRITTEN under Temporal; it is ignored
+/// by the other modes, so a caller with no state passes a dummy. `x`/`y` position the Bayer
+/// threshold under Ordered.
+inline uint8_t quantize(uint16_t v, Dither mode, uint8_t& carry,
+                        lengthType x = 0, lengthType y = 0, lengthType z = 0) {
+    switch (mode) {
+        case Dither::Ordered: {
+            // z ROTATES the matrix rather than indexing a third dimension. A 4x4x4 table would be
+            // the textbook answer and is the wrong trade here: it is 4x the constant data for a
+            // pattern the eye never resolves in depth, and a volume's slices only need to avoid
+            // sharing one threshold, not to be independently optimal. The rotation costs an add on
+            // an index that is already being computed, so a panel (z always 0) pays nothing.
+            const size_t cell = (static_cast<size_t>(y & 3) * 4) + (x & 3) + (static_cast<size_t>(z & 3) * 5);
+            const uint8_t thr = kBayer4[cell & 15];
+            const uint8_t hi = static_cast<uint8_t>(v >> 8);
+            // Round up when the discarded low byte beats this pixel's threshold. Saturating, so a
+            // sample already at full stays there rather than wrapping to black.
+            return (static_cast<uint8_t>(v & 0xFF) > thr && hi < 255) ? static_cast<uint8_t>(hi + 1) : hi;
+        }
+        case Dither::Temporal: {
+            // The remainder this frame could not express is added to the next, so the sequence of
+            // bytes averages to the true value. One byte of carry is enough: the error is always
+            // under one step, and letting it saturate rather than wrap keeps a bright pixel bright.
+            const uint32_t x16 = static_cast<uint32_t>(v) + carry;
+            const uint32_t hi = x16 >> 8;
+            const uint8_t out = static_cast<uint8_t>(hi > 255 ? 255 : hi);
+            const uint32_t used = static_cast<uint32_t>(out) << 8;
+            carry = static_cast<uint8_t>(x16 > used ? (x16 - used > 255 ? 255 : x16 - used) : 0);
+            return out;
+        }
+        case Dither::None:
+        default:
+            return static_cast<uint8_t>(v >> 8);
+    }
+}
+
+/// A 16-bit plane onto the canvas: the one narrowing step, dithered.
+///
+/// Three effects held a copy of this loop and they disagreed, which is the reason it is here: two
+/// dithered and one truncated, so the same slow fade banded in one effect and not the others. The
+/// `carry` plane is the dither's per-channel error, `w*h*d*3` bytes sized by the caller's prepare();
+/// pass nullptr for none and the narrowing truncates, which is what a plane with no fade wants.
+inline void blit16(const Canvas& cv, const uint16_t* p, lengthType w, lengthType h, lengthType d,
+                   uint8_t* carry) {
+    if (!p) return;
+    std::size_t i = 0;
+    uint8_t dummy = 0;
+    for (lengthType z = 0; z < d; z++)
+        for (lengthType y = 0; y < h; y++)
+            for (lengthType x = 0; x < w; x++, i += 3) {
+                const auto q = [&](std::size_t c) {
+                    uint8_t& st = carry ? carry[i + c] : dummy;
+                    return quantize(p[i + c], carry ? Dither::Temporal : Dither::None, st, x, y, z);
+                };
+                pixel(cv, {x, y, z}, RGB{q(0), q(1), q(2)});
+            }
+}
+
+
 // --- Velocity rules ----------------------------------------------------------------------------
 //
 // A velocity rule answers, for one point, which way the medium is moving there. They are plain

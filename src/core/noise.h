@@ -435,8 +435,18 @@ inline void curl16(uint32_t x, uint32_t y, uint32_t z, int32_t strength,
                      - static_cast<int32_t>(inoise16(x - eps, y, z));
     // The differences span roughly a quarter of the range at the default eps, so >>15 keeps the
     // result near `strength` rather than swamping it. A caller wanting a wilder field raises eps.
-    vx = (dy * strength) >> 15;
-    vy = (-dx * strength) >> 15;
+    //
+    // Widened to 64 bits for the product: a difference reaches +-65535 and `strength` is the
+    // caller's own number, so `dy * strength` overflows a signed 32-bit at a strength above 32768,
+    // which a large panel already approaches (a 768-wide fixture at full speed passes 12240, and a
+    // stalled frame scales that further). Signed overflow is undefined, so this is a real fault
+    // rather than a wrap; clamped on the way back down so a wild strength saturates instead.
+    const auto scaled = [](int32_t d, int32_t s) -> int32_t {
+        const int64_t v = (static_cast<int64_t>(d) * s) >> 15;
+        return static_cast<int32_t>(v > INT32_MAX ? INT32_MAX : (v < INT32_MIN ? INT32_MIN : v));
+    };
+    vx = scaled(dy, strength);
+    vy = scaled(-dx, strength);
 }
 
 /// The 2D form: the same field at a fixed z, which is what a panel wants.

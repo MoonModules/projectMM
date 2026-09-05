@@ -4,6 +4,7 @@
 #include "light/draw.h"
 
 #include <cstdlib>
+#include <vector>   // the upscale tests' planes: GCC needs it named
 
 using namespace mm;
 
@@ -495,4 +496,147 @@ TEST_CASE("a spiral is a radial flow with a turn added, so it both circles and e
     draw::flowSpiral(6, 3, 3, 3, 256, 256, sx, sy);
     CHECK(sx == rx);                                   // the outward part is the same
     CHECK(sy != ry);                                   // and the angular part is what it adds
+}
+
+// draw::quantize is the 16-to-8 boundary every wide pipeline ends at. What the modes buy is not
+// more levels, it is where the discarded half of the value goes.
+
+TEST_CASE("truncating a slow gradient bands it, and dithering restores its true mean") {
+    // A dark, slow ramp is the worst case: 64 distinct 16-bit values that truncation flattens to a
+    // handful of steps. Neither mode can add levels to a single frame; what ordered dithering fixes
+    // is the MEAN, so the band sits where the real value is rather than below it.
+    double trueSum = 0, truncSum = 0, ditherSum = 0;
+    uint8_t carry = 0;
+    for (int i = 0; i < 64; i++) {
+        const uint16_t v = static_cast<uint16_t>(65535 * 0.10 + (65535 * 0.02) * i / 64);
+        trueSum += v / 257.0;
+        truncSum += draw::quantize(v, draw::Dither::None, carry);
+        ditherSum += draw::quantize(v, draw::Dither::Ordered, carry, i % 8, i / 8);
+    }
+    const double trueMean = trueSum / 64, truncMean = truncSum / 64, ditherMean = ditherSum / 64;
+    CHECK(std::abs(ditherMean - trueMean) < std::abs(truncMean - trueMean));   // closer to the truth
+    CHECK(std::abs(ditherMean - trueMean) < 0.5);
+}
+
+TEST_CASE("temporal dithering resolves neighbors that a single frame cannot") {
+    // The property that makes a 16-bit pipeline worth having on 8-bit LEDs: eight values a fraction
+    // of a byte apart all truncate to the same one or two levels, but averaged over frames they
+    // separate, and the eye does that averaging. This is what turns a stepped fade into a smooth
+    // one.
+    constexpr int kLights = 8, kFrames = 32;
+    uint16_t v[kLights];
+    uint8_t carry[kLights] = {};
+    long sum[kLights] = {};
+    for (int i = 0; i < kLights; i++) v[i] = static_cast<uint16_t>(65535 * 0.10 + 40 * i);
+
+    for (int f = 0; f < kFrames; f++)
+        for (int i = 0; i < kLights; i++) sum[i] += draw::quantize(v[i], draw::Dither::Temporal, carry[i]);
+
+    // Every neighbor's average is distinct and ordered, which truncation cannot manage.
+    for (int i = 1; i < kLights; i++) {
+        const double lo = double(sum[i - 1]) / kFrames, hi = double(sum[i]) / kFrames;
+        CHECK(hi > lo);
+    }
+    // And each tracks its own true value, not merely its neighbor's order.
+    for (int i = 0; i < kLights; i++)
+        CHECK(std::abs(double(sum[i]) / kFrames - v[i] / 257.0) < 0.6);
+}
+
+TEST_CASE("a dithered value never wraps past full, so a bright light cannot flash black") {
+    uint8_t carry = 0;
+    for (int f = 0; f < 100; f++) {
+        CHECK(draw::quantize(65535, draw::Dither::Temporal, carry) == 255);
+        CHECK(draw::quantize(65535, draw::Dither::Ordered, carry, f % 4, f % 4) == 255);
+    }
+    // Black stays black under every mode: a carry must not light an unlit pixel.
+    uint8_t c2 = 0;
+    for (int f = 0; f < 100; f++) CHECK(draw::quantize(0, draw::Dither::Temporal, c2) == 0);
+}
+
+TEST_CASE("the ordered pattern differs per z, so a volume does not repeat one texture") {
+    // On a cube every slice would otherwise share a threshold, and the dither would read as a
+    // pattern stamped through the volume rather than as noise.
+    uint8_t carry = 0;
+    const uint16_t v = 0x2080;                      // a value squarely between two byte levels
+    bool differs = false;
+    for (lengthType z = 1; z < 4; z++)
+        for (lengthType y = 0; y < 4 && !differs; y++)
+            for (lengthType x = 0; x < 4 && !differs; x++)
+                if (draw::quantize(v, draw::Dither::Ordered, carry, x, y, z)
+                    != draw::quantize(v, draw::Dither::Ordered, carry, x, y, 0)) differs = true;
+    CHECK(differs);
+}
+
+// draw::upscale16 is the fieldScale lever: compute a smooth field at a fraction of the fixture's
+// resolution and interpolate the rest, which is nearly free visually because a field is smooth.
+
+TEST_CASE("an upscaled plane keeps a uniform value, so a flat field does not gain texture") {
+    std::vector<uint16_t> src(4 * 4 * 3, 30000), dst(16 * 16 * 3, 0);
+    std::vector<draw::UpscaleTap> taps(16);
+    draw::upscale16(dst.data(), 16, 16, 1, src.data(), 4, 4, 1, taps.data(), taps.size());
+    for (uint16_t v : dst) CHECK(v == 30000);
+}
+
+TEST_CASE("an upscaled ramp stays monotonic, so a gradient does not gain steps or reversals") {
+    // 8 wide, ramping left to right; stretched to 32. Every step must be non-decreasing, which is
+    // what a bilinear stretch guarantees and a nearest-neighbor one would not.
+    std::vector<uint16_t> src(8 * 3), dst(32 * 3, 0);
+    for (int x = 0; x < 8; x++)
+        for (int c = 0; c < 3; c++) src[x * 3 + c] = static_cast<uint16_t>(x * 8000);
+    std::vector<draw::UpscaleTap> taps(32);
+    draw::upscale16(dst.data(), 32, 1, 1, src.data(), 8, 1, 1, taps.data(), taps.size());
+    for (int x = 1; x < 32; x++) CHECK(dst[x * 3] >= dst[(x - 1) * 3]);
+    CHECK(dst[0] == 0);                                  // the ends reach the source's ends
+    CHECK(dst[31 * 3] == 7 * 8000);
+}
+
+TEST_CASE("a flat field stretches across a volume's depth without z work") {
+    // A 2D field on a 3D fixture: every slice gets the same picture, which is what a depth-1 source
+    // means, and it costs no interpolation along z.
+    std::vector<uint16_t> src(4 * 4 * 3), dst(8 * 8 * 4 * 3, 0);
+    for (size_t i = 0; i < src.size(); i++) src[i] = static_cast<uint16_t>(i * 700);
+    std::vector<draw::UpscaleTap> taps(8);
+    draw::upscale16(dst.data(), 8, 8, 4, src.data(), 4, 4, 1, taps.data(), taps.size());
+    const size_t slice = 8 * 8 * 3;
+    for (size_t z = 1; z < 4; z++)
+        for (size_t i = 0; i < slice; i++) REQUIRE(dst[i] == dst[z * slice + i]);
+}
+
+TEST_CASE("a volumetric field interpolates along z as well, so a coarse cube fills a fine one") {
+    // Two source slices, black and white. The destination's middle slices must land between them
+    // rather than snapping to one.
+    std::vector<uint16_t> src(2 * 2 * 2 * 3), dst(4 * 4 * 8 * 3, 0);
+    for (int z = 0; z < 2; z++)
+        for (int i = 0; i < 2 * 2 * 3; i++) src[z * 12 + i] = z ? 60000 : 0;
+    std::vector<draw::UpscaleTap> taps(4);
+    draw::upscale16(dst.data(), 4, 4, 8, src.data(), 2, 2, 2, taps.data(), taps.size());
+    const size_t slice = 4 * 4 * 3;
+    CHECK(dst[0] == 0);                                   // the near face is still black
+    CHECK(dst[7 * slice] == 60000);                       // the far face still white
+    CHECK(dst[3 * slice] > 5000);                         // and the middle is genuinely between
+    CHECK(dst[3 * slice] < 55000);
+}
+
+TEST_CASE("an upscaled saddle stays inside the values it was given, so a field that dips does not light up") {
+    // The fixtures above are uniform or monotone, so every interpolation ascends. A noise field is a
+    // saddle almost everywhere: along one diagonal it rises, along the other it falls. A descending
+    // pair is where an unsigned difference wraps, and blending a wrapped row against an unwrapped one
+    // lands far outside the input range (this fixture produced 98354 for inputs of 0 and 100).
+    std::vector<uint16_t> src(2 * 2 * 3, 0), dst(8 * 8 * 3, 0);
+    for (int c = 0; c < 3; c++) {
+        src[(0 * 2 + 0) * 3 + c] = 100;      // high, low
+        src[(1 * 2 + 1) * 3 + c] = 100;      // low,  high
+    }
+    std::vector<draw::UpscaleTap> taps(8);
+    draw::upscale16(dst.data(), 8, 8, 1, src.data(), 2, 2, 1, taps.data(), taps.size());
+    for (uint16_t v : dst) CHECK(v <= 100);
+}
+
+TEST_CASE("upscale16 declines rather than writing when the caller's tap table is too small") {
+    // The table is the caller's because tick() can neither allocate nor spare a large frame. A short
+    // one is a programming error, and the safe answer is to do nothing rather than run off its end.
+    std::vector<uint16_t> src(4 * 4 * 3, 30000), dst(16 * 16 * 3, 7);
+    std::vector<draw::UpscaleTap> taps(4);               // 16 columns need 16
+    draw::upscale16(dst.data(), 16, 16, 1, src.data(), 4, 4, 1, taps.data(), taps.size());
+    for (uint16_t v : dst) CHECK(v == 7);                // untouched
 }

@@ -23,6 +23,8 @@
 #include "light/moonlive/MoonLiveModifier.h"
 #include "light/moonlive/MoonLiveLayout.h"
 #include "light/effects/AuroraEffect.h"
+#include "light/effects/FluidEffect.h"
+#include "light/effects/NebulaEffect.h"
 #include "light/effects/TrailsEffect.h"
 #include "light/effects/PolarNoiseEffect.h"
 #include "light/effects/SpiralEffect.h"
@@ -223,6 +225,8 @@ static void registerScenarioTypes() {
     mm::ModuleFactory::registerType<mm::MoonLiveModifier>("MoonLiveModifier");
     mm::ModuleFactory::registerType<mm::MoonLiveLayout>("MoonLiveLayout");
     mm::ModuleFactory::registerType<mm::AuroraEffect>("AuroraEffect");
+    mm::ModuleFactory::registerType<mm::FluidEffect>("FluidEffect");
+    mm::ModuleFactory::registerType<mm::NebulaEffect>("NebulaEffect");
     mm::ModuleFactory::registerType<mm::TrailsEffect>("TrailsEffect");
     mm::ModuleFactory::registerType<mm::PolarNoiseEffect>("PolarNoiseEffect");
     mm::ModuleFactory::registerType<mm::SpiralEffect>("SpiralEffect");

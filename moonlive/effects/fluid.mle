@@ -1,0 +1,44 @@
+// Fluid: dye poured from sweeping jets and carried away by the flow.
+
+class FluidEffect {
+  byte jets = 3;
+  byte swirl = 90;
+  byte zoom = 30;
+  byte force = 140;
+  byte persistence = 170;
+
+  int dimensions() { return 3; }
+
+  string tags() { return "💫🖌️"; }
+
+  void defineControls() {
+    trail(1);
+    addControl("jets", jets, 1, 6); // how many places dye is poured in
+    addControl("swirl", swirl, 0, 255); // how fast the jets sweep
+    addControl("zoom", zoom, 1, 255); // the flow's cell size
+    addControl("force", force, 0, 255); // how hard the flow carries
+    addControl("persistence", persistence, 0, 255); // how long dye survives
+  }
+
+  void tick() {
+    int span = width;
+    if (height > span) { span = height; }
+
+    flowCurl(zoom, div(force * 4 * span, 64));
+    trailDecay(40 + persistence * persistence / 12);
+
+    int radius = div(span, 32) + 1;
+
+    for (int i = 0; i < jets; i = i + 1) {
+      int rate = 3 + div(swirl, 12) + i * 2;
+      int a = osc(rate, t, 2) + i * 10922;
+      int reach = 40 + div(osc(div(rate, 3) + 1, t, 1), 280);
+      int jx = div(width, 2) + div((cos(a) - 32768) * div(width - 2, 2) * reach, 255 * 32768);
+      int jy = div(height, 2) + div((sin(a) - 32768) * div(height - 2, 2) * reach, 255 * 32768);
+
+      for (int z = 0; z < depth; z = z + 1) {
+        emitTrail(jx, jy, z, mod(i * div(255, jets) + div(t, 64), 256), 255, radius);
+      }
+    }
+  }
+}

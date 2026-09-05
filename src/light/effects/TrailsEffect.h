@@ -59,17 +59,30 @@ public:
         plane_.resize(needed);
         // Same sample count but a different shape (8x16 -> 16x8, or a cube reshaped): resize() kept
         // the old samples, and they are laid out for the old geometry, so they would smear. Clear.
-        if (needed > 0 && needed == had && (w != planeW_ || h != planeH_ || d != planeD_))
-            std::memset(plane_.data(), 0, plane_.bytes());
         scratch_.resize(needed);
+        carry_.resize(needed);         // the dither's error, one byte per sample
+        // Same sample count but a different shape: BOTH planes hold samples laid out for the old
+        // geometry, and the ping-pong swaps the spare one in on the very next frame, so clearing
+        // only the live one leaves the stale picture one frame away. (A changed sample count needs
+        // no clear: resize() zero-fills when it reallocates.)
+        if (needed > 0 && needed == had && (w != planeW_ || h != planeH_ || d != planeD_)) {
+            std::memset(plane_.data(), 0, plane_.bytes());
+            std::memset(scratch_.data(), 0, scratch_.bytes());
+        }
         planeW_ = w; planeH_ = h; planeD_ = d;
+        started_ = false;      // the next tick is the first: it has no previous frame to measure
     }
 
     void tick() MM_NONBLOCKING override {
         if (!plane_ || !scratch_) return;               // a zero grid, or an allocation that failed
         const lengthType w = width(), h = height(), d = depth();
-        const uint32_t dt = elapsed() - lastMs_;
-        lastMs_ = elapsed();
+        // One reading of the clock, and a zero delta on the first tick: `lastMs_` has no previous
+        // frame to measure against, so `elapsed() - 0` would hand the flow the whole uptime and
+        // teleport the trail (and decay it to nothing) on the frame it starts.
+        const uint32_t now = elapsed();
+        const uint32_t dt = started_ ? now - lastMs_ : 0u;
+        lastMs_ = now;
+        started_ = true;
 
         // Two oscillators: one walks the emitters around, one breathes the flow's strength so the
         // composition swells and settles instead of running at one rate forever.
@@ -88,7 +101,7 @@ public:
 
         // 1. Transport: carry what is already there along the flow. Backward-sampled, so this both
         //    moves the trail and is what bends it, since neighboring pixels take different paths.
-        const uint32_t t = elapsed();
+        const uint32_t t = now;      // the same reading the delta came from
         const uint32_t cells = static_cast<uint32_t>(scale) * 256u;
         const int32_t strength = static_cast<int32_t>(bank_.value(1));   // the breathing multiplier
         const uint32_t step = (static_cast<uint32_t>(speed) * dt) / 8u;  // sub-pixels this frame
@@ -106,10 +119,12 @@ public:
 
         // 3. Emit: the bright heads, drawn after the transport so this frame's dots are sharp and
         //    only the previous ones have been carried.
-        emitDots(moved.data(), w, h, d);
+        emitDots(moved.data(), w, h, d, dt);
 
         // 4. Narrow onto the layer: the one place the wide plane meets the fixture's width.
-        blit(moved.data(), w, h, d);
+        // Dithered, like the other wide-plane effects: a trail's slow fade is exactly where an
+        // 8-bit truncation bands, and the carry is what removes it.
+        draw::blit16(canvas(), moved.data(), w, h, d, carry_ ? carry_.data() : nullptr);
     }
 
 private:
@@ -141,8 +156,24 @@ private:
     }
 
     /// The heads: a few bright points walking their own paths, each on the palette.
-    void emitDots(uint16_t* plane, lengthType w, lengthType h, lengthType d) {
+    ///
+    /// Emission is paced by TIME, not by frames, and the heads stay at full brightness.
+    ///
+    /// Writing a head every frame injects light at the framerate: measured, a 1200 fps device lit a
+    /// third more of the panel than a 60 fps one for the same settings. Scaling the brightness by
+    /// dt instead is the obvious fix and is WRONG here, because `writeWide` SETS the pixel rather
+    /// than accumulating into it: twenty dim writes do not add up to one bright one, and the fast
+    /// device came out twice as dark instead (1.96 the other way). So the head keeps its full
+    /// value and fires on a budget, with the remainder carried, which is the pattern
+    /// ParticlesEffect already uses for its fade.
+    void emitDots(uint16_t* plane, lengthType w, lengthType h, lengthType d, uint32_t dt) {
         const uint8_t n = dots < 1 ? 1 : (dots > kMaxDots ? kMaxDots : dots);
+        constexpr uint32_t kReferenceMs = 20;
+        emitCarry_ += dt;
+        if (emitCarry_ < kReferenceMs) return;      // not enough time has passed for a head yet
+        // Consume whole ticks and keep the remainder, so no time is lost to truncation and a slow
+        // frame does not emit a burst.
+        emitCarry_ %= kReferenceMs;
         const uint32_t walk = bank_.unitValue(0);
         for (uint8_t i = 0; i < n; i++) {
             // Each dot rides the same clock at its own offset and its own ratio, so they never
@@ -178,27 +209,16 @@ private:
         plane[off + 2] = static_cast<uint16_t>((c.b << 8) | c.b);
     }
 
-    /// The wide plane onto the layer, taking each channel's high byte. The one narrowing step.
-    void blit(const uint16_t* p, lengthType w, lengthType h, lengthType d) {
-        const draw::Canvas cv = canvas();
-        const std::size_t samples = static_cast<std::size_t>(w) * h * d * 3;
-        std::size_t i = 0;
-        for (lengthType z = 0; z < d; z++)
-            for (lengthType y = 0; y < h; y++)
-                for (lengthType x = 0; x < w; x++, i += 3) {
-                    if (i + 2 >= samples) return;
-                    draw::pixel(cv, {x, y, z}, RGB{static_cast<uint8_t>(p[i] >> 8),
-                                                   static_cast<uint8_t>(p[i + 1] >> 8),
-                                                   static_cast<uint8_t>(p[i + 2] >> 8)});
-                }
-    }
 
     ScratchBuffer<uint16_t> plane_{*this};     ///< the trail itself, three samples per light
     ScratchBuffer<uint16_t> scratch_{*this};   ///< advect's destination; the two alternate roles
+    ScratchBuffer<uint8_t>  carry_{*this};     ///< the dither's per-channel error
     bool                    front_ = true;     ///< which of the two currently holds the trail
     OscillatorBank<2>       bank_;
     lengthType              planeW_ = 0, planeH_ = 0, planeD_ = 0;
     uint32_t                lastMs_ = 0;
+    bool                    started_ = false;   ///< false until a frame has been timed
+    uint32_t                emitCarry_ = 0;     ///< time owed to the emitters, in ms
 };
 
 }  // namespace mm
