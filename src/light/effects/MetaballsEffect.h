@@ -52,7 +52,7 @@ public:
         const uint8_t n = count < MAX_BALLS ? count : MAX_BALLS;
         int16_t bx[MAX_BALLS];
         int16_t by[MAX_BALLS];
-        draw::blobCentres(BLOB_PATHS, n, t, w, h, bx, by);
+        draw::blobCenters(BLOB_PATHS, n, t, w, h, bx, by);
 
         // Field strength: sum of r^2 / (d^2 + 1)
         int32_t r2 = static_cast<int32_t>(radius) * radius;

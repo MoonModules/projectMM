@@ -535,12 +535,18 @@ TEST_CASE("x86_64: callLabel(L) patches to rel32 target - (site + 5)") {
         if (A.bytes()[i] == 0xE8) { callAt = i; break; }
     }
     REQUIRE(callAt != size_t(-1));
-    // Now bind the label just after the call and finalize; rel = 0.
+    // Bind the label after the call and finalize. rel is measured from the END of the E8
+    // instruction to the label, so it counts whatever callLabel emits AFTER the call: the pool
+    // restore that delivers a script function's return value. Asserting rel == 0 pinned the old
+    // shape, where the call was the last thing emitted.
+    const size_t afterCall = callAt + 5;
     A.bind(l);
     A.finalize();
+    const int32_t expected = static_cast<int32_t>(A.size() - afterCall);
     int32_t rel;
     std::memcpy(&rel, A.bytes() + callAt + 1, 4);
-    CHECK(rel == 0);
+    CHECK(rel == expected);
+    CHECK(rel > 0);        // the restore is emitted between the call and the label
 }
 
 // =================================================================================================

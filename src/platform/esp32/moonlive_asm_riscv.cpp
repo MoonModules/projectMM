@@ -61,11 +61,33 @@ void RiscvAssembler::bind(Label l) { if (l < kMaxLabels) labelPos_[l] = static_c
 // Pass the host arguments on (the contract is with IrOp::CallScript in core). The RISC-V delta:
 // there is no window rotation, so the values go straight into the argument registers the callee's
 // prologue reads.
-void RiscvAssembler::callLabel(Label l) {
+// The encoders below are defined with the arithmetic ops further down; declared here so callLabel
+// can sit with its sibling call-related routines rather than after them.
+static uint32_t encAddi(uint8_t rd, uint8_t rs1, int32_t imm);
+static uint32_t encSw(uint8_t rs2, uint8_t rs1, int32_t imm);
+static uint32_t encLw(uint8_t rd, uint8_t rs1, int32_t imm);
+
+void RiscvAssembler::callLabel(Label l, Reg d, bool take) {
+    // The same preservation call() gives a builtin: the whole vreg pool and ra to the stack, the
+    // callee's a0 stashed in t6 past the restore. Without it a value computed before the call and
+    // used after it, `a() + b()`, read the second call's result twice.
+    emit32(encAddi(2, 2, -80));                        // addi sp, sp, -80
+    emit32(encSw(1, 2, 76));                            // sw ra, 76(sp)
+    static const uint8_t saved[] = {10, 11, 12, 13, 14, 5, 6, 7, 28, 29, 30, 15, 16, 17};
+    int off = 0;
+    for (uint8_t r : saved) { emit32(encSw(r, 2, off)); off += 4; }
+    // The host arguments are reloaded from the FRAME (s0-relative), so the sp move above does not
+    // disturb where they come from.
     for (uint8_t v = 0; v < kHostArgSlots; v++) spillLoad(static_cast<Reg>(v), hostArgSlot(v));
     addFixup(len_, l, FixKind::Jal);
     // jal x1, 0: opcode 0x6f, rd = 1. The 20-bit immediate is scattered by the patcher.
     emit32(0x000000efu);
+    if (take) emit32(encAddi(kScratchFn, 10, 0));      // mv t6, a0
+    off = 0;
+    for (uint8_t r : saved) { emit32(encLw(r, 2, off)); off += 4; }
+    emit32(encLw(1, 2, 76));
+    emit32(encAddi(2, 2, 80));
+    if (take) emit32(encAddi(xr(d), kScratchFn, 0));   // mv dst, t6
 }
 
 // Record a pending branch fixup, guarding the fixed table (overflow_ rather than an OOB write).

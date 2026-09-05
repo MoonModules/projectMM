@@ -479,3 +479,90 @@ TEST_CASE("RmtLedDriver tick is crash-safe for every pin configuration") {
     }
     CHECK(true);                        // reached here ⇒ no crash in any subcase
 }
+
+// --- wire timing ------------------------------------------------------------
+//
+// A strip's bit rate is not universal: the shipped default satisfies WS2812, WS2812B and SK6812
+// together, but a 12V WS2811 in its low-speed mode wants twice the bit cell and reads the default
+// as noise past the first few lights (issue #94). The `timing` control is what lets a user say so.
+
+TEST_CASE("the default timing is the one that drives WS2812B and SK6812 alike") {
+    mm::RmtLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    wire(d, src, corr, 8);
+    const auto& c = d.wireTimingForTest();
+    CHECK(c.t0h_ns == 350);
+    CHECK(c.t1h_ns == 700);
+    CHECK(c.period_ns == 1250);
+}
+
+TEST_CASE("selecting 400 kHz doubles the bit cell, which is what a 12V WS2811 strip decodes") {
+    mm::RmtLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    d.timing = 1;
+    wire(d, src, corr, 8);
+    const auto& c = d.wireTimingForTest();
+    CHECK(c.t0h_ns == 500);
+    CHECK(c.t1h_ns == 1200);
+    CHECK(c.period_ns == 2500);
+}
+
+TEST_CASE("the WS2811 fast mode keeps the 1.25 us cell with narrower pulses") {
+    mm::RmtLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    d.timing = 2;
+    wire(d, src, corr, 8);
+    const auto& c = d.wireTimingForTest();
+    CHECK(c.t0h_ns == 250);
+    CHECK(c.t1h_ns == 600);
+    CHECK(c.period_ns == 1250);
+}
+
+TEST_CASE("custom timing is taken as the user typed it") {
+    // The escape hatch: a strip whose datasheet matches no preset is a control change rather than a
+    // firmware release, and the numbers a user finds by trying are ones they can report back.
+    mm::RmtLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    d.timing = 3;
+    d.t0hNs = 400; d.t1hNs = 850; d.periodNs = 1400;
+    wire(d, src, corr, 8);
+    const auto& c = d.wireTimingForTest();
+    CHECK(c.t0h_ns == 400);
+    CHECK(c.t1h_ns == 850);
+    CHECK(c.period_ns == 1400);
+}
+
+TEST_CASE("custom timing that no chip could decode is ordered rather than emitted") {
+    // A "1" pulse shorter than a "0" pulse, or a cell too short to contain the pulse, is not a
+    // slow strip: it is a typo. Emitting it would drive the line with something undecodable, so the
+    // values are ordered into a shape a receiver can at least read.
+    mm::RmtLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    d.timing = 3;
+    d.t0hNs = 900; d.t1hNs = 300; d.periodNs = 400;
+    wire(d, src, corr, 8);
+    const auto& c = d.wireTimingForTest();
+    CHECK(c.t1h_ns > c.t0h_ns);
+    CHECK(c.period_ns > c.t1h_ns);
+}
+
+TEST_CASE("switching timing takes effect without reconfiguring the pins") {
+    // Live reconfiguration: a user trying presets against a strip must not have to re-enter their
+    // wiring between attempts, and the frame after the change carries the new timing.
+    mm::RmtLedDriver d;
+    mm::Buffer src;
+    mm::Correction corr;
+    std::strncpy(d.pins, "2,4", sizeof(d.pins));
+    wire(d, src, corr, 18);
+    CHECK(d.wireTimingForTest().period_ns == 1250);
+
+    d.timing = 1;
+    d.applyState();                                  // what a control change triggers
+    CHECK(d.wireTimingForTest().period_ns == 2500);
+    CHECK(std::strcmp(d.pins, "2,4") == 0);          // and the wiring is untouched
+}

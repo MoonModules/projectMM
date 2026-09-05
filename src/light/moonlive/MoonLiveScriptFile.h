@@ -11,6 +11,11 @@ namespace mm::moonlive {
 /// Where a scripted module's script file lives. One fixed directory, the way `/.config` holds
 /// persisted state: a module stores a NAME, not a path, so it cannot reach outside this folder and
 /// the File Manager has one obvious place to look.
+/// The USER's scripts, which the UI writes and the loader prefers. An edit made in the device's
+/// own editor lands here, so a factory script of the same name is shadowed from that moment on:
+/// pushing a new version of a shipped script to `kFactoryScriptDir` will NOT be seen once a user
+/// has saved their own copy. (Two names differing only in case are one file on a case-insensitive
+/// desktop and two on the device's LittleFS, which makes that shadowing easy to miss.)
 inline constexpr const char* kScriptDir = "/moonlive";
 
 /// Where the FACTORY scripts land: the ones the picker offers from the shipped catalog and the UI

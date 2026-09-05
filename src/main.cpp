@@ -19,6 +19,8 @@
 #include "light/effects/LinesEffect.h"
 #include "light/effects/RainbowEffect.h"
 #include "light/effects/WaveEffect.h"
+#include "light/effects/FluidEffect.h"
+#include "light/effects/NebulaEffect.h"
 #include "light/effects/NoiseEffect.h"
 #include "light/effects/MovingHeadEffect.h"
 #include "light/effects/PacmanEffect.h"
@@ -44,8 +46,10 @@
 #include "light/effects/SolidEffect.h"
 #include "light/effects/StarSkyEffect.h"
 #include "light/effects/SdfShapesEffect.h"
+#include "light/effects/AuroraEffect.h"
 #include "light/effects/PolarNoiseEffect.h"
 #include "light/effects/WaterRippleEffect.h"
+#include "light/effects/TrailsEffect.h"
 #include "light/effects/TunnelEffect.h"
 #include "light/effects/EchoEffect.h"
 #include "light/effects/DissolveEffect.h"
@@ -67,7 +71,6 @@
 #include "light/effects/RandomEffect.h"
 #include "light/effects/LissajousEffect.h"
 #include "light/effects/RubiksCubeEffect.h"
-#include "light/effects/Noise2DEffect.h"
 #include "light/effects/BouncingBallsEffect.h"
 #include "light/effects/TetrixEffect.h"
 #include "light/effects/TextEffect.h"
@@ -223,7 +226,6 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::MoonLiveEffect>("MoonLiveEffect", "light/MoonLiveEffect.md");
     mm::ModuleFactory::registerType<mm::NetworkReceiveEffect>("NetworkReceiveEffect", "light/effects.md#networkreceive");
     mm::ModuleFactory::registerType<mm::NoiseEffect>("NoiseEffect", "light/effects.md#noise");
-    mm::ModuleFactory::registerType<mm::Noise2DEffect>("Noise2DEffect", "light/effects.md#noise2d");
     mm::ModuleFactory::registerType<mm::NoiseMeterEffect>("NoiseMeterEffect", "light/effects.md#noisemeter");
     mm::ModuleFactory::registerType<mm::PaintBrushEffect>("PaintBrushEffect", "light/effects.md#paintbrush");
     mm::ModuleFactory::registerType<mm::ParticlesEffect>("ParticlesEffect", "light/effects.md#particles");
@@ -237,8 +239,12 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::SineEffect>("SineEffect", "light/effects.md#sine");
     mm::ModuleFactory::registerType<mm::SolidEffect>("SolidEffect", "light/effects.md#solid");
     mm::ModuleFactory::registerType<mm::SdfShapesEffect>("SdfShapesEffect", "light/effects.md#sdfshapes");
+    mm::ModuleFactory::registerType<mm::AuroraEffect>("AuroraEffect", "light/effects.md#aurora");
     mm::ModuleFactory::registerType<mm::PolarNoiseEffect>("PolarNoiseEffect", "light/effects.md#polarnoise");
     mm::ModuleFactory::registerType<mm::WaterRippleEffect>("WaterRippleEffect", "light/effects.md#waterripple");
+    mm::ModuleFactory::registerType<mm::FluidEffect>("FluidEffect", "light/effects.md#fluid");
+    mm::ModuleFactory::registerType<mm::NebulaEffect>("NebulaEffect", "light/effects.md#nebula");
+    mm::ModuleFactory::registerType<mm::TrailsEffect>("TrailsEffect", "light/effects.md#trails");
     mm::ModuleFactory::registerType<mm::TunnelEffect>("TunnelEffect", "light/effects.md#tunnel");
     mm::ModuleFactory::registerType<mm::EchoEffect>("EchoEffect", "light/effects.md#echo");
     mm::ModuleFactory::registerType<mm::DissolveEffect>("DissolveEffect", "light/effects.md#dissolve");

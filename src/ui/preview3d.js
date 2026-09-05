@@ -866,7 +866,7 @@ function drawVerts() {
     // panel (¾ light, ¼ gap) at any size — a big grid is spatially downsampled (the device
     // sends ~1800 lattice points), so sizing by the full dimension left each dot a fraction of
     // its cell with big gaps. The sampled points fill the bounding box uniformly, so the pitch
-    // between neighbours (in grid units) is (boxVolume / count)^(1/activeDims): the square root
+    // between neighbors (in grid units) is (boxVolume / count)^(1/activeDims): the square root
     // for a flat grid, the CUBE root for a 3D volume (a cube's points spread over depth, so a
     // flat √ undercounts the pitch and the dots come out too small — the 3D-gap bug). Convert
     // that grid pitch to on-screen pixels (canvas px per grid unit) and take 75% of it. The
@@ -885,22 +885,45 @@ function drawVerts() {
     // Fade them by base sprite size — full rings ≥8px, gone ≤4px — so the layout shows on
     // small/zoomed grids and the lit pattern reads cleanly when dense. Lit dots are never
     // faded (their alpha ignores uRingFade in the shader).
-    const ringFade = Math.max(0, Math.min(1, (pointSize - 4) / 4));
+    let ringFade = Math.max(0, Math.min(1, (pointSize - 4) / 4));
+    // A VOLUME needs the opposite of a flat grid. On a panel the placeholders sit in one plane and
+    // an opaque one costs nothing; in a cube every dark LED is in front of some other LED, so at a
+    // large dot size the placeholders stack into a solid grey wall and the lit pattern inside it
+    // cannot be seen at all. Fade them by the depth they have to be seen through, and further as
+    // the dots grow: the layout still reads, and the effect shows through it.
+    if (dims > 2) {
+        // A volume stacks its placeholders: seen through N slices they compose as 1-(1-a)^N, so
+        // the same alpha that is a light tint on a panel is a wall in a cube. Solve for the per-LED
+        // value that holds the TOTAL at a quarter whatever the depth, so the layout stays readable
+        // without hiding the effect inside it. (The occlusion itself is fixed above, by not writing
+        // depth; this is what keeps the remaining tint from adding up.)
+        const kVolumeHaze = 0.25;
+        const perLed = 1 - Math.pow(1 - kVolumeHaze, 1 / Math.max(1, bZ));
+        ringFade = Math.min(ringFade, perLed / 0.22);   // 0.22 is the shader's base alpha
+    }
     gl.uniform1f(glLocs.uRingFade, ringFade);
 
-    // Two passes so lit LEDs always sit ABOVE the grey placeholders (your "lights should layer
-    // above the circles"). On a flat grid all LEDs share a z-plane, so a single pass let draw
-    // order + z-fighting clip a lit dot behind a neighbour's placeholder. Pass 1 draws the
-    // off-LED placeholders and writes depth; pass 2 draws the lit LEDs with depthFunc LEQUAL
-    // and depth-WRITE off — so a lit dot beats a co-located placeholder (equal depth passes)
-    // yet lit dots still depth-sort against each other in a true 3D cube under any pan/tilt.
-    gl.uniform1f(glLocs.uLitPass, 0.0);                 // placeholders (write depth)
-    gl.drawArrays(gl.POINTS, 0, lastVertCount);
-    gl.depthFunc(gl.LEQUAL);
+    // Two passes so lit LEDs always sit ABOVE the grey placeholders. On a flat grid all LEDs share
+    // a z-plane, so a single pass let draw order + z-fighting clip a lit dot behind a neighbor's
+    // placeholder. Pass 1 draws the off-LED placeholders, pass 2 the lit ones with depthFunc LEQUAL
+    // so they land on top.
+    // Placeholders do NOT write depth. They are decoration, not geometry: an unlit LED that
+    // occupies the depth buffer HIDES every lit LED behind it, however transparent it looks, since
+    // the depth test rejects the later fragment before its alpha is ever considered. That is what
+    // made a cube a solid wall at large dot sizes: not the grey, the depth. With the write off, a
+    // dark LED tints what is behind it and nothing more, so a volume is seen through.
+    // Pass 1, placeholders: depth TEST on (they hide behind lit LEDs in front of them) but depth
+    // WRITE off, so an unlit LED never occupies the buffer.
     gl.depthMask(false);
-    gl.uniform1f(glLocs.uLitPass, 1.0);                 // lit LEDs, on top
+    gl.uniform1f(glLocs.uLitPass, 0.0);
     gl.drawArrays(gl.POINTS, 0, lastVertCount);
+    // Pass 2, lit LEDs: depth write back ON, so they depth-sort against EACH OTHER in a volume.
+    // Leaving it off here was the bug's other half: a lit LED at the back of a cube then drew over
+    // one at the front, because nothing recorded which was nearer.
     gl.depthMask(true);
+    gl.depthFunc(gl.LEQUAL);                            // beats a co-located placeholder
+    gl.uniform1f(glLocs.uLitPass, 1.0);
+    gl.drawArrays(gl.POINTS, 0, lastVertCount);
     gl.depthFunc(gl.LESS);
 
     drawBoundingBox(mvp);
@@ -930,7 +953,7 @@ function drawVerts() {
 // A rest beam points along -Z, OUT of the layout toward the viewer. Z is the scene's depth axis
 // (architecture.md: 2D is the (x,y) face and 3D adds slices across Z), so X and Y are where the
 // fixtures are ARRANGED and Z is the only axis free to shine along. Aiming down -Y instead would
-// send each head along the axis its neighbours occupy, which is what a 1 x N chain of heads made
+// send each head along the axis its neighbors occupy, which is what a 1 x N chain of heads made
 // obvious: every beam ran through the next fixture.
 //
 // Pan then sweeps in the (x,z) plane and tilt lifts toward +Y, so a centered head points straight
@@ -1137,7 +1160,7 @@ function drawBoundingBox(mvp) {
 // rendered onto a 2D canvas laid over #preview: project the light's position through the
 // SAME mvp the GL render uses (so labels track LEDs in 2D AND 3D layouts), to a screen
 // pixel, and draw its number. Legibility LOD: a number is drawn only if it FITS INSIDE its
-// light bulb (the on-screen sprite) — so it never overflows onto neighbours. The font is
+// light bulb (the on-screen sprite), so it never overflows onto neighbors. The font is
 // sized to the sprite, so as you zoom in (sprites grow, depth-corrected) more numbers fit
 // and appear; zoomed out on a dense grid they don't fit and stay hidden. Behind-camera
 // points (w ≤ 0) are skipped — essential for 3D.

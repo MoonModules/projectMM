@@ -56,12 +56,20 @@ namespace mm { using namespace ::mm; using namespace ::mm::moonlive;
                                    // narrow form's 4-bit offset field could not reach and
                                    // silently wrapped to offset 0. One byte per sys-var read.
 #define MM_GOLD_FXLOOP_LEN  190u
-#define MM_GOLD_FXLOOP_HASH 307181036u
-#define MM_GOLD_FX_HASH   2796457628u
+// The two hashes moved 2026-09-04 when kMaxLocals went 16 -> 32 (the first volumetric script needed
+// 19 slots). A wider frame changes the prologue's reserve and every slot offset, so identical source
+// emits different bytes: a frame-offset change is exactly what this hash exists to surface, and it
+// did. The LENGTHS are unchanged, which is the evidence it is offsets rather than different code.
+#define MM_GOLD_FXLOOP_HASH 1859543084u
+#define MM_GOLD_FX_HASH   4201448700u
 // `mov.n a2, aN`: two bytes, {(dst << 4) | 0xd, src}. a2 is the windowed ABI's return register and
 // where R0 lives, so the first byte is 0x2d whatever the source. This backend emits BYTES in memory
 // order (not 24-bit words), so the pair is read as it sits.
 #define MM_ISA_RET_WRITES_RETREG(p) ((p)[0] == 0x2du)
+// The caller-side stash: `s32i a10, a1, kResultSlot`. The callee returns in the CALLER's a10
+// (call8 rotates the window by 8), and the pool restore below is about to overwrite it, so it is
+// parked in the frame first. Bytes: (10<<4)|2 = 0xa2, then 0x61, then the word offset 8.
+#define MM_ISA_STASHES_RESULT(p) ((p)[0] == 0xa2u && (p)[1] == 0x61u && (p)[2] == 0x08u)
 #define MM_ISA_RET_STRIDE 1
 #define MM_ISA_LOWER mm_xtensa_backend::mm::moonlive::lowerToBytes
 // The assembler type itself, so the stack-budget check can measure the object the compile path

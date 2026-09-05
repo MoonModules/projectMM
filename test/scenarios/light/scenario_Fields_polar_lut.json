@@ -1,0 +1,316 @@
+{
+  "name": "scenario_Fields_polar_lut",
+  "module": "PolarLut",
+  "mode": "mutate",
+  "also": [
+    "PolarNoiseEffect",
+    "AuroraEffect",
+    "GridLayout",
+    "Layer"
+  ],
+  "description": "The polar address table through a running pipeline: it is built for the grid a radial effect draws on, rebuilt when that grid resizes, dropped when the effect switches it off, and doubled when full precision is asked for. What the steps pin is that every one of those transitions happens live, under a rendering pipeline, without a reboot and without a stale table addressing pixels that no longer exist. The frame times are recorded per target and read as a TREND rather than as a pass mark: on a desktop the table and the computed address measure the same, because an out-of-order core with a large cache computes atan16 and dist16 about as fast as it loads two arrays. The 34% the table is worth was measured on an ESP32-S3, and it is an in-order-core property, so the contracts that matter here are the device ones. Aurora is measured last because it samples the field several times per pixel, which is what sets the fps a composition of this shape can promise.",
+  "fixture": [
+    {
+      "name": "fix-layouts",
+      "op": "add_module",
+      "id": "Layouts",
+      "type": "Layouts"
+    },
+    {
+      "name": "fix-layers",
+      "op": "add_module",
+      "id": "Effects",
+      "type": "Effects",
+      "props": {
+        "layouts": "Layouts"
+      }
+    },
+    {
+      "name": "fix-drivers",
+      "op": "add_module",
+      "id": "Drivers",
+      "type": "Drivers",
+      "props": {
+        "effects": "Effects"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "name": "canvas-clear-layers",
+      "description": "Self-canvas: clear and rebuild the pipeline this scenario assumes, so it runs from any device state.",
+      "op": "clear_children",
+      "id": "Effects"
+    },
+    {
+      "name": "canvas-clear-layouts",
+      "op": "clear_children",
+      "id": "Layouts"
+    },
+    {
+      "name": "canvas-grid",
+      "description": "A 64x64 panel: large enough that the address table is real memory (8 KB narrow) and small enough to run on every target.",
+      "op": "add_module",
+      "id": "Grid",
+      "type": "GridLayout",
+      "parent_id": "Layouts",
+      "props": {
+        "width": 64,
+        "height": 64
+      }
+    },
+    {
+      "name": "canvas-layer",
+      "op": "add_module",
+      "id": "Layer",
+      "type": "Layer",
+      "parent_id": "Effects"
+    },
+    {
+      "name": "add-polarnoise",
+      "description": "A radial effect on the layer. It builds the table in prepare(), so the allocation happens here rather than on the first rendered frame.",
+      "op": "add_module",
+      "id": "PolarNoise",
+      "type": "PolarNoiseEffect",
+      "parent_id": "Layer",
+      "measure": true,
+      "contract": {
+        "desktop-macos": {
+          "tick_us": 4000,
+          "free_heap": 0,
+          "set_by": "2026-09-04",
+          "reason": "initial contract: PolarNoise at 64x64 through the address table"
+        }
+      },
+      "observed": {
+        "desktop-macos": {
+          "tick_us": {
+            "p50": 289,
+            "p95": 387,
+            "min": 189,
+            "max": 387,
+            "n": 16,
+            "samples": [289, 189, 281, 384, 274, 387, 283, 278, 281, 289, 325, 292, 302, 291, 286, 293]
+          },
+          "last_updated": "2026-09-05"
+        }
+      }
+    },
+    {
+      "name": "table-off",
+      "description": "Switch the table off under a running effect: the effect computes each pixel's angle and radius instead, which is the path a device short of memory takes. The picture is unchanged, which unit_PolarLut_equivalence pins bit-for-bit at full precision; what this step proves is that the switch takes effect live.",
+      "op": "set_control",
+      "id": "PolarNoise",
+      "key": "polarTable",
+      "value": false,
+      "measure": true,
+      "contract": {
+        "desktop-macos": {
+          "tick_us": 6000,
+          "free_heap": 0,
+          "set_by": "2026-09-04",
+          "reason": "initial contract: the computed-address fallback, slower than the table above"
+        }
+      },
+      "observed": {
+        "desktop-macos": {
+          "tick_us": {
+            "p50": 281,
+            "p95": 313,
+            "min": 183,
+            "max": 313,
+            "n": 16,
+            "samples": [183, 189, 194, 279, 273, 275, 284, 281, 281, 313, 297, 290, 297, 283, 288, 291]
+          },
+          "last_updated": "2026-09-05"
+        }
+      }
+    },
+    {
+      "name": "table-on",
+      "description": "Back to the table, which prepare() rebuilds. Confirms the switch is live in both directions rather than one-way.",
+      "op": "set_control",
+      "id": "PolarNoise",
+      "key": "polarTable",
+      "value": true,
+      "measure": true,
+      "contract": {
+        "desktop-macos": {
+          "tick_us": 4000,
+          "free_heap": 0,
+          "set_by": "2026-09-04",
+          "reason": "initial contract: back to the table cost"
+        }
+      },
+      "observed": {
+        "desktop-macos": {
+          "tick_us": {
+            "p50": 282,
+            "p95": 303,
+            "min": 168,
+            "max": 303,
+            "n": 16,
+            "samples": [168, 180, 177, 279, 274, 274, 282, 281, 282, 288, 289, 289, 303, 284, 286, 289]
+          },
+          "last_updated": "2026-09-05"
+        }
+      }
+    },
+    {
+      "name": "table-wide",
+      "description": "Full 16-bit precision: 4 bytes per pixel instead of 2, so the table doubles at this grid. Frame time barely moves on any target, which is what makes precision a memory decision rather than a speed one.",
+      "op": "set_control",
+      "id": "PolarNoise",
+      "key": "polarTable16",
+      "value": true,
+      "measure": true,
+      "contract": {
+        "desktop-macos": {
+          "tick_us": 4200,
+          "free_heap": 0,
+          "set_by": "2026-09-04",
+          "reason": "initial contract: the wide table, near the narrow one in time"
+        }
+      },
+      "observed": {
+        "desktop-macos": {
+          "tick_us": {
+            "p50": 281,
+            "p95": 301,
+            "min": 168,
+            "max": 301,
+            "n": 16,
+            "samples": [168, 175, 179, 278, 274, 273, 284, 277, 282, 285, 286, 286, 301, 281, 287, 290]
+          },
+          "last_updated": "2026-09-05"
+        }
+      }
+    },
+    {
+      "name": "resize-down",
+      "description": "Shrink the grid under a running effect. The table is rebuilt for the new geometry in prepare(), not carried over: a stale table would address pixels that no longer exist.",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 32,
+      "measure": true,
+      "contract": {
+        "desktop-macos": {
+          "tick_us": 2400,
+          "free_heap": 0,
+          "set_by": "2026-09-04",
+          "reason": "initial contract: half the pixels, half the table"
+        }
+      },
+      "observed": {
+        "desktop-macos": {
+          "tick_us": {
+            "p50": 140,
+            "p95": 147,
+            "min": 83,
+            "max": 147,
+            "n": 16,
+            "samples": [83, 86, 88, 138, 137, 137, 142, 140, 138, 144, 141, 144, 147, 141, 144, 143]
+          },
+          "last_updated": "2026-09-05"
+        }
+      }
+    },
+    {
+      "name": "resize-up",
+      "description": "Grow it again, the direction that has to allocate rather than free. On a device without PSRAM this is where prepare() weighs the table against free heap minus the reserve that protects stacks, WiFi and HTTP, and declines it rather than taking the last of the heap; the effect keeps rendering through the computed address.",
+      "op": "set_control",
+      "id": "Grid",
+      "key": "height",
+      "value": 96,
+      "measure": true,
+      "contract": {
+        "desktop-macos": {
+          "tick_us": 7000,
+          "free_heap": 0,
+          "set_by": "2026-09-04",
+          "reason": "initial contract: 64x96 with the wide table"
+        }
+      },
+      "observed": {
+        "desktop-macos": {
+          "tick_us": {
+            "p50": 420,
+            "p95": 501,
+            "min": 250,
+            "max": 501,
+            "n": 16,
+            "samples": [250, 257, 264, 422, 413, 410, 501, 413, 417, 422, 421, 428, 444, 420, 451, 442]
+          },
+          "last_updated": "2026-09-05"
+        }
+      }
+    },
+    {
+      "name": "remove-polarnoise",
+      "description": "Take PolarNoise off the layer before Aurora goes on it. Adding a second effect to a layer does not replace the first: both render, so the step below would have measured the pair and reported it as Aurora's cost.",
+      "op": "remove_module",
+      "id": "PolarNoise"
+    },
+    {
+      "name": "swap-to-aurora",
+      "description": "Aurora alone on the layer: three layers of warped noise over the same address, each on its own oscillator. Several field samples per pixel, so this is the frame time that decides what the fps contract can promise.",
+      "op": "add_module",
+      "id": "Aurora",
+      "type": "AuroraEffect",
+      "parent_id": "Layer",
+      "measure": true,
+      "contract": {
+        "desktop-macos": {
+          "tick_us": 40000,
+          "free_heap": 0,
+          "set_by": "2026-09-04",
+          "reason": "initial contract: Aurora at 64x96, 3 layers, 2 octaves"
+        }
+      },
+      "observed": {
+        "desktop-macos": {
+          "tick_us": {
+            "p50": 1218,
+            "p95": 1311,
+            "min": 960,
+            "max": 1311,
+            "n": 16,
+            "samples": [960, 970, 981, 1200, 1187, 1206, 1234, 1239, 1206, 1218, 1228, 1239, 1298, 1269, 1240, 1311]
+          },
+          "last_updated": "2026-09-05"
+        }
+      }
+    },
+    {
+      "name": "aurora-one-layer",
+      "description": "Drop to a single layer, the cost knob at its cheapest. The ratio against the step above is what an effect author reads to choose a layer count for their fixture.",
+      "op": "set_control",
+      "id": "Aurora",
+      "key": "layers",
+      "value": 1,
+      "measure": true,
+      "contract": {
+        "desktop-macos": {
+          "tick_us": 16000,
+          "free_heap": 0,
+          "set_by": "2026-09-04",
+          "reason": "initial contract: roughly a third of the three-layer cost"
+        }
+      },
+      "observed": {
+        "desktop-macos": {
+          "tick_us": {
+            "p50": 480,
+            "p95": 604,
+            "min": 460,
+            "max": 604,
+            "n": 16,
+            "samples": [560, 561, 561, 479, 460, 590, 474, 479, 476, 472, 473, 480, 506, 482, 604, 488]
+          },
+          "last_updated": "2026-09-05"
+        }
+      }
+    }
+  ]
+}

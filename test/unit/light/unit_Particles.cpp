@@ -703,7 +703,7 @@ TEST_CASE("spreadLane gives every slot its own lane, for any count") {
 TEST_CASE("spreadLane interleaves rather than striding in order") {
     // EVERY consecutive pair must be non-adjacent, not merely one of them. The weaker form of
     // this test passed against a stride of `slots - 1`, which is coprime but congruent to -1, so
-    // consecutive slots walked DOWN neighbouring lanes and nothing was interleaved at all.
+    // consecutive slots walked DOWN neighboring lanes and nothing was interleaved at all.
     constexpr mm::lengthType kExtent = 27720;      // lcm(1..12): every count below divides it
     for (uint16_t slots = 5; slots <= 12; slots++) {
         if (slots == 6) continue;   // 6 has no coprime near 3 (2 and 3 both share a factor)

@@ -4,6 +4,7 @@
 #include "light/drivers/Drivers.h"
 #include "light/drivers/LightPresetsModule.h"   // the non-deletable boot-wired preset library
 #include "../core/conditional_controls.h"   // mm::test::setControlValue
+#include "platform/platform.h"                 // gpioRead: the desktop reads back what gpioWrite put there
 
 #include <cstring>
 
@@ -206,4 +207,65 @@ TEST_CASE("a probe Drivers (controls read, never prepared) leaves the scripted-p
     CHECK(mm::LivePalettes::count() == 1);
     CHECK(std::strcmp(mm::LivePalettes::nameAt(0), "running.mlp") == 0);
     mm::LivePalettes::clear();
+}
+
+// The power relay is the physical expression of "the lights are off", and brightness 0 is off as
+// much as `on` = false is: a WLED-style client says off by sending bri 0 without touching `on`, and
+// a strip at zero still draws its idle current through a closed relay. So the relay opens at
+// brightness 0 and closes again the moment brightness returns, with `on` unchanged either way.
+TEST_CASE("the relay opens at brightness 0 and closes again when brightness returns") {
+    mm::platform::clearTestGpioLevel();
+    mm::Drivers drivers;
+    std::strcpy(drivers.relayPins, "12");
+    drivers.on = true;
+    drivers.brightness = 100;
+    drivers.onControlChanged("relayPins");            // entering the pin closes the relay at once
+    CHECK(mm::platform::gpioRead(12));
+
+    drivers.brightness = 0;
+    drivers.onControlChanged("brightness");
+    CHECK_FALSE(mm::platform::gpioRead(12));          // off by brightness, `on` still true
+
+    drivers.brightness = 1;
+    drivers.onControlChanged("brightness");
+    CHECK(mm::platform::gpioRead(12));                // the smallest non-zero brightness is on
+
+    drivers.on = false;
+    drivers.onControlChanged("on");
+    CHECK_FALSE(mm::platform::gpioRead(12));          // and `on` still opens it whatever brightness says
+    mm::platform::clearTestGpioLevel();
+}
+
+// A typo in the relay list must not leave the previous relays closed. Reporting the parse error and
+// returning looked right, but the pins from the last VALID list stayed asserted on GPIOs no control
+// named any more: the strip kept its power through a brightness of zero, and nothing in the UI said
+// why. An unparseable list means no relays, which is the same state as an empty one.
+TEST_CASE("a typo in the relay list releases the relays it used to hold") {
+    mm::platform::clearTestGpioLevel();
+    mm::Drivers drivers;
+    std::strcpy(drivers.relayPins, "12,13");
+    drivers.on = true;
+    drivers.brightness = 100;
+    drivers.onControlChanged("relayPins");
+    CHECK(mm::platform::gpioRead(12));
+    CHECK(mm::platform::gpioRead(13));
+
+    // Mid-edit the list is briefly nonsense, which is the normal way a user types one.
+    std::strcpy(drivers.relayPins, "12,,x");
+    drivers.onControlChanged("relayPins");
+    CHECK_FALSE(mm::platform::gpioRead(12));
+    CHECK_FALSE(mm::platform::gpioRead(13));
+
+    // And the driver has forgotten them, so a later brightness change does not resurrect either pin.
+    drivers.brightness = 200;
+    drivers.onControlChanged("brightness");
+    CHECK_FALSE(mm::platform::gpioRead(12));
+    CHECK_FALSE(mm::platform::gpioRead(13));
+
+    // A corrected list takes effect normally.
+    std::strcpy(drivers.relayPins, "13");
+    drivers.onControlChanged("relayPins");
+    CHECK(mm::platform::gpioRead(13));
+    CHECK_FALSE(mm::platform::gpioRead(12));
+    mm::platform::clearTestGpioLevel();
 }

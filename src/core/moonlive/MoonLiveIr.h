@@ -85,10 +85,12 @@ enum class IrOp : uint8_t {
                // a null arena. Each backend reloads them from the frame before the call; where they
                // go is the per-ISA part.
                //
-               // NOTHING MAY BE LIVE IN A REGISTER ACROSS ONE. Script variables are slot-resident
-               // and temporaries die within their statement, so this holds today and is why no
-               // save-set is emitted. Xtensa's window rotation would hide a violation that
-               // corrupts RISC-V, so it is stated here rather than left to be discovered.
+               // Every caller vreg IS preserved across one: each backend's callLabel saves the
+               // pool and restores it, the same guarantee a builtin call gives, because a value
+               // computed before the call and read after it (`a() + b()`) is ordinary in an
+               // expression. `b` says whether the caller wants the callee's value, and when it does
+               // the result is delivered into `dst` after the pool is back. The allocator reads
+               // that same flag to decide the op defines `dst` (MoonLiveSpill's writesDst).
     ConstPtr,  // dst = the pointer in `ptr`: a full-width address materialized into a register.
                // Distinct from Const because `imm` is int32_t and a pointer is 64 bits on the
                // desktop, so an address cannot ride an immediate. Every backend already builds one
@@ -250,11 +252,18 @@ static constexpr uint8_t kIrLabels = 16;
 static constexpr uint8_t kAsmLabels = 48;
 static constexpr uint8_t kAsmFixups = 96;
 
-/// Script variables live in FRAME SLOTS, and this bounds how many one program may hold at once.
-/// Sixteen matches what every backend's frame can address (`kMaxSpillSlots`), so a program that
-/// parses is a program the assembler can encode. Raising it means widening the frame on all three
-/// backends together — the slot index is an instruction field, not just a table size.
-static constexpr uint8_t kMaxLocals = 16;
+/// Script variables live in FRAME SLOTS, and this bounds how many one program may hold at once:
+/// named variables, loop counters and limits, and the arguments staged for a call, all at the same
+/// moment. A block hands its slots back at its closing brace and a call hands back its staging, so
+/// the budget is what is LIVE at once rather than a total.
+///
+/// 32 is what a volumetric script needs: three nested loops cost six slots before a five-argument
+/// write stages anything. The budget's cost is STACK, not encoding (Xtensa's s32i/l32i offset
+/// reaches 256 slots, RISC-V's 2048, and the host addresses from a frame pointer), and it is
+/// measured: the script's own frame is 148 bytes on the render task, and only for a script that
+/// uses the slots, since the prologue reserves the peak the program actually reached; the compile
+/// chain's deepest nesting is 2512 bytes of the main task's 12288, at 24 bytes per parser local.
+static constexpr uint8_t kMaxLocals = 32;
 
 /// The most arguments one call can carry. Bounded by the FRAME, not by the register file: the parser
 /// stages arguments into consecutive local slots, so a call can take as many as the locals range

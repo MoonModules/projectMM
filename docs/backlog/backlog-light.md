@@ -18,6 +18,13 @@ Forward-looking to-build items for the **light domain** (`src/light/`: drivers, 
   so its motion speed is a property of the frame rate. **Build trigger**: a stall we cannot remove
   at its source, on hardware a user actually has.
 
+## Effects
+
+### Moving-head effects from MoonLight, including two of troyhack's (2026-09-04)
+
+MoonLight has several moving-head effects that have no equivalent here, two of them troyhack's.
+Migrate them all, on the power functions per the standing mandate rather than traced across.
+
 ## Drivers
 
 ### Logarithmic brightness, and a power budget the device knows about (2026-09-02)

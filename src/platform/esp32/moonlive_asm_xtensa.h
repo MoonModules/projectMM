@@ -119,7 +119,12 @@ public:
     ///
     /// The callee therefore owes the 32-byte window-save reserve like any other call8 frame, which
     /// per-function prologues already give it.
-    void callLabel(Label l);
+    ///
+    /// Every caller vreg is preserved across the call exactly as call() does for a builtin, and the
+    /// callee's return value is delivered into `d` when `take` is set. The window rotation is why
+    /// that value arrives in the CALLER's a10: call8 rotates by 8, so the callee's a2 is this
+    /// frame's a10.
+    void callLabel(Label l, Reg d = R0, bool take = false);
     void epilogue();                     // retw.n
     /// Park `a` where the ABI returns a value, so the host reads it after the call. The move
     /// happens BEFORE the epilogue's teardown: on a windowed or frame-pointer ABI the

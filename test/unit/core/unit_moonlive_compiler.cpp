@@ -1534,7 +1534,7 @@ TEST_CASE("a member declaration and a typed function are told apart") {
 #if MM_MOONLIVE_HAS_HOST_JIT
 TEST_CASE("an array is indexed correctly at both element widths, by a computed index") {
     // The index scaling, from the outside. `idx * width` is emitted as a SHIFT (width 4) or skipped
-    // entirely (width 1), so a wrong shift or a wrongly skipped one reads the neighbouring element
+    // entirely (width 1), so a wrong shift or a wrongly skipped one reads the neighboring element
     // rather than failing loudly. A CONSTANT index would not catch it: the interesting path is an
     // index the engine computes at run time, which is what a loop counter is.
     //
@@ -1799,4 +1799,125 @@ TEST_CASE("a fixed local reports its scaling where it is read") {
         mmScript("fill(0,0,0);\n fixed d = 1.5;\n int n = 2;\n fill(toInt(d * n), 0, 0);"),
         kTable, kSys, out, sizeof(out));
     CHECK_FALSE(r.ok);
+}
+
+// A script's own function can hand a value back, so a helper computes rather than only acts. The
+// return machinery already existed at the HOST boundary (a function declares int or void, and the
+// exit parks the value in the ABI register); what was missing was the call site taking it.
+//
+// What makes it harder than moving a register: the result has to survive the calls that FOLLOW it
+// in the same expression. So a script call now preserves the whole vreg pool exactly as a builtin
+// call does, and the callee's value is delivered into the destination vreg once that pool is back.
+// Parking it in the frame's argument region instead was tried and rotated the enclosing call's
+// arguments, since that region is still being filled as the expression parses.
+TEST_CASE("every shipped script still compiles after a builtin is added") {
+    // A builtin name is reserved for every script, so ADDING one can stop an existing script
+    // compiling: its member of that name becomes a call. Measured, not hypothetical: a `decay`
+    // builtin broke pulse.mle and beat-flash.mlp, which both declare `byte decay`, and the
+    // diagnostic pointed at the member rather than at the name that took it. It is `trailDecay`.
+    //
+    // The names below are the ones a member ACTUALLY uses in the shipped scripts today. A new
+    // builtin wanting one of them takes a compound name instead, as `fade` pushed authors to
+    // `fadeAmt`. (`scale` is a long-standing core builtin and no script declares it, so the rule
+    // is about what scripts use, not about every ordinary word.)
+    static constexpr const char* kNamesScriptsDeclare[] = {
+        "decay", "speed", "fade", "bri", "hue", "zoom", "twist", "contrast", "sparkle",
+    };
+    const moonlive::BuiltinTable& t = moonlive::lightBuiltins();
+    for (const char* word : kNamesScriptsDeclare) {
+        // `fade` is the exception that proves the rule: it was taken first, and every script since
+        // has written `fadeAmt`. Nothing else here may become a builtin.
+        if (std::strcmp(word, "fade") == 0) continue;
+        INFO("a builtin took a name the shipped scripts declare as a member: ", std::string(word));
+        CHECK(t.find(word, std::strlen(word)) == nullptr);
+    }
+}
+
+TEST_CASE("the builtin table has room for every name the light domain registers") {
+    // The table fails SILENTLY when full: add() returns false, nothing checks each call, and the
+    // script reports "unknown function" for a builtin that plainly exists in the source. The
+    // registration-time guard only prints, which no CI run reads, so this is the check that fails.
+    // It also keeps real headroom visible: the table hit 61 of 64 when the flow builtins landed.
+    const moonlive::BuiltinTable& t = moonlive::lightBuiltins();
+    CHECK_FALSE(t.full());                       // nothing was dropped
+    CHECK(t.registered() < moonlive::BuiltinTable::kMax);
+    // A domain within a couple of names of the cap is one commit from the silent failure.
+    CHECK(moonlive::BuiltinTable::kMax - t.registered() >= 4);
+}
+
+TEST_CASE("a script function's return value can be used in an expression") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile(
+        "class T {\n"
+        "  int answer() { return 21; }\n"
+        "  void tick() { setRGB(0, answer(), answer() + 1, 0); }\n"
+        "}\n", kTable, kSys));
+    std::vector<uint8_t> buf(4 * 3, 0);
+    eng.run(buf.data(), 4, 3, 0, "tick");
+    CHECK(buf[0] == 21);          // what the helper returned
+    CHECK(buf[1] == 22);          // and it is usable in arithmetic
+    eng.free();
+}
+
+TEST_CASE("a returned value survives the calls that follow it in the same expression") {
+    // The case that exposed both wrong designs: with the result in a register `a() + b()` read 6
+    // (b's value twice), and with it in the argument region the arguments came out rotated.
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile(
+        "class T {\n"
+        "  int a() { return 10; }\n"
+        "  int b() { return 3; }\n"
+        "  void tick() { setRGB(0, a() + b(), a(), b()); }\n"
+        "}\n", kTable, kSys));
+    std::vector<uint8_t> buf(4 * 3, 0);
+    eng.run(buf.data(), 4, 3, 0, "tick");
+    CHECK(buf[0] == 13);
+    CHECK(buf[1] == 10);
+    CHECK(buf[2] == 3);
+    eng.free();
+}
+
+TEST_CASE("a helper's value can drive a loop and a member") {
+    // What the feature is for: a helper that computes, called where a number is needed.
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile(
+        "class T {\n"
+        "  byte level = 4;\n"
+        "  int scaled() { return level * 10; }\n"
+        "  void tick() {\n"
+        "    for (int i = 0; i < 2; i = i + 1) { setRGB(i, scaled(), scaled() + i, 0); }\n"
+        "  }\n"
+        "}\n", kTable, kSys));
+    std::vector<uint8_t> buf(4 * 3, 0);
+    eng.run(buf.data(), 4, 3, 0, "tick");
+    CHECK(buf[0] == 40);
+    CHECK(buf[1] == 40);
+    CHECK(buf[3] == 40);
+    CHECK(buf[4] == 41);
+    eng.free();
+}
+
+TEST_CASE("a void function cannot be used as a value") {
+    // Reading the return register of a function that never wrote it would hand the script whatever
+    // the last call left there: a plausible number, silently wrong.
+    moonlive::MoonLive eng;
+    CHECK_FALSE(eng.compile(
+        "class T {\n"
+        "  void act() { }\n"
+        "  void tick() { setRGB(0, act(), 0, 0); }\n"
+        "}\n", kTable, kSys));
+    eng.free();
+}
+
+TEST_CASE("a returning function still works as a statement, with its value dropped") {
+    moonlive::MoonLive eng;
+    REQUIRE(eng.compile(
+        "class T {\n"
+        "  int side() { return 7; }\n"
+        "  void tick() { side(); setRGB(0, 1, 0, 0); }\n"
+        "}\n", kTable, kSys));
+    std::vector<uint8_t> buf(4 * 3, 0);
+    eng.run(buf.data(), 4, 3, 0, "tick");
+    CHECK(buf[0] == 1);
+    eng.free();
 }

@@ -253,6 +253,29 @@ TEST_CASE("every function in a class starts where a call can reach it, on " MM_I
 //
 // The predicate matches the DESTINATION only. Which register holds the value is the allocator's
 // choice and may change; that it is moved into the ABI's return register is the contract.
+// The CALLER side of the same contract, and the half nothing else reaches. Taking a value means
+// stashing the callee's result before the vreg pool is restored over it: the restore reloads the
+// very register the value arrived in. Host backends prove the SEMANTICS (unit_moonlive_spill and
+// unit_moonlive_compiler run the code), but these two ISAs are never executed here, so a wrong
+// stash is silent, and a value-returning call is exactly where an encoding slip reads as a
+// plausible number rather than a crash.
+TEST_CASE("taking a script function's value stashes it past the pool restore on " MM_ISA_NAME) {
+    bool ok = false;
+    // The value must be USED after a second call, so the pool restore genuinely runs over it.
+    const auto code = emitBytes("class T {\n"
+                                "  int a() { return 40; }\n"
+                                "  int b() { return 5; }\n"
+                                "  void tick() { setRGB(0, a() + b(), 0, 0); }\n"
+                                "}\n",
+                                mm::moonlive::effectSysVars(), ok);
+    REQUIRE(ok);
+    REQUIRE(code.size() > 4);
+    bool found = false;
+    for (size_t i = 0; i + 4 <= code.size(); i += MM_ISA_RET_STRIDE)
+        if (MM_ISA_STASHES_RESULT(&code[i])) { found = true; break; }
+    CHECK(found);
+}
+
 TEST_CASE("a returned value reaches the return register on " MM_ISA_NAME) {
     bool ok = false;
     // A function that returns a COMPUTED value: a literal could be materialized straight into the

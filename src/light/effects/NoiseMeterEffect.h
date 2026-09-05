@@ -5,7 +5,7 @@
 namespace mm {
 
 // Noise Meter: a vertical VU column whose height tracks the overall sound level and whose color is a
-// scrolling 2D value-noise field, so a loud moment fills the panel from the bottom up with a drifting,
+// scrolling 2D gradient-noise field, so a loud moment fills the panel from the bottom up with a drifting,
 // organic gradient instead of a flat bar. Each frame the buffer fades a little (motion trail), the
 // audio level (scaled by `width`) sets how many rows light up from the bottom, and for each lit row a
 // noise sample — taken from a field that both scrolls (the aux0/aux1 phase accumulators) and is

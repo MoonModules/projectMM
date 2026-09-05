@@ -70,7 +70,7 @@ TEST_CASE("fbm with no octaves is a flat field") {
     CHECK(fbm8(999, 111, 0) == 128);
 }
 
-// A field must be a FIELD: neighbouring points are similar, distant points are not. This is what
+// A field must be a FIELD: neighboring points are similar, distant points are not. This is what
 // separates noise from a raw hash, and it must survive the octave sum.
 TEST_CASE("fbm is smooth: neighbours resemble each other more than distant points") {
     const int here = fbm8(5000, 5000, 3);

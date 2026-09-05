@@ -29,7 +29,7 @@ public:
     Dim dimensions() const override { return Dim::D2; }
 
     // Waveform shapes, index-aligned with waveY()'s switch. "Sin3" is a composite of three sines
-    // (a richer, rolling wave); "Noise" plots value noise for a jittered band.
+    // (a richer, rolling wave); "Noise" plots gradient noise for a jittered band.
     static constexpr const char* kTypeOptions[] = {"Sawtooth", "Triangle", "Sine", "Square", "Sin3", "Noise"};
     static constexpr uint8_t kTypeCount = 6;
 
@@ -136,7 +136,7 @@ private:
             case 4: v = static_cast<uint8_t>(                                // Sin3: three summed sines
                         (sin8(phase) + sin8(static_cast<uint8_t>(phase * 2))
                                      + sin8(static_cast<uint8_t>(phase * 3))) / 3); break;
-            default: v = inoise8(phase); break;                              // Noise (type 5) — shared 1D value noise
+            default: v = inoise8(phase); break;                              // Noise (type 5): shared 1D gradient noise
         }
         const lengthType y = static_cast<lengthType>((static_cast<uint32_t>(v) * h) / 256);
         return y < h ? y : static_cast<lengthType>(h - 1);

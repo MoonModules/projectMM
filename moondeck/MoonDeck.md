@@ -204,6 +204,17 @@ The ESP32 half reads `esp32/monitor.log`, and refreshes it by opening the serial
 
 In `--commit` mode it also writes the repo-health snapshot (below), reusing the tick/FPS it just measured.
 
+### bench_kernels
+
+Kernel micro-bench: nanoseconds per call for the power-function kernels (noise, fBm, warp, and every kernel added since), on this host.
+
+```bash
+uv run moondeck/check/bench_kernels.py            # build (Release) and run
+uv run moondeck/check/bench_kernels.py --no-build # run the binary already built
+```
+
+A report, not a check: the Markdown table it prints is pasted into performance.md, and a kernel swap is accepted against the previous rows (the gradient-noise swap's bound is 1.3x per sample). Host timings; the S3 is 20-40x slower per core, so the ratio between rows is what transfers, and `collect_kpi.py` on a board gives the absolute cost. Builds only the `mm_bench` target, so it does not drag the test suite through the compiler.
+
 ### repo_health
 
 Measure the repo's current state into `repo-health.json` — flash per firmware variant, tick/FPS per target, lines of code by area, comment density, test counts, docs inventory.
@@ -775,7 +786,14 @@ uv run moondeck/docs/screenshot_modules.py    # requires projectMM running on lo
 uv run moondeck/docs/screenshot_modules.py --host 192.168.1.210:8080
 uv run moondeck/docs/screenshot_modules.py --gif    # also record 3-second GIF previews
 uv run moondeck/docs/screenshot_modules.py --force  # re-capture and overwrite existing screenshots
+uv run moondeck/docs/screenshot_modules.py --all-registered  # every registered module, not just the listed ones
 ```
+
+`--all-registered` is what keeps the set complete. The script carries a hand-written MODULES list
+for the few modules that need particular props or a parent that is not a Layer; every other
+registered effect and modifier is captured on a Layer with its defaults. Without it a module added
+today is silently skipped until someone remembers to edit the list, which is how 42 effects came to
+have no preview.
 
 The **GIF** and **Force** checkboxes in MoonDeck toggle these flags.
 

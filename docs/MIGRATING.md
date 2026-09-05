@@ -24,6 +24,18 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased (`next-iteration`)
 
+### Noise2D is gone; Noise renders it
+
+**Action: re-set one control.** Affects any device with a Noise2D effect on a layer.
+
+The two noise effects were one effect with two names: `Noise` is `Dim::D3` and draws the identical
+field on a panel, so the 2D variant earned nothing. A restored config maps `Noise2DEffect` to
+`NoiseEffect` and carries `scale` across.
+
+What does not carry is `speed`. Noise2D took a 0..15 divisor of its own; Noise takes its rate from
+`bpm` on the shared beat clock, so there is no value to map onto. Set `bpm` to taste after
+restoring.
+
 ### Infrared is a list of learned rows, and the remote must be re-learned
 
 **Action: re-learn the remote.** Affects any device with a configured infrared service.

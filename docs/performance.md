@@ -33,6 +33,92 @@ Binary sizes:
 | macOS arm64 | 358 KB | debug-arm64 (release-strip is smaller) |
 | Windows x64 | 432 KB | MSVC Release, static CRT |
 
+### Kernel micro-bench (host)
+
+`uv run moondeck/check/bench_kernels.py` (the `mm_bench` target, Release, best of 5 over a 256×256 sweep of 16.0 fixed coordinates). A report that gates a kernel swap: the generative-fields plan accepts gradient noise behind the same names only within 1.3× of the row it replaces. Host figures; the S3 is 20-40× slower per core, so the ratio between rows is what transfers to a board.
+
+**Phase 0, before and after the swap to Perlin improved gradient noise (2026-09-04, macOS arm64).** The bound for accepting the swap was 1.3x per sample against the row it replaces, and it had to hold on a board, not only here: the first gradient cut was 2.8x FASTER on this host and 1.5x SLOWER on an ESP32-S3, because a runtime arity argument, select expressions that compile to branches, and eight corners in flight cost nothing on an out-of-order core and everything on an in-order one without a branch predictor. The shipped core is arity-templated, branch-free (a gradient table), 32-bit on the 8-bit tier, and hashes each corner to four bits with one multiply (three hashed to a byte nothing read). Host, ns per sample:
+
+| Kernel | value noise | gradient noise | ratio |
+|---|---:|---:|---:|
+| inoise8 1D | 13.0 | 2.6 | 0.20 |
+| inoise8 2D | 22.2 | 5.4 | 0.24 |
+| inoise8 3D | 29.3 | 11.5 | 0.39 |
+| inoise16 1D | 4.7 | 3.2 | 0.68 |
+| inoise16 2D | 9.6 | 7.0 | 0.73 |
+| inoise16 3D | 17.8 | 13.3 | 0.75 |
+| fbm8 2D, 2 octaves | 22.8 | 11.7 | 0.51 |
+| fbm8 2D, 4 octaves | 38.0 | 24.2 | 0.64 |
+| fbm16 2D, 2 octaves | 14.8 | 13.5 | 0.91 |
+| fbm16 2D, 4 octaves | 22.2 | 27.1 | 1.22 |
+| turbulence8 2D, 2 octaves | 18.3 | 12.8 | 0.70 |
+| warp8 2D, 1 octave | 30.6 | 21.9 | 0.72 |
+| warp8 2D, 2 octaves | 36.5 | 29.8 | 0.82 |
+
+**ESP32-S3 (esp32s3-n16r8, 64x64, the four noise effects, tick in µs)**, the measurement that decided it. Same board, same grid, value noise re-flashed from the previous commit for the before column:
+
+| Effect (path) | value noise | gradient, first cut | gradient, shipped | ratio |
+|---|---:|---:|---:|---:|
+| Noise (inoise8 2D) | 4,621 | 7,009 | 5,049 | 1.09 |
+| Noise2D (inoise8 3D) | 6,681 | 10,661 | 8,453 | 1.27 |
+| Tunnel (fbm8) | 16,385 | 21,304 | 16,649 | 1.02 |
+| PolarNoise (warp8) | 20,356 | 29,199 | 20,490 | 1.01 |
+
+The two noise effects have since merged: `Noise` is `Dim::D3` and renders what `Noise2D` did, so the
+two rows above are one effect's 2D and 3D paths under the names they carried when the swap was
+measured.
+
+The 3D path is the closest to the bound and the reason: 3D gradient noise does eight dot products the value form never did, and the S3 instruction count for a 3D sample is 1.3x the old one. Method worth keeping: compile the kernel with the target's own compiler (`xtensa-esp32s3-elf-g++ -O2 -S`) and count instructions, branches and stack spills BEFORE flashing; three restructurings were compared that way in seconds, and the one flash went to the winner. The P4 and S31 numbers are open until those boards are back on the bench.
+
+**All rows, ns per sample, best of 5.** Re-measured 2026-09-04 after the benchmark stopped dispatching through `std::function`: a type-erased call cannot be inlined, so it added an indirect call to every sample and the old figures were part kernel and part harness. Every row roughly halved, which is the size of what was being attributed to the kernels:
+
+| Kernel | ns/sample | Msamples/s |
+|---|---:|---:|
+| inoise8 1D | 1.8 | 554.4 |
+| inoise8 2D | 4.6 | 218.5 |
+| inoise8 3D | 10.1 | 99.5 |
+| inoise16 1D | 1.0 | 954.4 |
+| inoise16 2D | 2.1 | 481.1 |
+| inoise16 3D | 12.5 | 80.1 |
+| fbm8 2D, 2 octaves | 10.0 | 100.0 |
+| fbm8 2D, 4 octaves | 21.3 | 47.0 |
+| fbm16 2D, 2 octaves | 5.2 | 190.7 |
+| fbm16 2D, 4 octaves | 11.8 | 84.9 |
+| turbulence8 2D, 2 octaves | 10.2 | 98.2 |
+| warp8 2D, 1 octave | 16.6 | 60.1 |
+| warp8 2D, 2 octaves | 25.5 | 39.2 |
+| atan16 | 1.5 | 649.1 |
+| dist16 | 8.0 | 125.3 |
+| polar address (dist16 + atan16 + kaleido) | 9.9 | 101.3 |
+
+That reading held: the 8-bit tier improved most (2D by 4x on the host), because the value form quantized at every stage where the gradient form carries its dot products at full width.
+
+### Fluid solver cost (host)
+
+`scenario_Fluid_solver`, desktop macOS arm64, tick in µs. The solver is Stam's stable fluid: several
+passes over the grid per frame, plus `iterations` Gauss-Seidel sweeps for the pressure projection
+that keeps the flow divergence-free.
+
+| Grid | iterations | tick µs |
+|---|---:|---:|
+| 32×32 | 1 | 20 |
+| 32×32 | 5 (default) | 30 |
+| 32×32 | 20 | 69 |
+| 64×64 | 5 | 133 |
+| 20×20×20 cube | 5 | 249 |
+| 16×16 | 5 | 7 |
+
+Two properties an author picks a setting from. **`iterations` is near-linear**: 1 to 20 is 20 to
+69 µs, since each is another sweep over the whole grid. **The forcing is free next to the solver**:
+going from 2 jets to 4, and persistence from 150 to 255, moved 135 µs to 134 µs, inside the noise.
+So the grid and the iteration count are the two knobs that matter, and the jets are a look rather
+than a cost. **A cube is depth times one panel**: twenty 20×20 slices, each its own medium, cost
+249 µs against 133 for one 64×64 panel with about half the lights, which is the per-slice solve
+paying its boundary and projection twenty times over.
+
+Device rows are open: the P4 and S3 numbers need a board and have not been measured, so what
+this effect can carry on either is an open question rather than a claim.
+
 ### Memory at 128×128 with mirror
 
 | Module | dynamicBytes | Breakdown |
@@ -216,7 +302,7 @@ A render-only per-effect sweep on the S3 (`observed.esp32s3-n16r8`, build `Jun 1
 | LavaLamp | 309 | 974 | 3,612 | 21,243 |
 | GameOfLife | 138 | 413 | 1,870 | 16,127 |
 
-The cheapest (Lines, Checkerboard, PlasmaPalette) clear ~100 FPS even at 16K; the heaviest is **Noise** (51 ms = ~19 FPS at 16K — simplex noise per pixel), then Rings and GlowParticles. Effect-compute differences stay visible across the whole range because nothing is output-bound here.
+The cheapest (Lines, Checkerboard, PlasmaPalette) clear ~100 FPS even at 16K; the heaviest is **Noise** (51 ms = ~19 FPS at 16K, a noise sample per pixel), then Rings and GlowParticles. Effect-compute differences stay visible across the whole range because nothing is output-bound here.
 
 **Free internal heap** holds ~8.54 MB at small grids and ~8.46–8.49 MB at 16K — the ~50–100 KB delta is just the grid-sized render buffer (the `model` array), and it returns to ~8.54 MB whenever the grid shrinks: **no leak, no fragmentation creep** across the sweep. Largest free internal block stays ~90–110 KB throughout. (Internal RAM is not the constraint on this PSRAM board; the Layer buffer is in PSRAM.)
 

@@ -159,11 +159,11 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | `mod(a, b)` | `a % b` — the wrap a cyclic animation needs |
 | `beat(bpm, t)` | a `0..65535` sawtooth at `bpm` |
 | `beatsin(bpm, t, high)` | a sine `0..high` at `bpm` |
-| `noise(x, y, z)` | `0..255` value noise at that point — the field behind fire, clouds and plasma |
+| `noise(x, y, z)` | `0..255` gradient noise at that point, the field behind fire, clouds and plasma |
 | `scale(value, n)` | a `0..65535` value onto `0..n-1` — lands a wave on an axis |
 | `sin(angle)`, `cos(angle)` | the circle; one turn is `0..65535`, result biased to `1..65535` centered at 32768 |
 | `turn(n)` | one revolution split `n` ways — the angle step for placing `n` points on a circle |
-| `print(v)` | log a value and return it ([what it costs](writing-scripts.md#debugging-print)) |
+| `print(v)` | log a value and return it. A host call per invocation, so it belongs in a cold path rather than a per-pixel loop |
 | `a / b`, `a % b` | divide and remainder. Both are host calls: cheap on a cold path, deliberate per light. Dividing by zero **saturates** toward the numerator's sign rather than faulting, so no script needs a zero-check of its own; the remainder is 0 |
 | `toFixed(v)`, `toInt(v)` | convert between a whole number and a `fixed` one, each a single instruction |
 | `smoothstep(e0, e1, v)` | a soft `0..65535` ramp between two edges, the anti-aliasing primitive |
@@ -171,9 +171,19 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | `smin(a, b, k)` | the smooth minimum of two distances, so shapes melt into one surface rather than overlapping |
 | `fade(amt)` | dim every light toward black, FastLED's `fadeToBlackBy`. The trail primitive |
 | `polarA(dx, dy)`, `polarR(dx, dy)` | angle and distance from a center, for a radial effect |
+| `fbm(x, y, octaves)` | octaves of noise summed at doubling frequency and halving amplitude, `0..255`: the cloud, smoke and terrain field. `octaves` is the cost knob, one noise sample each |
+| `warp(x, y, strength)` | the field sampled where the field itself displaced it, `0..255`: the flowing, marbled look. Three noise samples |
+| `fbm3(x, y, z, octaves)`, `warp3(x, y, z, strength)` | the same two fields with a third axis, so a volumetric fixture samples through the field rather than repeating one slice. On a panel, pass `0` for `z` and the result is the 2D form exactly |
+| `osc(rate, ms, shape)` | a low-frequency oscillator, `0..65535`, at `rate` cycles per minute. Shapes: 0 sine, 1 triangle, 2 sawtooth, 3 square. Stateless, so two oscillators sharing a rate hold their phase relationship |
 | `escape(cx, cy, jx, jy, iters)` | the Mandelbrot/Julia escape count, `0..255`, `0` inside the set. Zero seed = Mandelbrot; the four coordinates are `fixed`, so uv output flows straight in. The one loop a script cannot write: it squares signed values in 64 bits |
 | `setPaletteColor(x, y, index, bri)` | one light from the ACTIVE palette, in one call |
+| `setPaletteColorZ(x, y, z, index, bri)` | the same, addressing a light in a volume |
 | `paletteR(i, bri)`, `paletteG`, `paletteB` | one palette channel, when a script needs the value rather than a pixel |
+| `trail(1)` | ask for a trail plane, from `defineControls()`. A 16-bit plane the flow builtins carry and the binding blits, so a script gets tails without owning a buffer. Returns whether it got one |
+| `flowNoise(zoom, strength)`, `flowCurl(zoom, strength)` | carry the whole trail plane one frame along a flow: noise for a wandering field, curl for a divergence-free one where nothing clumps. One call, because a per-pixel rule would cross the script boundary 8000 times on a cube |
+| `trailDecay(halfLifeMs)` | fade the trail by a half-life in milliseconds, so a tail's length is in seconds and holds at any framerate. Named `trailDecay` because `decay` is an ordinary word a script may want for its own member |
+| `emitTrail(x, y, z, index, bri, radius)` | throw light into the trail as a disc of the given radius. A single-pixel head arrives at a fraction of a count after a long tail, which is why the radius is a parameter |
+| `fieldRate(n)` | true once every n frames: the lever that makes a per-pixel loop affordable on a large fixture. The flow and the decay still run every frame, so what it costs is detail rather than smoothness |
 | `pool(n)` | size this script's particle pool, from `defineControls()`. Returns what it got |
 | `emit(x, y, angle, speed, n, life, hue)` | throw `n` particles from a point |
 | `gravity(g)`, `drag(k)` | the two forces |
@@ -204,7 +214,7 @@ vocabulary follows the [WLED Particle System](https://github.com/wled/WLED) by D
 
 A class may define functions beside its entry point and call them, including calling itself. `effects/crosshair.mle` is the worked example: a `column()` and a `row()`, both called from `tick()`.
 
-These are real calls, not text pasted in by the compiler: the callee allocates its own frame when it runs, which is what lets one helper call another and what makes recursion work. A function takes no arguments and returns nothing yet, so a helper does a whole job rather than computing a value.
+These are real calls, not text pasted in by the compiler: the callee allocates its own frame when it runs, which is what lets one helper call another and what makes recursion work. A function takes no arguments yet, but it may RETURN a value: declare it `int` and the helper computes where a number is needed (`setRGB(0, level(), 0, 0)`); declare it `void` and it does a whole job instead.
 
 Two rules a script author meets:
 

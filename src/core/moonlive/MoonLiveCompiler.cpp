@@ -683,7 +683,25 @@ struct Parser {
                 lex.advance();
                 if (!expect(Tok::LParen, "expected '(' after the function name")) return;
                 if (!expect(Tok::RParen, "a script function takes no arguments yet")) return;
-                if (resultOut) { fail("a script function returns nothing yet"); return; }
+                // A call used as a VALUE takes what the callee returned. Refused when the callee
+                // declares void, since there is nothing to take and the script would otherwise
+                // read whatever the return register happened to hold.
+                if (resultOut) {
+                    if (fns[i].ret == RetType::Void) {
+                        fail("this function returns nothing, so it cannot be used as a value"); return;
+                    }
+                    if (fns[i].ret == RetType::Str) {
+                        fail("a string return cannot be used in an expression yet"); return;
+                    }
+                    // The value stays in its register: a script call preserves the caller's
+                    // vregs (every backend's callLabel saves the pool around it, exactly as a
+                    // builtin call does), so a second call in the same expression cannot overwrite
+                    // it. The first version left the pool unsaved and `a() + b()` read 6.
+                    const VReg v = alloc();
+                    emit({IrOp::CallScript, v, 0, 1, 0, 0, static_cast<int32_t>(i), nullptr, {}});
+                    *resultOut = v;
+                    return;
+                }
                 // `imm` is the callee's FUNCTION NUMBER, not its position in the op array. An IR
                 // index would be the more obvious choice and was the first one, but the spill pass
                 // rewrites the array and every index past its first insertion shifts: the call then

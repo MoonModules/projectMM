@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <numbers>
 
 using namespace mm;
@@ -298,7 +299,7 @@ TEST_CASE("hashInt is a pure function of its inputs") {
     CHECK(hashInt(5, 9, 0, 42) == hashInt(5, 9, 0, 42));
 }
 
-TEST_CASE("hashInt gives neighbouring pixels unrelated values") {
+TEST_CASE("hashInt gives neighboring pixels unrelated values") {
     // Adjacent inputs must not produce adjacent outputs, or a dissolve would appear in stripes.
     int differing = 0;
     for (uint32_t x = 0; x < 64; x++)
@@ -448,4 +449,49 @@ TEST_CASE("a beat completes one full cycle per beat, at any tempo") {
     CHECK(mm::beat16(120, 250) == mm::beat16(60, 500));
     // A zero tempo is a still frame rather than a divide-by-zero.
     CHECK(mm::beat16(0, 1234) == 0);
+}
+
+// halfLifeKeep: the decay a caller states as "half of it is gone after N ms". The properties below
+// are what make it framerate-independent, which is the whole reason it exists.
+
+TEST_CASE("a half-life decay loses exactly half its value over one half-life") {
+    CHECK(mm::halfLifeKeep(100, 100) == 32768);          // one half-life: half survives
+    CHECK(mm::halfLifeKeep(200, 100) == 16384);          // two: a quarter
+    CHECK(mm::halfLifeKeep(400, 100) == 4096);           // four: a sixteenth
+    // Nothing elapsed, or no half-life asked for, leaves the value alone rather than erasing it.
+    CHECK(mm::halfLifeKeep(0, 100) == 65536);
+    CHECK(mm::halfLifeKeep(50, 0) == 65536);
+    // A long stall decays to nothing instead of wrapping around to bright.
+    CHECK(mm::halfLifeKeep(100000, 100) == 0);
+}
+
+TEST_CASE("two decay steps reach the same place as one step of twice the time") {
+    // The framerate-independence property, and the reason the half-life form replaces a per-frame
+    // fade: a device rendering at 30 fps and one at 60 must dim a trail at the same rate in
+    // SECONDS. Written as decay(2dt) == decay(dt)^2, which is what that means arithmetically.
+    //
+    // The tolerance is one count at the BYTE width every caller narrows to (a channel is 8 bits),
+    // not at the 16-bit width of the weight itself: 256 of 65536. Measured worst case is 11.
+    for (uint32_t halfLife : {10u, 100u, 1000u, 5000u}) {
+        for (uint32_t dt = 1; dt < halfLife * 2; dt += 7) {
+            const uint64_t once = mm::halfLifeKeep(dt, halfLife);
+            const uint64_t twice = mm::halfLifeKeep(2 * dt, halfLife);
+            const uint64_t squared = (once * once) >> 16;
+            const int64_t diff = static_cast<int64_t>(twice) - static_cast<int64_t>(squared);
+            CHECK(std::llabs(diff) <= 256);
+        }
+    }
+}
+
+TEST_CASE("halving twice as often dims at the same rate, so framerate cannot change a trail") {
+    // The same property stated the way a user meets it: run 20 frames of 10 ms and 10 frames of
+    // 20 ms over the same 200 ms, and a value must land in the same place either way.
+    const uint32_t halfLife = 250;
+    uint64_t fast = 65535, slow = 65535;
+    for (int i = 0; i < 20; i++) fast = (fast * mm::halfLifeKeep(10, halfLife)) >> 16;
+    for (int i = 0; i < 10; i++) slow = (slow * mm::halfLifeKeep(20, halfLife)) >> 16;
+    // Both cover 200 ms of a 250 ms half-life, so both should sit near 65535 * 2^-0.8.
+    CHECK(std::llabs(static_cast<int64_t>(fast) - static_cast<int64_t>(slow)) <= 256);
+    CHECK(fast > 36000);      // 2^-0.8 is 0.574, so ~37600
+    CHECK(fast < 39000);
 }

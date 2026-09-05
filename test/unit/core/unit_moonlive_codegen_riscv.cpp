@@ -53,13 +53,22 @@ namespace mm { using namespace ::mm; using namespace ::mm::moonlive;
 #define MM_GOLD_FX_LEN    164u     // +4:  one branch
 #define MM_GOLD_FILLLOOP_LEN 360u  // +24: fits on every backend since the host args moved to the frame
 #define MM_GOLD_FXLOOP_LEN  252u   // +16: four branches
-#define MM_GOLD_FXLOOP_HASH 1379319229u
-#define MM_GOLD_FX_HASH   4146299475u
+// The two hashes moved 2026-09-04 when kMaxLocals went 16 -> 32 (the first volumetric script needed
+// 19 slots). A wider frame changes the prologue's reserve and every slot offset, so identical source
+// emits different bytes: a frame-offset change is exactly what this hash exists to surface, and it
+// did. The LENGTHS are unchanged, which is the evidence it is offsets rather than different code.
+#define MM_GOLD_FXLOOP_HASH 3140471189u
+#define MM_GOLD_FX_HASH   2676401519u
 // `mv a0, xN` is `addi a0, xN, 0`: opcode 0x13, funct3 0, rd = x10 (a0), imm 0. rs1 is the
 // allocator's choice, so it is masked out; rd and the immediate are the contract.
 #define MM_ISA_RET_WRITES_RETREG(p) \
     (((uint32_t((p)[0]) | (uint32_t((p)[1]) << 8) | (uint32_t((p)[2]) << 16) | \
        (uint32_t((p)[3]) << 24)) & 0xfff07fffu) == 0x00000513u)
+// The caller-side stash: `mv t6, a0`, i.e. `addi t6, a0, 0`. rd = x31 (t6), rs1 = x10 (a0),
+// imm 0. The callee's value is parked past the pool restore, which would otherwise overwrite a0.
+#define MM_ISA_STASHES_RESULT(p) \
+    ((uint32_t((p)[0]) | (uint32_t((p)[1]) << 8) | (uint32_t((p)[2]) << 16) | \
+      (uint32_t((p)[3]) << 24)) == 0x00050f93u)
 #define MM_ISA_RET_STRIDE 4
 #define MM_ISA_LOWER mm_riscv_backend::mm::moonlive::lowerToBytes
 // The assembler type itself, so the stack-budget check can measure the object the compile path

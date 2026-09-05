@@ -66,7 +66,7 @@ TEST_CASE("Canvas pixel writes land where get reads them, and clip outside") {
     CHECK(c.b == 30);
 
     // A write outside the grid is silently dropped, and reading there is black — never a crash and
-    // never a stray byte in a neighbouring light (the robustness rule).
+    // never a stray byte in a neighboring light (the robustness rule).
     draw::pixel(s.cv, {99, 99, 0}, RGB{255, 255, 255});
     const RGB out = draw::get(s.cv, {99, 99, 0});
     CHECK(out.r == 0);

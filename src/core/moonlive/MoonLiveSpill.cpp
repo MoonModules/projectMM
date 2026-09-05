@@ -114,16 +114,23 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
 // Does this op WRITE its dst? Branches, Label, Spill and the inline ops do not — their dst field is
 // a zero the front-end never fills in, and reading it as a definition would give vreg 0 (kArg0, the
 // buffer pointer) a spurious live range that the allocator would then try to manage.
-bool writesDst(IrOp op) {
-    switch (op) {
+/// Whether an op DEFINES its `dst`, which is what gives it a live interval and what makes the
+/// rewriter remap it. Takes the whole instruction because `CallScript` answers per call: the
+/// statement form writes nothing, the expression form writes its result.
+bool writesDst(const IrInst& in) {
+    switch (in.op) {
         case IrOp::Label: case IrOp::BranchGe: case IrOp::BranchGeS: case IrOp::BranchNe:
         // A member store writes MEMORY, not a register: its `a` is the value and `imm` the arena
         // offset, so reading its dst as a definition would give vreg 0 a spurious live range.
         case IrOp::StoreCtrl:
         case IrOp::StoreCtrl32:
-        // CallScript writes no dst either: a script function returns nothing today, so the call is
-        // a statement rather than an expression. When it gains a return value this moves.
-        case IrOp::CallScript:
+        // CallScript writes its dst only when the caller WANTED the value (`b != 0`). The flag has
+        // to be consulted: a statement call's dst field is 0, which is kArg4's neighbour kArg0, so
+        // treating every call as a definition would give that argument a spurious live interval.
+        // Reading it as never-defining is the other error, and the expensive one: the rewriter
+        // remaps every source but leaves an unmapped dst, so after a compaction the call wrote the
+        // pre-compaction register while its consumer read the new one, and the value was lost.
+        case IrOp::CallScript: return in.b != 0;
         case IrOp::Spill: case IrOp::Inline: return false;
         default: return true;
     }
@@ -240,7 +247,7 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
         VReg src[4];
         const uint8_t n = sourcesOf(in, src);
         for (uint8_t s = 0; s < n; s++) mention(src[s], i);
-        if (writesDst(in.op)) mention(in.dst, i);
+        if (writesDst(in)) mention(in.dst, i);
     }
 
     // A value whose live range TOUCHES a loop is live to that loop's end. Naive first-def-to-last-use
@@ -415,9 +422,9 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
         if (n > 2) in.c = mapped(src[2], 2);
         if (n > 3) in.d = mapped(src[3], 3);
 
-        const bool dstSpilled = writesDst(in.op) && in.dst < kMaxVRegs && iv[in.dst].spilled;
+        const bool dstSpilled = writesDst(in) && in.dst < kMaxVRegs && iv[in.dst].spilled;
         const uint8_t dstSlot = dstSpilled ? iv[in.dst].slot : 0;
-        if (writesDst(in.op)) {
+        if (writesDst(in)) {
             // A spilled destination is computed into a reload temp and then stored. It may reuse a
             // temp that carried a source: the op reads its sources and writes its destination as one
             // instruction, so the aliasing is the ordinary `add d, d, b` every ISA here defines.

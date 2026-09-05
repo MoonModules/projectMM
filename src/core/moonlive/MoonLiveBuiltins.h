@@ -4,16 +4,16 @@
 #include <cstddef>
 #include <cstdio>   // the builtin-table overflow diagnostic
 
-// MoonLive built-in table — the neutral seam by which a HOST registers the functions a script
+// MoonLive built-in table: the neutral seam by which a HOST registers the functions a script
 // may call (the ESPLiveScript `arti_external_function` / ARTI / doc §3.4 model). The core
 // compiler knows only *that a name maps to a descriptor*; it owns no function names and no
 // domain semantics. The light domain (or any other host) populates the table with its own
-// vocabulary — setRGB/fill/random16 for LEDs, something else for a display or a sensor.
+// vocabulary: setRGB/fill/random16 for LEDs, something else for a display or a sensor.
 //
 // A descriptor says how a call lowers:
-//   - Call   — a pure host helper: lower to a generic call to `fn` (a C function pointer),
+//   - Call  : a pure host helper: lower to a generic call to `fn` (a C function pointer),
 //              one argument in, one result out. (random16, later sin/cos/hsvToRgb…)
-//   - Inline — a routine the backend emits inline (no per-call overhead — the hot-path
+//   - Inline: a routine the backend emits inline (no per-call overhead: the hot-path
 //              writers): the descriptor carries an `inlineOp` TAG, a neutral opcode the
 //              per-ISA lowering knows how to emit. The core never interprets the tag; it just
 //              threads it through. The light domain decides which names map to which tags.
@@ -26,7 +26,7 @@ namespace mm::moonlive {
 // A script member's TYPE. A semantic, not a storage width: every SCALAR occupies one uniform
 // 4-byte slot whatever its type, and only ARRAYS pack by element. That is what removes the width
 // machinery a script used to spell for itself (uint8_t/uint16_t/int16_t), which is where four
-// bugs came from — a wrapped member, a sentinel read through a 16-bit window, a one-byte store
+// bugs came from: a wrapped member, a sentinel read through a 16-bit window, a one-byte store
 // into a two-byte member, a sign-blind array load. Here rather than with the IR because a builtin
 // descriptor names the type its by-reference argument takes.
 //
@@ -50,7 +50,7 @@ constexpr uint8_t ctrlSlotBytes(CtrlType) { return 4; }
 
 
 
-// Neutral inline opcodes — "store shapes a backend can emit", not "LED operations". A host maps
+// Neutral inline opcodes: "store shapes a backend can emit", not "LED operations". A host maps
 // its function names onto these; a backend implements them. StoreElem = store N bytes (one
 // element) at a computed index; FillElems = a counted loop writing one element per slot. The
 // core treats them as opaque tags; the per-ISA backend and the host both know the element is 3
@@ -70,7 +70,7 @@ enum class BuiltinKind : uint8_t { Call, Inline };
 //
 // The compiler already evaluates every argument into a CONSECUTIVE frame slot (the stack machine's
 // argument staging), so the call only has to say where they start. Each backend materialises that
-// address from its own frame pointer — the arithmetic spillStore/spillLoad already do — which means
+// address from its own frame pointer: the arithmetic spillStore/spillLoad already do: which means
 // the number of arguments is bounded by frame slots rather than by how many the calling convention
 // can carry. `draw::line` takes seven; a fixed three would have forced it to be split into bespoke
 // halves, and every power function added after it would inherit the same distortion.
@@ -81,7 +81,7 @@ enum class BuiltinKind : uint8_t { Call, Inline };
 //
 // `arena` is the control/system-variable block, as before.
 // `args` points at `argc` frame slots. The element type is uintptr_t because a frame slot IS one
-// machine word — 8 bytes on arm64, 4 on Xtensa and RISC-V — and the backends store a whole word per
+// machine word: 8 bytes on arm64, 4 on Xtensa and RISC-V: and the backends store a whole word per
 // slot. Reading them as uint32_t made args[1] land on the upper half of slot 0 on a 64-bit host,
 // which is a value of 0 rather than the argument: correct on both devices, wrong on the desktop.
 using HostCallFn = uint32_t (*)(const uintptr_t* args, uint32_t argc, const uint8_t* arena);
@@ -112,7 +112,7 @@ struct Builtin {
     // speaks fixed declares it here and the checker follows.
     //
     // Almost every builtin is whole numbers: a channel, a light index, an angle16, a count. The
-    // exceptions are the ones a shader hands coordinates to — uvX/uvY return a fixed coordinate,
+    // exceptions are the ones a shader hands coordinates to: uvX/uvY return a fixed coordinate,
     // and escape() takes four of them.
     uint8_t      fixedArgs = 0;
     bool         fixedReturn = false;
@@ -121,29 +121,30 @@ struct Builtin {
 /// Assert a host's builtin table did not silently drop a registration.
 ///
 /// `BuiltinTable::add()` returns false when the table is full, and a host registers dozens of
-/// names in a row without checking each one — so an overflow used to surface as a script failing
+/// names in a row without checking each one: so an overflow used to surface as a script failing
 /// with "unknown function" for a builtin that plainly exists in the source. This turns it into a
 /// failure at the point of registration. A host calls it once, after building its table.
 #define MM_ASSERT_NO_BUILTIN_OVERFLOW(t)                                              \
     do {                                                                              \
         if ((t).full()) {                                                             \
-            std::printf("MoonLive: builtin table FULL at %u entries — a registration " \
+            std::printf("MoonLive: builtin table FULL at %u entries, a registration " \
                         "was dropped. Raise BuiltinTable::kMax.\n",                    \
                         static_cast<unsigned>((t).registered()));                     \
         }                                                                             \
     } while (0)
 
 // A fixed-capacity table the host fills and the compiler reads. No heap; a host registers a
-// handful of functions. Lookup is by name (linear — the table is tiny).
+// handful of functions. Lookup is by name (linear: the table is tiny).
 struct BuiltinTable {
-    // 64, not 16. The light domain filled all 16, and a table at capacity fails SILENTLY: add()
-    // returned false, no caller checked it, and the script found out as "unknown function" at
-    // compile time with nothing pointing at the real cause. 64 is what the power-functions spec
-    // asks for; the cost is `sizeof(Builtin) * 48` more in a table the host builds once.
-    static constexpr uint8_t kMax = 64;
+    // 96, not 16 and no longer 64. The light domain filled all 16, and a table at capacity fails
+    // SILENTLY: add() returned false, no caller checked it, and the script found out as "unknown
+    // function" at compile time with nothing pointing at the real cause. 64 was reached at 61 of 64
+    // when the flow builtins arrived (2026-09-04), which is too little headroom for a table that
+    // fails this way; the cost is `sizeof(Builtin)` per unused slot in a table the host builds once.
+    static constexpr uint8_t kMax = 96;
     Builtin items[kMax];
     uint8_t count = 0;
-    bool overflowed = false;    // set when an add() was DROPPED — see full()
+    bool overflowed = false;    // set when an add() was DROPPED: see full()
 
     bool add(const Builtin& b) {
         if (b.name == nullptr) return false;   // a null name would null-deref in find()
@@ -153,7 +154,7 @@ struct BuiltinTable {
     }
 
     /// True when a registration was dropped for lack of room. A host builds its table once at
-    /// startup, so this is asserted there rather than checked per call — the point is that
+    /// startup, so this is asserted there rather than checked per call: the point is that
     /// running out of table is LOUD, which is exactly what the 16-entry version was not.
     bool full() const { return overflowed; }
 
@@ -194,13 +195,13 @@ static constexpr uint8_t kMaxCtrls  = 8;         // records: how many members/co
 //   [kCtrlBytes .. kCtrlBytes+kMaxSysVars)  host system variables (width/height/…), offset assigned
 //                                     by the host and CONSTANT for the program's life
 //   [kDepthSlot]                      the recursion depth counter, owned by the emitted code
-// System variables sit ABOVE the script's range so that adding or removing a control — which
-// renumbers every control offset — cannot move them. The binding caches their slot pointers, so a
+// System variables sit ABOVE the script's range so that adding or removing a control: which
+// renumbers every control offset: cannot move them. The binding caches their slot pointers, so a
 // moving offset would silently write the wrong byte.
 // The emitted-code buffer is sized to THE SCRIPT (codeCapFor below), not to a constant, for the
-// same reason the IR op array is: the backends differ by up to 1.9x on identical source — RISC-V is
+// same reason the IR op array is: the backends differ by up to 1.9x on identical source: RISC-V is
 // fixed-4-byte and saves the whole register pool around every call where Xtensa has 3-byte narrow
-// forms — so any single number is either too small for the sparsest backend or wasteful for the
+// forms: so any single number is either too small for the sparsest backend or wasteful for the
 // densest. A fixed 2 KB let `plasma.mle` run on an S3 and desktop and REFUSED it on an S31 by 96
 // bytes, which is the second time one constant made a script's portability depend on its ISA.
 //
@@ -210,7 +211,7 @@ static constexpr size_t  kCodeCap = 16384;
 
 /// Bytes to reserve for a script of `tokens` tokens. Over-estimating costs one cold-path allocation
 /// that is freed when the compile ends; under-estimating fails a script that would have fit, so the
-/// direction of the error is deliberate — the same rule the IR's op estimate follows.
+/// direction of the error is deliberate: the same rule the IR's op estimate follows.
 ///
 /// 48 bytes/token, measured across every shipped script on all three backends with `countTokens`
 /// (which skips comments, so a long header does not inflate the count). The densest is
@@ -274,7 +275,7 @@ static constexpr uint8_t kMaxCallDepth = 32;
 
 static constexpr uint8_t kArenaBytes  = kCtrlBytes + kMaxSysVars * kSysVarBytes + 1;   // +1: kDepthSlot
 
-/// A name the HOST defines and the script only reads: `width`, `height`, `depth`. Reserved — a
+/// A name the HOST defines and the script only reads (`width`, `height`, `depth`). Reserved: a
 /// script cannot declare one, so the name means the same thing in every script (the `t` rule, one
 /// construct wider). Distinct from a control: nobody sets it in the UI, and it never appears in
 /// declaredControls(), so no binding has to hide it.
@@ -285,7 +286,7 @@ static constexpr uint8_t kArenaBytes  = kCtrlBytes + kMaxSysVars * kSysVarBytes 
 /// declaring it.
 enum class SysVarKind : uint8_t {
     Arena,   // a byte in the controls arena the binding writes per frame (width/height/depth)
-    Arg,     // an argument register the host passes on every run (t) — costs no instruction
+    Arg,     // an argument register the host passes on every run (t): costs no instruction
 };
 
 struct SysVar {
@@ -294,7 +295,7 @@ struct SysVar {
     uint8_t     where = 0;   // Arena: byte offset into the arena. Arg: the VReg (kArg0..kArg4).
 };
 
-/// The system variables one host domain defines. Same shape and lookup as BuiltinTable — a host
+/// The system variables one host domain defines. Same shape and lookup as BuiltinTable: a host
 /// hands the compiler both, and the compiler resolves names against them without knowing the domain.
 struct SysVarTable {
     // Bounded by the arena's system range, not chosen independently: a host that could register
